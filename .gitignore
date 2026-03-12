@@ -1,0 +1,36 @@
+# Agent 참고 자료 (설계 문서, 스펙, 런북 — 로컬 관리)
+CLAUDE.md
+AGENT.md
+.claude/
+docs/
+
+# Runtime data
+data/
+db/
+
+# Secrets
+config/secrets.env
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Frontend
+frontend/dist/
+frontend/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
