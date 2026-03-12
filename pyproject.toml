@@ -9,6 +9,10 @@ description = "AI-Native Trading Engine"
 requires-python = ">=3.11"
 dependencies = [
     "aiosqlite>=0.20",
+    "polars>=1.0",
+    "click>=8.1",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
 ]
 
 [project.optional-dependencies]
