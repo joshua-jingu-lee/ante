@@ -1,4 +1,7 @@
-"""Ante - AI-Native Trading Engine entrypoint."""
+"""Ante - AI-Native Trading Engine entrypoint.
+
+Composition Root: 모든 모듈을 조립하고 시스템을 부팅한다.
+"""
 
 import asyncio
 import logging
@@ -15,19 +18,30 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     """Main asyncio entrypoint.
 
-    시스템 초기화 순서 (architecture.md 참조):
-    1. Config.load() + validate()
-    2. Database 초기화
-    3. EventBus 초기화
-    4. SystemState 초기화
-    5. DynamicConfigService 초기화
-    6~13. (Phase 2+ 에서 추가)
+    초기화 순서 (architecture.md 참조):
+    1. Config + Logging
+    2. Database
+    3. EventBus + EventHistoryStore
+    4. SystemState (킬 스위치)
+    5. DynamicConfigService
+    6. StrategyRegistry
+    7. RuleEngine
+    8. Treasury
+    9. Trade (Recorder, PositionHistory, PerformanceTracker, Service)
+    10. BotManager
+    11. Broker (KISAdapter) + APIGateway
+    12. Data Pipeline (ParquetStore, DataCatalog, DataCollector)
+    13. BacktestService
+    14. ReportStore
+    15. NotificationService
+    16. Web API (FastAPI)
+
+    종료 순서: 역순 (상위 소비자부터 정리)
     """
-    # 1. Config
+    # ── 1. Config ────────────────────────────────────
     config = Config.load(config_dir=Path("config"))
     config.validate()
 
-    # 로깅 설정
     log_level = config.get("system.log_level", "INFO")
     logging.basicConfig(
         level=getattr(logging, log_level),
@@ -35,34 +49,198 @@ async def main() -> None:
     )
     logger.info("Ante 시작")
 
-    # 2. Database
+    # ── 2. Database ──────────────────────────────────
     db_path = config.get("db.path", "db/ante.db")
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     db = Database(db_path)
     await db.connect()
     logger.info("Database 연결 완료: %s", db_path)
 
-    # 3. EventBus
+    # ── 3. EventBus ──────────────────────────────────
     history_size = config.get("eventbus.history_size", 1000)
     eventbus = EventBus(history_size=history_size)
 
-    # EventHistoryStore — 모든 이벤트를 SQLite에 영속화
     event_history = EventHistoryStore(db=db)
     await event_history.initialize()
     eventbus.use(event_history.record)
     logger.info("EventBus 초기화 완료 (history_size=%d)", history_size)
 
-    # 4. SystemState (킬 스위치)
+    # ── 4. SystemState (킬 스위치) ───────────────────
     system_state = SystemState(db=db, eventbus=eventbus)
     await system_state.initialize()
     logger.info("SystemState 초기화 완료: %s", system_state.trading_state)
 
-    # 5. DynamicConfigService
+    # ── 5. DynamicConfigService ──────────────────────
     dynamic_config = DynamicConfigService(db=db, eventbus=eventbus)
     await dynamic_config.initialize()
     logger.info("DynamicConfigService 초기화 완료")
 
-    # Graceful shutdown
+    # ── 6. StrategyRegistry ──────────────────────────
+    from ante.strategy import StrategyRegistry
+
+    strategy_registry = StrategyRegistry(db=db)
+    await strategy_registry.initialize()
+    logger.info("StrategyRegistry 초기화 완료")
+
+    # ── 7. RuleEngine ────────────────────────────────
+    from ante.rule import RuleEngine
+
+    rule_engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+    await rule_engine.start()
+
+    rule_configs = config.get("rules.global", [])
+    if rule_configs:
+        rule_engine.load_rules_from_config(rule_configs)
+    logger.info("RuleEngine 초기화 완료")
+
+    # ── 8. Treasury ──────────────────────────────────
+    from ante.treasury import Treasury
+
+    commission_rate = config.get("treasury.commission_rate", 0.00015)
+    treasury = Treasury(db=db, eventbus=eventbus, commission_rate=commission_rate)
+    await treasury.initialize()
+    logger.info("Treasury 초기화 완료")
+
+    # ── 9. Trade ─────────────────────────────────────
+    from ante.trade import (
+        PerformanceTracker,
+        PositionHistory,
+        TradeRecorder,
+        TradeService,
+    )
+
+    position_history = PositionHistory(db=db)
+    await position_history.initialize()
+
+    trade_recorder = TradeRecorder(db=db, position_history=position_history)
+    await trade_recorder.initialize()
+    trade_recorder.subscribe(eventbus)
+
+    performance_tracker = PerformanceTracker(db=db)
+
+    trade_service = TradeService(
+        recorder=trade_recorder,
+        position_history=position_history,
+        performance=performance_tracker,
+    )
+    logger.info("Trade 모듈 초기화 완료")
+
+    # ── 10. BotManager ───────────────────────────────
+    from ante.bot import BotManager
+
+    bot_manager = BotManager(eventbus=eventbus, db=db)
+    await bot_manager.initialize()
+    logger.info("BotManager 초기화 완료")
+
+    # ── 11. Broker + APIGateway ──────────────────────
+    from ante.broker import KISAdapter
+    from ante.gateway import APIGateway
+
+    broker = None
+    api_gateway = None
+
+    broker_config = config.get("broker", {})
+    if broker_config.get("app_key"):
+        broker = KISAdapter(config=broker_config)
+        try:
+            await broker.connect()
+            logger.info(
+                "KISAdapter 연결 완료 (paper=%s)", broker_config.get("is_paper", True)
+            )
+        except Exception:
+            logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
+            broker = None
+
+    if broker:
+        api_gateway = APIGateway(broker=broker, eventbus=eventbus)
+        await api_gateway.start()
+        logger.info("APIGateway 시작 완료")
+
+    # ── 12. Data Pipeline ────────────────────────────
+    from ante.data import DataCatalog, DataCollector, ParquetStore
+
+    data_path = config.get("data.path", "data/")
+    Path(data_path).mkdir(parents=True, exist_ok=True)
+    parquet_store = ParquetStore(base_path=Path(data_path))
+    data_catalog = DataCatalog(store=parquet_store)
+
+    data_collector = None
+    if api_gateway:
+        data_collector = DataCollector(store=parquet_store, eventbus=eventbus)  # noqa: F841
+    logger.info("Data Pipeline 초기화 완료: %s", data_path)
+
+    # ── 13. BacktestService ──────────────────────────
+    from ante.backtest import BacktestService
+
+    backtest_service = BacktestService(data_path=data_path)  # noqa: F841
+    logger.info("BacktestService 초기화 완료")
+
+    # ── 14. ReportStore ──────────────────────────────
+    from ante.report import ReportStore
+
+    report_store = ReportStore(db=db)
+    await report_store.initialize()
+    logger.info("ReportStore 초기화 완료")
+
+    # ── 15. NotificationService ──────────────────────
+    from ante.notification import (
+        NotificationLevel,
+        NotificationService,
+        TelegramAdapter,
+    )
+
+    notification_service = None
+    telegram_token = config.get_secret("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = config.get_secret("TELEGRAM_CHAT_ID")
+
+    if telegram_token and telegram_chat_id:
+        adapter = TelegramAdapter(bot_token=telegram_token, chat_id=telegram_chat_id)
+        min_level_str = config.get("notification.min_level", "info")
+        notification_service = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            min_level=NotificationLevel(min_level_str),
+        )
+        notification_service.subscribe()
+        logger.info("NotificationService 초기화 완료 (Telegram)")
+    else:
+        logger.info("NotificationService 건너뜀 — Telegram 설정 없음")
+
+    # ── 16. Web API ──────────────────────────────────
+    web_task = None
+    web_enabled = config.get("web.enabled", False)
+
+    if web_enabled:
+        from ante.web.app import create_app
+
+        app = create_app(
+            config=config,
+            eventbus=eventbus,
+            bot_manager=bot_manager,
+            trade_service=trade_service,
+            treasury=treasury,
+            report_store=report_store,
+            data_catalog=data_catalog,
+            data_store=parquet_store,
+        )
+
+        import uvicorn
+
+        uv_config = uvicorn.Config(
+            app,
+            host=config.get("web.host", "0.0.0.0"),
+            port=config.get("web.port", 8000),
+            log_level="info",
+        )
+        server = uvicorn.Server(uv_config)
+        web_task = asyncio.create_task(server.serve(), name="web-api")
+        logger.info(
+            "Web API 시작: http://%s:%d",
+            uv_config.host,
+            uv_config.port,
+        )
+
+    # ── Graceful Shutdown ────────────────────────────
     shutdown_event = asyncio.Event()
 
     def _signal_handler() -> None:
@@ -76,8 +254,33 @@ async def main() -> None:
     logger.info("Ante 준비 완료 — 종료 시그널 대기 중")
     await shutdown_event.wait()
 
-    # 종료 정리 (역순)
+    # ── 종료 정리 (역순) ─────────────────────────────
     logger.info("Ante 종료 시작")
+
+    # 16. Web API
+    if web_task and not web_task.done():
+        web_task.cancel()
+        try:
+            await web_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Web API 종료")
+
+    # 10. BotManager (봇 먼저 중지)
+    await bot_manager.stop_all()
+    logger.info("BotManager 종료 — 모든 봇 중지")
+
+    # 11. APIGateway
+    if api_gateway:
+        await api_gateway.stop()
+        logger.info("APIGateway 종료")
+
+    # 11. Broker
+    if broker:
+        await broker.disconnect()
+        logger.info("Broker 연결 해제")
+
+    # 2. Database (최종)
     await db.close()
     logger.info("Ante 종료 완료")
 
