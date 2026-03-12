@@ -27,6 +27,11 @@ class EventBus:
         self._handlers: dict[type[Event], list[tuple[int, EventHandler]]] = {}
         self._history: list[Event] = []
         self._history_size = history_size
+        self._middlewares: list[EventHandler] = []
+
+    def use(self, middleware: EventHandler) -> None:
+        """글로벌 미들웨어 등록. 모든 이벤트에 대해 호출된다."""
+        self._middlewares.append(middleware)
 
     def subscribe(
         self,
@@ -60,6 +65,19 @@ class EventBus:
     async def publish(self, event: Event) -> None:
         """이벤트를 모든 구독 핸들러에 순차 전달 + 히스토리 기록."""
         self._record_history(event)
+
+        # 글로벌 미들웨어 실행 (로깅, SQLite 영속화 등)
+        for mw in self._middlewares:
+            try:
+                result = mw(event)
+                if isawaitable(result):
+                    await result
+            except Exception:
+                logger.exception(
+                    "미들웨어 에러: %s for %s",
+                    mw.__qualname__,
+                    type(event).__name__,
+                )
 
         handlers = self._handlers.get(type(event), [])
         if not handlers:
