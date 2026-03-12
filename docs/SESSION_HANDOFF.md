@@ -42,23 +42,24 @@
 | 3-3 | API Gateway | #17→develop, #18→main | ✅ 완료 | 28개 |
 | 3-4 | Trade | #19→develop, #20→main | ✅ 완료 | 37개 |
 
-**총 테스트: 272개 (전체 통과)**
+### Phase 4 — 데이터 + 백테스트 (부분 완료)
 
-### Phase 4 — 데이터 + 백테스트 (다음 단계)
+| 순서 | 모듈 | PR | 상태 | 비고 |
+|------|------|----|------|------|
+| 4-1 | Data Pipeline | — | ⏭️ 스킵 | polars 미설치, pyproject.toml 수정 불가 |
+| 4-2 | Backtest Engine | — | ⏭️ 스킵 | Data Pipeline 의존 |
+| 4-3 | Report Store | #21→develop, #22→main | ✅ 완료 | 16개 테스트 |
 
-| 순서 | 모듈 | 설계 문서 | 상태 |
-|------|------|-----------|------|
-| 4-1 | Data Pipeline | specs/data-pipeline.md | ⏳ 대기 |
-| 4-2 | Backtest Engine | specs/backtest.md | ⏳ 대기 |
+### Phase 5 — 외부 인터페이스 (부분 완료)
 
-### Phase 5 — 외부 인터페이스
+| 순서 | 모듈 | PR | 상태 | 비고 |
+|------|------|----|------|------|
+| 5-1 | CLI | — | ⏭️ 스킵 | click 미설치, pyproject.toml 수정 불가 |
+| 5-2 | Web API | — | ⏭️ 스킵 | fastapi 미설치, pyproject.toml 수정 불가 |
+| 5-3 | Notification | #23→develop, #24→main | ✅ 완료 | 14개 테스트 |
+| 5-4 | Frontend | — | ⏳ 대기 | React 별도 구현 |
 
-| 순서 | 모듈 | 설계 문서 | 상태 |
-|------|------|-----------|------|
-| 5-1 | CLI | specs/cli.md | ⏳ 대기 |
-| 5-2 | Web API | specs/web-api.md | ⏳ 대기 |
-| 5-3 | Notification | specs/notification.md | ⏳ 대기 |
-| 5-4 | Report Store | specs/report-store.md | ⏳ 대기 |
+**총 테스트: 302개 (전체 통과)**
 
 ## 아키텍처 설계 (완료)
 
@@ -79,11 +80,22 @@
 
 ## 다음 단계
 
-Phase 4 구현 (데이터 + 백테스트):
-1. `docs/specs/data-pipeline.md` 읽기 → Data Pipeline (collector, normalizer, Parquet store)
-2. `docs/specs/backtest.md` 읽기 → Backtest Engine (subprocess 분리 실행)
+### 의존성 설치 후 구현 가능한 모듈 (pyproject.toml에 의존성 추가 필요)
 
-**마일스톤**: Phase 3 완료로 모의투자 E2E 검증 가능. Phase 4 완료 시 백테스트 가능.
+1. **Data Pipeline (4-1)**: `polars` 추가 후 구현 → specs/data-pipeline.md
+2. **Backtest Engine (4-2)**: Data Pipeline 완료 후 구현 → specs/backtest.md
+3. **CLI (5-1)**: `click` 추가 후 구현 → specs/cli.md
+4. **Web API (5-2)**: `fastapi`, `uvicorn` 추가 후 구현 → specs/web-api.md
+5. **Frontend (5-4)**: React 별도 프로젝트
+
+### 권장 작업 순서
+
+```
+1. pyproject.toml에 polars, click, fastapi, uvicorn 의존성 추가
+2. Data Pipeline → Backtest Engine (Phase 4 완료)
+3. CLI → Web API (Phase 5 완료)
+4. E2E 통합 테스트 (Phase 6)
+```
 
 ## 미해결 사항
 - DataProviderFactory / PortfolioViewFactory / OrderViewFactory 인터페이스 — Phase 4에서 구체화
@@ -92,4 +104,5 @@ Phase 4 구현 (데이터 + 백테스트):
 - 봇 자동 재시작 정책
 
 ## 최종 업데이트
-- 2026-03-13 (세션 8 — Phase 3 전체 구현 완료, 272개 테스트 통과)
+- 2026-03-13 (세션 9 — Report Store + Notification 구현 완료, 302개 테스트 통과)
+- 스킵 모듈: Data Pipeline(polars), Backtest(의존성), CLI(click), Web API(fastapi)
