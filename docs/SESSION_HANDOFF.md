@@ -59,7 +59,13 @@
 | 5-3 | Notification | #23→develop, #24→main | ✅ 완료 | 14개 |
 | 5-4 | Frontend | — | ⏳ 대기 | React 별도 구현 |
 
-**총 테스트: 432개 (전체 통과)**
+### Phase 6 — 통합 + 운영 (진행 중)
+
+| 순서 | 항목 | PR | 상태 | 테스트 |
+|------|------|----|------|--------|
+| 6-1 | main.py Composition Root | #33→develop, #34→main | ✅ 완료 | 5개 (신규 3) |
+
+**총 테스트: 435개 (전체 통과)**
 
 ## 아키텍처 설계 (완료)
 
@@ -95,8 +101,8 @@
 ### 권장 작업 순서
 
 ```
-1. E2E 통합 테스트 (전체 흐름 검증)
-2. main.py에 모든 모듈 조립 (Composition Root 완성)
+1. ✅ main.py에 모든 모듈 조립 (Composition Root 완성) — 완료
+2. E2E 통합 테스트 (전체 흐름 검증)
 3. KIS 모의투자 연동 테스트
 4. AGENT.md 작성 (운용 Agent 온보딩 가이드)
 5. Frontend React 대시보드
@@ -112,5 +118,6 @@
 - CLI `ante system/bot/trade/treasury/rule/broker` 커맨드 — 라이브 시스템 연동 필요
 
 ## 최종 업데이트
-- 2026-03-13 (세션 10 — Data Pipeline, Backtest, CLI, Web API 구현 완료, 432개 테스트 통과)
+- 2026-03-13 (세션 11 — main.py Composition Root 완성, 435개 테스트 통과)
 - Phase 1~5 핵심 모듈 전체 구현 완료 (Frontend 제외)
+- Phase 6 Composition Root 완료 — 시스템이 실제로 부팅 가능한 상태
