@@ -42,24 +42,24 @@
 | 3-3 | API Gateway | #17→develop, #18→main | ✅ 완료 | 28개 |
 | 3-4 | Trade | #19→develop, #20→main | ✅ 완료 | 37개 |
 
-### Phase 4 — 데이터 + 백테스트 (부분 완료)
+### Phase 4 — 데이터 + 백테스트 ✅ 완료
 
-| 순서 | 모듈 | PR | 상태 | 비고 |
-|------|------|----|------|------|
-| 4-1 | Data Pipeline | — | ⏭️ 스킵 | polars 미설치, pyproject.toml 수정 불가 |
-| 4-2 | Backtest Engine | — | ⏭️ 스킵 | Data Pipeline 의존 |
-| 4-3 | Report Store | #21→develop, #22→main | ✅ 완료 | 16개 테스트 |
+| 순서 | 모듈 | PR | 상태 | 테스트 |
+|------|------|----|------|--------|
+| 4-1 | Data Pipeline | #25→develop, #26→main | ✅ 완료 | 47개 |
+| 4-2 | Backtest Engine | #27→develop, #28→main | ✅ 완료 | 34개 |
+| 4-3 | Report Store | #21→develop, #22→main | ✅ 완료 | 16개 |
 
-### Phase 5 — 외부 인터페이스 (부분 완료)
+### Phase 5 — 외부 인터페이스 ✅ 완료 (Frontend 제외)
 
-| 순서 | 모듈 | PR | 상태 | 비고 |
-|------|------|----|------|------|
-| 5-1 | CLI | — | ⏭️ 스킵 | click 미설치, pyproject.toml 수정 불가 |
-| 5-2 | Web API | — | ⏭️ 스킵 | fastapi 미설치, pyproject.toml 수정 불가 |
-| 5-3 | Notification | #23→develop, #24→main | ✅ 완료 | 14개 테스트 |
+| 순서 | 모듈 | PR | 상태 | 테스트 |
+|------|------|----|------|--------|
+| 5-1 | CLI | #29→develop, #30→main | ✅ 완료 | 31개 |
+| 5-2 | Web API | #31→develop, #32→main | ✅ 완료 | 18개 |
+| 5-3 | Notification | #23→develop, #24→main | ✅ 완료 | 14개 |
 | 5-4 | Frontend | — | ⏳ 대기 | React 별도 구현 |
 
-**총 테스트: 302개 (전체 통과)**
+**총 테스트: 432개 (전체 통과)**
 
 ## 아키텍처 설계 (완료)
 
@@ -76,33 +76,41 @@
 - **포지션 단일 소유**: Trade 모듈. Treasury는 현금/예산만, 리스크는 Rule Engine
 - **주문 취소/정정**: 룰 검증 생략, APIGateway 직접 처리 (리스크 감소 행위)
 - **order_id 추적**: 내부 = OrderRequestEvent.event_id, 증권사 = broker_order_id
-- **aiohttp 미포함**: pyproject.toml dependencies 변경 금지. KISAdapter는 connect() 시 conditional import
+- **aiohttp 미포함**: KISAdapter는 connect() 시 conditional import
+- **의존성 추가 (세션 10)**: pyproject.toml에 polars, click, fastapi, uvicorn 추가됨
 
 ## 다음 단계
 
-### 의존성 설치 후 구현 가능한 모듈 (pyproject.toml에 의존성 추가 필요)
+### Phase 6 — 통합 + 운영
 
-1. **Data Pipeline (4-1)**: `polars` 추가 후 구현 → specs/data-pipeline.md
-2. **Backtest Engine (4-2)**: Data Pipeline 완료 후 구현 → specs/backtest.md
-3. **CLI (5-1)**: `click` 추가 후 구현 → specs/cli.md
-4. **Web API (5-2)**: `fastapi`, `uvicorn` 추가 후 구현 → specs/web-api.md
-5. **Frontend (5-4)**: React 별도 프로젝트
+| 항목 | 설명 |
+|------|------|
+| E2E 테스트 | 전략 제출 → 백테스트 → 봇 생성 → 거래 → 성과 리포트 전체 흐름 |
+| 모의투자 검증 | KIS 모의투자 API로 실제 운영 시뮬레이션 |
+| 성능 튜닝 | N100 환경에서 프로파일링 |
+| AGENT.md 작성 | 운용 Agent 온보딩 가이드 최종 작성 |
+| systemd 배포 | 홈서버 배포 + 모니터링 설정 |
+| Frontend (5-4) | React 대시보드 구현 |
 
 ### 권장 작업 순서
 
 ```
-1. pyproject.toml에 polars, click, fastapi, uvicorn 의존성 추가
-2. Data Pipeline → Backtest Engine (Phase 4 완료)
-3. CLI → Web API (Phase 5 완료)
-4. E2E 통합 테스트 (Phase 6)
+1. E2E 통합 테스트 (전체 흐름 검증)
+2. main.py에 모든 모듈 조립 (Composition Root 완성)
+3. KIS 모의투자 연동 테스트
+4. AGENT.md 작성 (운용 Agent 온보딩 가이드)
+5. Frontend React 대시보드
+6. systemd 배포 설정
 ```
 
 ## 미해결 사항
-- DataProviderFactory / PortfolioViewFactory / OrderViewFactory 인터페이스 — Phase 4에서 구체화
+- DataProviderFactory / PortfolioViewFactory / OrderViewFactory 인터페이스 — Phase 6에서 구체화
 - StopOrderManager 개입 위치 — 추후 결정
 - PaperExecutor 상세 설계 — 가상 체결 시뮬레이션
 - 봇 자동 재시작 정책
+- WebSocket 실시간 이벤트 스트리밍 — Web API에 추가 필요
+- CLI `ante system/bot/trade/treasury/rule/broker` 커맨드 — 라이브 시스템 연동 필요
 
 ## 최종 업데이트
-- 2026-03-13 (세션 9 — Report Store + Notification 구현 완료, 302개 테스트 통과)
-- 스킵 모듈: Data Pipeline(polars), Backtest(의존성), CLI(click), Web API(fastapi)
+- 2026-03-13 (세션 10 — Data Pipeline, Backtest, CLI, Web API 구현 완료, 432개 테스트 통과)
+- Phase 1~5 핵심 모듈 전체 구현 완료 (Frontend 제외)
