@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import require_auth, require_scope
 
 
 @click.group()
@@ -18,6 +19,8 @@ def data() -> None:
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("data:read")
 def data_list(ctx: click.Context, data_path: str, db_path: str) -> None:
     """보유 데이터셋 목록."""
     import asyncio
@@ -56,6 +59,8 @@ def data_list(ctx: click.Context, data_path: str, db_path: str) -> None:
 @data.command()
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.pass_context
+@require_auth
+@require_scope("data:read")
 def schema(ctx: click.Context, data_path: str) -> None:
     """OHLCV 데이터 스키마 조회."""
     from ante.data.catalog import DataCatalog
@@ -70,6 +75,8 @@ def schema(ctx: click.Context, data_path: str) -> None:
 @data.command()
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.pass_context
+@require_auth
+@require_scope("data:read")
 def storage(ctx: click.Context, data_path: str) -> None:
     """저장 용량 현황."""
     from ante.data.catalog import DataCatalog
@@ -93,6 +100,8 @@ def storage(ctx: click.Context, data_path: str) -> None:
 @click.option("--source", default="external", help="데이터 소스")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.pass_context
+@require_auth
+@require_scope("data:write")
 def inject(
     ctx: click.Context,
     path: str,

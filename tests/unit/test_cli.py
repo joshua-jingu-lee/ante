@@ -3,16 +3,49 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from ante.cli.formatter import OutputFormatter
 from ante.cli.main import cli
+from ante.member.models import Member, MemberRole, MemberType
+
+_MOCK_MASTER = Member(
+    member_id="test-master",
+    type=MemberType.HUMAN,
+    role=MemberRole.MASTER,
+    org="default",
+    name="Test Master",
+    status="active",
+    scopes=[],
+)
 
 
 @pytest.fixture
 def runner():
+    """인증된 상태의 CliRunner (모든 커맨드 테스트용)."""
+    r = CliRunner()
+    original_invoke = r.invoke
+
+    def _invoke_with_auth(cli_cmd, args=None, **kwargs):
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+            def _set_member(ctx):
+                ctx.obj = ctx.obj or {}
+                ctx.obj["member"] = _MOCK_MASTER
+
+            mock_auth.side_effect = _set_member
+            return original_invoke(cli_cmd, args, **kwargs)
+
+    r.invoke = _invoke_with_auth
+    return r
+
+
+@pytest.fixture
+def unauthenticated_runner():
+    """인증 안 된 상태의 CliRunner."""
     return CliRunner()
 
 

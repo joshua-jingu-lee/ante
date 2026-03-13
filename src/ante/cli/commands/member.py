@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import get_member_id, require_auth, require_scope
 
 
 @click.group()
@@ -33,6 +34,45 @@ async def _create_service():  # noqa: ANN202
     return service, db
 
 
+@member.command()
+@click.option("--id", "member_id", required=True, help="master 멤버 ID")
+@click.option("--name", default="", help="표시 이름")
+@click.pass_context
+def bootstrap(ctx: click.Context, member_id: str, name: str) -> None:
+    """최초 master 계정 생성 (인증 불필요)."""
+    fmt = get_formatter(ctx)
+    password = click.prompt("패스워드", hide_input=True, confirmation_prompt=True)
+
+    async def _run_bootstrap() -> tuple[dict, str]:
+        service, db = await _create_service()
+        try:
+            m, recovery_key = await service.bootstrap_master(
+                member_id=member_id,
+                password=password,
+                name=name,
+            )
+            return {
+                "member_id": m.member_id,
+                "role": m.role,
+                "emoji": m.emoji,
+            }, recovery_key
+        finally:
+            await db.close()
+
+    try:
+        result, recovery_key = _run(_run_bootstrap())
+    except ValueError as e:
+        fmt.error(str(e))
+        return
+
+    if fmt.is_json:
+        fmt.output({**result, "recovery_key": recovery_key})
+    else:
+        fmt.success("master 계정 생성 완료", result)
+        click.echo(f"\n  Recovery Key: {recovery_key}")
+        click.echo("  이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.")
+
+
 @member.command("list")
 @click.option(
     "--type",
@@ -45,6 +85,8 @@ async def _create_service():  # noqa: ANN202
     "--status", type=click.Choice(["active", "suspended", "revoked"]), help="상태 필터"
 )
 @click.pass_context
+@require_auth
+@require_scope("member:read")
 def member_list(
     ctx: click.Context, member_type: str | None, org: str | None, status: str | None
 ) -> None:
@@ -94,6 +136,8 @@ def member_list(
 @member.command("info")
 @click.argument("member_id")
 @click.pass_context
+@require_auth
+@require_scope("member:read")
 def member_info(ctx: click.Context, member_id: str) -> None:
     """멤버 상세 정보 조회."""
     fmt = get_formatter(ctx)
@@ -153,6 +197,8 @@ def member_info(ctx: click.Context, member_id: str) -> None:
 @click.option("--name", default="", help="표시 이름")
 @click.option("--scopes", default="", help="권한 범위 (쉼표 구분)")
 @click.pass_context
+@require_auth
+@require_scope("member:admin")
 def member_register(
     ctx: click.Context,
     member_id: str,
@@ -163,6 +209,7 @@ def member_register(
 ) -> None:
     """멤버 등록 (토큰 발급)."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
 
     async def _run_register() -> tuple[dict, str]:
@@ -174,7 +221,7 @@ def member_register(
                 org=org,
                 name=name,
                 scopes=scope_list,
-                registered_by="cli",
+                registered_by=actor,
             )
             return {
                 "member_id": m.member_id,
@@ -204,14 +251,17 @@ def member_register(
 @click.argument("member_id")
 @click.argument("emoji")
 @click.pass_context
+@require_auth
+@require_scope("member:admin")
 def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     """멤버 이모지 설정/변경."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _run_set_emoji() -> dict:
         service, db = await _create_service()
         try:
-            m = await service.update_emoji(member_id, emoji, updated_by="cli")
+            m = await service.update_emoji(member_id, emoji, updated_by=actor)
             return {"member_id": m.member_id, "emoji": m.emoji}
         finally:
             await db.close()
@@ -228,14 +278,17 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
 @member.command("suspend")
 @click.argument("member_id")
 @click.pass_context
+@require_auth
+@require_scope("member:admin")
 def member_suspend(ctx: click.Context, member_id: str) -> None:
     """멤버 일시 정지."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _run_suspend() -> dict:
         service, db = await _create_service()
         try:
-            m = await service.suspend(member_id, suspended_by="cli")
+            m = await service.suspend(member_id, suspended_by=actor)
             return {"member_id": m.member_id, "status": m.status}
         finally:
             await db.close()
@@ -252,14 +305,17 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
 @member.command("reactivate")
 @click.argument("member_id")
 @click.pass_context
+@require_auth
+@require_scope("member:admin")
 def member_reactivate(ctx: click.Context, member_id: str) -> None:
     """멤버 재활성화."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _run_reactivate() -> dict:
         service, db = await _create_service()
         try:
-            m = await service.reactivate(member_id, reactivated_by="cli")
+            m = await service.reactivate(member_id, reactivated_by=actor)
             return {"member_id": m.member_id, "status": m.status}
         finally:
             await db.close()
@@ -277,14 +333,17 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
 @click.argument("member_id")
 @click.confirmation_option(prompt="이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?")
 @click.pass_context
+@require_auth
+@require_scope("member:admin")
 def member_revoke(ctx: click.Context, member_id: str) -> None:
     """멤버 영구 폐기."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _run_revoke() -> dict:
         service, db = await _create_service()
         try:
-            m = await service.revoke(member_id, revoked_by="cli")
+            m = await service.revoke(member_id, revoked_by=actor)
             return {"member_id": m.member_id, "status": m.status}
         finally:
             await db.close()
@@ -301,14 +360,17 @@ def member_revoke(ctx: click.Context, member_id: str) -> None:
 @member.command("rotate-token")
 @click.argument("member_id")
 @click.pass_context
+@require_auth
+@require_scope("member:admin")
 def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     """토큰 재발급 (기존 토큰 즉시 무효화)."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _run_rotate() -> tuple[dict, str]:
         service, db = await _create_service()
         try:
-            m, token = await service.rotate_token(member_id, rotated_by="cli")
+            m, token = await service.rotate_token(member_id, rotated_by=actor)
             return {"member_id": m.member_id}, token
         finally:
             await db.close()
@@ -331,7 +393,7 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
 @click.option("--recovery-key", required=True, help="Recovery Key")
 @click.pass_context
 def member_reset_password(ctx: click.Context, recovery_key: str) -> None:
-    """Recovery Key로 패스워드 리셋."""
+    """Recovery Key로 패스워드 리셋 (인증 불필요)."""
     fmt = get_formatter(ctx)
     new_password = click.prompt(
         "새 패스워드", hide_input=True, confirmation_prompt=True
@@ -340,7 +402,6 @@ def member_reset_password(ctx: click.Context, recovery_key: str) -> None:
     async def _run_reset() -> None:
         service, db = await _create_service()
         try:
-            # master 멤버를 찾아서 리셋
             members = await service.list(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
             if not master:
@@ -362,7 +423,7 @@ def member_reset_password(ctx: click.Context, recovery_key: str) -> None:
 @member.command("regenerate-recovery-key")
 @click.pass_context
 def member_regenerate_recovery_key(ctx: click.Context) -> None:
-    """Recovery Key 재발급."""
+    """Recovery Key 재발급 (인증 불필요)."""
     fmt = get_formatter(ctx)
     password = click.prompt("현재 패스워드", hide_input=True)
 

@@ -8,6 +8,7 @@ import json
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import require_auth, require_scope
 
 
 @click.group()
@@ -17,6 +18,8 @@ def report() -> None:
 
 @report.command()
 @click.pass_context
+@require_auth
+@require_scope("report:read")
 def schema(ctx: click.Context) -> None:
     """리포트 제출 스키마 조회."""
     from ante.report import ReportStore
@@ -30,6 +33,8 @@ def schema(ctx: click.Context) -> None:
 @click.argument("json_path", type=click.Path(exists=True))
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("report:write")
 def submit(ctx: click.Context, json_path: str, db_path: str) -> None:
     """리포트 제출."""
     from ante.report import ReportStore
@@ -61,6 +66,8 @@ def submit(ctx: click.Context, json_path: str, db_path: str) -> None:
 @click.option("--status", help="상태 필터 (pending/adopted/rejected)")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("report:read")
 def report_list(ctx: click.Context, status: str | None, db_path: str) -> None:
     """리포트 목록 조회."""
     from ante.report import ReportStore
