@@ -34,14 +34,22 @@ def get_formatter(ctx: click.Context) -> OutputFormatter:
 # 서브커맨드 등록
 from ante.cli.commands.approval import approval  # noqa: E402
 from ante.cli.commands.backtest import backtest  # noqa: E402
+from ante.cli.commands.bot import bot  # noqa: E402
+from ante.cli.commands.broker import broker  # noqa: E402
 from ante.cli.commands.data import data  # noqa: E402
 from ante.cli.commands.instrument import instrument  # noqa: E402
 from ante.cli.commands.member import member  # noqa: E402
 from ante.cli.commands.notification import notification  # noqa: E402
 from ante.cli.commands.report import report  # noqa: E402
+from ante.cli.commands.rule import rule  # noqa: E402
 from ante.cli.commands.strategy import strategy  # noqa: E402
+from ante.cli.commands.system import system  # noqa: E402
+from ante.cli.commands.trade import trade  # noqa: E402
+from ante.cli.commands.treasury import treasury  # noqa: E402
 
 cli.add_command(approval)
+cli.add_command(bot)
+cli.add_command(broker)
 cli.add_command(strategy)
 cli.add_command(data)
 cli.add_command(backtest)
@@ -49,3 +57,7 @@ cli.add_command(report)
 cli.add_command(instrument)
 cli.add_command(member)
 cli.add_command(notification)
+cli.add_command(rule)
+cli.add_command(system)
+cli.add_command(trade)
+cli.add_command(treasury)
