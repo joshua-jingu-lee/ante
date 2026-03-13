@@ -202,6 +202,29 @@ async def main() -> None:
         await api_gateway.start()
         logger.info("APIGateway 시작 완료")
 
+    # ── 11.1. 종목 마스터 동기화 ───────────────────────
+    if broker:
+        try:
+            raw_instruments = await broker.get_instruments()
+            if raw_instruments:
+                from ante.instrument.models import Instrument
+
+                instruments_to_upsert = [
+                    Instrument(
+                        symbol=item["symbol"],
+                        exchange="KRX",
+                        name=item.get("name", ""),
+                        name_en=item.get("name_en", ""),
+                        instrument_type=item.get("instrument_type", ""),
+                        listed=item.get("listed", True),
+                    )
+                    for item in raw_instruments
+                ]
+                count = await instrument_service.bulk_upsert(instruments_to_upsert)
+                logger.info("종목 동기화 완료: %d건 갱신", count)
+        except Exception:
+            logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영", exc_info=True)
+
     # ── 11.5. StrategyContextFactory 완성 ─────────────
     from ante.gateway.data_provider import LiveDataProvider
 
@@ -290,7 +313,9 @@ async def main() -> None:
             eventbus=eventbus,
             min_level=NotificationLevel(min_level_str),
             instrument_service=instrument_service,
+            db=db,
         )
+        await notification_service.initialize()
         notification_service.subscribe()
         logger.info("NotificationService 초기화 완료 (Telegram)")
     else:

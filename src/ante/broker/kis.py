@@ -625,6 +625,70 @@ class KISAdapter(BrokerAdapter):
         raise NotImplementedError("실시간 주문 스트리밍은 추후 구현")
         yield {}  # type: ignore[misc]
 
+    # ── 종목 마스터 ────────────────────────────────────
+
+    async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
+        """KIS API에서 종목 마스터 데이터 조회 (코스피 + 코스닥)."""
+        instruments: list[dict[str, Any]] = []
+
+        # 코스피(J) + 코스닥(Q)
+        market_codes = [("J", "KOSPI"), ("Q", "KOSDAQ")]
+        for mrkt_code, market_name in market_codes:
+            try:
+                items = await self._fetch_stock_list(mrkt_code)
+                for item in items:
+                    inst_type = self._classify_instrument_type(
+                        item.get("std_pdno", ""),
+                        item.get("prdt_name", ""),
+                        item.get("rprs_mrkt_kor_name", market_name),
+                    )
+                    instruments.append(
+                        {
+                            "symbol": item.get("std_pdno", ""),
+                            "name": item.get("prdt_name", ""),
+                            "name_en": item.get("prdt_eng_name", ""),
+                            "instrument_type": inst_type,
+                            "listed": True,
+                        }
+                    )
+                logger.info("KIS 종목 조회 완료: %s %d건", market_name, len(items))
+            except Exception:
+                logger.warning("KIS %s 종목 조회 실패", market_name, exc_info=True)
+
+        return instruments
+
+    async def _fetch_stock_list(self, mrkt_code: str) -> list[dict[str, Any]]:
+        """시장 코드별 종목 목록 조회 (페이징 처리)."""
+        tr_id = "CTPF1702R"
+        url = (
+            f"{self.base_url}"
+            "/uapi/domestic-stock/v1/quotations/inquire-search-stock-info"
+        )
+        all_items: list[dict[str, Any]] = []
+
+        params = {
+            "PRDT_TYPE_CD": "300",
+            "PDNO": "",
+            "PRDT_GRP_CD": "",
+            "STTL_CYCL_CD": "",
+            "MKT_ID_CD": mrkt_code,
+        }
+        result = await self._request("GET", url, tr_id, params=params)
+        items = result.get("output2", [])
+        all_items.extend(items)
+
+        return all_items
+
+    @staticmethod
+    def _classify_instrument_type(symbol: str, name: str, market: str) -> str:
+        """종목명/코드 기반 instrument_type 분류."""
+        name_upper = name.upper()
+        if "ETF" in name_upper or "KODEX" in name_upper or "TIGER" in name_upper:
+            return "etf"
+        if "ETN" in name_upper:
+            return "etn"
+        return "stock"
+
     # ── 수수료 ────────────────────────────────────────
 
     def get_commission_info(self) -> CommissionInfo:
