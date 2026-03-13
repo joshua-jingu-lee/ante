@@ -36,6 +36,7 @@ from ante.cli.commands.approval import approval  # noqa: E402
 from ante.cli.commands.backtest import backtest  # noqa: E402
 from ante.cli.commands.bot import bot  # noqa: E402
 from ante.cli.commands.broker import broker  # noqa: E402
+from ante.cli.commands.config import config  # noqa: E402
 from ante.cli.commands.data import data  # noqa: E402
 from ante.cli.commands.instrument import instrument  # noqa: E402
 from ante.cli.commands.member import member  # noqa: E402
@@ -50,6 +51,7 @@ from ante.cli.commands.treasury import treasury  # noqa: E402
 cli.add_command(approval)
 cli.add_command(bot)
 cli.add_command(broker)
+cli.add_command(config)
 cli.add_command(strategy)
 cli.add_command(data)
 cli.add_command(backtest)
