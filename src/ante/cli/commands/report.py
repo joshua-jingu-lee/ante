@@ -94,3 +94,70 @@ def report_list(ctx: click.Context, status: str | None, db_path: str) -> None:
     except Exception as e:
         fmt.error(str(e), code="REPORT_ERROR")
         raise SystemExit(1) from e
+
+
+@report.command("performance")
+@click.option(
+    "--period",
+    type=click.Choice(["daily", "monthly"]),
+    default="daily",
+    help="집계 기간 (daily 또는 monthly)",
+)
+@click.option("--bot-id", default=None, help="봇 ID 필터")
+@click.option("--start", default=None, help="시작일 (YYYY-MM-DD, daily 전용)")
+@click.option("--end", default=None, help="종료일 (YYYY-MM-DD, daily 전용)")
+@click.option("--year", default=None, type=int, help="연도 필터 (monthly 전용)")
+@click.pass_context
+@require_auth
+@require_scope("report:read")
+def report_performance(
+    ctx: click.Context,
+    period: str,
+    bot_id: str | None,
+    start: str | None,
+    end: str | None,
+    year: int | None,
+) -> None:
+    """기간별 성과 집계 조회."""
+    from dataclasses import asdict
+
+    fmt = get_formatter(ctx)
+
+    async def _run_performance() -> list[dict]:
+        from ante.core.database import Database
+        from ante.trade.performance import PerformanceTracker
+
+        db = Database("db/ante.db")
+        await db.connect()
+        try:
+            tracker = PerformanceTracker(db)
+            if period == "daily":
+                summaries = await tracker.get_daily_summary(
+                    bot_id=bot_id,
+                    start_date=start,
+                    end_date=end,
+                )
+            else:
+                summaries = await tracker.get_monthly_summary(
+                    bot_id=bot_id,
+                    year=year,
+                )
+            return [asdict(s) for s in summaries]
+        finally:
+            await db.close()
+
+    result = asyncio.run(_run_performance())
+
+    if not result:
+        fmt.output({"message": "집계 데이터가 없습니다.", "summaries": []})
+        return
+
+    if fmt.is_json:
+        fmt.output({"period": period, "summaries": result})
+    else:
+        if period == "daily":
+            fmt.table(result, ["date", "realized_pnl", "trade_count", "win_rate"])
+        else:
+            fmt.table(
+                result, ["year", "month", "realized_pnl", "trade_count", "win_rate"]
+            )
