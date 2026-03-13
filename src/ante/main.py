@@ -321,6 +321,31 @@ async def main() -> None:
     else:
         logger.info("NotificationService 건너뜀 — Telegram 설정 없음")
 
+    # ── 15.5. TelegramCommandReceiver ─────────────────
+    telegram_receiver = None
+    if telegram_token and telegram_chat_id:
+        from ante.notification import TelegramCommandReceiver
+
+        allowed_ids_raw = config.get("telegram.command.allowed_user_ids", [])
+        allowed_user_ids = (
+            [int(uid) for uid in allowed_ids_raw] if allowed_ids_raw else []
+        )
+
+        if allowed_user_ids:
+            telegram_receiver = TelegramCommandReceiver(
+                adapter=adapter,
+                allowed_user_ids=allowed_user_ids,
+                polling_interval=config.get("telegram.command.polling_interval", 3.0),
+                confirm_timeout=config.get("telegram.command.confirm_timeout", 30.0),
+                bot_manager=bot_manager,
+                treasury=treasury,
+                system_state=system_state,
+            )
+            telegram_receiver.start()
+            logger.info("TelegramCommandReceiver 시작")
+        else:
+            logger.info("TelegramCommandReceiver 건너뜀 — allowed_user_ids 비어있음")
+
     # ── 16. Web API ──────────────────────────────────
     web_task = None
     web_enabled = config.get("web.enabled", False)
@@ -371,6 +396,11 @@ async def main() -> None:
 
     # ── 종료 정리 (역순) ─────────────────────────────
     logger.info("Ante 종료 시작")
+
+    # 15.5 TelegramCommandReceiver
+    if telegram_receiver:
+        await telegram_receiver.stop()
+        logger.info("TelegramCommandReceiver 종료")
 
     # 16. Web API
     if web_task and not web_task.done():
