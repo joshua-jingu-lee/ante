@@ -1,0 +1,384 @@
+"""Member 모듈 단위 테스트."""
+
+from __future__ import annotations
+
+import pytest
+
+from ante.core.database import Database
+from ante.eventbus import EventBus
+from ante.eventbus.events import (
+    MemberAuthFailedEvent,
+    MemberRegisteredEvent,
+    MemberRevokedEvent,
+    MemberSuspendedEvent,
+)
+from ante.member.auth import (
+    generate_recovery_key,
+    generate_token,
+    get_token_type,
+    hash_password,
+    hash_token,
+    verify_password,
+    verify_recovery_key,
+    verify_token,
+)
+from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from ante.member.service import MemberService
+
+# ── Fixtures ─────────────────────────────────────────
+
+
+@pytest.fixture
+async def db(tmp_path):
+    """테스트용 SQLite DB."""
+    db = Database(str(tmp_path / "test.db"))
+    await db.connect()
+    yield db
+    await db.close()
+
+
+@pytest.fixture
+def eventbus():
+    return EventBus()
+
+
+@pytest.fixture
+async def service(db, eventbus):
+    svc = MemberService(db, eventbus)
+    await svc.initialize()
+    return svc
+
+
+# ── Models ───────────────────────────────────────────
+
+
+class TestModels:
+    def test_member_type_values(self):
+        assert MemberType.HUMAN == "human"
+        assert MemberType.AGENT == "agent"
+
+    def test_member_role_values(self):
+        assert MemberRole.MASTER == "master"
+        assert MemberRole.ADMIN == "admin"
+        assert MemberRole.DEFAULT == "default"
+
+    def test_member_status_values(self):
+        assert MemberStatus.ACTIVE == "active"
+        assert MemberStatus.SUSPENDED == "suspended"
+        assert MemberStatus.REVOKED == "revoked"
+
+    def test_member_dataclass(self):
+        m = Member(
+            member_id="test-01",
+            type=MemberType.AGENT,
+            role=MemberRole.DEFAULT,
+        )
+        assert m.member_id == "test-01"
+        assert m.org == "default"
+        assert m.scopes == []
+        assert m.status == MemberStatus.ACTIVE
+
+
+# ── Auth Utilities ───────────────────────────────────
+
+
+class TestAuth:
+    def test_generate_token_human(self):
+        token = generate_token(MemberType.HUMAN)
+        assert token.startswith("ante_hk_")
+
+    def test_generate_token_agent(self):
+        token = generate_token(MemberType.AGENT)
+        assert token.startswith("ante_ak_")
+
+    def test_generate_token_invalid_type(self):
+        with pytest.raises(ValueError, match="지원하지 않는 멤버 타입"):
+            generate_token("unknown")
+
+    def test_hash_and_verify_token(self):
+        token = generate_token(MemberType.HUMAN)
+        h = hash_token(token)
+        assert verify_token(token, h)
+        assert not verify_token("wrong_token", h)
+
+    def test_get_token_type(self):
+        assert get_token_type("ante_hk_abc") == MemberType.HUMAN
+        assert get_token_type("ante_ak_abc") == MemberType.AGENT
+        assert get_token_type("unknown_abc") is None
+
+    def test_hash_and_verify_password(self):
+        stored = hash_password("secret123")
+        assert verify_password("secret123", stored)
+        assert not verify_password("wrong", stored)
+
+    def test_recovery_key_format(self):
+        key = generate_recovery_key()
+        assert key.startswith("ANTE-RK-")
+        parts = key.replace("ANTE-RK-", "").split("-")
+        assert len(parts) == 6
+        assert all(len(p) == 4 for p in parts)
+
+    def test_recovery_key_verify(self):
+        from ante.member.auth import hash_recovery_key
+
+        key = generate_recovery_key()
+        h = hash_recovery_key(key)
+        assert verify_recovery_key(key, h)
+        assert not verify_recovery_key("ANTE-RK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", h)
+
+
+# ── MemberService ────────────────────────────────────
+
+
+class TestBootstrapMaster:
+    async def test_bootstrap_creates_master(self, service):
+        member, recovery_key = await service.bootstrap_master(
+            member_id="owner", password="pass123", name="대표"
+        )
+        assert member.member_id == "owner"
+        assert member.type == MemberType.HUMAN
+        assert member.role == MemberRole.MASTER
+        assert member.name == "대표"
+        assert recovery_key.startswith("ANTE-RK-")
+
+    async def test_bootstrap_twice_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        with pytest.raises(ValueError, match="master가 이미 존재합니다"):
+            await service.bootstrap_master("owner2", "pass456")
+
+    async def test_bootstrap_publishes_event(self, service, eventbus):
+        events = []
+        eventbus.subscribe(MemberRegisteredEvent, events.append)
+        await service.bootstrap_master("owner", "pass123")
+        assert len(events) == 1
+        assert events[0].member_id == "owner"
+        assert events[0].role == "master"
+
+
+class TestRegister:
+    async def test_register_agent(self, service):
+        member, token = await service.register(
+            member_id="agent-01",
+            member_type=MemberType.AGENT,
+            org="strategy-lab",
+            name="전략봇 1호",
+            scopes=["strategy:write", "data:read"],
+            registered_by="owner",
+        )
+        assert member.member_id == "agent-01"
+        assert member.type == MemberType.AGENT
+        assert member.role == MemberRole.DEFAULT
+        assert member.org == "strategy-lab"
+        assert token.startswith("ante_ak_")
+        assert member.scopes == ["strategy:write", "data:read"]
+
+    async def test_register_duplicate_fails(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        with pytest.raises(ValueError, match="이미 존재하는"):
+            await service.register("agent-01", MemberType.AGENT)
+
+    async def test_register_agent_as_master_fails(self, service):
+        with pytest.raises(PermissionError, match="agent 타입은 master"):
+            await service.register(
+                "bad-agent", MemberType.AGENT, role=MemberRole.MASTER
+            )
+
+    async def test_register_agent_as_admin_fails(self, service):
+        with pytest.raises(PermissionError, match="agent 타입은 master 또는 admin"):
+            await service.register("bad-agent", MemberType.AGENT, role=MemberRole.ADMIN)
+
+
+class TestAuthenticate:
+    async def test_authenticate_token(self, service):
+        _, token = await service.register("agent-01", MemberType.AGENT)
+        member = await service.authenticate(token)
+        assert member.member_id == "agent-01"
+
+    async def test_authenticate_invalid_prefix(self, service):
+        with pytest.raises(PermissionError, match="유효하지 않은 토큰 형식"):
+            await service.authenticate("invalid_token_xyz")
+
+    async def test_authenticate_wrong_token(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        with pytest.raises(PermissionError, match="인증 실패"):
+            await service.authenticate("ante_ak_nonexistent_token")
+
+    async def test_authenticate_suspended_member(self, service):
+        _, token = await service.register("agent-01", MemberType.AGENT)
+        await service.suspend("agent-01", suspended_by="owner")
+        with pytest.raises(PermissionError, match="비활성 멤버"):
+            await service.authenticate(token)
+
+    async def test_authenticate_type_mismatch(self, service, db):
+        """agent 토큰으로 human 멤버를 인증할 수 없다."""
+        _, token = await service.register(
+            "human-01", MemberType.HUMAN, registered_by="owner"
+        )
+        # 토큰은 ante_hk_ 이지만, DB를 직접 조작하여 type을 agent로 변경
+        await db.execute(
+            "UPDATE members SET type = ? WHERE member_id = ?",
+            (MemberType.AGENT, "human-01"),
+        )
+        with pytest.raises(PermissionError, match="인증 불가"):
+            await service.authenticate(token)
+
+
+class TestAuthenticatePassword:
+    async def test_password_auth(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        member = await service.authenticate_password("owner", "pass123")
+        assert member.member_id == "owner"
+
+    async def test_wrong_password(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        with pytest.raises(PermissionError, match="인증 실패"):
+            await service.authenticate_password("owner", "wrong")
+
+    async def test_agent_cannot_password_auth(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        with pytest.raises(PermissionError, match="human 멤버만"):
+            await service.authenticate_password("agent-01", "anything")
+
+    async def test_nonexistent_member(self, service):
+        with pytest.raises(PermissionError, match="인증 실패"):
+            await service.authenticate_password("ghost", "pass")
+
+
+class TestSuspendReactivateRevoke:
+    async def test_suspend_and_reactivate(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        m = await service.suspend("agent-01", suspended_by="owner")
+        assert m.status == MemberStatus.SUSPENDED
+
+        m = await service.reactivate("agent-01", reactivated_by="owner")
+        assert m.status == MemberStatus.ACTIVE
+
+    async def test_suspend_master_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        with pytest.raises(PermissionError, match="master는 suspend"):
+            await service.suspend("owner")
+
+    async def test_revoke(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        m = await service.revoke("agent-01", revoked_by="owner")
+        assert m.status == MemberStatus.REVOKED
+        assert m.token_hash == ""
+
+    async def test_revoke_master_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        with pytest.raises(PermissionError, match="master는 revoke"):
+            await service.revoke("owner")
+
+    async def test_reactivate_active_fails(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        with pytest.raises(PermissionError, match="suspended 상태에서만"):
+            await service.reactivate("agent-01")
+
+    async def test_suspend_publishes_event(self, service, eventbus):
+        events = []
+        eventbus.subscribe(MemberSuspendedEvent, events.append)
+        await service.register("agent-01", MemberType.AGENT)
+        await service.suspend("agent-01", suspended_by="owner")
+        assert len(events) == 1
+        assert events[0].member_id == "agent-01"
+
+    async def test_revoke_publishes_event(self, service, eventbus):
+        events = []
+        eventbus.subscribe(MemberRevokedEvent, events.append)
+        await service.register("agent-01", MemberType.AGENT)
+        await service.revoke("agent-01", revoked_by="owner")
+        assert len(events) == 1
+
+
+class TestRotateToken:
+    async def test_rotate_token(self, service):
+        _, old_token = await service.register("agent-01", MemberType.AGENT)
+        _, new_token = await service.rotate_token("agent-01", rotated_by="owner")
+        assert old_token != new_token
+        # 새 토큰으로 인증 성공
+        m = await service.authenticate(new_token)
+        assert m.member_id == "agent-01"
+        # 기존 토큰으로 인증 실패
+        with pytest.raises(PermissionError):
+            await service.authenticate(old_token)
+
+
+class TestPasswordManagement:
+    async def test_change_password(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        await service.change_password("owner", "pass123", "newpass")
+        m = await service.authenticate_password("owner", "newpass")
+        assert m.member_id == "owner"
+
+    async def test_change_password_wrong_old(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        with pytest.raises(PermissionError, match="패스워드가 일치하지"):
+            await service.change_password("owner", "wrong", "newpass")
+
+    async def test_reset_password_with_recovery_key(self, service):
+        _, recovery_key = await service.bootstrap_master("owner", "pass123")
+        await service.reset_password("owner", recovery_key, "resetpass")
+        m = await service.authenticate_password("owner", "resetpass")
+        assert m.member_id == "owner"
+
+    async def test_reset_password_wrong_key(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        with pytest.raises(PermissionError, match="유효하지 않은 recovery key"):
+            await service.reset_password(
+                "owner", "ANTE-RK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", "newpass"
+            )
+
+    async def test_regenerate_recovery_key(self, service):
+        _, old_key = await service.bootstrap_master("owner", "pass123")
+        new_key = await service.regenerate_recovery_key("owner", "pass123")
+        assert new_key != old_key
+        assert new_key.startswith("ANTE-RK-")
+        # 새 키로 패스워드 리셋 가능
+        await service.reset_password("owner", new_key, "resetpass2")
+        # 기존 키로 리셋 불가
+        with pytest.raises(PermissionError):
+            await service.reset_password("owner", old_key, "hack")
+
+
+class TestScopes:
+    async def test_update_scopes(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        m = await service.update_scopes(
+            "agent-01", ["strategy:write", "data:read"], updated_by="owner"
+        )
+        assert m.scopes == ["strategy:write", "data:read"]
+        # DB에 반영 확인
+        fetched = await service.get("agent-01")
+        assert fetched.scopes == ["strategy:write", "data:read"]
+
+
+class TestList:
+    async def test_list_all(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-02", MemberType.AGENT, org="risk")
+        members = await service.list()
+        assert len(members) == 2
+
+    async def test_list_by_type(self, service):
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT)
+        humans = await service.list(member_type=MemberType.HUMAN)
+        assert len(humans) == 1
+        assert humans[0].type == MemberType.HUMAN
+
+    async def test_list_by_org(self, service):
+        await service.register("a1", MemberType.AGENT, org="strategy-lab")
+        await service.register("a2", MemberType.AGENT, org="risk")
+        result = await service.list(org="risk")
+        assert len(result) == 1
+        assert result[0].member_id == "a2"
+
+
+class TestAuthFailedEvent:
+    async def test_auth_failed_publishes_event(self, service, eventbus):
+        events = []
+        eventbus.subscribe(MemberAuthFailedEvent, events.append)
+        with pytest.raises(PermissionError):
+            await service.authenticate("invalid_token")
+        assert len(events) == 1
+        assert events[0].reason == "유효하지 않은 토큰 형식"

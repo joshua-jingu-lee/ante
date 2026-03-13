@@ -75,7 +75,14 @@ async def main() -> None:
     await dynamic_config.initialize()
     logger.info("DynamicConfigService 초기화 완료")
 
-    # ── 5.5. InstrumentService ─────────────────────────
+    # ── 5.5. MemberService ─────────────────────────────
+    from ante.member import MemberService
+
+    member_service = MemberService(db=db, eventbus=eventbus)
+    await member_service.initialize()
+    logger.info("MemberService 초기화 완료")
+
+    # ── 5.6. InstrumentService ─────────────────────────
     from ante.instrument import InstrumentService
 
     instrument_service = InstrumentService(db=db)

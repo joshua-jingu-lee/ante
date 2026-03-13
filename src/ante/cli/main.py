@@ -34,6 +34,7 @@ from ante.cli.commands.approval import approval  # noqa: E402
 from ante.cli.commands.backtest import backtest  # noqa: E402
 from ante.cli.commands.data import data  # noqa: E402
 from ante.cli.commands.instrument import instrument  # noqa: E402
+from ante.cli.commands.member import member  # noqa: E402
 from ante.cli.commands.report import report  # noqa: E402
 from ante.cli.commands.strategy import strategy  # noqa: E402
 
@@ -43,3 +44,4 @@ cli.add_command(data)
 cli.add_command(backtest)
 cli.add_command(report)
 cli.add_command(instrument)
+cli.add_command(member)

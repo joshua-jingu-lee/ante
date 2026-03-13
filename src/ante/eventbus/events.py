@@ -338,3 +338,40 @@ class ApprovalResolvedEvent(Event):
     approval_type: str = ""
     resolution: str = ""
     resolved_by: str = ""
+
+
+# ── 멤버 (Member) ───────────────────────────────
+
+
+@dataclass(frozen=True)
+class MemberRegisteredEvent(Event):
+    """MemberService → EventBus: 멤버 등록 완료."""
+
+    member_id: str = ""
+    member_type: str = ""
+    role: str = ""
+    registered_by: str = ""
+
+
+@dataclass(frozen=True)
+class MemberSuspendedEvent(Event):
+    """MemberService → EventBus: 멤버 정지."""
+
+    member_id: str = ""
+    suspended_by: str = ""
+
+
+@dataclass(frozen=True)
+class MemberRevokedEvent(Event):
+    """MemberService → EventBus: 멤버 폐기."""
+
+    member_id: str = ""
+    revoked_by: str = ""
+
+
+@dataclass(frozen=True)
+class MemberAuthFailedEvent(Event):
+    """MemberService → EventBus: 인증 실패."""
+
+    member_id: str = ""
+    reason: str = ""
