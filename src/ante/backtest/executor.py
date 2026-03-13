@@ -164,16 +164,25 @@ class BacktestExecutor:
 
     def _calculate_metrics(self) -> dict:
         """성과 지표 계산."""
+        from ante.backtest.metrics import calculate_metrics
+
         if not self._trades:
             return {}
 
-        return {
-            "total_trades": len(self._trades),
-            "buy_trades": sum(1 for t in self._trades if t.side == "buy"),
-            "sell_trades": sum(1 for t in self._trades if t.side == "sell"),
-            "total_commission": sum(t.commission for t in self._trades),
-            "total_slippage": sum(t.slippage for t in self._trades),
-        }
+        final_equity = self._calculate_equity()
+        metrics = calculate_metrics(
+            trades=self._trades,
+            equity_curve=self._equity_curve,
+            initial_balance=self._initial_balance,
+            final_balance=final_equity,
+        )
+
+        # 기존 호환 필드 추가
+        metrics["buy_trades"] = sum(1 for t in self._trades if t.side == "buy")
+        metrics["sell_trades"] = sum(1 for t in self._trades if t.side == "sell")
+        metrics["total_slippage"] = round(sum(t.slippage for t in self._trades), 2)
+
+        return metrics
 
     def get_positions(self, bot_id: str) -> dict[str, Any]:
         """PortfolioView 인터페이스."""
