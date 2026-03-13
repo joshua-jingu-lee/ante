@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from fastapi.testclient import TestClient
+import pytest
 
-from ante.web.app import create_app
 from ante.web.pagination import decode_cursor, encode_cursor, paginate
+
+httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from ante.web.app import create_app  # noqa: E402
 
 
 class TestPaginationUtil:
