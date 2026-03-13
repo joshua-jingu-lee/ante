@@ -10,6 +10,7 @@ from enum import StrEnum
 class ReportStatus(StrEnum):
     """리포트 상태."""
 
+    DRAFT = "draft"
     SUBMITTED = "submitted"
     REVIEWED = "reviewed"
     ADOPTED = "adopted"
