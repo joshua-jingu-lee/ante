@@ -52,6 +52,9 @@ CREATE INDEX IF NOT EXISTS idx_members_org ON members(org);
 """
 
 _EMOJI_MIGRATION = "ALTER TABLE members ADD COLUMN emoji TEXT NOT NULL DEFAULT ''"
+_TOKEN_EXPIRES_MIGRATION = (
+    "ALTER TABLE members ADD COLUMN token_expires_at TEXT DEFAULT ''"
+)
 
 # 단일 이모지(grapheme cluster) 검증 패턴
 # 기본 이모지 1개 + 선택적 modifier/ZWJ sequence
@@ -140,6 +143,7 @@ def _row_to_member(row: dict) -> Member:
         last_active_at=row.get("last_active_at", ""),
         suspended_at=row.get("suspended_at", ""),
         revoked_at=row.get("revoked_at", ""),
+        token_expires_at=row.get("token_expires_at", ""),
     )
 
 
@@ -148,20 +152,34 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _token_expires_at(ttl_days: int) -> str:
+    """TTL 일수 기준 토큰 만료 시각."""
+    from datetime import timedelta
+
+    return (datetime.now(UTC) + timedelta(days=ttl_days)).strftime("%Y-%m-%d %H:%M:%S")
+
+
 class MemberService:
     """멤버 등록·인증·관리 서비스."""
 
-    def __init__(self, db: Database, eventbus: EventBus) -> None:
+    def __init__(
+        self,
+        db: Database,
+        eventbus: EventBus,
+        token_ttl_days: int = 90,
+    ) -> None:
         self._db = db
         self._eventbus = eventbus
+        self._token_ttl_days = token_ttl_days
 
     async def initialize(self) -> None:
-        """스키마 생성 + emoji 컬럼 마이그레이션."""
+        """스키마 생성 + 컬럼 마이그레이션."""
         await self._db.execute_script(MEMBER_SCHEMA)
-        try:
-            await self._db.execute(_EMOJI_MIGRATION)
-        except Exception:  # noqa: BLE001
-            pass  # 컬럼이 이미 존재하면 무시
+        for migration in (_EMOJI_MIGRATION, _TOKEN_EXPIRES_MIGRATION):
+            try:
+                await self._db.execute(migration)
+            except Exception:  # noqa: BLE001
+                pass  # 컬럼이 이미 존재하면 무시
         logger.info("MemberService 초기화 완료")
 
     # ── emoji 관리 ──────────────────────────────────────
@@ -327,6 +345,7 @@ class MemberService:
 
         token = generate_token(member_type)
         now = _now()
+        expires_at = _token_expires_at(self._token_ttl_days)
         scopes = scopes or []
 
         member = Member(
@@ -341,14 +360,15 @@ class MemberService:
             token_hash=hash_token(token),
             created_at=now,
             created_by=registered_by,
+            token_expires_at=expires_at,
         )
 
         await self._db.execute(
             """INSERT INTO members
                (member_id, type, role, org, name, emoji, status, scopes,
                 token_hash, password_hash, recovery_key_hash,
-                created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                created_at, created_by, token_expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 member.member_id,
                 member.type,
@@ -363,6 +383,7 @@ class MemberService:
                 member.recovery_key_hash,
                 member.created_at,
                 member.created_by,
+                member.token_expires_at,
             ),
         )
 
@@ -415,6 +436,28 @@ class MemberService:
             )
             msg = f"비활성 멤버: {member.status}"
             raise PermissionError(msg)
+
+        # 토큰 만료 체크
+        if member.token_expires_at:
+            expires = datetime.strptime(  # noqa: DTZ007
+                member.token_expires_at, "%Y-%m-%d %H:%M:%S"
+            )
+            now = datetime.now(UTC).replace(tzinfo=None)
+            if now > expires:
+                await self._publish_auth_failed(member.member_id, "토큰 만료")
+                msg = (
+                    "토큰이 만료되었습니다. 'ante member rotate-token'으로 갱신하세요."
+                )
+                raise PermissionError(msg)
+
+            from datetime import timedelta
+
+            if now > expires - timedelta(days=7):
+                logger.warning(
+                    "토큰 만료 임박: %s (만료: %s)",
+                    member.member_id,
+                    member.token_expires_at,
+                )
 
         return member
 
@@ -561,20 +604,23 @@ class MemberService:
     async def rotate_token(
         self, member_id: str, rotated_by: str = ""
     ) -> tuple[Member, str]:
-        """토큰 재발급. 기존 토큰 즉시 무효화."""
+        """토큰 재발급. 기존 토큰 즉시 무효화. 새 TTL 적용."""
         member = await self._get_or_raise(member_id)
         self._assert_active(member, "rotate_token")
 
         token = generate_token(member.type)
         t_hash = hash_token(token)
+        expires_at = _token_expires_at(self._token_ttl_days)
 
         await self._db.execute(
-            "UPDATE members SET token_hash = ? WHERE member_id = ?",
-            (t_hash, member_id),
+            "UPDATE members SET token_hash = ?, token_expires_at = ? "
+            "WHERE member_id = ?",
+            (t_hash, expires_at, member_id),
         )
 
         logger.info("토큰 재발급: %s (by %s)", member_id, rotated_by)
         member.token_hash = t_hash
+        member.token_expires_at = expires_at
         return member, token
 
     # ── 패스워드 관리 ──────────────────────────────────

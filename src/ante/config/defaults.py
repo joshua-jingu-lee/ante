@@ -10,6 +10,7 @@ DEFAULTS: dict[str, object] = {
     "web.host": "0.0.0.0",
     "web.port": 8000,
     "eventbus.history_size": 1000,
+    "member.token_ttl_days": 90,
     "instrument.default_exchange": "KRX",
     "instrument.cache_ttl_seconds": 3600,
     "broker.commission_rate": 0.00015,

@@ -49,3 +49,4 @@ class Member:
     last_active_at: str = ""
     suspended_at: str = ""
     revoked_at: str = ""
+    token_expires_at: str = ""
