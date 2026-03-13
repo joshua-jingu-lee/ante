@@ -161,3 +161,60 @@ def report_performance(
             fmt.table(
                 result, ["year", "month", "realized_pnl", "trade_count", "win_rate"]
             )
+
+
+@report.command("view")
+@click.argument("report_id")
+@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.pass_context
+@require_auth
+@require_scope("report:read")
+def report_view(ctx: click.Context, report_id: str, db_path: str) -> None:
+    """리포트 상세 조회."""
+    from ante.report import ReportStore
+
+    fmt = get_formatter(ctx)
+
+    async def _view() -> dict | None:
+        from ante.core.database import Database
+
+        db = Database(db_path)
+        await db.connect()
+        try:
+            store = ReportStore(db)
+            await store.initialize()
+            r = await store.get(report_id)
+            if not r:
+                return None
+            return {
+                "report_id": r.report_id,
+                "strategy": f"{r.strategy_name} v{r.strategy_version}",
+                "status": r.status.value,
+                "submitted_at": str(r.submitted_at),
+                "submitted_by": r.submitted_by,
+                "backtest_period": r.backtest_period,
+                "total_return_pct": r.total_return_pct,
+                "total_trades": r.total_trades,
+                "sharpe_ratio": r.sharpe_ratio,
+                "max_drawdown_pct": r.max_drawdown_pct,
+                "win_rate": r.win_rate,
+                "summary": r.summary,
+                "rationale": r.rationale,
+                "risks": r.risks,
+                "recommendations": r.recommendations,
+            }
+        finally:
+            await db.close()
+
+    result = asyncio.run(_view())
+
+    if not result:
+        fmt.error(f"리포트를 찾을 수 없습니다: {report_id}")
+        return
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        for key, value in result.items():
+            if value is not None and value != "":
+                click.echo(f"  {key:20s}: {value}")
