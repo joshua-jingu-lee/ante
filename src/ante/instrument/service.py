@@ -35,9 +35,11 @@ class InstrumentService:
     한국 상장 종목 ~2,500개 수준이므로 전체 메모리 적재가 합리적.
     """
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, cache_ttl_seconds: float = 3600.0) -> None:
         self._db = db
         self._cache: dict[tuple[str, str], Instrument] = {}
+        self._cache_ttl = cache_ttl_seconds
+        self._cache_loaded_at: float = 0.0
 
     async def initialize(self) -> None:
         """스키마 생성 + 캐시 워밍."""
@@ -47,14 +49,33 @@ class InstrumentService:
 
     async def _warm_cache(self) -> None:
         """DB 전체 로드 → 메모리 캐시."""
+        import time as time_mod
+
         rows = await self._db.fetch_all("SELECT * FROM instruments")
         self._cache = {
             (row["symbol"], row["exchange"]): self._row_to_instrument(row)
             for row in rows
         }
+        self._cache_loaded_at = time_mod.monotonic()
+
+    def _is_cache_expired(self) -> bool:
+        """캐시 TTL 초과 여부."""
+        import time as time_mod
+
+        if self._cache_loaded_at == 0.0:
+            return True
+        return (time_mod.monotonic() - self._cache_loaded_at) > self._cache_ttl
+
+    async def _ensure_cache(self) -> None:
+        """캐시 TTL 초과 시 재로드."""
+        if self._is_cache_expired():
+            logger.info("캐시 TTL 만료, 재로드 시작")
+            await self._warm_cache()
+            logger.info("캐시 재로드 완료 (%d건)", len(self._cache))
 
     async def get(self, symbol: str, exchange: str = "KRX") -> Instrument | None:
-        """(symbol, exchange) 조회. 캐시 우선."""
+        """(symbol, exchange) 조회. 캐시 TTL 체크."""
+        await self._ensure_cache()
         return self._cache.get((symbol, exchange))
 
     def get_name(self, symbol: str, exchange: str = "KRX") -> str:
