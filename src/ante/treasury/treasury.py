@@ -73,7 +73,9 @@ class Treasury:
         self._external_eval_amount: float = 0.0
         self._budgets: dict[str, BotBudget] = {}
         self._unallocated: float = 0.0
-        self._reservations: dict[str, float] = {}
+        self._reservations: dict[
+            str, tuple[str, float]
+        ] = {}  # order_id → (bot_id, amount)
         self._sync_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
@@ -86,6 +88,7 @@ class Treasury:
     def _subscribe_events(self) -> None:
         """EventBus 이벤트 구독."""
         from ante.eventbus.events import (
+            BotStoppedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
@@ -100,6 +103,7 @@ class Treasury:
             OrderCancelledEvent, self._on_order_cancelled, priority=80
         )
         self._eventbus.subscribe(OrderFailedEvent, self._on_order_failed, priority=80)
+        self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped, priority=80)
 
     # ── 계좌 잔고 ───────────────────────────────────
 
@@ -206,7 +210,7 @@ class Treasury:
         budget.available -= amount
         budget.reserved += amount
         budget.last_updated = datetime.now(UTC)
-        self._reservations[order_id] = amount
+        self._reservations[order_id] = (bot_id, amount)
 
         await self._save_budget(budget)
         return True
@@ -214,7 +218,8 @@ class Treasury:
     async def release_reservation(self, bot_id: str, order_id: str) -> None:
         """주문 취소/실패 시 예약 해제."""
         budget = self._budgets.get(bot_id)
-        amount = self._reservations.pop(order_id, 0.0)
+        entry = self._reservations.pop(order_id, None)
+        amount = entry[1] if entry else 0.0
         if not budget or amount <= 0:
             return
 
@@ -223,6 +228,16 @@ class Treasury:
         budget.last_updated = datetime.now(UTC)
 
         await self._save_budget(budget)
+
+    def get_reservations(self, bot_id: str) -> dict[str, float]:
+        """특정 봇의 미체결 예약 내역 조회.
+
+        Returns:
+            {order_id: amount, ...}
+        """
+        return {
+            oid: amt for oid, (bid, amt) in self._reservations.items() if bid == bot_id
+        }
 
     # ── 이벤트 핸들러 ───────────────────────────────
 
@@ -296,7 +311,8 @@ class Treasury:
         commission = event.commission
 
         if event.side == "buy":
-            reserved_amount = self._reservations.pop(event.order_id, 0.0)
+            entry = self._reservations.pop(event.order_id, None)
+            reserved_amount = entry[1] if entry else 0.0
             actual_cost = fill_value + commission
             budget.reserved = max(0.0, budget.reserved - reserved_amount)
             budget.spent += actual_cost
@@ -334,6 +350,43 @@ class Treasury:
         if not isinstance(event, OrderFailedEvent):
             return
         await self.release_reservation(event.bot_id, event.order_id)
+
+    async def _on_bot_stopped(self, event: object) -> None:
+        """봇 중지 시 해당 봇의 모든 예약 자금 일괄 해제."""
+        from ante.eventbus.events import BotStoppedEvent
+
+        if not isinstance(event, BotStoppedEvent):
+            return
+
+        bot_id = event.bot_id
+        pending = self.get_reservations(bot_id)
+        if not pending:
+            return
+
+        total_released = 0.0
+        for order_id, amount in pending.items():
+            self._reservations.pop(order_id, None)
+            total_released += amount
+
+        budget = self._budgets.get(bot_id)
+        if budget:
+            budget.reserved = max(0.0, budget.reserved - total_released)
+            budget.available += total_released
+            budget.last_updated = datetime.now(UTC)
+            await self._save_budget(budget)
+
+        await self._log_transaction(
+            bot_id=bot_id,
+            tx_type="bot_stopped_release",
+            amount=total_released,
+            description=f"{len(pending)}건 예약 해제",
+        )
+        logger.info(
+            "봇 중지 예약 해제: %s — %d건, %s원",
+            bot_id,
+            len(pending),
+            f"{total_released:,.0f}",
+        )
 
     # ── 잔고 동기화 ────────────────────────────────
 
