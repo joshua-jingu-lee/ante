@@ -8,6 +8,7 @@ import json
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import get_member_id, require_auth, require_scope
 
 
 @click.group()
@@ -22,9 +23,10 @@ def approval() -> None:
 @click.option("--params", "params_json", default="{}", help="실행 파라미터 (JSON)")
 @click.option("--reference-id", default="", help="참조 ID (report_id 등)")
 @click.option("--expires-in", default="", help="만료 기한 (예: 72h, 7d)")
-@click.option("--requester", default="agent", help="요청자 식별")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("approval:write")
 def request(
     ctx: click.Context,
     approval_type: str,
@@ -33,11 +35,11 @@ def request(
     params_json: str,
     reference_id: str,
     expires_in: str,
-    requester: str,
     db_path: str,
 ) -> None:
     """결재 요청 생성."""
     fmt = get_formatter(ctx)
+    requester = get_member_id(ctx)
 
     try:
         params = json.loads(params_json)
@@ -88,6 +90,8 @@ def request(
 @click.option("--type", "approval_type", default=None, help="유형 필터")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("approval:read")
 def approval_list(
     ctx: click.Context,
     status: str | None,
@@ -134,6 +138,8 @@ def approval_list(
 @click.argument("id")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("approval:read")
 def info(ctx: click.Context, id: str, db_path: str) -> None:
     """결재 상세 조회."""
     fmt = get_formatter(ctx)
@@ -179,7 +185,6 @@ def info(ctx: click.Context, id: str, db_path: str) -> None:
 
 @approval.command()
 @click.argument("id")
-@click.option("--reviewer", required=True, help="검토자 식별")
 @click.option(
     "--result",
     "review_result",
@@ -190,16 +195,18 @@ def info(ctx: click.Context, id: str, db_path: str) -> None:
 @click.option("--detail", default="", help="검토 상세")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("approval:read")
 def review(
     ctx: click.Context,
     id: str,
-    reviewer: str,
     review_result: str,
     detail: str,
     db_path: str,
 ) -> None:
     """검토 의견 추가."""
     fmt = get_formatter(ctx)
+    reviewer = get_member_id(ctx)
 
     async def _review() -> dict:
         from ante.approval import ApprovalService
@@ -236,12 +243,14 @@ def review(
 
 @approval.command("cancel")
 @click.argument("id")
-@click.option("--requester", required=True, help="요청자 식별 (본인 확인용)")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
-def cancel(ctx: click.Context, id: str, requester: str, db_path: str) -> None:
+@require_auth
+@require_scope("approval:write")
+def cancel(ctx: click.Context, id: str, db_path: str) -> None:
     """결재 철회 (요청자만 가능)."""
     fmt = get_formatter(ctx)
+    requester = get_member_id(ctx)
 
     async def _cancel() -> dict:
         from ante.approval import ApprovalService
@@ -270,6 +279,8 @@ def cancel(ctx: click.Context, id: str, requester: str, db_path: str) -> None:
 @click.argument("id")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("approval:admin")
 def approve(ctx: click.Context, id: str, db_path: str) -> None:
     """결재 승인."""
     fmt = get_formatter(ctx)
@@ -302,6 +313,8 @@ def approve(ctx: click.Context, id: str, db_path: str) -> None:
 @click.option("--reason", default="", help="거절 사유")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("approval:admin")
 def reject(ctx: click.Context, id: str, reason: str, db_path: str) -> None:
     """결재 거절."""
     fmt = get_formatter(ctx)

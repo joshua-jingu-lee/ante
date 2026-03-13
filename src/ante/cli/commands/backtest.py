@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import require_auth, require_scope
 
 
 @click.group()
@@ -23,6 +24,8 @@ def backtest() -> None:
 @click.option("--timeframe", default="1d", help="타임프레임")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.pass_context
+@require_auth
+@require_scope("backtest:run")
 def run(
     ctx: click.Context,
     strategy_path: str,

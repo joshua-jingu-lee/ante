@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from ante.cli.formatter import OutputFormatter
+from ante.cli.middleware import authenticate_member
 
 
 @click.group()
@@ -22,6 +23,7 @@ def cli(ctx: click.Context, output_format: str) -> None:
     ctx.ensure_object(dict)
     ctx.obj["format"] = output_format
     ctx.obj["formatter"] = OutputFormatter(output_format)
+    authenticate_member(ctx)
 
 
 def get_formatter(ctx: click.Context) -> OutputFormatter:

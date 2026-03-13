@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import require_auth, require_scope
 
 
 @click.group()
@@ -21,6 +22,8 @@ def instrument() -> None:
 )
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("data:read")
 def instrument_list(
     ctx: click.Context,
     exchange: str,
@@ -76,6 +79,8 @@ def instrument_list(
 @click.option("--limit", default=20, help="최대 결과 수")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
+@require_auth
+@require_scope("data:read")
 def search(
     ctx: click.Context,
     keyword: str,

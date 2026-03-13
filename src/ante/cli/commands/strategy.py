@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from ante.cli.main import get_formatter
+from ante.cli.middleware import require_auth, require_scope
 
 
 @click.group()
@@ -17,6 +18,8 @@ def strategy() -> None:
 @strategy.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
+@require_auth
+@require_scope("strategy:write")
 def validate(ctx: click.Context, path: str) -> None:
     """전략 파일 정적 검증 (AST 기반)."""
     from ante.strategy.validator import StrategyValidator
@@ -46,6 +49,8 @@ def validate(ctx: click.Context, path: str) -> None:
 
 @strategy.command("list")
 @click.pass_context
+@require_auth
+@require_scope("strategy:read")
 def strategy_list(ctx: click.Context) -> None:
     """등록된 전략 목록 조회."""
     fmt = get_formatter(ctx)
