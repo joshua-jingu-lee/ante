@@ -20,6 +20,7 @@ def instrument() -> None:
 @click.option(
     "--type", "inst_type", default=None, help="종목 유형 필터 (stock, etf, etn 등)"
 )
+@click.option("--listed-only", is_flag=True, help="상장 종목만 표시")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
@@ -28,6 +29,7 @@ def instrument_list(
     ctx: click.Context,
     exchange: str,
     inst_type: str | None,
+    listed_only: bool,
     db_path: str,
 ) -> None:
     """등록된 종목 목록 조회."""
@@ -49,6 +51,9 @@ def instrument_list(
             if inst_type:
                 query += " AND instrument_type = ?"
                 params.append(inst_type)
+
+            if listed_only:
+                query += " AND listed = 1"
 
             query += " ORDER BY symbol"
             rows = await db.fetch_all(query, tuple(params))
@@ -183,6 +188,7 @@ def sync(
 @instrument.command()
 @click.argument("keyword")
 @click.option("--limit", default=20, help="최대 결과 수")
+@click.option("--listed-only", is_flag=True, help="상장 종목만 검색")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
@@ -191,6 +197,7 @@ def search(
     ctx: click.Context,
     keyword: str,
     limit: int,
+    listed_only: bool,
     db_path: str,
 ) -> None:
     """키워드로 종목 검색 (종목코드, 한글명, 영문명)."""
@@ -205,7 +212,11 @@ def search(
         try:
             svc = InstrumentService(db)
             await svc.initialize()
-            instruments = await svc.search(keyword, limit=limit)
+            instruments = await svc.search(
+                keyword,
+                limit=limit,
+                listed_only=listed_only,
+            )
             return [
                 {
                     "symbol": inst.symbol,

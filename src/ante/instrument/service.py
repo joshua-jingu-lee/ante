@@ -62,15 +62,27 @@ class InstrumentService:
         inst = self._cache.get((symbol, exchange))
         return inst.name if inst and inst.name else symbol
 
-    async def search(self, keyword: str, limit: int = 20) -> list[Instrument]:
+    async def search(
+        self,
+        keyword: str,
+        limit: int = 20,
+        listed_only: bool = False,
+    ) -> list[Instrument]:
         """키워드로 종목 검색 (name, name_en, symbol LIKE)."""
         pattern = f"%{keyword}%"
-        rows = await self._db.fetch_all(
+        query = (
             "SELECT * FROM instruments "
-            "WHERE name LIKE ? OR name_en LIKE ? OR symbol LIKE ? "
-            "LIMIT ?",
-            (pattern, pattern, pattern, limit),
+            "WHERE (name LIKE ? OR name_en LIKE ? OR symbol LIKE ?)"
         )
+        params: list[object] = [pattern, pattern, pattern]
+
+        if listed_only:
+            query += " AND listed = 1"
+
+        query += " LIMIT ?"
+        params.append(limit)
+
+        rows = await self._db.fetch_all(query, tuple(params))
         return [self._row_to_instrument(row) for row in rows]
 
     async def bulk_upsert(self, instruments: list[Instrument]) -> int:
