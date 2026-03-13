@@ -1,0 +1,43 @@
+"""알림 이력 API."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Request
+
+router = APIRouter()
+
+
+@router.get("")
+async def list_notifications(
+    request: Request,
+    level: str | None = None,
+    limit: int = 20,
+    cursor: str | None = None,
+) -> dict:
+    """알림 이력 조회 (cursor 기반 페이지네이션)."""
+    from ante.web.pagination import paginate
+
+    notification_service = getattr(request.app.state, "notification_service", None)
+    if notification_service is None:
+        raise HTTPException(
+            status_code=503, detail="Notification service not available"
+        )
+
+    rows = await notification_service.get_history(level=level, limit=limit + 1)
+    items = [
+        {
+            "id": str(r["id"]),
+            "level": r["level"],
+            "title": r["title"],
+            "message": r["message"],
+            "success": bool(r["success"]),
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+    result = paginate(items, cursor_field="id", limit=limit, cursor=cursor)
+    return {
+        "notifications": result["items"],
+        "next_cursor": result["next_cursor"],
+    }

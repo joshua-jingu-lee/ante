@@ -32,15 +32,25 @@ def create_app(**services: Any) -> FastAPI:
     for name, service in services.items():
         setattr(app.state, name, service)
 
+    from ante.web.routes.bots import router as bots_router
     from ante.web.routes.data import router as data_router
+    from ante.web.routes.notifications import router as notifications_router
     from ante.web.routes.reports import router as report_router
     from ante.web.routes.strategies import router as strategy_router
     from ante.web.routes.system import router as system_router
+    from ante.web.routes.trades import router as trades_router
 
     app.include_router(system_router, prefix="/api/system", tags=["system"])
     app.include_router(strategy_router, prefix="/api/strategies", tags=["strategies"])
     app.include_router(report_router, prefix="/api/reports", tags=["reports"])
     app.include_router(data_router, prefix="/api/data", tags=["data"])
+    app.include_router(trades_router, prefix="/api/trades", tags=["trades"])
+    app.include_router(bots_router, prefix="/api/bots", tags=["bots"])
+    app.include_router(
+        notifications_router,
+        prefix="/api/notifications",
+        tags=["notifications"],
+    )
 
     from ante.web.errors import register_exception_handlers
 
