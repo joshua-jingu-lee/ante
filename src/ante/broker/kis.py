@@ -204,6 +204,7 @@ class KISAdapter(BrokerAdapter):
             "purchase_amount": float(info.get("pchs_amt_smtl_amt", 0)),
             "eval_amount": float(info.get("evlu_amt_smtl_amt", 0)),
             "total_profit_loss": float(info.get("evlu_pfls_smtl_amt", 0)),
+            "purchasable_amount": float(info.get("psbl_sbst_amt", 0)),
         }
 
     async def get_positions(self) -> list[dict[str, Any]]:

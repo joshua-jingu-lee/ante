@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -9,8 +10,10 @@ from typing import TYPE_CHECKING, Any
 from ante.treasury.models import BotBudget
 
 if TYPE_CHECKING:
+    from ante.broker.base import BrokerAdapter
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
+    from ante.trade.position import PositionHistory
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +62,17 @@ class Treasury:
         self._commission_rate = commission_rate
 
         self._account_balance: float = 0.0
+        self._purchasable_amount: float = 0.0
+        self._total_evaluation: float = 0.0
+        self._purchase_amount: float = 0.0
+        self._eval_amount: float = 0.0
+        self._total_profit_loss: float = 0.0
+        self._external_purchase_amount: float = 0.0
+        self._external_eval_amount: float = 0.0
         self._budgets: dict[str, BotBudget] = {}
         self._unallocated: float = 0.0
         self._reservations: dict[str, float] = {}
+        self._sync_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
         """스키마 생성 + DB 복원 + EventBus 구독."""
@@ -302,6 +313,125 @@ class Treasury:
             return
         await self.release_reservation(event.bot_id, event.order_id)
 
+    # ── 잔고 동기화 ────────────────────────────────
+
+    async def start_sync(
+        self,
+        broker: BrokerAdapter,
+        position_history: PositionHistory,
+        interval_seconds: int = 300,
+    ) -> None:
+        """KIS 계좌 잔고 주기적 동기화 시작."""
+        if self._sync_task and not self._sync_task.done():
+            logger.warning("이미 동기화 루프가 실행 중입니다")
+            return
+
+        self._sync_task = asyncio.create_task(
+            self._sync_loop(broker, position_history, interval_seconds),
+            name="treasury-balance-sync",
+        )
+        logger.info("잔고 동기화 시작 (주기: %d초)", interval_seconds)
+
+    async def stop_sync(self) -> None:
+        """잔고 동기화 중지."""
+        if self._sync_task and not self._sync_task.done():
+            self._sync_task.cancel()
+            try:
+                await self._sync_task
+            except asyncio.CancelledError:
+                pass
+            self._sync_task = None
+            logger.info("잔고 동기화 중지")
+
+    async def _sync_loop(
+        self,
+        broker: BrokerAdapter,
+        position_history: PositionHistory,
+        interval_seconds: int,
+    ) -> None:
+        """주기적 잔고 동기화 루프."""
+        try:
+            while True:
+                try:
+                    await self._do_sync(broker, position_history)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning("잔고 동기화 실패 — 이전 값 유지", exc_info=True)
+                await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            raise
+
+    async def _do_sync(
+        self,
+        broker: BrokerAdapter,
+        position_history: PositionHistory,
+    ) -> None:
+        """한 번의 잔고 동기화 수행."""
+        from ante.eventbus.events import BalanceSyncedEvent
+
+        # 1) KIS 계좌 잔고 (output2)
+        balance_data = await broker.get_account_balance()
+        await self.sync_balance(balance_data)
+
+        # 2) KIS 보유종목 (output1) + Trade 내부 포지션 대조
+        broker_positions = await broker.get_positions()
+        internal_positions = await position_history.get_all_positions()
+        internal_symbols = {p.symbol for p in internal_positions}
+
+        external_purchase = 0.0
+        external_eval = 0.0
+        for pos in broker_positions:
+            if pos["symbol"] not in internal_symbols:
+                external_purchase += float(pos.get("avg_price", 0)) * float(
+                    pos.get("quantity", 0)
+                )
+                external_eval += float(pos.get("eval_amount", 0))
+
+        self._external_purchase_amount = external_purchase
+        self._external_eval_amount = external_eval
+        await self._save_state()
+
+        # 3) 이벤트 발행
+        await self._eventbus.publish(
+            BalanceSyncedEvent(
+                account_balance=self._account_balance,
+                purchasable_amount=self._purchasable_amount,
+                total_evaluation=self._total_evaluation,
+                external_purchase_amount=self._external_purchase_amount,
+                external_eval_amount=self._external_eval_amount,
+            )
+        )
+        logger.info(
+            "잔고 동기화 완료: 예수금=%s, 매수가능=%s, 외부종목=%d건",
+            f"{self._account_balance:,.0f}",
+            f"{self._purchasable_amount:,.0f}",
+            sum(1 for pos in broker_positions if pos["symbol"] not in internal_symbols),
+        )
+
+    async def sync_balance(self, balance_data: dict[str, float]) -> None:
+        """KIS 잔고 데이터로 Treasury 상태 동기화."""
+        self._account_balance = balance_data.get("cash", self._account_balance)
+        self._purchasable_amount = balance_data.get(
+            "purchasable_amount", self._purchasable_amount
+        )
+        self._total_evaluation = balance_data.get(
+            "total_assets", self._total_evaluation
+        )
+        self._purchase_amount = balance_data.get(
+            "purchase_amount", self._purchase_amount
+        )
+        self._eval_amount = balance_data.get("eval_amount", self._eval_amount)
+        self._total_profit_loss = balance_data.get(
+            "total_profit_loss", self._total_profit_loss
+        )
+
+        # 미할당 재계산
+        total_allocated = sum(b.allocated for b in self._budgets.values())
+        self._unallocated = self._account_balance - total_allocated
+
+        await self._save_state()
+
     # ── 모니터링 ────────────────────────────────────
 
     def get_summary(self) -> dict[str, Any]:
@@ -309,30 +439,56 @@ class Treasury:
         total_allocated = sum(b.allocated for b in self._budgets.values())
         total_reserved = sum(b.reserved for b in self._budgets.values())
 
+        ante_purchase = self._purchase_amount - self._external_purchase_amount
+        ante_eval = self._eval_amount - self._external_eval_amount
+        ante_profit_loss = ante_eval - ante_purchase
+
         return {
             "account_balance": self._account_balance,
+            "purchasable_amount": self._purchasable_amount,
+            "total_evaluation": self._total_evaluation,
+            "purchase_amount": self._purchase_amount,
+            "eval_amount": self._eval_amount,
+            "total_profit_loss": self._total_profit_loss,
             "total_allocated": total_allocated,
             "total_reserved": total_reserved,
             "unallocated": self._unallocated,
             "bot_count": len(self._budgets),
+            "external_purchase_amount": self._external_purchase_amount,
+            "external_eval_amount": self._external_eval_amount,
+            "ante_purchase_amount": ante_purchase,
+            "ante_eval_amount": ante_eval,
+            "ante_profit_loss": ante_profit_loss,
         }
 
     # ── DB 영속화 ───────────────────────────────────
 
+    _STATE_FIELDS = (
+        "account_balance",
+        "unallocated",
+        "purchasable_amount",
+        "total_evaluation",
+        "purchase_amount",
+        "eval_amount",
+        "total_profit_loss",
+        "external_purchase_amount",
+        "external_eval_amount",
+    )
+
     async def _load_from_db(self) -> None:
         """DB에서 자금 상태 복원."""
-        # 계좌 잔고
-        row = await self._db.fetch_one(
-            "SELECT value FROM treasury_state WHERE key = 'account_balance'"
-        )
-        if row:
-            self._account_balance = float(row["value"])
+        rows = await self._db.fetch_all("SELECT key, value FROM treasury_state")
+        state = {r["key"]: float(r["value"]) for r in rows}
 
-        row = await self._db.fetch_one(
-            "SELECT value FROM treasury_state WHERE key = 'unallocated'"
-        )
-        if row:
-            self._unallocated = float(row["value"])
+        self._account_balance = state.get("account_balance", 0.0)
+        self._unallocated = state.get("unallocated", 0.0)
+        self._purchasable_amount = state.get("purchasable_amount", 0.0)
+        self._total_evaluation = state.get("total_evaluation", 0.0)
+        self._purchase_amount = state.get("purchase_amount", 0.0)
+        self._eval_amount = state.get("eval_amount", 0.0)
+        self._total_profit_loss = state.get("total_profit_loss", 0.0)
+        self._external_purchase_amount = state.get("external_purchase_amount", 0.0)
+        self._external_eval_amount = state.get("external_eval_amount", 0.0)
 
         # 봇 예산
         rows = await self._db.fetch_all("SELECT * FROM bot_budgets")
@@ -349,10 +505,18 @@ class Treasury:
 
     async def _save_state(self) -> None:
         """계좌 상태 저장."""
-        for key, value in [
-            ("account_balance", self._account_balance),
-            ("unallocated", self._unallocated),
-        ]:
+        field_map = {
+            "account_balance": self._account_balance,
+            "unallocated": self._unallocated,
+            "purchasable_amount": self._purchasable_amount,
+            "total_evaluation": self._total_evaluation,
+            "purchase_amount": self._purchase_amount,
+            "eval_amount": self._eval_amount,
+            "total_profit_loss": self._total_profit_loss,
+            "external_purchase_amount": self._external_purchase_amount,
+            "external_eval_amount": self._external_eval_amount,
+        }
+        for key, value in field_map.items():
             await self._db.execute(
                 """INSERT INTO treasury_state (key, value)
                    VALUES (?, ?)

@@ -375,3 +375,17 @@ class MemberAuthFailedEvent(Event):
 
     member_id: str = ""
     reason: str = ""
+
+
+# ── 잔고 동기화 (Treasury) ──────────────────────
+
+
+@dataclass(frozen=True)
+class BalanceSyncedEvent(Event):
+    """Treasury → EventBus: 계좌 잔고 동기화 완료."""
+
+    account_balance: float = 0.0
+    purchasable_amount: float = 0.0
+    total_evaluation: float = 0.0
+    external_purchase_amount: float = 0.0
+    external_eval_amount: float = 0.0

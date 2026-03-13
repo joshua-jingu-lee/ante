@@ -213,6 +213,16 @@ async def main() -> None:
         bot_manager._context_factory = context_factory
         logger.info("StrategyContextFactory 설정 완료")
 
+    # ── 11.6. Treasury 잔고 동기화 ────────────────────
+    if broker:
+        sync_interval = config.get("treasury.sync_interval_seconds", 300)
+        await treasury.start_sync(
+            broker=broker,
+            position_history=position_history,
+            interval_seconds=sync_interval,
+        )
+        logger.info("Treasury 잔고 동기화 시작 (주기: %d초)", sync_interval)
+
     # ── 12. Data Pipeline ────────────────────────────
     from ante.data import DataCatalog, DataCollector, ParquetStore
 
@@ -338,6 +348,9 @@ async def main() -> None:
         except asyncio.CancelledError:
             pass
         logger.info("Web API 종료")
+
+    # 10.5 Treasury 잔고 동기화 중지
+    await treasury.stop_sync()
 
     # 10. BotManager (봇 먼저 중지)
     await bot_manager.stop_all()
