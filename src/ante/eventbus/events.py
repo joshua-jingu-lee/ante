@@ -315,3 +315,26 @@ class ConfigChangedEvent(Event):
     old_value: str = ""
     new_value: str = ""
     changed_by: str = ""
+
+
+# ── 결재 (Approval) ───────────────────────────
+
+
+@dataclass(frozen=True)
+class ApprovalCreatedEvent(Event):
+    """ApprovalService → EventBus: 결재 요청 생성."""
+
+    approval_id: str = ""
+    approval_type: str = ""
+    requester: str = ""
+    title: str = ""
+
+
+@dataclass(frozen=True)
+class ApprovalResolvedEvent(Event):
+    """ApprovalService → EventBus: 결재 처리 완료 (승인/거절/철회/만료)."""
+
+    approval_id: str = ""
+    approval_type: str = ""
+    resolution: str = ""
+    resolved_by: str = ""
