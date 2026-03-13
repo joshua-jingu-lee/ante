@@ -23,7 +23,7 @@ from ante.member.auth import (
     verify_token,
 )
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
-from ante.member.service import MemberService
+from ante.member.service import ANIMAL_EMOJI_POOL, MemberService
 
 # ── Fixtures ─────────────────────────────────────────
 
@@ -382,3 +382,114 @@ class TestAuthFailedEvent:
             await service.authenticate("invalid_token")
         assert len(events) == 1
         assert events[0].reason == "유효하지 않은 토큰 형식"
+
+
+# ── Emoji ───────────────────────────────────────────
+
+
+class TestEmojiField:
+    async def test_member_has_emoji_field(self):
+        m = Member(member_id="t", type=MemberType.AGENT, role=MemberRole.DEFAULT)
+        assert m.emoji == ""
+
+    async def test_register_auto_assigns_emoji(self, service):
+        member, _ = await service.register("a1", MemberType.AGENT)
+        assert member.emoji != ""
+        assert member.emoji in ANIMAL_EMOJI_POOL
+
+    async def test_register_with_explicit_emoji(self, service):
+        member, _ = await service.register("a1", MemberType.AGENT, emoji="🎸")
+        assert member.emoji == "🎸"
+
+    async def test_bootstrap_auto_assigns_emoji(self, service):
+        member, _ = await service.bootstrap_master("owner", "pass123")
+        assert member.emoji != ""
+        assert member.emoji in ANIMAL_EMOJI_POOL
+
+    async def test_bootstrap_with_explicit_emoji(self, service):
+        member, _ = await service.bootstrap_master("owner", "pass123", emoji="👑")
+        assert member.emoji == "👑"
+
+    async def test_emoji_persisted_in_db(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        fetched = await service.get("a1")
+        assert fetched.emoji == "🐶"
+
+
+class TestUpdateEmoji:
+    async def test_update_emoji(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        m = await service.update_emoji("a1", "🐱", updated_by="owner")
+        assert m.emoji == "🐱"
+        fetched = await service.get("a1")
+        assert fetched.emoji == "🐱"
+
+    async def test_update_emoji_to_empty(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        m = await service.update_emoji("a1", "", updated_by="owner")
+        assert m.emoji == ""
+
+    async def test_update_emoji_nonexistent_member(self, service):
+        with pytest.raises(ValueError, match="존재하지 않는 멤버"):
+            await service.update_emoji("ghost", "🐶")
+
+
+class TestEmojiValidation:
+    async def test_invalid_emoji_text(self, service):
+        with pytest.raises(ValueError, match="단일 이모지만"):
+            await service.register("a1", MemberType.AGENT, emoji="abc")
+
+    async def test_invalid_emoji_multiple(self, service):
+        with pytest.raises(ValueError, match="단일 이모지만"):
+            await service.register("a1", MemberType.AGENT, emoji="🐶🐱")
+
+    async def test_duplicate_emoji_fails(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        with pytest.raises(ValueError, match="이미.*사용 중"):
+            await service.register("a2", MemberType.AGENT, emoji="🐶")
+
+    async def test_duplicate_emoji_message_includes_owner(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        with pytest.raises(ValueError, match="a1"):
+            await service.register("a2", MemberType.AGENT, emoji="🐶")
+
+    async def test_empty_emoji_allows_duplicates(self, service):
+        # emoji=""는 빈 문자열 명시 (자동 배정 안 함)
+        m1, _ = await service.register("a1", MemberType.AGENT, emoji="")
+        m2, _ = await service.register("a2", MemberType.AGENT, emoji="")
+        assert m1.emoji == ""
+        assert m2.emoji == ""
+
+    async def test_update_emoji_duplicate_fails(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.register("a2", MemberType.AGENT, emoji="🐱")
+        with pytest.raises(ValueError, match="이미.*사용 중"):
+            await service.update_emoji("a2", "🐶")
+
+    async def test_update_emoji_same_value_ok(self, service):
+        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        m = await service.update_emoji("a1", "🐶")
+        assert m.emoji == "🐶"
+
+
+class TestAutoAssignEmoji:
+    async def test_auto_assign_unique(self, service):
+        m1, _ = await service.register("a1", MemberType.AGENT)
+        m2, _ = await service.register("a2", MemberType.AGENT)
+        assert m1.emoji != m2.emoji
+
+    async def test_auto_assign_exhausted_pool(self, service):
+        for i in range(len(ANIMAL_EMOJI_POOL)):
+            await service.register(
+                f"a{i}", MemberType.AGENT, emoji=ANIMAL_EMOJI_POOL[i]
+            )
+        # 풀 소진 후 등록 — 에러 없이 빈 문자열
+        member, _ = await service.register("overflow", MemberType.AGENT)
+        assert member.emoji == ""
+
+    async def test_auto_assigned_can_be_changed(self, service):
+        member, _ = await service.register("a1", MemberType.AGENT)
+        original = member.emoji
+        m = await service.update_emoji("a1", "🎸")
+        assert m.emoji == "🎸"
+        assert m.emoji != original

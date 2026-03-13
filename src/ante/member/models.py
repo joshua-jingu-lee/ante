@@ -38,6 +38,7 @@ class Member:
     role: str
     org: str = "default"
     name: str = ""
+    emoji: str = ""
     status: str = MemberStatus.ACTIVE
     scopes: list[str] = field(default_factory=list)
     token_hash: str = ""
