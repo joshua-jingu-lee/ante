@@ -142,6 +142,18 @@ class BrokerAdapter(ABC):
         """
         ...
 
+    # ── 종목 마스터 ────────────────────────────────────
+
+    @abstractmethod
+    async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
+        """종목 마스터 데이터 조회.
+
+        Returns:
+            [{"symbol": str, "name": str, "name_en": str,
+              "instrument_type": str, "listed": bool}, ...]
+        """
+        ...
+
     # ── 수수료 ────────────────────────────────────────
 
     @abstractmethod

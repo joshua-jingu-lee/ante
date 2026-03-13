@@ -119,6 +119,9 @@ class MockBrokerAdapter(BrokerAdapter):
     ) -> list[dict[str, Any]]:
         return list(self._orders.values())
 
+    async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
+        return []
+
     def get_commission_info(self) -> Any:
         from ante.broker.models import CommissionInfo
 
