@@ -52,7 +52,31 @@ def run(
 
     try:
         service = BacktestService(data_path=data_path)
-        result = asyncio.run(service.run(config))
+        show_progress = not fmt.is_json
+
+        progress_bar = None
+
+        def _progress_callback(current: int, total: int) -> None:
+            nonlocal progress_bar
+            if not show_progress:
+                return
+            if progress_bar is None and total > 0:
+                progress_bar = click.progressbar(
+                    length=total,
+                    label="백테스트 진행",
+                    show_percent=True,
+                    show_pos=True,
+                )
+                progress_bar.__enter__()
+            if progress_bar is not None:
+                progress_bar.update(1)
+
+        result = asyncio.run(service.run(config, progress_callback=_progress_callback))
+
+        if progress_bar is not None:
+            progress_bar.__exit__(None, None, None)
+            click.echo()
+
         result_dict = result.to_dict()
         metrics = result_dict.get("metrics", {})
 

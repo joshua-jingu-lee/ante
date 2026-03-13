@@ -41,8 +41,17 @@ class BacktestExecutor:
         self._trades: list[BacktestTrade] = []
         self._equity_curve: list[dict] = []
 
-    async def run(self) -> BacktestResult:
-        """백테스트 실행."""
+    async def run(
+        self,
+        progress_callback: Any | None = None,
+    ) -> BacktestResult:
+        """백테스트 실행.
+
+        Args:
+            progress_callback: (current_step, total_steps)를 받는 콜백.
+        """
+        total_steps = self._data.get_total_steps()
+
         ctx = BacktestStrategyContext(
             bot_id="backtest",
             data_provider=self._data,
@@ -77,6 +86,8 @@ class BacktestExecutor:
                 }
             )
             step += 1
+            if progress_callback:
+                progress_callback(step, total_steps)
 
         strategy.on_stop()
 

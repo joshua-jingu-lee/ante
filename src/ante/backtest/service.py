@@ -28,7 +28,11 @@ class BacktestService:
         self._data_path = data_path
         self._running: dict[str, asyncio.Task] = {}
 
-    async def run(self, config: dict[str, Any]) -> BacktestResult:
+    async def run(
+        self,
+        config: dict[str, Any],
+        progress_callback: Any | None = None,
+    ) -> BacktestResult:
         """백테스트를 in-process로 실행."""
         self._validate_config(config)
 
@@ -56,7 +60,7 @@ class BacktestService:
             slippage_rate=config.get("slippage_rate", 0.001),
         )
 
-        return await executor.run()
+        return await executor.run(progress_callback=progress_callback)
 
     async def run_subprocess(self, config: dict[str, Any]) -> dict:
         """백테스트를 subprocess로 격리 실행 (D-004)."""
