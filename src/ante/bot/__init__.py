@@ -2,6 +2,7 @@
 
 from ante.bot.bot import Bot
 from ante.bot.config import BotConfig, BotStatus
+from ante.bot.context_factory import StrategyContextFactory
 from ante.bot.exceptions import BotError
 from ante.bot.manager import BotManager
 
@@ -11,4 +12,5 @@ __all__ = [
     "BotError",
     "BotManager",
     "BotStatus",
+    "StrategyContextFactory",
 ]

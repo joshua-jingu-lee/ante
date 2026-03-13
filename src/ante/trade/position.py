@@ -47,12 +47,29 @@ class PositionHistory:
 
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._position_cache: dict[str, dict[str, PositionSnapshot]] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성 + 마이그레이션."""
+        """스키마 생성 + 마이그레이션 + 캐시 워밍."""
         await self._db.execute_script(POSITION_SCHEMA)
         await self._migrate_exchange_column()
+        await self._warm_cache()
         logger.info("PositionHistory 초기화 완료")
+
+    async def _warm_cache(self) -> None:
+        """DB에서 전체 포지션을 읽어 인메모리 캐시에 적재."""
+        rows = await self._db.fetch_all("SELECT * FROM positions WHERE quantity > 0")
+        self._position_cache.clear()
+        for row in rows:
+            snapshot = self._row_to_snapshot(row)
+            self._position_cache.setdefault(snapshot.bot_id, {})[snapshot.symbol] = (
+                snapshot
+            )
+
+    def get_positions_sync(self, bot_id: str) -> list[PositionSnapshot]:
+        """봇의 현재 포지션 동기 조회 (인메모리 캐시). PortfolioView용."""
+        bot_positions = self._position_cache.get(bot_id, {})
+        return list(bot_positions.values())
 
     async def _migrate_exchange_column(self) -> None:
         """exchange 컬럼 마이그레이션 (v0.2)."""
@@ -235,6 +252,34 @@ class PositionHistory:
                 realized_pnl_delta,
             ),
         )
+        # 인메모리 캐시 갱신
+        self._update_cache(
+            bot_id, symbol, quantity, avg_entry_price, realized_pnl_delta
+        )
+
+    def _update_cache(
+        self,
+        bot_id: str,
+        symbol: str,
+        quantity: float,
+        avg_entry_price: float,
+        realized_pnl_delta: float = 0.0,
+    ) -> None:
+        """인메모리 포지션 캐시 갱신."""
+        bot_cache = self._position_cache.setdefault(bot_id, {})
+        existing = bot_cache.get(symbol)
+        prev_pnl = existing.realized_pnl if existing else 0.0
+
+        if quantity > 0:
+            bot_cache[symbol] = PositionSnapshot(
+                bot_id=bot_id,
+                symbol=symbol,
+                quantity=quantity,
+                avg_entry_price=avg_entry_price,
+                realized_pnl=prev_pnl + realized_pnl_delta,
+            )
+        else:
+            bot_cache.pop(symbol, None)
 
     async def _save_history(
         self,
