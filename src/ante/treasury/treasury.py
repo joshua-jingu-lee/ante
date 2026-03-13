@@ -56,10 +56,12 @@ class Treasury:
         db: Database,
         eventbus: EventBus,
         commission_rate: float = 0.00015,
+        sell_tax_rate: float = 0.0023,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
         self._commission_rate = commission_rate
+        self._sell_tax_rate = sell_tax_rate
 
         self._account_balance: float = 0.0
         self._purchasable_amount: float = 0.0
@@ -116,6 +118,26 @@ class Treasury:
     @property
     def unallocated(self) -> float:
         return self._unallocated
+
+    @property
+    def commission_rate(self) -> float:
+        return self._commission_rate
+
+    @property
+    def sell_tax_rate(self) -> float:
+        return self._sell_tax_rate
+
+    def update_commission_rates(
+        self, commission_rate: float, sell_tax_rate: float
+    ) -> None:
+        """수수료율 업데이트 (DynamicConfig 변경 시 호출)."""
+        self._commission_rate = commission_rate
+        self._sell_tax_rate = sell_tax_rate
+        logger.info(
+            "수수료율 갱신: commission=%s, sell_tax=%s",
+            commission_rate,
+            sell_tax_rate,
+        )
 
     # ── 예산 조회 ───────────────────────────────────
 

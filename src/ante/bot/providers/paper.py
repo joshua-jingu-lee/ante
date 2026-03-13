@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from ante.broker.models import CommissionInfo
 from ante.strategy.base import OrderView, PortfolioView
 
 if TYPE_CHECKING:
@@ -129,11 +130,15 @@ class PaperExecutor:
         eventbus: EventBus,
         gateway: APIGateway | None = None,
         commission_rate: float = 0.00015,
+        sell_tax_rate: float = 0.0023,
         slippage_rate: float = 0.0,
     ) -> None:
         self._eventbus = eventbus
         self._gateway = gateway
-        self._commission_rate = commission_rate
+        self._commission_info = CommissionInfo(
+            commission_rate=commission_rate,
+            sell_tax_rate=sell_tax_rate,
+        )
         self._slippage_rate = slippage_rate
         self._portfolios: dict[str, PaperPortfolioView] = {}
         self._bot_configs: dict[str, Any] = {}
@@ -200,7 +205,7 @@ class PaperExecutor:
 
         # 수수료 계산
         trade_amount = fill_price * quantity
-        commission = trade_amount * self._commission_rate
+        commission = self._commission_info.calculate(side, trade_amount)
 
         # 잔고 확인 (매수 시)
         if side == "buy":

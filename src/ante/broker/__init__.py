@@ -9,10 +9,12 @@ from ante.broker.exceptions import (
     RateLimitError,
 )
 from ante.broker.kis import KISAdapter
+from ante.broker.models import CommissionInfo
 from ante.broker.order_registry import OrderRegistry
 
 __all__ = [
     "BrokerAdapter",
+    "CommissionInfo",
     "KISAdapter",
     "OrderRegistry",
     "BrokerError",

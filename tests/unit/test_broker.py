@@ -82,6 +82,7 @@ class TestBrokerAdapterABC:
             async def get_order_history(
                 self, from_date: str | None = None, to_date: str | None = None
             ) -> list[dict[str, Any]]: ...
+            def get_commission_info(self) -> Any: ...
 
         broker = DummyBroker({})
         assert broker.normalize_symbol("5930") == "005930"
@@ -121,6 +122,7 @@ class TestBrokerAdapterABC:
             async def get_order_history(
                 self, from_date: str | None = None, to_date: str | None = None
             ) -> list[dict[str, Any]]: ...
+            def get_commission_info(self) -> Any: ...
 
         cfg = {"key": "value"}
         broker = MinBroker(cfg)

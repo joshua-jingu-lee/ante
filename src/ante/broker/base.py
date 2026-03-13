@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ante.broker.models import CommissionInfo
 
 
 class BrokerAdapter(ABC):
@@ -137,6 +140,13 @@ class BrokerAdapter(ABC):
               "quantity": float, "filled_quantity": float,
               "price": float, "status": str, "timestamp": str}, ...]
         """
+        ...
+
+    # ── 수수료 ────────────────────────────────────────
+
+    @abstractmethod
+    def get_commission_info(self) -> CommissionInfo:
+        """증권사별 수수료율 정보 반환."""
         ...
 
     # ── 헬퍼 메서드 ─────────────────────────────────
