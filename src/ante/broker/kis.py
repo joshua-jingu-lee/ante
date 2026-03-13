@@ -10,23 +10,71 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ante.broker.base import BrokerAdapter
+from ante.broker.circuit_breaker import CircuitBreaker
+from ante.broker.error_codes import (
+    is_retryable_http_status,
+    is_retryable_msg_code,
+)
 from ante.broker.exceptions import (
     APIError,
     AuthenticationError,
+    CircuitOpenError,
     OrderNotFoundError,
+    RateLimitError,
 )
 from ante.broker.models import CommissionInfo
 
+if TYPE_CHECKING:
+    from ante.eventbus.bus import EventBus
+
 logger = logging.getLogger(__name__)
+
+# ── API 유형별 설정 ───────────────────────────────────
+
+# 최대 재시도 횟수
+DEFAULT_MAX_RETRIES_ORDER = 3
+DEFAULT_MAX_RETRIES_QUERY = 2
+DEFAULT_MAX_RETRIES_AUTH = 2
+
+# 타임아웃 (초)
+DEFAULT_TIMEOUT_ORDER = 10
+DEFAULT_TIMEOUT_QUERY = 5
+DEFAULT_TIMEOUT_AUTH = 10
+
+# Backoff
+DEFAULT_BACKOFF_BASE = 1.0
+
+# Circuit Breaker
+DEFAULT_CB_FAILURE_THRESHOLD = 5
+DEFAULT_CB_RECOVERY_TIMEOUT = 60
+
+# 주문 관련 tr_id (재시도 횟수 분류용)
+_ORDER_TR_IDS = frozenset(
+    {
+        "VTTC0802U",
+        "TTTC0802U",  # 매수
+        "VTTC0801U",
+        "TTTC0311U",  # 매도
+        "VTTC0803U",
+        "TTTC0803U",  # 취소
+    }
+)
+
+# 인증 경로
+_AUTH_PATH = "/oauth2/tokenP"
 
 
 class KISAdapter(BrokerAdapter):
     """한국투자증권 Open API 어댑터."""
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        eventbus: EventBus | None = None,
+    ) -> None:
         config.setdefault("exchange", "KRX")
         super().__init__(config)
 
@@ -36,6 +84,7 @@ class KISAdapter(BrokerAdapter):
         self.is_paper: bool = config.get("is_paper", False)
         self._commission_rate: float = config.get("commission_rate", 0.00015)
         self._sell_tax_rate: float = config.get("sell_tax_rate", 0.0023)
+        self._eventbus = eventbus
 
         # API 엔드포인트
         if self.is_paper:
@@ -55,6 +104,44 @@ class KISAdapter(BrokerAdapter):
         # Rate limiting
         self._request_times: list[datetime] = []
         self._rate_limit_per_minute: int = 5 if self.is_paper else 20
+
+        # ── 재시도 설정 ────────────────────────────────
+        self._max_retries_order: int = config.get(
+            "retry.max_retries_order", DEFAULT_MAX_RETRIES_ORDER
+        )
+        self._max_retries_query: int = config.get(
+            "retry.max_retries_query", DEFAULT_MAX_RETRIES_QUERY
+        )
+        self._max_retries_auth: int = config.get(
+            "retry.max_retries_auth", DEFAULT_MAX_RETRIES_AUTH
+        )
+        self._backoff_base: float = config.get(
+            "retry.backoff_base_seconds", DEFAULT_BACKOFF_BASE
+        )
+
+        # ── 타임아웃 설정 ──────────────────────────────
+        self._timeout_order: float = config.get("timeout.order", DEFAULT_TIMEOUT_ORDER)
+        self._timeout_query: float = config.get("timeout.query", DEFAULT_TIMEOUT_QUERY)
+        self._timeout_auth: float = config.get("timeout.auth", DEFAULT_TIMEOUT_AUTH)
+
+        # ── Circuit Breaker ────────────────────────────
+        cb_threshold = config.get(
+            "circuit_breaker.failure_threshold", DEFAULT_CB_FAILURE_THRESHOLD
+        )
+        cb_timeout = config.get(
+            "circuit_breaker.recovery_timeout", DEFAULT_CB_RECOVERY_TIMEOUT
+        )
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=cb_threshold,
+            recovery_timeout=cb_timeout,
+            eventbus=eventbus,
+            name="kis",
+        )
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker:
+        """Circuit breaker 접근자."""
+        return self._circuit_breaker
 
     async def connect(self) -> None:
         """KIS API 연결 및 인증."""
@@ -87,17 +174,21 @@ class KISAdapter(BrokerAdapter):
             "appsecret": self.app_secret,
         }
 
-        async with self._session.post(
-            url, json=data, headers={"content-type": "application/json"}
-        ) as response:
-            if response.status != 200:
-                text = await response.text()
-                raise AuthenticationError(f"인증 실패 (HTTP {response.status}): {text}")
+        timeout = self._get_timeout(url)
+        async with asyncio.timeout(timeout):
+            async with self._session.post(
+                url, json=data, headers={"content-type": "application/json"}
+            ) as response:
+                if response.status != 200:
+                    text = await response.text()
+                    raise AuthenticationError(
+                        f"인증 실패 (HTTP {response.status}): {text}"
+                    )
 
-            result = await response.json()
-            self.access_token = result["access_token"]
-            self.token_expires_at = datetime.now(UTC) + timedelta(hours=24)
-            logger.info("KIS 토큰 발급 완료")
+                result = await response.json()
+                self.access_token = result["access_token"]
+                self.token_expires_at = datetime.now(UTC) + timedelta(hours=24)
+                logger.info("KIS 토큰 발급 완료")
 
     async def _ensure_authenticated(self) -> None:
         """토큰 유효성 확인 및 재발급."""
@@ -125,6 +216,22 @@ class KISAdapter(BrokerAdapter):
 
         self._request_times.append(now)
 
+    # ── 타임아웃 / 재시도 설정 ─────────────────────
+
+    def _get_timeout(self, url: str) -> float:
+        """URL 기반 타임아웃 결정."""
+        if _AUTH_PATH in url:
+            return self._timeout_auth
+        return self._timeout_order  # 주문/조회 기본값
+
+    def _get_max_retries(self, url: str, tr_id: str) -> int:
+        """API 유형별 최대 재시도 횟수."""
+        if _AUTH_PATH in url:
+            return self._max_retries_auth
+        if tr_id in _ORDER_TR_IDS:
+            return self._max_retries_order
+        return self._max_retries_query
+
     # ── 헤더/응답 처리 ─────────────────────────────
 
     def _get_headers(self, tr_id: str = "") -> dict[str, str]:
@@ -139,19 +246,26 @@ class KISAdapter(BrokerAdapter):
         }
 
     async def _handle_response(self, response: Any) -> dict[str, Any]:
-        """API 응답 처리."""
+        """API 응답 처리 (에러 분류 포함)."""
         if response.status != 200:
             text = await response.text()
+            retryable = is_retryable_http_status(response.status)
             raise APIError(
                 f"HTTP {response.status}: {text}",
                 status_code=response.status,
+                retryable=retryable,
             )
 
         result = await response.json()
-        if result.get("rt_cd") != "0":
+        rt_cd = result.get("rt_cd", "")
+        if rt_cd != "0":
+            msg_cd = result.get("msg_cd", "")
+            msg1 = result.get("msg1", "Unknown")
+            retryable = is_retryable_msg_code(msg_cd)
             raise APIError(
-                f"KIS API Error {result.get('rt_cd')}: {result.get('msg1', 'Unknown')}",
-                error_code=result.get("rt_cd", ""),
+                f"KIS API Error [{msg_cd}]: {msg1}",
+                error_code=msg_cd,
+                retryable=retryable,
             )
         return result
 
@@ -163,18 +277,111 @@ class KISAdapter(BrokerAdapter):
         params: dict[str, str] | None = None,
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """API 요청 공통 래퍼 (인증 + rate limit + 에러 처리)."""
+        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃)."""
+        # [1] Circuit Breaker 확인
+        self._circuit_breaker.check()
+
         await self._ensure_authenticated()
         await self._rate_limit_wait()
 
-        headers = self._get_headers(tr_id)
+        max_retries = self._get_max_retries(url, tr_id)
+        timeout = self._timeout_query
+        if tr_id in _ORDER_TR_IDS:
+            timeout = self._timeout_order
 
-        if method == "GET":
-            async with self._session.get(url, headers=headers, params=params) as resp:
-                return await self._handle_response(resp)
-        else:
-            async with self._session.post(url, headers=headers, json=json_data) as resp:
-                return await self._handle_response(resp)
+        headers = self._get_headers(tr_id)
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                # [2] API 호출 (타임아웃 적용)
+                async with asyncio.timeout(timeout):
+                    if method == "GET":
+                        async with self._session.get(
+                            url, headers=headers, params=params
+                        ) as resp:
+                            result = await self._handle_response(resp)
+                    else:
+                        async with self._session.post(
+                            url, headers=headers, json=json_data
+                        ) as resp:
+                            result = await self._handle_response(resp)
+
+                # 성공
+                self._circuit_breaker.record_success()
+                return result
+
+            except CircuitOpenError:
+                raise
+            except TimeoutError:
+                last_error = APIError(
+                    f"타임아웃 ({timeout:.0f}초 초과)",
+                    retryable=True,
+                )
+                self._circuit_breaker.record_failure()
+                if attempt < max_retries:
+                    wait = self._backoff_base * (2**attempt)
+                    logger.warning(
+                        "API 타임아웃 [%s] 재시도 %d/%d (%.1f초 후)",
+                        tr_id,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+            except (ConnectionError, OSError) as e:
+                last_error = APIError(str(e), retryable=True)
+                self._circuit_breaker.record_failure()
+                if attempt < max_retries:
+                    wait = self._backoff_base * (2**attempt)
+                    logger.warning(
+                        "네트워크 오류 [%s] 재시도 %d/%d (%.1f초 후): %s",
+                        tr_id,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                        e,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+            except RateLimitError as e:
+                last_error = e
+                self._circuit_breaker.record_failure()
+                if attempt < max_retries:
+                    wait = self._backoff_base * (2**attempt)
+                    logger.warning(
+                        "Rate limit [%s] 재시도 %d/%d (%.1f초 후)",
+                        tr_id,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+            except APIError as e:
+                last_error = e
+                if not e.retryable:
+                    # permanent 에러 → 즉시 실패 (circuit breaker에 기록하지 않음)
+                    raise
+                self._circuit_breaker.record_failure()
+                if attempt < max_retries:
+                    wait = self._backoff_base * (2**attempt)
+                    logger.warning(
+                        "API 오류 [%s] 재시도 %d/%d (%.1f초 후): %s",
+                        tr_id,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                        e,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+            except AuthenticationError:
+                raise
+
+        # 모든 재시도 소진
+        raise last_error  # type: ignore[misc]
 
     # ── 계좌 정보 조회 ─────────────────────────────
 

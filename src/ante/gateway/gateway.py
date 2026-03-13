@@ -189,7 +189,11 @@ class APIGateway:
 
     async def _on_order_cancel(self, event: object) -> None:
         """주문 취소 요청 → BrokerAdapter 전달 (룰 검증 생략)."""
-        from ante.eventbus.events import OrderCancelEvent, OrderCancelledEvent
+        from ante.eventbus.events import (
+            OrderCancelEvent,
+            OrderCancelFailedEvent,
+            OrderCancelledEvent,
+        )
 
         if not isinstance(event, OrderCancelEvent):
             return
@@ -210,6 +214,14 @@ class APIGateway:
             )
         except Exception as e:
             logger.error("주문 취소 실패: %s — %s", event.order_id, e)
+            await self._eventbus.publish(
+                OrderCancelFailedEvent(
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    error_message=str(e),
+                )
+            )
 
     async def _on_order_modify(self, event: object) -> None:
         """주문 정정 요청 → 로깅만 (정정은 추후 구현)."""

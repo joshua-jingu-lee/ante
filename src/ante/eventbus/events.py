@@ -389,3 +389,30 @@ class BalanceSyncedEvent(Event):
     total_evaluation: float = 0.0
     external_purchase_amount: float = 0.0
     external_eval_amount: float = 0.0
+
+
+# ── Circuit Breaker ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class CircuitBreakerEvent(Event):
+    """KIS API circuit breaker 상태 변경."""
+
+    broker: str = ""
+    old_state: str = ""
+    new_state: str = ""
+    failure_count: int = 0
+    reason: str = ""
+
+
+# ── 주문 취소 실패 ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class OrderCancelFailedEvent(Event):
+    """주문 취소 실패."""
+
+    order_id: str = ""
+    bot_id: str = ""
+    strategy_id: str = ""
+    error_message: str = ""

@@ -38,7 +38,9 @@ class NotificationService:
         """이벤트 구독 등록."""
         from ante.eventbus.events import (
             BotErrorEvent,
+            CircuitBreakerEvent,
             NotificationEvent,
+            OrderCancelFailedEvent,
             OrderFilledEvent,
             TradingStateChangedEvent,
         )
@@ -49,6 +51,16 @@ class NotificationService:
         self._eventbus.subscribe(
             TradingStateChangedEvent,
             self._on_trading_state_changed,
+            priority=0,
+        )
+        self._eventbus.subscribe(
+            OrderCancelFailedEvent,
+            self._on_order_cancel_failed,
+            priority=0,
+        )
+        self._eventbus.subscribe(
+            CircuitBreakerEvent,
+            self._on_circuit_breaker,
             priority=0,
         )
 
@@ -112,6 +124,36 @@ class NotificationService:
         await self._adapter.send(
             NotificationLevel.CRITICAL,
             f"거래 상태 변경: {event.old_state} → {event.new_state} ({event.reason})",
+        )
+
+    async def _on_order_cancel_failed(self, event: object) -> None:
+        """주문 취소 실패 알림."""
+        from ante.eventbus.events import OrderCancelFailedEvent
+
+        if not isinstance(event, OrderCancelFailedEvent):
+            return
+
+        msg = (
+            f"주문 취소 실패 [{event.bot_id}] "
+            f"주문={event.order_id}: {event.error_message}"
+        )
+        await self._adapter.send(NotificationLevel.ERROR, msg)
+
+    async def _on_circuit_breaker(self, event: object) -> None:
+        """Circuit breaker 상태 변경 알림."""
+        from ante.eventbus.events import CircuitBreakerEvent
+
+        if not isinstance(event, CircuitBreakerEvent):
+            return
+
+        level = NotificationLevel.WARNING
+        if event.new_state == "open":
+            level = NotificationLevel.ERROR
+
+        await self._adapter.send(
+            level,
+            f"Circuit Breaker [{event.broker}] "
+            f"{event.old_state} → {event.new_state} ({event.reason})",
         )
 
     def _should_send(self, level: NotificationLevel) -> bool:
