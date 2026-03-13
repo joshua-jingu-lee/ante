@@ -188,6 +188,21 @@ async def main() -> None:
     await report_store.initialize()
     logger.info("ReportStore 초기화 완료")
 
+    # ── 14.5. ApprovalService ──────────────────────────
+    from ante.approval import ApprovalService
+
+    approval_executors: dict = {
+        "strategy_adopt": lambda params: report_store.update_status(
+            params["report_id"], "adopted"
+        ),
+        "bot_stop": lambda params: bot_manager.stop_bot(params["bot_id"]),
+    }
+    approval_service = ApprovalService(  # noqa: F841
+        db=db, eventbus=eventbus, executors=approval_executors
+    )
+    await approval_service.initialize()
+    logger.info("ApprovalService 초기화 완료")
+
     # ── 15. NotificationService ──────────────────────
     from ante.notification import (
         NotificationLevel,
