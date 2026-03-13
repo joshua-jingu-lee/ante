@@ -148,6 +148,54 @@ class ParquetStore:
                 usage[tf_dir.name] = size
         return usage
 
+    async def validate(
+        self,
+        symbol: str,
+        timeframe: str,
+        fix: bool = False,
+    ) -> dict:
+        """Parquet 파일 무결성 검증.
+
+        Args:
+            symbol: 종목 코드
+            timeframe: 타임프레임
+            fix: True이면 손상 파일을 .corrupted 확장자로 이동
+
+        Returns:
+            {"symbol": str, "timeframe": str, "total": int,
+             "valid": int, "corrupted": int, "corrupted_files": list[str]}
+        """
+        path = self._base / "ohlcv" / timeframe / symbol
+        result: dict = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "total": 0,
+            "valid": 0,
+            "corrupted": 0,
+            "corrupted_files": [],
+        }
+
+        if not path.exists():
+            return result
+
+        files = sorted(path.glob("*.parquet"))
+        result["total"] = len(files)
+
+        for f in files:
+            try:
+                pl.read_parquet(f)
+                result["valid"] += 1
+            except Exception:
+                logger.warning("손상된 Parquet 파일 발견: %s", f)
+                result["corrupted"] += 1
+                result["corrupted_files"].append(str(f))
+                if fix:
+                    corrupted_path = f.with_suffix(".corrupted")
+                    f.rename(corrupted_path)
+                    logger.info("손상 파일 이동: %s → %s", f, corrupted_path)
+
+        return result
+
     def delete_file(self, symbol: str, timeframe: str, month: str) -> bool:
         """특정 Parquet 파일 삭제. 성공 여부 반환."""
         filepath = self._base / "ohlcv" / timeframe / symbol / f"{month}.parquet"
