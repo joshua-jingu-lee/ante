@@ -226,3 +226,115 @@ def search(
         return
 
     fmt.table(results, ["symbol", "exchange", "name", "name_en", "type"])
+
+
+@instrument.command("import")
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="실제 저장 없이 미리보기")
+@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.pass_context
+@require_auth
+@require_scope("data:write")
+def instrument_import(
+    ctx: click.Context,
+    file_path: str,
+    dry_run: bool,
+    db_path: str,
+) -> None:
+    """CSV/JSON 파일에서 종목 데이터 import."""
+    import json
+    from pathlib import Path
+
+    from ante.instrument.models import Instrument
+
+    fmt = get_formatter(ctx)
+    path = Path(file_path)
+    ext = path.suffix.lower()
+
+    # 파일 읽기
+    try:
+        if ext == ".csv":
+            import csv
+
+            with open(path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                records = list(reader)
+        elif ext == ".json":
+            with open(path, encoding="utf-8") as f:
+                records = json.load(f)
+                if not isinstance(records, list):
+                    fmt.error("JSON 파일은 배열 형태여야 합니다.")
+                    return
+        else:
+            fmt.error(f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)")
+            return
+    except Exception as e:
+        fmt.error(f"파일 읽기 실패: {e}")
+        return
+
+    if not records:
+        fmt.error("파일에 데이터가 없습니다.")
+        return
+
+    # 필수 컬럼 확인
+    first = records[0]
+    if "symbol" not in first or "exchange" not in first:
+        fmt.error("필수 컬럼 누락: symbol, exchange가 필요합니다.")
+        return
+
+    instruments = [
+        Instrument(
+            symbol=r["symbol"],
+            exchange=r["exchange"],
+            name=r.get("name", ""),
+            name_en=r.get("name_en", ""),
+            instrument_type=r.get("instrument_type", ""),
+            listed=str(r.get("listed", "true")).lower() in ("true", "1", "yes", "y"),
+        )
+        for r in records
+    ]
+
+    if dry_run:
+        preview = [
+            {
+                "symbol": inst.symbol,
+                "exchange": inst.exchange,
+                "name": inst.name,
+                "type": inst.instrument_type,
+            }
+            for inst in instruments[:10]
+        ]
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "dry_run": True,
+                    "total": len(instruments),
+                    "preview": preview,
+                }
+            )
+        else:
+            click.echo(f"  미리보기 ({len(instruments)}건 중 상위 {len(preview)}건):")
+            fmt.table(
+                preview,
+                ["symbol", "exchange", "name", "type"],
+            )
+        return
+
+    async def _import() -> int:
+        from ante.core.database import Database
+        from ante.instrument.service import InstrumentService
+
+        db = Database(db_path)
+        await db.connect()
+        try:
+            svc = InstrumentService(db)
+            await svc.initialize()
+            return await svc.bulk_upsert(instruments)
+        finally:
+            await db.close()
+
+    count = asyncio.run(_import())
+    fmt.success(
+        f"종목 import 완료: {count}건",
+        {"count": count, "file": str(path)},
+    )
