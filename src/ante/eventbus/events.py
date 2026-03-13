@@ -35,6 +35,7 @@ class OrderRequestEvent(Event):
     price: float | None = None
     stop_price: float | None = None
     reason: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class OrderValidatedEvent(Event):
     order_type: str = ""
     stop_price: float | None = None
     reason: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ class OrderRejectedEvent(Event):
     price: float | None = None
     order_type: str = ""
     reason: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,7 @@ class OrderApprovedEvent(Event):
     order_type: str = ""
     stop_price: float | None = None
     reserved_amount: float = 0.0
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,7 @@ class OrderSubmittedEvent(Event):
     side: str = ""
     quantity: float = 0.0
     order_type: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -137,6 +142,7 @@ class OrderFilledEvent(Event):
     commission: float = 0.0
     order_type: str = ""
     reason: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -152,6 +158,7 @@ class OrderCancelledEvent(Event):
     quantity: float = 0.0
     price: float = 0.0
     reason: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -167,6 +174,7 @@ class OrderFailedEvent(Event):
     price: float = 0.0
     order_type: str = ""
     error_message: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass(frozen=True)
@@ -186,6 +194,7 @@ class OrderUpdateEvent(Event):
     order_type: str = ""
     quantity: float = 0.0
     reason: str = ""
+    exchange: str = "KRX"
 
 
 # ── 시스템 이벤트 (System) ────────────────────────
@@ -291,6 +300,7 @@ class ExternalSignalEvent(Event):
     reason: str = ""
     confidence: float = 0.0
     metadata: dict = field(default_factory=dict)  # type: ignore[assignment]
+    exchange: str = "KRX"
 
 
 # ── 설정 변경 (Config) ───────────────────────────

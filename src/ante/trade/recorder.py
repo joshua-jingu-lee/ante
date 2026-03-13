@@ -48,9 +48,20 @@ class TradeRecorder:
         self._position_history = position_history
 
     async def initialize(self) -> None:
-        """스키마 생성."""
+        """스키마 생성 + 마이그레이션."""
         await self._db.execute_script(TRADE_SCHEMA)
+        await self._migrate_exchange_column()
         logger.info("TradeRecorder 초기화 완료")
+
+    async def _migrate_exchange_column(self) -> None:
+        """exchange 컬럼 마이그레이션 (v0.2)."""
+        try:
+            await self._db.execute(
+                "ALTER TABLE trades ADD COLUMN exchange TEXT DEFAULT 'KRX'"
+            )
+            logger.info("trades 테이블에 exchange 컬럼 추가")
+        except Exception:
+            pass  # 이미 존재
 
     def subscribe(self, eventbus: EventBus) -> None:
         """이벤트 구독 등록."""

@@ -75,6 +75,12 @@ async def main() -> None:
     await dynamic_config.initialize()
     logger.info("DynamicConfigService 초기화 완료")
 
+    # ── 5.5. InstrumentService ─────────────────────────
+    from ante.instrument import InstrumentService
+
+    instrument_service = InstrumentService(db=db)
+    await instrument_service.initialize()
+
     # ── 6. StrategyRegistry ──────────────────────────
     from ante.strategy import StrategyRegistry
 
@@ -200,6 +206,7 @@ async def main() -> None:
             adapter=adapter,
             eventbus=eventbus,
             min_level=NotificationLevel(min_level_str),
+            instrument_service=instrument_service,
         )
         notification_service.subscribe()
         logger.info("NotificationService 초기화 완료 (Telegram)")

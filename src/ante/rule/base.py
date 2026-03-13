@@ -53,6 +53,7 @@ class RuleContext:
     quantity: float
     order_type: str
     price: float | None = None
+    exchange: str = "KRX"
 
     # 시장/포지션 정보
     current_price: float = 0.0

@@ -16,9 +16,12 @@ def data() -> None:
 
 @data.command("list")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
-def data_list(ctx: click.Context, data_path: str) -> None:
+def data_list(ctx: click.Context, data_path: str, db_path: str) -> None:
     """보유 데이터셋 목록."""
+    import asyncio
+
     from ante.data.catalog import DataCatalog
     from ante.data.store import ParquetStore
 
@@ -31,7 +34,23 @@ def data_list(ctx: click.Context, data_path: str) -> None:
         fmt.output({"datasets": [], "count": 0})
         return
 
-    fmt.table(datasets, ["symbol", "timeframe", "start", "end"])
+    async def _enrich(items: list[dict]) -> list[dict]:
+        from ante.core.database import Database
+        from ante.instrument.service import InstrumentService
+
+        db = Database(db_path)
+        await db.connect()
+        try:
+            svc = InstrumentService(db)
+            await svc.initialize()
+            for item in items:
+                item["name"] = svc.get_name(item["symbol"])
+            return items
+        finally:
+            await db.close()
+
+    datasets = asyncio.run(_enrich(datasets))
+    fmt.table(datasets, ["symbol", "name", "timeframe", "start", "end"])
 
 
 @data.command()

@@ -26,3 +26,4 @@ class BotConfig:
     interval_seconds: int = 60
     symbols: list[str] | None = None
     paper_initial_balance: float = 10_000_000.0
+    exchange: str = "KRX"
