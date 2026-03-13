@@ -54,6 +54,8 @@ def run(
         service = BacktestService(data_path=data_path)
         result = asyncio.run(service.run(config))
         result_dict = result.to_dict()
+        metrics = result_dict.get("metrics", {})
+
         fmt.output(
             result_dict,
             "Strategy: {strategy}\n"
@@ -62,6 +64,48 @@ def run(
             "Trades: {total_trades}\n"
             "Final Balance: {final_balance:,.0f}",
         )
+
+        if metrics:
+            metric_rows = _format_metrics(metrics)
+            fmt.table(metric_rows, ["지표", "값"])
+
     except Exception as e:
         fmt.error(str(e), code="BACKTEST_ERROR")
         raise SystemExit(1) from e
+
+
+def _format_metrics(metrics: dict) -> list[dict[str, str]]:
+    """metrics dict를 CLI 테이블 행으로 변환."""
+    labels = {
+        "total_return": ("총 수익률", "%"),
+        "annual_return": ("연환산 수익률", "%"),
+        "sharpe_ratio": ("Sharpe Ratio", ""),
+        "max_drawdown": ("최대 낙폭 (MDD)", "%"),
+        "max_drawdown_duration": ("MDD 지속 기간", "일"),
+        "total_trades": ("총 거래 횟수", ""),
+        "winning_trades": ("승리 거래", ""),
+        "losing_trades": ("패배 거래", ""),
+        "win_rate": ("승률", "%"),
+        "profit_factor": ("Profit Factor", ""),
+        "avg_profit": ("평균 수익", "원"),
+        "avg_loss": ("평균 손실", "원"),
+        "total_commission": ("총 수수료", "원"),
+    }
+    rows = []
+    for key, (label, unit) in labels.items():
+        value = metrics.get(key)
+        if value is None:
+            formatted = "N/A"
+        elif isinstance(value, float):
+            if value == float("inf"):
+                formatted = "∞"
+            else:
+                formatted = f"{value:,.4f}" if unit == "" else f"{value:,.2f}"
+            if unit:
+                formatted += unit
+        else:
+            formatted = str(value)
+            if unit:
+                formatted += unit
+        rows.append({"지표": label, "값": formatted})
+    return rows

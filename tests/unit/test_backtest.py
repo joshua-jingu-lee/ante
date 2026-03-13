@@ -407,9 +407,12 @@ class TestBacktestExecutor:
             slippage_rate=0.0,
         )
         result = await executor.run()
-        assert result.metrics["total_trades"] == 2
+        assert result.metrics["total_trades"] == 1  # 매도 기준 거래 횟수
         assert result.metrics["buy_trades"] == 1
         assert result.metrics["sell_trades"] == 1
+        assert "sharpe_ratio" in result.metrics
+        assert "max_drawdown" in result.metrics
+        assert "win_rate" in result.metrics
 
     async def test_metrics_empty_for_no_trades(self, data_provider):
         data_provider.reset()
