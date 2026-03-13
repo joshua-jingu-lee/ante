@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -32,6 +34,7 @@ CREATE TABLE IF NOT EXISTS members (
     role               TEXT NOT NULL DEFAULT 'default',
     org                TEXT NOT NULL DEFAULT 'default',
     name               TEXT NOT NULL DEFAULT '',
+    emoji              TEXT NOT NULL DEFAULT '',
     status             TEXT NOT NULL DEFAULT 'active',
     scopes             TEXT NOT NULL DEFAULT '[]',
     token_hash         TEXT DEFAULT '',
@@ -48,6 +51,75 @@ CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);
 CREATE INDEX IF NOT EXISTS idx_members_org ON members(org);
 """
 
+_EMOJI_MIGRATION = "ALTER TABLE members ADD COLUMN emoji TEXT NOT NULL DEFAULT ''"
+
+# 단일 이모지(grapheme cluster) 검증 패턴
+# 기본 이모지 1개 + 선택적 modifier/ZWJ sequence
+_EMOJI_BASE = (
+    r"[\U0001F600-\U0001F64F]"  # Emoticons
+    r"|[\U0001F300-\U0001F5FF]"  # Misc Symbols & Pictographs
+    r"|[\U0001F680-\U0001F6FF]"  # Transport & Map
+    r"|[\U0001F900-\U0001F9FF]"  # Supplemental Symbols
+    r"|[\U0001FA00-\U0001FA6F]"  # Chess Symbols
+    r"|[\U0001FA70-\U0001FAFF]"  # Symbols Extended-A
+    r"|[\U00002702-\U000027B0]"  # Dingbats
+    r"|[\U0001F1E0-\U0001F1FF]{2}"  # Flags (2 regional indicators)
+)
+_EMOJI_MODIFIER = (
+    r"[\U0000FE00-\U0000FE0F]"  # Variation Selectors
+    r"|[\U0001F3FB-\U0001F3FF]"  # Skin tone modifiers
+    r"|[\U000E0020-\U000E007F]"  # Tags
+)
+# 단일 이모지: base + optional ZWJ sequences
+_EMOJI_RE = re.compile(
+    r"^(?:" + _EMOJI_BASE + r")"
+    r"(?:" + _EMOJI_MODIFIER + r")*"
+    r"(?:\U0000200D(?:" + _EMOJI_BASE + r")(?:" + _EMOJI_MODIFIER + r")*)*$"
+)
+
+ANIMAL_EMOJI_POOL: list[str] = [
+    "🐶",
+    "🐱",
+    "🐻",
+    "🦊",
+    "🐼",
+    "🐨",
+    "🦁",
+    "🐯",
+    "🐸",
+    "🐵",
+    "🦄",
+    "🐳",
+    "🐙",
+    "🦉",
+    "🦋",
+    "🐧",
+    "🐺",
+    "🦈",
+    "🐝",
+    "🦜",
+    "🐢",
+    "🐬",
+    "🦅",
+    "🐲",
+    "🐴",
+    "🦩",
+    "🐿",
+    "🦔",
+    "🦇",
+    "🐞",
+    "🦀",
+    "🐘",
+    "🦒",
+    "🦘",
+    "🐊",
+]
+
+
+def _is_single_emoji(value: str) -> bool:
+    """단일 이모지인지 검증."""
+    return bool(_EMOJI_RE.match(value))
+
 
 def _row_to_member(row: dict) -> Member:
     """DB 행을 Member 객체로 변환."""
@@ -57,6 +129,7 @@ def _row_to_member(row: dict) -> Member:
         role=row["role"],
         org=row.get("org", "default"),
         name=row.get("name", ""),
+        emoji=row.get("emoji", ""),
         status=row.get("status", MemberStatus.ACTIVE),
         scopes=json.loads(row.get("scopes", "[]")),
         token_hash=row.get("token_hash", ""),
@@ -83,9 +156,67 @@ class MemberService:
         self._eventbus = eventbus
 
     async def initialize(self) -> None:
-        """스키마 생성."""
+        """스키마 생성 + emoji 컬럼 마이그레이션."""
         await self._db.execute_script(MEMBER_SCHEMA)
+        try:
+            await self._db.execute(_EMOJI_MIGRATION)
+        except Exception:  # noqa: BLE001
+            pass  # 컬럼이 이미 존재하면 무시
         logger.info("MemberService 초기화 완료")
+
+    # ── emoji 관리 ──────────────────────────────────────
+
+    async def _get_used_emojis(self) -> set[str]:
+        """사용 중인 emoji 집합 반환."""
+        rows = await self._db.fetch_all("SELECT emoji FROM members WHERE emoji != ''")
+        return {row["emoji"] for row in rows}
+
+    async def _auto_assign_emoji(self) -> str:
+        """미사용 동물 emoji 중 랜덤 선택. 소진 시 빈 문자열."""
+        used = await self._get_used_emojis()
+        available = [e for e in ANIMAL_EMOJI_POOL if e not in used]
+        if not available:
+            return ""
+        return random.choice(available)  # noqa: S311
+
+    async def _validate_emoji_unique(
+        self, emoji: str, exclude_member_id: str = ""
+    ) -> None:
+        """emoji 중복 검증. 빈 문자열은 중복 허용."""
+        if not emoji:
+            return
+        row = await self._db.fetch_one(
+            "SELECT member_id FROM members WHERE emoji = ?",
+            (emoji,),
+        )
+        if row and row["member_id"] != exclude_member_id:
+            msg = f"emoji '{emoji}'는 이미 {row['member_id']}가 사용 중입니다"
+            raise ValueError(msg)
+
+    @staticmethod
+    def _validate_emoji_format(emoji: str) -> None:
+        """emoji 형식 검증. 빈 문자열 허용, 그 외 단일 이모지만."""
+        if not emoji:
+            return
+        if not _is_single_emoji(emoji):
+            msg = "emoji는 단일 이모지만 허용됩니다"
+            raise ValueError(msg)
+
+    async def update_emoji(
+        self, member_id: str, emoji: str, updated_by: str = ""
+    ) -> Member:
+        """멤버 emoji 변경."""
+        member = await self._get_or_raise(member_id)
+        self._validate_emoji_format(emoji)
+        await self._validate_emoji_unique(emoji, exclude_member_id=member_id)
+
+        await self._db.execute(
+            "UPDATE members SET emoji = ? WHERE member_id = ?",
+            (emoji, member_id),
+        )
+        logger.info("emoji 변경: %s → %s (by %s)", member_id, emoji, updated_by)
+        member.emoji = emoji
+        return member
 
     # ── Master 부트스트랩 ──────────────────────────────
 
@@ -94,6 +225,7 @@ class MemberService:
         member_id: str,
         password: str,
         name: str = "",
+        emoji: str | None = None,
     ) -> tuple[Member, str]:
         """master 생성 + recovery key 반환. 최초 1회만 가능."""
         existing = await self._db.fetch_one(
@@ -104,6 +236,12 @@ class MemberService:
             msg = "master가 이미 존재합니다"
             raise ValueError(msg)
 
+        if emoji is None:
+            emoji = await self._auto_assign_emoji()
+        elif emoji:
+            self._validate_emoji_format(emoji)
+            await self._validate_emoji_unique(emoji)
+
         recovery_key = generate_recovery_key()
         now = _now()
 
@@ -113,6 +251,7 @@ class MemberService:
             role=MemberRole.MASTER,
             org="default",
             name=name or member_id,
+            emoji=emoji,
             status=MemberStatus.ACTIVE,
             scopes=[],
             token_hash="",
@@ -124,16 +263,17 @@ class MemberService:
 
         await self._db.execute(
             """INSERT INTO members
-               (member_id, type, role, org, name, status, scopes,
+               (member_id, type, role, org, name, emoji, status, scopes,
                 token_hash, password_hash, recovery_key_hash,
                 created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 member.member_id,
                 member.type,
                 member.role,
                 member.org,
                 member.name,
+                member.emoji,
                 member.status,
                 json.dumps(member.scopes),
                 member.token_hash,
@@ -167,6 +307,7 @@ class MemberService:
         role: str = MemberRole.DEFAULT,
         org: str = "default",
         name: str = "",
+        emoji: str | None = None,
         scopes: list[str] | None = None,
         registered_by: str = "",
     ) -> tuple[Member, str]:
@@ -178,6 +319,12 @@ class MemberService:
             msg = f"이미 존재하는 member_id: {member_id}"
             raise ValueError(msg)
 
+        if emoji is None:
+            emoji = await self._auto_assign_emoji()
+        elif emoji:
+            self._validate_emoji_format(emoji)
+            await self._validate_emoji_unique(emoji)
+
         token = generate_token(member_type)
         now = _now()
         scopes = scopes or []
@@ -188,6 +335,7 @@ class MemberService:
             role=role,
             org=org,
             name=name or member_id,
+            emoji=emoji,
             status=MemberStatus.ACTIVE,
             scopes=scopes,
             token_hash=hash_token(token),
@@ -197,16 +345,17 @@ class MemberService:
 
         await self._db.execute(
             """INSERT INTO members
-               (member_id, type, role, org, name, status, scopes,
+               (member_id, type, role, org, name, emoji, status, scopes,
                 token_hash, password_hash, recovery_key_hash,
                 created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 member.member_id,
                 member.type,
                 member.role,
                 member.org,
                 member.name,
+                member.emoji,
                 member.status,
                 json.dumps(member.scopes),
                 member.token_hash,

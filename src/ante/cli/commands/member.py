@@ -64,6 +64,7 @@ def member_list(
                     "role": m.role,
                     "org": m.org,
                     "name": m.name,
+                    "emoji": m.emoji,
                     "status": m.status,
                     "scopes": m.scopes,
                     "created_at": m.created_at,
@@ -83,8 +84,9 @@ def member_list(
     else:
         for m in result:
             scopes = ", ".join(m["scopes"]) if m["scopes"] else "-"
+            emoji = m["emoji"] or "-"
             click.echo(
-                f"  {m['member_id']:20s} {m['type']:6s} {m['role']:8s} "
+                f"  {emoji:2s} {m['member_id']:20s} {m['type']:6s} {m['role']:8s} "
                 f"{m['org']:15s} {m['status']:10s} {scopes}"
             )
 
@@ -108,6 +110,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
                 "role": m.role,
                 "org": m.org,
                 "name": m.name,
+                "emoji": m.emoji,
                 "status": m.status,
                 "scopes": m.scopes,
                 "created_at": m.created_at,
@@ -130,6 +133,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
         click.echo(f"  역할      : {result['role']}")
         click.echo(f"  조직      : {result['org']}")
         click.echo(f"  이름      : {result['name']}")
+        click.echo(f"  이모지    : {result['emoji'] or '-'}")
         click.echo(f"  상태      : {result['status']}")
         click.echo(f"  권한      : {', '.join(result['scopes']) or '-'}")
         click.echo(f"  생성일    : {result['created_at']}")
@@ -194,6 +198,31 @@ def member_register(
         fmt.success("멤버 등록 완료", result)
         click.echo(f"  토큰: {token}")
         click.echo("  이 토큰은 다시 표시되지 않습니다.")
+
+
+@member.command("set-emoji")
+@click.argument("member_id")
+@click.argument("emoji")
+@click.pass_context
+def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
+    """멤버 이모지 설정/변경."""
+    fmt = get_formatter(ctx)
+
+    async def _run_set_emoji() -> dict:
+        service, db = await _create_service()
+        try:
+            m = await service.update_emoji(member_id, emoji, updated_by="cli")
+            return {"member_id": m.member_id, "emoji": m.emoji}
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_run_set_emoji())
+    except ValueError as e:
+        fmt.error(str(e))
+        return
+
+    fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
 
 
 @member.command("suspend")
