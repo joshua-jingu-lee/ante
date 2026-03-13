@@ -11,4 +11,7 @@ DEFAULTS: dict[str, object] = {
     "web.port": 8000,
     "eventbus.history_size": 1000,
     "instrument.default_exchange": "KRX",
+    "broker.commission_rate": 0.00015,
+    "broker.sell_tax_rate": 0.0023,
+    "treasury.sync_interval_seconds": 300,
 }

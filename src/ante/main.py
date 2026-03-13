@@ -109,8 +109,14 @@ async def main() -> None:
     # ── 8. Treasury ──────────────────────────────────
     from ante.treasury import Treasury
 
-    commission_rate = config.get("treasury.commission_rate", 0.00015)
-    treasury = Treasury(db=db, eventbus=eventbus, commission_rate=commission_rate)
+    commission_rate = config.get("broker.commission_rate", 0.00015)
+    sell_tax_rate = config.get("broker.sell_tax_rate", 0.0023)
+    treasury = Treasury(
+        db=db,
+        eventbus=eventbus,
+        commission_rate=commission_rate,
+        sell_tax_rate=sell_tax_rate,
+    )
     await treasury.initialize()
     logger.info("Treasury 초기화 완료")
 
@@ -148,6 +154,7 @@ async def main() -> None:
         eventbus=eventbus,
         gateway=None,  # APIGateway 연결 후 설정
         commission_rate=commission_rate,
+        sell_tax_rate=sell_tax_rate,
     )
     paper_executor.subscribe()
 

@@ -18,6 +18,7 @@ from ante.broker.exceptions import (
     AuthenticationError,
     OrderNotFoundError,
 )
+from ante.broker.models import CommissionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ class KISAdapter(BrokerAdapter):
         self.app_secret: str = config["app_secret"]
         self.account_no: str = config["account_no"]
         self.is_paper: bool = config.get("is_paper", False)
+        self._commission_rate: float = config.get("commission_rate", 0.00015)
+        self._sell_tax_rate: float = config.get("sell_tax_rate", 0.0023)
 
         # API 엔드포인트
         if self.is_paper:
@@ -414,6 +417,15 @@ class KISAdapter(BrokerAdapter):
         """실시간 주문 체결 스트리밍. WebSocket 연동 Phase에서 구현."""
         raise NotImplementedError("실시간 주문 스트리밍은 추후 구현")
         yield {}  # type: ignore[misc]
+
+    # ── 수수료 ────────────────────────────────────────
+
+    def get_commission_info(self) -> CommissionInfo:
+        """KIS 수수료율 정보 반환."""
+        return CommissionInfo(
+            commission_rate=self._commission_rate,
+            sell_tax_rate=self._sell_tax_rate,
+        )
 
     # ── 대사용 조회 ────────────────────────────────
 

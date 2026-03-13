@@ -119,6 +119,11 @@ class MockBrokerAdapter(BrokerAdapter):
     ) -> list[dict[str, Any]]:
         return list(self._orders.values())
 
+    def get_commission_info(self) -> Any:
+        from ante.broker.models import CommissionInfo
+
+        return CommissionInfo()
+
 
 class AutoFillSimulator:
     """OrderSubmittedEvent를 수신하면 즉시 OrderFilledEvent를 발행하는 시뮬레이터.
