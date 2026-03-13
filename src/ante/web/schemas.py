@@ -13,10 +13,13 @@ class StatusResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    """에러 응답."""
+    """RFC 7807 Problem Details 에러 응답."""
 
-    detail: str
-    code: str = ""
+    type: str = "/errors/internal"
+    title: str = "Internal Server Error"
+    detail: str = ""
+    status: int = 500
+    instance: str = ""
 
 
 class ReportSubmitRequest(BaseModel):
