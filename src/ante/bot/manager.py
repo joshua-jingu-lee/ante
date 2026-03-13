@@ -12,6 +12,7 @@ from ante.bot.config import BotConfig, BotStatus
 from ante.bot.exceptions import BotError
 
 if TYPE_CHECKING:
+    from ante.bot.context_factory import StrategyContextFactory
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.strategy.base import Strategy
@@ -40,9 +41,11 @@ class BotManager:
         self,
         eventbus: EventBus,
         db: Database,
+        context_factory: StrategyContextFactory | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
+        self._context_factory = context_factory
         self._bots: dict[str, Bot] = {}
 
     async def initialize(self) -> None:
@@ -64,11 +67,20 @@ class BotManager:
         self,
         config: BotConfig,
         strategy_cls: type[Strategy],
-        ctx: StrategyContext,
+        ctx: StrategyContext | None = None,
     ) -> Bot:
-        """봇 생성. 전략 클래스와 StrategyContext를 직접 주입받는다."""
+        """봇 생성.
+
+        ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성한다.
+        """
         if config.bot_id in self._bots:
             raise BotError(f"Bot already exists: {config.bot_id}")
+
+        if ctx is None:
+            if self._context_factory is None:
+                msg = "ctx 또는 context_factory 중 하나는 필수입니다"
+                raise BotError(msg)
+            ctx = self._context_factory.create(config)
 
         bot = Bot(
             config=config,
@@ -101,6 +113,15 @@ class BotManager:
             await bot.stop()
 
         self._unregister_bot_events(bot)
+
+        # Paper 봇 PaperExecutor 등록 해제
+        if (
+            self._context_factory
+            and self._context_factory._paper_executor
+            and bot.config.bot_type == "paper"
+        ):
+            self._context_factory._paper_executor.unregister_bot(bot_id)
+
         del self._bots[bot_id]
         await self._db.execute("DELETE FROM bots WHERE bot_id = ?", (bot_id,))
         logger.info("봇 삭제: %s", bot_id)

@@ -117,6 +117,10 @@ class Treasury:
         """봇의 예산 상태 조회."""
         return self._budgets.get(bot_id)
 
+    def get_budget_sync(self, bot_id: str) -> BotBudget | None:
+        """봇의 예산 상태 동기 조회 (인메모리). PortfolioView용."""
+        return self._budgets.get(bot_id)
+
     # ── 예산 할당/회수 ──────────────────────────────
 
     async def allocate(self, bot_id: str, amount: float) -> bool:

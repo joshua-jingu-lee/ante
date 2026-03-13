@@ -138,10 +138,36 @@ async def main() -> None:
     )
     logger.info("Trade 모듈 초기화 완료")
 
-    # ── 10. BotManager ───────────────────────────────
-    from ante.bot import BotManager
+    # ── 10. BotManager + StrategyContextFactory ──────
+    from ante.bot import BotManager, StrategyContextFactory
+    from ante.bot.providers.live import LiveOrderView, LivePortfolioView
+    from ante.bot.providers.paper import PaperExecutor
 
-    bot_manager = BotManager(eventbus=eventbus, db=db)
+    # PaperExecutor (paper 봇이 존재할 때 가상 체결 처리)
+    paper_executor = PaperExecutor(
+        eventbus=eventbus,
+        gateway=None,  # APIGateway 연결 후 설정
+        commission_rate=commission_rate,
+    )
+    paper_executor.subscribe()
+
+    # Live 프로바이더
+    live_portfolio = LivePortfolioView(
+        treasury=treasury,
+        position_history=position_history,
+    )
+    live_order_view = LiveOrderView(order_registry=None)  # Broker 연결 후 설정
+
+    # StrategyContextFactory
+
+    # DataProvider는 APIGateway 연결 후 설정 (11단계)
+    context_factory: StrategyContextFactory | None = None
+
+    bot_manager = BotManager(
+        eventbus=eventbus,
+        db=db,
+        context_factory=context_factory,  # APIGateway 연결 후 갱신
+    )
     await bot_manager.initialize()
     logger.info("BotManager 초기화 완료")
 
@@ -168,6 +194,24 @@ async def main() -> None:
         api_gateway = APIGateway(broker=broker, eventbus=eventbus)
         await api_gateway.start()
         logger.info("APIGateway 시작 완료")
+
+    # ── 11.5. StrategyContextFactory 완성 ─────────────
+    from ante.gateway.data_provider import LiveDataProvider
+
+    data_provider: LiveDataProvider | None = None
+    if api_gateway:
+        data_provider = LiveDataProvider(gateway=api_gateway)
+        paper_executor._gateway = api_gateway
+
+    if data_provider:
+        context_factory = StrategyContextFactory(
+            data_provider=data_provider,
+            live_portfolio=live_portfolio,
+            live_order_view=live_order_view,
+            paper_executor=paper_executor,
+        )
+        bot_manager._context_factory = context_factory
+        logger.info("StrategyContextFactory 설정 완료")
 
     # ── 12. Data Pipeline ────────────────────────────
     from ante.data import DataCatalog, DataCollector, ParquetStore
