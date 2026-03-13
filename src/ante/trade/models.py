@@ -58,6 +58,27 @@ class PositionSnapshot:
     exchange: str = "KRX"
 
 
+@dataclass(frozen=True)
+class DailySummary:
+    """일별 성과 집계."""
+
+    date: str
+    realized_pnl: float
+    trade_count: int
+    win_rate: float
+
+
+@dataclass(frozen=True)
+class MonthlySummary:
+    """월별 성과 집계."""
+
+    year: int
+    month: int
+    realized_pnl: float
+    trade_count: int
+    win_rate: float
+
+
 @dataclass
 class PerformanceMetrics:
     """봇/전략 성과 지표."""

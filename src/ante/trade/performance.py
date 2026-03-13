@@ -7,7 +7,13 @@ import statistics
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ante.trade.models import PerformanceMetrics, TradeRecord, TradeStatus
+from ante.trade.models import (
+    DailySummary,
+    MonthlySummary,
+    PerformanceMetrics,
+    TradeRecord,
+    TradeStatus,
+)
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -77,6 +83,129 @@ class PerformanceTracker:
             last_trade_at=trades[-1].timestamp,
             active_days=len({t.timestamp.date() for t in trades if t.timestamp}),
         )
+
+    async def get_daily_summary(
+        self,
+        bot_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[DailySummary]:
+        """일별 성과 집계.
+
+        Args:
+            bot_id: 봇 ID 필터 (None이면 전체)
+            start_date: 시작일 (YYYY-MM-DD)
+            end_date: 종료일 (YYYY-MM-DD)
+        """
+        conditions: list[str] = [
+            "t.status = ?",
+            "t.side = 'sell'",
+        ]
+        params: list[Any] = [TradeStatus.FILLED.value]
+
+        if bot_id:
+            conditions.append("t.bot_id = ?")
+            params.append(bot_id)
+        if start_date:
+            conditions.append("date(t.timestamp) >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("date(t.timestamp) <= ?")
+            params.append(end_date)
+
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                date(t.timestamp) AS trade_date,
+                COALESCE(SUM(ph.pnl), 0.0) AS realized_pnl,
+                COUNT(*) AS trade_count,
+                SUM(CASE WHEN ph.pnl > 0 THEN 1 ELSE 0 END) AS win_count
+            FROM trades t
+            LEFT JOIN position_history ph
+                ON ph.bot_id = t.bot_id
+                AND ph.symbol = t.symbol
+                AND ph.action = 'sell'
+                AND ph.price = t.price
+                AND ph.quantity = t.quantity
+            WHERE {where}
+            GROUP BY trade_date
+            ORDER BY trade_date ASC
+        """
+
+        rows = await self._db.fetch_all(query, tuple(params))
+        return [
+            DailySummary(
+                date=row["trade_date"],
+                realized_pnl=float(row["realized_pnl"]),
+                trade_count=int(row["trade_count"]),
+                win_rate=(
+                    int(row["win_count"]) / int(row["trade_count"])
+                    if int(row["trade_count"]) > 0
+                    else 0.0
+                ),
+            )
+            for row in rows
+        ]
+
+    async def get_monthly_summary(
+        self,
+        bot_id: str | None = None,
+        year: int | None = None,
+    ) -> list[MonthlySummary]:
+        """월별 성과 집계.
+
+        Args:
+            bot_id: 봇 ID 필터 (None이면 전체)
+            year: 연도 필터 (None이면 전체)
+        """
+        conditions: list[str] = [
+            "t.status = ?",
+            "t.side = 'sell'",
+        ]
+        params: list[Any] = [TradeStatus.FILLED.value]
+
+        if bot_id:
+            conditions.append("t.bot_id = ?")
+            params.append(bot_id)
+        if year:
+            conditions.append("strftime('%Y', t.timestamp) = ?")
+            params.append(str(year))
+
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                CAST(strftime('%Y', t.timestamp) AS INTEGER) AS yr,
+                CAST(strftime('%m', t.timestamp) AS INTEGER) AS mo,
+                COALESCE(SUM(ph.pnl), 0.0) AS realized_pnl,
+                COUNT(*) AS trade_count,
+                SUM(CASE WHEN ph.pnl > 0 THEN 1 ELSE 0 END) AS win_count
+            FROM trades t
+            LEFT JOIN position_history ph
+                ON ph.bot_id = t.bot_id
+                AND ph.symbol = t.symbol
+                AND ph.action = 'sell'
+                AND ph.price = t.price
+                AND ph.quantity = t.quantity
+            WHERE {where}
+            GROUP BY yr, mo
+            ORDER BY yr ASC, mo ASC
+        """
+
+        rows = await self._db.fetch_all(query, tuple(params))
+        return [
+            MonthlySummary(
+                year=int(row["yr"]),
+                month=int(row["mo"]),
+                realized_pnl=float(row["realized_pnl"]),
+                trade_count=int(row["trade_count"]),
+                win_rate=(
+                    int(row["win_count"]) / int(row["trade_count"])
+                    if int(row["trade_count"]) > 0
+                    else 0.0
+                ),
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _calculate_mdd(pnl_list: list[float]) -> tuple[float, float]:
