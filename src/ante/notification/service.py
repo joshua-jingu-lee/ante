@@ -35,6 +35,9 @@ CREATE INDEX IF NOT EXISTS idx_notification_history_level
 """
 
 
+_SUPPRESSED = object()  # 중복 억제 센티널
+
+
 class NotificationService:
     """알림 라우팅 및 필터링 서비스."""
 
@@ -47,6 +50,7 @@ class NotificationService:
         quiet_end: time | None = None,
         instrument_service: InstrumentService | None = None,
         db: Database | None = None,
+        dedup_window: float = 60.0,
     ) -> None:
         self._adapter = adapter
         self._eventbus = eventbus
@@ -55,6 +59,9 @@ class NotificationService:
         self._quiet_end = quiet_end
         self._instrument_service = instrument_service
         self._db = db
+        self._dedup_window = dedup_window
+        # {dedup_key: (last_sent_timestamp, suppressed_count)}
+        self._dedup_cache: dict[str, tuple[float, int]] = {}
 
     async def initialize(self) -> None:
         """notification_history 테이블 스키마 생성."""
@@ -98,6 +105,46 @@ class NotificationService:
             priority=0,
         )
 
+    def _make_dedup_key(self, level: NotificationLevel, message: str) -> str:
+        """중복 방지 키 생성: level + message_hash."""
+        import hashlib
+
+        msg_hash = hashlib.md5(  # noqa: S324
+            message.encode()
+        ).hexdigest()[:12]
+        return f"{level}:{msg_hash}"
+
+    def _check_dedup(self, level: NotificationLevel, message: str) -> str | object:
+        """중복 여부 확인.
+
+        Returns:
+            _SUPPRESSED: 억제 (발송 안 함)
+            "": 발송 허용 (부기 없음)
+            "(N건 억제됨)": 발송 허용 + 이전 억제 건수 부기
+        """
+        import time as time_mod
+
+        if level == NotificationLevel.CRITICAL:
+            return ""
+
+        key = self._make_dedup_key(level, message)
+        now = time_mod.monotonic()
+
+        if key in self._dedup_cache:
+            last_sent, suppressed = self._dedup_cache[key]
+            if now - last_sent < self._dedup_window:
+                self._dedup_cache[key] = (last_sent, suppressed + 1)
+                return _SUPPRESSED
+
+        # 발송 허용
+        suffix = ""
+        if key in self._dedup_cache:
+            _, suppressed = self._dedup_cache[key]
+            if suppressed > 0:
+                suffix = f" ({suppressed}건 억제됨)"
+        self._dedup_cache[key] = (now, 0)
+        return suffix
+
     async def _send_and_record(
         self,
         level: NotificationLevel,
@@ -108,6 +155,14 @@ class NotificationService:
         bot_id: str = "",
     ) -> bool:
         """send() 호출 후 이력 기록."""
+        dedup_result = self._check_dedup(level, message)
+        if dedup_result is _SUPPRESSED:
+            logger.debug("알림 억제 (중복): %s", message[:50])
+            return False
+
+        if dedup_result:
+            message = message + dedup_result
+
         success = False
         error_message = ""
         try:
@@ -138,6 +193,14 @@ class NotificationService:
         bot_id: str = "",
     ) -> bool:
         """send_rich() 호출 후 이력 기록."""
+        dedup_result = self._check_dedup(level, body or title)
+        if dedup_result is _SUPPRESSED:
+            logger.debug("알림 억제 (중복): %s", (body or title)[:50])
+            return False
+
+        if dedup_result:
+            body = (body or "") + dedup_result
+
         success = False
         error_message = ""
         try:
