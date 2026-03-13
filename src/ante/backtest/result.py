@@ -46,6 +46,7 @@ class BacktestResult:
             "total_return_pct": round(self.total_return, 2),
             "total_trades": len(self.trades),
             "metrics": self.metrics,
+            "equity_curve": self.equity_curve,
             "trades": [
                 {
                     "timestamp": str(t.timestamp),

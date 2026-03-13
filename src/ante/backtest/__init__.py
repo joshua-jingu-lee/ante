@@ -7,6 +7,7 @@ from ante.backtest.exceptions import (
     BacktestError,
 )
 from ante.backtest.executor import BacktestExecutor
+from ante.backtest.metrics import calculate_metrics
 from ante.backtest.result import BacktestResult, BacktestTrade
 from ante.backtest.service import BacktestService
 
@@ -17,6 +18,7 @@ __all__ = [
     "BacktestError",
     "BacktestExecutor",
     "BacktestResult",
+    "calculate_metrics",
     "BacktestService",
     "BacktestTrade",
 ]
