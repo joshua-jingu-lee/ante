@@ -187,7 +187,7 @@ async def main() -> None:
 
     broker_config = config.get("broker", {})
     if broker_config.get("app_key"):
-        broker = KISAdapter(config=broker_config)
+        broker = KISAdapter(config=broker_config, eventbus=eventbus)
         try:
             await broker.connect()
             logger.info(

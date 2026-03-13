@@ -144,6 +144,7 @@ class Bot:
     async def on_order_update(self, event: object) -> None:
         """주문 상태 변경 통보를 전략에 전달."""
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderRejectedEvent,
@@ -184,6 +185,14 @@ class Bot:
                 "status": "failed",
                 "symbol": event.symbol,
                 "side": event.side,
+                "reason": event.error_message,
+            }
+        elif isinstance(event, OrderCancelFailedEvent):
+            update = {
+                "order_id": event.order_id,
+                "status": "cancel_failed",
+                "symbol": "",
+                "side": "",
                 "reason": event.error_message,
             }
 

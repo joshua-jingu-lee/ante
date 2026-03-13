@@ -176,6 +176,7 @@ class BotManager:
     def _register_bot_events(self, bot: Bot) -> None:
         """봇의 이벤트 핸들러 등록."""
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
@@ -189,12 +190,14 @@ class BotManager:
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderCancelFailedEvent,
         ):
             self._eventbus.subscribe(event_type, bot.on_order_update)
 
     def _unregister_bot_events(self, bot: Bot) -> None:
         """봇의 이벤트 핸들러 해제."""
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
@@ -208,6 +211,7 @@ class BotManager:
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderCancelFailedEvent,
         ):
             self._eventbus.unsubscribe(event_type, bot.on_order_update)
 
