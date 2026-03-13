@@ -47,6 +47,9 @@ class BotManager:
         self._db = db
         self._context_factory = context_factory
         self._bots: dict[str, Bot] = {}
+        self._restart_counts: dict[str, int] = {}
+        self._restart_tasks: dict[str, asyncio.Task[None]] = {}
+        self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
         """스키마 생성 + EventBus 구독."""
@@ -56,12 +59,17 @@ class BotManager:
 
     def _subscribe_events(self) -> None:
         """시스템 이벤트 구독."""
-        from ante.eventbus.events import BotStopEvent, TradingStateChangedEvent
+        from ante.eventbus.events import (
+            BotErrorEvent,
+            BotStopEvent,
+            TradingStateChangedEvent,
+        )
 
         self._eventbus.subscribe(BotStopEvent, self._on_bot_stop_request)
         self._eventbus.subscribe(
             TradingStateChangedEvent, self._on_trading_state_changed
         )
+        self._eventbus.subscribe(BotErrorEvent, self._on_bot_error)
 
     async def create_bot(
         self,
@@ -128,6 +136,14 @@ class BotManager:
 
     async def stop_all(self) -> None:
         """모든 봇 중지."""
+        # 재시작 태스크 취소
+        for task in list(self._restart_tasks.values()):
+            task.cancel()
+        for task in list(self._restart_reset_tasks.values()):
+            task.cancel()
+        self._restart_tasks.clear()
+        self._restart_reset_tasks.clear()
+
         tasks = [
             bot.stop() for bot in self._bots.values() if bot.status == BotStatus.RUNNING
         ]
@@ -170,6 +186,122 @@ class BotManager:
         if event.new_state == "halted":
             logger.warning("시스템 HALTED — 전체 봇 중지")
             await self.stop_all()
+
+    async def _on_bot_error(self, event: object) -> None:
+        """봇 에러 시 재시작 정책에 따라 자동 재시작."""
+        from ante.eventbus.events import BotErrorEvent
+
+        if not isinstance(event, BotErrorEvent):
+            return
+
+        bot = self._bots.get(event.bot_id)
+        if not bot or not bot.config.auto_restart:
+            return
+
+        config = bot.config
+        count = self._restart_counts.get(event.bot_id, 0)
+
+        if count >= config.max_restart_attempts:
+            await self._on_restart_exhausted(event.bot_id, count, event.error_message)
+            return
+
+        self._restart_counts[event.bot_id] = count + 1
+        logger.warning(
+            "봇 재시작 예약: %s (시도 %d/%d, %d초 후)",
+            event.bot_id,
+            count + 1,
+            config.max_restart_attempts,
+            config.restart_cooldown_seconds,
+        )
+
+        task = asyncio.create_task(
+            self._restart_after_cooldown(event.bot_id),
+            name=f"restart-{event.bot_id}",
+        )
+        self._restart_tasks[event.bot_id] = task
+
+    async def _restart_after_cooldown(self, bot_id: str) -> None:
+        """쿨다운 대기 후 봇 재시작."""
+        bot = self._bots.get(bot_id)
+        if not bot:
+            return
+
+        try:
+            await asyncio.sleep(bot.config.restart_cooldown_seconds)
+        except asyncio.CancelledError:
+            return
+
+        if bot.status != BotStatus.ERROR:
+            return
+
+        try:
+            await bot.start()
+            logger.info("봇 재시작 성공: %s", bot_id)
+            self._schedule_restart_reset(bot_id)
+        except Exception as e:
+            logger.error("봇 재시작 실패: %s — %s", bot_id, e)
+        finally:
+            self._restart_tasks.pop(bot_id, None)
+
+    def _schedule_restart_reset(self, bot_id: str) -> None:
+        """정상 실행 유지 시 재시작 카운터 리셋 스케줄링."""
+        old_task = self._restart_reset_tasks.pop(bot_id, None)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        bot = self._bots.get(bot_id)
+        if not bot:
+            return
+
+        config = bot.config
+        reset_after = config.restart_cooldown_seconds * config.max_restart_attempts
+
+        task = asyncio.create_task(
+            self._reset_restart_count_after(bot_id, reset_after),
+            name=f"restart-reset-{bot_id}",
+        )
+        self._restart_reset_tasks[bot_id] = task
+
+    async def _reset_restart_count_after(self, bot_id: str, seconds: float) -> None:
+        """일정 시간 정상 실행 후 재시작 카운터 초기화."""
+        try:
+            await asyncio.sleep(seconds)
+        except asyncio.CancelledError:
+            return
+
+        bot = self._bots.get(bot_id)
+        if bot and bot.status == BotStatus.RUNNING:
+            old_count = self._restart_counts.pop(bot_id, 0)
+            if old_count > 0:
+                logger.info(
+                    "봇 재시작 카운터 리셋: %s (정상 %d초 유지)",
+                    bot_id,
+                    seconds,
+                )
+        self._restart_reset_tasks.pop(bot_id, None)
+
+    async def _on_restart_exhausted(
+        self, bot_id: str, attempts: int, last_error: str
+    ) -> None:
+        """재시작 한도 소진 시 이벤트 발행."""
+        from ante.eventbus.events import BotRestartExhaustedEvent
+
+        logger.error(
+            "봇 재시작 한도 소진: %s (%d회 시도)",
+            bot_id,
+            attempts,
+        )
+        await self._eventbus.publish(
+            BotRestartExhaustedEvent(
+                bot_id=bot_id,
+                restart_attempts=attempts,
+                last_error=last_error,
+            )
+        )
+
+    def get_restart_count(self, bot_id: str) -> int:
+        """봇의 현재 재시작 시도 횟수."""
+        return self._restart_counts.get(bot_id, 0)
 
     # ── 봇 이벤트 구독 관리 ──────────────────────────
 

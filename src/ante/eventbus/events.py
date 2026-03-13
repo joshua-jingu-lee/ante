@@ -231,6 +231,15 @@ class BotErrorEvent(Event):
 
 
 @dataclass(frozen=True)
+class BotRestartExhaustedEvent(Event):
+    """BotManager → EventBus: 봇 재시작 한도 소진."""
+
+    bot_id: str = ""
+    restart_attempts: int = 0
+    last_error: str = ""
+
+
+@dataclass(frozen=True)
 class TradingStateChangedEvent(Event):
     """SystemState → EventBus: 거래 상태(킬 스위치) 변경."""
 
