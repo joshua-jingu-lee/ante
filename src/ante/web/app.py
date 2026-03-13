@@ -42,4 +42,8 @@ def create_app(**services: Any) -> FastAPI:
     app.include_router(report_router, prefix="/api/reports", tags=["reports"])
     app.include_router(data_router, prefix="/api/data", tags=["data"])
 
+    from ante.web.errors import register_exception_handlers
+
+    register_exception_handlers(app)
+
     return app
