@@ -3,10 +3,12 @@
 from ante.notification.base import NotificationAdapter, NotificationLevel
 from ante.notification.service import NotificationService
 from ante.notification.telegram import TelegramAdapter
+from ante.notification.telegram_receiver import TelegramCommandReceiver
 
 __all__ = [
     "NotificationAdapter",
     "NotificationLevel",
     "NotificationService",
     "TelegramAdapter",
+    "TelegramCommandReceiver",
 ]

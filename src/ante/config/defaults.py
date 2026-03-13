@@ -23,4 +23,6 @@ DEFAULTS: dict[str, object] = {
     "broker.timeout.query": 5,
     "broker.timeout.auth": 10,
     "treasury.sync_interval_seconds": 300,
+    "telegram.command.polling_interval": 3.0,
+    "telegram.command.confirm_timeout": 30.0,
 }
