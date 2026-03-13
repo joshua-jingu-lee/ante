@@ -98,6 +98,21 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
         click.echo(f"  생성일    : {result['created_at']}")
 
 
+def _parse_param(value: str) -> tuple[str, object]:
+    """key=value 형식의 파라미터 파싱. 값은 JSON 파싱 시도."""
+    import json as _json
+
+    if "=" not in value:
+        msg = f"잘못된 파라미터 형식: '{value}' (key=value 형태로 지정)"
+        raise click.BadParameter(msg)
+    key, raw = value.split("=", 1)
+    try:
+        parsed = _json.loads(raw)
+    except _json.JSONDecodeError:
+        parsed = raw
+    return key.strip(), parsed
+
+
 @bot.command("create")
 @click.option("--strategy", required=True, help="전략 ID")
 @click.option(
@@ -110,6 +125,12 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
 @click.option("--interval", default=60, help="실행 주기 (초)")
 @click.option("--symbols", default="", help="대상 종목 (쉼표 구분)")
 @click.option("--id", "bot_id", default="", help="봇 ID (미지정 시 자동 생성)")
+@click.option(
+    "--param",
+    "params",
+    multiple=True,
+    help="전략 파라미터 오버라이드 (key=value, 복수 지정 가능)",
+)
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
@@ -120,9 +141,20 @@ def bot_create(
     interval: int,
     symbols: str,
     bot_id: str,
+    params: tuple[str, ...],
 ) -> None:
     """봇 생성."""
     fmt = get_formatter(ctx)
+
+    # 파라미터 파싱
+    param_dict: dict = {}
+    for p in params:
+        try:
+            key, value = _parse_param(p)
+            param_dict[key] = value
+        except click.BadParameter as e:
+            fmt.error(str(e))
+            return
 
     async def _run_create() -> dict:
         import json
@@ -132,13 +164,15 @@ def bot_create(
         try:
             bid = bot_id or f"bot-{uuid4().hex[:8]}"
             symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] or None
-            config_dict = {
+            config_dict: dict = {
                 "bot_id": bid,
                 "strategy_id": strategy,
                 "bot_type": bot_type,
                 "interval_seconds": interval,
                 "symbols": symbol_list,
             }
+            if param_dict:
+                config_dict["params"] = param_dict
             await db.execute(
                 """INSERT INTO bots (bot_id, strategy_id, bot_type, config_json)
                    VALUES (?, ?, ?, ?)""",
