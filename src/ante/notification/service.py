@@ -38,6 +38,7 @@ class NotificationService:
         """이벤트 구독 등록."""
         from ante.eventbus.events import (
             BotErrorEvent,
+            BotRestartExhaustedEvent,
             CircuitBreakerEvent,
             NotificationEvent,
             OrderCancelFailedEvent,
@@ -51,6 +52,11 @@ class NotificationService:
         self._eventbus.subscribe(
             TradingStateChangedEvent,
             self._on_trading_state_changed,
+            priority=0,
+        )
+        self._eventbus.subscribe(
+            BotRestartExhaustedEvent,
+            self._on_restart_exhausted,
             priority=0,
         )
         self._eventbus.subscribe(
@@ -124,6 +130,19 @@ class NotificationService:
         await self._adapter.send(
             NotificationLevel.CRITICAL,
             f"거래 상태 변경: {event.old_state} → {event.new_state} ({event.reason})",
+        )
+
+    async def _on_restart_exhausted(self, event: object) -> None:
+        """봇 재시작 한도 소진 알림."""
+        from ante.eventbus.events import BotRestartExhaustedEvent
+
+        if not isinstance(event, BotRestartExhaustedEvent):
+            return
+
+        await self._adapter.send(
+            NotificationLevel.ERROR,
+            f"봇 재시작 한도 소진 [{event.bot_id}] "
+            f"{event.restart_attempts}회 시도: {event.last_error}",
         )
 
     async def _on_order_cancel_failed(self, event: object) -> None:
