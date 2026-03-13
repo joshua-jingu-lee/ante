@@ -42,6 +42,7 @@ class TradeRecord:
     commission: float = 0.0
     timestamp: datetime | None = None
     order_id: str | None = None
+    exchange: str = "KRX"
 
 
 @dataclass
@@ -54,6 +55,7 @@ class PositionSnapshot:
     avg_entry_price: float
     realized_pnl: float = 0.0
     updated_at: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass

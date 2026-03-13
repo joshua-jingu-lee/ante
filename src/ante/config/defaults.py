@@ -10,4 +10,5 @@ DEFAULTS: dict[str, object] = {
     "web.host": "0.0.0.0",
     "web.port": 8000,
     "eventbus.history_size": 1000,
+    "instrument.default_exchange": "KRX",
 }

@@ -36,9 +36,20 @@ class OrderRegistry:
         self._db = db
 
     async def initialize(self) -> None:
-        """스키마 생성."""
+        """스키마 생성 + 마이그레이션."""
         await self._db.execute_script(ORDER_REGISTRY_SCHEMA)
+        await self._migrate_exchange_column()
         logger.info("OrderRegistry 초기화 완료")
+
+    async def _migrate_exchange_column(self) -> None:
+        """exchange 컬럼 마이그레이션 (v0.2)."""
+        try:
+            await self._db.execute(
+                "ALTER TABLE order_registry ADD COLUMN exchange TEXT DEFAULT 'KRX'"
+            )
+            logger.info("order_registry 테이블에 exchange 컬럼 추가")
+        except Exception:
+            pass  # 이미 존재
 
     async def register(self, order_id: str, bot_id: str, symbol: str) -> None:
         """주문 제출 시 매핑 등록."""

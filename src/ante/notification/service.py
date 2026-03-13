@@ -10,6 +10,7 @@ from ante.notification.base import NotificationAdapter, NotificationLevel
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
+    from ante.instrument.service import InstrumentService
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,14 @@ class NotificationService:
         min_level: NotificationLevel = NotificationLevel.INFO,
         quiet_start: time | None = None,
         quiet_end: time | None = None,
+        instrument_service: InstrumentService | None = None,
     ) -> None:
         self._adapter = adapter
         self._eventbus = eventbus
         self._min_level = min_level
         self._quiet_start = quiet_start
         self._quiet_end = quiet_end
+        self._instrument_service = instrument_service
 
     def subscribe(self) -> None:
         """이벤트 구독 등록."""
@@ -87,9 +90,15 @@ class NotificationService:
         if not self._should_send(NotificationLevel.INFO):
             return
 
+        display = event.symbol
+        if self._instrument_service:
+            name = self._instrument_service.get_name(event.symbol, event.exchange)
+            if name != event.symbol:
+                display = f"{event.symbol}({name})"
+
         await self._adapter.send(
             NotificationLevel.INFO,
-            f"체결 [{event.bot_id}] {event.symbol} "
+            f"체결 [{event.bot_id}] {display} "
             f"{event.side} {event.quantity}주 @ {event.price:,.0f}원",
         )
 

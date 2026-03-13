@@ -66,9 +66,9 @@ class APIGateway:
 
     # ── 공개 API ──────────────────────────────────
 
-    async def get_current_price(self, symbol: str) -> float:
+    async def get_current_price(self, symbol: str, exchange: str = "KRX") -> float:
         """현재가 조회 (캐시 우선)."""
-        cache_key = f"price:{symbol}"
+        cache_key = f"price:{exchange}:{symbol}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
@@ -167,6 +167,7 @@ class APIGateway:
                     side=event.side,
                     quantity=event.quantity,
                     order_type=event.order_type,
+                    exchange=event.exchange,
                 )
             )
         except Exception as e:
@@ -182,6 +183,7 @@ class APIGateway:
                     price=event.price or 0.0,
                     order_type=event.order_type,
                     error_message=str(e),
+                    exchange=event.exchange,
                 )
             )
 
@@ -225,4 +227,4 @@ class APIGateway:
             return
         self._cache.invalidate("balance")
         self._cache.invalidate("positions")
-        self._cache.invalidate(f"price:{event.symbol}")
+        self._cache.invalidate(f"price:{event.exchange}:{event.symbol}")

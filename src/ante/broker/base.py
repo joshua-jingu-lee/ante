@@ -16,6 +16,7 @@ class BrokerAdapter(ABC):
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.is_connected: bool = False
+        self.exchange: str = config.get("exchange", "KRX")
 
     @abstractmethod
     async def connect(self) -> None:

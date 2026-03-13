@@ -23,6 +23,7 @@ class StrategyMeta:
     author: str = "agent"
     symbols: list[str] | None = None
     timeframe: str = "1d"
+    exchange: str = "KRX"
 
 
 # ── 시그널 / 주문 액션 ────────────────────────────

@@ -206,6 +206,7 @@ class Bot:
                     price=signal.price,
                     stop_price=signal.stop_price,
                     reason=signal.reason,
+                    exchange=self.config.exchange,
                 )
             )
 

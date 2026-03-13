@@ -18,6 +18,7 @@ class BacktestTrade:
     commission: float
     slippage: float
     reason: str = ""
+    exchange: str = "KRX"
 
 
 @dataclass

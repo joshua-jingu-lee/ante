@@ -26,6 +26,7 @@ class KISAdapter(BrokerAdapter):
     """한국투자증권 Open API 어댑터."""
 
     def __init__(self, config: dict[str, Any]) -> None:
+        config.setdefault("exchange", "KRX")
         super().__init__(config)
 
         self.app_key: str = config["app_key"]

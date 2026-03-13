@@ -353,7 +353,7 @@ class TestAPIGatewayEvents:
         # 캐시에 데이터 넣기
         gateway._cache.set("balance", {"cash": 5000000}, ttl=60)
         gateway._cache.set("positions", [], ttl=60)
-        gateway._cache.set("price:005930", 50000, ttl=60)
+        gateway._cache.set("price:KRX:005930", 50000, ttl=60)
 
         await eventbus.publish(
             OrderFilledEvent(
@@ -371,7 +371,7 @@ class TestAPIGatewayEvents:
 
         assert gateway._cache.get("balance") is None
         assert gateway._cache.get("positions") is None
-        assert gateway._cache.get("price:005930") is None
+        assert gateway._cache.get("price:KRX:005930") is None
 
 
 # ── LiveDataProvider ───────────────────────────────
