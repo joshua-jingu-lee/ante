@@ -38,6 +38,8 @@ class StrategyValidator:
         "pathlib",
     }
 
+    FORBIDDEN_BUILTINS: set[str] = {"eval", "exec", "compile", "__import__"}
+
     def validate(self, filepath: Path) -> ValidationResult:
         """전략 파일 정적 검증."""
         errors: list[str] = []
@@ -85,7 +87,13 @@ class StrategyValidator:
         for module in forbidden:
             errors.append(f"Forbidden import: {module}")
 
-        # 5. 위험 패턴 경고
+        # 5. 금지된 내장 함수 호출 (에러)
+        errors.extend(self._find_forbidden_builtins(tree))
+
+        # 6. 금지된 최상위 코드 (에러)
+        errors.extend(self._find_forbidden_toplevel(tree))
+
+        # 7. 위험 패턴 경고
         warnings.extend(self._find_dangerous_patterns(tree))
 
         return ValidationResult(
@@ -161,21 +169,60 @@ class StrategyValidator:
                         found.append(node.module)
         return found
 
+    def _find_forbidden_builtins(self, tree: ast.Module) -> list[str]:
+        """금지된 내장 함수 호출 탐지 (에러)."""
+        errors: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in self.FORBIDDEN_BUILTINS:
+                    errors.append(
+                        f"Forbidden built-in call: "
+                        f"{node.func.id}() at line {node.lineno}"
+                    )
+        return errors
+
+    def _find_forbidden_toplevel(self, tree: ast.Module) -> list[str]:
+        """금지된 최상위 코드 탐지 (에러)."""
+        errors: list[str] = []
+        for node in tree.body:
+            if isinstance(node, ast.Import | ast.ImportFrom):
+                continue
+            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if isinstance(node, ast.Pass):
+                continue
+            if isinstance(node, ast.If):
+                continue
+            # 모듈 docstring (문자열 리터럴 Expr)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                continue
+            # 리터럴 상수 할당
+            if isinstance(node, ast.Assign | ast.AnnAssign):
+                value = node.value
+                if value is not None and not self._contains_call(value):
+                    continue
+                if value is None:
+                    # 타입 어노테이션만 있는 경우 (x: int)
+                    continue
+            errors.append(
+                f"Forbidden top-level code at line {node.lineno}: {type(node).__name__}"
+            )
+        return errors
+
+    def _contains_call(self, node: ast.AST) -> bool:
+        """AST 서브트리에 함수 호출이 포함되어 있는지 확인."""
+        if isinstance(node, ast.Call):
+            return True
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                return True
+        return False
+
     def _find_dangerous_patterns(self, tree: ast.Module) -> list[str]:
         """위험 패턴 탐지 (경고 수준)."""
         warnings: list[str] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in (
-                    "eval",
-                    "exec",
-                    "compile",
-                    "__import__",
-                ):
-                    warnings.append(
-                        f"Dangerous built-in call: "
-                        f"{node.func.id}() at line {node.lineno}"
-                    )
-                elif node.func.id == "open":
+                if node.func.id == "open":
                     warnings.append(f"File access via open() at line {node.lineno}")
         return warnings
