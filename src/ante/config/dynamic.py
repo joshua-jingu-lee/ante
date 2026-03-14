@@ -21,6 +21,17 @@ CREATE TABLE IF NOT EXISTS dynamic_config (
     category  TEXT NOT NULL,
     updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS dynamic_config_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    key        TEXT NOT NULL,
+    old_value  TEXT,
+    new_value  TEXT NOT NULL,
+    changed_by TEXT NOT NULL,
+    changed_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_config_history_key ON dynamic_config_history(key);
+CREATE INDEX IF NOT EXISTS idx_config_history_changed_at
+    ON dynamic_config_history(changed_at);
 """
 
 
@@ -50,8 +61,10 @@ class DynamicConfigService:
             raise ConfigError(f"Dynamic config not found: {key}")
         return json.loads(row["value"])
 
-    async def set(self, key: str, value: Any, category: str) -> None:
-        """동적 설정 값 변경 + EventBus 알림."""
+    async def set(
+        self, key: str, value: Any, category: str, changed_by: str = "system"
+    ) -> None:
+        """동적 설정 값 변경 + 이력 기록 + EventBus 알림."""
         from ante.eventbus.events import ConfigChangedEvent
 
         old_value = None
@@ -59,6 +72,7 @@ class DynamicConfigService:
             old_value = await self.get(key)
 
         json_value = json.dumps(value)
+        old_json = json.dumps(old_value) if old_value is not None else None
         await self._db.execute(
             """INSERT INTO dynamic_config (key, value, category, updated_at)
                VALUES (?, ?, ?, datetime('now'))
@@ -67,15 +81,27 @@ class DynamicConfigService:
                  updated_at = excluded.updated_at""",
             (key, json_value, category),
         )
+        await self._db.execute(
+            """INSERT INTO dynamic_config_history
+               (key, old_value, new_value, changed_by, changed_at)
+               VALUES (?, ?, ?, ?, datetime('now'))""",
+            (key, old_json, json_value, changed_by),
+        )
         await self._eventbus.publish(
             ConfigChangedEvent(
                 category=category,
                 key=key,
-                old_value=json.dumps(old_value) if old_value is not None else "",
+                old_value=old_json if old_json is not None else "",
                 new_value=json_value,
             )
         )
-        logger.info("동적 설정 변경: %s = %s (category=%s)", key, value, category)
+        logger.info(
+            "동적 설정 변경: %s = %s (category=%s, by=%s)",
+            key,
+            value,
+            category,
+            changed_by,
+        )
 
     async def delete(self, key: str) -> bool:
         """동적 설정 삭제. 삭제 성공 시 True 반환."""
@@ -113,6 +139,37 @@ class DynamicConfigService:
             "SELECT 1 FROM dynamic_config WHERE key = ?", (key,)
         )
         return row is not None
+
+    async def get_history(self, key: str, limit: int = 50) -> list[dict[str, Any]]:
+        """설정 변경 이력 조회. 최신순 반환."""
+        rows = await self._db.fetch_all(
+            """SELECT id, key, old_value, new_value, changed_by, changed_at
+               FROM dynamic_config_history
+               WHERE key = ?
+               ORDER BY changed_at DESC, id DESC
+               LIMIT ?""",
+            (key, limit),
+        )
+        return list(rows)
+
+    async def cleanup_history(self, retention_days: int = 90) -> int:
+        """retention_days보다 오래된 이력 삭제. 삭제 건수 반환."""
+        rows = await self._db.fetch_all(
+            """SELECT id FROM dynamic_config_history
+               WHERE changed_at < datetime('now', ?)""",
+            (f"-{retention_days} days",),
+        )
+        count = len(rows)
+        if count > 0:
+            await self._db.execute(
+                """DELETE FROM dynamic_config_history
+                   WHERE changed_at < datetime('now', ?)""",
+                (f"-{retention_days} days",),
+            )
+            logger.info(
+                "설정 이력 정리: %d건 삭제 (retention=%d일)", count, retention_days
+            )
+        return count
 
 
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}

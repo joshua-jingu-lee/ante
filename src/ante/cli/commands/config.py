@@ -152,7 +152,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
             # 카테고리 추론
             category = key.split(".")[0] if "." in key else "general"
 
-            await dynamic.set(key, parsed, category)
+            await dynamic.set(key, parsed, category, changed_by=f"cli:{actor}")
             return {
                 "success": True,
                 "key": key,
@@ -176,3 +176,39 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
             f"설정 변경 완료: {result['key']} = {result['value']}",
             result,
         )
+
+
+@config.command("history")
+@click.argument("key")
+@click.option("--limit", "-n", default=20, help="조회 건수 (기본 20)")
+@click.pass_context
+@require_auth
+@require_scope("config:read")
+def config_history(ctx: click.Context, key: str, limit: int) -> None:
+    """설정 변경 이력 조회."""
+    fmt = get_formatter(ctx)
+
+    async def _run_history() -> list[dict]:
+        _, dynamic, db = await _create_services()
+        try:
+            return await dynamic.get_history(key, limit=limit)
+        finally:
+            await db.close()
+
+    rows = _run(_run_history())
+
+    if fmt.is_json:
+        fmt.output({"key": key, "history": rows})
+    else:
+        if not rows:
+            click.echo(f"  '{key}'에 대한 변경 이력이 없습니다.")
+            return
+        click.echo(f"  변경 이력: {key} (최근 {limit}건)")
+        click.echo(f"  {'시각':24s} {'변경자':16s} {'이전값':20s} → {'새값':20s}")
+        click.echo("  " + "-" * 84)
+        for row in rows:
+            old = row.get("old_value") or "(없음)"
+            new = row.get("new_value", "")
+            at = row["changed_at"]
+            by = row["changed_by"]
+            click.echo(f"  {at:24s} {by:16s} {old:20s} → {new:20s}")
