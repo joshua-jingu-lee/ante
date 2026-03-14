@@ -341,6 +341,7 @@ class BotManager:
     def _register_bot_events(self, bot: Bot) -> None:
         """봇의 이벤트 핸들러 등록."""
         from ante.eventbus.events import (
+            ExternalSignalEvent,
             OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
@@ -350,6 +351,7 @@ class BotManager:
         )
 
         self._eventbus.subscribe(OrderFilledEvent, bot.on_order_filled)
+        self._eventbus.subscribe(ExternalSignalEvent, bot.on_external_signal)
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -362,6 +364,7 @@ class BotManager:
     def _unregister_bot_events(self, bot: Bot) -> None:
         """봇의 이벤트 핸들러 해제."""
         from ante.eventbus.events import (
+            ExternalSignalEvent,
             OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
@@ -371,6 +374,7 @@ class BotManager:
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, bot.on_order_filled)
+        self._eventbus.unsubscribe(ExternalSignalEvent, bot.on_external_signal)
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
