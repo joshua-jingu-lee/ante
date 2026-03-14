@@ -12,6 +12,7 @@ from ante.strategy.base import (
 from ante.strategy.context import StrategyContext
 from ante.strategy.exceptions import (
     StrategyError,
+    StrategyFileAccessError,
     StrategyLoadError,
     StrategyValidationError,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "Strategy",
     "StrategyContext",
     "StrategyError",
+    "StrategyFileAccessError",
     "StrategyLoadError",
     "StrategyLoader",
     "StrategyMeta",

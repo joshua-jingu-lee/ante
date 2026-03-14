@@ -18,7 +18,11 @@ from ante.strategy import (
     StrategyStatus,
     StrategyValidator,
 )
-from ante.strategy.exceptions import StrategyError, StrategyLoadError
+from ante.strategy.exceptions import (
+    StrategyError,
+    StrategyFileAccessError,
+    StrategyLoadError,
+)
 
 # ── Test fixtures ─────────────────────────────────
 
@@ -170,6 +174,68 @@ class TestStrategyContext:
         ctx.cancel_order("ord1")
         ctx._drain_actions()
         assert ctx._drain_actions() == []
+
+
+# ── StrategyContext.load_file / load_text ────────
+
+
+class TestStrategyContextFileAccess:
+    @pytest.fixture
+    def strategies_dir(self, tmp_path):
+        d = tmp_path / "strategies"
+        d.mkdir()
+        return d
+
+    @pytest.fixture
+    def ctx(self, strategies_dir):
+        return StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+            strategies_dir=strategies_dir,
+        )
+
+    def test_load_file_success(self, ctx, strategies_dir):
+        """strategies/ 하위 파일을 읽는다."""
+        (strategies_dir / "data.bin").write_bytes(b"\x00\x01\x02")
+        result = ctx.load_file("data.bin")
+        assert result == b"\x00\x01\x02"
+
+    def test_load_text_success(self, ctx, strategies_dir):
+        """strategies/ 하위 텍스트 파일을 읽는다."""
+        (strategies_dir / "config.txt").write_text("hello", encoding="utf-8")
+        result = ctx.load_text("config.txt")
+        assert result == "hello"
+
+    def test_load_file_subdirectory(self, ctx, strategies_dir):
+        """strategies/ 하위 디렉토리의 파일을 읽는다."""
+        sub = strategies_dir / "sub"
+        sub.mkdir()
+        (sub / "data.csv").write_text("a,b,c")
+        result = ctx.load_text("sub/data.csv")
+        assert result == "a,b,c"
+
+    def test_load_file_absolute_path_rejected(self, ctx):
+        """절대 경로는 차단된다."""
+        with pytest.raises(StrategyFileAccessError, match="Absolute paths"):
+            ctx.load_file("/etc/passwd")
+
+    def test_load_file_path_escape_rejected(self, ctx):
+        """경로 탈출 시도는 차단된다."""
+        with pytest.raises(StrategyFileAccessError, match="escapes"):
+            ctx.load_file("../../etc/passwd")
+
+    def test_load_file_not_found(self, ctx):
+        """파일 미존재 시 명확한 에러."""
+        with pytest.raises(StrategyFileAccessError, match="File not found"):
+            ctx.load_file("nonexistent.txt")
+
+    def test_load_text_encoding(self, ctx, strategies_dir):
+        """인코딩 지정이 동작한다."""
+        (strategies_dir / "kr.txt").write_text("한글", encoding="euc-kr")
+        result = ctx.load_text("kr.txt", encoding="euc-kr")
+        assert result == "한글"
 
 
 # ── StrategyValidator ─────────────────────────────
@@ -371,8 +437,8 @@ class TestStrategy(Strategy):
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert not any("top-level" in e.lower() for e in result.errors)
 
-    def test_open_warning(self, validator, tmp_path):
-        """open 호출은 경고."""
+    def test_open_error(self, validator, tmp_path):
+        """open 호출은 에러."""
         code = """
 class TestStrategy(Strategy):
     meta = None
@@ -381,8 +447,60 @@ class TestStrategy(Strategy):
         return []
 """
         result = validator.validate(self._write_strategy(tmp_path, code))
-        assert len(result.warnings) > 0
-        assert any("open" in w for w in result.warnings)
+        assert not result.valid
+        assert any("open" in e for e in result.errors)
+
+    def test_forbidden_globals_error(self, validator, tmp_path):
+        """globals 호출은 에러."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        globals()
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("globals" in e for e in result.errors)
+
+    def test_forbidden_locals_error(self, validator, tmp_path):
+        """locals 호출은 에러."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        locals()
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("locals" in e for e in result.errors)
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            "multiprocessing",
+            "threading",
+            "signal",
+            "io",
+            "tempfile",
+            "glob",
+            "builtins",
+        ],
+    )
+    def test_forbidden_module_import(self, validator, tmp_path, module):
+        """새로 추가된 금지 모듈 import 시 실패."""
+        code = f"""
+import {module}
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(module in e for e in result.errors)
 
     def test_multiple_strategy_classes(self, validator, tmp_path):
         """복수 Strategy 클래스는 실패."""

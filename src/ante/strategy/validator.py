@@ -36,9 +36,24 @@ class StrategyValidator:
         "ctypes",
         "pickle",
         "pathlib",
+        "multiprocessing",
+        "threading",
+        "signal",
+        "io",
+        "tempfile",
+        "glob",
+        "builtins",
     }
 
-    FORBIDDEN_BUILTINS: set[str] = {"eval", "exec", "compile", "__import__"}
+    FORBIDDEN_BUILTINS: set[str] = {
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "globals",
+        "locals",
+        "open",
+    }
 
     def validate(self, filepath: Path) -> ValidationResult:
         """전략 파일 정적 검증."""
@@ -221,8 +236,5 @@ class StrategyValidator:
     def _find_dangerous_patterns(self, tree: ast.Module) -> list[str]:
         """위험 패턴 탐지 (경고 수준)."""
         warnings: list[str] = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id == "open":
-                    warnings.append(f"File access via open() at line {node.lineno}")
+        # open()은 FORBIDDEN_BUILTINS로 승격되어 에러로 처리됨
         return warnings
