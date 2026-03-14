@@ -6,7 +6,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ante.strategy.base import DataProvider, OrderAction, OrderView, PortfolioView
+from ante.strategy.base import (
+    DataProvider,
+    OrderAction,
+    OrderView,
+    PortfolioView,
+    TradeHistoryView,
+)
 from ante.strategy.exceptions import StrategyFileAccessError
 
 logger = logging.getLogger(__name__)
@@ -24,6 +30,7 @@ class StrategyContext:
         data_provider: DataProvider,
         portfolio: PortfolioView,
         order_view: OrderView,
+        trade_history: TradeHistoryView | None = None,
         logger: logging.Logger | None = None,
         strategies_dir: Path | None = None,
     ) -> None:
@@ -31,6 +38,7 @@ class StrategyContext:
         self._data = data_provider
         self._portfolio = portfolio
         self._orders = order_view
+        self._trade_history = trade_history
         self._log = logger or logging.getLogger(f"ante.strategy.{bot_id}")
         self._pending_actions: list[OrderAction] = []
         self._strategies_dir = (
@@ -70,6 +78,20 @@ class StrategyContext:
     def get_balance(self) -> dict[str, float]:
         """봇 할당 자금 현황 조회."""
         return self._portfolio.get_balance(self.bot_id)
+
+    # ── 거래 이력 ──
+
+    async def get_trade_history(
+        self,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """봇의 거래 이력 조회. 최신순 반환."""
+        if self._trade_history is None:
+            return []
+        return await self._trade_history.get_trade_history(
+            self.bot_id, symbol=symbol, limit=limit
+        )
 
     # ── 주문 관리 ──
 

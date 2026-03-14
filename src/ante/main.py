@@ -242,12 +242,17 @@ async def main() -> None:
         data_provider = LiveDataProvider(gateway=api_gateway)
         paper_executor._gateway = api_gateway
 
+    from ante.bot.providers.live import LiveTradeHistoryView
+
+    live_trade_history = LiveTradeHistoryView(trade_recorder=trade_recorder)
+
     if data_provider:
         context_factory = StrategyContextFactory(
             data_provider=data_provider,
             live_portfolio=live_portfolio,
             live_order_view=live_order_view,
             paper_executor=paper_executor,
+            live_trade_history=live_trade_history,
         )
         bot_manager._context_factory = context_factory
         logger.info("StrategyContextFactory 설정 완료")

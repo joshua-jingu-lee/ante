@@ -8,6 +8,7 @@ from ante.strategy.base import (
     Signal,
     Strategy,
     StrategyMeta,
+    TradeHistoryView,
 )
 from ante.strategy.context import StrategyContext
 from ante.strategy.exceptions import (
@@ -37,6 +38,7 @@ __all__ = [
     "StrategyRegistry",
     "StrategyStatus",
     "StrategyValidationError",
+    "TradeHistoryView",
     "StrategyValidator",
     "ValidationResult",
 ]

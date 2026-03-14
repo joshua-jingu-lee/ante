@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ante.strategy.base import OrderView, PortfolioView
+from ante.strategy.base import OrderView, PortfolioView, TradeHistoryView
 
 if TYPE_CHECKING:
     from ante.broker.order_registry import OrderRegistry
     from ante.trade.position import PositionHistory
+    from ante.trade.recorder import TradeRecorder
     from ante.treasury.treasury import Treasury
 
 logger = logging.getLogger(__name__)
@@ -68,3 +69,36 @@ class LiveOrderView(OrderView):
         현재는 빈 목록을 반환하며, 실시간 주문 추적은 Phase 2에서 구현.
         """
         return []
+
+
+class LiveTradeHistoryView(TradeHistoryView):
+    """Live 봇용 TradeHistoryView. TradeRecorder에서 거래 이력 조회."""
+
+    def __init__(self, trade_recorder: TradeRecorder) -> None:
+        self._recorder = trade_recorder
+
+    async def get_trade_history(
+        self,
+        bot_id: str,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """봇의 거래 이력 조회."""
+        records = await self._recorder.get_trades(
+            bot_id=bot_id, symbol=symbol, limit=limit
+        )
+        return [
+            {
+                "trade_id": r.trade_id,
+                "symbol": r.symbol,
+                "side": r.side,
+                "quantity": r.quantity,
+                "price": r.price,
+                "status": r.status.value,
+                "order_type": r.order_type,
+                "reason": r.reason,
+                "commission": r.commission,
+                "timestamp": r.timestamp.isoformat(),
+            }
+            for r in records
+        ]
