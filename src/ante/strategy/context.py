@@ -57,8 +57,29 @@ class StrategyContext:
         symbol: str,
         indicator: str,
         params: dict[str, Any] | None = None,
-    ) -> Any:
-        """기술 지표 데이터 조회."""
+    ) -> dict[str, Any]:
+        """기술 지표 계산.
+
+        TA-Lib 설치 시 OHLCV 데이터를 가져와 지표를 계산한다.
+        미설치 시 DataProvider 구현체에 위임한다.
+
+        Args:
+            symbol: 종목 코드.
+            indicator: 지표 이름 (예: "sma", "rsi", "macd").
+            params: TA-Lib 파라미터 오버라이드 (예: {"timeperiod": 50}).
+
+        Returns:
+            지표 결과 딕셔너리. 키는 지표명, 값은 numpy 배열 또는 리스트.
+        """
+        from ante.strategy.indicators import (
+            IndicatorCalculator,
+            ohlcv_to_numpy,
+        )
+
+        if IndicatorCalculator.is_available():
+            ohlcv_data = await self._data.get_ohlcv(symbol, limit=500)
+            arrays = ohlcv_to_numpy(ohlcv_data)
+            return IndicatorCalculator.compute(indicator, arrays, **(params or {}))
         return await self._data.get_indicator(symbol, indicator, params)
 
     # ── 포트폴리오 조회 ──

@@ -16,12 +16,14 @@ from ante.strategy.exceptions import (
     StrategyLoadError,
     StrategyValidationError,
 )
+from ante.strategy.indicators import IndicatorCalculator
 from ante.strategy.loader import StrategyLoader
 from ante.strategy.registry import StrategyRecord, StrategyRegistry, StrategyStatus
 from ante.strategy.validator import StrategyValidator, ValidationResult
 
 __all__ = [
     "DataProvider",
+    "IndicatorCalculator",
     "OrderAction",
     "OrderView",
     "PortfolioView",
