@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ante</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/ante/.venv/bin/python</string>
+        <string>-m</string>
+        <string>ante.main</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/opt/ante</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/opt/ante/logs/ante.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/opt/ante/logs/ante.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ANTE_HOME</key>
+        <string>/opt/ante</string>
+    </dict>
+</dict>
+</plist>
