@@ -30,3 +30,5 @@ class BotConfig:
     auto_restart: bool = True
     max_restart_attempts: int = 3
     restart_cooldown_seconds: int = 60
+    step_timeout_seconds: int = 30
+    max_signals_per_step: int = 50
