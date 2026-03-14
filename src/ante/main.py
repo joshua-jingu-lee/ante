@@ -73,6 +73,15 @@ async def main() -> None:
     # ── 5. DynamicConfigService ──────────────────────
     dynamic_config = DynamicConfigService(db=db, eventbus=eventbus)
     await dynamic_config.initialize()
+
+    # log_level 동적 설정: 기본값 등록 + 변경 구독
+    from ante.config.dynamic import _on_log_level_changed
+    from ante.eventbus.events import ConfigChangedEvent
+
+    await dynamic_config.register_default(
+        "system.log_level", log_level, category="system"
+    )
+    eventbus.subscribe(ConfigChangedEvent, _on_log_level_changed)
     logger.info("DynamicConfigService 초기화 완료")
 
     # ── 5.5. MemberService ─────────────────────────────

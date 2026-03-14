@@ -95,9 +95,38 @@ class DynamicConfigService:
         )
         return {row["key"]: json.loads(row["value"]) for row in rows}
 
+    async def register_default(self, key: str, value: Any, category: str) -> None:
+        """기본값 등록. 이미 값이 존재하면 무시한다."""
+        if not await self.exists(key):
+            json_value = json.dumps(value)
+            await self._db.execute(
+                "INSERT OR IGNORE INTO dynamic_config"
+                " (key, value, category, updated_at)"
+                " VALUES (?, ?, ?, datetime('now'))",
+                (key, json_value, category),
+            )
+            logger.info("동적 설정 기본값 등록: %s = %s", key, value)
+
     async def exists(self, key: str) -> bool:
         """설정 존재 여부 확인."""
         row = await self._db.fetch_one(
             "SELECT 1 FROM dynamic_config WHERE key = ?", (key,)
         )
         return row is not None
+
+
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+def _on_log_level_changed(event: Any) -> None:
+    """system.log_level 변경 시 루트 로거 레벨을 동적으로 갱신한다."""
+    if event.key != "system.log_level":
+        return
+
+    new_level = json.loads(event.new_value).upper()
+    if new_level not in _VALID_LOG_LEVELS:
+        logger.warning("유효하지 않은 log_level: %s — 무시", new_level)
+        return
+
+    logging.getLogger().setLevel(getattr(logging, new_level))
+    logger.info("루트 로거 레벨 변경: %s", new_level)
