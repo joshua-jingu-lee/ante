@@ -44,6 +44,8 @@ class Bot:
         self.started_at: datetime | None = None
         self.stopped_at: datetime | None = None
         self.error_message: str | None = None
+        self._consecutive_failures: int = 0
+        self._max_consecutive_failures: int = 3
 
     async def start(self) -> None:
         """봇 시작. 전략 인스턴스화 + 실행 루프 Task 생성."""
@@ -99,7 +101,62 @@ class Bot:
                     "balance": self._ctx.get_balance(),
                 }
 
-                signals = await self.strategy.on_step(step_context)  # type: ignore[union-attr]
+                # on_step 타임아웃 적용
+                try:
+                    signals = await asyncio.wait_for(
+                        self.strategy.on_step(step_context),  # type: ignore[union-attr]
+                        timeout=self.config.step_timeout_seconds,
+                    )
+                except TimeoutError:
+                    self._consecutive_failures += 1
+                    logger.warning(
+                        "on_step 타임아웃: %s (%d/%d)",
+                        self.bot_id,
+                        self._consecutive_failures,
+                        self._max_consecutive_failures,
+                    )
+                    if self._consecutive_failures >= self._max_consecutive_failures:
+                        logger.error(
+                            "연속 타임아웃 한도 초과 — 봇 중지: %s",
+                            self.bot_id,
+                        )
+                        await self.stop()
+                        return
+                    await asyncio.sleep(self.config.interval_seconds)
+                    continue
+
+                # Signal 수 상한 검증
+                max_signals = self.config.max_signals_per_step
+                if len(signals) > max_signals:
+                    self._consecutive_failures += 1
+                    logger.warning(
+                        "Signal 수 초과: %s (%d > %d, 연속 %d/%d)",
+                        self.bot_id,
+                        len(signals),
+                        max_signals,
+                        self._consecutive_failures,
+                        self._max_consecutive_failures,
+                    )
+                    msg = f"Signal count exceeded: {len(signals)} > {max_signals}"
+                    await self._eventbus.publish(
+                        BotErrorEvent(
+                            bot_id=self.bot_id,
+                            error_message=msg,
+                        )
+                    )
+                    if self._consecutive_failures >= self._max_consecutive_failures:
+                        logger.error(
+                            "연속 Signal 초과 한도 — 봇 중지: %s",
+                            self.bot_id,
+                        )
+                        await self.stop()
+                        return
+                    await asyncio.sleep(self.config.interval_seconds)
+                    continue
+
+                # 정상 실행 — 카운터 리셋
+                self._consecutive_failures = 0
+
                 await self._publish_signals(signals)
 
                 actions = self._ctx._drain_actions()
