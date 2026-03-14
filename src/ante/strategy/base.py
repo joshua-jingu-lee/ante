@@ -24,6 +24,7 @@ class StrategyMeta:
     symbols: list[str] | None = None
     timeframe: str = "1d"
     exchange: str = "KRX"
+    accepts_external_signals: bool = False
 
 
 # ── 시그널 / 주문 액션 ────────────────────────────
