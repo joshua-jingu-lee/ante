@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F811
 
 import pytest
 
@@ -82,8 +82,9 @@ class TestRegister:
 class TestTrigger:
     """트리거 판단 테스트."""
 
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
     async def test_sell_stop_triggered(
-        self, manager: StopOrderManager, eventbus: MagicMock
+        self, _mock_session: MagicMock, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """매도 스탑: 현재가 <= stop_price 시 트리거."""
         await manager.start()
@@ -117,8 +118,9 @@ class TestTrigger:
         assert order_event.order_type == "market"
         assert order_event.side == "sell"
 
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
     async def test_buy_stop_triggered(
-        self, manager: StopOrderManager, eventbus: MagicMock
+        self, _mock_session: MagicMock, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """매수 스탑: 현재가 >= stop_price 시 트리거."""
         await manager.start()
@@ -141,8 +143,9 @@ class TestTrigger:
         triggered_event = eventbus.publish.call_args_list[0][0][0]
         assert isinstance(triggered_event, StopOrderTriggeredEvent)
 
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
     async def test_stop_limit_converts_to_limit(
-        self, manager: StopOrderManager, eventbus: MagicMock
+        self, _mock_session: MagicMock, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """stop_limit → limit 변환."""
         await manager.start()

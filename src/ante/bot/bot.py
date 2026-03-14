@@ -199,6 +199,39 @@ class Bot:
         if update:
             await self.strategy.on_order_update(update)
 
+    async def on_external_signal(self, event: object) -> None:
+        """외부 시그널 수신 → 전략의 on_data()로 전달.
+
+        accepts_external_signals=False인 전략은 시그널을 무시한다.
+        """
+        from ante.eventbus.events import ExternalSignalEvent
+
+        if not isinstance(event, ExternalSignalEvent):
+            return
+        if not self.strategy or event.bot_id != self.bot_id:
+            return
+
+        if not self.strategy.meta.accepts_external_signals:
+            logger.warning(
+                "외부 시그널 거부: 봇 %s 전략 %s — accepts_external_signals=False",
+                self.bot_id,
+                self.strategy.meta.name,
+            )
+            return
+
+        follow_up = await self.strategy.on_data(
+            {
+                "signal_id": event.signal_id,
+                "symbol": event.symbol,
+                "action": event.action,
+                "reason": event.reason,
+                "confidence": event.confidence,
+                "metadata": event.metadata,
+                "timestamp": event.timestamp,
+            }
+        )
+        await self._publish_signals(follow_up or [])
+
     async def _publish_signals(self, signals: list[Signal]) -> None:
         """Signal → OrderRequestEvent 변환 + EventBus 발행."""
         from ante.eventbus.events import OrderRequestEvent

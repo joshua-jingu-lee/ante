@@ -71,6 +71,15 @@ class StrategyValidator:
             if not self._has_method(cls, "on_step"):
                 errors.append("Missing required method: on_step()")
 
+            # accepts_external_signals=True인 전략에 on_data() 구현 여부 경고
+            if self._has_accepts_external_signals(cls) and not self._has_method(
+                cls, "on_data"
+            ):
+                warnings.append(
+                    "Strategy has accepts_external_signals=True but does not "
+                    "implement on_data() — external signals will use default handler"
+                )
+
         # 4. 금지 모듈 import
         forbidden = self._find_forbidden_imports(tree)
         for module in forbidden:
@@ -115,6 +124,25 @@ class StrategyValidator:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 if node.name == name:
                     return True
+        return False
+
+    def _has_accepts_external_signals(self, cls: ast.ClassDef) -> bool:
+        """meta에 accepts_external_signals=True 설정 여부 탐지."""
+        for node in cls.body:
+            # meta = StrategyMeta(..., accepts_external_signals=True)
+            if isinstance(node, ast.Assign | ast.AnnAssign):
+                target = (
+                    node.targets[0] if isinstance(node, ast.Assign) else node.target
+                )
+                if not isinstance(target, ast.Name) or target.id != "meta":
+                    continue
+                value = node.value
+                if isinstance(value, ast.Call):
+                    for kw in value.keywords:
+                        if kw.arg == "accepts_external_signals" and isinstance(
+                            kw.value, ast.Constant
+                        ):
+                            return bool(kw.value.value)
         return False
 
     def _find_forbidden_imports(self, tree: ast.Module) -> list[str]:
