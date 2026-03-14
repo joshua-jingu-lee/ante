@@ -4,9 +4,9 @@ AGENT.md
 .claude/
 docs/
 
-# Runtime data
-data/
-db/
+# Runtime data (루트 디렉토리만 — src/ante/data/ 는 소스코드)
+/data/
+/db/
 
 # Secrets
 config/secrets.env

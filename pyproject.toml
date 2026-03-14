@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "AI-Native Trading Engine"
 requires-python = ">=3.11"
 dependencies = [
+    "aiohttp>=3.9",
     "aiosqlite>=0.20",
     "polars>=1.0",
     "click>=8.1",
