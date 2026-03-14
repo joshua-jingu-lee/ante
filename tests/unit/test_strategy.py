@@ -263,8 +263,8 @@ class TestStrategy(Strategy):
         assert not result.valid
         assert any("subprocess" in e for e in result.errors)
 
-    def test_dangerous_eval_warning(self, validator, tmp_path):
-        """eval 호출은 경고."""
+    def test_forbidden_eval_error(self, validator, tmp_path):
+        """eval 호출은 에러."""
         code = """
 class TestStrategy(Strategy):
     meta = None
@@ -273,8 +273,103 @@ class TestStrategy(Strategy):
         return []
 """
         result = validator.validate(self._write_strategy(tmp_path, code))
-        assert len(result.warnings) > 0
-        assert any("eval" in w for w in result.warnings)
+        assert not result.valid
+        assert any("eval" in e for e in result.errors)
+
+    def test_forbidden_exec_error(self, validator, tmp_path):
+        """exec 호출은 에러."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        exec("x = 1")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("exec" in e for e in result.errors)
+
+    def test_forbidden_compile_error(self, validator, tmp_path):
+        """compile 호출은 에러."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        compile("x = 1", "<string>", "exec")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("compile" in e for e in result.errors)
+
+    def test_forbidden_dunder_import_error(self, validator, tmp_path):
+        """__import__ 호출은 에러."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        __import__("os")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("__import__" in e for e in result.errors)
+
+    def test_forbidden_toplevel_function_call_assign(self, validator, tmp_path):
+        """최상위 함수 호출 할당은 에러."""
+        code = """
+data = load_model("path/to/model")
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_forbidden_toplevel_standalone_call(self, validator, tmp_path):
+        """최상위 독립 표현식(함수 호출)은 에러."""
+        code = """
+print("hello")
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_literal_assign_allowed(self, validator, tmp_path):
+        """최상위 리터럴 상수 할당은 허용."""
+        code = """
+X = [1, 2, 3]
+Y = "hello"
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        # 리터럴 할당은 top-level 에러가 아님
+        assert not any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_docstring_allowed(self, validator, tmp_path):
+        """모듈 docstring은 허용."""
+        code = '''
+"""This is a strategy module."""
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+'''
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not any("top-level" in e.lower() for e in result.errors)
 
     def test_open_warning(self, validator, tmp_path):
         """open 호출은 경고."""
