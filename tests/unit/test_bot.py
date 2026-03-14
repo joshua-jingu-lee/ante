@@ -471,7 +471,7 @@ class TestBotManager:
             )
             config = BotConfig(
                 bot_id=f"bot{i}",
-                strategy_id="s1",
+                strategy_id=f"s{i}",
                 interval_seconds=999,
             )
             await manager.create_bot(config, SimpleStrategy, ctx)
@@ -519,6 +519,78 @@ class TestBotManager:
         """존재하지 않는 봇 시작 시 에러."""
         with pytest.raises(BotError, match="not found"):
             await manager.start_bot("nonexistent")
+
+    async def test_single_bot_per_strategy_running(self, manager, eventbus):
+        """실행 중인 봇의 전략으로 새 봇 생성 시 에러."""
+        ctx1 = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        ctx2 = StrategyContext(
+            bot_id="bot2",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        config1 = BotConfig(bot_id="bot1", strategy_id="same_stg", interval_seconds=999)
+        config2 = BotConfig(bot_id="bot2", strategy_id="same_stg", interval_seconds=999)
+        await manager.create_bot(config1, SimpleStrategy, ctx1)
+        await manager.start_bot("bot1")
+
+        with pytest.raises(BotError, match="이미 봇"):
+            await manager.create_bot(config2, SimpleStrategy, ctx2)
+
+        await manager.stop_bot("bot1")
+
+    async def test_single_bot_per_strategy_stopped_reuse(self, manager, eventbus):
+        """중지된 봇의 전략은 재사용 가능."""
+        ctx1 = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        ctx2 = StrategyContext(
+            bot_id="bot2",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        config1 = BotConfig(bot_id="bot1", strategy_id="same_stg", interval_seconds=999)
+        config2 = BotConfig(bot_id="bot2", strategy_id="same_stg", interval_seconds=999)
+        await manager.create_bot(config1, SimpleStrategy, ctx1)
+        await manager.start_bot("bot1")
+        await manager.stop_bot("bot1")
+
+        # stopped 상태이므로 같은 전략으로 생성 가능
+        bot2 = await manager.create_bot(config2, SimpleStrategy, ctx2)
+        assert bot2.status == BotStatus.CREATED
+
+    async def test_single_bot_per_strategy_different_strategy(self, manager, eventbus):
+        """다른 전략이면 봇 생성 정상."""
+        ctx1 = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        ctx2 = StrategyContext(
+            bot_id="bot2",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        config1 = BotConfig(bot_id="bot1", strategy_id="stg_a", interval_seconds=999)
+        config2 = BotConfig(bot_id="bot2", strategy_id="stg_b", interval_seconds=999)
+        await manager.create_bot(config1, SimpleStrategy, ctx1)
+        await manager.start_bot("bot1")
+
+        bot2 = await manager.create_bot(config2, SimpleStrategy, ctx2)
+        assert bot2.status == BotStatus.CREATED
+
+        await manager.stop_bot("bot1")
 
     async def test_bot_config_persisted(self, manager, eventbus, ctx, db):
         """봇 설정이 DB에 저장됨."""
