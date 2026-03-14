@@ -87,6 +87,19 @@ class BotManager:
         if config.bot_id in self._bots:
             raise BotError(f"Bot already exists: {config.bot_id}")
 
+        # 1전략 1봇 정책: 실행 중인 봇이 사용 중인 전략 중복 차단
+        active_statuses = {BotStatus.RUNNING, BotStatus.STOPPING}
+        for existing_bot in self._bots.values():
+            if (
+                existing_bot.config.strategy_id == config.strategy_id
+                and existing_bot.status in active_statuses
+            ):
+                raise BotError(
+                    f"전략 '{config.strategy_id}'은(는) 이미 봇 "
+                    f"'{existing_bot.bot_id}'에서 사용 중입니다. "
+                    f"파라미터가 다른 전략은 별도 파일로 작성하세요."
+                )
+
         if ctx is None:
             if self._context_factory is None:
                 msg = "ctx 또는 context_factory 중 하나는 필수입니다"
