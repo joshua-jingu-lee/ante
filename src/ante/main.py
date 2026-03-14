@@ -201,6 +201,13 @@ async def main() -> None:
     api_gateway = None
 
     broker_config = config.get("broker", {})
+    try:
+        broker_config["app_key"] = config.secret("KIS_APP_KEY")
+        broker_config["app_secret"] = config.secret("KIS_APP_SECRET")
+        broker_config["account_no"] = config.secret("KIS_ACCOUNT_NO")
+    except Exception:
+        pass  # 비밀값 없으면 브로커 미사용
+
     if broker_config.get("app_key"):
         broker = KISAdapter(config=broker_config, eventbus=eventbus)
         try:

@@ -15,8 +15,7 @@
     python scripts/verify-install.py all
 
 필수 조건:
-    - config/secrets.env 에 KIS_APP_KEY, KIS_APP_SECRET 설정
-    - config/system.toml 에 broker.account_no 설정
+    - config/secrets.env 에 KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO 설정
 """
 
 from __future__ import annotations
@@ -228,18 +227,19 @@ async def stage_query() -> bool:
     config = Config.load(config_dir=project_root / "config")
 
     broker_config = config.get("broker", {})
-    app_key = config.get_secret("KIS_APP_KEY")
-    app_secret = config.get_secret("KIS_APP_SECRET")
-    account_no = broker_config.get("account_no", "")
-
-    if not app_key or not app_secret:
+    try:
+        app_key = config.secret("KIS_APP_KEY")
+        app_secret = config.secret("KIS_APP_SECRET")
+    except Exception:
         log_fail("KIS_APP_KEY / KIS_APP_SECRET 가 설정되지 않았습니다")
         log_info("config/secrets.env 파일을 확인하세요")
         return False
 
-    if not account_no:
-        log_fail("broker.account_no 가 설정되지 않았습니다")
-        log_info("config/system.toml [broker] 섹션을 확인하세요")
+    try:
+        account_no = config.secret("KIS_ACCOUNT_NO")
+    except Exception:
+        log_fail("KIS_ACCOUNT_NO 가 설정되지 않았습니다")
+        log_info("config/secrets.env 파일을 확인하세요")
         return False
 
     log_ok(f"설정 확인: app_key={app_key[:4]}****, account={account_no}")
@@ -350,9 +350,9 @@ async def stage_order() -> bool:
     config = Config.load(config_dir=project_root / "config")
 
     broker_config = config.get("broker", {})
-    app_key = config.get_secret("KIS_APP_KEY")
-    app_secret = config.get_secret("KIS_APP_SECRET")
-    account_no = broker_config.get("account_no", "")
+    app_key = config.secret("KIS_APP_KEY")
+    app_secret = config.secret("KIS_APP_SECRET")
+    account_no = config.secret("KIS_ACCOUNT_NO")
 
     from ante.broker import KISAdapter
 
