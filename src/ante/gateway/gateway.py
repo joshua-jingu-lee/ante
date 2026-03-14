@@ -21,6 +21,7 @@ class APIGateway:
     - Rate limit 준수
     - 응답 캐시 (시세, 잔고 등)
     - EventBus 이벤트 기반 주문 처리
+    - Stop order 라우팅 (StopOrderManager 연동)
     """
 
     def __init__(
@@ -28,6 +29,7 @@ class APIGateway:
         broker: BrokerAdapter,
         eventbus: EventBus,
         rate_config: RateLimitConfig | None = None,
+        stop_order_manager: Any | None = None,
     ) -> None:
         self._broker = broker
         self._eventbus = eventbus
@@ -36,6 +38,7 @@ class APIGateway:
         )
         self._cache = ResponseCache()
         self._running = False
+        self._stop_order_manager = stop_order_manager
 
     async def start(self) -> None:
         """이벤트 구독 시작."""
@@ -138,7 +141,10 @@ class APIGateway:
     # ── EventBus 핸들러 ──────────────────────────────
 
     async def _on_order_approved(self, event: object) -> None:
-        """Treasury 자금 확보 완료 → 증권사에 주문 제출."""
+        """Treasury 자금 확보 완료 → 증권사에 주문 제출.
+
+        stop/stop_limit 주문은 StopOrderManager로 라우팅한다.
+        """
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderFailedEvent,
@@ -147,6 +153,40 @@ class APIGateway:
 
         if not isinstance(event, OrderApprovedEvent):
             return
+
+        # stop/stop_limit → StopOrderManager로 라우팅
+        if event.order_type in ("stop", "stop_limit") and self._stop_order_manager:
+            try:
+                await self._stop_order_manager.register(
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    order_type=event.order_type,
+                    stop_price=event.stop_price or 0.0,
+                    limit_price=event.price,
+                    exchange=event.exchange,
+                )
+                return
+            except Exception as e:
+                logger.error("스탑 주문 등록 실패: %s — %s", event.order_id, e)
+                await self._eventbus.publish(
+                    OrderFailedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price or 0.0,
+                        order_type=event.order_type,
+                        error_message=str(e),
+                        exchange=event.exchange,
+                    )
+                )
+                return
 
         try:
             broker_order_id = await self.submit_order(

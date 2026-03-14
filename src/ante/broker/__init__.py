@@ -11,6 +11,7 @@ from ante.broker.exceptions import (
     RateLimitError,
 )
 from ante.broker.kis import KISAdapter
+from ante.broker.kis_stream import KISStreamClient
 from ante.broker.models import CommissionInfo
 from ante.broker.order_registry import OrderRegistry
 
@@ -21,6 +22,7 @@ __all__ = [
     "CircuitState",
     "CommissionInfo",
     "KISAdapter",
+    "KISStreamClient",
     "OrderRegistry",
     "BrokerError",
     "AuthenticationError",

@@ -5,6 +5,7 @@ from ante.gateway.data_provider import LiveDataProvider
 from ante.gateway.gateway import APIGateway
 from ante.gateway.queue import APIRequest, RequestPriority, RequestQueue
 from ante.gateway.rate_limiter import RateLimitConfig, RateLimiter
+from ante.gateway.stop_order import StopOrderManager
 
 __all__ = [
     "APIGateway",
@@ -15,4 +16,5 @@ __all__ = [
     "RequestQueue",
     "RequestPriority",
     "APIRequest",
+    "StopOrderManager",
 ]
