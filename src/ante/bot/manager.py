@@ -13,6 +13,7 @@ from ante.bot.exceptions import BotError
 
 if TYPE_CHECKING:
     from ante.bot.context_factory import StrategyContextFactory
+    from ante.bot.signal_key import SignalKeyManager  # noqa: F811
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.strategy.base import Strategy
@@ -42,10 +43,12 @@ class BotManager:
         eventbus: EventBus,
         db: Database,
         context_factory: StrategyContextFactory | None = None,
+        signal_key_manager: SignalKeyManager | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
         self._context_factory = context_factory
+        self._signal_key_manager = signal_key_manager
         self._bots: dict[str, Bot] = {}
         self._restart_counts: dict[str, int] = {}
         self._restart_tasks: dict[str, asyncio.Task[None]] = {}
@@ -101,6 +104,19 @@ class BotManager:
         self._bots[config.bot_id] = bot
         await self._save_bot_config(config)
 
+        # accepts_external_signals=True이면 시그널 키 자동 발급
+        if (
+            self._signal_key_manager
+            and hasattr(strategy_cls, "meta")
+            and getattr(strategy_cls.meta, "accepts_external_signals", False)
+        ):
+            signal_key = await self._signal_key_manager.generate(config.bot_id)
+            logger.info(
+                "시그널 키 자동 발급: bot=%s key=%s...",
+                config.bot_id,
+                signal_key[:8],
+            )
+
         logger.info("봇 생성: %s (전략: %s)", config.bot_id, config.strategy_id)
         return bot
 
@@ -129,6 +145,10 @@ class BotManager:
             and bot.config.bot_type == "paper"
         ):
             self._context_factory._paper_executor.unregister_bot(bot_id)
+
+        # 시그널 키 폐기
+        if self._signal_key_manager:
+            await self._signal_key_manager.revoke(bot_id)
 
         del self._bots[bot_id]
         await self._db.execute("DELETE FROM bots WHERE bot_id = ?", (bot_id,))
@@ -298,6 +318,19 @@ class BotManager:
                 last_error=last_error,
             )
         )
+
+    async def get_signal_key(self, bot_id: str) -> str | None:
+        """봇의 시그널 키 조회."""
+        if not self._signal_key_manager:
+            return None
+        return await self._signal_key_manager.get_key(bot_id)
+
+    async def rotate_signal_key(self, bot_id: str) -> str:
+        """시그널 키 재발급."""
+        if not self._signal_key_manager:
+            raise BotError("SignalKeyManager가 설정되지 않았습니다")
+        self._get_bot(bot_id)  # 존재 확인
+        return await self._signal_key_manager.rotate(bot_id)
 
     def get_restart_count(self, bot_id: str) -> int:
         """봇의 현재 재시작 시도 횟수."""

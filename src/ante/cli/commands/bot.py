@@ -221,6 +221,55 @@ def bot_remove(ctx: click.Context, bot_id: str) -> None:
     fmt.success(f"봇 삭제 완료: {bot_id}")
 
 
+@bot.command("signal-key")
+@click.argument("bot_id")
+@click.option("--rotate", is_flag=True, help="기존 키 폐기 + 새 키 발급")
+@click.pass_context
+@require_auth
+@require_scope("bot:admin")
+def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
+    """봇 시그널 키 조회 또는 재발급."""
+    fmt = get_formatter(ctx)
+
+    async def _run_signal_key() -> dict:
+        from ante.bot.signal_key import SignalKeyManager
+
+        db, _, _ = await _create_services()
+        try:
+            skm = SignalKeyManager(db)
+            await skm.initialize()
+
+            if rotate:
+                new_key = await skm.rotate(bot_id)
+                return {"bot_id": bot_id, "signal_key": new_key, "rotated": True}
+
+            key = await skm.get_key(bot_id)
+            if not key:
+                return {"bot_id": bot_id, "signal_key": None}
+            return {"bot_id": bot_id, "signal_key": key}
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_run_signal_key())
+    except Exception as e:
+        fmt.error(str(e))
+        return
+
+    if result.get("signal_key") is None:
+        fmt.error(f"시그널 키가 없습니다: {bot_id}")
+        return
+
+    if result.get("rotated"):
+        fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
+    else:
+        if fmt.is_json:
+            fmt.output(result)
+        else:
+            click.echo(f"  Bot ID     : {result['bot_id']}")
+            click.echo(f"  Signal Key : {result['signal_key']}")
+
+
 @bot.command("positions")
 @click.argument("bot_id")
 @click.pass_context
