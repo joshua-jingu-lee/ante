@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from ante.strategy.base import DataProvider, OrderAction, OrderView, PortfolioView
+from ante.strategy.exceptions import StrategyFileAccessError
+
+logger = logging.getLogger(__name__)
+
+# strategies/ 디렉토리 기준 경로 (프로젝트 루트 기준)
+_STRATEGIES_ROOT = Path("strategies")
 
 
 class StrategyContext:
@@ -18,6 +25,7 @@ class StrategyContext:
         portfolio: PortfolioView,
         order_view: OrderView,
         logger: logging.Logger | None = None,
+        strategies_dir: Path | None = None,
     ) -> None:
         self.bot_id = bot_id
         self._data = data_provider
@@ -25,6 +33,9 @@ class StrategyContext:
         self._orders = order_view
         self._log = logger or logging.getLogger(f"ante.strategy.{bot_id}")
         self._pending_actions: list[OrderAction] = []
+        self._strategies_dir = (
+            strategies_dir.resolve() if strategies_dir else _STRATEGIES_ROOT.resolve()
+        )
 
     # ── 데이터 조회 ──
 
@@ -95,6 +106,42 @@ class StrategyContext:
         actions = self._pending_actions.copy()
         self._pending_actions.clear()
         return actions
+
+    # ── 파일 접근 ──
+
+    def _resolve_strategy_path(self, path: str) -> Path:
+        """전략 파일 경로를 검증하고 절대 경로로 변환."""
+        # 절대 경로 차단
+        if Path(path).is_absolute():
+            raise StrategyFileAccessError(f"Absolute paths are not allowed: {path}")
+
+        # 경로 탈출 시도 차단
+        resolved = (self._strategies_dir / path).resolve()
+        if not resolved.is_relative_to(self._strategies_dir):
+            raise StrategyFileAccessError(f"Path escapes strategies directory: {path}")
+
+        return resolved
+
+    def load_file(self, path: str) -> bytes:
+        """전략 전용 파일 읽기 (바이너리).
+
+        strategies/ 하위 경로만 허용. 경로 탈출 시도 차단.
+        """
+        resolved = self._resolve_strategy_path(path)
+
+        if not resolved.exists():
+            raise StrategyFileAccessError(f"File not found: {path}")
+
+        self._log.info("[%s] Loading file: %s", self.bot_id, path)
+        return resolved.read_bytes()
+
+    def load_text(self, path: str, encoding: str = "utf-8") -> str:
+        """전략 전용 파일 읽기 (텍스트).
+
+        strategies/ 하위 경로만 허용. 경로 탈출 시도 차단.
+        """
+        data = self.load_file(path)
+        return data.decode(encoding)
 
     # ── 로깅 ──
 

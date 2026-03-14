@@ -17,3 +17,9 @@ class StrategyValidationError(StrategyError):
     """전략 검증 실패."""
 
     pass
+
+
+class StrategyFileAccessError(StrategyError):
+    """전략 파일 접근 오류."""
+
+    pass
