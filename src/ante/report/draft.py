@@ -114,6 +114,11 @@ class ReportDraftGenerator:
             f"거래: {total_trades}건"
         )
 
+        # equity_curve를 표준 포맷으로 변환
+        detail = dict(result_data)
+        raw_curve = detail.get("equity_curve", [])
+        detail["equity_curve"] = _standardize_equity_curve(raw_curve)
+
         return StrategyReport(
             report_id=str(uuid.uuid4()),
             strategy_name=name,
@@ -129,5 +134,21 @@ class ReportDraftGenerator:
             max_drawdown_pct=mdd,
             win_rate=win_rate,
             summary=summary,
-            detail_json=json.dumps(result_data, default=str),
+            detail_json=json.dumps(detail, default=str),
         )
+
+
+def _standardize_equity_curve(raw: list[dict]) -> list[dict]:
+    """백테스트 equity_curve를 표준 포맷으로 변환.
+
+    입력: [{"timestamp": "...", "equity": float, ...}, ...]
+    출력: [{"date": "YYYY-MM-DD", "value": float}, ...]
+    """
+    result = []
+    for point in raw:
+        ts = point.get("timestamp", "")
+        # timestamp에서 날짜 부분만 추출
+        date_str = str(ts)[:10] if ts else ""
+        value = point.get("equity", point.get("value", 0.0))
+        result.append({"date": date_str, "value": value})
+    return result

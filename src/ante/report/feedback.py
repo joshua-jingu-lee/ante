@@ -79,3 +79,46 @@ class PerformanceFeedback:
             }
             for t in trades
         ]
+
+    async def get_equity_curve(
+        self,
+        bot_id: str,
+        initial_balance: float = 0.0,
+    ) -> list[dict]:
+        """봇의 자산 곡선 데이터 생성.
+
+        체결 거래의 누적 PnL로 일별 자산 곡선을 산출한다.
+
+        Args:
+            bot_id: 봇 ID.
+            initial_balance: 초기 자산 (미지정 시 0, 상대 수익으로 표현).
+
+        Returns:
+            ``[{"date": "2025-01-01", "value": 10000000}, ...]`` 형식.
+        """
+        from ante.trade.recorder import TradeStatus
+
+        trades = await self._trade.get_trades(
+            bot_id=bot_id, status=TradeStatus.FILLED, limit=10000
+        )
+        if not trades:
+            return []
+
+        # 일별 PnL 집계
+        daily_pnl: dict[str, float] = {}
+        for t in trades:
+            if not t.timestamp:
+                continue
+            date_str = t.timestamp.strftime("%Y-%m-%d")
+            pnl = t.quantity * t.price * (1 if t.side == "sell" else -1)
+            pnl -= t.commission
+            daily_pnl[date_str] = daily_pnl.get(date_str, 0.0) + pnl
+
+        # 누적 자산 곡선
+        curve = []
+        equity = initial_balance
+        for date_str in sorted(daily_pnl.keys()):
+            equity += daily_pnl[date_str]
+            curve.append({"date": date_str, "value": round(equity, 2)})
+
+        return curve
