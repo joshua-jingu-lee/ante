@@ -60,9 +60,8 @@ def test_registry_input_types_valid():
     """레지스트리 input 타입이 유효한 값이다."""
     valid_types = {"close", "hlc", "close_volume", "hlcv"}
     for name, spec in INDICATOR_REGISTRY.items():
-        assert (
-            spec["input"] in valid_types
-        ), f"{name} has invalid input type: {spec['input']}"
+        msg = f"{name} has invalid input type: {spec['input']}"
+        assert spec["input"] in valid_types, msg
 
 
 # ── ohlcv_to_numpy ──
