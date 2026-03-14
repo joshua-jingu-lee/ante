@@ -275,7 +275,7 @@ async def stage_query() -> bool:
     # 2-2. 계좌 잔고 조회
     log_info("계좌 잔고 조회...")
     try:
-        balance = await adapter.get_balance()
+        balance = await adapter.get_account_balance()
         log_ok(f"잔고 조회 성공: {balance}")
     except Exception as e:
         log_fail(f"잔고 조회 실패: {e}")
