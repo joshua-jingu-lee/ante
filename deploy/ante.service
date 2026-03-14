@@ -1,0 +1,33 @@
+[Unit]
+Description=Ante AI-Native Trading Engine
+Documentation=https://github.com/joshua-jingu-lee/ante
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ante
+Group=ante
+WorkingDirectory=/opt/ante
+ExecStart=/opt/ante/.venv/bin/python -m ante.main
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# 환경 변수
+EnvironmentFile=-/opt/ante/.env
+
+# 보안 강화
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ante/db /opt/ante/data /opt/ante/logs
+PrivateTmp=true
+
+# 로깅 (journald)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ante
+
+[Install]
+WantedBy=multi-user.target
