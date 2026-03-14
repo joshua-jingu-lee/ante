@@ -179,10 +179,16 @@ async def main() -> None:
     # DataProvider는 APIGateway 연결 후 설정 (11단계)
     context_factory: StrategyContextFactory | None = None
 
+    from ante.strategy.snapshot import StrategySnapshot
+
+    strategies_dir = Path(config.get("strategy.dir", "strategies"))
+    strategy_snapshot = StrategySnapshot(strategies_dir)
+
     bot_manager = BotManager(
         eventbus=eventbus,
         db=db,
         context_factory=context_factory,  # APIGateway 연결 후 갱신
+        snapshot=strategy_snapshot,
     )
     await bot_manager.initialize()
     logger.info("BotManager 초기화 완료")

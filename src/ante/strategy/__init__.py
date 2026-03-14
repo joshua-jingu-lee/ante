@@ -18,6 +18,7 @@ from ante.strategy.exceptions import (
 )
 from ante.strategy.loader import StrategyLoader
 from ante.strategy.registry import StrategyRecord, StrategyRegistry, StrategyStatus
+from ante.strategy.snapshot import StrategySnapshot
 from ante.strategy.validator import StrategyValidator, ValidationResult
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "StrategyMeta",
     "StrategyRecord",
     "StrategyRegistry",
+    "StrategySnapshot",
     "StrategyStatus",
     "StrategyValidationError",
     "StrategyValidator",

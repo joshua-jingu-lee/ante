@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ante.bot.bot import Bot
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
     from ante.strategy.base import Strategy
     from ante.strategy.context import StrategyContext
+    from ante.strategy.snapshot import StrategySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +46,26 @@ class BotManager:
         db: Database,
         context_factory: StrategyContextFactory | None = None,
         signal_key_manager: SignalKeyManager | None = None,
+        snapshot: StrategySnapshot | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
         self._context_factory = context_factory
         self._signal_key_manager = signal_key_manager
+        self._snapshot = snapshot
         self._bots: dict[str, Bot] = {}
         self._restart_counts: dict[str, int] = {}
         self._restart_tasks: dict[str, asyncio.Task[None]] = {}
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성 + EventBus 구독."""
+        """스키마 생성 + EventBus 구독 + 잔존 스냅샷 정리."""
         await self._db.execute_script(BOT_SCHEMA)
         self._subscribe_events()
+        if self._snapshot:
+            cleaned = self._snapshot.cleanup_all()
+            if cleaned:
+                logger.info("잔존 전략 스냅샷 %d건 정리", cleaned)
         logger.info("BotManager 초기화 완료")
 
     def _subscribe_events(self) -> None:
@@ -79,10 +87,12 @@ class BotManager:
         config: BotConfig,
         strategy_cls: type[Strategy],
         ctx: StrategyContext | None = None,
+        source_path: Path | None = None,
     ) -> Bot:
         """봇 생성.
 
         ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성한다.
+        source_path가 주어지면 전략 파일을 스냅샷으로 복사하여 보호한다.
         """
         if config.bot_id in self._bots:
             raise BotError(f"Bot already exists: {config.bot_id}")
@@ -99,6 +109,18 @@ class BotManager:
                     f"'{existing_bot.bot_id}'에서 사용 중입니다. "
                     f"파라미터가 다른 전략은 별도 파일로 작성하세요."
                 )
+
+        # 전략 파일 스냅샷 생성
+        if self._snapshot and source_path:
+            from ante.strategy.loader import StrategyLoader
+
+            snapshot_path = self._snapshot.create(config.bot_id, source_path)
+            strategy_cls = StrategyLoader.load(snapshot_path)
+            logger.info(
+                "스냅샷에서 전략 로드: %s → %s",
+                source_path,
+                snapshot_path,
+            )
 
         if ctx is None:
             if self._context_factory is None:
@@ -162,6 +184,10 @@ class BotManager:
         # 시그널 키 폐기
         if self._signal_key_manager:
             await self._signal_key_manager.revoke(bot_id)
+
+        # 전략 스냅샷 정리
+        if self._snapshot:
+            self._snapshot.cleanup(bot_id)
 
         del self._bots[bot_id]
         await self._db.execute("DELETE FROM bots WHERE bot_id = ?", (bot_id,))
