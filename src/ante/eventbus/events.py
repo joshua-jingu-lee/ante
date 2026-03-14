@@ -55,6 +55,22 @@ class OrderModifyEvent(Event):
     bot_id: str = ""
     strategy_id: str = ""
     order_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    quantity: float = 0.0
+    price: float | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class OrderModifyRejectedEvent(Event):
+    """RuleEngine → EventBus: 주문 정정 룰 위반으로 거부."""
+
+    order_id: str = ""
+    bot_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
     quantity: float = 0.0
     price: float | None = None
     reason: str = ""

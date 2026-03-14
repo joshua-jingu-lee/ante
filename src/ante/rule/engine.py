@@ -61,11 +61,16 @@ class RuleEngine:
 
     async def start(self) -> None:
         """EventBus 구독 등록."""
-        from ante.eventbus.events import ConfigChangedEvent, OrderRequestEvent
+        from ante.eventbus.events import (
+            ConfigChangedEvent,
+            OrderModifyEvent,
+            OrderRequestEvent,
+        )
 
         self._eventbus.subscribe(
             OrderRequestEvent, self._on_order_request, priority=100
         )
+        self._eventbus.subscribe(OrderModifyEvent, self._on_order_modify, priority=100)
         self._eventbus.subscribe(ConfigChangedEvent, self._on_config_changed)
         logger.info("RuleEngine 시작")
 
@@ -312,6 +317,72 @@ class RuleEngine:
                     reason="Critical rule violation",
                     changed_by="rule_engine",
                 )
+
+    async def _on_order_modify(self, event: object) -> None:
+        """OrderModifyEvent 수신 시 룰 평가. 위반 시 거부 이벤트 발행."""
+        from ante.eventbus.events import (
+            OrderModifyEvent,
+            OrderModifyRejectedEvent,
+        )
+
+        if not isinstance(event, OrderModifyEvent):
+            return
+
+        context = RuleContext(
+            bot_id=event.bot_id,
+            strategy_id=event.strategy_id,
+            symbol=event.symbol,
+            side=event.side,
+            quantity=event.quantity,
+            order_type="limit" if event.price else "market",
+            price=event.price,
+            current_price=event.price or 0.0,
+            system_status=self._system_state.trading_state.value,
+        )
+
+        try:
+            result = self.evaluate(context)
+
+            if result.overall_result in (
+                RuleResult.BLOCK,
+                RuleResult.REJECT,
+            ):
+                logger.warning(
+                    "주문 정정 거부: order=%s bot=%s — %s",
+                    event.order_id,
+                    event.bot_id,
+                    result.rejection_reason,
+                )
+                await self._eventbus.publish(
+                    OrderModifyRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        reason=result.rejection_reason,
+                    )
+                )
+                # 거부 시 이벤트 소비 — 후속 핸들러(Gateway)에 전달 방지
+                if hasattr(event, "_consumed"):
+                    object.__setattr__(event, "_consumed", True)
+
+        except Exception:
+            logger.exception("주문 정정 룰 평가 실패: %s", event.order_id)
+            await self._eventbus.publish(
+                OrderModifyRejectedEvent(
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    reason="Rule evaluation error",
+                )
+            )
 
     async def _on_config_changed(self, event: object) -> None:
         """설정 변경 시 룰 재로딩 트리거."""
