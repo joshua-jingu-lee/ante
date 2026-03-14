@@ -110,6 +110,20 @@ class OrderView(ABC):
         ...
 
 
+class TradeHistoryView(ABC):
+    """거래 이력 읽기 전용 인터페이스."""
+
+    @abstractmethod
+    async def get_trade_history(
+        self,
+        bot_id: str,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """봇의 거래 이력 조회. 최신순 반환."""
+        ...
+
+
 # ── Strategy ABC ──────────────────────────────────
 
 

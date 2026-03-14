@@ -10,7 +10,11 @@ from ante.bot.providers.paper import PaperExecutor, PaperOrderView, PaperPortfol
 from ante.strategy.context import StrategyContext
 
 if TYPE_CHECKING:
-    from ante.bot.providers.live import LiveOrderView, LivePortfolioView
+    from ante.bot.providers.live import (
+        LiveOrderView,
+        LivePortfolioView,
+        LiveTradeHistoryView,
+    )
     from ante.strategy.base import DataProvider
 
 logger = logging.getLogger(__name__)
@@ -28,11 +32,13 @@ class StrategyContextFactory:
         live_portfolio: LivePortfolioView | None = None,
         live_order_view: LiveOrderView | None = None,
         paper_executor: PaperExecutor | None = None,
+        live_trade_history: LiveTradeHistoryView | None = None,
     ) -> None:
         self._data_provider = data_provider
         self._live_portfolio = live_portfolio
         self._live_order_view = live_order_view
         self._paper_executor = paper_executor
+        self._live_trade_history = live_trade_history
 
     def create(self, config: BotConfig) -> StrategyContext:
         """BotConfig 기반으로 적절한 StrategyContext 생성."""
@@ -51,6 +57,7 @@ class StrategyContextFactory:
             data_provider=self._data_provider,
             portfolio=self._live_portfolio,
             order_view=self._live_order_view,
+            trade_history=self._live_trade_history,
         )
         logger.info("Live StrategyContext 생성: %s", config.bot_id)
         return ctx
