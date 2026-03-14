@@ -425,3 +425,65 @@ class OrderCancelFailedEvent(Event):
     bot_id: str = ""
     strategy_id: str = ""
     error_message: str = ""
+
+
+# ── Stop Order 이벤트 ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class StopOrderRegisteredEvent(Event):
+    """StopOrderManager → EventBus: 스탑 주문 등록."""
+
+    stop_order_id: str = ""
+    bot_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    quantity: float = 0.0
+    order_type: str = ""
+    stop_price: float = 0.0
+    limit_price: float | None = None
+
+
+@dataclass(frozen=True)
+class StopOrderTriggeredEvent(Event):
+    """StopOrderManager → EventBus: 스탑 주문 트리거."""
+
+    stop_order_id: str = ""
+    bot_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    quantity: float = 0.0
+    trigger_price: float = 0.0
+    converted_order_type: str = ""
+
+
+@dataclass(frozen=True)
+class StopOrderExpiredEvent(Event):
+    """StopOrderManager → EventBus: 스탑 주문 만료 (세션 종료)."""
+
+    stop_order_id: str = ""
+    bot_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    reason: str = ""
+
+
+# ── 실시간 스트림 이벤트 ─────────────────────────────
+
+
+@dataclass(frozen=True)
+class StreamConnectedEvent(Event):
+    """KISStreamClient → EventBus: WebSocket 연결 성공."""
+
+    broker: str = ""
+    url: str = ""
+
+
+@dataclass(frozen=True)
+class StreamDisconnectedEvent(Event):
+    """KISStreamClient → EventBus: WebSocket 연결 해제."""
+
+    broker: str = ""
+    reason: str = ""

@@ -40,6 +40,7 @@ class Signal:
     price: float | None = None
     stop_price: float | None = None
     reason: str = ""
+    trading_session: str = "regular"  # "regular" | "extended"
 
 
 @dataclass(frozen=True)
