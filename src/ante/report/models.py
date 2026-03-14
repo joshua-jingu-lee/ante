@@ -50,3 +50,18 @@ class StrategyReport:
     # 사용자 피드백
     user_notes: str = ""
     reviewed_at: datetime | None = None
+
+    def get_equity_curve(self) -> list[dict]:
+        """detail_json에서 자산 곡선 데이터를 추출.
+
+        Returns:
+            ``[{"date": "2025-01-01", "value": 10000000}, ...]`` 형식 리스트.
+            equity_curve가 없으면 빈 리스트.
+        """
+        import json
+
+        try:
+            data = json.loads(self.detail_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        return data.get("equity_curve", [])
