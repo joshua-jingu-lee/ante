@@ -39,6 +39,7 @@ def create_app(**services: Any) -> FastAPI:
     from ante.web.routes.strategies import router as strategy_router
     from ante.web.routes.system import router as system_router
     from ante.web.routes.trades import router as trades_router
+    from ante.web.routes.treasury import router as treasury_router
 
     app.include_router(system_router, prefix="/api/system", tags=["system"])
     app.include_router(strategy_router, prefix="/api/strategies", tags=["strategies"])
@@ -46,6 +47,7 @@ def create_app(**services: Any) -> FastAPI:
     app.include_router(data_router, prefix="/api/data", tags=["data"])
     app.include_router(trades_router, prefix="/api/trades", tags=["trades"])
     app.include_router(bots_router, prefix="/api/bots", tags=["bots"])
+    app.include_router(treasury_router, prefix="/api/treasury", tags=["treasury"])
     app.include_router(
         notifications_router,
         prefix="/api/notifications",

@@ -191,6 +191,13 @@ async def main() -> None:
         snapshot=strategy_snapshot,
     )
     await bot_manager.initialize()
+
+    # Treasury에 봇 상태 확인 콜백 연결
+    def _get_bot_status(bot_id: str) -> str:
+        bot = bot_manager.get_bot(bot_id)
+        return bot.status if bot else ""
+
+    treasury.set_bot_status_checker(_get_bot_status)
     logger.info("BotManager 초기화 완료")
 
     # ── 11. Broker + APIGateway ──────────────────────
@@ -201,6 +208,13 @@ async def main() -> None:
     api_gateway = None
 
     broker_config = config.get("broker", {})
+    try:
+        broker_config["app_key"] = config.secret("KIS_APP_KEY")
+        broker_config["app_secret"] = config.secret("KIS_APP_SECRET")
+        broker_config["account_no"] = config.secret("KIS_ACCOUNT_NO")
+    except Exception:
+        pass  # 비밀값 없으면 브로커 미사용
+
     if broker_config.get("app_key"):
         broker = KISAdapter(config=broker_config, eventbus=eventbus)
         try:
