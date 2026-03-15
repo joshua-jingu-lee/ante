@@ -3,8 +3,24 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+
+class BotCreateRequest(BaseModel):
+    """봇 생성 요청."""
+
+    strategy_id: str
+    bot_type: str = "live"
+    interval_seconds: int = Field(default=60, ge=10, le=3600)
+    symbols: list[str] | None = None
+
+
+class BotUpdateRequest(BaseModel):
+    """봇 설정 수정 요청."""
+
+    interval_seconds: int | None = Field(default=None, ge=10, le=3600)
 
 
 @router.get("")
