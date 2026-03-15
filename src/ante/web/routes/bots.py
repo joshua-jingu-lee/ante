@@ -11,16 +11,11 @@ router = APIRouter()
 class BotCreateRequest(BaseModel):
     """봇 생성 요청."""
 
-    name: str
+    bot_id: str
     strategy_id: str
+    name: str = ""
     bot_type: str = "live"
     interval_seconds: int = Field(default=60, ge=10, le=3600)
-
-
-class BotUpdateRequest(BaseModel):
-    """봇 설정 수정 요청."""
-
-    interval_seconds: int | None = Field(default=None, ge=10, le=3600)
 
 
 @router.get("")
@@ -39,3 +34,124 @@ async def list_bots(
     bots = bot_manager.list_bots()
     result = paginate(bots, cursor_field="bot_id", limit=limit, cursor=cursor)
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
+
+
+@router.post("", status_code=201)
+async def create_bot(request: Request, body: BotCreateRequest) -> dict:
+    """봇 생성."""
+    from pathlib import Path
+
+    from ante.bot.config import BotConfig
+    from ante.bot.exceptions import BotError
+    from ante.strategy.loader import StrategyLoader
+
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is None:
+        raise HTTPException(status_code=503, detail="Bot manager not available")
+
+    registry = getattr(request.app.state, "strategy_registry", None)
+    if registry is None:
+        raise HTTPException(status_code=503, detail="Strategy registry not available")
+
+    record = await registry.get(body.strategy_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+
+    try:
+        strategy_cls = StrategyLoader.load(Path(record.filepath))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"전략 로딩 실패: {e}") from e
+
+    config = BotConfig(
+        bot_id=body.bot_id,
+        strategy_id=body.strategy_id,
+        name=body.name or body.bot_id,
+        bot_type=body.bot_type,
+        interval_seconds=body.interval_seconds,
+    )
+
+    try:
+        bot = await bot_manager.create_bot(
+            config=config,
+            strategy_cls=strategy_cls,
+            source_path=Path(record.filepath),
+        )
+    except BotError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    return {"bot": bot.get_info()}
+
+
+@router.get("/{bot_id}")
+async def get_bot(request: Request, bot_id: str) -> dict:
+    """봇 상세 조회."""
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is None:
+        raise HTTPException(status_code=503, detail="Bot manager not available")
+
+    bot = bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+
+    return {"bot": bot.get_info()}
+
+
+@router.post("/{bot_id}/start")
+async def start_bot(request: Request, bot_id: str) -> dict:
+    """봇 시작."""
+    from ante.bot.exceptions import BotError
+
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is None:
+        raise HTTPException(status_code=503, detail="Bot manager not available")
+
+    bot = bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+
+    try:
+        await bot_manager.start_bot(bot_id)
+    except BotError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    return {"bot": bot.get_info()}
+
+
+@router.post("/{bot_id}/stop")
+async def stop_bot(request: Request, bot_id: str) -> dict:
+    """봇 중지."""
+    from ante.bot.exceptions import BotError
+
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is None:
+        raise HTTPException(status_code=503, detail="Bot manager not available")
+
+    bot = bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+
+    try:
+        await bot_manager.stop_bot(bot_id)
+    except BotError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    return {"bot": bot.get_info()}
+
+
+@router.delete("/{bot_id}", status_code=204)
+async def delete_bot(request: Request, bot_id: str) -> None:
+    """봇 삭제."""
+    from ante.bot.exceptions import BotError
+
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is None:
+        raise HTTPException(status_code=503, detail="Bot manager not available")
+
+    bot = bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+
+    try:
+        await bot_manager.delete_bot(bot_id)
+    except BotError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
