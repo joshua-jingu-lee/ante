@@ -329,6 +329,40 @@ class TestAPIGatewayEvents:
 
         assert len(received) == 1
         assert "broker error" in received[0].error_message
+        assert received[0].error_code == ""
+
+    async def test_order_failure_with_api_error_code(self, gateway, eventbus, broker):
+        """APIError 주문 실패 → error_code 전달."""
+        from ante.broker.exceptions import APIError
+
+        broker.place_order = AsyncMock(
+            side_effect=APIError(
+                "잔고 부족",
+                status_code=500,
+                error_code="APBK0919",
+                retryable=False,
+            )
+        )
+
+        received: list[OrderFailedEvent] = []
+        eventbus.subscribe(OrderFailedEvent, lambda e: received.append(e))
+
+        await eventbus.publish(
+            OrderApprovedEvent(
+                order_id="ord1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                order_type="market",
+                reserved_amount=500000.0,
+            )
+        )
+
+        assert len(received) == 1
+        assert received[0].error_code == "APBK0919"
+        assert "잔고 부족" in received[0].error_message
 
     async def test_order_cancel_event(self, gateway, eventbus, broker):
         """OrderCancelEvent → 취소 → OrderCancelledEvent."""

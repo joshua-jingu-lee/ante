@@ -190,6 +190,7 @@ class OrderFailedEvent(Event):
     price: float = 0.0
     order_type: str = ""
     error_message: str = ""
+    error_code: str = ""
     exchange: str = "KRX"
 
 

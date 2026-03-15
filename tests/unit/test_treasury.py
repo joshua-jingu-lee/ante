@@ -359,8 +359,27 @@ class TestTreasurySummary:
         summary = treasury.get_summary()
         assert summary["account_balance"] == 10_000_000.0
         assert summary["total_allocated"] == 5_000_000.0
+        assert summary["total_available"] == 5_000_000.0
         assert summary["unallocated"] == 5_000_000.0
         assert summary["bot_count"] == 2
+        assert summary["budget_exceeds_purchasable"] is False
+
+    async def test_budget_exceeds_purchasable_warning(self, treasury):
+        """잔여예산 > 매수가능금액 시 경고 플래그."""
+        await treasury.allocate("bot1", 5_000_000.0)
+        await treasury.sync_balance(
+            {"cash": 10_000_000.0, "purchasable_amount": 3_000_000.0}
+        )
+
+        summary = treasury.get_summary()
+        assert summary["budget_exceeds_purchasable"] is True
+
+    async def test_no_warning_when_purchasable_zero(self, treasury):
+        """매수가능금액이 0이면 경고 미표시 (동기화 전)."""
+        await treasury.allocate("bot1", 5_000_000.0)
+
+        summary = treasury.get_summary()
+        assert summary["budget_exceeds_purchasable"] is False
 
 
 # ── DB 영속화 ───────────────────────────────────
