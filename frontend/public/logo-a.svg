@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <!-- 회로 트레이스 그라데이션 -->
+    <linearGradient id="traceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0.8"/>
+    </linearGradient>
+    <!-- 코어 글로우 -->
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="70%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </radialGradient>
+    <!-- 외곽 링 글로우 -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 배경 원 (칩 기판) -->
+  <circle cx="60" cy="60" r="52" fill="#1a1a2e" stroke="#2a2a4a" stroke-width="1.5"/>
+
+  <!-- 외곽 회로 트레이스 링 -->
+  <circle cx="60" cy="60" r="46" fill="none" stroke="url(#traceGrad)" stroke-width="0.8" stroke-dasharray="4 6" opacity="0.6">
+    <animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="60s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- 회로 트레이스 (상하좌우 핀) -->
+  <g stroke="#3B82F6" stroke-width="1.2" stroke-linecap="round" opacity="0">
+    <!-- 상단 핀 -->
+    <line x1="48" y1="8" x2="48" y2="18"/>
+    <line x1="60" y1="5" x2="60" y2="15"/>
+    <line x1="72" y1="8" x2="72" y2="18"/>
+    <!-- 하단 핀 -->
+    <line x1="48" y1="112" x2="48" y2="102"/>
+    <line x1="60" y1="115" x2="60" y2="105"/>
+    <line x1="72" y1="112" x2="72" y2="102"/>
+    <!-- 좌측 핀 -->
+    <line x1="8" y1="48" x2="18" y2="48"/>
+    <line x1="5" y1="60" x2="15" y2="60"/>
+    <line x1="8" y1="72" x2="18" y2="72"/>
+    <!-- 우측 핀 -->
+    <line x1="112" y1="48" x2="102" y2="48"/>
+    <line x1="115" y1="60" x2="105" y2="60"/>
+    <line x1="112" y1="72" x2="102" y2="72"/>
+    <animate attributeName="opacity" values="0;0.7;0" dur="3s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- 핀 끝 노드 (발광 점) -->
+  <g fill="#60A5FA" opacity="0">
+    <circle cx="48" cy="8" r="1.5"/><circle cx="60" cy="5" r="1.5"/><circle cx="72" cy="8" r="1.5"/>
+    <circle cx="48" cy="112" r="1.5"/><circle cx="60" cy="115" r="1.5"/><circle cx="72" cy="112" r="1.5"/>
+    <circle cx="8" cy="48" r="1.5"/><circle cx="5" cy="60" r="1.5"/><circle cx="8" cy="72" r="1.5"/>
+    <circle cx="112" cy="48" r="1.5"/><circle cx="115" cy="60" r="1.5"/><circle cx="112" cy="72" r="1.5"/>
+    <animate attributeName="opacity" values="0;1;0" dur="3s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- 내부 회로 트레이스 패턴 -->
+  <g stroke="#3B82F6" stroke-width="0.6" fill="none" opacity="0.25">
+    <!-- 대각선 트레이스 -->
+    <path d="M36 36 L28 28"/>
+    <path d="M84 36 L92 28"/>
+    <path d="M36 84 L28 92"/>
+    <path d="M84 84 L92 92"/>
+    <!-- 내부 연결선 -->
+    <path d="M42 38 L38 38 L38 42"/>
+    <path d="M78 38 L82 38 L82 42"/>
+    <path d="M42 82 L38 82 L38 78"/>
+    <path d="M78 82 L82 82 L82 78"/>
+  </g>
+
+  <!-- 중간 링 -->
+  <circle cx="60" cy="60" r="34" fill="none" stroke="#3B82F6" stroke-width="0.6" opacity="0.3"/>
+
+  <!-- 내부 회로 링 (역회전) -->
+  <circle cx="60" cy="60" r="28" fill="none" stroke="#3B82F6" stroke-width="0.5" stroke-dasharray="2 8" opacity="0.4">
+    <animateTransform attributeName="transform" type="rotate" from="360 60 60" to="0 60 60" dur="40s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- 코어 (중앙 칩 다이) -->
+  <rect x="40" y="40" width="40" height="40" rx="4" fill="#1e1e3a" stroke="#3B82F6" stroke-width="1" opacity="0.8"/>
+
+  <!-- 코어 내부 글로우 -->
+  <rect x="43" y="43" width="34" height="34" rx="2" fill="url(#coreGlow)" opacity="0.15">
+    <animate attributeName="opacity" values="0.1;0.25;0.1" dur="4s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- A 글리프 -->
+  <g filter="url(#glow)">
+    <text x="60" y="79" text-anchor="middle" font-family="'SF Pro Display', 'Inter', system-ui, sans-serif" font-size="58" font-weight="900" fill="#E2E8F0" letter-spacing="-1">A</text>
+  </g>
+
+  <!-- 코어 코너 노드 -->
+  <g fill="#60A5FA">
+    <circle cx="40" cy="40" r="1.5" opacity="0.6"/>
+    <circle cx="80" cy="40" r="1.5" opacity="0.6"/>
+    <circle cx="40" cy="80" r="1.5" opacity="0.6"/>
+    <circle cx="80" cy="80" r="1.5" opacity="0.6"/>
+  </g>
+
+  <!-- 펄스 링 (코어에서 확산) -->
+  <circle cx="60" cy="60" r="20" fill="none" stroke="#3B82F6" stroke-width="1" opacity="0">
+    <animate attributeName="r" values="20;48" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0" dur="3s" repeatCount="indefinite"/>
+  </circle>
+</svg>
