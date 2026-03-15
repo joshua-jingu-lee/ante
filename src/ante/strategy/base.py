@@ -175,3 +175,7 @@ class Strategy(ABC):
     def get_params(self) -> dict[str, Any]:
         """백테스트 최적화 파라미터 반환."""
         return {}
+
+    def get_param_schema(self) -> dict[str, str]:
+        """파라미터 설명 반환. {파라미터명: 설명} 형식."""
+        return {}
