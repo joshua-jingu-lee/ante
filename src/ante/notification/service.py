@@ -7,6 +7,15 @@ from datetime import time
 from typing import TYPE_CHECKING
 
 from ante.notification.base import NotificationAdapter, NotificationLevel
+from ante.notification.templates import (
+    BOT_ERROR,
+    CIRCUIT_BREAKER,
+    ORDER_CANCEL_FAILED,
+    ORDER_FILLED,
+    POSITION_MISMATCH,
+    RESTART_EXHAUSTED,
+    TRADING_STATE_CHANGED,
+)
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -314,11 +323,12 @@ class NotificationService:
         if not isinstance(event, PositionMismatchEvent):
             return
 
-        msg = (
-            f"포지션 불일치 [{event.bot_id}] {event.symbol}: "
-            f"내부={event.internal_qty:.0f}주, "
-            f"브로커={event.broker_qty:.0f}주 "
-            f"({event.reason})"
+        msg = POSITION_MISMATCH.format(
+            bot_id=event.bot_id,
+            symbol=event.symbol,
+            internal_qty=event.internal_qty,
+            broker_qty=event.broker_qty,
+            reason=event.reason,
         )
         await self._send_and_record(
             NotificationLevel.CRITICAL,
@@ -334,9 +344,13 @@ class NotificationService:
         if not isinstance(event, BotErrorEvent):
             return
 
+        msg = BOT_ERROR.format(
+            bot_id=event.bot_id,
+            error_message=event.error_message,
+        )
         await self._send_and_record(
             NotificationLevel.ERROR,
-            f"봇 에러 [{event.bot_id}]: {event.error_message}",
+            msg,
             event_type="BotErrorEvent",
             bot_id=event.bot_id,
         )
@@ -357,10 +371,16 @@ class NotificationService:
             if name != event.symbol:
                 display = f"{event.symbol}({name})"
 
+        msg = ORDER_FILLED.format(
+            bot_id=event.bot_id,
+            display=display,
+            side=event.side,
+            quantity=event.quantity,
+            price=event.price,
+        )
         await self._send_and_record(
             NotificationLevel.INFO,
-            f"체결 [{event.bot_id}] {display} "
-            f"{event.side} {event.quantity}주 @ {event.price:,.0f}원",
+            msg,
             event_type="OrderFilledEvent",
             bot_id=event.bot_id,
         )
@@ -372,9 +392,14 @@ class NotificationService:
         if not isinstance(event, TradingStateChangedEvent):
             return
 
+        msg = TRADING_STATE_CHANGED.format(
+            old_state=event.old_state,
+            new_state=event.new_state,
+            reason=event.reason,
+        )
         await self._send_and_record(
             NotificationLevel.CRITICAL,
-            f"거래 상태 변경: {event.old_state} → {event.new_state} ({event.reason})",
+            msg,
             event_type="TradingStateChangedEvent",
         )
 
@@ -385,10 +410,14 @@ class NotificationService:
         if not isinstance(event, BotRestartExhaustedEvent):
             return
 
+        msg = RESTART_EXHAUSTED.format(
+            bot_id=event.bot_id,
+            restart_attempts=event.restart_attempts,
+            last_error=event.last_error,
+        )
         await self._send_and_record(
             NotificationLevel.ERROR,
-            f"봇 재시작 한도 소진 [{event.bot_id}] "
-            f"{event.restart_attempts}회 시도: {event.last_error}",
+            msg,
             event_type="BotRestartExhaustedEvent",
             bot_id=event.bot_id,
         )
@@ -400,9 +429,10 @@ class NotificationService:
         if not isinstance(event, OrderCancelFailedEvent):
             return
 
-        msg = (
-            f"주문 취소 실패 [{event.bot_id}] "
-            f"주문={event.order_id}: {event.error_message}"
+        msg = ORDER_CANCEL_FAILED.format(
+            bot_id=event.bot_id,
+            order_id=event.order_id,
+            error_message=event.error_message,
         )
         await self._send_and_record(
             NotificationLevel.ERROR,
@@ -422,10 +452,15 @@ class NotificationService:
         if event.new_state == "open":
             level = NotificationLevel.ERROR
 
+        msg = CIRCUIT_BREAKER.format(
+            broker=event.broker,
+            old_state=event.old_state,
+            new_state=event.new_state,
+            reason=event.reason,
+        )
         await self._send_and_record(
             level,
-            f"Circuit Breaker [{event.broker}] "
-            f"{event.old_state} → {event.new_state} ({event.reason})",
+            msg,
             event_type="CircuitBreakerEvent",
         )
 
