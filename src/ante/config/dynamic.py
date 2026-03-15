@@ -113,6 +113,21 @@ class DynamicConfigService:
         await self._db.execute("DELETE FROM dynamic_config WHERE key = ?", (key,))
         return True
 
+    async def get_all(self) -> list[dict[str, Any]]:
+        """전체 동적 설정 조회."""
+        rows = await self._db.fetch_all(
+            "SELECT key, value, category, updated_at FROM dynamic_config ORDER BY key"
+        )
+        return [
+            {
+                "key": row["key"],
+                "value": json.loads(row["value"]),
+                "category": row["category"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     async def get_by_category(self, category: str) -> dict[str, Any]:
         """카테고리별 모든 설정 조회."""
         rows = await self._db.fetch_all(
