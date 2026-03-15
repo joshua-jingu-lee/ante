@@ -84,14 +84,21 @@ async def main() -> None:
     eventbus.subscribe(ConfigChangedEvent, _on_log_level_changed)
     logger.info("DynamicConfigService 초기화 완료")
 
-    # ── 5.5. MemberService ─────────────────────────────
+    # ── 5.5. AuditLogger ────────────────────────────────
+    from ante.audit import AuditLogger
+
+    audit_logger = AuditLogger(db=db)
+    await audit_logger.initialize()
+    logger.info("AuditLogger 초기화 완료")
+
+    # ── 5.6. MemberService ─────────────────────────────
     from ante.member import MemberService
 
     member_service = MemberService(db=db, eventbus=eventbus)
     await member_service.initialize()
     logger.info("MemberService 초기화 완료")
 
-    # ── 5.6. InstrumentService ─────────────────────────
+    # ── 5.7. InstrumentService ─────────────────────────
     from ante.instrument import InstrumentService
 
     instrument_service = InstrumentService(db=db)
@@ -396,6 +403,7 @@ async def main() -> None:
             report_store=report_store,
             data_catalog=data_catalog,
             data_store=parquet_store,
+            audit_logger=audit_logger,
         )
 
         import uvicorn
