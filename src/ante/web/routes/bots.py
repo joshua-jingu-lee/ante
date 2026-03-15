@@ -14,7 +14,6 @@ class BotCreateRequest(BaseModel):
     strategy_id: str
     bot_type: str = "live"
     interval_seconds: int = Field(default=60, ge=10, le=3600)
-    symbols: list[str] | None = None
 
 
 class BotUpdateRequest(BaseModel):
