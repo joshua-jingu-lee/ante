@@ -78,6 +78,7 @@ class NotificationService:
             NotificationEvent,
             OrderCancelFailedEvent,
             OrderFilledEvent,
+            PositionMismatchEvent,
             TradingStateChangedEvent,
         )
 
@@ -102,6 +103,11 @@ class NotificationService:
         self._eventbus.subscribe(
             CircuitBreakerEvent,
             self._on_circuit_breaker,
+            priority=0,
+        )
+        self._eventbus.subscribe(
+            PositionMismatchEvent,
+            self._on_position_mismatch,
             priority=0,
         )
 
@@ -300,6 +306,26 @@ class NotificationService:
                 metadata=event.metadata or None,
                 event_type="NotificationEvent",
             )
+
+    async def _on_position_mismatch(self, event: object) -> None:
+        """포지션 불일치 감지 알림 (critical)."""
+        from ante.eventbus.events import PositionMismatchEvent
+
+        if not isinstance(event, PositionMismatchEvent):
+            return
+
+        msg = (
+            f"포지션 불일치 [{event.bot_id}] {event.symbol}: "
+            f"내부={event.internal_qty:.0f}주, "
+            f"브로커={event.broker_qty:.0f}주 "
+            f"({event.reason})"
+        )
+        await self._send_and_record(
+            NotificationLevel.CRITICAL,
+            msg,
+            event_type="PositionMismatchEvent",
+            bot_id=event.bot_id,
+        )
 
     async def _on_bot_error(self, event: object) -> None:
         """봇 에러 자동 알림."""

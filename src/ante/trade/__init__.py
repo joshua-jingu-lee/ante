@@ -11,6 +11,7 @@ from ante.trade.models import (
 )
 from ante.trade.performance import PerformanceTracker
 from ante.trade.position import PositionHistory
+from ante.trade.reconciler import PositionReconciler
 from ante.trade.recorder import TradeRecorder
 from ante.trade.service import TradeService
 
@@ -20,6 +21,7 @@ __all__ = [
     "PerformanceMetrics",
     "PerformanceTracker",
     "PositionHistory",
+    "PositionReconciler",
     "PositionSnapshot",
     "TradeRecord",
     "TradeRecorder",
