@@ -1,0 +1,238 @@
+"""전략 API 테스트."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+import pytest
+
+httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from ante.strategy.registry import StrategyStatus  # noqa: E402
+from ante.web.app import create_app  # noqa: E402
+
+
+@dataclass
+class FakeStrategyRecord:
+    strategy_id: str
+    name: str
+    version: str
+    filepath: str = ""
+    status: StrategyStatus = StrategyStatus.ACTIVE
+    registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    description: str = ""
+    author: str = "agent"
+    validation_warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FakeTradeRecord:
+    trade_id: str
+    bot_id: str
+    strategy_id: str
+    symbol: str
+    side: str
+    quantity: float
+    price: float
+    status: str = "filled"
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+class FakeRegistry:
+    def __init__(self) -> None:
+        self._strategies: list[FakeStrategyRecord] = []
+
+    async def list_strategies(
+        self, status: str | None = None
+    ) -> list[FakeStrategyRecord]:
+        if status:
+            return [s for s in self._strategies if s.status.value == status]
+        return list(self._strategies)
+
+    async def get(self, strategy_id: str) -> FakeStrategyRecord | None:
+        for s in self._strategies:
+            if s.strategy_id == strategy_id:
+                return s
+        return None
+
+
+class FakeBotManager:
+    def __init__(self) -> None:
+        self._bots: list[dict] = []
+
+    def list_bots(self) -> list[dict]:
+        return list(self._bots)
+
+
+class FakeTradeService:
+    def __init__(self) -> None:
+        self._trades: list[FakeTradeRecord] = []
+
+    async def get_trades(
+        self,
+        strategy_id: str | None = None,
+        limit: int = 100,
+        **kwargs: object,
+    ) -> list[FakeTradeRecord]:
+        trades = self._trades
+        if strategy_id:
+            trades = [t for t in trades if t.strategy_id == strategy_id]
+        return trades[:limit]
+
+
+@pytest.fixture
+def registry():
+    return FakeRegistry()
+
+
+@pytest.fixture
+def bot_manager():
+    return FakeBotManager()
+
+
+@pytest.fixture
+def trade_service():
+    return FakeTradeService()
+
+
+@pytest.fixture
+def client(registry, bot_manager, trade_service):
+    app = create_app(
+        strategy_registry=registry,
+        bot_manager=bot_manager,
+        trade_service=trade_service,
+    )
+    return TestClient(app)
+
+
+class TestListStrategies:
+    def test_empty_list(self, client):
+        """전략 없을 때 빈 목록."""
+        resp = client.get("/api/strategies")
+        assert resp.status_code == 200
+        assert resp.json()["strategies"] == []
+
+    def test_list_with_data(self, client, registry):
+        """전략 목록 반환."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="ma_cross_v1",
+                name="ma_cross",
+                version="1",
+                status=StrategyStatus.ACTIVE,
+            ),
+        ]
+        resp = client.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["strategies"]) == 1
+        assert data["strategies"][0]["id"] == "ma_cross_v1"
+        assert data["strategies"][0]["name"] == "ma_cross"
+        assert data["strategies"][0]["status"] == "active"
+
+    def test_filter_by_status(self, client, registry):
+        """상태 필터."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1", name="s1", version="1", status=StrategyStatus.ACTIVE
+            ),
+            FakeStrategyRecord(
+                strategy_id="s2", name="s2", version="1", status=StrategyStatus.INACTIVE
+            ),
+        ]
+        resp = client.get("/api/strategies?status=active")
+        assert resp.status_code == 200
+        assert len(resp.json()["strategies"]) == 1
+        assert resp.json()["strategies"][0]["id"] == "s1"
+
+    def test_includes_bot_info(self, client, registry, bot_manager):
+        """봇 정보 포함."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        bot_manager._bots = [
+            {"bot_id": "bot-1", "strategy_id": "s1", "status": "running"},
+        ]
+        resp = client.get("/api/strategies")
+        data = resp.json()["strategies"][0]
+        assert data["bot_id"] == "bot-1"
+        assert data["bot_status"] == "running"
+
+
+class TestGetStrategy:
+    def test_get_existing(self, client, registry):
+        """전략 상세 조회."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="ma_cross_v1",
+                name="ma_cross",
+                version="1",
+                description="이동평균 크로스",
+            ),
+        ]
+        resp = client.get("/api/strategies/ma_cross_v1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["strategy"]["strategy_id"] == "ma_cross_v1"
+        assert data["strategy"]["description"] == "이동평균 크로스"
+
+    def test_get_nonexistent(self, client):
+        """존재하지 않는 전략 → 404."""
+        resp = client.get("/api/strategies/nonexistent")
+        assert resp.status_code == 404
+
+
+class TestStrategyTrades:
+    def test_get_trades(self, client, registry, trade_service):
+        """거래 내역 조회."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        trade_service._trades = [
+            FakeTradeRecord(
+                trade_id="t1",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                price=70000,
+            ),
+        ]
+        resp = client.get("/api/strategies/s1/trades")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["trades"]) == 1
+        assert data["trades"][0]["trade_id"] == "t1"
+        assert data["trades"][0]["symbol"] == "005930"
+
+    def test_trades_nonexistent_strategy(self, client):
+        """존재하지 않는 전략 거래 → 404."""
+        resp = client.get("/api/strategies/nonexistent/trades")
+        assert resp.status_code == 404
+
+    def test_trades_pagination(self, client, registry, trade_service):
+        """커서 페이지네이션 테스트."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        trade_service._trades = [
+            FakeTradeRecord(
+                trade_id=f"t{i}",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=1,
+                price=70000,
+            )
+            for i in range(5)
+        ]
+        resp = client.get("/api/strategies/s1/trades?limit=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["trades"]) == 2
+        assert data["next_cursor"] is not None
