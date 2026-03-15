@@ -16,13 +16,25 @@ from ante.cli.middleware import authenticate_member
     default="text",
     help="출력 형식 (text 또는 json)",
 )
+@click.option(
+    "--config-dir",
+    "config_dir",
+    type=click.Path(exists=False),
+    default=None,
+    envvar="ANTE_CONFIG_DIR",
+    help="설정 디렉토리 경로 (기본: ~/.config/ante/ 또는 ./config/)",
+)
 @click.version_option(version="0.1.0", prog_name="ante")
 @click.pass_context
-def cli(ctx: click.Context, output_format: str) -> None:
+def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
     """Ante — AI-Native Trading Engine CLI."""
     ctx.ensure_object(dict)
     ctx.obj["format"] = output_format
     ctx.obj["formatter"] = OutputFormatter(output_format)
+    if config_dir:
+        from pathlib import Path
+
+        ctx.obj["config_dir"] = Path(config_dir)
     authenticate_member(ctx)
 
 
@@ -39,6 +51,7 @@ from ante.cli.commands.bot import bot  # noqa: E402
 from ante.cli.commands.broker import broker  # noqa: E402
 from ante.cli.commands.config import config  # noqa: E402
 from ante.cli.commands.data import data  # noqa: E402
+from ante.cli.commands.init import init  # noqa: E402
 from ante.cli.commands.instrument import instrument  # noqa: E402
 from ante.cli.commands.member import member  # noqa: E402
 from ante.cli.commands.notification import notification  # noqa: E402
@@ -52,6 +65,7 @@ from ante.cli.commands.treasury import treasury  # noqa: E402
 
 cli.add_command(audit)
 cli.add_command(approval)
+cli.add_command(init)
 cli.add_command(bot)
 cli.add_command(broker)
 cli.add_command(config)

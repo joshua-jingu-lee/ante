@@ -62,6 +62,26 @@ def _nested_get(data: dict[str, Any], key: str, default: Any = None) -> Any:
     return current
 
 
+def resolve_config_dir(override: Path | None = None) -> Path:
+    """설정 디렉토리 탐색.
+
+    우선순위: override 인자 > ANTE_CONFIG_DIR 환경변수
+              > ~/.config/ante/ > ./config/
+    """
+    if override is not None:
+        return override
+
+    env_dir = os.environ.get("ANTE_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir)
+
+    user_dir = Path.home() / ".config" / "ante"
+    if user_dir.exists():
+        return user_dir
+
+    return Path("config")
+
+
 class Config:
     """Ante 통합 설정 접근 인터페이스.
 
@@ -74,10 +94,14 @@ class Config:
         self._secrets = secrets
 
     @classmethod
-    def load(cls, config_dir: Path = Path("config")) -> Config:
-        """설정 파일 로드 및 Config 인스턴스 생성."""
-        static = _load_toml(config_dir / "system.toml")
-        secrets = _load_dotenv(config_dir / "secrets.env")
+    def load(cls, config_dir: Path | None = None) -> Config:
+        """설정 파일 로드 및 Config 인스턴스 생성.
+
+        config_dir이 None이면 resolve_config_dir()로 자동 탐색.
+        """
+        resolved = resolve_config_dir(config_dir)
+        static = _load_toml(resolved / "system.toml")
+        secrets = _load_dotenv(resolved / "secrets.env")
         return cls(static=static, secrets=secrets)
 
     def get(self, key: str, default: Any = None) -> Any:
