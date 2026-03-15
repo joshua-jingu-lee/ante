@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -57,11 +58,13 @@ class Treasury:
         eventbus: EventBus,
         commission_rate: float = 0.00015,
         sell_tax_rate: float = 0.0023,
+        bot_status_checker: Callable[[str], str] | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
         self._commission_rate = commission_rate
         self._sell_tax_rate = sell_tax_rate
+        self._bot_status_checker = bot_status_checker
 
         self._account_balance: float = 0.0
         self._purchasable_amount: float = 0.0
@@ -131,6 +134,10 @@ class Treasury:
     def sell_tax_rate(self) -> float:
         return self._sell_tax_rate
 
+    def set_bot_status_checker(self, checker: Callable[[str], str]) -> None:
+        """봇 상태 확인 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
+        self._bot_status_checker = checker
+
     def update_commission_rates(
         self, commission_rate: float, sell_tax_rate: float
     ) -> None:
@@ -160,8 +167,22 @@ class Treasury:
 
     # ── 예산 할당/회수 ──────────────────────────────
 
+    def _check_bot_stopped(self, bot_id: str) -> None:
+        """봇이 중지 상태인지 확인. 운용 중이면 BotNotStoppedError."""
+        from ante.treasury.exceptions import BotNotStoppedError
+
+        if not self._bot_status_checker:
+            return
+        status = self._bot_status_checker(bot_id)
+        if status and status not in ("stopped", "created", "error"):
+            raise BotNotStoppedError(
+                f"봇 '{bot_id}'이(가) {status} 상태입니다. "
+                f"예산 변경은 봇 중지 후 가능합니다."
+            )
+
     async def allocate(self, bot_id: str, amount: float) -> bool:
         """봇에 예산 할당. 미할당 자금에서 차감."""
+        self._check_bot_stopped(bot_id)
         if amount <= 0 or self._unallocated < amount:
             return False
 
@@ -182,6 +203,7 @@ class Treasury:
 
     async def deallocate(self, bot_id: str, amount: float) -> bool:
         """봇에서 예산 회수. 가용 예산 범위 내에서만 가능."""
+        self._check_bot_stopped(bot_id)
         budget = self._budgets.get(bot_id)
         if not budget or amount <= 0 or budget.available < amount:
             return False

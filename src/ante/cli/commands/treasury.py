@@ -72,6 +72,8 @@ def allocate(ctx: click.Context, bot_id: str, amount: float) -> None:
     """봇에 예산 할당."""
     fmt = get_formatter(ctx)
 
+    from ante.treasury.exceptions import BotNotStoppedError
+
     async def _run_allocate() -> bool:
         t, db = await _create_treasury()
         try:
@@ -79,7 +81,11 @@ def allocate(ctx: click.Context, bot_id: str, amount: float) -> None:
         finally:
             await db.close()
 
-    success = _run(_run_allocate())
+    try:
+        success = _run(_run_allocate())
+    except BotNotStoppedError as e:
+        fmt.error(str(e))
+        return
 
     if success:
         fmt.success(
@@ -102,6 +108,8 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float) -> None:
     """봇 예산 회수."""
     fmt = get_formatter(ctx)
 
+    from ante.treasury.exceptions import BotNotStoppedError
+
     async def _run_deallocate() -> bool:
         t, db = await _create_treasury()
         try:
@@ -109,7 +117,11 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float) -> None:
         finally:
             await db.close()
 
-    success = _run(_run_deallocate())
+    try:
+        success = _run(_run_deallocate())
+    except BotNotStoppedError as e:
+        fmt.error(str(e))
+        return
 
     if success:
         fmt.success(

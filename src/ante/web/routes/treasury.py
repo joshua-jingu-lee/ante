@@ -1,0 +1,82 @@
+"""Treasury 자금 관리 API."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
+router = APIRouter()
+
+
+class BudgetChangeRequest(BaseModel):
+    """예산 할당/회수 요청."""
+
+    amount: float
+
+
+@router.get("")
+async def get_summary(request: Request) -> dict:
+    """자금 현황 요약."""
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is None:
+        raise HTTPException(status_code=503, detail="Treasury not available")
+    return treasury.get_summary()
+
+
+@router.post("/bots/{bot_id}/allocate")
+async def allocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> dict:
+    """봇에 예산 할당."""
+    from ante.treasury.exceptions import BotNotStoppedError
+
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is None:
+        raise HTTPException(status_code=503, detail="Treasury not available")
+
+    try:
+        success = await treasury.allocate(bot_id, body.amount)
+    except BotNotStoppedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "예산 할당 실패: 미할당 자금 부족 또는 금액 오류"
+                f" (요청: {body.amount:,.0f}원)"
+            ),
+        )
+
+    budget = await treasury.get_budget(bot_id)
+    return {
+        "bot_id": bot_id,
+        "allocated": budget.allocated if budget else 0.0,
+        "available": budget.available if budget else 0.0,
+    }
+
+
+@router.post("/bots/{bot_id}/deallocate")
+async def deallocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> dict:
+    """봇 예산 회수."""
+    from ante.treasury.exceptions import BotNotStoppedError
+
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is None:
+        raise HTTPException(status_code=503, detail="Treasury not available")
+
+    try:
+        success = await treasury.deallocate(bot_id, body.amount)
+    except BotNotStoppedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail=f"예산 회수 실패: 가용 예산 부족 (요청: {body.amount:,.0f}원)",
+        )
+
+    budget = await treasury.get_budget(bot_id)
+    return {
+        "bot_id": bot_id,
+        "allocated": budget.allocated if budget else 0.0,
+        "available": budget.available if budget else 0.0,
+    }

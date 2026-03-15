@@ -191,6 +191,13 @@ async def main() -> None:
         snapshot=strategy_snapshot,
     )
     await bot_manager.initialize()
+
+    # Treasury에 봇 상태 확인 콜백 연결
+    def _get_bot_status(bot_id: str) -> str:
+        bot = bot_manager.get_bot(bot_id)
+        return bot.status if bot else ""
+
+    treasury.set_bot_status_checker(_get_bot_status)
     logger.info("BotManager 초기화 완료")
 
     # ── 11. Broker + APIGateway ──────────────────────

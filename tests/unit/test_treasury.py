@@ -129,6 +129,95 @@ class TestAllocation:
         assert budget.available == 800_000.0
 
 
+# ── 봇 상태 검증 (예산 변경 시) ──────────────────
+
+
+class TestBotStatusCheck:
+    """운용 중인 봇에 대한 예산 변경을 거부한다."""
+
+    @pytest.fixture
+    async def treasury_with_checker(self, db, eventbus):
+        """봇 상태 확인 콜백이 설정된 Treasury."""
+        bot_statuses: dict[str, str] = {}
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            bot_status_checker=lambda bid: bot_statuses.get(bid, ""),
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        return t, bot_statuses
+
+    async def test_allocate_stopped_bot(self, treasury_with_checker):
+        """중지된 봇에 예산 할당 성공."""
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "stopped"
+        result = await t.allocate("bot1", 1_000_000.0)
+        assert result is True
+
+    async def test_allocate_created_bot(self, treasury_with_checker):
+        """생성 직후 봇에 예산 할당 성공."""
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "created"
+        result = await t.allocate("bot1", 1_000_000.0)
+        assert result is True
+
+    async def test_allocate_error_bot(self, treasury_with_checker):
+        """에러 상태 봇에 예산 할당 성공."""
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "error"
+        result = await t.allocate("bot1", 1_000_000.0)
+        assert result is True
+
+    async def test_allocate_running_bot_raises(self, treasury_with_checker):
+        """운용 중인 봇에 예산 할당 시 BotNotStoppedError."""
+        from ante.treasury.exceptions import BotNotStoppedError
+
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "running"
+        with pytest.raises(BotNotStoppedError, match="running"):
+            await t.allocate("bot1", 1_000_000.0)
+
+    async def test_allocate_stopping_bot_raises(self, treasury_with_checker):
+        """중지 중인 봇에 예산 할당 시 BotNotStoppedError."""
+        from ante.treasury.exceptions import BotNotStoppedError
+
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "stopping"
+        with pytest.raises(BotNotStoppedError, match="stopping"):
+            await t.allocate("bot1", 1_000_000.0)
+
+    async def test_deallocate_running_bot_raises(self, treasury_with_checker):
+        """운용 중인 봇에서 예산 회수 시 BotNotStoppedError."""
+        from ante.treasury.exceptions import BotNotStoppedError
+
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 1_000_000.0)
+        statuses["bot1"] = "running"
+        with pytest.raises(BotNotStoppedError, match="running"):
+            await t.deallocate("bot1", 500_000.0)
+
+    async def test_deallocate_stopped_bot(self, treasury_with_checker):
+        """중지된 봇에서 예산 회수 성공."""
+        t, statuses = treasury_with_checker
+        statuses["bot1"] = "stopped"
+        await t.allocate("bot1", 1_000_000.0)
+        result = await t.deallocate("bot1", 500_000.0)
+        assert result is True
+
+    async def test_allocate_unknown_bot_no_checker(self, treasury):
+        """checker 미설정 시 기존 동작 유지 (에러 없음)."""
+        result = await treasury.allocate("bot1", 1_000_000.0)
+        assert result is True
+
+    async def test_allocate_new_bot_no_status(self, treasury_with_checker):
+        """봇 상태가 없는 경우 (BotManager에 미등록) 할당 허용."""
+        t, statuses = treasury_with_checker
+        result = await t.allocate("new_bot", 1_000_000.0)
+        assert result is True
+
+
 # ── 주문 자금 예약/해제 ─────────────────────────
 
 
