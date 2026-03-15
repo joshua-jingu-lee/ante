@@ -121,6 +121,43 @@ class TestStrategyABC:
         result = await s.on_data({})
         assert result == []
 
+    def test_default_get_param_schema_returns_empty(self):
+        """get_param_schema 기본 구현은 빈 dict 반환."""
+
+        class S(Strategy):
+            meta = StrategyMeta(name="x", version="1.0.0", description="x")
+
+            async def on_step(self, context):
+                return []
+
+        s = S(ctx=None)
+        assert s.get_param_schema() == {}
+
+    def test_get_param_schema_with_descriptions(self):
+        """전략이 파라미터 설명을 제공할 수 있다."""
+
+        class S(Strategy):
+            meta = StrategyMeta(name="x", version="1.0.0", description="x")
+
+            async def on_step(self, context):
+                return []
+
+            def get_params(self):
+                return {"lookback": 20, "atr_mul": 2.5}
+
+            def get_param_schema(self):
+                return {
+                    "lookback": "고점 탐색 기간 (일)",
+                    "atr_mul": "ATR 배수",
+                }
+
+        s = S(ctx=None)
+        schema = s.get_param_schema()
+        assert schema["lookback"] == "고점 탐색 기간 (일)"
+        assert schema["atr_mul"] == "ATR 배수"
+        # params와 schema 키가 일치
+        assert set(s.get_params().keys()) == set(schema.keys())
+
 
 # ── StrategyContext ────────────────────────────────
 
