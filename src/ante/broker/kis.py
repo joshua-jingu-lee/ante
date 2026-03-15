@@ -657,27 +657,62 @@ class KISAdapter(BrokerAdapter):
 
         return instruments
 
+    # 마스터 파일 다운로드 설정 (KIS 공식 방식)
+    _MASTER_FILES: dict[str, dict[str, str | int]] = {
+        "J": {
+            "url": "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip",
+            "filename": "kospi_code.mst",
+            "tail_len": 228,
+        },
+        "Q": {
+            "url": "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip",
+            "filename": "kosdaq_code.mst",
+            "tail_len": 222,
+        },
+    }
+
     async def _fetch_stock_list(self, mrkt_code: str) -> list[dict[str, Any]]:
-        """시장 코드별 종목 목록 조회 (페이징 처리)."""
-        tr_id = "CTPF1702R"
-        url = (
-            f"{self.base_url}"
-            "/uapi/domestic-stock/v1/quotations/inquire-search-stock-info"
-        )
-        all_items: list[dict[str, Any]] = []
+        """KIS 마스터 파일 다운로드로 종목 목록 조회.
 
-        params = {
-            "PRDT_TYPE_CD": "300",
-            "PDNO": "",
-            "PRDT_GRP_CD": "",
-            "STTL_CYCL_CD": "",
-            "MKT_ID_CD": mrkt_code,
-        }
-        result = await self._request("GET", url, tr_id, params=params)
-        items = result.get("output2", [])
-        all_items.extend(items)
+        기존 CTPF1702R API가 404를 반환하여, KIS 공식 마스터 파일
+        다운로드 방식으로 대체 (koreainvestment/open-trading-api 참조).
+        """
+        import io
+        import zipfile
 
-        return all_items
+        config = self._MASTER_FILES.get(mrkt_code)
+        if config is None:
+            raise ValueError(f"지원하지 않는 시장 코드: {mrkt_code}")
+
+        url = str(config["url"])
+        filename = str(config["filename"])
+        tail_len = int(config["tail_len"])
+
+        async with self._session.get(url) as resp:
+            resp.raise_for_status()
+            zip_data = await resp.read()
+
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+            raw = zf.read(filename)
+
+        items: list[dict[str, Any]] = []
+        for line in raw.decode("cp949").splitlines():
+            if not line.strip():
+                continue
+            part1 = line[: len(line) - tail_len]
+            short_code = part1[0:9].strip()
+            name = part1[21:].strip()
+
+            if len(short_code) == 6 and short_code.isdigit():
+                items.append(
+                    {
+                        "std_pdno": short_code,
+                        "prdt_name": name,
+                        "prdt_eng_name": "",
+                    }
+                )
+
+        return items
 
     @staticmethod
     def _classify_instrument_type(symbol: str, name: str, market: str) -> str:
