@@ -44,7 +44,8 @@ def bot_list(ctx: click.Context) -> None:
         db, _, _ = await _create_services()
         try:
             rows = await db.fetch_all(
-                "SELECT bot_id, strategy_id, bot_type, status, created_at FROM bots"
+                "SELECT bot_id, name, strategy_id, bot_type, status, created_at"
+                " FROM bots"
             )
             return [dict(r) for r in rows]
         finally:
@@ -61,7 +62,7 @@ def bot_list(ctx: click.Context) -> None:
     else:
         fmt.table(
             result,
-            ["bot_id", "strategy_id", "bot_type", "status", "created_at"],
+            ["bot_id", "name", "strategy_id", "bot_type", "status", "created_at"],
         )
 
 
@@ -92,6 +93,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
         fmt.output(result)
     else:
         click.echo(f"  Bot ID    : {result['bot_id']}")
+        click.echo(f"  이름      : {result['name']}")
         click.echo(f"  전략      : {result['strategy_id']}")
         click.echo(f"  타입      : {result['bot_type']}")
         click.echo(f"  상태      : {result['status']}")
@@ -114,6 +116,7 @@ def _parse_param(value: str) -> tuple[str, object]:
 
 
 @bot.command("create")
+@click.option("--name", required=True, help="봇 이름")
 @click.option("--strategy", required=True, help="전략 ID")
 @click.option(
     "--type",
@@ -140,6 +143,7 @@ def _parse_param(value: str) -> tuple[str, object]:
 @require_scope("bot:admin")
 def bot_create(
     ctx: click.Context,
+    name: str,
     strategy: str,
     bot_type: str,
     interval: int,
@@ -168,6 +172,7 @@ def bot_create(
             bid = bot_id or f"bot-{uuid4().hex[:8]}"
             config_dict: dict = {
                 "bot_id": bid,
+                "name": name,
                 "strategy_id": strategy,
                 "bot_type": bot_type,
                 "interval_seconds": interval,
@@ -175,9 +180,10 @@ def bot_create(
             if param_dict:
                 config_dict["params"] = param_dict
             await db.execute(
-                """INSERT INTO bots (bot_id, strategy_id, bot_type, config_json)
-                   VALUES (?, ?, ?, ?)""",
-                (bid, strategy, bot_type, json.dumps(config_dict)),
+                """INSERT INTO bots
+                   (bot_id, name, strategy_id, bot_type, config_json)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (bid, name, strategy, bot_type, json.dumps(config_dict)),
             )
             return config_dict
         finally:

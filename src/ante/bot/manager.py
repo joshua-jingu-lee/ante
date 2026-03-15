@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 BOT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bots (
     bot_id       TEXT PRIMARY KEY,
+    name         TEXT NOT NULL DEFAULT '',
     strategy_id  TEXT NOT NULL,
     bot_type     TEXT NOT NULL DEFAULT 'live',
     config_json  TEXT NOT NULL,
@@ -429,6 +430,7 @@ class BotManager:
         """봇 설정 DB 저장."""
         config_dict = {
             "bot_id": config.bot_id,
+            "name": config.name,
             "strategy_id": config.strategy_id,
             "bot_type": config.bot_type,
             "interval_seconds": config.interval_seconds,
@@ -436,13 +438,15 @@ class BotManager:
         }
         await self._db.execute(
             """INSERT INTO bots
-               (bot_id, strategy_id, bot_type, config_json)
-               VALUES (?, ?, ?, ?)
+               (bot_id, name, strategy_id, bot_type, config_json)
+               VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(bot_id) DO UPDATE SET
+                 name = excluded.name,
                  config_json = excluded.config_json,
                  updated_at = datetime('now')""",
             (
                 config.bot_id,
+                config.name,
                 config.strategy_id,
                 config.bot_type,
                 json.dumps(config_dict),

@@ -337,6 +337,7 @@ class Bot:
         """봇 상태 정보 반환."""
         return {
             "bot_id": self.bot_id,
+            "name": self.config.name,
             "status": self.status.value,
             "bot_type": self.config.bot_type,
             "strategy_id": self.config.strategy_id,

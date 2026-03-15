@@ -11,6 +11,7 @@ router = APIRouter()
 class BotCreateRequest(BaseModel):
     """봇 생성 요청."""
 
+    name: str
     strategy_id: str
     bot_type: str = "live"
     interval_seconds: int = Field(default=60, ge=10, le=3600)
