@@ -39,7 +39,7 @@ async def main() -> None:
     종료 순서: 역순 (상위 소비자부터 정리)
     """
     # ── 1. Config ────────────────────────────────────
-    config = Config.load(config_dir=Path("config"))
+    config = Config.load()
     config.validate()
 
     log_level = config.get("system.log_level", "INFO")
