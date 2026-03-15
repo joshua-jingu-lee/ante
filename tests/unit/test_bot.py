@@ -479,6 +479,14 @@ class TestBotManager:
         await m.initialize()
         yield m
         await m.stop_all()
+        # 남아있는 봇 태스크 강제 정리
+        for bot in list(m._bots.values()):
+            if bot._task and not bot._task.done():
+                bot._task.cancel()
+                try:
+                    await bot._task
+                except asyncio.CancelledError:
+                    pass
 
     async def test_create_bot(self, manager, eventbus, ctx):
         """봇 생성."""
