@@ -304,6 +304,17 @@ class BacktestCompleteEvent(Event):
 
 
 @dataclass(frozen=True)
+class PositionMismatchEvent(Event):
+    """포지션 불일치 감지."""
+
+    bot_id: str = ""
+    symbol: str = ""
+    internal_qty: float = 0.0
+    broker_qty: float = 0.0
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class ReconcileEvent(Event):
     """Reconciler → EventBus: 대사 보정 완료."""
 
