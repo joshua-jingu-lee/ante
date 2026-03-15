@@ -3,10 +3,15 @@ name: "Gate 2: Test"
 on:
   pull_request:
     branches: [develop, main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
