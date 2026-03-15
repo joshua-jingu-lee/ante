@@ -144,8 +144,14 @@ class TestBotConfig:
     def test_defaults(self):
         """BotConfig 기본값."""
         c = BotConfig(bot_id="b1", strategy_id="s1")
+        assert c.name == ""
         assert c.bot_type == "live"
         assert c.interval_seconds == 60
+
+    def test_name_field(self):
+        """BotConfig name 필드 설정."""
+        c = BotConfig(bot_id="b1", strategy_id="s1", name="테스트 봇")
+        assert c.name == "테스트 봇"
 
     def test_bot_status_values(self):
         """BotStatus 값."""
@@ -434,7 +440,25 @@ class TestBot:
         )
         info = bot.get_info()
         assert info["bot_id"] == "bot1"
+        assert info["name"] == ""
         assert info["status"] == "created"
+
+    def test_get_info_with_name(self, eventbus, ctx):
+        """이름이 설정된 봇의 정보 반환."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            name="모멘텀 봇",
+            interval_seconds=10,
+        )
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        assert info["name"] == "모멘텀 봇"
 
 
 # ── BotManager ───────────────────────────────────
@@ -625,3 +649,12 @@ class TestBotManager:
         row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
         assert row is not None
         assert row["strategy_id"] == "s1"
+
+    async def test_bot_name_persisted(self, manager, eventbus, ctx, db):
+        """봇 이름이 DB에 저장됨."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", name="모멘텀 봇")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
+        assert row is not None
+        assert row["name"] == "모멘텀 봇"

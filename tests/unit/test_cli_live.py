@@ -139,6 +139,7 @@ class TestBotCommands:
                 return_value=[
                     {
                         "bot_id": "bot-1",
+                        "name": "테스트봇",
                         "strategy_id": "stg-1",
                         "bot_type": "paper",
                         "status": "created",
@@ -172,6 +173,7 @@ class TestBotCommands:
             mock_db.fetch_one = AsyncMock(
                 return_value={
                     "bot_id": "bot-1",
+                    "name": "테스트봇",
                     "strategy_id": "stg-1",
                     "bot_type": "live",
                     "status": "running",
@@ -197,7 +199,16 @@ class TestBotCommands:
 
             result = runner.invoke(
                 cli,
-                ["bot", "create", "--strategy", "stg-1", "--type", "paper"],
+                [
+                    "bot",
+                    "create",
+                    "--name",
+                    "테스트봇",
+                    "--strategy",
+                    "stg-1",
+                    "--type",
+                    "paper",
+                ],
             )
             assert result.exit_code == 0
             assert "생성 완료" in result.output

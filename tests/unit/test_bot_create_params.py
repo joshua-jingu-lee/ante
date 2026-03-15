@@ -88,6 +88,8 @@ class TestBotCreateWithParams:
                 [
                     "bot",
                     "create",
+                    "--name",
+                    "테스트봇",
                     "--strategy",
                     "stg-1",
                     "--param",
@@ -101,7 +103,7 @@ class TestBotCreateWithParams:
 
             # DB에 저장된 config_json에 params 포함 확인
             call_args = mock_db.execute.call_args[0]
-            config_json = call_args[1][3]
+            config_json = call_args[1][4]
             config = json.loads(config_json)
             assert config["params"]["lookback"] == 20
             assert config["params"]["threshold"] == 0.5
@@ -115,13 +117,13 @@ class TestBotCreateWithParams:
 
             result = runner.invoke(
                 cli,
-                ["bot", "create", "--strategy", "stg-1"],
+                ["bot", "create", "--name", "테스트봇", "--strategy", "stg-1"],
             )
             assert result.exit_code == 0
 
             # params 키가 없어야 함
             call_args = mock_db.execute.call_args[0]
-            config_json = call_args[1][3]
+            config_json = call_args[1][4]
             config = json.loads(config_json)
             assert "params" not in config
 
@@ -131,6 +133,8 @@ class TestBotCreateWithParams:
             [
                 "bot",
                 "create",
+                "--name",
+                "테스트봇",
                 "--strategy",
                 "stg-1",
                 "--param",
@@ -153,6 +157,8 @@ class TestBotCreateWithParams:
                     "json",
                     "bot",
                     "create",
+                    "--name",
+                    "테스트봇",
                     "--strategy",
                     "stg-1",
                     "--param",

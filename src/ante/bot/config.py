@@ -27,6 +27,7 @@ class BotConfig:
 
     bot_id: str
     strategy_id: str
+    name: str = ""
     bot_type: str = "live"
     interval_seconds: int = 60
     paper_initial_balance: float = 10_000_000.0
