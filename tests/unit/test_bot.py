@@ -158,6 +158,7 @@ class TestBotConfig:
         assert BotStatus.CREATED == "created"
         assert BotStatus.RUNNING == "running"
         assert BotStatus.ERROR == "error"
+        assert BotStatus.DELETED == "deleted"
 
     def test_interval_min_valid(self):
         """최소 간격 10초 허용."""
@@ -503,11 +504,38 @@ class TestBotManager:
         assert manager.get_bot("bot1").status == BotStatus.STOPPED
 
     async def test_remove_bot(self, manager, eventbus, ctx):
-        """봇 삭제."""
+        """봇 삭제 (하위 호환 — remove_bot은 delete_bot 별칭)."""
         config = BotConfig(bot_id="bot1", strategy_id="s1")
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.remove_bot("bot1")
         assert manager.get_bot("bot1") is None
+
+    async def test_delete_bot_soft_delete(self, manager, eventbus, ctx, db):
+        """delete_bot은 DB 레코드를 삭제하지 않고 status를 deleted로 변경."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await manager.delete_bot("bot1")
+
+        # 메모리에서는 제거
+        assert manager.get_bot("bot1") is None
+
+        # DB에는 레코드가 남아있고 status가 deleted
+        row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
+        assert row is not None
+        assert row["status"] == "deleted"
+
+    async def test_delete_bot_stops_running(self, manager, eventbus, ctx, db):
+        """실행 중인 봇 삭제 시 먼저 중지 후 deleted 처리."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await manager.start_bot("bot1")
+        assert manager.get_bot("bot1").status == BotStatus.RUNNING
+
+        await manager.delete_bot("bot1")
+        assert manager.get_bot("bot1") is None
+
+        row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
+        assert row["status"] == "deleted"
 
     async def test_stop_all(self, manager, eventbus):
         """전체 봇 중지."""

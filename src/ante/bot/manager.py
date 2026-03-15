@@ -166,8 +166,8 @@ class BotManager:
         bot = self._get_bot(bot_id)
         await bot.stop()
 
-    async def remove_bot(self, bot_id: str) -> None:
-        """봇 삭제. 실행 중이면 먼저 중지."""
+    async def delete_bot(self, bot_id: str) -> None:
+        """봇 소프트 딜리트. 실행 중이면 먼저 중지."""
         bot = self._get_bot(bot_id)
         if bot.status == BotStatus.RUNNING:
             await bot.stop()
@@ -190,9 +190,18 @@ class BotManager:
         if self._snapshot:
             self._snapshot.cleanup(bot_id)
 
+        bot.status = BotStatus.DELETED
         del self._bots[bot_id]
-        await self._db.execute("DELETE FROM bots WHERE bot_id = ?", (bot_id,))
-        logger.info("봇 삭제: %s", bot_id)
+        await self._db.execute(
+            "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
+            " WHERE bot_id = ?",
+            (bot_id,),
+        )
+        logger.info("봇 삭제 (soft delete): %s", bot_id)
+
+    async def remove_bot(self, bot_id: str) -> None:
+        """봇 삭제. delete_bot()의 별칭 (하위 호환)."""
+        await self.delete_bot(bot_id)
 
     async def stop_all(self) -> None:
         """모든 봇 중지."""

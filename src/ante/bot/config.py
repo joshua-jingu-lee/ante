@@ -14,6 +14,7 @@ class BotStatus(StrEnum):
     STOPPING = "stopping"
     STOPPED = "stopped"
     ERROR = "error"
+    DELETED = "deleted"
 
 
 # 실행 간격 제한
