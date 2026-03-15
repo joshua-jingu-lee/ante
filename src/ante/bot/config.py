@@ -29,7 +29,6 @@ class BotConfig:
     strategy_id: str
     bot_type: str = "live"
     interval_seconds: int = 60
-    symbols: list[str] | None = None
     paper_initial_balance: float = 10_000_000.0
     exchange: str = "KRX"
     auto_restart: bool = True

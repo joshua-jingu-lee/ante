@@ -432,7 +432,6 @@ class BotManager:
             "strategy_id": config.strategy_id,
             "bot_type": config.bot_type,
             "interval_seconds": config.interval_seconds,
-            "symbols": config.symbols,
             "paper_initial_balance": config.paper_initial_balance,
         }
         await self._db.execute(

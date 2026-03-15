@@ -128,7 +128,6 @@ def _parse_param(value: str) -> tuple[str, object]:
     type=click.IntRange(10, 3600),
     help="실행 주기 (초, 10-3600)",
 )
-@click.option("--symbols", default="", help="대상 종목 (쉼표 구분)")
 @click.option("--id", "bot_id", default="", help="봇 ID (미지정 시 자동 생성)")
 @click.option(
     "--param",
@@ -144,7 +143,6 @@ def bot_create(
     strategy: str,
     bot_type: str,
     interval: int,
-    symbols: str,
     bot_id: str,
     params: tuple[str, ...],
 ) -> None:
@@ -168,13 +166,11 @@ def bot_create(
         db, _, _ = await _create_services()
         try:
             bid = bot_id or f"bot-{uuid4().hex[:8]}"
-            symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] or None
             config_dict: dict = {
                 "bot_id": bid,
                 "strategy_id": strategy,
                 "bot_type": bot_type,
                 "interval_seconds": interval,
-                "symbols": symbol_list,
             }
             if param_dict:
                 config_dict["params"] = param_dict
