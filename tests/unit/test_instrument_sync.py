@@ -289,3 +289,121 @@ class TestDelistingHandling:
         samsung = await instrument_service.get("005930")
         assert samsung is not None
         assert samsung.listed is True
+
+
+# ── _fetch_stock_list 마스터 파일 파싱 ──────────
+
+
+def _build_master_zip(
+    filename: str, tail_len: int, rows: list[tuple[str, str, str]]
+) -> bytes:
+    """테스트용 KIS 마스터 파일 zip 생성.
+
+    rows: [(short_code, std_code, name), ...]
+    """
+    import io
+    import zipfile
+
+    lines = []
+    for short_code, std_code, name in rows:
+        part1 = f"{short_code:<9}{std_code:<12}{name}"
+        part2 = "0" * tail_len
+        lines.append(part1 + part2)
+
+    content = "\n".join(lines).encode("cp949")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(filename, content)
+    return buf.getvalue()
+
+
+class TestFetchStockListMaster:
+    async def test_parse_kospi_master_file(self):
+        """KOSPI 마스터 파일에서 종목 코드/이름 추출."""
+        config = {
+            "app_key": "test",
+            "app_secret": "test",
+            "account_no": "1234567890",
+            "is_paper": True,
+        }
+        adapter = KISAdapter(config=config)
+
+        zip_data = _build_master_zip(
+            "kospi_code.mst",
+            228,
+            [
+                ("005930", "KR7005930003", "삼성전자"),
+                ("069500", "KR7069500007", "KODEX 200"),
+            ],
+        )
+
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.read = AsyncMock(return_value=zip_data)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=_AsyncCtx(mock_resp))
+        adapter._session = mock_session
+
+        result = await adapter._fetch_stock_list("J")
+        assert len(result) == 2
+        assert result[0]["std_pdno"] == "005930"
+        assert result[0]["prdt_name"] == "삼성전자"
+        assert result[1]["std_pdno"] == "069500"
+        assert result[1]["prdt_name"] == "KODEX 200"
+
+    async def test_parse_kosdaq_master_file(self):
+        """KOSDAQ 마스터 파일 파싱."""
+        config = {
+            "app_key": "test",
+            "app_secret": "test",
+            "account_no": "1234567890",
+            "is_paper": True,
+        }
+        adapter = KISAdapter(config=config)
+
+        zip_data = _build_master_zip(
+            "kosdaq_code.mst",
+            222,
+            [("035720", "KR7035720002", "카카오")],
+        )
+
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.read = AsyncMock(return_value=zip_data)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=_AsyncCtx(mock_resp))
+        adapter._session = mock_session
+
+        result = await adapter._fetch_stock_list("Q")
+        assert len(result) == 1
+        assert result[0]["std_pdno"] == "035720"
+        assert result[0]["prdt_name"] == "카카오"
+
+    async def test_invalid_market_code_raises(self):
+        """지원하지 않는 시장 코드 시 ValueError."""
+        config = {
+            "app_key": "test",
+            "app_secret": "test",
+            "account_no": "1234567890",
+            "is_paper": True,
+        }
+        adapter = KISAdapter(config=config)
+
+        with pytest.raises(ValueError, match="지원하지 않는 시장 코드"):
+            await adapter._fetch_stock_list("X")
+
+
+class _AsyncCtx:
+    """async context manager mock helper."""
+
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    async def __aenter__(self) -> object:
+        return self._value
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
