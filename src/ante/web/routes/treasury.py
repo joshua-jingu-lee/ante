@@ -14,6 +14,12 @@ class BudgetChangeRequest(BaseModel):
     amount: float
 
 
+class BalanceSetRequest(BaseModel):
+    """잔고 수동 설정 요청."""
+
+    balance: float
+
+
 @router.get("")
 async def get_summary(request: Request) -> dict:
     """자금 현황 요약."""
@@ -79,4 +85,33 @@ async def deallocate(request: Request, bot_id: str, body: BudgetChangeRequest) -
         "bot_id": bot_id,
         "allocated": budget.allocated if budget else 0.0,
         "available": budget.available if budget else 0.0,
+    }
+
+
+@router.get("/budgets")
+async def list_budgets(request: Request) -> dict:
+    """봇별 예산 목록 조회."""
+    from dataclasses import asdict
+
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is None:
+        raise HTTPException(status_code=503, detail="Treasury not available")
+
+    budgets = treasury.list_budgets()
+    return {"budgets": [asdict(b) for b in budgets]}
+
+
+@router.post("/balance")
+async def set_balance(request: Request, body: BalanceSetRequest) -> dict:
+    """계좌 총 잔고 수동 설정."""
+    from datetime import UTC, datetime
+
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is None:
+        raise HTTPException(status_code=503, detail="Treasury not available")
+
+    await treasury.set_account_balance(body.balance)
+    return {
+        "total_balance": treasury.account_balance,
+        "updated_at": datetime.now(UTC).isoformat(),
     }
