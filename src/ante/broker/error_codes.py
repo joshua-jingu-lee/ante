@@ -70,6 +70,15 @@ def is_retryable_http_status(status_code: int) -> bool:
     return status_code in RETRYABLE_HTTP_STATUS_CODES
 
 
+# ── 예수금 부족 관련 에러 코드 ────────────────────────────
+INSUFFICIENT_DEPOSIT_CODE = "APBK0919"  # 잔고(예수금) 부족
+
+
+def is_insufficient_deposit(msg_cd: str) -> bool:
+    """예수금 부족 에러인지 판별."""
+    return msg_cd == INSUFFICIENT_DEPOSIT_CODE
+
+
 def get_error_message(msg_cd: str, fallback: str = "") -> str:
     """KIS msg_cd에 대한 한글 에러 메시지 반환."""
     return KIS_ERROR_MESSAGES.get(msg_cd, fallback or f"알 수 없는 에러 ({msg_cd})")

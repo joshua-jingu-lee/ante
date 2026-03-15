@@ -77,6 +77,20 @@ class TestErrorCodeClassification:
         msg2 = get_error_message("UNKNOWN")
         assert "알 수 없는 에러" in msg2
 
+    def test_insufficient_deposit_constant(self):
+        """예수금 부족 코드 상수 확인."""
+        from ante.broker.error_codes import INSUFFICIENT_DEPOSIT_CODE
+
+        assert INSUFFICIENT_DEPOSIT_CODE == "APBK0919"
+
+    def test_is_insufficient_deposit(self):
+        """예수금 부족 에러 판별."""
+        from ante.broker.error_codes import is_insufficient_deposit
+
+        assert is_insufficient_deposit("APBK0919") is True
+        assert is_insufficient_deposit("APBK0013") is False
+        assert is_insufficient_deposit("") is False
+
 
 # ── US-2: Circuit Breaker ──────────────────────────
 

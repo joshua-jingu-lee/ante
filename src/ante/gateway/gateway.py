@@ -211,6 +211,12 @@ class APIGateway:
                 )
             )
         except Exception as e:
+            from ante.broker.exceptions import APIError
+
+            error_code = ""
+            if isinstance(e, APIError):
+                error_code = e.error_code
+
             logger.error("주문 제출 실패: %s — %s", event.order_id, e)
             await self._eventbus.publish(
                 OrderFailedEvent(
@@ -223,6 +229,7 @@ class APIGateway:
                     price=event.price or 0.0,
                     order_type=event.order_type,
                     error_message=str(e),
+                    error_code=error_code,
                     exchange=event.exchange,
                 )
             )

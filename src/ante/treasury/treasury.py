@@ -540,6 +540,11 @@ class Treasury:
         ante_eval = self._eval_amount - self._external_eval_amount
         ante_profit_loss = ante_eval - ante_purchase
 
+        total_available = sum(b.available for b in self._budgets.values())
+        budget_exceeds_purchasable = (
+            self._purchasable_amount > 0 and total_available > self._purchasable_amount
+        )
+
         return {
             "account_balance": self._account_balance,
             "purchasable_amount": self._purchasable_amount,
@@ -549,6 +554,7 @@ class Treasury:
             "total_profit_loss": self._total_profit_loss,
             "total_allocated": total_allocated,
             "total_reserved": total_reserved,
+            "total_available": total_available,
             "unallocated": self._unallocated,
             "bot_count": len(self._budgets),
             "external_purchase_amount": self._external_purchase_amount,
@@ -556,6 +562,7 @@ class Treasury:
             "ante_purchase_amount": ante_purchase,
             "ante_eval_amount": ante_eval,
             "ante_profit_loss": ante_profit_loss,
+            "budget_exceeds_purchasable": budget_exceeds_purchasable,
         }
 
     # ── DB 영속화 ───────────────────────────────────
