@@ -32,6 +32,7 @@ def create_app(**services: Any) -> FastAPI:
     for name, service in services.items():
         setattr(app.state, name, service)
 
+    from ante.web.routes.approvals import router as approvals_router
     from ante.web.routes.audit import router as audit_router
     from ante.web.routes.bots import router as bots_router
     from ante.web.routes.data import router as data_router
@@ -42,6 +43,7 @@ def create_app(**services: Any) -> FastAPI:
     from ante.web.routes.trades import router as trades_router
     from ante.web.routes.treasury import router as treasury_router
 
+    app.include_router(approvals_router, prefix="/api/approvals", tags=["approvals"])
     app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
     app.include_router(system_router, prefix="/api/system", tags=["system"])
     app.include_router(strategy_router, prefix="/api/strategies", tags=["strategies"])
