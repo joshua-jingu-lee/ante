@@ -45,7 +45,7 @@ def bot_list(ctx: click.Context) -> None:
         try:
             rows = await db.fetch_all(
                 "SELECT bot_id, name, strategy_id, bot_type, status, created_at"
-                " FROM bots"
+                " FROM bots WHERE status != 'deleted'"
             )
             return [dict(r) for r in rows]
         finally:
@@ -212,11 +212,16 @@ def bot_remove(ctx: click.Context, bot_id: str) -> None:
         db, _, _ = await _create_services()
         try:
             row = await db.fetch_one(
-                "SELECT bot_id FROM bots WHERE bot_id = ?", (bot_id,)
+                "SELECT bot_id FROM bots WHERE bot_id = ? AND status != 'deleted'",
+                (bot_id,),
             )
             if not row:
                 return False
-            await db.execute("DELETE FROM bots WHERE bot_id = ?", (bot_id,))
+            await db.execute(
+                "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
+                " WHERE bot_id = ?",
+                (bot_id,),
+            )
             return True
         finally:
             await db.close()
