@@ -471,13 +471,25 @@ class TestBotManager:
         database = Database(str(tmp_path / "test.db"))
         await database.connect()
         yield database
-        await database.close()
+        try:
+            await asyncio.wait_for(database.close(), timeout=5.0)
+        except TimeoutError:
+            pass
 
     @pytest.fixture
     async def manager(self, eventbus, db):
         m = BotManager(eventbus=eventbus, db=db)
         await m.initialize()
-        return m
+        yield m
+        # 모든 봇 태스크 강제 취소
+        for bot in list(m._bots.values()):
+            if bot._task and not bot._task.done():
+                bot._task.cancel()
+        # stop_all에도 timeout 적용
+        try:
+            await asyncio.wait_for(m.stop_all(), timeout=5.0)
+        except TimeoutError:
+            pass
 
     async def test_create_bot(self, manager, eventbus, ctx):
         """봇 생성."""

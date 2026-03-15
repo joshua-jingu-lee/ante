@@ -32,17 +32,27 @@ def create_app(**services: Any) -> FastAPI:
     for name, service in services.items():
         setattr(app.state, name, service)
 
+    from ante.web.routes.approvals import router as approvals_router
     from ante.web.routes.audit import router as audit_router
+    from ante.web.routes.auth import router as auth_router
     from ante.web.routes.bots import router as bots_router
+    from ante.web.routes.config import router as config_router
     from ante.web.routes.data import router as data_router
+    from ante.web.routes.members import router as members_router
     from ante.web.routes.notifications import router as notifications_router
+    from ante.web.routes.portfolio import router as portfolio_router
     from ante.web.routes.reports import router as report_router
     from ante.web.routes.strategies import router as strategy_router
     from ante.web.routes.system import router as system_router
     from ante.web.routes.trades import router as trades_router
     from ante.web.routes.treasury import router as treasury_router
 
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    app.include_router(approvals_router, prefix="/api/approvals", tags=["approvals"])
     app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
+    app.include_router(portfolio_router, prefix="/api/portfolio", tags=["portfolio"])
+    app.include_router(members_router, prefix="/api/members", tags=["members"])
+    app.include_router(config_router, prefix="/api/config", tags=["config"])
     app.include_router(system_router, prefix="/api/system", tags=["system"])
     app.include_router(strategy_router, prefix="/api/strategies", tags=["strategies"])
     app.include_router(report_router, prefix="/api/reports", tags=["reports"])

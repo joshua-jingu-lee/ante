@@ -531,6 +531,10 @@ class Treasury:
 
     # ── 모니터링 ────────────────────────────────────
 
+    def list_budgets(self) -> list[BotBudget]:
+        """전체 봇 예산 목록 반환."""
+        return list(self._budgets.values())
+
     def get_summary(self) -> dict[str, Any]:
         """자금 현황 요약."""
         total_allocated = sum(b.allocated for b in self._budgets.values())

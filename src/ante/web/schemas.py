@@ -38,3 +38,31 @@ class DataInjectRequest(BaseModel):
     symbol: str
     timeframe: str = "1d"
     source: str = "external"
+
+
+# ── 인증 ──────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    """로그인 요청."""
+
+    member_id: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    """로그인 성공 응답."""
+
+    member_id: str
+    name: str
+    type: str
+
+
+class MeResponse(BaseModel):
+    """현재 사용자 정보 응답."""
+
+    member_id: str
+    name: str
+    type: str
+    emoji: str = ""
+    role: str = ""

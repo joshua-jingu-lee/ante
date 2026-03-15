@@ -393,6 +393,10 @@ async def main() -> None:
 
     if web_enabled:
         from ante.web.app import create_app
+        from ante.web.session import SessionService
+
+        session_service = SessionService(db=db)
+        await session_service.initialize()
 
         app = create_app(
             config=config,
@@ -404,6 +408,8 @@ async def main() -> None:
             data_catalog=data_catalog,
             data_store=parquet_store,
             audit_logger=audit_logger,
+            member_service=member_service,
+            session_service=session_service,
         )
 
         import uvicorn

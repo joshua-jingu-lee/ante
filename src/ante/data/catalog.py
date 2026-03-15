@@ -39,6 +39,16 @@ class DataCatalog:
         """데이터셋 스키마 조회. 현재는 OHLCV 스키마 고정 반환."""
         return {k: str(v) for k, v in OHLCV_SCHEMA.items()}
 
+    def delete_dataset(self, symbol: str, timeframe: str) -> bool:
+        """데이터셋(종목×타임프레임) 전체 삭제. 삭제 성공 여부 반환."""
+        import shutil
+
+        path = self._store._base / "ohlcv" / timeframe / symbol
+        if not path.exists():
+            return False
+        shutil.rmtree(path)
+        return True
+
     def get_storage_summary(self) -> dict:
         """저장 용량 요약."""
         usage = self._store.get_storage_usage()
