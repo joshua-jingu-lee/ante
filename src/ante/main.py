@@ -343,8 +343,8 @@ async def main() -> None:
     )
 
     notification_service = None
-    telegram_token = config.get_secret("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = config.get_secret("TELEGRAM_CHAT_ID")
+    telegram_token = config.secret("TELEGRAM_BOT_TOKEN")
+    telegram_chat_id = config.secret("TELEGRAM_CHAT_ID")
 
     if telegram_token and telegram_chat_id:
         adapter = TelegramAdapter(bot_token=telegram_token, chat_id=telegram_chat_id)
