@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
-from ante.web.app import create_app
-from ante.web.session import SessionService
+httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from ante.web.app import create_app  # noqa: E402
+from ante.web.session import SessionService  # noqa: E402
 
 
 @pytest.fixture
