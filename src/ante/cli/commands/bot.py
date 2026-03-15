@@ -122,7 +122,12 @@ def _parse_param(value: str) -> tuple[str, object]:
     default="live",
     help="봇 타입",
 )
-@click.option("--interval", default=60, help="실행 주기 (초)")
+@click.option(
+    "--interval",
+    default=60,
+    type=click.IntRange(10, 3600),
+    help="실행 주기 (초, 10-3600)",
+)
 @click.option("--symbols", default="", help="대상 종목 (쉼표 구분)")
 @click.option("--id", "bot_id", default="", help="봇 ID (미지정 시 자동 생성)")
 @click.option(

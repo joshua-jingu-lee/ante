@@ -49,7 +49,7 @@ def _make_bot(
     strategy_cls: type[Strategy],
     step_timeout: int = 30,
     max_signals: int = 50,
-    interval: int = 0,
+    interval: int = 10,
 ) -> Bot:
     config = BotConfig(
         bot_id="bot-test",
@@ -79,7 +79,7 @@ class TestStepTimeout:
 
     async def test_timeout_skips_step(self) -> None:
         """타임아웃 발생 시 해당 주기 스킵 + 카운터 증가."""
-        bot = _make_bot(_SlowStrategy, step_timeout=1, interval=0)
+        bot = _make_bot(_SlowStrategy, step_timeout=1, interval=10)
         bot.strategy = _SlowStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
 
@@ -110,7 +110,7 @@ class TestStepTimeout:
 
     async def test_consecutive_timeout_stops_bot(self) -> None:
         """연속 3회 타임아웃 시 봇 중지."""
-        bot = _make_bot(_SlowStrategy, step_timeout=1, interval=0)
+        bot = _make_bot(_SlowStrategy, step_timeout=1, interval=10)
         bot.strategy = _SlowStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
 
@@ -123,7 +123,7 @@ class TestStepTimeout:
 
     async def test_normal_execution_resets_counter(self) -> None:
         """정상 실행 시 카운터 리셋."""
-        bot = _make_bot(_NormalStrategy, step_timeout=30, interval=0)
+        bot = _make_bot(_NormalStrategy, step_timeout=30, interval=10)
         bot.strategy = _NormalStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
         bot._consecutive_failures = 2  # 이전에 2회 실패 상태
@@ -155,7 +155,7 @@ class TestSignalLimit:
 
     async def test_excess_signals_discarded(self) -> None:
         """Signal 수 초과 시 전체 폐기 + BotErrorEvent 발행."""
-        bot = _make_bot(_MassSignalStrategy, max_signals=10, interval=0)
+        bot = _make_bot(_MassSignalStrategy, max_signals=10, interval=10)
         bot.strategy = _MassSignalStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
 
@@ -192,7 +192,7 @@ class TestSignalLimit:
 
     async def test_consecutive_excess_stops_bot(self) -> None:
         """연속 3회 Signal 초과 시 봇 중지."""
-        bot = _make_bot(_MassSignalStrategy, max_signals=10, interval=0)
+        bot = _make_bot(_MassSignalStrategy, max_signals=10, interval=10)
         bot.strategy = _MassSignalStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
 
@@ -204,7 +204,7 @@ class TestSignalLimit:
 
     async def test_within_limit_passes(self) -> None:
         """Signal 수 상한 이내면 정상 처리."""
-        bot = _make_bot(_NormalStrategy, max_signals=50, interval=0)
+        bot = _make_bot(_NormalStrategy, max_signals=50, interval=10)
         bot.strategy = _NormalStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
 

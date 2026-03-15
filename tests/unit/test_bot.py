@@ -133,7 +133,7 @@ def simple_config():
     return BotConfig(
         bot_id="bot1",
         strategy_id="simple_v1.0.0",
-        interval_seconds=0,  # 테스트용: 즉시 반복
+        interval_seconds=10,  # 테스트용: 최소 유효 간격
     )
 
 
@@ -152,6 +152,31 @@ class TestBotConfig:
         assert BotStatus.CREATED == "created"
         assert BotStatus.RUNNING == "running"
         assert BotStatus.ERROR == "error"
+
+    def test_interval_min_valid(self):
+        """최소 간격 10초 허용."""
+        c = BotConfig(bot_id="b1", strategy_id="s1", interval_seconds=10)
+        assert c.interval_seconds == 10
+
+    def test_interval_max_valid(self):
+        """최대 간격 3600초 허용."""
+        c = BotConfig(bot_id="b1", strategy_id="s1", interval_seconds=3600)
+        assert c.interval_seconds == 3600
+
+    def test_interval_below_min_raises(self):
+        """10초 미만이면 ValueError."""
+        with pytest.raises(ValueError, match="10초 이상"):
+            BotConfig(bot_id="b1", strategy_id="s1", interval_seconds=5)
+
+    def test_interval_above_max_raises(self):
+        """3600초 초과면 ValueError."""
+        with pytest.raises(ValueError, match="3600초 이하"):
+            BotConfig(bot_id="b1", strategy_id="s1", interval_seconds=7200)
+
+    def test_interval_zero_raises(self):
+        """0초면 ValueError."""
+        with pytest.raises(ValueError):
+            BotConfig(bot_id="b1", strategy_id="s1", interval_seconds=0)
 
 
 # ── Bot 생명주기 ─────────────────────────────────
@@ -211,7 +236,7 @@ class TestBot:
         config = BotConfig(
             bot_id="bot1",
             strategy_id="buy_v1.0.0",
-            interval_seconds=0,
+            interval_seconds=10,
         )
         received = []
         eventbus.subscribe(OrderRequestEvent, lambda e: received.append(e))
@@ -238,7 +263,7 @@ class TestBot:
         config = BotConfig(
             bot_id="bot1",
             strategy_id="error_v1.0.0",
-            interval_seconds=0,
+            interval_seconds=10,
         )
         received = []
         eventbus.subscribe(BotErrorEvent, lambda e: received.append(e))
@@ -385,7 +410,7 @@ class TestBot:
             config=BotConfig(
                 bot_id="bot1",
                 strategy_id="c_v1.0.0",
-                interval_seconds=0,
+                interval_seconds=10,
             ),
             strategy_cls=CancelStrategy,
             ctx=ctx,

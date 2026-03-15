@@ -16,6 +16,11 @@ class BotStatus(StrEnum):
     ERROR = "error"
 
 
+# 실행 간격 제한
+MIN_INTERVAL_SECONDS = 10
+MAX_INTERVAL_SECONDS = 3600
+
+
 @dataclass
 class BotConfig:
     """봇 설정."""
@@ -32,3 +37,16 @@ class BotConfig:
     restart_cooldown_seconds: int = 60
     step_timeout_seconds: int = 30
     max_signals_per_step: int = 50
+
+    def __post_init__(self) -> None:
+        validate_interval(self.interval_seconds)
+
+
+def validate_interval(interval: int) -> None:
+    """실행 간격 범위 검증. 범위 밖이면 ValueError."""
+    if interval < MIN_INTERVAL_SECONDS or interval > MAX_INTERVAL_SECONDS:
+        raise ValueError(
+            f"실행 간격은 {MIN_INTERVAL_SECONDS}초 이상 "
+            f"{MAX_INTERVAL_SECONDS}초 이하여야 합니다. "
+            f"(입력값: {interval}초)"
+        )

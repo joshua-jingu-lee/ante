@@ -1,7 +1,13 @@
 """Bot — 전략 실행 봇 관리."""
 
 from ante.bot.bot import Bot
-from ante.bot.config import BotConfig, BotStatus
+from ante.bot.config import (
+    MAX_INTERVAL_SECONDS,
+    MIN_INTERVAL_SECONDS,
+    BotConfig,
+    BotStatus,
+    validate_interval,
+)
 from ante.bot.context_factory import StrategyContextFactory
 from ante.bot.exceptions import BotError
 from ante.bot.manager import BotManager
@@ -13,6 +19,9 @@ __all__ = [
     "BotError",
     "BotManager",
     "BotStatus",
+    "MAX_INTERVAL_SECONDS",
+    "MIN_INTERVAL_SECONDS",
     "SignalKeyManager",
     "StrategyContextFactory",
+    "validate_interval",
 ]
