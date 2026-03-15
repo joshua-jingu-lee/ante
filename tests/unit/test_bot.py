@@ -477,7 +477,8 @@ class TestBotManager:
     async def manager(self, eventbus, db):
         m = BotManager(eventbus=eventbus, db=db)
         await m.initialize()
-        return m
+        yield m
+        await m.stop_all()
 
     async def test_create_bot(self, manager, eventbus, ctx):
         """봇 생성."""
