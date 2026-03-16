@@ -32,3 +32,19 @@ export const MEMBER_STATUS_LABELS: Record<string, string> = {
   suspended: '정지',
   revoked: '폐기',
 }
+
+/** 자금 변동 유형 라벨 */
+export const TRANSACTION_TYPE_LABELS: Record<string, string> = {
+  allocate: '할당',
+  deallocate: '회수',
+  fill: '체결',
+  bot_stopped_release: '예약해제',
+}
+
+/** 자금 변동 유형 뱃지 색상 */
+export const TRANSACTION_TYPE_VARIANT: Record<string, string> = {
+  allocate: 'positive',
+  deallocate: 'warning',
+  fill: 'primary',
+  bot_stopped_release: 'default',
+}

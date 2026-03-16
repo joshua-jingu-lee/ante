@@ -1,8 +1,21 @@
 export interface TreasurySummary {
-  total_balance: number
-  allocated: number
+  // KIS 계좌
+  account_balance: number
+  purchasable_amount: number
+  total_evaluation: number
+  total_profit_loss: number
+  commission_rate: number
+  sell_tax_rate: number
+  // Ante 관리자산
+  total_allocated: number
+  total_reserved: number
+  total_available: number
   unallocated: number
-  reserved: number
+  bot_count: number
+  ante_purchase_amount: number
+  ante_eval_amount: number
+  ante_profit_loss: number
+  budget_exceeds_purchasable: boolean
 }
 
 export interface BotBudget {
@@ -10,12 +23,15 @@ export interface BotBudget {
   allocated: number
   available: number
   reserved: number
-  used: number
+  spent: number
+  returned: number
 }
+
+export type TransactionType = 'allocate' | 'deallocate' | 'fill' | 'bot_stopped_release'
 
 export interface TreasuryTransaction {
   id: number
-  type: 'allocate' | 'deallocate' | 'trade' | 'deposit' | 'withdrawal'
+  type: TransactionType
   bot_id?: string
   amount: number
   description: string
