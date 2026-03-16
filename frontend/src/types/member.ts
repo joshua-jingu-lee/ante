@@ -6,7 +6,9 @@ export interface Member {
   name: string
   type: MemberType
   org: string
+  emoji?: string
   status: MemberStatus
+  scopes?: string[]
   last_active_at?: string
   created_at: string
 }
@@ -14,6 +16,8 @@ export interface Member {
 export interface MemberDetail extends Member {
   scopes: string[]
   created_by?: string
+  token_prefix?: string
+  suspended_at?: string
 }
 
 export interface MemberCreateRequest {

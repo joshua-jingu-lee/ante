@@ -1,64 +1,97 @@
 import { useState } from 'react'
 import { useMembers, useMemberControl } from '../hooks/useMembers'
-import AgentTable from '../components/agents/AgentTable'
+import MemberCard from '../components/agents/MemberCard'
 import AgentRegisterForm from '../components/agents/AgentRegisterForm'
 import { TableSkeleton } from '../components/common/Skeleton'
-import type { MemberStatus } from '../types/member'
-
-const STATUS_FILTERS: { key: MemberStatus | 'all'; label: string }[] = [
-  { key: 'all', label: '전체' },
-  { key: 'active', label: 'active' },
-  { key: 'suspended', label: 'suspended' },
-  { key: 'revoked', label: 'revoked' },
-]
 
 export default function Agents() {
-  const [statusFilter, setStatusFilter] = useState<MemberStatus | 'all'>('all')
+  const [orgFilter, setOrgFilter] = useState<string>('all')
   const [showRegister, setShowRegister] = useState(false)
   const [createdToken, setCreatedToken] = useState<string | null>(null)
 
-  const { data: members, isLoading } = useMembers({
-    type: 'agent',
-    status: statusFilter === 'all' ? undefined : statusFilter,
-  })
+  const { data: allMembers, isLoading } = useMembers({})
+  const { data: humanMembers } = useMembers({ type: 'human' })
+  const { data: agentMembers } = useMembers({ type: 'agent' })
   const { suspend, reactivate, revoke } = useMemberControl()
+
+  const humans = humanMembers ?? []
+  const agents = agentMembers ?? []
+
+  // 소속 목록 추출
+  const allItems = allMembers ?? []
+  const orgs = Array.from(new Set(allItems.map((m) => m.org).filter(Boolean)))
+
+  const filterByOrg = (items: typeof allItems) =>
+    orgFilter === 'all' ? items : items.filter((m) => m.org === orgFilter)
 
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-1 bg-bg rounded-lg p-0.5">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setStatusFilter(f.key)}
-              className={`px-3.5 py-1.5 rounded text-[12px] font-medium border-none cursor-pointer ${
-                statusFilter === f.key ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:text-text'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <select
+            value={orgFilter}
+            onChange={(e) => setOrgFilter(e.target.value)}
+            className="bg-bg border border-border rounded-lg px-3 py-1.5 text-text text-[13px] cursor-pointer"
+          >
+            <option value="all">전체 소속</option>
+            {orgs.map((org) => (
+              <option key={org} value={org}>{org}</option>
+            ))}
+          </select>
         </div>
         <button
           onClick={() => setShowRegister(true)}
           className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
         >
-          에이전트 등록
+          멤버 등록
         </button>
       </div>
 
-      <div className="bg-surface border border-border rounded-lg p-5">
-        {isLoading ? (
-          <TableSkeleton rows={5} cols={5} />
-        ) : (
-          <AgentTable
-            items={members ?? []}
-            onSuspend={(id) => suspend.mutate(id)}
-            onReactivate={(id) => reactivate.mutate(id)}
-            onRevoke={(id) => { if (confirm('이 에이전트를 영구 폐기하시겠습니까?')) revoke.mutate(id) }}
-          />
-        )}
-      </div>
+      {isLoading ? (
+        <TableSkeleton rows={3} cols={3} />
+      ) : (
+        <>
+          {/* Human 멤버 섹션 */}
+          <div className="mb-8">
+            <div className="flex items-center gap-2 text-[15px] font-semibold text-text-muted mb-4">
+              Human 멤버
+              <span className="bg-border text-text text-[12px] font-medium px-2 py-0.5 rounded-full">{filterByOrg(humans).length}</span>
+            </div>
+            {filterByOrg(humans).length === 0 ? (
+              <div className="text-[13px] text-text-muted py-6 text-center">Human 멤버가 없습니다</div>
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+                {filterByOrg(humans).map((m) => (
+                  <MemberCard key={m.member_id} member={m} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Agent 멤버 섹션 */}
+          <div className="mb-8">
+            <div className="flex items-center gap-2 text-[15px] font-semibold text-text-muted mb-4">
+              Agent 멤버
+              <span className="bg-border text-text text-[12px] font-medium px-2 py-0.5 rounded-full">{filterByOrg(agents).length}</span>
+            </div>
+            {filterByOrg(agents).length === 0 ? (
+              <div className="text-[13px] text-text-muted py-6 text-center">Agent 멤버가 없습니다</div>
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+                {filterByOrg(agents).map((m) => (
+                  <MemberCard
+                    key={m.member_id}
+                    member={m}
+                    onSuspend={(id) => suspend.mutate(id)}
+                    onReactivate={(id) => reactivate.mutate(id)}
+                    onRevoke={(id) => { if (confirm('이 에이전트를 영구 폐기하시겠습니까?')) revoke.mutate(id) }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {showRegister && (
         <AgentRegisterForm
@@ -67,7 +100,6 @@ export default function Agents() {
         />
       )}
 
-      {/* 토큰 표시 모달 */}
       {createdToken && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
@@ -77,18 +109,8 @@ export default function Agents() {
               {createdToken}
             </div>
             <div className="flex justify-end gap-2">
-              <button
-                onClick={() => navigator.clipboard.writeText(createdToken)}
-                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
-              >
-                복사
-              </button>
-              <button
-                onClick={() => setCreatedToken(null)}
-                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover"
-              >
-                닫기
-              </button>
+              <button onClick={() => navigator.clipboard.writeText(createdToken)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">복사</button>
+              <button onClick={() => setCreatedToken(null)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">닫기</button>
             </div>
           </div>
         </div>
