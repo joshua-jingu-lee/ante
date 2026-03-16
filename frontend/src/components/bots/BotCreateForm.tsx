@@ -8,6 +8,7 @@ interface BotCreateFormProps {
 
 export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [botId, setBotId] = useState('')
+  const [name, setName] = useState('')
   const [strategyName, setStrategyName] = useState('')
   const [mode, setMode] = useState<BotMode>('paper')
   const [interval, setInterval] = useState('60')
@@ -20,6 +21,7 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
     createBot.mutate(
       {
         bot_id: botId,
+        name,
         strategy_name: strategyName,
         mode,
         interval_seconds: Number(interval),
@@ -35,6 +37,11 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
       <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto">
         <h2 className="text-[18px] font-bold mb-5">봇 생성</h2>
         <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">이름</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="모멘텀 돌파 봇" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
+            <div className="text-[11px] text-text-muted mt-1">대시보드에 표시되는 이름</div>
+          </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">봇 ID</label>
             <input value={botId} onChange={(e) => setBotId(e.target.value)} placeholder="bot-momentum-01" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
