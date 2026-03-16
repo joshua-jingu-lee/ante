@@ -30,6 +30,7 @@ build/
 # Frontend
 frontend/dist/
 frontend/node_modules/
+src/ante/web/static/
 
 # OS
 .DS_Store

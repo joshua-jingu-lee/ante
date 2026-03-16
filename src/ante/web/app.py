@@ -12,8 +12,19 @@ from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
 
-# frontend/dist/ 위치: 프로젝트 루트 기준
-_FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+# 프론트엔드 정적 파일 탐색 순서:
+# 1) 패키지 내장 (pip install ante 시 포함)
+# 2) 개발 환경 (frontend/dist/ 직접 빌드)
+_BUNDLED_DIR = Path(__file__).resolve().parent / "static"
+_DEV_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+
+def _get_frontend_dir() -> Path | None:
+    """프론트엔드 빌드 디렉토리를 탐색한다."""
+    for candidate in (_BUNDLED_DIR, _DEV_DIR):
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
 
 
 def create_app(**services: Any) -> FastAPI:
@@ -85,14 +96,14 @@ def create_app(**services: Any) -> FastAPI:
 
 
 def _mount_frontend(app: FastAPI) -> None:
-    """frontend/dist/ 정적 파일 서빙 + SPA fallback 설정."""
-    frontend_dir = _FRONTEND_DIR
-    index_html = frontend_dir / "index.html"
+    """프론트엔드 정적 파일 서빙 + SPA fallback 설정."""
+    frontend_dir = _get_frontend_dir()
 
-    if not frontend_dir.is_dir() or not index_html.is_file():
-        logger.info("프론트엔드 빌드 없음 (%s) — 정적 파일 서빙 비활성화", frontend_dir)
+    if frontend_dir is None:
+        logger.info("프론트엔드 빌드 없음 — 정적 파일 서빙 비활성화")
         return
 
+    index_html = frontend_dir / "index.html"
     logger.info("프론트엔드 정적 파일 서빙: %s", frontend_dir)
 
     # /assets/* 빌드 산출물 서빙 (Vite 번들)
