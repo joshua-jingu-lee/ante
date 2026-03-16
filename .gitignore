@@ -33,6 +33,9 @@ frontend/dist/
 frontend/node_modules/
 src/ante/web/static/
 
+# E2E test artifacts
+tests/e2e/screenshots/
+
 # OS
 .DS_Store
 Thumbs.db
