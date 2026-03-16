@@ -131,10 +131,10 @@ def _mount_frontend(app: FastAPI) -> None:
 
             # 404인 비-API 요청: 정적 파일이 있으면 반환, 없으면 index.html
             if response.status_code == 404:
+                from fastapi.responses import FileResponse
+
                 file_path = frontend_dir / path.lstrip("/")
                 if file_path.is_file():
-                    from fastapi.responses import FileResponse
-
                     return FileResponse(str(file_path))
                 return FileResponse(str(index_html))
 

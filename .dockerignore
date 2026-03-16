@@ -1,0 +1,35 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.coverage
+
+# Frontend (Stage 1에서 별도 빌드)
+frontend/node_modules/
+frontend/dist/
+
+# Runtime data
+data/
+db/
+
+# Secrets
+config/secrets.env
+.env
+
+# IDE / Docs
+.vscode/
+.idea/
+docs/
+.claude/
+CLAUDE.md
+AGENT.md
+
+# Tests
+tests/

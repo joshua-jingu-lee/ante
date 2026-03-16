@@ -1,0 +1,15 @@
+services:
+  ante:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config
+      - ante-data:/app/data
+      - ante-db:/app/db
+    env_file:
+      - config/secrets.env
+
+volumes:
+  ante-data:
+  ante-db:
