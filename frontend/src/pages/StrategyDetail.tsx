@@ -49,13 +49,19 @@ export default function StrategyDetail() {
       {/* 에쿼티 커브 */}
       <div className="bg-surface border border-border rounded-lg p-5 mb-6">
         <h3 className="text-[15px] font-semibold mb-3">자산 추이</h3>
-        <div className="h-[280px] bg-bg border border-dashed border-border rounded-lg flex items-center justify-center text-text-muted text-[13px]">
-          📈 에쿼티 커브 (TradingView Area Chart)
-        </div>
+        {!performance || performance.total_trades === 0 ? (
+          <div className="py-8 text-center text-text-muted text-[13px]">
+            아직 자산 추이 데이터가 없습니다
+          </div>
+        ) : (
+          <div className="h-[280px] bg-bg border border-dashed border-border rounded-lg flex items-center justify-center text-text-muted text-[13px]">
+            📈 에쿼티 커브 (TradingView Area Chart)
+          </div>
+        )}
       </div>
 
       {/* 성과 지표 */}
-      {performance && <PerformancePanel perf={performance} />}
+      <PerformancePanel perf={performance} />
 
       {/* 탭 */}
       <div className="flex gap-1 bg-bg rounded-lg p-0.5 mb-4 w-fit">

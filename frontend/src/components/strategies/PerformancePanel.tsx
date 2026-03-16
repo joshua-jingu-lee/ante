@@ -2,7 +2,20 @@ import HintTooltip from '../common/HintTooltip'
 import { formatPercent, formatNumber, formatKRW } from '../../utils/formatters'
 import type { StrategyPerformance } from '../../types/strategy'
 
-export default function PerformancePanel({ perf }: { perf: StrategyPerformance }) {
+export default function PerformancePanel({ perf }: { perf: StrategyPerformance | null | undefined }) {
+  const isEmpty = !perf || perf.total_trades === 0
+
+  if (isEmpty) {
+    return (
+      <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+        <h3 className="text-[15px] font-semibold mb-4">성과 지표</h3>
+        <div className="py-8 text-center text-text-muted text-[13px]">
+          아직 성과 데이터가 없습니다
+        </div>
+      </div>
+    )
+  }
+
   const metrics = [
     { label: '총 거래 수', value: formatNumber(perf.total_trades), hint: '전체 거래 횟수' },
     { label: '승률', value: formatPercent(perf.win_rate), hint: '수익 거래 비율' },
