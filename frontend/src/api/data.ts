@@ -10,8 +10,9 @@ export interface Dataset {
 }
 
 export interface StorageInfo {
-  total_size_bytes: number
-  dataset_count: number
+  total_bytes: number
+  total_mb: number
+  by_timeframe: Record<string, number>
 }
 
 export async function getDatasets(params?: {

@@ -7,6 +7,7 @@ import { TableSkeleton } from '../components/common/Skeleton'
 
 const LIMIT = 15
 const TF_OPTIONS = ['all', '1d', '1h', '1m'] as const
+const TF_LABELS: Record<string, string> = { '1d': '1일', '1h': '1시간', '1m': '1분' }
 
 export default function BacktestData() {
   const [search, setSearch] = useState('')
@@ -65,7 +66,7 @@ export default function BacktestData() {
                 timeframe === tf ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:text-text'
               }`}
             >
-              {tf === 'all' ? '전체' : tf}
+              {tf === 'all' ? '전체' : TF_LABELS[tf] ?? tf}
             </button>
           ))}
         </div>
@@ -96,7 +97,7 @@ export default function BacktestData() {
                     (data?.items ?? []).map((ds) => (
                       <tr key={ds.id} className="hover:bg-surface-hover">
                         <td className="px-3 py-3 border-b border-border text-[13px] font-mono font-medium">{ds.symbol}</td>
-                        <td className="px-3 py-3 border-b border-border text-[13px]">{ds.timeframe}</td>
+                        <td className="px-3 py-3 border-b border-border text-[13px]">{TF_LABELS[ds.timeframe] ?? ds.timeframe}</td>
                         <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{formatDate(ds.start_date)}</td>
                         <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{formatDate(ds.end_date)}</td>
                         <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatNumber(ds.row_count)}</td>
@@ -118,7 +119,12 @@ export default function BacktestData() {
             <div className="flex items-center justify-between pt-4">
               <span className="text-[12px] text-text-muted">
                 총 {formatNumber(data?.total ?? 0)}건
-                {storage && ` · ${(storage.total_size_bytes / 1024 / 1024).toFixed(1)} MB`}
+                {storage && ` · 전체 ${storage.total_mb >= 1024 ? `${(storage.total_mb / 1024).toFixed(1)} GB` : `${storage.total_mb.toFixed(1)} MB`}`}
+                {storage?.by_timeframe && Object.keys(storage.by_timeframe).length > 0 && (
+                  <> ({Object.entries(storage.by_timeframe).map(([tf, bytes], i) => (
+                    <span key={tf}>{i > 0 && ' · '}{TF_LABELS[tf] ?? tf}봉 {(bytes / 1024 / 1024).toFixed(0)} MB</span>
+                  ))})</>
+                )}
               </span>
               {(data?.total ?? 0) > LIMIT && (
                 <Pagination total={data?.total ?? 0} offset={offset} limit={LIMIT} onPageChange={setOffset} />
@@ -134,7 +140,7 @@ export default function BacktestData() {
           <div className="bg-surface border border-border rounded-lg p-6 w-[400px]">
             <h3 className="text-[18px] font-bold mb-4">데이터셋 삭제</h3>
             <p className="text-[13px] mb-2">
-              <span className="font-mono font-medium">{deleteTarget.symbol}</span> ({deleteTarget.timeframe}) 데이터를 삭제하시겠습니까?
+              <span className="font-mono font-medium">{deleteTarget.symbol}</span> ({TF_LABELS[deleteTarget.timeframe] ?? deleteTarget.timeframe}) 데이터를 삭제하시겠습니까?
             </p>
             <p className="text-[12px] text-warning mb-4">사용 중인 백테스트가 있을 수 있습니다.</p>
             <div className="flex justify-end gap-2 pt-4 border-t border-border">
