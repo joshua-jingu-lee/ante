@@ -3,6 +3,7 @@ export type BotMode = 'live' | 'paper'
 
 export interface Bot {
   bot_id: string
+  name: string
   strategy_name?: string
   status: BotStatus
   mode: BotMode
@@ -24,6 +25,7 @@ export interface BotLog {
 
 export interface BotCreateRequest {
   bot_id: string
+  name: string
   strategy_name: string
   mode: BotMode
   interval_seconds: number

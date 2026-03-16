@@ -26,7 +26,10 @@ export default function BotDetail() {
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-[20px] font-bold">{bot.bot_id}</h2>
+          <h2 className="text-[20px] font-bold">
+            {bot.name || bot.bot_id}
+            {bot.name && <span className="ml-2 text-[14px] font-normal text-text-muted font-mono">{bot.bot_id}</span>}
+          </h2>
           <div className="flex gap-3 items-center mt-1">
             <StatusBadge variant={STATUS_VARIANT[bot.status] as 'positive'}>
               {BOT_STATUS_LABELS[bot.status]}
