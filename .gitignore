@@ -20,6 +20,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.coverage
 
 # IDE
 .vscode/
