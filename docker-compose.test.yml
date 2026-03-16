@@ -1,0 +1,33 @@
+# E2E 테스트 전용 Docker Compose
+#
+# 사용법:
+#   docker compose -f docker-compose.test.yml up --build     # 테스트 환경 기동
+#   docker compose -f docker-compose.test.yml down -v         # 완전 정리 (볼륨 포함)
+#
+# CI에서:
+#   docker compose -f docker-compose.test.yml up --build -d   # 백그라운드 기동
+#   # ... E2E 테스트 실행 ...
+#   docker compose -f docker-compose.test.yml down -v         # 정리
+
+services:
+  ante-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTE_CONFIG_DIR=/app/config
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - e2e-data:/app/data
+      - e2e-db:/app/db
+
+volumes:
+  e2e-data:
+  e2e-db:
