@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.3.1 (2026-03-16)
+
+### Bug Fixes
+
+- **frontend**: 전략 상세 페이지 성과 데이터 없을 때 빈 상태 메시지 추가
+  ([`ea60387`](https://github.com/joshua-jingu-lee/ante/commit/ea60387b53d17b665790a828fc2ad3ce6d47e511))
+
+
 ## v0.2.0 (2026-03-16)
 
 ### Chores
