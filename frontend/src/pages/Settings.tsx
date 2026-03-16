@@ -1,51 +1,59 @@
 import { useState } from 'react'
 import { useSystemStatus, useKillSwitch, useConfigs, useUpdateConfig } from '../hooks/useSystemStatus'
-import { PageSkeleton, TableSkeleton } from '../components/common/Skeleton'
+import { PageSkeleton } from '../components/common/Skeleton'
 
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400)
-  const h = Math.floor((seconds % 86400) / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (d > 0) return `${d}일 ${h}시간 ${m}분`
-  if (h > 0) return `${h}시간 ${m}분`
-  return `${m}분`
-}
+/** 거래 설정 고정 항목 */
+const TRADING_CONFIGS = [
+  { key: 'risk.max_mdd_pct', label: '최대 낙폭 제한 (%)', desc: '이 비율 초과 시 거래 자동 중지 · 예: 15 → 고점 대비 15% 하락 시 정지' },
+  { key: 'risk.max_position_pct', label: '종목당 최대 비중 (%)', desc: '단일 종목에 투입 가능한 최대 예산 비율 · 예: 30 → 예산의 30%까지 한 종목에 투자' },
+  { key: 'rule.daily_loss_limit', label: '일일 손실 한도 (%)', desc: '일일 손실이 이 비율 초과 시 전체 거래 정지 · 예: 5 → 당일 손실 5% 초과 시 정지' },
+  { key: 'rule.max_exposure_percent', label: '총 노출 한도 (%)', desc: '잔고 대비 최대 투자 비율 · 예: 20 → 총 잔고의 20%까지만 투자' },
+  { key: 'rule.max_unrealized_loss', label: '미실현 손실 한도 (%)', desc: '배정 예산 대비 미실현 손실 초과 시 추가 매수 차단 · 예: 10 → 평가손실 10% 초과 시 매수 불가' },
+  { key: 'rule.max_trades_per_hour', label: '시간당 최대 거래 수', desc: '봇당 시간당 거래 횟수 제한 · 예: 10 → 봇 1개가 1시간에 최대 10회 거래' },
+  { key: 'rule.allowed_hours', label: '거래 허용 시간', desc: '장중 거래 허용 시간대 (KST) · 예: 09:00-15:30 → 오전 9시~오후 3시 30분만 거래' },
+  { key: 'bot.default_interval_sec', label: '봇 기본 실행 간격 (초)', desc: '봇 생성 시 기본값 (10~3600) · 예: 60 → 봇이 60초마다 전략 실행' },
+  { key: 'broker.commission_rate', label: '매매 수수료율 (%)', desc: '매수/매도 시 증권사 수수료 · 예: 0.015 → 100만원 거래 시 수수료 150원' },
+  { key: 'broker.sell_tax_rate', label: '매도 세금율 (%)', desc: '증권거래세 + 농특세 · 예: 0.23 → 100만원 매도 시 세금 2,300원' },
+]
 
-const CONFIG_HINTS: Record<string, string> = {
-  'risk.max_mdd_pct': '고점 대비 N% 하락 시 정지',
-  'risk.max_position_pct': '총 자산의 N%까지 한 종목 보유 가능',
-  'risk.max_daily_loss_pct': '당일 손실 N% 초과 시 당일 거래 중지',
-}
+/** 표시 및 알림 설정 */
+const DISPLAY_CONFIGS = [
+  { key: 'system.log_level', label: '시스템 로그 수준', desc: '로그 출력 상세도', type: 'select' as const, options: ['DEBUG', 'INFO', 'WARNING', 'ERROR'] },
+  { key: 'notification.telegram_level', label: '텔레그램 알림 수준', desc: '알림 발송 기준', type: 'select' as const, options: ['all', 'important', 'critical', 'off'] },
+  { key: 'notification.fill_alert', label: '체결 알림', desc: '매수/매도 체결 시 즉시 알림', type: 'toggle' as const },
+  { key: 'notification.daily_report', label: '일일 리포트', desc: '매일 장 마감 후 수익 요약 리포트', type: 'toggle' as const },
+]
 
 export default function Settings() {
   const { data: status, isLoading: statusLoading } = useSystemStatus()
   const killSwitch = useKillSwitch()
-  const { data: configs, isLoading: configLoading } = useConfigs()
+  const { data: configs } = useConfigs()
   const updateConfig = useUpdateConfig()
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [showKillConfirm, setShowKillConfirm] = useState(false)
+  const [showHaltModal, setShowHaltModal] = useState(false)
+  const [haltReason, setHaltReason] = useState('')
 
   if (statusLoading) return <PageSkeleton />
 
   const isActive = status?.trading_status === 'ACTIVE'
+  const configMap = new Map((configs ?? []).map((c) => [c.key, c.value]))
 
-  const handleKillSwitch = () => {
-    if (isActive) {
-      setShowKillConfirm(true)
-    } else {
-      killSwitch.mutate(false)
-    }
+  const getConfigValue = (key: string) => configMap.get(key) ?? ''
+
+  const handleHalt = () => {
+    killSwitch.mutate({ action: 'halt', reason: haltReason })
+    setShowHaltModal(false)
+    setHaltReason('')
   }
 
-  const confirmKill = () => {
-    killSwitch.mutate(true)
-    setShowKillConfirm(false)
+  const handleActivate = () => {
+    killSwitch.mutate({ action: 'activate' })
   }
 
-  const startEdit = (key: string, value: string) => {
+  const startEdit = (key: string) => {
     setEditingKey(key)
-    setEditValue(value)
+    setEditValue(getConfigValue(key))
   }
 
   const saveEdit = () => {
@@ -56,117 +64,177 @@ export default function Settings() {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {/* 좌측 — 시스템 상태 */}
-      <div className="space-y-6">
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        {/* 시스템 상태 */}
         <div className="bg-surface border border-border rounded-lg p-5">
           <h3 className="text-[15px] font-semibold mb-4">시스템 상태</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[13px]">거래 상태</div>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold mt-1 ${isActive ? 'bg-positive-bg text-positive' : 'bg-negative-bg text-negative'}`}>
-                  {isActive ? 'ACTIVE' : 'HALTED'}
-                </span>
-              </div>
+          {isActive ? (
+            <div className="flex items-center justify-between py-3">
+              <div className="text-[13px] text-text-muted">현재 모든 봇의 거래가 정상 운용 중입니다.</div>
               <button
-                onClick={handleKillSwitch}
-                className={`relative w-10 h-[22px] rounded-[11px] border-none cursor-pointer transition-colors ${isActive ? 'bg-positive' : 'bg-border'}`}
+                onClick={() => setShowHaltModal(true)}
+                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover whitespace-nowrap"
               >
-                <span className={`absolute top-[2px] w-[18px] h-[18px] bg-white rounded-full transition-transform ${isActive ? 'left-[20px]' : 'left-[2px]'}`} />
+                비상 거래 정지
               </button>
             </div>
-            <div className="flex justify-between py-2 border-t border-border text-[13px]">
-              <span className="text-text-muted">시스템 업타임</span>
-              <span>{status ? formatUptime(status.uptime_seconds) : '-'}</span>
-            </div>
-            <div className="flex justify-between py-2 border-t border-border text-[13px]">
-              <span className="text-text-muted">실행 중 봇</span>
-              <span>{status?.running_bots ?? 0}개</span>
-            </div>
-            <div className="flex justify-between py-2 border-t border-border text-[13px]">
-              <span className="text-text-muted">버전</span>
-              <span className="font-mono">{status?.version ?? '-'}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 우측 — 거래소 연결 */}
-      <div className="space-y-6">
-        <div className="bg-surface border border-border rounded-lg p-5">
-          <h3 className="text-[15px] font-semibold mb-4">거래소 연결</h3>
-          <div className="space-y-2">
-            <div className="flex justify-between py-2 border-b border-border text-[13px]">
-              <span className="text-text-muted">한국투자증권 API</span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-positive" />
-                연결됨
-              </span>
-            </div>
-            <div className="flex justify-between py-2 text-[13px]">
-              <span className="text-text-muted">모드</span>
-              <span>모의투자</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 하단 — 거래 설정 (전체 폭) */}
-      <div className="col-span-1 md:col-span-2">
-        <div className="bg-surface border border-border rounded-lg p-5">
-          <h3 className="text-[15px] font-semibold mb-4">거래 설정</h3>
-          {configLoading ? (
-            <TableSkeleton rows={3} cols={2} />
           ) : (
-            <div className="space-y-0">
-              {(configs ?? []).map((cfg) => (
-                <div key={cfg.key} className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
-                  <div>
-                    <div className="text-[13px] font-mono">{cfg.key}</div>
-                    <div className="text-[11px] text-text-muted mt-0.5">
-                      {CONFIG_HINTS[cfg.key] || cfg.description || ''}
-                    </div>
-                  </div>
-                  {editingKey === cfg.key ? (
-                    <div className="flex gap-2 items-center">
-                      <input
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        className="w-24 bg-bg border border-border rounded px-2 py-1 text-text text-[13px] focus:outline-none focus:border-primary"
-                        autoFocus
-                      />
-                      <button onClick={saveEdit} className="px-2.5 py-1 rounded text-[12px] bg-primary text-white border-none cursor-pointer">저장</button>
-                      <button onClick={() => setEditingKey(null)} className="px-2.5 py-1 rounded text-[12px] bg-transparent text-text-muted border border-border cursor-pointer">취소</button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => startEdit(cfg.key, cfg.value)}
-                      className="text-[13px] font-mono text-text bg-transparent border-none cursor-pointer hover:text-primary"
-                    >
-                      {cfg.value}
-                    </button>
-                  )}
-                </div>
-              ))}
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <div className="text-[13px] text-negative font-semibold">거래가 정지되었습니다</div>
+              </div>
+              <button
+                onClick={handleActivate}
+                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover whitespace-nowrap"
+              >
+                거래 재개
+              </button>
             </div>
           )}
         </div>
+
+        {/* 거래소 연결 */}
+        <div className="bg-surface border border-border rounded-lg p-5">
+          <h3 className="text-[15px] font-semibold mb-4">거래소 연결</h3>
+          <div className="space-y-0">
+            <div className="flex justify-between py-2.5 border-b border-border text-[13px]">
+              <span className="text-text-muted">이름</span>
+              <span>한국투자증권</span>
+            </div>
+            <div className="flex justify-between py-2.5 border-b border-border text-[13px]">
+              <span className="text-text-muted">거래 모드</span>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold bg-positive-bg text-primary">
+                {getConfigValue('broker.mode') || '모의투자'}
+              </span>
+            </div>
+            <div className="flex justify-between py-2.5 text-[13px]">
+              <span className="text-text-muted">계좌번호</span>
+              <span className="font-mono">{getConfigValue('broker.account_no') || '-'}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Kill Switch 확인 모달 */}
-      {showKillConfirm && (
+      {/* 거래 설정 */}
+      <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+        <h3 className="text-[15px] font-semibold mb-4">거래 설정</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">설정</th>
+                <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border w-[160px]">값</th>
+                <th className="text-right px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border w-[60px]"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {TRADING_CONFIGS.map((cfg) => (
+                <tr key={cfg.key} className="hover:bg-surface-hover">
+                  <td className="px-3 py-3 border-b border-border">
+                    <div className="text-[13px] font-medium">{cfg.label}</div>
+                    <div className="text-[11px] text-text-muted mt-0.5">{cfg.key} · {cfg.desc}</div>
+                  </td>
+                  <td className="px-3 py-3 border-b border-border">
+                    {editingKey === cfg.key ? (
+                      <input
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="w-full bg-bg border border-border rounded px-2 py-1 text-text text-[13px] font-mono focus:outline-none focus:border-primary"
+                        autoFocus
+                        onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
+                      />
+                    ) : (
+                      <span className="text-[13px] font-mono">{getConfigValue(cfg.key) || '-'}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 border-b border-border text-right">
+                    {editingKey === cfg.key ? (
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={saveEdit} className="px-2 py-1 rounded text-[11px] bg-primary text-white border-none cursor-pointer">저장</button>
+                        <button onClick={() => setEditingKey(null)} className="px-2 py-1 rounded text-[11px] bg-transparent text-text-muted border border-border cursor-pointer">취소</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => startEdit(cfg.key)} className="px-2.5 py-1 rounded text-[12px] bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">편집</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 표시 및 알림 */}
+      <div className="bg-surface border border-border rounded-lg p-5">
+        <h3 className="text-[15px] font-semibold mb-4">표시 및 알림</h3>
+        <div className="space-y-0">
+          {DISPLAY_CONFIGS.map((cfg) => (
+            <div key={cfg.key} className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
+              <div>
+                <div className="text-[13px] font-medium">{cfg.label}</div>
+                <div className="text-[12px] text-text-muted mt-0.5">{cfg.desc}</div>
+              </div>
+              {cfg.type === 'select' && (
+                <select
+                  value={getConfigValue(cfg.key) || cfg.options![1]}
+                  onChange={(e) => updateConfig.mutate({ key: cfg.key, value: e.target.value })}
+                  className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] cursor-pointer"
+                >
+                  {cfg.options!.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              )}
+              {cfg.type === 'toggle' && (
+                <button
+                  onClick={() => {
+                    const current = getConfigValue(cfg.key)
+                    updateConfig.mutate({ key: cfg.key, value: current === 'true' ? 'false' : 'true' })
+                  }}
+                  className={`relative w-10 h-[22px] rounded-[11px] border-none cursor-pointer transition-colors ${
+                    getConfigValue(cfg.key) === 'true' ? 'bg-positive' : 'bg-border'
+                  }`}
+                >
+                  <span className={`absolute top-[2px] w-[18px] h-[18px] bg-white rounded-full transition-transform ${
+                    getConfigValue(cfg.key) === 'true' ? 'left-[20px]' : 'left-[2px]'
+                  }`} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 비상 거래 정지 모달 */}
+      {showHaltModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
-          <div className="bg-surface border border-border rounded-lg p-6 w-[400px]">
-            <h3 className="text-[18px] font-bold mb-4">거래 중지 확인</h3>
-            <p className="text-[13px] text-negative mb-4">전체 거래가 중단됩니다. 모든 실행 중인 봇이 정지됩니다.</p>
+          <div className="bg-surface border border-border rounded-lg p-6 w-[440px]">
+            <h3 className="text-[18px] font-bold text-negative mb-4">비상 거래 정지</h3>
+            <p className="text-[13px] text-text-muted mb-4">
+              모든 봇의 거래가 즉시 중단됩니다.<br />
+              실행 중인 사이클이 완료된 후 정지되며, 보유 포지션은 유지됩니다.
+            </p>
+            <div className="mb-4">
+              <label className="block text-[12px] font-semibold text-text-muted mb-1.5">정지 사유</label>
+              <input
+                type="text"
+                value={haltReason}
+                onChange={(e) => setHaltReason(e.target.value)}
+                placeholder="예: 긴급 시장 변동"
+                className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] placeholder:text-text-muted focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="bg-warning-bg text-warning px-3 py-2.5 rounded text-[12px] mb-4">
+              ⚠ 이 작업은 실행 중인 모든 봇에 영향을 줍니다.
+            </div>
             <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => setShowKillConfirm(false)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-              <button onClick={confirmKill} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover">중지</button>
+              <button onClick={() => { setShowHaltModal(false); setHaltReason('') }} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
+              <button onClick={handleHalt} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover">거래 정지 확인</button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
