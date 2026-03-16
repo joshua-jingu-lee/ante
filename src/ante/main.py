@@ -208,30 +208,45 @@ async def main() -> None:
     logger.info("BotManager 초기화 완료")
 
     # ── 11. Broker + APIGateway ──────────────────────
-    from ante.broker import KISAdapter
     from ante.gateway import APIGateway
 
     broker = None
     api_gateway = None
 
     broker_config = config.get("broker", {})
-    try:
-        broker_config["app_key"] = config.secret("KIS_APP_KEY")
-        broker_config["app_secret"] = config.secret("KIS_APP_SECRET")
-        broker_config["account_no"] = config.secret("KIS_ACCOUNT_NO")
-    except Exception:
-        pass  # 비밀값 없으면 브로커 미사용
+    broker_type = (
+        broker_config.get("type", "kis") if isinstance(broker_config, dict) else "kis"
+    )
 
-    if broker_config.get("app_key"):
-        broker = KISAdapter(config=broker_config, eventbus=eventbus)
+    if broker_type == "mock":
+        from ante.broker.mock import MockBrokerAdapter
+
+        broker = MockBrokerAdapter(
+            broker_config if isinstance(broker_config, dict) else {}
+        )
+        await broker.connect()
+        logger.info("MockBrokerAdapter 연결 완료")
+    else:
+        from ante.broker import KISAdapter
+
         try:
-            await broker.connect()
-            logger.info(
-                "KISAdapter 연결 완료 (paper=%s)", broker_config.get("is_paper", True)
-            )
+            broker_config["app_key"] = config.secret("KIS_APP_KEY")
+            broker_config["app_secret"] = config.secret("KIS_APP_SECRET")
+            broker_config["account_no"] = config.secret("KIS_ACCOUNT_NO")
         except Exception:
-            logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
-            broker = None
+            pass  # 비밀값 없으면 브로커 미사용
+
+        if broker_config.get("app_key"):
+            broker = KISAdapter(config=broker_config, eventbus=eventbus)
+            try:
+                await broker.connect()
+                logger.info(
+                    "KISAdapter 연결 완료 (paper=%s)",
+                    broker_config.get("is_paper", True),
+                )
+            except Exception:
+                logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
+                broker = None
 
     if broker:
         api_gateway = APIGateway(broker=broker, eventbus=eventbus)
