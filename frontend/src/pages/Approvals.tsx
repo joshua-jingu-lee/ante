@@ -11,24 +11,33 @@ const LIMIT = 20
 export default function Approvals() {
   const [status, setStatus] = useState<ApprovalStatus | 'all'>('all')
   const [type, setType] = useState<ApprovalType | 'all'>('all')
+  const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
 
   const { data, isLoading } = useApprovals({ status, type, offset, limit: LIMIT })
+
+  const allItems = data?.items ?? []
+  const filtered = search
+    ? allItems.filter((item) => item.title.toLowerCase().includes(search.toLowerCase()))
+    : allItems
 
   return (
     <>
       <ApprovalFilters
         status={status}
         type={type}
+        search={search}
+        items={allItems}
         onStatusChange={(s) => { setStatus(s); setOffset(0) }}
         onTypeChange={(t) => { setType(t); setOffset(0) }}
+        onSearchChange={(q) => { setSearch(q); setOffset(0) }}
       />
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <TableSkeleton rows={5} cols={5} />
+          <TableSkeleton rows={5} cols={6} />
         ) : (
           <>
-            <ApprovalTable items={data?.items ?? []} />
+            <ApprovalTable items={filtered} />
             {(data?.total ?? 0) > LIMIT && (
               <Pagination
                 total={data?.total ?? 0}

@@ -21,12 +21,15 @@ export interface ApprovalDetail extends Approval {
 export interface StrategyReportDetail {
   strategy_name: string
   strategy_version: string
+  filepath?: string
   agent_summary: string
   agent_rationale: string
   agent_risks: string
   agent_recommendation: string
   backtest_start: string
   backtest_end: string
+  initial_capital?: number
+  final_capital?: number
   metrics: BacktestMetrics
   equity_curve: { date: string; value: number }[]
   drawdown: { date: string; value: number }[]

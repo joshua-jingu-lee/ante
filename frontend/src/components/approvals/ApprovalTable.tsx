@@ -29,13 +29,14 @@ export default function ApprovalTable({ items }: { items: Approval[] }) {
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">제목</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">요청자</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">요청일</th>
+            <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">처리일</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">상태</th>
           </tr>
         </thead>
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={5} className="px-3 py-8 text-center text-text-muted text-[13px]">결재 항목이 없습니다</td>
+              <td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">결재 항목이 없습니다</td>
             </tr>
           ) : (
             items.map((item) => {
@@ -52,6 +53,7 @@ export default function ApprovalTable({ items }: { items: Approval[] }) {
                   <td className="px-3 py-3 border-b border-border text-[13px]">{item.title}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{item.requester}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{formatDateTime(item.requested_at)}</td>
+                  <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{item.resolved_at ? formatDateTime(item.resolved_at) : '-'}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px]">
                     <StatusBadge variant={STATUS_VARIANT[item.status] as 'warning'}>
                       {APPROVAL_STATUS_LABELS[item.status] || item.status}
