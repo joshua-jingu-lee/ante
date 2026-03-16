@@ -46,8 +46,14 @@ SECRETS_ENV_TEMPLATE = """\
     default=None,
     help="설정 디렉토리 경로 (기본: ~/.config/ante/)",
 )
+@click.option(
+    "--seed",
+    is_flag=True,
+    default=False,
+    help="E2E 테스트용 시드 데이터 주입",
+)
 @click.pass_context
-def init(ctx: click.Context, target_dir: str | None) -> None:
+def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
     """설정 디렉토리 및 기본 설정 파일 생성."""
     fmt = get_formatter(ctx)
 
@@ -59,7 +65,7 @@ def init(ctx: click.Context, target_dir: str | None) -> None:
             existing.append("system.toml")
         if (config_path / "secrets.env").exists():
             existing.append("secrets.env")
-        if existing:
+        if existing and not seed:
             fmt.error(
                 f"설정 디렉토리가 이미 존재합니다: {config_path}\n"
                 f"  기존 파일: {', '.join(existing)}"
@@ -76,10 +82,26 @@ def init(ctx: click.Context, target_dir: str | None) -> None:
     if not secrets_env.exists():
         secrets_env.write_text(SECRETS_ENV_TEMPLATE)
 
+    created_files = ["system.toml", "secrets.env"]
+
+    if seed:
+        import asyncio
+
+        from tests.fixtures.seed.seeder import inject_seed_data
+
+        db_path = str(config_path / "db" / "ante.db")
+        (config_path / "db").mkdir(parents=True, exist_ok=True)
+        data_dir = str(config_path / "data")
+
+        result = asyncio.run(inject_seed_data(db_path, data_dir))
+        created_files.append("db/ante.db (시드 데이터)")
+        if result.get("parquet_path"):
+            created_files.append("data/ (샘플 OHLCV)")
+
     fmt.success(
         f"설정 초기화 완료: {config_path}",
         {
             "config_dir": str(config_path),
-            "files": ["system.toml", "secrets.env"],
+            "files": created_files,
         },
     )
