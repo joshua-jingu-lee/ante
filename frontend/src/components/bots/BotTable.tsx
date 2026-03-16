@@ -22,7 +22,7 @@ export default function BotTable({ items, onStart, onStop, onDelete }: BotTableP
       <table className="w-full border-collapse">
         <thead>
           <tr>
-            <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">ID</th>
+            <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">이름</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">전략</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">상태</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">유형</th>
@@ -35,7 +35,10 @@ export default function BotTable({ items, onStart, onStop, onDelete }: BotTableP
           ) : (
             items.map((bot) => (
               <tr key={bot.bot_id} onClick={() => navigate(`/bots/${bot.bot_id}`)} className="hover:bg-surface-hover cursor-pointer">
-                <td className="px-3 py-3 border-b border-border text-[13px] font-mono font-medium">{bot.bot_id}</td>
+                <td className="px-3 py-3 border-b border-border text-[13px] font-medium">
+                  <div>{bot.name || bot.bot_id}</div>
+                  {bot.name && <div className="text-[11px] text-text-muted font-mono">{bot.bot_id}</div>}
+                </td>
                 <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{bot.strategy_name || '-'}</td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">
                   <StatusBadge variant={STATUS_VARIANT[bot.status] as 'positive'}>{BOT_STATUS_LABELS[bot.status] || bot.status}</StatusBadge>
