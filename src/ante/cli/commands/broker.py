@@ -34,6 +34,12 @@ async def _create_broker():  # noqa: ANN202
         adapter = KISAdapter(broker_config)
         await adapter.connect()
         return adapter
+    elif broker_type == "mock":
+        from ante.broker.mock import MockBrokerAdapter
+
+        adapter = MockBrokerAdapter(broker_config)
+        await adapter.connect()
+        return adapter
     else:
         msg = f"지원하지 않는 브로커: {broker_type}"
         raise ValueError(msg)
