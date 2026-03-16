@@ -12,6 +12,7 @@ from ante.broker.exceptions import (
 )
 from ante.broker.kis import KISAdapter
 from ante.broker.kis_stream import KISStreamClient
+from ante.broker.mock import MockBrokerAdapter
 from ante.broker.models import CommissionInfo
 from ante.broker.order_registry import OrderRegistry
 
@@ -23,6 +24,7 @@ __all__ = [
     "CommissionInfo",
     "KISAdapter",
     "KISStreamClient",
+    "MockBrokerAdapter",
     "OrderRegistry",
     "BrokerError",
     "AuthenticationError",
