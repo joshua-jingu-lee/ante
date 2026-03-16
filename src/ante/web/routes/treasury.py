@@ -26,7 +26,64 @@ async def get_summary(request: Request) -> dict:
     treasury = getattr(request.app.state, "treasury", None)
     if treasury is None:
         raise HTTPException(status_code=503, detail="Treasury not available")
-    return treasury.get_summary()
+    summary = treasury.get_summary()
+    summary["commission_rate"] = getattr(treasury, "commission_rate", 0.00015)
+    summary["sell_tax_rate"] = getattr(treasury, "sell_tax_rate", 0.0023)
+    return summary
+
+
+@router.get("/transactions")
+async def list_transactions(
+    request: Request,
+    type: str | None = None,
+    bot_id: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> dict:
+    """자금 변동 이력 조회."""
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is None:
+        raise HTTPException(status_code=503, detail="Treasury not available")
+
+    db = getattr(treasury, "_db", None)
+    if db is None:
+        return {"items": [], "total": 0}
+
+    where_clauses: list[str] = []
+    params: list[str | int] = []
+
+    if type:
+        where_clauses.append("transaction_type = ?")
+        params.append(type)
+    if bot_id:
+        where_clauses.append("bot_id = ?")
+        params.append(bot_id)
+
+    where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    count_row = await db.fetch_one(
+        f"SELECT COUNT(*) as cnt FROM treasury_transactions{where_sql}",
+        tuple(params),
+    )
+    total = count_row["cnt"] if count_row else 0
+
+    query = (
+        f"SELECT * FROM treasury_transactions{where_sql}"
+        " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    )
+    rows = await db.fetch_all(query, (*params, limit, offset))
+    items = [
+        {
+            "id": r["id"],
+            "type": r["transaction_type"],
+            "bot_id": r["bot_id"],
+            "amount": r["amount"],
+            "description": r["description"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": total}
 
 
 @router.post("/bots/{bot_id}/allocate")

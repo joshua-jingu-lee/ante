@@ -1,22 +1,48 @@
-import { formatKRW } from '../../utils/formatters'
+import { formatKRW, formatPercent } from '../../utils/formatters'
 import type { TreasurySummary } from '../../types/treasury'
 
 export default function AccountSummary({ summary }: { summary: TreasurySummary }) {
-  const stats = [
-    { label: '총 잔고', value: formatKRW(summary.total_balance) },
-    { label: '할당됨', value: formatKRW(summary.allocated) },
-    { label: '미할당', value: formatKRW(summary.unallocated) },
-    { label: '예약됨', value: formatKRW(summary.reserved) },
-  ]
+  const profitColor = summary.total_profit_loss >= 0 ? 'text-positive' : 'text-negative'
+  const profitPercent = summary.total_evaluation > 0
+    ? summary.total_profit_loss / (summary.total_evaluation - summary.total_profit_loss)
+    : 0
 
   return (
-    <div className="grid grid-cols-4 gap-4 mb-6">
-      {stats.map((s) => (
-        <div key={s.label} className="bg-surface border border-border rounded-lg px-5 py-4">
-          <div className="text-[12px] text-text-muted mb-1">{s.label}</div>
-          <div className="text-[24px] font-bold">{s.value}</div>
+    <div className="bg-surface border border-border rounded-lg overflow-hidden mb-6">
+      {/* KIS 헤더 */}
+      <div className="flex items-center gap-4 px-5 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <span className="bg-primary text-white text-[11px] font-bold px-2 py-0.5 rounded">KIS</span>
+          <span className="text-[14px] font-semibold">한국투자증권</span>
         </div>
-      ))}
+        <div className="ml-auto flex items-center gap-4 text-[13px] text-text-muted">
+          <span>수수료 {(summary.commission_rate * 100).toFixed(3)}%</span>
+          <span>매도세 {(summary.sell_tax_rate * 100).toFixed(2)}%</span>
+        </div>
+      </div>
+
+      {/* 4개 통계 */}
+      <div className="grid grid-cols-4">
+        <div className="px-5 py-4">
+          <div className="text-[12px] text-text-muted mb-1">총 자산 평가</div>
+          <div className="text-[22px] font-bold">{formatKRW(summary.total_evaluation)}</div>
+        </div>
+        <div className="px-5 py-4">
+          <div className="text-[12px] text-text-muted mb-1">총 손익</div>
+          <div className={`text-[22px] font-bold ${profitColor}`}>{formatKRW(summary.total_profit_loss)}</div>
+          {profitPercent !== 0 && (
+            <div className={`text-[13px] ${profitColor}`}>({formatPercent(profitPercent)})</div>
+          )}
+        </div>
+        <div className="px-5 py-4">
+          <div className="text-[12px] text-text-muted mb-1">예수금</div>
+          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.account_balance)}</div>
+        </div>
+        <div className="px-5 py-4">
+          <div className="text-[12px] text-text-muted mb-1">매수가능금액</div>
+          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.purchasable_amount)}</div>
+        </div>
+      </div>
     </div>
   )
 }

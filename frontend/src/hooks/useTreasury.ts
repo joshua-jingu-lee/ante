@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getTreasurySummary, getBotBudgets, allocateBudget, deallocateBudget, getTreasuryHistory } from '../api/treasury'
+import { getTreasurySummary, getBotBudgets, allocateBudget, deallocateBudget, getTreasuryTransactions } from '../api/treasury'
 
 export function useTreasurySummary() {
   return useQuery({
@@ -35,9 +35,14 @@ export function useDeallocateBudget() {
   })
 }
 
-export function useTreasuryHistory(offset = 0, limit = 20) {
+export function useTreasuryTransactions(params: {
+  offset?: number
+  limit?: number
+  type?: string
+  bot_id?: string
+}) {
   return useQuery({
-    queryKey: ['treasury', 'history', offset, limit],
-    queryFn: () => getTreasuryHistory({ offset, limit }),
+    queryKey: ['treasury', 'transactions', params],
+    queryFn: () => getTreasuryTransactions(params),
   })
 }

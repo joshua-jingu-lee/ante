@@ -8,7 +8,7 @@ export async function getTreasurySummary(): Promise<TreasurySummary> {
 
 export async function getBotBudgets(): Promise<BotBudget[]> {
   const res = await client.get('/api/treasury/budgets')
-  return res.data
+  return res.data.budgets ?? res.data
 }
 
 export async function allocateBudget(botId: string, amount: number): Promise<void> {
@@ -19,10 +19,12 @@ export async function deallocateBudget(botId: string, amount: number): Promise<v
   await client.post(`/api/treasury/bots/${botId}/deallocate`, { amount })
 }
 
-export async function getTreasuryHistory(params: {
+export async function getTreasuryTransactions(params: {
   offset?: number
   limit?: number
+  type?: string
+  bot_id?: string
 }): Promise<{ items: TreasuryTransaction[]; total: number }> {
-  const res = await client.get('/api/audit', { params: { ...params, category: 'treasury' } })
+  const res = await client.get('/api/treasury/transactions', { params })
   return res.data
 }
