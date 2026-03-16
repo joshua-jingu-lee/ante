@@ -6,13 +6,13 @@ export async function getSystemStatus(): Promise<SystemStatus> {
   return res.data
 }
 
-export async function setKillSwitch(enabled: boolean): Promise<void> {
-  await client.post('/api/system/kill-switch', { enabled })
+export async function setKillSwitch(action: 'halt' | 'activate', reason?: string): Promise<void> {
+  await client.post('/api/system/kill-switch', { action, reason: reason ?? '' })
 }
 
 export async function getConfigs(): Promise<DynamicConfig[]> {
   const res = await client.get('/api/config')
-  return res.data
+  return res.data.configs ?? res.data
 }
 
 export async function updateConfig(key: string, value: string): Promise<void> {

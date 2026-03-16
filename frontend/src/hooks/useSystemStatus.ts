@@ -12,7 +12,8 @@ export function useSystemStatus() {
 export function useKillSwitch() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: setKillSwitch,
+    mutationFn: ({ action, reason }: { action: 'halt' | 'activate'; reason?: string }) =>
+      setKillSwitch(action, reason),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['system'] }),
   })
 }
