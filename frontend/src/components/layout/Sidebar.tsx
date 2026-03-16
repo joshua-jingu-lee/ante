@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { path: '/strategies', icon: '📈', label: '전략과 성과' },
   { path: '/bots', icon: '🤖', label: '봇 관리' },
   { path: '/backtest-data', icon: '📁', label: '백테스트 데이터' },
-  { path: '/agents', icon: '🧑‍💼', label: '에이전트 관리' },
+  { path: '/agents', icon: '🧑‍💼', label: '멤버 관리' },
 ]
 
 export default function Sidebar() {

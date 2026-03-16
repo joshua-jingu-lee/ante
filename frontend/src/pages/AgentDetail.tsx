@@ -36,14 +36,19 @@ export default function AgentDetail() {
     <>
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-[20px] font-bold">{member.name}</h2>
-          <div className="flex gap-3 items-center mt-1">
-            <span className="text-text-muted font-mono text-[13px]">{member.member_id}</span>
-            <span className="text-text-muted text-[13px]">{member.org}</span>
-            <StatusBadge variant={STATUS_VARIANT[member.status] as 'positive'}>
-              {MEMBER_STATUS_LABELS[member.status]}
-            </StatusBadge>
+        <div className="flex items-center gap-4">
+          <div className="w-[56px] h-[56px] rounded-full bg-surface border border-border flex items-center justify-center text-[28px] shrink-0">
+            {member.emoji || (member.type === 'human' ? '👤' : '🤖')}
+          </div>
+          <div>
+            <h2 className="text-[20px] font-bold font-mono">{member.member_id}</h2>
+            <div className="flex gap-3 items-center mt-1">
+              <span className="bg-border text-text text-[12px] font-medium px-2 py-0.5 rounded">{member.org}</span>
+              <span className="text-text-muted text-[13px]">{member.name}</span>
+              <StatusBadge variant={STATUS_VARIANT[member.status] as 'positive'}>
+                {MEMBER_STATUS_LABELS[member.status]}
+              </StatusBadge>
+            </div>
           </div>
         </div>
         <div className="flex gap-2">
@@ -59,6 +64,31 @@ export default function AgentDetail() {
         </div>
       </div>
 
+      {/* 기본 정보 카드 */}
+      <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+        <h3 className="text-[15px] font-semibold mb-3">기본 정보</h3>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-2">
+          <div className="flex justify-between py-2 border-b border-border text-[13px]">
+            <span className="text-text-muted">Agent ID</span>
+            <span className="font-mono">{member.member_id}</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-border text-[13px]">
+            <span className="text-text-muted">이름</span>
+            <span>{member.name}</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-border text-[13px]">
+            <span className="text-text-muted">소속</span>
+            <span>{member.org}</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-border text-[13px]">
+            <span className="text-text-muted">상태</span>
+            <StatusBadge variant={STATUS_VARIANT[member.status] as 'positive'}>
+              {MEMBER_STATUS_LABELS[member.status]}
+            </StatusBadge>
+          </div>
+        </div>
+      </div>
+
       {/* 토큰 관리 */}
       <div className="bg-surface border border-border rounded-lg p-5 mb-6">
         <div className="flex items-center justify-between mb-3">
@@ -71,6 +101,12 @@ export default function AgentDetail() {
             토큰 재발급
           </button>
         </div>
+        {member.token_prefix && (
+          <div className="flex justify-between py-2 border-b border-border text-[13px] mb-3">
+            <span className="text-text-muted">토큰 접두어</span>
+            <span className="font-mono">{member.token_prefix}****</span>
+          </div>
+        )}
         <p className="text-[12px] text-warning">기존 토큰이 즉시 무효화됩니다</p>
       </div>
 
@@ -122,6 +158,12 @@ export default function AgentDetail() {
             <span className="text-text-muted">생성자</span>
             <span>{member.created_by || '-'}</span>
           </div>
+          {member.suspended_at && (
+            <div className="flex justify-between py-2 border-b border-border text-[13px]">
+              <span className="text-text-muted">정지 시각</span>
+              <span>{formatDateTime(member.suspended_at)}</span>
+            </div>
+          )}
           <div className="flex justify-between py-2 text-[13px]">
             <span className="text-text-muted">마지막 활동</span>
             <span>{member.last_active_at ? formatDateTime(member.last_active_at) : '-'}</span>
