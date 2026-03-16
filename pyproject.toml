@@ -17,6 +17,9 @@ dependencies = [
     "websockets>=13.0",
 ]
 
+[project.scripts]
+ante = "ante.cli.main:cli"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
