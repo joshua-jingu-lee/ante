@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useBots, useBotControl } from '../hooks/useBots'
 import BotTable from '../components/bots/BotTable'
 import BotCreateForm from '../components/bots/BotCreateForm'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { TableSkeleton } from '../components/common/Skeleton'
 import type { BotStatus } from '../types/bot'
 
 const STATUS_FILTERS: { key: BotStatus | 'all'; label: string }[] = [
@@ -48,7 +48,7 @@ export default function Bots() {
 
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <LoadingSpinner />
+          <TableSkeleton rows={5} cols={4} />
         ) : (
           <BotTable
             items={items}

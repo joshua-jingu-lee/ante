@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMembers, useMemberControl } from '../hooks/useMembers'
 import AgentTable from '../components/agents/AgentTable'
 import AgentRegisterForm from '../components/agents/AgentRegisterForm'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { TableSkeleton } from '../components/common/Skeleton'
 import type { MemberStatus } from '../types/member'
 
 const STATUS_FILTERS: { key: MemberStatus | 'all'; label: string }[] = [
@@ -49,7 +49,7 @@ export default function Agents() {
 
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <LoadingSpinner />
+          <TableSkeleton rows={5} cols={5} />
         ) : (
           <AgentTable
             items={members ?? []}

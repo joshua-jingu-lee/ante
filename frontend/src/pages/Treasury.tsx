@@ -3,13 +3,13 @@ import { useTreasurySummary, useBotBudgets } from '../hooks/useTreasury'
 import AccountSummary from '../components/treasury/AccountSummary'
 import BudgetTable from '../components/treasury/BudgetTable'
 import AllocationForm from '../components/treasury/AllocationForm'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { PageSkeleton } from '../components/common/Skeleton'
 
 export default function Treasury() {
   const { data: summary, isLoading: summaryLoading } = useTreasurySummary()
   const { data: budgets, isLoading: budgetsLoading } = useBotBudgets()
 
-  if (summaryLoading || budgetsLoading) return <LoadingSpinner />
+  if (summaryLoading || budgetsLoading) return <PageSkeleton />
 
   const botIds = (budgets ?? []).map((b) => b.bot_id)
 

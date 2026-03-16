@@ -12,4 +12,18 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          router: ['react-router-dom'],
+          query: ['@tanstack/react-query'],
+        },
+      },
+    },
+    target: 'es2020',
+    sourcemap: false,
+    chunkSizeWarningLimit: 500,
+  },
 })

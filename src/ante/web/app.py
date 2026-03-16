@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+logger = logging.getLogger(__name__)
+
+# frontend/dist/ 위치: 프로젝트 루트 기준
+_FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 
 def create_app(**services: Any) -> FastAPI:
@@ -70,4 +78,55 @@ def create_app(**services: Any) -> FastAPI:
 
     register_exception_handlers(app)
 
+    # 프론트엔드 정적 파일 서빙 (빌드 결과물이 존재할 때만)
+    _mount_frontend(app)
+
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """frontend/dist/ 정적 파일 서빙 + SPA fallback 설정."""
+    frontend_dir = _FRONTEND_DIR
+    index_html = frontend_dir / "index.html"
+
+    if not frontend_dir.is_dir() or not index_html.is_file():
+        logger.info("프론트엔드 빌드 없음 (%s) — 정적 파일 서빙 비활성화", frontend_dir)
+        return
+
+    logger.info("프론트엔드 정적 파일 서빙: %s", frontend_dir)
+
+    # /assets/* 빌드 산출물 서빙 (Vite 번들)
+    assets_dir = frontend_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(assets_dir)),
+            name="frontend-assets",
+        )
+
+    # SPA fallback middleware: /api 외 404 → index.html
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import Response
+
+    class SPAFallbackMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: StarletteRequest, call_next: Any) -> Response:
+            response = await call_next(request)
+            path = request.url.path
+
+            # API 경로는 그대로 반환
+            if path.startswith("/api"):
+                return response
+
+            # 404인 비-API 요청: 정적 파일이 있으면 반환, 없으면 index.html
+            if response.status_code == 404:
+                file_path = frontend_dir / path.lstrip("/")
+                if file_path.is_file():
+                    from fastapi.responses import FileResponse
+
+                    return FileResponse(str(file_path))
+                return FileResponse(str(index_html))
+
+            return response
+
+    app.add_middleware(SPAFallbackMiddleware)

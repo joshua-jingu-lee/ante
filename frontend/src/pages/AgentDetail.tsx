@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMemberDetail, useMemberControl } from '../hooks/useMembers'
 import StatusBadge from '../components/common/StatusBadge'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { PageSkeleton } from '../components/common/Skeleton'
 import { formatDateTime } from '../utils/formatters'
 import { MEMBER_STATUS_LABELS } from '../utils/constants'
 import { ALL_SCOPES, type MemberStatus } from '../types/member'
@@ -19,7 +19,7 @@ export default function AgentDetail() {
   const [editingScopes, setEditingScopes] = useState(false)
   const [scopesDraft, setScopesDraft] = useState<string[]>([])
 
-  if (isLoading) return <LoadingSpinner />
+  if (isLoading) return <PageSkeleton />
   if (!member) return <div className="text-text-muted text-center py-12">에이전트를 찾을 수 없습니다</div>
 
   const startEditScopes = () => {

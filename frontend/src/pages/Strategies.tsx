@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useStrategies } from '../hooks/useStrategies'
 import StrategyTable from '../components/strategies/StrategyTable'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { TableSkeleton } from '../components/common/Skeleton'
 import type { StrategyStatus } from '../types/strategy'
 
 const STATUS_FILTERS: { key: StrategyStatus | 'all'; label: string }[] = [
@@ -35,7 +35,7 @@ export default function Strategies() {
         ))}
       </div>
       <div className="bg-surface border border-border rounded-lg p-5">
-        {isLoading ? <LoadingSpinner /> : <StrategyTable items={filtered} />}
+        {isLoading ? <TableSkeleton rows={5} cols={5} /> : <StrategyTable items={filtered} />}
       </div>
     </>
   )
