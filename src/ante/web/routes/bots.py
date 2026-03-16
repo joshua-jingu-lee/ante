@@ -93,7 +93,21 @@ async def get_bot(request: Request, bot_id: str) -> dict:
     if bot is None:
         raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
 
-    return {"bot": bot.get_info()}
+    info = bot.get_info()
+
+    # 전략 정보 추가
+    registry = getattr(request.app.state, "strategy_registry", None)
+    if registry is not None:
+        record = await registry.get(info.get("strategy_id", ""))
+        if record:
+            info["strategy"] = {
+                "name": record.name,
+                "version": record.version,
+                "author": record.author,
+                "description": record.description,
+            }
+
+    return {"bot": info}
 
 
 @router.post("/{bot_id}/start")
