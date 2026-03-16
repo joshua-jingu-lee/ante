@@ -1,0 +1,36 @@
+name: "[refactor] 리팩터링 / 성능 개선"
+description: 코드 개선 또는 성능 최적화
+labels: ["refactor"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 현재 코드의 문제점과 개선 동기.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 변경 범위
+      description: 영향받는 모듈, 파일 목록.
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: 접근 방법
+      description: 어떻게 개선할 것인지 (구체적 전략).
+
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 리팩터링 완료
+        - [ ] 기존 테스트 전체 통과
+        - [ ] 성능 개선 시: 개선 수치 측정
+    validations:
+      required: true
