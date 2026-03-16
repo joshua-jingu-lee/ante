@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useStrategyDetail, useStrategyPerformance, useStrategyTrades } from '../hooks/useStrategies'
 import PerformancePanel from '../components/strategies/PerformancePanel'
 import StatusBadge from '../components/common/StatusBadge'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { PageSkeleton } from '../components/common/Skeleton'
 import { formatKRW, formatDateTime } from '../utils/formatters'
 import { STRATEGY_STATUS_LABELS } from '../utils/constants'
 import type { StrategyStatus } from '../types/strategy'
@@ -23,7 +23,7 @@ export default function StrategyDetail() {
   const { data: performance } = useStrategyPerformance(numId)
   const { data: tradesData } = useStrategyTrades(numId)
 
-  if (isLoading) return <LoadingSpinner />
+  if (isLoading) return <PageSkeleton />
   if (!strategy) return <div className="text-text-muted text-center py-12">전략을 찾을 수 없습니다</div>
 
   return (

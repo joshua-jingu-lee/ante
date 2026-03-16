@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
 import { formatNumber, formatDate } from '../utils/formatters'
 import Pagination from '../components/common/Pagination'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { TableSkeleton } from '../components/common/Skeleton'
 
 const LIMIT = 15
 const TF_OPTIONS = ['all', '1d', '1h', '1m'] as const
@@ -74,7 +74,7 @@ export default function BacktestData() {
       {/* 테이블 */}
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <LoadingSpinner />
+          <TableSkeleton rows={5} cols={6} />
         ) : (
           <>
             <div className="overflow-x-auto">

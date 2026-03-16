@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useApprovals, useUpdateApprovalStatus } from '../../hooks/useApprovals'
 import { formatDateTime } from '../../utils/formatters'
 import StatusBadge from '../common/StatusBadge'
-import LoadingSpinner from '../common/LoadingSpinner'
+import { TableSkeleton } from '../common/Skeleton'
 import type { Approval, ApprovalType } from '../../types/approval'
 
 const TYPE_LABELS: Record<ApprovalType, { label: string; variant: string }> = {
@@ -41,7 +41,7 @@ export default function PendingApprovals() {
       </div>
 
       {isLoading ? (
-        <LoadingSpinner />
+        <TableSkeleton rows={3} cols={4} />
       ) : items.length === 0 ? (
         <div className="py-8 text-center text-text-muted text-[13px]">승인 대기 건이 없습니다</div>
       ) : (

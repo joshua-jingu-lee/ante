@@ -51,8 +51,8 @@ export default function Header() {
   }, [])
 
   return (
-    <header className="fixed top-0 left-sidebar right-0 h-header bg-surface border-b border-border flex items-center justify-between px-6 z-[100]">
-      <div className="flex items-center gap-4">
+    <header className="fixed top-0 left-0 md:left-sidebar right-0 h-header bg-surface border-b border-border flex items-center justify-between px-4 md:px-6 z-[100]">
+      <div className="flex items-center gap-4 ml-10 md:ml-0">
         {showBack && (
           <button
             onClick={() => navigate(-1)}
@@ -64,8 +64,8 @@ export default function Header() {
         <h1 className="text-[16px] font-semibold">{title}</h1>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5 text-[12px] text-text-muted">
+      <div className="flex items-center gap-2 md:gap-4">
+        <div className="hidden sm:flex items-center gap-1.5 text-[12px] text-text-muted">
           <span
             className={`w-2 h-2 rounded-full ${
               systemStatus?.trading_status === 'ACTIVE' ? 'bg-positive' : 'bg-negative'
@@ -80,7 +80,7 @@ export default function Header() {
             className="flex items-center gap-2 px-2.5 py-1 rounded-lg cursor-pointer text-[13px] text-text-muted bg-transparent border-none hover:bg-surface-hover hover:text-text"
           >
             <span className="text-[22px] leading-none mt-0.5">🦁</span>
-            <span>{user?.member_id ?? '...'} · {user?.role === 'master' ? '대표' : user?.role}</span>
+            <span className="hidden sm:inline">{user?.member_id ?? '...'} · {user?.role === 'master' ? '대표' : user?.role}</span>
           </button>
 
           {menuOpen && (

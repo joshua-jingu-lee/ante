@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import ErrorBoundary from './components/common/ErrorBoundary'
+import ToastContainer from './components/common/Toast'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import Layout from './components/layout/Layout'
 import Login from './pages/Login'
@@ -16,6 +18,7 @@ import BacktestData from './pages/BacktestData'
 import Agents from './pages/Agents'
 import AgentDetail from './pages/AgentDetail'
 import Settings from './pages/Settings'
+import NotFound from './pages/NotFound'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,34 +31,38 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="approvals" element={<Approvals />} />
-            <Route path="approvals/:id" element={<ApprovalDetail />} />
-            <Route path="treasury" element={<Treasury />} />
-            <Route path="treasury/history" element={<TreasuryHistory />} />
-            <Route path="strategies" element={<Strategies />} />
-            <Route path="strategies/:id" element={<StrategyDetail />} />
-            <Route path="bots" element={<Bots />} />
-            <Route path="bots/:id" element={<BotDetail />} />
-            <Route path="backtest-data" element={<BacktestData />} />
-            <Route path="agents" element={<Agents />} />
-            <Route path="agents/:id" element={<AgentDetail />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ToastContainer />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="approvals" element={<Approvals />} />
+              <Route path="approvals/:id" element={<ApprovalDetail />} />
+              <Route path="treasury" element={<Treasury />} />
+              <Route path="treasury/history" element={<TreasuryHistory />} />
+              <Route path="strategies" element={<Strategies />} />
+              <Route path="strategies/:id" element={<StrategyDetail />} />
+              <Route path="bots" element={<Bots />} />
+              <Route path="bots/:id" element={<BotDetail />} />
+              <Route path="backtest-data" element={<BacktestData />} />
+              <Route path="agents" element={<Agents />} />
+              <Route path="agents/:id" element={<AgentDetail />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="*" element={<NotFound />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }

@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useBotDetail, useBotControl } from '../hooks/useBots'
 import StatusBadge from '../components/common/StatusBadge'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { PageSkeleton } from '../components/common/Skeleton'
 import { formatKRW, formatDateTime } from '../utils/formatters'
 import { BOT_STATUS_LABELS } from '../utils/constants'
 import type { BotStatus } from '../types/bot'
@@ -15,7 +15,7 @@ export default function BotDetail() {
   const { data: bot, isLoading } = useBotDetail(id!)
   const { start, stop } = useBotControl()
 
-  if (isLoading) return <LoadingSpinner />
+  if (isLoading) return <PageSkeleton />
   if (!bot) return <div className="text-text-muted text-center py-12">봇을 찾을 수 없습니다</div>
 
   const canStart = bot.status === 'stopped' || bot.status === 'created'

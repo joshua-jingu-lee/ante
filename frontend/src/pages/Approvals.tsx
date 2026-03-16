@@ -3,7 +3,7 @@ import { useApprovals } from '../hooks/useApprovals'
 import ApprovalFilters from '../components/approvals/ApprovalFilters'
 import ApprovalTable from '../components/approvals/ApprovalTable'
 import Pagination from '../components/common/Pagination'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { TableSkeleton } from '../components/common/Skeleton'
 import type { ApprovalStatus, ApprovalType } from '../types/approval'
 
 const LIMIT = 20
@@ -25,7 +25,7 @@ export default function Approvals() {
       />
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <LoadingSpinner />
+          <TableSkeleton rows={5} cols={5} />
         ) : (
           <>
             <ApprovalTable items={data?.items ?? []} />

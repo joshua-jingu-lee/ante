@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTreasuryHistory } from '../hooks/useTreasury'
 import { formatKRW, formatDateTime } from '../utils/formatters'
 import Pagination from '../components/common/Pagination'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { TableSkeleton } from '../components/common/Skeleton'
 
 const LIMIT = 20
 
@@ -14,7 +14,7 @@ export default function TreasuryHistory() {
     <div className="bg-surface border border-border rounded-lg p-5">
       <h3 className="text-[15px] font-semibold mb-4">자금 거래 이력</h3>
       {isLoading ? (
-        <LoadingSpinner />
+        <TableSkeleton rows={5} cols={5} />
       ) : (
         <>
           <div className="overflow-x-auto">

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSystemStatus, useKillSwitch, useConfigs, useUpdateConfig } from '../hooks/useSystemStatus'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { PageSkeleton, TableSkeleton } from '../components/common/Skeleton'
 
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -26,7 +26,7 @@ export default function Settings() {
   const [editValue, setEditValue] = useState('')
   const [showKillConfirm, setShowKillConfirm] = useState(false)
 
-  if (statusLoading) return <LoadingSpinner />
+  if (statusLoading) return <PageSkeleton />
 
   const isActive = status?.trading_status === 'ACTIVE'
 
@@ -56,7 +56,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {/* 좌측 — 시스템 상태 */}
       <div className="space-y-6">
         <div className="bg-surface border border-border rounded-lg p-5">
@@ -113,11 +113,11 @@ export default function Settings() {
       </div>
 
       {/* 하단 — 거래 설정 (전체 폭) */}
-      <div className="col-span-2">
+      <div className="col-span-1 md:col-span-2">
         <div className="bg-surface border border-border rounded-lg p-5">
           <h3 className="text-[15px] font-semibold mb-4">거래 설정</h3>
           {configLoading ? (
-            <LoadingSpinner />
+            <TableSkeleton rows={3} cols={2} />
           ) : (
             <div className="space-y-0">
               {(configs ?? []).map((cfg) => (

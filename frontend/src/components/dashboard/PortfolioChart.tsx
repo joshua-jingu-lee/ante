@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { usePortfolioValue, usePortfolioHistory } from '../../hooks/usePortfolio'
 import { formatKRW, formatPercent } from '../../utils/formatters'
 import type { Period } from '../../types/portfolio'
-import LoadingSpinner from '../common/LoadingSpinner'
+import { ChartSkeleton } from '../common/Skeleton'
 
 const PERIODS: { key: Period; label: string }[] = [
   { key: '1d', label: '1일' },
@@ -58,7 +58,7 @@ export default function PortfolioChart() {
       </div>
 
       {historyLoading ? (
-        <LoadingSpinner />
+        <ChartSkeleton />
       ) : history && history.length > 0 ? (
         <div className="h-[280px] bg-bg border border-dashed border-border rounded-lg flex items-center justify-center text-text-muted text-[13px]">
           📈 자산 추이 차트 (TradingView Area Chart) — {history.length}개 데이터 포인트

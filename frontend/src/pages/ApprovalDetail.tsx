@@ -3,7 +3,7 @@ import { useApprovalDetail } from '../hooks/useApprovals'
 import ReviewControls from '../components/approvals/ReviewControls'
 import BacktestMetricsPanel from '../components/approvals/BacktestMetrics'
 import StatusBadge from '../components/common/StatusBadge'
-import LoadingSpinner from '../components/common/LoadingSpinner'
+import { PageSkeleton } from '../components/common/Skeleton'
 import { formatDate } from '../utils/formatters'
 import { APPROVAL_STATUS_LABELS } from '../utils/constants'
 import type { ApprovalStatus } from '../types/approval'
@@ -18,7 +18,7 @@ export default function ApprovalDetail() {
   const { id } = useParams<{ id: string }>()
   const { data: approval, isLoading } = useApprovalDetail(Number(id))
 
-  if (isLoading) return <LoadingSpinner />
+  if (isLoading) return <PageSkeleton />
   if (!approval) return <div className="text-text-muted text-center py-12">결재 항목을 찾을 수 없습니다</div>
 
   const detail = approval.detail
@@ -55,7 +55,7 @@ export default function ApprovalDetail() {
       )}
 
       {/* 전략 정보 + 백테스트 요약 */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-surface border border-border rounded-lg p-5">
           <h3 className="text-[15px] font-semibold mb-3">전략 정보</h3>
           <div className="space-y-2">
@@ -120,7 +120,7 @@ export default function ApprovalDetail() {
 
       {/* 차트 */}
       {detail && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-surface border border-border rounded-lg p-5">
             <h3 className="text-[15px] font-semibold mb-3">자산 추이</h3>
             <div className="h-[200px] bg-bg border border-dashed border-border rounded-lg flex items-center justify-center text-text-muted text-[13px]">
