@@ -5,6 +5,7 @@ export interface Strategy {
   name: string
   version: string
   status: StrategyStatus
+  author?: string
   bot_id?: string
   cumulative_return?: number
   created_at: string

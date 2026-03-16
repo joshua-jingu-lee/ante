@@ -67,6 +67,7 @@ async def list_strategies(
                 "status": r.status.value
                 if hasattr(r.status, "value")
                 else str(r.status),
+                "author": r.author,
                 "bot_id": bot_info["bot_id"] if bot_info else None,
                 "bot_status": bot_info["status"] if bot_info else None,
             }

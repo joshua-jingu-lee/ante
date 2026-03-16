@@ -21,6 +21,7 @@ export default function StrategyTable({ items }: { items: Strategy[] }) {
           <tr>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">전략명</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">버전</th>
+            <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">제출자</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">상태</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">실행 봇</th>
             <th className="text-right px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">누적 수익률</th>
@@ -28,12 +29,13 @@ export default function StrategyTable({ items }: { items: Strategy[] }) {
         </thead>
         <tbody>
           {items.length === 0 ? (
-            <tr><td colSpan={5} className="px-3 py-8 text-center text-text-muted text-[13px]">등록된 전략이 없습니다</td></tr>
+            <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">등록된 전략이 없습니다</td></tr>
           ) : (
             items.map((s) => (
               <tr key={s.id} onClick={() => navigate(`/strategies/${s.id}`)} className="hover:bg-surface-hover cursor-pointer">
                 <td className="px-3 py-3 border-b border-border text-[13px] font-medium">{s.name}</td>
                 <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{s.version}</td>
+                <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{s.author || '-'}</td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">
                   <StatusBadge variant={STATUS_VARIANT[s.status] as 'positive'}>{STRATEGY_STATUS_LABELS[s.status] || s.status}</StatusBadge>
                 </td>
