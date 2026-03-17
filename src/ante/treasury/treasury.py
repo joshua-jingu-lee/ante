@@ -80,6 +80,7 @@ class Treasury:
             str, tuple[str, float]
         ] = {}  # order_id → (bot_id, amount)
         self._sync_task: asyncio.Task[None] | None = None
+        self._last_synced_at: datetime | None = None
 
     async def initialize(self) -> None:
         """스키마 생성 + DB 복원 + EventBus 구독."""
@@ -133,6 +134,10 @@ class Treasury:
     @property
     def sell_tax_rate(self) -> float:
         return self._sell_tax_rate
+
+    @property
+    def last_synced_at(self) -> datetime | None:
+        return self._last_synced_at
 
     def set_bot_status_checker(self, checker: Callable[[str], str]) -> None:
         """봇 상태 확인 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
@@ -488,6 +493,8 @@ class Treasury:
         self._external_purchase_amount = external_purchase
         self._external_eval_amount = external_eval
         await self._save_state()
+
+        self._last_synced_at = datetime.now(UTC)
 
         # 3) 이벤트 발행
         await self._eventbus.publish(

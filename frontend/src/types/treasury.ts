@@ -6,6 +6,10 @@ export interface TreasurySummary {
   total_profit_loss: number
   commission_rate: number
   sell_tax_rate: number
+  // KIS 계좌 헤더 (선택)
+  account_no?: string
+  is_virtual?: boolean
+  synced_at?: string
   // Ante 관리자산
   total_allocated: number
   total_reserved: number
