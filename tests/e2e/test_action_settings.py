@@ -173,9 +173,9 @@ class TestConfigEdit:
         configs = _api_get_config(api_url)
         cfg = _find_config(configs, "broker.commission_rate")
         assert cfg is not None, "broker.commission_rate 설정을 API에서 찾을 수 없음"
-        assert (
-            str(cfg["value"]) == "0.020"
-        ), f"API 반환 값이 예상과 다름: {cfg['value']}"
+        assert str(cfg["value"]) == "0.020", (
+            f"API 반환 값이 예상과 다름: {cfg['value']}"
+        )
 
 
 # ── 킬 스위치 (ACTIVE → HALTED) ──────────────────────
@@ -260,9 +260,9 @@ class TestKillSwitchHalt:
     ) -> None:
         """정지 후 API 조회 시 trading_status가 HALTED임을 확인한다."""
         status = _api_get_system_status(api_url)
-        assert (
-            status["trading_status"] == "HALTED"
-        ), f"API 반환 상태가 HALTED가 아님: {status['trading_status']}"
+        assert status["trading_status"] == "HALTED", (
+            f"API 반환 상태가 HALTED가 아님: {status['trading_status']}"
+        )
 
 
 # ── 킬 스위치 (HALTED → ACTIVE) ──────────────────────
@@ -310,9 +310,9 @@ class TestKillSwitchResume:
     ) -> None:
         """재개 후 API 조회 시 trading_status가 ACTIVE임을 확인한다."""
         status = _api_get_system_status(api_url)
-        assert (
-            status["trading_status"] == "ACTIVE"
-        ), f"API 반환 상태가 ACTIVE가 아님: {status['trading_status']}"
+        assert status["trading_status"] == "ACTIVE", (
+            f"API 반환 상태가 ACTIVE가 아님: {status['trading_status']}"
+        )
 
 
 # ── 알림 토글 ─────────────────────────────────────────
@@ -368,9 +368,9 @@ class TestNotificationToggle:
         assert cfg_after is not None, "notification.daily_report 설정이 없음"
         value_after = cfg_after["value"]
 
-        assert str(value_before) != str(
-            value_after
-        ), f"토글 후 값이 변경되지 않음: before={value_before}, after={value_after}"
+        assert str(value_before) != str(value_after), (
+            f"토글 후 값이 변경되지 않음: before={value_before}, after={value_after}"
+        )
 
     def test_fill_alert_toggle_changes_state(
         self, authenticated_page: Page, base_url: str, api_url: str
@@ -401,6 +401,6 @@ class TestNotificationToggle:
         assert cfg_after is not None, "notification.fill_alert 설정이 없음"
         value_after = cfg_after["value"]
 
-        assert str(value_before) != str(
-            value_after
-        ), f"토글 후 값이 변경되지 않음: before={value_before}, after={value_after}"
+        assert str(value_before) != str(value_after), (
+            f"토글 후 값이 변경되지 않음: before={value_before}, after={value_after}"
+        )
