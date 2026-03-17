@@ -531,8 +531,10 @@ class TestDataCatalog:
 class TestRetentionPolicy:
     def test_default_retention_days(self, store):
         policy = RetentionPolicy(store)
-        assert policy.retention_days["1m"] == 90
+        assert policy.retention_days["1m"] == 365
+        assert policy.retention_days["5m"] == 365
         assert policy.retention_days["1d"] == 3650
+        assert policy.retention_days["fundamental"] == -1
 
     def test_custom_retention_days(self, store):
         custom = {"1m": 30, "1d": 100}
@@ -563,6 +565,16 @@ class TestRetentionPolicy:
         deleted = await policy.enforce(now=now)
 
         # 2026-03 데이터는 15일 전이므로 삭제 안 됨
+        assert deleted == {}
+        result = await store.read("005930", "1m")
+        assert len(result) == 5
+
+    async def test_enforce_skips_negative_retention(self, store):
+        """보존 기간이 -1(무기한)이면 삭제하지 않는다."""
+        await store.write("005930", "1m", _make_ohlcv_df())
+        policy = RetentionPolicy(store, retention_days={"1m": -1})
+        now = datetime(2099, 1, 1, tzinfo=UTC)
+        deleted = await policy.enforce(now=now)
         assert deleted == {}
         result = await store.read("005930", "1m")
         assert len(result) == 5

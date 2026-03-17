@@ -14,14 +14,16 @@ class RetentionPolicy:
     """데이터 보존 정책 — 오래된 데이터 삭제로 용량 관리.
 
     타임프레임별로 보존 기간을 설정하고, 초과된 데이터를 자동 삭제한다.
+    -1은 무기한 보존을 의미한다.
     """
 
     DEFAULT_RETENTION: dict[str, int] = {
-        "1m": 90,  # 1분봉: 90일
-        "5m": 180,  # 5분봉: 180일
-        "15m": 365,  # 15분봉: 1년
-        "1h": 365,  # 1시간봉: 1년
+        "1m": 365,  # 1분봉: 365일
+        "5m": 365,  # 5분봉: 365일
+        "15m": 365,  # 15분봉: 365일
+        "1h": 365,  # 1시간봉: 365일
         "1d": 3650,  # 일봉: 10년
+        "fundamental": -1,  # 재무데이터: 무기한
     }
 
     def __init__(
@@ -51,6 +53,10 @@ class RetentionPolicy:
         deleted: dict[str, int] = {}
 
         for tf, max_days in self._retention.items():
+            # -1이면 무기한 보존 → 스킵
+            if max_days < 0:
+                continue
+
             count = 0
             symbols = self._store.list_symbols(tf)
 
