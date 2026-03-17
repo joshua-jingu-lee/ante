@@ -1,6 +1,11 @@
 import { formatKRW, formatPercent } from '../../utils/formatters'
 import type { TreasurySummary } from '../../types/treasury'
 
+function formatSyncTime(isoString: string): string {
+  const date = new Date(isoString)
+  return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+}
+
 export default function AccountSummary({ summary }: { summary: TreasurySummary }) {
   const profitColor = summary.total_profit_loss >= 0 ? 'text-positive' : 'text-negative'
   const profitPercent = summary.total_evaluation > 0
@@ -15,9 +20,21 @@ export default function AccountSummary({ summary }: { summary: TreasurySummary }
           <span className="bg-primary text-white text-[11px] font-bold px-2 py-0.5 rounded">KIS</span>
           <span className="text-[14px] font-semibold">한국투자증권</span>
         </div>
+        {summary.account_number && (
+          <span className="text-[13px] font-mono">{summary.account_number}</span>
+        )}
+        <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${summary.is_demo_trading ? 'bg-warning-bg text-warning' : 'bg-positive-bg text-positive'}`}>
+          {summary.is_demo_trading ? '모의투자' : '실전투자'}
+        </span>
         <div className="ml-auto flex items-center gap-4 text-[13px] text-text-muted">
           <span>수수료 {(summary.commission_rate * 100).toFixed(3)}%</span>
           <span>매도세 {(summary.sell_tax_rate * 100).toFixed(2)}%</span>
+          {summary.last_sync_time && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-positive inline-block" />
+              동기화 {formatSyncTime(summary.last_sync_time)}
+            </span>
+          )}
         </div>
       </div>
 

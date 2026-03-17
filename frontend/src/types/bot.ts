@@ -7,6 +7,7 @@ export interface Bot {
   strategy_name?: string
   status: BotStatus
   mode: BotMode
+  interval_seconds?: number
   created_at: string
 }
 
@@ -17,12 +18,29 @@ export interface BotStrategy {
   description: string
 }
 
+export interface BotBudgetDetail {
+  allocated: number
+  spent: number
+  reserved: number
+  available: number
+}
+
+export interface BotPosition {
+  symbol: string
+  quantity: number
+  avg_entry_price: number
+  current_price?: number
+  realized_pnl: number
+}
+
 export interface BotDetail extends Bot {
   interval_seconds: number
   symbols: string[]
   allocated_budget: number
   logs: BotLog[]
   strategy?: BotStrategy
+  budget?: BotBudgetDetail
+  positions?: BotPosition[]
 }
 
 export interface BotLog {

@@ -50,3 +50,19 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+/* Bot icon running animations */
+@keyframes border-glow {
+  0%, 100% { box-shadow: inset 0 0 2px rgba(255, 255, 255, 0.1); }
+  50% { box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.3); }
+}
+
+@keyframes antenna-pulse {
+  0%, 100% { opacity: 0.3; filter: drop-shadow(0 0 0px #fff); }
+  50% { opacity: 1; filter: drop-shadow(0 0 8px #fff); }
+}
+
+@keyframes eye-glow {
+  0%, 100% { fill: var(--color-surface); filter: drop-shadow(0 0 0px #fff); }
+  50% { fill: #fff; filter: drop-shadow(0 0 6px #fff); }
+}
