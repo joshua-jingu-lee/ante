@@ -6,6 +6,41 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class ValidationResult:
+    """4계층 데이터 검증 결과를 담는 데이터클래스.
+
+    각 검증 계층(전송/구문/스키마/비즈니스)이 생성하며,
+    경고와 오류를 분리하여 보고한다.
+    """
+
+    passed: bool
+    """검증 통과 여부. errors가 비어있으면 True."""
+
+    warnings: list[str] = field(default_factory=list)
+    """경고 메시지 목록 (비즈니스 규칙 위반 등, 저장은 허용)."""
+
+    errors: list[str] = field(default_factory=list)
+    """오류 메시지 목록 (스키마 위반 등, 저장 불가)."""
+
+    def merge(self, other: ValidationResult) -> ValidationResult:
+        """다른 ValidationResult를 병합하여 새 결과를 반환한다.
+
+        Args:
+            other: 병합할 검증 결과.
+
+        Returns:
+            병합된 검증 결과. errors가 하나라도 있으면 passed=False.
+        """
+        merged_warnings = self.warnings + other.warnings
+        merged_errors = self.errors + other.errors
+        return ValidationResult(
+            passed=len(merged_errors) == 0,
+            warnings=merged_warnings,
+            errors=merged_errors,
+        )
+
+
+@dataclass
 class CollectionResult:
     """수집 작업의 집계 결과를 담는 데이터클래스.
 
