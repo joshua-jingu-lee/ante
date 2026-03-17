@@ -96,5 +96,21 @@ async def reset_seed(
     scenario_content = scenario_sql.read_text(encoding="utf-8")
     await db.execute_script(scenario_content)
 
+    # 5. 메모리 기반 매니저 리로드
+    await _reload_managers(request)
+
     logger.info("시드 리셋 완료: scenario=%s", scenario)
     return {"ok": True, "scenario": scenario}
+
+
+async def _reload_managers(request: Request) -> None:
+    """시딩 후 메모리 기반 매니저들을 DB에서 리로드한다."""
+    # BotManager
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is not None:
+        await bot_manager.load_from_db()
+
+    # Treasury (budget 리로드)
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is not None and hasattr(treasury, "load_from_db"):
+        await treasury.load_from_db()

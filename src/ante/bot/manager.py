@@ -69,6 +69,59 @@ class BotManager:
                 logger.info("잔존 전략 스냅샷 %d건 정리", cleaned)
         logger.info("BotManager 초기화 완료")
 
+    async def load_from_db(self) -> int:
+        """DB에서 봇 설정을 읽어 메모리에 로드한다 (테스트용).
+
+        deleted 상태가 아닌 모든 봇을 읽어 stub Bot 인스턴스를 생성한다.
+        기존 메모리 상태는 초기화된다. 반환값은 로드된 봇 수.
+        """
+        from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+        # NullStrategy: 실제 전략 실행 없이 봇 인스턴스만 생성하기 위한 스텁
+        class _NullStrategy(Strategy):
+            meta = StrategyMeta(name="null", version="0.0.0", description="test stub")
+
+            async def on_step(self, context: dict) -> list[Signal]:  # type: ignore[override]
+                return []
+
+        # NullContext: StrategyContext 없이 Bot을 생성하기 위한 스텁
+        class _NullContext:
+            def __init__(self, bot_id: str) -> None:
+                self.bot_id = bot_id
+
+        self._bots.clear()
+
+        rows = await self._db.fetch_all(
+            "SELECT bot_id, name, strategy_id, bot_type, config_json, status"
+            " FROM bots WHERE status != 'deleted'"
+        )
+
+        for row in rows:
+            config_data = json.loads(row["config_json"]) if row["config_json"] else {}
+            config = BotConfig(
+                bot_id=row["bot_id"],
+                strategy_id=row["strategy_id"],
+                name=row["name"] or config_data.get("name", row["bot_id"]),
+                bot_type=row["bot_type"] or "live",
+                interval_seconds=config_data.get("interval_seconds", 60),
+            )
+            bot = Bot(
+                config=config,
+                strategy_cls=_NullStrategy,
+                ctx=_NullContext(config.bot_id),  # type: ignore[arg-type]
+                eventbus=self._eventbus,
+            )
+            # DB에 저장된 상태로 복원
+            status_str = row["status"]
+            try:
+                bot.status = BotStatus(status_str)
+            except ValueError:
+                bot.status = BotStatus.CREATED
+            self._bots[config.bot_id] = bot
+
+        logger.info("DB에서 봇 %d건 로드", len(self._bots))
+        return len(self._bots)
+
     def _subscribe_events(self) -> None:
         """시스템 이벤트 구독."""
         from ante.eventbus.events import (
