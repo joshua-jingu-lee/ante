@@ -29,6 +29,27 @@ async def get_summary(request: Request) -> dict:
     summary = treasury.get_summary()
     summary["commission_rate"] = getattr(treasury, "commission_rate", 0.00015)
     summary["sell_tax_rate"] = getattr(treasury, "sell_tax_rate", 0.0023)
+
+    # KIS 계좌 헤더 정보
+    config = getattr(request.app.state, "config", None)
+    if config is not None:
+        try:
+            account_no = config.secret("KIS_ACCOUNT_NO")
+            # "1234567801" → "12345678-01" 포맷 변환
+            if account_no and len(account_no) == 10:
+                summary["account_no"] = f"{account_no[:8]}-{account_no[8:]}"
+            elif account_no:
+                summary["account_no"] = account_no
+        except Exception:
+            pass
+        broker_config = config.get("broker", {})
+        if isinstance(broker_config, dict):
+            summary["is_virtual"] = broker_config.get("is_paper", True)
+
+    last_synced = getattr(treasury, "last_synced_at", None)
+    if last_synced is not None:
+        summary["synced_at"] = last_synced.isoformat()
+
     return summary
 
 
