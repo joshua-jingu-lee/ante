@@ -17,6 +17,7 @@ import BotDetail from './pages/BotDetail'
 import BacktestData from './pages/BacktestData'
 import Agents from './pages/Agents'
 import AgentDetail from './pages/AgentDetail'
+import ReportDetail from './pages/ReportDetail'
 import Settings from './pages/Settings'
 import NotFound from './pages/NotFound'
 
@@ -53,6 +54,7 @@ export default function App() {
               <Route path="strategies/:id" element={<StrategyDetail />} />
               <Route path="bots" element={<Bots />} />
               <Route path="bots/:id" element={<BotDetail />} />
+              <Route path="reports/:id" element={<ReportDetail />} />
               <Route path="backtest-data" element={<BacktestData />} />
               <Route path="members" element={<Agents />} />
               <Route path="members/:id" element={<AgentDetail />} />
