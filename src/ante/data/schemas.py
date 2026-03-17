@@ -13,6 +13,7 @@ OHLCV_SCHEMA: dict[str, type[pl.DataType]] = {
     "low": pl.Float64,
     "close": pl.Float64,
     "volume": pl.Int64,
+    "amount": pl.Int64,
     "source": pl.Utf8,
 }
 

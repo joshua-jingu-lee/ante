@@ -62,6 +62,12 @@ class BaseNormalizer(ABC):
                 df = df.with_columns(pl.col(col).cast(pl.Float64))
         if "volume" in df.columns:
             df = df.with_columns(pl.col("volume").cast(pl.Int64))
+        if "amount" in df.columns:
+            df = df.with_columns(pl.col("amount").cast(pl.Int64))
+
+        # amount 컬럼 (없으면 null로 채움)
+        if "amount" not in df.columns:
+            df = df.with_columns(pl.lit(None).cast(pl.Int64).alias("amount"))
 
         # source 컬럼
         if "source" not in df.columns:
