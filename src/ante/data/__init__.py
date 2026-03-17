@@ -4,6 +4,7 @@ from ante.data.collector import DataCollector
 from ante.data.injector import DataInjector
 from ante.data.normalizer import (
     BaseNormalizer,
+    DARTNormalizer,
     DataGoKrNormalizer,
     DataNormalizer,
     DefaultNormalizer,
@@ -25,6 +26,7 @@ from ante.data.store import ParquetStore
 
 __all__ = [
     "BaseNormalizer",
+    "DARTNormalizer",
     "DataCollector",
     "DataGoKrNormalizer",
     "DataInjector",

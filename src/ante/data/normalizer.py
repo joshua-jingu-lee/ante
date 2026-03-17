@@ -253,6 +253,229 @@ class DataGoKrNormalizer(BaseNormalizer):
         return df.select(available)
 
 
+# ── DART 재무제표 Normalizer ─────────────────────────
+
+# DART 계정과목명 → FUNDAMENTAL_SCHEMA 필드 매핑
+_DART_ACCOUNT_MAP: dict[str, str] = {
+    "매출액": "revenue",
+    "수익(매출액)": "revenue",
+    "당기순이익": "net_income",
+    "당기순이익(손실)": "net_income",
+    "자본총계": "total_equity",
+    "부채총계": "total_debt",
+    "자산총계": "total_assets",
+}
+
+# DART reprt_code → (분기, 월) 매핑
+_REPRT_CODE_MAP: dict[str, tuple[str, int]] = {
+    "11013": ("1Q", 3),
+    "11012": ("semi", 6),
+    "11014": ("3Q", 9),
+    "11011": ("annual", 12),
+}
+
+
+class DARTNormalizer:
+    """DART API 재무제표 응답을 FUNDAMENTAL_SCHEMA로 정규화.
+
+    DART 응답은 계정과목별 행(row-per-account) 구조이므로
+    종목별 컬럼 구조로 피벗 변환한다.
+
+    파생 지표(PER/PBR/EPS/BPS/ROE/부채비율)는 계산하지 않는다.
+    이들은 orchestrator가 data.go.kr 데이터와 결합하여 계산한다.
+    """
+
+    @property
+    def source_name(self) -> str:
+        """데이터 소스 식별자."""
+        return "dart"
+
+    def normalize(
+        self,
+        df: pl.DataFrame,
+        corp_code_map: dict[str, str],
+    ) -> pl.DataFrame:
+        """DART 재무제표 DataFrame을 정규화.
+
+        Args:
+            df: DART API 원본 응답 DataFrame.
+                필수 컬럼: corp_code, account_nm,
+                thstrm_amount, fs_div, reprt_code, bsns_year
+            corp_code_map: corp_code -> symbol 매핑
+                (예: {"00126380": "005930"}).
+
+        Returns:
+            FUNDAMENTAL_SCHEMA 부분 컬럼을 가진 DataFrame.
+            포함: date, symbol, revenue, net_income,
+            total_equity, total_debt, total_assets, source.
+        """
+        from ante.data.schemas import FUNDAMENTAL_COLUMNS
+
+        empty_schema = {
+            "date": pl.Date,
+            "symbol": pl.Utf8,
+            "source": pl.Utf8,
+        }
+
+        if df.is_empty():
+            return pl.DataFrame(schema=empty_schema)
+
+        required_cols = {
+            "corp_code",
+            "account_nm",
+            "thstrm_amount",
+            "fs_div",
+            "reprt_code",
+            "bsns_year",
+        }
+        missing = required_cols - set(df.columns)
+        if missing:
+            msg = f"DART DataFrame에 필수 컬럼이 없습니다: {missing}"
+            raise ValueError(msg)
+
+        # 매핑 대상 계정과목만 필터링
+        target_accounts = list(_DART_ACCOUNT_MAP.keys())
+        df = df.filter(pl.col("account_nm").is_in(target_accounts))
+
+        if df.is_empty():
+            return pl.DataFrame(schema=empty_schema)
+
+        # CFS(연결재무제표) 우선, OFS(개별재무제표) 폴백
+        df = self._select_fs_div(df)
+
+        # corp_code → symbol 매핑
+        df = df.with_columns(
+            pl.col("corp_code")
+            .replace_strict(corp_code_map, default=None)
+            .alias("symbol")
+        )
+        # 매핑 실패 행 제거
+        df = df.filter(pl.col("symbol").is_not_null())
+
+        if df.is_empty():
+            return pl.DataFrame(schema=empty_schema)
+
+        # reprt_code + bsns_year → date 변환
+        df = self._convert_report_date(df)
+
+        # thstrm_amount 콤마 제거 + 숫자 변환
+        df = df.with_columns(
+            pl.col("thstrm_amount")
+            .cast(pl.Utf8)
+            .str.replace_all(",", "")
+            .cast(pl.Int64, strict=False)
+            .alias("amount_value")
+        )
+
+        # 계정과목명 → 필드명 매핑
+        df = df.with_columns(
+            pl.col("account_nm")
+            .replace_strict(_DART_ACCOUNT_MAP, default=None)
+            .alias("field_name")
+        )
+        df = df.filter(pl.col("field_name").is_not_null())
+
+        if df.is_empty():
+            return pl.DataFrame(schema=empty_schema)
+
+        # 피벗: 행(계정과목별) → 열(종목별 필드)
+        pivoted = df.pivot(
+            on="field_name",
+            index=["symbol", "date"],
+            values="amount_value",
+            aggregate_function="first",
+        )
+
+        # source 컬럼 추가
+        pivoted = pivoted.with_columns(pl.lit("dart").alias("source"))
+
+        # 출력 컬럼 선택
+        fundamental_cols = set(FUNDAMENTAL_COLUMNS)
+        extra_cols = {
+            "total_equity",
+            "total_debt",
+            "total_assets",
+        }
+        select_cols: list[str] = [
+            col
+            for col in pivoted.columns
+            if col in fundamental_cols or col in extra_cols
+        ]
+
+        result = pivoted.select(select_cols)
+
+        # 숫자 컬럼 타입 강제
+        int_fields = {
+            "revenue",
+            "net_income",
+            "total_equity",
+            "total_debt",
+            "total_assets",
+        }
+        for col in int_fields:
+            if col in result.columns:
+                result = result.with_columns(pl.col(col).cast(pl.Int64, strict=False))
+
+        return result.sort("symbol", "date")
+
+    def _select_fs_div(self, df: pl.DataFrame) -> pl.DataFrame:
+        """CFS(연결) 우선, 없으면 OFS(개별) 폴백.
+
+        corp_code + reprt_code 기준으로 CFS 데이터가 있으면
+        CFS만, CFS가 없는 조합은 OFS를 사용한다.
+        """
+        cfs = df.filter(pl.col("fs_div") == "CFS")
+        ofs = df.filter(pl.col("fs_div") == "OFS")
+
+        if cfs.is_empty():
+            return ofs
+        if ofs.is_empty():
+            return cfs
+
+        # CFS가 있는 (corp_code, reprt_code) 조합
+        cfs_keys = cfs.select("corp_code", "reprt_code").unique()
+
+        # OFS 중 CFS가 없는 조합만 추출
+        ofs_fallback = ofs.join(
+            cfs_keys,
+            on=["corp_code", "reprt_code"],
+            how="anti",
+        )
+
+        return pl.concat([cfs, ofs_fallback])
+
+    def _convert_report_date(self, df: pl.DataFrame) -> pl.DataFrame:
+        """reprt_code + bsns_year → date 컬럼 변환.
+
+        reprt_code 매핑:
+        - 11013 → 1Q (3월 말)
+        - 11012 → semi (6월 말)
+        - 11014 → 3Q (9월 말)
+        - 11011 → annual (12월 말)
+        """
+        from calendar import monthrange
+        from datetime import date as date_cls
+
+        def _to_date(reprt_code: str, bsns_year: str) -> date_cls | None:
+            mapping = _REPRT_CODE_MAP.get(reprt_code)
+            if mapping is None:
+                return None
+            _, month = mapping
+            year = int(bsns_year)
+            day = monthrange(year, month)[1]
+            return date_cls(year, month, day)
+
+        dates: list[date_cls | None] = []
+        for rc, by in zip(
+            df["reprt_code"].to_list(),
+            df["bsns_year"].to_list(),
+        ):
+            dates.append(_to_date(str(rc), str(by)))
+
+        df = df.with_columns(pl.Series("date", dates, dtype=pl.Date))
+        return df.filter(pl.col("date").is_not_null())
+
+
 # ── Normalizer 레지스트리 ────────────────────────────
 
 NORMALIZER_REGISTRY: dict[str, type[BaseNormalizer]] = {
@@ -261,6 +484,11 @@ NORMALIZER_REGISTRY: dict[str, type[BaseNormalizer]] = {
     "default": DefaultNormalizer,
     "external": DefaultNormalizer,
     "data_go_kr": DataGoKrNormalizer,
+}
+
+# DARTNormalizer는 BaseNormalizer(OHLCV)와 다른 스키마이므로 별도 등록
+DART_NORMALIZER_REGISTRY: dict[str, type[DARTNormalizer]] = {
+    "dart": DARTNormalizer,
 }
 
 

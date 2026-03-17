@@ -836,3 +836,268 @@ class TestRetentionPolicy:
         policy = RetentionPolicy(store)
         deleted = await policy.enforce()
         assert deleted == {}
+
+
+# ── DARTNormalizer 테스트 ─────────────────────────────
+
+
+def _make_dart_df(
+    corp_codes: list[str] | None = None,
+    accounts: list[str] | None = None,
+    amounts: list[str] | None = None,
+    fs_divs: list[str] | None = None,
+    reprt_codes: list[str] | None = None,
+    bsns_years: list[str] | None = None,
+) -> pl.DataFrame:
+    """테스트용 DART API 응답 DataFrame 생성."""
+    if corp_codes is None:
+        corp_codes = ["00126380"] * 5
+    if accounts is None:
+        accounts = [
+            "매출액",
+            "당기순이익",
+            "자본총계",
+            "부채총계",
+            "자산총계",
+        ]
+    if amounts is None:
+        amounts = [
+            "1,000,000",
+            "200,000",
+            "500,000",
+            "300,000",
+            "800,000",
+        ]
+    if fs_divs is None:
+        fs_divs = ["CFS"] * 5
+    if reprt_codes is None:
+        reprt_codes = ["11011"] * 5
+    if bsns_years is None:
+        bsns_years = ["2025"] * 5
+
+    return pl.DataFrame(
+        {
+            "corp_code": corp_codes,
+            "account_nm": accounts,
+            "thstrm_amount": amounts,
+            "fs_div": fs_divs,
+            "reprt_code": reprt_codes,
+            "bsns_year": bsns_years,
+        }
+    )
+
+
+class TestDARTNormalizer:
+    """DARTNormalizer 단위 테스트."""
+
+    @pytest.fixture
+    def dart_normalizer(self):
+        from ante.data.normalizer import DARTNormalizer
+
+        return DARTNormalizer()
+
+    @pytest.fixture
+    def corp_code_map(self) -> dict[str, str]:
+        return {
+            "00126380": "005930",
+            "00164742": "000660",
+        }
+
+    def test_source_name(self, dart_normalizer):
+        assert dart_normalizer.source_name == "dart"
+
+    def test_normalize_basic(self, dart_normalizer, corp_code_map):
+        """기본 정규화: 5개 계정과목 -> 피벗된 1행."""
+        df = _make_dart_df()
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        assert len(result) == 1
+        assert "symbol" in result.columns
+        assert "date" in result.columns
+        assert "source" in result.columns
+        assert result["symbol"][0] == "005930"
+        assert result["source"][0] == "dart"
+        assert result["revenue"][0] == 1_000_000
+        assert result["net_income"][0] == 200_000
+        assert result["total_equity"][0] == 500_000
+        assert result["total_debt"][0] == 300_000
+        assert result["total_assets"][0] == 800_000
+
+    def test_normalize_comma_removal(self, dart_normalizer, corp_code_map):
+        """thstrm_amount 콤마 제거 후 숫자 변환."""
+        df = _make_dart_df(amounts=["1,234,567,890"] * 5)
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["revenue"][0] == 1_234_567_890
+
+    def test_normalize_reprt_code_1q(self, dart_normalizer, corp_code_map):
+        """reprt_code 11013 -> 1Q (3월 말)."""
+        from datetime import date
+
+        df = _make_dart_df(
+            reprt_codes=["11013"] * 5,
+            bsns_years=["2025"] * 5,
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["date"][0] == date(2025, 3, 31)
+
+    def test_normalize_reprt_code_semi(self, dart_normalizer, corp_code_map):
+        """reprt_code 11012 -> semi (6월 말)."""
+        from datetime import date
+
+        df = _make_dart_df(
+            reprt_codes=["11012"] * 5,
+            bsns_years=["2025"] * 5,
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["date"][0] == date(2025, 6, 30)
+
+    def test_normalize_reprt_code_3q(self, dart_normalizer, corp_code_map):
+        """reprt_code 11014 -> 3Q (9월 말)."""
+        from datetime import date
+
+        df = _make_dart_df(
+            reprt_codes=["11014"] * 5,
+            bsns_years=["2025"] * 5,
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["date"][0] == date(2025, 9, 30)
+
+    def test_normalize_reprt_code_annual(self, dart_normalizer, corp_code_map):
+        """reprt_code 11011 -> annual (12월 말)."""
+        from datetime import date
+
+        df = _make_dart_df(
+            reprt_codes=["11011"] * 5,
+            bsns_years=["2025"] * 5,
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["date"][0] == date(2025, 12, 31)
+
+    def test_normalize_cfs_priority(self, dart_normalizer, corp_code_map):
+        """CFS 우선: CFS/OFS 둘 다 있으면 CFS만 사용."""
+        df = pl.DataFrame(
+            {
+                "corp_code": ["00126380"] * 2,
+                "account_nm": ["매출액", "매출액"],
+                "thstrm_amount": ["1,000,000", "500,000"],
+                "fs_div": ["CFS", "OFS"],
+                "reprt_code": ["11011", "11011"],
+                "bsns_year": ["2025", "2025"],
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["revenue"][0] == 1_000_000
+
+    def test_normalize_ofs_fallback(self, dart_normalizer, corp_code_map):
+        """OFS 폴백: CFS가 없으면 OFS 사용."""
+        df = _make_dart_df(fs_divs=["OFS"] * 5)
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert len(result) == 1
+        assert result["revenue"][0] == 1_000_000
+
+    def test_normalize_empty_df(self, dart_normalizer, corp_code_map):
+        """빈 DataFrame 입력 시 빈 결과."""
+        df = pl.DataFrame(
+            schema={
+                "corp_code": pl.Utf8,
+                "account_nm": pl.Utf8,
+                "thstrm_amount": pl.Utf8,
+                "fs_div": pl.Utf8,
+                "reprt_code": pl.Utf8,
+                "bsns_year": pl.Utf8,
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result.is_empty()
+
+    def test_normalize_missing_columns_raises(self, dart_normalizer, corp_code_map):
+        """필수 컬럼 누락 시 ValueError."""
+        df = pl.DataFrame(
+            {
+                "corp_code": ["00126380"],
+                "account_nm": ["매출액"],
+            }
+        )
+        with pytest.raises(ValueError, match="필수 컬럼"):
+            dart_normalizer.normalize(df, corp_code_map)
+
+    def test_normalize_unknown_corp_code_filtered(self, dart_normalizer):
+        """매핑되지 않는 corp_code는 필터링."""
+        df = _make_dart_df(corp_codes=["99999999"] * 5)
+        result = dart_normalizer.normalize(df, {"00126380": "005930"})
+        assert result.is_empty()
+
+    def test_normalize_alternative_account_names(self, dart_normalizer, corp_code_map):
+        """대체 계정과목명 매핑."""
+        df = _make_dart_df(
+            accounts=[
+                "수익(매출액)",
+                "당기순이익(손실)",
+                "자본총계",
+                "부채총계",
+                "자산총계",
+            ]
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert result["revenue"][0] == 1_000_000
+        assert result["net_income"][0] == 200_000
+
+    def test_normalize_multi_symbol(self, dart_normalizer, corp_code_map):
+        """여러 종목 동시 정규화."""
+        df = pl.DataFrame(
+            {
+                "corp_code": [
+                    "00126380",
+                    "00126380",
+                    "00164742",
+                    "00164742",
+                ],
+                "account_nm": [
+                    "매출액",
+                    "당기순이익",
+                    "매출액",
+                    "당기순이익",
+                ],
+                "thstrm_amount": [
+                    "1,000,000",
+                    "200,000",
+                    "500,000",
+                    "100,000",
+                ],
+                "fs_div": ["CFS"] * 4,
+                "reprt_code": ["11011"] * 4,
+                "bsns_year": ["2025"] * 4,
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert len(result) == 2
+        symbols = result["symbol"].to_list()
+        assert symbols == ["000660", "005930"]
+
+    def test_normalize_unrecognized_account_filtered(
+        self, dart_normalizer, corp_code_map
+    ):
+        """인식되지 않는 계정과목은 무시."""
+        df = _make_dart_df(
+            accounts=[
+                "매출액",
+                "당기순이익",
+                "영업이익",
+                "미지의계정",
+                "자산총계",
+            ],
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert "revenue" in result.columns
+        assert "net_income" in result.columns
+        assert "total_assets" in result.columns
+
+    def test_dart_in_registry(self):
+        """DARTNormalizer가 DART_NORMALIZER_REGISTRY에 등록."""
+        from ante.data.normalizer import (
+            DART_NORMALIZER_REGISTRY,
+            DARTNormalizer,
+        )
+
+        assert "dart" in DART_NORMALIZER_REGISTRY
+        assert DART_NORMALIZER_REGISTRY["dart"] is DARTNormalizer
