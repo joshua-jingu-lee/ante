@@ -13,7 +13,14 @@ from ante.data.collector import DataCollector
 from ante.data.injector import DataInjector
 from ante.data.normalizer import DataNormalizer
 from ante.data.retention import RetentionPolicy
-from ante.data.schemas import OHLCV_COLUMNS, TIMEFRAMES, validate_ohlcv
+from ante.data.schemas import (
+    FUNDAMENTAL_COLUMNS,
+    FUNDAMENTAL_SCHEMA,
+    OHLCV_COLUMNS,
+    TIMEFRAMES,
+    validate_fundamental,
+    validate_ohlcv,
+)
 from ante.data.store import ParquetStore
 
 # ── Fixtures ─────────────────────────────────────────
@@ -89,6 +96,39 @@ class TestSchemas:
     def test_validate_ohlcv_missing_column(self):
         df = _make_ohlcv_df().drop("volume")
         assert validate_ohlcv(df) is False
+
+    def test_fundamental_schema_field_count(self):
+        assert len(FUNDAMENTAL_SCHEMA) == 18
+
+    def test_fundamental_columns_list(self):
+        assert "date" in FUNDAMENTAL_COLUMNS
+        assert "symbol" in FUNDAMENTAL_COLUMNS
+        assert "market_cap" in FUNDAMENTAL_COLUMNS
+        assert "per" in FUNDAMENTAL_COLUMNS
+        assert "source" in FUNDAMENTAL_COLUMNS
+        assert len(FUNDAMENTAL_COLUMNS) == 18
+
+    def test_fundamental_schema_types(self):
+        assert FUNDAMENTAL_SCHEMA["date"] == pl.Date
+        assert FUNDAMENTAL_SCHEMA["symbol"] == pl.Utf8
+        assert FUNDAMENTAL_SCHEMA["market_cap"] == pl.Int64
+        assert FUNDAMENTAL_SCHEMA["per"] == pl.Float64
+        assert FUNDAMENTAL_SCHEMA["source"] == pl.Utf8
+
+    def test_validate_fundamental_valid(self):
+        df = pl.DataFrame(
+            {
+                "date": [datetime(2026, 3, 1).date()],
+                "symbol": ["005930"],
+                "source": ["dart"],
+                "market_cap": [None],
+            }
+        )
+        assert validate_fundamental(df) is True
+
+    def test_validate_fundamental_missing_required(self):
+        df = pl.DataFrame({"date": [datetime(2026, 3, 1).date()], "symbol": ["005930"]})
+        assert validate_fundamental(df) is False
 
 
 # ── store.py 테스트 ─────────────────────────────────
