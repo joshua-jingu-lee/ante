@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 
 import polars as pl
 
-from ante.data.schemas import OHLCV_COLUMNS
+from ante.data.schemas import FUNDAMENTAL_COLUMNS, OHLCV_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,107 @@ class DefaultNormalizer(BaseNormalizer):
         }
 
 
+class DataGoKrNormalizer(BaseNormalizer):
+    """data.go.kr 주식시세 API 응답 정규화.
+
+    동일한 API 응답에서 OHLCV와 FUNDAMENTAL 두 스키마를 각각 추출한다.
+    모든 API 응답 값이 문자열이므로 숫자 타입 변환을 수행한다.
+    """
+
+    # OHLCV 컬럼 매핑
+    _OHLCV_MAPPING: dict[str, str] = {
+        "basDt": "timestamp",
+        "srtnCd": "symbol",
+        "mkp": "open",
+        "hipr": "high",
+        "lopr": "low",
+        "clpr": "close",
+        "trqu": "volume",
+        "trPrc": "amount",
+    }
+
+    # FUNDAMENTAL 컬럼 매핑
+    _FUNDAMENTAL_MAPPING: dict[str, str] = {
+        "basDt": "date",
+        "srtnCd": "symbol",
+        "mrktTotAmt": "market_cap",
+        "lstgStCnt": "shares_listed",
+    }
+
+    @property
+    def source_name(self) -> str:
+        return "data_go_kr"
+
+    @property
+    def column_mapping(self) -> dict[str, str]:
+        return self._OHLCV_MAPPING
+
+    def transform(self, df: pl.DataFrame) -> pl.DataFrame:
+        """data.go.kr 문자열 값을 숫자로 변환."""
+        # 숫자 컬럼: 문자열 → 숫자 변환
+        for col in ("open", "high", "low", "close"):
+            if col in df.columns and df[col].dtype == pl.Utf8:
+                df = df.with_columns(pl.col(col).cast(pl.Float64))
+        for col in ("volume", "amount"):
+            if col in df.columns and df[col].dtype == pl.Utf8:
+                df = df.with_columns(pl.col(col).cast(pl.Int64))
+
+        # timestamp: YYYYMMDD 문자열 → Date → Datetime 변환
+        if "timestamp" in df.columns and df["timestamp"].dtype == pl.Utf8:
+            df = df.with_columns(
+                pl.col("timestamp").str.to_date("%Y%m%d").cast(pl.Datetime("ns"))
+            )
+        return df
+
+    def normalize_ohlcv(self, df: pl.DataFrame) -> pl.DataFrame:
+        """data.go.kr 응답을 OHLCV_SCHEMA DataFrame으로 정규화.
+
+        Args:
+            df: data.go.kr API 원본 응답 DataFrame (모든 값이 문자열).
+
+        Returns:
+            OHLCV_SCHEMA에 맞춘 DataFrame.
+        """
+        return self.normalize(df)
+
+    def normalize_fundamental(self, df: pl.DataFrame) -> pl.DataFrame:
+        """data.go.kr 응답을 FUNDAMENTAL_SCHEMA 부분 DataFrame으로 정규화.
+
+        Args:
+            df: data.go.kr API 원본 응답 DataFrame (모든 값이 문자열).
+
+        Returns:
+            FUNDAMENTAL_SCHEMA 부분 필드
+            (date, symbol, market_cap, shares_listed, source).
+        """
+        # 컬럼 매핑
+        rename_map = {
+            src: dst
+            for src, dst in self._FUNDAMENTAL_MAPPING.items()
+            if src in df.columns
+        }
+        if rename_map:
+            df = df.rename(rename_map)
+
+        # date: YYYYMMDD 문자열 → Date 변환
+        if "date" in df.columns and df["date"].dtype == pl.Utf8:
+            df = df.with_columns(pl.col("date").str.to_date("%Y%m%d"))
+
+        # 숫자 컬럼 변환
+        if "market_cap" in df.columns and df["market_cap"].dtype == pl.Utf8:
+            df = df.with_columns(pl.col("market_cap").cast(pl.Int64))
+        if "shares_listed" in df.columns and df["shares_listed"].dtype == pl.Utf8:
+            df = df.with_columns(pl.col("shares_listed").cast(pl.Int64))
+
+        # source 컬럼
+        if "source" not in df.columns:
+            df = df.with_columns(pl.lit(self.source_name).alias("source"))
+
+        # FUNDAMENTAL_SCHEMA 컬럼만 선택
+        available = [c for c in FUNDAMENTAL_COLUMNS if c in df.columns]
+        return df.select(available)
+
+
 # ── Normalizer 레지스트리 ────────────────────────────
 
 NORMALIZER_REGISTRY: dict[str, type[BaseNormalizer]] = {
@@ -159,6 +260,7 @@ NORMALIZER_REGISTRY: dict[str, type[BaseNormalizer]] = {
     "yahoo": YahooNormalizer,
     "default": DefaultNormalizer,
     "external": DefaultNormalizer,
+    "data_go_kr": DataGoKrNormalizer,
 }
 
 

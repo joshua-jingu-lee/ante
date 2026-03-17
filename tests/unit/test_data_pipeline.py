@@ -10,7 +10,9 @@ import pytest
 
 from ante.data.collector import DataCollector
 from ante.data.injector import DataInjector
-from ante.data.normalizer import DataNormalizer
+from ante.data.normalizer import (
+    DataNormalizer,
+)
 from ante.data.retention import RetentionPolicy
 from ante.data.schemas import (
     FUNDAMENTAL_COLUMNS,
@@ -480,6 +482,153 @@ class TestDataNormalizer:
         result = normalizer.normalize(df)
         assert result["open"].dtype == pl.Float64
         assert result["volume"].dtype == pl.Int64
+
+
+# ── DataGoKrNormalizer 테스트 ─────────────────────────
+
+
+class TestDataGoKrNormalizer:
+    """data.go.kr API 응답 정규화 테스트."""
+
+    @pytest.fixture
+    def dgk_normalizer(self):
+        from ante.data.normalizer import DataGoKrNormalizer
+
+        return DataGoKrNormalizer()
+
+    @pytest.fixture
+    def sample_df(self):
+        """data.go.kr API 응답 샘플 (모든 값이 문자열)."""
+        return pl.DataFrame(
+            {
+                "basDt": ["20260301", "20260302"],
+                "srtnCd": ["005930", "005930"],
+                "mkp": ["50000", "50500"],
+                "hipr": ["51000", "51500"],
+                "lopr": ["49500", "50000"],
+                "clpr": ["50500", "51000"],
+                "trqu": ["1000000", "1200000"],
+                "trPrc": ["50500000000", "61200000000"],
+                "mrktTotAmt": ["300000000000000", "305000000000000"],
+                "lstgStCnt": ["5969782550", "5969782550"],
+            }
+        )
+
+    def test_source_name(self, dgk_normalizer):
+        assert dgk_normalizer.source_name == "data_go_kr"
+
+    def test_registry_lookup(self):
+        from ante.data.normalizer import get_normalizer
+
+        n = get_normalizer("data_go_kr")
+        assert n.source_name == "data_go_kr"
+
+    def test_normalize_ohlcv(self, dgk_normalizer, sample_df):
+        result = dgk_normalizer.normalize_ohlcv(sample_df)
+
+        assert "timestamp" in result.columns
+        assert "symbol" in result.columns
+        assert "open" in result.columns
+        assert "close" in result.columns
+        assert "volume" in result.columns
+        assert "amount" in result.columns
+        assert "source" in result.columns
+
+        assert result["open"].dtype == pl.Float64
+        assert result["close"].dtype == pl.Float64
+        assert result["volume"].dtype == pl.Int64
+        assert result["amount"].dtype == pl.Int64
+        assert isinstance(result["timestamp"].dtype, pl.Datetime)
+        assert result["source"][0] == "data_go_kr"
+
+        assert result["open"][0] == 50000.0
+        assert result["close"][0] == 50500.0
+        assert result["volume"][0] == 1000000
+        assert result["amount"][0] == 50500000000
+        assert result["symbol"][0] == "005930"
+
+    def test_normalize_ohlcv_sorts_by_timestamp(self, dgk_normalizer):
+        df = pl.DataFrame(
+            {
+                "basDt": ["20260302", "20260301"],
+                "srtnCd": ["005930", "005930"],
+                "mkp": ["50500", "50000"],
+                "hipr": ["51500", "51000"],
+                "lopr": ["50000", "49500"],
+                "clpr": ["51000", "50500"],
+                "trqu": ["1200000", "1000000"],
+                "trPrc": ["61200000000", "50500000000"],
+            }
+        )
+        result = dgk_normalizer.normalize_ohlcv(df)
+        assert result["open"][0] == 50000.0
+
+    def test_normalize_fundamental(self, dgk_normalizer, sample_df):
+        result = dgk_normalizer.normalize_fundamental(sample_df)
+
+        assert "date" in result.columns
+        assert "symbol" in result.columns
+        assert "market_cap" in result.columns
+        assert "shares_listed" in result.columns
+        assert "source" in result.columns
+
+        assert result["date"].dtype == pl.Date
+        assert result["market_cap"].dtype == pl.Int64
+        assert result["shares_listed"].dtype == pl.Int64
+
+        assert result["symbol"][0] == "005930"
+        assert result["market_cap"][0] == 300000000000000
+        assert result["shares_listed"][0] == 5969782550
+        assert result["source"][0] == "data_go_kr"
+
+    def test_normalize_fundamental_date_parsing(self, dgk_normalizer, sample_df):
+        result = dgk_normalizer.normalize_fundamental(sample_df)
+        from datetime import date
+
+        assert result["date"][0] == date(2026, 3, 1)
+        assert result["date"][1] == date(2026, 3, 2)
+
+    def test_normalize_ohlcv_timestamp_parsing(self, dgk_normalizer):
+        """YYYYMMDD 문자열이 Datetime으로 변환되는지 확인."""
+        df = pl.DataFrame(
+            {
+                "basDt": ["20260315"],
+                "srtnCd": ["005930"],
+                "mkp": ["50000"],
+                "hipr": ["51000"],
+                "lopr": ["49500"],
+                "clpr": ["50500"],
+                "trqu": ["1000000"],
+                "trPrc": ["50500000000"],
+            }
+        )
+        result = dgk_normalizer.normalize_ohlcv(df)
+        ts = result["timestamp"][0]
+        assert ts.year == 2026
+        assert ts.month == 3
+        assert ts.day == 15
+
+    def test_normalize_fundamental_excludes_ohlcv_columns(
+        self, dgk_normalizer, sample_df
+    ):
+        """fundamental 결과에 OHLCV 전용 컬럼이 포함되지 않아야 한다."""
+        result = dgk_normalizer.normalize_fundamental(sample_df)
+        for col in ("open", "high", "low", "close", "volume", "amount", "timestamp"):
+            assert col not in result.columns
+
+    def test_normalize_ohlcv_via_base_normalize(self, dgk_normalizer, sample_df):
+        """BaseNormalizer.normalize()를 직접 호출해도 OHLCV 결과가 동일."""
+        result = dgk_normalizer.normalize(sample_df)
+        assert "timestamp" in result.columns
+        assert "close" in result.columns
+        assert result["source"][0] == "data_go_kr"
+
+    def test_export_from_package(self):
+        """ante.data 패키지에서 DataGoKrNormalizer를 임포트할 수 있어야 한다."""
+        from ante.data import DataGoKrNormalizer
+
+        n = DataGoKrNormalizer()
+        assert n.source_name == "data_go_kr"
 
 
 # ── collector.py 테스트 ─────────────────────────────
