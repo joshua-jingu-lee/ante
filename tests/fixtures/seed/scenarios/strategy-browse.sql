@@ -35,27 +35,27 @@ VALUES ('bot-momentum-browse', '모멘텀 봇', 'momentum-v2', 'live',
 
 -- ── 거래 내역 (전략 C) ─────────────────────────────
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-01', 'bot-momentum-browse', 'momentum-v2', '005930', 'buy', 50, 72300, 'filled', datetime('now', '-7 days'), datetime('now', '-7 days'));
+VALUES ('a0000000-0000-4000-8000-000000000001', 'bot-momentum-browse', 'momentum-v2', '005930', 'buy', 50, 72300, 'filled', datetime('now', '-7 days'), datetime('now', '-7 days'));
 
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-02', 'bot-momentum-browse', 'momentum-v2', '000660', 'buy', 10, 150000, 'filled', datetime('now', '-5 days'), datetime('now', '-5 days'));
+VALUES ('a0000000-0000-4000-8000-000000000002', 'bot-momentum-browse', 'momentum-v2', '000660', 'buy', 10, 150000, 'filled', datetime('now', '-5 days'), datetime('now', '-5 days'));
 
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-03', 'bot-momentum-browse', 'momentum-v2', '005930', 'sell', 50, 74800, 'filled', datetime('now', '-2 days'), datetime('now', '-2 days'));
+VALUES ('a0000000-0000-4000-8000-000000000003', 'bot-momentum-browse', 'momentum-v2', '005930', 'sell', 50, 74800, 'filled', datetime('now', '-2 days'), datetime('now', '-2 days'));
 
 -- ── 거래 내역 (전략 D — 과거 기록) ──────────────────
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-d1', 'bot-mean-old', 'mean-revert-01', '035420', 'buy', 20, 210000, 'filled', datetime('now', '-45 days'), datetime('now', '-45 days'));
+VALUES ('b0000000-0000-4000-8000-000000000001', 'bot-mean-old', 'mean-revert-01', '035420', 'buy', 20, 210000, 'filled', datetime('now', '-45 days'), datetime('now', '-45 days'));
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-d2', 'bot-mean-old', 'mean-revert-01', '035420', 'sell', 20, 208600, 'filled', datetime('now', '-40 days'), datetime('now', '-40 days'));
+VALUES ('b0000000-0000-4000-8000-000000000002', 'bot-mean-old', 'mean-revert-01', '035420', 'sell', 20, 208600, 'filled', datetime('now', '-40 days'), datetime('now', '-40 days'));
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-d3', 'bot-mean-old', 'mean-revert-01', '035720', 'buy', 30, 55000, 'filled', datetime('now', '-38 days'), datetime('now', '-38 days'));
+VALUES ('b0000000-0000-4000-8000-000000000003', 'bot-mean-old', 'mean-revert-01', '035720', 'buy', 30, 55000, 'filled', datetime('now', '-38 days'), datetime('now', '-38 days'));
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-d4', 'bot-mean-old', 'mean-revert-01', '035720', 'sell', 30, 54200, 'filled', datetime('now', '-35 days'), datetime('now', '-35 days'));
+VALUES ('b0000000-0000-4000-8000-000000000004', 'bot-mean-old', 'mean-revert-01', '035720', 'sell', 30, 54200, 'filled', datetime('now', '-35 days'), datetime('now', '-35 days'));
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-d5', 'bot-mean-old', 'mean-revert-01', '005930', 'buy', 10, 71000, 'filled', datetime('now', '-33 days'), datetime('now', '-33 days'));
+VALUES ('b0000000-0000-4000-8000-000000000005', 'bot-mean-old', 'mean-revert-01', '005930', 'buy', 10, 71000, 'filled', datetime('now', '-33 days'), datetime('now', '-33 days'));
 INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, timestamp, created_at)
-VALUES ('trade-sb-d6', 'bot-mean-old', 'mean-revert-01', '005930', 'sell', 10, 70500, 'filled', datetime('now', '-31 days'), datetime('now', '-31 days'));
+VALUES ('b0000000-0000-4000-8000-000000000006', 'bot-mean-old', 'mean-revert-01', '005930', 'sell', 10, 70500, 'filled', datetime('now', '-31 days'), datetime('now', '-31 days'));
 
 -- ── 자금 ────────────────────────────────────────────
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 50000000.0);

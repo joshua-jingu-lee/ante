@@ -26,8 +26,10 @@ export default function BudgetTable({ budgets }: { budgets: BotBudget[] }) {
               <tr><td colSpan={9} className="px-3 py-8 text-center text-text-muted text-[13px]">할당된 봇이 없습니다</td></tr>
             ) : (
               budgets.map((b) => {
-                const pnlColor = b.position_pnl >= 0 ? 'text-positive' : 'text-negative'
-                const budgetRoi = b.allocated > 0 ? b.position_pnl / b.allocated : 0
+                const hasPosition = b.eval_amount != null
+                const positionPnl = b.position_pnl ?? 0
+                const pnlColor = positionPnl >= 0 ? 'text-positive' : 'text-negative'
+                const budgetRoi = hasPosition && b.allocated > 0 ? positionPnl / b.allocated : 0
                 const budgetRoiColor = budgetRoi >= 0 ? 'text-positive' : 'text-negative'
                 return (
                   <tr key={b.bot_id} className="hover:bg-surface-hover">
@@ -38,10 +40,10 @@ export default function BudgetTable({ budgets }: { budgets: BotBudget[] }) {
                     <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatKRW(b.spent)}</td>
                     <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatKRW(b.available)}</td>
                     <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatKRW(b.reserved)}</td>
-                    <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatKRW(b.eval_amount)}</td>
-                    <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${pnlColor}`}>{formatKRW(b.position_pnl)}</td>
-                    <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${pnlColor}`}>{formatPercent(b.position_return)}</td>
-                    <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${budgetRoiColor}`}>{formatPercent(budgetRoi)}</td>
+                    <td className="px-3 py-3 border-b border-border text-[13px] text-right">{hasPosition ? formatKRW(b.eval_amount) : '-'}</td>
+                    <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${hasPosition ? pnlColor : ''}`}>{hasPosition ? formatKRW(positionPnl) : '-'}</td>
+                    <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${hasPosition ? pnlColor : ''}`}>{hasPosition ? formatPercent(b.position_return ?? 0) : '-'}</td>
+                    <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${hasPosition ? budgetRoiColor : ''}`}>{hasPosition ? formatPercent(budgetRoi) : '-'}</td>
                   </tr>
                 )
               })

@@ -21,7 +21,7 @@ export async function getStrategyTrades(
   params?: { cursor?: number; limit?: number },
 ): Promise<{ items: Trade[]; next_cursor?: number }> {
   const res = await client.get(`/api/strategies/${id}/trades`, { params })
-  return res.data
+  return { items: res.data.trades ?? [], next_cursor: res.data.next_cursor }
 }
 
 export async function getStrategyDailySummary(id: string): Promise<DailySummary[]> {

@@ -114,13 +114,13 @@ async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
 
-    trade_service = getattr(request.app.state, "trade_service", None)
-    if trade_service is None:
-        raise HTTPException(status_code=503, detail="Trade service not available")
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
-    tracker = PerformanceTracker(trade_service)
+    tracker = PerformanceTracker(db)
     metrics = await tracker.calculate(strategy_id=strategy_id)
 
     result = asdict(metrics)
@@ -128,7 +128,8 @@ async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
     # equity curve: bot_id가 있으면 추가
     equity_curve: list[dict] = []
     bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is not None:
+    trade_service = getattr(request.app.state, "trade_service", None)
+    if bot_manager is not None and trade_service is not None:
         for b in bot_manager.list_bots():
             if b.get("strategy_id") == strategy_id:
                 from ante.report.feedback import PerformanceFeedback
@@ -158,13 +159,13 @@ async def get_strategy_daily_summary(
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
 
-    trade_service = getattr(request.app.state, "trade_service", None)
-    if trade_service is None:
-        raise HTTPException(status_code=503, detail="Trade service not available")
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
-    tracker = PerformanceTracker(trade_service)
+    tracker = PerformanceTracker(db)
 
     # strategy에 연결된 bot_id 찾기
     bot_id = None
@@ -203,13 +204,13 @@ async def get_strategy_monthly_summary(
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
 
-    trade_service = getattr(request.app.state, "trade_service", None)
-    if trade_service is None:
-        raise HTTPException(status_code=503, detail="Trade service not available")
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
-    tracker = PerformanceTracker(trade_service)
+    tracker = PerformanceTracker(db)
 
     bot_id = None
     bot_manager = getattr(request.app.state, "bot_manager", None)

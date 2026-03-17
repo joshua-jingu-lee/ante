@@ -21,7 +21,7 @@ export default function PerformancePanel({ perf }: { perf: StrategyPerformance |
     { label: '총 거래 수', value: formatNumber(perf.total_trades), hint: '전체 거래 횟수' },
     { label: '승률', value: formatPercent(perf.win_rate), hint: '수익 거래 비율' },
     { label: '활성 거래일', value: `${perf.active_days}일`, hint: '실제 거래가 발생한 날 수' },
-    { label: '수익 팩터', value: perf.profit_factor === Infinity ? '∞' : perf.profit_factor.toFixed(2), hint: '총 이익 / 총 손실' },
+    { label: '수익 팩터', value: perf.profit_factor == null ? '-' : perf.profit_factor === Infinity ? '∞' : perf.profit_factor.toFixed(2), hint: '총 이익 / 총 손실' },
     { label: '샤프 비율', value: perf.sharpe_ratio != null ? perf.sharpe_ratio.toFixed(2) : '-', hint: '위험 대비 수익 효율' },
     { label: 'MDD', value: formatPercent(perf.max_drawdown), hint: '고점 대비 최대 하락 폭' },
     { label: '수수료 합계', value: formatKRW(perf.total_commission), hint: '총 거래 수수료' },
