@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
 import { formatNumber, formatDate } from '../utils/formatters'
@@ -13,8 +13,19 @@ export default function BacktestData() {
   const [search, setSearch] = useState('')
   const [timeframe, setTimeframe] = useState<string>('all')
   const [offset, setOffset] = useState(0)
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; symbol: string; timeframe: string } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; symbol: string; timeframe: string; start_date: string; end_date: string; row_count: number } | null>(null)
   const queryClient = useQueryClient()
+
+  /* 자동완성용: 전체 데이터셋에서 고유 종목 목록 추출 */
+  const { data: allDatasets } = useQuery({
+    queryKey: ['datasets-all-symbols'],
+    queryFn: () => getDatasets({ limit: 1000 }),
+  })
+
+  const symbolOptions = useMemo(() => {
+    if (!allDatasets?.items) return []
+    return [...new Set(allDatasets.items.map((ds) => ds.symbol))]
+  }, [allDatasets])
 
   const { data, isLoading } = useQuery({
     queryKey: ['datasets', search, timeframe, offset],
@@ -45,35 +56,40 @@ export default function BacktestData() {
     <>
       {/* 안내 배너 */}
       <div className="bg-info-bg border border-[rgba(167,139,250,0.2)] rounded-lg px-4 py-3 mb-4 text-[13px] text-info">
-        데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-bg px-1.5 py-0.5 rounded text-[12px]">ante data collect</code>)를 사용하세요
+        {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-bg px-1.5 py-0.5 rounded text-[12px]">ante data collect</code>)를 사용하세요.
       </div>
 
-      {/* 필터 */}
-      <div className="flex items-center gap-3 mb-4">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setOffset(0) }}
-          placeholder="종목 검색..."
-          className="bg-bg border border-border rounded-lg px-3 py-1.5 text-text text-[13px] w-60 placeholder:text-text-muted focus:outline-none focus:border-primary"
-        />
-        <div className="flex gap-1 bg-bg rounded-lg p-0.5">
-          {TF_OPTIONS.map((tf) => (
-            <button
-              key={tf}
-              onClick={() => { setTimeframe(tf); setOffset(0) }}
-              className={`px-3.5 py-1.5 rounded text-[12px] font-medium border-none cursor-pointer ${
-                timeframe === tf ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:text-text'
-              }`}
-            >
-              {tf === 'all' ? '전체' : TF_LABELS[tf] ?? tf}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 테이블 */}
+      {/* 데이터셋 카드 */}
       <div className="bg-surface border border-border rounded-lg p-5">
+        {/* 카드 헤더: 타이틀 + 필터를 한 줄 배치 */}
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-[15px] font-semibold text-text">데이터셋</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setOffset(0) }}
+              list="symbol-list"
+              placeholder="종목 검색"
+              className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] w-40 placeholder:text-text-muted focus:outline-none focus:border-primary"
+            />
+            <datalist id="symbol-list">
+              {symbolOptions.map((sym) => (
+                <option key={sym} value={sym} />
+              ))}
+            </datalist>
+            <select
+              value={timeframe}
+              onChange={(e) => { setTimeframe(e.target.value); setOffset(0) }}
+              className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] cursor-pointer focus:outline-none focus:border-primary"
+            >
+              <option value="all">전체 타임프레임</option>
+              {TF_OPTIONS.filter((tf) => tf !== 'all').map((tf) => (
+                <option key={tf} value={tf}>{TF_LABELS[tf] ?? tf}</option>
+              ))}
+            </select>
+          </div>
+        </div>
         {isLoading ? (
           <TableSkeleton rows={5} cols={6} />
         ) : (
@@ -103,7 +119,7 @@ export default function BacktestData() {
                         <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatNumber(ds.row_count)}</td>
                         <td className="px-3 py-3 border-b border-border text-[13px] text-right">
                           <button
-                            onClick={() => setDeleteTarget({ id: ds.id, symbol: ds.symbol, timeframe: ds.timeframe })}
+                            onClick={() => setDeleteTarget({ id: ds.id, symbol: ds.symbol, timeframe: ds.timeframe, start_date: ds.start_date, end_date: ds.end_date, row_count: ds.row_count })}
                             className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-negative border border-border cursor-pointer hover:bg-negative-bg"
                           >
                             삭제
@@ -138,11 +154,15 @@ export default function BacktestData() {
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[400px]">
-            <h3 className="text-[18px] font-bold mb-4">데이터셋 삭제</h3>
-            <p className="text-[13px] mb-2">
-              <span className="font-mono font-medium">{deleteTarget.symbol}</span> ({TF_LABELS[deleteTarget.timeframe] ?? deleteTarget.timeframe}) 데이터를 삭제하시겠습니까?
-            </p>
-            <p className="text-[12px] text-warning mb-4">사용 중인 백테스트가 있을 수 있습니다.</p>
+            <h3 className="text-[18px] font-bold mb-4 text-negative">데이터셋 삭제</h3>
+            <div className="mb-4 text-[13px] text-text-muted">
+              <strong className="text-text">{deleteTarget.symbol} — {TF_LABELS[deleteTarget.timeframe] ?? deleteTarget.timeframe}</strong><br />
+              기간: {formatDate(deleteTarget.start_date)} ~ {formatDate(deleteTarget.end_date)} · {formatNumber(deleteTarget.row_count)}건<br /><br />
+              삭제된 데이터는 복구할 수 없습니다.
+            </div>
+            <div className="bg-warning-bg text-warning px-3.5 py-2.5 rounded text-[12px] mb-4">
+              ⚠ 이 데이터를 사용 중인 백테스트가 있을 수 있습니다.
+            </div>
             <div className="flex justify-end gap-2 pt-4 border-t border-border">
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
               <button

@@ -32,10 +32,12 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
   const isOwner = member.member_id === 'owner'
   const role = member.role ?? (isOwner ? 'owner' : undefined)
 
+  const isRevoked = member.status === 'revoked'
+
   return (
     <div
       onClick={() => navigate(`/agents/${member.member_id}`)}
-      className="bg-surface border border-border rounded-lg p-5 flex gap-4 items-start cursor-pointer hover:border-primary/50 transition-colors"
+      className={`bg-surface border border-border rounded-lg p-5 flex gap-4 items-start cursor-pointer hover:border-primary/50 transition-colors${isRevoked ? ' opacity-50' : ''}`}
     >
       <div className="relative shrink-0">
         {role === 'owner' && (
@@ -43,7 +45,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
             {'👑'}
           </div>
         )}
-        <div className="w-[56px] h-[56px] rounded-full bg-bg flex items-center justify-center text-[28px]">
+        <div className={`w-[56px] h-[56px] rounded-full bg-bg flex items-center justify-center text-[28px]${isRevoked ? ' blur-[2px]' : ''}`}>
           {member.emoji || (member.type === 'human' ? '👤' : '🤖')}
         </div>
       </div>
@@ -72,7 +74,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
           </div>
         )}
         {/* Human 멤버 액션 버튼 */}
-        {member.type === 'human' && (onSuspend || onChangePassword) && (
+        {!isRevoked && member.type === 'human' && (onSuspend || onChangePassword) && (
           <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
             {!isOwner && member.status === 'active' && onSuspend && (
               <button onClick={() => onSuspend(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-warning border border-border cursor-pointer hover:bg-warning-bg">정지</button>
@@ -83,7 +85,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
           </div>
         )}
         {/* Agent 멤버 액션 버튼 */}
-        {member.type === 'agent' && (onSuspend || onReactivate || onRevoke) && (
+        {!isRevoked && member.type === 'agent' && (onSuspend || onReactivate || onRevoke) && (
           <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
             {member.status === 'active' && onSuspend && (
               <button onClick={() => onSuspend(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-warning border border-border cursor-pointer hover:bg-warning-bg">정지</button>

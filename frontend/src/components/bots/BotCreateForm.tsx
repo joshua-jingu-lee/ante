@@ -1,10 +1,15 @@
 import { useState } from 'react'
 import { useCreateBot } from '../../hooks/useBots'
+import { useStrategies } from '../../hooks/useStrategies'
+import { useTreasurySummary } from '../../hooks/useTreasury'
+import { formatNumber } from '../../utils/formatters'
 import type { BotMode } from '../../types/bot'
 
 interface BotCreateFormProps {
   onClose: () => void
 }
+
+const BOT_ID_PATTERN = /^[a-zA-Z0-9-]+$/
 
 export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [botId, setBotId] = useState('')
@@ -14,10 +19,30 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [interval, setInterval] = useState('60')
   const [budget, setBudget] = useState('')
   const [symbols, setSymbols] = useState('')
+  const [botIdError, setBotIdError] = useState('')
   const createBot = useCreateBot()
+  const { data: strategies } = useStrategies()
+  const { data: treasury } = useTreasurySummary()
+
+  const activeStrategies = strategies?.filter((s) => s.status === 'active' || s.status === 'registered') ?? []
+  const remainingBudget = treasury?.unallocated ?? 0
+
+  const validateBotId = (value: string) => {
+    if (value && !BOT_ID_PATTERN.test(value)) {
+      setBotIdError('영문, 숫자, 하이픈만 사용 가능합니다')
+    } else {
+      setBotIdError('')
+    }
+  }
+
+  const handleBotIdChange = (value: string) => {
+    setBotId(value)
+    validateBotId(value)
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (botId && !BOT_ID_PATTERN.test(botId)) return
     createBot.mutate(
       {
         bot_id: botId,
@@ -38,17 +63,27 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
         <h2 className="text-[18px] font-bold mb-5">봇 생성</h2>
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Bot ID</label>
+            <input value={botId} onChange={(e) => handleBotIdChange(e.target.value)} placeholder="bot-momentum-01" className={`w-full bg-bg border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary ${botIdError ? 'border-negative' : 'border-border'}`} required />
+            {botIdError ? (
+              <div className="text-[11px] text-negative mt-1">{botIdError}</div>
+            ) : (
+              <div className="text-[11px] text-text-muted mt-1">영문, 숫자, 하이픈만 사용 가능 (고유값)</div>
+            )}
+          </div>
+          <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">이름</label>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="모멘텀 돌파 봇" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
             <div className="text-[11px] text-text-muted mt-1">대시보드에 표시되는 이름</div>
           </div>
           <div className="mb-4">
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">봇 ID</label>
-            <input value={botId} onChange={(e) => setBotId(e.target.value)} placeholder="bot-momentum-01" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
-          </div>
-          <div className="mb-4">
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">전략</label>
-            <input value={strategyName} onChange={(e) => setStrategyName(e.target.value)} placeholder="전략명" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">전략 선택</label>
+            <select value={strategyName} onChange={(e) => setStrategyName(e.target.value)} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary appearance-none cursor-pointer" required>
+              <option value="">전략을 선택하세요</option>
+              {activeStrategies.map((s) => (
+                <option key={s.id} value={s.name}>{s.name} {s.version}</option>
+              ))}
+            </select>
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">봇 유형</label>
@@ -59,11 +94,13 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">실행 간격 (초)</label>
-            <input type="number" value={interval} onChange={(e) => setInterval(e.target.value)} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
+            <input type="number" value={interval} onChange={(e) => setInterval(e.target.value)} min={10} max={3600} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
+            <div className="text-[11px] text-text-muted mt-1">최소 10초 ~ 최대 3,600초 (1시간)</div>
           </div>
           <div className="mb-4">
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">예산 (원)</label>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">배정예산 (원)</label>
             <input type="number" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="5000000" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <div className="text-[11px] text-text-muted mt-1">잔여예산: {formatNumber(remainingBudget)}원</div>
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">대상 종목 (콤마 구분)</label>
@@ -72,7 +109,7 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
           </div>
           <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-            <button type="submit" disabled={createBot.isPending} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50">생성</button>
+            <button type="submit" disabled={createBot.isPending || !!botIdError} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50">생성</button>
           </div>
         </form>
       </div>
