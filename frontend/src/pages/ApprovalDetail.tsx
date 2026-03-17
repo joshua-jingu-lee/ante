@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useApprovalDetail } from '../hooks/useApprovals'
 import ReviewControls from '../components/approvals/ReviewControls'
 import ExecutionContent from '../components/approvals/ExecutionContent'
+import MarkdownBody from '../components/approvals/MarkdownBody'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
 import { formatDateTime } from '../utils/formatters'
@@ -176,10 +177,10 @@ export default function ApprovalDetail() {
         <ReviewsCard reviews={approval.reviews ?? []} />
       </div>
 
-      {/* 2행: 본문 (placeholder — #268에서 마크다운 렌더링 구현) */}
+      {/* 2행: 본문 */}
       {approval.body && (
         <div className="bg-surface border border-border rounded-lg p-5 mb-6">
-          <div className="text-[13px] text-text-muted whitespace-pre-wrap leading-relaxed">{approval.body}</div>
+          <MarkdownBody content={approval.body} />
         </div>
       )}
 
