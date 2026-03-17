@@ -2,10 +2,15 @@ import { useState } from 'react'
 import { useBots, useBotControl } from '../hooks/useBots'
 import BotCard from '../components/bots/BotCard'
 import BotCreateForm from '../components/bots/BotCreateForm'
+import BotStopModal from '../components/bots/BotStopModal'
+import BotDeleteModal from '../components/bots/BotDeleteModal'
 import { TableSkeleton } from '../components/common/Skeleton'
+import type { Bot } from '../types/bot'
 
 export default function Bots() {
   const [showCreate, setShowCreate] = useState(false)
+  const [stopTarget, setStopTarget] = useState<Bot | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Bot | null>(null)
   const { data, isLoading } = useBots()
   const { start, stop, remove } = useBotControl()
 
@@ -13,8 +18,26 @@ export default function Bots() {
   const runningBots = allBots.filter((b) => b.status === 'running')
   const inactiveBots = allBots.filter((b) => b.status !== 'running' && b.status !== 'deleted')
 
-  const handleDelete = (id: string) => {
-    if (confirm('이 봇을 삭제하시겠습니까?')) remove.mutate(id)
+  const handleStopClick = (id: string) => {
+    const bot = allBots.find((b) => b.bot_id === id)
+    if (bot) setStopTarget(bot)
+  }
+
+  const handleDeleteClick = (id: string) => {
+    const bot = allBots.find((b) => b.bot_id === id)
+    if (bot) setDeleteTarget(bot)
+  }
+
+  const handleStopConfirm = () => {
+    if (stopTarget) {
+      stop.mutate(stopTarget.bot_id, { onSuccess: () => setStopTarget(null) })
+    }
+  }
+
+  const handleDeleteConfirm = () => {
+    if (deleteTarget) {
+      remove.mutate(deleteTarget.bot_id, { onSuccess: () => setDeleteTarget(null) })
+    }
   }
 
   return (
@@ -43,7 +66,7 @@ export default function Bots() {
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
                 {runningBots.map((bot) => (
-                  <BotCard key={bot.bot_id} bot={bot} onStart={(id) => start.mutate(id)} onStop={(id) => stop.mutate(id)} onDelete={handleDelete} />
+                  <BotCard key={bot.bot_id} bot={bot} onStart={(id) => start.mutate(id)} onStop={handleStopClick} onDelete={handleDeleteClick} />
                 ))}
               </div>
             )}
@@ -63,7 +86,7 @@ export default function Bots() {
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
                 {inactiveBots.map((bot) => (
-                  <BotCard key={bot.bot_id} bot={bot} onStart={(id) => start.mutate(id)} onStop={(id) => stop.mutate(id)} onDelete={handleDelete} />
+                  <BotCard key={bot.bot_id} bot={bot} onStart={(id) => start.mutate(id)} onStop={handleStopClick} onDelete={handleDeleteClick} />
                 ))}
               </div>
             )}
@@ -72,6 +95,24 @@ export default function Bots() {
       )}
 
       {showCreate && <BotCreateForm onClose={() => setShowCreate(false)} />}
+
+      {stopTarget && (
+        <BotStopModal
+          bot={stopTarget}
+          onConfirm={handleStopConfirm}
+          onClose={() => setStopTarget(null)}
+          isPending={stop.isPending}
+        />
+      )}
+
+      {deleteTarget && (
+        <BotDeleteModal
+          bot={deleteTarget}
+          onConfirm={handleDeleteConfirm}
+          onClose={() => setDeleteTarget(null)}
+          isPending={remove.isPending}
+        />
+      )}
     </>
   )
 }
