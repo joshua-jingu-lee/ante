@@ -1,46 +1,37 @@
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
-export type ApprovalType = 'strategy_report' | 'budget_allocation' | 'live_switch' | 'risk_alert'
+export type ApprovalType = 'strategy_adopt' | 'budget_change' | 'bot_create' | 'bot_stop' | 'rule_change'
+
+export interface ApprovalReview {
+  reviewer: string
+  result: 'pass' | 'warn' | 'fail'
+  detail: string
+  reviewed_at: string
+}
+
+export interface ApprovalHistoryEntry {
+  action: string
+  actor: string
+  at: string
+  detail?: string
+}
 
 export interface Approval {
-  id: number
+  id: string
   type: ApprovalType
   title: string
   requester: string
   requested_at: string
   status: ApprovalStatus
-  reference_id?: number
+  reference_id?: string
   memo?: string
   resolved_at?: string
   resolved_by?: string
+  body?: string
+  params?: Record<string, unknown>
+  reviews?: ApprovalReview[]
+  history?: ApprovalHistoryEntry[]
+  expires_at?: string
+  reject_reason?: string
 }
 
-export interface ApprovalDetail extends Approval {
-  detail?: StrategyReportDetail
-}
-
-export interface StrategyReportDetail {
-  strategy_name: string
-  strategy_version: string
-  filepath?: string
-  agent_summary: string
-  agent_rationale: string
-  agent_risks: string
-  agent_recommendation: string
-  backtest_start: string
-  backtest_end: string
-  initial_capital?: number
-  final_capital?: number
-  metrics: BacktestMetrics
-  equity_curve: { date: string; value: number }[]
-  drawdown: { date: string; value: number }[]
-}
-
-export interface BacktestMetrics {
-  sharpe_ratio: number
-  max_drawdown: number
-  win_rate: number
-  profit_factor: number
-  total_trades: number
-  total_return: number
-  annual_return: number
-}
+export type ApprovalDetail = Approval

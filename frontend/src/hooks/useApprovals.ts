@@ -14,18 +14,18 @@ export function useApprovals(params: {
   })
 }
 
-export function useApprovalDetail(id: number) {
+export function useApprovalDetail(id: string) {
   return useQuery({
     queryKey: ['approvals', id],
     queryFn: () => getApprovalDetail(id),
-    enabled: id > 0,
+    enabled: !!id,
   })
 }
 
 export function useUpdateApprovalStatus() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, status, memo }: { id: number; status: 'approved' | 'rejected'; memo?: string }) =>
+    mutationFn: ({ id, status, memo }: { id: string; status: 'approved' | 'rejected'; memo?: string }) =>
       updateApprovalStatus(id, status, memo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['approvals'] })
