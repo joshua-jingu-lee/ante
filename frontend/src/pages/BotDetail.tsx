@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useBotDetail, useBotControl } from '../hooks/useBots'
+import { useStrategies } from '../hooks/useStrategies'
+import { useTreasurySummary } from '../hooks/useTreasury'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
 import { formatKRW, formatDateTime, formatPercent } from '../utils/formatters'
 import { BOT_STATUS_LABELS } from '../utils/constants'
-import type { BotStatus, BotDetail as BotDetailType } from '../types/bot'
+import type { BotStatus, BotMode, BotDetail as BotDetailType } from '../types/bot'
 
 const STATUS_VARIANT: Record<BotStatus, string> = {
-  created: 'muted', running: 'positive', stopping: 'warning', stopped: 'muted', error: 'negative', deleted: 'muted',
+  created: 'muted', running: 'positive', stopping: 'warning', stopped: 'warning', error: 'negative', deleted: 'muted',
 }
 
 export default function BotDetail() {
@@ -23,15 +25,26 @@ export default function BotDetail() {
   const canStart = bot.status === 'stopped' || bot.status === 'created'
   const canStop = bot.status === 'running'
   const canEdit = bot.status === 'stopped' || bot.status === 'created'
+  const isStopped = bot.status === 'stopped'
 
   return (
     <>
+      {/* 뒤로가기 링크 */}
+      <div className="mb-4">
+        <Link to="/bots" className="text-text-muted text-[13px] no-underline hover:text-text hover:underline">
+          &larr; 봇 관리
+        </Link>
+      </div>
+
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-[20px] font-bold">
+          <h2 className="text-[20px] font-bold flex items-center gap-2">
             {bot.name || bot.bot_id}
-            {bot.name && <span className="ml-2 text-[14px] font-normal text-text-muted font-mono">{bot.bot_id}</span>}
+            {bot.name && <span className="text-[14px] font-normal text-text-muted font-mono">{bot.bot_id}</span>}
+            {isStopped && (
+              <StatusBadge variant="warning">중지</StatusBadge>
+            )}
           </h2>
           <div className="flex gap-3 items-center mt-1">
             <StatusBadge variant={STATUS_VARIANT[bot.status] as 'positive'}>
@@ -224,22 +237,114 @@ export default function BotDetail() {
 }
 
 function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => void }) {
+  const { data: strategies } = useStrategies()
+  const { data: treasury } = useTreasurySummary()
+  const [name, setName] = useState(bot.name || '')
+  const [strategyName, setStrategyName] = useState(bot.strategy_name || '')
+  const [mode, setMode] = useState<BotMode>(bot.mode)
+  const [intervalSeconds, setIntervalSeconds] = useState(bot.interval_seconds)
+  const [budget, setBudget] = useState(bot.allocated_budget)
+
+  const currentBudget = bot.allocated_budget
+  const maxPossible = treasury ? currentBudget + treasury.unallocated : currentBudget
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
-      <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
-        <h2 className="text-[18px] font-bold mb-5">설정 수정</h2>
+      <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto">
+        <h2 className="text-[18px] font-bold mb-5">Bot 설정 수정</h2>
         <div className="space-y-4">
+          {/* Bot ID (읽기 전용) */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Bot ID</label>
+            <input
+              type="text"
+              value={bot.bot_id}
+              disabled
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] opacity-50 cursor-not-allowed"
+            />
+          </div>
+
+          {/* 이름 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">이름</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+            />
+          </div>
+
+          {/* 전략 선택 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">전략 선택</label>
+            <select
+              value={strategyName}
+              onChange={(e) => setStrategyName(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+            >
+              <option value="">전략을 선택하세요</option>
+              {(strategies ?? []).map((s) => (
+                <option key={s.id} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Bot 유형 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Bot 유형</label>
+            <div className="inline-flex rounded-lg border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setMode('paper')}
+                className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${
+                  mode === 'paper'
+                    ? 'bg-primary text-white'
+                    : 'bg-transparent text-text-muted hover:bg-surface-hover'
+                }`}
+              >
+                모의투자
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('live')}
+                className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${
+                  mode === 'live'
+                    ? 'bg-primary text-white'
+                    : 'bg-transparent text-text-muted hover:bg-surface-hover'
+                }`}
+              >
+                실전투자
+              </button>
+            </div>
+          </div>
+
+          {/* 실행 간격 */}
           <div>
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">실행 간격 (초)</label>
-            <input type="number" defaultValue={bot.interval_seconds} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
+            <input
+              type="number"
+              value={intervalSeconds}
+              onChange={(e) => setIntervalSeconds(Number(e.target.value))}
+              min={10}
+              max={3600}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+            />
+            <div className="text-[11px] text-text-muted mt-1">최소 10초 ~ 최대 3,600초 (1시간)</div>
           </div>
+
+          {/* 배정예산 */}
           <div>
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">대상 종목 (콤마 구분)</label>
-            <input defaultValue={bot.symbols?.join(', ')} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
-          </div>
-          <div>
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">할당 예산 (원)</label>
-            <input type="number" defaultValue={bot.allocated_budget} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">배정예산 (원)</label>
+            <input
+              type="number"
+              value={budget}
+              onChange={(e) => setBudget(Number(e.target.value))}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+            />
+            <div className="text-[11px] text-text-muted mt-1">
+              현재 배정예산: {formatKRW(currentBudget)} · 최대 가능: {formatKRW(maxPossible)}
+            </div>
           </div>
         </div>
         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
