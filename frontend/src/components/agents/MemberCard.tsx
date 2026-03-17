@@ -1,10 +1,22 @@
 import { useNavigate } from 'react-router-dom'
 import StatusBadge from '../common/StatusBadge'
 import { MEMBER_STATUS_LABELS } from '../../utils/constants'
-import type { Member, MemberStatus } from '../../types/member'
+import type { Member, MemberStatus, HumanRole } from '../../types/member'
 
 const STATUS_VARIANT: Record<MemberStatus, string> = {
   active: 'positive', suspended: 'warning', revoked: 'negative',
+}
+
+const ROLE_BADGE_STYLE: Record<HumanRole, string> = {
+  owner: 'bg-primary/15 text-primary',
+  master: 'bg-purple-500/15 text-purple-400',
+  admin: 'bg-border text-text-muted',
+}
+
+const ROLE_LABELS: Record<HumanRole, string> = {
+  owner: 'Owner',
+  master: 'Master',
+  admin: 'Admin',
 }
 
 interface MemberCardProps {
@@ -12,10 +24,13 @@ interface MemberCardProps {
   onSuspend?: (id: string) => void
   onReactivate?: (id: string) => void
   onRevoke?: (id: string) => void
+  onChangePassword?: (id: string) => void
 }
 
-export default function MemberCard({ member, onSuspend, onReactivate, onRevoke }: MemberCardProps) {
+export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, onChangePassword }: MemberCardProps) {
   const navigate = useNavigate()
+  const isOwner = member.member_id === 'owner'
+  const role = member.role ?? (isOwner ? 'owner' : undefined)
 
   const isRevoked = member.status === 'revoked'
 
@@ -24,12 +39,26 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke }
       onClick={() => navigate(`/members/${member.member_id}`)}
       className={`bg-surface border border-border rounded-lg p-5 flex gap-4 items-start cursor-pointer hover:border-primary/50 transition-colors${isRevoked ? ' opacity-50' : ''}`}
     >
-      <div className={`w-[56px] h-[56px] rounded-full bg-bg flex items-center justify-center text-[28px] shrink-0${isRevoked ? ' blur-[2px]' : ''}`}>
-        {member.emoji || (member.type === 'human' ? '👤' : '🤖')}
+      <div className="relative shrink-0">
+        {role === 'owner' && (
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[16px] leading-none">
+            {'👑'}
+          </div>
+        )}
+        <div className={`w-[56px] h-[56px] rounded-full bg-bg flex items-center justify-center text-[28px]${isRevoked ? ' blur-[2px]' : ''}`}>
+          {member.emoji || (member.type === 'human' ? '👤' : '🤖')}
+        </div>
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[15px] font-semibold">{member.name}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[15px] font-semibold">{member.name}</span>
+            {role && (
+              <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${ROLE_BADGE_STYLE[role]}`}>
+                {ROLE_LABELS[role]}
+              </span>
+            )}
+          </div>
           <StatusBadge variant={STATUS_VARIANT[member.status] as 'positive'}>{MEMBER_STATUS_LABELS[member.status]}</StatusBadge>
         </div>
         <div className="text-[13px] text-text-muted font-mono mb-2">{member.member_id}</div>
@@ -44,7 +73,19 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke }
             )}
           </div>
         )}
-        {!isRevoked && (onSuspend || onReactivate || onRevoke) && (
+        {/* Human 멤버 액션 버튼 */}
+        {!isRevoked && member.type === 'human' && (onSuspend || onChangePassword) && (
+          <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
+            {!isOwner && member.status === 'active' && onSuspend && (
+              <button onClick={() => onSuspend(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-warning border border-border cursor-pointer hover:bg-warning-bg">정지</button>
+            )}
+            {onChangePassword && (
+              <button onClick={() => onChangePassword(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">비밀번호 변경</button>
+            )}
+          </div>
+        )}
+        {/* Agent 멤버 액션 버튼 */}
+        {!isRevoked && member.type === 'agent' && (onSuspend || onReactivate || onRevoke) && (
           <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
             {member.status === 'active' && onSuspend && (
               <button onClick={() => onSuspend(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-warning border border-border cursor-pointer hover:bg-warning-bg">정지</button>

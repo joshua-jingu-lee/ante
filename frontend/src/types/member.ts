@@ -1,5 +1,6 @@
 export type MemberStatus = 'active' | 'suspended' | 'revoked'
 export type MemberType = 'human' | 'agent'
+export type HumanRole = 'owner' | 'master' | 'admin'
 
 export interface Member {
   member_id: string
@@ -7,6 +8,7 @@ export interface Member {
   type: MemberType
   org: string
   emoji?: string
+  role?: HumanRole
   status: MemberStatus
   scopes?: string[]
   last_active_at?: string
