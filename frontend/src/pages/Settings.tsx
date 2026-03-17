@@ -29,8 +29,7 @@ export default function Settings() {
   const killSwitch = useKillSwitch()
   const { data: configs } = useConfigs()
   const updateConfig = useUpdateConfig()
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
+  const [rowValues, setRowValues] = useState<Record<string, string>>({})
   const [showHaltModal, setShowHaltModal] = useState(false)
   const [haltReason, setHaltReason] = useState('')
 
@@ -51,16 +50,14 @@ export default function Settings() {
     killSwitch.mutate({ action: 'activate' })
   }
 
-  const startEdit = (key: string) => {
-    setEditingKey(key)
-    setEditValue(getConfigValue(key))
-  }
+  const getRowValue = (key: string) =>
+    rowValues[key] !== undefined ? rowValues[key] : getConfigValue(key)
 
-  const saveEdit = () => {
-    if (editingKey) {
-      updateConfig.mutate({ key: editingKey, value: editValue })
-      setEditingKey(null)
-    }
+  const setRowValue = (key: string, value: string) =>
+    setRowValues((prev) => ({ ...prev, [key]: value }))
+
+  const saveRow = (key: string) => {
+    updateConfig.mutate({ key, value: getRowValue(key) })
   }
 
   return (
@@ -111,7 +108,7 @@ export default function Settings() {
             </div>
             <div className="flex justify-between py-2.5 border-b border-border text-[13px]">
               <span className="text-text-muted">거래 모드</span>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold bg-positive-bg text-primary">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold bg-primary/15 text-primary">
                 {getConfigValue('broker.mode') || '모의투자'}
               </span>
             </div>
@@ -143,27 +140,15 @@ export default function Settings() {
                     <div className="text-[11px] text-text-muted mt-0.5">{cfg.key} · {cfg.desc}</div>
                   </td>
                   <td className="px-3 py-3 border-b border-border">
-                    {editingKey === cfg.key ? (
-                      <input
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        className="w-full bg-bg border border-border rounded px-2 py-1 text-text text-[13px] font-mono focus:outline-none focus:border-primary"
-                        autoFocus
-                        onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
-                      />
-                    ) : (
-                      <span className="text-[13px] font-mono">{getConfigValue(cfg.key) || '-'}</span>
-                    )}
+                    <input
+                      value={getRowValue(cfg.key)}
+                      onChange={(e) => setRowValue(cfg.key, e.target.value)}
+                      className="w-full bg-bg border border-border rounded px-2 py-1 text-text text-[13px] font-mono focus:outline-none focus:border-primary"
+                      onKeyDown={(e) => e.key === 'Enter' && saveRow(cfg.key)}
+                    />
                   </td>
                   <td className="px-3 py-3 border-b border-border text-right">
-                    {editingKey === cfg.key ? (
-                      <div className="flex gap-1 justify-end">
-                        <button onClick={saveEdit} className="px-2 py-1 rounded text-[11px] bg-primary text-white border-none cursor-pointer">저장</button>
-                        <button onClick={() => setEditingKey(null)} className="px-2 py-1 rounded text-[11px] bg-transparent text-text-muted border border-border cursor-pointer">취소</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => startEdit(cfg.key)} className="px-2.5 py-1 rounded text-[12px] bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">편집</button>
-                    )}
+                    <button onClick={() => saveRow(cfg.key)} className="px-2 py-1 rounded text-[11px] bg-primary text-white border-none cursor-pointer">저장</button>
                   </td>
                 </tr>
               ))}
