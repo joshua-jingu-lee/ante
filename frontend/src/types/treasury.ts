@@ -25,6 +25,9 @@ export interface BotBudget {
   reserved: number
   spent: number
   returned: number
+  eval_amount: number
+  position_pnl: number
+  position_return: number
 }
 
 export type TransactionType = 'allocate' | 'deallocate' | 'fill' | 'bot_stopped_release'
