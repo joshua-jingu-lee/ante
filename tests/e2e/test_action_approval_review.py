@@ -121,9 +121,9 @@ class TestApproveFlow:
         """승인 완료 후 API로 조회해도 approved 상태임을 확인한다."""
         approval = _api_get_approval(api_url, "appr-r01")
 
-        assert (
-            approval["status"] == "approved"
-        ), f"API 조회 결과 상태가 approved가 아님: {approval['status']}"
+        assert approval["status"] == "approved", (
+            f"API 조회 결과 상태가 approved가 아님: {approval['status']}"
+        )
         assert approval["resolved_by"] is not None, "resolved_by가 없음"
 
 
@@ -222,12 +222,12 @@ class TestRejectFlow:
         """거부 완료 후 API로 조회해도 rejected 상태이고 reject_reason이 있음을 확인한다."""  # noqa: E501
         approval = _api_get_approval(api_url, "appr-r02")
 
-        assert (
-            approval["status"] == "rejected"
-        ), f"API 조회 결과 상태가 rejected가 아님: {approval['status']}"
-        assert (
-            approval["reject_reason"] == "변동성 구간 추가 백테스트 필요"
-        ), f"거부 사유 불일치: {approval['reject_reason']}"
+        assert approval["status"] == "rejected", (
+            f"API 조회 결과 상태가 rejected가 아님: {approval['status']}"
+        )
+        assert approval["reject_reason"] == "변동성 구간 추가 백테스트 필요", (
+            f"거부 사유 불일치: {approval['reject_reason']}"
+        )
 
 
 # ── 목록 카운트 검증 ──────────────────────────────────
