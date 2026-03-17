@@ -1,7 +1,6 @@
 """Data Pipeline — 시세 데이터의 수집·정규화·적재·조회."""
 
 from ante.data.collector import DataCollector
-from ante.data.injector import DataInjector
 from ante.data.normalizer import (
     BaseNormalizer,
     DARTNormalizer,
@@ -29,7 +28,6 @@ __all__ = [
     "DARTNormalizer",
     "DataCollector",
     "DataGoKrNormalizer",
-    "DataInjector",
     "DataNormalizer",
     "DefaultNormalizer",
     "FUNDAMENTAL_COLUMNS",

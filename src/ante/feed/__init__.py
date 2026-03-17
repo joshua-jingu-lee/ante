@@ -3,5 +3,6 @@
 from __future__ import annotations
 
 from ante.feed.config import FeedConfig
+from ante.feed.injector import FeedInjector
 
-__all__ = ["FeedConfig"]
+__all__ = ["FeedConfig", "FeedInjector"]

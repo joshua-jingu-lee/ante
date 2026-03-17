@@ -9,7 +9,6 @@ import polars as pl
 import pytest
 
 from ante.data.collector import DataCollector
-from ante.data.injector import DataInjector
 from ante.data.normalizer import (
     DataNormalizer,
 )
@@ -740,42 +739,6 @@ class TestDataCollector:
 
         result = await store.read("005930", "1m")
         assert len(result) >= 1
-
-
-# ── injector.py 테스트 ─────────────────────────────
-
-
-class TestDataInjector:
-    async def test_inject_csv(self, store, normalizer, tmp_path):
-        csv_path = tmp_path / "test.csv"
-        csv_path.write_text(
-            "date,open,high,low,close,volume\n"
-            "2026-03-01T09:00:00,50000,50100,49900,50050,1000\n"
-            "2026-03-01T09:01:00,50100,50200,50000,50150,1100\n"
-        )
-
-        injector = DataInjector(store=store, normalizer=normalizer)
-        count = await injector.inject_csv(csv_path, "005930", "1m")
-        assert count == 2
-
-        result = await store.read("005930", "1m")
-        assert len(result) == 2
-
-    async def test_inject_csv_not_found(self, store, normalizer):
-        injector = DataInjector(store=store, normalizer=normalizer)
-        with pytest.raises(FileNotFoundError):
-            await injector.inject_csv("/nonexistent.csv", "005930", "1m")
-
-    async def test_inject_dataframe(self, store, normalizer):
-        df = _make_ohlcv_df(n=3)
-        injector = DataInjector(store=store, normalizer=normalizer)
-        count = await injector.inject_dataframe(df, "005930", "1m")
-        assert count == 3
-
-    async def test_inject_empty_dataframe(self, store, normalizer):
-        injector = DataInjector(store=store, normalizer=normalizer)
-        count = await injector.inject_dataframe(pl.DataFrame(), "005930", "1m")
-        assert count == 0
 
 
 # ── retention.py 테스트 ─────────────────────────────
