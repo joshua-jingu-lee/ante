@@ -7,6 +7,7 @@ export interface Bot {
   strategy_name?: string
   status: BotStatus
   mode: BotMode
+  interval_seconds?: number
   created_at: string
 }
 
