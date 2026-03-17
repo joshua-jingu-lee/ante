@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -19,7 +21,7 @@ class DataSource(Protocol):
     orchestrator는 이 프로토콜을 통해 소스를 다룬다.
     """
 
-    def fetch(self, date: str, **kwargs: Any) -> list[dict]:
+    async def fetch(self, date: str, **kwargs: Any) -> list[dict]:
         """지정된 날짜의 데이터를 수집한다.
 
         Args:
@@ -46,15 +48,32 @@ class RateLimiter:
             tps_limit: 초당 허용 트랜잭션 수.
             daily_limit: 일일 최대 호출 수.
         """
-        ...
+        self._rate = tps_limit
+        self._burst = int(tps_limit)
+        self._tokens = float(self._burst)
+        self._last_refill = time.monotonic()
+        self._lock = asyncio.Lock()
+        self._daily_limit = daily_limit
+        self._daily_count = 0
 
-    def acquire(self) -> None:
+    async def acquire(self) -> None:
         """토큰 하나를 소비한다. 필요 시 대기한다."""
-        ...
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_refill
+            self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
+            self._last_refill = now
+
+            if self._tokens < 1:
+                wait_time = (1 - self._tokens) / self._rate
+                await asyncio.sleep(wait_time)
+                self._tokens = 0
+            else:
+                self._tokens -= 1
 
     def increment_daily(self) -> None:
         """일일 호출 카운터를 1 증가시킨다."""
-        ...
+        self._daily_count += 1
 
     def is_daily_limit_reached(self, threshold: float = 0.9) -> bool:
         """일일 한도의 threshold 비율에 도달했는지 확인한다.
@@ -65,8 +84,13 @@ class RateLimiter:
         Returns:
             한도에 도달하면 True.
         """
-        ...
+        return self._daily_count >= int(self._daily_limit * threshold)
 
     def reset_daily(self) -> None:
         """일일 카운터를 초기화한다 (자정 후 호출)."""
-        ...
+        self._daily_count = 0
+
+    @property
+    def daily_count(self) -> int:
+        """현재 일일 호출 수."""
+        return self._daily_count
