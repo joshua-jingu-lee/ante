@@ -116,26 +116,22 @@ class TestDataRoutes:
         data = resp.json()
         assert data["total_bytes"] == 0
 
-    def test_datasets_with_catalog(self, tmp_path):
-        from ante.data.catalog import DataCatalog
+    def test_datasets_with_store(self, tmp_path):
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        catalog = DataCatalog(store)
-        app = create_app(data_catalog=catalog)
+        app = create_app(data_store=store)
         client = TestClient(app)
 
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
         assert isinstance(resp.json()["datasets"], list)
 
-    def test_storage_with_catalog(self, tmp_path):
-        from ante.data.catalog import DataCatalog
+    def test_storage_with_store(self, tmp_path):
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        catalog = DataCatalog(store)
-        app = create_app(data_catalog=catalog)
+        app = create_app(data_store=store)
         client = TestClient(app)
 
         resp = client.get("/api/data/storage")

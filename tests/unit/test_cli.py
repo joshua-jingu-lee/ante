@@ -263,52 +263,6 @@ class TestDataCommands:
         result = runner.invoke(cli, ["data", "storage", "--data-path", str(data_dir)])
         assert result.exit_code == 0
 
-    def test_inject(self, runner, tmp_path, data_dir):
-        csv_path = tmp_path / "test.csv"
-        csv_path.write_text(
-            "date,open,high,low,close,volume\n"
-            "2026-03-01T09:00:00,50000,50100,49900,50050,1000\n"
-        )
-        result = runner.invoke(
-            cli,
-            [
-                "data",
-                "inject",
-                str(csv_path),
-                "--symbol",
-                "005930",
-                "--data-path",
-                str(data_dir),
-            ],
-        )
-        assert result.exit_code == 0
-        assert "1 rows" in result.output
-
-    def test_inject_json(self, runner, tmp_path, data_dir):
-        csv_path = tmp_path / "test.csv"
-        csv_path.write_text(
-            "date,open,high,low,close,volume\n"
-            "2026-03-01T09:00:00,50000,50100,49900,50050,1000\n"
-            "2026-03-01T09:01:00,50100,50200,50000,50150,1100\n"
-        )
-        result = runner.invoke(
-            cli,
-            [
-                "--format",
-                "json",
-                "data",
-                "inject",
-                str(csv_path),
-                "--symbol",
-                "005930",
-                "--data-path",
-                str(data_dir),
-            ],
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["count"] == 2
-
 
 # ── Report 커맨드 테스트 ──────────────────────────
 

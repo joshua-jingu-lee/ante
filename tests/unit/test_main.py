@@ -172,12 +172,11 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     # 11. Broker + APIGateway — 건너뜀 (외부 의존성)
 
     # 12. Data Pipeline
-    from ante.data import DataCatalog, ParquetStore
+    from ante.data import ParquetStore
 
     data_path = tmp_path / "data"
     data_path.mkdir(parents=True, exist_ok=True)
     parquet_store = ParquetStore(base_path=data_path)
-    data_catalog = DataCatalog(store=parquet_store)
 
     # 13. BacktestService
     from ante.backtest import BacktestService
@@ -204,8 +203,8 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     # BotManager 빈 상태
     assert bot_manager.list_bots() == []
 
-    # DataCatalog 빈 상태
-    assert data_catalog.list_datasets() == []
+    # ParquetStore 빈 상태
+    assert parquet_store.list_symbols("1d") == []
 
     # TradeService 빈 상태
     trades = await trade_service.get_trades()
@@ -274,12 +273,11 @@ async def test_composition_root_with_web_api(tmp_path: Path) -> None:
     report_store = ReportStore(db=db)
     await report_store.initialize()
 
-    from ante.data import DataCatalog, ParquetStore
+    from ante.data import ParquetStore
 
     data_path = tmp_path / "data"
     data_path.mkdir(parents=True, exist_ok=True)
     parquet_store = ParquetStore(base_path=data_path)
-    data_catalog = DataCatalog(store=parquet_store)
 
     # Web App 생성 — 모든 서비스 주입
     app = create_app(
@@ -289,7 +287,6 @@ async def test_composition_root_with_web_api(tmp_path: Path) -> None:
         trade_service=trade_service,
         treasury=treasury,
         report_store=report_store,
-        data_catalog=data_catalog,
         data_store=parquet_store,
     )
 
