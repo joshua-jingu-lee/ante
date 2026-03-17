@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
 import { formatNumber, formatDate } from '../utils/formatters'
-import Pagination from '../components/common/Pagination'
 import { TableSkeleton } from '../components/common/Skeleton'
 
 const LIMIT = 15
@@ -116,9 +115,10 @@ export default function BacktestData() {
               </table>
             </div>
 
-            <div className="flex items-center justify-between pt-4">
-              <span className="text-[12px] text-text-muted">
+            <div className="flex items-center justify-between pt-4 text-[13px] text-text-muted">
+              <span>
                 총 {formatNumber(data?.total ?? 0)}건
+                {(data?.total ?? 0) > 0 && ` 중 ${offset + 1}-${Math.min(offset + LIMIT, data?.total ?? 0)}`}
                 {storage && ` · 전체 ${storage.total_mb >= 1024 ? `${(storage.total_mb / 1024).toFixed(1)} GB` : `${storage.total_mb.toFixed(1)} MB`}`}
                 {storage?.by_timeframe && Object.keys(storage.by_timeframe).length > 0 && (
                   <> ({Object.entries(storage.by_timeframe).map(([tf, bytes], i) => (
@@ -127,7 +127,22 @@ export default function BacktestData() {
                 )}
               </span>
               {(data?.total ?? 0) > LIMIT && (
-                <Pagination total={data?.total ?? 0} offset={offset} limit={LIMIT} onPageChange={setOffset} />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                    disabled={offset <= 0}
+                    className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    ← 이전
+                  </button>
+                  <button
+                    onClick={() => setOffset(offset + LIMIT)}
+                    disabled={offset + LIMIT >= (data?.total ?? 0)}
+                    className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    다음 →
+                  </button>
+                </div>
               )}
             </div>
           </>

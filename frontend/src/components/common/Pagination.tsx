@@ -22,14 +22,14 @@ export default function Pagination({ total, offset, limit, onPageChange }: Pagin
           disabled={!hasPrev}
           className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          이전
+          ← 이전
         </button>
         <button
           onClick={() => onPageChange(offset + limit)}
           disabled={!hasNext}
           className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          다음
+          다음 →
         </button>
       </div>
     </div>
