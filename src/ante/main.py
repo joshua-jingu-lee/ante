@@ -30,7 +30,7 @@ async def main() -> None:
     9. Trade (Recorder, PositionHistory, PerformanceTracker, Service)
     10. BotManager
     11. Broker (KISAdapter) + APIGateway
-    12. Data Pipeline (ParquetStore, DataCatalog, DataCollector)
+    12. Data Pipeline (ParquetStore, DataCollector)
     13. BacktestService
     14. ReportStore
     15. NotificationService
@@ -323,12 +323,11 @@ async def main() -> None:
         logger.info("Treasury 잔고 동기화 시작 (주기: %d초)", sync_interval)
 
     # ── 12. Data Pipeline ────────────────────────────
-    from ante.data import DataCatalog, DataCollector, ParquetStore
+    from ante.data import DataCollector, ParquetStore
 
     data_path = config.get("data.path", "data/")
     Path(data_path).mkdir(parents=True, exist_ok=True)
     parquet_store = ParquetStore(base_path=Path(data_path))
-    data_catalog = DataCatalog(store=parquet_store)
 
     data_collector = None
     if api_gateway:
@@ -434,7 +433,6 @@ async def main() -> None:
             trade_service=trade_service,
             treasury=treasury,
             report_store=report_store,
-            data_catalog=data_catalog,
             data_store=parquet_store,
             audit_logger=audit_logger,
             member_service=member_service,

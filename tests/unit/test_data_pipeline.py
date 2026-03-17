@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 import polars as pl
 import pytest
 
-from ante.data.catalog import DataCatalog
 from ante.data.collector import DataCollector
 from ante.data.injector import DataInjector
 from ante.data.normalizer import DataNormalizer
@@ -40,11 +39,6 @@ def store(data_dir):
 @pytest.fixture
 def normalizer():
     return DataNormalizer()
-
-
-@pytest.fixture
-def catalog(store):
-    return DataCatalog(store)
 
 
 def _make_ohlcv_df(
@@ -633,45 +627,6 @@ class TestDataInjector:
         injector = DataInjector(store=store, normalizer=normalizer)
         count = await injector.inject_dataframe(pl.DataFrame(), "005930", "1m")
         assert count == 0
-
-
-# ── catalog.py 테스트 ─────────────────────────────
-
-
-class TestDataCatalog:
-    async def test_list_datasets_empty(self, catalog):
-        assert catalog.list_datasets() == []
-
-    async def test_list_datasets_with_data(self, store, catalog):
-        await store.write("005930", "1d", _make_ohlcv_df("005930"))
-        datasets = catalog.list_datasets()
-        assert len(datasets) == 1
-        assert datasets[0]["symbol"] == "005930"
-        assert datasets[0]["timeframe"] == "1d"
-
-    async def test_list_datasets_multi(self, store, catalog):
-        await store.write("005930", "1d", _make_ohlcv_df("005930"))
-        await store.write("005930", "1m", _make_ohlcv_df("005930"))
-        await store.write("000660", "1d", _make_ohlcv_df("000660"))
-
-        datasets = catalog.list_datasets()
-        assert len(datasets) == 3
-
-    def test_get_schema(self, catalog):
-        schema = catalog.get_schema()
-        assert "timestamp" in schema
-        assert "close" in schema
-
-    async def test_get_storage_summary_empty(self, catalog):
-        summary = catalog.get_storage_summary()
-        assert summary["total_bytes"] == 0
-        assert summary["total_mb"] == 0.0
-
-    async def test_get_storage_summary_with_data(self, store, catalog):
-        await store.write("005930", "1d", _make_ohlcv_df())
-        summary = catalog.get_storage_summary()
-        assert summary["total_bytes"] > 0
-        assert "1d" in summary["by_timeframe"]
 
 
 # ── retention.py 테스트 ─────────────────────────────
