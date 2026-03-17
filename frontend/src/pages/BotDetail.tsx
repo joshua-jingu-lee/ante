@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useBotDetail, useBotControl } from '../hooks/useBots'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
+import BotStopModal from '../components/bots/BotStopModal'
 import { formatKRW, formatDateTime } from '../utils/formatters'
 import { BOT_STATUS_LABELS } from '../utils/constants'
 import type { BotStatus, BotDetail as BotDetailType } from '../types/bot'
@@ -16,6 +17,7 @@ export default function BotDetail() {
   const { data: bot, isLoading } = useBotDetail(id!)
   const { start, stop } = useBotControl()
   const [showEditModal, setShowEditModal] = useState(false)
+  const [showStopModal, setShowStopModal] = useState(false)
 
   if (isLoading) return <PageSkeleton />
   if (!bot) return <div className="text-text-muted text-center py-12">봇을 찾을 수 없습니다</div>
@@ -55,7 +57,7 @@ export default function BotDetail() {
             <button onClick={() => start.mutate(bot.bot_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">시작</button>
           )}
           {canStop && (
-            <button onClick={() => stop.mutate(bot.bot_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">중지</button>
+            <button onClick={() => setShowStopModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">중지</button>
           )}
         </div>
       </div>
@@ -184,6 +186,18 @@ export default function BotDetail() {
           </div>
         )}
       </div>
+
+      {/* 중지 확인 모달 */}
+      {showStopModal && (
+        <BotStopModal
+          bot={bot}
+          onConfirm={() => {
+            stop.mutate(bot.bot_id, { onSuccess: () => setShowStopModal(false) })
+          }}
+          onClose={() => setShowStopModal(false)}
+          isPending={stop.isPending}
+        />
+      )}
 
       {/* 설정 수정 모달 */}
       {showEditModal && <BotEditModal bot={bot} onClose={() => setShowEditModal(false)} />}
