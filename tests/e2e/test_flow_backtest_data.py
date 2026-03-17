@@ -63,9 +63,9 @@ def test_filter_tabs(authenticated_page, base_url: str) -> None:  # noqa: ANN001
     options = select.locator("option")
     option_texts = options.all_text_contents()
     for label in ["전체 타임프레임", "1일", "1시간", "1분"]:
-        assert (
-            label in option_texts
-        ), f"'{label}' 옵션이 select에 없습니다: {option_texts}"
+        assert label in option_texts, (
+            f"'{label}' 옵션이 select에 없습니다: {option_texts}"
+        )
 
 
 # ── 4. 데이터셋 테이블 컬럼 헤더 ─────────────────────

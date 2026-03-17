@@ -62,6 +62,7 @@ from ante.cli.commands.strategy import strategy  # noqa: E402
 from ante.cli.commands.system import system  # noqa: E402
 from ante.cli.commands.trade import trade  # noqa: E402
 from ante.cli.commands.treasury import treasury  # noqa: E402
+from ante.feed.cli import feed  # noqa: E402
 
 cli.add_command(audit)
 cli.add_command(approval)
@@ -81,3 +82,4 @@ cli.add_command(signal)
 cli.add_command(system)
 cli.add_command(trade)
 cli.add_command(treasury)
+cli.add_command(feed)
