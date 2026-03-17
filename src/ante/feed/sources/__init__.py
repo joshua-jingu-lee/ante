@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ante.feed.sources.base import DataSource, RateLimiter
+from ante.feed.sources.dart import DARTError, DARTSource
 from ante.feed.sources.data_go_kr import (
     CriticalApiError,
     DailyLimitExceededError,
@@ -12,6 +13,8 @@ from ante.feed.sources.data_go_kr import (
 
 __all__ = [
     "CriticalApiError",
+    "DARTError",
+    "DARTSource",
     "DailyLimitExceededError",
     "DataGoKrError",
     "DataGoKrSource",
