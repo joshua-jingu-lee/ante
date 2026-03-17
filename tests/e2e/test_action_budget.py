@@ -112,12 +112,12 @@ class TestAllocationFormUI:
         bot_select = page.locator("select").first
         options = bot_select.locator("option").all_inner_texts()
 
-        assert any(
-            "bot-alloc-01" in o for o in options
-        ), f"bot-alloc-01이 드롭다운에 없음: {options}"
-        assert any(
-            "bot-revoke-01" in o for o in options
-        ), f"bot-revoke-01이 드롭다운에 없음: {options}"
+        assert any("bot-alloc-01" in o for o in options), (
+            f"bot-alloc-01이 드롭다운에 없음: {options}"
+        )
+        assert any("bot-revoke-01" in o for o in options), (
+            f"bot-revoke-01이 드롭다운에 없음: {options}"
+        )
 
     def test_buttons_disabled_without_amount(
         self, authenticated_page, base_url: str
@@ -202,9 +202,9 @@ class TestConfirmModal:
         # API 상태 변경 없음
         after = _get_budget_for_bot(api_url, "bot-alloc-01")
         after_allocated = after["allocated"] if after else 0.0
-        assert (
-            after_allocated == before_allocated
-        ), f"취소 후 예산이 변경됨: {before_allocated} → {after_allocated}"
+        assert after_allocated == before_allocated, (
+            f"취소 후 예산이 변경됨: {before_allocated} → {after_allocated}"
+        )
 
 
 # ── 예산 할당 플로우 ──────────────────────────────────
@@ -399,9 +399,9 @@ class TestRevocationErrorCase:
 
         after = _get_budget_for_bot(api_url, "bot-revoke-01")
         assert after is not None
-        assert after["allocated"] == pytest.approx(
-            before_allocated, abs=1
-        ), f"실패한 회수 후 예산이 변경됨: {before_allocated} → {after['allocated']}"
+        assert after["allocated"] == pytest.approx(before_allocated, abs=1), (
+            f"실패한 회수 후 예산이 변경됨: {before_allocated} → {after['allocated']}"
+        )
 
 
 # ── API 교차 검증 ─────────────────────────────────────
@@ -456,9 +456,9 @@ class TestAPIValidation:
         budgets = _get_bot_budgets(api_url)
         bot_ids = {b["bot_id"] for b in budgets}
 
-        assert (
-            "bot-alloc-01" in bot_ids
-        ), f"bot-alloc-01이 budgets 응답에 없음: {bot_ids}"
-        assert (
-            "bot-revoke-01" in bot_ids
-        ), f"bot-revoke-01이 budgets 응답에 없음: {bot_ids}"
+        assert "bot-alloc-01" in bot_ids, (
+            f"bot-alloc-01이 budgets 응답에 없음: {bot_ids}"
+        )
+        assert "bot-revoke-01" in bot_ids, (
+            f"bot-revoke-01이 budgets 응답에 없음: {bot_ids}"
+        )
