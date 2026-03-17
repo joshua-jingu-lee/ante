@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.4.1 (2026-03-17)
+
+### Bug Fixes
+
+- 미사용 BacktestMetrics 컴포넌트 삭제 및 unused import 제거
+  ([`672f7d6`](https://github.com/joshua-jingu-lee/ante/commit/672f7d62749a1faa72b8acca263743d3e0f3576d))
+
+
 ## v0.4.0 (2026-03-17)
 
 ### Features
