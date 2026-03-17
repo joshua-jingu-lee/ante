@@ -62,7 +62,12 @@ export default function Agents() {
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
                 {filterByOrg(humans).map((m) => (
-                  <MemberCard key={m.member_id} member={m} />
+                  <MemberCard
+                    key={m.member_id}
+                    member={m}
+                    onSuspend={m.member_id !== 'owner' ? (id) => suspend.mutate(id) : undefined}
+                    onChangePassword={() => {/* TODO: 비밀번호 변경 모달 연결 */}}
+                  />
                 ))}
               </div>
             )}
