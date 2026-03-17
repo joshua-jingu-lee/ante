@@ -23,13 +23,13 @@ export async function getApprovals(params: ApprovalsParams): Promise<ApprovalsRe
   return res.data
 }
 
-export async function getApprovalDetail(id: number): Promise<ApprovalDetail> {
+export async function getApprovalDetail(id: string): Promise<ApprovalDetail> {
   const res = await client.get(`/api/approvals/${id}`)
   return res.data
 }
 
 export async function updateApprovalStatus(
-  id: number,
+  id: string,
   status: 'approved' | 'rejected',
   memo?: string,
 ): Promise<void> {

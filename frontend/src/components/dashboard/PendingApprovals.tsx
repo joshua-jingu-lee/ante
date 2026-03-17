@@ -6,10 +6,11 @@ import { TableSkeleton } from '../common/Skeleton'
 import type { Approval, ApprovalType } from '../../types/approval'
 
 const TYPE_LABELS: Record<ApprovalType, { label: string; variant: string }> = {
-  strategy_report: { label: '전략 리포트', variant: 'info' },
-  budget_allocation: { label: '예산 할당', variant: 'primary' },
-  live_switch: { label: '실전 전환', variant: 'warning' },
-  risk_alert: { label: '위험 알림', variant: 'negative' },
+  strategy_adopt: { label: '전략 채택', variant: 'info' },
+  budget_change: { label: '예산 변경', variant: 'primary' },
+  bot_create: { label: '봇 생성', variant: 'positive' },
+  bot_stop: { label: '봇 중지', variant: 'warning' },
+  rule_change: { label: '규칙 변경', variant: 'negative' },
 }
 
 export default function PendingApprovals() {
@@ -19,7 +20,7 @@ export default function PendingApprovals() {
   const items = data?.items ?? []
   const total = data?.total ?? 0
 
-  const handleAction = (id: number, status: 'approved' | 'rejected') => {
+  const handleAction = (id: string, status: 'approved' | 'rejected') => {
     updateStatus.mutate({ id, status })
   }
 

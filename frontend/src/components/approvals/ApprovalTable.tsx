@@ -5,10 +5,11 @@ import type { Approval, ApprovalStatus, ApprovalType } from '../../types/approva
 import { APPROVAL_STATUS_LABELS } from '../../utils/constants'
 
 const TYPE_BADGE: Record<ApprovalType, { label: string; variant: string }> = {
-  strategy_report: { label: '전략 리포트', variant: 'info' },
-  budget_allocation: { label: '예산 할당', variant: 'primary' },
-  live_switch: { label: '실전 전환', variant: 'warning' },
-  risk_alert: { label: '위험 알림', variant: 'negative' },
+  strategy_adopt: { label: '전략 채택', variant: 'info' },
+  budget_change: { label: '예산 변경', variant: 'primary' },
+  bot_create: { label: '봇 생성', variant: 'positive' },
+  bot_stop: { label: '봇 중지', variant: 'warning' },
+  rule_change: { label: '규칙 변경', variant: 'negative' },
 }
 
 const STATUS_VARIANT: Record<ApprovalStatus, string> = {

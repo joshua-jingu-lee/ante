@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useUpdateApprovalStatus } from '../../hooks/useApprovals'
 
-export default function ReviewControls({ approvalId, isPending }: { approvalId: number; isPending: boolean }) {
+export default function ReviewControls({ approvalId, isPending }: { approvalId: string; isPending: boolean }) {
   const [memo, setMemo] = useState('')
   const updateStatus = useUpdateApprovalStatus()
 
