@@ -36,7 +36,7 @@ export default function AgentTable({ items, onSuspend, onReactivate, onRevoke }:
             <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">등록된 에이전트가 없습니다</td></tr>
           ) : (
             items.map((m) => (
-              <tr key={m.member_id} onClick={() => navigate(`/agents/${m.member_id}`)} className="hover:bg-surface-hover cursor-pointer">
+              <tr key={m.member_id} onClick={() => navigate(`/members/${m.member_id}`)} className="hover:bg-surface-hover cursor-pointer">
                 <td className="px-3 py-3 border-b border-border text-[13px] font-mono font-medium">{m.member_id}</td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">{m.name}</td>
                 <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{m.org}</td>

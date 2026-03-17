@@ -54,8 +54,8 @@ export default function App() {
               <Route path="bots" element={<Bots />} />
               <Route path="bots/:id" element={<BotDetail />} />
               <Route path="backtest-data" element={<BacktestData />} />
-              <Route path="agents" element={<Agents />} />
-              <Route path="agents/:id" element={<AgentDetail />} />
+              <Route path="members" element={<Agents />} />
+              <Route path="members/:id" element={<AgentDetail />} />
               <Route path="settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
             </Route>

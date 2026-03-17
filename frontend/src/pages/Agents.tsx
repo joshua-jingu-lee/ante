@@ -43,7 +43,7 @@ export default function Agents() {
           onClick={() => setShowRegister(true)}
           className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
         >
-          멤버 등록
+          + 에이전트 등록
         </button>
       </div>
 
