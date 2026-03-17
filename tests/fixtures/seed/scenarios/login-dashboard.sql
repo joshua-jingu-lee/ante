@@ -2,9 +2,9 @@
 -- 로그인 → 대시보드 플로우에 필요한 시드 데이터
 
 -- ── 포트폴리오 (treasury) ───────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 10000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 100000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 0.0);
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 10000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 100000000.0);
 
 -- ── 승인 대기 2건 ───────────────────────────────────
 INSERT INTO approvals (id, type, status, requester, title, body, params, created_at, expires_at)

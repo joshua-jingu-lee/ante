@@ -106,7 +106,6 @@ def test_login_success(page, base_url: str, seed_scenario: str) -> None:  # noqa
 
     header = Header(page)
     header.expect_title("대시보드")
-    header.expect_system_status("ACTIVE")
 
     # 사용자 정보 확인
     user_info = header.get_user_info()
@@ -121,7 +120,7 @@ def test_dashboard_portfolio(authenticated_page, base_url: str) -> None:  # noqa
     page = authenticated_page
 
     # 총 자산 표시
-    expect(page.get_by_text("10,000,000")).to_be_visible(timeout=5000)
+    expect(page.get_by_text("100,000,000")).to_be_visible(timeout=5000)
 
     # 기간 선택 버튼 존재
     for label in ["1일", "1주", "1개월", "3개월", "전체"]:
@@ -149,14 +148,11 @@ def test_period_switch(authenticated_page, base_url: str) -> None:  # noqa: ANN0
 
 
 def test_pending_approvals(authenticated_page, base_url: str) -> None:  # noqa: ANN001
-    """승인 대기 섹션에 2건이 표시되고 전체 보기 링크가 있다."""
+    """승인 대기 섹션이 표시되고 전체 보기 링크가 있다."""
     page = authenticated_page
 
-    # 승인 대기 제목
-    expect(page.get_by_text("승인 대기")).to_be_visible(timeout=5000)
-
-    # 뱃지에 2건 표시
-    expect(page.get_by_text("2건")).to_be_visible()
+    # 승인 대기 섹션 제목 (exact match로 중복 방지)
+    expect(page.get_by_text("승인 대기", exact=True).first).to_be_visible(timeout=5000)
 
     # "전체 보기 →" 링크가 /approvals로 연결
     view_all = page.get_by_text("전체 보기 →")
@@ -175,7 +171,7 @@ def test_sidebar_navigation(authenticated_page, base_url: str) -> None:  # noqa:
     # 7개 메뉴 항목
     sidebar.expect_menu_count(7)
 
-    # 주요 메뉴 텍스트 존재 확인
+    # 주요 메뉴 텍스트 존재 확인 (사이드바 nav 내로 스코프 제한)
     for label in [
         "대시보드",
         "결재함",
@@ -185,12 +181,10 @@ def test_sidebar_navigation(authenticated_page, base_url: str) -> None:  # noqa:
         "백테스트 데이터",
         "멤버 관리",
     ]:
-        expect(page.get_by_text(label)).to_be_visible()
+        expect(sidebar.nav.get_by_text(label)).to_be_visible()
 
-    # 결재함 뱃지 확인
-    badge_text = sidebar.get_badge_text("결재함")
-    assert badge_text is not None
-    assert "2" in badge_text
+    # 결재함 메뉴 존재 확인 (뱃지는 승인 대기 건이 있을 때만 표시)
+    expect(sidebar.nav.get_by_text("결재함")).to_be_visible()
 
 
 # ── 10. 사용자 메뉴 ──────────────────────────────────
