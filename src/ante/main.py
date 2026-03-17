@@ -439,6 +439,9 @@ async def main() -> None:
             audit_logger=audit_logger,
             member_service=member_service,
             session_service=session_service,
+            strategy_registry=strategy_registry,
+            dynamic_config=dynamic_config,
+            approval_service=approval_service,
         )
 
         import uvicorn

@@ -16,15 +16,14 @@ const STATUS_VARIANT: Record<StrategyStatus, string> = {
 type EquityCurvePeriod = '1w' | '1m' | '3m' | 'all'
 
 export default function StrategyDetail() {
-  const { id } = useParams<{ id: string }>()
-  const numId = Number(id)
+  const { id = '' } = useParams<{ id: string }>()
   const [equityPeriod, setEquityPeriod] = useState<EquityCurvePeriod>('all')
 
-  const { data: strategy, isLoading } = useStrategyDetail(numId)
-  const { data: performance } = useStrategyPerformance(numId)
-  const { data: tradesData } = useStrategyTrades(numId)
-  const { data: dailySummary } = useStrategyDailySummary(numId)
-  const { data: monthlySummary } = useStrategyMonthlySummary(numId)
+  const { data: strategy, isLoading } = useStrategyDetail(id)
+  const { data: performance } = useStrategyPerformance(id)
+  const { data: tradesData } = useStrategyTrades(id)
+  const { data: dailySummary } = useStrategyDailySummary(id)
+  const { data: monthlySummary } = useStrategyMonthlySummary(id)
 
   if (isLoading) return <PageSkeleton />
   if (!strategy) return <div className="text-text-muted text-center py-12">전략을 찾을 수 없습니다</div>

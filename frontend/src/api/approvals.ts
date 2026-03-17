@@ -20,12 +20,16 @@ export async function getApprovals(params: ApprovalsParams): Promise<ApprovalsRe
   if (params.offset) query.offset = params.offset
   if (params.limit) query.limit = params.limit
   const res = await client.get('/api/approvals', { params: query })
-  return res.data
+  const data = res.data
+  return {
+    items: data.approvals ?? data.items ?? [],
+    total: data.total ?? (data.approvals ?? data.items ?? []).length,
+  }
 }
 
 export async function getApprovalDetail(id: string): Promise<ApprovalDetail> {
   const res = await client.get(`/api/approvals/${id}`)
-  return res.data
+  return res.data.approval ?? res.data
 }
 
 export async function updateApprovalStatus(

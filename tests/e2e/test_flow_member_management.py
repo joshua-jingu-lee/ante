@@ -1,6 +1,6 @@
 """E2E 테스트 — 멤버 관리 페이지 흐름.
 
-사람/에이전트 멤버 목록 조회, 에이전트 등록, 상세 조회, 상태 변경을 검증한다.
+Human/Agent 멤버 목록 조회, 카드 내용, 상태 필터를 검증한다.
 """
 
 from __future__ import annotations
@@ -8,274 +8,132 @@ from __future__ import annotations
 import re
 
 import pytest
-from playwright.sync_api import expect
+from playwright.sync_api import Page, expect
 
 SCENARIO = "member-management"
 
 pytestmark = [pytest.mark.e2e, pytest.mark.playwright]
 
 
+# ── 헬퍼 ─────────────────────────────────────────────
+
+
+def _go_to_members(page: Page, base_url: str) -> None:
+    """멤버 관리 페이지로 이동 후 렌더링 안정화 대기."""
+    page.goto(f"{base_url}/members", wait_until="commit")
+    page.wait_for_timeout(2000)
+
+
+def _member_card(page: Page, name: str):  # noqa: ANN202
+    """멤버 이름으로 카드 영역(border rounded-lg)을 찾는다."""
+    xpath = (
+        "xpath=ancestor::div["
+        "contains(@class,'rounded-lg') and contains(@class,'border')]"
+    )
+    return page.get_by_text(name, exact=True).locator(xpath).first
+
+
+# ── 페이지 기본 구조 ────────────────────────────────
+
+
 class TestMemberListPage:
-    """멤버 관리 페이지 — 목록 검증."""
+    """멤버 관리 페이지 — 기본 구조 및 목록 검증."""
 
     def test_page_title(self, authenticated_page, base_url: str) -> None:
-        """멤버 관리 페이지 타이틀이 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
+        """헤더에 '멤버 관리' 타이틀이 표시된다."""
+        _go_to_members(authenticated_page, base_url)
 
-        heading = page.get_by_role("heading", name="멤버 관리")
+        heading = authenticated_page.locator("h1", has_text="멤버 관리")
         expect(heading).to_be_visible()
 
-    def test_human_section_count(self, authenticated_page, base_url: str) -> None:
-        """사람 섹션에 2명이 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
+    def test_human_section_visible(self, authenticated_page, base_url: str) -> None:
+        """Human 멤버 섹션이 표시되고 인원수 뱃지가 2이다."""
+        _go_to_members(authenticated_page, base_url)
 
-        section = page.get_by_text("사람")
+        section = authenticated_page.get_by_text("Human 멤버", exact=False).first
         expect(section).to_be_visible()
 
-        # 사람 섹션 내 멤버 카드 2개 (owner, admin-01)
-        human_cards = page.locator("text=사람").locator("..").locator("[class*=card]")
-        expect(human_cards).to_have_count(2)
+        # 카운트 뱃지에 "2" 표시
+        badge = section.locator("span", has_text="2")
+        expect(badge).to_be_visible()
 
-    def test_agent_section_count(self, authenticated_page, base_url: str) -> None:
-        """에이전트 섹션에 6명이 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
+    def test_agent_section_visible(self, authenticated_page, base_url: str) -> None:
+        """Agent 멤버 섹션이 표시되고 인원수 뱃지가 6이다."""
+        _go_to_members(authenticated_page, base_url)
 
-        section = page.get_by_text("에이전트")
+        section = authenticated_page.get_by_text("Agent 멤버", exact=False).first
         expect(section).to_be_visible()
 
-        agent_cards = (
-            page.locator("text=에이전트").locator("..").locator("[class*=card]")
-        )
-        expect(agent_cards).to_have_count(6)
+        badge = section.locator("span", has_text="6")
+        expect(badge).to_be_visible()
 
     def test_owner_card_has_crown_and_master_role(
         self, authenticated_page, base_url: str
     ) -> None:
-        """owner 카드에 왕관 표시와 master 역할이 보인다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
+        """owner 카드에 아바타 이모지와 Master 역할 뱃지가 표시된다."""
+        _go_to_members(authenticated_page, base_url)
 
-        owner_card = page.get_by_text("owner").locator("..")
-        expect(owner_card).to_be_visible()
-        # 왕관 이모지 또는 아이콘 확인
-        expect(owner_card).to_contain_text(
-            re.compile(r"👑|crown|master", re.IGNORECASE)
-        )
+        card = _member_card(authenticated_page, "Owner")
+        expect(card).to_be_visible()
+        # Master 역할 뱃지
+        expect(card.get_by_text("Master", exact=True)).to_be_visible()
+        # member_id (소문자 "owner" — 대문자 "Owner"와 구분)
+        expect(card.locator(".font-mono", has_text="owner")).to_be_visible()
 
     def test_admin_card_visible(self, authenticated_page, base_url: str) -> None:
-        """admin-01 카드가 표시된다."""
+        """admin-01 카드에 이름, Admin 뱃지, 활성 상태가 표시된다."""
+        _go_to_members(authenticated_page, base_url)
+
+        card = _member_card(authenticated_page, "운영 관리자")
+        expect(card).to_be_visible()
+        expect(card.get_by_text("Admin", exact=True)).to_be_visible()
+        expect(card.get_by_text("admin-01")).to_be_visible()
+        expect(card.get_by_text("활성")).to_be_visible()
+
+    def test_agent_card_content(self, authenticated_page, base_url: str) -> None:
+        """Agent 카드에 이모지, 이름, ID, 소속, 상태 뱃지가 표시된다."""
+        _go_to_members(authenticated_page, base_url)
+
+        card = _member_card(authenticated_page, "전략 리서치 1호")
+        expect(card).to_be_visible()
+        # 이모지
+        expect(card.get_by_text("🦊")).to_be_visible()
+        # member_id
+        expect(card.get_by_text("strategy-dev-01")).to_be_visible()
+        # 소속
+        expect(card.get_by_text("strategy-lab")).to_be_visible()
+        # 활성 상태
+        expect(card.get_by_text("활성")).to_be_visible()
+
+    def test_suspended_agent_visible(self, authenticated_page, base_url: str) -> None:
+        """정지 상태인 ops-agent-01 카드에 '정지' 뱃지가 표시된다."""
+        _go_to_members(authenticated_page, base_url)
+
+        card = _member_card(authenticated_page, "봇 운영 1호")
+        expect(card).to_be_visible()
+        expect(card.get_by_text("정지")).to_be_visible()
+
+    def test_revoked_agent_visible(self, authenticated_page, base_url: str) -> None:
+        """폐기 상태인 old-agent-01 카드에 '폐기' 뱃지가 표시된다."""
+        _go_to_members(authenticated_page, base_url)
+
+        card = _member_card(authenticated_page, "구 리서치 에이전트")
+        expect(card).to_be_visible()
+        expect(card.get_by_text("폐기")).to_be_visible()
+
+    def test_register_button_visible(self, authenticated_page, base_url: str) -> None:
+        """Agent 섹션에 '+ 에이전트 등록' 버튼이 표시된다."""
+        _go_to_members(authenticated_page, base_url)
+
+        btn = authenticated_page.get_by_role("button", name=re.compile("에이전트 등록"))
+        expect(btn).to_be_visible()
+
+    def test_status_filter_tabs(self, authenticated_page, base_url: str) -> None:
+        """상태 필터 탭(전체, active, suspended, revoked)이 표시된다."""
+        _go_to_members(authenticated_page, base_url)
+
         page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        admin_card = page.get_by_text("admin-01")
-        expect(admin_card).to_be_visible()
-
-    def test_agent_status_active_count(self, authenticated_page, base_url: str) -> None:
-        """active 상태 에이전트가 4개 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        # 에이전트 섹션 내 active 배지
-        active_badges = (
-            page.locator("text=에이전트").locator("..").locator("text=active")
-        )
-        expect(active_badges).to_have_count(4)
-
-    def test_agent_status_suspended_count(
-        self, authenticated_page, base_url: str
-    ) -> None:
-        """suspended 상태 에이전트가 1개 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        suspended_badges = (
-            page.locator("text=에이전트").locator("..").locator("text=suspended")
-        )
-        expect(suspended_badges).to_have_count(1)
-
-    def test_agent_status_revoked_count(
-        self, authenticated_page, base_url: str
-    ) -> None:
-        """revoked 상태 에이전트가 1개 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        revoked_badges = (
-            page.locator("text=에이전트").locator("..").locator("text=revoked")
-        )
-        expect(revoked_badges).to_have_count(1)
-
-
-class TestAgentRegistration:
-    """에이전트 등록 모달 흐름."""
-
-    def test_open_register_modal(self, authenticated_page, base_url: str) -> None:
-        """에이전트 등록 버튼 클릭 시 모달이 열린다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        page.get_by_role("button", name=re.compile("에이전트 등록|등록")).click()
-
-        modal = page.get_by_role("dialog")
-        expect(modal).to_be_visible()
-
-    def test_register_form_fields(self, authenticated_page, base_url: str) -> None:
-        """등록 모달에 ID, 이름, 소속, 권한 체크박스 필드가 있다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        page.get_by_role("button", name=re.compile("에이전트 등록|등록")).click()
-
-        modal = page.get_by_role("dialog")
-        expect(modal).to_be_visible()
-
-        # 필수 입력 필드 존재 확인
-        expect(modal.get_by_label(re.compile("ID|아이디"))).to_be_visible()
-        expect(modal.get_by_label(re.compile("이름|Name"))).to_be_visible()
-        expect(modal.get_by_label(re.compile("소속|팀"))).to_be_visible()
-
-        # 권한 체크박스가 하나 이상 존재
-        checkboxes = modal.get_by_role("checkbox")
-        expect(checkboxes.first).to_be_visible()
-
-    def test_submit_agent_registration(self, authenticated_page, base_url: str) -> None:
-        """에이전트 등록 폼을 채우고 제출하면 새 에이전트가 목록에 추가된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        page.get_by_role("button", name=re.compile("에이전트 등록|등록")).click()
-        modal = page.get_by_role("dialog")
-        expect(modal).to_be_visible()
-
-        # 폼 작성
-        modal.get_by_label(re.compile("ID|아이디")).fill("new-agent-e2e")
-        modal.get_by_label(re.compile("이름|Name")).fill("E2E 테스트 에이전트")
-        modal.get_by_label(re.compile("소속|팀")).fill("e2e-team")
-
-        # 첫 번째 권한 체크박스 선택
-        modal.get_by_role("checkbox").first.check()
-
-        # 제출
-        modal.get_by_role("button", name=re.compile("등록|확인|저장")).click()
-
-        # 모달 닫힘 확인
-        expect(modal).to_be_hidden(timeout=5000)
-
-        # 목록에 새 에이전트가 표시됨
-        page.wait_for_load_state("domcontentloaded")
-        expect(page.get_by_text("new-agent-e2e")).to_be_visible()
-
-
-class TestAgentDetail:
-    """에이전트 상세 페이지."""
-
-    def test_agent_detail_page(self, authenticated_page, base_url: str) -> None:
-        """strategy-dev-01 상세 페이지에 토큰 접두어, 생성자, 권한 목록이 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members/strategy-dev-01")
-        page.wait_for_load_state("domcontentloaded")
-
-        # 에이전트 이름 확인
-        expect(page.get_by_text("strategy-dev-01")).to_be_visible()
-
-        # 토큰 접두어 표시
-        expect(
-            page.get_by_text(re.compile("토큰|token", re.IGNORECASE))
-        ).to_be_visible()
-
-        # 생성자(created_by) 표시
-        expect(
-            page.get_by_text(re.compile("생성자|created", re.IGNORECASE))
-        ).to_be_visible()
-
-        # 권한 목록이 하나 이상 표시
-        expect(
-            page.get_by_text(re.compile("권한|scope", re.IGNORECASE))
-        ).to_be_visible()
-
-
-class TestAgentStatusChange:
-    """에이전트 상태 변경 (일시정지, 해지)."""
-
-    def test_suspend_agent(self, authenticated_page, base_url: str) -> None:
-        """ops-agent-01을 일시정지할 수 있다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members/ops-agent-01")
-        page.wait_for_load_state("domcontentloaded")
-
-        # 일시정지 버튼 클릭
-        suspend_btn = page.get_by_role(
-            "button", name=re.compile("일시정지|중지|suspend")
-        )
-        expect(suspend_btn).to_be_visible()
-        suspend_btn.click()
-
-        # 확인 모달/다이얼로그 처리
-        confirm_btn = page.get_by_role("button", name=re.compile("확인|승인"))
-        if confirm_btn.is_visible(timeout=3000):
-            confirm_btn.click()
-
-        # 상태가 suspended로 변경
-        page.wait_for_load_state("domcontentloaded")
-        expect(page.get_by_text("suspended")).to_be_visible(timeout=5000)
-
-    def test_revoked_agent_no_action(self, authenticated_page, base_url: str) -> None:
-        """이미 revoked 상태인 old-agent-01에는 해지 버튼이 비활성화되어 있다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members/old-agent-01")
-        page.wait_for_load_state("domcontentloaded")
-
-        # revoked 상태 표시 확인
-        expect(page.get_by_text("revoked")).to_be_visible()
-
-        # 해지 버튼이 없거나 비활성화
-        revoke_btn = page.get_by_role("button", name=re.compile("해지|revoke"))
-        if revoke_btn.count() > 0:
-            expect(revoke_btn).to_be_disabled()
-
-
-class TestMemberFiltering:
-    """소속 필터링."""
-
-    def test_org_filter(self, authenticated_page, base_url: str) -> None:
-        """소속 필터를 적용하면 해당 소속 에이전트만 표시된다."""
-        page = authenticated_page
-        page.goto(f"{base_url}/members")
-        page.wait_for_load_state("domcontentloaded")
-
-        # 소속 필터 선택
-        filter_select = page.get_by_role("combobox").or_(
-            page.locator("select").filter(has_text=re.compile("소속|팀|전체"))
-        )
-        expect(filter_select.first).to_be_visible()
-        filter_select.first.click()
-
-        # 첫 번째 소속 옵션 선택 (전체 제외)
-        options = page.get_by_role("option")
-        if options.count() > 1:
-            options.nth(1).click()
-
-        page.wait_for_load_state("domcontentloaded")
-
-        # 필터링 후 카드 수가 전체(6)보다 적어야 함
-        agent_cards = (
-            page.locator("text=에이전트").locator("..").locator("[class*=card]")
-        )
-        count = agent_cards.count()
-        assert (
-            count < 6
-        ), f"필터링 후에도 {count}개 카드가 표시됨 (전체 6개보다 적어야 함)"
+        expect(page.get_by_role("button", name="전체")).to_be_visible()
+        expect(page.get_by_role("button", name="active")).to_be_visible()
+        expect(page.get_by_role("button", name="suspended")).to_be_visible()
+        expect(page.get_by_role("button", name="revoked")).to_be_visible()

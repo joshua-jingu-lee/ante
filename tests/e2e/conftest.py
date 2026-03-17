@@ -32,15 +32,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 @pytest.fixture(scope="session")
-def base_url(base_url: str) -> str:  # noqa: ANN001
-    """Ante 서버 base URL — pytest-playwright의 --base-url을 그대로 사용.
+def base_url(request: pytest.FixtureRequest) -> str:
+    """Ante 서버 base URL.
 
-    E2E_BASE_URL 환경변수가 설정되어 있고 --base-url이 기본값이면 환경변수를 우선한다.
+    우선순위: --base-url CLI 옵션 > E2E_BASE_URL 환경변수 > 기본값.
     """
+    cli_url = request.config.getoption("--base-url", default=None)
     env_url = os.environ.get("E2E_BASE_URL")
-    if env_url and base_url == "http://localhost:8000":
+    if cli_url:
+        return cli_url
+    if env_url:
         return env_url
-    return base_url
+    return "http://localhost:8000"
 
 
 @pytest.fixture(scope="session")

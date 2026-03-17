@@ -7,12 +7,12 @@ export async function getMembers(params?: {
   status?: string
 }): Promise<Member[]> {
   const res = await client.get('/api/members', { params })
-  return res.data
+  return res.data.members ?? res.data
 }
 
 export async function getMemberDetail(id: string): Promise<MemberDetail> {
   const res = await client.get(`/api/members/${id}`)
-  return res.data
+  return res.data.member ?? res.data
 }
 
 export async function createMember(data: MemberCreateRequest): Promise<{ token: string }> {

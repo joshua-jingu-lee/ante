@@ -3,33 +3,33 @@ import type { Strategy, StrategyDetail, StrategyPerformance, Trade, DailySummary
 
 export async function getStrategies(): Promise<Strategy[]> {
   const res = await client.get('/api/strategies')
-  return res.data
+  return res.data.strategies ?? res.data
 }
 
-export async function getStrategyDetail(id: number): Promise<StrategyDetail> {
+export async function getStrategyDetail(id: string): Promise<StrategyDetail> {
   const res = await client.get(`/api/strategies/${id}`)
-  return res.data
+  return res.data.strategy ?? res.data
 }
 
-export async function getStrategyPerformance(id: number): Promise<StrategyPerformance> {
+export async function getStrategyPerformance(id: string): Promise<StrategyPerformance> {
   const res = await client.get(`/api/strategies/${id}/performance`)
   return res.data
 }
 
 export async function getStrategyTrades(
-  id: number,
+  id: string,
   params?: { cursor?: number; limit?: number },
 ): Promise<{ items: Trade[]; next_cursor?: number }> {
   const res = await client.get(`/api/strategies/${id}/trades`, { params })
   return res.data
 }
 
-export async function getStrategyDailySummary(id: number): Promise<DailySummary[]> {
+export async function getStrategyDailySummary(id: string): Promise<DailySummary[]> {
   const res = await client.get(`/api/strategies/${id}/daily-summary`)
   return res.data.items
 }
 
-export async function getStrategyMonthlySummary(id: number): Promise<MonthlySummary[]> {
+export async function getStrategyMonthlySummary(id: string): Promise<MonthlySummary[]> {
   const res = await client.get(`/api/strategies/${id}/monthly-summary`)
   return res.data.items
 }
