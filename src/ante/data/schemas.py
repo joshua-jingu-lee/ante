@@ -27,6 +27,30 @@ TICK_SCHEMA: dict[str, type[pl.DataType]] = {
     "side": pl.Utf8,
 }
 
+# 재무 데이터 스키마 (DART, data.go.kr 등)
+FUNDAMENTAL_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date,
+    "symbol": pl.Utf8,
+    "market_cap": pl.Int64,
+    "shares_listed": pl.Int64,
+    "shares_outstanding": pl.Int64,
+    "foreign_ratio": pl.Float64,
+    "foreign_shares": pl.Int64,
+    "per": pl.Float64,
+    "pbr": pl.Float64,
+    "eps": pl.Float64,
+    "bps": pl.Float64,
+    "roe": pl.Float64,
+    "debt_to_equity": pl.Float64,
+    "revenue": pl.Int64,
+    "net_income": pl.Int64,
+    "div_yield": pl.Float64,
+    "dps": pl.Float64,
+    "source": pl.Utf8,
+}
+
+FUNDAMENTAL_COLUMNS: list[str] = list(FUNDAMENTAL_SCHEMA.keys())
+
 # 지원되는 타임프레임
 TIMEFRAMES: list[str] = ["1m", "5m", "15m", "1h", "1d"]
 
@@ -43,4 +67,13 @@ def validate_ohlcv(df: pl.DataFrame) -> bool:
         "volume",
         "source",
     }
+    return required.issubset(set(df.columns))
+
+
+def validate_fundamental(df: pl.DataFrame) -> bool:
+    """FUNDAMENTAL DataFrame이 스키마에 부합하는지 검증.
+
+    필수 필드: date, symbol, source만 필수. 나머지는 null 허용.
+    """
+    required = {"date", "symbol", "source"}
     return required.issubset(set(df.columns))

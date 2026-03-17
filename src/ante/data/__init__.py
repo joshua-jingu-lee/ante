@@ -13,7 +13,14 @@ from ante.data.normalizer import (
     register_normalizer,
 )
 from ante.data.retention import RetentionPolicy
-from ante.data.schemas import OHLCV_COLUMNS, OHLCV_SCHEMA, TICK_SCHEMA, TIMEFRAMES
+from ante.data.schemas import (
+    FUNDAMENTAL_COLUMNS,
+    FUNDAMENTAL_SCHEMA,
+    OHLCV_COLUMNS,
+    OHLCV_SCHEMA,
+    TICK_SCHEMA,
+    TIMEFRAMES,
+)
 from ante.data.store import ParquetStore
 
 __all__ = [
@@ -23,6 +30,8 @@ __all__ = [
     "DataInjector",
     "DataNormalizer",
     "DefaultNormalizer",
+    "FUNDAMENTAL_COLUMNS",
+    "FUNDAMENTAL_SCHEMA",
     "KISNormalizer",
     "OHLCV_COLUMNS",
     "OHLCV_SCHEMA",
