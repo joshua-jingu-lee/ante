@@ -3,6 +3,8 @@ export interface SystemStatus {
   uptime_seconds: number
   running_bots: number
   version: string
+  halt_time?: string
+  halt_reason?: string
 }
 
 export interface BrokerStatus {

@@ -83,6 +83,13 @@ export default function Settings() {
             <div className="flex items-center justify-between py-3">
               <div>
                 <div className="text-[13px] text-negative font-semibold">거래가 정지되었습니다</div>
+                {(status?.halt_time || status?.halt_reason) && (
+                  <div className="text-[12px] text-text-muted mt-1">
+                    {status.halt_time && `정지 시각: ${status.halt_time}`}
+                    {status.halt_time && status.halt_reason && ' · '}
+                    {status.halt_reason && `사유: ${status.halt_reason}`}
+                  </div>
+                )}
               </div>
               <button
                 onClick={handleActivate}
@@ -169,6 +176,25 @@ export default function Settings() {
       <div className="bg-surface border border-border rounded-lg p-5">
         <h3 className="text-[15px] font-semibold mb-4">표시 및 알림</h3>
         <div className="space-y-0">
+          {/* 금액 단위 위치 토글 */}
+          <div className="flex items-center justify-between py-3 border-b border-border">
+            <div>
+              <div className="text-[13px] font-medium">금액 단위 위치</div>
+              <div className="text-[12px] text-text-muted mt-0.5">금액 표시 시 통화 단위(원)의 위치를 설정합니다</div>
+            </div>
+            <div className="flex gap-2">
+              <CurrencyFormatButton
+                label="₩ 1,000,000"
+                active={getConfigValue('display.currency_position') === 'prefix'}
+                onClick={() => updateConfig.mutate({ key: 'display.currency_position', value: 'prefix' })}
+              />
+              <CurrencyFormatButton
+                label="1,000,000 원"
+                active={getConfigValue('display.currency_position') !== 'prefix'}
+                onClick={() => updateConfig.mutate({ key: 'display.currency_position', value: 'suffix' })}
+              />
+            </div>
+          </div>
           {DISPLAY_CONFIGS.map((cfg) => (
             <div key={cfg.key} className="flex items-center justify-between py-3 border-b border-border last:border-b-0">
               <div>
@@ -236,5 +262,20 @@ export default function Settings() {
         </div>
       )}
     </>
+  )
+}
+
+function CurrencyFormatButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-[13px] font-medium border cursor-pointer transition-colors ${
+        active
+          ? 'bg-primary text-white border-primary'
+          : 'bg-transparent text-text-muted border-border hover:bg-surface-hover'
+      }`}
+    >
+      {label}
+    </button>
   )
 }

@@ -16,12 +16,38 @@ class KillSwitchRequest(BaseModel):
 
 
 @router.get("/status")
-async def get_system_status() -> dict:
+async def get_system_status(request: Request) -> dict:
     """시스템 상태 조회."""
-    return {
+    result: dict = {
         "status": "running",
         "version": "0.1.0",
     }
+
+    system_state = getattr(request.app.state, "system_state", None)
+    if system_state is not None:
+        result["trading_status"] = system_state.trading_state.value.upper()
+
+        # HALTED 상태이면 최근 halt 이력에서 시각·사유를 가져옴
+        if system_state.trading_state.value == "halted":
+            halt_info = await _get_last_halt_info(system_state)
+            if halt_info:
+                result["halt_time"] = halt_info.get("created_at")
+                result["halt_reason"] = halt_info.get("reason", "")
+
+    return result
+
+
+async def _get_last_halt_info(system_state: object) -> dict | None:
+    """system_state_history에서 마지막 HALTED 전환 정보를 가져온다."""
+    db = getattr(system_state, "_db", None)
+    if db is None:
+        return None
+    row = await db.fetch_one(
+        "SELECT reason, changed_by, created_at FROM system_state_history"
+        " WHERE new_state = 'halted'"
+        " ORDER BY id DESC LIMIT 1"
+    )
+    return dict(row) if row else None
 
 
 @router.get("/health")
