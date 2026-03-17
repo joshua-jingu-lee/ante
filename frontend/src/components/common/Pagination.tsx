@@ -8,28 +8,59 @@ interface PaginationProps {
 export default function Pagination({ total, offset, limit, onPageChange }: PaginationProps) {
   const start = offset + 1
   const end = Math.min(offset + limit, total)
-  const hasPrev = offset > 0
-  const hasNext = offset + limit < total
+  const totalPages = Math.ceil(total / limit)
+  const currentPage = Math.floor(offset / limit) + 1
+
+  const btnBase =
+    'w-8 h-8 flex items-center justify-center rounded-lg text-[13px] font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+  const btnOutline = `${btnBase} border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text`
+  const btnActive = `${btnBase} border-primary bg-primary text-white`
+
+  // Build visible page numbers: show up to 5 pages centered around current
+  const getPageNumbers = (): number[] => {
+    if (totalPages <= 5) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1)
+    }
+    let startPage = Math.max(1, currentPage - 2)
+    let endPage = Math.min(totalPages, startPage + 4)
+    if (endPage - startPage < 4) {
+      startPage = Math.max(1, endPage - 4)
+    }
+    return Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i)
+  }
+
+  const pages = getPageNumbers()
 
   return (
-    <div className="flex items-center justify-between pt-4 text-[13px]">
+    <div className="flex items-center justify-between pt-4 border-t border-border mt-4 text-[13px]">
       <span className="text-text-muted">
-        {total}건 중 {start}-{end}
+        총 {total}건 중 {start}-{end}
       </span>
-      <div className="flex gap-2">
+      <div className="flex gap-1">
         <button
-          onClick={() => onPageChange(Math.max(0, offset - limit))}
-          disabled={!hasPrev}
-          className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+          onClick={() => onPageChange(0)}
+          disabled={currentPage === 1}
+          className={btnOutline}
+          aria-label="첫 페이지"
         >
-          이전
+          &laquo;
         </button>
+        {pages.map((page) => (
+          <button
+            key={page}
+            onClick={() => onPageChange((page - 1) * limit)}
+            className={page === currentPage ? btnActive : btnOutline}
+          >
+            {page}
+          </button>
+        ))}
         <button
-          onClick={() => onPageChange(offset + limit)}
-          disabled={!hasNext}
-          className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+          onClick={() => onPageChange((totalPages - 1) * limit)}
+          disabled={currentPage === totalPages}
+          className={btnOutline}
+          aria-label="마지막 페이지"
         >
-          다음
+          &raquo;
         </button>
       </div>
     </div>
