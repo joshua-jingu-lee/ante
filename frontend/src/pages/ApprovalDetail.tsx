@@ -160,7 +160,7 @@ export default function ApprovalDetail() {
       {/* 상세 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-[20px] font-bold">{approval.title}</h2>
-        {isPending && <ReviewControls approvalId={approval.id} isPending={isPending} />}
+        {isPending && <ReviewControls approvalId={approval.id} isPending={isPending} title={approval.title} reviews={approval.reviews} />}
       </div>
 
       {/* 거부 사유 배너 */}
