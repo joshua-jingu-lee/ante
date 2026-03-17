@@ -79,14 +79,92 @@ class FakeBotManager:
             del self._bots[bot_id]
 
 
+class FakeBotBudget:
+    """테스트용 BotBudget stub."""
+
+    def __init__(
+        self,
+        bot_id: str,
+        allocated: float = 0.0,
+        spent: float = 0.0,
+        reserved: float = 0.0,
+        available: float = 0.0,
+    ) -> None:
+        self.bot_id = bot_id
+        self.allocated = allocated
+        self.spent = spent
+        self.reserved = reserved
+        self.available = available
+
+
+class FakeTreasury:
+    """테스트용 Treasury stub."""
+
+    def __init__(self) -> None:
+        self._budgets: dict[str, FakeBotBudget] = {}
+
+    async def get_budget(self, bot_id: str) -> FakeBotBudget | None:
+        return self._budgets.get(bot_id)
+
+
+class FakePositionSnapshot:
+    """테스트용 PositionSnapshot stub."""
+
+    def __init__(
+        self,
+        bot_id: str,
+        symbol: str,
+        quantity: float,
+        avg_entry_price: float,
+        realized_pnl: float = 0.0,
+    ) -> None:
+        self.bot_id = bot_id
+        self.symbol = symbol
+        self.quantity = quantity
+        self.avg_entry_price = avg_entry_price
+        self.realized_pnl = realized_pnl
+
+
+class FakeTradeService:
+    """테스트용 TradeService stub."""
+
+    def __init__(self) -> None:
+        self._positions: dict[str, list[FakePositionSnapshot]] = {}
+
+    async def get_positions(
+        self, bot_id: str, include_closed: bool = False
+    ) -> list[FakePositionSnapshot]:
+        return self._positions.get(bot_id, [])
+
+
 @pytest.fixture
 def bot_manager():
     return FakeBotManager()
 
 
 @pytest.fixture
+def treasury():
+    return FakeTreasury()
+
+
+@pytest.fixture
+def trade_service():
+    return FakeTradeService()
+
+
+@pytest.fixture
 def client(bot_manager):
     app = create_app(bot_manager=bot_manager)
+    return TestClient(app)
+
+
+@pytest.fixture
+def client_with_services(bot_manager, treasury, trade_service):
+    app = create_app(
+        bot_manager=bot_manager,
+        treasury=treasury,
+        trade_service=trade_service,
+    )
     return TestClient(app)
 
 
@@ -158,6 +236,68 @@ class TestDeleteBot:
         """존재하지 않는 봇 삭제 → 404."""
         resp = client.delete("/api/bots/nonexistent")
         assert resp.status_code == 404
+
+
+class TestGetBotWithBudget:
+    def test_budget_included(self, client_with_services, bot_manager, treasury):
+        """봇 상세 조회 시 예산 정보 포함."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1")
+        treasury._budgets["bot-1"] = FakeBotBudget(
+            bot_id="bot-1",
+            allocated=15_000_000,
+            spent=5_000_000,
+            reserved=1_500_000,
+            available=8_500_000,
+        )
+        resp = client_with_services.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        budget = resp.json()["bot"]["budget"]
+        assert budget["allocated"] == 15_000_000
+        assert budget["spent"] == 5_000_000
+        assert budget["reserved"] == 1_500_000
+        assert budget["available"] == 8_500_000
+
+    def test_no_budget(self, client_with_services, bot_manager):
+        """예산 미할당 봇은 budget 필드 없음."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1")
+        resp = client_with_services.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        assert "budget" not in resp.json()["bot"]
+
+
+class TestGetBotWithPositions:
+    def test_positions_included(self, client_with_services, bot_manager, trade_service):
+        """봇 상세 조회 시 포지션 정보 포함."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1")
+        trade_service._positions["bot-1"] = [
+            FakePositionSnapshot("bot-1", "005930", 50, 72300.0, 0.0),
+            FakePositionSnapshot("bot-1", "035420", 15, 210000.0, 0.0),
+            FakePositionSnapshot("bot-1", "035720", 0, 0.0, 45000.0),
+        ]
+        resp = client_with_services.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        positions = resp.json()["bot"]["positions"]
+        assert len(positions) == 3
+        assert positions[0]["symbol"] == "005930"
+        assert positions[0]["quantity"] == 50
+        assert positions[0]["avg_entry_price"] == 72300.0
+        # 청산 완료 종목
+        assert positions[2]["quantity"] == 0
+        assert positions[2]["realized_pnl"] == 45000.0
+
+    def test_no_positions(self, client_with_services, bot_manager, trade_service):
+        """포지션 없는 봇은 빈 배열."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1")
+        resp = client_with_services.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["positions"] == []
+
+    def test_no_trade_service(self, client, bot_manager):
+        """trade_service 없으면 positions 필드 없음."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1")
+        resp = client.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        assert "positions" not in resp.json()["bot"]
 
 
 class TestBotLifecycle:

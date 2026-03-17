@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useBotDetail, useBotControl } from '../hooks/useBots'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
-import { formatKRW, formatDateTime } from '../utils/formatters'
+import { formatKRW, formatDateTime, formatPercent } from '../utils/formatters'
 import { BOT_STATUS_LABELS } from '../utils/constants'
 import type { BotStatus, BotDetail as BotDetailType } from '../types/bot'
 
@@ -117,20 +117,20 @@ export default function BotDetail() {
           <h3 className="text-[15px] font-semibold mb-3">예산</h3>
           <div className="space-y-2">
             <div className="flex justify-between py-1.5 text-[13px]">
-              <span className="text-text-muted">배정 금액</span>
-              <span>{formatKRW(bot.allocated_budget)}</span>
+              <span className="text-text-muted">배정금액</span>
+              <span>{formatKRW(bot.budget?.allocated ?? bot.allocated_budget)}</span>
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
-              <span className="text-text-muted">매수 금액</span>
-              <span>-</span>
+              <span className="text-text-muted">매수금액</span>
+              <span>{bot.budget ? formatKRW(bot.budget.spent) : '-'}</span>
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
-              <span className="text-text-muted">체결 대기</span>
-              <span>-</span>
+              <span className="text-text-muted">체결대기</span>
+              <span>{bot.budget ? formatKRW(bot.budget.reserved) : '-'}</span>
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
-              <span className="text-text-muted">잔여 예산</span>
-              <span>-</span>
+              <span className="text-text-muted">잔여예산</span>
+              <span>{bot.budget ? formatKRW(bot.budget.available) : '-'}</span>
             </div>
           </div>
         </div>
@@ -151,10 +151,42 @@ export default function BotDetail() {
                 <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">평가금액</th>
                 <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">미실현 손익</th>
                 <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">수익률</th>
+                <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">실현 손익</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td colSpan={8} className="px-3 py-6 text-center text-text-muted text-[13px]">보유 종목이 없습니다</td></tr>
+              {(!bot.positions || bot.positions.length === 0) ? (
+                <tr><td colSpan={9} className="px-3 py-6 text-center text-text-muted text-[13px]">보유 종목이 없습니다</td></tr>
+              ) : (
+                bot.positions.map((pos) => {
+                  const isClosed = pos.quantity === 0
+                  const cost = isClosed ? 0 : pos.quantity * pos.avg_entry_price
+                  const evalAmount = isClosed ? 0 : pos.quantity * (pos.current_price ?? pos.avg_entry_price)
+                  const unrealizedPnl = isClosed ? 0 : evalAmount - cost
+                  const returnRate = isClosed ? 0 : cost > 0 ? unrealizedPnl / cost : 0
+                  const pnlColor = (v: number) => v > 0 ? 'text-positive' : v < 0 ? 'text-negative' : 'text-text-muted'
+
+                  return (
+                    <tr key={pos.symbol} className="border-b border-border">
+                      <td className="px-3 py-2 text-[13px]">{pos.symbol}</td>
+                      <td className="text-right px-3 py-2 text-[13px]">{pos.quantity}</td>
+                      <td className="text-right px-3 py-2 text-[13px]">{isClosed ? '—' : formatKRW(pos.avg_entry_price)}</td>
+                      <td className="text-right px-3 py-2 text-[13px]">{isClosed ? '—' : formatKRW(pos.current_price ?? pos.avg_entry_price)}</td>
+                      <td className="text-right px-3 py-2 text-[13px]">{isClosed ? '—' : formatKRW(cost)}</td>
+                      <td className="text-right px-3 py-2 text-[13px]">{isClosed ? '—' : formatKRW(evalAmount)}</td>
+                      <td className={`text-right px-3 py-2 text-[13px] ${isClosed ? 'text-text-muted' : pnlColor(unrealizedPnl)}`}>
+                        {isClosed ? '—' : formatKRW(unrealizedPnl)}
+                      </td>
+                      <td className={`text-right px-3 py-2 text-[13px] ${isClosed ? 'text-text-muted' : pnlColor(returnRate)}`}>
+                        {isClosed ? '—' : formatPercent(returnRate)}
+                      </td>
+                      <td className={`text-right px-3 py-2 text-[13px] ${pnlColor(pos.realized_pnl)}`}>
+                        {formatKRW(pos.realized_pnl)}
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
         </div>
