@@ -9,24 +9,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime
 from typing import Any
 
+from ante.feed.models.result import ValidationResult
+
 logger = logging.getLogger(__name__)
-
-
-class ValidationResult:
-    """검증 결과를 담는 클래스."""
-
-    def __init__(self, passed: bool, warnings: list[str], errors: list[str]) -> None:
-        """ValidationResult를 초기화한다.
-
-        Args:
-            passed: 검증 통과 여부.
-            warnings: 경고 메시지 목록 (비즈니스 규칙 위반 등).
-            errors: 오류 메시지 목록 (스키마 위반 등).
-        """
-        ...
 
 
 def validate_transport(
@@ -44,7 +34,20 @@ def validate_transport(
     Returns:
         검증 결과.
     """
-    ...
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not (200 <= status_code < 300):
+        errors.append(f"HTTP 상태 코드 오류: {status_code}")
+
+    if content_length is not None and content_length == 0:
+        errors.append("응답 본문이 비어있음 (Content-Length: 0)")
+
+    return ValidationResult(
+        passed=len(errors) == 0,
+        warnings=warnings,
+        errors=errors,
+    )
 
 
 def validate_syntax(raw: Any) -> ValidationResult:
@@ -53,16 +56,46 @@ def validate_syntax(raw: Any) -> ValidationResult:
     JSON 파싱 가능 여부와 인코딩 정상 여부를 확인한다.
 
     Args:
-        raw: 원시 응답 데이터.
+        raw: 원시 응답 데이터. str이면 JSON 파싱을 시도하고,
+             dict/list면 이미 파싱된 것으로 간주한다.
 
     Returns:
         검증 결과.
     """
-    ...
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if raw is None:
+        errors.append("응답 데이터가 None")
+        return ValidationResult(passed=False, warnings=warnings, errors=errors)
+
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            errors.append(f"인코딩 오류: {e}")
+            return ValidationResult(passed=False, warnings=warnings, errors=errors)
+
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            errors.append(f"JSON 파싱 오류: {e}")
+            return ValidationResult(passed=False, warnings=warnings, errors=errors)
+        if not isinstance(parsed, (dict, list)):
+            errors.append(f"예상치 못한 JSON 타입: {type(parsed).__name__}")
+    elif not isinstance(raw, (dict, list)):
+        errors.append(f"지원하지 않는 데이터 타입: {type(raw).__name__}")
+
+    return ValidationResult(
+        passed=len(errors) == 0,
+        warnings=warnings,
+        errors=errors,
+    )
 
 
 def validate_schema(
-    records: list[dict],
+    records: list[dict[str, Any]],
     required_fields: list[str],
 ) -> ValidationResult:
     """스키마 계층 검증.
@@ -76,30 +109,208 @@ def validate_schema(
     Returns:
         검증 결과.
     """
-    ...
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not records:
+        warnings.append("레코드가 비어있음")
+        return ValidationResult(passed=True, warnings=warnings, errors=errors)
+
+    # 첫 레코드 기준으로 필수 필드 존재 여부 확인
+    first_record_keys = set(records[0].keys())
+    missing_fields = set(required_fields) - first_record_keys
+    if missing_fields:
+        errors.append(f"필수 필드 누락: {sorted(missing_fields)}")
+
+    # 숫자 필드 타입 변환 가능 여부 확인
+    numeric_fields = {"open", "high", "low", "close", "volume", "amount"}
+    check_fields = numeric_fields & first_record_keys
+
+    for i, record in enumerate(records):
+        for field_name in check_fields:
+            value = record.get(field_name)
+            if value is None:
+                continue
+            if isinstance(value, (int, float)):
+                continue
+            try:
+                float(value)
+            except (ValueError, TypeError):
+                errors.append(
+                    f"레코드 {i}: 필드 '{field_name}' 값 '{value}'를 숫자로 변환 불가"
+                )
+
+    return ValidationResult(
+        passed=len(errors) == 0,
+        warnings=warnings,
+        errors=errors,
+    )
 
 
-def validate_business(records: list[dict]) -> ValidationResult:
+def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
     """비즈니스 계층 검증.
 
-    low <= open/close <= high, volume >= 0, 시계열 갭 등을 확인한다.
+    OHLCV 비즈니스 규칙과 시계열 연속성을 확인한다.
     실패 시 경고 로그를 남기고 저장은 허용한다.
+
+    검증 규칙:
+    - price > 0 (open, high, low, close)
+    - volume >= 0
+    - low <= close <= high
+    - low <= open <= high
+    - 시계열 갭 감지 (날짜 중복, 순서 역전)
 
     Args:
         records: 검증할 OHLCV 레코드 목록.
 
     Returns:
-        검증 결과 (경고 포함 가능).
+        검증 결과 (경고 포함 가능, 비즈니스 규칙 위반은 경고로 분류).
     """
-    ...
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not records:
+        return ValidationResult(passed=True, warnings=warnings, errors=errors)
+
+    for i, record in enumerate(records):
+        symbol = record.get("symbol", f"record_{i}")
+
+        # 가격 양수 검증
+        for price_field in ("open", "high", "low", "close"):
+            value = record.get(price_field)
+            if value is None:
+                continue
+            try:
+                price = float(value)
+            except (ValueError, TypeError):
+                continue  # 스키마 검증에서 이미 잡힘
+            if price <= 0:
+                warnings.append(f"{symbol}: {price_field} <= 0 ({price_field}={price})")
+
+        # 거래량 >= 0 검증
+        volume_val = record.get("volume")
+        if volume_val is not None:
+            try:
+                vol = int(float(str(volume_val)))
+            except (ValueError, TypeError):
+                pass
+            else:
+                if vol < 0:
+                    warnings.append(f"{symbol}: volume < 0 (volume={vol})")
+
+        # OHLC 관계 검증: low <= open/close <= high
+        try:
+            o = float(record["open"]) if "open" in record else None
+            h = float(record["high"]) if "high" in record else None
+            low_val = float(record["low"]) if "low" in record else None
+            c = float(record["close"]) if "close" in record else None
+        except (ValueError, TypeError):
+            continue  # 숫자 변환 실패는 스키마 계층에서 처리
+
+        if all(v is not None for v in (o, h, low_val, c)):
+            if low_val > c:
+                warnings.append(f"{symbol}: low > close (low={low_val}, close={c})")
+            if c > h:
+                warnings.append(f"{symbol}: close > high (close={c}, high={h})")
+            if low_val > o:
+                warnings.append(f"{symbol}: low > open (low={low_val}, open={o})")
+            if o > h:
+                warnings.append(f"{symbol}: open > high (open={o}, high={h})")
+
+    # 시계열 연속성 검증 (날짜 중복 및 순서)
+    _validate_time_series(records, warnings)
+
+    if warnings:
+        for w in warnings:
+            logger.warning("비즈니스 검증 경고: %s", w)
+
+    return ValidationResult(
+        passed=True,  # 비즈니스 규칙 위반은 경고이므로 passed=True
+        warnings=warnings,
+        errors=errors,
+    )
+
+
+def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) -> None:
+    """시계열 연속성을 검증한다.
+
+    날짜 중복과 순서 역전을 감지한다.
+
+    Args:
+        records: 검증할 레코드 목록.
+        warnings: 경고를 추가할 목록.
+    """
+    # timestamp 또는 date 필드로 시계열 확인
+    date_field = "timestamp" if "timestamp" in records[0] else "date"
+    if date_field not in records[0]:
+        return
+
+    # 심볼별로 그룹핑하여 검증
+    by_symbol: dict[str, list[str]] = {}
+    for record in records:
+        symbol = record.get("symbol", "unknown")
+        date_val = record.get(date_field)
+        if date_val is not None:
+            by_symbol.setdefault(symbol, []).append(str(date_val))
+
+    for symbol, dates in by_symbol.items():
+        # 중복 검사
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for d in dates:
+            if d in seen:
+                duplicates.append(d)
+            seen.add(d)
+
+        if duplicates:
+            warnings.append(f"{symbol}: 중복 날짜 감지: {duplicates}")
+
+        # 순서 검증 (파싱 가능한 날짜에 대해서만)
+        parsed_dates: list[tuple[datetime, str]] = []
+        for d in dates:
+            dt = _try_parse_date(d)
+            if dt is not None:
+                parsed_dates.append((dt, d))
+
+        for j in range(1, len(parsed_dates)):
+            if parsed_dates[j][0] < parsed_dates[j - 1][0]:
+                warnings.append(
+                    f"{symbol}: 날짜 순서 역전 감지: "
+                    f"{parsed_dates[j - 1][1]} -> {parsed_dates[j][1]}"
+                )
+
+
+def _try_parse_date(value: str) -> datetime | None:
+    """날짜 문자열을 파싱 시도한다.
+
+    Args:
+        value: 날짜 문자열.
+
+    Returns:
+        파싱된 datetime 또는 None.
+    """
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d",
+        "%Y%m%d",
+    ):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def validate_all(
-    records: list[dict],
+    records: list[dict[str, Any]],
     required_fields: list[str],
     status_code: int = 200,
 ) -> ValidationResult:
     """4계층 검증을 순서대로 실행한다.
+
+    각 계층에서 오류가 발생하면 다음 계층으로 진행하지 않고
+    해당 시점까지의 결과를 반환한다.
 
     Args:
         records: 검증할 레코드 목록.
@@ -109,4 +320,22 @@ def validate_all(
     Returns:
         통합 검증 결과.
     """
-    ...
+    # 1. 전송 계층
+    transport_result = validate_transport(status_code)
+    if not transport_result.passed:
+        return transport_result
+
+    # 2. 구문 계층 (records가 이미 파싱된 상태이므로 list 검증)
+    syntax_result = validate_syntax(records)
+    if not syntax_result.passed:
+        return transport_result.merge(syntax_result)
+
+    # 3. 스키마 계층
+    schema_result = validate_schema(records, required_fields)
+    merged = transport_result.merge(syntax_result).merge(schema_result)
+    if not merged.passed:
+        return merged
+
+    # 4. 비즈니스 계층
+    business_result = validate_business(records)
+    return merged.merge(business_result)

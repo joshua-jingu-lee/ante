@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from ante.feed.models.result import CollectionResult
+from ante.feed.models.result import CollectionResult, ValidationResult
 
-__all__ = ["CollectionResult"]
+__all__ = ["CollectionResult", "ValidationResult"]
