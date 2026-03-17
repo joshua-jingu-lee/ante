@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useMemberDetail, useMemberControl } from '../hooks/useMembers'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
@@ -34,6 +34,11 @@ export default function AgentDetail() {
 
   return (
     <>
+      {/* 브레드크럼 */}
+      <Link to="/agents" className="inline-flex items-center gap-1 text-[13px] text-text-muted hover:text-text mb-4 no-underline">
+        ← 에이전트 관리
+      </Link>
+
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
