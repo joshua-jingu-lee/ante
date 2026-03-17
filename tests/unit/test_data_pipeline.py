@@ -75,7 +75,8 @@ class TestSchemas:
         assert "timestamp" in OHLCV_COLUMNS
         assert "symbol" in OHLCV_COLUMNS
         assert "close" in OHLCV_COLUMNS
-        assert len(OHLCV_COLUMNS) == 8
+        assert "amount" in OHLCV_COLUMNS
+        assert len(OHLCV_COLUMNS) == 9
 
     def test_timeframes(self):
         assert "1m" in TIMEFRAMES
@@ -322,6 +323,41 @@ class TestDataNormalizer:
         )
         result = normalizer.normalize(df)
         assert isinstance(result["timestamp"].dtype, pl.Datetime)
+
+    def test_normalize_fills_amount_null_when_missing(self, normalizer):
+        """amount 컬럼이 없는 소스 데이터는 null로 채워진다."""
+        df = pl.DataFrame(
+            {
+                "timestamp": ["2026-03-01T09:00:00"],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+            }
+        )
+        result = normalizer.normalize(df)
+        assert "amount" in result.columns
+        assert result["amount"].dtype == pl.Int64
+        assert result["amount"][0] is None
+
+    def test_normalize_preserves_amount_when_present(self, normalizer):
+        """amount 컬럼이 있는 소스 데이터는 값이 유지된다."""
+        df = pl.DataFrame(
+            {
+                "timestamp": ["2026-03-01T09:00:00"],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+                "amount": [5000000],
+            }
+        )
+        result = normalizer.normalize(df)
+        assert "amount" in result.columns
+        assert result["amount"][0] == 5000000
+        assert result["amount"].dtype == pl.Int64
 
     def test_normalize_casts_numeric_types(self, normalizer):
         df = pl.DataFrame(
