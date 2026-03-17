@@ -185,3 +185,74 @@ def feed_status(ctx: click.Context, data_path: str) -> None:
     else:
         click.echo(f"DataFeed 초기화됨: {cfg.feed_dir}")
         click.echo("(상세 상태 조회는 Phase 2에서 구현 예정)")
+
+
+# ── inject ───────────────────────────────────────────────────────────────────
+
+
+@feed.command("inject")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--symbol", required=True, help="종목 코드 (6자리)")
+@click.option("--timeframe", default="1d", help="타임프레임 (기본값: 1d)")
+@click.option("--source", default="external", help="데이터 소스 식별자")
+@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.pass_context
+@require_auth
+@require_scope("data:write")
+def feed_inject(
+    ctx: click.Context,
+    path: str,
+    symbol: str,
+    timeframe: str,
+    source: str,
+    data_path: str,
+) -> None:
+    """외부 CSV 파일에서 과거 데이터를 수동 주입한다."""
+    import asyncio
+    from pathlib import Path as _Path
+
+    from ante.data.normalizer import DataNormalizer
+    from ante.data.store import ParquetStore
+    from ante.feed.injector import FeedInjector
+
+    fmt = get_formatter(ctx)
+    filepath = _Path(path)
+
+    store = ParquetStore(base_path=_Path(data_path))
+    normalizer = DataNormalizer()
+    injector = FeedInjector(store=store, normalizer=normalizer)
+
+    try:
+        count = asyncio.run(
+            injector.inject_csv(
+                filepath,
+                symbol=symbol,
+                timeframe=timeframe,
+                source=source,
+            )
+        )
+    except FileNotFoundError as e:
+        fmt.error(str(e), "FILE_NOT_FOUND")
+        raise SystemExit(1)
+    except ValueError as e:
+        fmt.error(str(e), "VALIDATION_ERROR")
+        raise SystemExit(1)
+
+    if fmt.is_json:
+        fmt.output(
+            {
+                "rows": count,
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "source": source,
+                "path": str(filepath),
+            }
+        )
+    else:
+        click.echo()
+        click.echo(f"Loaded {count} rows from {filepath.name}")
+        click.echo(f"Normalized: source={source}, schema=OHLCV")
+        click.echo(f"Validated: {count} rows passed")
+        click.echo(f"Written to ohlcv/krx/{timeframe}/{symbol}/")
+        click.echo()
+        click.echo(f"Injected {count} rows for {symbol} ({timeframe})")
