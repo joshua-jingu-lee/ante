@@ -85,6 +85,15 @@ def create_app(**services: Any) -> FastAPI:
         tags=["notifications"],
     )
 
+    # 테스트 모드에서만 시드 리셋 API 활성화
+    import os
+
+    if os.environ.get("ANTE_TEST_MODE") == "1":
+        from ante.web.routes.test_seed import router as test_seed_router
+
+        app.include_router(test_seed_router, prefix="/api/test", tags=["test"])
+        logger.info("테스트 모드 활성화 — /api/test/* 엔드포인트 등록")
+
     from ante.web.errors import register_exception_handlers
 
     register_exception_handlers(app)

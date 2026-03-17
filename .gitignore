@@ -35,6 +35,7 @@ src/ante/web/static/
 
 # E2E test artifacts
 tests/e2e/screenshots/
+test-results/
 
 # OS
 .DS_Store
