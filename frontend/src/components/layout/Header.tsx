@@ -11,7 +11,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/strategies': '전략과 성과',
   '/bots': '봇 관리',
   '/backtest-data': '백테스트 데이터',
-  '/agents': '에이전트 관리',
+  '/members': '멤버 관리',
   '/settings': '설정',
 }
 
@@ -20,12 +20,12 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/approvals/')) return '결재 상세'
   if (pathname.startsWith('/strategies/')) return '전략 상세'
   if (pathname.startsWith('/bots/')) return '봇 상세'
-  if (pathname.startsWith('/agents/')) return '에이전트 상세'
+  if (pathname.startsWith('/members/')) return '멤버 상세'
   return '대시보드'
 }
 
 function isDetailPage(pathname: string): boolean {
-  return /^\/(approvals|strategies|bots|agents)\/[^/]+/.test(pathname) || pathname === '/treasury/history'
+  return /^\/(approvals|strategies|bots|members)\/[^/]+/.test(pathname) || pathname === '/treasury/history'
 }
 
 export default function Header() {

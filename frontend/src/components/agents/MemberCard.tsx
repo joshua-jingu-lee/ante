@@ -21,7 +21,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke }
 
   return (
     <div
-      onClick={() => navigate(`/agents/${member.member_id}`)}
+      onClick={() => navigate(`/members/${member.member_id}`)}
       className={`bg-surface border border-border rounded-lg p-5 flex gap-4 items-start cursor-pointer hover:border-primary/50 transition-colors${isRevoked ? ' opacity-50' : ''}`}
     >
       <div className={`w-[56px] h-[56px] rounded-full bg-bg flex items-center justify-center text-[28px] shrink-0${isRevoked ? ' blur-[2px]' : ''}`}>
