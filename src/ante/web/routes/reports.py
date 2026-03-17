@@ -31,6 +31,52 @@ async def submit_report(request: Request, body: dict) -> dict:
     }
 
 
+@router.get("/{report_id}")
+async def report_view(request: Request, report_id: str) -> dict:
+    """리포트 단건 조회."""
+    import json
+
+    report_store = getattr(request.app.state, "report_store", None)
+    if report_store is None:
+        raise HTTPException(status_code=503, detail="Report store not available")
+
+    report = await report_store.get(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
+
+    try:
+        detail = json.loads(report.detail_json)
+    except (json.JSONDecodeError, TypeError):
+        detail = {}
+
+    return {
+        "report_id": report.report_id,
+        "strategy_name": report.strategy_name,
+        "strategy_version": report.strategy_version,
+        "strategy_path": report.strategy_path,
+        "status": report.status.value,
+        "submitted_at": str(report.submitted_at),
+        "submitted_by": report.submitted_by,
+        "backtest_period": report.backtest_period,
+        "total_return_pct": report.total_return_pct,
+        "total_trades": report.total_trades,
+        "sharpe_ratio": report.sharpe_ratio,
+        "max_drawdown_pct": report.max_drawdown_pct,
+        "win_rate": report.win_rate,
+        "summary": report.summary,
+        "rationale": report.rationale,
+        "risks": report.risks,
+        "recommendations": report.recommendations,
+        "equity_curve": detail.get("equity_curve", []),
+        "metrics": detail.get("metrics", {}),
+        "initial_balance": detail.get("initial_balance"),
+        "final_balance": detail.get("final_balance"),
+        "symbols": detail.get("symbols", []),
+        "user_notes": report.user_notes,
+        "reviewed_at": str(report.reviewed_at) if report.reviewed_at else None,
+    }
+
+
 @router.get("")
 async def list_reports(
     request: Request,
