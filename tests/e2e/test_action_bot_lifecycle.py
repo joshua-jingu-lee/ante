@@ -236,10 +236,10 @@ class TestBotDelete:
         # 봇이 삭제되었으므로 404이거나 status가 deleted여야 한다
         if resp.status == 200:
             bot = resp.json()
-            assert (
-                bot["status"] == "deleted"
-            ), f"삭제된 봇의 status가 'deleted'여야 하지만 '{bot['status']}'임"
+            assert bot["status"] == "deleted", (
+                f"삭제된 봇의 status가 'deleted'여야 하지만 '{bot['status']}'임"
+            )
         else:
-            assert (
-                resp.status == 404
-            ), f"삭제된 봇 조회 시 404여야 하지만 {resp.status}를 반환함"
+            assert resp.status == 404, (
+                f"삭제된 봇 조회 시 404여야 하지만 {resp.status}를 반환함"
+            )
