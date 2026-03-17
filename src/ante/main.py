@@ -428,6 +428,7 @@ async def main() -> None:
 
         app = create_app(
             config=config,
+            db=db,
             eventbus=eventbus,
             bot_manager=bot_manager,
             trade_service=trade_service,

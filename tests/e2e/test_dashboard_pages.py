@@ -17,7 +17,7 @@ class TestDashboardPages:
     def test_login_page(self, page, base_url: str) -> None:  # noqa: ANN001
         """로그인 페이지가 렌더링된다."""
         page.goto(f"{base_url}/login")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # React SPA가 렌더링되면 root div가 존재
         assert page.locator("#root").count() > 0
@@ -25,34 +25,34 @@ class TestDashboardPages:
     def test_dashboard_page(self, page, base_url: str) -> None:  # noqa: ANN001
         """대시보드 메인 페이지가 렌더링된다."""
         page.goto(base_url)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         assert page.locator("#root").count() > 0
 
     def test_bots_page(self, page, base_url: str) -> None:  # noqa: ANN001
         """봇 관리 페이지가 렌더링된다."""
         page.goto(f"{base_url}/bots")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         assert page.locator("#root").count() > 0
 
     def test_strategies_page(self, page, base_url: str) -> None:  # noqa: ANN001
         """전략 관리 페이지가 렌더링된다."""
         page.goto(f"{base_url}/strategies")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         assert page.locator("#root").count() > 0
 
     def test_treasury_page(self, page, base_url: str) -> None:  # noqa: ANN001
         """자금 관리 페이지가 렌더링된다."""
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         assert page.locator("#root").count() > 0
 
     def test_settings_page(self, page, base_url: str) -> None:  # noqa: ANN001
         """설정 페이지가 렌더링된다."""
         page.goto(f"{base_url}/settings")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         assert page.locator("#root").count() > 0

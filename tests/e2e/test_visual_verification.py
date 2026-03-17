@@ -42,7 +42,7 @@ class TestVisualVerification:
         from tests.e2e.visual_checker import capture_and_verify
 
         page.goto(f"{base_url}{path}")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # async → sync 변환 (Playwright sync API에서는 불필요하지만 안전)
         import asyncio
@@ -71,7 +71,7 @@ class TestVisualVerification:
         )
 
         page.goto(base_url)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 네트워크 에러(API 미연결 등)는 E2E 환경에서 허용
         critical_errors = [
@@ -100,7 +100,7 @@ class TestScreenshotReport:
 
         for page_name, path in PAGES:
             page.goto(f"{base_url}{path}")
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("domcontentloaded")
 
             report = asyncio.get_event_loop().run_until_complete(
                 capture_and_verify(page, SCREENSHOT_DIR, page_name)

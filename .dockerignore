@@ -31,5 +31,6 @@ docs/
 CLAUDE.md
 AGENT.md
 
-# Tests
-tests/
+# Tests (unit tests 제외, e2e/fixtures는 테스트 빌드에 필요)
+tests/unit/
+tests/conftest.py

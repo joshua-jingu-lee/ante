@@ -22,7 +22,7 @@ class TestMemberListPage:
         """멤버 관리 페이지 타이틀이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         heading = page.get_by_role("heading", name="멤버 관리")
         expect(heading).to_be_visible()
@@ -31,7 +31,7 @@ class TestMemberListPage:
         """사람 섹션에 2명이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         section = page.get_by_text("사람")
         expect(section).to_be_visible()
@@ -44,7 +44,7 @@ class TestMemberListPage:
         """에이전트 섹션에 6명이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         section = page.get_by_text("에이전트")
         expect(section).to_be_visible()
@@ -60,7 +60,7 @@ class TestMemberListPage:
         """owner 카드에 왕관 표시와 master 역할이 보인다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         owner_card = page.get_by_text("owner").locator("..")
         expect(owner_card).to_be_visible()
@@ -73,7 +73,7 @@ class TestMemberListPage:
         """admin-01 카드가 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         admin_card = page.get_by_text("admin-01")
         expect(admin_card).to_be_visible()
@@ -82,7 +82,7 @@ class TestMemberListPage:
         """active 상태 에이전트가 4개 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 에이전트 섹션 내 active 배지
         active_badges = (
@@ -96,7 +96,7 @@ class TestMemberListPage:
         """suspended 상태 에이전트가 1개 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         suspended_badges = (
             page.locator("text=에이전트").locator("..").locator("text=suspended")
@@ -109,7 +109,7 @@ class TestMemberListPage:
         """revoked 상태 에이전트가 1개 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         revoked_badges = (
             page.locator("text=에이전트").locator("..").locator("text=revoked")
@@ -124,7 +124,7 @@ class TestAgentRegistration:
         """에이전트 등록 버튼 클릭 시 모달이 열린다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_role("button", name=re.compile("에이전트 등록|등록")).click()
 
@@ -135,7 +135,7 @@ class TestAgentRegistration:
         """등록 모달에 ID, 이름, 소속, 권한 체크박스 필드가 있다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_role("button", name=re.compile("에이전트 등록|등록")).click()
 
@@ -155,7 +155,7 @@ class TestAgentRegistration:
         """에이전트 등록 폼을 채우고 제출하면 새 에이전트가 목록에 추가된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_role("button", name=re.compile("에이전트 등록|등록")).click()
         modal = page.get_by_role("dialog")
@@ -176,7 +176,7 @@ class TestAgentRegistration:
         expect(modal).to_be_hidden(timeout=5000)
 
         # 목록에 새 에이전트가 표시됨
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_text("new-agent-e2e")).to_be_visible()
 
 
@@ -187,7 +187,7 @@ class TestAgentDetail:
         """strategy-dev-01 상세 페이지에 토큰 접두어, 생성자, 권한 목록이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members/strategy-dev-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 에이전트 이름 확인
         expect(page.get_by_text("strategy-dev-01")).to_be_visible()
@@ -215,7 +215,7 @@ class TestAgentStatusChange:
         """ops-agent-01을 일시정지할 수 있다."""
         page = authenticated_page
         page.goto(f"{base_url}/members/ops-agent-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 일시정지 버튼 클릭
         suspend_btn = page.get_by_role(
@@ -230,14 +230,14 @@ class TestAgentStatusChange:
             confirm_btn.click()
 
         # 상태가 suspended로 변경
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_text("suspended")).to_be_visible(timeout=5000)
 
     def test_revoked_agent_no_action(self, authenticated_page, base_url: str) -> None:
         """이미 revoked 상태인 old-agent-01에는 해지 버튼이 비활성화되어 있다."""
         page = authenticated_page
         page.goto(f"{base_url}/members/old-agent-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # revoked 상태 표시 확인
         expect(page.get_by_text("revoked")).to_be_visible()
@@ -255,7 +255,7 @@ class TestMemberFiltering:
         """소속 필터를 적용하면 해당 소속 에이전트만 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/members")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 소속 필터 선택
         filter_select = page.get_by_role("combobox").or_(
@@ -269,7 +269,7 @@ class TestMemberFiltering:
         if options.count() > 1:
             options.nth(1).click()
 
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 필터링 후 카드 수가 전체(6)보다 적어야 함
         agent_cards = (

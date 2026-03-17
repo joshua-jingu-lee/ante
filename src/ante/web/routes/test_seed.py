@@ -15,9 +15,42 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SCENARIOS_DIR = (
-    Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "seed" / "scenarios"
-)
+
+def _find_scenarios_dir() -> Path:
+    """시나리오 SQL 디렉토리를 탐색한다.
+
+    pip install로 site-packages에 설치된 경우 __file__ 기준 경로가 맞지 않으므로,
+    환경변수 → CWD → __file__ 순서로 탐색한다.
+    """
+    import os
+
+    # 1. 환경변수로 명시적 지정
+    env_dir = os.environ.get("ANTE_SCENARIOS_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        if p.is_dir():
+            return p
+
+    # 2. CWD 기준 (Docker 컨테이너에서 WORKDIR=/app)
+    cwd_based = Path.cwd() / "tests" / "fixtures" / "seed" / "scenarios"
+    if cwd_based.is_dir():
+        return cwd_based
+
+    # 3. __file__ 기준 (로컬 개발 시)
+    file_based = (
+        Path(__file__).resolve().parents[4]
+        / "tests"
+        / "fixtures"
+        / "seed"
+        / "scenarios"
+    )
+    if file_based.is_dir():
+        return file_based
+
+    return cwd_based  # fallback — 에러 메시지에서 경로 확인용
+
+
+SCENARIOS_DIR = _find_scenarios_dir()
 BASE_SQL = SCENARIOS_DIR / "_base.sql"
 
 

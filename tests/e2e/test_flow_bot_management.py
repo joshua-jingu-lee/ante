@@ -24,7 +24,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.playwright]
 def _go_to_bots(page, base_url: str) -> None:  # noqa: ANN001
     """봇 관리 페이지로 이동."""
     page.goto(f"{base_url}/bots")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
 
 def _section(page, title: str):  # noqa: ANN001, ANN202
@@ -193,7 +193,7 @@ class TestBotCreate:
         expect_toast(page, "생성")
 
         # 목록에 새 봇이 나타나는지 확인
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_text("E2E 테스트 봇")).to_be_visible(timeout=5000)
 
 
@@ -216,7 +216,7 @@ class TestBotStartStop:
         card.get_by_role("button", name="시작").click()
 
         # 시작 후 상태 변경 대기
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 봇 A가 실행중 상태로 전환
         updated_card = _bot_card(page, "SMA 크로스 봇")
@@ -241,7 +241,7 @@ class TestBotStartStop:
         page.get_by_role("button", name="중지").last.click()
 
         # 중지 후 상태 변경 대기
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 봇 B가 중지됨 상태로 전환
         updated_card = _bot_card(page, "모멘텀 추세 봇")
@@ -273,7 +273,7 @@ class TestBotDelete:
         page.get_by_role("button", name="삭제").last.click()
 
         # 삭제 후 목록에서 사라지는지 확인
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_text("오류 테스트 봇")).not_to_be_visible(timeout=5000)
 
     def test_delete_bot_c_with_positions(
@@ -302,7 +302,7 @@ class TestBotDelete:
         page.get_by_role("button", name="삭제").last.click()
 
         # 삭제 후 목록에서 사라지는지 확인
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_text("평균회귀 실전 봇")).not_to_be_visible(timeout=5000)
 
 
@@ -323,7 +323,7 @@ class TestBotDetailPage:
 
         # 봇 ID 링크 클릭
         page.get_by_text("bot-momentum-01").click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # URL 확인
         expect(page).to_have_url(re.compile(r"/bots/bot-momentum-01"))
@@ -339,7 +339,7 @@ class TestBotDetailPage:
         """상세 페이지 헤더에 봇 이름과 상태가 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("모멘텀 추세 봇")).to_be_visible()
         expect(page.get_by_text("실행중")).to_be_visible()
@@ -353,7 +353,7 @@ class TestBotDetailPage:
         """상세 페이지에 운용 전략 카드가 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("운용 전략")).to_be_visible()
         expect(page.get_by_text("momentum-v2")).to_be_visible()
@@ -366,7 +366,7 @@ class TestBotDetailPage:
         """상세 페이지에 실행 설정 카드가 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("실행 설정")).to_be_visible()
 
@@ -378,7 +378,7 @@ class TestBotDetailPage:
         """상세 페이지에 예산 카드가 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("예산")).to_be_visible()
 
@@ -390,7 +390,7 @@ class TestBotDetailPage:
         """상세 페이지에 보유 종목 테이블이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("보유 종목")).to_be_visible()
 
@@ -413,7 +413,7 @@ class TestBotDetailPage:
         """상세 페이지에 실행 로그 섹션이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("실행 로그")).to_be_visible()
 
@@ -425,9 +425,9 @@ class TestBotDetailPage:
         """뒤로 가기 링크를 클릭하면 봇 목록으로 돌아간다."""
         page = authenticated_page
         page.goto(f"{base_url}/bots/bot-momentum-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_text("← 봇 관리").click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page).to_have_url(re.compile(r"/bots/?$"))

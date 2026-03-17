@@ -40,7 +40,7 @@ def test_page_title(authenticated_page, base_url: str) -> None:  # noqa: ANN001
     """백테스트 데이터 페이지에 '백테스트 데이터' 타이틀이 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     header = Header(page)
     header.expect_title("백테스트 데이터")
@@ -53,7 +53,7 @@ def test_dataset_catalog_displayed(authenticated_page, base_url: str) -> None:  
     """데이터셋 카탈로그(카드 또는 테이블)가 페이지에 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 카탈로그 영역이 존재 — 테이블이거나 카드 목록이거나 빈 상태 안내
     has_table = page.locator("table").count() > 0
@@ -72,7 +72,7 @@ def test_search_filter_ui_exists(authenticated_page, base_url: str) -> None:  # 
     """검색 입력창 또는 필터 버튼이 존재한다."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     has_search_input = (
         page.locator(
@@ -97,7 +97,7 @@ def test_report_list_count(authenticated_page, base_url: str) -> None:  # noqa: 
     """백테스트 리포트가 2건 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 리포트 행 또는 카드를 찾음 — 테이블 행 또는 리포트 카드
     table = page.locator("table")
@@ -117,7 +117,7 @@ def test_report_shows_strategy_name(authenticated_page, base_url: str) -> None: 
     """리포트 목록에 전략명 'momentum-v2'가 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     expect(page.get_by_text("momentum-v2", exact=False).first).to_be_visible(
         timeout=5000
@@ -131,7 +131,7 @@ def test_report_detail_metrics(authenticated_page, base_url: str) -> None:  # no
     """리포트 상세에 수익률, 샤프비율 등 성과 지표가 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 첫 번째 리포트 항목 클릭 (테이블 행 또는 카드)
     table = page.locator("table")
@@ -140,7 +140,7 @@ def test_report_detail_metrics(authenticated_page, base_url: str) -> None:  # no
     else:
         page.get_by_text("momentum-v2", exact=False).first.click()
 
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 상세 화면에서 성과 지표 키워드 확인
     has_return = page.get_by_text("수익률", exact=False).count() > 0
@@ -160,7 +160,7 @@ def test_page_layout_integrity(authenticated_page, base_url: str) -> None:  # no
     """페이지 레이아웃이 정상이다 (루트 렌더링, 에러 텍스트 없음)."""
     page = authenticated_page
     page.goto(f"{base_url}/backtest-data")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # React 루트가 비어있지 않음
     expect(page.locator("#root")).not_to_be_empty()

@@ -7,7 +7,7 @@ from playwright.sync_api import Page, expect
 
 def wait_for_page_load(page: Page) -> None:
     """페이지 로딩 완료 대기."""
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     expect(page.locator("#root")).not_to_be_empty()
 
 

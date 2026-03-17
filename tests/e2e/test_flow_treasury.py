@@ -31,7 +31,7 @@ class TestAccountSummary:
         """자금관리 페이지에 KIS 계좌 요약(예수금, 매수가능금액)이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("계좌 현황", exact=False)).to_be_visible()
         expect(page.get_by_text("예수금", exact=False)).to_be_visible()
@@ -43,7 +43,7 @@ class TestAccountSummary:
         """Ante 관리자산 요약(Bot 배정예산, 잔여예산, 보유종목 평가)이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         expect(page.get_by_text("자금 운용", exact=False)).to_be_visible()
 
@@ -58,7 +58,7 @@ class TestBotBudgetTable:
         """Bot별 예산 테이블에 3개 봇이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 3개 봇 이름이 모두 보여야 한다
         for bot_name in ["bot-momentum-01", "bot-macd-cross", "bot-rsi-01"]:
@@ -68,7 +68,7 @@ class TestBotBudgetTable:
         """Bot별 예산 테이블에 주요 컬럼(배정, 사용, 잔여)이 존재한다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 테이블 헤더에 예산 관련 컬럼 확인
         for header_text in ["배정", "사용", "잔여"]:
@@ -87,7 +87,7 @@ class TestTransactionHistory:
         """자금 변동 이력 테이블이 표시되고 최신 항목이 보인다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 이력 섹션 존재
         expect(page.get_by_text("변동 이력", exact=False)).to_be_visible()
@@ -103,7 +103,7 @@ class TestTransactionHistory:
         """첫 페이지에 이력 8건이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         history_table = page.locator("table").last
         rows = history_table.locator("tbody tr")
@@ -113,7 +113,7 @@ class TestTransactionHistory:
         """페이지네이션으로 다음 페이지 이력을 볼 수 있다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 다음 페이지 버튼 클릭
         next_button = page.get_by_role(
@@ -121,7 +121,7 @@ class TestTransactionHistory:
         )
         expect(next_button).to_be_visible()
         next_button.click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 다음 페이지에도 행이 존재
         history_table = page.locator("table").last
@@ -139,7 +139,7 @@ class TestBudgetAllocationForm:
         """예산 할당 폼에 Bot 선택, 금액 입력, 할당/회수 버튼이 존재한다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # Bot 선택 드롭다운 또는 select
         bot_select = page.locator("select").first
@@ -159,7 +159,7 @@ class TestBudgetAllocationForm:
         """할당 버튼 클릭 시 확인 모달이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/treasury")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # Bot 선택
         bot_select = page.locator("select").first

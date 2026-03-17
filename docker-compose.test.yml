@@ -19,6 +19,8 @@ services:
     environment:
       - ANTE_CONFIG_DIR=/app/config
       - ANTE_TEST_MODE=1
+      - TELEGRAM_BOT_TOKEN=dummy-token-for-test
+      - TELEGRAM_CHAT_ID=dummy-chat-id-for-test
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
       interval: 5s
@@ -46,7 +48,7 @@ services:
     networks:
       - e2e-net
     command: >
-      pytest tests/e2e/ -m e2e
+      tests/e2e/ -m e2e
       --base-url http://ante-test:8000
       -v --tb=short
       --output=test-results

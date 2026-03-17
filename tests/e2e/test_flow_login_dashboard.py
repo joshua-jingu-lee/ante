@@ -25,7 +25,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.playwright]
 def test_unauthenticated_redirect(page, base_url: str, seed_scenario: str) -> None:  # noqa: ANN001, ARG001
     """비인증 상태에서 / 접속 시 /login으로 리다이렉트된다."""
     page.goto(base_url)
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     expect(page).to_have_url(f"{base_url}/login")
     expect(page.get_by_text("AI-Native Trading Engine")).to_be_visible()
@@ -219,10 +219,10 @@ def test_logout(authenticated_page, base_url: str) -> None:  # noqa: ANN001
     header.open_user_menu()
     header.click_logout()
 
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     expect(page).to_have_url(f"{base_url}/login")
 
     # 로그아웃 후 / 접속 시 다시 /login으로 리다이렉트
     page.goto(base_url)
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
     expect(page).to_have_url(f"{base_url}/login")

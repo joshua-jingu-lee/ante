@@ -28,7 +28,7 @@ def test_navigate_to_settings(authenticated_page, base_url: str) -> None:  # noq
     """사이드바 또는 URL로 /settings 페이지에 진입할 수 있다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     expect(page).to_have_url(f"{base_url}/settings")
     expect(page.locator("#root")).not_to_be_empty()
@@ -41,7 +41,7 @@ def test_system_status_active(authenticated_page, base_url: str) -> None:  # noq
     """설정 페이지에 시스템 상태 'ACTIVE'가 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     expect(page.get_by_text("ACTIVE", exact=False)).to_be_visible(timeout=5000)
 
@@ -53,7 +53,7 @@ def test_settings_items_count(authenticated_page, base_url: str) -> None:  # noq
     """거래 설정 항목이 10개 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 설정 항목은 테이블 행 또는 리스트 아이템으로 표시
     table = page.locator("table")
@@ -74,7 +74,7 @@ def test_settings_categories(authenticated_page, base_url: str) -> None:  # noqa
     """설정이 카테고리(위험 관리, 거래 규칙, 봇 설정, 브로커)별로 그룹화된다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     categories = ["위험 관리", "거래 규칙", "봇 설정", "브로커"]
     visible_count = 0
@@ -94,7 +94,7 @@ def test_edit_max_drawdown_setting(authenticated_page, base_url: str) -> None:  
     """'최대 낙폭 제한' 설정값을 15.0에서 20.0으로 변경할 수 있다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # "최대 낙폭 제한" 텍스트 근처의 입력 필드 찾기
     drawdown_label = page.get_by_text("최대 낙폭 제한", exact=False)
@@ -123,7 +123,7 @@ def test_save_setting_shows_toast(authenticated_page, base_url: str) -> None:  #
     """설정을 저장하면 성공 토스트 메시지가 표시된다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 편집할 설정 찾기
     drawdown_label = page.get_by_text("최대 낙폭 제한", exact=False)
@@ -157,7 +157,7 @@ def test_config_change_history(authenticated_page, base_url: str) -> None:  # no
     """설정 변경 이력이 표시되고 2건의 기록이 있다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 변경 이력 섹션
     history_label = page.get_by_text("변경 이력", exact=False).or_(
@@ -186,7 +186,7 @@ def test_notification_toggles(authenticated_page, base_url: str) -> None:  # noq
     """체결 알림 ON, 일일 리포트 OFF 토글이 동작한다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 체결 알림 토글 확인
     trade_notification = page.get_by_text("체결 알림", exact=False)
@@ -203,7 +203,7 @@ def test_notification_toggles(authenticated_page, base_url: str) -> None:  # noq
     if trade_toggle.count() > 0:
         trade_toggle.click()
         # 토글이 반응했는지 — 에러 없이 동작하면 통과
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
     # 일일 리포트 토글 확인
     daily_report = page.get_by_text("일일 리포트", exact=False)
@@ -215,7 +215,7 @@ def test_notification_toggles(authenticated_page, base_url: str) -> None:  # noq
         ).first
         if report_toggle.count() > 0:
             report_toggle.click()
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("domcontentloaded")
 
 
 # ── 9. 킬 스위치 (거래 중지/재개) ────────────────────
@@ -225,7 +225,7 @@ def test_kill_switch_button(authenticated_page, base_url: str) -> None:  # noqa:
     """'거래 중지' 또는 '거래 재개' 킬 스위치 버튼이 존재한다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     kill_switch = page.get_by_role("button", name="거래 중지").or_(
         page.get_by_role("button", name="거래 재개")
@@ -240,7 +240,7 @@ def test_kill_switch_toggles_state(authenticated_page, base_url: str) -> None:  
     """킬 스위치 클릭 시 시스템 상태가 전환된다."""
     page = authenticated_page
     page.goto(f"{base_url}/settings")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 현재 ACTIVE이므로 "거래 중지" 버튼이 보여야 함
     stop_btn = page.get_by_role("button", name="거래 중지")
@@ -255,7 +255,7 @@ def test_kill_switch_toggles_state(authenticated_page, base_url: str) -> None:  
     if confirm_btn.count() > 0:
         confirm_btn.first.click()
 
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
     # 상태가 전환되어 "거래 재개" 버튼이 나타나거나 상태 텍스트가 변경됨
     resume_btn = page.get_by_role("button", name="거래 재개")

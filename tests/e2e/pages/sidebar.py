@@ -31,7 +31,7 @@ class Sidebar:
     def navigate_to(self, label: str) -> None:
         """메뉴 항목을 클릭하여 해당 페이지로 이동."""
         self.page.get_by_text(label, exact=False).click()
-        self.page.wait_for_load_state("networkidle")
+        self.page.wait_for_load_state("domcontentloaded")
 
     def expect_menu_count(self, count: int) -> None:
         """사이드바 메뉴 항목 수를 검증."""

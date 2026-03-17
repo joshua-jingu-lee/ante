@@ -24,7 +24,7 @@ class TestApprovalListPage:
         """결재함 페이지에 '전체' 탭이 기본 선택되어 있고, 6건이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         heading = page.get_by_role("heading", name="결재함")
         expect(heading).to_be_visible()
@@ -41,10 +41,10 @@ class TestApprovalListPage:
         """'대기' 탭 클릭 시 3건이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_role("button", name="대기").click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         rows = page.locator("table tbody tr")
         expect(rows).to_have_count(3)
@@ -53,10 +53,10 @@ class TestApprovalListPage:
         """'승인' 탭 클릭 시 2건이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_role("button", name="승인").click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         rows = page.locator("table tbody tr")
         expect(rows).to_have_count(2)
@@ -65,10 +65,10 @@ class TestApprovalListPage:
         """'거부' 탭 클릭 시 1건이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.get_by_role("button", name="거부").click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         rows = page.locator("table tbody tr")
         expect(rows).to_have_count(1)
@@ -83,7 +83,7 @@ class TestApprovalFilters:
         """'전략 채택' 유형 필터 시 2건이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 유형 필터 select
         type_filter = page.locator("select").filter(
@@ -92,7 +92,7 @@ class TestApprovalFilters:
         expect(type_filter.first).to_be_visible()
         type_filter.first.select_option(label="전략 채택")
 
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         rows = page.locator("table tbody tr")
         expect(rows).to_have_count(2)
@@ -101,7 +101,7 @@ class TestApprovalFilters:
         """'모멘텀' 검색 시 해당 건이 필터링된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         search_input = page.get_by_placeholder(
             re.compile("제목.*검색|전략명.*검색|검색")
@@ -109,7 +109,7 @@ class TestApprovalFilters:
         expect(search_input).to_be_visible()
         search_input.fill("모멘텀")
 
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         # 최소 1건 이상 검색 결과
         rows = page.locator("table tbody tr")
         count = rows.count()
@@ -124,11 +124,11 @@ class TestApprovalDetail:
         """대기 건(appr-01) 클릭 시 상세 페이지로 이동한다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 첫 번째 대기 건 클릭
         page.get_by_role("button", name="대기").click()
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         page.locator("table tbody tr").first.click()
         page.wait_for_url(re.compile(r"/approvals/appr-\d+"), timeout=5000)
@@ -137,7 +137,7 @@ class TestApprovalDetail:
         """상세 페이지에 제목, 요청자, 요청일, 만료일이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 요청 정보 필드 확인
         expect(page.get_by_text(re.compile("제목"))).to_be_visible()
@@ -149,7 +149,7 @@ class TestApprovalDetail:
         """상세 페이지에 본문 내용이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 본문 영역 — 비어있지 않은 콘텐츠 블록이 존재
         body_section = page.locator("article, [class*=body], [class*=content]")
@@ -163,7 +163,7 @@ class TestApprovalDetail:
         """대기 상태 상세에 승인/거부 버튼이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         approve_btn = page.get_by_role("button", name="승인")
         reject_btn = page.get_by_role("button", name="거부")
@@ -179,7 +179,7 @@ class TestApprovalActions:
         """승인 버튼 → 승인 모달 → 확인하면 승인 처리된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-01")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 승인 버튼 클릭
         page.get_by_role("button", name="승인").click()
@@ -194,7 +194,7 @@ class TestApprovalActions:
 
         # 모달 닫힘 및 상태 변경 확인
         expect(modal).to_be_hidden(timeout=5000)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(
             page.get_by_text(re.compile("승인|approved", re.IGNORECASE))
         ).to_be_visible()
@@ -203,7 +203,7 @@ class TestApprovalActions:
         """거부 버튼 → 거부 모달 → 사유 입력 → 확인하면 거부 처리된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-02")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 거부 버튼 클릭
         page.get_by_role("button", name="거부").click()
@@ -223,7 +223,7 @@ class TestApprovalActions:
 
         # 모달 닫힘 및 상태 변경 확인
         expect(modal).to_be_hidden(timeout=5000)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         expect(
             page.get_by_text(re.compile("거부|rejected", re.IGNORECASE))
         ).to_be_visible()
@@ -238,7 +238,7 @@ class TestApprovalCompletedDetail:
         """승인 완료된 건(appr-04) 상세에 승인 상태와 검토의견이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-04")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 승인 상태 표시
         expect(
@@ -258,7 +258,7 @@ class TestApprovalCompletedDetail:
         """거부된 건(appr-06) 상세에 거부 상태와 사유가 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-06")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 거부 상태 표시
         expect(
@@ -278,7 +278,7 @@ class TestApprovalNavigation:
         """상세 페이지에서 대시보드로 돌아갈 수 있다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals/appr-04")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 뒤로가기 링크 또는 목록으로 돌아가기
         back_link = page.get_by_role("link", name=re.compile("목록|돌아가기|뒤로"))
@@ -288,7 +288,7 @@ class TestApprovalNavigation:
             # 브라우저 뒤로가기 대체
             page.go_back()
 
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         # 결재함 목록 또는 대시보드에 도착
         expect(page).to_have_url(re.compile(r"/(approvals|dashboard)?$"))
@@ -297,7 +297,7 @@ class TestApprovalNavigation:
         """결재 테이블에 유형, 제목, 요청자, 요청일, 상태, 처리일 컬럼이 표시된다."""
         page = authenticated_page
         page.goto(f"{base_url}/approvals")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
         headers = page.locator("table thead th")
         header_texts = headers.all_inner_texts()
