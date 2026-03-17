@@ -15,6 +15,7 @@ export default function Approvals() {
   const [offset, setOffset] = useState(0)
 
   const { data, isLoading } = useApprovals({ status, type, offset, limit: LIMIT })
+  const pendingQuery = useApprovals({ status: 'pending', limit: 0 })
 
   const allItems = data?.items ?? []
   const filtered = search
@@ -27,7 +28,7 @@ export default function Approvals() {
         status={status}
         type={type}
         search={search}
-        items={allItems}
+        pendingCount={pendingQuery.data?.total ?? 0}
         onStatusChange={(s) => { setStatus(s); setOffset(0) }}
         onTypeChange={(t) => { setType(t); setOffset(0) }}
         onSearchChange={(q) => { setSearch(q); setOffset(0) }}

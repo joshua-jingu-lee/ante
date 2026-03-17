@@ -4,12 +4,12 @@ import { formatDateTime } from '../../utils/formatters'
 import type { Approval, ApprovalStatus, ApprovalType } from '../../types/approval'
 import { APPROVAL_STATUS_LABELS } from '../../utils/constants'
 
-const TYPE_BADGE: Record<ApprovalType, { label: string; variant: string }> = {
-  strategy_adopt: { label: '전략 채택', variant: 'info' },
-  budget_change: { label: '예산 변경', variant: 'primary' },
-  bot_create: { label: '봇 생성', variant: 'positive' },
-  bot_stop: { label: '봇 중지', variant: 'warning' },
-  rule_change: { label: '규칙 변경', variant: 'negative' },
+const TYPE_LABEL: Record<ApprovalType, string> = {
+  strategy_adopt: '전략 채택',
+  budget_change: '예산 변경',
+  bot_create: '봇 생성',
+  bot_stop: '봇 중지',
+  rule_change: '규칙 변경',
 }
 
 const STATUS_VARIANT: Record<ApprovalStatus, string> = {
@@ -30,8 +30,8 @@ export default function ApprovalTable({ items }: { items: Approval[] }) {
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">제목</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">요청자</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">요청일</th>
-            <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">처리일</th>
             <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">상태</th>
+            <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">처리일</th>
           </tr>
         </thead>
         <tbody>
@@ -40,29 +40,26 @@ export default function ApprovalTable({ items }: { items: Approval[] }) {
               <td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">결재 항목이 없습니다</td>
             </tr>
           ) : (
-            items.map((item) => {
-              const typeInfo = TYPE_BADGE[item.type] || { label: item.type, variant: 'muted' }
-              return (
+            items.map((item) => (
                 <tr
                   key={item.id}
                   onClick={() => navigate(`/approvals/${item.id}`)}
                   className="hover:bg-surface-hover cursor-pointer"
                 >
                   <td className="px-3 py-3 border-b border-border text-[13px]">
-                    <StatusBadge variant={typeInfo.variant as 'info'}>{typeInfo.label}</StatusBadge>
+                    <StatusBadge variant="muted">{TYPE_LABEL[item.type] || item.type}</StatusBadge>
                   </td>
                   <td className="px-3 py-3 border-b border-border text-[13px]">{item.title}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{item.requester}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{formatDateTime(item.requested_at)}</td>
-                  <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{item.resolved_at ? formatDateTime(item.resolved_at) : '-'}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px]">
                     <StatusBadge variant={STATUS_VARIANT[item.status] as 'warning'}>
                       {APPROVAL_STATUS_LABELS[item.status] || item.status}
                     </StatusBadge>
                   </td>
+                  <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{item.resolved_at ? formatDateTime(item.resolved_at) : '-'}</td>
                 </tr>
-              )
-            })
+              ))
           )}
         </tbody>
       </table>
