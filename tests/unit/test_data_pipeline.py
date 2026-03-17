@@ -235,6 +235,79 @@ class TestParquetStore:
         assert march_file.exists()
         assert april_file.exists()
 
+    async def test_fundamental_write_and_read(self, store):
+        """fundamental 데이터 타입으로 write/read."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "date": [date(2026, 3, 1), date(2026, 3, 2)],
+                "symbol": ["005930", "005930"],
+                "market_cap": [500000000000, 510000000000],
+                "per": [12.5, 12.8],
+                "source": ["dart", "dart"],
+            }
+        )
+        await store.write("005930", "", df, data_type="fundamental")
+        result = await store.read("005930", "", data_type="fundamental")
+        assert len(result) == 2
+        assert result["market_cap"][0] == 500000000000
+
+    async def test_fundamental_path_structure(self, store, data_dir):
+        """fundamental은 {base}/fundamental/krx/{symbol}/ 경로."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "date": [date(2026, 3, 1)],
+                "symbol": ["005930"],
+                "source": ["dart"],
+            }
+        )
+        await store.write("005930", "", df, data_type="fundamental")
+        path = data_dir / "fundamental" / "krx" / "005930"
+        assert path.exists()
+        assert list(path.glob("*.parquet"))
+
+    async def test_list_symbols_fundamental(self, store):
+        """fundamental data_type의 종목 목록."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "date": [date(2026, 3, 1)],
+                "symbol": ["005930"],
+                "source": ["dart"],
+            }
+        )
+        await store.write("005930", "", df, data_type="fundamental")
+        symbols = store.list_symbols(data_type="fundamental")
+        assert symbols == ["005930"]
+
+    async def test_storage_usage_includes_fundamental(self, store):
+        """get_storage_usage가 fundamental 용량도 포함."""
+        from datetime import date
+
+        await store.write("005930", "1d", _make_ohlcv_df())
+        df = pl.DataFrame(
+            {
+                "date": [date(2026, 3, 1)],
+                "symbol": ["005930"],
+                "source": ["dart"],
+            }
+        )
+        await store.write("005930", "", df, data_type="fundamental")
+        usage = store.get_storage_usage()
+        assert "1d" in usage
+        assert "fundamental" in usage
+
+    async def test_ohlcv_default_backward_compat(self, store):
+        """data_type 미지정 시 기존 OHLCV 동작 유지."""
+        df = _make_ohlcv_df()
+        await store.write("005930", "1m", df)
+        result = await store.read("005930", "1m")
+        assert len(result) == 5
+
 
 # ── normalizer.py 테스트 ─────────────────────────────
 
