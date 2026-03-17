@@ -55,9 +55,9 @@ class TestApprovalListPage:
 
         expected_columns = ["유형", "제목", "요청자", "요청일", "상태", "처리일"]
         for col in expected_columns:
-            assert any(
-                col in h for h in header_texts
-            ), f"테이블 헤더에 '{col}' 컬럼이 없음: {header_texts}"
+            assert any(col in h for h in header_texts), (
+                f"테이블 헤더에 '{col}' 컬럼이 없음: {header_texts}"
+            )
 
     def test_pending_tab_filters_to_3(self, authenticated_page, base_url: str) -> None:
         """'대기' 탭 클릭 시 3건이 표시된다."""
