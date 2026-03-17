@@ -45,6 +45,14 @@ export default function Pagination({ total, offset, limit, onPageChange }: Pagin
         >
           &laquo;
         </button>
+        <button
+          onClick={() => onPageChange(Math.max(0, (currentPage - 2) * limit))}
+          disabled={currentPage === 1}
+          className={btnOutline}
+          aria-label="이전 페이지"
+        >
+          &lsaquo;
+        </button>
         {pages.map((page) => (
           <button
             key={page}
@@ -54,6 +62,14 @@ export default function Pagination({ total, offset, limit, onPageChange }: Pagin
             {page}
           </button>
         ))}
+        <button
+          onClick={() => onPageChange(currentPage * limit)}
+          disabled={currentPage === totalPages}
+          className={btnOutline}
+          aria-label="다음 페이지"
+        >
+          &rsaquo;
+        </button>
         <button
           onClick={() => onPageChange((totalPages - 1) * limit)}
           disabled={currentPage === totalPages}
