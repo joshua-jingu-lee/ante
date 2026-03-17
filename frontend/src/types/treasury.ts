@@ -6,6 +6,10 @@ export interface TreasurySummary {
   total_profit_loss: number
   commission_rate: number
   sell_tax_rate: number
+  // KIS 계좌 헤더
+  account_number: string
+  is_demo_trading: boolean
+  last_sync_time: string | null
   // Ante 관리자산
   total_allocated: number
   total_reserved: number
@@ -25,6 +29,9 @@ export interface BotBudget {
   reserved: number
   spent: number
   returned: number
+  eval_amount: number
+  position_pnl: number
+  position_return: number
 }
 
 export type TransactionType = 'allocate' | 'deallocate' | 'fill' | 'bot_stopped_release'

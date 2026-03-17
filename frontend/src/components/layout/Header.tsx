@@ -7,7 +7,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/': '대시보드',
   '/approvals': '결재함',
   '/treasury': '자금관리',
-  '/treasury/history': '자금 거래 이력',
+  '/treasury/history': '자금 변동 이력',
   '/strategies': '전략과 성과',
   '/bots': '봇 관리',
   '/backtest-data': '백테스트 데이터',

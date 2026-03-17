@@ -107,6 +107,34 @@ async def get_bot(request: Request, bot_id: str) -> dict:
                 "description": record.description,
             }
 
+    # 예산 정보 추가
+    treasury = getattr(request.app.state, "treasury", None)
+    if treasury is not None:
+        budget = await treasury.get_budget(bot_id)
+        if budget:
+            info["budget"] = {
+                "allocated": budget.allocated,
+                "spent": budget.spent,
+                "reserved": budget.reserved,
+                "available": budget.available,
+            }
+
+    # 포지션 정보 추가
+    trade_service = getattr(request.app.state, "trade_service", None)
+    if trade_service is not None:
+        positions = await trade_service.get_positions(
+            bot_id=bot_id, include_closed=True
+        )
+        info["positions"] = [
+            {
+                "symbol": p.symbol,
+                "quantity": p.quantity,
+                "avg_entry_price": p.avg_entry_price,
+                "realized_pnl": p.realized_pnl,
+            }
+            for p in positions
+        ]
+
     return {"bot": info}
 
 

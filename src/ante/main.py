@@ -301,6 +301,19 @@ async def main() -> None:
 
     # ── 11.6. Treasury 잔고 동기화 ────────────────────
     if broker:
+        # KIS 계좌 메타 정보 전달
+        account_no = getattr(broker, "account_no", "")
+        is_paper = getattr(broker, "is_paper", False)
+        formatted_account = (
+            f"{account_no[:8]}-{account_no[8:]}"
+            if len(account_no) >= 10
+            else account_no
+        )
+        treasury.set_account_info(
+            account_number=formatted_account,
+            is_demo_trading=is_paper,
+        )
+
         sync_interval = config.get("treasury.sync_interval_seconds", 300)
         await treasury.start_sync(
             broker=broker,
