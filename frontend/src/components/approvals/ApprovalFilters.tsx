@@ -1,4 +1,4 @@
-import type { ApprovalStatus, ApprovalType, Approval } from '../../types/approval'
+import type { ApprovalStatus, ApprovalType } from '../../types/approval'
 
 const STATUS_OPTIONS: { key: ApprovalStatus | 'all'; label: string }[] = [
   { key: 'all', label: '전체' },
