@@ -80,6 +80,10 @@ class Treasury:
             str, tuple[str, float]
         ] = {}  # order_id → (bot_id, amount)
         self._sync_task: asyncio.Task[None] | None = None
+
+        # KIS 계좌 메타 정보 (broker 연결 후 set_account_info로 설정)
+        self._account_number: str = ""
+        self._is_demo_trading: bool = False
         self._last_synced_at: datetime | None = None
 
     async def initialize(self) -> None:
@@ -138,6 +142,29 @@ class Treasury:
     @property
     def last_synced_at(self) -> datetime | None:
         return self._last_synced_at
+
+    @property
+    def account_number(self) -> str:
+        return self._account_number
+
+    @property
+    def is_demo_trading(self) -> bool:
+        return self._is_demo_trading
+
+    @property
+    def last_sync_time(self) -> str | None:
+        """마지막 동기화 시각 (ISO 8601 문자열)."""
+        if self._last_synced_at is None:
+            return None
+        return self._last_synced_at.isoformat()
+
+    def set_account_info(self, account_number: str, is_demo_trading: bool) -> None:
+        """KIS 계좌 메타 정보 설정 (broker 연결 후 호출)."""
+        self._account_number = account_number
+        self._is_demo_trading = is_demo_trading
+        logger.info(
+            "계좌 정보 설정: %s (모의투자: %s)", account_number, is_demo_trading
+        )
 
     def set_bot_status_checker(self, checker: Callable[[str], str]) -> None:
         """봇 상태 확인 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
@@ -574,6 +601,9 @@ class Treasury:
             "ante_eval_amount": ante_eval,
             "ante_profit_loss": ante_profit_loss,
             "budget_exceeds_purchasable": budget_exceeds_purchasable,
+            "account_number": self._account_number,
+            "is_demo_trading": self._is_demo_trading,
+            "last_sync_time": self.last_sync_time,
         }
 
     # ── DB 영속화 ───────────────────────────────────
