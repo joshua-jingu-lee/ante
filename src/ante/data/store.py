@@ -195,6 +195,23 @@ class ParquetStore:
             return None
         return files[0].stem, files[-1].stem
 
+    def get_row_count(
+        self, symbol: str, timeframe: str, data_type: str = "ohlcv"
+    ) -> int:
+        """종목의 총 행 수 조회. Parquet 메타데이터만 읽어 빠르게 반환."""
+        path = self._resolve_path(symbol, timeframe, data_type)
+        if not path.exists():
+            return 0
+        files = sorted(path.glob("*.parquet"))
+        total = 0
+        for f in files:
+            try:
+                total += pl.scan_parquet(f).select(pl.len()).collect().item()
+            except Exception:
+                logger.warning("Failed to read row count: %s", f)
+                continue
+        return total
+
     def get_storage_usage(self) -> dict[str, int]:
         """저장 용량 현황 (바이트). 데이터 타입/타임프레임별 합산."""
         usage: dict[str, int] = {}

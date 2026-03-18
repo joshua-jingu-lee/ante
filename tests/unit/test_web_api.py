@@ -102,7 +102,9 @@ class TestDataRoutes:
     def test_datasets_no_catalog(self, client):
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
-        assert resp.json()["datasets"] == []
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_schema_no_catalog(self, client):
         resp = client.get("/api/data/schema")
@@ -125,7 +127,9 @@ class TestDataRoutes:
 
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
-        assert isinstance(resp.json()["datasets"], list)
+        body = resp.json()
+        assert isinstance(body["items"], list)
+        assert "total" in body
 
     def test_storage_with_store(self, tmp_path):
         from ante.data.store import ParquetStore

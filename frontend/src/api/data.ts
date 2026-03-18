@@ -1,7 +1,7 @@
 import client from './client'
 
 export interface Dataset {
-  id: number
+  id: string
   symbol: string
   timeframe: string
   start_date: string
@@ -30,6 +30,6 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   return res.data
 }
 
-export async function deleteDataset(id: number): Promise<void> {
+export async function deleteDataset(id: string): Promise<void> {
   await client.delete(`/api/data/datasets/${id}`)
 }

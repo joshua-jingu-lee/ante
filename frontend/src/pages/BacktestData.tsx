@@ -12,7 +12,7 @@ export default function BacktestData() {
   const [search, setSearch] = useState('')
   const [timeframe, setTimeframe] = useState<string>('all')
   const [offset, setOffset] = useState(0)
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; symbol: string; timeframe: string; start_date: string; end_date: string; row_count: number } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; symbol: string; timeframe: string; start_date: string; end_date: string; row_count: number } | null>(null)
   const queryClient = useQueryClient()
 
   /* 자동완성용: 전체 데이터셋에서 고유 종목 목록 추출 */

@@ -10,28 +10,48 @@ router = APIRouter()
 
 
 @router.get("/datasets")
-async def list_datasets(request: Request) -> dict:
-    """보유 데이터셋 목록."""
+async def list_datasets(
+    request: Request,
+    symbol: str | None = None,
+    timeframe: str | None = None,
+    offset: int = 0,
+    limit: int = 50,
+) -> dict:
+    """보유 데이터셋 목록 (페이지네이션 지원).
+
+    Returns:
+        {items: [...], total: int}
+    """
     store = getattr(request.app.state, "data_store", None)
     if store is None:
-        return {"datasets": []}
+        return {"items": [], "total": 0}
 
     from ante.data.schemas import TIMEFRAMES
 
-    datasets = []
-    for tf in TIMEFRAMES:
+    tf_list = [timeframe] if timeframe else TIMEFRAMES
+
+    all_datasets = []
+    for tf in tf_list:
         symbols = store.list_symbols(tf)
-        for symbol in symbols:
-            date_range = store.get_date_range(symbol, tf)
-            datasets.append(
+        for sym in symbols:
+            if symbol and sym != symbol:
+                continue
+            date_range = store.get_date_range(sym, tf)
+            row_count = store.get_row_count(sym, tf)
+            all_datasets.append(
                 {
-                    "symbol": symbol,
+                    "id": f"{sym}__{tf}",
+                    "symbol": sym,
                     "timeframe": tf,
-                    "start": date_range[0] if date_range else None,
-                    "end": date_range[1] if date_range else None,
+                    "start_date": date_range[0] if date_range else None,
+                    "end_date": date_range[1] if date_range else None,
+                    "row_count": row_count,
                 }
             )
-    return {"datasets": datasets}
+
+    total = len(all_datasets)
+    items = all_datasets[offset : offset + limit]
+    return {"items": items, "total": total}
 
 
 @router.get("/schema")
