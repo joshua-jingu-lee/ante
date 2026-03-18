@@ -190,6 +190,52 @@ async def get_strategy_daily_summary(
     }
 
 
+@router.get("/{strategy_id}/weekly-summary")
+async def get_strategy_weekly_summary(
+    request: Request,
+    strategy_id: str,
+) -> dict:
+    """전략 주별 성과 집계."""
+    registry = getattr(request.app.state, "strategy_registry", None)
+    if registry is None:
+        raise HTTPException(status_code=503, detail="Strategy registry not available")
+
+    record = await registry.get(strategy_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from ante.trade.performance import PerformanceTracker
+
+    tracker = PerformanceTracker(db)
+
+    bot_id = None
+    bot_manager = getattr(request.app.state, "bot_manager", None)
+    if bot_manager is not None:
+        for b in bot_manager.list_bots():
+            if b.get("strategy_id") == strategy_id:
+                bot_id = b["bot_id"]
+                break
+
+    summaries = await tracker.get_weekly_summary(bot_id=bot_id)
+    return {
+        "items": [
+            {
+                "week_start": s.week_start,
+                "week_end": s.week_end,
+                "week_label": s.week_label,
+                "realized_pnl": s.realized_pnl,
+                "trade_count": s.trade_count,
+                "win_rate": s.win_rate,
+            }
+            for s in summaries
+        ]
+    }
+
+
 @router.get("/{strategy_id}/monthly-summary")
 async def get_strategy_monthly_summary(
     request: Request,
