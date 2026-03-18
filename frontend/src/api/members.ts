@@ -37,6 +37,10 @@ export async function rotateToken(id: string): Promise<{ token: string }> {
   return res.data
 }
 
+export async function changePassword(id: string, oldPassword: string, newPassword: string): Promise<void> {
+  await client.patch(`/api/members/${id}/password`, { old_password: oldPassword, new_password: newPassword })
+}
+
 export async function updateScopes(id: string, scopes: string[]): Promise<void> {
   await client.put(`/api/members/${id}/scopes`, { scopes })
 }

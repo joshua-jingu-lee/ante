@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMembers, useMemberControl } from '../hooks/useMembers'
 import MemberCard from '../components/agents/MemberCard'
 import AgentRegisterForm from '../components/agents/AgentRegisterForm'
+import ChangePasswordModal from '../components/agents/ChangePasswordModal'
 import { TableSkeleton } from '../components/common/Skeleton'
 import type { MemberStatus } from '../types/member'
 
@@ -17,6 +18,7 @@ export default function Agents() {
   const [statusFilter, setStatusFilter] = useState<MemberStatus | 'all'>('all')
   const [showRegister, setShowRegister] = useState(false)
   const [createdToken, setCreatedToken] = useState<{ agentId: string; token: string } | null>(null)
+  const [passwordTarget, setPasswordTarget] = useState<string | null>(null)
 
   const { data: allMembers, isLoading } = useMembers({})
   const { data: humanMembers } = useMembers({ type: 'human' })
@@ -62,7 +64,7 @@ export default function Agents() {
                     key={m.member_id}
                     member={m}
                     onSuspend={m.member_id !== 'owner' ? (id) => suspend.mutate(id) : undefined}
-                    onChangePassword={() => {/* TODO: 비밀번호 변경 모달 연결 */}}
+                    onChangePassword={(id) => setPasswordTarget(id)}
                   />
                 ))}
               </div>
@@ -136,6 +138,13 @@ export default function Agents() {
         <AgentRegisterForm
           onClose={() => setShowRegister(false)}
           onTokenCreated={(agentId, token) => { setShowRegister(false); setCreatedToken({ agentId, token }) }}
+        />
+      )}
+
+      {passwordTarget && (
+        <ChangePasswordModal
+          memberId={passwordTarget}
+          onClose={() => setPasswordTarget(null)}
         />
       )}
 
