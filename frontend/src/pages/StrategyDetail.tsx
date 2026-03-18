@@ -154,53 +154,64 @@ export default function StrategyDetail() {
       {/* 2열 그리드: 기간별 성과 + 최근 거래 */}
       <div className="grid grid-cols-2 gap-4">
         {/* 좌: 기간별 성과 */}
-        <PeriodPerformance daily={dailySummary} weekly={weeklySummary} monthly={monthlySummary} strategyId={id} />
+        <div>
+          <PeriodPerformance daily={dailySummary} weekly={weeklySummary} monthly={monthlySummary} strategyId={id} />
+          <div className="mt-2 text-right">
+            <Link to={`/strategies/${id}/performance`} className="text-[13px] text-primary no-underline hover:underline">
+              기간별 성과 더보기 &rarr;
+            </Link>
+          </div>
+        </div>
 
         {/* 우: 최근 거래 */}
-        <div className="bg-surface border border-border rounded-lg p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-[15px] font-semibold">최근 거래</h3>
-            <span className="text-[13px] text-primary cursor-pointer hover:underline">전체 보기 &rarr;</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className="text-left px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">시각</th>
-                  <th className="text-left px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">종목</th>
-                  <th className="text-left px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">매매</th>
-                  <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">수량</th>
-                  <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">단가</th>
-                  <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">손익</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(tradesData?.items ?? []).length === 0 ? (
-                  <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">거래 내역이 없습니다</td></tr>
-                ) : (
-                  (tradesData?.items ?? []).slice(0, 12).map((t) => (
-                    <tr key={t.id} className="hover:bg-surface-hover">
-                      <td className="px-3 py-2.5 border-b border-border text-[13px] font-mono text-text-muted">{formatShortDateTime(t.executed_at)}</td>
-                      <td className="px-3 py-2.5 border-b border-border text-[13px]">{t.symbol}</td>
-                      <td className="px-3 py-2.5 border-b border-border text-[13px]">
-                        <StatusBadge variant={t.side === 'buy' ? 'negative' : 'positive'}>
-                          {t.side === 'buy' ? '매수' : '매도'}
-                        </StatusBadge>
-                      </td>
-                      <td className="px-3 py-2.5 border-b border-border text-[13px] text-right">{formatNumber(t.quantity)}</td>
-                      <td className="px-3 py-2.5 border-b border-border text-[13px] text-right">{formatNumber(t.price)}</td>
-                      <td className="px-3 py-2.5 border-b border-border text-[13px] text-right">
-                        {t.pnl != null ? (
-                          <span className={t.pnl >= 0 ? 'text-positive' : 'text-negative'}>{formatNumber(t.pnl)}</span>
-                        ) : (
-                          <span className="text-text-muted">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        <div>
+          <div className="bg-surface border border-border rounded-lg p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[15px] font-semibold">최근 거래</h3>
+              <Link to={`/strategies/${id}/trades`} className="text-[13px] text-primary no-underline hover:underline">
+                전체 보기 &rarr;
+              </Link>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr>
+                    <th className="text-left px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">시각</th>
+                    <th className="text-left px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">종목</th>
+                    <th className="text-left px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">매매</th>
+                    <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">수량</th>
+                    <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">단가</th>
+                    <th className="text-right px-3 py-2 text-[12px] font-semibold text-text-muted border-b border-border">손익</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(tradesData?.items ?? []).length === 0 ? (
+                    <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">거래 내역이 없습니다</td></tr>
+                  ) : (
+                    (tradesData?.items ?? []).slice(0, 12).map((t) => (
+                      <tr key={t.id} className="hover:bg-surface-hover">
+                        <td className="px-3 py-2.5 border-b border-border text-[13px] font-mono text-text-muted">{formatShortDateTime(t.executed_at)}</td>
+                        <td className="px-3 py-2.5 border-b border-border text-[13px]">{t.symbol}</td>
+                        <td className="px-3 py-2.5 border-b border-border text-[13px]">
+                          <StatusBadge variant={t.side === 'buy' ? 'negative' : 'positive'}>
+                            {t.side === 'buy' ? '매수' : '매도'}
+                          </StatusBadge>
+                        </td>
+                        <td className="px-3 py-2.5 border-b border-border text-[13px] text-right">{formatNumber(t.quantity)}</td>
+                        <td className="px-3 py-2.5 border-b border-border text-[13px] text-right">{formatNumber(t.price)}</td>
+                        <td className="px-3 py-2.5 border-b border-border text-[13px] text-right">
+                          {t.pnl != null ? (
+                            <span className={t.pnl >= 0 ? 'text-positive' : 'text-negative'}>{formatNumber(t.pnl)}</span>
+                          ) : (
+                            <span className="text-text-muted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

@@ -38,3 +38,11 @@ export async function getStrategyMonthlySummary(id: string): Promise<MonthlySumm
   const res = await client.get(`/api/strategies/${id}/monthly-summary`)
   return res.data.items
 }
+
+export async function getStrategyTradesPaginated(
+  id: string,
+  params?: { offset?: number; limit?: number; side?: string; start_date?: string; end_date?: string },
+): Promise<{ items: Trade[]; total: number }> {
+  const res = await client.get(`/api/strategies/${id}/trades`, { params })
+  return { items: res.data.trades ?? [], total: res.data.total ?? 0 }
+}
