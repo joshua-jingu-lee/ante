@@ -103,15 +103,15 @@ class TestDataRoutes:
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["datasets"] == []
-        assert body["data_type"] == "ohlcv"
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_datasets_no_catalog_fundamental(self, client):
         resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["datasets"] == []
-        assert body["data_type"] == "fundamental"
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_schema_no_catalog(self, client):
         resp = client.get("/api/data/schema")
@@ -142,7 +142,9 @@ class TestDataRoutes:
 
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
-        assert isinstance(resp.json()["datasets"], list)
+        body = resp.json()
+        assert isinstance(body["items"], list)
+        assert "total" in body
 
     def test_datasets_with_store_data_type_ohlcv(self, tmp_path):
         """data_type=ohlcv 파라미터로 OHLCV 데이터셋만 반환."""
@@ -155,8 +157,7 @@ class TestDataRoutes:
         resp = client.get("/api/data/datasets", params={"data_type": "ohlcv"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["data_type"] == "ohlcv"
-        for ds in body["datasets"]:
+        for ds in body["items"]:
             assert ds["data_type"] == "ohlcv"
 
     def test_datasets_with_store_data_type_fundamental(self, tmp_path):
@@ -170,8 +171,7 @@ class TestDataRoutes:
         resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["data_type"] == "fundamental"
-        for ds in body["datasets"]:
+        for ds in body["items"]:
             assert ds["data_type"] == "fundamental"
 
     def test_storage_with_store(self, tmp_path):

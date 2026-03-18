@@ -20,7 +20,7 @@ export default function BacktestData() {
   const [dataType, setDataType] = useState<DataType>('ohlcv')
   const [timeframe, setTimeframe] = useState<string>('all')
   const [offset, setOffset] = useState(0)
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; symbol: string; timeframe: string; data_type: DataType; start_date: string; end_date: string; row_count: number } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; symbol: string; timeframe: string; data_type: DataType; start_date: string; end_date: string; row_count: number } | null>(null)
   const queryClient = useQueryClient()
 
   /* 자동완성용: 전체 데이터셋에서 고유 종목 목록 추출 */

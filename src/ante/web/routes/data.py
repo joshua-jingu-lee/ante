@@ -18,51 +18,67 @@ DATA_TYPES = ["ohlcv", "fundamental"]
 @router.get("/datasets")
 async def list_datasets(
     request: Request,
+    symbol: str | None = None,
+    timeframe: str | None = None,
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+    offset: int = 0,
+    limit: int = 50,
 ) -> dict:
-    """보유 데이터셋 목록.
+    """보유 데이터셋 목록 (페이지네이션 지원).
 
     data_type에 따라 해당 유형의 데이터셋만 반환한다.
-    - ohlcv: 타임프레임별 OHLCV 시세 데이터
-    - fundamental: 재무 데이터 (타임프레임 없음, 'krx' 고정)
+    Returns:
+        {items: [...], total: int}
     """
     store = getattr(request.app.state, "data_store", None)
     if store is None:
-        return {"datasets": [], "data_type": data_type}
+        return {"items": [], "total": 0}
 
-    datasets = []
+    all_datasets = []
 
     if data_type == "fundamental":
         symbols = store.list_symbols(data_type="fundamental")
-        for symbol in symbols:
-            date_range = store.get_date_range(symbol, "", data_type="fundamental")
-            datasets.append(
+        for sym in symbols:
+            if symbol and sym != symbol:
+                continue
+            date_range = store.get_date_range(sym, "", data_type="fundamental")
+            all_datasets.append(
                 {
-                    "symbol": symbol,
+                    "id": f"{sym}__fundamental",
+                    "symbol": sym,
                     "timeframe": "",
                     "data_type": "fundamental",
-                    "start": date_range[0] if date_range else None,
-                    "end": date_range[1] if date_range else None,
+                    "start_date": date_range[0] if date_range else None,
+                    "end_date": date_range[1] if date_range else None,
+                    "row_count": 0,
                 }
             )
     else:
         from ante.data.schemas import TIMEFRAMES
 
-        for tf in TIMEFRAMES:
+        tf_list = [timeframe] if timeframe else TIMEFRAMES
+        for tf in tf_list:
             symbols = store.list_symbols(tf)
-            for symbol in symbols:
-                date_range = store.get_date_range(symbol, tf)
-                datasets.append(
+            for sym in symbols:
+                if symbol and sym != symbol:
+                    continue
+                date_range = store.get_date_range(sym, tf)
+                row_count = store.get_row_count(sym, tf)
+                all_datasets.append(
                     {
-                        "symbol": symbol,
+                        "id": f"{sym}__{tf}",
+                        "symbol": sym,
                         "timeframe": tf,
                         "data_type": "ohlcv",
-                        "start": date_range[0] if date_range else None,
-                        "end": date_range[1] if date_range else None,
+                        "start_date": date_range[0] if date_range else None,
+                        "end_date": date_range[1] if date_range else None,
+                        "row_count": row_count,
                     }
                 )
 
-    return {"datasets": datasets, "data_type": data_type}
+    total = len(all_datasets)
+    items = all_datasets[offset : offset + limit]
+    return {"items": items, "total": total}
 
 
 @router.get("/schema")

@@ -300,7 +300,9 @@ async def test_composition_root_with_web_api(tmp_path: Path) -> None:
     # 데이터셋 목록
     resp = client.get("/api/data/datasets")
     assert resp.status_code == 200
-    assert resp.json()["datasets"] == []
+    body = resp.json()
+    assert body["items"] == []
+    assert body["total"] == 0
 
     # 스토리지 정보
     resp = client.get("/api/data/storage")
