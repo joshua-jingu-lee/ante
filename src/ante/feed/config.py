@@ -69,6 +69,19 @@ class FeedConfig:
         """DataFeed가 초기화되어 있는지 확인한다."""
         return self.config_path.exists()
 
+    def load_config(self) -> dict[str, object]:
+        """config.toml을 읽어 딕셔너리로 반환한다.
+
+        Returns:
+            설정 딕셔너리. 파일이 없으면 빈 딕셔너리.
+        """
+        import tomllib
+
+        if not self.config_path.exists():
+            return {}
+        with self.config_path.open("rb") as f:
+            return tomllib.load(f)
+
     def init(self) -> list[str]:
         """피드 디렉토리를 초기화한다. 생성된 경로 목록을 반환한다."""
         created = []
