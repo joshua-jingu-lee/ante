@@ -38,12 +38,9 @@ export default function ApprovalFilters({ status, type, search, pendingCount, on
               status === opt.key ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:text-text'
             }`}
           >
-            {opt.label}
-            {opt.key === 'pending' && pendingCount > 0 && (
-              <span className="ml-1 bg-border text-text text-[11px] px-1.5 py-0.5 rounded-full">
-                {pendingCount}
-              </span>
-            )}
+            {opt.key === 'pending' && pendingCount > 0
+              ? `${opt.label} (${pendingCount})`
+              : opt.label}
           </button>
         ))}
       </div>

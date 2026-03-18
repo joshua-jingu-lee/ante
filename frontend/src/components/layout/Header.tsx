@@ -79,22 +79,21 @@ export default function Header() {
             onClick={() => setMenuOpen(!menuOpen)}
             className="flex items-center gap-2 px-2.5 py-1 rounded-lg cursor-pointer text-[13px] text-text-muted bg-transparent border-none hover:bg-surface-hover hover:text-text"
           >
-            <span className="text-[22px] leading-none mt-0.5">🦁</span>
+            <span className="text-[22px] leading-none mt-0.5">{user?.emoji || '🦁'}</span>
             <span className="hidden sm:inline">{user?.member_id ?? '...'} · {user?.role === 'master' ? '대표' : user?.role}</span>
           </button>
 
           {menuOpen && (
             <div className="absolute top-[calc(100%+6px)] right-0 bg-surface border border-border rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.3)] min-w-[200px] z-[200] py-3">
               <div className="px-4 pb-3 border-b border-border text-[12px] text-text-muted">
-                <div className="font-medium text-text">{user?.name}</div>
-                <div>{user?.org}</div>
+                {user?.login_at ? `접속: ${user.login_at.slice(0, 16)}` : ''}
               </div>
               <Link
                 to="/settings"
                 onClick={() => setMenuOpen(false)}
                 className="block px-4 py-2 text-[13px] text-text no-underline hover:bg-surface-hover"
               >
-                설정
+                ⚙️ 설정
               </Link>
               <button
                 onClick={() => { setMenuOpen(false); logoutMutation.mutate() }}

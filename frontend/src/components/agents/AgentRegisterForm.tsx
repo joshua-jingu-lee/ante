@@ -1,18 +1,25 @@
 import { useState } from 'react'
-import { useCreateMember } from '../../hooks/useMembers'
+import { useCreateMember, useMembers } from '../../hooks/useMembers'
 import { ALL_SCOPES } from '../../types/member'
+
+const DEFAULT_ORGS = ['default', 'strategy-lab', 'risk', 'treasury', 'operations']
 
 interface AgentRegisterFormProps {
   onClose: () => void
-  onTokenCreated: (token: string) => void
+  onTokenCreated: (agentId: string, token: string) => void
 }
 
 export default function AgentRegisterForm({ onClose, onTokenCreated }: AgentRegisterFormProps) {
   const [memberId, setMemberId] = useState('')
   const [name, setName] = useState('')
-  const [org, setOrg] = useState('')
+  const [org, setOrg] = useState('default')
   const [scopes, setScopes] = useState<string[]>([])
   const createMember = useCreateMember()
+
+  // 기존 소속 목록에서 동적으로 추출, 기본값과 병합
+  const { data: allMembers } = useMembers({})
+  const existingOrgs = Array.from(new Set((allMembers ?? []).map((m) => m.org).filter(Boolean)))
+  const orgOptions = Array.from(new Set([...DEFAULT_ORGS, ...existingOrgs]))
 
   const toggleScope = (scope: string) => {
     setScopes((prev) => prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope])
@@ -22,7 +29,7 @@ export default function AgentRegisterForm({ onClose, onTokenCreated }: AgentRegi
     e.preventDefault()
     createMember.mutate(
       { member_id: memberId, name, org, scopes },
-      { onSuccess: (data) => onTokenCreated(data.token) },
+      { onSuccess: (data) => onTokenCreated(memberId, data.token) },
     )
   }
 
@@ -33,18 +40,27 @@ export default function AgentRegisterForm({ onClose, onTokenCreated }: AgentRegi
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Agent ID</label>
-            <input value={memberId} onChange={(e) => setMemberId(e.target.value)} placeholder="agent-research-01" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <input value={memberId} onChange={(e) => setMemberId(e.target.value)} placeholder="strategy-dev-03" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <div className="text-[12px] text-text-muted mt-1">영문, 숫자, 하이픈만 사용 가능</div>
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">이름</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="리서치 에이전트" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="전략 리서치 3호" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">소속 (org)</label>
-            <input value={org} onChange={(e) => setOrg(e.target.value)} placeholder="research" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <select
+              value={org}
+              onChange={(e) => setOrg(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary cursor-pointer"
+            >
+              {orgOptions.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
           </div>
           <div className="mb-4">
-            <label className="block text-[12px] font-semibold text-text-muted mb-2">권한 범위</label>
+            <label className="block text-[12px] font-semibold text-text-muted mb-2">권한 범위 (Scopes)</label>
             <div className="grid grid-cols-2 gap-2">
               {ALL_SCOPES.map((scope) => (
                 <label key={scope} className="flex items-center gap-2 text-[13px] cursor-pointer">

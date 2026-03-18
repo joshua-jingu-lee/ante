@@ -33,13 +33,13 @@ export default function RecentTransactions() {
                 <tr key={tx.id} className="hover:bg-surface-hover">
                   <td className="px-3 py-3 border-b border-border text-[13px] font-mono text-text-muted">{formatDateTime(tx.created_at)}</td>
                   <td className="px-3 py-3 border-b border-border text-[13px]">
-                    <StatusBadge variant={TRANSACTION_TYPE_VARIANT[tx.type] ?? 'default'}>
+                    <StatusBadge variant={TRANSACTION_TYPE_VARIANT[tx.type] ?? 'muted'}>
                       {TRANSACTION_TYPE_LABELS[tx.type] ?? tx.type}
                     </StatusBadge>
                   </td>
                   <td className="px-3 py-3 border-b border-border text-[13px] font-mono">{tx.bot_id || '-'}</td>
-                  <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${tx.type === 'allocate' ? 'text-positive' : tx.type === 'deallocate' ? 'text-negative' : ''}`}>
-                    {tx.type === 'allocate' ? '+' : ''}{formatKRW(tx.amount)}
+                  <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${tx.amount >= 0 ? 'text-positive' : 'text-negative'}`}>
+                    {tx.amount > 0 ? '+' : ''}{formatKRW(tx.amount)}
                   </td>
                   <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{tx.description}</td>
                 </tr>

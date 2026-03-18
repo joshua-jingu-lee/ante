@@ -1,5 +1,5 @@
 import client from './client'
-import type { Strategy, StrategyDetail, StrategyPerformance, Trade, DailySummary, MonthlySummary, WeeklySummary } from '../types/strategy'
+import type { Strategy, StrategyDetail, StrategyPerformance, Trade, DailySummary, WeeklySummary, MonthlySummary } from '../types/strategy'
 
 export async function getStrategies(): Promise<Strategy[]> {
   const res = await client.get('/api/strategies')

@@ -1,5 +1,14 @@
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
-export type ApprovalType = 'strategy_adopt' | 'budget_change' | 'bot_create' | 'bot_stop' | 'rule_change'
+export type ApprovalType =
+  | 'strategy_report'
+  | 'budget_allocate'
+  | 'live_switch'
+  | 'risk_alert'
+  | 'strategy_adopt'
+  | 'budget_change'
+  | 'bot_create'
+  | 'bot_stop'
+  | 'rule_change'
 
 export interface ApprovalReview {
   reviewer: string

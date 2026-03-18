@@ -6,6 +6,7 @@ export interface Strategy {
   version: string
   status: StrategyStatus
   author?: string
+  author_id?: string
   bot_id?: string
   cumulative_return?: number
   created_at: string
@@ -13,7 +14,21 @@ export interface Strategy {
 
 export interface StrategyDetail extends Strategy {
   description?: string
-  params?: Record<string, unknown>
+  rationale?: string
+  risks?: string
+  params?: Record<string, StrategyParam | unknown>
+}
+
+export interface StrategyParam {
+  value: unknown
+  description?: string
+}
+
+export interface WeeklySummary {
+  week_label: string
+  realized_pnl: number
+  trade_count: number
+  win_rate: number
 }
 
 export interface StrategyPerformance {

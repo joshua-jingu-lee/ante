@@ -27,13 +27,11 @@ export default function BotDetail() {
   const canStart = bot.status === 'stopped' || bot.status === 'created'
   const canStop = bot.status === 'running'
   const canEdit = bot.status === 'stopped' || bot.status === 'created'
-  const isStopped = bot.status === 'stopped'
-
   return (
     <>
       {/* 뒤로가기 링크 */}
       <div className="mb-4">
-        <Link to="/bots" className="text-text-muted text-[13px] no-underline hover:text-text hover:underline">
+        <Link to="/bots" className="inline-flex items-center text-text-muted text-[13px] no-underline px-2 py-1 rounded hover:bg-surface-hover hover:text-text">
           &larr; 봇 관리
         </Link>
       </div>
@@ -43,34 +41,18 @@ export default function BotDetail() {
         <div>
           <h2 className="text-[20px] font-bold flex items-center gap-2">
             {bot.name || bot.bot_id}
-            {bot.name && <span className="text-[14px] font-normal text-text-muted font-mono">{bot.bot_id}</span>}
-            {isStopped && (
-              <StatusBadge variant="warning">중지</StatusBadge>
-            )}
+            {bot.name && <span className="text-[16px] font-normal text-text-muted">{bot.bot_id}</span>}
           </h2>
-          <div className="flex gap-3 items-center mt-1">
-            <StatusBadge variant={STATUS_VARIANT[bot.status] as 'positive'}>
-              {BOT_STATUS_LABELS[bot.status]}
-            </StatusBadge>
-            <StatusBadge variant={bot.mode === 'live' ? 'warning' : 'info'}>
-              {bot.mode === 'live' ? '실전' : '모의'}
-            </StatusBadge>
-            {bot.strategy_name && (
-              <Link to="/strategies" className="text-primary text-[13px] no-underline hover:underline">
-                {bot.strategy_name}
-              </Link>
-            )}
-          </div>
         </div>
         <div className="flex gap-2">
           {canEdit && (
             <button onClick={() => setShowEditModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">설정 수정</button>
           )}
           {canStart && (
-            <button onClick={() => start.mutate(bot.bot_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">시작</button>
+            <button onClick={() => start.mutate(bot.bot_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">시작</button>
           )}
           {canStop && (
-            <button onClick={() => setShowStopModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">중지</button>
+            <button onClick={() => setShowStopModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-negative border border-negative cursor-pointer hover:bg-negative-bg">중지</button>
           )}
         </div>
       </div>
@@ -83,7 +65,7 @@ export default function BotDetail() {
           <div className="space-y-2">
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">전략명</span>
-              <span>{bot.strategy?.name || bot.strategy_name || '-'}</span>
+              <span>{bot.strategy?.name || bot.strategy_name ? <Link to="/strategies" className="text-primary no-underline hover:underline">{bot.strategy?.name || bot.strategy_name}</Link> : '-'}</span>
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">버전</span>
@@ -95,7 +77,7 @@ export default function BotDetail() {
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">설명</span>
-              <span className="text-right max-w-[60%]">{bot.strategy?.description || '-'}</span>
+              <span className="text-right max-w-[60%] text-[12px] text-text-muted">{bot.strategy?.description || '-'}</span>
             </div>
           </div>
         </div>
@@ -106,7 +88,7 @@ export default function BotDetail() {
           <div className="space-y-2">
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">모드</span>
-              <StatusBadge variant={bot.mode === 'live' ? 'warning' : 'info'}>
+              <StatusBadge variant={bot.mode === 'live' ? 'primary' : 'warning'}>
                 {bot.mode === 'live' ? '실전' : '모의'}
               </StatusBadge>
             </div>
@@ -119,10 +101,6 @@ export default function BotDetail() {
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">실행 간격</span>
               <span>{bot.interval_seconds}초</span>
-            </div>
-            <div className="flex justify-between py-1.5 text-[13px]">
-              <span className="text-text-muted">대상 종목</span>
-              <span className="font-mono">{bot.symbols?.length ? bot.symbols.join(', ') : '-'}</span>
             </div>
           </div>
         </div>
@@ -212,7 +190,7 @@ export default function BotDetail() {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[15px] font-semibold">실행 로그</h3>
           {(bot.logs ?? []).length > 0 && (
-            <span className="text-[12px] text-primary cursor-pointer hover:underline">전체 보기</span>
+            <span className="text-[13px] text-primary cursor-pointer hover:underline">전체 보기 &rarr;</span>
           )}
         </div>
         {(bot.logs ?? []).length === 0 ? (
@@ -225,7 +203,7 @@ export default function BotDetail() {
                 <StatusBadge variant={log.success ? 'positive' : 'negative'}>
                   {log.success ? '성공' : '실패'}
                 </StatusBadge>
-                {log.message && <span className="text-text-muted">{log.message}</span>}
+                {log.message && <span className={log.success ? '' : 'text-negative'}>{log.message}</span>}
               </div>
             ))}
           </div>

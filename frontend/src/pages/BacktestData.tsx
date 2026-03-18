@@ -54,8 +54,8 @@ export default function BacktestData() {
   return (
     <>
       {/* 안내 배너 */}
-      <div className="bg-info-bg border border-[rgba(167,139,250,0.2)] rounded-lg px-4 py-3 mb-4 text-[13px] text-info">
-        {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-bg px-1.5 py-0.5 rounded text-[12px]">ante data collect</code>)를 사용하세요.
+      <div className="bg-info-bg rounded px-3.5 py-2.5 mb-4 text-[12px] text-info">
+        {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante data collect</code>)를 사용하세요.
       </div>
 
       {/* 데이터셋 카드 */}
@@ -109,29 +109,33 @@ export default function BacktestData() {
                   {(data?.items ?? []).length === 0 ? (
                     <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted text-[13px]">데이터셋이 없습니다</td></tr>
                   ) : (
-                    (data?.items ?? []).map((ds) => (
+                    (data?.items ?? []).map((ds, idx, arr) => {
+                      const isLast = idx === arr.length - 1
+                      const borderCls = isLast ? '' : 'border-b border-border'
+                      return (
                       <tr key={ds.id} className="hover:bg-surface-hover">
-                        <td className="px-3 py-3 border-b border-border text-[13px] font-mono font-medium">{ds.symbol}</td>
-                        <td className="px-3 py-3 border-b border-border text-[13px]">{TF_LABELS[ds.timeframe] ?? ds.timeframe}</td>
-                        <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{formatDate(ds.start_date)}</td>
-                        <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{formatDate(ds.end_date)}</td>
-                        <td className="px-3 py-3 border-b border-border text-[13px] text-right">{formatNumber(ds.row_count)}</td>
-                        <td className="px-3 py-3 border-b border-border text-[13px] text-right">
+                        <td className={`px-3 py-3 ${borderCls} text-[13px] font-mono font-medium`}>{ds.symbol}</td>
+                        <td className={`px-3 py-3 ${borderCls} text-[13px]`}>{TF_LABELS[ds.timeframe] ?? ds.timeframe}</td>
+                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-text-muted`}>{formatDate(ds.start_date)}</td>
+                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-text-muted`}>{formatDate(ds.end_date)}</td>
+                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-right`}>{formatNumber(ds.row_count)}</td>
+                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-right`}>
                           <button
                             onClick={() => setDeleteTarget({ id: ds.id, symbol: ds.symbol, timeframe: ds.timeframe, start_date: ds.start_date, end_date: ds.end_date, row_count: ds.row_count })}
-                            className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-negative border border-border cursor-pointer hover:bg-negative-bg"
+                            className="px-2.5 py-1 rounded text-[12px] bg-transparent text-negative border border-border cursor-pointer hover:bg-surface-hover hover:text-text"
                           >
                             삭제
                           </button>
                         </td>
                       </tr>
-                    ))
+                      )
+                    })
                   )}
                 </tbody>
               </table>
             </div>
 
-            <div className="flex items-center justify-between pt-4 text-[13px] text-text-muted">
+            <div className="flex items-center justify-between pt-3 text-[13px] text-text-muted">
               <span>
                 총 {formatNumber(data?.total ?? 0)}건
                 {(data?.total ?? 0) > 0 && ` 중 ${offset + 1}-${Math.min(offset + LIMIT, data?.total ?? 0)}`}
@@ -142,24 +146,22 @@ export default function BacktestData() {
                   ))})</>
                 )}
               </span>
-              {(data?.total ?? 0) > LIMIT && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-                    disabled={offset <= 0}
-                    className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    ← 이전
-                  </button>
-                  <button
-                    onClick={() => setOffset(offset + LIMIT)}
-                    disabled={offset + LIMIT >= (data?.total ?? 0)}
-                    className="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    다음 →
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                  disabled={offset <= 0}
+                  className="px-2.5 py-1 rounded text-[12px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  &larr; 이전
+                </button>
+                <button
+                  onClick={() => setOffset(offset + LIMIT)}
+                  disabled={offset + LIMIT >= (data?.total ?? 0)}
+                  className="px-2.5 py-1 rounded text-[12px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  다음 &rarr;
+                </button>
+              </div>
             </div>
           </>
         )}
@@ -168,8 +170,8 @@ export default function BacktestData() {
       {/* 삭제 확인 모달 */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
-          <div className="bg-surface border border-border rounded-lg p-6 w-[400px]">
-            <h3 className="text-[18px] font-bold mb-4 text-negative">데이터셋 삭제</h3>
+          <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
+            <h3 className="text-[18px] font-bold mb-5 text-negative">데이터셋 삭제</h3>
             <div className="mb-4 text-[13px] text-text-muted">
               <strong className="text-text">{deleteTarget.symbol} — {TF_LABELS[deleteTarget.timeframe] ?? deleteTarget.timeframe}</strong><br />
               기간: {formatDate(deleteTarget.start_date)} ~ {formatDate(deleteTarget.end_date)} · {formatNumber(deleteTarget.row_count)}건<br /><br />
@@ -178,12 +180,12 @@ export default function BacktestData() {
             <div className="bg-warning-bg text-warning px-3.5 py-2.5 rounded text-[12px] mb-4">
               ⚠ 이 데이터를 사용 중인 백테스트가 있을 수 있습니다.
             </div>
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
+            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text">취소</button>
               <button
                 onClick={() => deleteMutation.mutate(deleteTarget.id)}
                 disabled={deleteMutation.isPending}
-                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover disabled:opacity-50"
+                className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-white border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
               >
                 삭제
               </button>

@@ -7,7 +7,11 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
     ? summary.ante_profit_loss / summary.ante_purchase_amount
     : 0
 
-  const holdingProfitColor = (summary.ante_eval_amount - summary.ante_purchase_amount) >= 0 ? 'text-positive' : 'text-negative'
+  const holdingPnl = summary.ante_eval_amount - summary.ante_purchase_amount
+  const holdingProfitColor = holdingPnl >= 0 ? 'text-positive' : 'text-negative'
+  const holdingProfitPercent = summary.ante_purchase_amount > 0
+    ? holdingPnl / summary.ante_purchase_amount
+    : 0
 
   return (
     <div className="bg-surface border border-border rounded-lg overflow-hidden mb-6">
@@ -56,7 +60,10 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">보유종목 손익</div>
-          <div className={`text-[22px] font-bold ${holdingProfitColor}`}>{formatKRW(summary.ante_profit_loss)}</div>
+          <div className={`text-[22px] font-bold ${holdingProfitColor}`}>{formatKRW(holdingPnl)}</div>
+          {holdingProfitPercent !== 0 && (
+            <div className={`text-[13px] ${holdingProfitColor}`}>({formatPercent(holdingProfitPercent)})</div>
+          )}
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">체결대기 자금</div>
