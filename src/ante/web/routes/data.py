@@ -4,39 +4,75 @@ from __future__ import annotations
 
 import shutil
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 router = APIRouter()
 
+# 지원하는 데이터 유형
+DATA_TYPES = ["ohlcv", "fundamental"]
+
 
 @router.get("/datasets")
-async def list_datasets(request: Request) -> dict:
-    """보유 데이터셋 목록."""
+async def list_datasets(
+    request: Request,
+    data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+) -> dict:
+    """보유 데이터셋 목록.
+
+    data_type에 따라 해당 유형의 데이터셋만 반환한다.
+    - ohlcv: 타임프레임별 OHLCV 시세 데이터
+    - fundamental: 재무 데이터 (타임프레임 없음, 'krx' 고정)
+    """
     store = getattr(request.app.state, "data_store", None)
     if store is None:
-        return {"datasets": []}
-
-    from ante.data.schemas import TIMEFRAMES
+        return {"datasets": [], "data_type": data_type}
 
     datasets = []
-    for tf in TIMEFRAMES:
-        symbols = store.list_symbols(tf)
+
+    if data_type == "fundamental":
+        symbols = store.list_symbols(data_type="fundamental")
         for symbol in symbols:
-            date_range = store.get_date_range(symbol, tf)
+            date_range = store.get_date_range(symbol, "", data_type="fundamental")
             datasets.append(
                 {
                     "symbol": symbol,
-                    "timeframe": tf,
+                    "timeframe": "",
+                    "data_type": "fundamental",
                     "start": date_range[0] if date_range else None,
                     "end": date_range[1] if date_range else None,
                 }
             )
-    return {"datasets": datasets}
+    else:
+        from ante.data.schemas import TIMEFRAMES
+
+        for tf in TIMEFRAMES:
+            symbols = store.list_symbols(tf)
+            for symbol in symbols:
+                date_range = store.get_date_range(symbol, tf)
+                datasets.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": tf,
+                        "data_type": "ohlcv",
+                        "start": date_range[0] if date_range else None,
+                        "end": date_range[1] if date_range else None,
+                    }
+                )
+
+    return {"datasets": datasets, "data_type": data_type}
 
 
 @router.get("/schema")
-async def get_data_schema(request: Request) -> dict:
-    """OHLCV 데이터 스키마."""
+async def get_data_schema(
+    request: Request,
+    data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+) -> dict:
+    """데이터 스키마 조회. data_type에 따라 해당 스키마를 반환."""
+    if data_type == "fundamental":
+        from ante.data.schemas import FUNDAMENTAL_SCHEMA
+
+        return {k: str(v) for k, v in FUNDAMENTAL_SCHEMA.items()}
+
     from ante.data.schemas import OHLCV_SCHEMA
 
     return {k: str(v) for k, v in OHLCV_SCHEMA.items()}
@@ -60,10 +96,15 @@ async def get_storage_summary(request: Request) -> dict:
 
 
 @router.delete("/datasets/{dataset_id}", status_code=204)
-async def delete_dataset(request: Request, dataset_id: str) -> None:
+async def delete_dataset(
+    request: Request,
+    dataset_id: str,
+    data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+) -> None:
     """데이터셋 삭제.
 
     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
+    fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
     """
     from fastapi import HTTPException
 
@@ -79,7 +120,12 @@ async def delete_dataset(request: Request, dataset_id: str) -> None:
         )
 
     symbol, timeframe = parts
-    path = store.base_path / "ohlcv" / timeframe / symbol
+
+    if data_type == "fundamental":
+        path = store._resolve_path(symbol, "", data_type="fundamental")
+    else:
+        path = store.base_path / "ohlcv" / timeframe / symbol
+
     if not path.exists():
         raise HTTPException(status_code=404, detail="데이터셋을 찾을 수 없습니다")
     shutil.rmtree(path)

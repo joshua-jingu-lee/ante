@@ -102,13 +102,30 @@ class TestDataRoutes:
     def test_datasets_no_catalog(self, client):
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
-        assert resp.json()["datasets"] == []
+        body = resp.json()
+        assert body["datasets"] == []
+        assert body["data_type"] == "ohlcv"
+
+    def test_datasets_no_catalog_fundamental(self, client):
+        resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["datasets"] == []
+        assert body["data_type"] == "fundamental"
 
     def test_schema_no_catalog(self, client):
         resp = client.get("/api/data/schema")
         assert resp.status_code == 200
         data = resp.json()
         assert "timestamp" in data
+
+    def test_schema_fundamental(self, client):
+        resp = client.get("/api/data/schema", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "date" in data
+        assert "per" in data
+        assert "pbr" in data
 
     def test_storage_no_catalog(self, client):
         resp = client.get("/api/data/storage")
@@ -126,6 +143,36 @@ class TestDataRoutes:
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
         assert isinstance(resp.json()["datasets"], list)
+
+    def test_datasets_with_store_data_type_ohlcv(self, tmp_path):
+        """data_type=ohlcv 파라미터로 OHLCV 데이터셋만 반환."""
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=tmp_path / "data")
+        app = create_app(data_store=store)
+        client = TestClient(app)
+
+        resp = client.get("/api/data/datasets", params={"data_type": "ohlcv"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data_type"] == "ohlcv"
+        for ds in body["datasets"]:
+            assert ds["data_type"] == "ohlcv"
+
+    def test_datasets_with_store_data_type_fundamental(self, tmp_path):
+        """data_type=fundamental 파라미터로 fundamental 데이터셋만 반환."""
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=tmp_path / "data")
+        app = create_app(data_store=store)
+        client = TestClient(app)
+
+        resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data_type"] == "fundamental"
+        for ds in body["datasets"]:
+            assert ds["data_type"] == "fundamental"
 
     def test_storage_with_store(self, tmp_path):
         from ante.data.store import ParquetStore

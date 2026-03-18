@@ -38,6 +38,21 @@ def _make_ohlcv_df() -> pl.DataFrame:
     )
 
 
+def _make_fundamental_df() -> pl.DataFrame:
+    from datetime import date
+
+    return pl.DataFrame(
+        {
+            "date": [date(2026, 3, 1), date(2026, 3, 2)],
+            "symbol": ["005930", "005930"],
+            "market_cap": [400_000_000_000, 401_000_000_000],
+            "per": [12.5, 12.6],
+            "pbr": [1.2, 1.3],
+            "source": ["test", "test"],
+        }
+    )
+
+
 @pytest.fixture
 def store(tmp_path):
     return ParquetStore(base_path=tmp_path / "data")
@@ -73,3 +88,49 @@ class TestDeleteDataset:
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
         assert resp.json()["datasets"] == []
+
+
+class TestFundamentalDatasets:
+    """fundamental 데이터 유형 API 테스트."""
+
+    async def test_list_fundamental_datasets(self, client, store):
+        """fundamental 데이터셋 목록 조회."""
+        await store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data_type"] == "fundamental"
+        assert len(body["datasets"]) == 1
+        ds = body["datasets"][0]
+        assert ds["symbol"] == "005930"
+        assert ds["data_type"] == "fundamental"
+
+    async def test_list_ohlcv_excludes_fundamental(self, client, store):
+        """OHLCV 조회 시 fundamental 데이터가 포함되지 않음."""
+        await store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        resp = client.get("/api/data/datasets", params={"data_type": "ohlcv"})
+        assert resp.status_code == 200
+        assert resp.json()["datasets"] == []
+
+    async def test_delete_fundamental_dataset(self, client, store):
+        """fundamental 데이터셋 삭제."""
+        await store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        resp = client.delete(
+            "/api/data/datasets/005930__fundamental",
+            params={"data_type": "fundamental"},
+        )
+        assert resp.status_code == 204
+
+        # 삭제 후 목록에서 제거 확인
+        resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert resp.json()["datasets"] == []
+
+    def test_schema_fundamental(self, client):
+        """fundamental 스키마 조회."""
+        resp = client.get("/api/data/schema", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "date" in data
+        assert "per" in data
+        assert "pbr" in data
+        assert "market_cap" in data
