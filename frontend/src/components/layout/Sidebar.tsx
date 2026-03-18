@@ -78,7 +78,7 @@ export default function Sidebar() {
         </nav>
 
         <div className="px-4 py-3 text-[11px] text-text-muted border-t border-border">
-          Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT" className="text-text-muted hover:text-text no-underline">MIT</a>
+          Ante v{__APP_VERSION__} · <a href="https://opensource.org/licenses/MIT" className="text-text-muted hover:text-text no-underline">MIT</a>
         </div>
       </aside>
     </>
