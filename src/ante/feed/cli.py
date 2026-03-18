@@ -131,6 +131,334 @@ def config_check(ctx: click.Context, data_path: str) -> None:
         click.echo()
 
 
+# ── run 서브그룹 ──────────────────────────────────────────────────────────────
+
+
+@feed.group("run")
+def feed_run() -> None:
+    """수집을 1회 실행한다 (backfill / daily)."""
+
+
+def _build_orchestrator(  # noqa: ANN001, ANN201
+    cfg,  # FeedConfig
+):  # -> FeedOrchestrator
+    """FeedConfig의 API 키를 기반으로 FeedOrchestrator를 조립한다."""
+    from ante.feed.pipeline.orchestrator import FeedOrchestrator
+    from ante.feed.sources.dart import DARTSource
+    from ante.feed.sources.data_go_kr import DataGoKrSource
+
+    api_keys = cfg.load_api_keys()
+
+    data_go_kr_source = None
+    dart_source = None
+
+    datagokr_key = api_keys.get("ANTE_DATAGOKR_API_KEY")
+    if datagokr_key:
+        data_go_kr_source = DataGoKrSource(api_key=datagokr_key)
+
+    dart_key = api_keys.get("ANTE_DART_API_KEY")
+    if dart_key:
+        dart_source = DARTSource(api_key=dart_key)
+
+    return FeedOrchestrator(
+        data_go_kr_source=data_go_kr_source,
+        dart_source=dart_source,
+    )
+
+
+def _ensure_initialized(  # noqa: ANN001, ANN201
+    cfg,  # FeedConfig
+    fmt,  # OutputFormatter
+    data_path: str,
+) -> bool:
+    """초기화 상태를 확인하고 미초기화 시 에러를 출력한다."""
+    if not cfg.is_initialized():
+        fmt.error(
+            f"DataFeed가 초기화되지 않았습니다. 먼저 실행: ante feed init {data_path}",
+            "NOT_INITIALIZED",
+        )
+        return False
+    return True
+
+
+@feed_run.command("backfill")
+@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option(
+    "--since", default=None, help="수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드)"
+)
+@click.option("--until", default=None, help="수집 종료일 (YYYY-MM-DD, 기본값: 오늘)")
+@click.pass_context
+@require_auth
+@require_scope("data:write")
+def run_backfill(
+    ctx: click.Context,
+    data_path: str,
+    since: str | None,
+    until: str | None,
+) -> None:
+    """과거 데이터를 1회 수집한다 (backfill)."""
+    import asyncio
+    from pathlib import Path
+
+    from ante.feed.config import FeedConfig
+
+    fmt = get_formatter(ctx)
+    cfg = FeedConfig(data_path)
+
+    if not _ensure_initialized(cfg, fmt, data_path):
+        raise SystemExit(1)
+
+    config = cfg.load_config()
+
+    # CLI 옵션으로 schedule 오버라이드
+    if since is not None:
+        config.setdefault("schedule", {})["backfill_since"] = since  # type: ignore[union-attr]
+
+    orchestrator = _build_orchestrator(cfg)
+
+    result = asyncio.run(
+        orchestrator.run_backfill(
+            data_path=Path(data_path),
+            config=config,
+        )
+    )
+
+    if fmt.is_json:
+        fmt.output(
+            {
+                "mode": result.mode,
+                "symbols_total": result.symbols_total,
+                "symbols_success": result.symbols_success,
+                "symbols_failed": result.symbols_failed,
+                "rows_written": result.rows_written,
+                "data_types": result.data_types,
+                "duration_seconds": result.duration_seconds,
+                "config_errors": result.config_errors,
+            }
+        )
+    else:
+        click.echo()
+        click.echo(
+            f"Backfill 완료: {result.symbols_success}/{result.symbols_total} 종목 성공"
+        )
+        click.echo(f"  기록: {result.rows_written} rows")
+        click.echo(f"  데이터: {', '.join(result.data_types) or '없음'}")
+        click.echo(f"  소요: {result.duration_seconds:.1f}초")
+        if result.config_errors:
+            click.echo()
+            for err in result.config_errors:
+                click.echo(f"  [경고] {err.get('error', err)}")
+        click.echo()
+
+
+@feed_run.command("daily")
+@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option(
+    "--date", "target_date", default=None, help="수집 대상일 (YYYY-MM-DD, 기본값: 어제)"
+)
+@click.pass_context
+@require_auth
+@require_scope("data:write")
+def run_daily(
+    ctx: click.Context,
+    data_path: str,
+    target_date: str | None,
+) -> None:
+    """어제(또는 지정일) 데이터를 1회 수집한다 (daily)."""
+    import asyncio
+    from pathlib import Path
+
+    from ante.feed.config import FeedConfig
+
+    fmt = get_formatter(ctx)
+    cfg = FeedConfig(data_path)
+
+    if not _ensure_initialized(cfg, fmt, data_path):
+        raise SystemExit(1)
+
+    config = cfg.load_config()
+
+    orchestrator = _build_orchestrator(cfg)
+
+    # --date 옵션이 있으면 generate_daily_date를 패치
+    if target_date is not None:
+        import ante.feed.pipeline.scheduler as _sched
+
+        _original_generate = _sched.generate_daily_date
+
+        def _override(reference: object = None) -> str:
+            return target_date  # type: ignore[return-value]
+
+        _sched.generate_daily_date = _override  # type: ignore[assignment]
+        try:
+            result = asyncio.run(
+                orchestrator.run_daily(
+                    data_path=Path(data_path),
+                    config=config,
+                )
+            )
+        finally:
+            _sched.generate_daily_date = _original_generate
+    else:
+        result = asyncio.run(
+            orchestrator.run_daily(
+                data_path=Path(data_path),
+                config=config,
+            )
+        )
+
+    if fmt.is_json:
+        fmt.output(
+            {
+                "mode": result.mode,
+                "target_date": result.target_date,
+                "symbols_total": result.symbols_total,
+                "symbols_success": result.symbols_success,
+                "symbols_failed": result.symbols_failed,
+                "rows_written": result.rows_written,
+                "data_types": result.data_types,
+                "duration_seconds": result.duration_seconds,
+                "config_errors": result.config_errors,
+            }
+        )
+    else:
+        click.echo()
+        click.echo(
+            f"Daily 수집 완료 ({result.target_date}): "
+            f"{result.symbols_success}/{result.symbols_total} 종목 성공"
+        )
+        click.echo(f"  기록: {result.rows_written} rows")
+        click.echo(f"  데이터: {', '.join(result.data_types) or '없음'}")
+        click.echo(f"  소요: {result.duration_seconds:.1f}초")
+        if result.config_errors:
+            click.echo()
+            for err in result.config_errors:
+                click.echo(f"  [경고] {err.get('error', err)}")
+        click.echo()
+
+
+# ── start (상주 스케줄러) ─────────────────────────────────────────────────────
+
+
+@feed.command("start")
+@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.pass_context
+@require_auth
+@require_scope("data:write")
+def feed_start(ctx: click.Context, data_path: str) -> None:
+    """내장 스케줄러로 backfill/daily를 자동 실행하는 상주 프로세스를 시작한다."""
+    import asyncio
+    import signal
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+
+    from ante.feed.config import FeedConfig
+
+    fmt = get_formatter(ctx)
+    cfg = FeedConfig(data_path)
+
+    if not _ensure_initialized(cfg, fmt, data_path):
+        raise SystemExit(1)
+
+    config = cfg.load_config()
+    schedule = config.get("schedule", {})
+    daily_at = (
+        schedule.get("daily_at", "16:00") if isinstance(schedule, dict) else "16:00"
+    )
+    backfill_at = (
+        schedule.get("backfill_at", "01:00") if isinstance(schedule, dict) else "01:00"
+    )
+
+    orchestrator = _build_orchestrator(cfg)
+
+    kst = timezone(timedelta(hours=9))
+
+    async def _scheduler_loop() -> None:
+        """스케줄 루프: daily_at / backfill_at 시각에 수집 실행."""
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def _handle_signal() -> None:
+            logger.info("종료 시그널 수신, 스케줄러 중지...")
+            stop_event.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _handle_signal)
+
+        logger.info(
+            "DataFeed 스케줄러 시작 (daily_at=%s, backfill_at=%s)",
+            daily_at,
+            backfill_at,
+        )
+        click.echo(
+            f"DataFeed 스케줄러 시작 (daily_at={daily_at}, backfill_at={backfill_at})"
+        )
+        click.echo("종료하려면 Ctrl+C 또는 SIGTERM을 보내세요.")
+
+        daily_ran_today = False
+        backfill_ran_today = False
+        last_date = ""
+
+        while not stop_event.is_set():
+            now = datetime.now(tz=kst)
+            current_time = now.strftime("%H:%M")
+            current_date_str = now.strftime("%Y-%m-%d")
+
+            # 날짜가 바뀌면 플래그 초기화
+            if last_date and last_date != current_date_str:
+                daily_ran_today = False
+                backfill_ran_today = False
+            last_date = current_date_str
+
+            # daily 실행
+            if not daily_ran_today and current_time >= str(daily_at):
+                logger.info("Daily 수집 시작 (%s)", current_date_str)
+                try:
+                    result = await orchestrator.run_daily(
+                        data_path=Path(data_path),
+                        config=config,
+                    )
+                    click.echo(
+                        f"[{current_date_str}] Daily 완료: "
+                        f"{result.symbols_success}/{result.symbols_total} 종목, "
+                        f"{result.rows_written} rows"
+                    )
+                except Exception as exc:
+                    logger.error("Daily 수집 실패: %s", exc)
+                daily_ran_today = True
+
+            # backfill 실행
+            if not backfill_ran_today and current_time >= str(backfill_at):
+                logger.info("Backfill 수집 시작 (%s)", current_date_str)
+                try:
+                    result = await orchestrator.run_backfill(
+                        data_path=Path(data_path),
+                        config=config,
+                    )
+                    click.echo(
+                        f"[{current_date_str}] Backfill 완료: "
+                        f"{result.symbols_success}/{result.symbols_total} 종목, "
+                        f"{result.rows_written} rows"
+                    )
+                except Exception as exc:
+                    logger.error("Backfill 수집 실패: %s", exc)
+                backfill_ran_today = True
+
+            # 60초 대기 (stop_event 감시)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=60.0)
+            except TimeoutError:
+                pass
+
+        logger.info("DataFeed 스케줄러 종료")
+        click.echo("DataFeed 스케줄러 종료")
+
+    try:
+        asyncio.run(_scheduler_loop())
+    except KeyboardInterrupt:
+        click.echo("\nDataFeed 스케줄러 종료")
+
+
 # ── init ─────────────────────────────────────────────────────────────────────
 
 
