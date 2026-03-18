@@ -66,3 +66,4 @@ class MeResponse(BaseModel):
     type: str
     emoji: str = ""
     role: str = ""
+    login_at: str = ""
