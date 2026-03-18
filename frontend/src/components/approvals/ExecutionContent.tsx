@@ -1,3 +1,4 @@
+import StatusBadge from '../common/StatusBadge'
 import type { ApprovalType } from '../../types/approval'
 
 interface ExecutionContentProps {
@@ -5,11 +6,11 @@ interface ExecutionContentProps {
   params?: Record<string, unknown>
 }
 
-const INFO_BANNERS: Record<ApprovalType, { text: string; variant: 'info' | 'warning' }> = {
+const INFO_BANNERS: Record<ApprovalType, { text: string; variant: 'info' | 'negative' }> = {
   strategy_adopt: { text: '승인 시 해당 전략이 채택(registered) 상태로 전환됩니다.', variant: 'info' },
   budget_change: { text: '승인 시 Treasury에서 예산이 즉시 재배분됩니다.', variant: 'info' },
   bot_create: { text: '승인 시 BotManager에서 봇이 즉시 생성됩니다.', variant: 'info' },
-  bot_stop: { text: '승인 시 해당 봇의 거래가 즉시 중지됩니다.', variant: 'warning' },
+  bot_stop: { text: '승인 시 해당 봇의 거래가 즉시 중지됩니다.', variant: 'negative' },
   rule_change: { text: '승인 시 RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.', variant: 'info' },
 }
 
@@ -17,18 +18,18 @@ function InfoBanner({ type }: { type: ApprovalType }) {
   const banner = INFO_BANNERS[type]
   if (!banner) return null
 
-  const isWarning = banner.variant === 'warning'
+  const isNegative = banner.variant === 'negative'
   return (
-    <div className={`${isWarning ? 'bg-warning/10 text-warning' : 'bg-info/10 text-info'} p-3 rounded text-[12px] mb-4`}>
-      {isWarning ? '\u26A0' : '\uD83D\uDCA1'} {banner.text}
+    <div className={`${isNegative ? 'bg-negative/10 text-negative' : 'bg-info/10 text-info'} p-3 rounded text-[12px] mb-4`}>
+      {isNegative ? '\u26A0' : '\uD83D\uDCA1'} {banner.text}
     </div>
   )
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex justify-between py-2 border-b border-border text-[13px]">
-      <span className="text-text-muted">{label}</span>
+    <div className="flex justify-between py-2 border-b border-border last:border-b-0 text-[13px]">
+      <span className="text-text-muted min-w-[80px]">{label}</span>
       <span>{value}</span>
     </div>
   )
@@ -43,7 +44,9 @@ function formatCurrency(value: unknown): string {
 function StrategyAdoptContent({ params }: { params: Record<string, unknown> }) {
   return (
     <>
-      <InfoRow label="대상 전략" value={<span className="font-mono text-[12px]">{String(params.strategy_name ?? '-')}</span>} />
+      <InfoRow label="대상 전략" value={
+        <span className="font-mono text-[12px] text-primary">{String(params.strategy_name ?? '-')}</span>
+      } />
       <InfoRow label="버전" value={String(params.version ?? '-')} />
     </>
   )
@@ -55,23 +58,37 @@ function BudgetChangeContent({ params }: { params: Record<string, unknown> }) {
   const diff = requested - current
   const pct = current > 0 ? ((diff / current) * 100).toFixed(0) : '-'
   const sign = diff >= 0 ? '+' : ''
+  const colorClass = diff >= 0 ? 'text-positive' : 'text-negative'
 
   return (
     <>
-      <InfoRow label="대상 봇" value={<span className="font-mono text-[12px]">{String(params.bot_id ?? '-')}</span>} />
+      <InfoRow label="대상 봇" value={
+        <span className="font-mono text-[12px] text-primary">{String(params.bot_id ?? '-')}</span>
+      } />
       <InfoRow label="현재 예산" value={formatCurrency(current)} />
-      <InfoRow label="요청 예산" value={formatCurrency(requested)} />
-      <InfoRow label="변경폭" value={`${sign}${formatCurrency(diff)} (${sign}${pct}%)`} />
+      <InfoRow label="요청 예산" value={
+        <span className={`${colorClass} font-semibold`}>{formatCurrency(requested)}</span>
+      } />
+      <InfoRow label="변경폭" value={
+        <span className={colorClass}>{sign}{formatCurrency(diff)} ({sign}{pct}%)</span>
+      } />
     </>
   )
 }
 
 function BotCreateContent({ params }: { params: Record<string, unknown> }) {
+  const tradeMode = String(params.trade_mode ?? '-')
+  const isMock = tradeMode === 'mock' || tradeMode === '모의투자'
+
   return (
     <>
       <InfoRow label="전략명" value={<span className="font-mono text-[12px]">{String(params.strategy_name ?? '-')}</span>} />
       <InfoRow label="배정 예산" value={formatCurrency(params.budget)} />
-      <InfoRow label="거래 모드" value={String(params.trade_mode ?? '-')} />
+      <InfoRow label="거래 모드" value={
+        isMock
+          ? <StatusBadge variant="warning">모의투자</StatusBadge>
+          : <StatusBadge variant="positive">실전투자</StatusBadge>
+      } />
     </>
   )
 }
@@ -79,7 +96,9 @@ function BotCreateContent({ params }: { params: Record<string, unknown> }) {
 function BotStopContent({ params }: { params: Record<string, unknown> }) {
   return (
     <>
-      <InfoRow label="대상 봇" value={<span className="font-mono text-[12px]">{String(params.bot_id ?? '-')}</span>} />
+      <InfoRow label="대상 봇" value={
+        <span className="font-mono text-[12px] text-primary">{String(params.bot_id ?? '-')}</span>
+      } />
       <InfoRow label="중지 사유" value={String(params.reason ?? '-')} />
     </>
   )
@@ -94,7 +113,9 @@ function RuleChangeContent({ params }: { params: Record<string, unknown> }) {
 
   return (
     <>
-      <InfoRow label="대상 봇" value={<span className="font-mono text-[12px]">{String(params.bot_id ?? '-')}</span>} />
+      <InfoRow label="대상 봇" value={
+        <span className="font-mono text-[12px] text-primary">{String(params.bot_id ?? '-')}</span>
+      } />
       {rules.length > 0 && (
         <div className="mt-3">
           <div className="text-[12px] font-semibold text-text-muted mb-2">변경 규칙</div>
@@ -114,7 +135,7 @@ function RuleChangeContent({ params }: { params: Record<string, unknown> }) {
                     <td className="px-3 py-2 border-b border-border text-[13px] font-mono">{rule.name}</td>
                     <td className="px-3 py-2 border-b border-border text-[13px]">{String(rule.current_value)}</td>
                     <td className="text-center px-2 py-2 border-b border-border text-[13px] text-text-muted">&rarr;</td>
-                    <td className="px-3 py-2 border-b border-border text-[13px]">{String(rule.requested_value)}</td>
+                    <td className="px-3 py-2 border-b border-border text-[13px] text-warning font-semibold">{String(rule.requested_value)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -140,7 +161,7 @@ export default function ExecutionContent({ type, params }: ExecutionContentProps
 
   return (
     <div className="bg-surface border border-border rounded-lg p-5 mb-6">
-      <h3 className="text-[15px] font-semibold mb-3">실행 내용</h3>
+      <h3 className="text-[15px] font-semibold mb-4">실행 내용</h3>
       <InfoBanner type={type} />
       <div className="space-y-0">
         <ContentComponent params={params} />

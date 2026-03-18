@@ -1,16 +1,64 @@
 import { useState } from 'react'
 import { useUpdateApprovalStatus } from '../../hooks/useApprovals'
 import Modal from '../common/Modal'
-import type { ApprovalReview } from '../../types/approval'
+import StatusBadge from '../common/StatusBadge'
+import type { ApprovalReview, ApprovalType } from '../../types/approval'
+
+const APPROVE_ACTION_TEXT: Record<ApprovalType, string> = {
+  strategy_adopt: '전략이 채택 상태로 전환됩니다.',
+  budget_change: 'Treasury에서 예산이 즉시 재배분됩니다.',
+  bot_create: 'BotManager에서 봇이 즉시 생성됩니다.',
+  bot_stop: '해당 봇의 거래가 즉시 중지됩니다.',
+  rule_change: 'RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.',
+}
 
 interface ReviewControlsProps {
   approvalId: string
   isPending: boolean
   title: string
   reviews?: ApprovalReview[]
+  type?: ApprovalType
+  params?: Record<string, unknown>
 }
 
-export default function ReviewControls({ approvalId, isPending, title, reviews }: ReviewControlsProps) {
+function formatCurrency(value: unknown): string {
+  const num = Number(value)
+  if (isNaN(num)) return String(value ?? '-')
+  return `${num.toLocaleString()}원`
+}
+
+function ApproveModalSummary({ type, params }: { type?: ApprovalType; params?: Record<string, unknown> }) {
+  if (!type || !params) return null
+
+  if (type === 'bot_create') {
+    const tradeMode = String(params.trade_mode ?? '')
+    const isMock = tradeMode === 'mock' || tradeMode === '모의투자'
+    return (
+      <div className="text-[13px] text-text-muted mb-4">
+        전략: <span className="font-mono">{String(params.strategy_name ?? '-')}</span>
+        {' · '}예산: {formatCurrency(params.budget)}
+        {' · '}모드: {isMock
+          ? <StatusBadge variant="warning">모의투자</StatusBadge>
+          : <StatusBadge variant="positive">실전투자</StatusBadge>}
+      </div>
+    )
+  }
+
+  if (type === 'budget_change') {
+    const current = Number(params.current_budget ?? 0)
+    const requested = Number(params.requested_budget ?? 0)
+    const diff = requested - current
+    return (
+      <div className="text-[13px] text-text-muted mb-4">
+        예산: {formatCurrency(current)} → <strong className="text-positive">{formatCurrency(requested)}</strong> ({diff >= 0 ? '+' : ''}{formatCurrency(diff)})
+      </div>
+    )
+  }
+
+  return null
+}
+
+export default function ReviewControls({ approvalId, isPending, title, reviews, type, params }: ReviewControlsProps) {
   const [showApprove, setShowApprove] = useState(false)
   const [showReject, setShowReject] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
@@ -56,6 +104,12 @@ export default function ReviewControls({ approvalId, isPending, title, reviews }
         <div className="text-[13px] text-text-muted mb-4">
           <strong className="text-text">{title}</strong>을 승인하시겠습니까?
         </div>
+        <ApproveModalSummary type={type} params={params} />
+        {type && (
+          <div className="bg-info/10 text-info p-3 rounded text-[12px] mb-4">
+            {'\uD83D\uDCA1'} 승인 시 <strong>{APPROVE_ACTION_TEXT[type]}</strong>
+          </div>
+        )}
         {hasWarnings && (
           <div className="bg-warning/10 text-warning p-3 rounded text-[12px] mb-4">
             {'\u26A0'} 검토 의견에 <strong>warn</strong> 또는 <strong>fail</strong> 결과가 포함되어 있습니다. 검증 내용을 확인하세요.
