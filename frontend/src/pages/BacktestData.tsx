@@ -55,7 +55,7 @@ export default function BacktestData() {
     <>
       {/* 안내 배너 */}
       <div className="bg-info-bg rounded px-3.5 py-2.5 mb-4 text-[12px] text-info">
-        {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante data collect</code>)를 사용하세요.
+        {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed</code>)를 사용하세요.
       </div>
 
       {/* 데이터셋 카드 */}
