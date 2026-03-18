@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import logging
+import pathlib
+from typing import TYPE_CHECKING
 
 import click
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+
+if TYPE_CHECKING:
+    from ante.feed.report.generator import ReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +172,9 @@ def feed_init(ctx: click.Context, data_path: str) -> None:
 @require_scope("data:read")
 def feed_status(ctx: click.Context, data_path: str) -> None:
     """수집 상태를 조회한다."""
+
     from ante.feed.config import FeedConfig
+    from ante.feed.report.generator import ReportGenerator
 
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
@@ -180,11 +187,118 @@ def feed_status(ctx: click.Context, data_path: str) -> None:
             click.echo(f"초기화: ante feed init {data_path}")
         return
 
+    # 1. 체크포인트 로드
+    checkpoints = _load_checkpoints(cfg.feed_dir)
+
+    # 2. 최근 리포트 1건 로드
+    report_gen = ReportGenerator(cfg.feed_dir)
+    latest_report = _load_latest_report(report_gen)
+
+    # 3. API 키 상태 확인
+    api_keys = cfg.check_api_keys()
+
     if fmt.is_json:
-        fmt.output({"initialized": True, "feed_dir": str(cfg.feed_dir)})
+        fmt.output(
+            {
+                "initialized": True,
+                "feed_dir": str(cfg.feed_dir),
+                "checkpoints": checkpoints,
+                "latest_report": latest_report,
+                "api_keys": api_keys,
+            }
+        )
     else:
-        click.echo(f"DataFeed 초기화됨: {cfg.feed_dir}")
-        click.echo("(상세 상태 조회는 Phase 2에서 구현 예정)")
+        click.echo()
+        click.echo(f"DataFeed Status ({cfg.feed_dir})")
+        click.echo("══════════════════════════════════════════════════")
+
+        # 체크포인트 섹션
+        click.echo()
+        click.echo("Checkpoints")
+        click.echo("──────────────────────────────────────────────────")
+        if checkpoints:
+            for cp in checkpoints:
+                click.echo(
+                    f"  {cp['source']}/{cp['data_type']:<16}"
+                    f" last_date: {cp['last_date']}"
+                    f"  (updated: {cp['updated_at']})"
+                )
+        else:
+            click.echo("  (체크포인트 없음 — 아직 수집을 실행하지 않았습니다)")
+
+        # 최근 리포트 섹션
+        click.echo()
+        click.echo("Latest Report")
+        click.echo("──────────────────────────────────────────────────")
+        if latest_report:
+            summary = latest_report.get("summary", {})
+            click.echo(f"  mode: {latest_report.get('mode', '?')}")
+            click.echo(f"  date: {latest_report.get('target_date', '?')}")
+            click.echo(
+                f"  result: {summary.get('symbols_success', 0)} success"
+                f" / {summary.get('symbols_failed', 0)} failed"
+                f" / {len(latest_report.get('warnings', []))} warnings"
+            )
+            click.echo(f"  rows: {summary.get('rows_written', 0)}")
+        else:
+            click.echo("  (리포트 없음 — 아직 수집을 실행하지 않았습니다)")
+
+        # API 키 섹션
+        click.echo()
+        click.echo("API Keys")
+        click.echo("──────────────────────────────────────────────────")
+        for entry in api_keys:
+            if entry["set"]:
+                source_info = f"(source: {entry['source']})"
+                click.echo(f"  {entry['key']:<30} ✓ 설정됨 {source_info}")
+            else:
+                click.echo(f"  {entry['key']:<30} ✗ 미설정")
+
+        click.echo()
+
+
+def _load_checkpoints(feed_dir: pathlib.Path) -> list[dict[str, str]]:
+    """체크포인트 디렉토리에서 모든 체크포인트를 로드한다."""
+    import json
+
+    from ante.feed.pipeline.checkpoint import CHECKPOINT_DIR
+
+    checkpoint_dir = feed_dir / CHECKPOINT_DIR
+    if not checkpoint_dir.exists():
+        return []
+
+    results: list[dict[str, str]] = []
+    for cp_file in sorted(checkpoint_dir.glob("*.json")):
+        try:
+            data: dict[str, str] = json.loads(cp_file.read_text(encoding="utf-8"))
+            results.append(
+                {
+                    "source": data.get("source", "?"),
+                    "data_type": data.get("data_type", "?"),
+                    "last_date": data.get("last_date", "?"),
+                    "updated_at": data.get("updated_at", "?"),
+                }
+            )
+        except (json.JSONDecodeError, OSError):
+            logger.warning("체크포인트 파일 읽기 실패: %s", cp_file)
+    return results
+
+
+def _load_latest_report(
+    report_gen: ReportGenerator,
+) -> dict | None:
+    """최근 리포트 1건을 로드한다."""
+    import json
+
+    reports = report_gen.list_reports(limit=1)
+    if not reports:
+        return None
+
+    try:
+        return json.loads(reports[0].read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    except (json.JSONDecodeError, OSError):
+        logger.warning("리포트 파일 읽기 실패: %s", reports[0])
+        return None
 
 
 # ── inject ───────────────────────────────────────────────────────────────────
