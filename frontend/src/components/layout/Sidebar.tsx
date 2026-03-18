@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { path: '/strategies', icon: '📈', label: '전략과 성과' },
   { path: '/bots', icon: '🤖', label: '봇 관리' },
   { path: '/backtest-data', icon: '📁', label: '백테스트 데이터' },
-  { path: '/members', icon: '🧑‍💼', label: '멤버 관리' },
+  { path: '/agents', icon: '🧑‍💼', label: '에이전트 관리' },
 ]
 
 export default function Sidebar() {
@@ -51,7 +51,7 @@ export default function Sidebar() {
           <img src="/logo-e.svg" alt="E" className="w-8 h-8" />
         </div>
 
-        <nav className="flex-1 py-3 px-2 flex flex-col gap-0.5">
+        <nav className="flex-1 py-3 px-2 flex flex-col gap-[2px]">
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.path}
@@ -59,15 +59,15 @@ export default function Sidebar() {
               end={item.path === '/'}
               onClick={() => setMobileOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[15px] font-medium no-underline transition-colors ${
+                `flex items-center gap-[10px] px-3 py-[10px] rounded-lg text-[15px] font-medium no-underline transition-colors ${
                   isActive
-                    ? 'bg-primary text-white'
+                    ? 'bg-primary !text-white'
                     : 'text-text-muted hover:bg-surface-hover hover:text-text'
                 }`
               }
             >
               <span className="text-[16px] w-5 text-center">{item.icon}</span>
-              <span>{item.label}</span>
+              <span className="leading-none">{item.label}</span>
               {item.showBadge && pendingCount > 0 && (
                 <span className="ml-auto bg-negative text-white text-[11px] px-1.5 py-px rounded-[10px] font-semibold">
                   {pendingCount}
