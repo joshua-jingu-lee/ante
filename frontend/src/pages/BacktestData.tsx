@@ -4,6 +4,7 @@ import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
 import type { DataType } from '../api/data'
 import { formatNumber, formatDate } from '../utils/formatters'
 import { TableSkeleton } from '../components/common/Skeleton'
+import FeedStatusPanel from '../components/data/FeedStatusPanel'
 
 const LIMIT = 15
 const TF_OPTIONS = ['all', '1d', '1h', '1m'] as const
@@ -68,6 +69,9 @@ export default function BacktestData() {
       <div className="bg-info-bg rounded px-3.5 py-2.5 mb-4 text-[12px] text-info">
         {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed</code>)를 사용하세요.
       </div>
+
+      {/* Feed 파이프라인 상태 (BD-6) */}
+      <FeedStatusPanel />
 
       {/* 데이터셋 카드 */}
       <div className="bg-surface border border-border rounded-lg p-5">

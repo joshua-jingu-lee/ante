@@ -1,4 +1,5 @@
 import client from './client'
+import type { FeedStatus } from '../types/feed'
 
 export type DataType = 'ohlcv' | 'fundamental'
 
@@ -36,4 +37,9 @@ export async function getStorageInfo(): Promise<StorageInfo> {
 
 export async function deleteDataset(id: number, data_type?: DataType): Promise<void> {
   await client.delete(`/api/data/datasets/${id}`, { params: { data_type } })
+}
+
+export async function getFeedStatus(): Promise<FeedStatus> {
+  const res = await client.get('/api/data/feed-status')
+  return res.data
 }
