@@ -70,6 +70,10 @@ _AUTH_PATH = "/oauth2/tokenP"
 class KISAdapter(BrokerAdapter):
     """한국투자증권 Open API 어댑터."""
 
+    broker_id: str = "kis"
+    broker_name: str = "한국투자증권"
+    broker_short_name: str = "KIS"
+
     def __init__(
         self,
         config: dict[str, Any],

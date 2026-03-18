@@ -69,6 +69,10 @@ class MockBrokerAdapter(BrokerAdapter):
         prices: 종목별 현재가 딕셔너리 (예: {"005930": 70000})
     """
 
+    broker_id: str = "mock"
+    broker_name: str = "모의 브로커"
+    broker_short_name: str = "MOCK"
+
     def __init__(self, config: dict[str, Any]) -> None:
         config.setdefault("exchange", "KRX")
         super().__init__(config)
