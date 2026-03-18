@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyMonthlySummary } from '../api/strategies'
+import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary } from '../api/strategies'
 
 export function useStrategies() {
   return useQuery({
@@ -36,6 +36,14 @@ export function useStrategyDailySummary(id: string) {
   return useQuery({
     queryKey: ['strategies', id, 'daily-summary'],
     queryFn: () => getStrategyDailySummary(id),
+    enabled: !!id,
+  })
+}
+
+export function useStrategyWeeklySummary(id: string) {
+  return useQuery({
+    queryKey: ['strategies', id, 'weekly-summary'],
+    queryFn: () => getStrategyWeeklySummary(id),
     enabled: !!id,
   })
 }

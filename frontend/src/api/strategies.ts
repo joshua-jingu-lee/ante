@@ -1,5 +1,5 @@
 import client from './client'
-import type { Strategy, StrategyDetail, StrategyPerformance, Trade, DailySummary, MonthlySummary } from '../types/strategy'
+import type { Strategy, StrategyDetail, StrategyPerformance, Trade, DailySummary, WeeklySummary, MonthlySummary } from '../types/strategy'
 
 export async function getStrategies(): Promise<Strategy[]> {
   const res = await client.get('/api/strategies')
@@ -26,6 +26,11 @@ export async function getStrategyTrades(
 
 export async function getStrategyDailySummary(id: string): Promise<DailySummary[]> {
   const res = await client.get(`/api/strategies/${id}/daily-summary`)
+  return res.data.items
+}
+
+export async function getStrategyWeeklySummary(id: string): Promise<WeeklySummary[]> {
+  const res = await client.get(`/api/strategies/${id}/weekly-summary`)
   return res.data.items
 }
 
