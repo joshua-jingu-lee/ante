@@ -56,7 +56,7 @@ export default function Bots() {
               onClick={() => setShowCreate(true)}
               className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
             >
-              봇 생성
+              + 봇 생성
             </button>
           </div>
 

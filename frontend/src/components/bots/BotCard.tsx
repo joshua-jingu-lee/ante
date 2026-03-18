@@ -75,7 +75,7 @@ export default function BotCard({ bot, onStart, onStop, onDelete }: BotCardProps
           </div>
           <div className="flex justify-between">
             <span>모드</span>
-            <StatusBadge variant={bot.mode === 'live' ? 'warning' : 'info'}>{bot.mode === 'live' ? '실전' : '모의'}</StatusBadge>
+            <StatusBadge variant={bot.mode === 'live' ? 'primary' : 'warning'}>{bot.mode === 'live' ? '실전' : '모의'}</StatusBadge>
           </div>
           {bot.interval_seconds != null && (
             <div className="flex justify-between">
@@ -85,7 +85,7 @@ export default function BotCard({ bot, onStart, onStop, onDelete }: BotCardProps
           )}
         </div>
         <div className="flex gap-2 justify-end">
-          {(bot.status === 'stopped' || bot.status === 'created') && (
+          {(bot.status === 'stopped' || bot.status === 'created' || bot.status === 'error') && (
             <>
               <button onClick={() => onStart(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">시작</button>
               <button onClick={() => onDelete(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-negative border-none cursor-pointer hover:underline">삭제</button>
@@ -93,9 +93,6 @@ export default function BotCard({ bot, onStart, onStop, onDelete }: BotCardProps
           )}
           {bot.status === 'running' && (
             <button onClick={() => onStop(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-negative border border-negative cursor-pointer hover:bg-negative-bg">중지</button>
-          )}
-          {bot.status === 'error' && (
-            <button onClick={() => onDelete(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-negative border-none cursor-pointer hover:underline">삭제</button>
           )}
         </div>
       </div>
