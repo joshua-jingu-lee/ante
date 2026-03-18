@@ -121,6 +121,18 @@ class FakeMemberService:
         self._token_counter += 1
         return member, f"ante_ak_{self._token_counter}"
 
+    async def change_password(
+        self, member_id: str, old_password: str, new_password: str
+    ) -> None:
+        member = self._members.get(member_id)
+        if member is None:
+            raise ValueError(f"멤버를 찾을 수 없습니다: {member_id}")
+        if member.type != "human":
+            raise PermissionError("human 멤버만 비밀번호를 변경할 수 있습니다")
+        if member.password_hash and member.password_hash != old_password:
+            raise PermissionError("현재 패스워드가 일치하지 않습니다")
+        member.password_hash = new_password
+
     async def update_scopes(
         self, member_id: str, scopes: list[str], updated_by: str = ""
     ) -> FakeMember:
@@ -260,6 +272,50 @@ class TestTokenManagement:
         """존재하지 않는 멤버 → 404."""
         resp = client.post("/api/members/nonexistent/rotate-token")
         assert resp.status_code == 404
+
+
+class TestChangePassword:
+    def test_change_password_success(self, client, member_service):
+        """비밀번호 변경 성공."""
+        member_service._members["user-01"] = FakeMember(
+            member_id="user-01", type="human", password_hash="old123"
+        )
+        resp = client.patch(
+            "/api/members/user-01/password",
+            json={"old_password": "old123", "new_password": "new456"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    def test_change_password_wrong_old(self, client, member_service):
+        """기존 비밀번호 불일치 → 403."""
+        member_service._members["user-01"] = FakeMember(
+            member_id="user-01", type="human", password_hash="old123"
+        )
+        resp = client.patch(
+            "/api/members/user-01/password",
+            json={"old_password": "wrong", "new_password": "new456"},
+        )
+        assert resp.status_code == 403
+
+    def test_change_password_nonexistent(self, client):
+        """존재하지 않는 멤버 → 404."""
+        resp = client.patch(
+            "/api/members/nonexistent/password",
+            json={"old_password": "old", "new_password": "new"},
+        )
+        assert resp.status_code == 404
+
+    def test_change_password_agent_forbidden(self, client, member_service):
+        """agent 멤버 비밀번호 변경 → 403."""
+        member_service._members["agent-01"] = FakeMember(
+            member_id="agent-01", type="agent"
+        )
+        resp = client.patch(
+            "/api/members/agent-01/password",
+            json={"old_password": "old", "new_password": "new"},
+        )
+        assert resp.status_code == 403
 
 
 class TestScopesUpdate:

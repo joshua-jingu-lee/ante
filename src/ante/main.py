@@ -81,6 +81,9 @@ async def main() -> None:
     await dynamic_config.register_default(
         "system.log_level", log_level, category="system"
     )
+    await dynamic_config.register_default(
+        "display.currency_position", "suffix", category="display"
+    )
     eventbus.subscribe(ConfigChangedEvent, _on_log_level_changed)
     logger.info("DynamicConfigService 초기화 완료")
 
