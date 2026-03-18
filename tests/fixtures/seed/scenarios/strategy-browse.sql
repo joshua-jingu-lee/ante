@@ -58,7 +58,7 @@ INSERT INTO trades (trade_id, bot_id, strategy_id, symbol, side, quantity, price
 VALUES ('b0000000-0000-4000-8000-000000000006', 'bot-mean-old', 'mean-revert-01', '005930', 'sell', 10, 70500, 'filled', datetime('now', '-31 days'), datetime('now', '-31 days'));
 
 -- ── 자금 ────────────────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 50000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 50000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 20000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 30000000.0);
 

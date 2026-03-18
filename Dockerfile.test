@@ -31,7 +31,10 @@ RUN pip install --no-cache-dir .
 COPY tests/ tests/
 
 # 런타임 디렉토리
-RUN mkdir -p config data db
+RUN mkdir -p config data db strategies
+
+# E2E 테스트용 더미 전략 파일 (봇 생성 테스트에 필요)
+COPY tests/fixtures/seed/strategies/ strategies/
 
 # 테스트 전용 설정 파일
 COPY config/system.test.toml config/system.toml

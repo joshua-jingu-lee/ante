@@ -39,7 +39,7 @@ INSERT INTO bot_budgets (bot_id, allocated, available, reserved, spent, returned
 VALUES ('bot-rsi-01', 10000000.0, 7300000.0, 700000.0, 2000000.0, 0.0);
 
 -- ── Treasury 상태 ───────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 42000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 42000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 35000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 7000000.0);
 

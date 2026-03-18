@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS members (
     created_by         TEXT DEFAULT '',
     last_active_at     TEXT DEFAULT '',
     suspended_at       TEXT DEFAULT '',
-    revoked_at         TEXT DEFAULT ''
+    revoked_at         TEXT DEFAULT '',
+    token_expires_at   TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_members_type ON members(type);
 CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);

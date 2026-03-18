@@ -153,8 +153,9 @@ class TestConfirmModal:
         # 모달 제목
         expect(page.get_by_text("예산 할당 확인", exact=False)).to_be_visible()
 
-        # 봇 ID 표시
-        expect(page.get_by_text("bot-alloc-01", exact=False).first).to_be_visible()
+        # 모달 내 봇 ID 표시 (font-mono span)
+        modal = page.locator(".fixed")
+        expect(modal.locator(".font-mono", has_text="bot-alloc-01")).to_be_visible()
 
         # 취소하여 상태 복원
         _cancel_action(page)

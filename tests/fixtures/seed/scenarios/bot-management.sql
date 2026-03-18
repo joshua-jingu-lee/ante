@@ -100,7 +100,7 @@ INSERT INTO event_log (event_id, event_type, timestamp, payload) VALUES ('ev-bd-
 INSERT INTO event_log (event_id, event_type, timestamp, payload) VALUES ('ev-bd-02', 'bot.step.error', datetime('now', '-3 days'), '{"bot_id":"bot-err-01","message":"전략 초기화 실패: invalid config"}');
 
 -- ── 자금 ────────────────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 100000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 100000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 19500000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 80500000.0);
 

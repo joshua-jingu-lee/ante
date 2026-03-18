@@ -84,7 +84,7 @@ INSERT INTO audit_log (member_id, action, resource, detail, created_at)
 VALUES ('owner', 'approval.reject', 'appr-06', '비중 변경 거부', '2026-03-09 11:45:00');
 
 -- ── 자금 (최소) ─────────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 50000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 50000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 10000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 40000000.0);
 

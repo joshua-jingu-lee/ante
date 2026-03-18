@@ -14,12 +14,13 @@ export function formatPercent(value: number, digits = 2): string {
 }
 
 /** 날짜 문자열을 Date로 파싱 (공백 구분자 호환) */
-function parseDate(dateStr: string): Date {
+function parseDate(dateStr: string | undefined | null): Date {
+  if (!dateStr) return new Date(NaN)
   return new Date(dateStr.replace(' ', 'T'))
 }
 
 /** 날짜 포맷 (예: 2025-01-01) */
-export function formatDate(dateStr: string): string {
+export function formatDate(dateStr: string | undefined | null): string {
   const d = parseDate(dateStr)
   if (isNaN(d.getTime())) return '-'
   return d.toLocaleDateString('ko-KR', {
@@ -30,7 +31,7 @@ export function formatDate(dateStr: string): string {
 }
 
 /** 날짜+시간 포맷 (예: 2025-01-01 14:30) */
-export function formatDateTime(dateStr: string): string {
+export function formatDateTime(dateStr: string | undefined | null): string {
   const d = parseDate(dateStr)
   if (isNaN(d.getTime())) return '-'
   return d.toLocaleString('ko-KR', {

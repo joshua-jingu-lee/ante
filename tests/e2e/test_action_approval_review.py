@@ -72,7 +72,9 @@ class TestApproveFlow:
         # 모달 내 '결재 승인' 제목 확인
         expect(page.get_by_text("결재 승인")).to_be_visible()
         # 모달 내 결재 제목 포함 확인
-        expect(page.get_by_text("모멘텀 돌파 전략 v3 채택 요청")).to_be_visible()
+        expect(
+            page.get_by_role("heading", name="모멘텀 돌파 전략 v3 채택 요청")
+        ).to_be_visible()
 
     def test_approve_cancel_closes_modal(
         self, authenticated_page: Page, base_url: str
@@ -211,7 +213,9 @@ class TestRejectFlow:
         page = authenticated_page
 
         expect(page.get_by_text("거부 사유")).to_be_visible()
-        expect(page.get_by_text("변동성 구간 추가 백테스트 필요")).to_be_visible()
+        expect(
+            page.get_by_text("변동성 구간 추가 백테스트 필요", exact=True)
+        ).to_be_visible()
 
     def test_reject_api_cross_validation(
         self,
@@ -236,15 +240,15 @@ class TestRejectFlow:
 class TestApprovalListCountAfterActions:
     """승인/거부 액션 후 목록 건수 검증.
 
-    시나리오 시드에 pending 2건이 있으며, 승인/거부 테스트 클래스가 먼저 실행된 후
+    시나리오 시드에 pending 3건이 있으며, 승인/거부 테스트 클래스가 먼저 실행된 후
     이 클래스가 실행된다고 가정한다.
-    두 건 모두 처리된 상태에서 대기 탭이 0건임을 확인한다.
+    appr-r01(승인) + appr-r02(거부) 처리 후, appr-r03 1건이 대기 상태로 남는다.
     """
 
     def test_pending_tab_shows_zero_after_both_actions(
         self, authenticated_page: Page, base_url: str
     ) -> None:
-        """승인/거부 액션 후 목록의 '대기' 탭에 결재 건수가 0건이 된다."""
+        """승인/거부 액션 후 목록의 '대기' 탭에 미처리 1건만 남는다."""
         _go_to_approvals(authenticated_page, base_url)
         page = authenticated_page
 
@@ -253,14 +257,14 @@ class TestApprovalListCountAfterActions:
 
         rows = page.locator("table tbody tr")
         count = rows.count()
-        assert count == 0, f"대기 탭에 처리된 건이 남아 있음: {count}건"
+        assert count == 1, f"대기 탭 건수가 1건이 아님: {count}건"
 
-    def test_total_count_shows_two_rows(
+    def test_total_count_shows_three_rows(
         self, authenticated_page: Page, base_url: str
     ) -> None:
-        """전체 탭에는 처리된 2건이 모두 표시된다."""
+        """전체 탭에는 처리된 2건 + 미처리 1건 = 총 3건이 표시된다."""
         _go_to_approvals(authenticated_page, base_url)
         page = authenticated_page
 
         rows = page.locator("table tbody tr")
-        expect(rows).to_have_count(2)
+        expect(rows).to_have_count(3)
