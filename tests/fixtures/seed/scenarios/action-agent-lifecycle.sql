@@ -8,6 +8,6 @@ VALUES ('lifecycle-agent-01', 'agent', 'default', 'strategy-lab', '라이프사�
         datetime('now', '-10 days'), 'owner', datetime('now', '-1 hours'));
 
 -- ── 자금 (최소) ─────────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 50000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 50000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 0.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 50000000.0);

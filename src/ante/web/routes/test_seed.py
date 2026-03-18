@@ -105,6 +105,11 @@ async def reset_seed(
 
 async def _reload_managers(request: Request) -> None:
     """시딩 후 메모리 기반 매니저들을 DB에서 리로드한다."""
+    # SystemState (인메모리 trading_state 동기화)
+    system_state = getattr(request.app.state, "system_state", None)
+    if system_state is not None and hasattr(system_state, "_load_from_db"):
+        await system_state._load_from_db()  # noqa: SLF001
+
     # BotManager
     bot_manager = getattr(request.app.state, "bot_manager", None)
     if bot_manager is not None:

@@ -440,6 +440,7 @@ async def main() -> None:
             strategy_registry=strategy_registry,
             dynamic_config=dynamic_config,
             approval_service=approval_service,
+            system_state=system_state,
         )
 
         import uvicorn

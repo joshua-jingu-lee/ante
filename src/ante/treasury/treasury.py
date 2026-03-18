@@ -620,6 +620,15 @@ class Treasury:
         "external_eval_amount",
     )
 
+    async def load_from_db(self) -> None:
+        """DB에서 자금 상태 복원 (테스트용 리로드 포함).
+
+        기존 메모리 상태를 초기화한 뒤 DB에서 다시 로드한다.
+        """
+        self._budgets.clear()
+        self._reservations.clear()
+        await self._load_from_db()
+
     async def _load_from_db(self) -> None:
         """DB에서 자금 상태 복원."""
         rows = await self._db.fetch_all("SELECT key, value FROM treasury_state")

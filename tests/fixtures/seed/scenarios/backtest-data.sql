@@ -26,7 +26,7 @@ VALUES ('report-bt-02', 'SMA 크로스', '1.0.0', 'strategies/sma_cross.py', 're
         '3년간 18.5% 수익, MDD 18.7%', '단순하지만 안정적');
 
 -- ── 자금 (최소) ─────────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 50000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 50000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 0.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 50000000.0);
 

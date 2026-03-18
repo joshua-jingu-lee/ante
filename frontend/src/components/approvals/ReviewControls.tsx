@@ -91,6 +91,7 @@ export default function ReviewControls({ approvalId, isPending, title, reviews }
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="예: 변동성 구간 추가 검증 필요"
+            aria-label="거부 사유"
             className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-[13px] focus:outline-none focus:border-primary"
           />
         </div>

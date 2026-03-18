@@ -21,7 +21,11 @@ INSERT INTO strategies (strategy_id, name, version, filepath, status, registered
 VALUES ('macd-v2', 'MACD 크로스 v2', '2.0.0', 'strategies/macd_v2.py', 'registered',
         datetime('now', '-8 days'), 'MACD 다중 타임프레임 크로스 전략', 'strategy-dev-02');
 
--- ── 결재 요청 2건 (모두 pending) ────────────────────
+INSERT INTO strategies (strategy_id, name, version, filepath, status, registered_at, description, author)
+VALUES ('rsi-mean-v1', 'RSI 평균회귀 v1', '1.0.0', 'strategies/rsi_mean_v1.py', 'registered',
+        datetime('now', '-5 days'), 'RSI 과매도 구간 평균회귀 전략', 'strategy-dev-01');
+
+-- ── 결재 요청 3건 (모두 pending) ────────────────────
 -- [대기] 전략 채택 — 승인 테스트용 (appr-r01)
 INSERT INTO approvals (id, type, status, requester, title, body, params, created_at, expires_at)
 VALUES ('appr-r01', 'strategy_adopt', 'pending', 'strategy-dev-01',
@@ -38,7 +42,15 @@ VALUES ('appr-r02', 'strategy_adopt', 'pending', 'strategy-dev-02',
         '{"strategy_id":"macd-v2","version":"2.0.0"}',
         '2026-03-16 11:00:00', '2026-03-19 11:00:00');
 
+-- [대기] 전략 채택 — 미처리 잔여 pending (appr-r03)
+INSERT INTO approvals (id, type, status, requester, title, body, params, created_at, expires_at)
+VALUES ('appr-r03', 'strategy_adopt', 'pending', 'strategy-dev-01',
+        'RSI 평균회귀 v1 채택 요청',
+        'RSI 과매도 구간 평균회귀 전략 백테스트 완료. 실전 투입을 요청합니다.',
+        '{"strategy_id":"rsi-mean-v1","version":"1.0.0"}',
+        '2026-03-16 14:00:00', '2026-03-19 14:00:00');
+
 -- ── 자금 (최소) ─────────────────────────────────────
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 50000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 50000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 0.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 50000000.0);

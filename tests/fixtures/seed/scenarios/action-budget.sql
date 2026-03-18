@@ -38,8 +38,7 @@ VALUES ('bot-revoke-01', 10000000.0, 10000000.0, 0.0, 0.0, 0.0);
 
 -- ── Treasury 상태 ─────────────────────────────────────
 -- 총 잔고 100,000,000 / 할당 10,000,000 / 미할당 90,000,000 (할당 여유 충분)
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('total_cash', 100000000.0);
-INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('allocated', 10000000.0);
+INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('account_balance', 100000000.0);
 INSERT OR IGNORE INTO treasury_state (key, value) VALUES ('unallocated', 90000000.0);
 
 -- ── 자금 변동 이력 (초기 할당 기록) ──────────────────
