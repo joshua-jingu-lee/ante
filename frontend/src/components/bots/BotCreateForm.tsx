@@ -18,7 +18,6 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [mode, setMode] = useState<BotMode>('paper')
   const [interval, setInterval] = useState('60')
   const [budget, setBudget] = useState('')
-  const [symbols, setSymbols] = useState('')
   const [botIdError, setBotIdError] = useState('')
   const createBot = useCreateBot()
   const { data: strategies } = useStrategies()
@@ -50,8 +49,8 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
         strategy_name: strategyName,
         mode,
         interval_seconds: Number(interval),
-        budget: Number(budget),
-        symbols: symbols.split(',').map((s) => s.trim()).filter(Boolean),
+        budget: Number(budget.replace(/,/g, '')),
+        symbols: [],
       },
       { onSuccess: onClose },
     )
@@ -64,7 +63,7 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Bot ID</label>
-            <input value={botId} onChange={(e) => handleBotIdChange(e.target.value)} placeholder="bot-momentum-01" className={`w-full bg-bg border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary ${botIdError ? 'border-negative' : 'border-border'}`} required />
+            <input value={botId} onChange={(e) => handleBotIdChange(e.target.value)} placeholder="my-bot-01" className={`w-full bg-bg border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary ${botIdError ? 'border-negative' : 'border-border'}`} required />
             {botIdError ? (
               <div className="text-[11px] text-negative mt-1">{botIdError}</div>
             ) : (
@@ -87,9 +86,9 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">봇 유형</label>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setMode('paper')} className={`flex-1 py-2 rounded-lg text-[13px] font-medium border cursor-pointer ${mode === 'paper' ? 'bg-primary text-white border-primary' : 'bg-transparent text-text-muted border-border hover:bg-surface-hover'}`}>모의투자</button>
-              <button type="button" onClick={() => setMode('live')} className={`flex-1 py-2 rounded-lg text-[13px] font-medium border cursor-pointer ${mode === 'live' ? 'bg-warning text-black border-warning' : 'bg-transparent text-text-muted border-border hover:bg-surface-hover'}`}>실전투자</button>
+            <div className="inline-flex rounded-lg border border-border overflow-hidden">
+              <button type="button" onClick={() => setMode('paper')} className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${mode === 'paper' ? 'bg-primary text-white' : 'bg-transparent text-text-muted hover:bg-surface-hover'}`}>모의투자</button>
+              <button type="button" onClick={() => setMode('live')} className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${mode === 'live' ? 'bg-primary text-white' : 'bg-transparent text-text-muted hover:bg-surface-hover'}`}>실전투자</button>
             </div>
           </div>
           <div className="mb-4">
@@ -99,13 +98,8 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">배정예산 (원)</label>
-            <input type="number" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="5000000" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
-            <div className="text-[11px] text-text-muted mt-1">잔여예산: {formatNumber(remainingBudget)}원</div>
-          </div>
-          <div className="mb-4">
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">대상 종목 (콤마 구분)</label>
-            <input value={symbols} onChange={(e) => setSymbols(e.target.value)} placeholder="005930, 035420" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" />
-            <div className="text-[11px] text-text-muted mt-1">선택사항</div>
+            <input type="text" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="5,000,000" className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary" required />
+            <div className="text-[11px] text-text-muted mt-1">잔여예산: {formatNumber(remainingBudget)} 원</div>
           </div>
           <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
