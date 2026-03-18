@@ -28,7 +28,7 @@ export default function AgentRegisterForm({ onClose, onTokenCreated }: AgentRegi
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     createMember.mutate(
-      { member_id: memberId, name, org, scopes },
+      { member_id: memberId, member_type: 'agent', name, org, scopes },
       { onSuccess: (data) => onTokenCreated(memberId, data.token) },
     )
   }

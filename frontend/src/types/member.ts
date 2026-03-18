@@ -24,6 +24,7 @@ export interface MemberDetail extends Member {
 
 export interface MemberCreateRequest {
   member_id: string
+  member_type: MemberType
   name: string
   org: string
   scopes: string[]
