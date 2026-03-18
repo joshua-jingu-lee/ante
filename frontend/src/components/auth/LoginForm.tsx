@@ -52,7 +52,7 @@ export default function LoginForm() {
             className="absolute right-3 top-1/2 -translate-y-1/2 bg-transparent border-none text-text-muted cursor-pointer text-[14px]"
             title="패스워드 표시"
           >
-            {showPassword ? '🙈' : '👁'}
+            {'\u{1F441}'}
           </button>
         </div>
       </div>
@@ -60,7 +60,7 @@ export default function LoginForm() {
       <button
         type="submit"
         disabled={loginMutation.isPending || !memberId || !password}
-        className="w-full py-3 bg-primary text-white rounded-lg text-[14px] font-semibold mt-2 hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-none"
+        className="w-full inline-flex items-center justify-center py-3 bg-primary text-white rounded-lg text-[14px] font-semibold mt-2 hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border-none transition-colors duration-150"
       >
         {loginMutation.isPending ? '로그인 중...' : '로그인'}
       </button>
