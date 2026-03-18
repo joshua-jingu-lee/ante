@@ -13,6 +13,7 @@ from ante.trade.models import (
     PerformanceMetrics,
     TradeRecord,
     TradeStatus,
+    WeeklySummary,
 )
 
 if TYPE_CHECKING:
@@ -136,6 +137,63 @@ class PerformanceTracker:
         return [
             DailySummary(
                 date=row["trade_date"],
+                realized_pnl=float(row["realized_pnl"]),
+                trade_count=int(row["trade_count"]),
+                win_rate=(
+                    int(row["win_count"]) / int(row["trade_count"])
+                    if int(row["trade_count"]) > 0
+                    else 0.0
+                ),
+            )
+            for row in rows
+        ]
+
+    async def get_weekly_summary(
+        self,
+        bot_id: str | None = None,
+    ) -> list[WeeklySummary]:
+        """주별 성과 집계.
+
+        ISO 주 단위(월요일 시작)로 거래를 그룹화하여 집계한다.
+
+        Args:
+            bot_id: 봇 ID 필터 (None이면 전체)
+        """
+        conditions: list[str] = [
+            "t.status = ?",
+            "t.side = 'sell'",
+        ]
+        params: list[Any] = [TradeStatus.FILLED.value]
+
+        if bot_id:
+            conditions.append("t.bot_id = ?")
+            params.append(bot_id)
+
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                date(t.timestamp, 'weekday 0', '-6 days') AS week_start,
+                date(t.timestamp, 'weekday 0') AS week_end,
+                COALESCE(SUM(ph.pnl), 0.0) AS realized_pnl,
+                COUNT(*) AS trade_count,
+                SUM(CASE WHEN ph.pnl > 0 THEN 1 ELSE 0 END) AS win_count
+            FROM trades t
+            LEFT JOIN position_history ph
+                ON ph.bot_id = t.bot_id
+                AND ph.symbol = t.symbol
+                AND ph.action = 'sell'
+                AND ph.price = t.price
+                AND ph.quantity = t.quantity
+            WHERE {where}
+            GROUP BY week_start
+            ORDER BY week_start ASC
+        """
+
+        rows = await self._db.fetch_all(query, tuple(params))
+        return [
+            WeeklySummary(
+                week_start=row["week_start"],
+                week_end=row["week_end"],
                 realized_pnl=float(row["realized_pnl"]),
                 trade_count=int(row["trade_count"]),
                 win_rate=(

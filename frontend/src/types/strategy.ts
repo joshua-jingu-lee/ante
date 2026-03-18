@@ -24,13 +24,6 @@ export interface StrategyParam {
   description?: string
 }
 
-export interface WeeklySummary {
-  week_label: string
-  realized_pnl: number
-  trade_count: number
-  win_rate: number
-}
-
 export interface StrategyPerformance {
   total_trades: number
   winning_trades: number
@@ -68,6 +61,7 @@ export interface MonthlySummary {
 export interface WeeklySummary {
   week_start: string
   week_end: string
+  week_label: string
   realized_pnl: number
   trade_count: number
   win_rate: number

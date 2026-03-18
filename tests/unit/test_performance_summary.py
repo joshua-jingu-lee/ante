@@ -1,4 +1,4 @@
-"""일별/월별 성과 집계 단위 테스트."""
+"""일별/주별/월별 성과 집계 단위 테스트."""
 
 from __future__ import annotations
 
@@ -115,6 +115,83 @@ class TestGetDailySummary:
         result = await tracker.get_daily_summary()
 
         assert result == []
+
+
+class TestGetWeeklySummary:
+    @pytest.mark.asyncio
+    async def test_weekly_summary_basic(self):
+        from ante.trade.models import WeeklySummary
+
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(
+            return_value=[
+                {
+                    "week_start": "2026-03-09",
+                    "week_end": "2026-03-15",
+                    "realized_pnl": 30000.0,
+                    "trade_count": 5,
+                    "win_count": 3,
+                },
+                {
+                    "week_start": "2026-03-16",
+                    "week_end": "2026-03-22",
+                    "realized_pnl": -10000.0,
+                    "trade_count": 4,
+                    "win_count": 1,
+                },
+            ]
+        )
+
+        tracker = PerformanceTracker(db)
+        result = await tracker.get_weekly_summary()
+
+        assert len(result) == 2
+        assert isinstance(result[0], WeeklySummary)
+        assert result[0].week_start == "2026-03-09"
+        assert result[0].week_end == "2026-03-15"
+        assert result[0].realized_pnl == 30000.0
+        assert result[0].trade_count == 5
+        assert result[0].win_rate == pytest.approx(3 / 5)
+        assert result[0].week_label == "03-09 ~ 03-15"
+        assert result[1].win_rate == pytest.approx(1 / 4)
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_with_bot_filter(self):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        result = await tracker.get_weekly_summary(bot_id="bot-1")
+
+        assert result == []
+        call_args = db.fetch_all.call_args
+        query = call_args[0][0]
+        params = call_args[0][1]
+        assert "t.bot_id = ?" in query
+        assert "bot-1" in params
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_empty(self):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        result = await tracker.get_weekly_summary()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_query_groups_by_week(self):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        await tracker.get_weekly_summary()
+
+        call_args = db.fetch_all.call_args
+        query = call_args[0][0]
+        assert "week_start" in query
+        assert "GROUP BY week_start" in query
 
 
 class TestGetMonthlySummary:

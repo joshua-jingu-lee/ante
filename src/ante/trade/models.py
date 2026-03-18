@@ -69,6 +69,22 @@ class DailySummary:
 
 
 @dataclass(frozen=True)
+class WeeklySummary:
+    """주별 성과 집계."""
+
+    week_start: str
+    week_end: str
+    realized_pnl: float
+    trade_count: int
+    win_rate: float
+
+    @property
+    def week_label(self) -> str:
+        """주간 라벨 (MM-DD ~ MM-DD 형식)."""
+        return f"{self.week_start[5:]} ~ {self.week_end[5:]}"
+
+
+@dataclass(frozen=True)
 class MonthlySummary:
     """월별 성과 집계."""
 
