@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useMemberDetail, useMemberControl } from '../hooks/useMembers'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'

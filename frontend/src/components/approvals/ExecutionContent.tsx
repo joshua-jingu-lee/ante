@@ -8,9 +8,13 @@ interface ExecutionContentProps {
 
 const INFO_BANNERS: Record<ApprovalType, { text: string; variant: 'info' | 'negative' }> = {
   strategy_adopt: { text: '승인 시 해당 전략이 채택(registered) 상태로 전환됩니다.', variant: 'info' },
+  strategy_report: { text: '승인 시 전략 리포트가 채택됩니다.', variant: 'info' },
   budget_change: { text: '승인 시 Treasury에서 예산이 즉시 재배분됩니다.', variant: 'info' },
+  budget_allocate: { text: '승인 시 Treasury에서 예산이 할당됩니다.', variant: 'info' },
   bot_create: { text: '승인 시 BotManager에서 봇이 즉시 생성됩니다.', variant: 'info' },
   bot_stop: { text: '승인 시 해당 봇의 거래가 즉시 중지됩니다.', variant: 'negative' },
+  live_switch: { text: '승인 시 봇이 모의투자에서 실전투자로 전환됩니다.', variant: 'negative' },
+  risk_alert: { text: '확인 시 위험 알림이 처리 완료됩니다.', variant: 'negative' },
   rule_change: { text: '승인 시 RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.', variant: 'info' },
 }
 
@@ -149,9 +153,13 @@ function RuleChangeContent({ params }: { params: Record<string, unknown> }) {
 
 const CONTENT_COMPONENTS: Record<ApprovalType, React.FC<{ params: Record<string, unknown> }>> = {
   strategy_adopt: StrategyAdoptContent,
+  strategy_report: StrategyAdoptContent,
   budget_change: BudgetChangeContent,
+  budget_allocate: BudgetChangeContent,
   bot_create: BotCreateContent,
   bot_stop: BotStopContent,
+  live_switch: BotCreateContent,
+  risk_alert: BotStopContent,
   rule_change: RuleChangeContent,
 }
 

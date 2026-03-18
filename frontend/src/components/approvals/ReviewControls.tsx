@@ -6,9 +6,13 @@ import type { ApprovalReview, ApprovalType } from '../../types/approval'
 
 const APPROVE_ACTION_TEXT: Record<ApprovalType, string> = {
   strategy_adopt: '전략이 채택 상태로 전환됩니다.',
+  strategy_report: '전략 리포트가 채택됩니다.',
   budget_change: 'Treasury에서 예산이 즉시 재배분됩니다.',
+  budget_allocate: 'Treasury에서 예산이 할당됩니다.',
   bot_create: 'BotManager에서 봇이 즉시 생성됩니다.',
   bot_stop: '해당 봇의 거래가 즉시 중지됩니다.',
+  live_switch: '봇이 모의투자에서 실전투자로 전환됩니다.',
+  risk_alert: '위험 알림이 처리 완료됩니다.',
   rule_change: 'RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.',
 }
 

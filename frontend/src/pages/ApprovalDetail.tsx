@@ -17,9 +17,13 @@ const STATUS_VARIANT: Record<ApprovalStatus, string> = {
 
 const TYPE_LABEL: Record<ApprovalType, string> = {
   strategy_adopt: '전략 채택',
+  strategy_report: '전략 리포트',
   budget_change: '예산 변경',
+  budget_allocate: '예산 할당',
   bot_create: '봇 생성',
   bot_stop: '봇 중지',
+  live_switch: '실전 전환',
+  risk_alert: '위험 알림',
   rule_change: '규칙 변경',
 }
 
