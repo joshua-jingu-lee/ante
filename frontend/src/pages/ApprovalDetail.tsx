@@ -29,14 +29,13 @@ const REVIEW_RESULT_VARIANT: Record<string, string> = {
   fail: 'negative',
 }
 
-const ACTOR_COLOR: Record<string, string> = {
-  user: 'text-positive',
-  rule_engine: 'text-text-muted',
-  treasury: 'text-text-muted',
-}
-
-function getActorColor(actor: string): string {
-  if (actor in ACTOR_COLOR) return ACTOR_COLOR[actor]
+function getActorColor(actor: string, action?: string): string {
+  if (actor === 'user') {
+    if (action === 'approved' || action === 'approve') return 'text-positive'
+    if (action === 'rejected' || action === 'reject') return 'text-negative'
+    return 'text-positive'
+  }
+  if (actor === 'rule_engine' || actor === 'treasury') return 'text-text-muted'
   if (actor.startsWith('agent:')) return 'text-primary'
   return 'text-text-muted'
 }
@@ -46,9 +45,11 @@ function ApprovalInfoCard({ approval }: { approval: Approval }) {
   const typeLabel = TYPE_LABEL[approval.type] || approval.type
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
-      <h3 className="text-[15px] font-semibold mb-3">결재 정보</h3>
+      <h3 className="text-[15px] font-semibold mb-4">결재 정보</h3>
       <div className="space-y-0">
-        <InfoRow label="요청자" value={approval.requester} />
+        <InfoRow label="요청자" value={
+          <span className="text-primary">{approval.requester}</span>
+        } />
         <InfoRow label="유형" value={typeLabel} />
         <InfoRow label="상태" value={
           <StatusBadge variant={STATUS_VARIANT[approval.status] as 'warning'}>
@@ -56,7 +57,9 @@ function ApprovalInfoCard({ approval }: { approval: Approval }) {
           </StatusBadge>
         } />
         <InfoRow label="요청일" value={formatDateTime(approval.requested_at)} />
-        {approval.expires_at && <InfoRow label="만료일" value={formatDateTime(approval.expires_at)} />}
+        {approval.status === 'pending' && approval.expires_at && (
+          <InfoRow label="만료일" value={formatDateTime(approval.expires_at)} />
+        )}
         {approval.resolved_at && <InfoRow label="처리일" value={formatDateTime(approval.resolved_at)} />}
         {approval.resolved_by && <InfoRow label="처리자" value={approval.resolved_by} />}
         {approval.reference_id && (
@@ -75,7 +78,7 @@ function ApprovalInfoCard({ approval }: { approval: Approval }) {
 function ReviewsCard({ reviews }: { reviews: ApprovalReview[] }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
-      <h3 className="text-[15px] font-semibold mb-3">검토 의견</h3>
+      <h3 className="text-[15px] font-semibold mb-4">검토 의견</h3>
       {reviews.length === 0 ? (
         <div className="text-[13px] text-text-muted py-4 text-center">검토 의견이 없습니다</div>
       ) : (
@@ -114,7 +117,7 @@ function ReviewsCard({ reviews }: { reviews: ApprovalReview[] }) {
 function AuditHistoryCard({ history }: { history: ApprovalHistoryEntry[] }) {
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
-      <h3 className="text-[15px] font-semibold mb-3">감사 이력</h3>
+      <h3 className="text-[15px] font-semibold mb-4">감사 이력</h3>
       {history.length === 0 ? (
         <div className="text-[13px] text-text-muted py-4 text-center">이력이 없습니다</div>
       ) : (
@@ -123,7 +126,7 @@ function AuditHistoryCard({ history }: { history: ApprovalHistoryEntry[] }) {
             <div key={i} className="flex items-start gap-4 py-2.5 border-b border-border last:border-b-0">
               <span className="text-[12px] text-text-muted whitespace-nowrap min-w-[130px]">{formatDateTime(entry.at)}</span>
               <span className="text-[13px]">
-                <span className={`font-mono ${getActorColor(entry.actor)}`}>{entry.actor}</span>
+                <span className={`font-mono ${getActorColor(entry.actor, entry.action)}`}>{entry.actor}</span>
                 {' — '}
                 {entry.detail || entry.action}
               </span>
@@ -139,7 +142,7 @@ function AuditHistoryCard({ history }: { history: ApprovalHistoryEntry[] }) {
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between py-2 border-b border-border last:border-b-0 text-[13px]">
-      <span className="text-text-muted">{label}</span>
+      <span className="text-text-muted min-w-[80px]">{label}</span>
       <span>{value}</span>
     </div>
   )
@@ -160,14 +163,17 @@ export default function ApprovalDetail() {
       {/* 상세 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-[20px] font-bold">{approval.title}</h2>
-        {isPending && <ReviewControls approvalId={approval.id} isPending={isPending} title={approval.title} reviews={approval.reviews} />}
+        {isPending && <ReviewControls approvalId={approval.id} isPending={isPending} title={approval.title} reviews={approval.reviews} type={approval.type} params={approval.params} />}
       </div>
 
       {/* 거부 사유 배너 */}
-      {approval.reject_reason && (
-        <div className="bg-negative/10 border border-negative/30 rounded-lg p-4 mb-6 text-[13px]">
-          <div className="font-semibold text-negative mb-1">거부 사유</div>
-          <div className="text-text-muted">{approval.reject_reason}</div>
+      {approval.status === 'rejected' && approval.reject_reason && (
+        <div className="bg-negative/10 text-negative rounded-lg px-[18px] py-[14px] mb-6 flex items-start gap-2.5 text-[13px]">
+          <span className="text-[16px] leading-none mt-0.5">{'\u2715'}</span>
+          <div>
+            <div className="font-semibold mb-1">거부 사유</div>
+            <div className="text-[12px]">{approval.reject_reason}</div>
+          </div>
         </div>
       )}
 
