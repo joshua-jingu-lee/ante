@@ -800,6 +800,36 @@ class TestRetentionPolicy:
         deleted = await policy.enforce()
         assert deleted == {}
 
+    async def test_enforce_fundamental_path_resolution(self, store, data_dir):
+        """fundamental data_type이 _resolve_path 경로를 사용하여 삭제."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 15), date(2024, 2, 15)],
+                "symbol": ["005930", "005930"],
+                "market_cap": [300000000000000, 305000000000000],
+                "source": ["dart", "dart"],
+            }
+        )
+        await store.write("005930", "", df, data_type="fundamental")
+
+        # fundamental/krx/005930/ 경로에 파일이 생성되었는지 확인
+        fundamental_path = data_dir / "fundamental" / "krx" / "005930"
+        assert fundamental_path.exists()
+        assert len(list(fundamental_path.glob("*.parquet"))) == 2
+
+        # fundamental 보존 기간을 0일로 설정 → 오래된 데이터 삭제 대상
+        policy = RetentionPolicy(store, retention_days={"fundamental": 0})
+        now = datetime(2026, 6, 1, tzinfo=UTC)
+        deleted = await policy.enforce(now=now)
+
+        assert "fundamental" in deleted
+        assert deleted["fundamental"] == 2
+
+        result = await store.read("005930", "", data_type="fundamental")
+        assert result.is_empty()
+
 
 # ── DARTNormalizer 테스트 ─────────────────────────────
 

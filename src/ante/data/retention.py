@@ -9,6 +9,23 @@ from ante.data.store import ParquetStore
 
 logger = logging.getLogger(__name__)
 
+# OHLCV 타임프레임 집합 — retention key가 여기 속하면 data_type="ohlcv"
+_OHLCV_TIMEFRAMES: frozenset[str] = frozenset({"1m", "5m", "15m", "1h", "1d"})
+
+
+def _resolve_data_type(key: str) -> tuple[str, str]:
+    """retention key를 (data_type, timeframe) 튜플로 변환.
+
+    Args:
+        key: retention 딕셔너리의 키 (예: "1m", "fundamental")
+
+    Returns:
+        (data_type, timeframe) — 예: ("ohlcv", "1m"), ("fundamental", "")
+    """
+    if key in _OHLCV_TIMEFRAMES:
+        return ("ohlcv", key)
+    return (key, "")
+
 
 class RetentionPolicy:
     """데이터 보존 정책 — 오래된 데이터 삭제로 용량 관리.
@@ -52,21 +69,24 @@ class RetentionPolicy:
 
         deleted: dict[str, int] = {}
 
-        for tf, max_days in self._retention.items():
+        for key, max_days in self._retention.items():
             # -1이면 무기한 보존 → 스킵
             if max_days < 0:
                 continue
 
+            data_type, timeframe = _resolve_data_type(key)
             count = 0
-            symbols = self._store.list_symbols(tf)
+            symbols = self._store.list_symbols(timeframe, data_type=data_type)
 
             for symbol in symbols:
-                date_range = self._store.get_date_range(symbol, tf)
+                date_range = self._store.get_date_range(
+                    symbol, timeframe, data_type=data_type
+                )
                 if not date_range:
                     continue
 
-                # Parquet 파일 순회
-                path = self._store.base_path / "ohlcv" / tf / symbol
+                # ParquetStore._resolve_path()로 경로 결정
+                path = self._store._resolve_path(symbol, timeframe, data_type)
                 if not path.exists():
                     continue
 
@@ -80,14 +100,16 @@ class RetentionPolicy:
                         age_days = (now - file_month_end).days
 
                         if age_days > max_days:
-                            if self._store.delete_file(symbol, tf, month_str):
+                            if self._store.delete_file(
+                                symbol, timeframe, month_str, data_type=data_type
+                            ):
                                 count += 1
                     except (ValueError, IndexError):
                         logger.warning("Invalid parquet filename: %s", parquet_file)
                         continue
 
             if count > 0:
-                deleted[tf] = count
-                logger.info("Retention: deleted %d files for timeframe %s", count, tf)
+                deleted[key] = count
+                logger.info("Retention: deleted %d files for %s", count, key)
 
         return deleted
