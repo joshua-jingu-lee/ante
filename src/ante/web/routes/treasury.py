@@ -30,6 +30,14 @@ async def get_summary(request: Request) -> dict:
     summary["commission_rate"] = getattr(treasury, "commission_rate", 0.00015)
     summary["sell_tax_rate"] = getattr(treasury, "sell_tax_rate", 0.0023)
 
+    # 브로커 메타정보
+    broker = getattr(request.app.state, "broker", None)
+    if broker is not None:
+        summary["broker_id"] = broker.broker_id
+        summary["broker_name"] = broker.broker_name
+        summary["broker_short_name"] = broker.broker_short_name
+        summary["exchange"] = broker.exchange
+
     # KIS 계좌 헤더 정보
     config = getattr(request.app.state, "config", None)
     if config is not None:

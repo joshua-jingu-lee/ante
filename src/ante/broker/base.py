@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 class BrokerAdapter(ABC):
     """증권사 API 어댑터 추상 기본 클래스."""
 
+    # 서브클래스에서 오버라이드하는 브로커 메타정보
+    broker_id: str = "unknown"
+    broker_name: str = "Unknown Broker"
+    broker_short_name: str = "UNK"
+
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.is_connected: bool = False

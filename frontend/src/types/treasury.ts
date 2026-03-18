@@ -6,6 +6,11 @@ export interface TreasurySummary {
   total_profit_loss: number
   commission_rate: number
   sell_tax_rate: number
+  // 브로커 메타정보
+  broker_id: string
+  broker_name: string
+  broker_short_name: string
+  exchange: string
   // KIS 계좌 헤더
   account_number: string
   is_demo_trading: boolean

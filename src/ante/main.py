@@ -435,6 +435,7 @@ async def main() -> None:
             bot_manager=bot_manager,
             trade_service=trade_service,
             treasury=treasury,
+            broker=broker,
             report_store=report_store,
             data_store=parquet_store,
             audit_logger=audit_logger,
