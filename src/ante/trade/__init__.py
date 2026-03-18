@@ -8,6 +8,7 @@ from ante.trade.models import (
     TradeRecord,
     TradeStatus,
     TradeType,
+    WeeklySummary,
 )
 from ante.trade.performance import PerformanceTracker
 from ante.trade.position import PositionHistory
@@ -18,6 +19,7 @@ from ante.trade.service import TradeService
 __all__ = [
     "DailySummary",
     "MonthlySummary",
+    "WeeklySummary",
     "PerformanceMetrics",
     "PerformanceTracker",
     "PositionHistory",

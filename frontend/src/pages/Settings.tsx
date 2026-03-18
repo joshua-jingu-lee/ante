@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSystemStatus, useKillSwitch, useConfigs, useUpdateConfig } from '../hooks/useSystemStatus'
 import { PageSkeleton } from '../components/common/Skeleton'
+import ApiKeyStatusPanel from '../components/data/ApiKeyStatusPanel'
 
 /** 거래 설정 고정 항목 */
 const TRADING_CONFIGS = [
@@ -118,6 +119,11 @@ export default function Settings() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* 외부 데이터 API 키 상태 (BD-7) */}
+      <div className="mb-6">
+        <ApiKeyStatusPanel />
       </div>
 
       {/* 거래 설정 */}

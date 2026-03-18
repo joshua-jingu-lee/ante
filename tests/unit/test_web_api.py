@@ -106,11 +106,26 @@ class TestDataRoutes:
         assert body["items"] == []
         assert body["total"] == 0
 
+    def test_datasets_no_catalog_fundamental(self, client):
+        resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
+
     def test_schema_no_catalog(self, client):
         resp = client.get("/api/data/schema")
         assert resp.status_code == 200
         data = resp.json()
         assert "timestamp" in data
+
+    def test_schema_fundamental(self, client):
+        resp = client.get("/api/data/schema", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "date" in data
+        assert "per" in data
+        assert "pbr" in data
 
     def test_storage_no_catalog(self, client):
         resp = client.get("/api/data/storage")
@@ -131,6 +146,34 @@ class TestDataRoutes:
         assert isinstance(body["items"], list)
         assert "total" in body
 
+    def test_datasets_with_store_data_type_ohlcv(self, tmp_path):
+        """data_type=ohlcv 파라미터로 OHLCV 데이터셋만 반환."""
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=tmp_path / "data")
+        app = create_app(data_store=store)
+        client = TestClient(app)
+
+        resp = client.get("/api/data/datasets", params={"data_type": "ohlcv"})
+        assert resp.status_code == 200
+        body = resp.json()
+        for ds in body["items"]:
+            assert ds["data_type"] == "ohlcv"
+
+    def test_datasets_with_store_data_type_fundamental(self, tmp_path):
+        """data_type=fundamental 파라미터로 fundamental 데이터셋만 반환."""
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=tmp_path / "data")
+        app = create_app(data_store=store)
+        client = TestClient(app)
+
+        resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert resp.status_code == 200
+        body = resp.json()
+        for ds in body["items"]:
+            assert ds["data_type"] == "fundamental"
+
     def test_storage_with_store(self, tmp_path):
         from ante.data.store import ParquetStore
 
@@ -142,6 +185,92 @@ class TestDataRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert "total_mb" in data
+
+    def test_feed_status_no_store(self, client):
+        resp = client.get("/api/data/feed-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["initialized"] is False
+        assert data["checkpoints"] == []
+        assert data["recent_reports"] == []
+        assert data["api_keys"] == []
+
+    def test_feed_status_not_initialized(self, tmp_path):
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=tmp_path / "data")
+        app = create_app(data_store=store)
+        client = TestClient(app)
+
+        resp = client.get("/api/data/feed-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["initialized"] is False
+        assert isinstance(data["api_keys"], list)
+
+    def test_feed_status_initialized(self, tmp_path):
+        import json
+
+        from ante.data.store import ParquetStore
+        from ante.feed.config import FeedConfig
+
+        data_path = tmp_path / "data"
+        store = ParquetStore(base_path=data_path)
+        config = FeedConfig(data_path)
+        config.init()
+
+        # 체크포인트 생성
+        cp_dir = config.feed_dir / "checkpoints"
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        (cp_dir / "data_go_kr_ohlcv.json").write_text(
+            json.dumps(
+                {
+                    "source": "data_go_kr",
+                    "data_type": "ohlcv",
+                    "last_date": "2026-03-17",
+                    "updated_at": "2026-03-17T16:00:00Z",
+                }
+            )
+        )
+
+        # 리포트 생성
+        rpt_dir = config.feed_dir / "reports"
+        rpt_dir.mkdir(parents=True, exist_ok=True)
+        (rpt_dir / "2026-03-17-daily.json").write_text(
+            json.dumps(
+                {
+                    "mode": "daily",
+                    "started_at": "2026-03-17T16:00:12Z",
+                    "finished_at": "2026-03-17T16:05:34Z",
+                    "duration_seconds": 322,
+                    "target_date": "2026-03-16",
+                    "summary": {
+                        "symbols_total": 2487,
+                        "symbols_success": 2485,
+                        "symbols_failed": 2,
+                        "rows_written": 2485,
+                        "data_types": ["ohlcv", "fundamental"],
+                    },
+                    "failures": [],
+                    "warnings": [],
+                    "config_errors": [],
+                }
+            )
+        )
+
+        app = create_app(data_store=store)
+        client = TestClient(app)
+
+        resp = client.get("/api/data/feed-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["initialized"] is True
+        assert len(data["checkpoints"]) == 1
+        assert data["checkpoints"][0]["source"] == "data_go_kr"
+        assert data["checkpoints"][0]["last_date"] == "2026-03-17"
+        assert len(data["recent_reports"]) == 1
+        assert data["recent_reports"][0]["mode"] == "daily"
+        assert isinstance(data["api_keys"], list)
 
 
 # ── Report 라우트 테스트 ────────────────────────

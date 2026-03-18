@@ -21,6 +21,13 @@ class MemberCreateRequest(BaseModel):
     scopes: list[str] = []
 
 
+class PasswordChangeRequest(BaseModel):
+    """비밀번호 변경 요청."""
+
+    old_password: str
+    new_password: str
+
+
 class ScopesUpdateRequest(BaseModel):
     """권한 범위 변경 요청."""
 
@@ -134,6 +141,21 @@ async def rotate_token(request: Request, member_id: str) -> dict:
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     return {"member": asdict(member), "token": token}
+
+
+@router.patch("/{member_id}/password")
+async def change_password(
+    request: Request, member_id: str, body: PasswordChangeRequest
+) -> dict:
+    """비밀번호 변경 (human 멤버 전용)."""
+    svc = _get_member_service(request)
+    try:
+        await svc.change_password(member_id, body.old_password, body.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    return {"ok": True}
 
 
 @router.put("/{member_id}/scopes")
