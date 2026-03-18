@@ -50,14 +50,24 @@ export interface MonthlySummary {
   win_rate: number
 }
 
+export interface WeeklySummary {
+  week_start: string
+  week_end: string
+  realized_pnl: number
+  trade_count: number
+  win_rate: number
+}
+
 export interface Trade {
   id: number
   strategy_id: number
   bot_id: string
   symbol: string
+  symbol_name?: string
   side: 'buy' | 'sell'
   quantity: number
   price: number
   executed_at: string
   pnl?: number
+  commission?: number
 }
