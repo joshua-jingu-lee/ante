@@ -102,4 +102,5 @@ async def me(
         type=member.type,
         emoji=member.emoji,
         role=member.role,
+        login_at=session.get("created_at", ""),
     )

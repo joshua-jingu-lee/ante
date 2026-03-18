@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyMonthlySummary } from '../api/strategies'
+import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary, getStrategyTradesPaginated } from '../api/strategies'
 
 export function useStrategies() {
   return useQuery({
@@ -40,10 +40,29 @@ export function useStrategyDailySummary(id: string) {
   })
 }
 
+export function useStrategyWeeklySummary(id: string) {
+  return useQuery({
+    queryKey: ['strategies', id, 'weekly-summary'],
+    queryFn: () => getStrategyWeeklySummary(id),
+    enabled: !!id,
+  })
+}
+
 export function useStrategyMonthlySummary(id: string) {
   return useQuery({
     queryKey: ['strategies', id, 'monthly-summary'],
     queryFn: () => getStrategyMonthlySummary(id),
+    enabled: !!id,
+  })
+}
+
+export function useStrategyTradesPaginated(
+  id: string,
+  params?: { offset?: number; limit?: number; side?: string; start_date?: string; end_date?: string },
+) {
+  return useQuery({
+    queryKey: ['strategies', id, 'trades-paginated', params],
+    queryFn: () => getStrategyTradesPaginated(id, params),
     enabled: !!id,
   })
 }

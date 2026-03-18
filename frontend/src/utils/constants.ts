@@ -13,9 +13,9 @@ export const BOT_STATUS_LABELS: Record<string, string> = {
 
 /** 전략 상태 라벨 */
 export const STRATEGY_STATUS_LABELS: Record<string, string> = {
-  registered: '등록됨',
-  active: '활성',
-  inactive: '비활성',
+  registered: '대기',
+  active: '운용중',
+  inactive: '중지',
   archived: '보관됨',
 }
 

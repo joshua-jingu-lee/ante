@@ -17,6 +17,8 @@ import BotDetail from './pages/BotDetail'
 import BacktestData from './pages/BacktestData'
 import Agents from './pages/Agents'
 import AgentDetail from './pages/AgentDetail'
+import Performance from './pages/Performance'
+import Trades from './pages/Trades'
 import ReportDetail from './pages/ReportDetail'
 import Settings from './pages/Settings'
 import NotFound from './pages/NotFound'
@@ -52,6 +54,8 @@ export default function App() {
               <Route path="treasury/history" element={<TreasuryHistory />} />
               <Route path="strategies" element={<Strategies />} />
               <Route path="strategies/:id" element={<StrategyDetail />} />
+              <Route path="strategies/:id/performance" element={<Performance />} />
+              <Route path="strategies/:id/trades" element={<Trades />} />
               <Route path="bots" element={<Bots />} />
               <Route path="bots/:id" element={<BotDetail />} />
               <Route path="reports/:id" element={<ReportDetail />} />

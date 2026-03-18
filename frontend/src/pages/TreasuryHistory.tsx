@@ -35,16 +35,16 @@ export default function TreasuryHistory() {
   return (
     <>
       {/* 필터 */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-1">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex gap-1 bg-bg rounded-lg p-[3px]">
           {TYPE_TABS.map((tab) => (
             <button
               key={tab.value}
               onClick={() => handleTypeChange(tab.value)}
-              className={`px-3 py-1.5 rounded-lg text-[13px] font-medium border-none cursor-pointer transition-colors ${
+              className={`px-3.5 py-1.5 rounded text-[12px] font-medium border-none cursor-pointer transition-colors ${
                 typeFilter === tab.value
-                  ? 'bg-primary text-white'
-                  : 'bg-transparent text-text-muted hover:bg-surface-hover hover:text-text'
+                  ? 'bg-surface text-text'
+                  : 'bg-transparent text-text-muted hover:text-text'
               }`}
             >
               {tab.label}
@@ -93,8 +93,8 @@ export default function TreasuryHistory() {
                           </StatusBadge>
                         </td>
                         <td className="px-3 py-3 border-b border-border text-[13px] font-mono">{tx.bot_id || '-'}</td>
-                        <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${tx.type === 'allocate' ? 'text-positive' : tx.type === 'deallocate' ? 'text-negative' : ''}`}>
-                          {tx.type === 'allocate' ? '+' : ''}{formatKRW(tx.amount)}
+                        <td className={`px-3 py-3 border-b border-border text-[13px] text-right ${tx.amount >= 0 ? 'text-positive' : 'text-negative'}`}>
+                          {tx.amount > 0 ? '+' : ''}{formatKRW(tx.amount)}
                         </td>
                         <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">{tx.description}</td>
                       </tr>

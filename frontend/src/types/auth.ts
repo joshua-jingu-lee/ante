@@ -10,6 +10,8 @@ export interface User {
   type: string
   org: string
   scopes: string[]
+  emoji: string
+  login_at: string
 }
 
 export interface LoginResponse {

@@ -1,10 +1,9 @@
-/** 원화 포맷 (예: 1,000,000원) */
+/** 원화 포맷 (예: 1,000,000 원) — 목업 기준 "숫자 원" 형식 */
 export function formatKRW(value: number): string {
-  return new Intl.NumberFormat('ko-KR', {
-    style: 'currency',
-    currency: 'KRW',
+  const formatted = new Intl.NumberFormat('ko-KR', {
     maximumFractionDigits: 0,
   }).format(value)
+  return `${formatted} 원`
 }
 
 /** 퍼센트 포맷 (예: +1.23%) */
