@@ -5,7 +5,7 @@
 -- _base.sql 의 trading_state = 'active' 를 그대로 유지한다.
 -- (INSERT OR IGNORE 이므로 별도 override 불필요)
 
--- ── 동적 설정 (10개) ──────────────────────────────────
+-- ── 동적 설정 (11개) ──────────────────────────────────
 -- 값은 DynamicConfigService와 동일하게 JSON 인코딩하여 저장한다.
 INSERT INTO dynamic_config (key, value, category, updated_at)
 VALUES ('risk.max_mdd_pct', '"15.0"', 'risk', datetime('now', '-7 days'));
@@ -38,6 +38,9 @@ INSERT INTO dynamic_config (key, value, category, updated_at)
 VALUES ('broker.sell_tax_rate', '"0.23"', 'broker', datetime('now', '-7 days'));
 
 -- ── 표시·알림 설정 ────────────────────────────────────
+INSERT INTO dynamic_config (key, value, category, updated_at)
+VALUES ('display.currency_position', '"suffix"', 'display', datetime('now', '-7 days'));
+
 INSERT INTO dynamic_config (key, value, category, updated_at)
 VALUES ('notification.fill_alert', '"true"', 'notification', datetime('now', '-7 days'));
 

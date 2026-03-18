@@ -7,7 +7,7 @@ UPDATE system_state SET value = 'halted' WHERE key = 'trading_state';
 INSERT INTO system_state_history (old_state, new_state, reason, changed_by)
 VALUES ('active', 'halted', '설정 페이지 테스트용 거래 정지', 'test-seed');
 
--- ── 동적 설정 (10개) ────────────────────────────────
+-- ── 동적 설정 (11개) ────────────────────────────────
 INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('risk.max_mdd_pct', '15.0', 'risk', datetime('now', '-7 days'));
 INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('risk.max_position_pct', '30.0', 'risk', datetime('now', '-7 days'));
 INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('rule.daily_loss_limit', '5.0', 'rule', datetime('now', '-7 days'));
@@ -18,6 +18,7 @@ INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('rule.allo
 INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('bot.default_interval_sec', '60', 'bot', datetime('now', '-7 days'));
 INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('broker.commission_rate', '0.015', 'broker', datetime('now', '-7 days'));
 INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('broker.sell_tax_rate', '0.23', 'broker', datetime('now', '-7 days'));
+INSERT INTO dynamic_config (key, value, category, updated_at) VALUES ('display.currency_position', '"suffix"', 'display', datetime('now', '-7 days'));
 
 -- ── 설정 변경 이력 ──────────────────────────────────
 INSERT INTO dynamic_config_history (key, old_value, new_value, changed_by, changed_at)
