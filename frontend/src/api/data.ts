@@ -1,4 +1,5 @@
 import client from './client'
+import type { FeedStatus } from '../types/feed'
 
 export interface Dataset {
   id: number
@@ -32,4 +33,9 @@ export async function getStorageInfo(): Promise<StorageInfo> {
 
 export async function deleteDataset(id: number): Promise<void> {
   await client.delete(`/api/data/datasets/${id}`)
+}
+
+export async function getFeedStatus(): Promise<FeedStatus> {
+  const res = await client.get('/api/data/feed-status')
+  return res.data
 }
