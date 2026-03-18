@@ -3,9 +3,14 @@ import { useApprovals, useUpdateApprovalStatus } from '../../hooks/useApprovals'
 import { formatDateTime } from '../../utils/formatters'
 import StatusBadge from '../common/StatusBadge'
 import { TableSkeleton } from '../common/Skeleton'
-import type { Approval, ApprovalType } from '../../types/approval'
+import type { Approval } from '../../types/approval'
 
-const TYPE_LABELS: Record<ApprovalType, { label: string; variant: string }> = {
+const TYPE_LABELS: Record<string, { label: string; variant: string }> = {
+  strategy_report: { label: '전략 리포트', variant: 'info' },
+  budget_allocate: { label: '예산 할당', variant: 'primary' },
+  live_switch: { label: '실전 전환', variant: 'warning' },
+  risk_alert: { label: '위험 알림', variant: 'negative' },
+  // 레거시 타입 호환
   strategy_adopt: { label: '전략 채택', variant: 'info' },
   budget_change: { label: '예산 변경', variant: 'primary' },
   bot_create: { label: '봇 생성', variant: 'positive' },
@@ -57,22 +62,24 @@ export default function PendingApprovals() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item: Approval) => {
+              {items.map((item: Approval, idx: number) => {
                 const typeInfo = TYPE_LABELS[item.type] || { label: item.type, variant: 'muted' }
+                const isLast = idx === items.length - 1
+                const borderCls = isLast ? '' : 'border-b border-border'
                 return (
                   <tr key={item.id} className="hover:bg-surface-hover">
-                    <td className="px-3 py-3 border-b border-border text-[13px]">
+                    <td className={`px-3 py-3 text-[13px] ${borderCls}`}>
                       <StatusBadge variant={typeInfo.variant as 'info'}>{typeInfo.label}</StatusBadge>
                     </td>
-                    <td className="px-3 py-3 border-b border-border text-[13px]">
+                    <td className={`px-3 py-3 text-[13px] ${borderCls}`}>
                       <Link to={`/approvals/${item.id}`} className="text-primary no-underline hover:underline">
                         {item.title}
                       </Link>
                     </td>
-                    <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">
+                    <td className={`px-3 py-3 text-[13px] text-text-muted ${borderCls}`}>
                       {formatDateTime(item.requested_at)}
                     </td>
-                    <td className="px-3 py-3 border-b border-border text-[13px] text-right">
+                    <td className={`px-3 py-3 text-[13px] text-right ${borderCls}`}>
                       <div className="flex gap-2 justify-end">
                         <button
                           onClick={() => handleAction(item.id, 'approved')}
