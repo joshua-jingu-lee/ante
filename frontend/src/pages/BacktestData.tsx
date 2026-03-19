@@ -52,7 +52,7 @@ export default function BacktestData() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (target: { id: number; data_type: DataType }) => deleteDataset(target.id, target.data_type),
+    mutationFn: (target: { id: string; data_type: DataType }) => deleteDataset(target.id, target.data_type),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['datasets'] })
       queryClient.invalidateQueries({ queryKey: ['datasets-all-symbols'] })

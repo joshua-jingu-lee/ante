@@ -98,8 +98,11 @@ class _OpenPosition:
 
 
 def _make_trade_id(prefix: str, seq: int) -> str:
-    """시나리오 내 고유 trade_id 생성."""
-    return f"{prefix}-{seq:04d}"
+    """시나리오 내 고유 trade_id 생성 (UUID5 형식)."""
+    import uuid
+
+    namespace = uuid.UUID("12345678-1234-5678-1234-567812345678")
+    return str(uuid.uuid5(namespace, f"{prefix}-{seq:04d}"))
 
 
 def _make_timestamp(d: date, hour: int = 10, minute: int = 0) -> str:
