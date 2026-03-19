@@ -27,3 +27,7 @@ sell_tax_rate = 0.0023      # 매도 세금율 (증권거래세+농특세)
 
 [treasury]
 sync_interval_seconds = 300 # 잔고 동기화 주기 (초)
+
+[reconcile]
+enabled = true              # 대사 스케줄러 활성화 여부
+interval_seconds = 1800     # 대사 반복 주기 (초, 기본 30분)

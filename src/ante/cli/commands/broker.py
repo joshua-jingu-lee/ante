@@ -148,10 +148,13 @@ def positions(ctx: click.Context) -> None:
 
 
 @broker.command()
+@click.option(
+    "--fix", is_flag=True, default=False, help="불일치 발견 시 자동 보정 수행"
+)
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def reconcile(ctx: click.Context) -> None:
+def reconcile(ctx: click.Context, fix: bool) -> None:
     """내부 데이터와 증권사 데이터 대사."""
     fmt = get_formatter(ctx)
 
@@ -160,6 +163,7 @@ def reconcile(ctx: click.Context) -> None:
         from ante.eventbus.bus import EventBus
         from ante.trade.performance import PerformanceTracker
         from ante.trade.position import PositionHistory
+        from ante.trade.reconciler import PositionReconciler
         from ante.trade.recorder import TradeRecorder
         from ante.trade.service import TradeService
 
@@ -168,10 +172,10 @@ def reconcile(ctx: click.Context) -> None:
         await db.connect()
         try:
             eventbus = EventBus()
-            recorder = TradeRecorder(db, eventbus)
-            await recorder.initialize()
-            position_history = PositionHistory(db, eventbus)
+            position_history = PositionHistory(db)
             await position_history.initialize()
+            recorder = TradeRecorder(db, position_history)
+            await recorder.initialize()
             performance = PerformanceTracker(db)
             await performance.initialize()
             trade_service = TradeService(recorder, position_history, performance)
@@ -199,10 +203,30 @@ def reconcile(ctx: click.Context) -> None:
                         }
                     )
 
+            corrections: list[dict] = []
+            if fix and discrepancies:
+                reconciler = PositionReconciler(
+                    trade_service=trade_service,
+                    eventbus=eventbus,
+                )
+                # 전체 봇 대사: 모든 봇 ID 수집
+                bot_ids = {p.bot_id for p in internal_positions if p.quantity > 0}
+                # 봇이 없어도 외부 매수가 있을 수 있으므로 기본 봇 사용
+                if not bot_ids:
+                    bot_ids = {"default"}
+                for bot_id in bot_ids:
+                    bot_corrections = await reconciler.reconcile(
+                        bot_id=bot_id,
+                        broker_positions=broker_positions,
+                    )
+                    corrections.extend(bot_corrections)
+
             return {
                 "total_symbols": len(all_symbols),
                 "discrepancies": discrepancies,
                 "match": len(discrepancies) == 0,
+                "fix_applied": fix and len(corrections) > 0,
+                "corrections": len(corrections),
             }
         finally:
             await adapter.disconnect()
@@ -225,3 +249,5 @@ def reconcile(ctx: click.Context) -> None:
                 result["discrepancies"],
                 ["symbol", "broker_qty", "internal_qty", "diff"],
             )
+        if result.get("fix_applied"):
+            click.echo(f"  자동 보정      : {result['corrections']}건 수행")

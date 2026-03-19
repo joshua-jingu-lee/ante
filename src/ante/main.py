@@ -47,6 +47,7 @@ class Services:
     broker: Any = None
     api_gateway: Any = None
     stream_integration: Any = None
+    reconcile_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
     data_collector: Any = None
@@ -289,6 +290,42 @@ async def _init_broker(s: Services) -> None:
 
     if s.broker:
         await _sync_instruments(s)
+
+    # ReconcileScheduler 초기화
+    if s.broker and s.trade_service:
+        await _init_reconcile_scheduler(s)
+
+
+async def _init_reconcile_scheduler(s: Services) -> None:
+    """ReconcileScheduler 생성 및 시작."""
+    from ante.broker.scheduler import ReconcileScheduler
+    from ante.trade.reconciler import PositionReconciler
+
+    reconcile_config = s.config.get("reconcile", {})
+    if not isinstance(reconcile_config, dict):
+        reconcile_config = {}
+
+    enabled = reconcile_config.get("enabled", True)
+    if not enabled:
+        logger.info("ReconcileScheduler 비활성화 (reconcile.enabled=false)")
+        return
+
+    interval = reconcile_config.get("interval_seconds", 1800)
+
+    reconciler = PositionReconciler(
+        trade_service=s.trade_service,
+        eventbus=s.eventbus,
+    )
+
+    s.reconcile_scheduler = ReconcileScheduler(
+        reconciler=reconciler,
+        broker=s.broker,
+        bot_manager=s.bot_manager,
+        eventbus=s.eventbus,
+        interval_seconds=interval,
+    )
+    await s.reconcile_scheduler.start()
+    logger.info("ReconcileScheduler 시작 완료 (주기: %d초)", interval)
 
 
 async def _connect_mock_broker(s: Services, broker_config: dict) -> None:
@@ -864,6 +901,10 @@ async def _shutdown(s: Services) -> None:
         except asyncio.CancelledError:
             pass
         logger.info("Web API 종료")
+
+    if s.reconcile_scheduler:
+        await s.reconcile_scheduler.stop()
+        logger.info("ReconcileScheduler 종료")
 
     await s.treasury.stop_sync()
 
