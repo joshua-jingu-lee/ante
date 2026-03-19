@@ -460,6 +460,8 @@ class TelegramCommandReceiver:
 
     async def _cmd_stop(self, args: list[str]) -> str:
         """특정 봇 중지."""
+        from ante.bot.config import BotStatus
+
         if not self._bot_manager:
             return "BotManager가 연결되지 않았습니다."
 
@@ -471,8 +473,35 @@ class TelegramCommandReceiver:
         if not bot:
             return f"봇을 찾을 수 없습니다: {bot_id}"
 
+        if bot.status != BotStatus.RUNNING:
+            return f"이미 중지된 봇입니다: {bot_id}"
+
+        # 중지 전 포지션·미체결 주문 조회
+        positions = bot._ctx.get_positions()
+        open_orders = bot._ctx.get_open_orders()
+
         await self._bot_manager.stop_bot(bot_id)
-        return f"봇 {bot_id}이 중지되었습니다."
+
+        bot_name = bot.config.name or bot_id
+        header = f"ℹ️ *봇 중지*\n\n봇: {bot_name} ({bot_id})\n상태: 실행 중 → 중지됨"
+
+        if not positions:
+            return f"{header}\n\n미체결 주문은 자동 취소되지 않습니다."
+
+        # 보유 종목 있음 — 메시지 B
+        symbols = sorted(positions.keys())
+        pending_amount = sum(order.get("amount", 0) for order in open_orders)
+
+        lines = [
+            header,
+            "",
+            f"⚠️ 보유 종목 {len(symbols)}개가 유지됩니다.",
+            "중지 후 포지션을 직접 관리해야 합니다.",
+            "",
+            f"보유: {', '.join(symbols)}",
+            f"체결대기: {pending_amount:,.0f}원",
+        ]
+        return "\n".join(lines)
 
     # ── 유틸 ────────────────────────────────────────
 
