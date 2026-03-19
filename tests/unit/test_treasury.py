@@ -492,3 +492,91 @@ class TestTreasuryPersistence:
         assert budget is not None
         assert budget.allocated == 2_000_000.0
         assert budget.available == 2_000_000.0
+
+
+# ── update_budget ─────────────────────────────
+
+
+class TestUpdateBudget:
+    """Treasury.update_budget() 단위 테스트."""
+
+    async def test_increase_budget(self, treasury):
+        """기존 봇의 예산 증액."""
+        await treasury.allocate("bot1", 2_000_000.0)
+        await treasury.update_budget("bot1", 5_000_000.0)
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 5_000_000.0
+        assert budget.available == 5_000_000.0
+        assert treasury.unallocated == 5_000_000.0
+
+    async def test_decrease_budget(self, treasury):
+        """기존 봇의 예산 감액."""
+        await treasury.allocate("bot1", 5_000_000.0)
+        await treasury.update_budget("bot1", 3_000_000.0)
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 3_000_000.0
+        assert budget.available == 3_000_000.0
+        assert treasury.unallocated == 7_000_000.0
+
+    async def test_new_bot_budget(self, treasury):
+        """예산이 없는 봇에 최초 할당."""
+        await treasury.update_budget("new_bot", 3_000_000.0)
+
+        budget = treasury.get_budget("new_bot")
+        assert budget is not None
+        assert budget.allocated == 3_000_000.0
+        assert budget.available == 3_000_000.0
+        assert treasury.unallocated == 7_000_000.0
+
+    async def test_same_amount_noop(self, treasury):
+        """동일 금액이면 변경 없음."""
+        await treasury.allocate("bot1", 3_000_000.0)
+        await treasury.update_budget("bot1", 3_000_000.0)
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 3_000_000.0
+
+    async def test_increase_insufficient_funds(self, treasury):
+        """증액 시 미할당 잔액 부족이면 InsufficientFundsError."""
+        from ante.treasury.exceptions import InsufficientFundsError
+
+        await treasury.allocate("bot1", 8_000_000.0)
+        with pytest.raises(InsufficientFundsError, match="미할당 잔액 부족"):
+            await treasury.update_budget("bot1", 15_000_000.0)
+
+        # 원래 상태 유지
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 8_000_000.0
+
+    async def test_decrease_exceeds_available(self, treasury):
+        """감액 시 가용 예산 부족이면 InsufficientFundsError."""
+        from ante.treasury.exceptions import InsufficientFundsError
+
+        await treasury.allocate("bot1", 5_000_000.0)
+        # 자금 예약으로 available을 줄임
+        await treasury.reserve_for_order("bot1", "ord1", 4_000_000.0)
+
+        with pytest.raises(InsufficientFundsError, match="예산 회수 실패"):
+            await treasury.update_budget("bot1", 0.0)
+
+    async def test_negative_target_raises(self, treasury):
+        """목표 금액이 음수면 ValueError."""
+        with pytest.raises(ValueError, match="0 이상"):
+            await treasury.update_budget("bot1", -100.0)
+
+    async def test_set_to_zero(self, treasury):
+        """예산을 0으로 설정."""
+        await treasury.allocate("bot1", 3_000_000.0)
+        await treasury.update_budget("bot1", 0.0)
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 0.0
+        assert budget.available == 0.0
+        assert treasury.unallocated == 10_000_000.0
