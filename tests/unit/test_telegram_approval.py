@@ -10,11 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ante.core.database import Database
-from ante.eventbus import EventBus
-from ante.eventbus.events import ApprovalCreatedEvent, ApprovalResolvedEvent
 from ante.notification.base import NotificationLevel
-from ante.notification.service import NOTIFICATION_HISTORY_SCHEMA, NotificationService
 from ante.notification.telegram import TelegramAdapter
 from ante.notification.telegram_receiver import TelegramCommandReceiver
 
@@ -52,20 +48,6 @@ def receiver(adapter, approval_service):
         allowed_user_ids=[12345],
         approval_service=approval_service,
     )
-
-
-@pytest.fixture
-def eventbus():
-    return EventBus()
-
-
-@pytest.fixture
-async def db(tmp_path):
-    """테스트용 DB."""
-    _db = Database(str(tmp_path / "test.db"))
-    await _db.connect()
-    yield _db
-    await _db.close()
 
 
 # ── TelegramAdapter.send_with_buttons ─────────────
@@ -343,120 +325,7 @@ class TestApproveRejectCommands:
 
 
 # ── NotificationService 결재 이벤트 구독 ─────────
-
-
-class TestNotificationApprovalEvents:
-    """NotificationService의 ApprovalEvent 구독 테스트."""
-
-    async def test_approval_created_with_buttons(self, adapter, eventbus, db):
-        """ApprovalCreatedEvent가 인라인 버튼 메시지를 발송한다."""
-        await db.execute_script(NOTIFICATION_HISTORY_SCHEMA)
-
-        svc = NotificationService(
-            adapter=adapter,
-            eventbus=eventbus,
-            db=db,
-        )
-        await svc.initialize()
-        svc.subscribe()
-
-        event = ApprovalCreatedEvent(
-            approval_id="test-id",
-            approval_type="budget_change",
-            requester="agent",
-            title="예산 증액",
-            auto_approved=False,
-        )
-        await eventbus.publish(event)
-
-        # TelegramAdapter이므로 send_with_buttons 호출
-        adapter.send_with_buttons.assert_called_once()
-        call_args = adapter.send_with_buttons.call_args
-        assert call_args[0][0] == NotificationLevel.INFO
-        assert "결재 요청" in call_args[0][1]
-        assert "예산 증액" in call_args[0][1]
-        # 버튼 확인
-        buttons = call_args[0][2]
-        assert len(buttons) == 1
-        assert buttons[0][0]["callback_data"] == "approve:test-id"
-        assert buttons[0][1]["callback_data"] == "reject:test-id"
-
-    async def test_approval_created_auto_approved(self, adapter, eventbus, db):
-        """자동 승인 시 [자동 승인] 접두사가 포함된다."""
-        await db.execute_script(NOTIFICATION_HISTORY_SCHEMA)
-
-        svc = NotificationService(
-            adapter=adapter,
-            eventbus=eventbus,
-            db=db,
-        )
-        await svc.initialize()
-        svc.subscribe()
-
-        event = ApprovalCreatedEvent(
-            approval_id="test-auto",
-            approval_type="bot_stop",
-            requester="agent",
-            title="봇 중지",
-            auto_approved=True,
-        )
-        await eventbus.publish(event)
-
-        # 자동 승인이므로 send_with_buttons가 아닌 일반 send 호출
-        adapter.send_with_buttons.assert_not_called()
-        adapter.send.assert_called_once()
-        msg = adapter.send.call_args[0][1]
-        assert "[자동 승인]" in msg
-
-    async def test_approval_resolved_event(self, adapter, eventbus, db):
-        """ApprovalResolvedEvent가 결과 메시지를 발송한다."""
-        await db.execute_script(NOTIFICATION_HISTORY_SCHEMA)
-
-        svc = NotificationService(
-            adapter=adapter,
-            eventbus=eventbus,
-            db=db,
-        )
-        await svc.initialize()
-        svc.subscribe()
-
-        event = ApprovalResolvedEvent(
-            approval_id="test-id",
-            approval_type="budget_change",
-            resolution="approved",
-            resolved_by="telegram",
-        )
-        await eventbus.publish(event)
-
-        adapter.send.assert_called_once()
-        msg = adapter.send.call_args[0][1]
-        assert "처리 완료" in msg
-        assert "approved" in msg
-
-    async def test_approval_created_non_telegram_adapter(self, eventbus, db):
-        """TelegramAdapter가 아닌 경우 일반 send로 발송한다."""
-        await db.execute_script(NOTIFICATION_HISTORY_SCHEMA)
-
-        mock_adapter = MagicMock()
-        mock_adapter.send = AsyncMock(return_value=True)
-        mock_adapter.send_rich = AsyncMock(return_value=True)
-
-        svc = NotificationService(
-            adapter=mock_adapter,
-            eventbus=eventbus,
-            db=db,
-        )
-        await svc.initialize()
-        svc.subscribe()
-
-        event = ApprovalCreatedEvent(
-            approval_id="test-id",
-            approval_type="budget_change",
-            requester="agent",
-            title="예산 증액",
-            auto_approved=False,
-        )
-        await eventbus.publish(event)
-
-        # TelegramAdapter가 아니므로 일반 send 호출
-        mock_adapter.send.assert_called_once()
+# NotificationService는 이제 NotificationEvent 단일 구독 구조.
+# ApprovalCreatedEvent/ApprovalResolvedEvent 개별 핸들러는 제거됨.
+# 결재 알림은 ApprovalService가 NotificationEvent를
+# 직접 발행하는 방식으로 전환 예정 (#5).
