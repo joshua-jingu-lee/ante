@@ -168,3 +168,8 @@ def get_config(request: Request) -> Any | None:
 def get_broker(request: Request) -> Any | None:
     """브로커 (선택적). 없으면 None."""
     return getattr(request.app.state, "broker", None)
+
+
+def get_audit_logger_optional(request: Request) -> Any | None:
+    """감사 로거 (선택적). 없으면 None."""
+    return getattr(request.app.state, "audit_logger", None)

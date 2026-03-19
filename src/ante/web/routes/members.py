@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from ante.web.deps import get_member_service
+from ante.web.deps import get_audit_logger_optional, get_member_service
 from ante.web.schemas import (
     MemberCreateResponse,
     MemberDetailResponse,
@@ -77,7 +77,9 @@ async def list_members(
 )
 async def create_member(
     body: MemberCreateRequest,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """멤버 등록. 토큰 1회 반환."""
     try:
@@ -94,6 +96,15 @@ async def create_member(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="member.create",
+            resource=f"member:{body.member_id}",
+            detail=f"type={body.member_type}, role={body.role}",
+            ip=request.client.host if request.client else "",
+        )
 
     return {"member": asdict(member), "token": token}
 
@@ -128,7 +139,9 @@ async def get_member(
 )
 async def suspend_member(
     member_id: str,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """멤버 일시 정지."""
     try:
@@ -137,6 +150,15 @@ async def suspend_member(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="member.suspend",
+            resource=f"member:{member_id}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"member": asdict(member)}
 
 
@@ -151,7 +173,9 @@ async def suspend_member(
 )
 async def reactivate_member(
     member_id: str,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """멤버 재활성화."""
     try:
@@ -160,6 +184,15 @@ async def reactivate_member(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="member.reactivate",
+            resource=f"member:{member_id}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"member": asdict(member)}
 
 
@@ -174,7 +207,9 @@ async def reactivate_member(
 )
 async def revoke_member(
     member_id: str,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """멤버 영구 폐기."""
     try:
@@ -183,6 +218,15 @@ async def revoke_member(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="member.revoke",
+            resource=f"member:{member_id}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"member": asdict(member)}
 
 
@@ -197,7 +241,9 @@ async def revoke_member(
 )
 async def rotate_token(
     member_id: str,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """토큰 재발급."""
     try:
@@ -206,6 +252,15 @@ async def rotate_token(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="member.rotate_token",
+            resource=f"member:{member_id}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"member": asdict(member), "token": token}
 
 
@@ -221,7 +276,9 @@ async def rotate_token(
 async def change_password(
     member_id: str,
     body: PasswordChangeRequest,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """비밀번호 변경 (human 멤버 전용)."""
     try:
@@ -230,6 +287,15 @@ async def change_password(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", member_id),
+            action="member.change_password",
+            resource=f"member:{member_id}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"ok": True}
 
 
@@ -245,7 +311,9 @@ async def change_password(
 async def update_scopes(
     member_id: str,
     body: ScopesUpdateRequest,
+    request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """권한 범위 변경."""
     try:
@@ -254,4 +322,14 @@ async def update_scopes(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="member.update_scopes",
+            resource=f"member:{member_id}",
+            detail=f"scopes={body.scopes}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"member": asdict(member)}

@@ -11,6 +11,18 @@ from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
 
+async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
+    """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
+    try:
+        from ante.audit import AuditLogger
+
+        al = AuditLogger(db=db)
+        await al.initialize()
+        await al.log(**kwargs)
+    except Exception:
+        pass
+
+
 @click.group()
 def approval() -> None:
     """결재 관리."""
@@ -329,6 +341,14 @@ def cancel(ctx: click.Context, id: str, db_path: str) -> None:
         await service.initialize()
 
         req = await service.cancel(id=id, requester=requester)
+
+        await _audit_log(
+            db,
+            member_id=requester,
+            action="approval.cancel",
+            resource=f"approval:{id}",
+        )
+
         await db.close()
         return {"id": req.id, "status": req.status}
 
@@ -349,6 +369,7 @@ def cancel(ctx: click.Context, id: str, db_path: str) -> None:
 def approve(ctx: click.Context, id: str, db_path: str) -> None:
     """결재 승인."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _approve() -> dict:
         from ante.approval import ApprovalService
@@ -362,6 +383,14 @@ def approve(ctx: click.Context, id: str, db_path: str) -> None:
         await service.initialize()
 
         req = await service.approve(id=id)
+
+        await _audit_log(
+            db,
+            member_id=actor,
+            action="approval.approve",
+            resource=f"approval:{id}",
+        )
+
         await db.close()
         return {"id": req.id, "status": req.status, "type": req.type}
 
@@ -383,6 +412,7 @@ def approve(ctx: click.Context, id: str, db_path: str) -> None:
 def reject(ctx: click.Context, id: str, reason: str, db_path: str) -> None:
     """결재 거절."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _reject() -> dict:
         from ante.approval import ApprovalService
@@ -396,6 +426,15 @@ def reject(ctx: click.Context, id: str, reason: str, db_path: str) -> None:
         await service.initialize()
 
         req = await service.reject(id=id, reject_reason=reason)
+
+        await _audit_log(
+            db,
+            member_id=actor,
+            action="approval.reject",
+            resource=f"approval:{id}",
+            detail=reason,
+        )
+
         await db.close()
         return {"id": req.id, "status": req.status, "reject_reason": reason}
 

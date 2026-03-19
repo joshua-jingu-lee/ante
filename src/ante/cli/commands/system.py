@@ -29,6 +29,18 @@ async def _create_services():  # noqa: ANN202
     return db, eventbus
 
 
+async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
+    """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
+    try:
+        from ante.audit import AuditLogger
+
+        al = AuditLogger(db=db)
+        await al.initialize()
+        await al.log(**kwargs)
+    except Exception:
+        pass
+
+
 @system.command()
 @click.pass_context
 @require_auth
@@ -83,6 +95,15 @@ def halt(ctx: click.Context, reason: str) -> None:
             state = SystemState(db, eventbus)
             await state.initialize()
             await state.set_state(TradingState.HALTED, reason=reason, changed_by=actor)
+
+            await _audit_log(
+                db,
+                member_id=actor,
+                action="system.halt",
+                resource="system:kill_switch",
+                detail=reason,
+            )
+
             return {"trading_state": state.trading_state.value}
         finally:
             await db.close()
@@ -109,6 +130,15 @@ def activate(ctx: click.Context, reason: str) -> None:
             state = SystemState(db, eventbus)
             await state.initialize()
             await state.set_state(TradingState.ACTIVE, reason=reason, changed_by=actor)
+
+            await _audit_log(
+                db,
+                member_id=actor,
+                action="system.activate",
+                resource="system:kill_switch",
+                detail=reason,
+            )
+
             return {"trading_state": state.trading_state.value}
         finally:
             await db.close()

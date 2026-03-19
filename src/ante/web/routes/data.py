@@ -6,9 +6,9 @@ import logging
 import shutil
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ante.web.deps import get_data_store
+from ante.web.deps import get_audit_logger_optional, get_data_store
 from ante.web.schemas import (
     DataSchemaResponse,
     DatasetListResponse,
@@ -133,7 +133,9 @@ async def get_storage_summary(
 )
 async def delete_dataset(
     dataset_id: str,
+    request: Request,
     store: Annotated[Any | None, Depends(get_data_store)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
 ) -> None:
     """데이터셋 삭제.
@@ -161,6 +163,14 @@ async def delete_dataset(
     if not path.exists():
         raise HTTPException(status_code=404, detail="데이터셋을 찾을 수 없습니다")
     shutil.rmtree(path)
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="data.delete_dataset",
+            resource=f"dataset:{dataset_id}",
+            ip=request.client.host if request.client else "",
+        )
 
 
 @router.get("/feed-status", response_model=FeedStatusResponse)
