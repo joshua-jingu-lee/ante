@@ -331,18 +331,148 @@ class TestNotificationService:
         )
         assert len(adapter.sent_rich) == 1
 
-    async def test_subscribe_only_notification_event(self, adapter, eventbus):
-        """subscribe()는 NotificationEvent만 구독한다."""
+    async def test_subscribe_registers_events(self, adapter, eventbus):
+        """subscribe()는 NotificationEvent + ConfigChangedEvent를 구독한다."""
+        from ante.eventbus.events import ConfigChangedEvent
+
         svc = NotificationService(adapter=adapter, eventbus=eventbus)
         svc.subscribe()
 
-        # NotificationEvent 핸들러만 등록되어 있어야 함
         handlers = eventbus._handlers
         assert NotificationEvent in handlers
-        assert len(handlers) == 1
+        assert ConfigChangedEvent in handlers
+        assert len(handlers) == 2
 
     async def test_no_instrument_service_dependency(self):
         """생성자에 instrument_service 파라미터가 없다."""
         sig = inspect.signature(NotificationService.__init__)
         param_names = list(sig.parameters.keys())
         assert "instrument_service" not in param_names
+
+
+# ── parse_quiet_hours ─────────────────────────────
+
+
+class TestParseQuietHours:
+    def test_valid_format(self):
+        """정상 형식 파싱."""
+        from ante.notification.service import parse_quiet_hours
+
+        result = parse_quiet_hours("23:00-07:00")
+        assert result == (time(23, 0), time(7, 0))
+
+    def test_with_spaces(self):
+        """공백 포함 형식 파싱."""
+        from ante.notification.service import parse_quiet_hours
+
+        result = parse_quiet_hours("23:00 - 07:00")
+        assert result == (time(23, 0), time(7, 0))
+
+    def test_invalid_format_returns_none(self):
+        """잘못된 형식은 None 반환."""
+        from ante.notification.service import parse_quiet_hours
+
+        assert parse_quiet_hours("invalid") is None
+        assert parse_quiet_hours("") is None
+        assert parse_quiet_hours("25:00-07:00") is None
+
+    def test_midnight_range(self):
+        """자정 포함 범위."""
+        from ante.notification.service import parse_quiet_hours
+
+        result = parse_quiet_hours("00:00-06:00")
+        assert result == (time(0, 0), time(6, 0))
+
+
+# ── ConfigChangedEvent → quiet_hours 갱신 ─────────
+
+
+class TestQuietHoursConfigChange:
+    @pytest.fixture
+    def adapter(self):
+        return MockAdapter()
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    def service(self, adapter, eventbus):
+        svc = NotificationService(adapter=adapter, eventbus=eventbus)
+        svc.subscribe()
+        return svc
+
+    async def test_config_change_updates_quiet_hours(self, service, eventbus):
+        """ConfigChangedEvent로 quiet_hours 갱신."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.quiet_hours",
+                old_value="",
+                new_value='"23:00-07:00"',
+                changed_by="test",
+            )
+        )
+        assert service._quiet_start == time(23, 0)
+        assert service._quiet_end == time(7, 0)
+
+    async def test_config_change_clears_quiet_hours(self, service, eventbus):
+        """빈 값으로 quiet_hours 비활성화."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        # 먼저 설정
+        service._quiet_start = time(23, 0)
+        service._quiet_end = time(7, 0)
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.quiet_hours",
+                old_value='"23:00-07:00"',
+                new_value='""',
+                changed_by="test",
+            )
+        )
+        assert service._quiet_start is None
+        assert service._quiet_end is None
+
+    async def test_config_change_ignores_other_keys(self, service, eventbus):
+        """다른 키 변경은 무시."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        service._quiet_start = time(23, 0)
+        service._quiet_end = time(7, 0)
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="system",
+                key="system.log_level",
+                old_value='"INFO"',
+                new_value='"DEBUG"',
+                changed_by="test",
+            )
+        )
+        # 변경 없음
+        assert service._quiet_start == time(23, 0)
+        assert service._quiet_end == time(7, 0)
+
+    async def test_config_change_invalid_format(self, service, eventbus):
+        """잘못된 형식이면 quiet_hours 비활성화."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        service._quiet_start = time(23, 0)
+        service._quiet_end = time(7, 0)
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.quiet_hours",
+                old_value='"23:00-07:00"',
+                new_value='"invalid"',
+                changed_by="test",
+            )
+        )
+        assert service._quiet_start is None
+        assert service._quiet_end is None

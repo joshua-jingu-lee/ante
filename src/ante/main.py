@@ -843,10 +843,25 @@ async def _init_notification(s: Services) -> None:
 
     adapter = TelegramAdapter(bot_token=telegram_token, chat_id=telegram_chat_id)
     min_level_str = s.config.get("notification.min_level", "info")
+
+    # quiet_hours 파싱
+    quiet_start = None
+    quiet_end = None
+    if s.dynamic_config:
+        from ante.notification.service import parse_quiet_hours
+
+        raw = await s.dynamic_config.get("notification.quiet_hours", default=None)
+        if raw:
+            parsed = parse_quiet_hours(str(raw))
+            if parsed:
+                quiet_start, quiet_end = parsed
+
     s.notification_service = NotificationService(
         adapter=adapter,
         eventbus=s.eventbus,
         min_level=NotificationLevel(min_level_str),
+        quiet_start=quiet_start,
+        quiet_end=quiet_end,
     )
     s.notification_service.subscribe()
     logger.info("NotificationService 초기화 완료 (Telegram)")
