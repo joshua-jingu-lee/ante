@@ -6,10 +6,14 @@ import logging
 from dataclasses import asdict
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from ante.web.deps import get_approval_service, get_report_store_optional
+from ante.web.deps import (
+    get_approval_service,
+    get_audit_logger_optional,
+    get_report_store_optional,
+)
 from ante.web.schemas import (
     ApprovalDetailResponse,
     ApprovalListResponse,
@@ -94,7 +98,9 @@ async def get_approval(
 async def update_approval_status(
     approval_id: str,
     body: ApprovalStatusUpdate,
+    request: Request,
     approval_service: Annotated[Any, Depends(get_approval_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """결재 승인/거부 처리."""
     try:
@@ -113,5 +119,15 @@ async def update_approval_status(
             )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    action = "approval.approve" if body.status == "approved" else "approval.reject"
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "user"),
+            action=action,
+            resource=f"approval:{approval_id}",
+            detail=body.memo,
+            ip=request.client.host if request.client else "",
+        )
 
     return {"approval": asdict(approval)}

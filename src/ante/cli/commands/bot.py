@@ -7,7 +7,7 @@ import asyncio
 import click
 
 from ante.cli.main import get_formatter
-from ante.cli.middleware import require_auth, require_scope
+from ante.cli.middleware import get_member_id, require_auth, require_scope
 
 
 @click.group()
@@ -30,6 +30,18 @@ async def _create_services():  # noqa: ANN202
     manager = BotManager(eventbus=eventbus, db=db)
     await manager.initialize()
     return db, eventbus, manager
+
+
+async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
+    """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
+    try:
+        from ante.audit import AuditLogger
+
+        al = AuditLogger(db=db)
+        await al.initialize()
+        await al.log(**kwargs)
+    except Exception:
+        pass
 
 
 @bot.command("list")
@@ -152,6 +164,7 @@ def bot_create(
 ) -> None:
     """봇 생성."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     # 파라미터 파싱
     param_dict: dict = {}
@@ -185,6 +198,15 @@ def bot_create(
                    VALUES (?, ?, ?, ?, ?)""",
                 (bid, name, strategy, bot_type, json.dumps(config_dict)),
             )
+
+            await _audit_log(
+                db,
+                member_id=actor,
+                action="bot.create",
+                resource=f"bot:{bid}",
+                detail=f"strategy={strategy}",
+            )
+
             return config_dict
         finally:
             await db.close()
@@ -207,6 +229,7 @@ def bot_create(
 def bot_remove(ctx: click.Context, bot_id: str) -> None:
     """봇 삭제."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
     async def _run_remove() -> bool:
         db, _, _ = await _create_services()
@@ -222,6 +245,14 @@ def bot_remove(ctx: click.Context, bot_id: str) -> None:
                 " WHERE bot_id = ?",
                 (bot_id,),
             )
+
+            await _audit_log(
+                db,
+                member_id=actor,
+                action="bot.delete",
+                resource=f"bot:{bot_id}",
+            )
+
             return True
         finally:
             await db.close()

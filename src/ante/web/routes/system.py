@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ante.web.deps import get_system_state, get_system_state_optional
+from ante.web.deps import (
+    get_audit_logger_optional,
+    get_system_state,
+    get_system_state_optional,
+)
 from ante.web.schemas import HealthResponse, KillSwitchResponse, StatusResponse
 
 router = APIRouter()
@@ -72,7 +76,9 @@ async def health_check() -> dict:
 )
 async def kill_switch(
     body: KillSwitchRequest,
+    request: Request,
     system_state: Annotated[Any, Depends(get_system_state)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """킬 스위치 제어 (halt/activate)."""
     from datetime import UTC, datetime
@@ -90,6 +96,17 @@ async def kill_switch(
         )
 
     await system_state.set_state(target, reason=body.reason, changed_by="dashboard")
+
+    action = "system.halt" if body.action == "halt" else "system.activate"
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action=action,
+            resource="system:kill_switch",
+            detail=body.reason,
+            ip=request.client.host if request.client else "",
+        )
+
     return {
         "status": system_state.trading_state.value,
         "changed_at": datetime.now(UTC).isoformat(),

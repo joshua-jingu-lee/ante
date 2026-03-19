@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ante.web.deps import get_report_store
+from ante.web.deps import get_audit_logger_optional, get_report_store
 from ante.web.schemas import (
     ReportDetailResponse,
     ReportListResponse,
@@ -34,10 +34,22 @@ async def get_report_schema() -> dict:
 )
 async def submit_report(
     body: dict,
+    request: Request,
     report_store: Annotated[Any, Depends(get_report_store)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """리포트 제출."""
     report = await report_store.submit(body)
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="report.submit",
+            resource=f"report:{report.report_id}",
+            detail=f"strategy={report.strategy_name}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {
         "report_id": report.report_id,
         "strategy": report.strategy_name,

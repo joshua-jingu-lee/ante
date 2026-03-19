@@ -48,6 +48,10 @@ def create_app(**services: Any) -> FastAPI:
         allow_headers=["*"],
     )
 
+    from ante.web.middleware.audit import AuditMiddleware
+
+    app.add_middleware(AuditMiddleware)
+
     for name, service in services.items():
         setattr(app.state, name, service)
 
