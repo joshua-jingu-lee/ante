@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -106,16 +106,31 @@ def agent_no_scopes_runner():
     return r
 
 
+def _mock_strategy_registry():
+    """strategy list가 DB 접속 없이 동작하도록 mock."""
+    db = MagicMock()
+    db.connect = AsyncMock()
+    db.close = AsyncMock()
+    registry = MagicMock()
+    registry.list_strategies = AsyncMock(return_value=[])
+    return patch(
+        "ante.cli.commands.strategy._create_registry",
+        new_callable=AsyncMock,
+        return_value=(registry, db),
+    )
+
+
 class TestAuthRequired:
     """@require_auth 데코레이터 테스트."""
 
     def test_unauthenticated_command_fails(self, runner):
         """토큰 없이 인증 필수 커맨드 실행 시 실패."""
-        result = runner.invoke(cli, ["strategy", "list"])
-        assert result.exit_code != 0
-        assert "인증이 필요합니다" in result.output or "인증이 필요합니다" in (
-            result.output + (result.stderr_bytes or b"").decode()
-        )
+        with _mock_strategy_registry():
+            result = runner.invoke(cli, ["strategy", "list"])
+            assert result.exit_code != 0
+            assert "인증이 필요합니다" in result.output or "인증이 필요합니다" in (
+                result.output + (result.stderr_bytes or b"").decode()
+            )
 
     def test_authenticated_help_works(self, runner):
         """--help는 인증 없이도 동작."""
@@ -124,8 +139,9 @@ class TestAuthRequired:
 
     def test_authenticated_command_succeeds(self, auth_runner):
         """인증된 상태에서 커맨드 정상 실행."""
-        result = auth_runner.invoke(cli, ["strategy", "list"])
-        assert result.exit_code == 0
+        with _mock_strategy_registry():
+            result = auth_runner.invoke(cli, ["strategy", "list"])
+            assert result.exit_code == 0
 
 
 class TestRequireScope:
@@ -133,18 +149,21 @@ class TestRequireScope:
 
     def test_human_bypasses_scope_check(self, auth_runner):
         """Human(master) 멤버는 scope 검증 없이 통과."""
-        result = auth_runner.invoke(cli, ["strategy", "list"])
-        assert result.exit_code == 0
+        with _mock_strategy_registry():
+            result = auth_runner.invoke(cli, ["strategy", "list"])
+            assert result.exit_code == 0
 
     def test_agent_with_matching_scope_passes(self, agent_runner):
         """Agent가 필요 scope를 보유하면 통과."""
-        result = agent_runner.invoke(cli, ["strategy", "list"])
-        assert result.exit_code == 0
+        with _mock_strategy_registry():
+            result = agent_runner.invoke(cli, ["strategy", "list"])
+            assert result.exit_code == 0
 
     def test_agent_without_scope_fails(self, agent_no_scopes_runner):
         """Agent가 필요 scope가 없으면 실패."""
-        result = agent_no_scopes_runner.invoke(cli, ["strategy", "list"])
-        assert result.exit_code != 0
+        with _mock_strategy_registry():
+            result = agent_no_scopes_runner.invoke(cli, ["strategy", "list"])
+            assert result.exit_code != 0
 
 
 class TestAuthExemptCommands:

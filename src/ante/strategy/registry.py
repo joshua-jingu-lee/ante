@@ -150,6 +150,14 @@ class StrategyRegistry:
             (status.value, strategy_id),
         )
 
+    async def get_by_name(self, name: str) -> list[StrategyRecord]:
+        """이름으로 전략 레코드 조회 (동일 이름 여러 버전 가능)."""
+        rows = await self._db.fetch_all(
+            "SELECT * FROM strategies WHERE name = ? ORDER BY registered_at DESC",
+            (name,),
+        )
+        return [self._row_to_record(row) for row in rows]
+
     async def exists(self, strategy_id: str) -> bool:
         """전략 존재 여부 확인."""
         row = await self._db.fetch_one(
