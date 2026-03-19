@@ -267,6 +267,13 @@ class TradingStateChangedEvent(Event):
 
 
 @dataclass(frozen=True)
+class SystemStartedEvent(Event):
+    """Main → EventBus: 시스템 초기화 완료."""
+
+    auto_started_bots: int = 0
+
+
+@dataclass(frozen=True)
 class SystemShutdownEvent(Event):
     """Main → EventBus: 시스템 종료 시작."""
 

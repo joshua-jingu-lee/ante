@@ -936,7 +936,7 @@ async def _run(s: Services) -> None:
 
     logger.info("Ante 준비 완료 — 종료 시그널 대기 중")
 
-    from ante.eventbus.events import NotificationEvent
+    from ante.eventbus.events import NotificationEvent, SystemStartedEvent
 
     if s.eventbus:
         await s.eventbus.publish(
@@ -947,6 +947,7 @@ async def _run(s: Services) -> None:
                 category="system",
             )
         )
+        await s.eventbus.publish(SystemStartedEvent())
 
     await shutdown_event.wait()
 
