@@ -46,7 +46,59 @@ class TelegramAdapter(NotificationAdapter):
         text = "\n".join(parts)
         return await self._send_message(text, parse_mode="Markdown")
 
-    async def _send_message(self, text: str, parse_mode: str = "") -> bool:
+    async def send_with_buttons(
+        self,
+        level: NotificationLevel,
+        message: str,
+        buttons: list[list[dict]],
+    ) -> bool:
+        """인라인 버튼이 포함된 알림 발송.
+
+        Args:
+            level: 알림 레벨.
+            message: 메시지 본문.
+            buttons: 인라인 키보드 버튼 행 목록.
+                [[{"text": "승인", "callback_data": "approve:id"}, ...], ...]
+        """
+        emoji = LEVEL_EMOJI.get(level, "\U0001f4cc")
+        text = f"{emoji} {message}"
+        reply_markup = {
+            "inline_keyboard": buttons,
+        }
+        return await self._send_message(
+            text, parse_mode="Markdown", reply_markup=reply_markup
+        )
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        text: str = "",
+    ) -> bool:
+        """answerCallbackQuery API 호출 (버튼 로딩 해제)."""
+        try:
+            import aiohttp
+        except ImportError:
+            return False
+
+        url = f"{self._api_base}/answerCallbackQuery"
+        payload: dict = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    return resp.status == 200
+        except Exception as e:
+            logger.warning("answerCallbackQuery 오류: %s", e)
+            return False
+
+    async def _send_message(
+        self,
+        text: str,
+        parse_mode: str = "",
+        reply_markup: dict | None = None,
+    ) -> bool:
         """텔레그램 sendMessage API 호출."""
         try:
             import aiohttp
@@ -63,6 +115,8 @@ class TelegramAdapter(NotificationAdapter):
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
 
         try:
             async with aiohttp.ClientSession() as session:

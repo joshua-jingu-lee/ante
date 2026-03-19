@@ -120,6 +120,19 @@ class NotificationService:
             priority=0,
         )
 
+        from ante.eventbus.events import ApprovalCreatedEvent, ApprovalResolvedEvent
+
+        self._eventbus.subscribe(
+            ApprovalCreatedEvent,
+            self._on_approval_created,
+            priority=0,
+        )
+        self._eventbus.subscribe(
+            ApprovalResolvedEvent,
+            self._on_approval_resolved,
+            priority=0,
+        )
+
     def _make_dedup_key(self, level: NotificationLevel, message: str) -> str:
         """중복 방지 키 생성: level + message_hash."""
         import hashlib
@@ -462,6 +475,89 @@ class NotificationService:
             level,
             msg,
             event_type="CircuitBreakerEvent",
+        )
+
+    async def _on_approval_created(self, event: object) -> None:
+        """결재 요청 생성 알림 (인라인 버튼 포함)."""
+        from ante.eventbus.events import ApprovalCreatedEvent
+        from ante.notification.templates import APPROVAL_CREATED
+
+        if not isinstance(event, ApprovalCreatedEvent):
+            return
+
+        prefix = "[자동 승인] 📋 " if event.auto_approved else "📋 "
+        msg = APPROVAL_CREATED.format(
+            prefix=prefix,
+            approval_type=event.approval_type,
+            title=event.title,
+            requester=event.requester,
+            approval_id=event.approval_id,
+        )
+
+        # 자동 승인이 아닌 경우 인라인 버튼 포함 발송 시도
+        if not event.auto_approved:
+            from ante.notification.telegram import TelegramAdapter
+
+            if isinstance(self._adapter, TelegramAdapter):
+                buttons = [
+                    [
+                        {
+                            "text": "\u2705 승인",
+                            "callback_data": f"approve:{event.approval_id}",
+                        },
+                        {
+                            "text": "\u274c 거절",
+                            "callback_data": f"reject:{event.approval_id}",
+                        },
+                    ]
+                ]
+                success = False
+                error_message = ""
+                try:
+                    success = await self._adapter.send_with_buttons(
+                        NotificationLevel.INFO, msg, buttons
+                    )
+                except Exception as e:
+                    error_message = str(e)
+                    logger.warning("결재 알림 발송 실패: %s", e)
+
+                await self._record_history(
+                    level=NotificationLevel.INFO,
+                    title="결재 요청",
+                    message=msg,
+                    success=success,
+                    error_message=error_message,
+                    event_type="ApprovalCreatedEvent",
+                )
+                return
+
+        # 자동 승인 또는 TelegramAdapter가 아닌 경우 일반 발송
+        await self._send_and_record(
+            NotificationLevel.INFO,
+            msg,
+            title="결재 요청",
+            event_type="ApprovalCreatedEvent",
+        )
+
+    async def _on_approval_resolved(self, event: object) -> None:
+        """결재 처리 완료 알림."""
+        from ante.eventbus.events import ApprovalResolvedEvent
+        from ante.notification.templates import APPROVAL_RESOLVED
+
+        if not isinstance(event, ApprovalResolvedEvent):
+            return
+
+        msg = APPROVAL_RESOLVED.format(
+            approval_type=event.approval_type,
+            resolution=event.resolution,
+            resolved_by=event.resolved_by,
+            approval_id=event.approval_id,
+        )
+        await self._send_and_record(
+            NotificationLevel.INFO,
+            msg,
+            title="결재 처리 완료",
+            event_type="ApprovalResolvedEvent",
         )
 
     def _should_send(self, level: NotificationLevel) -> bool:

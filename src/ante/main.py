@@ -667,6 +667,7 @@ async def _init_notification(s: Services) -> None:
             bot_manager=s.bot_manager,
             treasury=s.treasury,
             system_state=s.system_state,
+            approval_service=s.approval_service,
         )
         s.telegram_receiver.start()
         logger.info("TelegramCommandReceiver 시작")
