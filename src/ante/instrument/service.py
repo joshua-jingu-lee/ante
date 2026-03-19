@@ -60,9 +60,10 @@ class InstrumentService:
 
     def _is_cache_expired(self) -> bool:
         """캐시 TTL 초과 여부."""
+        import math
         import time as time_mod
 
-        if self._cache_loaded_at == 0.0:
+        if math.isclose(self._cache_loaded_at, 0.0, abs_tol=1e-9):
             return True
         return (time_mod.monotonic() - self._cache_loaded_at) > self._cache_ttl
 

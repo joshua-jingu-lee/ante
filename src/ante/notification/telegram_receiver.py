@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as time_mod
+from inspect import isawaitable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -83,7 +84,7 @@ class TelegramCommandReceiver:
                 for update in updates:
                     await self._handle_update(update)
             except asyncio.CancelledError:
-                break
+                raise
             except Exception:
                 logger.warning("텔레그램 폴링 실패, 다음 주기에 재시도", exc_info=True)
 
@@ -188,7 +189,10 @@ class TelegramCommandReceiver:
 
         handler = handlers.get(command)
         if handler:
-            return await handler(args)
+            result = handler(args)
+            if isawaitable(result):
+                return await result
+            return result
 
         return "알 수 없는 명령입니다. /help를 입력해 주세요."
 
@@ -232,7 +236,7 @@ class TelegramCommandReceiver:
 
     # ── 명령 핸들러 ─────────────────────────────────
 
-    async def _cmd_help(self, args: list[str]) -> str:
+    def _cmd_help(self, args: list[str]) -> str:
         """사용 가능한 명령어 목록."""
         return (
             "사용 가능한 명령어:\n"
@@ -245,7 +249,7 @@ class TelegramCommandReceiver:
             "/help — 이 도움말"
         )
 
-    async def _cmd_status(self, args: list[str]) -> str:
+    def _cmd_status(self, args: list[str]) -> str:
         """시스템 상태 요약."""
         parts = []
 
@@ -263,7 +267,7 @@ class TelegramCommandReceiver:
 
         return "\n".join(parts)
 
-    async def _cmd_bots(self, args: list[str]) -> str:
+    def _cmd_bots(self, args: list[str]) -> str:
         """봇 목록."""
         if not self._bot_manager:
             return "BotManager가 연결되지 않았습니다."
@@ -281,7 +285,7 @@ class TelegramCommandReceiver:
 
         return "봇 목록:\n" + "\n".join(lines)
 
-    async def _cmd_balance(self, args: list[str]) -> str:
+    def _cmd_balance(self, args: list[str]) -> str:
         """자금 현황."""
         if not self._treasury:
             return "Treasury가 연결되지 않았습니다."

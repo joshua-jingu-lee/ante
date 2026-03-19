@@ -55,7 +55,7 @@ class RetentionPolicy:
     def retention_days(self) -> dict[str, int]:
         return self._retention
 
-    async def enforce(self, now: datetime | None = None) -> dict[str, int]:
+    def enforce(self, now: datetime | None = None) -> dict[str, int]:
         """보존 정책 적용. 삭제된 파일 수를 timeframe별로 반환.
 
         Args:

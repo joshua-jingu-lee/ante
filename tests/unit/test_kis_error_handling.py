@@ -353,7 +353,7 @@ class TestGatewayCancelFailed:
         mock_broker.cancel_order = AsyncMock(side_effect=Exception("network error"))
 
         gw = APIGateway(broker=mock_broker, eventbus=eventbus)
-        await gw.start()
+        gw.start()
 
         received: list[OrderCancelFailedEvent] = []
         eventbus.subscribe(OrderCancelFailedEvent, lambda e: received.append(e))

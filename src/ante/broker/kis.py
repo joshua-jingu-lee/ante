@@ -67,6 +67,94 @@ _ORDER_TR_IDS = frozenset(
 _AUTH_PATH = "/oauth2/tokenP"
 
 
+class KISErrorClassifier:
+    """KIS API 에러를 분류하여 재시도/즉시실패/서킷브레이크를 결정한다."""
+
+    @staticmethod
+    def classify(error: Exception) -> tuple[bool, bool]:
+        """에러를 분류하여 (retryable, record_cb_failure) 튜플을 반환한다.
+
+        Returns:
+            retryable: 재시도 가능 여부
+            record_cb_failure: circuit breaker에 실패 기록 여부
+        """
+        if isinstance(error, (CircuitOpenError, AuthenticationError)):
+            return False, False
+        if isinstance(error, TimeoutError):
+            return True, True
+        if isinstance(error, (ConnectionError, OSError)):
+            return True, True
+        if isinstance(error, RateLimitError):
+            return True, True
+        if isinstance(error, APIError):
+            if not error.retryable:
+                return False, False
+            return True, True
+        # 알 수 없는 에러는 재시도하지 않음
+        return False, False
+
+    @staticmethod
+    def to_api_error(error: Exception, timeout: float) -> Exception:
+        """네트워크/타임아웃 에러를 APIError로 래핑한다."""
+        if isinstance(error, TimeoutError):
+            return APIError(f"타임아웃 ({timeout:.0f}초 초과)", retryable=True)
+        if isinstance(error, (ConnectionError, OSError)):
+            return APIError(str(error), retryable=True)
+        return error
+
+    @staticmethod
+    def log_label(error: Exception) -> str:
+        """에러 종류별 로그 라벨 반환."""
+        if isinstance(error, TimeoutError):
+            return "API 타임아웃"
+        if isinstance(error, (ConnectionError, OSError)):
+            return "네트워크 오류"
+        if isinstance(error, RateLimitError):
+            return "Rate limit"
+        return "API 오류"
+
+
+class KISRetryHandler:
+    """지수 백오프 기반 재시도 전략을 관리한다."""
+
+    def __init__(self, backoff_base: float = DEFAULT_BACKOFF_BASE) -> None:
+        self._backoff_base = backoff_base
+
+    def backoff_delay(self, attempt: int) -> float:
+        """attempt 번째 시도의 백오프 대기 시간(초)."""
+        return self._backoff_base * (2**attempt)
+
+    def should_retry(self, attempt: int, max_retries: int) -> bool:
+        """재시도 여부 결정."""
+        return attempt < max_retries
+
+    async def wait_and_log(
+        self,
+        attempt: int,
+        max_retries: int,
+        tr_id: str,
+        error: Exception,
+    ) -> None:
+        """백오프 대기 후 로그를 남긴다."""
+        wait = self.backoff_delay(attempt)
+        label = KISErrorClassifier.log_label(error)
+        detail = (
+            f": {error}"
+            if not isinstance(error, (TimeoutError, RateLimitError))
+            else ""
+        )
+        logger.warning(
+            "%s [%s] 재시도 %d/%d (%.1f초 후)%s",
+            label,
+            tr_id,
+            attempt + 1,
+            max_retries,
+            wait,
+            detail,
+        )
+        await asyncio.sleep(wait)
+
+
 class KISAdapter(BrokerAdapter):
     """한국투자증권 Open API 어댑터."""
 
@@ -141,6 +229,9 @@ class KISAdapter(BrokerAdapter):
             eventbus=eventbus,
             name="kis",
         )
+
+        # ── 재시도 핸들러 ─────────────────────────────
+        self._retry_handler = KISRetryHandler(backoff_base=self._backoff_base)
 
     @property
     def circuit_breaker(self) -> CircuitBreaker:
@@ -281,111 +372,63 @@ class KISAdapter(BrokerAdapter):
         params: dict[str, str] | None = None,
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃)."""
-        # [1] Circuit Breaker 확인
-        self._circuit_breaker.check()
+        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃).
 
+        조율만 담당하며, 에러 분류는 KISErrorClassifier,
+        재시도 전략은 KISRetryHandler에 위임한다.
+        """
+        self._circuit_breaker.check()
         await self._ensure_authenticated()
         await self._rate_limit_wait()
 
         max_retries = self._get_max_retries(url, tr_id)
-        timeout = self._timeout_query
-        if tr_id in _ORDER_TR_IDS:
-            timeout = self._timeout_order
-
+        timeout = self._timeout_order if tr_id in _ORDER_TR_IDS else self._timeout_query
         headers = self._get_headers(tr_id)
         last_error: Exception | None = None
 
         for attempt in range(max_retries + 1):
             try:
-                # [2] API 호출 (타임아웃 적용)
-                async with asyncio.timeout(timeout):
-                    if method == "GET":
-                        async with self._session.get(
-                            url, headers=headers, params=params
-                        ) as resp:
-                            result = await self._handle_response(resp)
-                    else:
-                        async with self._session.post(
-                            url, headers=headers, json=json_data
-                        ) as resp:
-                            result = await self._handle_response(resp)
-
-                # 성공
+                result = await self._send_http(
+                    method, url, headers, params, json_data, timeout
+                )
                 self._circuit_breaker.record_success()
                 return result
-
-            except CircuitOpenError:
-                raise
-            except TimeoutError:
-                last_error = APIError(
-                    f"타임아웃 ({timeout:.0f}초 초과)",
-                    retryable=True,
-                )
-                self._circuit_breaker.record_failure()
-                if attempt < max_retries:
-                    wait = self._backoff_base * (2**attempt)
-                    logger.warning(
-                        "API 타임아웃 [%s] 재시도 %d/%d (%.1f초 후)",
-                        tr_id,
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-            except (ConnectionError, OSError) as e:
-                last_error = APIError(str(e), retryable=True)
-                self._circuit_breaker.record_failure()
-                if attempt < max_retries:
-                    wait = self._backoff_base * (2**attempt)
-                    logger.warning(
-                        "네트워크 오류 [%s] 재시도 %d/%d (%.1f초 후): %s",
-                        tr_id,
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                        e,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-            except RateLimitError as e:
-                last_error = e
-                self._circuit_breaker.record_failure()
-                if attempt < max_retries:
-                    wait = self._backoff_base * (2**attempt)
-                    logger.warning(
-                        "Rate limit [%s] 재시도 %d/%d (%.1f초 후)",
-                        tr_id,
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-            except APIError as e:
-                last_error = e
-                if not e.retryable:
-                    # permanent 에러 → 즉시 실패 (circuit breaker에 기록하지 않음)
+            except Exception as e:
+                retryable, record_failure = KISErrorClassifier.classify(e)
+                if not retryable:
                     raise
-                self._circuit_breaker.record_failure()
-                if attempt < max_retries:
-                    wait = self._backoff_base * (2**attempt)
-                    logger.warning(
-                        "API 오류 [%s] 재시도 %d/%d (%.1f초 후): %s",
-                        tr_id,
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                        e,
+                last_error = KISErrorClassifier.to_api_error(e, timeout)
+                if record_failure:
+                    self._circuit_breaker.record_failure()
+                if self._retry_handler.should_retry(attempt, max_retries):
+                    await self._retry_handler.wait_and_log(
+                        attempt, max_retries, tr_id, e
                     )
-                    await asyncio.sleep(wait)
                     continue
-            except AuthenticationError:
-                raise
 
-        # 모든 재시도 소진
         raise last_error  # type: ignore[misc]
+
+    async def _send_http(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        params: dict[str, str] | None,
+        json_data: dict[str, Any] | None,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """단일 HTTP 요청 실행 (타임아웃 적용)."""
+        async with asyncio.timeout(timeout):
+            if method == "GET":
+                async with self._session.get(
+                    url, headers=headers, params=params
+                ) as resp:
+                    return await self._handle_response(resp)
+            else:
+                async with self._session.post(
+                    url, headers=headers, json=json_data
+                ) as resp:
+                    return await self._handle_response(resp)
 
     # ── 계좌 정보 조회 ─────────────────────────────
 
@@ -616,18 +659,21 @@ class KISAdapter(BrokerAdapter):
         return orders
 
     # ── 실시간 스트리밍 (구현 예정) ────────────────
+    # BrokerAdapter 인터페이스 준수를 위해 async def 유지
 
     async def realtime_price_stream(
         self, symbols: list[str]
     ) -> AsyncIterator[dict[str, Any]]:
         """실시간 가격 스트리밍. WebSocket 연동 Phase에서 구현."""
         raise NotImplementedError("실시간 가격 스트리밍은 추후 구현")
-        yield {}  # type: ignore[misc]
+        # AsyncIterator 시그니처 충족을 위한 yield (도달 불가)
+        yield  # pragma: no cover
 
     async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
         """실시간 주문 체결 스트리밍. WebSocket 연동 Phase에서 구현."""
         raise NotImplementedError("실시간 주문 스트리밍은 추후 구현")
-        yield {}  # type: ignore[misc]
+        # AsyncIterator 시그니처 충족을 위한 yield (도달 불가)
+        yield  # pragma: no cover
 
     # ── 종목 마스터 ────────────────────────────────────
 

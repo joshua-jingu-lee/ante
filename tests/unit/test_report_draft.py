@@ -185,7 +185,7 @@ class TestOnBacktestComplete:
         mock_eventbus.subscribe = MagicMock()
 
         generator = ReportDraftGenerator(mock_store, mock_eventbus)
-        await generator.initialize()
+        generator.initialize()
 
         mock_eventbus.subscribe.assert_called_once()
 

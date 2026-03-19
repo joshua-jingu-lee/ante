@@ -69,7 +69,7 @@ class TestParquetValidate:
         _create_valid_parquet(tmp_path / "ohlcv" / "1d" / "005930" / "2026-01.parquet")
         _create_valid_parquet(tmp_path / "ohlcv" / "1d" / "005930" / "2026-02.parquet")
 
-        result = await tmp_store.validate("005930", "1d")
+        result = tmp_store.validate("005930", "1d")
 
         assert result["total"] == 2
         assert result["valid"] == 2
@@ -83,7 +83,7 @@ class TestParquetValidate:
             tmp_path / "ohlcv" / "1d" / "005930" / "2026-02.parquet"
         )
 
-        result = await tmp_store.validate("005930", "1d")
+        result = tmp_store.validate("005930", "1d")
 
         assert result["total"] == 2
         assert result["valid"] == 1
@@ -95,7 +95,7 @@ class TestParquetValidate:
         corrupted_path = tmp_path / "ohlcv" / "1d" / "005930" / "2026-02.parquet"
         _create_corrupted_parquet(corrupted_path)
 
-        result = await tmp_store.validate("005930", "1d", fix=True)
+        result = tmp_store.validate("005930", "1d", fix=True)
 
         assert result["corrupted"] == 1
         assert not corrupted_path.exists()
@@ -103,7 +103,7 @@ class TestParquetValidate:
 
     @pytest.mark.asyncio
     async def test_validate_no_data(self, tmp_store):
-        result = await tmp_store.validate("NONE", "1d")
+        result = tmp_store.validate("NONE", "1d")
 
         assert result["total"] == 0
         assert result["valid"] == 0
@@ -113,56 +113,50 @@ class TestParquetValidate:
     async def test_validate_empty_directory(self, tmp_store, tmp_path):
         (tmp_path / "ohlcv" / "1d" / "005930").mkdir(parents=True)
 
-        result = await tmp_store.validate("005930", "1d")
+        result = tmp_store.validate("005930", "1d")
 
         assert result["total"] == 0
 
 
 class TestValidateCLI:
     def test_validate_specific_symbol(self, runner):
-        with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "timeframe": "1d",
-                    "total": 3,
-                    "valid": 3,
-                    "corrupted": 0,
-                    "corrupted_files": [],
-                }
-            ]
+        with patch("ante.data.store.ParquetStore.validate") as mock_validate:
+            mock_validate.return_value = {
+                "symbol": "005930",
+                "timeframe": "1d",
+                "total": 3,
+                "valid": 3,
+                "corrupted": 0,
+                "corrupted_files": [],
+            }
             result = runner.invoke(cli, ["data", "validate", "--symbol", "005930"])
             assert result.exit_code == 0
             assert "정상 3개" in result.output
 
     def test_validate_with_corrupted(self, runner):
-        with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "timeframe": "1d",
-                    "total": 3,
-                    "valid": 2,
-                    "corrupted": 1,
-                    "corrupted_files": ["/data/ohlcv/1d/005930/2026-01.parquet"],
-                }
-            ]
+        with patch("ante.data.store.ParquetStore.validate") as mock_validate:
+            mock_validate.return_value = {
+                "symbol": "005930",
+                "timeframe": "1d",
+                "total": 3,
+                "valid": 2,
+                "corrupted": 1,
+                "corrupted_files": ["/data/ohlcv/1d/005930/2026-01.parquet"],
+            }
             result = runner.invoke(cli, ["data", "validate", "--symbol", "005930"])
             assert result.exit_code == 0
             assert "손상 1개" in result.output
 
     def test_validate_json_output(self, runner):
-        with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "timeframe": "1d",
-                    "total": 2,
-                    "valid": 2,
-                    "corrupted": 0,
-                    "corrupted_files": [],
-                }
-            ]
+        with patch("ante.data.store.ParquetStore.validate") as mock_validate:
+            mock_validate.return_value = {
+                "symbol": "005930",
+                "timeframe": "1d",
+                "total": 2,
+                "valid": 2,
+                "corrupted": 0,
+                "corrupted_files": [],
+            }
             result = runner.invoke(
                 cli,
                 ["--format", "json", "data", "validate", "--symbol", "005930"],
@@ -181,11 +175,11 @@ class TestValidateCLI:
 
     def test_validate_all_symbols(self, runner):
         with (
-            patch("asyncio.run") as mock_run,
+            patch("ante.data.store.ParquetStore.validate") as mock_validate,
             patch("ante.data.store.ParquetStore.list_symbols") as mock_list,
         ):
             mock_list.return_value = ["005930", "000660"]
-            mock_run.return_value = [
+            mock_validate.side_effect = [
                 {
                     "symbol": "005930",
                     "timeframe": "1d",

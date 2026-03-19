@@ -1,31 +1,33 @@
-"""MemberService — 멤버 등록·인증·관리."""
+"""MemberService — 멤버 등록·조회·상태 관리."""
 
 from __future__ import annotations
 
 import json
 import logging
-import random
 import re
+import secrets
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ante.member.auth import (
     generate_recovery_key,
-    generate_token,
-    get_token_type,
     hash_password,
     hash_recovery_key,
-    hash_token,
-    verify_password,
-    verify_recovery_key,
 )
+from ante.member.auth_service import AuthService
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from ante.member.recovery_key_manager import RecoveryKeyManager
+from ante.member.token_manager import TokenManager, _token_expires_at
+
+__all__ = ["MemberService", "ANIMAL_EMOJI_POOL", "MEMBER_SCHEMA", "_token_expires_at"]
 
 if TYPE_CHECKING:
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_ORG = "default"
 
 MEMBER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS members (
@@ -82,41 +84,41 @@ _EMOJI_RE = re.compile(
 )
 
 ANIMAL_EMOJI_POOL: list[str] = [
-    "🐶",
-    "🐱",
-    "🐻",
-    "🦊",
-    "🐼",
-    "🐨",
-    "🦁",
-    "🐯",
-    "🐸",
-    "🐵",
-    "🦄",
-    "🐳",
-    "🐙",
-    "🦉",
-    "🦋",
-    "🐧",
-    "🐺",
-    "🦈",
-    "🐝",
-    "🦜",
-    "🐢",
-    "🐬",
-    "🦅",
-    "🐲",
-    "🐴",
-    "🦩",
-    "🐿",
-    "🦔",
-    "🦇",
-    "🐞",
-    "🦀",
-    "🐘",
-    "🦒",
-    "🦘",
-    "🐊",
+    "\U0001f436",
+    "\U0001f431",
+    "\U0001f43b",
+    "\U0001f98a",
+    "\U0001f43c",
+    "\U0001f428",
+    "\U0001f981",
+    "\U0001f42f",
+    "\U0001f438",
+    "\U0001f435",
+    "\U0001f984",
+    "\U0001f433",
+    "\U0001f419",
+    "\U0001f989",
+    "\U0001f98b",
+    "\U0001f427",
+    "\U0001f43a",
+    "\U0001f988",
+    "\U0001f41d",
+    "\U0001f99c",
+    "\U0001f422",
+    "\U0001f42c",
+    "\U0001f985",
+    "\U0001f432",
+    "\U0001f434",
+    "\U0001f9a9",
+    "\U0001f43f",
+    "\U0001f994",
+    "\U0001f987",
+    "\U0001f41e",
+    "\U0001f980",
+    "\U0001f418",
+    "\U0001f992",
+    "\U0001f998",
+    "\U0001f40a",
 ]
 
 
@@ -131,7 +133,7 @@ def _row_to_member(row: dict) -> Member:
         member_id=row["member_id"],
         type=row["type"],
         role=row["role"],
-        org=row.get("org", "default"),
+        org=row.get("org", _DEFAULT_ORG),
         name=row.get("name", ""),
         emoji=row.get("emoji", ""),
         status=row.get("status", MemberStatus.ACTIVE),
@@ -153,15 +155,12 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _token_expires_at(ttl_days: int) -> str:
-    """TTL 일수 기준 토큰 만료 시각."""
-    from datetime import timedelta
-
-    return (datetime.now(UTC) + timedelta(days=ttl_days)).strftime("%Y-%m-%d %H:%M:%S")
-
-
 class MemberService:
-    """멤버 등록·인증·관리 서비스."""
+    """멤버 등록·조회·상태 관리 서비스.
+
+    인증은 AuthService, 토큰은 TokenManager,
+    복구키·패스워드는 RecoveryKeyManager에 위임한다.
+    """
 
     def __init__(
         self,
@@ -172,6 +171,16 @@ class MemberService:
         self._db = db
         self._eventbus = eventbus
         self._token_ttl_days = token_ttl_days
+
+        # 하위 매니저 조립
+        self._token_manager = TokenManager(db, token_ttl_days)
+        self._auth_service = AuthService(
+            db=db,
+            eventbus=eventbus,
+            token_manager=self._token_manager,
+            get_member=self.get,
+        )
+        self._recovery_key_manager = RecoveryKeyManager(db=db, eventbus=eventbus)
 
     async def initialize(self) -> None:
         """스키마 생성 + 컬럼 마이그레이션."""
@@ -196,7 +205,7 @@ class MemberService:
         available = [e for e in ANIMAL_EMOJI_POOL if e not in used]
         if not available:
             return ""
-        return random.choice(available)  # noqa: S311
+        return secrets.choice(available)
 
     async def _validate_emoji_unique(
         self, emoji: str, exclude_member_id: str = ""
@@ -268,7 +277,7 @@ class MemberService:
             member_id=member_id,
             type=MemberType.HUMAN,
             role=MemberRole.MASTER,
-            org="default",
+            org=_DEFAULT_ORG,
             name=name or member_id,
             emoji=emoji,
             status=MemberStatus.ACTIVE,
@@ -324,7 +333,7 @@ class MemberService:
         member_id: str,
         member_type: str,
         role: str = MemberRole.DEFAULT,
-        org: str = "default",
+        org: str = _DEFAULT_ORG,
         name: str = "",
         emoji: str | None = None,
         scopes: list[str] | None = None,
@@ -344,9 +353,8 @@ class MemberService:
             self._validate_emoji_format(emoji)
             await self._validate_emoji_unique(emoji)
 
-        token = generate_token(member_type)
+        token, t_hash, expires_at = self._token_manager.create_token(member_type)
         now = _now()
-        expires_at = _token_expires_at(self._token_ttl_days)
         scopes = scopes or []
 
         member = Member(
@@ -358,7 +366,7 @@ class MemberService:
             emoji=emoji,
             status=MemberStatus.ACTIVE,
             scopes=scopes,
-            token_hash=hash_token(token),
+            token_hash=t_hash,
             created_at=now,
             created_by=registered_by,
             token_expires_at=expires_at,
@@ -402,92 +410,15 @@ class MemberService:
         logger.info("멤버 등록 완료: %s (type=%s)", member.member_id, member.type)
         return member, token
 
-    # ── 인증 ───────────────────────────────────────────
+    # ── 인증 (AuthService 위임) ────────────────────────
 
     async def authenticate(self, token: str) -> Member:
-        """토큰으로 멤버 인증. 접두어 기반 타입 강제."""
-        token_type = get_token_type(token)
-        if token_type is None:
-            await self._publish_auth_failed("", "유효하지 않은 토큰 형식")
-            msg = "유효하지 않은 토큰 형식"
-            raise PermissionError(msg)
-
-        t_hash = hash_token(token)
-        row = await self._db.fetch_one(
-            "SELECT * FROM members WHERE token_hash = ?",
-            (t_hash,),
-        )
-        if not row:
-            await self._publish_auth_failed("", "토큰과 일치하는 멤버 없음")
-            msg = "인증 실패"
-            raise PermissionError(msg)
-
-        member = _row_to_member(row)
-
-        if member.type != token_type:
-            await self._publish_auth_failed(
-                member.member_id, "토큰 접두어와 멤버 타입 불일치"
-            )
-            msg = f"{token_type} key로 {member.type} 멤버 인증 불가"
-            raise PermissionError(msg)
-
-        if member.status != MemberStatus.ACTIVE:
-            await self._publish_auth_failed(
-                member.member_id, f"비활성 멤버: {member.status}"
-            )
-            msg = f"비활성 멤버: {member.status}"
-            raise PermissionError(msg)
-
-        # 토큰 만료 체크
-        if member.token_expires_at:
-            expires = datetime.strptime(  # noqa: DTZ007
-                member.token_expires_at, "%Y-%m-%d %H:%M:%S"
-            )
-            now = datetime.now(UTC).replace(tzinfo=None)
-            if now > expires:
-                await self._publish_auth_failed(member.member_id, "토큰 만료")
-                msg = (
-                    "토큰이 만료되었습니다. 'ante member rotate-token'으로 갱신하세요."
-                )
-                raise PermissionError(msg)
-
-            from datetime import timedelta
-
-            if now > expires - timedelta(days=7):
-                logger.warning(
-                    "토큰 만료 임박: %s (만료: %s)",
-                    member.member_id,
-                    member.token_expires_at,
-                )
-
-        return member
+        """토큰으로 멤버 인증."""
+        return await self._auth_service.authenticate(token)
 
     async def authenticate_password(self, member_id: str, password: str) -> Member:
         """패스워드 인증 (human 대시보드 로그인)."""
-        member = await self.get(member_id)
-        if not member:
-            await self._publish_auth_failed(member_id, "존재하지 않는 멤버")
-            msg = "인증 실패"
-            raise PermissionError(msg)
-
-        if member.type != MemberType.HUMAN:
-            await self._publish_auth_failed(member_id, "human 전용 인증")
-            msg = "패스워드 인증은 human 멤버만 가능합니다"
-            raise PermissionError(msg)
-
-        if member.status != MemberStatus.ACTIVE:
-            await self._publish_auth_failed(member_id, f"비활성 멤버: {member.status}")
-            msg = f"비활성 멤버: {member.status}"
-            raise PermissionError(msg)
-
-        if not member.password_hash or not verify_password(
-            password, member.password_hash
-        ):
-            await self._publish_auth_failed(member_id, "패스워드 불일치")
-            msg = "인증 실패"
-            raise PermissionError(msg)
-
-        return member
+        return await self._auth_service.authenticate_password(member_id, password)
 
     # ── 조회 ───────────────────────────────────────────
 
@@ -600,91 +531,41 @@ class MemberService:
         member.revoked_at = now
         return member
 
-    # ── 토큰 관리 ──────────────────────────────────────
+    # ── 토큰 관리 (TokenManager 위임) ──────────────────
 
     async def rotate_token(
         self, member_id: str, rotated_by: str = ""
     ) -> tuple[Member, str]:
-        """토큰 재발급. 기존 토큰 즉시 무효화. 새 TTL 적용."""
+        """토큰 재발급. 기존 토큰 즉시 무효화."""
         member = await self._get_or_raise(member_id)
-        self._assert_active(member, "rotate_token")
+        return await self._token_manager.rotate_token(member, rotated_by)
 
-        token = generate_token(member.type)
-        t_hash = hash_token(token)
-        expires_at = _token_expires_at(self._token_ttl_days)
-
-        await self._db.execute(
-            "UPDATE members SET token_hash = ?, token_expires_at = ? "
-            "WHERE member_id = ?",
-            (t_hash, expires_at, member_id),
-        )
-
-        logger.info("토큰 재발급: %s (by %s)", member_id, rotated_by)
-        member.token_hash = t_hash
-        member.token_expires_at = expires_at
-        return member, token
-
-    # ── 패스워드 관리 ──────────────────────────────────
+    # ── 패스워드·복구키 관리 (RecoveryKeyManager 위임) ─
 
     async def change_password(
         self, member_id: str, old_password: str, new_password: str
     ) -> None:
         """패스워드 변경 (human만)."""
         member = await self._get_or_raise(member_id)
-        self._assert_human(member, "change_password")
-        self._assert_active(member, "change_password")
-
-        if not member.password_hash or not verify_password(
-            old_password, member.password_hash
-        ):
-            msg = "현재 패스워드가 일치하지 않습니다"
-            raise PermissionError(msg)
-
-        await self._db.execute(
-            "UPDATE members SET password_hash = ? WHERE member_id = ?",
-            (hash_password(new_password), member_id),
+        await self._recovery_key_manager.change_password(
+            member, old_password, new_password
         )
-        logger.info("패스워드 변경 완료: %s", member_id)
 
     async def reset_password(
         self, member_id: str, recovery_key: str, new_password: str
     ) -> None:
         """recovery key로 패스워드 리셋 (human만)."""
         member = await self._get_or_raise(member_id)
-        self._assert_human(member, "reset_password")
-
-        if not member.recovery_key_hash or not verify_recovery_key(
-            recovery_key, member.recovery_key_hash
-        ):
-            await self._publish_auth_failed(member_id, "recovery key 불일치")
-            msg = "유효하지 않은 recovery key"
-            raise PermissionError(msg)
-
-        await self._db.execute(
-            "UPDATE members SET password_hash = ? WHERE member_id = ?",
-            (hash_password(new_password), member_id),
+        await self._recovery_key_manager.reset_password(
+            member, recovery_key, new_password
         )
-        logger.info("패스워드 리셋 완료 (recovery key): %s", member_id)
 
     async def regenerate_recovery_key(self, member_id: str, password: str) -> str:
-        """복구 키 재발급. 현재 패스워드 확인 필수."""
+        """복구 키 재발급."""
         member = await self._get_or_raise(member_id)
-        self._assert_human(member, "regenerate_recovery_key")
-        self._assert_active(member, "regenerate_recovery_key")
-
-        if not member.password_hash or not verify_password(
-            password, member.password_hash
-        ):
-            msg = "현재 패스워드가 일치하지 않습니다"
-            raise PermissionError(msg)
-
-        recovery_key = generate_recovery_key()
-        await self._db.execute(
-            "UPDATE members SET recovery_key_hash = ? WHERE member_id = ?",
-            (hash_recovery_key(recovery_key), member_id),
+        return await self._recovery_key_manager.regenerate_recovery_key(
+            member, password
         )
-        logger.info("Recovery key 재발급 완료: %s", member_id)
-        return recovery_key
 
     # ── 권한 관리 ──────────────────────────────────────
 
@@ -723,14 +604,6 @@ class MemberService:
             raise ValueError(msg)
         return member
 
-    async def _publish_auth_failed(self, member_id: str, reason: str) -> None:
-        """인증 실패 이벤트 발행."""
-        from ante.eventbus.events import MemberAuthFailedEvent
-
-        await self._eventbus.publish(
-            MemberAuthFailedEvent(member_id=member_id, reason=reason)
-        )
-
     @staticmethod
     def _assert_type_role(member_type: str, role: str) -> None:
         """타입-역할 불변식 검증."""
@@ -753,13 +626,6 @@ class MemberService:
         """활성 상태 검증."""
         if member.status != MemberStatus.ACTIVE:
             msg = f"비활성 멤버는 {action}할 수 없습니다 (현재: {member.status})"
-            raise PermissionError(msg)
-
-    @staticmethod
-    def _assert_human(member: Member, action: str) -> None:
-        """human 전용 검증."""
-        if member.type != MemberType.HUMAN:
-            msg = f"{action}은(는) human 멤버만 가능합니다"
             raise PermissionError(msg)
 
     @staticmethod

@@ -21,6 +21,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# SQL query fragments reused in daily/weekly/monthly summary methods
+_COND_STATUS_FILLED = "t.status = ?"
+_COND_SIDE_SELL = "t.side = 'sell'"
+_COND_BOT_ID = "t.bot_id = ?"
+_JOIN_POSITION_HISTORY = """LEFT JOIN position_history ph
+                ON ph.bot_id = t.bot_id
+                AND ph.symbol = t.symbol
+                AND ph.action = 'sell'
+                AND ph.price = t.price
+                AND ph.quantity = t.quantity"""
+
 
 class PerformanceTracker:
     """봇/전략의 성과 지표를 조회 시 계산."""
@@ -99,13 +110,13 @@ class PerformanceTracker:
             end_date: 종료일 (YYYY-MM-DD)
         """
         conditions: list[str] = [
-            "t.status = ?",
-            "t.side = 'sell'",
+            _COND_STATUS_FILLED,
+            _COND_SIDE_SELL,
         ]
         params: list[Any] = [TradeStatus.FILLED.value]
 
         if bot_id:
-            conditions.append("t.bot_id = ?")
+            conditions.append(_COND_BOT_ID)
             params.append(bot_id)
         if start_date:
             conditions.append("date(t.timestamp) >= ?")
@@ -122,12 +133,7 @@ class PerformanceTracker:
                 COUNT(*) AS trade_count,
                 SUM(CASE WHEN ph.pnl > 0 THEN 1 ELSE 0 END) AS win_count
             FROM trades t
-            LEFT JOIN position_history ph
-                ON ph.bot_id = t.bot_id
-                AND ph.symbol = t.symbol
-                AND ph.action = 'sell'
-                AND ph.price = t.price
-                AND ph.quantity = t.quantity
+            {_JOIN_POSITION_HISTORY}
             WHERE {where}
             GROUP BY trade_date
             ORDER BY trade_date ASC
@@ -160,13 +166,13 @@ class PerformanceTracker:
             bot_id: 봇 ID 필터 (None이면 전체)
         """
         conditions: list[str] = [
-            "t.status = ?",
-            "t.side = 'sell'",
+            _COND_STATUS_FILLED,
+            _COND_SIDE_SELL,
         ]
         params: list[Any] = [TradeStatus.FILLED.value]
 
         if bot_id:
-            conditions.append("t.bot_id = ?")
+            conditions.append(_COND_BOT_ID)
             params.append(bot_id)
 
         where = " AND ".join(conditions)
@@ -178,12 +184,7 @@ class PerformanceTracker:
                 COUNT(*) AS trade_count,
                 SUM(CASE WHEN ph.pnl > 0 THEN 1 ELSE 0 END) AS win_count
             FROM trades t
-            LEFT JOIN position_history ph
-                ON ph.bot_id = t.bot_id
-                AND ph.symbol = t.symbol
-                AND ph.action = 'sell'
-                AND ph.price = t.price
-                AND ph.quantity = t.quantity
+            {_JOIN_POSITION_HISTORY}
             WHERE {where}
             GROUP BY week_start
             ORDER BY week_start ASC
@@ -217,13 +218,13 @@ class PerformanceTracker:
             year: 연도 필터 (None이면 전체)
         """
         conditions: list[str] = [
-            "t.status = ?",
-            "t.side = 'sell'",
+            _COND_STATUS_FILLED,
+            _COND_SIDE_SELL,
         ]
         params: list[Any] = [TradeStatus.FILLED.value]
 
         if bot_id:
-            conditions.append("t.bot_id = ?")
+            conditions.append(_COND_BOT_ID)
             params.append(bot_id)
         if year:
             conditions.append("strftime('%Y', t.timestamp) = ?")
@@ -238,12 +239,7 @@ class PerformanceTracker:
                 COUNT(*) AS trade_count,
                 SUM(CASE WHEN ph.pnl > 0 THEN 1 ELSE 0 END) AS win_count
             FROM trades t
-            LEFT JOIN position_history ph
-                ON ph.bot_id = t.bot_id
-                AND ph.symbol = t.symbol
-                AND ph.action = 'sell'
-                AND ph.price = t.price
-                AND ph.quantity = t.quantity
+            {_JOIN_POSITION_HISTORY}
             WHERE {where}
             GROUP BY yr, mo
             ORDER BY yr ASC, mo ASC

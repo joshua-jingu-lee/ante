@@ -81,7 +81,7 @@ class TestAllocation:
         """예산 할당."""
         result = await treasury.allocate("bot1", 1_000_000.0)
         assert result is True
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 1_000_000.0
         assert budget.available == 1_000_000.0
@@ -101,7 +101,7 @@ class TestAllocation:
         await treasury.allocate("bot1", 1_000_000.0)
         result = await treasury.deallocate("bot1", 500_000.0)
         assert result is True
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 500_000.0
         assert budget.available == 500_000.0
@@ -123,7 +123,7 @@ class TestAllocation:
         """동일 봇에 추가 할당."""
         await treasury.allocate("bot1", 500_000.0)
         await treasury.allocate("bot1", 300_000.0)
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 800_000.0
         assert budget.available == 800_000.0
@@ -227,7 +227,7 @@ class TestReservation:
         await treasury.allocate("bot1", 1_000_000.0)
         result = await treasury.reserve_for_order("bot1", "ord1", 500_000.0)
         assert result is True
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.available == 500_000.0
         assert budget.reserved == 500_000.0
@@ -243,7 +243,7 @@ class TestReservation:
         await treasury.allocate("bot1", 1_000_000.0)
         await treasury.reserve_for_order("bot1", "ord1", 500_000.0)
         await treasury.release_reservation("bot1", "ord1")
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.available == 1_000_000.0
         assert budget.reserved == 0.0
@@ -252,7 +252,7 @@ class TestReservation:
         """존재하지 않는 주문 해제는 무시."""
         await treasury.allocate("bot1", 1_000_000.0)
         await treasury.release_reservation("bot1", "unknown_ord")
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.available == 1_000_000.0
 
@@ -285,7 +285,7 @@ class TestTreasuryEvents:
         assert received[0].order_id == "ord1"
         assert received[0].reserved_amount > 0
 
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.reserved > 0
         assert budget.available < 1_000_000.0
@@ -356,7 +356,7 @@ class TestTreasuryEvents:
             )
         )
 
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.reserved == 0.0
         assert budget.spent == 500_075.0  # 500,000 + 75
@@ -382,7 +382,7 @@ class TestTreasuryEvents:
             )
         )
 
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         expected_proceeds = 550_000.0 - 82.5
         assert budget.returned == expected_proceeds
@@ -406,7 +406,7 @@ class TestTreasuryEvents:
             )
         )
 
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.available == 1_000_000.0
         assert budget.reserved == 0.0
@@ -430,7 +430,7 @@ class TestTreasuryEvents:
             )
         )
 
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.available == 1_000_000.0
         assert budget.reserved == 0.0
@@ -488,7 +488,7 @@ class TestTreasuryPersistence:
 
         assert t2.account_balance == 5_000_000.0
         assert t2.unallocated == 3_000_000.0
-        budget = await t2.get_budget("bot1")
+        budget = t2.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 2_000_000.0
         assert budget.available == 2_000_000.0

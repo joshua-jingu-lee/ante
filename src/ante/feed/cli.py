@@ -16,6 +16,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_DATA_PATH = "data/"
+_DATA_PATH_HELP = "데이터 저장소 경로"
+_SCOPE_DATA_WRITE = "data:write"
+_SCOPE_DATA_READ = "data:read"
+_SEPARATOR = "──────────────────────────────────────────────────"
+
 _API_KEY_GUIDE = """\
 ──────────────────────────────────────────────────
 API 키 설정이 필요합니다.
@@ -56,10 +62,10 @@ def feed_config() -> None:
 @feed_config.command("set")
 @click.argument("key")
 @click.argument("value")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None:
     """API 키를 .feed/.env 파일에 저장한다."""
     from ante.feed.config import API_KEYS, FeedConfig
@@ -81,10 +87,10 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None
 
 
 @feed_config.command("list")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:read")
+@require_scope(_SCOPE_DATA_READ)
 def config_list(ctx: click.Context, data_path: str) -> None:
     """등록된 API 키 목록을 마스킹하여 표시한다."""
     from ante.feed.config import FeedConfig
@@ -104,10 +110,10 @@ def config_list(ctx: click.Context, data_path: str) -> None:
 
 
 @feed_config.command("check")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:read")
+@require_scope(_SCOPE_DATA_READ)
 def config_check(ctx: click.Context, data_path: str) -> None:
     """API 키 존재 여부를 확인한다."""
     from ante.feed.config import FeedConfig
@@ -121,7 +127,7 @@ def config_check(ctx: click.Context, data_path: str) -> None:
     else:
         click.echo()
         click.echo("API Key Status")
-        click.echo("──────────────────────────────────────────────────")
+        click.echo(_SEPARATOR)
         all_set = True
         for entry in statuses:
             if entry["set"]:
@@ -130,7 +136,7 @@ def config_check(ctx: click.Context, data_path: str) -> None:
             else:
                 click.echo(f"  {entry['key']:<30} ✗ 미설정")
                 all_set = False
-        click.echo("──────────────────────────────────────────────────")
+        click.echo(_SEPARATOR)
         if not all_set:
             click.echo("설정: ante feed config set <KEY> <VALUE>")
         click.echo()
@@ -187,14 +193,14 @@ def _ensure_initialized(  # noqa: ANN001, ANN201
 
 
 @feed_run.command("backfill")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.option(
     "--since", default=None, help="수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드)"
 )
 @click.option("--until", default=None, help="수집 종료일 (YYYY-MM-DD, 기본값: 오늘)")
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def run_backfill(
     ctx: click.Context,
     data_path: str,
@@ -205,6 +211,7 @@ def run_backfill(
     import asyncio
     from pathlib import Path
 
+    from ante.feed.cli_output import format_backfill_result
     from ante.feed.config import FeedConfig
 
     fmt = get_formatter(ctx)
@@ -228,42 +235,17 @@ def run_backfill(
         )
     )
 
-    if fmt.is_json:
-        fmt.output(
-            {
-                "mode": result.mode,
-                "symbols_total": result.symbols_total,
-                "symbols_success": result.symbols_success,
-                "symbols_failed": result.symbols_failed,
-                "rows_written": result.rows_written,
-                "data_types": result.data_types,
-                "duration_seconds": result.duration_seconds,
-                "config_errors": result.config_errors,
-            }
-        )
-    else:
-        click.echo()
-        click.echo(
-            f"Backfill 완료: {result.symbols_success}/{result.symbols_total} 종목 성공"
-        )
-        click.echo(f"  기록: {result.rows_written} rows")
-        click.echo(f"  데이터: {', '.join(result.data_types) or '없음'}")
-        click.echo(f"  소요: {result.duration_seconds:.1f}초")
-        if result.config_errors:
-            click.echo()
-            for err in result.config_errors:
-                click.echo(f"  [경고] {err.get('error', err)}")
-        click.echo()
+    format_backfill_result(result, fmt)
 
 
 @feed_run.command("daily")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.option(
     "--date", "target_date", default=None, help="수집 대상일 (YYYY-MM-DD, 기본값: 어제)"
 )
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def run_daily(
     ctx: click.Context,
     data_path: str,
@@ -273,6 +255,7 @@ def run_daily(
     import asyncio
     from pathlib import Path
 
+    from ante.feed.cli_output import format_daily_result
     from ante.feed.config import FeedConfig
 
     fmt = get_formatter(ctx)
@@ -312,51 +295,22 @@ def run_daily(
             )
         )
 
-    if fmt.is_json:
-        fmt.output(
-            {
-                "mode": result.mode,
-                "target_date": result.target_date,
-                "symbols_total": result.symbols_total,
-                "symbols_success": result.symbols_success,
-                "symbols_failed": result.symbols_failed,
-                "rows_written": result.rows_written,
-                "data_types": result.data_types,
-                "duration_seconds": result.duration_seconds,
-                "config_errors": result.config_errors,
-            }
-        )
-    else:
-        click.echo()
-        click.echo(
-            f"Daily 수집 완료 ({result.target_date}): "
-            f"{result.symbols_success}/{result.symbols_total} 종목 성공"
-        )
-        click.echo(f"  기록: {result.rows_written} rows")
-        click.echo(f"  데이터: {', '.join(result.data_types) or '없음'}")
-        click.echo(f"  소요: {result.duration_seconds:.1f}초")
-        if result.config_errors:
-            click.echo()
-            for err in result.config_errors:
-                click.echo(f"  [경고] {err.get('error', err)}")
-        click.echo()
+    format_daily_result(result, fmt)
 
 
 # ── start (상주 스케줄러) ─────────────────────────────────────────────────────
 
 
 @feed.command("start")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def feed_start(ctx: click.Context, data_path: str) -> None:
     """내장 스케줄러로 backfill/daily를 자동 실행하는 상주 프로세스를 시작한다."""
     import asyncio
-    import signal
-    from datetime import datetime, timedelta, timezone
-    from pathlib import Path
 
+    from ante.feed.cli_scheduler import run_scheduler_loop
     from ante.feed.config import FeedConfig
 
     fmt = get_formatter(ctx)
@@ -376,90 +330,16 @@ def feed_start(ctx: click.Context, data_path: str) -> None:
 
     orchestrator = _build_orchestrator(cfg)
 
-    kst = timezone(timedelta(hours=9))
-
-    async def _scheduler_loop() -> None:
-        """스케줄 루프: daily_at / backfill_at 시각에 수집 실행."""
-        stop_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-
-        def _handle_signal() -> None:
-            logger.info("종료 시그널 수신, 스케줄러 중지...")
-            stop_event.set()
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, _handle_signal)
-
-        logger.info(
-            "DataFeed 스케줄러 시작 (daily_at=%s, backfill_at=%s)",
-            daily_at,
-            backfill_at,
-        )
-        click.echo(
-            f"DataFeed 스케줄러 시작 (daily_at={daily_at}, backfill_at={backfill_at})"
-        )
-        click.echo("종료하려면 Ctrl+C 또는 SIGTERM을 보내세요.")
-
-        daily_ran_today = False
-        backfill_ran_today = False
-        last_date = ""
-
-        while not stop_event.is_set():
-            now = datetime.now(tz=kst)
-            current_time = now.strftime("%H:%M")
-            current_date_str = now.strftime("%Y-%m-%d")
-
-            # 날짜가 바뀌면 플래그 초기화
-            if last_date and last_date != current_date_str:
-                daily_ran_today = False
-                backfill_ran_today = False
-            last_date = current_date_str
-
-            # daily 실행
-            if not daily_ran_today and current_time >= str(daily_at):
-                logger.info("Daily 수집 시작 (%s)", current_date_str)
-                try:
-                    result = await orchestrator.run_daily(
-                        data_path=Path(data_path),
-                        config=config,
-                    )
-                    click.echo(
-                        f"[{current_date_str}] Daily 완료: "
-                        f"{result.symbols_success}/{result.symbols_total} 종목, "
-                        f"{result.rows_written} rows"
-                    )
-                except Exception as exc:
-                    logger.error("Daily 수집 실패: %s", exc)
-                daily_ran_today = True
-
-            # backfill 실행
-            if not backfill_ran_today and current_time >= str(backfill_at):
-                logger.info("Backfill 수집 시작 (%s)", current_date_str)
-                try:
-                    result = await orchestrator.run_backfill(
-                        data_path=Path(data_path),
-                        config=config,
-                    )
-                    click.echo(
-                        f"[{current_date_str}] Backfill 완료: "
-                        f"{result.symbols_success}/{result.symbols_total} 종목, "
-                        f"{result.rows_written} rows"
-                    )
-                except Exception as exc:
-                    logger.error("Backfill 수집 실패: %s", exc)
-                backfill_ran_today = True
-
-            # 60초 대기 (stop_event 감시)
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=60.0)
-            except TimeoutError:
-                pass
-
-        logger.info("DataFeed 스케줄러 종료")
-        click.echo("DataFeed 스케줄러 종료")
-
     try:
-        asyncio.run(_scheduler_loop())
+        asyncio.run(
+            run_scheduler_loop(
+                orchestrator=orchestrator,
+                data_path=data_path,
+                config=config,
+                daily_at=daily_at,
+                backfill_at=backfill_at,
+            )
+        )
     except KeyboardInterrupt:
         click.echo("\nDataFeed 스케줄러 종료")
 
@@ -468,10 +348,10 @@ def feed_start(ctx: click.Context, data_path: str) -> None:
 
 
 @feed.command("init")
-@click.argument("data_path", default="data/")
+@click.argument("data_path", default=_DEFAULT_DATA_PATH)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def feed_init(ctx: click.Context, data_path: str) -> None:
     """DataFeed 운영 디렉토리를 초기화한다."""
     from ante.feed.config import FeedConfig
@@ -494,10 +374,10 @@ def feed_init(ctx: click.Context, data_path: str) -> None:
 
 
 @feed.command("status")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:read")
+@require_scope(_SCOPE_DATA_READ)
 def feed_status(ctx: click.Context, data_path: str) -> None:
     """수집 상태를 조회한다."""
 
@@ -536,53 +416,73 @@ def feed_status(ctx: click.Context, data_path: str) -> None:
             }
         )
     else:
-        click.echo()
-        click.echo(f"DataFeed Status ({cfg.feed_dir})")
-        click.echo("══════════════════════════════════════════════════")
+        _echo_status_text(cfg, checkpoints, latest_report, api_keys)
 
-        # 체크포인트 섹션
-        click.echo()
-        click.echo("Checkpoints")
-        click.echo("──────────────────────────────────────────────────")
-        if checkpoints:
-            for cp in checkpoints:
-                click.echo(
-                    f"  {cp['source']}/{cp['data_type']:<16}"
-                    f" last_date: {cp['last_date']}"
-                    f"  (updated: {cp['updated_at']})"
-                )
-        else:
-            click.echo("  (체크포인트 없음 — 아직 수집을 실행하지 않았습니다)")
 
-        # 최근 리포트 섹션
-        click.echo()
-        click.echo("Latest Report")
-        click.echo("──────────────────────────────────────────────────")
-        if latest_report:
-            summary = latest_report.get("summary", {})
-            click.echo(f"  mode: {latest_report.get('mode', '?')}")
-            click.echo(f"  date: {latest_report.get('target_date', '?')}")
+def _echo_status_text(
+    cfg: object,  # FeedConfig
+    checkpoints: list[dict[str, str]],
+    latest_report: dict | None,
+    api_keys: list[dict],
+) -> None:
+    """feed status의 텍스트 출력을 수행한다."""
+    click.echo()
+    click.echo(f"DataFeed Status ({cfg.feed_dir})")  # type: ignore[attr-defined]
+    click.echo("═" * 50)
+
+    _echo_checkpoints_section(checkpoints)
+    _echo_report_section(latest_report)
+    _echo_api_keys_section(api_keys)
+
+    click.echo()
+
+
+def _echo_checkpoints_section(checkpoints: list[dict[str, str]]) -> None:
+    """체크포인트 섹션을 출력한다."""
+    click.echo()
+    click.echo("Checkpoints")
+    click.echo(_SEPARATOR)
+    if checkpoints:
+        for cp in checkpoints:
             click.echo(
-                f"  result: {summary.get('symbols_success', 0)} success"
-                f" / {summary.get('symbols_failed', 0)} failed"
-                f" / {len(latest_report.get('warnings', []))} warnings"
+                f"  {cp['source']}/{cp['data_type']:<16}"
+                f" last_date: {cp['last_date']}"
+                f"  (updated: {cp['updated_at']})"
             )
-            click.echo(f"  rows: {summary.get('rows_written', 0)}")
+    else:
+        click.echo("  (체크포인트 없음 — 아직 수집을 실행하지 않았습니다)")
+
+
+def _echo_report_section(latest_report: dict | None) -> None:
+    """최근 리포트 섹션을 출력한다."""
+    click.echo()
+    click.echo("Latest Report")
+    click.echo(_SEPARATOR)
+    if latest_report:
+        summary = latest_report.get("summary", {})
+        click.echo(f"  mode: {latest_report.get('mode', '?')}")
+        click.echo(f"  date: {latest_report.get('target_date', '?')}")
+        click.echo(
+            f"  result: {summary.get('symbols_success', 0)} success"
+            f" / {summary.get('symbols_failed', 0)} failed"
+            f" / {len(latest_report.get('warnings', []))} warnings"
+        )
+        click.echo(f"  rows: {summary.get('rows_written', 0)}")
+    else:
+        click.echo("  (리포트 없음 — 아직 수집을 실행하지 않았습니다)")
+
+
+def _echo_api_keys_section(api_keys: list[dict]) -> None:
+    """API 키 섹션을 출력한다."""
+    click.echo()
+    click.echo("API Keys")
+    click.echo(_SEPARATOR)
+    for entry in api_keys:
+        if entry["set"]:
+            source_info = f"(source: {entry['source']})"
+            click.echo(f"  {entry['key']:<30} ✓ 설정됨 {source_info}")
         else:
-            click.echo("  (리포트 없음 — 아직 수집을 실행하지 않았습니다)")
-
-        # API 키 섹션
-        click.echo()
-        click.echo("API Keys")
-        click.echo("──────────────────────────────────────────────────")
-        for entry in api_keys:
-            if entry["set"]:
-                source_info = f"(source: {entry['source']})"
-                click.echo(f"  {entry['key']:<30} ✓ 설정됨 {source_info}")
-            else:
-                click.echo(f"  {entry['key']:<30} ✗ 미설정")
-
-        click.echo()
+            click.echo(f"  {entry['key']:<30} ✗ 미설정")
 
 
 def _load_checkpoints(feed_dir: pathlib.Path) -> list[dict[str, str]]:
@@ -637,10 +537,10 @@ def _load_latest_report(
 @click.option("--symbol", required=True, help="종목 코드 (6자리)")
 @click.option("--timeframe", default="1d", help="타임프레임 (기본값: 1d)")
 @click.option("--source", default="external", help="데이터 소스 식별자")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def feed_inject(
     ctx: click.Context,
     path: str,
@@ -650,7 +550,6 @@ def feed_inject(
     data_path: str,
 ) -> None:
     """외부 CSV 파일에서 과거 데이터를 수동 주입한다."""
-    import asyncio
     from pathlib import Path as _Path
 
     from ante.data.normalizer import DataNormalizer
@@ -665,13 +564,11 @@ def feed_inject(
     injector = FeedInjector(store=store, normalizer=normalizer)
 
     try:
-        count = asyncio.run(
-            injector.inject_csv(
-                filepath,
-                symbol=symbol,
-                timeframe=timeframe,
-                source=source,
-            )
+        count = injector.inject_csv(
+            filepath,
+            symbol=symbol,
+            timeframe=timeframe,
+            source=source,
         )
     except FileNotFoundError as e:
         fmt.error(str(e), "FILE_NOT_FOUND")

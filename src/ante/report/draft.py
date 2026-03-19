@@ -24,7 +24,7 @@ class ReportDraftGenerator:
         self._store = report_store
         self._eventbus = eventbus
 
-    async def initialize(self) -> None:
+    def initialize(self) -> None:
         """EventBus에 핸들러 등록."""
         from ante.eventbus.events import BacktestCompleteEvent
 

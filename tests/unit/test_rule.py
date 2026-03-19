@@ -473,7 +473,7 @@ class TestRuleEngineEventBus:
     @pytest.fixture
     async def engine(self, eventbus, system_state):
         engine = RuleEngine(eventbus=eventbus, system_state=system_state)
-        await engine.start()
+        engine.start()
         return engine
 
     async def test_order_validated_on_pass(self, engine, eventbus):
