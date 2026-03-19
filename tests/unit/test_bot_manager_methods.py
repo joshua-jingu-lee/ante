@@ -274,3 +274,75 @@ class TestResumeBot:
         """존재하지 않는 봇 재개 시 예외."""
         with pytest.raises(BotError, match="not found"):
             await manager.resume_bot("nonexistent")
+
+
+# ── stop_bot suppress_notification ──────────────
+
+
+class TestStopBotSuppressNotification:
+    async def test_suppress_false_publishes_notification(self, manager, eventbus, ctx):
+        """suppress_notification=False(기본값)이면 NotificationEvent가 발행된다."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await manager.start_bot("bot1")
+        await manager.stop_bot("bot1")
+
+        stop_notifs = [n for n in notifications if n.title == "봇 중지"]
+        assert len(stop_notifs) == 1
+
+    async def test_suppress_true_skips_notification(self, manager, eventbus, ctx):
+        """suppress_notification=True이면 NotificationEvent가 발행되지 않는다."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await manager.start_bot("bot1")
+        await manager.stop_bot("bot1", suppress_notification=True)
+
+        stop_notifs = [n for n in notifications if n.title == "봇 중지"]
+        assert len(stop_notifs) == 0
+
+    async def test_suppress_is_one_shot(self, manager, eventbus, ctx):
+        """suppress는 1회성이다. 두 번째 stop에서는 알림이 발행된다."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        # 1회차: suppress
+        await manager.start_bot("bot1")
+        await manager.stop_bot("bot1", suppress_notification=True)
+        stop_notifs_1 = [n for n in notifications if n.title == "봇 중지"]
+        assert len(stop_notifs_1) == 0
+
+        # 2회차: 기본값 (알림 발행)
+        await manager.start_bot("bot1")
+        await manager.stop_bot("bot1")
+        stop_notifs_2 = [n for n in notifications if n.title == "봇 중지"]
+        assert len(stop_notifs_2) == 1
+
+    async def test_suppress_preserves_bot_stopped_event(self, manager, eventbus, ctx):
+        """suppress_notification=True여도 BotStoppedEvent는 정상 발행된다."""
+        from ante.eventbus.events import BotStoppedEvent
+
+        stopped_events: list[BotStoppedEvent] = []
+        eventbus.subscribe(BotStoppedEvent, lambda e: stopped_events.append(e))
+
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await manager.start_bot("bot1")
+        await manager.stop_bot("bot1", suppress_notification=True)
+
+        assert len(stopped_events) == 1
+        assert stopped_events[0].bot_id == "bot1"

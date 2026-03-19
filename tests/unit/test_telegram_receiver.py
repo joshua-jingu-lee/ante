@@ -216,6 +216,8 @@ class TestCommands:
         result = await receiver._cmd_activate([])
         assert "재개" in result
         system_state.set_state.assert_called_once()
+        call_kwargs = system_state.set_state.call_args
+        assert call_kwargs.kwargs.get("suppress_notification") is True
 
     async def test_activate_no_state(self, receiver):
         receiver._system_state = None
@@ -226,7 +228,9 @@ class TestCommands:
         result = await receiver._cmd_stop(["bot-1"])
         assert "중지" in result
         assert "bot-1" in result
-        bot_manager.stop_bot.assert_called_once_with("bot-1")
+        bot_manager.stop_bot.assert_called_once_with(
+            "bot-1", suppress_notification=True
+        )
 
     async def test_stop_bot_no_args(self, receiver):
         result = await receiver._cmd_stop([])
@@ -270,13 +274,17 @@ class TestConfirmation:
         result = await receiver._handle_confirm(12345)
         assert "중지되었습니다" in result
         system_state.set_state.assert_called_once()
+        call_kwargs = system_state.set_state.call_args
+        assert call_kwargs.kwargs.get("suppress_notification") is True
 
     async def test_confirm_executes_stop(self, receiver, bot_manager):
         """confirm으로 stop이 실행된다."""
         await receiver._execute("stop", ["bot-1"], 12345, 100)
         result = await receiver._handle_confirm(12345)
         assert "중지" in result
-        bot_manager.stop_bot.assert_called_once_with("bot-1")
+        bot_manager.stop_bot.assert_called_once_with(
+            "bot-1", suppress_notification=True
+        )
 
     async def test_confirm_no_pending(self, receiver):
         """대기 중인 명령이 없으면 안내 메시지."""
@@ -432,6 +440,8 @@ class TestIntegrationFlow:
         assert receiver._reply.call_count == 2
         assert "중지되었습니다" in receiver._reply.call_args[0][1]
         system_state.set_state.assert_called_once()
+        call_kwargs = system_state.set_state.call_args
+        assert call_kwargs.kwargs.get("suppress_notification") is True
 
     async def test_reply_with_no_chat_id(self, receiver):
         """chat_id가 없어도 에러 없이 처리."""

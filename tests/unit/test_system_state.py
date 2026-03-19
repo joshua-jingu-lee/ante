@@ -97,6 +97,31 @@ async def test_state_history_recorded(state, db):
     assert rows[1]["new_state"] == "halted"
 
 
+async def test_suppress_notification_skips_notification_event(state, eventbus):
+    """suppress_notification=True이면 NotificationEvent를 발행하지 않는다."""
+    await state.set_state(
+        TradingState.HALTED, reason="silent", suppress_notification=True
+    )
+
+    # 도메인 이벤트(TradingStateChangedEvent)만 발행
+    assert len(eventbus.published) == 1
+    assert isinstance(eventbus.published[0], TradingStateChangedEvent)
+    assert eventbus.published[0].new_state == "halted"
+
+
+async def test_suppress_notification_false_publishes_both(state, eventbus):
+    """suppress_notification=False(기본값)이면 두 이벤트 모두 발행한다."""
+    from ante.eventbus.events import NotificationEvent
+
+    await state.set_state(
+        TradingState.REDUCING, reason="normal", suppress_notification=False
+    )
+
+    assert len(eventbus.published) == 2
+    assert isinstance(eventbus.published[0], TradingStateChangedEvent)
+    assert isinstance(eventbus.published[1], NotificationEvent)
+
+
 async def test_trading_state_enum_values():
     """TradingState enum 값 확인."""
     assert TradingState.ACTIVE == "active"
