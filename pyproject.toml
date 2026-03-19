@@ -11,6 +11,7 @@ dependencies = [
     "aiohttp>=3.9",
     "aiosqlite>=0.20",
     "polars>=1.0",
+    "pandas-ta>=0.3",
     "click>=8.1",
     "fastapi>=0.115",
     "uvicorn>=0.34",

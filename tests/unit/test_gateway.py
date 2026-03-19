@@ -422,16 +422,21 @@ class TestLiveDataProvider:
         assert price == 50000.0
         mock_gateway.get_current_price.assert_called_once_with("005930")
 
-    async def test_get_ohlcv_returns_empty(self):
-        """OHLCV는 현재 빈 리스트 반환 (Phase 4에서 구현)."""
+    async def test_get_ohlcv_delegates_to_gateway(self):
+        """OHLCV 조회가 gateway.get_ohlcv()를 호출한다."""
         mock_gateway = AsyncMock()
+        mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
         provider = LiveDataProvider(mock_gateway)
         result = await provider.get_ohlcv("005930")
-        assert result == []
+        assert result == [{"close": 50000.0}]
+        mock_gateway.get_ohlcv.assert_called_once_with(
+            "005930", timeframe="1d", limit=100
+        )
 
-    async def test_get_indicator_returns_empty(self):
-        """지표는 현재 빈 dict 반환 (추후 구현)."""
+    async def test_get_indicator_returns_empty_when_no_ohlcv(self):
+        """OHLCV 데이터 없을 때 빈 dict 반환."""
         mock_gateway = AsyncMock()
+        mock_gateway.get_ohlcv = AsyncMock(return_value=[])
         provider = LiveDataProvider(mock_gateway)
         result = await provider.get_indicator("005930", "sma")
         assert result == {}

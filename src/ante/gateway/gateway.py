@@ -69,6 +69,33 @@ class APIGateway:
 
     # ── 공개 API ──────────────────────────────────
 
+    async def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = "1d",
+        limit: int = 100,
+        exchange: str = "KRX",
+    ) -> list[dict[str, Any]]:
+        """과거 봉 데이터 조회 (캐시 우선).
+
+        BrokerAdapter.get_ohlcv()가 미구현이면 빈 리스트를 반환한다.
+        추후 KIS 일봉 API 연동 시 BrokerAdapter에 구현체를 추가한다.
+        """
+        cache_key = f"ohlcv:{exchange}:{symbol}:{timeframe}:{limit}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        await self._rate_limiter.acquire()
+        get_ohlcv = getattr(self._broker, "get_ohlcv", None)
+        if get_ohlcv is None:
+            return []
+        data: list[dict[str, Any]] = await get_ohlcv(
+            symbol, timeframe=timeframe, limit=limit
+        )
+        self._cache.set(cache_key, data, ttl=60)
+        return data
+
     async def get_current_price(self, symbol: str, exchange: str = "KRX") -> float:
         """현재가 조회 (캐시 우선)."""
         cache_key = f"price:{exchange}:{symbol}"
