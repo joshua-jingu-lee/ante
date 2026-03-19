@@ -27,7 +27,6 @@ async def _ensure_schemas(db: Database) -> None:
     from ante.config.system_state import SYSTEM_STATE_SCHEMA
     from ante.eventbus.history import EVENT_LOG_SCHEMA
     from ante.member.service import MEMBER_SCHEMA
-    from ante.notification.service import NOTIFICATION_HISTORY_SCHEMA
     from ante.report.store import REPORT_SCHEMA
     from ante.strategy.registry import STRATEGY_REGISTRY_SCHEMA
     from ante.trade.position import POSITION_SCHEMA
@@ -49,7 +48,6 @@ async def _ensure_schemas(db: Database) -> None:
         EVENT_LOG_SCHEMA,
         APPROVAL_SCHEMA,
         REPORT_SCHEMA,
-        NOTIFICATION_HISTORY_SCHEMA,
         SESSION_SCHEMA,
         AUDIT_SCHEMA,
     ]

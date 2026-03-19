@@ -1,4 +1,4 @@
-"""NotificationService — 알림 라우팅 + 필터링 + 이력 저장."""
+"""NotificationService — 알림 라우팅 + 필터링."""
 
 from __future__ import annotations
 
@@ -9,29 +9,9 @@ from typing import TYPE_CHECKING
 from ante.notification.base import NotificationAdapter, NotificationLevel
 
 if TYPE_CHECKING:
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
-
-NOTIFICATION_HISTORY_SCHEMA = """
-CREATE TABLE IF NOT EXISTS notification_history (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    level         TEXT NOT NULL,
-    title         TEXT DEFAULT '',
-    message       TEXT NOT NULL,
-    adapter_type  TEXT NOT NULL,
-    success       BOOLEAN NOT NULL,
-    error_message TEXT DEFAULT '',
-    event_type    TEXT DEFAULT '',
-    bot_id        TEXT DEFAULT '',
-    created_at    TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_notification_history_created
-    ON notification_history(created_at);
-CREATE INDEX IF NOT EXISTS idx_notification_history_level
-    ON notification_history(level);
-"""
 
 
 _SUPPRESSED = object()  # 중복 억제 센티널
@@ -52,7 +32,6 @@ class NotificationService:
         min_level: NotificationLevel = NotificationLevel.INFO,
         quiet_start: time | None = None,
         quiet_end: time | None = None,
-        db: Database | None = None,
         dedup_window: float = 60.0,
     ) -> None:
         self._adapter = adapter
@@ -60,16 +39,9 @@ class NotificationService:
         self._min_level = min_level
         self._quiet_start = quiet_start
         self._quiet_end = quiet_end
-        self._db = db
         self._dedup_window = dedup_window
         # {dedup_key: (last_sent_timestamp, suppressed_count)}
         self._dedup_cache: dict[str, tuple[float, int]] = {}
-
-    async def initialize(self) -> None:
-        """notification_history 테이블 스키마 생성."""
-        if self._db:
-            await self._db.execute_script(NOTIFICATION_HISTORY_SCHEMA)
-            logger.debug("notification_history 테이블 초기화 완료")
 
     def subscribe(self) -> None:
         """이벤트 구독 등록 — NotificationEvent 단일 구독."""
@@ -117,16 +89,12 @@ class NotificationService:
         self._dedup_cache[key] = (now, 0)
         return suffix
 
-    async def _send_and_record(
+    async def _send(
         self,
         level: NotificationLevel,
         message: str,
-        *,
-        title: str = "",
-        event_type: str = "",
-        bot_id: str = "",
     ) -> bool:
-        """send() 호출 후 이력 기록."""
+        """send() 호출."""
         dedup_result = self._check_dedup(level, message)
         if dedup_result is _SUPPRESSED:
             logger.debug("알림 억제 (중복): %s", message[:50])
@@ -135,36 +103,21 @@ class NotificationService:
         if dedup_result:
             message = message + dedup_result
 
-        success = False
-        error_message = ""
         try:
-            success = await self._adapter.send(level, message)
+            return await self._adapter.send(level, message)
         except Exception as e:
-            error_message = str(e)
             logger.warning("알림 발송 실패: %s", e)
+            return False
 
-        await self._record_history(
-            level=level,
-            title=title,
-            message=message,
-            success=success,
-            error_message=error_message,
-            event_type=event_type,
-            bot_id=bot_id,
-        )
-        return success
-
-    async def _send_rich_and_record(
+    async def _send_rich(
         self,
         level: NotificationLevel,
         title: str,
         body: str,
         *,
         metadata: dict | None = None,
-        event_type: str = "",
-        bot_id: str = "",
     ) -> bool:
-        """send_rich() 호출 후 이력 기록."""
+        """send_rich() 호출."""
         dedup_result = self._check_dedup(level, body or title)
         if dedup_result is _SUPPRESSED:
             logger.debug("알림 억제 (중복): %s", (body or title)[:50])
@@ -173,37 +126,22 @@ class NotificationService:
         if dedup_result:
             body = (body or "") + dedup_result
 
-        success = False
-        error_message = ""
         try:
-            success = await self._adapter.send_rich(
+            return await self._adapter.send_rich(
                 level=level, title=title, body=body, metadata=metadata
             )
         except Exception as e:
-            error_message = str(e)
             logger.warning("알림 발송 실패: %s", e)
+            return False
 
-        await self._record_history(
-            level=level,
-            title=title,
-            message=body or title,
-            success=success,
-            error_message=error_message,
-            event_type=event_type,
-            bot_id=bot_id,
-        )
-        return success
-
-    async def _send_with_buttons_and_record(
+    async def _send_with_buttons(
         self,
         level: NotificationLevel,
         title: str,
         body: str,
         buttons: list,
-        *,
-        event_type: str = "",
     ) -> bool:
-        """send_with_buttons() 호출 후 이력 기록."""
+        """send_with_buttons() 호출."""
         dedup_result = self._check_dedup(level, body or title)
         if dedup_result is _SUPPRESSED:
             logger.debug("알림 억제 (중복): %s", (body or title)[:50])
@@ -213,93 +151,19 @@ class NotificationService:
             body = (body or "") + dedup_result
 
         # 어댑터가 send_with_buttons를 지원하는 경우 사용, 아니면 send_rich fallback
-        success = False
-        error_message = ""
         try:
             if hasattr(self._adapter, "send_with_buttons"):
                 # 버튼 포함 발송 시 title + body를 합쳐서 메시지로 전달
                 message = f"*{title}*\n{body}" if body else f"*{title}*"
-                success = await self._adapter.send_with_buttons(level, message, buttons)
+                return await self._adapter.send_with_buttons(level, message, buttons)
             else:
                 # 버튼 미지원 어댑터 — send_rich fallback
-                success = await self._adapter.send_rich(
+                return await self._adapter.send_rich(
                     level=level, title=title, body=body
                 )
         except Exception as e:
-            error_message = str(e)
             logger.warning("알림 발송 실패: %s", e)
-
-        await self._record_history(
-            level=level,
-            title=title,
-            message=body or title,
-            success=success,
-            error_message=error_message,
-            event_type=event_type,
-        )
-        return success
-
-    async def _record_history(
-        self,
-        *,
-        level: NotificationLevel,
-        title: str,
-        message: str,
-        success: bool,
-        error_message: str = "",
-        event_type: str = "",
-        bot_id: str = "",
-    ) -> None:
-        """알림 이력을 DB에 기록."""
-        if not self._db:
-            return
-
-        try:
-            await self._db.execute(
-                """INSERT INTO notification_history
-                   (level, title, message, adapter_type, success,
-                    error_message, event_type, bot_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    str(level),
-                    title,
-                    message,
-                    type(self._adapter).__name__,
-                    success,
-                    error_message,
-                    event_type,
-                    bot_id,
-                ),
-            )
-        except Exception:
-            logger.exception("알림 이력 기록 실패")
-
-    async def get_history(
-        self,
-        *,
-        limit: int = 50,
-        level: str | None = None,
-        success_only: bool | None = None,
-    ) -> list[dict]:
-        """알림 이력 조회."""
-        if not self._db:
-            return []
-
-        query = "SELECT * FROM notification_history WHERE 1=1"
-        params: list[object] = []
-
-        if level:
-            query += " AND level = ?"
-            params.append(level)
-
-        if success_only is not None:
-            query += " AND success = ?"
-            params.append(success_only)
-
-        query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-
-        return await self._db.fetch_all(query, tuple(params))
+            return False
 
     async def _on_notification(self, event: object) -> None:
         """NotificationEvent 단일 핸들러.
@@ -316,19 +180,17 @@ class NotificationService:
             return
 
         if event.buttons:
-            await self._send_with_buttons_and_record(
+            await self._send_with_buttons(
                 level=level,
                 title=event.title,
                 body=event.message,
                 buttons=event.buttons,
-                event_type="NotificationEvent",
             )
         else:
-            await self._send_rich_and_record(
+            await self._send_rich(
                 level=level,
                 title=event.title,
                 body=event.message,
-                event_type="NotificationEvent",
             )
 
     def _should_send(self, level: NotificationLevel) -> bool:
