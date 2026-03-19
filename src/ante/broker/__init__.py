@@ -15,6 +15,7 @@ from ante.broker.kis_stream import KISStreamClient
 from ante.broker.mock import MockBrokerAdapter
 from ante.broker.models import CommissionInfo
 from ante.broker.order_registry import OrderRegistry
+from ante.broker.scheduler import ReconcileScheduler
 from ante.broker.test import TestBrokerAdapter
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "KISStreamClient",
     "MockBrokerAdapter",
     "OrderRegistry",
+    "ReconcileScheduler",
     "TestBrokerAdapter",
     "BrokerError",
     "AuthenticationError",
