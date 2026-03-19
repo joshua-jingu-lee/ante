@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ante.approval.auto_approve import AutoApproveEvaluator
 from ante.approval.models import ApprovalRequest, ApprovalStatus
 
 if TYPE_CHECKING:
@@ -49,10 +50,12 @@ class ApprovalService:
         db: Database,
         eventbus: EventBus,
         executors: dict[str, Callable[..., Awaitable]] | None = None,
+        auto_approve_evaluator: AutoApproveEvaluator | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
         self._executors = executors or {}
+        self._auto_approve = auto_approve_evaluator or AutoApproveEvaluator()
 
     async def initialize(self) -> None:
         """스키마 생성."""
@@ -98,11 +101,30 @@ class ApprovalService:
             created_at=now,
         )
 
+        # 전결 평가
+        auto_approved = self._auto_approve.should_auto_approve(type, params)
+
+        if auto_approved:
+            # 즉시 승인 처리: status를 APPROVED로 설정
+            request.status = ApprovalStatus.APPROVED
+            request.resolved_at = now
+            request.resolved_by = "system:auto_approve"
+            request.history.append(
+                {
+                    "action": "approved",
+                    "actor": "system:auto_approve",
+                    "at": now,
+                    "detail": "전결 규칙에 의한 자동 승인",
+                }
+            )
+
+        # DB INSERT (auto_approved이면 approved 상태로 저장)
         await self._db.execute(
             """INSERT INTO approvals
                (id, type, status, requester, title, body, params,
-                reviews, history, reference_id, expires_at, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                reviews, history, reference_id, expires_at, created_at,
+                resolved_at, resolved_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 request.id,
                 request.type,
@@ -116,14 +138,17 @@ class ApprovalService:
                 request.reference_id,
                 request.expires_at,
                 request.created_at,
+                request.resolved_at,
+                request.resolved_by,
             ),
         )
 
         logger.info(
-            "결재 요청 생성: %s (%s) by %s",
+            "결재 요청 생성: %s (%s) by %s%s",
             request.id,
             request.type,
             request.requester,
+            " [자동 승인]" if auto_approved else "",
         )
 
         # ApprovalCreatedEvent 발행
@@ -135,8 +160,33 @@ class ApprovalService:
                 approval_type=request.type,
                 requester=request.requester,
                 title=request.title,
+                auto_approved=auto_approved,
             )
         )
+
+        # 전결 시 executor 즉시 실행
+        if auto_approved:
+            executor = self._executors.get(request.type)
+            if executor:
+                try:
+                    await executor(request.params)
+                    logger.info("전결 실행 완료: %s (%s)", request.id, request.type)
+                except Exception:
+                    logger.exception(
+                        "전결 실행 실패: %s (%s)", request.id, request.type
+                    )
+
+            # ApprovalResolvedEvent 발행
+            from ante.eventbus.events import ApprovalResolvedEvent
+
+            await self._eventbus.publish(
+                ApprovalResolvedEvent(
+                    approval_id=request.id,
+                    approval_type=request.type,
+                    resolution=ApprovalStatus.APPROVED,
+                    resolved_by="system:auto_approve",
+                )
+            )
 
         return request
 

@@ -365,6 +365,7 @@ class ApprovalCreatedEvent(Event):
     approval_type: str = ""
     requester: str = ""
     title: str = ""
+    auto_approved: bool = False
 
 
 @dataclass(frozen=True)

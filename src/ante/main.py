@@ -414,6 +414,7 @@ async def _init_feed(s: Services) -> None:
 
     # ApprovalService
     from ante.approval import ApprovalService
+    from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
 
     async def _exec_rule_change(params: dict) -> None:
         s.rule_engine.update_rules(params["bot_id"], params["rules"])
@@ -443,8 +444,21 @@ async def _init_feed(s: Services) -> None:
         ),
         "rule_change": _exec_rule_change,
     }
+
+    # 전결 설정 로딩
+    auto_approve_raw = s.config.get("approval.auto_approve", {})
+    auto_approve_config = AutoApproveConfig.from_dict(
+        auto_approve_raw if isinstance(auto_approve_raw, dict) else {}
+    )
+    auto_approve_evaluator = AutoApproveEvaluator(config=auto_approve_config)
+    if auto_approve_config.enabled:
+        logger.info("전결 기능 활성화")
+
     s.approval_service = ApprovalService(
-        db=s.db, eventbus=s.eventbus, executors=approval_executors
+        db=s.db,
+        eventbus=s.eventbus,
+        executors=approval_executors,
+        auto_approve_evaluator=auto_approve_evaluator,
     )
     await s.approval_service.initialize()
     logger.info("ApprovalService 초기화 완료")

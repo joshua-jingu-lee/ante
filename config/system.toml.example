@@ -36,3 +36,14 @@ tick_interval = 1.0         # 가격 변동 간격 (초)
 
 [treasury]
 sync_interval_seconds = 300 # 잔고 동기화 주기 (초)
+
+# 결재 전결 (자동 승인) 설정
+# ⚠️ 잘못된 설정은 의도하지 않은 거래·자금 변동으로 이어질 수 있으므로 신중하게 사용
+[approval.auto_approve]
+enabled = false                  # 전결 기능 전체 on/off (기본: false)
+
+# 유형별 전결 규칙 (enabled = true일 때만 적용)
+[approval.auto_approve.rules]
+bot_stop = true                  # 봇 중지는 항상 자동 승인
+bot_create_paper = true          # 모의투자 봇 생성은 자동 승인
+budget_change_max = 5000000      # 예산 변경 500만원 이하 자동 승인 (0이면 비활성)
