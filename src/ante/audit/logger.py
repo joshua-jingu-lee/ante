@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from ante.core.database import Database
 
@@ -60,6 +60,8 @@ class AuditLogger:
         *,
         member_id: str | None = None,
         action: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
@@ -73,6 +75,14 @@ class AuditLogger:
         if action:
             conditions.append("action LIKE ?")
             params.append(f"{action}%")
+        if from_date:
+            conditions.append("created_at >= ?")
+            params.append(from_date)
+        if to_date:
+            conditions.append("created_at <= ?")
+            params.append(to_date + "T23:59:59" if len(to_date) == 10 else to_date)
+
+        limit = min(limit, 200)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         sql = f"""SELECT id, member_id, action, resource, detail, ip, created_at
@@ -86,6 +96,8 @@ class AuditLogger:
         *,
         member_id: str | None = None,
         action: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> int:
         """감사 로그 건수 조회."""
         conditions: list[str] = []
@@ -97,8 +109,46 @@ class AuditLogger:
         if action:
             conditions.append("action LIKE ?")
             params.append(f"{action}%")
+        if from_date:
+            conditions.append("created_at >= ?")
+            params.append(from_date)
+        if to_date:
+            conditions.append("created_at <= ?")
+            params.append(to_date + "T23:59:59" if len(to_date) == 10 else to_date)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         sql = f"SELECT COUNT(*) as cnt FROM audit_log {where}"
         row = await self._db.fetch_one(sql, tuple(params))
         return row["cnt"] if row else 0
+
+    async def cleanup(self, retention_days: int) -> int:
+        """보존 기간 초과 로그 삭제. 삭제 건수 반환.
+
+        Args:
+            retention_days: 보존 일수. 0이면 삭제하지 않음.
+
+        Returns:
+            삭제된 로그 건수.
+        """
+        if retention_days <= 0:
+            return 0
+
+        cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+
+        # Database.execute()는 rowcount를 반환하지 않으므로 사전 카운트
+        row = await self._db.fetch_one(
+            "SELECT COUNT(*) as cnt FROM audit_log WHERE created_at < ?",
+            (cutoff,),
+        )
+        count = row["cnt"] if row else 0
+
+        if count > 0:
+            await self._db.execute(
+                "DELETE FROM audit_log WHERE created_at < ?",
+                (cutoff,),
+            )
+            logger.info("감사 로그 정리: %d건 삭제 (기준: %s)", count, cutoff)
+
+        return count

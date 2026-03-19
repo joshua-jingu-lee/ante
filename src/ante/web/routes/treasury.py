@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ante.web.deps import get_broker, get_config, get_treasury
+from ante.web.deps import (
+    get_audit_logger_optional,
+    get_broker,
+    get_config,
+    get_treasury,
+)
 from ante.web.schemas import (
     BalanceSetResponse,
     BudgetListResponse,
@@ -142,7 +147,9 @@ async def list_transactions(
 async def allocate(
     bot_id: str,
     body: BudgetChangeRequest,
+    request: Request,
     treasury: Annotated[Any, Depends(get_treasury)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇에 예산 할당."""
     from ante.treasury.exceptions import BotNotStoppedError
@@ -159,6 +166,15 @@ async def allocate(
                 "예산 할당 실패: 미할당 자금 부족 또는 금액 오류"
                 f" (요청: {body.amount:,.0f}원)"
             ),
+        )
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="treasury.allocate",
+            resource=f"bot:{bot_id}",
+            detail=f"amount={body.amount:,.0f}",
+            ip=request.client.host if request.client else "",
         )
 
     budget = treasury.get_budget(bot_id)
@@ -181,7 +197,9 @@ async def allocate(
 async def deallocate(
     bot_id: str,
     body: BudgetChangeRequest,
+    request: Request,
     treasury: Annotated[Any, Depends(get_treasury)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 예산 회수."""
     from ante.treasury.exceptions import BotNotStoppedError
@@ -195,6 +213,15 @@ async def deallocate(
         raise HTTPException(
             status_code=400,
             detail=f"예산 회수 실패: 가용 예산 부족 (요청: {body.amount:,.0f}원)",
+        )
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="treasury.deallocate",
+            resource=f"bot:{bot_id}",
+            detail=f"amount={body.amount:,.0f}",
+            ip=request.client.host if request.client else "",
         )
 
     budget = treasury.get_budget(bot_id)
@@ -234,12 +261,24 @@ async def list_budgets(
 )
 async def set_balance(
     body: BalanceSetRequest,
+    request: Request,
     treasury: Annotated[Any, Depends(get_treasury)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """계좌 총 잔고 수동 설정."""
     from datetime import UTC, datetime
 
     await treasury.set_account_balance(body.balance)
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="treasury.set_balance",
+            resource="treasury",
+            detail=f"balance={body.balance:,.0f}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {
         "total_balance": treasury.account_balance,
         "updated_at": datetime.now(UTC).isoformat(),

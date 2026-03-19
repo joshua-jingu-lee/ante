@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ante.web.deps import get_dynamic_config
+from ante.web.deps import get_audit_logger_optional, get_dynamic_config
 from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse
 
 router = APIRouter()
@@ -44,7 +44,9 @@ async def list_configs(
 async def update_config(
     key: str,
     body: ConfigUpdateRequest,
+    request: Request,
     config_service: Annotated[Any, Depends(get_dynamic_config)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """동적 설정 값 변경."""
     if not await config_service.exists(key):
@@ -56,5 +58,14 @@ async def update_config(
     category = body.category or key.split(".")[0]
 
     await config_service.set(key, body.value, category=category, changed_by="dashboard")
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="config.update",
+            resource=f"config:{key}",
+            detail=f"{old_value!r} -> {body.value!r}",
+            ip=request.client.host if request.client else "",
+        )
 
     return {"key": key, "old_value": old_value, "new_value": body.value}

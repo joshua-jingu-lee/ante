@@ -7,7 +7,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 
-from ante.web.deps import get_member_service, get_session_service
+from ante.web.deps import (
+    get_audit_logger_optional,
+    get_member_service,
+    get_session_service,
+)
 from ante.web.schemas import LoginRequest, LoginResponse, LogoutResponse, MeResponse
 
 logger = logging.getLogger(__name__)
@@ -32,6 +36,7 @@ async def login(
     response: Response,
     member_service: Annotated[Any, Depends(get_member_service)],
     session_service: Annotated[Any, Depends(get_session_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> LoginResponse:
     """패스워드 로그인 -> 세션 쿠키 발급."""
     try:
@@ -63,6 +68,14 @@ async def login(
         secure=request.url.scheme == "https",
     )
 
+    if audit_logger:
+        await audit_logger.log(
+            member_id=member.member_id,
+            action="auth.login",
+            resource=f"member:{member.member_id}",
+            ip=ip_address,
+        )
+
     return LoginResponse(
         member_id=member.member_id,
         name=member.name,
@@ -76,15 +89,30 @@ async def login(
     responses={503: {"description": "Session service not available"}},
 )
 async def logout(
+    request: Request,
     response: Response,
     session_service: Annotated[Any, Depends(get_session_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     ante_session: str | None = Cookie(default=None),
 ) -> dict:
     """로그아웃 — 세션 삭제 + 쿠키 제거."""
+    member_id = "anonymous"
     if ante_session:
+        session = await session_service.validate(ante_session)
+        if session:
+            member_id = session.get("member_id", "anonymous")
         await session_service.delete(ante_session)
 
     response.delete_cookie(key=COOKIE_NAME)
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=member_id,
+            action="auth.logout",
+            resource=f"member:{member_id}",
+            ip=request.client.host if request.client else "",
+        )
+
     return {"ok": True}
 
 

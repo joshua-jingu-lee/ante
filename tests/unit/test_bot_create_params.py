@@ -102,8 +102,14 @@ class TestBotCreateWithParams:
             assert "생성 완료" in result.output
 
             # DB에 저장된 config_json에 params 포함 확인
-            call_args = mock_db.execute.call_args[0]
-            config_json = call_args[1][4]
+            # INSERT INTO bots 호출을 찾기 (audit 로그 호출과 구분)
+            bot_insert = [
+                c
+                for c in mock_db.execute.call_args_list
+                if "INSERT INTO bots" in str(c[0][0])
+            ]
+            assert len(bot_insert) == 1
+            config_json = bot_insert[0][0][1][4]
             config = json.loads(config_json)
             assert config["params"]["lookback"] == 20
             assert config["params"]["threshold"] == 0.5
@@ -122,8 +128,13 @@ class TestBotCreateWithParams:
             assert result.exit_code == 0
 
             # params 키가 없어야 함
-            call_args = mock_db.execute.call_args[0]
-            config_json = call_args[1][4]
+            bot_insert = [
+                c
+                for c in mock_db.execute.call_args_list
+                if "INSERT INTO bots" in str(c[0][0])
+            ]
+            assert len(bot_insert) == 1
+            config_json = bot_insert[0][0][1][4]
             config = json.loads(config_json)
             assert "params" not in config
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ante.web.deps import (
+    get_audit_logger_optional,
     get_bot_manager,
     get_strategy_registry,
     get_strategy_registry_optional,
@@ -62,8 +63,10 @@ async def list_bots(
 )
 async def create_bot(
     body: BotCreateRequest,
+    request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any, Depends(get_strategy_registry)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 생성."""
     from pathlib import Path
@@ -97,6 +100,15 @@ async def create_bot(
         )
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="bot.create",
+            resource=f"bot:{body.bot_id}",
+            detail=f"strategy={body.strategy_id}",
+            ip=request.client.host if request.client else "",
+        )
 
     return {"bot": bot.get_info()}
 
@@ -174,7 +186,9 @@ async def get_bot(
 )
 async def start_bot(
     bot_id: str,
+    request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 시작."""
     from ante.bot.exceptions import BotError
@@ -187,6 +201,14 @@ async def start_bot(
         await bot_manager.start_bot(bot_id)
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="bot.start",
+            resource=f"bot:{bot_id}",
+            ip=request.client.host if request.client else "",
+        )
 
     return {"bot": bot.get_info()}
 
@@ -202,7 +224,9 @@ async def start_bot(
 )
 async def stop_bot(
     bot_id: str,
+    request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 중지."""
     from ante.bot.exceptions import BotError
@@ -215,6 +239,14 @@ async def stop_bot(
         await bot_manager.stop_bot(bot_id)
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="bot.stop",
+            resource=f"bot:{bot_id}",
+            ip=request.client.host if request.client else "",
+        )
 
     return {"bot": bot.get_info()}
 
@@ -230,7 +262,9 @@ async def stop_bot(
 )
 async def delete_bot(
     bot_id: str,
+    request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> None:
     """봇 삭제."""
     from ante.bot.exceptions import BotError
@@ -243,3 +277,11 @@ async def delete_bot(
         await bot_manager.delete_bot(bot_id)
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="bot.delete",
+            resource=f"bot:{bot_id}",
+            ip=request.client.host if request.client else "",
+        )
