@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse
+
 router = APIRouter()
 
 
@@ -17,7 +19,7 @@ class ConfigUpdateRequest(BaseModel):
     category: str = ""
 
 
-@router.get("")
+@router.get("", response_model=ConfigListResponse)
 async def list_configs(request: Request) -> dict:
     """동적 설정 전체 조회."""
     config_service = getattr(request.app.state, "dynamic_config", None)
@@ -28,7 +30,7 @@ async def list_configs(request: Request) -> dict:
     return {"configs": configs}
 
 
-@router.put("/{key:path}")
+@router.put("/{key:path}", response_model=ConfigUpdateResponse)
 async def update_config(request: Request, key: str, body: ConfigUpdateRequest) -> dict:
     """동적 설정 값 변경."""
     config_service = getattr(request.app.state, "dynamic_config", None)
@@ -40,7 +42,7 @@ async def update_config(request: Request, key: str, body: ConfigUpdateRequest) -
 
     old_value = await config_service.get(key)
 
-    # category: 요청에 없으면 key에서 추출 (예: "risk.max_mdd" → "risk")
+    # category: 요청에 없으면 key에서 추출 (예: "risk.max_mdd" -> "risk")
     category = body.category or key.split(".")[0]
 
     await config_service.set(key, body.value, category=category, changed_by="dashboard")

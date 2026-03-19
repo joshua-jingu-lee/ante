@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ante.web.schemas import NotificationListResponse
+
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=NotificationListResponse)
 async def list_notifications(
     request: Request,
     level: str | None = None,

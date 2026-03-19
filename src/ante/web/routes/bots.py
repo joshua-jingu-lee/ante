@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ante.web.schemas import BotDetailResponse, BotListResponse
+
 router = APIRouter()
 
 
@@ -18,7 +20,7 @@ class BotCreateRequest(BaseModel):
     interval_seconds: int = Field(default=60, ge=10, le=3600)
 
 
-@router.get("")
+@router.get("", response_model=BotListResponse)
 async def list_bots(
     request: Request,
     limit: int = 20,
@@ -36,7 +38,7 @@ async def list_bots(
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=BotDetailResponse)
 async def create_bot(request: Request, body: BotCreateRequest) -> dict:
     """봇 생성."""
     from pathlib import Path
@@ -82,7 +84,7 @@ async def create_bot(request: Request, body: BotCreateRequest) -> dict:
     return {"bot": bot.get_info()}
 
 
-@router.get("/{bot_id}")
+@router.get("/{bot_id}", response_model=BotDetailResponse)
 async def get_bot(request: Request, bot_id: str) -> dict:
     """봇 상세 조회."""
     bot_manager = getattr(request.app.state, "bot_manager", None)
@@ -138,7 +140,7 @@ async def get_bot(request: Request, bot_id: str) -> dict:
     return {"bot": info}
 
 
-@router.post("/{bot_id}/start")
+@router.post("/{bot_id}/start", response_model=BotDetailResponse)
 async def start_bot(request: Request, bot_id: str) -> dict:
     """봇 시작."""
     from ante.bot.exceptions import BotError
@@ -159,7 +161,7 @@ async def start_bot(request: Request, bot_id: str) -> dict:
     return {"bot": bot.get_info()}
 
 
-@router.post("/{bot_id}/stop")
+@router.post("/{bot_id}/stop", response_model=BotDetailResponse)
 async def stop_bot(request: Request, bot_id: str) -> dict:
     """봇 중지."""
     from ante.bot.exceptions import BotError

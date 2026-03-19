@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ante.web.schemas import TradeListResponse
+
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=TradeListResponse)
 async def list_trades(
     request: Request,
     bot_id: str | None = None,
