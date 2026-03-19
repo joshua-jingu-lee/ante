@@ -246,62 +246,79 @@ async def _init_broker(s: Services) -> None:
     )
 
     if broker_type == "mock":
-        from ante.broker.mock import MockBrokerAdapter
-
-        s.broker = MockBrokerAdapter(
-            broker_config if isinstance(broker_config, dict) else {}
-        )
-        await s.broker.connect()
-        logger.info("MockBrokerAdapter 연결 완료")
+        await _connect_mock_broker(s, broker_config)
     else:
-        from ante.broker import KISAdapter
-
-        try:
-            broker_config["app_key"] = s.config.secret("KIS_APP_KEY")
-            broker_config["app_secret"] = s.config.secret("KIS_APP_SECRET")
-            broker_config["account_no"] = s.config.secret("KIS_ACCOUNT_NO")
-        except Exception:
-            pass  # 비밀값 없으면 브로커 미사용
-
-        if broker_config.get("app_key"):
-            s.broker = KISAdapter(config=broker_config, eventbus=s.eventbus)
-            try:
-                await s.broker.connect()
-                logger.info(
-                    "KISAdapter 연결 완료 (paper=%s)",
-                    broker_config.get("is_paper", True),
-                )
-            except Exception:
-                logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
-                s.broker = None
+        await _connect_kis_broker(s, broker_config)
 
     if s.broker:
         s.api_gateway = APIGateway(broker=s.broker, eventbus=s.eventbus)
         await s.api_gateway.start()
         logger.info("APIGateway 시작 완료")
 
-    # 종목 마스터 동기화
     if s.broker:
-        try:
-            raw_instruments = await s.broker.get_instruments()
-            if raw_instruments:
-                from ante.instrument.models import Instrument
+        await _sync_instruments(s)
 
-                instruments_to_upsert = [
-                    Instrument(
-                        symbol=item["symbol"],
-                        exchange="KRX",
-                        name=item.get("name", ""),
-                        name_en=item.get("name_en", ""),
-                        instrument_type=item.get("instrument_type", ""),
-                        listed=item.get("listed", True),
-                    )
-                    for item in raw_instruments
-                ]
-                count = await s.instrument_service.bulk_upsert(instruments_to_upsert)
-                logger.info("종목 동기화 완료: %d건 갱신", count)
-        except Exception:
-            logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영", exc_info=True)
+
+async def _connect_mock_broker(s: Services, broker_config: dict) -> None:
+    """MockBrokerAdapter 연결."""
+    from ante.broker.mock import MockBrokerAdapter
+
+    s.broker = MockBrokerAdapter(
+        broker_config if isinstance(broker_config, dict) else {}
+    )
+    await s.broker.connect()
+    logger.info("MockBrokerAdapter 연결 완료")
+
+
+async def _connect_kis_broker(s: Services, broker_config: dict) -> None:
+    """KISAdapter 연결 (비밀값 없으면 건너뜀)."""
+    from ante.broker import KISAdapter
+
+    try:
+        broker_config["app_key"] = s.config.secret("KIS_APP_KEY")
+        broker_config["app_secret"] = s.config.secret("KIS_APP_SECRET")
+        broker_config["account_no"] = s.config.secret("KIS_ACCOUNT_NO")
+    except Exception:
+        return  # 비밀값 없으면 브로커 미사용
+
+    if not broker_config.get("app_key"):
+        return
+
+    s.broker = KISAdapter(config=broker_config, eventbus=s.eventbus)
+    try:
+        await s.broker.connect()
+        logger.info(
+            "KISAdapter 연결 완료 (paper=%s)",
+            broker_config.get("is_paper", True),
+        )
+    except Exception:
+        logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
+        s.broker = None
+
+
+async def _sync_instruments(s: Services) -> None:
+    """종목 마스터 동기화."""
+    try:
+        raw_instruments = await s.broker.get_instruments()
+        if not raw_instruments:
+            return
+        from ante.instrument.models import Instrument
+
+        instruments_to_upsert = [
+            Instrument(
+                symbol=item["symbol"],
+                exchange="KRX",
+                name=item.get("name", ""),
+                name_en=item.get("name_en", ""),
+                instrument_type=item.get("instrument_type", ""),
+                listed=item.get("listed", True),
+            )
+            for item in raw_instruments
+        ]
+        count = await s.instrument_service.bulk_upsert(instruments_to_upsert)
+        logger.info("종목 동기화 완료: %d건 갱신", count)
+    except Exception:
+        logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영", exc_info=True)
 
 
 async def _init_context_factory(s: Services) -> None:
