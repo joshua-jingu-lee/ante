@@ -127,7 +127,7 @@ class DataCollector:
             try:
                 await asyncio.sleep(self._collect_interval)
             except asyncio.CancelledError:
-                break
+                raise
 
     async def _flush_loop(self) -> None:
         """주기적 버퍼 flush."""
@@ -135,7 +135,7 @@ class DataCollector:
             try:
                 await asyncio.sleep(self._flush_interval)
             except asyncio.CancelledError:
-                break
+                raise
             await self.flush_all()
 
     async def _flush(self, key: str) -> None:

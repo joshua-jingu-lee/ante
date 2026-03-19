@@ -69,7 +69,7 @@ class SignalChannel:
                     break
                 await self._handle_line(line.decode("utf-8").strip())
             except asyncio.CancelledError:
-                break
+                raise
             except Exception:
                 logger.exception("채널 메시지 처리 오류")
 

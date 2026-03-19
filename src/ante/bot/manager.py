@@ -351,7 +351,7 @@ class BotManager:
         try:
             await asyncio.sleep(bot.config.restart_cooldown_seconds)
         except asyncio.CancelledError:
-            return
+            raise
 
         if bot.status != BotStatus.ERROR:
             return
@@ -389,7 +389,7 @@ class BotManager:
         try:
             await asyncio.sleep(seconds)
         except asyncio.CancelledError:
-            return
+            raise
 
         bot = self._bots.get(bot_id)
         if bot and bot.status == BotStatus.RUNNING:
