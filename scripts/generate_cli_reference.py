@@ -30,6 +30,20 @@ def get_cli() -> click.Group:
 # ── Click introspection helpers ──────────────────────────────────────────────
 
 
+def _registration_order(group: click.Group) -> list[str]:
+    """Click Group의 내부 커맨드 dict 삽입 순서를 반환한다.
+
+    click.Group._commands (Click 8+) 또는 commands dict의 키 순서가
+    add_command() 호출 순서를 보존한다.
+    """
+    # Click 8+: group.commands 는 dict (삽입 순서 보존)
+    if hasattr(group, "commands") and isinstance(group.commands, dict):
+        return list(group.commands.keys())
+    # fallback: list_commands (알파벳 정렬)
+    ctx = click.Context(group, info_name=group.name or "ante")
+    return list(group.list_commands(ctx))
+
+
 def _collect_commands(
     group: click.Group,
     prefix: str = "",
@@ -38,7 +52,7 @@ def _collect_commands(
     results: list[tuple[str, click.BaseCommand]] = []
     ctx = click.Context(group, info_name=prefix or group.name or "ante")
 
-    for name in sorted(group.list_commands(ctx)):
+    for name in _registration_order(group):
         cmd = group.get_command(ctx, name)
         if cmd is None:
             continue
@@ -154,7 +168,7 @@ def _write_toc(
     out.write(f"- [글로벌 옵션](#{_to_anchor('글로벌 옵션')})\n")
     out.write(f"- [명령어 요약](#{_to_anchor('명령어 요약')})\n")
 
-    for group_name in sorted(grouped):
+    for group_name in grouped:
         items = grouped[group_name]
         # 그룹 헤딩 텍스트 재현
         group_cmd = None
@@ -304,7 +318,7 @@ def generate_cli_reference(out: TextIO) -> int:
     _write_summary_table(out, leaf_commands)
 
     # 그룹별 상세
-    for group_name in sorted(grouped):
+    for group_name in grouped:
         items = grouped[group_name]
         # 그룹 설명 찾기
         group_cmd = None
