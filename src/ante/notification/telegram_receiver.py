@@ -336,6 +336,15 @@ class TelegramCommandReceiver:
 
         return "\n".join(parts)
 
+    _STATUS_KO: dict[str, str] = {
+        "created": "생성됨",
+        "running": "실행 중",
+        "stopping": "중지 중",
+        "stopped": "중지됨",
+        "error": "에러",
+        "deleted": "삭제됨",
+    }
+
     def _cmd_bots(self, args: list[str]) -> str:
         """봇 목록."""
         if not self._bot_manager:
@@ -345,14 +354,17 @@ class TelegramCommandReceiver:
         if not bots:
             return "등록된 봇이 없습니다."
 
+        running = sum(1 for b in bots if b["status"] == "running")
+        total = len(bots)
+
         lines = []
         for b in bots:
-            status = b["status"]
+            status_ko = self._STATUS_KO.get(b["status"], b["status"])
             bot_id = b["bot_id"]
             strategy = b.get("strategy_id", "-")
-            lines.append(f"  {bot_id} [{status}] {strategy}")
+            lines.append(f"  {bot_id} [{status_ko}] {strategy}")
 
-        return "봇 목록:\n" + "\n".join(lines)
+        return f"\U0001f916 봇 목록 ({running}/{total} 실행 중)\n" + "\n".join(lines)
 
     def _cmd_balance(self, args: list[str]) -> str:
         """자금 현황."""

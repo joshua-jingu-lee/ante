@@ -163,9 +163,11 @@ class TestCommands:
 
     async def test_bots(self, receiver):
         result = receiver._cmd_bots([])
-        assert "봇 목록" in result
+        assert "봇 목록 (1/2 실행 중)" in result
         assert "bot-1" in result
+        assert "[실행 중]" in result
         assert "bot-2" in result
+        assert "[중지됨]" in result
 
     async def test_bots_no_manager(self, receiver):
         receiver._bot_manager = None
