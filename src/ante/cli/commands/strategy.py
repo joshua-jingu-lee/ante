@@ -275,30 +275,52 @@ def strategy_info(ctx: click.Context, name: str) -> None:
     if fmt.is_json:
         fmt.output(result)
     else:
-        click.echo(f"  {'이름':15s}: {result['name']}")
-        click.echo(f"  {'버전':15s}: {result['version']}")
-        click.echo(f"  {'상태':15s}: {result['status']}")
-        click.echo(f"  {'설명':15s}: {result['description']}")
-        click.echo(f"  {'작성자':15s}: {result['author']}")
-        click.echo(f"  {'파일 경로':15s}: {result['filepath']}")
-        click.echo(f"  {'등록일':15s}: {result['registered_at']}")
-        if result.get("validation_warnings"):
-            click.echo(f"  {'검증 경고':15s}:")
-            for w in result["validation_warnings"]:
-                click.echo(f"    - {w}")
-        if result.get("params"):
-            click.echo(f"  {'파라미터':15s}:")
-            schema = result.get("param_schema", {})
-            for key, value in result["params"].items():
-                desc = schema.get(key, "")
-                line = f"    {key} = {value}"
-                if desc:
-                    line += f"  ({desc})"
-                click.echo(line)
-        if result.get("other_versions"):
-            click.echo(f"  {'다른 버전':15s}:")
-            for v in result["other_versions"]:
-                click.echo(f"    - {v['strategy_id']} ({v['status']})")
+        _print_info_text(result)
+
+
+def _print_info_text(result: dict) -> None:
+    """전략 상세 정보 텍스트 출력."""
+    click.echo(f"  {'이름':15s}: {result['name']}")
+    click.echo(f"  {'버전':15s}: {result['version']}")
+    click.echo(f"  {'상태':15s}: {result['status']}")
+    click.echo(f"  {'설명':15s}: {result['description']}")
+    click.echo(f"  {'작성자':15s}: {result['author']}")
+    click.echo(f"  {'파일 경로':15s}: {result['filepath']}")
+    click.echo(f"  {'등록일':15s}: {result['registered_at']}")
+    _print_info_warnings(result.get("validation_warnings"))
+    _print_info_params(result.get("params"), result.get("param_schema", {}))
+    _print_info_versions(result.get("other_versions"))
+
+
+def _print_info_warnings(warnings: list[str] | None) -> None:
+    """검증 경고 섹션 출력."""
+    if not warnings:
+        return
+    click.echo(f"  {'검증 경고':15s}:")
+    for w in warnings:
+        click.echo(f"    - {w}")
+
+
+def _print_info_params(params: dict | None, schema: dict) -> None:
+    """파라미터 섹션 출력."""
+    if not params:
+        return
+    click.echo(f"  {'파라미터':15s}:")
+    for key, value in params.items():
+        desc = schema.get(key, "")
+        line = f"    {key} = {value}"
+        if desc:
+            line += f"  ({desc})"
+        click.echo(line)
+
+
+def _print_info_versions(versions: list[dict] | None) -> None:
+    """다른 버전 목록 섹션 출력."""
+    if not versions:
+        return
+    click.echo(f"  {'다른 버전':15s}:")
+    for v in versions:
+        click.echo(f"    - {v['strategy_id']} ({v['status']})")
 
 
 def _load_strategy_params(filepath: str) -> dict | None:
