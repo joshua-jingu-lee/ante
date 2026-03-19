@@ -63,6 +63,109 @@ def validate(ctx: click.Context, path: str) -> None:
             fmt.output(data)
 
 
+@strategy.command("submit")
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_context
+@require_auth
+@require_scope("strategy:write")
+def submit(ctx: click.Context, path: str) -> None:
+    """전략 제출 (검증 -> 로드 테스트 -> Registry 등록)."""
+    from ante.strategy.exceptions import StrategyError, StrategyLoadError
+    from ante.strategy.loader import StrategyLoader
+    from ante.strategy.validator import StrategyValidator
+
+    fmt = get_formatter(ctx)
+    filepath = Path(path)
+
+    # 1. 정적 검증
+    validator = StrategyValidator()
+    validation = validator.validate(filepath)
+
+    if not validation.valid:
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "submitted": False,
+                    "stage": "validate",
+                    "errors": validation.errors,
+                }
+            )
+        else:
+            fmt.error(f"Validation failed: {path}")
+            for err in validation.errors:
+                click.echo(f"  - {err}", err=True)
+        raise SystemExit(1)
+
+    if validation.warnings and not fmt.is_json:
+        for warn in validation.warnings:
+            click.echo(f"  [warn] {warn}", err=True)
+
+    # 2. 로드 테스트 — Strategy 클래스 import + meta 추출
+    try:
+        strategy_cls = StrategyLoader.load(filepath)
+    except StrategyLoadError as e:
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "submitted": False,
+                    "stage": "load",
+                    "error": str(e),
+                }
+            )
+        else:
+            fmt.error(f"Load test failed: {e}")
+        raise SystemExit(1)
+
+    meta = strategy_cls.meta
+
+    # 3. Registry 등록
+    async def _register() -> dict:
+        registry, db = await _create_registry()
+        try:
+            await registry.initialize()
+            record = await registry.register(
+                filepath=filepath,
+                meta=meta,
+                warnings=validation.warnings,
+            )
+            return {
+                "submitted": True,
+                "strategy_id": record.strategy_id,
+                "name": record.name,
+                "version": record.version,
+                "description": record.description,
+                "author": record.author,
+                "filepath": str(record.filepath),
+                "registered_at": record.registered_at.isoformat(),
+                "validation_warnings": record.validation_warnings,
+            }
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_register())
+    except StrategyError as e:
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "submitted": False,
+                    "stage": "register",
+                    "error": str(e),
+                }
+            )
+        else:
+            fmt.error(str(e))
+        raise SystemExit(1)
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.success(
+            f"전략 등록 완료: {result['strategy_id']}",
+            result,
+        )
+
+
 @strategy.command("list")
 @click.option(
     "--status", default=None, help="상태 필터 (registered/active/inactive/archived)"

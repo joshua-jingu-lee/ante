@@ -1,4 +1,4 @@
-"""CLI strategy list/info/performance 커맨드 단위 테스트."""
+"""CLI strategy list/info/performance/submit 커맨드 단위 테스트."""
 
 from __future__ import annotations
 
@@ -374,3 +374,196 @@ class TestStrategyPerformance:
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["metrics"]["total_trades"] == 0
+
+
+class TestStrategySubmit:
+    """ante strategy submit 커맨드 테스트."""
+
+    @pytest.fixture
+    def strategy_file(self, tmp_path):
+        """유효한 전략 파일 생성."""
+        import textwrap
+
+        code = textwrap.dedent("""\
+            from ante.strategy.base import Strategy, StrategyMeta, Signal
+
+            class MyStrategy(Strategy):
+                meta = StrategyMeta(
+                    name="test_strat",
+                    version="1.0.0",
+                    description="Test strategy",
+                    author="agent",
+                )
+
+                async def on_step(self, context):
+                    return []
+        """)
+        fp = tmp_path / "test_strat.py"
+        fp.write_text(code)
+        return str(fp)
+
+    @pytest.fixture
+    def invalid_strategy_file(self, tmp_path):
+        """검증 실패하는 전략 파일 (Strategy 클래스 없음)."""
+        fp = tmp_path / "bad_strat.py"
+        fp.write_text("x = 1\n")
+        return str(fp)
+
+    def test_submit_success(self, runner, strategy_file):
+        """검증 -> 로드 -> 등록 전체 성공 플로우."""
+
+        mock_record = StrategyRecord(
+            strategy_id="test_strat_v1.0.0",
+            name="test_strat",
+            version="1.0.0",
+            filepath=strategy_file,
+            status=StrategyStatus.REGISTERED,
+            registered_at=_NOW,
+            description="Test strategy",
+            author="agent",
+            validation_warnings=[],
+        )
+
+        db = _mock_db()
+        registry = MagicMock()
+        registry.initialize = AsyncMock()
+        registry.register = AsyncMock(return_value=mock_record)
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(cli, ["strategy", "submit", strategy_file])
+            assert result.exit_code == 0
+            assert "test_strat_v1.0.0" in result.output
+
+    def test_submit_success_json(self, runner, strategy_file):
+        """JSON 모드 성공 출력."""
+        mock_record = StrategyRecord(
+            strategy_id="test_strat_v1.0.0",
+            name="test_strat",
+            version="1.0.0",
+            filepath=strategy_file,
+            status=StrategyStatus.REGISTERED,
+            registered_at=_NOW,
+            description="Test strategy",
+            author="agent",
+            validation_warnings=[],
+        )
+
+        db = _mock_db()
+        registry = MagicMock()
+        registry.initialize = AsyncMock()
+        registry.register = AsyncMock(return_value=mock_record)
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "strategy", "submit", strategy_file]
+            )
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["submitted"] is True
+            assert data["strategy_id"] == "test_strat_v1.0.0"
+            assert data["name"] == "test_strat"
+            assert data["version"] == "1.0.0"
+
+    def test_submit_validation_failure(self, runner, invalid_strategy_file):
+        """정적 검증 실패 시 exit 1."""
+        result = runner.invoke(cli, ["strategy", "submit", invalid_strategy_file])
+        assert result.exit_code == 1
+
+    def test_submit_validation_failure_json(self, runner, invalid_strategy_file):
+        """JSON 모드 — 검증 실패."""
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "strategy", "submit", invalid_strategy_file],
+        )
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["submitted"] is False
+        assert data["stage"] == "validate"
+        assert len(data["errors"]) > 0
+
+    def test_submit_load_failure(self, runner, tmp_path):
+        """로드 테스트 실패 (올바른 AST이지만 import 불가)."""
+        import textwrap
+
+        # 검증은 통과하지만 로드 시 실패하는 전략 파일
+        code = textwrap.dedent("""\
+            from ante.strategy.base import Strategy, StrategyMeta, Signal
+
+            class BrokenStrategy(Strategy):
+                meta = StrategyMeta(
+                    name="broken",
+                    version="1.0.0",
+                    description="Broken",
+                )
+
+                async def on_step(self, context):
+                    return []
+
+                def __init_subclass__(cls, **kwargs):
+                    raise RuntimeError("intentional break")
+        """)
+        fp = tmp_path / "broken.py"
+        fp.write_text(code)
+
+        # 검증은 통과하도록 mock, 로드만 실패
+        from ante.strategy.exceptions import StrategyLoadError
+
+        with patch(
+            "ante.strategy.loader.StrategyLoader.load",
+            side_effect=StrategyLoadError("Cannot load"),
+        ):
+            result = runner.invoke(cli, ["strategy", "submit", str(fp)])
+            assert result.exit_code == 1
+
+    def test_submit_duplicate(self, runner, strategy_file):
+        """중복 등록 시 에러."""
+        from ante.strategy.exceptions import StrategyError
+
+        db = _mock_db()
+        registry = MagicMock()
+        registry.initialize = AsyncMock()
+        registry.register = AsyncMock(
+            side_effect=StrategyError("Strategy already registered: test_strat_v1.0.0")
+        )
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(cli, ["strategy", "submit", strategy_file])
+            assert result.exit_code == 1
+            assert "already registered" in result.output
+
+    def test_submit_duplicate_json(self, runner, strategy_file):
+        """JSON 모드 — 중복 등록 에러."""
+        from ante.strategy.exceptions import StrategyError
+
+        db = _mock_db()
+        registry = MagicMock()
+        registry.initialize = AsyncMock()
+        registry.register = AsyncMock(
+            side_effect=StrategyError("Strategy already registered: test_strat_v1.0.0")
+        )
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "strategy", "submit", strategy_file],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert data["submitted"] is False
+            assert data["stage"] == "register"
