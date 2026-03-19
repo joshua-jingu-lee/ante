@@ -209,6 +209,69 @@ class BotManager:
         logger.info("봇 생성: %s (전략: %s)", config.bot_id, config.strategy_id)
         return bot
 
+    async def assign_strategy(self, bot_id: str, strategy_id: str) -> None:
+        """봇에 전략 배정.
+
+        running 상태이면 중지 후 전략을 교체하고 재시작한다.
+        stopped/created 상태이면 전략 ID만 교체한다.
+        """
+        bot = self._get_bot(bot_id)
+        was_running = bot.status == BotStatus.RUNNING
+
+        if was_running:
+            await bot.stop()
+
+        bot.config.strategy_id = strategy_id
+        await self._update_bot_strategy(bot_id, strategy_id)
+
+        if was_running:
+            await bot.start()
+
+        logger.info(
+            "전략 배정: bot=%s strategy=%s (재시작=%s)",
+            bot_id,
+            strategy_id,
+            was_running,
+        )
+
+    async def change_strategy(self, bot_id: str, strategy_id: str) -> None:
+        """중지 상태 봇의 전략 교체.
+
+        running 상태이면 예외를 발생시킨다.
+        stopped/created/error 상태에서만 전략 ID를 교체한다.
+        """
+        bot = self._get_bot(bot_id)
+        if bot.status == BotStatus.RUNNING:
+            raise BotError(
+                f"실행 중인 봇의 전략은 변경할 수 없습니다: {bot_id}. "
+                f"assign_strategy()를 사용하거나 먼저 봇을 중지하세요."
+            )
+
+        bot.config.strategy_id = strategy_id
+        await self._update_bot_strategy(bot_id, strategy_id)
+
+        logger.info("전략 교체: bot=%s strategy=%s", bot_id, strategy_id)
+
+    async def resume_bot(self, bot_id: str) -> None:
+        """중지/에러 상태 봇 재시작.
+
+        에러 카운터를 리셋하고 봇을 시작한다.
+        running 상태이면 예외를 발생시킨다.
+        """
+        bot = self._get_bot(bot_id)
+        if bot.status == BotStatus.RUNNING:
+            raise BotError(f"이미 실행 중인 봇입니다: {bot_id}")
+
+        if bot.status not in (BotStatus.STOPPED, BotStatus.ERROR):
+            raise BotError(f"재개할 수 없는 상태입니다: {bot_id} (현재: {bot.status})")
+
+        # 에러 카운터 리셋
+        self._restart_counts.pop(bot_id, None)
+        bot.error_message = None
+
+        await bot.start()
+        logger.info("봇 재개: %s", bot_id)
+
     async def start_bot(self, bot_id: str) -> None:
         """봇 시작."""
         bot = self._get_bot(bot_id)
@@ -487,6 +550,14 @@ class BotManager:
             self._eventbus.unsubscribe(event_type, bot.on_order_update)
 
     # ── DB ───────────────────────────────────────────
+
+    async def _update_bot_strategy(self, bot_id: str, strategy_id: str) -> None:
+        """봇의 전략 ID를 DB에 갱신."""
+        await self._db.execute(
+            "UPDATE bots SET strategy_id = ?, updated_at = datetime('now')"
+            " WHERE bot_id = ?",
+            (strategy_id, bot_id),
+        )
 
     async def _save_bot_config(self, config: BotConfig) -> None:
         """봇 설정 DB 저장."""
