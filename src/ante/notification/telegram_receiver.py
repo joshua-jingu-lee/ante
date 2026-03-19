@@ -477,10 +477,13 @@ class TelegramCommandReceiver:
 
         from ante.config.system_state import TradingState
 
+        if self._system_state.trading_state == TradingState.ACTIVE:
+            return "이미 거래가 활성 상태입니다."
+
         await self._system_state.set_state(
             TradingState.ACTIVE, reason="텔레그램 명령", changed_by="telegram"
         )
-        return "거래가 재개되었습니다."
+        return "✅ 거래가 재개되었습니다."
 
     async def _cmd_stop(self, args: list[str]) -> str:
         """특정 봇 중지."""
