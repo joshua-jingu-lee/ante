@@ -80,45 +80,13 @@ class ApprovalService:
         expires_at: str = "",
     ) -> ApprovalRequest:
         """결재 요청 생성."""
-        request_id = str(uuid4())
         now = datetime.now(UTC).isoformat()
         params = params or {}
 
-        # 사전 검증 (validator)
-        reviews: list[dict] = []
-        validator = self._validators.get(type)
-        if validator:
-            results = validator(params)
-            for r in results:
-                if r.grade == "fail":
-                    logger.info(
-                        "사전 검증 실패 (%s): %s — %s",
-                        type,
-                        r.reviewer,
-                        r.detail,
-                    )
-                    raise ApprovalValidationError(r.detail)
-                if r.grade == "warn":
-                    reviews.append(
-                        {
-                            "reviewer": r.reviewer,
-                            "result": "warn",
-                            "detail": r.detail,
-                            "reviewed_at": now,
-                        }
-                    )
-
-        history = [
-            {
-                "action": "created",
-                "actor": requester,
-                "at": now,
-                "detail": "",
-            }
-        ]
+        reviews = self._validate_params(type, params, now)
 
         request = ApprovalRequest(
-            id=request_id,
+            id=str(uuid4()),
             type=type,
             status=ApprovalStatus.PENDING,
             requester=requester,
@@ -126,7 +94,9 @@ class ApprovalService:
             body=body,
             params=params,
             reviews=reviews,
-            history=history,
+            history=[
+                {"action": "created", "actor": requester, "at": now, "detail": ""}
+            ],
             reference_id=reference_id,
             expires_at=expires_at,
             created_at=now,
@@ -134,9 +104,7 @@ class ApprovalService:
 
         # 전결 평가
         auto_approved = self._auto_approve.should_auto_approve(type, params)
-
         if auto_approved:
-            # 즉시 승인 처리: status를 APPROVED로 설정
             request.status = ApprovalStatus.APPROVED
             request.resolved_at = now
             request.resolved_by = "system:auto_approve"
@@ -149,30 +117,7 @@ class ApprovalService:
                 }
             )
 
-        # DB INSERT (auto_approved이면 approved 상태로 저장)
-        await self._db.execute(
-            """INSERT INTO approvals
-               (id, type, status, requester, title, body, params,
-                reviews, history, reference_id, expires_at, created_at,
-                resolved_at, resolved_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                request.id,
-                request.type,
-                request.status,
-                request.requester,
-                request.title,
-                request.body,
-                json.dumps(request.params, ensure_ascii=False),
-                json.dumps(request.reviews, ensure_ascii=False),
-                json.dumps(request.history, ensure_ascii=False),
-                request.reference_id,
-                request.expires_at,
-                request.created_at,
-                request.resolved_at,
-                request.resolved_by,
-            ),
-        )
+        await self._persist_request(request)
 
         logger.info(
             "결재 요청 생성: %s (%s) by %s%s",
@@ -182,104 +127,10 @@ class ApprovalService:
             " [자동 승인]" if auto_approved else "",
         )
 
-        # ApprovalCreatedEvent 발행
-        from ante.eventbus.events import ApprovalCreatedEvent, NotificationEvent
+        await self._publish_created(request, auto_approved)
 
-        await self._eventbus.publish(
-            ApprovalCreatedEvent(
-                approval_id=request.id,
-                approval_type=request.type,
-                requester=request.requester,
-                title=request.title,
-                auto_approved=auto_approved,
-            )
-        )
-
-        # 결재 요청 알림 발행
-        prefix = "[자동 승인] " if auto_approved else ""
-        buttons = None
-        if not auto_approved:
-            buttons = [
-                [
-                    {"text": "승인", "callback_data": f"approve:{request.id}"},
-                    {"text": "거절", "callback_data": f"reject:{request.id}"},
-                ]
-            ]
-        await self._eventbus.publish(
-            NotificationEvent(
-                level="info",
-                title="결재 요청",
-                message=(
-                    f"{prefix}유형: `{request.type}`\n"
-                    f"제목: {request.title}\n"
-                    f"요청자: `{request.requester}`\n"
-                    f"ID: `{request.id}`"
-                ),
-                category="approval",
-                buttons=buttons,
-            )
-        )
-
-        # 전결 시 executor 즉시 실행
         if auto_approved:
-            executor = self._executors.get(request.type)
-            if executor:
-                try:
-                    await executor(request.params)
-                    request.history.append(
-                        {
-                            "action": "executed",
-                            "actor": "system:auto_approve",
-                            "at": now,
-                            "detail": "",
-                        }
-                    )
-                    await self._db.execute(
-                        """UPDATE approvals SET history = ? WHERE id = ?""",
-                        (
-                            json.dumps(request.history, ensure_ascii=False),
-                            request.id,
-                        ),
-                    )
-                    logger.info("전결 실행 완료: %s (%s)", request.id, request.type)
-                except Exception as exc:
-                    request.status = ApprovalStatus.EXECUTION_FAILED
-                    request.history.append(
-                        {
-                            "action": "execution_failed",
-                            "actor": "system:auto_approve",
-                            "at": now,
-                            "detail": str(exc),
-                        }
-                    )
-                    await self._db.execute(
-                        """UPDATE approvals
-                           SET status = ?, history = ?
-                           WHERE id = ?""",
-                        (
-                            ApprovalStatus.EXECUTION_FAILED,
-                            json.dumps(request.history, ensure_ascii=False),
-                            request.id,
-                        ),
-                    )
-                    logger.exception(
-                        "전결 실행 실패: %s (%s)", request.id, request.type
-                    )
-
-            # ApprovalResolvedEvent 발행
-            from ante.eventbus.events import ApprovalResolvedEvent
-
-            await self._eventbus.publish(
-                ApprovalResolvedEvent(
-                    approval_id=request.id,
-                    approval_type=request.type,
-                    resolution=request.status,
-                    resolved_by="system:auto_approve",
-                )
-            )
-            await self._publish_resolved_notification(
-                request.id, request.type, request.status, "system:auto_approve"
-            )
+            await self._execute_approved(request, "system:auto_approve")
 
         return request
 
@@ -307,6 +158,10 @@ class ApprovalService:
             {"action": "approved", "actor": resolved_by, "at": now, "detail": ""}
         )
 
+        request.status = ApprovalStatus.APPROVED
+        request.resolved_at = now
+        request.resolved_by = resolved_by
+
         await self._db.execute(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
@@ -321,68 +176,9 @@ class ApprovalService:
             ),
         )
 
-        request.status = ApprovalStatus.APPROVED
-        request.resolved_at = now
-        request.resolved_by = resolved_by
-
         logger.info("결재 승인: %s by %s", id, resolved_by)
 
-        # 자동 실행
-        executor = self._executors.get(request.type)
-        if executor:
-            try:
-                await executor(request.params)
-                request.history.append(
-                    {
-                        "action": "executed",
-                        "actor": resolved_by,
-                        "at": now,
-                        "detail": "",
-                    }
-                )
-                logger.info("결재 실행 완료: %s (%s)", id, request.type)
-            except Exception as exc:
-                request.status = ApprovalStatus.EXECUTION_FAILED
-                request.history.append(
-                    {
-                        "action": "execution_failed",
-                        "actor": resolved_by,
-                        "at": now,
-                        "detail": str(exc),
-                    }
-                )
-                await self._db.execute(
-                    """UPDATE approvals
-                       SET status = ?, history = ?
-                       WHERE id = ?""",
-                    (
-                        ApprovalStatus.EXECUTION_FAILED,
-                        json.dumps(request.history, ensure_ascii=False),
-                        id,
-                    ),
-                )
-                logger.exception("결재 실행 실패: %s (%s)", id, request.type)
-            else:
-                # 실행 성공 시 history만 갱신
-                await self._db.execute(
-                    """UPDATE approvals SET history = ? WHERE id = ?""",
-                    (json.dumps(request.history, ensure_ascii=False), id),
-                )
-
-        # ApprovalResolvedEvent 발행
-        from ante.eventbus.events import ApprovalResolvedEvent
-
-        await self._eventbus.publish(
-            ApprovalResolvedEvent(
-                approval_id=id,
-                approval_type=request.type,
-                resolution=request.status,
-                resolved_by=resolved_by,
-            )
-        )
-        await self._publish_resolved_notification(
-            id, request.type, request.status, resolved_by
-        )
+        await self._execute_approved(request, resolved_by)
 
         return request
 
@@ -489,27 +285,8 @@ class ApprovalService:
 
         # 사전 검증(validator) 재실행
         now = datetime.now(UTC).isoformat()
-        validator = self._validators.get(request.type)
-        if validator:
-            results = validator(request.params)
-            for r in results:
-                if r.grade == "fail":
-                    logger.info(
-                        "reopen 사전 검증 실패 (%s): %s — %s",
-                        request.type,
-                        r.reviewer,
-                        r.detail,
-                    )
-                    raise ApprovalValidationError(r.detail)
-                if r.grade == "warn":
-                    request.reviews.append(
-                        {
-                            "reviewer": r.reviewer,
-                            "result": "warn",
-                            "detail": r.detail,
-                            "reviewed_at": now,
-                        }
-                    )
+        warn_reviews = self._validate_params(request.type, request.params, now)
+        request.reviews.extend(warn_reviews)
 
         # 상태 전환 + 이력 기록
         request.status = ApprovalStatus.PENDING
@@ -832,6 +609,152 @@ class ApprovalService:
 
         rows = await self._db.fetch_all(query, tuple(params))
         return [self._row_to_request(row) for row in rows]
+
+    def _validate_params(
+        self,
+        type: str,
+        params: dict,
+        now: str,
+    ) -> list[dict]:
+        """사전 검증(validator)을 실행하고 warn reviews를 반환한다."""
+        reviews: list[dict] = []
+        validator = self._validators.get(type)
+        if not validator:
+            return reviews
+
+        results = validator(params)
+        for r in results:
+            if r.grade == "fail":
+                logger.info("사전 검증 실패 (%s): %s — %s", type, r.reviewer, r.detail)
+                raise ApprovalValidationError(r.detail)
+            if r.grade == "warn":
+                reviews.append(
+                    {
+                        "reviewer": r.reviewer,
+                        "result": "warn",
+                        "detail": r.detail,
+                        "reviewed_at": now,
+                    }
+                )
+        return reviews
+
+    async def _persist_request(self, request: ApprovalRequest) -> None:
+        """ApprovalRequest를 DB에 INSERT한다."""
+        await self._db.execute(
+            """INSERT INTO approvals
+               (id, type, status, requester, title, body, params,
+                reviews, history, reference_id, expires_at, created_at,
+                resolved_at, resolved_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                request.id,
+                request.type,
+                request.status,
+                request.requester,
+                request.title,
+                request.body,
+                json.dumps(request.params, ensure_ascii=False),
+                json.dumps(request.reviews, ensure_ascii=False),
+                json.dumps(request.history, ensure_ascii=False),
+                request.reference_id,
+                request.expires_at,
+                request.created_at,
+                request.resolved_at,
+                request.resolved_by,
+            ),
+        )
+
+    async def _publish_created(
+        self, request: ApprovalRequest, auto_approved: bool
+    ) -> None:
+        """ApprovalCreatedEvent + 알림을 발행한다."""
+        from ante.eventbus.events import ApprovalCreatedEvent, NotificationEvent
+
+        await self._eventbus.publish(
+            ApprovalCreatedEvent(
+                approval_id=request.id,
+                approval_type=request.type,
+                requester=request.requester,
+                title=request.title,
+                auto_approved=auto_approved,
+            )
+        )
+
+        prefix = "[자동 승인] " if auto_approved else ""
+        buttons = None
+        if not auto_approved:
+            buttons = [
+                [
+                    {"text": "승인", "callback_data": f"approve:{request.id}"},
+                    {"text": "거절", "callback_data": f"reject:{request.id}"},
+                ]
+            ]
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="결재 요청",
+                message=(
+                    f"{prefix}유형: `{request.type}`\n"
+                    f"제목: {request.title}\n"
+                    f"요청자: `{request.requester}`\n"
+                    f"ID: `{request.id}`"
+                ),
+                category="approval",
+                buttons=buttons,
+            )
+        )
+
+    async def _execute_approved(self, request: ApprovalRequest, actor: str) -> None:
+        """승인된 요청의 executor를 실행하고 결과를 반영한다.
+
+        create()의 전결 실행과 approve()의 자동 실행에서 공유된다.
+        """
+        executor = self._executors.get(request.type)
+        if executor:
+            now = datetime.now(UTC).isoformat()
+            try:
+                await executor(request.params)
+                request.history.append(
+                    {"action": "executed", "actor": actor, "at": now, "detail": ""}
+                )
+                await self._db.execute(
+                    """UPDATE approvals SET history = ? WHERE id = ?""",
+                    (json.dumps(request.history, ensure_ascii=False), request.id),
+                )
+                logger.info("결재 실행 완료: %s (%s)", request.id, request.type)
+            except Exception as exc:
+                request.status = ApprovalStatus.EXECUTION_FAILED
+                request.history.append(
+                    {
+                        "action": "execution_failed",
+                        "actor": actor,
+                        "at": now,
+                        "detail": str(exc),
+                    }
+                )
+                await self._db.execute(
+                    """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
+                    (
+                        ApprovalStatus.EXECUTION_FAILED,
+                        json.dumps(request.history, ensure_ascii=False),
+                        request.id,
+                    ),
+                )
+                logger.exception("결재 실행 실패: %s (%s)", request.id, request.type)
+
+        from ante.eventbus.events import ApprovalResolvedEvent
+
+        await self._eventbus.publish(
+            ApprovalResolvedEvent(
+                approval_id=request.id,
+                approval_type=request.type,
+                resolution=request.status,
+                resolved_by=actor,
+            )
+        )
+        await self._publish_resolved_notification(
+            request.id, request.type, request.status, actor
+        )
 
     async def _publish_resolved_notification(
         self,
