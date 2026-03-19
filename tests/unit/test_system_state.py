@@ -49,15 +49,22 @@ async def test_set_state(state):
 
 
 async def test_set_state_publishes_event(state, eventbus):
-    """상태 변경 시 TradingStateChangedEvent를 발행한다."""
+    """상태 변경 시 TradingStateChangedEvent + NotificationEvent를 발행한다."""
     await state.set_state(TradingState.REDUCING, reason="loss limit")
 
-    assert len(eventbus.published) == 1
+    assert len(eventbus.published) == 2
     event = eventbus.published[0]
     assert isinstance(event, TradingStateChangedEvent)
     assert event.old_state == "active"
     assert event.new_state == "reducing"
     assert event.reason == "loss limit"
+
+    from ante.eventbus.events import NotificationEvent
+
+    notif = eventbus.published[1]
+    assert isinstance(notif, NotificationEvent)
+    assert notif.level == "critical"
+    assert notif.category == "system"
 
 
 async def test_same_state_no_event(state, eventbus):

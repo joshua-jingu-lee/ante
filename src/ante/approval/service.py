@@ -183,7 +183,7 @@ class ApprovalService:
         )
 
         # ApprovalCreatedEvent 발행
-        from ante.eventbus.events import ApprovalCreatedEvent
+        from ante.eventbus.events import ApprovalCreatedEvent, NotificationEvent
 
         await self._eventbus.publish(
             ApprovalCreatedEvent(
@@ -192,6 +192,31 @@ class ApprovalService:
                 requester=request.requester,
                 title=request.title,
                 auto_approved=auto_approved,
+            )
+        )
+
+        # 결재 요청 알림 발행
+        prefix = "[자동 승인] " if auto_approved else ""
+        buttons = None
+        if not auto_approved:
+            buttons = [
+                [
+                    {"text": "승인", "callback_data": f"approve:{request.id}"},
+                    {"text": "거절", "callback_data": f"reject:{request.id}"},
+                ]
+            ]
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="결재 요청",
+                message=(
+                    f"{prefix}유형: `{request.type}`\n"
+                    f"제목: {request.title}\n"
+                    f"요청자: `{request.requester}`\n"
+                    f"ID: `{request.id}`"
+                ),
+                category="approval",
+                buttons=buttons,
             )
         )
 
@@ -251,6 +276,9 @@ class ApprovalService:
                     resolution=request.status,
                     resolved_by="system:auto_approve",
                 )
+            )
+            await self._publish_resolved_notification(
+                request.id, request.type, request.status, "system:auto_approve"
             )
 
         return request
@@ -352,6 +380,9 @@ class ApprovalService:
                 resolved_by=resolved_by,
             )
         )
+        await self._publish_resolved_notification(
+            id, request.type, request.status, resolved_by
+        )
 
         return request
 
@@ -416,6 +447,9 @@ class ApprovalService:
                 resolution=ApprovalStatus.REJECTED,
                 resolved_by=resolved_by,
             )
+        )
+        await self._publish_resolved_notification(
+            id, request.type, ApprovalStatus.REJECTED, resolved_by
         )
 
         return request
@@ -598,6 +632,9 @@ class ApprovalService:
                 resolved_by=requester,
             )
         )
+        await self._publish_resolved_notification(
+            id, request.type, ApprovalStatus.CANCELLED, requester
+        )
 
         return request
 
@@ -748,6 +785,9 @@ class ApprovalService:
                     resolved_by="system",
                 )
             )
+            await self._publish_resolved_notification(
+                request.id, request.type, ApprovalStatus.EXPIRED, "system"
+            )
             count += 1
 
         if count:
@@ -792,6 +832,30 @@ class ApprovalService:
 
         rows = await self._db.fetch_all(query, tuple(params))
         return [self._row_to_request(row) for row in rows]
+
+    async def _publish_resolved_notification(
+        self,
+        approval_id: str,
+        approval_type: str,
+        resolution: str,
+        resolved_by: str,
+    ) -> None:
+        """결재 처리 완료 알림 발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="결재 처리 완료",
+                message=(
+                    f"유형: `{approval_type}`\n"
+                    f"결과: *{resolution}*\n"
+                    f"처리자: `{resolved_by}`\n"
+                    f"ID: `{approval_id}`"
+                ),
+                category="approval",
+            )
+        )
 
     @staticmethod
     def _row_to_request(row: dict) -> ApprovalRequest:
