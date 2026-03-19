@@ -93,7 +93,7 @@ class TestBacktestServiceProgress:
         ):
             mock_load.return_value = MagicMock()
             mock_dp = AsyncMock()
-            mock_dp.load = AsyncMock(return_value=100)
+            mock_dp.load = MagicMock(return_value=100)
             mock_dp_cls.return_value = mock_dp
 
             mock_exec = AsyncMock()

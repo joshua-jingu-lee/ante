@@ -38,7 +38,7 @@ class FeedInjector:
         self._store = store
         self._normalizer = normalizer
 
-    async def inject_csv(
+    def inject_csv(
         self,
         path: str | Path,
         symbol: str,
@@ -80,7 +80,7 @@ class FeedInjector:
         # 4계층 검증 (스키마 + 비즈니스)
         self._validate(normalized)
 
-        await self._store.write(symbol, timeframe, normalized)
+        self._store.write(symbol, timeframe, normalized)
         logger.info(
             "CSV 주입 완료: %d행, %s → %s/%s",
             len(normalized),
@@ -90,7 +90,7 @@ class FeedInjector:
         )
         return len(normalized)
 
-    async def inject_dataframe(
+    def inject_dataframe(
         self,
         df: pl.DataFrame,
         symbol: str,
@@ -122,7 +122,7 @@ class FeedInjector:
         # 4계층 검증 (스키마 + 비즈니스)
         self._validate(df)
 
-        await self._store.write(symbol, timeframe, df)
+        self._store.write(symbol, timeframe, df)
         logger.info("DataFrame 주입 완료: %d행, %s/%s", len(df), symbol, timeframe)
         return len(df)
 

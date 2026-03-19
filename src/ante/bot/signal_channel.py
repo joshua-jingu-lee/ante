@@ -190,7 +190,10 @@ class SignalChannel:
             self._eventbus.unsubscribe(evt, self._on_order_update)
 
     async def _on_fill(self, event: object) -> None:
-        """체결 이벤트 → 외부 전달."""
+        """체결 이벤트 → 외부 전달.
+
+        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
+        """
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
@@ -212,7 +215,10 @@ class SignalChannel:
         )
 
     async def _on_order_update(self, event: object) -> None:
-        """주문 상태 변경 → 외부 전달."""
+        """주문 상태 변경 → 외부 전달.
+
+        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
+        """
         bot_id = getattr(event, "bot_id", None)
         if bot_id != self._bot.bot_id:
             return

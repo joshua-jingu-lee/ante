@@ -170,13 +170,13 @@ class DARTCollector:
         if not raw_items:
             return 0, set()
 
-        return await self._normalize_and_store(
+        return self._normalize_and_store(
             raw_items,
             corp_code_map,
             store,
         )
 
-    async def _normalize_and_store(
+    def _normalize_and_store(
         self,
         raw_items: list[dict],
         corp_code_map: dict[str, str],
@@ -193,7 +193,7 @@ class DARTCollector:
         symbols: set[str] = set()
         for sym in normalized["symbol"].unique().to_list():
             sym_df = normalized.filter(pl.col("symbol") == sym)
-            await store.write(sym, "krx", sym_df, data_type="fundamental")
+            store.write(sym, "krx", sym_df, data_type="fundamental")
             rows += len(sym_df)
             symbols.add(sym)
 

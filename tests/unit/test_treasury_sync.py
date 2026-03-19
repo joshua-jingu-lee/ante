@@ -183,7 +183,7 @@ class TestSyncLoop:
         broker = FakeBroker()
         pos_history = FakePositionHistory()
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=1)
+        treasury.start_sync(broker, pos_history, interval_seconds=1)
         assert treasury._sync_task is not None
         assert not treasury._sync_task.done()
 
@@ -198,7 +198,7 @@ class TestSyncLoop:
         broker = FakeBroker()
         pos_history = FakePositionHistory()
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -213,7 +213,7 @@ class TestSyncLoop:
         broker = FailingBroker()
         pos_history = FakePositionHistory()
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -227,7 +227,7 @@ class TestSyncLoop:
         broker = FakeBroker()
         pos_history = FakePositionHistory()
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -240,10 +240,10 @@ class TestSyncLoop:
         broker = FakeBroker()
         pos_history = FakePositionHistory()
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         task1 = treasury._sync_task
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         assert treasury._sync_task is task1  # 같은 태스크
 
         await treasury.stop_sync()
@@ -286,7 +286,7 @@ class TestExternalPositions:
             ]
         )
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -316,7 +316,7 @@ class TestExternalPositions:
             ]
         )
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -337,7 +337,7 @@ class TestExternalPositions:
         )
         pos_history = FakePositionHistory(positions=[])
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -358,7 +358,7 @@ class TestExternalPositions:
         )
         pos_history = FakePositionHistory(positions=[])
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
@@ -386,7 +386,7 @@ class TestExternalPositions:
         )
         pos_history = FakePositionHistory(positions=[])
 
-        await treasury.start_sync(broker, pos_history, interval_seconds=100)
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 

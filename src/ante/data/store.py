@@ -48,7 +48,7 @@ class ParquetStore:
         else:
             return self._base / data_type / timeframe / symbol
 
-    async def read(
+    def read(
         self,
         symbol: str,
         timeframe: str,
@@ -106,7 +106,7 @@ class ParquetStore:
 
         return df
 
-    async def write(
+    def write(
         self,
         symbol: str,
         timeframe: str,
@@ -160,7 +160,7 @@ class ParquetStore:
 
         logger.debug("Wrote %d rows for %s/%s", len(data), symbol, timeframe)
 
-    async def append(
+    def append(
         self,
         symbol: str,
         timeframe: str,
@@ -169,7 +169,7 @@ class ParquetStore:
     ) -> None:
         """버퍼 데이터를 기존 Parquet에 추가."""
         df = pl.DataFrame(rows)
-        await self.write(symbol, timeframe, df, data_type=data_type)
+        self.write(symbol, timeframe, df, data_type=data_type)
 
     def list_symbols(
         self, timeframe: str = "1d", data_type: str = "ohlcv"
@@ -231,7 +231,7 @@ class ParquetStore:
                     usage[dtype] = size
         return usage
 
-    async def validate(
+    def validate(
         self,
         symbol: str,
         timeframe: str,

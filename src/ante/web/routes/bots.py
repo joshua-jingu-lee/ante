@@ -113,7 +113,7 @@ async def get_bot(
 
     # 예산 정보 추가
     if treasury is not None:
-        budget = await treasury.get_budget(bot_id)
+        budget = treasury.get_budget(bot_id)
         if budget:
             info["budget"] = {
                 "allocated": budget.allocated,

@@ -146,7 +146,7 @@ async def allocate(
             ),
         )
 
-    budget = await treasury.get_budget(bot_id)
+    budget = treasury.get_budget(bot_id)
     return {
         "bot_id": bot_id,
         "allocated": budget.allocated if budget else 0.0,
@@ -174,7 +174,7 @@ async def deallocate(
             detail=f"예산 회수 실패: 가용 예산 부족 (요청: {body.amount:,.0f}원)",
         )
 
-    budget = await treasury.get_budget(bot_id)
+    budget = treasury.get_budget(bot_id)
     return {
         "bot_id": bot_id,
         "allocated": budget.allocated if budget else 0.0,

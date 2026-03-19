@@ -215,7 +215,7 @@ class TestAPIGateway:
             eventbus=eventbus,
             rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
         )
-        await gw.start()
+        gw.start()
         return gw
 
     async def test_get_current_price(self, gateway, broker):
@@ -281,7 +281,7 @@ class TestAPIGatewayEvents:
             eventbus=eventbus,
             rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
         )
-        await gw.start()
+        gw.start()
         return gw
 
     async def test_order_approved_submits(self, gateway, eventbus, broker):

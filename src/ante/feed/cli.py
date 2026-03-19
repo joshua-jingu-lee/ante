@@ -544,7 +544,6 @@ def feed_inject(
     data_path: str,
 ) -> None:
     """외부 CSV 파일에서 과거 데이터를 수동 주입한다."""
-    import asyncio
     from pathlib import Path as _Path
 
     from ante.data.normalizer import DataNormalizer
@@ -559,13 +558,11 @@ def feed_inject(
     injector = FeedInjector(store=store, normalizer=normalizer)
 
     try:
-        count = asyncio.run(
-            injector.inject_csv(
-                filepath,
-                symbol=symbol,
-                timeframe=timeframe,
-                source=source,
-            )
+        count = injector.inject_csv(
+            filepath,
+            symbol=symbol,
+            timeframe=timeframe,
+            source=source,
         )
     except FileNotFoundError as e:
         fmt.error(str(e), "FILE_NOT_FOUND")

@@ -75,7 +75,7 @@ class DailyRunner:
             store,
             ctx,
         )
-        await self._compute_indicators(store, ctx)
+        self._compute_indicators(store, ctx)
 
         return ctx.to_result("daily", started_at, target_date=target_date)
 
@@ -164,7 +164,7 @@ class DailyRunner:
                 }
             )
 
-    async def _compute_indicators(
+    def _compute_indicators(
         self,
         store: ParquetStore,
         ctx: _RunContext,
@@ -176,7 +176,7 @@ class DailyRunner:
             return
 
         try:
-            written = await self._indicator.compute(
+            written = self._indicator.compute(
                 store,
                 list(ctx.success_symbols),
             )

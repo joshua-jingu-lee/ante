@@ -89,7 +89,7 @@ class BackfillRunner:
             store,
             ctx,
         )
-        await self._compute_indicators(store, ctx)
+        self._compute_indicators(store, ctx)
 
         return ctx.to_result("backfill", started_at)
 
@@ -220,7 +220,7 @@ class BackfillRunner:
                 }
             )
 
-    async def _compute_indicators(
+    def _compute_indicators(
         self,
         store: ParquetStore,
         ctx: _RunContext,
@@ -232,7 +232,7 @@ class BackfillRunner:
             return
 
         try:
-            written = await self._indicator.compute(
+            written = self._indicator.compute(
                 store,
                 list(ctx.success_symbols),
             )

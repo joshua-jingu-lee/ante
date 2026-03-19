@@ -123,7 +123,7 @@ def store(data_dir):
 async def loaded_store(store):
     """데이터가 미리 적재된 store."""
     df = _make_ohlcv_df()
-    await store.write("005930", "1d", df)
+    store.write("005930", "1d", df)
     return store
 
 
@@ -134,7 +134,7 @@ async def data_provider(loaded_store):
         start_date="2026-01-01",
         end_date="2026-12-31",
     )
-    await provider.load("005930", "1d")
+    provider.load("005930", "1d")
     return provider
 
 

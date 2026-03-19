@@ -23,7 +23,7 @@ class IndicatorCalculator:
     - 부채비율 = 부채총계 / 자본총계
     """
 
-    async def compute(
+    def compute(
         self,
         store: ParquetStore,
         symbols: list[str],
@@ -36,7 +36,7 @@ class IndicatorCalculator:
         rows_updated = 0
 
         for sym in symbols:
-            updated = await self._compute_symbol(store, sym)
+            updated = self._compute_symbol(store, sym)
             rows_updated += updated
 
         logger.info(
@@ -46,14 +46,14 @@ class IndicatorCalculator:
         )
         return rows_updated
 
-    async def _compute_symbol(
+    def _compute_symbol(
         self,
         store: ParquetStore,
         sym: str,
     ) -> int:
         """단일 심볼의 파생 지표를 계산한다."""
         try:
-            fundamental = await store.read(sym, "krx", data_type="fundamental")
+            fundamental = store.read(sym, "krx", data_type="fundamental")
         except Exception:
             return 0
 
@@ -65,7 +65,7 @@ class IndicatorCalculator:
             return 0
 
         updated = fundamental.with_columns(exprs)
-        await store.write(sym, "krx", updated, data_type="fundamental")
+        store.write(sym, "krx", updated, data_type="fundamental")
         return len(updated)
 
     @staticmethod
