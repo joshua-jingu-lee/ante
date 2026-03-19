@@ -75,6 +75,7 @@ class Services:
     api_gateway: Any = None
     stream_integration: Any = None
     reconcile_scheduler: Any = None
+    daily_report_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
     data_collector: Any = None
@@ -330,6 +331,10 @@ async def _init_broker(s: Services) -> None:
     if s.broker and s.trade_service:
         await _init_reconcile_scheduler(s)
 
+    # DailyReportScheduler 초기화
+    if s.performance_tracker and s.trade_recorder and s.position_history:
+        await _init_daily_report_scheduler(s)
+
 
 async def _init_reconcile_scheduler(s: Services) -> None:
     """ReconcileScheduler 생성 및 시작."""
@@ -361,6 +366,20 @@ async def _init_reconcile_scheduler(s: Services) -> None:
     )
     await s.reconcile_scheduler.start()
     logger.info("ReconcileScheduler 시작 완료 (주기: %d초)", interval)
+
+
+async def _init_daily_report_scheduler(s: Services) -> None:
+    """DailyReportScheduler 생성 및 시작."""
+    from ante.trade.daily_report import DailyReportScheduler
+
+    s.daily_report_scheduler = DailyReportScheduler(
+        performance_tracker=s.performance_tracker,
+        trade_recorder=s.trade_recorder,
+        position_history=s.position_history,
+        eventbus=s.eventbus,
+    )
+    await s.daily_report_scheduler.start()
+    logger.info("DailyReportScheduler 시작 완료")
 
 
 async def _connect_mock_broker(s: Services, broker_config: dict) -> None:
@@ -975,6 +994,10 @@ async def _shutdown(s: Services) -> None:
         except asyncio.CancelledError:
             pass
         logger.info("Web API 종료")
+
+    if s.daily_report_scheduler:
+        await s.daily_report_scheduler.stop()
+        logger.info("DailyReportScheduler 종료")
 
     if s.reconcile_scheduler:
         await s.reconcile_scheduler.stop()

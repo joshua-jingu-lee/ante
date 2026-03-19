@@ -1,5 +1,6 @@
 """Trade 모듈 — 거래 기록, 포지션 추적, 성과 산출."""
 
+from ante.trade.daily_report import DailyReportScheduler
 from ante.trade.models import (
     DailySummary,
     MonthlySummary,
@@ -17,6 +18,7 @@ from ante.trade.recorder import TradeRecorder
 from ante.trade.service import TradeService
 
 __all__ = [
+    "DailyReportScheduler",
     "DailySummary",
     "MonthlySummary",
     "WeeklySummary",
