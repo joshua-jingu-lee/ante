@@ -20,6 +20,24 @@ def adapter():
     return mock
 
 
+def _make_running_bot(
+    bot_id: str = "bot-1",
+    name: str = "테스트봇",
+    positions: dict | None = None,
+    open_orders: list | None = None,
+):
+    """RUNNING 상태의 Bot mock 생성 헬퍼."""
+    from ante.bot.config import BotStatus
+
+    bot = MagicMock()
+    bot.bot_id = bot_id
+    bot.status = BotStatus.RUNNING
+    bot.config.name = name
+    bot._ctx.get_positions.return_value = positions or {}
+    bot._ctx.get_open_orders.return_value = open_orders or []
+    return bot
+
+
 @pytest.fixture
 def bot_manager():
     mock = MagicMock()
@@ -27,7 +45,7 @@ def bot_manager():
         {"bot_id": "bot-1", "status": "running", "strategy_id": "s1"},
         {"bot_id": "bot-2", "status": "stopped", "strategy_id": "s2"},
     ]
-    mock.get_bot.return_value = MagicMock()
+    mock.get_bot.return_value = _make_running_bot()
     mock.stop_bot = AsyncMock()
     return mock
 
@@ -50,9 +68,10 @@ def treasury():
 
 @pytest.fixture
 def system_state():
+    from ante.config.system_state import TradingState
+
     mock = MagicMock()
-    mock.trading_state = MagicMock()
-    mock.trading_state.value = "active"
+    mock.trading_state = TradingState.HALTED
     mock.set_state = AsyncMock()
     return mock
 
@@ -129,7 +148,7 @@ class TestCommands:
     async def test_status(self, receiver):
         result = receiver._cmd_status([])
         assert "거래 상태" in result
-        assert "active" in result
+        assert "halted" in result
         assert "봇" in result
 
     async def test_status_no_manager(self, receiver):
@@ -145,9 +164,11 @@ class TestCommands:
 
     async def test_bots(self, receiver):
         result = receiver._cmd_bots([])
-        assert "봇 목록" in result
+        assert "봇 목록 (1/2 실행 중)" in result
         assert "bot-1" in result
+        assert "[실행 중]" in result
         assert "bot-2" in result
+        assert "[중지됨]" in result
 
     async def test_bots_no_manager(self, receiver):
         receiver._bot_manager = None
@@ -214,23 +235,67 @@ class TestCommands:
 
     async def test_activate(self, receiver, system_state):
         result = await receiver._cmd_activate([])
-        assert "재개" in result
+        assert "거래가 재개되었습니다" in result
         system_state.set_state.assert_called_once()
         call_kwargs = system_state.set_state.call_args
         assert call_kwargs.kwargs.get("suppress_notification") is True
+
+    async def test_activate_already_active(self, receiver, system_state):
+        from ante.config.system_state import TradingState
+
+        system_state.trading_state = TradingState.ACTIVE
+        result = await receiver._cmd_activate([])
+        assert "이미 거래가 활성 상태입니다" in result
+        system_state.set_state.assert_not_called()
 
     async def test_activate_no_state(self, receiver):
         receiver._system_state = None
         result = await receiver._cmd_activate([])
         assert "연결되지 않았습니다" in result
 
-    async def test_stop_bot(self, receiver, bot_manager):
+    async def test_stop_bot_no_positions(self, receiver, bot_manager):
+        """보유 종목 없이 봇 중지 — 메시지 A."""
         result = await receiver._cmd_stop(["bot-1"])
-        assert "중지" in result
-        assert "bot-1" in result
+        assert "봇 중지" in result
+        assert "테스트봇 (bot-1)" in result
+        assert "실행 중 → 중지됨" in result
+        assert "미체결 주문은 자동 취소되지 않습니다" in result
         bot_manager.stop_bot.assert_called_once_with(
             "bot-1", suppress_notification=True
         )
+
+    async def test_stop_bot_with_positions(self, receiver, bot_manager):
+        """보유 종목 있으면 메시지 B — 종목명 및 체결대기 금액 표시."""
+        bot = _make_running_bot(
+            positions={
+                "005930": {
+                    "symbol": "005930",
+                    "quantity": 10,
+                    "avg_entry_price": 70000,
+                },
+                "035720": {"symbol": "035720", "quantity": 5, "avg_entry_price": 50000},
+            },
+            open_orders=[{"amount": 500_000}, {"amount": 300_000}],
+        )
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "봇 중지" in result
+        assert "보유 종목 2개가 유지됩니다" in result
+        assert "포지션을 직접 관리" in result
+        assert "005930" in result
+        assert "035720" in result
+        assert "800,000원" in result
+
+    async def test_stop_bot_already_stopped(self, receiver, bot_manager):
+        """이미 중지된 봇은 안내 메시지 반환."""
+        from ante.bot.config import BotStatus
+
+        bot = MagicMock()
+        bot.status = BotStatus.STOPPED
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "이미 중지된 봇입니다" in result
+        bot_manager.stop_bot.assert_not_called()
 
     async def test_stop_bot_no_args(self, receiver):
         result = await receiver._cmd_stop([])
@@ -245,6 +310,13 @@ class TestCommands:
         receiver._bot_manager = None
         result = await receiver._cmd_stop(["bot-1"])
         assert "연결되지 않았습니다" in result
+
+    async def test_stop_bot_name_fallback(self, receiver, bot_manager):
+        """봇 이름이 빈 문자열이면 bot_id로 대체."""
+        bot = _make_running_bot(name="")
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "bot-1 (bot-1)" in result
 
 
 # ── US-4: 2단계 확인 ─────────────────────────────
@@ -281,7 +353,8 @@ class TestConfirmation:
         """confirm으로 stop이 실행된다."""
         await receiver._execute("stop", ["bot-1"], 12345, 100)
         result = await receiver._handle_confirm(12345)
-        assert "중지" in result
+        assert "봇 중지" in result
+        assert "실행 중 → 중지됨" in result
         bot_manager.stop_bot.assert_called_once_with(
             "bot-1", suppress_notification=True
         )
@@ -438,10 +511,33 @@ class TestIntegrationFlow:
         }
         await receiver._handle_update(confirm_update)
         assert receiver._reply.call_count == 2
-        assert "중지되었습니다" in receiver._reply.call_args[0][1]
+        reply_text = receiver._reply.call_args[0][1]
+        assert "중지되었습니다" in reply_text
+        assert "/activate" in reply_text
         system_state.set_state.assert_called_once()
         call_kwargs = system_state.set_state.call_args
         assert call_kwargs.kwargs.get("suppress_notification") is True
+
+    async def test_halt_already_halted(self, receiver, system_state):
+        """이미 HALTED 상태이면 중복 메시지를 반환한다."""
+        from ante.config.system_state import TradingState
+
+        system_state.trading_state = TradingState.HALTED
+        receiver._reply = AsyncMock()
+
+        halt_update = {
+            "message": {
+                "text": "/halt",
+                "from": {"id": 12345},
+                "chat": {"id": 100},
+            }
+        }
+        await receiver._handle_update(halt_update)
+
+        # confirm 없이 즉시 응답
+        assert receiver._reply.call_count == 1
+        assert "이미 거래가 중지된 상태입니다" in receiver._reply.call_args[0][1]
+        system_state.set_state.assert_not_called()
 
     async def test_reply_with_no_chat_id(self, receiver):
         """chat_id가 없어도 에러 없이 처리."""

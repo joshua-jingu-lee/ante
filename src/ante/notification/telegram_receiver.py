@@ -265,8 +265,13 @@ class TelegramCommandReceiver:
         if command == "confirm":
             return await self._handle_confirm(user_id)
 
-        # 위험 명령 → 확인 절차
+        # 위험 명령 → 확인 절차 (이미 해당 상태이면 즉시 반환)
         if command in _DANGEROUS_COMMANDS:
+            if command == "halt" and self._system_state:
+                from ante.config.system_state import TradingState
+
+                if self._system_state.trading_state == TradingState.HALTED:
+                    return "이미 거래가 중지된 상태입니다."
             return self._request_confirmation(command, args, user_id)
 
         # 즉시 실행 명령
@@ -362,6 +367,15 @@ class TelegramCommandReceiver:
 
         return "\n".join(parts)
 
+    _STATUS_KO: dict[str, str] = {
+        "created": "생성됨",
+        "running": "실행 중",
+        "stopping": "중지 중",
+        "stopped": "중지됨",
+        "error": "에러",
+        "deleted": "삭제됨",
+    }
+
     def _cmd_bots(self, args: list[str]) -> str:
         """봇 목록."""
         if not self._bot_manager:
@@ -371,14 +385,17 @@ class TelegramCommandReceiver:
         if not bots:
             return "등록된 봇이 없습니다."
 
+        running = sum(1 for b in bots if b["status"] == "running")
+        total = len(bots)
+
         lines = []
         for b in bots:
-            status = b["status"]
+            status_ko = self._STATUS_KO.get(b["status"], b["status"])
             bot_id = b["bot_id"]
             strategy = b.get("strategy_id", "-")
-            lines.append(f"  {bot_id} [{status}] {strategy}")
+            lines.append(f"  {bot_id} [{status_ko}] {strategy}")
 
-        return "봇 목록:\n" + "\n".join(lines)
+        return f"\U0001f916 봇 목록 ({running}/{total} 실행 중)\n" + "\n".join(lines)
 
     def _cmd_balance(self, args: list[str]) -> str:
         """자금 현황."""
@@ -506,6 +523,9 @@ class TelegramCommandReceiver:
 
         from ante.config.system_state import TradingState
 
+        if self._system_state.trading_state == TradingState.HALTED:
+            return "이미 거래가 중지된 상태입니다."
+
         reason = " ".join(args) if args else "텔레그램 명령"
         await self._system_state.set_state(
             TradingState.HALTED,
@@ -513,7 +533,11 @@ class TelegramCommandReceiver:
             changed_by="telegram",
             suppress_notification=True,
         )
-        return f"전체 거래가 중지되었습니다. (사유: {reason})"
+        return (
+            "\U0001f6a8 전체 거래가 중지되었습니다.\n"
+            f"사유: {reason}\n"
+            "해제하려면 /activate 를 입력하세요."
+        )
 
     async def _cmd_activate(self, args: list[str]) -> str:
         """거래 재개."""
@@ -522,16 +546,21 @@ class TelegramCommandReceiver:
 
         from ante.config.system_state import TradingState
 
+        if self._system_state.trading_state == TradingState.ACTIVE:
+            return "이미 거래가 활성 상태입니다."
+
         await self._system_state.set_state(
             TradingState.ACTIVE,
             reason="텔레그램 명령",
             changed_by="telegram",
             suppress_notification=True,
         )
-        return "거래가 재개되었습니다."
+        return "✅ 거래가 재개되었습니다."
 
     async def _cmd_stop(self, args: list[str]) -> str:
         """특정 봇 중지."""
+        from ante.bot.config import BotStatus
+
         if not self._bot_manager:
             return "BotManager가 연결되지 않았습니다."
 
@@ -543,8 +572,35 @@ class TelegramCommandReceiver:
         if not bot:
             return f"봇을 찾을 수 없습니다: {bot_id}"
 
+        if bot.status != BotStatus.RUNNING:
+            return f"이미 중지된 봇입니다: {bot_id}"
+
+        # 중지 전 포지션·미체결 주문 조회
+        positions = bot._ctx.get_positions()
+        open_orders = bot._ctx.get_open_orders()
+
         await self._bot_manager.stop_bot(bot_id, suppress_notification=True)
-        return f"봇 {bot_id}이 중지되었습니다."
+
+        bot_name = bot.config.name or bot_id
+        header = f"ℹ️ *봇 중지*\n\n봇: {bot_name} ({bot_id})\n상태: 실행 중 → 중지됨"
+
+        if not positions:
+            return f"{header}\n\n미체결 주문은 자동 취소되지 않습니다."
+
+        # 보유 종목 있음 — 메시지 B
+        symbols = sorted(positions.keys())
+        pending_amount = sum(order.get("amount", 0) for order in open_orders)
+
+        lines = [
+            header,
+            "",
+            f"⚠️ 보유 종목 {len(symbols)}개가 유지됩니다.",
+            "중지 후 포지션을 직접 관리해야 합니다.",
+            "",
+            f"보유: {', '.join(symbols)}",
+            f"체결대기: {pending_amount:,.0f}원",
+        ]
+        return "\n".join(lines)
 
     # ── 유틸 ────────────────────────────────────────
 
