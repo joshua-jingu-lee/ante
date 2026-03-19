@@ -55,6 +55,7 @@ class Services:
     notification_service: Any = None
     telegram_receiver: Any = None
     web_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     commission_rate: float = 0.00015
     sell_tax_rate: float = 0.0023
     _cleanup_tasks: list[str] = field(default_factory=list)
@@ -463,6 +464,30 @@ async def _init_feed(s: Services) -> None:
     await s.approval_service.initialize()
     logger.info("ApprovalService 초기화 완료")
 
+    # 결재 만료 스케줄러 등록
+    s.approval_expire_task = asyncio.create_task(
+        _approval_expire_loop(s.approval_service),
+        name="approval-expire",
+    )
+    logger.info("결재 만료 스케줄러 시작 (주기: 300초)")
+
+
+async def _approval_expire_loop(
+    approval_service: Any,
+    interval: float = 300.0,
+) -> None:
+    """만료 기한이 지난 결재 요청을 주기적으로 expired 처리."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            expired = await approval_service.expire_stale()
+            if expired:
+                logger.info("결재 만료 처리: %d건", expired)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("결재 만료 스케줄러 오류")
+
 
 async def _init_notification(s: Services) -> None:
     """NotificationService, TelegramCommandReceiver 초기화."""
@@ -587,6 +612,14 @@ async def _shutdown(s: Services) -> None:
     if s.telegram_receiver:
         await s.telegram_receiver.stop()
         logger.info("TelegramCommandReceiver 종료")
+
+    if s.approval_expire_task and not s.approval_expire_task.done():
+        s.approval_expire_task.cancel()
+        try:
+            await s.approval_expire_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("결재 만료 스케줄러 종료")
 
     if s.web_task and not s.web_task.done():
         s.web_task.cancel()
