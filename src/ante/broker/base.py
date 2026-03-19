@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -106,20 +105,6 @@ class BrokerAdapter(ABC):
     async def get_pending_orders(self) -> list[dict[str, Any]]:
         """미체결 주문 목록 조회."""
         ...
-
-    @abstractmethod
-    async def realtime_price_stream(
-        self, symbols: list[str]
-    ) -> AsyncIterator[dict[str, Any]]:
-        """실시간 가격 스트리밍 (비동기 제너레이터)."""
-        ...
-        yield {}  # type: ignore[misc]
-
-    @abstractmethod
-    async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
-        """실시간 주문 체결 스트리밍."""
-        ...
-        yield {}  # type: ignore[misc]
 
     # ── 대사(Reconciliation)용 조회 ────────────────────
 

@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
@@ -360,61 +358,6 @@ class TestOrderStatus:
         )
         history = await connected_broker.get_order_history()
         assert len(history) == 2
-
-
-# ── 스트리밍 ─────────────────────────────────────────────────
-
-
-class TestStreaming:
-    """realtime_price_stream() / realtime_order_stream() 검증."""
-
-    @pytest.mark.asyncio
-    async def test_price_stream_yields_data(
-        self, connected_broker: TestBrokerAdapter
-    ) -> None:
-        """가격 스트림이 데이터를 yield한다."""
-        # tick_interval을 짧게 설정
-        connected_broker._tick_interval = 0.01
-
-        items: list[dict] = []
-        async for item in connected_broker.realtime_price_stream(["000001", "000002"]):
-            items.append(item)
-            if len(items) >= 4:  # 2종목 x 2라운드
-                await connected_broker.disconnect()  # 스트림 종료
-
-        assert len(items) >= 4
-        assert all("symbol" in item for item in items)
-        assert all("price" in item for item in items)
-        assert all("timestamp" in item for item in items)
-
-    @pytest.mark.asyncio
-    async def test_price_stream_stops_on_disconnect(
-        self, connected_broker: TestBrokerAdapter
-    ) -> None:
-        """disconnect 후 스트림이 종료된다."""
-        connected_broker._tick_interval = 0.01
-
-        async def disconnect_after(delay: float) -> None:
-            await asyncio.sleep(delay)
-            await connected_broker.disconnect()
-
-        task = asyncio.create_task(disconnect_after(0.05))
-        count = 0
-        async for _ in connected_broker.realtime_price_stream(["000001"]):
-            count += 1
-        await task
-        assert count > 0  # 최소 한 번은 yield해야 함
-
-    @pytest.mark.asyncio
-    async def test_order_stream_returns_filled_orders(
-        self, connected_broker: TestBrokerAdapter
-    ) -> None:
-        """주문 스트림이 체결 주문을 반환한다."""
-        await connected_broker.place_order("000001", "buy", 10)
-        items = []
-        async for item in connected_broker.realtime_order_stream():
-            items.append(item)
-        assert len(items) >= 1
 
 
 # ── 종목 마스터 ──────────────────────────────────────────────
