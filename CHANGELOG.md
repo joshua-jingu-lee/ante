@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.6.1 (2026-03-19)
+
+### Bug Fixes
+
+- **build**: Pandas-ta 의존성 버전 스펙 수정
+  ([`3bf9125`](https://github.com/joshua-jingu-lee/ante/commit/3bf91251c1d9d801ed6314121791c7cc6b247362))
+
+
 ## v0.6.0 (2026-03-19)
 
 ### Bug Fixes
