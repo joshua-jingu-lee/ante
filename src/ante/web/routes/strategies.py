@@ -28,6 +28,8 @@ from ante.web.schemas import (
 
 router = APIRouter()
 
+_STRATEGY_NOT_FOUND = "전략을 찾을 수 없습니다"
+
 
 @router.post("/validate", response_model=StrategyValidateResponse)
 async def validate_strategy(body: dict) -> dict:
@@ -100,7 +102,7 @@ async def get_strategy(
     """전략 상세 조회."""
     record = await registry.get(strategy_id)
     if not record:
-        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
     strategy_dict = asdict(record)
     strategy_dict["status"] = (
@@ -128,7 +130,7 @@ async def get_strategy_performance(
     """전략 성과 지표 조회."""
     record = await registry.get(strategy_id)
     if not record:
-        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
     from ante.trade.performance import PerformanceTracker
 
@@ -165,7 +167,7 @@ async def get_strategy_daily_summary(
     """전략 일별 성과 집계."""
     record = await registry.get(strategy_id)
     if not record:
-        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
     from ante.trade.performance import PerformanceTracker
 
@@ -203,7 +205,7 @@ async def get_strategy_weekly_summary(
     """전략 주별 성과 집계."""
     record = await registry.get(strategy_id)
     if not record:
-        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
     from ante.trade.performance import PerformanceTracker
 
@@ -242,7 +244,7 @@ async def get_strategy_monthly_summary(
     """전략 월별 성과 집계."""
     record = await registry.get(strategy_id)
     if not record:
-        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
     from ante.trade.performance import PerformanceTracker
 
@@ -283,7 +285,7 @@ async def get_strategy_trades(
 
     record = await registry.get(strategy_id)
     if not record:
-        raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
     trades = await trade_service.get_trades(
         strategy_id=strategy_id,
