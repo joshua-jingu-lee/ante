@@ -151,7 +151,8 @@ class StrategyPerformanceResponse(BaseModel):
     sharpe_ratio: float = 0.0
     equity_curve: list[dict[str, Any]] = []
 
-    model_config = ConfigDict(extra="allow")  #
+    # 전략별 커스텀 지표가 추가될 수 있어 동적 필드 허용
+    model_config = ConfigDict(extra="allow")
 
 
 class DailySummaryItem(BaseModel):
@@ -243,7 +244,8 @@ class TreasurySummaryResponse(BaseModel):
     is_virtual: bool | None = None
     synced_at: str | None = None
 
-    model_config = ConfigDict(extra="allow")  #
+    # 브로커 연동 시 추가 메타데이터가 동적으로 포함됨
+    model_config = ConfigDict(extra="allow")
 
 
 class TransactionItem(BaseModel):
@@ -354,7 +356,8 @@ class ReportListResponse(BaseModel):
 class ReportSchemaResponse(BaseModel):
     """리포트 스키마 응답."""
 
-    model_config = ConfigDict(extra="allow")  #
+    # 리포트 스키마 구조가 전략 유형에 따라 달라지므로 동적 필드 허용
+    model_config = ConfigDict(extra="allow")
 
 
 # ── 데이터 ──────────────────────────────────────────────
@@ -390,7 +393,8 @@ class DatasetListResponse(BaseModel):
 class DataSchemaResponse(BaseModel):
     """데이터 스키마 응답 (동적 키-값)."""
 
-    model_config = ConfigDict(extra="allow")  #
+    # OHLCV/fundamental 등 데이터 유형별 스키마 키가 다르므로 동적 필드 허용
+    model_config = ConfigDict(extra="allow")
 
 
 class StorageSummaryResponse(BaseModel):

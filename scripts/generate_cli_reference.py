@@ -86,13 +86,17 @@ def _format_param_type(param: click.Parameter) -> str:
 
 def _format_default(param: click.Parameter) -> str:
     """기본값을 문자열로 포맷팅한다."""
-    if param.default is None:
+    default = param.default
+    if default is None:
         return "\u2014"
-    if isinstance(param.default, bool):
-        return "false" if not param.default else "true"
-    if isinstance(param.default, tuple) and len(param.default) == 0:
+    # Click 8.2+: multiple=True 옵션의 default가 Sentinel.UNSET일 수 있음
+    if not isinstance(default, (bool, int, float, str, tuple, list)):
         return "\u2014"
-    return str(param.default)
+    if isinstance(default, bool):
+        return "false" if not default else "true"
+    if isinstance(default, tuple) and len(default) == 0:
+        return "\u2014"
+    return str(default)
 
 
 def _is_required(param: click.Parameter) -> str:
