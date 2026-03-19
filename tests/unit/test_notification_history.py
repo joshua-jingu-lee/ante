@@ -9,7 +9,7 @@ import pytest
 
 from ante.core.database import Database
 from ante.eventbus import EventBus
-from ante.eventbus.events import BotErrorEvent, NotificationEvent, OrderFilledEvent
+from ante.eventbus.events import NotificationEvent
 from ante.notification.base import NotificationAdapter, NotificationLevel
 from ante.notification.service import NOTIFICATION_HISTORY_SCHEMA, NotificationService
 
@@ -120,17 +120,8 @@ class TestNotificationHistory:
         assert rows[0]["success"] == 0
         assert "send failed" in rows[0]["error_message"]
 
-    async def test_event_handler_records_history(self, service, eventbus, db):
-        """이벤트 핸들러를 통한 발송도 이력이 기록된다."""
-        await eventbus.publish(BotErrorEvent(bot_id="bot1", error_message="timeout"))
-
-        rows = await service.get_history()
-        assert len(rows) == 1
-        assert rows[0]["event_type"] == "BotErrorEvent"
-        assert rows[0]["bot_id"] == "bot1"
-
     async def test_notification_event_records_history(self, service, eventbus, db):
-        """NotificationEvent도 이력이 기록된다."""
+        """NotificationEvent를 통한 발송도 이력이 기록된다."""
         await eventbus.publish(
             NotificationEvent(level="info", title="알림 제목", message="알림 본문")
         )
@@ -140,26 +131,23 @@ class TestNotificationHistory:
         assert rows[0]["event_type"] == "NotificationEvent"
         assert rows[0]["title"] == "알림 제목"
 
-    async def test_order_filled_records_history(self, service, eventbus, db):
-        """OrderFilledEvent도 이력이 기록된다."""
+    async def test_notification_event_with_category_records_history(
+        self, service, eventbus, db
+    ):
+        """category 포함 NotificationEvent도 이력이 기록된다."""
         await eventbus.publish(
-            OrderFilledEvent(
-                order_id="ord1",
-                broker_order_id="bk1",
-                bot_id="bot1",
-                strategy_id="s1",
-                symbol="005930",
-                side="buy",
-                quantity=100.0,
-                price=72000.0,
-                order_type="market",
+            NotificationEvent(
+                level="error",
+                title="봇 에러",
+                message="Connection timeout",
+                category="bot",
             )
         )
 
         rows = await service.get_history()
         assert len(rows) == 1
-        assert rows[0]["event_type"] == "OrderFilledEvent"
-        assert rows[0]["bot_id"] == "bot1"
+        assert rows[0]["event_type"] == "NotificationEvent"
+        assert rows[0]["title"] == "봇 에러"
 
     async def test_adapter_type_recorded(self, service, db):
         """adapter_type에 어댑터 클래스 이름이 기록된다."""
@@ -229,7 +217,14 @@ class TestServiceWithoutDB:
         svc = NotificationService(adapter=adapter, eventbus=eventbus)
         svc.subscribe()
 
-        await eventbus.publish(BotErrorEvent(bot_id="bot1", error_message="test error"))
+        await eventbus.publish(
+            NotificationEvent(
+                level="error",
+                title="봇 에러",
+                message="test error",
+                category="bot",
+            )
+        )
         assert len(adapter.sent) == 1
 
     async def test_initialize_without_db(self, adapter, eventbus):
