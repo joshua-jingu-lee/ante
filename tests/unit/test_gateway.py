@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -422,8 +422,8 @@ class TestLiveDataProvider:
         assert price == 50000.0
         mock_gateway.get_current_price.assert_called_once_with("005930")
 
-    async def test_get_ohlcv_delegates_to_gateway(self):
-        """OHLCV 조회가 gateway.get_ohlcv()를 호출한다."""
+    async def test_get_ohlcv_delegates_to_gateway_without_store(self):
+        """ParquetStore 미주입 시 gateway.get_ohlcv()를 호출한다."""
         mock_gateway = AsyncMock()
         mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
         provider = LiveDataProvider(mock_gateway)
@@ -432,6 +432,61 @@ class TestLiveDataProvider:
         mock_gateway.get_ohlcv.assert_called_once_with(
             "005930", timeframe="1d", limit=100
         )
+
+    async def test_get_ohlcv_reads_from_parquet_store(self):
+        """ParquetStore에 데이터가 있으면 ParquetStore에서 읽는다."""
+        import polars as pl
+
+        mock_gateway = AsyncMock()
+        mock_store = MagicMock()
+        df = pl.DataFrame(
+            {
+                "timestamp": ["2026-01-01"],
+                "open": [49000.0],
+                "high": [51000.0],
+                "low": [48500.0],
+                "close": [50000.0],
+                "volume": [1000],
+            }
+        )
+        mock_store.read = MagicMock(return_value=df)
+
+        provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
+        result = await provider.get_ohlcv("005930", timeframe="1d", limit=50)
+
+        assert len(result) == 1
+        assert result[0]["close"] == 50000.0
+        mock_store.read.assert_called_once_with("005930", "1d", limit=50)
+        mock_gateway.get_ohlcv.assert_not_called()
+
+    async def test_get_ohlcv_fallback_to_gateway_when_store_empty(self):
+        """ParquetStore에 데이터가 없으면 APIGateway로 폴백한다."""
+        import polars as pl
+
+        mock_gateway = AsyncMock()
+        mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
+        mock_store = MagicMock()
+        mock_store.read = MagicMock(return_value=pl.DataFrame())
+
+        provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
+        result = await provider.get_ohlcv("005930")
+
+        assert result == [{"close": 50000.0}]
+        mock_store.read.assert_called_once()
+        mock_gateway.get_ohlcv.assert_called_once()
+
+    async def test_get_ohlcv_fallback_to_gateway_on_store_error(self):
+        """ParquetStore 읽기 실패 시 APIGateway로 폴백한다."""
+        mock_gateway = AsyncMock()
+        mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
+        mock_store = MagicMock()
+        mock_store.read = MagicMock(side_effect=Exception("parquet read error"))
+
+        provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
+        result = await provider.get_ohlcv("005930")
+
+        assert result == [{"close": 50000.0}]
+        mock_gateway.get_ohlcv.assert_called_once()
 
     async def test_get_indicator_returns_empty_when_no_ohlcv(self):
         """OHLCV 데이터 없을 때 빈 dict 반환."""
