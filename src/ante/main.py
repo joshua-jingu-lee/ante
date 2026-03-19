@@ -229,6 +229,19 @@ async def main() -> None:
         )
         await broker.connect()
         logger.info("MockBrokerAdapter 연결 완료")
+    elif broker_type == "test":
+        from ante.broker import TestBrokerAdapter
+
+        test_config = (
+            broker_config.get("test", {}) if isinstance(broker_config, dict) else {}
+        )
+        merged = {
+            **(broker_config if isinstance(broker_config, dict) else {}),
+            **test_config,
+        }
+        broker = TestBrokerAdapter(merged)
+        await broker.connect()
+        logger.info("TestBrokerAdapter 연결 완료 (seed=%s)", merged.get("seed", 42))
     else:
         from ante.broker import KISAdapter
 
