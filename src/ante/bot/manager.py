@@ -60,6 +60,7 @@ class BotManager:
         self._rule_engine = rule_engine
         self._strategy_rule_configs = strategy_rule_configs or {}
         self._bots: dict[str, Bot] = {}
+        self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
         self._restart_tasks: dict[str, asyncio.Task[None]] = {}
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
@@ -290,9 +291,17 @@ class BotManager:
         self._load_strategy_rules(bot.config.strategy_id)
         await bot.start()
 
-    async def stop_bot(self, bot_id: str) -> None:
-        """봇 중지. 전략별 룰을 RuleEngine에서 제거."""
+    async def stop_bot(
+        self, bot_id: str, *, suppress_notification: bool = False
+    ) -> None:
+        """봇 중지. 전략별 룰을 RuleEngine에서 제거.
+
+        suppress_notification이 True이면 BotStoppedEvent에 의한
+        NotificationEvent 발행을 1회 억제한다.
+        """
         bot = self._get_bot(bot_id)
+        if suppress_notification:
+            self._suppress_notification_bot_ids.add(bot_id)
         await bot.stop()
         self._remove_strategy_rules(bot.config.strategy_id)
 
@@ -421,10 +430,13 @@ class BotManager:
         )
 
     async def _on_bot_stopped(self, event: object) -> None:
-        """봇 중지 알림 발행."""
+        """봇 중지 알림 발행. suppress 목록에 있으면 알림 생략."""
         from ante.eventbus.events import BotStoppedEvent, NotificationEvent
 
         if not isinstance(event, BotStoppedEvent):
+            return
+        if event.bot_id in self._suppress_notification_bot_ids:
+            self._suppress_notification_bot_ids.discard(event.bot_id)
             return
         await self._eventbus.publish(
             NotificationEvent(

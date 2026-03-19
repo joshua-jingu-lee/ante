@@ -192,22 +192,53 @@ class TelegramCommandReceiver:
 
         try:
             if action == "approve":
-                await self._approval_service.approve(
-                    approval_id, resolved_by="telegram"
+                request = await self._approval_service.approve(
+                    approval_id,
+                    resolved_by="telegram",
+                    suppress_notification=True,
                 )
-                result_msg = f"결재 승인 완료: {approval_id}"
+                if request.status == "execution_failed":
+                    detail = ""
+                    for entry in reversed(request.history):
+                        if entry.get("action") == "execution_failed":
+                            detail = entry.get("detail", "")
+                            break
+                    result_msg = (
+                        f"⚠️ 승인되었으나 실행 실패\n"
+                        f"제목: {request.title}\n"
+                        f"ID: {approval_id}\n"
+                        f"사유: {detail}"
+                    )
+                else:
+                    result_msg = (
+                        f"✅ 결재 승인 완료\n제목: {request.title}\nID: {approval_id}"
+                    )
             elif action == "reject":
-                await self._approval_service.reject(
-                    approval_id, resolved_by="telegram", reject_reason="사용자 거절"
+                request = await self._approval_service.reject(
+                    approval_id,
+                    resolved_by="telegram",
+                    reject_reason="사용자 거절",
+                    suppress_notification=True,
                 )
-                result_msg = f"결재 거절 완료: {approval_id}"
+                result_msg = (
+                    f"❌ 결재 거절 완료\n"
+                    f"제목: {request.title}\n"
+                    f"ID: {approval_id}\n"
+                    f"사유: 사용자 거절"
+                )
             else:
                 await self._adapter.answer_callback_query(
                     callback_id, "알 수 없는 동작입니다."
                 )
                 return
         except ValueError as e:
-            result_msg = f"처리 실패: {e}"
+            err = str(e)
+            if "찾을 수 없음" in err:
+                result_msg = f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
+            elif "만료" in err:
+                result_msg = f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
+            else:
+                result_msg = f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
         except Exception:
             logger.exception("콜백 결재 처리 오류: %s", data)
             result_msg = "처리 중 오류가 발생했습니다."
@@ -422,10 +453,32 @@ class TelegramCommandReceiver:
 
         approval_id = args[0]
         try:
-            await self._approval_service.approve(approval_id, resolved_by="telegram")
-            return f"결재 승인 완료: {approval_id}"
+            request = await self._approval_service.approve(
+                approval_id,
+                resolved_by="telegram",
+                suppress_notification=True,
+            )
+            if request.status == "execution_failed":
+                # executor 실행 실패 — history 마지막 항목에서 사유 추출
+                detail = ""
+                for entry in reversed(request.history):
+                    if entry.get("action") == "execution_failed":
+                        detail = entry.get("detail", "")
+                        break
+                return (
+                    f"⚠️ 승인되었으나 실행 실패\n"
+                    f"제목: {request.title}\n"
+                    f"ID: {approval_id}\n"
+                    f"사유: {detail}"
+                )
+            return f"✅ 결재 승인 완료\n제목: {request.title}\nID: {approval_id}"
         except ValueError as e:
-            return f"승인 실패: {e}"
+            err = str(e)
+            if "찾을 수 없음" in err:
+                return f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
+            if "만료" in err:
+                return f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
+            return f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
         except Exception:
             logger.exception("결재 승인 오류: %s", approval_id)
             return "승인 처리 중 오류가 발생했습니다."
@@ -440,12 +493,25 @@ class TelegramCommandReceiver:
         approval_id = args[0]
         reason = " ".join(args[1:]) if len(args) > 1 else "사용자 거절"
         try:
-            await self._approval_service.reject(
-                approval_id, resolved_by="telegram", reject_reason=reason
+            request = await self._approval_service.reject(
+                approval_id,
+                resolved_by="telegram",
+                reject_reason=reason,
+                suppress_notification=True,
             )
-            return f"결재 거절 완료: {approval_id} (사유: {reason})"
+            return (
+                f"❌ 결재 거절 완료\n"
+                f"제목: {request.title}\n"
+                f"ID: {approval_id}\n"
+                f"사유: {reason}"
+            )
         except ValueError as e:
-            return f"거절 실패: {e}"
+            err = str(e)
+            if "찾을 수 없음" in err:
+                return f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
+            if "만료" in err:
+                return f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
+            return f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
         except Exception:
             logger.exception("결재 거절 오류: %s", approval_id)
             return "거절 처리 중 오류가 발생했습니다."
@@ -462,7 +528,10 @@ class TelegramCommandReceiver:
 
         reason = " ".join(args) if args else "텔레그램 명령"
         await self._system_state.set_state(
-            TradingState.HALTED, reason=reason, changed_by="telegram"
+            TradingState.HALTED,
+            reason=reason,
+            changed_by="telegram",
+            suppress_notification=True,
         )
         return (
             "\U0001f6a8 전체 거래가 중지되었습니다.\n"
@@ -481,7 +550,10 @@ class TelegramCommandReceiver:
             return "이미 거래가 활성 상태입니다."
 
         await self._system_state.set_state(
-            TradingState.ACTIVE, reason="텔레그램 명령", changed_by="telegram"
+            TradingState.ACTIVE,
+            reason="텔레그램 명령",
+            changed_by="telegram",
+            suppress_notification=True,
         )
         return "✅ 거래가 재개되었습니다."
 
@@ -507,7 +579,7 @@ class TelegramCommandReceiver:
         positions = bot._ctx.get_positions()
         open_orders = bot._ctx.get_open_orders()
 
-        await self._bot_manager.stop_bot(bot_id)
+        await self._bot_manager.stop_bot(bot_id, suppress_notification=True)
 
         bot_name = bot.config.name or bot_id
         header = f"ℹ️ *봇 중지*\n\n봇: {bot_name} ({bot_id})\n상태: 실행 중 → 중지됨"

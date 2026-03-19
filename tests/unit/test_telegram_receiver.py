@@ -237,6 +237,8 @@ class TestCommands:
         result = await receiver._cmd_activate([])
         assert "거래가 재개되었습니다" in result
         system_state.set_state.assert_called_once()
+        call_kwargs = system_state.set_state.call_args
+        assert call_kwargs.kwargs.get("suppress_notification") is True
 
     async def test_activate_already_active(self, receiver, system_state):
         from ante.config.system_state import TradingState
@@ -258,7 +260,9 @@ class TestCommands:
         assert "테스트봇 (bot-1)" in result
         assert "실행 중 → 중지됨" in result
         assert "미체결 주문은 자동 취소되지 않습니다" in result
-        bot_manager.stop_bot.assert_called_once_with("bot-1")
+        bot_manager.stop_bot.assert_called_once_with(
+            "bot-1", suppress_notification=True
+        )
 
     async def test_stop_bot_with_positions(self, receiver, bot_manager):
         """보유 종목 있으면 메시지 B — 종목명 및 체결대기 금액 표시."""
@@ -342,6 +346,8 @@ class TestConfirmation:
         result = await receiver._handle_confirm(12345)
         assert "중지되었습니다" in result
         system_state.set_state.assert_called_once()
+        call_kwargs = system_state.set_state.call_args
+        assert call_kwargs.kwargs.get("suppress_notification") is True
 
     async def test_confirm_executes_stop(self, receiver, bot_manager):
         """confirm으로 stop이 실행된다."""
@@ -349,7 +355,9 @@ class TestConfirmation:
         result = await receiver._handle_confirm(12345)
         assert "봇 중지" in result
         assert "실행 중 → 중지됨" in result
-        bot_manager.stop_bot.assert_called_once_with("bot-1")
+        bot_manager.stop_bot.assert_called_once_with(
+            "bot-1", suppress_notification=True
+        )
 
     async def test_confirm_no_pending(self, receiver):
         """대기 중인 명령이 없으면 안내 메시지."""
@@ -507,6 +515,8 @@ class TestIntegrationFlow:
         assert "중지되었습니다" in reply_text
         assert "/activate" in reply_text
         system_state.set_state.assert_called_once()
+        call_kwargs = system_state.set_state.call_args
+        assert call_kwargs.kwargs.get("suppress_notification") is True
 
     async def test_halt_already_halted(self, receiver, system_state):
         """이미 HALTED 상태이면 중복 메시지를 반환한다."""

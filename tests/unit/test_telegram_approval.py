@@ -17,6 +17,22 @@ from ante.notification.telegram_receiver import TelegramCommandReceiver
 # ── Fixtures ──────────────────────────────────────
 
 
+def _make_approval_request(
+    *,
+    approval_id: str = "abc123",
+    title: str = "테스트 결재",
+    status: str = "approved",
+    history: list | None = None,
+) -> MagicMock:
+    """ApprovalRequest mock 생성."""
+    req = MagicMock()
+    req.id = approval_id
+    req.title = title
+    req.status = status
+    req.history = history or []
+    return req
+
+
 @pytest.fixture
 def adapter():
     """TelegramAdapter mock."""
@@ -35,8 +51,8 @@ def adapter():
 def approval_service():
     """ApprovalService mock."""
     mock = MagicMock()
-    mock.approve = AsyncMock()
-    mock.reject = AsyncMock()
+    mock.approve = AsyncMock(return_value=_make_approval_request(status="approved"))
+    mock.reject = AsyncMock(return_value=_make_approval_request(status="rejected"))
     return mock
 
 
@@ -116,7 +132,7 @@ class TestCallbackQuery:
     """인라인 버튼 콜백 처리 테스트."""
 
     async def test_approve_callback(self, receiver, approval_service):
-        """approve 콜백이 ApprovalService.approve()를 호출한다."""
+        """approve 콜백이 suppress_notification=True로 호출한다."""
         update = {
             "callback_query": {
                 "id": "cb1",
@@ -129,11 +145,54 @@ class TestCallbackQuery:
         await receiver._handle_update(update)
 
         approval_service.approve.assert_called_once_with(
-            "abc123", resolved_by="telegram"
+            "abc123", resolved_by="telegram", suppress_notification=True
         )
 
+    async def test_approve_callback_response_format(self, receiver, approval_service):
+        """approve 콜백 성공 시 스펙 형식의 응답을 반환한다."""
+        approval_service.approve.return_value = _make_approval_request(
+            title="예산 증액", status="approved"
+        )
+        update = {
+            "callback_query": {
+                "id": "cb1",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 100}},
+                "data": "approve:abc123",
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
+
+        reply_text = receiver._reply.call_args[0][1]
+        assert "✅ 결재 승인 완료" in reply_text
+        assert "제목: 예산 증액" in reply_text
+        assert "ID: abc123" in reply_text
+
+    async def test_approve_callback_execution_failed(self, receiver, approval_service):
+        """approve 콜백 executor 실행 실패 시 경고 메시지."""
+        approval_service.approve.return_value = _make_approval_request(
+            title="봇 중지",
+            status="execution_failed",
+            history=[{"action": "execution_failed", "detail": "봇 미존재"}],
+        )
+        update = {
+            "callback_query": {
+                "id": "cb1",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 100}},
+                "data": "approve:abc123",
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
+
+        reply_text = receiver._reply.call_args[0][1]
+        assert "⚠️ 승인되었으나 실행 실패" in reply_text
+        assert "봇 미존재" in reply_text
+
     async def test_reject_callback(self, receiver, approval_service):
-        """reject 콜백이 ApprovalService.reject()를 호출한다."""
+        """reject 콜백이 suppress_notification=True로 호출한다."""
         update = {
             "callback_query": {
                 "id": "cb2",
@@ -146,8 +205,32 @@ class TestCallbackQuery:
         await receiver._handle_update(update)
 
         approval_service.reject.assert_called_once_with(
-            "abc123", resolved_by="telegram", reject_reason="사용자 거절"
+            "abc123",
+            resolved_by="telegram",
+            reject_reason="사용자 거절",
+            suppress_notification=True,
         )
+
+    async def test_reject_callback_response_format(self, receiver, approval_service):
+        """reject 콜백 성공 시 스펙 형식의 응답을 반환한다."""
+        approval_service.reject.return_value = _make_approval_request(
+            title="예산 증액", status="rejected"
+        )
+        update = {
+            "callback_query": {
+                "id": "cb2",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 100}},
+                "data": "reject:abc123",
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
+
+        reply_text = receiver._reply.call_args[0][1]
+        assert "❌ 결재 거절 완료" in reply_text
+        assert "제목: 예산 증액" in reply_text
+        assert "사유: 사용자 거절" in reply_text
 
     async def test_callback_unauthorized(self, receiver, adapter):
         """미인가 사용자의 콜백은 거부된다."""
@@ -192,8 +275,10 @@ class TestCallbackQuery:
         assert "알 수 없는" in adapter.answer_callback_query.call_args[0][1]
 
     async def test_callback_approve_error(self, receiver, approval_service, adapter):
-        """approve 실패 시 에러 메시지를 반환한다."""
-        approval_service.approve.side_effect = ValueError("pending 상태가 아님")
+        """approve ValueError 시 스펙 형식 에러 메시지를 반환한다."""
+        approval_service.approve.side_effect = ValueError(
+            "pending/execution_failed 상태에서만 승인 가능 (현재: approved)"
+        )
         update = {
             "callback_query": {
                 "id": "cb6",
@@ -204,8 +289,29 @@ class TestCallbackQuery:
         }
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
-        adapter.answer_callback_query.assert_called_once()
-        assert "실패" in adapter.answer_callback_query.call_args[0][1]
+        reply_text = receiver._reply.call_args[0][1]
+        assert "이미 처리된 결재입니다" in reply_text
+
+    async def test_callback_approve_not_found(
+        self, receiver, approval_service, adapter
+    ):
+        """approve 대상을 찾을 수 없을 때 스펙 형식 에러 메시지."""
+        approval_service.approve.side_effect = ValueError(
+            "결재 요청을 찾을 수 없음: abc123"
+        )
+        update = {
+            "callback_query": {
+                "id": "cb6",
+                "from": {"id": 12345},
+                "message": {"chat": {"id": 100}},
+                "data": "approve:abc123",
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
+        reply_text = receiver._reply.call_args[0][1]
+        assert "결재를 찾을 수 없습니다" in reply_text
+        assert "ID: abc123" in reply_text
 
     async def test_callback_no_approval_service(self, adapter):
         """approval_service 없으면 안내 메시지."""
@@ -247,12 +353,34 @@ class TestApproveRejectCommands:
     """텍스트 명령어 /approve, /reject 테스트."""
 
     async def test_approve_command(self, receiver, approval_service):
-        """/approve <id> 명령이 ApprovalService.approve()를 호출한다."""
+        """/approve <id> 명령이 suppress_notification=True로 호출한다."""
         result = await receiver._cmd_approve(["abc123"])
-        assert "승인 완료" in result
+        assert "✅ 결재 승인 완료" in result
         approval_service.approve.assert_called_once_with(
-            "abc123", resolved_by="telegram"
+            "abc123", resolved_by="telegram", suppress_notification=True
         )
+
+    async def test_approve_response_format(self, receiver, approval_service):
+        """/approve 성공 시 제목과 ID를 포함한 스펙 형식 응답."""
+        approval_service.approve.return_value = _make_approval_request(
+            title="봇 중지 요청", status="approved"
+        )
+        result = await receiver._cmd_approve(["abc123"])
+        assert "✅ 결재 승인 완료" in result
+        assert "제목: 봇 중지 요청" in result
+        assert "ID: abc123" in result
+
+    async def test_approve_execution_failed(self, receiver, approval_service):
+        """/approve executor 실행 실패 시 경고 형식 응답."""
+        approval_service.approve.return_value = _make_approval_request(
+            title="봇 중지 요청",
+            status="execution_failed",
+            history=[{"action": "execution_failed", "detail": "봇이 이미 중지됨"}],
+        )
+        result = await receiver._cmd_approve(["abc123"])
+        assert "⚠️ 승인되었으나 실행 실패" in result
+        assert "제목: 봇 중지 요청" in result
+        assert "사유: 봇이 이미 중지됨" in result
 
     async def test_approve_no_args(self, receiver):
         """/approve 인자 없으면 안내 메시지."""
@@ -267,25 +395,54 @@ class TestApproveRejectCommands:
         result = await r._cmd_approve(["abc123"])
         assert "연결되지 않았습니다" in result
 
-    async def test_approve_error(self, receiver, approval_service):
-        """approve 실패 시 에러 메시지."""
-        approval_service.approve.side_effect = ValueError("찾을 수 없음")
+    async def test_approve_not_found(self, receiver, approval_service):
+        """존재하지 않는 결재 ID에 대한 에러 메시지."""
+        approval_service.approve.side_effect = ValueError(
+            "결재 요청을 찾을 수 없음: abc123"
+        )
         result = await receiver._cmd_approve(["abc123"])
-        assert "실패" in result
+        assert "결재를 찾을 수 없습니다" in result
+        assert "ID: abc123" in result
+
+    async def test_approve_already_processed(self, receiver, approval_service):
+        """이미 처리된 결재에 대한 에러 메시지."""
+        approval_service.approve.side_effect = ValueError(
+            "pending/execution_failed 상태에서만 승인 가능 (현재: approved)"
+        )
+        result = await receiver._cmd_approve(["abc123"])
+        assert "이미 처리된 결재입니다" in result
+        assert "ID: abc123" in result
 
     async def test_reject_command(self, receiver, approval_service):
-        """/reject <id> [reason] 명령이 reject를 호출한다."""
+        """/reject <id> [reason] 명령이 suppress_notification=True로 호출한다."""
         result = await receiver._cmd_reject(["abc123", "리스크", "과다"])
-        assert "거절 완료" in result
+        assert "❌ 결재 거절 완료" in result
         approval_service.reject.assert_called_once_with(
-            "abc123", resolved_by="telegram", reject_reason="리스크 과다"
+            "abc123",
+            resolved_by="telegram",
+            reject_reason="리스크 과다",
+            suppress_notification=True,
         )
+
+    async def test_reject_response_format(self, receiver, approval_service):
+        """/reject 성공 시 스펙 형식 응답."""
+        approval_service.reject.return_value = _make_approval_request(
+            title="예산 변경", status="rejected"
+        )
+        result = await receiver._cmd_reject(["abc123", "리스크", "과다"])
+        assert "❌ 결재 거절 완료" in result
+        assert "제목: 예산 변경" in result
+        assert "ID: abc123" in result
+        assert "사유: 리스크 과다" in result
 
     async def test_reject_default_reason(self, receiver, approval_service):
         """/reject <id> 사유 미지정 시 기본 사유."""
         await receiver._cmd_reject(["abc123"])
         approval_service.reject.assert_called_once_with(
-            "abc123", resolved_by="telegram", reject_reason="사용자 거절"
+            "abc123",
+            resolved_by="telegram",
+            reject_reason="사용자 거절",
+            suppress_notification=True,
         )
 
     async def test_reject_no_args(self, receiver):
@@ -301,11 +458,21 @@ class TestApproveRejectCommands:
         result = await r._cmd_reject(["abc123"])
         assert "연결되지 않았습니다" in result
 
-    async def test_reject_error(self, receiver, approval_service):
-        """reject 실패 시 에러 메시지."""
-        approval_service.reject.side_effect = ValueError("이미 처리됨")
+    async def test_reject_not_found(self, receiver, approval_service):
+        """존재하지 않는 결재 ID에 대한 에러 메시지."""
+        approval_service.reject.side_effect = ValueError(
+            "결재 요청을 찾을 수 없음: abc123"
+        )
         result = await receiver._cmd_reject(["abc123"])
-        assert "실패" in result
+        assert "결재를 찾을 수 없습니다" in result
+
+    async def test_reject_already_processed(self, receiver, approval_service):
+        """이미 처리된 결재에 대한 에러 메시지."""
+        approval_service.reject.side_effect = ValueError(
+            "pending/execution_failed 상태에서만 거절 가능 (현재: rejected)"
+        )
+        result = await receiver._cmd_reject(["abc123"])
+        assert "이미 처리된 결재입니다" in result
 
     async def test_help_includes_approval_commands(self, receiver):
         """/help에 /approve, /reject 명령이 포함된다."""

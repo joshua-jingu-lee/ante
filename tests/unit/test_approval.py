@@ -16,7 +16,10 @@ from ante.approval.models import (
 from ante.approval.service import ApprovalService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
-from ante.eventbus.events import ApprovalCreatedEvent, ApprovalResolvedEvent
+from ante.eventbus.events import (
+    ApprovalCreatedEvent,
+    ApprovalResolvedEvent,
+)
 
 # ── Fixtures ─────────────────────────────────────────
 
@@ -1336,3 +1339,106 @@ class TestReopen:
         assert approved.status == "approved"
         actions = [h["action"] for h in approved.history]
         assert actions == ["created", "rejected", "reopened", "approved"]
+
+
+# ── suppress_notification (#516) ───────────────────
+
+
+class TestSuppressNotification:
+    """suppress_notification=True 시 NotificationEvent 미발행, 도메인 이벤트는 유지."""
+
+    async def test_approve_suppress_skips_notification(self, service, eventbus):
+        """approve(suppress_notification=True) 시 NotificationEvent 미발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+        resolved: list[ApprovalResolvedEvent] = []
+
+        async def on_notification(event: NotificationEvent) -> None:
+            if event.category == "approval" and event.title == "결재 처리 완료":
+                notifications.append(event)
+
+        async def on_resolved(event: ApprovalResolvedEvent) -> None:
+            resolved.append(event)
+
+        eventbus.subscribe(NotificationEvent, on_notification)
+        eventbus.subscribe(ApprovalResolvedEvent, on_resolved)
+
+        req = await service.create(
+            type="budget_change", requester="agent", title="알림 억제 테스트"
+        )
+        await service.approve(req.id, suppress_notification=True)
+
+        # 도메인 이벤트는 발행됨
+        assert len(resolved) == 1
+        assert resolved[0].resolution == "approved"
+
+        # NotificationEvent는 미발행
+        assert len(notifications) == 0
+
+    async def test_approve_default_sends_notification(self, service, eventbus):
+        """approve() 기본 동작은 NotificationEvent 발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+
+        async def on_notification(event: NotificationEvent) -> None:
+            if event.category == "approval" and event.title == "결재 처리 완료":
+                notifications.append(event)
+
+        eventbus.subscribe(NotificationEvent, on_notification)
+
+        req = await service.create(
+            type="budget_change", requester="agent", title="기본 동작 테스트"
+        )
+        await service.approve(req.id)
+
+        assert len(notifications) == 1
+
+    async def test_reject_suppress_skips_notification(self, service, eventbus):
+        """reject(suppress_notification=True) 시 NotificationEvent 미발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+        resolved: list[ApprovalResolvedEvent] = []
+
+        async def on_notification(event: NotificationEvent) -> None:
+            if event.category == "approval" and event.title == "결재 처리 완료":
+                notifications.append(event)
+
+        async def on_resolved(event: ApprovalResolvedEvent) -> None:
+            resolved.append(event)
+
+        eventbus.subscribe(NotificationEvent, on_notification)
+        eventbus.subscribe(ApprovalResolvedEvent, on_resolved)
+
+        req = await service.create(
+            type="budget_change", requester="agent", title="거절 알림 억제"
+        )
+        await service.reject(req.id, suppress_notification=True)
+
+        # 도메인 이벤트는 발행됨
+        assert len(resolved) == 1
+        assert resolved[0].resolution == "rejected"
+
+        # NotificationEvent는 미발행
+        assert len(notifications) == 0
+
+    async def test_reject_default_sends_notification(self, service, eventbus):
+        """reject() 기본 동작은 NotificationEvent 발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications: list[NotificationEvent] = []
+
+        async def on_notification(event: NotificationEvent) -> None:
+            if event.category == "approval" and event.title == "결재 처리 완료":
+                notifications.append(event)
+
+        eventbus.subscribe(NotificationEvent, on_notification)
+
+        req = await service.create(
+            type="budget_change", requester="agent", title="거절 기본 동작"
+        )
+        await service.reject(req.id)
+
+        assert len(notifications) == 1
