@@ -81,17 +81,34 @@ class MeResponse(BaseModel):
 # ── 봇 ──────────────────────────────────────────────
 
 
+class BotInfo(BaseModel):
+    """봇 정보."""
+
+    bot_id: str
+    name: str = ""
+    status: str = ""
+    bot_type: str = ""
+    strategy_id: str = ""
+    interval_seconds: int = 60
+    started_at: str | None = None
+    stopped_at: str | None = None
+    error_message: str | None = None
+
+    # 봇 상세 조회 시 추가되는 동적 필드 (strategy, budget, positions 등)
+    model_config = ConfigDict(extra="allow")
+
+
 class BotListResponse(BaseModel):
     """봇 목록 응답."""
 
-    bots: list[dict[str, Any]]
+    bots: list[BotInfo]
     next_cursor: str | None = None
 
 
 class BotDetailResponse(BaseModel):
     """봇 상세/생성/시작/중지 응답."""
 
-    bot: dict[str, Any]
+    bot: BotInfo
 
 
 # ── 전략 ──────────────────────────────────────────────
@@ -123,11 +140,28 @@ class StrategyListResponse(BaseModel):
     strategies: list[StrategyListItem]
 
 
+class StrategyInfo(BaseModel):
+    """전략 상세 정보."""
+
+    strategy_id: str
+    name: str
+    version: str
+    filepath: str = ""
+    status: str = ""
+    registered_at: str = ""
+    description: str = ""
+    author: str = "agent"
+    validation_warnings: list[str] = []
+
+    # asdict(StrategyRecord) 변환 시 추가 필드 허용
+    model_config = ConfigDict(extra="allow")
+
+
 class StrategyDetailResponse(BaseModel):
     """전략 상세 응답."""
 
-    strategy: dict[str, Any]
-    bot: dict[str, Any] | None = None
+    strategy: StrategyInfo
+    bot: BotInfo | None = None
 
 
 class EquityCurvePoint(BaseModel):
@@ -274,10 +308,25 @@ class BudgetOperationResponse(BaseModel):
     available: float
 
 
+class BudgetItem(BaseModel):
+    """봇별 예산 아이템."""
+
+    bot_id: str
+    allocated: float = 0.0
+    available: float = 0.0
+    reserved: float = 0.0
+    spent: float = 0.0
+    returned: float = 0.0
+    last_updated: str = ""
+
+    # BotBudget 변환 시 추가 필드 허용
+    model_config = ConfigDict(extra="allow")
+
+
 class BudgetListResponse(BaseModel):
     """예산 목록 응답."""
 
-    budgets: list[dict[str, Any]]
+    budgets: list[BudgetItem]
 
 
 class BalanceSetResponse(BaseModel):
@@ -417,30 +466,55 @@ class FeedStatusResponse(BaseModel):
 # ── 멤버 ──────────────────────────────────────────────
 
 
+class MemberInfo(BaseModel):
+    """멤버 정보."""
+
+    member_id: str
+    type: str
+    role: str
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = []
+    token_hash: str = ""
+    password_hash: str = ""
+    recovery_key_hash: str = ""
+    created_at: str = ""
+    created_by: str = ""
+    last_active_at: str = ""
+    suspended_at: str = ""
+    revoked_at: str = ""
+    token_expires_at: str = ""
+
+    # Member dataclass 변환 시 추가 필드 허용
+    model_config = ConfigDict(extra="allow")
+
+
 class MemberListResponse(BaseModel):
     """멤버 목록 응답."""
 
-    members: list[dict[str, Any]]
+    members: list[MemberInfo]
     total: int
 
 
 class MemberDetailResponse(BaseModel):
     """멤버 상세 응답."""
 
-    member: dict[str, Any]
+    member: MemberInfo
 
 
 class MemberCreateResponse(BaseModel):
     """멤버 생성 응답 (토큰 포함)."""
 
-    member: dict[str, Any]
+    member: MemberInfo
     token: str
 
 
 class MemberTokenResponse(BaseModel):
     """토큰 재발급 응답."""
 
-    member: dict[str, Any]
+    member: MemberInfo
     token: str
 
 
@@ -453,7 +527,7 @@ class OkResponse(BaseModel):
 class MemberScopesResponse(BaseModel):
     """권한 범위 변경 응답."""
 
-    member: dict[str, Any]
+    member: MemberInfo
 
 
 # ── 거래 ──────────────────────────────────────────────
@@ -482,33 +556,68 @@ class TradeListResponse(BaseModel):
 # ── 결재 ──────────────────────────────────────────────
 
 
+class ApprovalItem(BaseModel):
+    """결재 요청 아이템."""
+
+    id: str
+    type: str
+    status: str
+    requester: str
+    title: str
+    body: str = ""
+    params: dict[str, Any] = {}
+    reviews: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
+    reference_id: str = ""
+    expires_at: str = ""
+    created_at: str = ""
+    resolved_at: str = ""
+    resolved_by: str = ""
+    reject_reason: str = ""
+
+    # ApprovalRequest dataclass 변환 시 추가 필드 허용
+    model_config = ConfigDict(extra="allow")
+
+
 class ApprovalListResponse(BaseModel):
     """결재 목록 응답."""
 
-    approvals: list[dict[str, Any]]
+    approvals: list[ApprovalItem]
     total: int
 
 
 class ApprovalDetailResponse(BaseModel):
     """결재 상세 응답."""
 
-    approval: dict[str, Any]
+    approval: ApprovalItem
     report_detail: dict[str, Any] | None = None
 
 
 class ApprovalUpdateResponse(BaseModel):
     """결재 상태 변경 응답."""
 
-    approval: dict[str, Any]
+    approval: ApprovalItem
 
 
 # ── 설정 ──────────────────────────────────────────────
 
 
+class ConfigItem(BaseModel):
+    """동적 설정 아이템."""
+
+    key: str
+    value: Any = None
+    category: str = ""
+    updated_at: str = ""
+
+    # 설정 항목별 추가 메타데이터 허용
+    model_config = ConfigDict(extra="allow")
+
+
 class ConfigListResponse(BaseModel):
     """동적 설정 목록 응답."""
 
-    configs: list[dict[str, Any]]
+    configs: list[ConfigItem]
 
 
 class ConfigUpdateResponse(BaseModel):
@@ -548,10 +657,25 @@ class PortfolioHistoryResponse(BaseModel):
 # ── 감사 로그 ──────────────────────────────────────────────
 
 
+class AuditLogItem(BaseModel):
+    """감사 로그 아이템."""
+
+    id: int
+    member_id: str = ""
+    action: str = ""
+    resource: str = ""
+    detail: str = ""
+    ip: str = ""
+    created_at: str = ""
+
+    # 감사 로그 확장 필드 허용
+    model_config = ConfigDict(extra="allow")
+
+
 class AuditLogListResponse(BaseModel):
     """감사 로그 목록 응답."""
 
-    logs: list[dict[str, Any]]
+    logs: list[AuditLogItem]
     total: int
 
 
