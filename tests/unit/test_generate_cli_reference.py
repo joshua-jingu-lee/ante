@@ -231,3 +231,21 @@ class TestGenerateCliReference:
 
         # bot create는 --name, --strategy 등 옵션이 많음
         assert "**Options:**" in content
+
+    def test_all_subcommands_have_description(self) -> None:
+        """모든 서브커맨드에 설명(docstring)이 존재한다.
+
+        요약 테이블의 설명 열이 비어 있으면 안 된다 (#494).
+        """
+        import re
+
+        buf = io.StringIO()
+        generate_cli_reference(buf)
+        content = buf.getvalue()
+
+        # 요약 테이블에서 명령어 행 추출
+        summary_rows = re.findall(r"\| `(ante [^`]+)` \| (.*?) \|", content)
+        assert len(summary_rows) > 0, "요약 테이블에서 명령어를 찾지 못함"
+
+        blank = [cmd for cmd, desc in summary_rows if not desc.strip()]
+        assert blank == [], f"설명이 비어 있는 명령어: {blank}"
