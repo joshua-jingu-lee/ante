@@ -241,6 +241,71 @@ def review(
         raise SystemExit(1) from e
 
 
+@approval.command("reopen")
+@click.argument("id")
+@click.option("--body", default=None, help="수정할 본문 (미지정 시 기존 값 유지)")
+@click.option(
+    "--params",
+    "params_json",
+    default=None,
+    help="수정할 파라미터 (JSON, 미지정 시 기존 값 유지)",
+)
+@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.pass_context
+@require_auth
+@require_scope("approval:write")
+def reopen(
+    ctx: click.Context,
+    id: str,
+    body: str | None,
+    params_json: str | None,
+    db_path: str,
+) -> None:
+    """거절된 결재 재상신."""
+    fmt = get_formatter(ctx)
+    requester = get_member_id(ctx)
+
+    params = None
+    if params_json is not None:
+        try:
+            params = json.loads(params_json)
+        except json.JSONDecodeError as e:
+            fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
+            raise SystemExit(1) from e
+
+    async def _reopen() -> dict:
+        from ante.approval import ApprovalService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        db = Database(db_path)
+        await db.connect()
+        eventbus = EventBus()
+        service = ApprovalService(db=db, eventbus=eventbus)
+        await service.initialize()
+
+        req = await service.reopen(
+            id=id,
+            requester=requester,
+            body=body,
+            params=params,
+        )
+        await db.close()
+        return {
+            "id": req.id,
+            "type": req.type,
+            "status": req.status,
+            "title": req.title,
+        }
+
+    try:
+        result = asyncio.run(_reopen())
+        fmt.success(f"결재 재상신: {result['id']}", result)
+    except Exception as e:
+        fmt.error(str(e), code="APPROVAL_ERROR")
+        raise SystemExit(1) from e
+
+
 @approval.command("cancel")
 @click.argument("id")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")

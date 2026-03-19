@@ -420,6 +420,122 @@ class ApprovalService:
 
         return request
 
+    async def reopen(
+        self,
+        id: str,
+        requester: str,
+        body: str | None = None,
+        params: dict | None = None,
+    ) -> ApprovalRequest:
+        """거절된 요청을 수정하여 재상신 (rejected → pending).
+
+        body와 params를 갱신할 수 있다. None이면 기존 값 유지.
+        본인 요청만 reopen 가능. 사전 검증(validator)을 재실행한다.
+        """
+        request = await self.get(id)
+        if not request:
+            msg = f"결재 요청을 찾을 수 없음: {id}"
+            raise ValueError(msg)
+
+        # 상태 검증: rejected만 허용
+        if request.status != ApprovalStatus.REJECTED:
+            msg = f"rejected 상태에서만 reopen 가능 (현재: {request.status})"
+            raise ValueError(msg)
+
+        # 권한 검증: 본인 요청만 reopen 가능
+        if request.requester != requester:
+            msg = f"본인 요청만 reopen 가능 (요청자: {request.requester})"
+            raise ValueError(msg)
+
+        # body/params 갱신 (None이면 기존 값 유지)
+        if body is not None:
+            request.body = body
+        if params is not None:
+            request.params = params
+
+        # 사전 검증(validator) 재실행
+        now = datetime.now(UTC).isoformat()
+        validator = self._validators.get(request.type)
+        if validator:
+            results = validator(request.params)
+            for r in results:
+                if r.grade == "fail":
+                    logger.info(
+                        "reopen 사전 검증 실패 (%s): %s — %s",
+                        request.type,
+                        r.reviewer,
+                        r.detail,
+                    )
+                    raise ApprovalValidationError(r.detail)
+                if r.grade == "warn":
+                    request.reviews.append(
+                        {
+                            "reviewer": r.reviewer,
+                            "result": "warn",
+                            "detail": r.detail,
+                            "reviewed_at": now,
+                        }
+                    )
+
+        # 상태 전환 + 이력 기록
+        request.status = ApprovalStatus.PENDING
+        request.reject_reason = ""
+        request.resolved_at = ""
+        request.resolved_by = ""
+
+        detail_parts: list[str] = []
+        if body is not None:
+            detail_parts.append("body 수정")
+        if params is not None:
+            detail_parts.append("params 수정")
+        detail = ", ".join(detail_parts) + " 후 재상신" if detail_parts else "재상신"
+
+        request.history.append(
+            {
+                "action": "reopened",
+                "actor": requester,
+                "at": now,
+                "detail": detail,
+            }
+        )
+
+        # DB 업데이트
+        await self._db.execute(
+            """UPDATE approvals
+               SET status = ?, body = ?, params = ?, reviews = ?,
+                   history = ?, reject_reason = ?,
+                   resolved_at = ?, resolved_by = ?
+               WHERE id = ?""",
+            (
+                ApprovalStatus.PENDING,
+                request.body,
+                json.dumps(request.params, ensure_ascii=False),
+                json.dumps(request.reviews, ensure_ascii=False),
+                json.dumps(request.history, ensure_ascii=False),
+                "",
+                "",
+                "",
+                id,
+            ),
+        )
+
+        logger.info("결재 재상신: %s by %s", id, requester)
+
+        # ApprovalCreatedEvent 재발행 (알림 재발송)
+        from ante.eventbus.events import ApprovalCreatedEvent
+
+        await self._eventbus.publish(
+            ApprovalCreatedEvent(
+                approval_id=request.id,
+                approval_type=request.type,
+                requester=request.requester,
+                title=request.title,
+                auto_approved=False,
+            )
+        )
+
+        return request
+
     async def cancel(
         self,
         id: str,

@@ -1077,3 +1077,254 @@ class TestExecutionFailed:
         failed_list = await svc.list(status="execution_failed")
         assert len(failed_list) == 1
         assert failed_list[0].status == "execution_failed"
+
+
+# ── 재상신 Reopen (US-10) ────────────────────────────
+
+
+class TestReopen:
+    async def test_reopen_rejected_to_pending(self, service):
+        """거절된 요청을 재상신하면 pending 상태로 전환된다."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="재상신 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await service.reject(req.id, reject_reason="금액 과다")
+
+        reopened = await service.reopen(
+            id=req.id,
+            requester="agent:dev",
+            params={"bot_id": "bot-1", "amount": 15000000},
+        )
+
+        assert reopened.status == "pending"
+        assert reopened.params == {"bot_id": "bot-1", "amount": 15000000}
+        assert reopened.reject_reason == ""
+        assert any(h["action"] == "reopened" for h in reopened.history)
+
+    async def test_reopen_updates_body(self, service):
+        """재상신 시 body를 갱신할 수 있다."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="body 갱신",
+            body="원본 사유",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await service.reject(req.id)
+
+        reopened = await service.reopen(
+            id=req.id,
+            requester="agent:dev",
+            body="수정된 사유",
+        )
+
+        assert reopened.body == "수정된 사유"
+        # params는 기존 값 유지
+        assert reopened.params == {"bot_id": "bot-1", "amount": 25000000}
+
+    async def test_reopen_keeps_existing_when_none(self, service):
+        """body/params를 None으로 전달하면 기존 값이 유지된다."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="유지 테스트",
+            body="원본 본문",
+            params={"bot_id": "bot-1", "amount": 20000000},
+        )
+        await service.reject(req.id)
+
+        reopened = await service.reopen(id=req.id, requester="agent:dev")
+
+        assert reopened.body == "원본 본문"
+        assert reopened.params == {"bot_id": "bot-1", "amount": 20000000}
+
+    async def test_reopen_non_rejected_fails(self, service):
+        """rejected가 아닌 상태에서 reopen 시 에러."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="상태 에러",
+        )
+
+        with pytest.raises(ValueError, match="rejected 상태에서만 reopen 가능"):
+            await service.reopen(id=req.id, requester="agent:dev")
+
+    async def test_reopen_wrong_requester_fails(self, service):
+        """본인이 아닌 요청자가 reopen 시 에러."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="권한 에러",
+        )
+        await service.reject(req.id)
+
+        with pytest.raises(ValueError, match="본인 요청만 reopen 가능"):
+            await service.reopen(id=req.id, requester="agent:other")
+
+    async def test_reopen_nonexistent_fails(self, service):
+        """존재하지 않는 요청 reopen 시 에러."""
+        with pytest.raises(ValueError, match="결재 요청을 찾을 수 없음"):
+            await service.reopen(id="nonexistent", requester="agent:dev")
+
+    async def test_reopen_reruns_validator_fail(self, db, eventbus):
+        """reopen 시 validator가 재실행되고, fail이면 차단된다."""
+
+        def fail_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("fail", "잔액 부족", "system:treasury")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": fail_validator},
+        )
+        await svc.initialize()
+
+        # validator 없이 생성 (직접 DB에 rejected 상태 만들기)
+        svc_no_validator = ApprovalService(db=db, eventbus=eventbus)
+        await svc_no_validator.initialize()
+        req = await svc_no_validator.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="검증 실패 테스트",
+            params={"bot_id": "bot-1", "amount": 50000000},
+        )
+        await svc_no_validator.reject(req.id)
+
+        with pytest.raises(ApprovalValidationError, match="잔액 부족"):
+            await svc.reopen(
+                id=req.id,
+                requester="agent:dev",
+                params={"bot_id": "bot-1", "amount": 50000000},
+            )
+
+        # 상태가 여전히 rejected인지 확인
+        fetched = await svc.get(req.id)
+        assert fetched is not None
+        assert fetched.status == "rejected"
+
+    async def test_reopen_reruns_validator_warn(self, db, eventbus):
+        """reopen 시 validator warn이면 reviews에 첨부되고 pending 전환."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("warn", "잔액 주의", "system:treasury")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        # validator 없이 생성
+        svc_no_validator = ApprovalService(db=db, eventbus=eventbus)
+        req = await svc_no_validator.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="warn 테스트",
+            params={"bot_id": "bot-1", "amount": 30000000},
+        )
+        await svc_no_validator.reject(req.id)
+
+        reopened = await svc.reopen(
+            id=req.id,
+            requester="agent:dev",
+        )
+
+        assert reopened.status == "pending"
+        assert any(r["result"] == "warn" for r in reopened.reviews)
+
+    async def test_reopen_publishes_created_event(self, service, eventbus):
+        """reopen 시 ApprovalCreatedEvent가 재발행된다."""
+        received = []
+
+        async def handler(event: object) -> None:
+            if isinstance(event, ApprovalCreatedEvent):
+                received.append(event)
+
+        eventbus.subscribe(ApprovalCreatedEvent, handler)
+
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="이벤트 테스트",
+        )
+        created_event_count = len(received)
+
+        await service.reject(req.id)
+        await service.reopen(id=req.id, requester="agent:dev")
+
+        # 생성 시 1건 + reopen 시 1건
+        assert len(received) == created_event_count + 1
+        assert received[-1].approval_id == req.id
+
+    async def test_reopen_history_detail(self, service):
+        """reopen history에 수정 내용이 기록된다."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="이력 테스트",
+            body="원본",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await service.reject(req.id)
+
+        reopened = await service.reopen(
+            id=req.id,
+            requester="agent:dev",
+            body="수정본",
+            params={"bot_id": "bot-1", "amount": 15000000},
+        )
+
+        reopened_entry = next(h for h in reopened.history if h["action"] == "reopened")
+        assert "body 수정" in reopened_entry["detail"]
+        assert "params 수정" in reopened_entry["detail"]
+
+    async def test_reopen_persisted_to_db(self, service):
+        """reopen 결과가 DB에 영속화된다."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="영속화 테스트",
+            body="원본",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await service.reject(req.id)
+        await service.reopen(
+            id=req.id,
+            requester="agent:dev",
+            body="수정본",
+            params={"bot_id": "bot-1", "amount": 15000000},
+        )
+
+        fetched = await service.get(req.id)
+        assert fetched is not None
+        assert fetched.status == "pending"
+        assert fetched.body == "수정본"
+        assert fetched.params == {"bot_id": "bot-1", "amount": 15000000}
+        assert fetched.reject_reason == ""
+        assert fetched.resolved_at == ""
+        assert fetched.resolved_by == ""
+        assert any(h["action"] == "reopened" for h in fetched.history)
+
+    async def test_reopen_then_approve(self, service):
+        """reopen 후 승인까지의 전체 흐름."""
+        req = await service.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="전체 흐름",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await service.reject(req.id, reject_reason="금액 과다")
+        await service.reopen(
+            id=req.id,
+            requester="agent:dev",
+            params={"bot_id": "bot-1", "amount": 15000000},
+        )
+        approved = await service.approve(req.id)
+
+        assert approved.status == "approved"
+        actions = [h["action"] for h in approved.history]
+        assert actions == ["created", "rejected", "reopened", "approved"]
