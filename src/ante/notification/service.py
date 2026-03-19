@@ -14,6 +14,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def parse_quiet_hours(value: str) -> tuple[time, time] | None:
+    """``"HH:MM-HH:MM"`` 형식 문자열을 ``(time, time)`` 으로 변환.
+
+    잘못된 형식이면 ``None`` 을 반환하고 경고 로그를 남긴다.
+    """
+    try:
+        start_str, end_str = value.split("-", 1)
+        sh, sm = start_str.strip().split(":")
+        eh, em = end_str.strip().split(":")
+        return time(int(sh), int(sm)), time(int(eh), int(em))
+    except Exception:
+        logger.warning("quiet_hours 파싱 실패 (무음 비활성 유지): %r", value)
+        return None
+
+
 _SUPPRESSED = object()  # 중복 억제 센티널
 
 
@@ -44,10 +59,41 @@ class NotificationService:
         self._dedup_cache: dict[str, tuple[float, int]] = {}
 
     def subscribe(self) -> None:
-        """이벤트 구독 등록 — NotificationEvent 단일 구독."""
-        from ante.eventbus.events import NotificationEvent
+        """이벤트 구독 등록 — NotificationEvent + ConfigChangedEvent."""
+        from ante.eventbus.events import ConfigChangedEvent, NotificationEvent
 
         self._eventbus.subscribe(NotificationEvent, self._on_notification, priority=0)
+        self._eventbus.subscribe(ConfigChangedEvent, self._on_config_changed)
+
+    async def _on_config_changed(self, event: object) -> None:
+        """``notification.quiet_hours`` 키 변경 시 무음 시간대를 갱신한다."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        if not isinstance(event, ConfigChangedEvent):
+            return
+        if event.key != "notification.quiet_hours":
+            return
+
+        import json
+
+        try:
+            raw = json.loads(event.new_value)
+        except (json.JSONDecodeError, TypeError):
+            raw = event.new_value
+
+        if not raw:
+            self._quiet_start = None
+            self._quiet_end = None
+            logger.info("무음 시간대 비활성화")
+            return
+
+        result = parse_quiet_hours(str(raw))
+        if result:
+            self._quiet_start, self._quiet_end = result
+            logger.info("무음 시간대 갱신: %s-%s", self._quiet_start, self._quiet_end)
+        else:
+            self._quiet_start = None
+            self._quiet_end = None
 
     def _make_dedup_key(self, level: NotificationLevel, message: str) -> str:
         """중복 방지 키 생성: level + message_hash."""
