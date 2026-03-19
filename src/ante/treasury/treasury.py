@@ -251,6 +251,64 @@ class Treasury:
         logger.info("예산 회수: %s ← %s", bot_id, amount)
         return True
 
+    async def update_budget(self, bot_id: str, target_amount: float) -> None:
+        """봇의 예산을 목표 금액으로 변경.
+
+        현재 할당액과 목표 금액의 차이를 계산하여 allocate/deallocate를 호출한다.
+        미할당 잔액이 부족하면 InsufficientFundsError를 발생시킨다.
+
+        Args:
+            bot_id: 대상 봇 ID.
+            target_amount: 목표 할당 금액.
+
+        Raises:
+            InsufficientFundsError: 증액 시 미할당 잔액 부족.
+            BotNotStoppedError: 봇이 운용 중인 경우.
+            ValueError: 목표 금액이 음수인 경우.
+        """
+        from ante.treasury.exceptions import InsufficientFundsError
+
+        if target_amount < 0:
+            raise ValueError(f"목표 금액은 0 이상이어야 합니다: {target_amount}")
+
+        budget = self._budgets.get(bot_id)
+        current = budget.allocated if budget else 0.0
+        diff = target_amount - current
+
+        if diff == 0:
+            return
+
+        if diff > 0:
+            # 증액
+            if self._unallocated < diff:
+                raise InsufficientFundsError(
+                    f"미할당 잔액 부족: 필요 {diff:,.0f}, 가용 {self._unallocated:,.0f}"
+                )
+            result = await self.allocate(bot_id, diff)
+            if not result:
+                raise InsufficientFundsError(
+                    f"예산 할당 실패: bot_id={bot_id}, amount={diff}"
+                )
+        else:
+            # 감액
+            decrease = abs(diff)
+            result = await self.deallocate(bot_id, decrease)
+            if not result:
+                available = budget.available if budget else 0.0
+                raise InsufficientFundsError(
+                    f"예산 회수 실패: 회수 요청 {decrease:,.0f}, "
+                    f"가용 예산 {available:,.0f}"
+                )
+
+        logger.info(
+            "예산 변경: %s — %s → %s (차이: %s%s)",
+            bot_id,
+            f"{current:,.0f}",
+            f"{target_amount:,.0f}",
+            "+" if diff > 0 else "",
+            f"{diff:,.0f}",
+        )
+
     # ── 주문 자금 예약/해제 ─────────────────────────
 
     async def reserve_for_order(

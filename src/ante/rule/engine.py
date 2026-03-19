@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ante.rule.base import (
@@ -52,9 +53,11 @@ class RuleEngine:
         self,
         eventbus: EventBus,
         system_state: SystemState,
+        bot_strategy_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._system_state = system_state
+        self._bot_strategy_resolver = bot_strategy_resolver
 
         self._global_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
@@ -87,6 +90,43 @@ class RuleEngine:
             self._strategy_rules[strategy_id] = []
         self._strategy_rules[strategy_id].append(rule)
         self._strategy_rules[strategy_id].sort(key=lambda r: r.priority)
+
+    def set_bot_strategy_resolver(self, resolver: Callable[[str], str | None]) -> None:
+        """봇 ID → 전략 ID 변환 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
+        self._bot_strategy_resolver = resolver
+
+    def update_rules(self, bot_id: str, rules: list[dict[str, Any]]) -> None:
+        """봇의 거래 규칙을 갱신.
+
+        bot_id에 연결된 strategy_id를 조회한 뒤
+        load_strategy_rules_from_config(strategy_id, rules)로 기존 룰을 교체한다.
+
+        Args:
+            bot_id: 대상 봇 ID.
+            rules: 새 룰 설정 리스트.
+
+        Raises:
+            RuleError: resolver 미설정 또는 strategy_id 조회 실패.
+        """
+        from ante.rule.exceptions import RuleError
+
+        if not self._bot_strategy_resolver:
+            raise RuleError(
+                "bot_strategy_resolver가 설정되지 않았습니다. "
+                "set_bot_strategy_resolver()를 먼저 호출하세요."
+            )
+
+        strategy_id = self._bot_strategy_resolver(bot_id)
+        if not strategy_id:
+            raise RuleError(f"봇 '{bot_id}'에 연결된 전략을 찾을 수 없습니다.")
+
+        self.load_strategy_rules_from_config(strategy_id, rules)
+        logger.info(
+            "룰 갱신: bot=%s, strategy=%s, 룰 %d건",
+            bot_id,
+            strategy_id,
+            len(rules),
+        )
 
     def clear_rules(self) -> None:
         """모든 룰 제거."""

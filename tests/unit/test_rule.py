@@ -530,3 +530,185 @@ class TestRuleEngineEventBus:
 
         assert len(received) == 1
         assert "Trading not allowed" in received[0].reason
+
+
+# ── RuleEngine.update_rules ──────────────────────
+
+
+class TestRuleEngineUpdateRules:
+    """RuleEngine.update_rules() 단위 테스트."""
+
+    @pytest.fixture
+    async def db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        await database.connect()
+        yield database
+        await database.close()
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    async def system_state(self, db, eventbus):
+        from ante.config.system_state import SystemState
+
+        state = SystemState(db=db, eventbus=eventbus)
+        await state.initialize()
+        return state
+
+    @pytest.fixture
+    def bot_strategies(self):
+        """bot_id → strategy_id 매핑."""
+        return {"bot1": "momentum_v1", "bot2": "mean_revert_v1"}
+
+    @pytest.fixture
+    def engine(self, eventbus, system_state, bot_strategies):
+        return RuleEngine(
+            eventbus=eventbus,
+            system_state=system_state,
+            bot_strategy_resolver=lambda bid: bot_strategies.get(bid),
+        )
+
+    def test_update_rules_replaces_strategy_rules(self, engine):
+        """update_rules는 해당 전략의 기존 룰을 교체한다."""
+        # 기존 룰 설정
+        engine.add_strategy_rule(
+            "momentum_v1",
+            PositionSizeRule("old_ps", {"max_position_percent": 0.10}),
+        )
+        assert len(engine._strategy_rules["momentum_v1"]) == 1
+
+        # update_rules로 교체
+        new_rules = [
+            {
+                "type": "position_size",
+                "id": "new_ps",
+                "max_position_percent": 0.20,
+                "max_position_amount": 500000.0,
+            },
+            {
+                "type": "trade_frequency",
+                "id": "new_freq",
+                "max_trades_per_hour": 10,
+            },
+        ]
+        engine.update_rules("bot1", new_rules)
+
+        assert len(engine._strategy_rules["momentum_v1"]) == 2
+        rule_ids = [r.rule_id for r in engine._strategy_rules["momentum_v1"]]
+        assert "new_ps" in rule_ids
+        assert "new_freq" in rule_ids
+        assert "old_ps" not in rule_ids
+
+    def test_update_rules_no_resolver_raises(self, eventbus, system_state):
+        """resolver 미설정 시 RuleError."""
+        from ante.rule.exceptions import RuleError
+
+        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+        with pytest.raises(RuleError, match="bot_strategy_resolver"):
+            engine.update_rules("bot1", [])
+
+    def test_update_rules_unknown_bot_raises(self, engine):
+        """존재하지 않는 봇이면 RuleError."""
+        from ante.rule.exceptions import RuleError
+
+        with pytest.raises(RuleError, match="전략을 찾을 수 없습니다"):
+            engine.update_rules("nonexistent", [])
+
+    def test_update_rules_empty_list(self, engine):
+        """빈 룰 리스트로 갱신하면 기존 룰이 모두 제거된다."""
+        engine.add_strategy_rule(
+            "momentum_v1",
+            PositionSizeRule("ps", {"max_position_percent": 0.10}),
+        )
+        engine.update_rules("bot1", [])
+        assert engine._strategy_rules["momentum_v1"] == []
+
+    def test_update_rules_does_not_affect_other_strategies(self, engine):
+        """다른 전략의 룰에 영향 없음."""
+        engine.add_strategy_rule(
+            "momentum_v1",
+            PositionSizeRule("ps1", {"max_position_percent": 0.10}),
+        )
+        engine.add_strategy_rule(
+            "mean_revert_v1",
+            TradeFrequencyRule("freq1", {"max_trades_per_hour": 5}),
+        )
+
+        engine.update_rules(
+            "bot1",
+            [
+                {
+                    "type": "trade_frequency",
+                    "id": "new_freq",
+                    "max_trades_per_hour": 20,
+                },
+            ],
+        )
+
+        # bot1의 전략(momentum_v1) 룰은 교체됨
+        assert len(engine._strategy_rules["momentum_v1"]) == 1
+        assert engine._strategy_rules["momentum_v1"][0].rule_id == "new_freq"
+
+        # bot2의 전략(mean_revert_v1) 룰은 그대로
+        assert len(engine._strategy_rules["mean_revert_v1"]) == 1
+        assert engine._strategy_rules["mean_revert_v1"][0].rule_id == "freq1"
+
+    def test_set_bot_strategy_resolver(self, eventbus, system_state):
+        """set_bot_strategy_resolver로 resolver를 나중에 설정할 수 있다."""
+        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+        engine.set_bot_strategy_resolver(lambda bid: "strat_a" if bid == "b1" else None)
+
+        engine.update_rules(
+            "b1",
+            [
+                {"type": "position_size", "id": "ps", "max_position_percent": 0.15},
+            ],
+        )
+        assert "strat_a" in engine._strategy_rules
+        assert len(engine._strategy_rules["strat_a"]) == 1
+
+    def test_update_rules_evaluate_with_new_rules(self, engine):
+        """갱신된 룰이 실제 평가에 반영된다."""
+        # 느슨한 룰
+        engine.update_rules(
+            "bot1",
+            [
+                {
+                    "type": "position_size",
+                    "id": "ps",
+                    "max_position_percent": 1.0,
+                    "max_position_amount": 10_000_000.0,
+                },
+            ],
+        )
+
+        context = RuleContext(
+            bot_id="bot1",
+            strategy_id="momentum_v1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            current_price=50000.0,
+            available_balance=1_000_000.0,
+            system_status="active",
+        )
+        result = engine.evaluate(context)
+        assert result.overall_result == RuleResult.PASS
+
+        # 타이트한 룰로 교체
+        engine.update_rules(
+            "bot1",
+            [
+                {
+                    "type": "position_size",
+                    "id": "ps_tight",
+                    "max_position_percent": 0.01,
+                    "max_position_amount": 10_000.0,
+                },
+            ],
+        )
+        result = engine.evaluate(context)
+        assert result.overall_result == RuleResult.REJECT
