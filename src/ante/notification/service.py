@@ -1,4 +1,4 @@
-"""NotificationService — 알림 라우팅 + 필터링 + 이력 저장."""
+"""NotificationService — 알림 라우팅 + 필터링."""
 
 from __future__ import annotations
 
@@ -7,48 +7,23 @@ from datetime import time
 from typing import TYPE_CHECKING
 
 from ante.notification.base import NotificationAdapter, NotificationLevel
-from ante.notification.templates import (
-    BOT_ERROR,
-    CIRCUIT_BREAKER,
-    ORDER_CANCEL_FAILED,
-    ORDER_FILLED,
-    POSITION_MISMATCH,
-    RESTART_EXHAUSTED,
-    TRADING_STATE_CHANGED,
-)
 
 if TYPE_CHECKING:
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
-    from ante.instrument.service import InstrumentService
 
 logger = logging.getLogger(__name__)
-
-NOTIFICATION_HISTORY_SCHEMA = """
-CREATE TABLE IF NOT EXISTS notification_history (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    level         TEXT NOT NULL,
-    title         TEXT DEFAULT '',
-    message       TEXT NOT NULL,
-    adapter_type  TEXT NOT NULL,
-    success       BOOLEAN NOT NULL,
-    error_message TEXT DEFAULT '',
-    event_type    TEXT DEFAULT '',
-    bot_id        TEXT DEFAULT '',
-    created_at    TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_notification_history_created
-    ON notification_history(created_at);
-CREATE INDEX IF NOT EXISTS idx_notification_history_level
-    ON notification_history(level);
-"""
 
 
 _SUPPRESSED = object()  # 중복 억제 센티널
 
 
 class NotificationService:
-    """알림 라우팅 및 필터링 서비스."""
+    """알림 라우팅 및 필터링 서비스.
+
+    NotificationEvent 단일 구독으로 모든 알림을 처리한다.
+    각 모듈이 NotificationEvent를 직접 발행하면,
+    이 서비스가 필터링 → 중복 억제 → 발송을 담당한다.
+    """
 
     def __init__(
         self,
@@ -57,8 +32,6 @@ class NotificationService:
         min_level: NotificationLevel = NotificationLevel.INFO,
         quiet_start: time | None = None,
         quiet_end: time | None = None,
-        instrument_service: InstrumentService | None = None,
-        db: Database | None = None,
         dedup_window: float = 60.0,
     ) -> None:
         self._adapter = adapter
@@ -66,72 +39,15 @@ class NotificationService:
         self._min_level = min_level
         self._quiet_start = quiet_start
         self._quiet_end = quiet_end
-        self._instrument_service = instrument_service
-        self._db = db
         self._dedup_window = dedup_window
         # {dedup_key: (last_sent_timestamp, suppressed_count)}
         self._dedup_cache: dict[str, tuple[float, int]] = {}
 
-    async def initialize(self) -> None:
-        """notification_history 테이블 스키마 생성."""
-        if self._db:
-            await self._db.execute_script(NOTIFICATION_HISTORY_SCHEMA)
-            logger.debug("notification_history 테이블 초기화 완료")
-
     def subscribe(self) -> None:
-        """이벤트 구독 등록."""
-        from ante.eventbus.events import (
-            BotErrorEvent,
-            BotRestartExhaustedEvent,
-            CircuitBreakerEvent,
-            NotificationEvent,
-            OrderCancelFailedEvent,
-            OrderFilledEvent,
-            PositionMismatchEvent,
-            TradingStateChangedEvent,
-        )
+        """이벤트 구독 등록 — NotificationEvent 단일 구독."""
+        from ante.eventbus.events import NotificationEvent
 
         self._eventbus.subscribe(NotificationEvent, self._on_notification, priority=0)
-        self._eventbus.subscribe(BotErrorEvent, self._on_bot_error, priority=0)
-        self._eventbus.subscribe(OrderFilledEvent, self._on_order_filled, priority=0)
-        self._eventbus.subscribe(
-            TradingStateChangedEvent,
-            self._on_trading_state_changed,
-            priority=0,
-        )
-        self._eventbus.subscribe(
-            BotRestartExhaustedEvent,
-            self._on_restart_exhausted,
-            priority=0,
-        )
-        self._eventbus.subscribe(
-            OrderCancelFailedEvent,
-            self._on_order_cancel_failed,
-            priority=0,
-        )
-        self._eventbus.subscribe(
-            CircuitBreakerEvent,
-            self._on_circuit_breaker,
-            priority=0,
-        )
-        self._eventbus.subscribe(
-            PositionMismatchEvent,
-            self._on_position_mismatch,
-            priority=0,
-        )
-
-        from ante.eventbus.events import ApprovalCreatedEvent, ApprovalResolvedEvent
-
-        self._eventbus.subscribe(
-            ApprovalCreatedEvent,
-            self._on_approval_created,
-            priority=0,
-        )
-        self._eventbus.subscribe(
-            ApprovalResolvedEvent,
-            self._on_approval_resolved,
-            priority=0,
-        )
 
     def _make_dedup_key(self, level: NotificationLevel, message: str) -> str:
         """중복 방지 키 생성: level + message_hash."""
@@ -173,16 +89,12 @@ class NotificationService:
         self._dedup_cache[key] = (now, 0)
         return suffix
 
-    async def _send_and_record(
+    async def _send(
         self,
         level: NotificationLevel,
         message: str,
-        *,
-        title: str = "",
-        event_type: str = "",
-        bot_id: str = "",
     ) -> bool:
-        """send() 호출 후 이력 기록."""
+        """send() 호출."""
         dedup_result = self._check_dedup(level, message)
         if dedup_result is _SUPPRESSED:
             logger.debug("알림 억제 (중복): %s", message[:50])
@@ -191,36 +103,21 @@ class NotificationService:
         if dedup_result:
             message = message + dedup_result
 
-        success = False
-        error_message = ""
         try:
-            success = await self._adapter.send(level, message)
+            return await self._adapter.send(level, message)
         except Exception as e:
-            error_message = str(e)
             logger.warning("알림 발송 실패: %s", e)
+            return False
 
-        await self._record_history(
-            level=level,
-            title=title,
-            message=message,
-            success=success,
-            error_message=error_message,
-            event_type=event_type,
-            bot_id=bot_id,
-        )
-        return success
-
-    async def _send_rich_and_record(
+    async def _send_rich(
         self,
         level: NotificationLevel,
         title: str,
         body: str,
         *,
         metadata: dict | None = None,
-        event_type: str = "",
-        bot_id: str = "",
     ) -> bool:
-        """send_rich() 호출 후 이력 기록."""
+        """send_rich() 호출."""
         dedup_result = self._check_dedup(level, body or title)
         if dedup_result is _SUPPRESSED:
             logger.debug("알림 억제 (중복): %s", (body or title)[:50])
@@ -229,336 +126,72 @@ class NotificationService:
         if dedup_result:
             body = (body or "") + dedup_result
 
-        success = False
-        error_message = ""
         try:
-            success = await self._adapter.send_rich(
+            return await self._adapter.send_rich(
                 level=level, title=title, body=body, metadata=metadata
             )
         except Exception as e:
-            error_message = str(e)
             logger.warning("알림 발송 실패: %s", e)
+            return False
 
-        await self._record_history(
-            level=level,
-            title=title,
-            message=body or title,
-            success=success,
-            error_message=error_message,
-            event_type=event_type,
-            bot_id=bot_id,
-        )
-        return success
-
-    async def _record_history(
+    async def _send_with_buttons(
         self,
-        *,
         level: NotificationLevel,
         title: str,
-        message: str,
-        success: bool,
-        error_message: str = "",
-        event_type: str = "",
-        bot_id: str = "",
-    ) -> None:
-        """알림 이력을 DB에 기록."""
-        if not self._db:
-            return
+        body: str,
+        buttons: list,
+    ) -> bool:
+        """send_with_buttons() 호출."""
+        dedup_result = self._check_dedup(level, body or title)
+        if dedup_result is _SUPPRESSED:
+            logger.debug("알림 억제 (중복): %s", (body or title)[:50])
+            return False
 
+        if dedup_result:
+            body = (body or "") + dedup_result
+
+        # 어댑터가 send_with_buttons를 지원하는 경우 사용, 아니면 send_rich fallback
         try:
-            await self._db.execute(
-                """INSERT INTO notification_history
-                   (level, title, message, adapter_type, success,
-                    error_message, event_type, bot_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    str(level),
-                    title,
-                    message,
-                    type(self._adapter).__name__,
-                    success,
-                    error_message,
-                    event_type,
-                    bot_id,
-                ),
-            )
-        except Exception:
-            logger.exception("알림 이력 기록 실패")
-
-    async def get_history(
-        self,
-        *,
-        limit: int = 50,
-        level: str | None = None,
-        success_only: bool | None = None,
-    ) -> list[dict]:
-        """알림 이력 조회."""
-        if not self._db:
-            return []
-
-        query = "SELECT * FROM notification_history WHERE 1=1"
-        params: list[object] = []
-
-        if level:
-            query += " AND level = ?"
-            params.append(level)
-
-        if success_only is not None:
-            query += " AND success = ?"
-            params.append(success_only)
-
-        query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-
-        return await self._db.fetch_all(query, tuple(params))
+            if hasattr(self._adapter, "send_with_buttons"):
+                # 버튼 포함 발송 시 title + body를 합쳐서 메시지로 전달
+                message = f"*{title}*\n{body}" if body else f"*{title}*"
+                return await self._adapter.send_with_buttons(level, message, buttons)
+            else:
+                # 버튼 미지원 어댑터 — send_rich fallback
+                return await self._adapter.send_rich(
+                    level=level, title=title, body=body
+                )
+        except Exception as e:
+            logger.warning("알림 발송 실패: %s", e)
+            return False
 
     async def _on_notification(self, event: object) -> None:
-        """NotificationEvent 처리."""
+        """NotificationEvent 단일 핸들러.
+
+        buttons 유무에 따라 send_with_buttons / send_rich 분기.
+        """
         from ante.eventbus.events import NotificationEvent
 
         if not isinstance(event, NotificationEvent):
             return
 
         level = NotificationLevel(event.level)
-        if self._should_send(level):
-            await self._send_rich_and_record(
+        if not self._should_send(level):
+            return
+
+        if event.buttons:
+            await self._send_with_buttons(
                 level=level,
-                title=event.message,
-                body=event.detail,
-                metadata=event.metadata or None,
-                event_type="NotificationEvent",
+                title=event.title,
+                body=event.message,
+                buttons=event.buttons,
             )
-
-    async def _on_position_mismatch(self, event: object) -> None:
-        """포지션 불일치 감지 알림 (critical)."""
-        from ante.eventbus.events import PositionMismatchEvent
-
-        if not isinstance(event, PositionMismatchEvent):
-            return
-
-        msg = POSITION_MISMATCH.format(
-            bot_id=event.bot_id,
-            symbol=event.symbol,
-            internal_qty=event.internal_qty,
-            broker_qty=event.broker_qty,
-            reason=event.reason,
-        )
-        await self._send_and_record(
-            NotificationLevel.CRITICAL,
-            msg,
-            event_type="PositionMismatchEvent",
-            bot_id=event.bot_id,
-        )
-
-    async def _on_bot_error(self, event: object) -> None:
-        """봇 에러 자동 알림."""
-        from ante.eventbus.events import BotErrorEvent
-
-        if not isinstance(event, BotErrorEvent):
-            return
-
-        msg = BOT_ERROR.format(
-            bot_id=event.bot_id,
-            error_message=event.error_message,
-        )
-        await self._send_and_record(
-            NotificationLevel.ERROR,
-            msg,
-            event_type="BotErrorEvent",
-            bot_id=event.bot_id,
-        )
-
-    async def _on_order_filled(self, event: object) -> None:
-        """체결 완료 알림."""
-        from ante.eventbus.events import OrderFilledEvent
-
-        if not isinstance(event, OrderFilledEvent):
-            return
-
-        if not self._should_send(NotificationLevel.INFO):
-            return
-
-        display = event.symbol
-        if self._instrument_service:
-            name = self._instrument_service.get_name(event.symbol, event.exchange)
-            if name != event.symbol:
-                display = f"{event.symbol}({name})"
-
-        msg = ORDER_FILLED.format(
-            bot_id=event.bot_id,
-            display=display,
-            side=event.side,
-            quantity=event.quantity,
-            price=event.price,
-        )
-        await self._send_and_record(
-            NotificationLevel.INFO,
-            msg,
-            event_type="OrderFilledEvent",
-            bot_id=event.bot_id,
-        )
-
-    async def _on_trading_state_changed(self, event: object) -> None:
-        """거래 상태 변경 알림."""
-        from ante.eventbus.events import TradingStateChangedEvent
-
-        if not isinstance(event, TradingStateChangedEvent):
-            return
-
-        msg = TRADING_STATE_CHANGED.format(
-            old_state=event.old_state,
-            new_state=event.new_state,
-            reason=event.reason,
-        )
-        await self._send_and_record(
-            NotificationLevel.CRITICAL,
-            msg,
-            event_type="TradingStateChangedEvent",
-        )
-
-    async def _on_restart_exhausted(self, event: object) -> None:
-        """봇 재시작 한도 소진 알림."""
-        from ante.eventbus.events import BotRestartExhaustedEvent
-
-        if not isinstance(event, BotRestartExhaustedEvent):
-            return
-
-        msg = RESTART_EXHAUSTED.format(
-            bot_id=event.bot_id,
-            restart_attempts=event.restart_attempts,
-            last_error=event.last_error,
-        )
-        await self._send_and_record(
-            NotificationLevel.ERROR,
-            msg,
-            event_type="BotRestartExhaustedEvent",
-            bot_id=event.bot_id,
-        )
-
-    async def _on_order_cancel_failed(self, event: object) -> None:
-        """주문 취소 실패 알림."""
-        from ante.eventbus.events import OrderCancelFailedEvent
-
-        if not isinstance(event, OrderCancelFailedEvent):
-            return
-
-        msg = ORDER_CANCEL_FAILED.format(
-            bot_id=event.bot_id,
-            order_id=event.order_id,
-            error_message=event.error_message,
-        )
-        await self._send_and_record(
-            NotificationLevel.ERROR,
-            msg,
-            event_type="OrderCancelFailedEvent",
-            bot_id=event.bot_id,
-        )
-
-    async def _on_circuit_breaker(self, event: object) -> None:
-        """Circuit breaker 상태 변경 알림."""
-        from ante.eventbus.events import CircuitBreakerEvent
-
-        if not isinstance(event, CircuitBreakerEvent):
-            return
-
-        level = NotificationLevel.WARNING
-        if event.new_state == "open":
-            level = NotificationLevel.ERROR
-
-        msg = CIRCUIT_BREAKER.format(
-            broker=event.broker,
-            old_state=event.old_state,
-            new_state=event.new_state,
-            reason=event.reason,
-        )
-        await self._send_and_record(
-            level,
-            msg,
-            event_type="CircuitBreakerEvent",
-        )
-
-    async def _on_approval_created(self, event: object) -> None:
-        """결재 요청 생성 알림 (인라인 버튼 포함)."""
-        from ante.eventbus.events import ApprovalCreatedEvent
-        from ante.notification.templates import APPROVAL_CREATED
-
-        if not isinstance(event, ApprovalCreatedEvent):
-            return
-
-        prefix = "[자동 승인] 📋 " if event.auto_approved else "📋 "
-        msg = APPROVAL_CREATED.format(
-            prefix=prefix,
-            approval_type=event.approval_type,
-            title=event.title,
-            requester=event.requester,
-            approval_id=event.approval_id,
-        )
-
-        # 자동 승인이 아닌 경우 인라인 버튼 포함 발송 시도
-        if not event.auto_approved:
-            from ante.notification.telegram import TelegramAdapter
-
-            if isinstance(self._adapter, TelegramAdapter):
-                buttons = [
-                    [
-                        {
-                            "text": "\u2705 승인",
-                            "callback_data": f"approve:{event.approval_id}",
-                        },
-                        {
-                            "text": "\u274c 거절",
-                            "callback_data": f"reject:{event.approval_id}",
-                        },
-                    ]
-                ]
-                success = False
-                error_message = ""
-                try:
-                    success = await self._adapter.send_with_buttons(
-                        NotificationLevel.INFO, msg, buttons
-                    )
-                except Exception as e:
-                    error_message = str(e)
-                    logger.warning("결재 알림 발송 실패: %s", e)
-
-                await self._record_history(
-                    level=NotificationLevel.INFO,
-                    title="결재 요청",
-                    message=msg,
-                    success=success,
-                    error_message=error_message,
-                    event_type="ApprovalCreatedEvent",
-                )
-                return
-
-        # 자동 승인 또는 TelegramAdapter가 아닌 경우 일반 발송
-        await self._send_and_record(
-            NotificationLevel.INFO,
-            msg,
-            title="결재 요청",
-            event_type="ApprovalCreatedEvent",
-        )
-
-    async def _on_approval_resolved(self, event: object) -> None:
-        """결재 처리 완료 알림."""
-        from ante.eventbus.events import ApprovalResolvedEvent
-        from ante.notification.templates import APPROVAL_RESOLVED
-
-        if not isinstance(event, ApprovalResolvedEvent):
-            return
-
-        msg = APPROVAL_RESOLVED.format(
-            approval_type=event.approval_type,
-            resolution=event.resolution,
-            resolved_by=event.resolved_by,
-            approval_id=event.approval_id,
-        )
-        await self._send_and_record(
-            NotificationLevel.INFO,
-            msg,
-            title="결재 처리 완료",
-            event_type="ApprovalResolvedEvent",
-        )
+        else:
+            await self._send_rich(
+                level=level,
+                title=event.title,
+                body=event.message,
+            )
 
     def _should_send(self, level: NotificationLevel) -> bool:
         """알림 발송 여부. CRITICAL은 항상 발송."""

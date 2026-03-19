@@ -138,7 +138,7 @@ class TestOnBacktestComplete:
         mock_eventbus.publish.assert_called_once()
         notification = mock_eventbus.publish.call_args[0][0]
         assert isinstance(notification, NotificationEvent)
-        assert "초안 생성" in notification.message
+        assert "초안 생성" in notification.title
 
     @pytest.mark.asyncio
     async def test_event_handler_skips_failed_backtest(self):

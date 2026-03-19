@@ -1,16 +1,17 @@
-"""Notification 모듈 단위 테스트."""
+"""Notification 모듈 단위 테스트.
 
+NotificationService는 NotificationEvent 단일 구독으로 동작한다.
+개별 도메인 이벤트 핸들러는 제거되었으며,
+각 모듈이 NotificationEvent를 직접 발행하는 구조.
+"""
+
+import inspect
 from datetime import time
 
 import pytest
 
 from ante.eventbus import EventBus
-from ante.eventbus.events import (
-    BotErrorEvent,
-    NotificationEvent,
-    OrderFilledEvent,
-    TradingStateChangedEvent,
-)
+from ante.eventbus.events import NotificationEvent
 from ante.notification.base import NotificationAdapter, NotificationLevel
 from ante.notification.service import NotificationService
 from ante.notification.telegram import LEVEL_EMOJI, TelegramAdapter
@@ -69,11 +70,12 @@ class TestTelegramAdapter:
 
 
 class MockAdapter(NotificationAdapter):
-    """테스트용 Mock 어댑터."""
+    """테스트용 Mock 어댑터 (send_with_buttons 지원)."""
 
     def __init__(self) -> None:
         self.sent: list[tuple[NotificationLevel, str]] = []
         self.sent_rich: list[dict] = []
+        self.sent_buttons: list[dict] = []
 
     async def send(self, level: NotificationLevel, message: str) -> bool:
         self.sent.append((level, message))
@@ -94,6 +96,41 @@ class MockAdapter(NotificationAdapter):
                 "metadata": metadata,
             }
         )
+        return True
+
+    async def send_with_buttons(
+        self,
+        level: NotificationLevel,
+        message: str,
+        buttons: list[list[dict]],
+    ) -> bool:
+        self.sent_buttons.append(
+            {
+                "level": level,
+                "message": message,
+                "buttons": buttons,
+            }
+        )
+        return True
+
+
+class BasicMockAdapter(NotificationAdapter):
+    """send_with_buttons 미지원 어댑터."""
+
+    def __init__(self) -> None:
+        self.sent_rich: list[dict] = []
+
+    async def send(self, level: NotificationLevel, message: str) -> bool:
+        return True
+
+    async def send_rich(
+        self,
+        level: NotificationLevel,
+        title: str,
+        body: str,
+        metadata: dict | None = None,
+    ) -> bool:
+        self.sent_rich.append({"title": title, "body": body})
         return True
 
 
@@ -123,58 +160,96 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="info",
-                message="테스트 알림",
-                detail="상세 내용",
+                title="테스트 알림",
+                message="상세 내용",
             )
         )
         assert len(adapter.sent_rich) == 1
         assert adapter.sent_rich[0]["title"] == "테스트 알림"
         assert adapter.sent_rich[0]["body"] == "상세 내용"
 
-    async def test_bot_error_event(self, service, eventbus, adapter):
-        """BotErrorEvent → send 호출."""
+    async def test_notification_with_category(self, service, eventbus, adapter):
+        """category 포함 알림."""
         await eventbus.publish(
-            BotErrorEvent(
-                bot_id="bot1",
-                error_message="Connection timeout",
+            NotificationEvent(
+                level="warning",
+                title="대사 불일치",
+                message="3건 보정",
+                category="broker",
             )
         )
-        assert len(adapter.sent) == 1
-        assert "봇 에러" in adapter.sent[0][1]
-        assert "bot1" in adapter.sent[0][1]
-        assert adapter.sent[0][0] == NotificationLevel.ERROR
+        assert len(adapter.sent_rich) == 1
+        assert adapter.sent_rich[0]["title"] == "대사 불일치"
+        assert adapter.sent_rich[0]["body"] == "3건 보정"
 
-    async def test_order_filled_event(self, service, eventbus, adapter):
-        """OrderFilledEvent → 체결 알림."""
+    async def test_notification_with_buttons(self, service, eventbus, adapter):
+        """buttons 포함 알림 → send_with_buttons 호출."""
+        buttons = [
+            [
+                {"text": "승인", "callback_data": "approve:1"},
+                {"text": "거절", "callback_data": "reject:1"},
+            ]
+        ]
         await eventbus.publish(
-            OrderFilledEvent(
-                order_id="ord1",
-                broker_order_id="bk1",
-                bot_id="bot1",
-                strategy_id="s1",
-                symbol="005930",
-                side="buy",
-                quantity=100.0,
-                price=72000.0,
-                order_type="market",
+            NotificationEvent(
+                level="info",
+                title="결재 요청",
+                message="봇 등록 결재",
+                category="approval",
+                buttons=buttons,
             )
         )
-        assert len(adapter.sent) == 1
-        assert "체결" in adapter.sent[0][1]
-        assert "005930" in adapter.sent[0][1]
+        assert len(adapter.sent_buttons) == 1
+        assert adapter.sent_buttons[0]["buttons"] == buttons
+        assert "결재 요청" in adapter.sent_buttons[0]["message"]
+        # send_rich는 호출되지 않음
+        assert len(adapter.sent_rich) == 0
 
-    async def test_trading_state_changed(self, service, eventbus, adapter):
-        """TradingStateChangedEvent → CRITICAL 알림."""
+    async def test_notification_buttons_fallback_to_send_rich(self, eventbus):
+        """send_with_buttons 미지원 어댑터 → send_rich fallback."""
+        adapter = BasicMockAdapter()
+        svc = NotificationService(adapter=adapter, eventbus=eventbus)
+        svc.subscribe()
+
+        buttons = [[{"text": "OK", "callback_data": "ok"}]]
         await eventbus.publish(
-            TradingStateChangedEvent(
-                old_state="active",
-                new_state="halted",
-                reason="일일 손실 한도 초과",
-                changed_by="rule_engine",
+            NotificationEvent(
+                level="info",
+                title="테스트",
+                message="본문",
+                buttons=buttons,
             )
         )
-        assert len(adapter.sent) == 1
-        assert adapter.sent[0][0] == NotificationLevel.CRITICAL
+        # send_with_buttons 없으므로 send_rich fallback
+        assert len(adapter.sent_rich) == 1
+        assert adapter.sent_rich[0]["title"] == "테스트"
+
+    async def test_error_level_notification(self, service, eventbus, adapter):
+        """ERROR 레벨 NotificationEvent 발송."""
+        await eventbus.publish(
+            NotificationEvent(
+                level="error",
+                title="봇 에러",
+                message="Connection timeout",
+                category="bot",
+            )
+        )
+        assert len(adapter.sent_rich) == 1
+        assert adapter.sent_rich[0]["level"] == NotificationLevel.ERROR
+        assert adapter.sent_rich[0]["title"] == "봇 에러"
+
+    async def test_critical_level_notification(self, service, eventbus, adapter):
+        """CRITICAL 레벨 NotificationEvent 발송."""
+        await eventbus.publish(
+            NotificationEvent(
+                level="critical",
+                title="거래 상태 변경",
+                message="active → halted (일일 손실 한도 초과)",
+                category="system",
+            )
+        )
+        assert len(adapter.sent_rich) == 1
+        assert adapter.sent_rich[0]["level"] == NotificationLevel.CRITICAL
 
     async def test_min_level_filter(self, adapter, eventbus):
         """min_level 이하만 발송."""
@@ -189,8 +264,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="info",
-                message="필터 테스트",
-                detail="",
+                title="필터 테스트",
             )
         )
         assert len(adapter.sent_rich) == 0
@@ -199,8 +273,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="error",
-                message="에러 알림",
-                detail="",
+                title="에러 알림",
             )
         )
         assert len(adapter.sent_rich) == 1
@@ -217,8 +290,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="critical",
-                message="긴급",
-                detail="",
+                title="긴급",
             )
         )
         assert len(adapter.sent_rich) == 1
@@ -236,8 +308,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="info",
-                message="조용한 시간",
-                detail="",
+                title="조용한 시간",
             )
         )
         assert len(adapter.sent_rich) == 0
@@ -255,24 +326,23 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="critical",
-                message="긴급 알림",
-                detail="",
+                title="긴급 알림",
             )
         )
         assert len(adapter.sent_rich) == 1
 
-    async def test_notification_with_metadata(self, service, eventbus, adapter):
-        """메타데이터 포함 알림."""
-        await eventbus.publish(
-            NotificationEvent(
-                level="warning",
-                message="대사 불일치",
-                detail="3건 보정",
-                metadata={"bot_id": "bot1", "count": 3},
-            )
-        )
-        assert len(adapter.sent_rich) == 1
-        assert adapter.sent_rich[0]["metadata"] == {
-            "bot_id": "bot1",
-            "count": 3,
-        }
+    async def test_subscribe_only_notification_event(self, adapter, eventbus):
+        """subscribe()는 NotificationEvent만 구독한다."""
+        svc = NotificationService(adapter=adapter, eventbus=eventbus)
+        svc.subscribe()
+
+        # NotificationEvent 핸들러만 등록되어 있어야 함
+        handlers = eventbus._handlers
+        assert NotificationEvent in handlers
+        assert len(handlers) == 1
+
+    async def test_no_instrument_service_dependency(self):
+        """생성자에 instrument_service 파라미터가 없다."""
+        sig = inspect.signature(NotificationService.__init__)
+        param_names = list(sig.parameters.keys())
+        assert "instrument_service" not in param_names

@@ -108,6 +108,17 @@ class SystemState:
                 changed_by=changed_by,
             )
         )
+
+        from ante.eventbus.events import NotificationEvent
+
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="critical",
+                title="거래 상태 변경",
+                message=(f"{old_state.value} → *{state.value}*\n사유: {reason}"),
+                category="system",
+            )
+        )
         logger.info(
             "거래 상태 변경: %s → %s (사유: %s, 변경자: %s)",
             old_state,

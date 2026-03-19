@@ -281,9 +281,10 @@ class NotificationEvent(Event):
     """각 모듈 → EventBus: 알림 발송 트리거."""
 
     level: str = "info"
+    title: str = ""
     message: str = ""
-    detail: str = ""
-    metadata: dict = field(default_factory=dict)  # type: ignore[assignment]
+    category: str = ""
+    buttons: list | None = None  # type: ignore[assignment]
 
 
 # ── 백테스트 (Backtest) ──────────────────────────

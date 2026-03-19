@@ -56,12 +56,12 @@ class ReportDraftGenerator:
             await self._eventbus.publish(
                 NotificationEvent(
                     level="info",
-                    message=f"백테스트 리포트 초안 생성: {report.report_id}",
-                    detail=(
+                    title=f"백테스트 리포트 초안 생성: {report.report_id}",
+                    message=(
                         f"전략: {report.strategy_name}, "
                         f"수익률: {report.total_return_pct}%"
                     ),
-                    metadata={"report_id": report.report_id},
+                    category="system",
                 )
             )
             logger.info("리포트 초안 생성 완료: %s", report.report_id)

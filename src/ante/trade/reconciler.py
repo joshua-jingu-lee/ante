@@ -39,6 +39,7 @@ class PositionReconciler:
             보정 내역 리스트. 불일치가 없으면 빈 리스트.
         """
         from ante.eventbus.events import (
+            NotificationEvent,
             PositionMismatchEvent,
             ReconcileEvent,
         )
@@ -101,6 +102,18 @@ class PositionReconciler:
                     internal_qty=i_qty,
                     broker_qty=b_qty,
                     reason=reason,
+                )
+            )
+            await self._eventbus.publish(
+                NotificationEvent(
+                    level="critical",
+                    title="포지션 불일치",
+                    message=(
+                        f"봇: `{bot_id}` · 종목: `{symbol}`\n"
+                        f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
+                        f"사유: {reason}"
+                    ),
+                    category="broker",
                 )
             )
 
