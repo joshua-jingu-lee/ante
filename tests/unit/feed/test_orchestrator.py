@@ -14,6 +14,7 @@ import pytest
 
 from ante.data.store import ParquetStore
 from ante.feed.models.result import CollectionResult
+from ante.feed.pipeline.indicator_calculator import IndicatorCalculator
 from ante.feed.pipeline.orchestrator import FeedOrchestrator
 from ante.feed.sources.dart import (
     DailyLimitExceededError as DARTDailyLimitError,
@@ -422,8 +423,8 @@ async def test_compute_derived_indicators(tmp_data_path: Path) -> None:
 
     await store.write("005930", "krx", fundamental_df, data_type="fundamental")
 
-    orchestrator = FeedOrchestrator(store=store)
-    rows = await orchestrator._compute_derived_indicators(store, ["005930"])
+    calculator = IndicatorCalculator()
+    rows = await calculator.compute(store, ["005930"])
 
     assert rows > 0
 
@@ -478,8 +479,8 @@ async def test_compute_derived_zero_division(tmp_data_path: Path) -> None:
 
     await store.write("005930", "krx", fundamental_df, data_type="fundamental")
 
-    orchestrator = FeedOrchestrator(store=store)
-    await orchestrator._compute_derived_indicators(store, ["005930"])
+    calculator = IndicatorCalculator()
+    await calculator.compute(store, ["005930"])
 
     result = await store.read("005930", "krx", data_type="fundamental")
     row = result.row(0, named=True)
@@ -511,9 +512,9 @@ async def test_compute_derived_missing_columns(tmp_data_path: Path) -> None:
 
     await store.write("005930", "krx", fundamental_df, data_type="fundamental")
 
-    orchestrator = FeedOrchestrator(store=store)
+    calculator = IndicatorCalculator()
     # 에러 없이 실행되어야 함
-    rows = await orchestrator._compute_derived_indicators(store, ["005930"])
+    rows = await calculator.compute(store, ["005930"])
     assert rows >= 0
 
 
