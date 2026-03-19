@@ -59,18 +59,7 @@ class BackfillRunner:
         started_at: datetime,
         is_blocked: Any,
     ) -> CollectionResult:
-        """Backfill 내부 구현.
-
-        Args:
-            data_path: Ante 데이터 저장소 루트 경로.
-            config: 설정 딕셔너리.
-            feed_dir: .feed 디렉토리.
-            started_at: 실행 시작 시각.
-            is_blocked: 방어 가드 함수.
-
-        Returns:
-            수집 결과 CollectionResult.
-        """
+        """Backfill 내부 구현. data.go.kr + DART 수집 후 지표 계산."""
         ctx = _RunContext()
         store = self._store or ParquetStore(base_path=data_path)
 
