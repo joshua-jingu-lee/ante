@@ -276,11 +276,12 @@ class TestServiceAutoApprove:
         assert req.status == ApprovalStatus.APPROVED
         assert req.resolved_by == "system:auto_approve"
         assert req.resolved_at != ""
-        # history: created + approved
-        assert len(req.history) == 2
+        # history: created + approved + executed
+        assert len(req.history) == 3
         assert req.history[0]["action"] == "created"
         assert req.history[1]["action"] == "approved"
         assert req.history[1]["actor"] == "system:auto_approve"
+        assert req.history[2]["action"] == "executed"
 
     async def test_auto_approve_executes_handler(self, service_with_auto_approve):
         """전결 시 executor가 실행된다."""
@@ -384,7 +385,7 @@ class TestServiceAutoApprove:
         assert fetched is not None
         assert fetched.status == "approved"
         assert fetched.resolved_by == "system:auto_approve"
-        assert len(fetched.history) == 2
+        assert len(fetched.history) == 3
 
     async def test_created_event_auto_approved_false_for_normal(
         self, service_without_auto_approve, eventbus
