@@ -554,7 +554,7 @@ def _init_treasury_sync(s: Services) -> None:
 
 
 async def _init_feed(s: Services) -> None:
-    """Data Pipeline, BacktestService, ReportStore, ApprovalService 초기화."""
+    """Data Pipeline, BacktestService, ReportStore 초기화."""
     from ante.data import DataCollector, ParquetStore
 
     data_path = s.config.get("data.path", "data/")
@@ -595,7 +595,9 @@ async def _init_feed(s: Services) -> None:
     draft_generator.initialize()
     logger.info("ReportDraftGenerator 초기화 완료")
 
-    # ApprovalService
+
+async def _init_approval(s: Services) -> None:
+    """ApprovalService 초기화: Executor, Validator, 전결 설정, 만료 스케줄러."""
     from ante.approval import ApprovalService
     from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
     from ante.approval.models import ValidationResult
@@ -1031,9 +1033,10 @@ async def main() -> None:
     1. Core: Config, Database, EventBus, SystemState, DynamicConfig
     2. Services: AuditLogger, MemberService, InstrumentService
     3. Trading: Strategy, Rule, Treasury, Trade, Bot, Broker, Gateway
-    4. Feed: DataPipeline, Backtest, Report, Approval
-    5. Notification: Telegram
-    6. Web: FastAPI + uvicorn
+    4. Feed: DataPipeline, Backtest, Report
+    5. Approval: ApprovalService, Executor, Validator, 전결, 만료 스케줄러
+    6. Notification: Telegram
+    7. Web: FastAPI + uvicorn
 
     종료 순서: 역순 (상위 소비자부터 정리)
     """
@@ -1045,6 +1048,7 @@ async def main() -> None:
         await _init_services(s)
         await _init_trading(s)
         await _init_feed(s)
+        await _init_approval(s)
         await _init_notification(s)
         await _init_web(s)
         await _run(s)
