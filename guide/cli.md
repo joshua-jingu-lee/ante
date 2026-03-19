@@ -1,8 +1,7 @@
 # Ante CLI Reference
 
-> 이 문서는 `scripts/generate_cli_reference.py`에 의해 Click introspection으로 자동 생성됩니다.
-> 직접 수정하지 마세요. CLI 코드 변경 후 스크립트를 재실행하세요.
->
+Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
+
 > 마지막 갱신: 2026-03-20
 
 ## 목차

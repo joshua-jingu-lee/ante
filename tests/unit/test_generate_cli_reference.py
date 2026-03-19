@@ -212,15 +212,15 @@ class TestGenerateCliReference:
         for cmd in expected_commands:
             assert cmd in content, f"'{cmd}'가 문서에 없음"
 
-    def test_auto_generation_notice(self) -> None:
-        """자동 생성 안내 문구가 포함된다."""
+    def test_intro_notice(self) -> None:
+        """사용자 친화적 소개 문구가 포함된다."""
 
         buf = io.StringIO()
         generate_cli_reference(buf)
         content = buf.getvalue()
 
-        assert "자동 생성" in content
-        assert "직접 수정하지 마세요" in content
+        assert "CLI 명령어를 정리한 문서" in content
+        assert "마지막 갱신" in content
 
     def test_options_have_details(self) -> None:
         """옵션이 있는 명령어에 옵션 테이블이 포함된다."""
