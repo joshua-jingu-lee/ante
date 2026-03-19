@@ -115,6 +115,89 @@ class TestAuditQuery:
         assert len(page2) == 3
         assert page1[0]["id"] != page2[0]["id"]
 
+    async def test_filter_by_from_date(self, audit_logger: AuditLogger) -> None:
+        """from_date로 필터링."""
+        # 직접 SQL로 과거 날짜 로그 삽입
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "old.action", "2025-01-01T00:00:00"),
+        )
+        await audit_logger.log(member_id="user-01", action="new.action")
+
+        logs = await audit_logger.query(from_date="2026-01-01")
+        assert len(logs) == 1
+        assert logs[0]["action"] == "new.action"
+
+    async def test_filter_by_to_date(self, audit_logger: AuditLogger) -> None:
+        """to_date로 필터링."""
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "old.action", "2025-01-01T10:00:00"),
+        )
+        await audit_logger.log(member_id="user-01", action="new.action")
+
+        logs = await audit_logger.query(to_date="2025-12-31")
+        assert len(logs) == 1
+        assert logs[0]["action"] == "old.action"
+
+    async def test_filter_by_date_range(self, audit_logger: AuditLogger) -> None:
+        """from_date + to_date 범위 필터."""
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "jan.action", "2025-01-15T12:00:00"),
+        )
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "mar.action", "2025-03-15T12:00:00"),
+        )
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "jun.action", "2025-06-15T12:00:00"),
+        )
+
+        logs = await audit_logger.query(from_date="2025-02-01", to_date="2025-04-30")
+        assert len(logs) == 1
+        assert logs[0]["action"] == "mar.action"
+
+    async def test_to_date_includes_full_day(self, audit_logger: AuditLogger) -> None:
+        """to_date가 YYYY-MM-DD이면 해당 일자 끝까지 포함."""
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "evening.action", "2025-03-15T23:30:00"),
+        )
+
+        logs = await audit_logger.query(to_date="2025-03-15")
+        assert len(logs) == 1
+        assert logs[0]["action"] == "evening.action"
+
+
+# ── limit 클램핑 ─────────────────────────────────
+
+
+class TestAuditLimitClamping:
+    """limit 200 클램핑 테스트."""
+
+    async def test_limit_clamped_to_200(self, audit_logger: AuditLogger) -> None:
+        """limit > 200이면 200으로 클램핑."""
+        for i in range(5):
+            await audit_logger.log(member_id="user-01", action=f"action.{i}")
+
+        # limit=500을 전달해도 오류 없이 동작 (내부에서 200으로 클램핑)
+        logs = await audit_logger.query(limit=500)
+        assert len(logs) == 5  # 데이터가 5건이므로 5건 반환
+
+    async def test_limit_exactly_200(self, audit_logger: AuditLogger) -> None:
+        """limit=200은 그대로 통과."""
+        await audit_logger.log(member_id="user-01", action="test.action")
+        logs = await audit_logger.query(limit=200)
+        assert len(logs) == 1
+
 
 # ── 건수 조회 ────────────────────────────────────
 
@@ -139,6 +222,19 @@ class TestAuditCount:
     async def test_count_empty(self, audit_logger: AuditLogger) -> None:
         """빈 테이블."""
         assert await audit_logger.count() == 0
+
+    async def test_count_with_date_filter(self, audit_logger: AuditLogger) -> None:
+        """날짜 필터 적용 건수."""
+        await audit_logger._db.execute(
+            """INSERT INTO audit_log (member_id, action, created_at)
+               VALUES (?, ?, ?)""",
+            ("user-01", "old.action", "2025-01-01T00:00:00"),
+        )
+        await audit_logger.log(member_id="user-01", action="new.action")
+
+        assert await audit_logger.count(from_date="2026-01-01") == 1
+        assert await audit_logger.count(to_date="2025-12-31") == 1
+        assert await audit_logger.count() == 2
 
 
 # ── 스키마 멱등성 ────────────────────────────────

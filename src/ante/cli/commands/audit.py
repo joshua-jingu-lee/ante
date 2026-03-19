@@ -22,6 +22,8 @@ def _run(coro):  # noqa: ANN001, ANN202
 @audit.command("list")
 @click.option("--member", "member_id", default=None, help="멤버 ID 필터")
 @click.option("--action", default=None, help="액션 필터 (prefix 매칭)")
+@click.option("--from-date", default=None, help="시작 날짜 (YYYY-MM-DD)")
+@click.option("--to-date", default=None, help="종료 날짜 (YYYY-MM-DD)")
 @click.option("--limit", default=20, type=click.IntRange(1, 200), help="조회 건수")
 @click.option("--offset", default=0, type=int, help="오프셋")
 @click.pass_context
@@ -31,6 +33,8 @@ def audit_list(
     ctx: click.Context,
     member_id: str | None,
     action: str | None,
+    from_date: str | None,
+    to_date: str | None,
     limit: int,
     offset: int,
 ) -> None:
@@ -49,6 +53,8 @@ def audit_list(
             return await audit_logger.query(
                 member_id=member_id,
                 action=action,
+                from_date=from_date,
+                to_date=to_date,
                 limit=limit,
                 offset=offset,
             )
