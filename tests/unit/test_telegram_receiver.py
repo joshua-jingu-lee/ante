@@ -20,6 +20,24 @@ def adapter():
     return mock
 
 
+def _make_running_bot(
+    bot_id: str = "bot-1",
+    name: str = "테스트봇",
+    positions: dict | None = None,
+    open_orders: list | None = None,
+):
+    """RUNNING 상태의 Bot mock 생성 헬퍼."""
+    from ante.bot.config import BotStatus
+
+    bot = MagicMock()
+    bot.bot_id = bot_id
+    bot.status = BotStatus.RUNNING
+    bot.config.name = name
+    bot._ctx.get_positions.return_value = positions or {}
+    bot._ctx.get_open_orders.return_value = open_orders or []
+    return bot
+
+
 @pytest.fixture
 def bot_manager():
     mock = MagicMock()
@@ -27,7 +45,7 @@ def bot_manager():
         {"bot_id": "bot-1", "status": "running", "strategy_id": "s1"},
         {"bot_id": "bot-2", "status": "stopped", "strategy_id": "s2"},
     ]
-    mock.get_bot.return_value = MagicMock()
+    mock.get_bot.return_value = _make_running_bot()
     mock.stop_bot = AsyncMock()
     return mock
 
@@ -222,11 +240,47 @@ class TestCommands:
         result = await receiver._cmd_activate([])
         assert "연결되지 않았습니다" in result
 
-    async def test_stop_bot(self, receiver, bot_manager):
+    async def test_stop_bot_no_positions(self, receiver, bot_manager):
+        """보유 종목 없이 봇 중지 — 메시지 A."""
         result = await receiver._cmd_stop(["bot-1"])
-        assert "중지" in result
-        assert "bot-1" in result
+        assert "봇 중지" in result
+        assert "테스트봇 (bot-1)" in result
+        assert "실행 중 → 중지됨" in result
+        assert "미체결 주문은 자동 취소되지 않습니다" in result
         bot_manager.stop_bot.assert_called_once_with("bot-1")
+
+    async def test_stop_bot_with_positions(self, receiver, bot_manager):
+        """보유 종목 있으면 메시지 B — 종목명 및 체결대기 금액 표시."""
+        bot = _make_running_bot(
+            positions={
+                "005930": {
+                    "symbol": "005930",
+                    "quantity": 10,
+                    "avg_entry_price": 70000,
+                },
+                "035720": {"symbol": "035720", "quantity": 5, "avg_entry_price": 50000},
+            },
+            open_orders=[{"amount": 500_000}, {"amount": 300_000}],
+        )
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "봇 중지" in result
+        assert "보유 종목 2개가 유지됩니다" in result
+        assert "포지션을 직접 관리" in result
+        assert "005930" in result
+        assert "035720" in result
+        assert "800,000원" in result
+
+    async def test_stop_bot_already_stopped(self, receiver, bot_manager):
+        """이미 중지된 봇은 안내 메시지 반환."""
+        from ante.bot.config import BotStatus
+
+        bot = MagicMock()
+        bot.status = BotStatus.STOPPED
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "이미 중지된 봇입니다" in result
+        bot_manager.stop_bot.assert_not_called()
 
     async def test_stop_bot_no_args(self, receiver):
         result = await receiver._cmd_stop([])
@@ -241,6 +295,13 @@ class TestCommands:
         receiver._bot_manager = None
         result = await receiver._cmd_stop(["bot-1"])
         assert "연결되지 않았습니다" in result
+
+    async def test_stop_bot_name_fallback(self, receiver, bot_manager):
+        """봇 이름이 빈 문자열이면 bot_id로 대체."""
+        bot = _make_running_bot(name="")
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "bot-1 (bot-1)" in result
 
 
 # ── US-4: 2단계 확인 ─────────────────────────────
@@ -275,7 +336,8 @@ class TestConfirmation:
         """confirm으로 stop이 실행된다."""
         await receiver._execute("stop", ["bot-1"], 12345, 100)
         result = await receiver._handle_confirm(12345)
-        assert "중지" in result
+        assert "봇 중지" in result
+        assert "실행 중 → 중지됨" in result
         bot_manager.stop_bot.assert_called_once_with("bot-1")
 
     async def test_confirm_no_pending(self, receiver):
