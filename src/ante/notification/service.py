@@ -323,9 +323,8 @@ class NotificationService:
         if self._should_send(level):
             await self._send_rich_and_record(
                 level=level,
-                title=event.message,
-                body=event.detail,
-                metadata=event.metadata or None,
+                title=event.title,
+                body=event.message,
                 event_type="NotificationEvent",
             )
 

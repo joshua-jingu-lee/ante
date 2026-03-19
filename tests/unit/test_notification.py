@@ -123,8 +123,8 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="info",
-                message="테스트 알림",
-                detail="상세 내용",
+                title="테스트 알림",
+                message="상세 내용",
             )
         )
         assert len(adapter.sent_rich) == 1
@@ -189,8 +189,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="info",
-                message="필터 테스트",
-                detail="",
+                title="필터 테스트",
             )
         )
         assert len(adapter.sent_rich) == 0
@@ -199,8 +198,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="error",
-                message="에러 알림",
-                detail="",
+                title="에러 알림",
             )
         )
         assert len(adapter.sent_rich) == 1
@@ -217,8 +215,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="critical",
-                message="긴급",
-                detail="",
+                title="긴급",
             )
         )
         assert len(adapter.sent_rich) == 1
@@ -236,8 +233,7 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="info",
-                message="조용한 시간",
-                detail="",
+                title="조용한 시간",
             )
         )
         assert len(adapter.sent_rich) == 0
@@ -255,24 +251,39 @@ class TestNotificationService:
         await eventbus.publish(
             NotificationEvent(
                 level="critical",
-                message="긴급 알림",
-                detail="",
+                title="긴급 알림",
             )
         )
         assert len(adapter.sent_rich) == 1
 
-    async def test_notification_with_metadata(self, service, eventbus, adapter):
-        """메타데이터 포함 알림."""
+    async def test_notification_with_category(self, service, eventbus, adapter):
+        """category 포함 알림."""
         await eventbus.publish(
             NotificationEvent(
                 level="warning",
-                message="대사 불일치",
-                detail="3건 보정",
-                metadata={"bot_id": "bot1", "count": 3},
+                title="대사 불일치",
+                message="3건 보정",
+                category="broker",
             )
         )
         assert len(adapter.sent_rich) == 1
-        assert adapter.sent_rich[0]["metadata"] == {
-            "bot_id": "bot1",
-            "count": 3,
-        }
+        assert adapter.sent_rich[0]["title"] == "대사 불일치"
+        assert adapter.sent_rich[0]["body"] == "3건 보정"
+
+    async def test_notification_with_buttons(self, service, eventbus, adapter):
+        """buttons 필드가 NotificationEvent에 설정 가능."""
+        buttons = [
+            [
+                {"text": "승인", "callback_data": "approve:1"},
+                {"text": "거절", "callback_data": "reject:1"},
+            ]
+        ]
+        event = NotificationEvent(
+            level="info",
+            title="결재 요청",
+            message="봇 등록 결재",
+            category="approval",
+            buttons=buttons,
+        )
+        assert event.buttons == buttons
+        assert event.category == "approval"

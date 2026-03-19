@@ -132,7 +132,7 @@ class TestNotificationHistory:
     async def test_notification_event_records_history(self, service, eventbus, db):
         """NotificationEvent도 이력이 기록된다."""
         await eventbus.publish(
-            NotificationEvent(level="info", message="알림 제목", detail="알림 본문")
+            NotificationEvent(level="info", title="알림 제목", message="알림 본문")
         )
 
         rows = await service.get_history()
