@@ -128,6 +128,12 @@ class RuleEngine:
             len(rules),
         )
 
+    def remove_strategy_rules(self, strategy_id: str) -> None:
+        """특정 전략의 룰 제거."""
+        removed = self._strategy_rules.pop(strategy_id, None)
+        if removed:
+            logger.info("전략별 룰 제거: strategy=%s (%d건)", strategy_id, len(removed))
+
     def clear_rules(self) -> None:
         """모든 룰 제거."""
         self._global_rules.clear()

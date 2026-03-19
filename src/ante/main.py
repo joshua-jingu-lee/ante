@@ -255,11 +255,19 @@ async def _init_trading(s: Services) -> None:
     strategies_dir = Path(s.config.get("strategy.dir", "strategies"))
     s.strategy_snapshot = StrategySnapshot(strategies_dir)
 
+    # 전략별 룰 설정 로딩
+    strategy_rule_configs_raw = s.config.get("rules.strategy", {})
+    strategy_rule_configs = (
+        strategy_rule_configs_raw if isinstance(strategy_rule_configs_raw, dict) else {}
+    )
+
     s.bot_manager = BotManager(
         eventbus=s.eventbus,
         db=s.db,
         context_factory=None,  # APIGateway 연결 후 갱신
         snapshot=s.strategy_snapshot,
+        rule_engine=s.rule_engine,
+        strategy_rule_configs=strategy_rule_configs,
     )
     await s.bot_manager.initialize()
 
