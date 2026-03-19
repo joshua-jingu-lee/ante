@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends, HTTPException
+
+from ante.web.deps import get_report_store
 from ante.web.schemas import (
     ReportDetailResponse,
     ReportListResponse,
@@ -24,12 +27,11 @@ async def get_report_schema() -> dict:
 
 
 @router.post("", status_code=201, response_model=ReportSubmitResponse)
-async def submit_report(request: Request, body: dict) -> dict:
+async def submit_report(
+    body: dict,
+    report_store: Annotated[Any, Depends(get_report_store)],
+) -> dict:
     """리포트 제출."""
-    report_store = getattr(request.app.state, "report_store", None)
-    if report_store is None:
-        raise HTTPException(status_code=503, detail="Report store not available")
-
     report = await report_store.submit(body)
     return {
         "report_id": report.report_id,
@@ -39,13 +41,12 @@ async def submit_report(request: Request, body: dict) -> dict:
 
 
 @router.get("/{report_id}", response_model=ReportDetailResponse)
-async def report_view(request: Request, report_id: str) -> dict:
+async def report_view(
+    report_id: str,
+    report_store: Annotated[Any, Depends(get_report_store)],
+) -> dict:
     """리포트 단건 조회."""
     import json
-
-    report_store = getattr(request.app.state, "report_store", None)
-    if report_store is None:
-        raise HTTPException(status_code=503, detail="Report store not available")
 
     report = await report_store.get(report_id)
     if report is None:
@@ -86,17 +87,13 @@ async def report_view(request: Request, report_id: str) -> dict:
 
 @router.get("", response_model=ReportListResponse)
 async def list_reports(
-    request: Request,
+    report_store: Annotated[Any, Depends(get_report_store)],
     status: str | None = None,
     limit: int = 20,
     cursor: str | None = None,
 ) -> dict:
     """리포트 목록 조회 (cursor 기반 페이지네이션)."""
     from ante.web.pagination import paginate
-
-    report_store = getattr(request.app.state, "report_store", None)
-    if report_store is None:
-        raise HTTPException(status_code=503, detail="Report store not available")
 
     reports = await report_store.list_reports(status=status)
     items = [

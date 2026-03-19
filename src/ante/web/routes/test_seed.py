@@ -8,9 +8,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ante.web.deps import (
+    get_bot_manager_optional,
+    get_db,
+    get_system_state_optional,
+    get_treasury_optional,
+)
 from ante.web.schemas import SeedResetResponse
 
 logger = logging.getLogger(__name__)
@@ -58,7 +65,10 @@ BASE_SQL = SCENARIOS_DIR / "_base.sql"
 
 @router.post("/reset", response_model=SeedResetResponse)
 async def reset_seed(
-    request: Request,
+    db: Annotated[Any, Depends(get_db)],
+    system_state: Annotated[Any | None, Depends(get_system_state_optional)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
+    treasury: Annotated[Any | None, Depends(get_treasury_optional)],
     scenario: str = Query(..., description="시나리오 이름 (예: login-dashboard)"),
 ) -> dict:
     """DB를 초기화하고 시나리오별 시드 데이터를 주입한다.
@@ -74,8 +84,6 @@ async def reset_seed(
             status_code=400,
             detail=f"시나리오를 찾을 수 없습니다: {scenario}",
         )
-
-    db = request.app.state.db
 
     # 1. 모든 테이블 DROP
     rows = await db.fetch_all(
@@ -99,25 +107,26 @@ async def reset_seed(
     await db.execute_script(scenario_content)
 
     # 5. 메모리 기반 매니저 리로드
-    await _reload_managers(request)
+    await _reload_managers(system_state, bot_manager, treasury)
 
     logger.info("시드 리셋 완료: scenario=%s", scenario)
     return {"ok": True, "scenario": scenario}
 
 
-async def _reload_managers(request: Request) -> None:
+async def _reload_managers(
+    system_state: Any | None,
+    bot_manager: Any | None,
+    treasury: Any | None,
+) -> None:
     """시딩 후 메모리 기반 매니저들을 DB에서 리로드한다."""
     # SystemState (인메모리 trading_state 동기화)
-    system_state = getattr(request.app.state, "system_state", None)
     if system_state is not None and hasattr(system_state, "_load_from_db"):
         await system_state._load_from_db()  # noqa: SLF001
 
     # BotManager
-    bot_manager = getattr(request.app.state, "bot_manager", None)
     if bot_manager is not None:
         await bot_manager.load_from_db()
 
     # Treasury (budget 리로드)
-    treasury = getattr(request.app.state, "treasury", None)
     if treasury is not None and hasattr(treasury, "load_from_db"):
         await treasury.load_from_db()

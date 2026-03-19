@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from ante.web.deps import (
+    get_bot_manager,
+    get_strategy_registry,
+    get_strategy_registry_optional,
+    get_trade_service_optional,
+    get_treasury_optional,
+)
 from ante.web.schemas import BotDetailResponse, BotListResponse
 
 router = APIRouter()
@@ -22,16 +31,12 @@ class BotCreateRequest(BaseModel):
 
 @router.get("", response_model=BotListResponse)
 async def list_bots(
-    request: Request,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
     limit: int = 20,
     cursor: str | None = None,
 ) -> dict:
     """봇 목록 조회 (cursor 기반 페이지네이션)."""
     from ante.web.pagination import paginate
-
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is None:
-        raise HTTPException(status_code=503, detail="Bot manager not available")
 
     bots = bot_manager.list_bots()
     result = paginate(bots, cursor_field="bot_id", limit=limit, cursor=cursor)
@@ -39,21 +44,17 @@ async def list_bots(
 
 
 @router.post("", status_code=201, response_model=BotDetailResponse)
-async def create_bot(request: Request, body: BotCreateRequest) -> dict:
+async def create_bot(
+    body: BotCreateRequest,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+) -> dict:
     """봇 생성."""
     from pathlib import Path
 
     from ante.bot.config import BotConfig
     from ante.bot.exceptions import BotError
     from ante.strategy.loader import StrategyLoader
-
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is None:
-        raise HTTPException(status_code=503, detail="Bot manager not available")
-
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
 
     record = await registry.get(body.strategy_id)
     if not record:
@@ -85,12 +86,14 @@ async def create_bot(request: Request, body: BotCreateRequest) -> dict:
 
 
 @router.get("/{bot_id}", response_model=BotDetailResponse)
-async def get_bot(request: Request, bot_id: str) -> dict:
+async def get_bot(
+    bot_id: str,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
+    treasury: Annotated[Any | None, Depends(get_treasury_optional)],
+    trade_service: Annotated[Any | None, Depends(get_trade_service_optional)],
+) -> dict:
     """봇 상세 조회."""
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is None:
-        raise HTTPException(status_code=503, detail="Bot manager not available")
-
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
@@ -98,7 +101,6 @@ async def get_bot(request: Request, bot_id: str) -> dict:
     info = bot.get_info()
 
     # 전략 정보 추가
-    registry = getattr(request.app.state, "strategy_registry", None)
     if registry is not None:
         record = await registry.get(info.get("strategy_id", ""))
         if record:
@@ -110,7 +112,6 @@ async def get_bot(request: Request, bot_id: str) -> dict:
             }
 
     # 예산 정보 추가
-    treasury = getattr(request.app.state, "treasury", None)
     if treasury is not None:
         budget = await treasury.get_budget(bot_id)
         if budget:
@@ -122,7 +123,6 @@ async def get_bot(request: Request, bot_id: str) -> dict:
             }
 
     # 포지션 정보 추가
-    trade_service = getattr(request.app.state, "trade_service", None)
     if trade_service is not None:
         positions = await trade_service.get_positions(
             bot_id=bot_id, include_closed=True
@@ -141,13 +141,12 @@ async def get_bot(request: Request, bot_id: str) -> dict:
 
 
 @router.post("/{bot_id}/start", response_model=BotDetailResponse)
-async def start_bot(request: Request, bot_id: str) -> dict:
+async def start_bot(
+    bot_id: str,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+) -> dict:
     """봇 시작."""
     from ante.bot.exceptions import BotError
-
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is None:
-        raise HTTPException(status_code=503, detail="Bot manager not available")
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
@@ -162,13 +161,12 @@ async def start_bot(request: Request, bot_id: str) -> dict:
 
 
 @router.post("/{bot_id}/stop", response_model=BotDetailResponse)
-async def stop_bot(request: Request, bot_id: str) -> dict:
+async def stop_bot(
+    bot_id: str,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+) -> dict:
     """봇 중지."""
     from ante.bot.exceptions import BotError
-
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is None:
-        raise HTTPException(status_code=503, detail="Bot manager not available")
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
@@ -183,13 +181,12 @@ async def stop_bot(request: Request, bot_id: str) -> dict:
 
 
 @router.delete("/{bot_id}", status_code=204)
-async def delete_bot(request: Request, bot_id: str) -> None:
+async def delete_bot(
+    bot_id: str,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+) -> None:
     """봇 삭제."""
     from ante.bot.exceptions import BotError
-
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    if bot_manager is None:
-        raise HTTPException(status_code=503, detail="Bot manager not available")
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:

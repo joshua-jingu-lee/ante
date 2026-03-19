@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ante.web.deps import get_broker, get_config, get_treasury
 from ante.web.schemas import (
     BalanceSetResponse,
     BudgetListResponse,
@@ -31,17 +34,17 @@ class BalanceSetRequest(BaseModel):
 @router.get(
     "", response_model=TreasurySummaryResponse, response_model_exclude_none=True
 )
-async def get_summary(request: Request) -> dict:
+async def get_summary(
+    treasury: Annotated[Any, Depends(get_treasury)],
+    broker: Annotated[Any | None, Depends(get_broker)],
+    config: Annotated[Any | None, Depends(get_config)],
+) -> dict:
     """자금 현황 요약."""
-    treasury = getattr(request.app.state, "treasury", None)
-    if treasury is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
     summary = treasury.get_summary()
     summary["commission_rate"] = getattr(treasury, "commission_rate", 0.00015)
     summary["sell_tax_rate"] = getattr(treasury, "sell_tax_rate", 0.0023)
 
     # 브로커 메타정보
-    broker = getattr(request.app.state, "broker", None)
     if broker is not None:
         summary["broker_id"] = broker.broker_id
         summary["broker_name"] = broker.broker_name
@@ -49,7 +52,6 @@ async def get_summary(request: Request) -> dict:
         summary["exchange"] = broker.exchange
 
     # KIS 계좌 헤더 정보
-    config = getattr(request.app.state, "config", None)
     if config is not None:
         try:
             account_no = config.secret("KIS_ACCOUNT_NO")
@@ -73,17 +75,13 @@ async def get_summary(request: Request) -> dict:
 
 @router.get("/transactions", response_model=TransactionListResponse)
 async def list_transactions(
-    request: Request,
+    treasury: Annotated[Any, Depends(get_treasury)],
     type: str | None = None,
     bot_id: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
     """자금 변동 이력 조회."""
-    treasury = getattr(request.app.state, "treasury", None)
-    if treasury is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
-
     db = getattr(treasury, "_db", None)
     if db is None:
         return {"items": [], "total": 0}
@@ -126,13 +124,13 @@ async def list_transactions(
 
 
 @router.post("/bots/{bot_id}/allocate", response_model=BudgetOperationResponse)
-async def allocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> dict:
+async def allocate(
+    bot_id: str,
+    body: BudgetChangeRequest,
+    treasury: Annotated[Any, Depends(get_treasury)],
+) -> dict:
     """봇에 예산 할당."""
     from ante.treasury.exceptions import BotNotStoppedError
-
-    treasury = getattr(request.app.state, "treasury", None)
-    if treasury is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
 
     try:
         success = await treasury.allocate(bot_id, body.amount)
@@ -157,13 +155,13 @@ async def allocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> 
 
 
 @router.post("/bots/{bot_id}/deallocate", response_model=BudgetOperationResponse)
-async def deallocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> dict:
+async def deallocate(
+    bot_id: str,
+    body: BudgetChangeRequest,
+    treasury: Annotated[Any, Depends(get_treasury)],
+) -> dict:
     """봇 예산 회수."""
     from ante.treasury.exceptions import BotNotStoppedError
-
-    treasury = getattr(request.app.state, "treasury", None)
-    if treasury is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
 
     try:
         success = await treasury.deallocate(bot_id, body.amount)
@@ -185,26 +183,23 @@ async def deallocate(request: Request, bot_id: str, body: BudgetChangeRequest) -
 
 
 @router.get("/budgets", response_model=BudgetListResponse)
-async def list_budgets(request: Request) -> dict:
+async def list_budgets(
+    treasury: Annotated[Any, Depends(get_treasury)],
+) -> dict:
     """봇별 예산 목록 조회."""
     from dataclasses import asdict
-
-    treasury = getattr(request.app.state, "treasury", None)
-    if treasury is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
 
     budgets = treasury.list_budgets()
     return {"budgets": [asdict(b) for b in budgets]}
 
 
 @router.post("/balance", response_model=BalanceSetResponse)
-async def set_balance(request: Request, body: BalanceSetRequest) -> dict:
+async def set_balance(
+    body: BalanceSetRequest,
+    treasury: Annotated[Any, Depends(get_treasury)],
+) -> dict:
     """계좌 총 잔고 수동 설정."""
     from datetime import UTC, datetime
-
-    treasury = getattr(request.app.state, "treasury", None)
-    if treasury is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
 
     await treasury.set_account_balance(body.balance)
     return {

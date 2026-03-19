@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query
 
+from ante.web.deps import get_bot_manager, get_trade_service, get_treasury
 from ante.web.schemas import PortfolioHistoryResponse, PortfolioValueResponse
 
 logger = logging.getLogger(__name__)
@@ -15,10 +17,10 @@ router = APIRouter()
 
 
 @router.get("/value", response_model=PortfolioValueResponse)
-async def portfolio_value(request: Request) -> dict:
+async def portfolio_value(
+    treasury: Annotated[Any, Depends(get_treasury)],
+) -> dict:
     """총 자산 가치 + 오늘 손익."""
-    treasury = request.app.state.treasury
-
     summary = treasury.get_summary()
     total_value = summary["total_evaluation"]
     daily_pnl = summary["total_profit_loss"]
@@ -44,13 +46,11 @@ _PERIOD_DAYS = {
 
 @router.get("/history", response_model=PortfolioHistoryResponse)
 async def portfolio_history(
-    request: Request,
+    trade_service: Annotated[Any, Depends(get_trade_service)],
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
     period: str = Query(default="1m", pattern="^(1d|1w|1m|3m|all)$"),
 ) -> dict:
     """기간별 자산 추이."""
-    trade_service = request.app.state.trade_service
-    bot_manager = request.app.state.bot_manager
-
     # 모든 봇의 equity curve를 합산
     from ante.report.feedback import PerformanceFeedback
 

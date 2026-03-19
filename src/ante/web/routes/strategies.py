@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ante.web.deps import (
+    get_bot_manager_optional,
+    get_db,
+    get_strategy_registry,
+    get_trade_service,
+    get_trade_service_optional,
+)
 from ante.web.schemas import (
     DailySummaryResponse,
     MonthlySummaryResponse,
@@ -49,17 +57,13 @@ async def validate_strategy(body: dict) -> dict:
 
 @router.get("", response_model=StrategyListResponse)
 async def list_strategies(
-    request: Request,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     status: str | None = Query(default=None),
 ) -> dict:
     """전략 목록 조회."""
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     records = await registry.list_strategies(status=status)
 
-    bot_manager = getattr(request.app.state, "bot_manager", None)
     bots_by_strategy: dict[str, dict] = {}
     if bot_manager is not None:
         for bot_info in bot_manager.list_bots():
@@ -88,12 +92,12 @@ async def list_strategies(
 
 
 @router.get("/{strategy_id}", response_model=StrategyDetailResponse)
-async def get_strategy(request: Request, strategy_id: str) -> dict:
+async def get_strategy(
+    strategy_id: str,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
+) -> dict:
     """전략 상세 조회."""
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
@@ -104,7 +108,6 @@ async def get_strategy(request: Request, strategy_id: str) -> dict:
     )
 
     bot_info = None
-    bot_manager = getattr(request.app.state, "bot_manager", None)
     if bot_manager is not None:
         for b in bot_manager.list_bots():
             if b.get("strategy_id") == strategy_id:
@@ -115,19 +118,17 @@ async def get_strategy(request: Request, strategy_id: str) -> dict:
 
 
 @router.get("/{strategy_id}/performance", response_model=StrategyPerformanceResponse)
-async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
+async def get_strategy_performance(
+    strategy_id: str,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    db: Annotated[Any, Depends(get_db)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
+    trade_service: Annotated[Any | None, Depends(get_trade_service_optional)],
+) -> dict:
     """전략 성과 지표 조회."""
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
-
-    db = getattr(request.app.state, "db", None)
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
@@ -138,8 +139,6 @@ async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
 
     # equity curve: bot_id가 있으면 추가
     equity_curve: list[dict] = []
-    bot_manager = getattr(request.app.state, "bot_manager", None)
-    trade_service = getattr(request.app.state, "trade_service", None)
     if bot_manager is not None and trade_service is not None:
         for b in bot_manager.list_bots():
             if b.get("strategy_id") == strategy_id:
@@ -158,21 +157,15 @@ async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
 
 @router.get("/{strategy_id}/daily-summary", response_model=DailySummaryResponse)
 async def get_strategy_daily_summary(
-    request: Request,
     strategy_id: str,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    db: Annotated[Any, Depends(get_db)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
 ) -> dict:
     """전략 일별 성과 집계."""
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
-
-    db = getattr(request.app.state, "db", None)
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
@@ -180,7 +173,6 @@ async def get_strategy_daily_summary(
 
     # strategy에 연결된 bot_id 찾기
     bot_id = None
-    bot_manager = getattr(request.app.state, "bot_manager", None)
     if bot_manager is not None:
         for b in bot_manager.list_bots():
             if b.get("strategy_id") == strategy_id:
@@ -203,28 +195,21 @@ async def get_strategy_daily_summary(
 
 @router.get("/{strategy_id}/weekly-summary", response_model=WeeklySummaryResponse)
 async def get_strategy_weekly_summary(
-    request: Request,
     strategy_id: str,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    db: Annotated[Any, Depends(get_db)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
 ) -> dict:
     """전략 주별 성과 집계."""
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
-
-    db = getattr(request.app.state, "db", None)
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
     tracker = PerformanceTracker(db)
 
     bot_id = None
-    bot_manager = getattr(request.app.state, "bot_manager", None)
     if bot_manager is not None:
         for b in bot_manager.list_bots():
             if b.get("strategy_id") == strategy_id:
@@ -249,28 +234,21 @@ async def get_strategy_weekly_summary(
 
 @router.get("/{strategy_id}/monthly-summary", response_model=MonthlySummaryResponse)
 async def get_strategy_monthly_summary(
-    request: Request,
     strategy_id: str,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    db: Annotated[Any, Depends(get_db)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
 ) -> dict:
     """전략 월별 성과 집계."""
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
-
-    db = getattr(request.app.state, "db", None)
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database not available")
 
     from ante.trade.performance import PerformanceTracker
 
     tracker = PerformanceTracker(db)
 
     bot_id = None
-    bot_manager = getattr(request.app.state, "bot_manager", None)
     if bot_manager is not None:
         for b in bot_manager.list_bots():
             if b.get("strategy_id") == strategy_id:
@@ -294,25 +272,18 @@ async def get_strategy_monthly_summary(
 
 @router.get("/{strategy_id}/trades", response_model=StrategyTradesResponse)
 async def get_strategy_trades(
-    request: Request,
     strategy_id: str,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+    trade_service: Annotated[Any, Depends(get_trade_service)],
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> dict:
     """전략 거래 내역 조회 (cursor 기반 페이지네이션)."""
     from ante.web.pagination import paginate
 
-    registry = getattr(request.app.state, "strategy_registry", None)
-    if registry is None:
-        raise HTTPException(status_code=503, detail="Strategy registry not available")
-
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
-
-    trade_service = getattr(request.app.state, "trade_service", None)
-    if trade_service is None:
-        raise HTTPException(status_code=503, detail="Trade service not available")
 
     trades = await trade_service.get_trades(
         strategy_id=strategy_id,
