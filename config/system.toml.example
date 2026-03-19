@@ -2,7 +2,7 @@
 # 이 파일을 config/system.toml 로 복사하여 사용하세요.
 
 [system]
-log_level = "INFO"          # DEBUG, INFO, WARNING, ERROR
+log_level = "INFO"  # DEBUG, INFO, WARNING, ERROR
 timezone = "Asia/Seoul"
 
 [db]
@@ -12,7 +12,7 @@ path = "db/ante.db"
 path = "data/"
 
 [web]
-enabled = false             # 대시보드 활성화 시 true
+enabled = false  # 대시보드 활성화 시 true
 host = "0.0.0.0"
 port = 8000
 
@@ -20,30 +20,33 @@ port = 8000
 history_size = 1000
 
 [broker]
-type = "kis"                # "kis" | "test" | "mock"
+type = "kis"  # "kis" | "test" | "mock"
 # KIS: secrets.env 에서 앱키/시크릿/계좌번호 관리
 # Test: KIS 시크릿 없이 시뮬레이션 구동 (broker.test 섹션 참조)
 # Mock: E2E 테스트 자동화 전용
-is_paper = true             # true: 모의투자, false: 실전투자
-commission_rate = 0.00015   # 매매 수수료율
-sell_tax_rate = 0.0023      # 매도 세금율 (증권거래세+농특세)
+is_paper = true  # true: 모의투자, false: 실전투자
+commission_rate = 0.00015  # 매매 수수료율
+sell_tax_rate = 0.0023  # 매도 세금율 (증권거래세+농특세)
 
 # Test 브로커 전용 설정 (type = "test" 일 때만 사용)
 [broker.test]
-seed = 42                   # 재현 가능한 시뮬레이션 시드
-initial_cash = 100000000    # 초기 자금 (1억)
-tick_interval = 1.0         # 가격 변동 간격 (초)
+seed = 42  # 재현 가능한 시뮬레이션 시드
+initial_cash = 100000000  # 초기 자금 (1억)
+tick_interval = 1.0  # 가격 변동 간격 (초)
+
+[audit]
+retention_days = 90  # 감사 로그 보존 기간 (일). 0이면 무기한 보존
 
 [treasury]
-sync_interval_seconds = 300 # 잔고 동기화 주기 (초)
+sync_interval_seconds = 300  # 잔고 동기화 주기 (초)
 
 # 결재 전결 (자동 승인) 설정
 # ⚠️ 잘못된 설정은 의도하지 않은 거래·자금 변동으로 이어질 수 있으므로 신중하게 사용
 [approval.auto_approve]
-enabled = false                  # 전결 기능 전체 on/off (기본: false)
+enabled = false  # 전결 기능 전체 on/off (기본: false)
 
 # 유형별 전결 규칙 (enabled = true일 때만 적용)
 [approval.auto_approve.rules]
-bot_stop = true                  # 봇 중지는 항상 자동 승인
-bot_create_paper = true          # 모의투자 봇 생성은 자동 승인
-budget_change_max = 5000000      # 예산 변경 500만원 이하 자동 승인 (0이면 비활성)
+bot_stop = true  # 봇 중지는 항상 자동 승인
+bot_create_paper = true  # 모의투자 봇 생성은 자동 승인
+budget_change_max = 5000000  # 예산 변경 500만원 이하 자동 승인 (0이면 비활성)

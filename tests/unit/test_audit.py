@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from ante.audit import AuditLogger
@@ -154,3 +156,102 @@ class TestAuditInit:
         await al.initialize()
         await al.log(member_id="test", action="test.action")
         assert await al.count() == 1
+
+
+# ── 보존 기간 정리 ────────────────────────────────
+
+
+class TestAuditCleanup:
+    """감사 로그 보존 기간(retention) 정리 테스트."""
+
+    async def test_cleanup_deletes_old_logs(
+        self, audit_logger: AuditLogger, db: Database
+    ) -> None:
+        """retention_days 이전 로그가 삭제된다."""
+        # 현재 로그 1건 기록
+        await audit_logger.log(member_id="user-01", action="auth.login")
+
+        # 100일 전 로그를 직접 INSERT
+        old_time = (datetime.now(UTC) - timedelta(days=100)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        await db.execute(
+            "INSERT INTO audit_log"
+            " (member_id, action, resource, detail, ip, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("user-01", "old.action", "", "", "", old_time),
+        )
+        assert await audit_logger.count() == 2
+
+        deleted = await audit_logger.cleanup(retention_days=90)
+        assert deleted == 1
+        assert await audit_logger.count() == 1
+
+        # 남은 건은 최근 로그
+        logs = await audit_logger.query()
+        assert logs[0]["action"] == "auth.login"
+
+    async def test_cleanup_keeps_recent_logs(
+        self, audit_logger: AuditLogger, db: Database
+    ) -> None:
+        """보존 기간 이내 로그는 삭제되지 않는다."""
+        # 30일 전 로그 (retention 90일 이내)
+        recent_time = (datetime.now(UTC) - timedelta(days=30)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        await db.execute(
+            "INSERT INTO audit_log"
+            " (member_id, action, resource, detail, ip, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("user-01", "recent.action", "", "", "", recent_time),
+        )
+        await audit_logger.log(member_id="user-01", action="auth.login")
+
+        deleted = await audit_logger.cleanup(retention_days=90)
+        assert deleted == 0
+        assert await audit_logger.count() == 2
+
+    async def test_cleanup_zero_retention_disabled(
+        self, audit_logger: AuditLogger, db: Database
+    ) -> None:
+        """retention_days=0이면 삭제하지 않는다."""
+        old_time = (datetime.now(UTC) - timedelta(days=1000)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        await db.execute(
+            "INSERT INTO audit_log"
+            " (member_id, action, resource, detail, ip, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("user-01", "ancient.action", "", "", "", old_time),
+        )
+        assert await audit_logger.count() == 1
+
+        deleted = await audit_logger.cleanup(retention_days=0)
+        assert deleted == 0
+        assert await audit_logger.count() == 1
+
+    async def test_cleanup_empty_table(self, audit_logger: AuditLogger) -> None:
+        """빈 테이블에서 cleanup 호출해도 안전."""
+        deleted = await audit_logger.cleanup(retention_days=90)
+        assert deleted == 0
+
+    async def test_cleanup_multiple_old_logs(
+        self, audit_logger: AuditLogger, db: Database
+    ) -> None:
+        """여러 건의 오래된 로그가 한 번에 삭제된다."""
+        old_time = (datetime.now(UTC) - timedelta(days=100)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        for i in range(5):
+            await db.execute(
+                "INSERT INTO audit_log"
+                " (member_id, action, resource, detail, ip, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                ("user-01", f"old.action.{i}", "", "", "", old_time),
+            )
+        await audit_logger.log(member_id="user-01", action="recent.action")
+        assert await audit_logger.count() == 6
+
+        deleted = await audit_logger.cleanup(retention_days=90)
+        assert deleted == 5
+        assert await audit_logger.count() == 1
