@@ -113,7 +113,7 @@ class TestOnBacktestComplete:
         result_file.write_text(json.dumps(_SAMPLE_RESULT))
 
         mock_store = AsyncMock()
-        mock_store.submit = AsyncMock(return_value="report-123")
+        mock_store.upsert_draft = AsyncMock(return_value="report-123")
         mock_eventbus = AsyncMock()
         mock_eventbus.subscribe = MagicMock()
         mock_eventbus.publish = AsyncMock()
@@ -129,8 +129,8 @@ class TestOnBacktestComplete:
 
         await generator._on_backtest_complete(event)
 
-        mock_store.submit.assert_called_once()
-        submitted_report = mock_store.submit.call_args[0][0]
+        mock_store.upsert_draft.assert_called_once()
+        submitted_report = mock_store.upsert_draft.call_args[0][0]
         assert submitted_report.status == ReportStatus.DRAFT
         assert submitted_report.total_return_pct == 15.0
 

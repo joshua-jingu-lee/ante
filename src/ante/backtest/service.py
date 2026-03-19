@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.exceptions import BacktestConfigError, BacktestError
@@ -14,6 +14,9 @@ from ante.backtest.executor import BacktestExecutor
 from ante.backtest.result import BacktestResult
 from ante.data.store import ParquetStore
 from ante.strategy.loader import StrategyLoader
+
+if TYPE_CHECKING:
+    from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +27,13 @@ class BacktestService:
     in-process 실행과 subprocess 격리 실행 두 모드를 지원한다.
     """
 
-    def __init__(self, data_path: str = "data/") -> None:
+    def __init__(
+        self,
+        data_path: str = "data/",
+        eventbus: EventBus | None = None,
+    ) -> None:
         self._data_path = data_path
+        self._eventbus = eventbus
         self._running: dict[str, asyncio.Task] = {}
 
     async def run(
@@ -60,7 +68,12 @@ class BacktestService:
             slippage_rate=config.get("slippage_rate", 0.001),
         )
 
-        return await executor.run(progress_callback=progress_callback)
+        result = await executor.run(progress_callback=progress_callback)
+
+        # BacktestCompleteEvent 발행
+        await self._publish_complete_event(result, config)
+
+        return result
 
     async def run_subprocess(self, config: dict[str, Any]) -> dict:
         """백테스트를 subprocess로 격리 실행 (D-004)."""
@@ -83,6 +96,27 @@ class BacktestService:
             raise BacktestError(msg)
 
         return json.loads(stdout.decode())
+
+    async def _publish_complete_event(
+        self,
+        result: BacktestResult,
+        config: dict[str, Any],
+    ) -> None:
+        """BacktestCompleteEvent 발행."""
+        if not self._eventbus:
+            return
+
+        from ante.eventbus.events import BacktestCompleteEvent
+
+        strategy_id = f"{result.strategy_name}_v{result.strategy_version}"
+        event = BacktestCompleteEvent(
+            backtest_id=strategy_id,
+            strategy_id=strategy_id,
+            status="completed",
+            result_path=config.get("result_path", ""),
+        )
+        await self._eventbus.publish(event)
+        logger.info("BacktestCompleteEvent 발행: %s", strategy_id)
 
     def _validate_config(self, config: dict[str, Any]) -> None:
         """설정 검증."""

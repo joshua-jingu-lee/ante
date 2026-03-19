@@ -23,6 +23,7 @@ def backtest() -> None:
 @click.option("--balance", default=10_000_000, type=float, help="초기 자금")
 @click.option("--timeframe", default="1d", help="타임프레임")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
 @require_scope("backtest:run")
@@ -35,6 +36,7 @@ def run(
     balance: float,
     timeframe: str,
     data_path: str,
+    db_path: str,
 ) -> None:
     """백테스트 실행."""
     from ante.backtest.service import BacktestService
@@ -80,8 +82,13 @@ def run(
         result_dict = result.to_dict()
         metrics = result_dict.get("metrics", {})
 
+        # backtest_runs 이력 저장
+        run_id = asyncio.run(_save_backtest_run(db_path, result, config, metrics))
+        result_dict["run_id"] = run_id
+
         fmt.output(
             result_dict,
+            "Run ID: {run_id}\n"
             "Strategy: {strategy}\n"
             "Period: {period}\n"
             "Return: {total_return_pct}%\n"
@@ -93,6 +100,95 @@ def run(
             metric_rows = _format_metrics(metrics)
             fmt.table(metric_rows, ["지표", "값"])
 
+    except Exception as e:
+        fmt.error(str(e), code="BACKTEST_ERROR")
+        raise SystemExit(1) from e
+
+
+async def _save_backtest_run(
+    db_path: str,
+    result: object,
+    config: dict,
+    metrics: dict,
+) -> str:
+    """backtest_runs 테이블에 이력 저장."""
+    from ante.backtest.run_store import BacktestRunStore
+    from ante.core.database import Database
+
+    db = Database(db_path)
+    await db.connect()
+    try:
+        store = BacktestRunStore(db)
+        await store.initialize()
+        return await store.save(
+            strategy_name=result.strategy_name,
+            strategy_version=result.strategy_version,
+            params=config,
+            total_return_pct=round(result.total_return, 2),
+            sharpe_ratio=metrics.get("sharpe_ratio"),
+            max_drawdown_pct=metrics.get("max_drawdown"),
+            total_trades=len(result.trades),
+            win_rate=metrics.get("win_rate"),
+            result_path="",
+        )
+    finally:
+        await db.close()
+
+
+@backtest.command()
+@click.argument("strategy_name")
+@click.option("--limit", default=20, type=int, help="조회 건수")
+@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.pass_context
+@require_auth
+@require_scope("backtest:run")
+def history(
+    ctx: click.Context,
+    strategy_name: str,
+    limit: int,
+    db_path: str,
+) -> None:
+    """전략별 백테스트 실행 이력 조회."""
+    fmt = get_formatter(ctx)
+
+    async def _list() -> list[dict]:
+        from ante.backtest.run_store import BacktestRunStore
+        from ante.core.database import Database
+
+        db = Database(db_path)
+        await db.connect()
+        try:
+            store = BacktestRunStore(db)
+            await store.initialize()
+            runs = await store.list_by_strategy(strategy_name, limit=limit)
+            return [r.to_dict() for r in runs]
+        finally:
+            await db.close()
+
+    try:
+        rows = asyncio.run(_list())
+        if not rows:
+            fmt.output(
+                {"message": f"'{strategy_name}' 백테스트 이력이 없습니다.", "runs": []},
+                f"'{strategy_name}' 백테스트 이력이 없습니다.",
+            )
+            return
+
+        if fmt.is_json:
+            fmt.output({"strategy_name": strategy_name, "runs": rows})
+        else:
+            fmt.table(
+                rows,
+                [
+                    "run_id",
+                    "strategy_version",
+                    "total_return_pct",
+                    "sharpe_ratio",
+                    "total_trades",
+                    "win_rate",
+                    "created_at",
+                ],
+            )
     except Exception as e:
         fmt.error(str(e), code="BACKTEST_ERROR")
         raise SystemExit(1) from e

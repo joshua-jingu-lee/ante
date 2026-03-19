@@ -32,10 +32,16 @@ def schema(ctx: click.Context) -> None:
 @report.command()
 @click.argument("json_path", type=click.Path(exists=True))
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--run", "run_id", default=None, help="참조할 백테스트 run_id")
 @click.pass_context
 @require_auth
 @require_scope("report:write")
-def submit(ctx: click.Context, json_path: str, db_path: str) -> None:
+def submit(
+    ctx: click.Context,
+    json_path: str,
+    db_path: str,
+    run_id: str | None,
+) -> None:
     """리포트 제출."""
     from ante.report import ReportStore
 
@@ -44,15 +50,66 @@ def submit(ctx: click.Context, json_path: str, db_path: str) -> None:
     with open(json_path) as f:
         report_data = json.load(f)
 
+    # --run 옵션으로 백테스트 run 참조 추가
+    if run_id:
+        report_data["backtest_run_id"] = run_id
+
     async def _submit() -> dict:
-        store = ReportStore(db_path=db_path)
-        await store.initialize()
-        report_obj = await store.submit(report_data)
-        return {
-            "report_id": report_obj.report_id,
-            "strategy": report_obj.strategy_name,
-            "status": report_obj.status.value,
-        }
+        from ante.core.database import Database
+
+        db = Database(db_path)
+        await db.connect()
+        try:
+            # run_id가 제공되면 backtest_runs에서 참조 검증
+            if run_id:
+                from ante.backtest.run_store import BacktestRunStore
+
+                run_store = BacktestRunStore(db)
+                await run_store.initialize()
+                bt_run = await run_store.get(run_id)
+                if not bt_run:
+                    msg = f"백테스트 run을 찾을 수 없습니다: {run_id}"
+                    raise ValueError(msg)
+
+            store = ReportStore(db)
+            await store.initialize()
+
+            # StrategyReport 생성
+            from datetime import UTC, datetime
+            from uuid import uuid4
+
+            from ante.report.models import ReportStatus, StrategyReport
+
+            report_obj = StrategyReport(
+                report_id=str(uuid4()),
+                strategy_name=report_data["strategy_name"],
+                strategy_version=report_data["strategy_version"],
+                strategy_path=report_data.get("strategy_path", ""),
+                status=ReportStatus.SUBMITTED,
+                submitted_at=datetime.now(tz=UTC),
+                submitted_by=report_data.get("submitted_by", "agent"),
+                backtest_period=report_data.get("backtest_period", ""),
+                total_return_pct=float(report_data.get("total_return_pct", 0)),
+                total_trades=int(report_data.get("total_trades", 0)),
+                sharpe_ratio=report_data.get("sharpe_ratio"),
+                max_drawdown_pct=report_data.get("max_drawdown_pct"),
+                win_rate=report_data.get("win_rate"),
+                summary=report_data.get("summary", ""),
+                rationale=report_data.get("rationale", ""),
+                risks=report_data.get("risks", ""),
+                recommendations=report_data.get("recommendations", ""),
+                detail_json=json.dumps(report_data.get("detail_json", {})),
+            )
+
+            report_id = await store.submit(report_obj)
+            return {
+                "report_id": report_id,
+                "strategy": report_obj.strategy_name,
+                "status": report_obj.status.value,
+                "backtest_run_id": run_id,
+            }
+        finally:
+            await db.close()
 
     try:
         result = asyncio.run(_submit())
