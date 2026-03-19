@@ -679,27 +679,6 @@ class AuditLogListResponse(BaseModel):
     total: int
 
 
-# ── 알림 ──────────────────────────────────────────────
-
-
-class NotificationItem(BaseModel):
-    """알림 이력 아이템."""
-
-    id: str
-    level: str
-    title: str
-    message: str
-    success: bool
-    created_at: str
-
-
-class NotificationListResponse(BaseModel):
-    """알림 이력 목록 응답."""
-
-    notifications: list[NotificationItem]
-    next_cursor: str | None = None
-
-
 # ── 테스트 시드 ──────────────────────────────────────────────
 
 

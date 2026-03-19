@@ -801,10 +801,7 @@ async def _init_notification(s: Services) -> None:
         adapter=adapter,
         eventbus=s.eventbus,
         min_level=NotificationLevel(min_level_str),
-        instrument_service=s.instrument_service,
-        db=s.db,
     )
-    await s.notification_service.initialize()
     s.notification_service.subscribe()
     logger.info("NotificationService 초기화 완료 (Telegram)")
 

@@ -36,7 +36,6 @@ from ante.web.schemas import (
     MemberTokenResponse,
     MeResponse,
     MonthlySummaryResponse,
-    NotificationListResponse,
     OkResponse,
     PortfolioHistoryResponse,
     PortfolioValueResponse,
@@ -991,37 +990,6 @@ class TestAuditLogResponseModels:
         }
         model = AuditLogListResponse.model_validate(data)
         assert model.total == 1
-
-
-# ── 알림 라우트 응답 모델 ──────────────────────────
-
-
-class TestNotificationResponseModels:
-    """notifications.py 핸들러 반환값과 응답 모델 호환성."""
-
-    def test_notification_list_response(self):
-        """GET /api/notifications."""
-        data = {
-            "notifications": [
-                {
-                    "id": "1",
-                    "level": "info",
-                    "title": "봇 시작",
-                    "message": "bot-1이 시작되었습니다",
-                    "success": True,
-                    "created_at": "2026-03-19T10:00:00Z",
-                }
-            ],
-            "next_cursor": None,
-        }
-        model = NotificationListResponse.model_validate(data)
-        assert model.notifications[0].level == "info"
-
-    def test_notification_list_empty(self):
-        """GET /api/notifications — 비어있을 때."""
-        data = {"notifications": [], "next_cursor": None}
-        model = NotificationListResponse.model_validate(data)
-        assert len(model.notifications) == 0
 
 
 # ── 에러 응답 모델 ──────────────────────────

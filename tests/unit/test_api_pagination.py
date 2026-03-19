@@ -148,29 +148,3 @@ class TestTradesEndpointPagination:
         data = resp.json()
         assert len(data["trades"]) == 3
         assert data["next_cursor"] is not None
-
-
-class TestNotificationsEndpointPagination:
-    def test_notifications_pagination(self):
-        """알림 이력 페이지네이션."""
-        mock_service = AsyncMock()
-        rows = [
-            {
-                "id": i,
-                "level": "INFO",
-                "title": "",
-                "message": f"msg-{i}",
-                "success": 1,
-                "created_at": "2025-01-01",
-            }
-            for i in range(5)
-        ]
-        mock_service.get_history = AsyncMock(return_value=rows)
-
-        app = create_app(notification_service=mock_service)
-        client = TestClient(app)
-        resp = client.get("/api/notifications?limit=3")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["notifications"]) == 3
-        assert data["next_cursor"] is not None
