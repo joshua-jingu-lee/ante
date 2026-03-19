@@ -37,6 +37,10 @@ def treasury():
     mock = MagicMock()
     mock.get_summary.return_value = {
         "account_balance": 10_000_000,
+        "purchasable_amount": 7_000_000,
+        "ante_purchase_amount": 2_500_000,
+        "ante_eval_amount": 2_650_000,
+        "ante_profit_loss": 150_000,
         "total_allocated": 5_000_000,
         "unallocated": 5_000_000,
         "bot_count": 2,
@@ -157,9 +161,47 @@ class TestCommands:
 
     async def test_balance(self, receiver):
         result = receiver._cmd_balance([])
-        assert "계좌 잔고" in result
-        assert "10,000,000" in result
-        assert "할당" in result
+        assert "자금 현황" in result
+        assert "계좌 예수금: 10,000,000원" in result
+        assert "매수 가능: 7,000,000원" in result
+        assert "매입: 2,500,000원" in result
+        assert "평가: 2,650,000원" in result
+        assert "+150,000원" in result
+        assert "봇 할당: 5,000,000원 (2개)" in result
+        assert "미할당: 5,000,000원" in result
+
+    async def test_balance_no_positions(self, receiver, treasury):
+        """Ante 관리 종목이 없으면 해당 섹션 미표시."""
+        treasury.get_summary.return_value = {
+            "account_balance": 10_000_000,
+            "purchasable_amount": 10_000_000,
+            "ante_purchase_amount": 0,
+            "ante_eval_amount": 0,
+            "ante_profit_loss": 0,
+            "total_allocated": 0,
+            "unallocated": 10_000_000,
+            "bot_count": 0,
+        }
+        result = receiver._cmd_balance([])
+        assert "자금 현황" in result
+        assert "Ante 관리 종목" not in result
+        assert "봇 할당: 0원 (0개)" in result
+
+    async def test_balance_negative_pl(self, receiver, treasury):
+        """손실 시 음수 부호 및 📉 이모지."""
+        treasury.get_summary.return_value = {
+            "account_balance": 10_000_000,
+            "purchasable_amount": 7_000_000,
+            "ante_purchase_amount": 2_500_000,
+            "ante_eval_amount": 2_300_000,
+            "ante_profit_loss": -200_000,
+            "total_allocated": 5_000_000,
+            "unallocated": 5_000_000,
+            "bot_count": 2,
+        }
+        result = receiver._cmd_balance([])
+        assert "📉" in result
+        assert "-200,000원" in result
 
     async def test_balance_no_treasury(self, receiver):
         receiver._treasury = None
