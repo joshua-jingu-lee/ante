@@ -11,6 +11,7 @@ class ApprovalStatus(StrEnum):
 
     PENDING = "pending"
     APPROVED = "approved"
+    EXECUTION_FAILED = "execution_failed"
     REJECTED = "rejected"
     ON_HOLD = "on_hold"
     EXPIRED = "expired"

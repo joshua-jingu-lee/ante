@@ -850,3 +850,230 @@ class TestValidationModels:
         assert ApprovalType.BOT_CHANGE_STRATEGY == "bot_change_strategy"
         assert ApprovalType.BOT_RESUME == "bot_resume"
         assert ApprovalType.BOT_DELETE == "bot_delete"
+
+
+class TestExecutionFailed:
+    async def test_executor_failure_transitions_to_execution_failed(self, db, eventbus):
+        """executor 실패 시 execution_failed 상태로 전환."""
+
+        async def failing_executor(params: dict) -> None:
+            msg = "잔액 부족"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="실행 실패 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        result = await svc.approve(req.id)
+
+        assert result.status == "execution_failed"
+        assert any(h["action"] == "execution_failed" for h in result.history)
+        # 에러 메시지가 history에 기록
+        failed_entry = next(
+            h for h in result.history if h["action"] == "execution_failed"
+        )
+        assert "잔액 부족" in failed_entry["detail"]
+
+    async def test_execution_failed_persisted_in_db(self, db, eventbus):
+        """execution_failed 상태가 DB에 영속화."""
+
+        async def failing_executor(params: dict) -> None:
+            msg = "봇 미존재"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"bot_stop": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="bot_stop",
+            requester="agent",
+            title="영속화 테스트",
+            params={"bot_id": "bot-1"},
+        )
+        await svc.approve(req.id)
+
+        fetched = await svc.get(req.id)
+        assert fetched is not None
+        assert fetched.status == "execution_failed"
+        assert any(h["action"] == "execution_failed" for h in fetched.history)
+
+    async def test_reapprove_after_execution_failed(self, db, eventbus):
+        """execution_failed 상태에서 재승인 → executor 재실행."""
+        call_count = 0
+
+        async def flaky_executor(params: dict) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                msg = "일시적 오류"
+                raise RuntimeError(msg)
+            # 두 번째 호출은 성공
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": flaky_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="재승인 테스트",
+            params={"bot_id": "bot-1", "amount": 10000000},
+        )
+        failed = await svc.approve(req.id)
+        assert failed.status == "execution_failed"
+
+        # 재승인
+        success = await svc.approve(req.id)
+        assert success.status == "approved"
+        assert call_count == 2
+        assert any(h["action"] == "executed" for h in success.history)
+
+    async def test_reject_after_execution_failed(self, db, eventbus):
+        """execution_failed 상태에서 거절 가능."""
+
+        async def failing_executor(params: dict) -> None:
+            msg = "실패"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="거절 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await svc.approve(req.id)
+        rejected = await svc.reject(req.id, reject_reason="원인 해소 불가")
+
+        assert rejected.status == "rejected"
+        assert rejected.reject_reason == "원인 해소 불가"
+
+    async def test_hold_after_execution_failed(self, db, eventbus):
+        """execution_failed 상태에서 보류 가능."""
+
+        async def failing_executor(params: dict) -> None:
+            msg = "실패"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="보류 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await svc.approve(req.id)
+        held = await svc.hold(req.id)
+
+        assert held.status == "on_hold"
+
+    async def test_cancel_after_execution_failed(self, db, eventbus):
+        """execution_failed 상태에서 철회 가능."""
+
+        async def failing_executor(params: dict) -> None:
+            msg = "실패"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent:dev",
+            title="철회 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await svc.approve(req.id)
+        cancelled = await svc.cancel(req.id, requester="agent:dev")
+
+        assert cancelled.status == "cancelled"
+
+    async def test_execution_failed_publishes_event(self, db, eventbus):
+        """executor 실패 시 ApprovalResolvedEvent에 execution_failed resolution."""
+        received = []
+
+        async def handler(event: object) -> None:
+            if isinstance(event, ApprovalResolvedEvent):
+                received.append(event)
+
+        eventbus.subscribe(ApprovalResolvedEvent, handler)
+
+        async def failing_executor(params: dict) -> None:
+            msg = "실패"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="이벤트 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await svc.approve(req.id)
+
+        assert len(received) == 1
+        assert received[0].resolution == "execution_failed"
+
+    async def test_list_filter_execution_failed(self, db, eventbus):
+        """execution_failed 상태 필터 조회."""
+
+        async def failing_executor(params: dict) -> None:
+            msg = "실패"
+            raise RuntimeError(msg)
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            executors={"budget_change": failing_executor},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="필터 테스트",
+            params={"bot_id": "bot-1", "amount": 25000000},
+        )
+        await svc.approve(req.id)
+
+        failed_list = await svc.list(status="execution_failed")
+        assert len(failed_list) == 1
+        assert failed_list[0].status == "execution_failed"
