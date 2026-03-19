@@ -507,6 +507,9 @@ class MemberService:
         """멤버 영구 폐기. 토큰 해시 삭제."""
         member = await self._get_or_raise(member_id)
         self._assert_not_master(member, "revoke")
+        self._assert_status(
+            member, (MemberStatus.ACTIVE, MemberStatus.SUSPENDED), "revoke"
+        )
 
         now = _now()
         await self._db.execute(
@@ -629,11 +632,15 @@ class MemberService:
             raise PermissionError(msg)
 
     @staticmethod
-    def _assert_status(member: Member, expected: str, action: str) -> None:
-        """특정 상태 검증."""
-        if member.status != expected:
+    def _assert_status(
+        member: Member, expected: str | tuple[str, ...], action: str
+    ) -> None:
+        """특정 상태 검증. 단일 또는 복수 상태를 허용한다."""
+        statuses = (expected,) if isinstance(expected, str) else expected
+        if member.status not in statuses:
+            allowed = ", ".join(statuses)
             msg = (
-                f"{action}은(는) {expected} 상태에서만 "
+                f"{action}은(는) {allowed} 상태에서만 "
                 f"가능합니다 (현재: {member.status})"
             )
             raise PermissionError(msg)

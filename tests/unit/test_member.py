@@ -264,6 +264,19 @@ class TestSuspendReactivateRevoke:
         assert m.status == MemberStatus.REVOKED
         assert m.token_hash == ""
 
+    async def test_revoke_suspended_member(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        await service.suspend("agent-01", suspended_by="owner")
+        m = await service.revoke("agent-01", revoked_by="owner")
+        assert m.status == MemberStatus.REVOKED
+        assert m.token_hash == ""
+
+    async def test_revoke_already_revoked_fails(self, service):
+        await service.register("agent-01", MemberType.AGENT)
+        await service.revoke("agent-01", revoked_by="owner")
+        with pytest.raises(PermissionError, match="active, suspended 상태에서만"):
+            await service.revoke("agent-01", revoked_by="owner")
+
     async def test_revoke_master_fails(self, service):
         await service.bootstrap_master("owner", "pass123")
         with pytest.raises(PermissionError, match="master는 revoke"):
