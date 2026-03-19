@@ -415,11 +415,33 @@ async def _init_feed(s: Services) -> None:
     # ApprovalService
     from ante.approval import ApprovalService
 
+    async def _exec_rule_change(params: dict) -> None:
+        s.rule_engine.update_rules(params["bot_id"], params["rules"])
+
     approval_executors: dict = {
+        # 전략 관련
         "strategy_adopt": lambda params: s.report_store.update_status(
             params["report_id"], "adopted"
         ),
+        "strategy_retire": lambda params: s.report_store.update_status(
+            params["report_id"], "retired"
+        ),
+        # 봇 생명주기
+        "bot_create": lambda params: s.bot_manager.create_bot(**params),
+        "bot_assign_strategy": lambda params: s.bot_manager.assign_strategy(
+            params["bot_id"], params["strategy_id"]
+        ),
+        "bot_change_strategy": lambda params: s.bot_manager.change_strategy(
+            params["bot_id"], params["strategy_id"]
+        ),
         "bot_stop": lambda params: s.bot_manager.stop_bot(params["bot_id"]),
+        "bot_resume": lambda params: s.bot_manager.resume_bot(params["bot_id"]),
+        "bot_delete": lambda params: s.bot_manager.delete_bot(params["bot_id"]),
+        # 자금·규칙
+        "budget_change": lambda params: s.treasury.update_budget(
+            params["bot_id"], params["amount"]
+        ),
+        "rule_change": _exec_rule_change,
     }
     s.approval_service = ApprovalService(
         db=s.db, eventbus=s.eventbus, executors=approval_executors
