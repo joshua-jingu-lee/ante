@@ -49,7 +49,7 @@ class ReportDraftGenerator:
                 return
 
             report = self.generate_draft(result_data, event.strategy_id)
-            await self._store.submit(report)
+            await self._store.upsert_draft(report)
 
             from ante.eventbus.events import NotificationEvent
 

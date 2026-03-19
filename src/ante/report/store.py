@@ -95,6 +95,59 @@ class ReportStore:
         )
         return report.report_id
 
+    async def upsert_draft(self, report: StrategyReport) -> str:
+        """DRAFT 리포트 upsert — 전략당 DRAFT 1건만 유지.
+
+        동일 strategy_name의 기존 DRAFT가 있으면 덮어쓰고,
+        없으면 새로 삽입한다.
+        """
+        existing = await self._db.fetch_one(
+            "SELECT report_id FROM reports WHERE strategy_name = ? AND status = ?",
+            (report.strategy_name, ReportStatus.DRAFT.value),
+        )
+
+        if existing:
+            # 기존 DRAFT 업데이트
+            old_id = existing["report_id"]
+            await self._db.execute(
+                """UPDATE reports
+                   SET strategy_version = ?, strategy_path = ?,
+                       submitted_at = ?, submitted_by = ?,
+                       backtest_period = ?, total_return_pct = ?,
+                       total_trades = ?, sharpe_ratio = ?,
+                       max_drawdown_pct = ?, win_rate = ?,
+                       summary = ?, rationale = ?, risks = ?,
+                       recommendations = ?, detail_json = ?
+                   WHERE report_id = ?""",
+                (
+                    report.strategy_version,
+                    report.strategy_path,
+                    report.submitted_at.isoformat(),
+                    report.submitted_by,
+                    report.backtest_period,
+                    report.total_return_pct,
+                    report.total_trades,
+                    report.sharpe_ratio,
+                    report.max_drawdown_pct,
+                    report.win_rate,
+                    report.summary,
+                    report.rationale,
+                    report.risks,
+                    report.recommendations,
+                    report.detail_json,
+                    old_id,
+                ),
+            )
+            logger.info(
+                "DRAFT 리포트 갱신: %s (%s)",
+                old_id,
+                report.strategy_name,
+            )
+            return old_id
+
+        # 신규 DRAFT 삽입
+        return await self.submit(report)
+
     async def get(self, report_id: str) -> StrategyReport | None:
         """리포트 조회."""
         row = await self._db.fetch_one(

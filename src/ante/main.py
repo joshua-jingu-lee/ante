@@ -546,11 +546,18 @@ async def _init_feed(s: Services) -> None:
         s.data_collector = DataCollector(store=s.parquet_store, eventbus=s.eventbus)
     logger.info("Data Pipeline 초기화 완료: %s", data_path)
 
-    # BacktestService
+    # BacktestService (EventBus 주입)
     from ante.backtest import BacktestService
 
-    s.backtest_service = BacktestService(data_path=data_path)
+    s.backtest_service = BacktestService(data_path=data_path, eventbus=s.eventbus)
     logger.info("BacktestService 초기화 완료")
+
+    # BacktestRunStore
+    from ante.backtest.run_store import BacktestRunStore
+
+    backtest_run_store = BacktestRunStore(db=s.db)
+    await backtest_run_store.initialize()
+    logger.info("BacktestRunStore 초기화 완료")
 
     # ReportStore
     from ante.report import ReportStore
@@ -558,6 +565,16 @@ async def _init_feed(s: Services) -> None:
     s.report_store = ReportStore(db=s.db)
     await s.report_store.initialize()
     logger.info("ReportStore 초기화 완료")
+
+    # ReportDraftGenerator — BacktestCompleteEvent 구독
+    from ante.report import ReportDraftGenerator
+
+    draft_generator = ReportDraftGenerator(
+        report_store=s.report_store,
+        eventbus=s.eventbus,
+    )
+    draft_generator.initialize()
+    logger.info("ReportDraftGenerator 초기화 완료")
 
     # ApprovalService
     from ante.approval import ApprovalService
