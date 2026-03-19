@@ -286,8 +286,8 @@ class RuleEngine:
                             await self._eventbus.publish(
                                 NotificationEvent(
                                     level="warning",
-                                    message=f"Rule warning: {ev.message}",
-                                    metadata=ev.metadata,
+                                    title=f"Rule warning: {ev.message}",
+                                    category="system",
                                 )
                             )
             else:
