@@ -551,7 +551,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/api/strategies/{strategy_id}/performance/daily": {
+    "/api/strategies/{strategy_id}/daily-summary": {
         parameters: {
             query?: never;
             header?: never;
@@ -568,7 +568,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/api/strategies/{strategy_id}/performance/monthly": {
+    "/api/strategies/{strategy_id}/monthly-summary": {
         parameters: {
             query?: never;
             header?: never;
@@ -585,7 +585,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/api/strategies/{strategy_id}/performance/weekly": {
+    "/api/strategies/{strategy_id}/weekly-summary": {
         parameters: {
             query?: never;
             header?: never;

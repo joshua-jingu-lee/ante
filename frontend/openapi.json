@@ -351,7 +351,7 @@
         }
       }
     },
-    "/api/strategies/{strategy_id}/performance/daily": {
+    "/api/strategies/{strategy_id}/daily-summary": {
       "get": {
         "operationId": "get_daily_summary",
         "summary": "일별 성과 집계",
@@ -379,7 +379,7 @@
         }
       }
     },
-    "/api/strategies/{strategy_id}/performance/weekly": {
+    "/api/strategies/{strategy_id}/weekly-summary": {
       "get": {
         "operationId": "get_weekly_summary",
         "summary": "주별 성과 집계",
@@ -407,7 +407,7 @@
         }
       }
     },
-    "/api/strategies/{strategy_id}/performance/monthly": {
+    "/api/strategies/{strategy_id}/monthly-summary": {
       "get": {
         "operationId": "get_monthly_summary",
         "summary": "월별 성과 집계",
