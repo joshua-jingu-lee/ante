@@ -247,6 +247,8 @@ async def _init_broker(s: Services) -> None:
 
     if broker_type == "mock":
         await _connect_mock_broker(s, broker_config)
+    elif broker_type == "test":
+        await _connect_test_broker(s, broker_config)
     else:
         await _connect_kis_broker(s, broker_config)
 
@@ -268,6 +270,22 @@ async def _connect_mock_broker(s: Services, broker_config: dict) -> None:
     )
     await s.broker.connect()
     logger.info("MockBrokerAdapter 연결 완료")
+
+
+async def _connect_test_broker(s: Services, broker_config: dict) -> None:
+    """TestBrokerAdapter 연결."""
+    from ante.broker import TestBrokerAdapter
+
+    test_config = (
+        broker_config.get("test", {}) if isinstance(broker_config, dict) else {}
+    )
+    merged = {
+        **(broker_config if isinstance(broker_config, dict) else {}),
+        **test_config,
+    }
+    s.broker = TestBrokerAdapter(merged)
+    await s.broker.connect()
+    logger.info("TestBrokerAdapter 연결 완료 (seed=%s)", merged.get("seed", 42))
 
 
 async def _connect_kis_broker(s: Services, broker_config: dict) -> None:
