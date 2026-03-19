@@ -122,6 +122,16 @@ def _param_display_name(param: click.Parameter) -> str:
 # ── Markdown generation ──────────────────────────────────────────────────────
 
 
+def _to_anchor(heading: str) -> str:
+    """마크다운 헤딩을 GitHub 호환 앵커로 변환한다."""
+    import re
+
+    anchor = heading.lower()
+    anchor = re.sub(r"[^\w\s가-힣-]", "", anchor)
+    anchor = re.sub(r"\s+", "-", anchor.strip())
+    return anchor
+
+
 def _write_header(out: TextIO) -> None:
     """문서 헤더를 출력한다."""
     kst = timezone(timedelta(hours=9))
@@ -133,6 +143,41 @@ def _write_header(out: TextIO) -> None:
     )
     out.write("> 직접 수정하지 마세요. CLI 코드 변경 후 스크립트를 재실행하세요.\n")
     out.write(f">\n> 마지막 갱신: {today}\n\n")
+
+
+def _write_toc(
+    out: TextIO,
+    grouped: dict[str, list[tuple[str, click.BaseCommand]]],
+) -> None:
+    """목차를 출력한다."""
+    out.write("## 목차\n\n")
+    out.write(f"- [글로벌 옵션](#{_to_anchor('글로벌 옵션')})\n")
+    out.write(f"- [명령어 요약](#{_to_anchor('명령어 요약')})\n")
+
+    for group_name in sorted(grouped):
+        items = grouped[group_name]
+        # 그룹 헤딩 텍스트 재현
+        group_cmd = None
+        for _, cmd in items:
+            if isinstance(cmd, click.Group):
+                group_cmd = cmd
+                break
+
+        group_help = ""
+        if group_cmd and group_cmd.help:
+            group_help = f" \u2014 {group_cmd.help.strip().split(chr(10))[0]}"
+
+        heading = f"{group_name}{group_help}"
+        out.write(f"- [{heading}](#{_to_anchor(heading)})\n")
+
+        # 리프 커맨드 서브 항목
+        for full_name, cmd in items:
+            if isinstance(cmd, click.Group):
+                continue
+            sub_heading = f"ante {full_name}"
+            out.write(f"  - [{sub_heading}](#{_to_anchor(sub_heading)})\n")
+
+    out.write("\n---\n\n")
 
 
 def _write_global_options(out: TextIO, cli: click.Group) -> None:
@@ -251,12 +296,14 @@ def generate_cli_reference(out: TextIO) -> int:
     commands = _collect_commands(cli)
     leaf_commands = [(n, c) for n, c in commands if not isinstance(c, click.Group)]
 
+    grouped = _group_by_top_level(commands)
+
     _write_header(out)
+    _write_toc(out, grouped)
     _write_global_options(out, cli)
     _write_summary_table(out, leaf_commands)
 
     # 그룹별 상세
-    grouped = _group_by_top_level(commands)
     for group_name in sorted(grouped):
         items = grouped[group_name]
         # 그룹 설명 찾기
