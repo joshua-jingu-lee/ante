@@ -418,7 +418,10 @@ def _init_context_factory(s: Services) -> None:
     from ante.gateway.data_provider import LiveDataProvider
 
     if s.api_gateway:
-        s.data_provider = LiveDataProvider(gateway=s.api_gateway)
+        s.data_provider = LiveDataProvider(
+            gateway=s.api_gateway,
+            parquet_store=s.parquet_store,
+        )
         s.paper_executor._gateway = s.api_gateway
 
     live_trade_history = LiveTradeHistoryView(trade_recorder=s.trade_recorder)

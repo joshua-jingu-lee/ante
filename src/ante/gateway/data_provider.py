@@ -8,19 +8,28 @@ from typing import TYPE_CHECKING, Any
 from ante.strategy.base import DataProvider
 
 if TYPE_CHECKING:
+    from ante.data.store import ParquetStore
     from ante.gateway.gateway import APIGateway
 
 logger = logging.getLogger(__name__)
 
 
 class LiveDataProvider(DataProvider):
-    """라이브 모드 DataProvider. APIGateway 경유로 캐시 활용.
+    """라이브 모드 DataProvider. ParquetStore + APIGateway 조합.
+
+    과거 봉 데이터는 ParquetStore에서 읽고, 현재가는 APIGateway 캐시를 활용한다.
+    ParquetStore에 데이터가 없으면 APIGateway 경유로 폴백한다.
 
     Note: DataProvider 인터페이스 준수를 위해 async def를 유지한다.
     """
 
-    def __init__(self, gateway: APIGateway) -> None:
+    def __init__(
+        self,
+        gateway: APIGateway,
+        parquet_store: ParquetStore | None = None,
+    ) -> None:
         self._gateway = gateway
+        self._store = parquet_store
 
     async def get_ohlcv(
         self,
@@ -28,11 +37,30 @@ class LiveDataProvider(DataProvider):
         timeframe: str = "1d",
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """OHLCV 데이터 조회 (APIGateway 경유).
+        """OHLCV 데이터 조회 (ParquetStore 우선, APIGateway 폴백).
 
-        APIGateway.get_ohlcv()를 통해 과거 봉 데이터를 가져온다.
-        BrokerAdapter에 get_ohlcv가 구현되어 있지 않으면 빈 리스트를 반환한다.
+        1. ParquetStore가 주입되어 있으면 과거 봉 데이터를 읽는다.
+        2. ParquetStore에 데이터가 없으면 APIGateway 경유로 폴백한다.
+        3. 둘 다 데이터가 없으면 빈 리스트를 반환한다.
         """
+        if self._store is not None:
+            try:
+                df = self._store.read(symbol, timeframe, limit=limit)
+                if not df.is_empty():
+                    return df.to_dicts()
+                logger.warning(
+                    "ParquetStore 데이터 없음 — APIGateway 폴백: %s %s",
+                    symbol,
+                    timeframe,
+                )
+            except Exception:
+                logger.warning(
+                    "ParquetStore 읽기 실패 — APIGateway 폴백: %s %s",
+                    symbol,
+                    timeframe,
+                    exc_info=True,
+                )
+
         return await self._gateway.get_ohlcv(symbol, timeframe=timeframe, limit=limit)
 
     async def get_current_price(self, symbol: str) -> float:
