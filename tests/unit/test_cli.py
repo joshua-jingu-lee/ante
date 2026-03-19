@@ -225,8 +225,21 @@ class TestStrategyCommands:
         assert result.exit_code != 0
 
     def test_list(self, runner):
-        result = runner.invoke(cli, ["strategy", "list"])
-        assert result.exit_code == 0
+        from unittest.mock import AsyncMock, MagicMock
+
+        db = MagicMock()
+        db.connect = AsyncMock()
+        db.close = AsyncMock()
+        registry = MagicMock()
+        registry.list_strategies = AsyncMock(return_value=[])
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(cli, ["strategy", "list"])
+            assert result.exit_code == 0
 
 
 # ── Data 커맨드 테스트 ──────────────────────────────
