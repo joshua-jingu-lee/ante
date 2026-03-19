@@ -356,15 +356,45 @@ class TelegramCommandReceiver:
 
         summary = self._treasury.get_summary()
         balance = summary.get("account_balance", 0)
+        purchasable = summary.get("purchasable_amount", 0)
+        ante_purchase = summary.get("ante_purchase_amount", 0)
+        ante_eval = summary.get("ante_eval_amount", 0)
+        ante_pl = summary.get("ante_profit_loss", 0)
         allocated = summary.get("total_allocated", 0)
         unallocated = summary.get("unallocated", 0)
         bot_count = summary.get("bot_count", 0)
 
-        return (
-            f"계좌 잔고: {balance:,.0f}원\n"
-            f"할당: {allocated:,.0f}원 ({bot_count}개 봇)\n"
-            f"미할당: {unallocated:,.0f}원"
-        )
+        # 손익 부호 및 이모지
+        if ante_pl > 0:
+            pl_sign = "+"
+            pl_emoji = "📈"
+        elif ante_pl < 0:
+            pl_sign = ""  # 음수는 자동으로 - 붙음
+            pl_emoji = "📉"
+        else:
+            pl_sign = ""
+            pl_emoji = "➖"
+
+        lines = [
+            "ℹ️ 자금 현황",
+            f"계좌 예수금: {balance:,.0f}원",
+            f"매수 가능: {purchasable:,.0f}원",
+        ]
+
+        # Ante 관리 종목 (매입금이 있을 때만 표시)
+        if ante_purchase > 0:
+            lines.append("")
+            lines.append(
+                f"{pl_emoji} Ante 관리 종목\n"
+                f"  매입: {ante_purchase:,.0f}원 → "
+                f"평가: {ante_eval:,.0f}원 ({pl_sign}{ante_pl:,.0f}원)"
+            )
+
+        lines.append("")
+        lines.append(f"봇 할당: {allocated:,.0f}원 ({bot_count}개)")
+        lines.append(f"미할당: {unallocated:,.0f}원")
+
+        return "\n".join(lines)
 
     async def _cmd_approve(self, args: list[str]) -> str:
         """결재 승인. /approve <id>"""
