@@ -29,7 +29,11 @@ class BotCreateRequest(BaseModel):
     interval_seconds: int = Field(default=60, ge=10, le=3600)
 
 
-@router.get("", response_model=BotListResponse)
+@router.get(
+    "",
+    response_model=BotListResponse,
+    responses={503: {"description": "Bot manager not available"}},
+)
 async def list_bots(
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     limit: int = 20,
@@ -43,7 +47,17 @@ async def list_bots(
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
 
 
-@router.post("", status_code=201, response_model=BotDetailResponse)
+@router.post(
+    "",
+    status_code=201,
+    response_model=BotDetailResponse,
+    responses={
+        400: {"description": "Strategy loading failed"},
+        404: {"description": "Strategy not found"},
+        409: {"description": "Bot already exists or conflict"},
+        503: {"description": "Bot manager or strategy registry not available"},
+    },
+)
 async def create_bot(
     body: BotCreateRequest,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
@@ -85,7 +99,14 @@ async def create_bot(
     return {"bot": bot.get_info()}
 
 
-@router.get("/{bot_id}", response_model=BotDetailResponse)
+@router.get(
+    "/{bot_id}",
+    response_model=BotDetailResponse,
+    responses={
+        404: {"description": "Bot not found"},
+        503: {"description": "Bot manager not available"},
+    },
+)
 async def get_bot(
     bot_id: str,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
@@ -140,7 +161,15 @@ async def get_bot(
     return {"bot": info}
 
 
-@router.post("/{bot_id}/start", response_model=BotDetailResponse)
+@router.post(
+    "/{bot_id}/start",
+    response_model=BotDetailResponse,
+    responses={
+        404: {"description": "Bot not found"},
+        409: {"description": "Bot state conflict"},
+        503: {"description": "Bot manager not available"},
+    },
+)
 async def start_bot(
     bot_id: str,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
@@ -160,7 +189,15 @@ async def start_bot(
     return {"bot": bot.get_info()}
 
 
-@router.post("/{bot_id}/stop", response_model=BotDetailResponse)
+@router.post(
+    "/{bot_id}/stop",
+    response_model=BotDetailResponse,
+    responses={
+        404: {"description": "Bot not found"},
+        409: {"description": "Bot state conflict"},
+        503: {"description": "Bot manager not available"},
+    },
+)
 async def stop_bot(
     bot_id: str,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
@@ -180,7 +217,15 @@ async def stop_bot(
     return {"bot": bot.get_info()}
 
 
-@router.delete("/{bot_id}", status_code=204)
+@router.delete(
+    "/{bot_id}",
+    status_code=204,
+    responses={
+        404: {"description": "Bot not found"},
+        409: {"description": "Bot state conflict"},
+        503: {"description": "Bot manager not available"},
+    },
+)
 async def delete_bot(
     bot_id: str,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],

@@ -45,7 +45,11 @@ class ScopesUpdateRequest(BaseModel):
     scopes: list[str]
 
 
-@router.get("", response_model=MemberListResponse)
+@router.get(
+    "",
+    response_model=MemberListResponse,
+    responses={503: {"description": "Member service not available"}},
+)
 async def list_members(
     svc: Annotated[Any, Depends(get_member_service)],
     type: str | None = Query(default=None),
@@ -61,7 +65,16 @@ async def list_members(
     return {"members": [asdict(m) for m in members], "total": len(members)}
 
 
-@router.post("", status_code=201, response_model=MemberCreateResponse)
+@router.post(
+    "",
+    status_code=201,
+    response_model=MemberCreateResponse,
+    responses={
+        400: {"description": "Invalid member data"},
+        403: {"description": "Permission denied"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def create_member(
     body: MemberCreateRequest,
     svc: Annotated[Any, Depends(get_member_service)],
@@ -85,7 +98,14 @@ async def create_member(
     return {"member": asdict(member), "token": token}
 
 
-@router.get("/{member_id}", response_model=MemberDetailResponse)
+@router.get(
+    "/{member_id}",
+    response_model=MemberDetailResponse,
+    responses={
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def get_member(
     member_id: str,
     svc: Annotated[Any, Depends(get_member_service)],
@@ -97,7 +117,15 @@ async def get_member(
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/suspend", response_model=MemberDetailResponse)
+@router.post(
+    "/{member_id}/suspend",
+    response_model=MemberDetailResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def suspend_member(
     member_id: str,
     svc: Annotated[Any, Depends(get_member_service)],
@@ -112,7 +140,15 @@ async def suspend_member(
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/reactivate", response_model=MemberDetailResponse)
+@router.post(
+    "/{member_id}/reactivate",
+    response_model=MemberDetailResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def reactivate_member(
     member_id: str,
     svc: Annotated[Any, Depends(get_member_service)],
@@ -127,7 +163,15 @@ async def reactivate_member(
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/revoke", response_model=MemberDetailResponse)
+@router.post(
+    "/{member_id}/revoke",
+    response_model=MemberDetailResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def revoke_member(
     member_id: str,
     svc: Annotated[Any, Depends(get_member_service)],
@@ -142,7 +186,15 @@ async def revoke_member(
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/rotate-token", response_model=MemberTokenResponse)
+@router.post(
+    "/{member_id}/rotate-token",
+    response_model=MemberTokenResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def rotate_token(
     member_id: str,
     svc: Annotated[Any, Depends(get_member_service)],
@@ -157,7 +209,15 @@ async def rotate_token(
     return {"member": asdict(member), "token": token}
 
 
-@router.patch("/{member_id}/password", response_model=OkResponse)
+@router.patch(
+    "/{member_id}/password",
+    response_model=OkResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def change_password(
     member_id: str,
     body: PasswordChangeRequest,
@@ -173,7 +233,15 @@ async def change_password(
     return {"ok": True}
 
 
-@router.put("/{member_id}/scopes", response_model=MemberScopesResponse)
+@router.put(
+    "/{member_id}/scopes",
+    response_model=MemberScopesResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def update_scopes(
     member_id: str,
     body: ScopesUpdateRequest,

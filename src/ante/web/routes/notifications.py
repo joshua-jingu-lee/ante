@@ -12,7 +12,11 @@ from ante.web.schemas import NotificationListResponse
 router = APIRouter()
 
 
-@router.get("", response_model=NotificationListResponse)
+@router.get(
+    "",
+    response_model=NotificationListResponse,
+    responses={503: {"description": "Notification service not available"}},
+)
 async def list_notifications(
     notification_service: Annotated[Any, Depends(get_notification_service)],
     level: str | None = None,

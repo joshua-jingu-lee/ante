@@ -29,7 +29,14 @@ from ante.web.schemas import (
 router = APIRouter()
 
 
-@router.post("/validate", response_model=StrategyValidateResponse)
+@router.post(
+    "/validate",
+    response_model=StrategyValidateResponse,
+    responses={
+        400: {"description": "Path is required"},
+        404: {"description": "Strategy file not found"},
+    },
+)
 async def validate_strategy(body: dict) -> dict:
     """전략 파일 정적 검증.
 
@@ -55,7 +62,11 @@ async def validate_strategy(body: dict) -> dict:
     }
 
 
-@router.get("", response_model=StrategyListResponse)
+@router.get(
+    "",
+    response_model=StrategyListResponse,
+    responses={503: {"description": "Strategy registry not available"}},
+)
 async def list_strategies(
     registry: Annotated[Any, Depends(get_strategy_registry)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
@@ -91,7 +102,14 @@ async def list_strategies(
     return {"strategies": strategies}
 
 
-@router.get("/{strategy_id}", response_model=StrategyDetailResponse)
+@router.get(
+    "/{strategy_id}",
+    response_model=StrategyDetailResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+        503: {"description": "Strategy registry not available"},
+    },
+)
 async def get_strategy(
     strategy_id: str,
     registry: Annotated[Any, Depends(get_strategy_registry)],
@@ -117,7 +135,14 @@ async def get_strategy(
     return {"strategy": strategy_dict, "bot": bot_info}
 
 
-@router.get("/{strategy_id}/performance", response_model=StrategyPerformanceResponse)
+@router.get(
+    "/{strategy_id}/performance",
+    response_model=StrategyPerformanceResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+        503: {"description": "Strategy registry or database not available"},
+    },
+)
 async def get_strategy_performance(
     strategy_id: str,
     registry: Annotated[Any, Depends(get_strategy_registry)],
@@ -155,7 +180,14 @@ async def get_strategy_performance(
     return result
 
 
-@router.get("/{strategy_id}/daily-summary", response_model=DailySummaryResponse)
+@router.get(
+    "/{strategy_id}/daily-summary",
+    response_model=DailySummaryResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+        503: {"description": "Strategy registry or database not available"},
+    },
+)
 async def get_strategy_daily_summary(
     strategy_id: str,
     registry: Annotated[Any, Depends(get_strategy_registry)],
@@ -193,7 +225,14 @@ async def get_strategy_daily_summary(
     }
 
 
-@router.get("/{strategy_id}/weekly-summary", response_model=WeeklySummaryResponse)
+@router.get(
+    "/{strategy_id}/weekly-summary",
+    response_model=WeeklySummaryResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+        503: {"description": "Strategy registry or database not available"},
+    },
+)
 async def get_strategy_weekly_summary(
     strategy_id: str,
     registry: Annotated[Any, Depends(get_strategy_registry)],
@@ -232,7 +271,14 @@ async def get_strategy_weekly_summary(
     }
 
 
-@router.get("/{strategy_id}/monthly-summary", response_model=MonthlySummaryResponse)
+@router.get(
+    "/{strategy_id}/monthly-summary",
+    response_model=MonthlySummaryResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+        503: {"description": "Strategy registry or database not available"},
+    },
+)
 async def get_strategy_monthly_summary(
     strategy_id: str,
     registry: Annotated[Any, Depends(get_strategy_registry)],
@@ -270,7 +316,14 @@ async def get_strategy_monthly_summary(
     }
 
 
-@router.get("/{strategy_id}/trades", response_model=StrategyTradesResponse)
+@router.get(
+    "/{strategy_id}/trades",
+    response_model=StrategyTradesResponse,
+    responses={
+        404: {"description": "Strategy not found"},
+        503: {"description": "Strategy registry or trade service not available"},
+    },
+)
 async def get_strategy_trades(
     strategy_id: str,
     registry: Annotated[Any, Depends(get_strategy_registry)],

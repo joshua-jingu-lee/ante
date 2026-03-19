@@ -63,7 +63,14 @@ SCENARIOS_DIR = _find_scenarios_dir()
 BASE_SQL = SCENARIOS_DIR / "_base.sql"
 
 
-@router.post("/reset", response_model=SeedResetResponse)
+@router.post(
+    "/reset",
+    response_model=SeedResetResponse,
+    responses={
+        400: {"description": "Scenario not found"},
+        503: {"description": "Database not available"},
+    },
+)
 async def reset_seed(
     db: Annotated[Any, Depends(get_db)],
     system_state: Annotated[Any | None, Depends(get_system_state_optional)],

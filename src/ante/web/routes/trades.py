@@ -12,7 +12,11 @@ from ante.web.schemas import TradeListResponse
 router = APIRouter()
 
 
-@router.get("", response_model=TradeListResponse)
+@router.get(
+    "",
+    response_model=TradeListResponse,
+    responses={503: {"description": "Trade service not available"}},
+)
 async def list_trades(
     trade_service: Annotated[Any, Depends(get_trade_service)],
     bot_id: str | None = None,
