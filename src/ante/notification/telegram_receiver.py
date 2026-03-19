@@ -83,7 +83,7 @@ class TelegramCommandReceiver:
                 for update in updates:
                     await self._handle_update(update)
             except asyncio.CancelledError:
-                break
+                raise
             except Exception:
                 logger.warning("텔레그램 폴링 실패, 다음 주기에 재시도", exc_info=True)
 
