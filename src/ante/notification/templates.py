@@ -41,3 +41,21 @@ ORDER_FILLED = (
     "종목: *{display}*\n"
     "{side} {quantity}주 @ {price:,.0f}원"
 )
+
+# ── 결재 (Approval) ──────────────────────────
+
+APPROVAL_CREATED = (
+    "{prefix}*결재 요청*\n"
+    "유형: `{approval_type}`\n"
+    "제목: {title}\n"
+    "요청자: `{requester}`\n"
+    "ID: `{approval_id}`"
+)
+
+APPROVAL_RESOLVED = (
+    "📋 *결재 처리 완료*\n"
+    "유형: `{approval_type}`\n"
+    "결과: *{resolution}*\n"
+    "처리자: `{resolved_by}`\n"
+    "ID: `{approval_id}`"
+)

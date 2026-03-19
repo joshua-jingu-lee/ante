@@ -9,6 +9,7 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ante.approval.service import ApprovalService
     from ante.bot.manager import BotManager
     from ante.config.system_state import SystemState
     from ante.notification.telegram import TelegramAdapter
@@ -33,6 +34,7 @@ class TelegramCommandReceiver:
         bot_manager: BotManager | None = None,
         treasury: Treasury | None = None,
         system_state: SystemState | None = None,
+        approval_service: ApprovalService | None = None,
     ) -> None:
         self._adapter = adapter
         self._allowed_user_ids = set(allowed_user_ids or [])
@@ -41,6 +43,7 @@ class TelegramCommandReceiver:
         self._bot_manager = bot_manager
         self._treasury = treasury
         self._system_state = system_state
+        self._approval_service = approval_service
 
         self._offset: int = 0
         self._task: asyncio.Task[None] | None = None
@@ -125,6 +128,11 @@ class TelegramCommandReceiver:
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
         """개별 업데이트 처리."""
+        # callback_query (인라인 버튼) 처리
+        if "callback_query" in update:
+            await self._handle_callback_query(update["callback_query"])
+            return
+
         message = update.get("message")
         if not message:
             return
@@ -156,6 +164,58 @@ class TelegramCommandReceiver:
         if reply:
             await self._reply(chat_id, reply)
 
+    async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
+        """인라인 버튼 콜백 처리 (결재 승인/거절)."""
+        callback_id = callback_query.get("id", "")
+        user = callback_query.get("from", {})
+        user_id = user.get("id", 0)
+        chat_id = callback_query.get("message", {}).get("chat", {}).get("id")
+        data = callback_query.get("data", "")
+
+        if not self._is_authorized(user_id):
+            logger.warning("미인가 콜백 시도: user_id=%d, data=%s", user_id, data)
+            await self._adapter.answer_callback_query(callback_id, "권한이 없습니다.")
+            return
+
+        if not self._approval_service:
+            await self._adapter.answer_callback_query(
+                callback_id, "ApprovalService가 연결되지 않았습니다."
+            )
+            return
+
+        # data 형식: "approve:{id}" 또는 "reject:{id}"
+        if ":" not in data:
+            await self._adapter.answer_callback_query(callback_id, "잘못된 요청입니다.")
+            return
+
+        action, approval_id = data.split(":", 1)
+
+        try:
+            if action == "approve":
+                await self._approval_service.approve(
+                    approval_id, resolved_by="telegram"
+                )
+                result_msg = f"결재 승인 완료: {approval_id}"
+            elif action == "reject":
+                await self._approval_service.reject(
+                    approval_id, resolved_by="telegram", reject_reason="사용자 거절"
+                )
+                result_msg = f"결재 거절 완료: {approval_id}"
+            else:
+                await self._adapter.answer_callback_query(
+                    callback_id, "알 수 없는 동작입니다."
+                )
+                return
+        except ValueError as e:
+            result_msg = f"처리 실패: {e}"
+        except Exception:
+            logger.exception("콜백 결재 처리 오류: %s", data)
+            result_msg = "처리 중 오류가 발생했습니다."
+
+        await self._adapter.answer_callback_query(callback_id, result_msg)
+        if chat_id:
+            await self._reply(chat_id, result_msg)
+
     def _is_authorized(self, user_id: int) -> bool:
         """화이트리스트 인증 확인."""
         return user_id in self._allowed_user_ids
@@ -185,6 +245,8 @@ class TelegramCommandReceiver:
             "bots": self._cmd_bots,
             "balance": self._cmd_balance,
             "activate": self._cmd_activate,
+            "approve": self._cmd_approve,
+            "reject": self._cmd_reject,
         }
 
         handler = handlers.get(command)
@@ -246,6 +308,8 @@ class TelegramCommandReceiver:
             "/halt [reason] — 전체 거래 중지 (확인 필요)\n"
             "/activate — 거래 재개\n"
             "/stop <bot_id> — 특정 봇 중지 (확인 필요)\n"
+            "/approve <id> — 결재 승인\n"
+            "/reject <id> [reason] — 결재 거절\n"
             "/help — 이 도움말"
         )
 
@@ -301,6 +365,43 @@ class TelegramCommandReceiver:
             f"할당: {allocated:,.0f}원 ({bot_count}개 봇)\n"
             f"미할당: {unallocated:,.0f}원"
         )
+
+    async def _cmd_approve(self, args: list[str]) -> str:
+        """결재 승인. /approve <id>"""
+        if not self._approval_service:
+            return "ApprovalService가 연결되지 않았습니다."
+        if not args:
+            return "결재 ID를 지정해 주세요. 예: /approve abc123"
+
+        approval_id = args[0]
+        try:
+            await self._approval_service.approve(approval_id, resolved_by="telegram")
+            return f"결재 승인 완료: {approval_id}"
+        except ValueError as e:
+            return f"승인 실패: {e}"
+        except Exception:
+            logger.exception("결재 승인 오류: %s", approval_id)
+            return "승인 처리 중 오류가 발생했습니다."
+
+    async def _cmd_reject(self, args: list[str]) -> str:
+        """결재 거절. /reject <id> [reason]"""
+        if not self._approval_service:
+            return "ApprovalService가 연결되지 않았습니다."
+        if not args:
+            return "결재 ID를 지정해 주세요. 예: /reject abc123 사유"
+
+        approval_id = args[0]
+        reason = " ".join(args[1:]) if len(args) > 1 else "사용자 거절"
+        try:
+            await self._approval_service.reject(
+                approval_id, resolved_by="telegram", reject_reason=reason
+            )
+            return f"결재 거절 완료: {approval_id} (사유: {reason})"
+        except ValueError as e:
+            return f"거절 실패: {e}"
+        except Exception:
+            logger.exception("결재 거절 오류: %s", approval_id)
+            return "거절 처리 중 오류가 발생했습니다."
 
     async def _cmd_halt(self, args: list[str]) -> str:
         """전체 거래 중지."""

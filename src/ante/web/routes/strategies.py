@@ -126,6 +126,9 @@ async def get_strategy(
     strategy_dict["status"] = (
         record.status.value if hasattr(record.status, "value") else str(record.status)
     )
+    # datetime → str 변환 (response_model 호환)
+    if hasattr(record.registered_at, "isoformat"):
+        strategy_dict["registered_at"] = record.registered_at.isoformat()
 
     bot_info = None
     if bot_manager is not None:

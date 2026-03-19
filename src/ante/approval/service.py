@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ante.approval.auto_approve import AutoApproveEvaluator
-from ante.approval.models import ApprovalRequest, ApprovalStatus
+from ante.approval.models import (
+    ApprovalRequest,
+    ApprovalStatus,
+    ApprovalValidationError,
+    ValidationResult,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -50,11 +55,13 @@ class ApprovalService:
         db: Database,
         eventbus: EventBus,
         executors: dict[str, Callable[..., Awaitable]] | None = None,
+        validators: dict[str, Callable[..., list[ValidationResult]]] | None = None,
         auto_approve_evaluator: AutoApproveEvaluator | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
         self._executors = executors or {}
+        self._validators = validators or {}
         self._auto_approve = auto_approve_evaluator or AutoApproveEvaluator()
 
     async def initialize(self) -> None:
@@ -77,6 +84,30 @@ class ApprovalService:
         now = datetime.now(UTC).isoformat()
         params = params or {}
 
+        # 사전 검증 (validator)
+        reviews: list[dict] = []
+        validator = self._validators.get(type)
+        if validator:
+            results = validator(params)
+            for r in results:
+                if r.grade == "fail":
+                    logger.info(
+                        "사전 검증 실패 (%s): %s — %s",
+                        type,
+                        r.reviewer,
+                        r.detail,
+                    )
+                    raise ApprovalValidationError(r.detail)
+                if r.grade == "warn":
+                    reviews.append(
+                        {
+                            "reviewer": r.reviewer,
+                            "result": "warn",
+                            "detail": r.detail,
+                            "reviewed_at": now,
+                        }
+                    )
+
         history = [
             {
                 "action": "created",
@@ -94,7 +125,7 @@ class ApprovalService:
             title=title,
             body=body,
             params=params,
-            reviews=[],
+            reviews=reviews,
             history=history,
             reference_id=reference_id,
             expires_at=expires_at,
@@ -170,8 +201,42 @@ class ApprovalService:
             if executor:
                 try:
                     await executor(request.params)
+                    request.history.append(
+                        {
+                            "action": "executed",
+                            "actor": "system:auto_approve",
+                            "at": now,
+                            "detail": "",
+                        }
+                    )
+                    await self._db.execute(
+                        """UPDATE approvals SET history = ? WHERE id = ?""",
+                        (
+                            json.dumps(request.history, ensure_ascii=False),
+                            request.id,
+                        ),
+                    )
                     logger.info("전결 실행 완료: %s (%s)", request.id, request.type)
-                except Exception:
+                except Exception as exc:
+                    request.status = ApprovalStatus.EXECUTION_FAILED
+                    request.history.append(
+                        {
+                            "action": "execution_failed",
+                            "actor": "system:auto_approve",
+                            "at": now,
+                            "detail": str(exc),
+                        }
+                    )
+                    await self._db.execute(
+                        """UPDATE approvals
+                           SET status = ?, history = ?
+                           WHERE id = ?""",
+                        (
+                            ApprovalStatus.EXECUTION_FAILED,
+                            json.dumps(request.history, ensure_ascii=False),
+                            request.id,
+                        ),
+                    )
                     logger.exception(
                         "전결 실행 실패: %s (%s)", request.id, request.type
                     )
@@ -183,7 +248,7 @@ class ApprovalService:
                 ApprovalResolvedEvent(
                     approval_id=request.id,
                     approval_type=request.type,
-                    resolution=ApprovalStatus.APPROVED,
+                    resolution=request.status,
                     resolved_by="system:auto_approve",
                 )
             )
@@ -201,8 +266,12 @@ class ApprovalService:
             msg = f"결재 요청을 찾을 수 없음: {id}"
             raise ValueError(msg)
 
-        if request.status != ApprovalStatus.PENDING:
-            msg = f"pending 상태에서만 승인 가능 (현재: {request.status})"
+        approvable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
+        if request.status not in approvable:
+            msg = (
+                "pending/execution_failed 상태에서만 승인 가능"
+                f" (현재: {request.status})"
+            )
             raise ValueError(msg)
 
         now = datetime.now(UTC).isoformat()
@@ -235,9 +304,42 @@ class ApprovalService:
         if executor:
             try:
                 await executor(request.params)
+                request.history.append(
+                    {
+                        "action": "executed",
+                        "actor": resolved_by,
+                        "at": now,
+                        "detail": "",
+                    }
+                )
                 logger.info("결재 실행 완료: %s (%s)", id, request.type)
-            except Exception:
+            except Exception as exc:
+                request.status = ApprovalStatus.EXECUTION_FAILED
+                request.history.append(
+                    {
+                        "action": "execution_failed",
+                        "actor": resolved_by,
+                        "at": now,
+                        "detail": str(exc),
+                    }
+                )
+                await self._db.execute(
+                    """UPDATE approvals
+                       SET status = ?, history = ?
+                       WHERE id = ?""",
+                    (
+                        ApprovalStatus.EXECUTION_FAILED,
+                        json.dumps(request.history, ensure_ascii=False),
+                        id,
+                    ),
+                )
                 logger.exception("결재 실행 실패: %s (%s)", id, request.type)
+            else:
+                # 실행 성공 시 history만 갱신
+                await self._db.execute(
+                    """UPDATE approvals SET history = ? WHERE id = ?""",
+                    (json.dumps(request.history, ensure_ascii=False), id),
+                )
 
         # ApprovalResolvedEvent 발행
         from ante.eventbus.events import ApprovalResolvedEvent
@@ -246,7 +348,7 @@ class ApprovalService:
             ApprovalResolvedEvent(
                 approval_id=id,
                 approval_type=request.type,
-                resolution=ApprovalStatus.APPROVED,
+                resolution=request.status,
                 resolved_by=resolved_by,
             )
         )
@@ -265,8 +367,12 @@ class ApprovalService:
             msg = f"결재 요청을 찾을 수 없음: {id}"
             raise ValueError(msg)
 
-        if request.status != ApprovalStatus.PENDING:
-            msg = f"pending 상태에서만 거절 가능 (현재: {request.status})"
+        rejectable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
+        if request.status not in rejectable:
+            msg = (
+                "pending/execution_failed 상태에서만 거절 가능"
+                f" (현재: {request.status})"
+            )
             raise ValueError(msg)
 
         now = datetime.now(UTC).isoformat()
@@ -314,6 +420,122 @@ class ApprovalService:
 
         return request
 
+    async def reopen(
+        self,
+        id: str,
+        requester: str,
+        body: str | None = None,
+        params: dict | None = None,
+    ) -> ApprovalRequest:
+        """거절된 요청을 수정하여 재상신 (rejected → pending).
+
+        body와 params를 갱신할 수 있다. None이면 기존 값 유지.
+        본인 요청만 reopen 가능. 사전 검증(validator)을 재실행한다.
+        """
+        request = await self.get(id)
+        if not request:
+            msg = f"결재 요청을 찾을 수 없음: {id}"
+            raise ValueError(msg)
+
+        # 상태 검증: rejected만 허용
+        if request.status != ApprovalStatus.REJECTED:
+            msg = f"rejected 상태에서만 reopen 가능 (현재: {request.status})"
+            raise ValueError(msg)
+
+        # 권한 검증: 본인 요청만 reopen 가능
+        if request.requester != requester:
+            msg = f"본인 요청만 reopen 가능 (요청자: {request.requester})"
+            raise ValueError(msg)
+
+        # body/params 갱신 (None이면 기존 값 유지)
+        if body is not None:
+            request.body = body
+        if params is not None:
+            request.params = params
+
+        # 사전 검증(validator) 재실행
+        now = datetime.now(UTC).isoformat()
+        validator = self._validators.get(request.type)
+        if validator:
+            results = validator(request.params)
+            for r in results:
+                if r.grade == "fail":
+                    logger.info(
+                        "reopen 사전 검증 실패 (%s): %s — %s",
+                        request.type,
+                        r.reviewer,
+                        r.detail,
+                    )
+                    raise ApprovalValidationError(r.detail)
+                if r.grade == "warn":
+                    request.reviews.append(
+                        {
+                            "reviewer": r.reviewer,
+                            "result": "warn",
+                            "detail": r.detail,
+                            "reviewed_at": now,
+                        }
+                    )
+
+        # 상태 전환 + 이력 기록
+        request.status = ApprovalStatus.PENDING
+        request.reject_reason = ""
+        request.resolved_at = ""
+        request.resolved_by = ""
+
+        detail_parts: list[str] = []
+        if body is not None:
+            detail_parts.append("body 수정")
+        if params is not None:
+            detail_parts.append("params 수정")
+        detail = ", ".join(detail_parts) + " 후 재상신" if detail_parts else "재상신"
+
+        request.history.append(
+            {
+                "action": "reopened",
+                "actor": requester,
+                "at": now,
+                "detail": detail,
+            }
+        )
+
+        # DB 업데이트
+        await self._db.execute(
+            """UPDATE approvals
+               SET status = ?, body = ?, params = ?, reviews = ?,
+                   history = ?, reject_reason = ?,
+                   resolved_at = ?, resolved_by = ?
+               WHERE id = ?""",
+            (
+                ApprovalStatus.PENDING,
+                request.body,
+                json.dumps(request.params, ensure_ascii=False),
+                json.dumps(request.reviews, ensure_ascii=False),
+                json.dumps(request.history, ensure_ascii=False),
+                "",
+                "",
+                "",
+                id,
+            ),
+        )
+
+        logger.info("결재 재상신: %s by %s", id, requester)
+
+        # ApprovalCreatedEvent 재발행 (알림 재발송)
+        from ante.eventbus.events import ApprovalCreatedEvent
+
+        await self._eventbus.publish(
+            ApprovalCreatedEvent(
+                approval_id=request.id,
+                approval_type=request.type,
+                requester=request.requester,
+                title=request.title,
+                auto_approved=False,
+            )
+        )
+
+        return request
+
     async def cancel(
         self,
         id: str,
@@ -329,8 +551,16 @@ class ApprovalService:
             msg = f"본인 요청만 철회 가능 (요청자: {request.requester})"
             raise ValueError(msg)
 
-        if request.status not in (ApprovalStatus.PENDING, ApprovalStatus.ON_HOLD):
-            msg = f"pending/on_hold 상태에서만 철회 가능 (현재: {request.status})"
+        cancellable = (
+            ApprovalStatus.PENDING,
+            ApprovalStatus.ON_HOLD,
+            ApprovalStatus.EXECUTION_FAILED,
+        )
+        if request.status not in cancellable:
+            msg = (
+                "pending/on_hold/execution_failed 상태에서만 철회 가능"
+                f" (현재: {request.status})"
+            )
             raise ValueError(msg)
 
         now = datetime.now(UTC).isoformat()
@@ -378,8 +608,12 @@ class ApprovalService:
             msg = f"결재 요청을 찾을 수 없음: {id}"
             raise ValueError(msg)
 
-        if request.status != ApprovalStatus.PENDING:
-            msg = f"pending 상태에서만 보류 가능 (현재: {request.status})"
+        holdable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
+        if request.status not in holdable:
+            msg = (
+                "pending/execution_failed 상태에서만 보류 가능"
+                f" (현재: {request.status})"
+            )
             raise ValueError(msg)
 
         now = datetime.now(UTC).isoformat()
