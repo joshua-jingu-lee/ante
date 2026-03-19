@@ -121,44 +121,56 @@ class ParquetStore:
         path.mkdir(parents=True, exist_ok=True)
 
         time_col = _TIME_COLUMN.get(data_type, "timestamp")
+        partitioned = self._partition_by_month(data, time_col)
 
-        # 월별 파티셔닝
-        if time_col in data.columns:
-            if data[time_col].dtype == pl.Date:
-                month_col = data[time_col].cast(pl.Utf8).str.slice(0, 7)
-            else:
-                month_col = data[time_col].dt.strftime("%Y-%m")
-        else:
-            month_col = pl.Series(["unknown"] * len(data))
-
-        data_with_month = data.with_columns(month_col.alias("_month"))
-
-        for month_val in data_with_month["_month"].unique().to_list():
-            group = data_with_month.filter(pl.col("_month") == month_val).drop("_month")
+        for month_val, group in partitioned:
             filepath = path / f"{month_val}.parquet"
-
             unique_col = time_col if time_col in group.columns else None
-
-            if filepath.exists():
-                try:
-                    existing = pl.read_parquet(filepath)
-                    merged = pl.concat([existing, group])
-                    if unique_col:
-                        merged = merged.unique(subset=[unique_col]).sort(unique_col)
-                    merged.write_parquet(str(filepath), compression=self._compression)
-                except Exception:
-                    logger.warning(
-                        "Failed to merge with existing file: %s, overwriting", filepath
-                    )
-                    if unique_col and unique_col in group.columns:
-                        group = group.sort(unique_col)
-                    group.write_parquet(str(filepath), compression=self._compression)
-            else:
-                if unique_col and unique_col in group.columns:
-                    group = group.sort(unique_col)
-                group.write_parquet(str(filepath), compression=self._compression)
+            self._persist_partition(filepath, group, unique_col)
 
         logger.debug("Wrote %d rows for %s/%s", len(data), symbol, timeframe)
+
+    def _partition_by_month(
+        self, data: pl.DataFrame, time_col: str
+    ) -> list[tuple[str, pl.DataFrame]]:
+        """데이터를 월별로 분할하여 (월, DataFrame) 리스트 반환."""
+        if time_col in data.columns:
+            if data[time_col].dtype == pl.Date:
+                month_series = data[time_col].cast(pl.Utf8).str.slice(0, 7)
+            else:
+                month_series = data[time_col].dt.strftime("%Y-%m")
+        else:
+            month_series = pl.Series(["unknown"] * len(data))
+
+        data_with_month = data.with_columns(month_series.alias("_month"))
+        return [
+            (
+                month_val,
+                data_with_month.filter(pl.col("_month") == month_val).drop("_month"),
+            )
+            for month_val in data_with_month["_month"].unique().to_list()
+        ]
+
+    def _persist_partition(
+        self, filepath: Path, group: pl.DataFrame, unique_col: str | None
+    ) -> None:
+        """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge."""
+        if filepath.exists():
+            try:
+                existing = pl.read_parquet(filepath)
+                merged = pl.concat([existing, group])
+                if unique_col:
+                    merged = merged.unique(subset=[unique_col]).sort(unique_col)
+                merged.write_parquet(str(filepath), compression=self._compression)
+                return
+            except Exception:
+                logger.warning(
+                    "Failed to merge with existing file: %s, overwriting", filepath
+                )
+
+        if unique_col and unique_col in group.columns:
+            group = group.sort(unique_col)
+        group.write_parquet(str(filepath), compression=self._compression)
 
     def append(
         self,
