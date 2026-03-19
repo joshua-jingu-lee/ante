@@ -8,6 +8,12 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ante.web.schemas import (
+    ApprovalDetailResponse,
+    ApprovalListResponse,
+    ApprovalUpdateResponse,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -20,7 +26,7 @@ class ApprovalStatusUpdate(BaseModel):
     memo: str = ""
 
 
-@router.get("")
+@router.get("", response_model=ApprovalListResponse)
 async def list_approvals(
     request: Request,
     status: str | None = Query(default=None),
@@ -41,7 +47,7 @@ async def list_approvals(
     }
 
 
-@router.get("/{approval_id}")
+@router.get("/{approval_id}", response_model=ApprovalDetailResponse)
 async def get_approval(request: Request, approval_id: str) -> dict:
     """결재 상세 조회."""
     approval_service = request.app.state.approval_service
@@ -64,7 +70,7 @@ async def get_approval(request: Request, approval_id: str) -> dict:
     return result
 
 
-@router.patch("/{approval_id}/status")
+@router.patch("/{approval_id}/status", response_model=ApprovalUpdateResponse)
 async def update_approval_status(
     request: Request,
     approval_id: str,

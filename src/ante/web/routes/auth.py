@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
-from ante.web.schemas import LoginRequest, LoginResponse, MeResponse
+from ante.web.schemas import LoginRequest, LoginResponse, LogoutResponse, MeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +16,11 @@ COOKIE_NAME = "ante_session"
 COOKIE_MAX_AGE = 86400  # 24시간
 
 
-@router.post("/login")
+@router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest, request: Request, response: Response
 ) -> LoginResponse:
-    """패스워드 로그인 → 세션 쿠키 발급."""
+    """패스워드 로그인 -> 세션 쿠키 발급."""
     member_service = request.app.state.member_service
     session_service = request.app.state.session_service
 
@@ -60,7 +60,7 @@ async def login(
     )
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse)
 async def logout(
     request: Request,
     response: Response,
@@ -75,7 +75,7 @@ async def logout(
     return {"ok": True}
 
 
-@router.get("/me")
+@router.get("/me", response_model=MeResponse)
 async def me(
     request: Request,
     ante_session: str | None = Cookie(default=None),

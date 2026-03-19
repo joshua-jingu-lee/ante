@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ante.web.schemas import (
+    ReportDetailResponse,
+    ReportListResponse,
+    ReportSubmitResponse,
+)
+
 router = APIRouter()
 
 
@@ -16,7 +22,7 @@ async def get_report_schema() -> dict:
     return store.get_schema()
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=ReportSubmitResponse)
 async def submit_report(request: Request, body: dict) -> dict:
     """리포트 제출."""
     report_store = getattr(request.app.state, "report_store", None)
@@ -31,7 +37,7 @@ async def submit_report(request: Request, body: dict) -> dict:
     }
 
 
-@router.get("/{report_id}")
+@router.get("/{report_id}", response_model=ReportDetailResponse)
 async def report_view(request: Request, report_id: str) -> dict:
     """리포트 단건 조회."""
     import json
@@ -77,7 +83,7 @@ async def report_view(request: Request, report_id: str) -> dict:
     }
 
 
-@router.get("")
+@router.get("", response_model=ReportListResponse)
 async def list_reports(
     request: Request,
     status: str | None = None,

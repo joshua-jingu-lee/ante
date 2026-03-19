@@ -7,6 +7,15 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ante.web.schemas import (
+    MemberCreateResponse,
+    MemberDetailResponse,
+    MemberListResponse,
+    MemberScopesResponse,
+    MemberTokenResponse,
+    OkResponse,
+)
+
 router = APIRouter()
 
 
@@ -41,7 +50,7 @@ def _get_member_service(request: Request):
     return svc
 
 
-@router.get("")
+@router.get("", response_model=MemberListResponse)
 async def list_members(
     request: Request,
     type: str | None = Query(default=None),
@@ -58,7 +67,7 @@ async def list_members(
     return {"members": [asdict(m) for m in members], "total": len(members)}
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=MemberCreateResponse)
 async def create_member(request: Request, body: MemberCreateRequest) -> dict:
     """멤버 등록. 토큰 1회 반환."""
     svc = _get_member_service(request)
@@ -81,7 +90,7 @@ async def create_member(request: Request, body: MemberCreateRequest) -> dict:
     return {"member": asdict(member), "token": token}
 
 
-@router.get("/{member_id}")
+@router.get("/{member_id}", response_model=MemberDetailResponse)
 async def get_member(request: Request, member_id: str) -> dict:
     """멤버 상세 조회."""
     svc = _get_member_service(request)
@@ -91,7 +100,7 @@ async def get_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/suspend")
+@router.post("/{member_id}/suspend", response_model=MemberDetailResponse)
 async def suspend_member(request: Request, member_id: str) -> dict:
     """멤버 일시 정지."""
     svc = _get_member_service(request)
@@ -104,7 +113,7 @@ async def suspend_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/reactivate")
+@router.post("/{member_id}/reactivate", response_model=MemberDetailResponse)
 async def reactivate_member(request: Request, member_id: str) -> dict:
     """멤버 재활성화."""
     svc = _get_member_service(request)
@@ -117,7 +126,7 @@ async def reactivate_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/revoke")
+@router.post("/{member_id}/revoke", response_model=MemberDetailResponse)
 async def revoke_member(request: Request, member_id: str) -> dict:
     """멤버 영구 폐기."""
     svc = _get_member_service(request)
@@ -130,7 +139,7 @@ async def revoke_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/rotate-token")
+@router.post("/{member_id}/rotate-token", response_model=MemberTokenResponse)
 async def rotate_token(request: Request, member_id: str) -> dict:
     """토큰 재발급."""
     svc = _get_member_service(request)
@@ -143,7 +152,7 @@ async def rotate_token(request: Request, member_id: str) -> dict:
     return {"member": asdict(member), "token": token}
 
 
-@router.patch("/{member_id}/password")
+@router.patch("/{member_id}/password", response_model=OkResponse)
 async def change_password(
     request: Request, member_id: str, body: PasswordChangeRequest
 ) -> dict:
@@ -158,7 +167,7 @@ async def change_password(
     return {"ok": True}
 
 
-@router.put("/{member_id}/scopes")
+@router.put("/{member_id}/scopes", response_model=MemberScopesResponse)
 async def update_scopes(
     request: Request, member_id: str, body: ScopesUpdateRequest
 ) -> dict:

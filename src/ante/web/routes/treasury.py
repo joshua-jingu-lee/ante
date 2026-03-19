@@ -5,6 +5,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ante.web.schemas import (
+    BalanceSetResponse,
+    BudgetListResponse,
+    BudgetOperationResponse,
+    TransactionListResponse,
+    TreasurySummaryResponse,
+)
+
 router = APIRouter()
 
 
@@ -20,7 +28,9 @@ class BalanceSetRequest(BaseModel):
     balance: float
 
 
-@router.get("")
+@router.get(
+    "", response_model=TreasurySummaryResponse, response_model_exclude_none=True
+)
 async def get_summary(request: Request) -> dict:
     """자금 현황 요약."""
     treasury = getattr(request.app.state, "treasury", None)
@@ -43,7 +53,7 @@ async def get_summary(request: Request) -> dict:
     if config is not None:
         try:
             account_no = config.secret("KIS_ACCOUNT_NO")
-            # "1234567801" → "12345678-01" 포맷 변환
+            # "1234567801" -> "12345678-01" 포맷 변환
             if account_no and len(account_no) == 10:
                 summary["account_no"] = f"{account_no[:8]}-{account_no[8:]}"
             elif account_no:
@@ -61,7 +71,7 @@ async def get_summary(request: Request) -> dict:
     return summary
 
 
-@router.get("/transactions")
+@router.get("/transactions", response_model=TransactionListResponse)
 async def list_transactions(
     request: Request,
     type: str | None = None,
@@ -115,7 +125,7 @@ async def list_transactions(
     return {"items": items, "total": total}
 
 
-@router.post("/bots/{bot_id}/allocate")
+@router.post("/bots/{bot_id}/allocate", response_model=BudgetOperationResponse)
 async def allocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> dict:
     """봇에 예산 할당."""
     from ante.treasury.exceptions import BotNotStoppedError
@@ -146,7 +156,7 @@ async def allocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> 
     }
 
 
-@router.post("/bots/{bot_id}/deallocate")
+@router.post("/bots/{bot_id}/deallocate", response_model=BudgetOperationResponse)
 async def deallocate(request: Request, bot_id: str, body: BudgetChangeRequest) -> dict:
     """봇 예산 회수."""
     from ante.treasury.exceptions import BotNotStoppedError
@@ -174,7 +184,7 @@ async def deallocate(request: Request, bot_id: str, body: BudgetChangeRequest) -
     }
 
 
-@router.get("/budgets")
+@router.get("/budgets", response_model=BudgetListResponse)
 async def list_budgets(request: Request) -> dict:
     """봇별 예산 목록 조회."""
     from dataclasses import asdict
@@ -187,7 +197,7 @@ async def list_budgets(request: Request) -> dict:
     return {"budgets": [asdict(b) for b in budgets]}
 
 
-@router.post("/balance")
+@router.post("/balance", response_model=BalanceSetResponse)
 async def set_balance(request: Request, body: BalanceSetRequest) -> dict:
     """계좌 총 잔고 수동 설정."""
     from datetime import UTC, datetime

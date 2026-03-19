@@ -7,10 +7,21 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ante.web.schemas import (
+    DailySummaryResponse,
+    MonthlySummaryResponse,
+    StrategyDetailResponse,
+    StrategyListResponse,
+    StrategyPerformanceResponse,
+    StrategyTradesResponse,
+    StrategyValidateResponse,
+    WeeklySummaryResponse,
+)
+
 router = APIRouter()
 
 
-@router.post("/validate")
+@router.post("/validate", response_model=StrategyValidateResponse)
 async def validate_strategy(body: dict) -> dict:
     """전략 파일 정적 검증.
 
@@ -36,7 +47,7 @@ async def validate_strategy(body: dict) -> dict:
     }
 
 
-@router.get("")
+@router.get("", response_model=StrategyListResponse)
 async def list_strategies(
     request: Request,
     status: str | None = Query(default=None),
@@ -76,7 +87,7 @@ async def list_strategies(
     return {"strategies": strategies}
 
 
-@router.get("/{strategy_id}")
+@router.get("/{strategy_id}", response_model=StrategyDetailResponse)
 async def get_strategy(request: Request, strategy_id: str) -> dict:
     """전략 상세 조회."""
     registry = getattr(request.app.state, "strategy_registry", None)
@@ -103,7 +114,7 @@ async def get_strategy(request: Request, strategy_id: str) -> dict:
     return {"strategy": strategy_dict, "bot": bot_info}
 
 
-@router.get("/{strategy_id}/performance")
+@router.get("/{strategy_id}/performance", response_model=StrategyPerformanceResponse)
 async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
     """전략 성과 지표 조회."""
     registry = getattr(request.app.state, "strategy_registry", None)
@@ -145,7 +156,7 @@ async def get_strategy_performance(request: Request, strategy_id: str) -> dict:
     return result
 
 
-@router.get("/{strategy_id}/daily-summary")
+@router.get("/{strategy_id}/daily-summary", response_model=DailySummaryResponse)
 async def get_strategy_daily_summary(
     request: Request,
     strategy_id: str,
@@ -190,7 +201,7 @@ async def get_strategy_daily_summary(
     }
 
 
-@router.get("/{strategy_id}/weekly-summary")
+@router.get("/{strategy_id}/weekly-summary", response_model=WeeklySummaryResponse)
 async def get_strategy_weekly_summary(
     request: Request,
     strategy_id: str,
@@ -236,7 +247,7 @@ async def get_strategy_weekly_summary(
     }
 
 
-@router.get("/{strategy_id}/monthly-summary")
+@router.get("/{strategy_id}/monthly-summary", response_model=MonthlySummaryResponse)
 async def get_strategy_monthly_summary(
     request: Request,
     strategy_id: str,
@@ -281,7 +292,7 @@ async def get_strategy_monthly_summary(
     }
 
 
-@router.get("/{strategy_id}/trades")
+@router.get("/{strategy_id}/trades", response_model=StrategyTradesResponse)
 async def get_strategy_trades(
     request: Request,
     strategy_id: str,

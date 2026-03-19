@@ -7,12 +7,14 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Query, Request
 
+from ante.web.schemas import PortfolioHistoryResponse, PortfolioValueResponse
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/value")
+@router.get("/value", response_model=PortfolioValueResponse)
 async def portfolio_value(request: Request) -> dict:
     """총 자산 가치 + 오늘 손익."""
     treasury = request.app.state.treasury
@@ -30,7 +32,7 @@ async def portfolio_value(request: Request) -> dict:
     }
 
 
-# 기간 → 일수 매핑
+# 기간 -> 일수 매핑
 _PERIOD_DAYS = {
     "1d": 1,
     "1w": 7,
@@ -40,7 +42,7 @@ _PERIOD_DAYS = {
 }
 
 
-@router.get("/history")
+@router.get("/history", response_model=PortfolioHistoryResponse)
 async def portfolio_history(
     request: Request,
     period: str = Query(default="1m", pattern="^(1d|1w|1m|3m|all)$"),

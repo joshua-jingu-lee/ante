@@ -7,6 +7,12 @@ import shutil
 
 from fastapi import APIRouter, Query, Request
 
+from ante.web.schemas import (
+    DatasetListResponse,
+    FeedStatusResponse,
+    StorageSummaryResponse,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -15,7 +21,7 @@ router = APIRouter()
 DATA_TYPES = ["ohlcv", "fundamental"]
 
 
-@router.get("/datasets")
+@router.get("/datasets", response_model=DatasetListResponse)
 async def list_datasets(
     request: Request,
     symbol: str | None = None,
@@ -97,7 +103,7 @@ async def get_data_schema(
     return {k: str(v) for k, v in OHLCV_SCHEMA.items()}
 
 
-@router.get("/storage")
+@router.get("/storage", response_model=StorageSummaryResponse)
 async def get_storage_summary(request: Request) -> dict:
     """저장 용량 현황."""
     store = getattr(request.app.state, "data_store", None)
@@ -150,7 +156,7 @@ async def delete_dataset(
     shutil.rmtree(path)
 
 
-@router.get("/feed-status")
+@router.get("/feed-status", response_model=FeedStatusResponse)
 async def get_feed_status(request: Request) -> dict:
     """Feed 파이프라인 상태 조회.
 

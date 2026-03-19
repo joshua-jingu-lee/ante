@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ante.web.schemas import HealthResponse, KillSwitchResponse, StatusResponse
+
 router = APIRouter()
 
 
@@ -15,7 +17,7 @@ class KillSwitchRequest(BaseModel):
     reason: str = ""
 
 
-@router.get("/status")
+@router.get("/status", response_model=StatusResponse)
 async def get_system_status(request: Request) -> dict:
     """시스템 상태 조회."""
     result: dict = {
@@ -50,13 +52,13 @@ async def _get_last_halt_info(system_state: object) -> dict | None:
     return dict(row) if row else None
 
 
-@router.get("/health")
+@router.get("/health", response_model=HealthResponse)
 async def health_check() -> dict:
     """헬스체크."""
     return {"ok": True}
 
 
-@router.post("/kill-switch")
+@router.post("/kill-switch", response_model=KillSwitchResponse)
 async def kill_switch(request: Request, body: KillSwitchRequest) -> dict:
     """킬 스위치 제어 (halt/activate)."""
     from datetime import UTC, datetime
