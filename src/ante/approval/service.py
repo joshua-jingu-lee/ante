@@ -138,6 +138,8 @@ class ApprovalService:
         self,
         id: str,
         resolved_by: str = "user",
+        *,
+        suppress_notification: bool = False,
     ) -> ApprovalRequest:
         """결재 승인 + 자동 실행."""
         request = await self.get(id)
@@ -178,7 +180,9 @@ class ApprovalService:
 
         logger.info("결재 승인: %s by %s", id, resolved_by)
 
-        await self._execute_approved(request, resolved_by)
+        await self._execute_approved(
+            request, resolved_by, suppress_notification=suppress_notification
+        )
 
         return request
 
@@ -187,6 +191,8 @@ class ApprovalService:
         id: str,
         resolved_by: str = "user",
         reject_reason: str = "",
+        *,
+        suppress_notification: bool = False,
     ) -> ApprovalRequest:
         """결재 거절."""
         request = await self.get(id)
@@ -244,9 +250,10 @@ class ApprovalService:
                 resolved_by=resolved_by,
             )
         )
-        await self._publish_resolved_notification(
-            id, request.type, ApprovalStatus.REJECTED, resolved_by
-        )
+        if not suppress_notification:
+            await self._publish_resolved_notification(
+                id, request.type, ApprovalStatus.REJECTED, resolved_by
+            )
 
         return request
 
@@ -704,7 +711,13 @@ class ApprovalService:
             )
         )
 
-    async def _execute_approved(self, request: ApprovalRequest, actor: str) -> None:
+    async def _execute_approved(
+        self,
+        request: ApprovalRequest,
+        actor: str,
+        *,
+        suppress_notification: bool = False,
+    ) -> None:
         """승인된 요청의 executor를 실행하고 결과를 반영한다.
 
         create()의 전결 실행과 approve()의 자동 실행에서 공유된다.
@@ -752,9 +765,10 @@ class ApprovalService:
                 resolved_by=actor,
             )
         )
-        await self._publish_resolved_notification(
-            request.id, request.type, request.status, actor
-        )
+        if not suppress_notification:
+            await self._publish_resolved_notification(
+                request.id, request.type, request.status, actor
+            )
 
     async def _publish_resolved_notification(
         self,
