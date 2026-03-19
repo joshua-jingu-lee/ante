@@ -7,13 +7,14 @@ from fastapi import APIRouter, HTTPException, Request
 from ante.web.schemas import (
     ReportDetailResponse,
     ReportListResponse,
+    ReportSchemaResponse,
     ReportSubmitResponse,
 )
 
 router = APIRouter()
 
 
-@router.get("/schema")
+@router.get("/schema", response_model=ReportSchemaResponse)
 async def get_report_schema() -> dict:
     """리포트 제출 스키마 조회."""
     from ante.report import ReportStore

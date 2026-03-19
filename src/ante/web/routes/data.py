@@ -8,6 +8,7 @@ import shutil
 from fastapi import APIRouter, Query, Request
 
 from ante.web.schemas import (
+    DataSchemaResponse,
     DatasetListResponse,
     FeedStatusResponse,
     StorageSummaryResponse,
@@ -87,7 +88,7 @@ async def list_datasets(
     return {"items": items, "total": total}
 
 
-@router.get("/schema")
+@router.get("/schema", response_model=DataSchemaResponse)
 async def get_data_schema(
     request: Request,
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
