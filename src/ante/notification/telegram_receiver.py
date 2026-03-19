@@ -234,8 +234,13 @@ class TelegramCommandReceiver:
         if command == "confirm":
             return await self._handle_confirm(user_id)
 
-        # 위험 명령 → 확인 절차
+        # 위험 명령 → 확인 절차 (이미 해당 상태이면 즉시 반환)
         if command in _DANGEROUS_COMMANDS:
+            if command == "halt" and self._system_state:
+                from ante.config.system_state import TradingState
+
+                if self._system_state.trading_state == TradingState.HALTED:
+                    return "이미 거래가 중지된 상태입니다."
             return self._request_confirmation(command, args, user_id)
 
         # 즉시 실행 명령
@@ -440,11 +445,18 @@ class TelegramCommandReceiver:
 
         from ante.config.system_state import TradingState
 
+        if self._system_state.trading_state == TradingState.HALTED:
+            return "이미 거래가 중지된 상태입니다."
+
         reason = " ".join(args) if args else "텔레그램 명령"
         await self._system_state.set_state(
             TradingState.HALTED, reason=reason, changed_by="telegram"
         )
-        return f"전체 거래가 중지되었습니다. (사유: {reason})"
+        return (
+            "\U0001f6a8 전체 거래가 중지되었습니다.\n"
+            f"사유: {reason}\n"
+            "해제하려면 /activate 를 입력하세요."
+        )
 
     async def _cmd_activate(self, args: list[str]) -> str:
         """거래 재개."""

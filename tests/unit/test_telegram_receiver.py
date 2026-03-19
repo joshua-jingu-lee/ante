@@ -430,8 +430,31 @@ class TestIntegrationFlow:
         }
         await receiver._handle_update(confirm_update)
         assert receiver._reply.call_count == 2
-        assert "중지되었습니다" in receiver._reply.call_args[0][1]
+        reply_text = receiver._reply.call_args[0][1]
+        assert "중지되었습니다" in reply_text
+        assert "/activate" in reply_text
         system_state.set_state.assert_called_once()
+
+    async def test_halt_already_halted(self, receiver, system_state):
+        """이미 HALTED 상태이면 중복 메시지를 반환한다."""
+        from ante.config.system_state import TradingState
+
+        system_state.trading_state = TradingState.HALTED
+        receiver._reply = AsyncMock()
+
+        halt_update = {
+            "message": {
+                "text": "/halt",
+                "from": {"id": 12345},
+                "chat": {"id": 100},
+            }
+        }
+        await receiver._handle_update(halt_update)
+
+        # confirm 없이 즉시 응답
+        assert receiver._reply.call_count == 1
+        assert "이미 거래가 중지된 상태입니다" in receiver._reply.call_args[0][1]
+        system_state.set_state.assert_not_called()
 
     async def test_reply_with_no_chat_id(self, receiver):
         """chat_id가 없어도 에러 없이 처리."""
