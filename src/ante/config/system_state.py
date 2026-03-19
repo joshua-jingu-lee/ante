@@ -76,9 +76,22 @@ class SystemState:
         return self._state
 
     async def set_state(
-        self, state: TradingState, reason: str = "", changed_by: str = ""
+        self,
+        state: TradingState,
+        reason: str = "",
+        changed_by: str = "",
+        *,
+        suppress_notification: bool = False,
     ) -> None:
-        """거래 상태 변경. 인메모리 즉시 반영 + DB 영속화 + 이벤트 발행."""
+        """거래 상태 변경. 인메모리 즉시 반영 + DB 영속화 + 이벤트 발행.
+
+        Args:
+            state: 변경할 거래 상태.
+            reason: 변경 사유.
+            changed_by: 변경 주체.
+            suppress_notification: True이면 NotificationEvent 발행을 생략한다.
+                TradingStateChangedEvent(도메인 이벤트)는 항상 발행된다.
+        """
         from ante.eventbus.events import TradingStateChangedEvent
 
         old_state = self._state
@@ -109,16 +122,17 @@ class SystemState:
             )
         )
 
-        from ante.eventbus.events import NotificationEvent
+        if not suppress_notification:
+            from ante.eventbus.events import NotificationEvent
 
-        await self._eventbus.publish(
-            NotificationEvent(
-                level="critical",
-                title="거래 상태 변경",
-                message=(f"{old_state.value} → *{state.value}*\n사유: {reason}"),
-                category="system",
+            await self._eventbus.publish(
+                NotificationEvent(
+                    level="critical",
+                    title="거래 상태 변경",
+                    message=(f"{old_state.value} → *{state.value}*\n사유: {reason}"),
+                    category="system",
+                )
             )
-        )
         logger.info(
             "거래 상태 변경: %s → %s (사유: %s, 변경자: %s)",
             old_state,
