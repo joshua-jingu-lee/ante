@@ -28,7 +28,11 @@ class ApprovalStatusUpdate(BaseModel):
     memo: str = ""
 
 
-@router.get("", response_model=ApprovalListResponse)
+@router.get(
+    "",
+    response_model=ApprovalListResponse,
+    responses={503: {"description": "Approval service not available"}},
+)
 async def list_approvals(
     approval_service: Annotated[Any, Depends(get_approval_service)],
     status: str | None = Query(default=None),
@@ -47,7 +51,14 @@ async def list_approvals(
     }
 
 
-@router.get("/{approval_id}", response_model=ApprovalDetailResponse)
+@router.get(
+    "/{approval_id}",
+    response_model=ApprovalDetailResponse,
+    responses={
+        404: {"description": "Approval not found"},
+        503: {"description": "Approval service not available"},
+    },
+)
 async def get_approval(
     approval_id: str,
     approval_service: Annotated[Any, Depends(get_approval_service)],
@@ -71,7 +82,15 @@ async def get_approval(
     return result
 
 
-@router.patch("/{approval_id}/status", response_model=ApprovalUpdateResponse)
+@router.patch(
+    "/{approval_id}/status",
+    response_model=ApprovalUpdateResponse,
+    responses={
+        400: {"description": "Invalid status value"},
+        404: {"description": "Approval not found"},
+        503: {"description": "Approval service not available"},
+    },
+)
 async def update_approval_status(
     approval_id: str,
     body: ApprovalStatusUpdate,

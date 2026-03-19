@@ -122,7 +122,15 @@ async def get_storage_summary(
     }
 
 
-@router.delete("/datasets/{dataset_id}", status_code=204)
+@router.delete(
+    "/datasets/{dataset_id}",
+    status_code=204,
+    responses={
+        400: {"description": "Invalid dataset_id format"},
+        404: {"description": "Dataset not found"},
+        503: {"description": "Data store not available"},
+    },
+)
 async def delete_dataset(
     dataset_id: str,
     store: Annotated[Any | None, Depends(get_data_store)],

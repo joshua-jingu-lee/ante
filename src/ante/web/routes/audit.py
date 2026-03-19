@@ -12,7 +12,11 @@ from ante.web.schemas import AuditLogListResponse
 router = APIRouter()
 
 
-@router.get("", response_model=AuditLogListResponse)
+@router.get(
+    "",
+    response_model=AuditLogListResponse,
+    responses={503: {"description": "Audit logger not available"}},
+)
 async def list_audit_logs(
     audit_logger: Annotated[Any, Depends(get_audit_logger)],
     member_id: str | None = None,

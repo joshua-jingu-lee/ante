@@ -62,7 +62,14 @@ async def health_check() -> dict:
     return {"ok": True}
 
 
-@router.post("/kill-switch", response_model=KillSwitchResponse)
+@router.post(
+    "/kill-switch",
+    response_model=KillSwitchResponse,
+    responses={
+        400: {"description": "Invalid action value"},
+        503: {"description": "System state not available"},
+    },
+)
 async def kill_switch(
     body: KillSwitchRequest,
     system_state: Annotated[Any, Depends(get_system_state)],

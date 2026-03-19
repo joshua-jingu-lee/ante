@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/value", response_model=PortfolioValueResponse)
+@router.get(
+    "/value",
+    response_model=PortfolioValueResponse,
+    responses={503: {"description": "Treasury not available"}},
+)
 async def portfolio_value(
     treasury: Annotated[Any, Depends(get_treasury)],
 ) -> dict:
@@ -44,7 +48,13 @@ _PERIOD_DAYS = {
 }
 
 
-@router.get("/history", response_model=PortfolioHistoryResponse)
+@router.get(
+    "/history",
+    response_model=PortfolioHistoryResponse,
+    responses={
+        503: {"description": "Trade service or bot manager not available"},
+    },
+)
 async def portfolio_history(
     trade_service: Annotated[Any, Depends(get_trade_service)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],

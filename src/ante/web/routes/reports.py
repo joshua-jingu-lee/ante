@@ -26,7 +26,12 @@ async def get_report_schema() -> dict:
     return store.get_schema()
 
 
-@router.post("", status_code=201, response_model=ReportSubmitResponse)
+@router.post(
+    "",
+    status_code=201,
+    response_model=ReportSubmitResponse,
+    responses={503: {"description": "Report store not available"}},
+)
 async def submit_report(
     body: dict,
     report_store: Annotated[Any, Depends(get_report_store)],
@@ -40,7 +45,14 @@ async def submit_report(
     }
 
 
-@router.get("/{report_id}", response_model=ReportDetailResponse)
+@router.get(
+    "/{report_id}",
+    response_model=ReportDetailResponse,
+    responses={
+        404: {"description": "Report not found"},
+        503: {"description": "Report store not available"},
+    },
+)
 async def report_view(
     report_id: str,
     report_store: Annotated[Any, Depends(get_report_store)],
@@ -85,7 +97,11 @@ async def report_view(
     }
 
 
-@router.get("", response_model=ReportListResponse)
+@router.get(
+    "",
+    response_model=ReportListResponse,
+    responses={503: {"description": "Report store not available"}},
+)
 async def list_reports(
     report_store: Annotated[Any, Depends(get_report_store)],
     status: str | None = None,

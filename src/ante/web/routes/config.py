@@ -20,7 +20,11 @@ class ConfigUpdateRequest(BaseModel):
     category: str = ""
 
 
-@router.get("", response_model=ConfigListResponse)
+@router.get(
+    "",
+    response_model=ConfigListResponse,
+    responses={503: {"description": "Config service not available"}},
+)
 async def list_configs(
     config_service: Annotated[Any, Depends(get_dynamic_config)],
 ) -> dict:
@@ -29,7 +33,14 @@ async def list_configs(
     return {"configs": configs}
 
 
-@router.put("/{key:path}", response_model=ConfigUpdateResponse)
+@router.put(
+    "/{key:path}",
+    response_model=ConfigUpdateResponse,
+    responses={
+        404: {"description": "Config key not found"},
+        503: {"description": "Config service not available"},
+    },
+)
 async def update_config(
     key: str,
     body: ConfigUpdateRequest,

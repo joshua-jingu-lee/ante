@@ -18,7 +18,14 @@ COOKIE_NAME = "ante_session"
 COOKIE_MAX_AGE = 86400  # 24시간
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    responses={
+        401: {"description": "Invalid credentials"},
+        503: {"description": "Member or session service not available"},
+    },
+)
 async def login(
     body: LoginRequest,
     request: Request,
@@ -63,7 +70,11 @@ async def login(
     )
 
 
-@router.post("/logout", response_model=LogoutResponse)
+@router.post(
+    "/logout",
+    response_model=LogoutResponse,
+    responses={503: {"description": "Session service not available"}},
+)
 async def logout(
     response: Response,
     session_service: Annotated[Any, Depends(get_session_service)],
@@ -77,7 +88,14 @@ async def logout(
     return {"ok": True}
 
 
-@router.get("/me", response_model=MeResponse)
+@router.get(
+    "/me",
+    response_model=MeResponse,
+    responses={
+        401: {"description": "Not authenticated or session expired"},
+        503: {"description": "Member or session service not available"},
+    },
+)
 async def me(
     member_service: Annotated[Any, Depends(get_member_service)],
     session_service: Annotated[Any, Depends(get_session_service)],

@@ -32,7 +32,10 @@ class BalanceSetRequest(BaseModel):
 
 
 @router.get(
-    "", response_model=TreasurySummaryResponse, response_model_exclude_none=True
+    "",
+    response_model=TreasurySummaryResponse,
+    response_model_exclude_none=True,
+    responses={503: {"description": "Treasury not available"}},
 )
 async def get_summary(
     treasury: Annotated[Any, Depends(get_treasury)],
@@ -73,7 +76,11 @@ async def get_summary(
     return summary
 
 
-@router.get("/transactions", response_model=TransactionListResponse)
+@router.get(
+    "/transactions",
+    response_model=TransactionListResponse,
+    responses={503: {"description": "Treasury not available"}},
+)
 async def list_transactions(
     treasury: Annotated[Any, Depends(get_treasury)],
     type: str | None = None,
@@ -123,7 +130,15 @@ async def list_transactions(
     return {"items": items, "total": total}
 
 
-@router.post("/bots/{bot_id}/allocate", response_model=BudgetOperationResponse)
+@router.post(
+    "/bots/{bot_id}/allocate",
+    response_model=BudgetOperationResponse,
+    responses={
+        400: {"description": "Insufficient funds or invalid amount"},
+        409: {"description": "Bot not stopped"},
+        503: {"description": "Treasury not available"},
+    },
+)
 async def allocate(
     bot_id: str,
     body: BudgetChangeRequest,
@@ -154,7 +169,15 @@ async def allocate(
     }
 
 
-@router.post("/bots/{bot_id}/deallocate", response_model=BudgetOperationResponse)
+@router.post(
+    "/bots/{bot_id}/deallocate",
+    response_model=BudgetOperationResponse,
+    responses={
+        400: {"description": "Insufficient available budget"},
+        409: {"description": "Bot not stopped"},
+        503: {"description": "Treasury not available"},
+    },
+)
 async def deallocate(
     bot_id: str,
     body: BudgetChangeRequest,
@@ -182,7 +205,11 @@ async def deallocate(
     }
 
 
-@router.get("/budgets", response_model=BudgetListResponse)
+@router.get(
+    "/budgets",
+    response_model=BudgetListResponse,
+    responses={503: {"description": "Treasury not available"}},
+)
 async def list_budgets(
     treasury: Annotated[Any, Depends(get_treasury)],
 ) -> dict:
@@ -193,7 +220,11 @@ async def list_budgets(
     return {"budgets": [asdict(b) for b in budgets]}
 
 
-@router.post("/balance", response_model=BalanceSetResponse)
+@router.post(
+    "/balance",
+    response_model=BalanceSetResponse,
+    responses={503: {"description": "Treasury not available"}},
+)
 async def set_balance(
     body: BalanceSetRequest,
     treasury: Annotated[Any, Depends(get_treasury)],
