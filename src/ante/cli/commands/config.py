@@ -35,6 +35,65 @@ async def _create_services():  # noqa: ANN202
     return static_config, dynamic, db
 
 
+async def _resolve_single(key, static_config, dynamic) -> dict:  # noqa: ANN001
+    """단일 키 설정값 조회."""
+    if await dynamic.exists(key):
+        value = await dynamic.get(key)
+        return {"key": key, "value": value, "source": "dynamic"}
+    static_value = static_config.get(key)
+    if static_value is not None:
+        return {"key": key, "value": static_value, "source": "static"}
+    return {"key": key, "value": None, "source": "not_found"}
+
+
+async def _resolve_all(static_config, db) -> list[dict]:  # noqa: ANN001
+    """전체 설정 목록 조회."""
+    from ante.config.defaults import DEFAULTS
+
+    results: list[dict] = []
+    for k, v in sorted(DEFAULTS.items()):
+        static_val = static_config.get(k, v)
+        results.append({"key": k, "value": static_val, "source": "static"})
+
+    rows = await db.fetch_all(
+        "SELECT key, value, category FROM dynamic_config ORDER BY key"
+    )
+    for row in rows:
+        results.append(
+            {
+                "key": row["key"],
+                "value": json.loads(row["value"]),
+                "source": "dynamic",
+            }
+        )
+    return results
+
+
+def _render_single(result: dict, fmt) -> None:  # noqa: ANN001
+    """단일 설정 결과 출력."""
+    if result["source"] == "not_found":
+        fmt.error(f"설정을 찾을 수 없습니다: {result['key']}")
+        return
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        click.echo(
+            f"  {result['key']} = {result['value']} (source: {result['source']})"
+        )
+
+
+def _render_list(result: list[dict], fmt) -> None:  # noqa: ANN001
+    """설정 목록 출력."""
+    if fmt.is_json:
+        fmt.output({"configs": result})
+        return
+    if not result:
+        click.echo("  (설정 없음)")
+        return
+    for item in result:
+        click.echo(f"  {item['key']:40s} = {str(item['value']):20s} ({item['source']})")
+
+
 @config.command("get")
 @click.argument("key", required=False, default=None)
 @click.pass_context
@@ -48,72 +107,17 @@ def config_get(ctx: click.Context, key: str | None) -> None:
         static_config, dynamic, db = await _create_services()
         try:
             if key is not None:
-                # 동적 설정 먼저 확인
-                if await dynamic.exists(key):
-                    value = await dynamic.get(key)
-                    return {"key": key, "value": value, "source": "dynamic"}
-                # 정적 설정 확인
-                static_value = static_config.get(key)
-                if static_value is not None:
-                    return {"key": key, "value": static_value, "source": "static"}
-                return {"key": key, "value": None, "source": "not_found"}
-            else:
-                # 전체 목록
-                results: list[dict] = []
-
-                # 정적 설정 (defaults + system.toml)
-                from ante.config.defaults import DEFAULTS
-
-                for k, v in sorted(DEFAULTS.items()):
-                    static_val = static_config.get(k, v)
-                    results.append(
-                        {
-                            "key": k,
-                            "value": static_val,
-                            "source": "static",
-                        }
-                    )
-
-                # 동적 설정
-                rows = await db.fetch_all(
-                    "SELECT key, value, category FROM dynamic_config ORDER BY key"
-                )
-                for row in rows:
-                    results.append(
-                        {
-                            "key": row["key"],
-                            "value": json.loads(row["value"]),
-                            "source": "dynamic",
-                        }
-                    )
-
-                return results
+                return await _resolve_single(key, static_config, dynamic)
+            return await _resolve_all(static_config, db)
         finally:
             await db.close()
 
     result = _run(_run_get())
 
     if isinstance(result, dict):
-        if result["source"] == "not_found":
-            fmt.error(f"설정을 찾을 수 없습니다: {result['key']}")
-            return
-        if fmt.is_json:
-            fmt.output(result)
-        else:
-            click.echo(
-                f"  {result['key']} = {result['value']} (source: {result['source']})"
-            )
+        _render_single(result, fmt)
     else:
-        if fmt.is_json:
-            fmt.output({"configs": result})
-        else:
-            if not result:
-                click.echo("  (설정 없음)")
-                return
-            for item in result:
-                click.echo(
-                    f"  {item['key']:40s} = {str(item['value']):20s} ({item['source']})"
-                )
+        _render_list(result, fmt)
 
 
 @config.command("set")
