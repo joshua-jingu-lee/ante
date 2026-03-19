@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_ORG = "default"
+
 MEMBER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS members (
     member_id          TEXT PRIMARY KEY,
@@ -131,7 +133,7 @@ def _row_to_member(row: dict) -> Member:
         member_id=row["member_id"],
         type=row["type"],
         role=row["role"],
-        org=row.get("org", "default"),
+        org=row.get("org", _DEFAULT_ORG),
         name=row.get("name", ""),
         emoji=row.get("emoji", ""),
         status=row.get("status", MemberStatus.ACTIVE),
@@ -275,7 +277,7 @@ class MemberService:
             member_id=member_id,
             type=MemberType.HUMAN,
             role=MemberRole.MASTER,
-            org="default",
+            org=_DEFAULT_ORG,
             name=name or member_id,
             emoji=emoji,
             status=MemberStatus.ACTIVE,
@@ -331,7 +333,7 @@ class MemberService:
         member_id: str,
         member_type: str,
         role: str = MemberRole.DEFAULT,
-        org: str = "default",
+        org: str = _DEFAULT_ORG,
         name: str = "",
         emoji: str | None = None,
         scopes: list[str] | None = None,

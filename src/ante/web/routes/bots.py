@@ -18,6 +18,8 @@ from ante.web.schemas import BotDetailResponse, BotListResponse
 
 router = APIRouter()
 
+_BOT_NOT_FOUND = "봇을 찾을 수 없습니다"
+
 
 class BotCreateRequest(BaseModel):
     """봇 생성 요청."""
@@ -96,7 +98,7 @@ async def get_bot(
     """봇 상세 조회."""
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
-        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
     info = bot.get_info()
 
@@ -150,7 +152,7 @@ async def start_bot(
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
-        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
     try:
         await bot_manager.start_bot(bot_id)
@@ -170,7 +172,7 @@ async def stop_bot(
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
-        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
     try:
         await bot_manager.stop_bot(bot_id)
@@ -190,7 +192,7 @@ async def delete_bot(
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
-        raise HTTPException(status_code=404, detail="봇을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
     try:
         await bot_manager.delete_bot(bot_id)

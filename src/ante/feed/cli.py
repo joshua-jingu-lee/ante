@@ -16,6 +16,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_DATA_PATH = "data/"
+_DATA_PATH_HELP = "데이터 저장소 경로"
+_SCOPE_DATA_WRITE = "data:write"
+_SCOPE_DATA_READ = "data:read"
+_SEPARATOR = "──────────────────────────────────────────────────"
+
 _API_KEY_GUIDE = """\
 ──────────────────────────────────────────────────
 API 키 설정이 필요합니다.
@@ -56,10 +62,10 @@ def feed_config() -> None:
 @feed_config.command("set")
 @click.argument("key")
 @click.argument("value")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None:
     """API 키를 .feed/.env 파일에 저장한다."""
     from ante.feed.config import API_KEYS, FeedConfig
@@ -81,10 +87,10 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None
 
 
 @feed_config.command("list")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:read")
+@require_scope(_SCOPE_DATA_READ)
 def config_list(ctx: click.Context, data_path: str) -> None:
     """등록된 API 키 목록을 마스킹하여 표시한다."""
     from ante.feed.config import FeedConfig
@@ -104,10 +110,10 @@ def config_list(ctx: click.Context, data_path: str) -> None:
 
 
 @feed_config.command("check")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:read")
+@require_scope(_SCOPE_DATA_READ)
 def config_check(ctx: click.Context, data_path: str) -> None:
     """API 키 존재 여부를 확인한다."""
     from ante.feed.config import FeedConfig
@@ -121,7 +127,7 @@ def config_check(ctx: click.Context, data_path: str) -> None:
     else:
         click.echo()
         click.echo("API Key Status")
-        click.echo("──────────────────────────────────────────────────")
+        click.echo(_SEPARATOR)
         all_set = True
         for entry in statuses:
             if entry["set"]:
@@ -130,7 +136,7 @@ def config_check(ctx: click.Context, data_path: str) -> None:
             else:
                 click.echo(f"  {entry['key']:<30} ✗ 미설정")
                 all_set = False
-        click.echo("──────────────────────────────────────────────────")
+        click.echo(_SEPARATOR)
         if not all_set:
             click.echo("설정: ante feed config set <KEY> <VALUE>")
         click.echo()
@@ -187,14 +193,14 @@ def _ensure_initialized(  # noqa: ANN001, ANN201
 
 
 @feed_run.command("backfill")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.option(
     "--since", default=None, help="수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드)"
 )
 @click.option("--until", default=None, help="수집 종료일 (YYYY-MM-DD, 기본값: 오늘)")
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def run_backfill(
     ctx: click.Context,
     data_path: str,
@@ -233,13 +239,13 @@ def run_backfill(
 
 
 @feed_run.command("daily")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.option(
     "--date", "target_date", default=None, help="수집 대상일 (YYYY-MM-DD, 기본값: 어제)"
 )
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def run_daily(
     ctx: click.Context,
     data_path: str,
@@ -296,10 +302,10 @@ def run_daily(
 
 
 @feed.command("start")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def feed_start(ctx: click.Context, data_path: str) -> None:
     """내장 스케줄러로 backfill/daily를 자동 실행하는 상주 프로세스를 시작한다."""
     import asyncio
@@ -342,10 +348,10 @@ def feed_start(ctx: click.Context, data_path: str) -> None:
 
 
 @feed.command("init")
-@click.argument("data_path", default="data/")
+@click.argument("data_path", default=_DEFAULT_DATA_PATH)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def feed_init(ctx: click.Context, data_path: str) -> None:
     """DataFeed 운영 디렉토리를 초기화한다."""
     from ante.feed.config import FeedConfig
@@ -368,10 +374,10 @@ def feed_init(ctx: click.Context, data_path: str) -> None:
 
 
 @feed.command("status")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:read")
+@require_scope(_SCOPE_DATA_READ)
 def feed_status(ctx: click.Context, data_path: str) -> None:
     """수집 상태를 조회한다."""
 
@@ -422,7 +428,7 @@ def _echo_status_text(
     """feed status의 텍스트 출력을 수행한다."""
     click.echo()
     click.echo(f"DataFeed Status ({cfg.feed_dir})")  # type: ignore[attr-defined]
-    click.echo("══════════════════════════════════════════════════")
+    click.echo("═" * 50)
 
     _echo_checkpoints_section(checkpoints)
     _echo_report_section(latest_report)
@@ -435,7 +441,7 @@ def _echo_checkpoints_section(checkpoints: list[dict[str, str]]) -> None:
     """체크포인트 섹션을 출력한다."""
     click.echo()
     click.echo("Checkpoints")
-    click.echo("──────────────────────────────────────────────────")
+    click.echo(_SEPARATOR)
     if checkpoints:
         for cp in checkpoints:
             click.echo(
@@ -451,7 +457,7 @@ def _echo_report_section(latest_report: dict | None) -> None:
     """최근 리포트 섹션을 출력한다."""
     click.echo()
     click.echo("Latest Report")
-    click.echo("──────────────────────────────────────────────────")
+    click.echo(_SEPARATOR)
     if latest_report:
         summary = latest_report.get("summary", {})
         click.echo(f"  mode: {latest_report.get('mode', '?')}")
@@ -470,7 +476,7 @@ def _echo_api_keys_section(api_keys: list[dict]) -> None:
     """API 키 섹션을 출력한다."""
     click.echo()
     click.echo("API Keys")
-    click.echo("──────────────────────────────────────────────────")
+    click.echo(_SEPARATOR)
     for entry in api_keys:
         if entry["set"]:
             source_info = f"(source: {entry['source']})"
@@ -531,10 +537,10 @@ def _load_latest_report(
 @click.option("--symbol", required=True, help="종목 코드 (6자리)")
 @click.option("--timeframe", default="1d", help="타임프레임 (기본값: 1d)")
 @click.option("--source", default="external", help="데이터 소스 식별자")
-@click.option("--data-path", default="data/", help="데이터 저장소 경로")
+@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
-@require_scope("data:write")
+@require_scope(_SCOPE_DATA_WRITE)
 def feed_inject(
     ctx: click.Context,
     path: str,
