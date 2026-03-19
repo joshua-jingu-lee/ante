@@ -8,12 +8,10 @@ MockBrokerAdapter(E2E용)와는 목적이 다르며 유지한다.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
 import random
 import uuid
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -454,32 +452,6 @@ class TestBrokerAdapter(BrokerAdapter):
             if order.status in ("pending", "partially_filled"):
                 results.append(await self.get_order_status(order.order_id))
         return results
-
-    # ── 실시간 스트리밍 ───────────────────────────────────
-
-    async def realtime_price_stream(
-        self, symbols: list[str]
-    ) -> AsyncIterator[dict[str, Any]]:
-        """1초 간격 가격 변동 스트림.
-
-        매 인터벌마다 각 종목의 tick()을 호출하여 GBM 변동이 적용된
-        가격을 yield한다. 연결이 끊기면 스트림이 종료된다.
-        """
-        while self.is_connected:
-            for symbol in symbols:
-                price = self._simulator.tick(symbol)
-                yield {
-                    "symbol": symbol,
-                    "price": price,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-            await asyncio.sleep(self._tick_interval)
-
-    async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
-        """실시간 주문 체결 스트리밍 — 체결된 주문 반환 후 종료."""
-        for order in self._orders.values():
-            if order.status in ("filled", "partially_filled"):
-                yield await self.get_order_status(order.order_id)
 
     # ── 이력/마스터 ───────────────────────────────────────
 
