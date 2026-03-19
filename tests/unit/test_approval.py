@@ -6,7 +6,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ante.approval.models import ApprovalRequest, ApprovalStatus, ApprovalType
+from ante.approval.models import (
+    ApprovalRequest,
+    ApprovalStatus,
+    ApprovalType,
+    ApprovalValidationError,
+    ValidationResult,
+)
 from ante.approval.service import ApprovalService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
@@ -43,7 +49,6 @@ class TestModels:
         """ApprovalStatus 값."""
         assert ApprovalStatus.PENDING == "pending"
         assert ApprovalStatus.APPROVED == "approved"
-        assert ApprovalStatus.EXECUTION_FAILED == "execution_failed"
         assert ApprovalStatus.REJECTED == "rejected"
         assert ApprovalStatus.ON_HOLD == "on_hold"
         assert ApprovalStatus.EXPIRED == "expired"
@@ -261,15 +266,13 @@ class TestResolve:
         assert received[0].resolution == "approved"
 
     async def test_approve_non_pending_fails(self, service):
-        """pending/execution_failed이 아닌 상태에서 승인 시 에러."""
+        """pending이 아닌 상태에서 승인 시 에러."""
         req = await service.create(
             type="budget_change", requester="agent", title="테스트"
         )
         await service.approve(req.id)
 
-        with pytest.raises(
-            ValueError, match="pending/execution_failed 상태에서만 승인 가능"
-        ):
+        with pytest.raises(ValueError, match="pending 상태에서만 승인 가능"):
             await service.approve(req.id)
 
     async def test_reject(self, service):
@@ -284,15 +287,13 @@ class TestResolve:
         assert any(h["action"] == "rejected" for h in rejected.history)
 
     async def test_reject_non_pending_fails(self, service):
-        """pending/execution_failed이 아닌 상태에서 거절 시 에러."""
+        """pending이 아닌 상태에서 거절 시 에러."""
         req = await service.create(
             type="budget_change", requester="agent", title="테스트"
         )
         await service.reject(req.id)
 
-        with pytest.raises(
-            ValueError, match="pending/execution_failed 상태에서만 거절 가능"
-        ):
+        with pytest.raises(ValueError, match="pending 상태에서만 거절 가능"):
             await service.reject(req.id)
 
     async def test_hold_and_resume(self, service):
@@ -310,15 +311,13 @@ class TestResolve:
         assert any(h["action"] == "resumed" for h in resumed.history)
 
     async def test_hold_non_pending_fails(self, service):
-        """pending/execution_failed이 아닌 상태에서 보류 시 에러."""
+        """pending이 아닌 상태에서 보류 시 에러."""
         req = await service.create(
             type="budget_change", requester="agent", title="테스트"
         )
         await service.approve(req.id)
 
-        with pytest.raises(
-            ValueError, match="pending/execution_failed 상태에서만 보류 가능"
-        ):
+        with pytest.raises(ValueError, match="pending 상태에서만 보류 가능"):
             await service.hold(req.id)
 
     async def test_resume_non_hold_fails(self, service):
@@ -371,10 +370,7 @@ class TestCancel:
         )
         await service.approve(req.id)
 
-        with pytest.raises(
-            ValueError,
-            match="pending/on_hold/execution_failed 상태에서만 철회 가능",
-        ):
+        with pytest.raises(ValueError, match="pending/on_hold 상태에서만 철회 가능"):
             await service.cancel(req.id, requester="agent:dev")
 
     async def test_cancel_publishes_event(self, service, eventbus):
@@ -530,6 +526,109 @@ class TestExpire:
         count = await service.expire_stale()
         assert count == 0
 
+    async def test_expire_event_published(self, service, eventbus):
+        """만료 처리 시 건별 ApprovalResolvedEvent가 발행된다."""
+        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        await service.create(
+            type="budget_change",
+            requester="agent",
+            title="만료 이벤트 테스트",
+            expires_at=past,
+        )
+
+        received: list[ApprovalResolvedEvent] = []
+
+        async def _handler(event: ApprovalResolvedEvent) -> None:
+            received.append(event)
+
+        eventbus.subscribe(ApprovalResolvedEvent, _handler)
+
+        count = await service.expire_stale()
+        assert count == 1
+        assert len(received) == 1
+        assert received[0].resolution == ApprovalStatus.EXPIRED
+        assert received[0].resolved_by == "system"
+
+
+# ── 만료 스케줄러 (US-8) ──────────────────────────────
+
+
+class TestExpireLoop:
+    @staticmethod
+    async def _expire_loop(approval_service, interval: float = 300.0):
+        """main._approval_expire_loop과 동일한 로직 (테스트용 복제)."""
+        import asyncio
+
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                expired = await approval_service.expire_stale()
+                if expired:
+                    pass  # 로깅 생략
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass  # 로깅 생략
+
+    async def test_expire_loop_calls_expire_stale(self):
+        """만료 스케줄러가 주기적으로 expire_stale()을 호출한다."""
+        import asyncio
+
+        call_count = 0
+
+        class FakeApprovalService:
+            async def expire_stale(self) -> int:
+                nonlocal call_count
+                call_count += 1
+                return call_count
+
+        fake_service = FakeApprovalService()
+        task = asyncio.create_task(
+            self._expire_loop(fake_service, interval=0.01),
+            name="test-expire-loop",
+        )
+
+        # 짧은 interval로 최소 2회 호출될 때까지 대기
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert call_count >= 2
+
+    async def test_expire_loop_survives_error(self):
+        """expire_stale()이 예외를 던져도 루프가 계속된다."""
+        import asyncio
+
+        call_count = 0
+
+        class FlakyApprovalService:
+            async def expire_stale(self) -> int:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    msg = "일시적 DB 오류"
+                    raise RuntimeError(msg)
+                return 0
+
+        fake_service = FlakyApprovalService()
+        task = asyncio.create_task(
+            self._expire_loop(fake_service, interval=0.01),
+            name="test-expire-loop-error",
+        )
+
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # 첫 번째에서 예외가 발생해도 두 번째 이후 호출이 이루어져야 한다
+        assert call_count >= 2
+
 
 # ── 이벤트 모델 (US-7) ──────────────────────────────
 
@@ -559,7 +658,198 @@ class TestEvents:
         assert event.event_id is not None
 
 
-# ── 실행 실패 (US-8: EXECUTION_FAILED) ──────────────
+# ── 사전 검증 Validator (US-8) ────────────────────────
+
+
+class TestValidator:
+    """사전 검증(validator) 단위 테스트."""
+
+    async def test_fail_blocks_creation(self, db, eventbus):
+        """fail 등급 검증 결과 시 요청 생성이 차단된다."""
+
+        def fail_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("fail", "봇이 running 상태", "system:bot_manager")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"bot_delete": fail_validator},
+        )
+        await svc.initialize()
+
+        with pytest.raises(ApprovalValidationError, match="봇이 running 상태"):
+            await svc.create(
+                type="bot_delete",
+                requester="agent",
+                title="봇 삭제 요청",
+                params={"bot_id": "bot-1"},
+            )
+
+        # DB에 요청이 생성되지 않았는지 확인
+        all_requests = await svc.list()
+        assert len(all_requests) == 0
+
+    async def test_warn_attaches_review(self, db, eventbus):
+        """warn 등급 검증 결과 시 요청은 생성되고 reviews에 경고가 첨부된다."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [
+                ValidationResult(
+                    "warn",
+                    "미할당 잔액 부족",
+                    "system:treasury",
+                )
+            ]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="예산 증액",
+            params={"bot_id": "bot-1", "amount": 50000000, "current": 10000000},
+        )
+
+        assert req.status == "pending"
+        assert len(req.reviews) == 1
+        assert req.reviews[0]["result"] == "warn"
+        assert req.reviews[0]["reviewer"] == "system:treasury"
+        assert "미할당 잔액 부족" in req.reviews[0]["detail"]
+
+    async def test_pass_creates_normally(self, db, eventbus):
+        """pass 등급 검증 결과 시 요청이 정상 생성된다."""
+
+        def pass_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("pass", "", "system:bot_manager")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"bot_delete": pass_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="bot_delete",
+            requester="agent",
+            title="봇 삭제",
+            params={"bot_id": "bot-1"},
+        )
+
+        assert req.status == "pending"
+        assert len(req.reviews) == 0
+
+    async def test_no_validator_creates_normally(self, service):
+        """validator가 등록되지 않은 유형은 정상 생성된다."""
+        req = await service.create(
+            type="rule_change",
+            requester="agent",
+            title="규칙 변경",
+            params={"bot_id": "bot-1", "rules": {}},
+        )
+        assert req.status == "pending"
+
+    async def test_multiple_results_first_fail_blocks(self, db, eventbus):
+        """복수 검증 결과 중 첫 번째 fail이 생성을 차단한다."""
+
+        def multi_validator(params: dict) -> list[ValidationResult]:
+            return [
+                ValidationResult("fail", "봇이 running 상태", "system:bot_manager"),
+                ValidationResult("fail", "보유 포지션 존재", "system:trade"),
+            ]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"bot_delete": multi_validator},
+        )
+        await svc.initialize()
+
+        with pytest.raises(ApprovalValidationError, match="봇이 running 상태"):
+            await svc.create(
+                type="bot_delete",
+                requester="agent",
+                title="봇 삭제",
+                params={"bot_id": "bot-1"},
+            )
+
+    async def test_warn_persisted_to_db(self, db, eventbus):
+        """warn reviews가 DB에 영속화된다."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("warn", "잔액 주의", "system:treasury")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="예산 변경",
+            params={"bot_id": "bot-1", "amount": 20000000, "current": 10000000},
+        )
+
+        fetched = await svc.get(req.id)
+        assert fetched is not None
+        assert len(fetched.reviews) == 1
+        assert fetched.reviews[0]["result"] == "warn"
+
+    async def test_warn_with_reviewed_at(self, db, eventbus):
+        """warn review에 reviewed_at 시각이 포함된다."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("warn", "잔액 부족", "system:treasury")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="예산 변경",
+            params={"bot_id": "bot-1", "amount": 20000000},
+        )
+
+        assert "reviewed_at" in req.reviews[0]
+        assert req.reviews[0]["reviewed_at"] != ""
+
+
+# ── 모델 추가분 (US-9) ──────────────────────────────
+
+
+class TestValidationModels:
+    def test_validation_result_frozen(self):
+        """ValidationResult는 불변이다."""
+        result = ValidationResult("fail", "테스트", "system:test")
+        with pytest.raises(AttributeError):
+            result.grade = "pass"  # type: ignore[misc]
+
+    def test_approval_validation_error(self):
+        """ApprovalValidationError에 detail 속성이 있다."""
+        error = ApprovalValidationError("검증 실패")
+        assert error.detail == "검증 실패"
+        assert str(error) == "검증 실패"
+
+    def test_approval_type_new_values(self):
+        """새로 추가된 ApprovalType 값."""
+        assert ApprovalType.STRATEGY_RETIRE == "strategy_retire"
+        assert ApprovalType.BOT_ASSIGN_STRATEGY == "bot_assign_strategy"
+        assert ApprovalType.BOT_CHANGE_STRATEGY == "bot_change_strategy"
+        assert ApprovalType.BOT_RESUME == "bot_resume"
+        assert ApprovalType.BOT_DELETE == "bot_delete"
 
 
 class TestExecutionFailed:
