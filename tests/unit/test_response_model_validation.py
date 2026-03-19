@@ -171,7 +171,7 @@ class TestBotResponseModels:
         """GET /api/bots/{bot_id} — 기본."""
         data = {"bot": {"bot_id": "bot-1", "status": "running", "strategy_id": "s1"}}
         model = BotDetailResponse.model_validate(data)
-        assert model.bot["bot_id"] == "bot-1"
+        assert model.bot.bot_id == "bot-1"
 
     def test_bot_detail_response_with_extras(self):
         """GET /api/bots/{bot_id} — strategy, budget, positions 포함."""
@@ -203,7 +203,7 @@ class TestBotResponseModels:
             }
         }
         model = BotDetailResponse.model_validate(data)
-        assert model.bot["strategy"]["name"] == "TestStrategy"
+        assert model.bot.strategy["name"] == "TestStrategy"
 
 
 # ── 전략 라우트 응답 모델 ──────────────────────────
@@ -269,7 +269,7 @@ class TestStrategyResponseModels:
             "bot": None,
         }
         model = StrategyDetailResponse.model_validate(data)
-        assert model.strategy["strategy_id"] == "s1"
+        assert model.strategy.strategy_id == "s1"
         assert model.bot is None
 
     def test_strategy_detail_response_with_bot(self):
@@ -760,6 +760,8 @@ class TestApprovalResponseModels:
                     "id": "apr-001",
                     "type": "strategy_deploy",
                     "status": "pending",
+                    "requester": "agent-1",
+                    "title": "전략 배포 요청",
                     "reference_id": "rpt-001",
                 }
             ],
@@ -775,6 +777,8 @@ class TestApprovalResponseModels:
                 "id": "apr-001",
                 "type": "strategy_deploy",
                 "status": "pending",
+                "requester": "agent-1",
+                "title": "전략 배포 요청",
             },
             "report_detail": None,
         }
@@ -788,6 +792,8 @@ class TestApprovalResponseModels:
                 "id": "apr-001",
                 "type": "strategy_deploy",
                 "status": "pending",
+                "requester": "agent-1",
+                "title": "전략 배포 요청",
             },
             "report_detail": {
                 "report_id": "rpt-001",
@@ -804,10 +810,12 @@ class TestApprovalResponseModels:
                 "id": "apr-001",
                 "type": "strategy_deploy",
                 "status": "approved",
+                "requester": "agent-1",
+                "title": "전략 배포 요청",
             }
         }
         model = ApprovalUpdateResponse.model_validate(data)
-        assert model.approval["status"] == "approved"
+        assert model.approval.status == "approved"
 
 
 # ── 설정 라우트 응답 모델 ──────────────────────────
@@ -906,10 +914,11 @@ class TestMemberResponseModels:
                 "member_id": "admin",
                 "name": "관리자",
                 "type": "human",
+                "role": "owner",
             }
         }
         model = MemberDetailResponse.model_validate(data)
-        assert model.member["member_id"] == "admin"
+        assert model.member.member_id == "admin"
 
     def test_member_create_response(self):
         """POST /api/members."""
@@ -918,6 +927,7 @@ class TestMemberResponseModels:
                 "member_id": "agent-1",
                 "name": "분석 에이전트",
                 "type": "agent",
+                "role": "agent",
             },
             "token": "tok_abc123def456",
         }
@@ -927,7 +937,12 @@ class TestMemberResponseModels:
     def test_member_token_response(self):
         """POST /api/members/{member_id}/rotate-token."""
         data = {
-            "member": {"member_id": "agent-1", "name": "에이전트", "type": "agent"},
+            "member": {
+                "member_id": "agent-1",
+                "name": "에이전트",
+                "type": "agent",
+                "role": "agent",
+            },
             "token": "tok_new_token_789",
         }
         model = MemberTokenResponse.model_validate(data)
@@ -946,11 +961,12 @@ class TestMemberResponseModels:
                 "member_id": "agent-1",
                 "name": "에이전트",
                 "type": "agent",
+                "role": "agent",
                 "scopes": ["trade:read", "trade:write"],
             }
         }
         model = MemberScopesResponse.model_validate(data)
-        assert "scopes" in model.member
+        assert model.member.scopes == ["trade:read", "trade:write"]
 
 
 # ── 감사 로그 라우트 응답 모델 ──────────────────────────

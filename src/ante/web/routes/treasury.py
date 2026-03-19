@@ -217,7 +217,14 @@ async def list_budgets(
     from dataclasses import asdict
 
     budgets = treasury.list_budgets()
-    return {"budgets": [asdict(b) for b in budgets]}
+    items = []
+    for b in budgets:
+        d = asdict(b)
+        # datetime → str 변환 (response_model 호환)
+        if hasattr(b.last_updated, "isoformat"):
+            d["last_updated"] = b.last_updated.isoformat()
+        items.append(d)
+    return {"budgets": items}
 
 
 @router.post(

@@ -272,7 +272,9 @@ class TestResolve:
         )
         await service.approve(req.id)
 
-        with pytest.raises(ValueError, match="pending 상태에서만 승인 가능"):
+        with pytest.raises(
+            ValueError, match="pending/execution_failed 상태에서만 승인 가능"
+        ):
             await service.approve(req.id)
 
     async def test_reject(self, service):
@@ -293,7 +295,9 @@ class TestResolve:
         )
         await service.reject(req.id)
 
-        with pytest.raises(ValueError, match="pending 상태에서만 거절 가능"):
+        with pytest.raises(
+            ValueError, match="pending/execution_failed 상태에서만 거절 가능"
+        ):
             await service.reject(req.id)
 
     async def test_hold_and_resume(self, service):
@@ -317,7 +321,9 @@ class TestResolve:
         )
         await service.approve(req.id)
 
-        with pytest.raises(ValueError, match="pending 상태에서만 보류 가능"):
+        with pytest.raises(
+            ValueError, match="pending/execution_failed 상태에서만 보류 가능"
+        ):
             await service.hold(req.id)
 
     async def test_resume_non_hold_fails(self, service):
@@ -370,7 +376,9 @@ class TestCancel:
         )
         await service.approve(req.id)
 
-        with pytest.raises(ValueError, match="pending/on_hold 상태에서만 철회 가능"):
+        with pytest.raises(
+            ValueError, match="pending/on_hold/execution_failed 상태에서만 철회 가능"
+        ):
             await service.cancel(req.id, requester="agent:dev")
 
     async def test_cancel_publishes_event(self, service, eventbus):
