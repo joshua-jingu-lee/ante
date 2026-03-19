@@ -520,6 +520,109 @@ class TestExpire:
         count = await service.expire_stale()
         assert count == 0
 
+    async def test_expire_event_published(self, service, eventbus):
+        """만료 처리 시 건별 ApprovalResolvedEvent가 발행된다."""
+        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        await service.create(
+            type="budget_change",
+            requester="agent",
+            title="만료 이벤트 테스트",
+            expires_at=past,
+        )
+
+        received: list[ApprovalResolvedEvent] = []
+
+        async def _handler(event: ApprovalResolvedEvent) -> None:
+            received.append(event)
+
+        eventbus.subscribe(ApprovalResolvedEvent, _handler)
+
+        count = await service.expire_stale()
+        assert count == 1
+        assert len(received) == 1
+        assert received[0].resolution == ApprovalStatus.EXPIRED
+        assert received[0].resolved_by == "system"
+
+
+# ── 만료 스케줄러 (US-8) ──────────────────────────────
+
+
+class TestExpireLoop:
+    @staticmethod
+    async def _expire_loop(approval_service, interval: float = 300.0):
+        """main._approval_expire_loop과 동일한 로직 (테스트용 복제)."""
+        import asyncio
+
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                expired = await approval_service.expire_stale()
+                if expired:
+                    pass  # 로깅 생략
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass  # 로깅 생략
+
+    async def test_expire_loop_calls_expire_stale(self):
+        """만료 스케줄러가 주기적으로 expire_stale()을 호출한다."""
+        import asyncio
+
+        call_count = 0
+
+        class FakeApprovalService:
+            async def expire_stale(self) -> int:
+                nonlocal call_count
+                call_count += 1
+                return call_count
+
+        fake_service = FakeApprovalService()
+        task = asyncio.create_task(
+            self._expire_loop(fake_service, interval=0.01),
+            name="test-expire-loop",
+        )
+
+        # 짧은 interval로 최소 2회 호출될 때까지 대기
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert call_count >= 2
+
+    async def test_expire_loop_survives_error(self):
+        """expire_stale()이 예외를 던져도 루프가 계속된다."""
+        import asyncio
+
+        call_count = 0
+
+        class FlakyApprovalService:
+            async def expire_stale(self) -> int:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    msg = "일시적 DB 오류"
+                    raise RuntimeError(msg)
+                return 0
+
+        fake_service = FlakyApprovalService()
+        task = asyncio.create_task(
+            self._expire_loop(fake_service, interval=0.01),
+            name="test-expire-loop-error",
+        )
+
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # 첫 번째에서 예외가 발생해도 두 번째 이후 호출이 이루어져야 한다
+        assert call_count >= 2
+
 
 # ── 이벤트 모델 (US-7) ──────────────────────────────
 
