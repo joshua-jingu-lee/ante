@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ante.web.schemas import AuditLogListResponse
+
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", response_model=AuditLogListResponse)
 async def list_audit_logs(
     request: Request,
     member_id: str | None = None,

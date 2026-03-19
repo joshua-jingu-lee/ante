@@ -405,3 +405,138 @@ class TestAppFactory:
         assert resp.status_code == 200
         data = resp.json()
         assert data["info"]["title"] == "Ante"
+
+
+# ── response_model 커버리지 테스트 ────────────────────────
+
+
+class TestResponseModelCoverage:
+    """모든 엔드포인트에 response_model이 설정되어 있는지 검증."""
+
+    # response_model 면제 대상 (동적 스키마를 반환하는 엔드포인트)
+    _EXEMPT_PATHS = {
+        "/api/reports/schema",
+        "/api/data/schema",
+    }
+
+    def test_all_endpoints_have_response_model(self, app):
+        """204를 제외한 모든 API 엔드포인트에 response_model이 설정되어야 한다."""
+        missing = []
+        for route in app.routes:
+            if not hasattr(route, "methods"):
+                continue
+            path = getattr(route, "path", "")
+            if not path.startswith("/api"):
+                continue
+            if path in self._EXEMPT_PATHS:
+                continue
+            # 204 응답(삭제)은 response_model 불필요
+            status_code = getattr(route, "status_code", None) or 200
+            if status_code == 204:
+                continue
+            response_model = getattr(route, "response_model", None)
+            if response_model is None:
+                methods = getattr(route, "methods", set())
+                missing.append(f"{','.join(methods)} {path}")
+
+        assert missing == [], "response_model 누락 엔드포인트:\n" + "\n".join(
+            f"  - {m}" for m in missing
+        )
+
+    def test_openapi_schema_has_response_schemas(self, client):
+        """OpenAPI 스키마에서 모든 엔드포인트에 응답 스키마가 존재."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        paths = openapi.get("paths", {})
+
+        missing = []
+        for path, methods in paths.items():
+            if not path.startswith("/api"):
+                continue
+            if path in self._EXEMPT_PATHS:
+                continue
+            for method, spec in methods.items():
+                if method in ("options", "head"):
+                    continue
+                responses = spec.get("responses", {})
+                # 204 응답은 스키마 불필요
+                if "204" in responses and len(responses) <= 2:
+                    continue
+                # 200 또는 201에 content schema가 있어야 함
+                success_codes = [c for c in ("200", "201") if c in responses]
+                if not success_codes:
+                    continue
+                for code in success_codes:
+                    content = responses[code].get("content", {})
+                    json_schema = content.get("application/json", {}).get("schema")
+                    if json_schema is None:
+                        missing.append(f"{method.upper()} {path} ({code})")
+
+        assert missing == [], "OpenAPI 응답 스키마 누락:\n" + "\n".join(
+            f"  - {m}" for m in missing
+        )
+
+    def test_response_model_validates_status_response(self, client):
+        """StatusResponse 모델이 실제 응답과 일치하는지 검증."""
+        from ante.web.schemas import StatusResponse
+
+        resp = client.get("/api/system/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Pydantic 모델로 파싱 가능해야 함
+        model = StatusResponse(**data)
+        assert model.status == "running"
+
+    def test_response_model_validates_health_response(self, client):
+        """HealthResponse 모델이 실제 응답과 일치하는지 검증."""
+        from ante.web.schemas import HealthResponse
+
+        resp = client.get("/api/system/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        model = HealthResponse(**data)
+        assert model.ok is True
+
+    def test_response_model_validates_strategy_validate(self, client, tmp_path):
+        """StrategyValidateResponse 모델이 실제 응답과 일치하는지 검증."""
+        from ante.web.schemas import StrategyValidateResponse
+
+        path = tmp_path / "test.py"
+        path.write_text("import os\nprint('not a strategy')")
+
+        resp = client.post("/api/strategies/validate", json={"path": str(path)})
+        assert resp.status_code == 200
+        data = resp.json()
+        model = StrategyValidateResponse(**data)
+        assert model.valid is False
+
+    def test_response_model_validates_dataset_list(self, client):
+        """DatasetListResponse 모델이 실제 응답과 일치하는지 검증."""
+        from ante.web.schemas import DatasetListResponse
+
+        resp = client.get("/api/data/datasets")
+        assert resp.status_code == 200
+        data = resp.json()
+        model = DatasetListResponse(**data)
+        assert model.total == 0
+
+    def test_response_model_validates_storage_summary(self, client):
+        """StorageSummaryResponse 모델이 실제 응답과 일치하는지 검증."""
+        from ante.web.schemas import StorageSummaryResponse
+
+        resp = client.get("/api/data/storage")
+        assert resp.status_code == 200
+        data = resp.json()
+        model = StorageSummaryResponse(**data)
+        assert model.total_bytes == 0
+
+    def test_response_model_validates_feed_status(self, client):
+        """FeedStatusResponse 모델이 실제 응답과 일치하는지 검증."""
+        from ante.web.schemas import FeedStatusResponse
+
+        resp = client.get("/api/data/feed-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        model = FeedStatusResponse(**data)
+        assert model.initialized is False

@@ -11,6 +11,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ante.web.schemas import SeedResetResponse
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -20,7 +22,7 @@ def _find_scenarios_dir() -> Path:
     """시나리오 SQL 디렉토리를 탐색한다.
 
     pip install로 site-packages에 설치된 경우 __file__ 기준 경로가 맞지 않으므로,
-    환경변수 → CWD → __file__ 순서로 탐색한다.
+    환경변수 -> CWD -> __file__ 순서로 탐색한다.
     """
     import os
 
@@ -54,7 +56,7 @@ SCENARIOS_DIR = _find_scenarios_dir()
 BASE_SQL = SCENARIOS_DIR / "_base.sql"
 
 
-@router.post("/reset")
+@router.post("/reset", response_model=SeedResetResponse)
 async def reset_seed(
     request: Request,
     scenario: str = Query(..., description="시나리오 이름 (예: login-dashboard)"),
