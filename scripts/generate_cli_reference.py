@@ -92,7 +92,11 @@ def _format_default(param: click.Parameter) -> str:
         return "false" if not param.default else "true"
     if isinstance(param.default, tuple) and len(param.default) == 0:
         return "\u2014"
-    return str(param.default)
+    # Click 8.2+ 에서 multiple=True 옵션의 기본값이 Sentinel.UNSET일 수 있음
+    default_str = str(param.default)
+    if "UNSET" in default_str or "Sentinel" in default_str:
+        return "\u2014"
+    return default_str
 
 
 def _is_required(param: click.Parameter) -> str:
