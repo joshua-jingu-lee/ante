@@ -60,6 +60,9 @@ class MockOrder:
 class MockBrokerAdapter(BrokerAdapter):
     """E2E 테스트용 가상 브로커 어댑터.
 
+    Note: BrokerAdapter 인터페이스 준수를 위해 async def를 유지한다.
+    내부적으로 await를 사용하지 않지만, 호출부에서 await로 사용된다.
+
     설정 옵션:
         fill_mode: "immediate" | "partial" | "delayed" | "reject"
         partial_fill_ratio: 부분 체결 비율 (0.0~1.0, 기본 0.5)

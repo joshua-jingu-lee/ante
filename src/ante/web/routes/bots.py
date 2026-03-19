@@ -112,7 +112,7 @@ async def get_bot(request: Request, bot_id: str) -> dict:
     # 예산 정보 추가
     treasury = getattr(request.app.state, "treasury", None)
     if treasury is not None:
-        budget = await treasury.get_budget(bot_id)
+        budget = treasury.get_budget(bot_id)
         if budget:
             info["budget"] = {
                 "allocated": budget.allocated,

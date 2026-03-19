@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 
 
 class LiveDataProvider(DataProvider):
-    """라이브 모드 DataProvider. APIGateway 경유로 캐시 활용."""
+    """라이브 모드 DataProvider. APIGateway 경유로 캐시 활용.
+
+    Note: DataProvider 인터페이스 준수를 위해 async def를 유지한다.
+    """
 
     def __init__(self, gateway: APIGateway) -> None:
         self._gateway = gateway

@@ -87,7 +87,7 @@ class TestTrigger:
         self, _mock_session: MagicMock, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """매도 스탑: 현재가 <= stop_price 시 트리거."""
-        await manager.start()
+        manager.start()
 
         await manager.register(
             order_id="ord-001",
@@ -123,7 +123,7 @@ class TestTrigger:
         self, _mock_session: MagicMock, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """매수 스탑: 현재가 >= stop_price 시 트리거."""
-        await manager.start()
+        manager.start()
 
         await manager.register(
             order_id="ord-002",
@@ -148,7 +148,7 @@ class TestTrigger:
         self, _mock_session: MagicMock, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """stop_limit → limit 변환."""
-        await manager.start()
+        manager.start()
 
         await manager.register(
             order_id="ord-003",
@@ -174,7 +174,7 @@ class TestTrigger:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """트리거 조건 미충족 시 주문 유지."""
-        await manager.start()
+        manager.start()
 
         await manager.register(
             order_id="ord-004",
@@ -198,7 +198,7 @@ class TestTrigger:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """다른 종목 시세는 무시."""
-        await manager.start()
+        manager.start()
 
         await manager.register(
             order_id="ord-005",
@@ -256,13 +256,13 @@ class TestCancel:
             stop_price=49000.0,
         )
 
-        result = await manager.cancel(stop_id)
+        result = manager.cancel(stop_id)
         assert result is True
         assert len(manager.active_orders) == 0
 
     async def test_cancel_nonexistent(self, manager: StopOrderManager) -> None:
         """존재하지 않는 주문 취소."""
-        result = await manager.cancel("stop-nonexistent")
+        result = manager.cancel("stop-nonexistent")
         assert result is False
 
 
@@ -273,7 +273,7 @@ class TestExpiry:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """매니저 중지 시 모든 주문 만료."""
-        await manager.start()
+        manager.start()
 
         await manager.register(
             order_id="ord-001",

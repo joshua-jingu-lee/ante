@@ -151,6 +151,7 @@ class Strategy(ABC):
         ...
 
     # ── 이벤트 핸들러 (선택) ──
+    # 서브클래스에서 override하여 async 작업을 수행할 수 있으므로 async def 유지
 
     async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
         """주문 체결 통보."""

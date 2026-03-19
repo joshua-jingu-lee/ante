@@ -659,6 +659,7 @@ class KISAdapter(BrokerAdapter):
         return orders
 
     # ── 실시간 스트리밍 (구현 예정) ────────────────
+    # BrokerAdapter 인터페이스 준수를 위해 async def 유지
 
     async def realtime_price_stream(
         self, symbols: list[str]

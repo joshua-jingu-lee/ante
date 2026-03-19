@@ -58,7 +58,7 @@ class DataGoKrCollector:
         df = pl.DataFrame(raw_items)
         df = self._deduplicate(df)
 
-        rows_written, symbols = await self._normalize_and_store(
+        rows_written, symbols = self._normalize_and_store(
             df,
             store,
             target_date,
@@ -92,7 +92,7 @@ class DataGoKrCollector:
             return df.unique(subset=["srtnCd", "basDt"])
         return df
 
-    async def _normalize_and_store(
+    def _normalize_and_store(
         self,
         df: pl.DataFrame,
         store: ParquetStore,
@@ -102,8 +102,8 @@ class DataGoKrCollector:
         rows_written = 0
         symbols: set[str] = set()
 
-        rows_written += await self._store_ohlcv(df, store, symbols)
-        rows_written += await self._store_fundamental(df, store, symbols)
+        rows_written += self._store_ohlcv(df, store, symbols)
+        rows_written += self._store_fundamental(df, store, symbols)
 
         logger.info(
             "data.go.kr 수집 완료: date=%s symbols=%d rows=%d",
@@ -113,7 +113,7 @@ class DataGoKrCollector:
         )
         return rows_written, symbols
 
-    async def _store_ohlcv(
+    def _store_ohlcv(
         self,
         df: pl.DataFrame,
         store: ParquetStore,
@@ -127,12 +127,12 @@ class DataGoKrCollector:
         rows = 0
         for sym in ohlcv_df["symbol"].unique().to_list():
             sym_df = ohlcv_df.filter(pl.col("symbol") == sym)
-            await store.write(sym, "1d", sym_df, data_type="ohlcv")
+            store.write(sym, "1d", sym_df, data_type="ohlcv")
             rows += len(sym_df)
             symbols.add(sym)
         return rows
 
-    async def _store_fundamental(
+    def _store_fundamental(
         self,
         df: pl.DataFrame,
         store: ParquetStore,
@@ -146,7 +146,7 @@ class DataGoKrCollector:
         rows = 0
         for sym in fund_df["symbol"].unique().to_list():
             sym_df = fund_df.filter(pl.col("symbol") == sym)
-            await store.write(sym, "krx", sym_df, data_type="fundamental")
+            store.write(sym, "krx", sym_df, data_type="fundamental")
             rows += len(sym_df)
             symbols.add(sym)
         return rows

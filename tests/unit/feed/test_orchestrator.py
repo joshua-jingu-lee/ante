@@ -421,15 +421,15 @@ async def test_compute_derived_indicators(tmp_data_path: Path) -> None:
         }
     )
 
-    await store.write("005930", "krx", fundamental_df, data_type="fundamental")
+    store.write("005930", "krx", fundamental_df, data_type="fundamental")
 
     calculator = IndicatorCalculator()
-    rows = await calculator.compute(store, ["005930"])
+    rows = calculator.compute(store, ["005930"])
 
     assert rows > 0
 
     # 결과 읽기
-    result = await store.read("005930", "krx", data_type="fundamental")
+    result = store.read("005930", "krx", data_type="fundamental")
     assert not result.is_empty()
 
     row = result.row(0, named=True)
@@ -477,12 +477,12 @@ async def test_compute_derived_zero_division(tmp_data_path: Path) -> None:
         }
     )
 
-    await store.write("005930", "krx", fundamental_df, data_type="fundamental")
+    store.write("005930", "krx", fundamental_df, data_type="fundamental")
 
     calculator = IndicatorCalculator()
-    await calculator.compute(store, ["005930"])
+    calculator.compute(store, ["005930"])
 
-    result = await store.read("005930", "krx", data_type="fundamental")
+    result = store.read("005930", "krx", data_type="fundamental")
     row = result.row(0, named=True)
 
     # 분모 0이면 None
@@ -510,11 +510,11 @@ async def test_compute_derived_missing_columns(tmp_data_path: Path) -> None:
         }
     )
 
-    await store.write("005930", "krx", fundamental_df, data_type="fundamental")
+    store.write("005930", "krx", fundamental_df, data_type="fundamental")
 
     calculator = IndicatorCalculator()
     # 에러 없이 실행되어야 함
-    rows = await calculator.compute(store, ["005930"])
+    rows = calculator.compute(store, ["005930"])
     assert rows >= 0
 
 

@@ -84,23 +84,23 @@ class TestFeedInjectorCSV:
             "2026-03-01T09:01:00,50100,50200,50000,50150,1100\n"
         )
 
-        count = await injector.inject_csv(csv_path, "005930", "1m")
+        count = injector.inject_csv(csv_path, "005930", "1m")
         assert count == 2
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 2
 
     async def test_inject_csv_not_found(self, injector):
         """존재하지 않는 CSV 파일은 FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            await injector.inject_csv("/nonexistent.csv", "005930", "1m")
+            injector.inject_csv("/nonexistent.csv", "005930", "1m")
 
     async def test_inject_csv_empty(self, injector, tmp_path):
         """빈 CSV 파일은 0행 반환."""
         csv_path = tmp_path / "empty.csv"
         csv_path.write_text("date,open,high,low,close,volume\n")
 
-        count = await injector.inject_csv(csv_path, "005930", "1d")
+        count = injector.inject_csv(csv_path, "005930", "1d")
         assert count == 0
 
     async def test_inject_csv_default_timeframe(self, injector, store, tmp_path):
@@ -111,10 +111,10 @@ class TestFeedInjectorCSV:
             "2026-03-01T00:00:00,50000,50100,49900,50050,1000\n"
         )
 
-        count = await injector.inject_csv(csv_path, "005930")
+        count = injector.inject_csv(csv_path, "005930")
         assert count == 1
 
-        result = await store.read("005930", "1d")
+        result = store.read("005930", "1d")
         assert len(result) == 1
 
 
@@ -127,15 +127,15 @@ class TestFeedInjectorDataFrame:
     async def test_inject_dataframe(self, injector, store):
         """DataFrame을 직접 주입한다."""
         df = _make_ohlcv_df(n=3)
-        count = await injector.inject_dataframe(df, "005930", "1m")
+        count = injector.inject_dataframe(df, "005930", "1m")
         assert count == 3
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 3
 
     async def test_inject_empty_dataframe(self, injector):
         """빈 DataFrame은 0행 반환."""
-        count = await injector.inject_dataframe(pl.DataFrame(), "005930", "1m")
+        count = injector.inject_dataframe(pl.DataFrame(), "005930", "1m")
         assert count == 0
 
     async def test_inject_dataframe_adds_symbol(self, injector, store):
@@ -157,16 +157,16 @@ class TestFeedInjectorDataFrame:
                 "source": ["test"] * 3,
             }
         )
-        count = await injector.inject_dataframe(df, "005930", "1m")
+        count = injector.inject_dataframe(df, "005930", "1m")
         assert count == 3
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert result["symbol"][0] == "005930"
 
     async def test_inject_dataframe_adds_source(self, injector, store):
         """source 컬럼이 없는 DataFrame에 source를 추가한다."""
         df = _make_ohlcv_df(n=2).drop("source")
-        count = await injector.inject_dataframe(df, "005930", "1m", source="custom")
+        count = injector.inject_dataframe(df, "005930", "1m", source="custom")
         assert count == 2
 
 
@@ -179,7 +179,7 @@ class TestFeedInjectorValidation:
     async def test_schema_validation_passes(self, injector, store):
         """올바른 스키마의 DataFrame은 검증을 통과한다."""
         df = _make_ohlcv_df(n=2)
-        count = await injector.inject_dataframe(df, "005930", "1m")
+        count = injector.inject_dataframe(df, "005930", "1m")
         assert count == 2
 
     async def test_business_validation_warnings_allow_storage(self, injector, store):
@@ -197,8 +197,8 @@ class TestFeedInjectorValidation:
                 "source": ["test"],
             }
         )
-        count = await injector.inject_dataframe(df, "005930", "1m")
+        count = injector.inject_dataframe(df, "005930", "1m")
         assert count == 1
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 1

@@ -142,7 +142,7 @@ async def _init_trading(s: Services) -> None:
     from ante.rule import RuleEngine
 
     s.rule_engine = RuleEngine(eventbus=s.eventbus, system_state=s.system_state)
-    await s.rule_engine.start()
+    s.rule_engine.start()
 
     rule_configs = s.config.get("rules.global", [])
     if rule_configs:
@@ -230,10 +230,10 @@ async def _init_trading(s: Services) -> None:
     await _init_broker(s)
 
     # StrategyContextFactory 완성 (Broker 연결 이후)
-    await _init_context_factory(s)
+    _init_context_factory(s)
 
     # Treasury 잔고 동기화 (Broker 연결 이후)
-    await _init_treasury_sync(s)
+    _init_treasury_sync(s)
 
 
 async def _init_broker(s: Services) -> None:
@@ -252,7 +252,7 @@ async def _init_broker(s: Services) -> None:
 
     if s.broker:
         s.api_gateway = APIGateway(broker=s.broker, eventbus=s.eventbus)
-        await s.api_gateway.start()
+        s.api_gateway.start()
         logger.info("APIGateway 시작 완료")
 
     if s.broker:
@@ -321,7 +321,7 @@ async def _sync_instruments(s: Services) -> None:
         logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영", exc_info=True)
 
 
-async def _init_context_factory(s: Services) -> None:
+def _init_context_factory(s: Services) -> None:
     """StrategyContextFactory 완성 (Broker/APIGateway 연결 이후)."""
     from ante.bot import StrategyContextFactory
     from ante.bot.providers.live import LiveTradeHistoryView
@@ -345,7 +345,7 @@ async def _init_context_factory(s: Services) -> None:
         logger.info("StrategyContextFactory 설정 완료")
 
 
-async def _init_treasury_sync(s: Services) -> None:
+def _init_treasury_sync(s: Services) -> None:
     """Treasury 잔고 동기화 시작 (Broker 연결 이후)."""
     if not s.broker:
         return
@@ -361,7 +361,7 @@ async def _init_treasury_sync(s: Services) -> None:
     )
 
     sync_interval = s.config.get("treasury.sync_interval_seconds", 300)
-    await s.treasury.start_sync(
+    s.treasury.start_sync(
         broker=s.broker,
         position_history=s.position_history,
         interval_seconds=sync_interval,
@@ -548,7 +548,7 @@ async def _shutdown(s: Services) -> None:
     logger.info("BotManager 종료 — 모든 봇 중지")
 
     if s.api_gateway:
-        await s.api_gateway.stop()
+        s.api_gateway.stop()
         logger.info("APIGateway 종료")
 
     if s.broker:

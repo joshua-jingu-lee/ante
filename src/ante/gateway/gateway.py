@@ -40,13 +40,13 @@ class APIGateway:
         self._running = False
         self._stop_order_manager = stop_order_manager
 
-    async def start(self) -> None:
+    def start(self) -> None:
         """이벤트 구독 시작."""
         self._subscribe_events()
         self._running = True
         logger.info("APIGateway 시작")
 
-    async def stop(self) -> None:
+    def stop(self) -> None:
         """중지."""
         self._running = False
         logger.info("APIGateway 중지")
@@ -271,7 +271,10 @@ class APIGateway:
             )
 
     async def _on_order_modify(self, event: object) -> None:
-        """주문 정정 요청 → 로깅만 (정정은 추후 구현)."""
+        """주문 정정 요청 → 로깅만 (정정은 추후 구현).
+
+        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
+        """
         from ante.eventbus.events import OrderModifyEvent
 
         if not isinstance(event, OrderModifyEvent):
@@ -279,7 +282,10 @@ class APIGateway:
         logger.warning("주문 정정은 추후 구현: %s", event.order_id)
 
     async def _on_order_filled(self, event: object) -> None:
-        """체결 시 관련 캐시 무효화."""
+        """체결 시 관련 캐시 무효화.
+
+        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
+        """
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
