@@ -126,7 +126,9 @@ class BotManager:
         """시스템 이벤트 구독."""
         from ante.eventbus.events import (
             BotErrorEvent,
+            BotStartedEvent,
             BotStopEvent,
+            BotStoppedEvent,
             TradingStateChangedEvent,
         )
 
@@ -135,6 +137,8 @@ class BotManager:
             TradingStateChangedEvent, self._on_trading_state_changed
         )
         self._eventbus.subscribe(BotErrorEvent, self._on_bot_error)
+        self._eventbus.subscribe(BotStartedEvent, self._on_bot_started)
+        self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped)
 
     async def create_bot(
         self,
@@ -372,12 +376,51 @@ class BotManager:
             logger.warning("시스템 HALTED — 전체 봇 중지")
             await self.stop_all()
 
+    async def _on_bot_started(self, event: object) -> None:
+        """봇 시작 알림 발행."""
+        from ante.eventbus.events import BotStartedEvent, NotificationEvent
+
+        if not isinstance(event, BotStartedEvent):
+            return
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="봇 시작",
+                message=f"봇 `{event.bot_id}` 실행 시작",
+                category="bot",
+            )
+        )
+
+    async def _on_bot_stopped(self, event: object) -> None:
+        """봇 중지 알림 발행."""
+        from ante.eventbus.events import BotStoppedEvent, NotificationEvent
+
+        if not isinstance(event, BotStoppedEvent):
+            return
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="봇 중지",
+                message=f"봇 `{event.bot_id}` 중지 완료",
+                category="bot",
+            )
+        )
+
     async def _on_bot_error(self, event: object) -> None:
-        """봇 에러 시 재시작 정책에 따라 자동 재시작."""
-        from ante.eventbus.events import BotErrorEvent
+        """봇 에러 시 알림 발행 + 재시작 정책에 따라 자동 재시작."""
+        from ante.eventbus.events import BotErrorEvent, NotificationEvent
 
         if not isinstance(event, BotErrorEvent):
             return
+
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="error",
+                title="봇 에러",
+                message=f"봇 `{event.bot_id}`\n{event.error_message}",
+                category="bot",
+            )
+        )
 
         bot = self._bots.get(event.bot_id)
         if not bot or not bot.config.auto_restart:
@@ -468,8 +511,8 @@ class BotManager:
     async def _on_restart_exhausted(
         self, bot_id: str, attempts: int, last_error: str
     ) -> None:
-        """재시작 한도 소진 시 이벤트 발행."""
-        from ante.eventbus.events import BotRestartExhaustedEvent
+        """재시작 한도 소진 시 이벤트 + 알림 발행."""
+        from ante.eventbus.events import BotRestartExhaustedEvent, NotificationEvent
 
         logger.error(
             "봇 재시작 한도 소진: %s (%d회 시도)",
@@ -481,6 +524,14 @@ class BotManager:
                 bot_id=bot_id,
                 restart_attempts=attempts,
                 last_error=last_error,
+            )
+        )
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="error",
+                title="봇 재시작 한도 소진",
+                message=(f"봇 `{bot_id}` · {attempts}회 시도\n{last_error}"),
+                category="bot",
             )
         )
 

@@ -46,6 +46,7 @@ class TradeRecorder:
     def __init__(self, db: Database, position_history: PositionHistory) -> None:
         self._db = db
         self._position_history = position_history
+        self._eventbus: EventBus | None = None
 
     async def initialize(self) -> None:
         """스키마 생성 + 마이그레이션."""
@@ -66,20 +67,23 @@ class TradeRecorder:
     def subscribe(self, eventbus: EventBus) -> None:
         """이벤트 구독 등록."""
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
             OrderRejectedEvent,
         )
 
+        self._eventbus = eventbus
         eventbus.subscribe(OrderFilledEvent, self._on_filled, priority=10)
         eventbus.subscribe(OrderRejectedEvent, self._on_rejected, priority=10)
         eventbus.subscribe(OrderFailedEvent, self._on_failed, priority=10)
         eventbus.subscribe(OrderCancelledEvent, self._on_cancelled, priority=10)
+        eventbus.subscribe(OrderCancelFailedEvent, self._on_cancel_failed, priority=10)
 
     async def _on_filled(self, event: object) -> None:
-        """체결 이벤트 → 거래 기록 + 포지션 갱신."""
-        from ante.eventbus.events import OrderFilledEvent
+        """체결 이벤트 → 거래 기록 + 포지션 갱신 + 알림 발행."""
+        from ante.eventbus.events import NotificationEvent, OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
             return
@@ -101,6 +105,21 @@ class TradeRecorder:
         )
         await self._save(record)
         await self._position_history.on_trade(record)
+
+        side_label = "매수" if event.side == "buy" else "매도"
+        if self._eventbus:
+            await self._eventbus.publish(
+                NotificationEvent(
+                    level="info",
+                    title=f"체결 완료 ({side_label})",
+                    message=(
+                        f"봇 `{event.bot_id}`\n"
+                        f"종목: `{event.symbol}`\n"
+                        f"{side_label} {event.quantity}주 @ {event.price:,.0f}원"
+                    ),
+                    category="trade",
+                )
+            )
 
     async def _on_rejected(self, event: object) -> None:
         """거부 이벤트 → 거부 기록 저장."""
@@ -168,6 +187,26 @@ class TradeRecorder:
             order_id=event.order_id,
         )
         await self._save(record)
+
+    async def _on_cancel_failed(self, event: object) -> None:
+        """주문 취소 실패 알림 발행."""
+        from ante.eventbus.events import NotificationEvent, OrderCancelFailedEvent
+
+        if not isinstance(event, OrderCancelFailedEvent):
+            return
+
+        if self._eventbus:
+            await self._eventbus.publish(
+                NotificationEvent(
+                    level="error",
+                    title="주문 취소 실패",
+                    message=(
+                        f"봇 `{event.bot_id}` · 주문 `{event.order_id}`\n"
+                        f"{event.error_message}"
+                    ),
+                    category="trade",
+                )
+            )
 
     async def _save(self, record: TradeRecord) -> None:
         """거래 기록을 SQLite에 저장."""

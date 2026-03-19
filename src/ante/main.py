@@ -892,6 +892,19 @@ async def _run(s: Services) -> None:
         loop.add_signal_handler(sig, _signal_handler)
 
     logger.info("Ante 준비 완료 — 종료 시그널 대기 중")
+
+    from ante.eventbus.events import NotificationEvent
+
+    if s.eventbus:
+        await s.eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="시스템 시작",
+                message="Ante 시스템이 시작되었습니다.",
+                category="system",
+            )
+        )
+
     await shutdown_event.wait()
 
     await _shutdown(s)
@@ -900,6 +913,18 @@ async def _run(s: Services) -> None:
 async def _shutdown(s: Services) -> None:
     """종료 정리 (역순)."""
     logger.info("Ante 종료 시작")
+
+    from ante.eventbus.events import NotificationEvent
+
+    if s.eventbus:
+        await s.eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="시스템 종료",
+                message="Ante 시스템이 종료됩니다.",
+                category="system",
+            )
+        )
 
     if s.telegram_receiver:
         await s.telegram_receiver.stop()

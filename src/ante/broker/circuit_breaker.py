@@ -120,10 +120,10 @@ class CircuitBreaker:
         new_state: CircuitState,
         reason: str,
     ) -> None:
-        """CircuitBreakerEvent 발행 (fire-and-forget)."""
+        """CircuitBreakerEvent + NotificationEvent 발행 (fire-and-forget)."""
         import asyncio
 
-        from ante.eventbus.events import CircuitBreakerEvent
+        from ante.eventbus.events import CircuitBreakerEvent, NotificationEvent
 
         event = CircuitBreakerEvent(
             broker=self._name,
@@ -136,6 +136,30 @@ class CircuitBreaker:
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(self._eventbus.publish(event))  # type: ignore[union-attr]
+
+            # 서킷 브레이커 차단/복구 알림
+            if new_state == CircuitState.OPEN:
+                notification = NotificationEvent(
+                    level="error",
+                    title="서킷 브레이커 차단",
+                    message=(
+                        f"브로커 `{self._name}`\n"
+                        f"{old_state.value} → *{new_state.value}* ({reason})"
+                    ),
+                    category="broker",
+                )
+                loop.create_task(self._eventbus.publish(notification))  # type: ignore[union-attr]
+            elif new_state == CircuitState.CLOSED:
+                notification = NotificationEvent(
+                    level="info",
+                    title="서킷 브레이커 복구",
+                    message=(
+                        f"브로커 `{self._name}`\n"
+                        f"{old_state.value} → *{new_state.value}* ({reason})"
+                    ),
+                    category="broker",
+                )
+                loop.create_task(self._eventbus.publish(notification))  # type: ignore[union-attr]
         except RuntimeError:
             # 이벤트 루프가 없는 경우 (테스트 등) 무시
             pass
