@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ante.bot.signal_key import SignalKeyManager  # noqa: F811
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
+    from ante.rule.engine import RuleEngine  # noqa: F811
     from ante.strategy.base import Strategy
     from ante.strategy.context import StrategyContext
     from ante.strategy.snapshot import StrategySnapshot
@@ -48,12 +49,16 @@ class BotManager:
         context_factory: StrategyContextFactory | None = None,
         signal_key_manager: SignalKeyManager | None = None,
         snapshot: StrategySnapshot | None = None,
+        rule_engine: RuleEngine | None = None,
+        strategy_rule_configs: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
         self._context_factory = context_factory
         self._signal_key_manager = signal_key_manager
         self._snapshot = snapshot
+        self._rule_engine = rule_engine
+        self._strategy_rule_configs = strategy_rule_configs or {}
         self._bots: dict[str, Bot] = {}
         self._restart_counts: dict[str, int] = {}
         self._restart_tasks: dict[str, asyncio.Task[None]] = {}
@@ -224,11 +229,13 @@ class BotManager:
 
         if was_running:
             await bot.stop()
+            self._remove_strategy_rules(bot.config.strategy_id)
 
         bot.config.strategy_id = strategy_id
         await self._update_bot_strategy(bot_id, strategy_id)
 
         if was_running:
+            self._load_strategy_rules(strategy_id)
             await bot.start()
 
         logger.info(
@@ -273,18 +280,21 @@ class BotManager:
         self._restart_counts.pop(bot_id, None)
         bot.error_message = None
 
+        self._load_strategy_rules(bot.config.strategy_id)
         await bot.start()
         logger.info("봇 재개: %s", bot_id)
 
     async def start_bot(self, bot_id: str) -> None:
-        """봇 시작."""
+        """봇 시작. 전략별 룰이 설정되어 있으면 RuleEngine에 로드."""
         bot = self._get_bot(bot_id)
+        self._load_strategy_rules(bot.config.strategy_id)
         await bot.start()
 
     async def stop_bot(self, bot_id: str) -> None:
-        """봇 중지."""
+        """봇 중지. 전략별 룰을 RuleEngine에서 제거."""
         bot = self._get_bot(bot_id)
         await bot.stop()
+        self._remove_strategy_rules(bot.config.strategy_id)
 
     async def delete_bot(self, bot_id: str) -> None:
         """봇 소프트 딜리트. 실행 중이면 먼저 중지."""
@@ -354,6 +364,25 @@ class BotManager:
         if bot is None:
             raise BotError(f"Bot not found: {bot_id}")
         return bot
+
+    # ── 전략별 룰 관리 ─────────────────────────────────
+
+    def _load_strategy_rules(self, strategy_id: str) -> None:
+        """설정에서 전략별 룰을 RuleEngine에 로드."""
+        if not self._rule_engine:
+            return
+        rule_configs = self._strategy_rule_configs.get(strategy_id)
+        if rule_configs:
+            self._rule_engine.load_strategy_rules_from_config(strategy_id, rule_configs)
+            logger.info(
+                "전략별 룰 로드: strategy=%s (%d건)", strategy_id, len(rule_configs)
+            )
+
+    def _remove_strategy_rules(self, strategy_id: str) -> None:
+        """RuleEngine에서 전략별 룰 제거."""
+        if not self._rule_engine:
+            return
+        self._rule_engine.remove_strategy_rules(strategy_id)
 
     # ── EventBus 핸들러 ──────────────────────────────
 
@@ -463,6 +492,7 @@ class BotManager:
             return
 
         try:
+            self._load_strategy_rules(bot.config.strategy_id)
             await bot.start()
             logger.info("봇 재시작 성공: %s", bot_id)
             self._schedule_restart_reset(bot_id)
