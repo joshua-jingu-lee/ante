@@ -60,6 +60,8 @@ class AuditLogger:
         *,
         member_id: str | None = None,
         action: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
@@ -73,6 +75,14 @@ class AuditLogger:
         if action:
             conditions.append("action LIKE ?")
             params.append(f"{action}%")
+        if from_date:
+            conditions.append("created_at >= ?")
+            params.append(from_date)
+        if to_date:
+            conditions.append("created_at <= ?")
+            params.append(to_date + "T23:59:59" if len(to_date) == 10 else to_date)
+
+        limit = min(limit, 200)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         sql = f"""SELECT id, member_id, action, resource, detail, ip, created_at
@@ -86,6 +96,8 @@ class AuditLogger:
         *,
         member_id: str | None = None,
         action: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> int:
         """감사 로그 건수 조회."""
         conditions: list[str] = []
@@ -97,6 +109,12 @@ class AuditLogger:
         if action:
             conditions.append("action LIKE ?")
             params.append(f"{action}%")
+        if from_date:
+            conditions.append("created_at >= ?")
+            params.append(from_date)
+        if to_date:
+            conditions.append("created_at <= ?")
+            params.append(to_date + "T23:59:59" if len(to_date) == 10 else to_date)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         sql = f"SELECT COUNT(*) as cnt FROM audit_log {where}"
