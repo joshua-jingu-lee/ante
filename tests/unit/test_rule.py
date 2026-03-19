@@ -712,3 +712,193 @@ class TestRuleEngineUpdateRules:
         )
         result = engine.evaluate(context)
         assert result.overall_result == RuleResult.REJECT
+
+
+class TestRuleEngineConfigReload:
+    """RuleEngine._on_config_changed() 전역/전략 룰 재로드 테스트."""
+
+    @pytest.fixture
+    async def db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        await database.connect()
+        yield database
+        await database.close()
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    async def system_state(self, db, eventbus):
+        from ante.config.system_state import SystemState
+
+        state = SystemState(db=db, eventbus=eventbus)
+        await state.initialize()
+        return state
+
+    @pytest.fixture
+    async def engine(self, eventbus, system_state):
+        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+        engine.start()
+        return engine
+
+    async def test_global_rule_reload_on_config_changed(self, engine, eventbus):
+        """category='global_rule' ConfigChangedEvent 발행 시 전역 룰이 재로드된다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        # 초기 전역 룰 설정
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
+        )
+        assert len(engine._global_rules) == 1
+        assert engine._global_rules[0].rule_id == "dl"
+
+        # ConfigChangedEvent로 전역 룰 교체
+        new_rules = [
+            {"type": "total_exposure_limit", "id": "exp", "max_exposure_percent": 0.20},
+            {
+                "type": "trading_hours",
+                "id": "th",
+                "start_time": "09:00",
+                "end_time": "15:30",
+            },
+        ]
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="global_rule",
+                key="rules.global",
+                new_value=json.dumps(new_rules),
+            )
+        )
+
+        assert len(engine._global_rules) == 2
+        rule_ids = {r.rule_id for r in engine._global_rules}
+        assert rule_ids == {"exp", "th"}
+        assert "dl" not in rule_ids
+
+    async def test_rule_category_reload(self, engine, eventbus):
+        """category='rule'도 전역 룰 재로드를 트리거한다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
+        )
+
+        new_rules = [
+            {
+                "type": "total_exposure_limit",
+                "id": "exp2",
+                "max_exposure_percent": 0.30,
+            },
+        ]
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="rule",
+                key="rules.global",
+                new_value=json.dumps(new_rules),
+            )
+        )
+
+        assert len(engine._global_rules) == 1
+        assert engine._global_rules[0].rule_id == "exp2"
+
+    async def test_strategy_rule_reload_on_config_changed(self, engine, eventbus):
+        """category='strategy_rule' ConfigChangedEvent로 전략 룰이 재로드된다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        # 초기 전략 룰 설정
+        engine.load_strategy_rules_from_config(
+            "momentum_v1",
+            [{"type": "position_size", "id": "ps", "max_position_percent": 0.10}],
+        )
+        assert len(engine._strategy_rules["momentum_v1"]) == 1
+
+        # ConfigChangedEvent로 전략 룰 교체
+        new_rules = [
+            {"type": "trade_frequency", "id": "freq", "max_trades_per_hour": 10},
+            {
+                "type": "unrealized_loss_limit",
+                "id": "ul",
+                "max_unrealized_loss_percent": 0.03,
+            },
+        ]
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="strategy_rule",
+                key="rules.strategy.momentum_v1",
+                new_value=json.dumps(new_rules),
+            )
+        )
+
+        assert len(engine._strategy_rules["momentum_v1"]) == 2
+        rule_ids = {r.rule_id for r in engine._strategy_rules["momentum_v1"]}
+        assert rule_ids == {"freq", "ul"}
+
+    async def test_config_changed_invalid_json_ignored(self, engine, eventbus):
+        """잘못된 JSON new_value는 무시한다."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
+        )
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="global_rule",
+                key="rules.global",
+                new_value="not-valid-json{{{",
+            )
+        )
+
+        # 기존 룰이 유지되어야 한다
+        assert len(engine._global_rules) == 1
+        assert engine._global_rules[0].rule_id == "dl"
+
+    async def test_config_changed_non_list_ignored(self, engine, eventbus):
+        """new_value가 list가 아닌 경우 무시한다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
+        )
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="global_rule",
+                key="rules.global",
+                new_value=json.dumps({"not": "a list"}),
+            )
+        )
+
+        # 기존 룰 유지
+        assert len(engine._global_rules) == 1
+
+    async def test_config_changed_unrelated_category_ignored(self, engine, eventbus):
+        """rule 관련이 아닌 category는 무시한다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
+        )
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="broker",
+                key="broker.commission_rate",
+                new_value=json.dumps(0.0002),
+            )
+        )
+
+        # 기존 룰 변경 없음
+        assert len(engine._global_rules) == 1
+        assert engine._global_rules[0].rule_id == "dl"

@@ -431,13 +431,45 @@ class RuleEngine:
             )
 
     async def _on_config_changed(self, event: object) -> None:
-        """설정 변경 시 룰 재로딩 트리거.
+        """설정 변경 시 룰 재로딩.
+
+        category가 ``"rule"`` 또는 ``"global_rule"``이면 전역 룰을 재로드하고,
+        ``"strategy_rule"``이면 해당 전략 룰을 재로드한다.
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
         """
+        import json
+
         from ante.eventbus.events import ConfigChangedEvent
 
         if not isinstance(event, ConfigChangedEvent):
             return
-        if event.category in ("rule", "global_rule", "strategy_rule"):
-            logger.info("룰 설정 변경 감지, 룰 재로딩 필요: %s", event.key)
+        if event.category not in ("rule", "global_rule", "strategy_rule"):
+            return
+
+        logger.info("룰 설정 변경 감지, 재로딩 시작: %s", event.key)
+
+        try:
+            new_rules: list[dict[str, Any]] = json.loads(event.new_value)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("룰 설정 파싱 실패 — 재로딩 건너뜀: %s", event.key)
+            return
+
+        if not isinstance(new_rules, list):
+            logger.warning("룰 설정이 list가 아님 — 재로딩 건너뜀: %s", event.key)
+            return
+
+        if event.category in ("rule", "global_rule"):
+            self._global_rules.clear()
+            self.load_rules_from_config(new_rules)
+            logger.info("전역 룰 재로드 완료: %d건", len(self._global_rules))
+        elif event.category == "strategy_rule":
+            # key 형식: "rules.strategy.<strategy_id>" 또는 strategy_id 직접
+            parts = event.key.rsplit(".", 1)
+            strategy_id = parts[-1] if len(parts) > 1 else event.key
+            self.load_strategy_rules_from_config(strategy_id, new_rules)
+            logger.info(
+                "전략 룰 재로드 완료: strategy=%s, %d건",
+                strategy_id,
+                len(self._strategy_rules.get(strategy_id, [])),
+            )
