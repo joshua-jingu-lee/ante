@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ante.approval.auto_approve import AutoApproveEvaluator
-from ante.approval.models import ApprovalRequest, ApprovalStatus
+from ante.approval.models import (
+    ApprovalRequest,
+    ApprovalStatus,
+    ApprovalValidationError,
+    ValidationResult,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -50,11 +55,13 @@ class ApprovalService:
         db: Database,
         eventbus: EventBus,
         executors: dict[str, Callable[..., Awaitable]] | None = None,
+        validators: dict[str, Callable[..., list[ValidationResult]]] | None = None,
         auto_approve_evaluator: AutoApproveEvaluator | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
         self._executors = executors or {}
+        self._validators = validators or {}
         self._auto_approve = auto_approve_evaluator or AutoApproveEvaluator()
 
     async def initialize(self) -> None:
@@ -77,6 +84,30 @@ class ApprovalService:
         now = datetime.now(UTC).isoformat()
         params = params or {}
 
+        # 사전 검증 (validator)
+        reviews: list[dict] = []
+        validator = self._validators.get(type)
+        if validator:
+            results = validator(params)
+            for r in results:
+                if r.grade == "fail":
+                    logger.info(
+                        "사전 검증 실패 (%s): %s — %s",
+                        type,
+                        r.reviewer,
+                        r.detail,
+                    )
+                    raise ApprovalValidationError(r.detail)
+                if r.grade == "warn":
+                    reviews.append(
+                        {
+                            "reviewer": r.reviewer,
+                            "result": "warn",
+                            "detail": r.detail,
+                            "reviewed_at": now,
+                        }
+                    )
+
         history = [
             {
                 "action": "created",
@@ -94,7 +125,7 @@ class ApprovalService:
             title=title,
             body=body,
             params=params,
-            reviews=[],
+            reviews=reviews,
             history=history,
             reference_id=reference_id,
             expires_at=expires_at,
