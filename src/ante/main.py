@@ -843,10 +843,25 @@ async def _init_notification(s: Services) -> None:
 
     adapter = TelegramAdapter(bot_token=telegram_token, chat_id=telegram_chat_id)
     min_level_str = s.config.get("notification.min_level", "info")
+
+    # quiet_hours 파싱
+    quiet_start = None
+    quiet_end = None
+    if s.dynamic_config:
+        from ante.notification.service import parse_quiet_hours
+
+        raw = await s.dynamic_config.get("notification.quiet_hours", default=None)
+        if raw:
+            parsed = parse_quiet_hours(str(raw))
+            if parsed:
+                quiet_start, quiet_end = parsed
+
     s.notification_service = NotificationService(
         adapter=adapter,
         eventbus=s.eventbus,
         min_level=NotificationLevel(min_level_str),
+        quiet_start=quiet_start,
+        quiet_end=quiet_end,
     )
     s.notification_service.subscribe()
     logger.info("NotificationService 초기화 완료 (Telegram)")
@@ -936,7 +951,7 @@ async def _run(s: Services) -> None:
 
     logger.info("Ante 준비 완료 — 종료 시그널 대기 중")
 
-    from ante.eventbus.events import NotificationEvent
+    from ante.eventbus.events import NotificationEvent, SystemStartedEvent
 
     if s.eventbus:
         await s.eventbus.publish(
@@ -947,6 +962,7 @@ async def _run(s: Services) -> None:
                 category="system",
             )
         )
+        await s.eventbus.publish(SystemStartedEvent())
 
     await shutdown_event.wait()
 
