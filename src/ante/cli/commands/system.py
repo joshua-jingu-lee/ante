@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
+import subprocess
+import sys
 
 import click
 
@@ -39,6 +43,91 @@ async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
         await al.log(**kwargs)
     except Exception:
         pass
+
+
+def _is_process_alive(pid: int) -> bool:
+    """프로세스가 살아있는지 확인."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+@system.command()
+@click.option(
+    "--config-dir",
+    "config_dir",
+    type=click.Path(exists=False),
+    default=None,
+    help="설정 디렉토리 경로",
+)
+@click.pass_context
+@require_auth
+@require_scope("system:admin")
+def start(ctx: click.Context, config_dir: str | None) -> None:
+    """시스템 시작 (포어그라운드)."""
+    from ante.main import read_pid_file
+
+    fmt = get_formatter(ctx)
+
+    # 이미 실행 중인지 확인
+    existing_pid = read_pid_file()
+    if existing_pid is not None and _is_process_alive(existing_pid):
+        fmt.error(
+            f"시스템이 이미 실행 중입니다 (pid={existing_pid})", code="ALREADY_RUNNING"
+        )
+        raise SystemExit(1)
+
+    # python -m ante.main 실행
+    cmd = [sys.executable, "-m", "ante.main"]
+
+    env = os.environ.copy()
+    if config_dir:
+        env["ANTE_CONFIG_DIR"] = config_dir
+    # 루트 컨텍스트에서 --config-dir이 설정된 경우 전달
+    root_config_dir = ctx.obj.get("config_dir")
+    if root_config_dir and not config_dir:
+        env["ANTE_CONFIG_DIR"] = str(root_config_dir)
+
+    fmt.success("시스템 시작 중...")
+
+    try:
+        proc = subprocess.run(cmd, env=env)
+        raise SystemExit(proc.returncode)
+    except KeyboardInterrupt:
+        raise SystemExit(0)
+
+
+@system.command()
+@click.pass_context
+@require_auth
+@require_scope("system:admin")
+def stop(ctx: click.Context) -> None:
+    """시스템 정상 종료 (SIGTERM)."""
+    from ante.main import PID_FILE, read_pid_file
+
+    fmt = get_formatter(ctx)
+
+    pid = read_pid_file()
+    if pid is None:
+        fmt.error(
+            f"PID 파일이 없습니다 ({PID_FILE})",
+            code="PID_NOT_FOUND",
+        )
+        raise SystemExit(1)
+
+    if not _is_process_alive(pid):
+        # 프로세스가 없으면 stale PID 파일 정리
+        PID_FILE.unlink(missing_ok=True)
+        fmt.error(
+            f"프로세스가 존재하지 않습니다 (pid={pid}). PID 파일을 정리했습니다.",
+            code="PROCESS_NOT_FOUND",
+        )
+        raise SystemExit(1)
+
+    os.kill(pid, signal.SIGTERM)
+    fmt.success("종료 시그널 전송 완료", {"pid": pid})
 
 
 @system.command()
