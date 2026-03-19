@@ -7,6 +7,7 @@ main()은 조율만 수행한다.
 
 import asyncio
 import logging
+import os
 import signal
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,32 @@ from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
 
 logger = logging.getLogger(__name__)
+
+PID_FILE = Path("db/ante.pid")
+
+
+def _write_pid_file() -> None:
+    """PID 파일 기록."""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+    logger.info("PID 파일 기록: %s (pid=%d)", PID_FILE, os.getpid())
+
+
+def _remove_pid_file() -> None:
+    """PID 파일 삭제."""
+    try:
+        PID_FILE.unlink(missing_ok=True)
+        logger.info("PID 파일 삭제: %s", PID_FILE)
+    except OSError:
+        logger.warning("PID 파일 삭제 실패: %s", PID_FILE, exc_info=True)
+
+
+def read_pid_file() -> int | None:
+    """PID 파일에서 PID 읽기. 파일이 없거나 파싱 실패 시 None."""
+    try:
+        return int(PID_FILE.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 @dataclass
@@ -941,14 +968,18 @@ async def main() -> None:
     종료 순서: 역순 (상위 소비자부터 정리)
     """
     s = Services()
+    _write_pid_file()
 
-    await _init_core(s)
-    await _init_services(s)
-    await _init_trading(s)
-    await _init_feed(s)
-    await _init_notification(s)
-    await _init_web(s)
-    await _run(s)
+    try:
+        await _init_core(s)
+        await _init_services(s)
+        await _init_trading(s)
+        await _init_feed(s)
+        await _init_notification(s)
+        await _init_web(s)
+        await _run(s)
+    finally:
+        _remove_pid_file()
 
 
 if __name__ == "__main__":
