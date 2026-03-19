@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Click introspection 기반 CLI 레퍼런스 문서 자동 생성.
 
-ante CLI의 Click 명령어 트리를 순회하며 docs/generated/cli-reference.md를 생성한다.
-SSOT: Click 데코레이터 → cli-reference.md (자동 생성)
+ante CLI의 Click 명령어 트리를 순회하며 guide/cli.md를 생성한다.
+SSOT: Click 데코레이터 → guide/cli.md (자동 생성)
 
 사용법:
     python scripts/generate_cli_reference.py
-    python scripts/generate_cli_reference.py --output docs/generated/cli-reference.md
+    python scripts/generate_cli_reference.py --output guide/cli.md
 """
 
 from __future__ import annotations
@@ -291,8 +291,8 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        default="docs/generated/cli-reference.md",
-        help="출력 파일 경로 (기본: docs/generated/cli-reference.md)",
+        default="guide/cli.md",
+        help="출력 파일 경로 (기본: guide/cli.md)",
     )
     parser.add_argument(
         "--stdout",
