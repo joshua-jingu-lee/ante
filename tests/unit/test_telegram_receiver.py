@@ -50,9 +50,10 @@ def treasury():
 
 @pytest.fixture
 def system_state():
+    from ante.config.system_state import TradingState
+
     mock = MagicMock()
-    mock.trading_state = MagicMock()
-    mock.trading_state.value = "active"
+    mock.trading_state = TradingState.HALTED
     mock.set_state = AsyncMock()
     return mock
 
@@ -129,7 +130,7 @@ class TestCommands:
     async def test_status(self, receiver):
         result = receiver._cmd_status([])
         assert "거래 상태" in result
-        assert "active" in result
+        assert "halted" in result
         assert "봇" in result
 
     async def test_status_no_manager(self, receiver):
@@ -214,8 +215,16 @@ class TestCommands:
 
     async def test_activate(self, receiver, system_state):
         result = await receiver._cmd_activate([])
-        assert "재개" in result
+        assert "거래가 재개되었습니다" in result
         system_state.set_state.assert_called_once()
+
+    async def test_activate_already_active(self, receiver, system_state):
+        from ante.config.system_state import TradingState
+
+        system_state.trading_state = TradingState.ACTIVE
+        result = await receiver._cmd_activate([])
+        assert "이미 거래가 활성 상태입니다" in result
+        system_state.set_state.assert_not_called()
 
     async def test_activate_no_state(self, receiver):
         receiver._system_state = None
