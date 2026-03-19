@@ -166,58 +166,17 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
     Returns:
         검증 결과 (경고 포함 가능, 비즈니스 규칙 위반은 경고로 분류).
     """
-    errors: list[str] = []
     warnings: list[str] = []
 
     if not records:
-        return ValidationResult(passed=True, warnings=warnings, errors=errors)
+        return ValidationResult(passed=True, warnings=warnings, errors=[])
 
     for i, record in enumerate(records):
         symbol = record.get("symbol", f"record_{i}")
+        _check_positive_prices(record, symbol, warnings)
+        _check_volume_non_negative(record, symbol, warnings)
+        _check_ohlc_relationship(record, symbol, warnings)
 
-        # 가격 양수 검증
-        for price_field in ("open", "high", "low", "close"):
-            value = record.get(price_field)
-            if value is None:
-                continue
-            try:
-                price = float(value)
-            except (ValueError, TypeError):
-                continue  # 스키마 검증에서 이미 잡힘
-            if price <= 0:
-                warnings.append(f"{symbol}: {price_field} <= 0 ({price_field}={price})")
-
-        # 거래량 >= 0 검증
-        volume_val = record.get("volume")
-        if volume_val is not None:
-            try:
-                vol = int(float(str(volume_val)))
-            except (ValueError, TypeError):
-                pass
-            else:
-                if vol < 0:
-                    warnings.append(f"{symbol}: volume < 0 (volume={vol})")
-
-        # OHLC 관계 검증: low <= open/close <= high
-        try:
-            o = float(record["open"]) if "open" in record else None
-            h = float(record["high"]) if "high" in record else None
-            low_val = float(record["low"]) if "low" in record else None
-            c = float(record["close"]) if "close" in record else None
-        except (ValueError, TypeError):
-            continue  # 숫자 변환 실패는 스키마 계층에서 처리
-
-        if all(v is not None for v in (o, h, low_val, c)):
-            if low_val > c:
-                warnings.append(f"{symbol}: low > close (low={low_val}, close={c})")
-            if c > h:
-                warnings.append(f"{symbol}: close > high (close={c}, high={h})")
-            if low_val > o:
-                warnings.append(f"{symbol}: low > open (low={low_val}, open={o})")
-            if o > h:
-                warnings.append(f"{symbol}: open > high (open={o}, high={h})")
-
-    # 시계열 연속성 검증 (날짜 중복 및 순서)
     _validate_time_series(records, warnings)
 
     if warnings:
@@ -227,8 +186,88 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
     return ValidationResult(
         passed=True,  # 비즈니스 규칙 위반은 경고이므로 passed=True
         warnings=warnings,
-        errors=errors,
+        errors=[],
     )
+
+
+def _check_positive_prices(
+    record: dict[str, Any],
+    symbol: str,
+    warnings: list[str],
+) -> None:
+    """가격 필드가 양수인지 검증한다.
+
+    Args:
+        record: 검증할 레코드.
+        symbol: 심볼 식별자 (경고 메시지용).
+        warnings: 경고를 추가할 목록.
+    """
+    for price_field in ("open", "high", "low", "close"):
+        value = record.get(price_field)
+        if value is None:
+            continue
+        try:
+            price = float(value)
+        except (ValueError, TypeError):
+            continue  # 스키마 검증에서 이미 잡힘
+        if price <= 0:
+            warnings.append(f"{symbol}: {price_field} <= 0 ({price_field}={price})")
+
+
+def _check_volume_non_negative(
+    record: dict[str, Any],
+    symbol: str,
+    warnings: list[str],
+) -> None:
+    """거래량이 0 이상인지 검증한다.
+
+    Args:
+        record: 검증할 레코드.
+        symbol: 심볼 식별자 (경고 메시지용).
+        warnings: 경고를 추가할 목록.
+    """
+    volume_val = record.get("volume")
+    if volume_val is None:
+        return
+    try:
+        vol = int(float(str(volume_val)))
+    except (ValueError, TypeError):
+        return
+    if vol < 0:
+        warnings.append(f"{symbol}: volume < 0 (volume={vol})")
+
+
+def _check_ohlc_relationship(
+    record: dict[str, Any],
+    symbol: str,
+    warnings: list[str],
+) -> None:
+    """OHLC 관계(low <= open/close <= high)를 검증한다.
+
+    Args:
+        record: 검증할 레코드.
+        symbol: 심볼 식별자 (경고 메시지용).
+        warnings: 경고를 추가할 목록.
+    """
+    try:
+        o = float(record["open"]) if "open" in record else None
+        h = float(record["high"]) if "high" in record else None
+        low_val = float(record["low"]) if "low" in record else None
+        c = float(record["close"]) if "close" in record else None
+    except (ValueError, TypeError):
+        return  # 숫자 변환 실패는 스키마 계층에서 처리
+
+    if not all(v is not None for v in (o, h, low_val, c)):
+        return
+
+    if low_val > c:
+        warnings.append(f"{symbol}: low > close (low={low_val}, close={c})")
+    if c > h:
+        warnings.append(f"{symbol}: close > high (close={c}, high={h})")
+    if low_val > o:
+        warnings.append(f"{symbol}: low > open (low={low_val}, open={o})")
+    if o > h:
+        warnings.append(f"{symbol}: open > high (open={o}, high={h})")
 
 
 def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) -> None:
@@ -254,30 +293,57 @@ def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) ->
             by_symbol.setdefault(symbol, []).append(str(date_val))
 
     for symbol, dates in by_symbol.items():
-        # 중복 검사
-        seen: set[str] = set()
-        duplicates: list[str] = []
-        for d in dates:
-            if d in seen:
-                duplicates.append(d)
-            seen.add(d)
+        _check_duplicate_dates(symbol, dates, warnings)
+        _check_date_order(symbol, dates, warnings)
 
-        if duplicates:
-            warnings.append(f"{symbol}: 중복 날짜 감지: {duplicates}")
 
-        # 순서 검증 (파싱 가능한 날짜에 대해서만)
-        parsed_dates: list[tuple[datetime, str]] = []
-        for d in dates:
-            dt = _try_parse_date(d)
-            if dt is not None:
-                parsed_dates.append((dt, d))
+def _check_duplicate_dates(
+    symbol: str,
+    dates: list[str],
+    warnings: list[str],
+) -> None:
+    """날짜 중복을 검사한다.
 
-        for j in range(1, len(parsed_dates)):
-            if parsed_dates[j][0] < parsed_dates[j - 1][0]:
-                warnings.append(
-                    f"{symbol}: 날짜 순서 역전 감지: "
-                    f"{parsed_dates[j - 1][1]} -> {parsed_dates[j][1]}"
-                )
+    Args:
+        symbol: 심볼 식별자.
+        dates: 날짜 문자열 목록.
+        warnings: 경고를 추가할 목록.
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for d in dates:
+        if d in seen:
+            duplicates.append(d)
+        seen.add(d)
+
+    if duplicates:
+        warnings.append(f"{symbol}: 중복 날짜 감지: {duplicates}")
+
+
+def _check_date_order(
+    symbol: str,
+    dates: list[str],
+    warnings: list[str],
+) -> None:
+    """날짜 순서 역전을 검사한다.
+
+    Args:
+        symbol: 심볼 식별자.
+        dates: 날짜 문자열 목록.
+        warnings: 경고를 추가할 목록.
+    """
+    parsed_dates: list[tuple[datetime, str]] = []
+    for d in dates:
+        dt = _try_parse_date(d)
+        if dt is not None:
+            parsed_dates.append((dt, d))
+
+    for j in range(1, len(parsed_dates)):
+        if parsed_dates[j][0] < parsed_dates[j - 1][0]:
+            warnings.append(
+                f"{symbol}: 날짜 순서 역전 감지: "
+                f"{parsed_dates[j - 1][1]} -> {parsed_dates[j][1]}"
+            )
 
 
 def _try_parse_date(value: str) -> datetime | None:

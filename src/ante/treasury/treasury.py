@@ -184,12 +184,12 @@ class Treasury:
 
     # ── 예산 조회 ───────────────────────────────────
 
-    async def get_available(self, bot_id: str) -> float:
+    def get_available(self, bot_id: str) -> float:
         """봇의 가용 예산 조회."""
         budget = self._budgets.get(bot_id)
         return budget.available if budget else 0.0
 
-    async def get_budget(self, bot_id: str) -> BotBudget | None:
+    def get_budget(self, bot_id: str) -> BotBudget | None:
         """봇의 예산 상태 조회."""
         return self._budgets.get(bot_id)
 
@@ -316,7 +316,7 @@ class Treasury:
                 event.bot_id, event.order_id, total_reserve
             )
             if not success:
-                available = await self.get_available(event.bot_id)
+                available = self.get_available(event.bot_id)
                 await self._eventbus.publish(
                     OrderRejectedEvent(
                         order_id=event.order_id,
@@ -444,7 +444,7 @@ class Treasury:
 
     # ── 잔고 동기화 ────────────────────────────────
 
-    async def start_sync(
+    def start_sync(
         self,
         broker: BrokerAdapter,
         position_history: PositionHistory,

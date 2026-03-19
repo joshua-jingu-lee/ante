@@ -8,6 +8,9 @@ import click
 
 from ante.cli.main import get_formatter
 
+_SYSTEM_TOML_FILENAME = "system.toml"
+_SECRETS_ENV_FILENAME = "secrets.env"
+
 SYSTEM_TOML_TEMPLATE = """\
 # Ante 시스템 설정
 
@@ -61,10 +64,10 @@ def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
 
     if config_path.exists():
         existing = []
-        if (config_path / "system.toml").exists():
-            existing.append("system.toml")
-        if (config_path / "secrets.env").exists():
-            existing.append("secrets.env")
+        if (config_path / _SYSTEM_TOML_FILENAME).exists():
+            existing.append(_SYSTEM_TOML_FILENAME)
+        if (config_path / _SECRETS_ENV_FILENAME).exists():
+            existing.append(_SECRETS_ENV_FILENAME)
         if existing and not seed:
             fmt.error(
                 f"설정 디렉토리가 이미 존재합니다: {config_path}\n"
@@ -74,15 +77,15 @@ def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
 
     config_path.mkdir(parents=True, exist_ok=True)
 
-    system_toml = config_path / "system.toml"
+    system_toml = config_path / _SYSTEM_TOML_FILENAME
     if not system_toml.exists():
         system_toml.write_text(SYSTEM_TOML_TEMPLATE)
 
-    secrets_env = config_path / "secrets.env"
+    secrets_env = config_path / _SECRETS_ENV_FILENAME
     if not secrets_env.exists():
         secrets_env.write_text(SECRETS_ENV_TEMPLATE)
 
-    created_files = ["system.toml", "secrets.env"]
+    created_files = [_SYSTEM_TOML_FILENAME, _SECRETS_ENV_FILENAME]
 
     if seed:
         import asyncio

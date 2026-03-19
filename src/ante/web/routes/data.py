@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import shutil
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ante.web.deps import get_data_store
 from ante.web.schemas import (
     DataSchemaResponse,
     DatasetListResponse,
@@ -24,7 +26,7 @@ DATA_TYPES = ["ohlcv", "fundamental"]
 
 @router.get("/datasets", response_model=DatasetListResponse)
 async def list_datasets(
-    request: Request,
+    store: Annotated[Any | None, Depends(get_data_store)],
     symbol: str | None = None,
     timeframe: str | None = None,
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
@@ -37,7 +39,6 @@ async def list_datasets(
     Returns:
         {items: [...], total: int}
     """
-    store = getattr(request.app.state, "data_store", None)
     if store is None:
         return {"items": [], "total": 0}
 
@@ -90,7 +91,6 @@ async def list_datasets(
 
 @router.get("/schema", response_model=DataSchemaResponse)
 async def get_data_schema(
-    request: Request,
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
 ) -> dict:
     """데이터 스키마 조회. data_type에 따라 해당 스키마를 반환."""
@@ -105,9 +105,10 @@ async def get_data_schema(
 
 
 @router.get("/storage", response_model=StorageSummaryResponse)
-async def get_storage_summary(request: Request) -> dict:
+async def get_storage_summary(
+    store: Annotated[Any | None, Depends(get_data_store)],
+) -> dict:
     """저장 용량 현황."""
-    store = getattr(request.app.state, "data_store", None)
     if store is None:
         return {"total_bytes": 0, "total_mb": 0.0, "by_timeframe": {}}
     usage = store.get_storage_usage()
@@ -121,10 +122,18 @@ async def get_storage_summary(request: Request) -> dict:
     }
 
 
-@router.delete("/datasets/{dataset_id}", status_code=204)
+@router.delete(
+    "/datasets/{dataset_id}",
+    status_code=204,
+    responses={
+        400: {"description": "Invalid dataset_id format"},
+        404: {"description": "Dataset not found"},
+        503: {"description": "Data store not available"},
+    },
+)
 async def delete_dataset(
-    request: Request,
     dataset_id: str,
+    store: Annotated[Any | None, Depends(get_data_store)],
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
 ) -> None:
     """데이터셋 삭제.
@@ -132,9 +141,6 @@ async def delete_dataset(
     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
     fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
     """
-    from fastapi import HTTPException
-
-    store = getattr(request.app.state, "data_store", None)
     if store is None:
         raise HTTPException(status_code=503, detail="Data store not available")
 
@@ -158,7 +164,9 @@ async def delete_dataset(
 
 
 @router.get("/feed-status", response_model=FeedStatusResponse)
-async def get_feed_status(request: Request) -> dict:
+async def get_feed_status(
+    store: Annotated[Any | None, Depends(get_data_store)],
+) -> dict:
     """Feed 파이프라인 상태 조회.
 
     Feed 초기화 여부, 소스별 체크포인트 현황, 최근 리포트 요약,
@@ -167,7 +175,6 @@ async def get_feed_status(request: Request) -> dict:
     import json
     from pathlib import Path
 
-    store = getattr(request.app.state, "data_store", None)
     data_path: Path | None = getattr(store, "base_path", None) if store else None
 
     result: dict = {

@@ -69,7 +69,7 @@ class TestListDatasets:
 
     async def test_response_wrapper_format(self, client, store):
         """응답이 {items, total} 래퍼를 사용한다."""
-        await store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
         body = resp.json()
@@ -80,7 +80,7 @@ class TestListDatasets:
 
     async def test_field_names(self, client, store):
         """각 데이터셋에 id, start_date, end_date, row_count 필드가 있다."""
-        await store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
         resp = client.get("/api/data/datasets")
         ds = resp.json()["items"][0]
         assert ds["id"] == "005930__1d"
@@ -94,7 +94,7 @@ class TestListDatasets:
     async def test_pagination(self, client, store):
         """offset/limit 파라미터로 페이지네이션이 동작한다."""
         for sym in ["000010", "000020", "000030"]:
-            await store.write(sym, "1d", _make_ohlcv_df())
+            store.write(sym, "1d", _make_ohlcv_df())
 
         resp = client.get("/api/data/datasets", params={"offset": 0, "limit": 2})
         body = resp.json()
@@ -108,8 +108,8 @@ class TestListDatasets:
 
     async def test_filter_by_symbol(self, client, store):
         """symbol 필터로 특정 종목만 반환한다."""
-        await store.write("005930", "1d", _make_ohlcv_df())
-        await store.write("035720", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
+        store.write("035720", "1d", _make_ohlcv_df())
 
         resp = client.get("/api/data/datasets", params={"symbol": "005930"})
         body = resp.json()
@@ -118,8 +118,8 @@ class TestListDatasets:
 
     async def test_filter_by_timeframe(self, client, store):
         """timeframe 필터로 특정 타임프레임만 반환한다."""
-        await store.write("005930", "1d", _make_ohlcv_df())
-        await store.write("005930", "1h", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1h", _make_ohlcv_df())
 
         resp = client.get("/api/data/datasets", params={"timeframe": "1d"})
         body = resp.json()
@@ -137,7 +137,7 @@ class TestListDatasets:
 class TestDeleteDataset:
     async def test_delete_success(self, client, store):
         """데이터셋 삭제 성공."""
-        await store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
         resp = client.delete("/api/data/datasets/005930__1d")
         assert resp.status_code == 204
 
@@ -153,7 +153,7 @@ class TestDeleteDataset:
 
     async def test_datasets_empty_after_delete(self, client, store):
         """삭제 후 목록에서 제거 확인."""
-        await store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
         client.delete("/api/data/datasets/005930__1d")
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
@@ -167,7 +167,7 @@ class TestFundamentalDatasets:
 
     async def test_list_fundamental_datasets(self, client, store):
         """fundamental 데이터셋 목록 조회."""
-        await store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
         resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
         assert resp.status_code == 200
         body = resp.json()
@@ -178,14 +178,14 @@ class TestFundamentalDatasets:
 
     async def test_list_ohlcv_excludes_fundamental(self, client, store):
         """OHLCV 조회 시 fundamental 데이터가 포함되지 않음."""
-        await store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
         resp = client.get("/api/data/datasets", params={"data_type": "ohlcv"})
         assert resp.status_code == 200
         assert resp.json()["items"] == []
 
     async def test_delete_fundamental_dataset(self, client, store):
         """fundamental 데이터셋 삭제."""
-        await store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
         resp = client.delete(
             "/api/data/datasets/005930__fundamental",
             params={"data_type": "fundamental"},

@@ -55,7 +55,7 @@ async def system_state(db):
 async def engine(system_state):
     eventbus = EventBus()
     engine = RuleEngine(eventbus=eventbus, system_state=system_state)
-    await engine.start()
+    engine.start()
     return engine
 
 

@@ -103,7 +103,7 @@ class FakeTreasury:
     def __init__(self) -> None:
         self._budgets: dict[str, FakeBotBudget] = {}
 
-    async def get_budget(self, bot_id: str) -> FakeBotBudget | None:
+    def get_budget(self, bot_id: str) -> FakeBotBudget | None:
         return self._budgets.get(bot_id)
 
 

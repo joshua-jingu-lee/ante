@@ -117,53 +117,53 @@ class TestCommands:
     """명령 핸들러 테스트."""
 
     async def test_help(self, receiver):
-        result = await receiver._cmd_help([])
+        result = receiver._cmd_help([])
         assert "/status" in result
         assert "/halt" in result
         assert "/help" in result
 
     async def test_status(self, receiver):
-        result = await receiver._cmd_status([])
+        result = receiver._cmd_status([])
         assert "거래 상태" in result
         assert "active" in result
         assert "봇" in result
 
     async def test_status_no_manager(self, receiver):
         receiver._bot_manager = None
-        result = await receiver._cmd_status([])
+        result = receiver._cmd_status([])
         assert "거래 상태" in result
 
     async def test_status_no_state(self, receiver):
         receiver._system_state = None
         receiver._bot_manager = None
-        result = await receiver._cmd_status([])
+        result = receiver._cmd_status([])
         assert "조회할 수 없습니다" in result
 
     async def test_bots(self, receiver):
-        result = await receiver._cmd_bots([])
+        result = receiver._cmd_bots([])
         assert "봇 목록" in result
         assert "bot-1" in result
         assert "bot-2" in result
 
     async def test_bots_no_manager(self, receiver):
         receiver._bot_manager = None
-        result = await receiver._cmd_bots([])
+        result = receiver._cmd_bots([])
         assert "연결되지 않았습니다" in result
 
     async def test_bots_empty(self, receiver):
         receiver._bot_manager.list_bots.return_value = []
-        result = await receiver._cmd_bots([])
+        result = receiver._cmd_bots([])
         assert "없습니다" in result
 
     async def test_balance(self, receiver):
-        result = await receiver._cmd_balance([])
+        result = receiver._cmd_balance([])
         assert "계좌 잔고" in result
         assert "10,000,000" in result
         assert "할당" in result
 
     async def test_balance_no_treasury(self, receiver):
         receiver._treasury = None
-        result = await receiver._cmd_balance([])
+        result = receiver._cmd_balance([])
         assert "연결되지 않았습니다" in result
 
     async def test_unknown_command(self, receiver):

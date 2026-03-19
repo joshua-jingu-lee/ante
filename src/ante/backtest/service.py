@@ -50,7 +50,7 @@ class BacktestService:
         symbols = config.get("symbols", [])
         timeframe = config.get("timeframe", "1d")
         for symbol in symbols:
-            await data_provider.load(symbol, timeframe)
+            data_provider.load(symbol, timeframe)
 
         executor = BacktestExecutor(
             strategy_cls=strategy_cls,

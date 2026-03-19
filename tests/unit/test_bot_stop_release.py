@@ -76,12 +76,12 @@ class TestBotStopRelease:
         await treasury.reserve_for_order("bot1", "ord1", 100_000.0)
         await treasury.reserve_for_order("bot1", "ord2", 200_000.0)
 
-        budget_before = await treasury.get_budget("bot1")
+        budget_before = treasury.get_budget("bot1")
         available_before = budget_before.available
 
         await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
 
-        budget_after = await treasury.get_budget("bot1")
+        budget_after = treasury.get_budget("bot1")
         assert budget_after.reserved == 0.0
         assert budget_after.available == pytest.approx(available_before + 300_000.0)
         assert treasury.get_reservations("bot1") == {}
@@ -94,16 +94,16 @@ class TestBotStopRelease:
         await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
 
         assert treasury.get_reservations("bot2") == {"ord2": 200_000.0}
-        budget2 = await treasury.get_budget("bot2")
+        budget2 = treasury.get_budget("bot2")
         assert budget2.reserved == 200_000.0
 
     async def test_bot_stopped_no_reservations_noop(self, treasury, eventbus):
         """예약 없는 봇 중지 → 아무 변화 없음."""
-        budget_before = await treasury.get_budget("bot1")
+        budget_before = treasury.get_budget("bot1")
 
         await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
 
-        budget_after = await treasury.get_budget("bot1")
+        budget_after = treasury.get_budget("bot1")
         assert budget_after.available == budget_before.available
         assert budget_after.reserved == budget_before.reserved
 
@@ -130,7 +130,7 @@ class TestBotStopRelease:
 
         await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
 
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget.reserved == 0.0
         # available should have all 500k returned
         assert budget.available == pytest.approx(5_000_000.0 - 500_000.0 + 500_000.0)
@@ -148,15 +148,15 @@ class TestReservationCompatibility:
     async def test_reserve_and_release_still_works(self, treasury):
         """기존 reserve/release 정상 동작."""
         await treasury.reserve_for_order("bot1", "ord1", 100_000.0)
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget.reserved == 100_000.0
 
         await treasury.release_reservation("bot1", "ord1")
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget.reserved == 0.0
 
     async def test_nonexistent_order_release_noop(self, treasury):
         """존재하지 않는 주문 해제 → 무시."""
         await treasury.release_reservation("bot1", "nonexistent")
-        budget = await treasury.get_budget("bot1")
+        budget = treasury.get_budget("bot1")
         assert budget.available == 5_000_000.0

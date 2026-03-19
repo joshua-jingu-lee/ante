@@ -132,19 +132,19 @@ class TestSchemas:
 class TestParquetStore:
     async def test_write_and_read(self, store):
         df = _make_ohlcv_df()
-        await store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 5
         assert result["symbol"][0] == "005930"
 
     async def test_read_empty(self, store):
-        result = await store.read("999999", "1d")
+        result = store.read("999999", "1d")
         assert result.is_empty()
 
     async def test_write_creates_partitioned_files(self, store, data_dir):
         df = _make_ohlcv_df()
-        await store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
 
         parquet_path = data_dir / "ohlcv" / "1m" / "005930" / "2026-03.parquet"
         assert parquet_path.exists()
@@ -152,17 +152,17 @@ class TestParquetStore:
     async def test_write_merge_dedup(self, store):
         """같은 timestamp 데이터를 두 번 쓰면 중복 제거."""
         df = _make_ohlcv_df(n=3)
-        await store.write("005930", "1m", df)
-        await store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 3  # 중복 제거됨
 
     async def test_read_with_time_filter(self, store):
         df = _make_ohlcv_df(n=10, start="2026-03-01T09:00:00")
-        await store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
 
-        result = await store.read(
+        result = store.read(
             "005930",
             "1m",
             start="2026-03-01T09:03:00",
@@ -172,9 +172,9 @@ class TestParquetStore:
 
     async def test_read_with_limit(self, store):
         df = _make_ohlcv_df(n=10)
-        await store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
 
-        result = await store.read("005930", "1m", limit=3)
+        result = store.read("005930", "1m", limit=3)
         assert len(result) == 3
 
     async def test_append(self, store):
@@ -190,13 +190,13 @@ class TestParquetStore:
                 "source": "test",
             }
         ]
-        await store.append("005930", "1m", rows)
-        result = await store.read("005930", "1m")
+        store.append("005930", "1m", rows)
+        result = store.read("005930", "1m")
         assert len(result) == 1
 
     async def test_list_symbols(self, store):
-        await store.write("005930", "1d", _make_ohlcv_df("005930"))
-        await store.write("000660", "1d", _make_ohlcv_df("000660"))
+        store.write("005930", "1d", _make_ohlcv_df("005930"))
+        store.write("000660", "1d", _make_ohlcv_df("000660"))
 
         symbols = store.list_symbols("1d")
         assert symbols == ["000660", "005930"]
@@ -205,7 +205,7 @@ class TestParquetStore:
         assert store.list_symbols("1d") == []
 
     async def test_get_date_range(self, store):
-        await store.write("005930", "1m", _make_ohlcv_df())
+        store.write("005930", "1m", _make_ohlcv_df())
         result = store.get_date_range("005930", "1m")
         assert result is not None
         assert result == ("2026-03", "2026-03")
@@ -214,15 +214,15 @@ class TestParquetStore:
         assert store.get_date_range("999999", "1m") is None
 
     async def test_get_storage_usage(self, store):
-        await store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
         usage = store.get_storage_usage()
         assert "1d" in usage
         assert usage["1d"] > 0
 
     async def test_delete_file(self, store):
-        await store.write("005930", "1m", _make_ohlcv_df())
+        store.write("005930", "1m", _make_ohlcv_df())
         assert store.delete_file("005930", "1m", "2026-03") is True
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert result.is_empty()
 
     async def test_delete_file_nonexistent(self, store):
@@ -230,8 +230,8 @@ class TestParquetStore:
 
     async def test_write_empty_df(self, store):
         empty = pl.DataFrame()
-        await store.write("005930", "1m", empty)
-        result = await store.read("005930", "1m")
+        store.write("005930", "1m", empty)
+        result = store.read("005930", "1m")
         assert result.is_empty()
 
     async def test_multi_month_partitioning(self, store, data_dir):
@@ -264,7 +264,7 @@ class TestParquetStore:
                 "source": ["test"] * n,
             }
         )
-        await store.write("005930", "1m", df)
+        store.write("005930", "1m", df)
 
         march_file = data_dir / "ohlcv" / "1m" / "005930" / "2026-03.parquet"
         april_file = data_dir / "ohlcv" / "1m" / "005930" / "2026-04.parquet"
@@ -284,8 +284,8 @@ class TestParquetStore:
                 "source": ["dart", "dart"],
             }
         )
-        await store.write("005930", "", df, data_type="fundamental")
-        result = await store.read("005930", "", data_type="fundamental")
+        store.write("005930", "", df, data_type="fundamental")
+        result = store.read("005930", "", data_type="fundamental")
         assert len(result) == 2
         assert result["market_cap"][0] == 500000000000
 
@@ -300,7 +300,7 @@ class TestParquetStore:
                 "source": ["dart"],
             }
         )
-        await store.write("005930", "", df, data_type="fundamental")
+        store.write("005930", "", df, data_type="fundamental")
         path = data_dir / "fundamental" / "krx" / "005930"
         assert path.exists()
         assert list(path.glob("*.parquet"))
@@ -316,7 +316,7 @@ class TestParquetStore:
                 "source": ["dart"],
             }
         )
-        await store.write("005930", "", df, data_type="fundamental")
+        store.write("005930", "", df, data_type="fundamental")
         symbols = store.list_symbols(data_type="fundamental")
         assert symbols == ["005930"]
 
@@ -324,7 +324,7 @@ class TestParquetStore:
         """get_storage_usage가 fundamental 용량도 포함."""
         from datetime import date
 
-        await store.write("005930", "1d", _make_ohlcv_df())
+        store.write("005930", "1d", _make_ohlcv_df())
         df = pl.DataFrame(
             {
                 "date": [date(2026, 3, 1)],
@@ -332,7 +332,7 @@ class TestParquetStore:
                 "source": ["dart"],
             }
         )
-        await store.write("005930", "", df, data_type="fundamental")
+        store.write("005930", "", df, data_type="fundamental")
         usage = store.get_storage_usage()
         assert "1d" in usage
         assert "fundamental" in usage
@@ -340,8 +340,8 @@ class TestParquetStore:
     async def test_ohlcv_default_backward_compat(self, store):
         """data_type 미지정 시 기존 OHLCV 동작 유지."""
         df = _make_ohlcv_df()
-        await store.write("005930", "1m", df)
-        result = await store.read("005930", "1m")
+        store.write("005930", "1m", df)
+        result = store.read("005930", "1m")
         assert len(result) == 5
 
 
@@ -650,10 +650,10 @@ class TestDataCollector:
             "volume": 1000,
             "source": "test",
         }
-        await collector.add_data("005930", "1m", row)
+        collector.add_data("005930", "1m", row)
         assert len(collector.buffer["005930:1m"]) == 1
 
-        flushed = await collector.flush_all()
+        flushed = collector.flush_all()
         assert flushed == 1
         assert "005930:1m" not in collector.buffer
 
@@ -674,12 +674,12 @@ class TestDataCollector:
                 "volume": 1000,
                 "source": "test",
             }
-            await collector.add_data("005930", "1m", row)
+            collector.add_data("005930", "1m", row)
 
         # buffer_size=2이므로 자동 flush됨
         assert "005930:1m" not in collector.buffer
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 2
 
     async def test_start_and_stop(self, store):
@@ -688,11 +688,11 @@ class TestDataCollector:
         eventbus = AsyncMock()
         collector = DataCollector(store=store, eventbus=eventbus, collect_interval=0.05)
 
-        await collector.start(["005930"], ["1m"])
+        collector.start(["005930"], ["1m"])
         assert collector.running is True
 
         await asyncio.sleep(0.02)
-        await collector.stop()
+        collector.stop()
         assert collector.running is False
 
     async def test_start_twice_ignored(self, store):
@@ -701,11 +701,11 @@ class TestDataCollector:
         eventbus = AsyncMock()
         collector = DataCollector(store=store, eventbus=eventbus)
 
-        await collector.start(["005930"], ["1m"])
-        await collector.start(["005930"], ["1m"])  # 두 번째 호출은 무시
+        collector.start(["005930"], ["1m"])
+        collector.start(["005930"], ["1m"])  # 두 번째 호출은 무시
         assert collector.running is True
 
-        await collector.stop()
+        collector.stop()
 
     async def test_data_callback(self, store):
         from unittest.mock import AsyncMock
@@ -733,11 +733,11 @@ class TestDataCollector:
             ]
 
         collector.set_data_callback(mock_callback)
-        await collector.start(["005930"], ["1m"])
+        collector.start(["005930"], ["1m"])
         await asyncio.sleep(0.1)
-        await collector.stop()
+        collector.stop()
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) >= 1
 
 
@@ -759,45 +759,45 @@ class TestRetentionPolicy:
 
     async def test_enforce_deletes_old_data(self, store):
         """보존 기간 초과 데이터 삭제."""
-        await store.write("005930", "1m", _make_ohlcv_df())
+        store.write("005930", "1m", _make_ohlcv_df())
 
         # 1분봉 보존 기간을 0일로 설정 → 모든 데이터 삭제 대상
         policy = RetentionPolicy(store, retention_days={"1m": 0})
         now = datetime(2026, 6, 1, tzinfo=UTC)
-        deleted = await policy.enforce(now=now)
+        deleted = policy.enforce(now=now)
 
         assert "1m" in deleted
         assert deleted["1m"] >= 1
 
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert result.is_empty()
 
     async def test_enforce_keeps_recent_data(self, store):
         """보존 기간 내 데이터는 유지."""
-        await store.write("005930", "1m", _make_ohlcv_df())
+        store.write("005930", "1m", _make_ohlcv_df())
 
         policy = RetentionPolicy(store, retention_days={"1m": 365})
         now = datetime(2026, 3, 15, tzinfo=UTC)
-        deleted = await policy.enforce(now=now)
+        deleted = policy.enforce(now=now)
 
         # 2026-03 데이터는 15일 전이므로 삭제 안 됨
         assert deleted == {}
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 5
 
     async def test_enforce_skips_negative_retention(self, store):
         """보존 기간이 -1(무기한)이면 삭제하지 않는다."""
-        await store.write("005930", "1m", _make_ohlcv_df())
+        store.write("005930", "1m", _make_ohlcv_df())
         policy = RetentionPolicy(store, retention_days={"1m": -1})
         now = datetime(2099, 1, 1, tzinfo=UTC)
-        deleted = await policy.enforce(now=now)
+        deleted = policy.enforce(now=now)
         assert deleted == {}
-        result = await store.read("005930", "1m")
+        result = store.read("005930", "1m")
         assert len(result) == 5
 
     async def test_enforce_empty_store(self, store):
         policy = RetentionPolicy(store)
-        deleted = await policy.enforce()
+        deleted = policy.enforce()
         assert deleted == {}
 
     async def test_enforce_fundamental_path_resolution(self, store, data_dir):
@@ -812,7 +812,7 @@ class TestRetentionPolicy:
                 "source": ["dart", "dart"],
             }
         )
-        await store.write("005930", "", df, data_type="fundamental")
+        store.write("005930", "", df, data_type="fundamental")
 
         # fundamental/krx/005930/ 경로에 파일이 생성되었는지 확인
         fundamental_path = data_dir / "fundamental" / "krx" / "005930"
@@ -822,12 +822,12 @@ class TestRetentionPolicy:
         # fundamental 보존 기간을 0일로 설정 → 오래된 데이터 삭제 대상
         policy = RetentionPolicy(store, retention_days={"fundamental": 0})
         now = datetime(2026, 6, 1, tzinfo=UTC)
-        deleted = await policy.enforce(now=now)
+        deleted = policy.enforce(now=now)
 
         assert "fundamental" in deleted
         assert deleted["fundamental"] == 2
 
-        result = await store.read("005930", "", data_type="fundamental")
+        result = store.read("005930", "", data_type="fundamental")
         assert result.is_empty()
 
 

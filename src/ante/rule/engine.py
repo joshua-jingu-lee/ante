@@ -59,7 +59,7 @@ class RuleEngine:
         self._global_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
 
-    async def start(self) -> None:
+    def start(self) -> None:
         """EventBus 구독 등록."""
         from ante.eventbus.events import (
             ConfigChangedEvent,
@@ -385,7 +385,10 @@ class RuleEngine:
             )
 
     async def _on_config_changed(self, event: object) -> None:
-        """설정 변경 시 룰 재로딩 트리거."""
+        """설정 변경 시 룰 재로딩 트리거.
+
+        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
+        """
         from ante.eventbus.events import ConfigChangedEvent
 
         if not isinstance(event, ConfigChangedEvent):

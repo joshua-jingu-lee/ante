@@ -124,7 +124,6 @@ def validate(
     data_path: str,
 ) -> None:
     """Parquet 파일 무결성 검증."""
-    import asyncio
 
     from ante.data.store import ParquetStore
 
@@ -140,14 +139,10 @@ def validate(
         fmt.output({"message": "검증할 데이터가 없습니다.", "results": []})
         return
 
-    async def _validate() -> list[dict]:
-        results = []
-        for sym in symbols:
-            result = await store.validate(sym, timeframe, fix=fix)
-            results.append(result)
-        return results
-
-    results = asyncio.run(_validate())
+    results = []
+    for sym in symbols:
+        result = store.validate(sym, timeframe, fix=fix)
+        results.append(result)
 
     total_files = sum(r["total"] for r in results)
     total_valid = sum(r["valid"] for r in results)

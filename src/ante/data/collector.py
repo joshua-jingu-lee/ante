@@ -56,7 +56,7 @@ class DataCollector:
         """데이터 수집 콜백 설정. 시그니처: async (symbol, tf) -> list[dict]."""
         self._data_callback = callback
 
-    async def start(self, symbols: list[str], timeframes: list[str]) -> None:
+    def start(self, symbols: list[str], timeframes: list[str]) -> None:
         """데이터 수집 시작."""
         if self._running:
             logger.warning("DataCollector is already running")
@@ -73,7 +73,7 @@ class DataCollector:
             timeframes,
         )
 
-    async def stop(self) -> None:
+    def stop(self) -> None:
         """데이터 수집 중지. 남은 버퍼를 flush."""
         self._running = False
         if self._collect_task:
@@ -84,10 +84,10 @@ class DataCollector:
             self._flush_task = None
 
         # 남은 데이터 flush
-        await self.flush_all()
+        self.flush_all()
         logger.info("DataCollector stopped")
 
-    async def add_data(self, symbol: str, timeframe: str, row: dict) -> None:
+    def add_data(self, symbol: str, timeframe: str, row: dict) -> None:
         """외부에서 직접 데이터를 추가 (이벤트 기반 수집 시 사용)."""
         key = f"{symbol}:{timeframe}"
         if key not in self._buffer:
@@ -95,15 +95,15 @@ class DataCollector:
         self._buffer[key].append(row)
 
         if len(self._buffer[key]) >= self._buffer_size:
-            await self._flush(key)
+            self._flush(key)
 
-    async def flush_all(self) -> int:
+    def flush_all(self) -> int:
         """모든 버퍼 데이터를 Parquet에 flush. flush된 총 건수 반환."""
         total = 0
         for key in list(self._buffer.keys()):
             if self._buffer[key]:
                 count = len(self._buffer[key])
-                await self._flush(key)
+                self._flush(key)
                 total += count
         return total
 
@@ -116,7 +116,7 @@ class DataCollector:
                         try:
                             rows = await self._data_callback(symbol, tf)
                             for row in rows:
-                                await self.add_data(symbol, tf, row)
+                                self.add_data(symbol, tf, row)
                         except Exception as e:
                             logger.warning(
                                 "Data collection failed for %s/%s: %s",
@@ -127,7 +127,7 @@ class DataCollector:
             try:
                 await asyncio.sleep(self._collect_interval)
             except asyncio.CancelledError:
-                break
+                raise
 
     async def _flush_loop(self) -> None:
         """주기적 버퍼 flush."""
@@ -135,17 +135,17 @@ class DataCollector:
             try:
                 await asyncio.sleep(self._flush_interval)
             except asyncio.CancelledError:
-                break
-            await self.flush_all()
+                raise
+            self.flush_all()
 
-    async def _flush(self, key: str) -> None:
+    def _flush(self, key: str) -> None:
         """버퍼의 데이터를 Parquet에 적재."""
         rows = self._buffer.pop(key, [])
         if not rows:
             return
         symbol, tf = key.split(":")
         try:
-            await self._store.append(symbol, tf, rows)
+            self._store.append(symbol, tf, rows)
             logger.debug("Flushed %d rows for %s/%s", len(rows), symbol, tf)
         except Exception as e:
             logger.error("Failed to flush data for %s/%s: %s", symbol, tf, e)

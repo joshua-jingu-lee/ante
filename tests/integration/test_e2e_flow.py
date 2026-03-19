@@ -267,7 +267,7 @@ async def system(tmp_path: Path):
 
     # RuleEngine
     rule_engine = RuleEngine(eventbus=eventbus, system_state=system_state)
-    await rule_engine.start()
+    rule_engine.start()
 
     # Treasury
     treasury = Treasury(db=db, eventbus=eventbus, commission_rate=0.00015)
@@ -293,7 +293,7 @@ async def system(tmp_path: Path):
     # MockBroker + APIGateway
     broker = MockBrokerAdapter()
     api_gateway = APIGateway(broker=broker, eventbus=eventbus)
-    await api_gateway.start()
+    api_gateway.start()
 
     # AutoFill 시뮬레이터
     auto_fill = AutoFillSimulator(eventbus=eventbus, broker=broker)
@@ -324,7 +324,7 @@ async def system(tmp_path: Path):
 
     # Teardown
     await bot_manager.stop_all()
-    await api_gateway.stop()
+    api_gateway.stop()
     await db.close()
 
 
@@ -434,7 +434,7 @@ class TestE2EBacktest:
                 "volume": [1000.0] * 20,
             }
         )
-        await store.write("005930", "1d", df)
+        store.write("005930", "1d", df)
 
         # 전략 파일
         filepath = _write_test_strategy(tmp_path)
@@ -616,7 +616,7 @@ class TestE2EOrderFlow:
         assert positions[0].quantity == 10.0
 
         # 6. Treasury 자금 변동 확인
-        budget = await treasury.get_budget(bot_id)
+        budget = treasury.get_budget(bot_id)
         assert budget is not None
         assert budget.spent > 0
 
@@ -757,7 +757,7 @@ class TestE2EFullPipeline:
                 "volume": [1000.0] * 20,
             }
         )
-        await store.write("005930", "1d", df)
+        store.write("005930", "1d", df)
 
         bt_service = BacktestService(data_path=str(data_path))
         bt_result = await bt_service.run(

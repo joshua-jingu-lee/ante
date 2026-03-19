@@ -21,6 +21,8 @@ class BacktestDataProvider(DataProvider):
     """백테스트용 DataProvider. 과거 데이터를 시간순으로 제공.
 
     미래 데이터 참조를 방지하기 위해 current_idx까지만 노출한다.
+
+    Note: DataProvider 인터페이스 준수를 위해 get_ohlcv 등은 async def를 유지한다.
     """
 
     def __init__(
@@ -47,10 +49,10 @@ class BacktestDataProvider(DataProvider):
     def end(self) -> str:
         return self._end
 
-    async def load(self, symbol: str, timeframe: str) -> int:
+    def load(self, symbol: str, timeframe: str) -> int:
         """데이터를 캐시에 로드. 로드된 행 수 반환."""
         key = f"{symbol}:{timeframe}"
-        df = await self._store.read(symbol, timeframe, start=self._start, end=self._end)
+        df = self._store.read(symbol, timeframe, start=self._start, end=self._end)
         self._cache[key] = df
         return len(df)
 
@@ -63,7 +65,7 @@ class BacktestDataProvider(DataProvider):
         """현재 시점까지의 OHLCV 데이터 반환."""
         key = f"{symbol}:{timeframe}"
         if key not in self._cache:
-            await self.load(symbol, timeframe)
+            self.load(symbol, timeframe)
 
         df = self._cache[key]
         visible = df.head(self._current_idx + 1)

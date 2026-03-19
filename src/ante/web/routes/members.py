@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from ante.web.deps import get_member_service
 from ante.web.schemas import (
     MemberCreateResponse,
     MemberDetailResponse,
@@ -43,16 +45,13 @@ class ScopesUpdateRequest(BaseModel):
     scopes: list[str]
 
 
-def _get_member_service(request: Request):
-    svc = getattr(request.app.state, "member_service", None)
-    if svc is None:
-        raise HTTPException(status_code=503, detail="Member service not available")
-    return svc
-
-
-@router.get("", response_model=MemberListResponse)
+@router.get(
+    "",
+    response_model=MemberListResponse,
+    responses={503: {"description": "Member service not available"}},
+)
 async def list_members(
-    request: Request,
+    svc: Annotated[Any, Depends(get_member_service)],
     type: str | None = Query(default=None),
     org: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -60,18 +59,27 @@ async def list_members(
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     """멤버 목록 조회."""
-    svc = _get_member_service(request)
     members = await svc.list(
         member_type=type, org=org, status=status, limit=limit, offset=offset
     )
     return {"members": [asdict(m) for m in members], "total": len(members)}
 
 
-@router.post("", status_code=201, response_model=MemberCreateResponse)
-async def create_member(request: Request, body: MemberCreateRequest) -> dict:
+@router.post(
+    "",
+    status_code=201,
+    response_model=MemberCreateResponse,
+    responses={
+        400: {"description": "Invalid member data"},
+        403: {"description": "Permission denied"},
+        503: {"description": "Member service not available"},
+    },
+)
+async def create_member(
+    body: MemberCreateRequest,
+    svc: Annotated[Any, Depends(get_member_service)],
+) -> dict:
     """멤버 등록. 토큰 1회 반환."""
-    svc = _get_member_service(request)
-
     try:
         member, token = await svc.register(
             member_id=body.member_id,
@@ -90,20 +98,39 @@ async def create_member(request: Request, body: MemberCreateRequest) -> dict:
     return {"member": asdict(member), "token": token}
 
 
-@router.get("/{member_id}", response_model=MemberDetailResponse)
-async def get_member(request: Request, member_id: str) -> dict:
+@router.get(
+    "/{member_id}",
+    response_model=MemberDetailResponse,
+    responses={
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
+async def get_member(
+    member_id: str,
+    svc: Annotated[Any, Depends(get_member_service)],
+) -> dict:
     """멤버 상세 조회."""
-    svc = _get_member_service(request)
     member = await svc.get(member_id)
     if member is None:
         raise HTTPException(status_code=404, detail="멤버를 찾을 수 없습니다")
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/suspend", response_model=MemberDetailResponse)
-async def suspend_member(request: Request, member_id: str) -> dict:
+@router.post(
+    "/{member_id}/suspend",
+    response_model=MemberDetailResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
+async def suspend_member(
+    member_id: str,
+    svc: Annotated[Any, Depends(get_member_service)],
+) -> dict:
     """멤버 일시 정지."""
-    svc = _get_member_service(request)
     try:
         member = await svc.suspend(member_id, suspended_by="dashboard")
     except ValueError as e:
@@ -113,10 +140,20 @@ async def suspend_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/reactivate", response_model=MemberDetailResponse)
-async def reactivate_member(request: Request, member_id: str) -> dict:
+@router.post(
+    "/{member_id}/reactivate",
+    response_model=MemberDetailResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
+async def reactivate_member(
+    member_id: str,
+    svc: Annotated[Any, Depends(get_member_service)],
+) -> dict:
     """멤버 재활성화."""
-    svc = _get_member_service(request)
     try:
         member = await svc.reactivate(member_id, reactivated_by="dashboard")
     except ValueError as e:
@@ -126,10 +163,20 @@ async def reactivate_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/revoke", response_model=MemberDetailResponse)
-async def revoke_member(request: Request, member_id: str) -> dict:
+@router.post(
+    "/{member_id}/revoke",
+    response_model=MemberDetailResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
+async def revoke_member(
+    member_id: str,
+    svc: Annotated[Any, Depends(get_member_service)],
+) -> dict:
     """멤버 영구 폐기."""
-    svc = _get_member_service(request)
     try:
         member = await svc.revoke(member_id, revoked_by="dashboard")
     except ValueError as e:
@@ -139,10 +186,20 @@ async def revoke_member(request: Request, member_id: str) -> dict:
     return {"member": asdict(member)}
 
 
-@router.post("/{member_id}/rotate-token", response_model=MemberTokenResponse)
-async def rotate_token(request: Request, member_id: str) -> dict:
+@router.post(
+    "/{member_id}/rotate-token",
+    response_model=MemberTokenResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
+async def rotate_token(
+    member_id: str,
+    svc: Annotated[Any, Depends(get_member_service)],
+) -> dict:
     """토큰 재발급."""
-    svc = _get_member_service(request)
     try:
         member, token = await svc.rotate_token(member_id, rotated_by="dashboard")
     except ValueError as e:
@@ -152,12 +209,21 @@ async def rotate_token(request: Request, member_id: str) -> dict:
     return {"member": asdict(member), "token": token}
 
 
-@router.patch("/{member_id}/password", response_model=OkResponse)
+@router.patch(
+    "/{member_id}/password",
+    response_model=OkResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def change_password(
-    request: Request, member_id: str, body: PasswordChangeRequest
+    member_id: str,
+    body: PasswordChangeRequest,
+    svc: Annotated[Any, Depends(get_member_service)],
 ) -> dict:
     """비밀번호 변경 (human 멤버 전용)."""
-    svc = _get_member_service(request)
     try:
         await svc.change_password(member_id, body.old_password, body.new_password)
     except ValueError as e:
@@ -167,12 +233,21 @@ async def change_password(
     return {"ok": True}
 
 
-@router.put("/{member_id}/scopes", response_model=MemberScopesResponse)
+@router.put(
+    "/{member_id}/scopes",
+    response_model=MemberScopesResponse,
+    responses={
+        403: {"description": "Permission denied"},
+        404: {"description": "Member not found"},
+        503: {"description": "Member service not available"},
+    },
+)
 async def update_scopes(
-    request: Request, member_id: str, body: ScopesUpdateRequest
+    member_id: str,
+    body: ScopesUpdateRequest,
+    svc: Annotated[Any, Depends(get_member_service)],
 ) -> dict:
     """권한 범위 변경."""
-    svc = _get_member_service(request)
     try:
         member = await svc.update_scopes(member_id, body.scopes, updated_by="dashboard")
     except ValueError as e:

@@ -69,7 +69,7 @@ class StopOrderManager:
         """모니터링 대상 종목."""
         return {o.symbol for o in self.active_orders}
 
-    async def start(self) -> None:
+    def start(self) -> None:
         """매니저 시작."""
         self._running = True
         logger.info("StopOrderManager 시작")
@@ -144,7 +144,7 @@ class StopOrderManager:
 
         return stop_order_id
 
-    async def cancel(self, stop_order_id: str) -> bool:
+    def cancel(self, stop_order_id: str) -> bool:
         """스탑 주문 취소."""
         order = self._orders.get(stop_order_id)
         if not order or order.triggered or order.expired:
