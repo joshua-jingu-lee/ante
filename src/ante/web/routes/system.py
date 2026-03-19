@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ante.web.deps import get_system_state, get_system_state_optional
 from ante.web.schemas import HealthResponse, KillSwitchResponse, StatusResponse
 
 router = APIRouter()
@@ -18,14 +21,15 @@ class KillSwitchRequest(BaseModel):
 
 
 @router.get("/status", response_model=StatusResponse)
-async def get_system_status(request: Request) -> dict:
+async def get_system_status(
+    system_state: Annotated[Any | None, Depends(get_system_state_optional)],
+) -> dict:
     """시스템 상태 조회."""
     result: dict = {
         "status": "running",
         "version": "0.1.0",
     }
 
-    system_state = getattr(request.app.state, "system_state", None)
     if system_state is not None:
         result["trading_status"] = system_state.trading_state.value.upper()
 
@@ -59,15 +63,14 @@ async def health_check() -> dict:
 
 
 @router.post("/kill-switch", response_model=KillSwitchResponse)
-async def kill_switch(request: Request, body: KillSwitchRequest) -> dict:
+async def kill_switch(
+    body: KillSwitchRequest,
+    system_state: Annotated[Any, Depends(get_system_state)],
+) -> dict:
     """킬 스위치 제어 (halt/activate)."""
     from datetime import UTC, datetime
 
     from ante.config.system_state import TradingState
-
-    system_state = getattr(request.app.state, "system_state", None)
-    if system_state is None:
-        raise HTTPException(status_code=503, detail="System state not available")
 
     if body.action == "halt":
         target = TradingState.HALTED

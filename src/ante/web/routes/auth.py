@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 
+from ante.web.deps import get_member_service, get_session_service
 from ante.web.schemas import LoginRequest, LoginResponse, LogoutResponse, MeResponse
 
 logger = logging.getLogger(__name__)
@@ -18,12 +20,13 @@ COOKIE_MAX_AGE = 86400  # 24시간
 
 @router.post("/login", response_model=LoginResponse)
 async def login(
-    body: LoginRequest, request: Request, response: Response
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    member_service: Annotated[Any, Depends(get_member_service)],
+    session_service: Annotated[Any, Depends(get_session_service)],
 ) -> LoginResponse:
     """패스워드 로그인 -> 세션 쿠키 발급."""
-    member_service = request.app.state.member_service
-    session_service = request.app.state.session_service
-
     try:
         member = await member_service.authenticate_password(
             body.member_id, body.password
@@ -62,13 +65,12 @@ async def login(
 
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(
-    request: Request,
     response: Response,
+    session_service: Annotated[Any, Depends(get_session_service)],
     ante_session: str | None = Cookie(default=None),
 ) -> dict:
     """로그아웃 — 세션 삭제 + 쿠키 제거."""
     if ante_session:
-        session_service = request.app.state.session_service
         await session_service.delete(ante_session)
 
     response.delete_cookie(key=COOKIE_NAME)
@@ -77,19 +79,18 @@ async def logout(
 
 @router.get("/me", response_model=MeResponse)
 async def me(
-    request: Request,
+    member_service: Annotated[Any, Depends(get_member_service)],
+    session_service: Annotated[Any, Depends(get_session_service)],
     ante_session: str | None = Cookie(default=None),
 ) -> MeResponse:
     """현재 로그인 사용자 정보."""
     if not ante_session:
         raise HTTPException(status_code=401, detail="인증이 필요합니다")
 
-    session_service = request.app.state.session_service
     session = await session_service.validate(ante_session)
     if not session:
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다")
 
-    member_service = request.app.state.member_service
     member = await member_service.get(session["member_id"])
     if not member:
         raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다")

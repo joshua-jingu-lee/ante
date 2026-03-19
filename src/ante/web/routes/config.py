@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ante.web.deps import get_dynamic_config
 from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse
 
 router = APIRouter()
@@ -20,23 +21,21 @@ class ConfigUpdateRequest(BaseModel):
 
 
 @router.get("", response_model=ConfigListResponse)
-async def list_configs(request: Request) -> dict:
+async def list_configs(
+    config_service: Annotated[Any, Depends(get_dynamic_config)],
+) -> dict:
     """동적 설정 전체 조회."""
-    config_service = getattr(request.app.state, "dynamic_config", None)
-    if config_service is None:
-        raise HTTPException(status_code=503, detail="Config service not available")
-
     configs = await config_service.get_all()
     return {"configs": configs}
 
 
 @router.put("/{key:path}", response_model=ConfigUpdateResponse)
-async def update_config(request: Request, key: str, body: ConfigUpdateRequest) -> dict:
+async def update_config(
+    key: str,
+    body: ConfigUpdateRequest,
+    config_service: Annotated[Any, Depends(get_dynamic_config)],
+) -> dict:
     """동적 설정 값 변경."""
-    config_service = getattr(request.app.state, "dynamic_config", None)
-    if config_service is None:
-        raise HTTPException(status_code=503, detail="Config service not available")
-
     if not await config_service.exists(key):
         raise HTTPException(status_code=404, detail=f"설정을 찾을 수 없습니다: {key}")
 

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends
+
+from ante.web.deps import get_notification_service
 from ante.web.schemas import NotificationListResponse
 
 router = APIRouter()
@@ -11,19 +14,13 @@ router = APIRouter()
 
 @router.get("", response_model=NotificationListResponse)
 async def list_notifications(
-    request: Request,
+    notification_service: Annotated[Any, Depends(get_notification_service)],
     level: str | None = None,
     limit: int = 20,
     cursor: str | None = None,
 ) -> dict:
     """알림 이력 조회 (cursor 기반 페이지네이션)."""
     from ante.web.pagination import paginate
-
-    notification_service = getattr(request.app.state, "notification_service", None)
-    if notification_service is None:
-        raise HTTPException(
-            status_code=503, detail="Notification service not available"
-        )
 
     rows = await notification_service.get_history(level=level, limit=limit + 1)
     items = [
