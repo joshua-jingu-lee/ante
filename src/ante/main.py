@@ -56,6 +56,7 @@ class Services:
     telegram_receiver: Any = None
     web_task: asyncio.Task | None = None  # type: ignore[type-arg]
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
     commission_rate: float = 0.00015
     sell_tax_rate: float = 0.0023
     _cleanup_tasks: list[str] = field(default_factory=list)
@@ -117,6 +118,20 @@ async def _init_services(s: Services) -> None:
 
     s.audit_logger = AuditLogger(db=s.db)
     await s.audit_logger.initialize()
+
+    # 감사 로그 보존 기간 정리 태스크
+    retention_days = s.config.get("audit.retention_days", 90)
+    if retention_days > 0:
+        s.audit_cleanup_task = asyncio.create_task(
+            _audit_cleanup_loop(s.audit_logger, retention_days),
+            name="audit-cleanup",
+        )
+        logger.info(
+            "감사 로그 정리 스케줄러 시작 (보존: %d일, 주기: 24시간)", retention_days
+        )
+    else:
+        logger.info("감사 로그 자동 정리 비활성화 (retention_days=0)")
+
     logger.info("AuditLogger 초기화 완료")
 
     from ante.member import MemberService
@@ -607,6 +622,24 @@ async def _init_feed(s: Services) -> None:
     logger.info("결재 만료 스케줄러 시작 (주기: 300초)")
 
 
+async def _audit_cleanup_loop(
+    audit_logger: Any,
+    retention_days: int,
+    interval: float = 86400.0,
+) -> None:
+    """보존 기간 초과 감사 로그를 주기적으로 삭제."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            deleted = await audit_logger.cleanup(retention_days)
+            if deleted:
+                logger.info("감사 로그 정리 완료: %d건 삭제", deleted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("감사 로그 정리 스케줄러 오류")
+
+
 async def _approval_expire_loop(
     approval_service: Any,
     interval: float = 300.0,
@@ -748,6 +781,14 @@ async def _shutdown(s: Services) -> None:
     if s.telegram_receiver:
         await s.telegram_receiver.stop()
         logger.info("TelegramCommandReceiver 종료")
+
+    if s.audit_cleanup_task and not s.audit_cleanup_task.done():
+        s.audit_cleanup_task.cancel()
+        try:
+            await s.audit_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("감사 로그 정리 스케줄러 종료")
 
     if s.approval_expire_task and not s.approval_expire_task.done():
         s.approval_expire_task.cancel()
