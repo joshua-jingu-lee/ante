@@ -46,6 +46,7 @@ class Services:
     strategy_snapshot: Any = None
     broker: Any = None
     api_gateway: Any = None
+    stream_integration: Any = None
     data_provider: Any = None
     parquet_store: Any = None
     data_collector: Any = None
@@ -253,8 +254,9 @@ async def _init_trading(s: Services) -> None:
 
 
 async def _init_broker(s: Services) -> None:
-    """Broker, APIGateway 연결 및 종목 마스터 동기화."""
+    """Broker, APIGateway, StreamIntegration 연결 및 종목 마스터 동기화."""
     from ante.gateway import APIGateway
+    from ante.gateway.stop_order import StopOrderManager
 
     broker_config = s.config.get("broker", {})
     broker_type = (
@@ -268,10 +270,22 @@ async def _init_broker(s: Services) -> None:
     else:
         await _connect_kis_broker(s, broker_config)
 
+    # StopOrderManager 초기화
+    stop_order_manager = StopOrderManager(eventbus=s.eventbus)
+    stop_order_manager.start()
+
     if s.broker:
-        s.api_gateway = APIGateway(broker=s.broker, eventbus=s.eventbus)
+        s.api_gateway = APIGateway(
+            broker=s.broker,
+            eventbus=s.eventbus,
+            stop_order_manager=stop_order_manager,
+        )
         s.api_gateway.start()
         logger.info("APIGateway 시작 완료")
+
+    # KIS 브로커일 때 StreamIntegration 초기화
+    if s.broker and broker_type == "kis":
+        await _init_stream_integration(s, broker_config, stop_order_manager)
 
     if s.broker:
         await _sync_instruments(s)
@@ -328,6 +342,48 @@ async def _connect_kis_broker(s: Services, broker_config: dict) -> None:
     except Exception:
         logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
         s.broker = None
+
+
+async def _init_stream_integration(
+    s: Services,
+    broker_config: dict,
+    stop_order_manager: Any,
+) -> None:
+    """KISStreamClient + StreamIntegration 초기화."""
+    from ante.broker.kis_stream import KISStreamClient
+    from ante.gateway.stream_integration import StreamIntegration
+
+    is_paper = broker_config.get("is_paper", True)
+    ws_url = (
+        "ws://ops.koreainvestment.com:21000"
+        if is_paper
+        else "ws://ops.koreainvestment.com:31000"
+    )
+
+    stream_client = KISStreamClient(
+        websocket_url=ws_url,
+        app_key=broker_config.get("app_key", ""),
+        app_secret=broker_config.get("app_secret", ""),
+        eventbus=s.eventbus,
+    )
+
+    s.stream_integration = StreamIntegration(
+        stream_client=stream_client,
+        cache=s.api_gateway._cache,
+        eventbus=s.eventbus,
+        stop_order_manager=stop_order_manager,
+        gateway=s.api_gateway,
+        bot_manager=s.bot_manager,
+    )
+
+    try:
+        await s.stream_integration.start()
+        logger.info("StreamIntegration 시작 완료 (paper=%s)", is_paper)
+    except Exception:
+        logger.warning(
+            "StreamIntegration 시작 실패 — REST 전용 모드로 운영", exc_info=True
+        )
+        s.stream_integration = None
 
 
 async def _sync_instruments(s: Services) -> None:
@@ -810,6 +866,10 @@ async def _shutdown(s: Services) -> None:
 
     await s.bot_manager.stop_all()
     logger.info("BotManager 종료 — 모든 봇 중지")
+
+    if s.stream_integration:
+        await s.stream_integration.stop()
+        logger.info("StreamIntegration 종료")
 
     if s.api_gateway:
         s.api_gateway.stop()
