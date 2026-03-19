@@ -299,16 +299,6 @@ async def test_health_check(broker: MockBrokerAdapter) -> None:
 
 
 @pytest.mark.asyncio
-async def test_realtime_price_stream(broker: MockBrokerAdapter) -> None:
-    """실시간 가격 스트리밍이 종목 데이터를 반환한다."""
-    items = []
-    async for item in broker.realtime_price_stream(["005930", "000660"]):
-        items.append(item)
-    assert len(items) == 2
-    assert items[0]["symbol"] == "005930"
-
-
-@pytest.mark.asyncio
 async def test_multiple_buys_avg_price(broker: MockBrokerAdapter) -> None:
     """동일 종목 추가 매수 시 평균단가가 올바르게 계산된다."""
     broker.set_price("005930", 50_000)

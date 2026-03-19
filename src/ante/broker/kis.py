@@ -1,6 +1,6 @@
 """한국투자증권 (KIS) Open API 어댑터.
 
-KIS REST API + WebSocket을 통해 주문, 조회, 실시간 스트리밍을 처리한다.
+KIS REST API를 통해 주문, 조회를 처리한다.
 실행 시 aiohttp 패키지가 필요하다.
 """
 
@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -657,23 +656,6 @@ class KISAdapter(BrokerAdapter):
                 }
             )
         return orders
-
-    # ── 실시간 스트리밍 (구현 예정) ────────────────
-    # BrokerAdapter 인터페이스 준수를 위해 async def 유지
-
-    async def realtime_price_stream(
-        self, symbols: list[str]
-    ) -> AsyncIterator[dict[str, Any]]:
-        """실시간 가격 스트리밍. WebSocket 연동 Phase에서 구현."""
-        raise NotImplementedError("실시간 가격 스트리밍은 추후 구현")
-        # AsyncIterator 시그니처 충족을 위한 yield (도달 불가)
-        yield  # pragma: no cover
-
-    async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
-        """실시간 주문 체결 스트리밍. WebSocket 연동 Phase에서 구현."""
-        raise NotImplementedError("실시간 주문 스트리밍은 추후 구현")
-        # AsyncIterator 시그니처 충족을 위한 yield (도달 불가)
-        yield  # pragma: no cover
 
     # ── 종목 마스터 ────────────────────────────────────
 

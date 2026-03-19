@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -70,14 +69,6 @@ class TestBrokerAdapterABC:
             async def cancel_order(self, order_id: str) -> bool: ...
             async def get_order_status(self, order_id: str) -> dict[str, Any]: ...
             async def get_pending_orders(self) -> list[dict[str, Any]]: ...
-            async def realtime_price_stream(
-                self, symbols: list[str]
-            ) -> AsyncIterator[dict[str, Any]]:
-                yield {}
-
-            async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
-                yield {}
-
             async def get_account_positions(self) -> list[dict[str, Any]]: ...
             async def get_order_history(
                 self, from_date: str | None = None, to_date: str | None = None
@@ -113,14 +104,6 @@ class TestBrokerAdapterABC:
             async def cancel_order(self, order_id: str) -> bool: ...
             async def get_order_status(self, order_id: str) -> dict[str, Any]: ...
             async def get_pending_orders(self) -> list[dict[str, Any]]: ...
-            async def realtime_price_stream(
-                self, symbols: list[str]
-            ) -> AsyncIterator[dict[str, Any]]:
-                yield {}
-
-            async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
-                yield {}
-
             async def get_account_positions(self) -> list[dict[str, Any]]: ...
             async def get_order_history(
                 self, from_date: str | None = None, to_date: str | None = None
@@ -443,16 +426,6 @@ class TestKISAdapterAPI:
         assert positions[0]["symbol"] == "005930"
         assert positions[0]["quantity"] == 50.0
         assert "name" not in positions[0]
-
-    async def test_realtime_streams_not_implemented(self, adapter):
-        """실시간 스트리밍은 NotImplementedError."""
-        with pytest.raises(NotImplementedError):
-            async for _ in adapter.realtime_price_stream(["005930"]):
-                pass
-
-        with pytest.raises(NotImplementedError):
-            async for _ in adapter.realtime_order_stream():
-                pass
 
 
 # ── OrderRegistry ──────────────────────────────────

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,6 +23,7 @@ from ante.web.schemas import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class BudgetChangeRequest(BaseModel):
@@ -68,8 +70,8 @@ async def get_summary(
                 summary["account_no"] = f"{account_no[:8]}-{account_no[8:]}"
             elif account_no:
                 summary["account_no"] = account_no
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("KIS 계좌번호 조회 실패: %s", e)
         broker_config = config.get("broker", {})
         if isinstance(broker_config, dict):
             summary["is_virtual"] = broker_config.get("is_paper", True)

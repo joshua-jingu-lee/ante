@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import click
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -98,8 +101,8 @@ def rule_list(ctx: click.Context, scope_filter: str | None) -> None:
         try:
             try:
                 _load_rules_from_config(engine)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("룰 설정 로드 실패: %s", e)
             rules = _collect_rules(engine)
             if scope_filter:
                 rules = [
@@ -141,8 +144,8 @@ def rule_info(ctx: click.Context, rule_id: str) -> None:
         try:
             try:
                 _load_rules_from_config(engine)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("룰 설정 로드 실패: %s", e)
             rules = _collect_rules(engine)
             return next((r for r in rules if r["rule_id"] == rule_id), None)
         finally:

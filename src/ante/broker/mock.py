@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -224,25 +223,6 @@ class MockBrokerAdapter(BrokerAdapter):
             if order.status in ("pending", "partially_filled"):
                 results.append(await self.get_order_status(order.order_id))
         return results
-
-    # ── 실시간 스트리밍 (stub) ────────────────────────
-
-    async def realtime_price_stream(
-        self, symbols: list[str]
-    ) -> AsyncIterator[dict[str, Any]]:
-        """Mock 실시간 가격 스트리밍 (단일 스냅샷 후 종료)."""
-        for symbol in symbols:
-            yield {
-                "symbol": symbol,
-                "price": self._get_price(symbol),
-                "timestamp": datetime.now(UTC).isoformat(),
-            }
-
-    async def realtime_order_stream(self) -> AsyncIterator[dict[str, Any]]:
-        """Mock 실시간 주문 체결 스트리밍 (체결된 주문 반환 후 종료)."""
-        for order in self._orders.values():
-            if order.status in ("filled", "partially_filled"):
-                yield await self.get_order_status(order.order_id)
 
     # ── 대사(Reconciliation) 조회 ─────────────────────
 

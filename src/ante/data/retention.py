@@ -74,42 +74,89 @@ class RetentionPolicy:
             if max_days < 0:
                 continue
 
-            data_type, timeframe = _resolve_data_type(key)
-            count = 0
-            symbols = self._store.list_symbols(timeframe, data_type=data_type)
-
-            for symbol in symbols:
-                date_range = self._store.get_date_range(
-                    symbol, timeframe, data_type=data_type
-                )
-                if not date_range:
-                    continue
-
-                # ParquetStore._resolve_path()로 경로 결정
-                path = self._store._resolve_path(symbol, timeframe, data_type)
-                if not path.exists():
-                    continue
-
-                for parquet_file in sorted(path.glob("*.parquet")):
-                    month_str = parquet_file.stem  # "2024-01"
-                    try:
-                        # 월 파일의 마지막 날을 기준으로 판단
-                        year, month = month_str.split("-")
-                        # 해당 월의 말일 근사치 (다음달 1일 - 1일)
-                        file_month_end = datetime(int(year), int(month), 28, tzinfo=UTC)
-                        age_days = (now - file_month_end).days
-
-                        if age_days > max_days:
-                            if self._store.delete_file(
-                                symbol, timeframe, month_str, data_type=data_type
-                            ):
-                                count += 1
-                    except (ValueError, IndexError):
-                        logger.warning("Invalid parquet filename: %s", parquet_file)
-                        continue
-
+            count = self._enforce_age(key, max_days, now)
             if count > 0:
                 deleted[key] = count
                 logger.info("Retention: deleted %d files for %s", count, key)
 
         return deleted
+
+    def _enforce_age(self, key: str, max_days: int, now: datetime) -> int:
+        """기간 기반 보존 정책: max_days 초과 파일 삭제.
+
+        Args:
+            key: retention 딕셔너리 키 (예: "1m", "fundamental")
+            max_days: 보존 일수
+            now: 기준 시간
+
+        Returns:
+            삭제된 파일 수
+        """
+        data_type, timeframe = _resolve_data_type(key)
+        count = 0
+        symbols = self._store.list_symbols(timeframe, data_type=data_type)
+
+        for symbol in symbols:
+            count += self._delete_expired_files(
+                symbol, timeframe, data_type, max_days, now
+            )
+
+        return count
+
+    def _delete_expired_files(
+        self,
+        symbol: str,
+        timeframe: str,
+        data_type: str,
+        max_days: int,
+        now: datetime,
+    ) -> int:
+        """심볼 하나의 만료 파일 삭제.
+
+        Args:
+            symbol: 종목 코드
+            timeframe: 타임프레임 (예: "1m", "")
+            data_type: 데이터 타입 (예: "ohlcv", "fundamental")
+            max_days: 보존 일수
+            now: 기준 시간
+
+        Returns:
+            삭제된 파일 수
+        """
+        date_range = self._store.get_date_range(symbol, timeframe, data_type=data_type)
+        if not date_range:
+            return 0
+
+        path = self._store._resolve_path(symbol, timeframe, data_type)
+        if not path.exists():
+            return 0
+
+        count = 0
+        for parquet_file in sorted(path.glob("*.parquet")):
+            if self._is_expired(parquet_file.stem, max_days, now):
+                if self._store.delete_file(
+                    symbol, timeframe, parquet_file.stem, data_type=data_type
+                ):
+                    count += 1
+        return count
+
+    @staticmethod
+    def _is_expired(month_str: str, max_days: int, now: datetime) -> bool:
+        """월별 parquet 파일이 보존 기간을 초과했는지 판단.
+
+        Args:
+            month_str: 파일명 stem (예: "2024-01")
+            max_days: 보존 일수
+            now: 기준 시간
+
+        Returns:
+            보존 기간 초과 여부
+        """
+        try:
+            year, month = month_str.split("-")
+            file_month_end = datetime(int(year), int(month), 28, tzinfo=UTC)
+            age_days = (now - file_month_end).days
+            return age_days > max_days
+        except (ValueError, IndexError):
+            logger.warning("Invalid parquet filename: %s.parquet", month_str)
+            return False
