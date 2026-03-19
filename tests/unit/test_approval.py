@@ -6,7 +6,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ante.approval.models import ApprovalRequest, ApprovalStatus, ApprovalType
+from ante.approval.models import (
+    ApprovalRequest,
+    ApprovalStatus,
+    ApprovalType,
+    ApprovalValidationError,
+    ValidationResult,
+)
 from ante.approval.service import ApprovalService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
@@ -547,3 +553,197 @@ class TestEvents:
         )
         assert event.resolution == "approved"
         assert event.event_id is not None
+
+
+# ── 사전 검증 Validator (US-8) ────────────────────────
+
+
+class TestValidator:
+    """사전 검증(validator) 단위 테스트."""
+
+    async def test_fail_blocks_creation(self, db, eventbus):
+        """fail 등급 검증 결과 시 요청 생성이 차단된다."""
+
+        def fail_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("fail", "봇이 running 상태", "system:bot_manager")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"bot_delete": fail_validator},
+        )
+        await svc.initialize()
+
+        with pytest.raises(ApprovalValidationError, match="봇이 running 상태"):
+            await svc.create(
+                type="bot_delete",
+                requester="agent",
+                title="봇 삭제 요청",
+                params={"bot_id": "bot-1"},
+            )
+
+        # DB에 요청이 생성되지 않았는지 확인
+        all_requests = await svc.list()
+        assert len(all_requests) == 0
+
+    async def test_warn_attaches_review(self, db, eventbus):
+        """warn 등급 검증 결과 시 요청은 생성되고 reviews에 경고가 첨부된다."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [
+                ValidationResult(
+                    "warn",
+                    "미할당 잔액 부족",
+                    "system:treasury",
+                )
+            ]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="예산 증액",
+            params={"bot_id": "bot-1", "amount": 50000000, "current": 10000000},
+        )
+
+        assert req.status == "pending"
+        assert len(req.reviews) == 1
+        assert req.reviews[0]["result"] == "warn"
+        assert req.reviews[0]["reviewer"] == "system:treasury"
+        assert "미할당 잔액 부족" in req.reviews[0]["detail"]
+
+    async def test_pass_creates_normally(self, db, eventbus):
+        """pass 등급 검증 결과 시 요청이 정상 생성된다."""
+
+        def pass_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("pass", "", "system:bot_manager")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"bot_delete": pass_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="bot_delete",
+            requester="agent",
+            title="봇 삭제",
+            params={"bot_id": "bot-1"},
+        )
+
+        assert req.status == "pending"
+        assert len(req.reviews) == 0
+
+    async def test_no_validator_creates_normally(self, service):
+        """validator가 등록되지 않은 유형은 정상 생성된다."""
+        req = await service.create(
+            type="rule_change",
+            requester="agent",
+            title="규칙 변경",
+            params={"bot_id": "bot-1", "rules": {}},
+        )
+        assert req.status == "pending"
+
+    async def test_multiple_results_first_fail_blocks(self, db, eventbus):
+        """복수 검증 결과 중 첫 번째 fail이 생성을 차단한다."""
+
+        def multi_validator(params: dict) -> list[ValidationResult]:
+            return [
+                ValidationResult("fail", "봇이 running 상태", "system:bot_manager"),
+                ValidationResult("fail", "보유 포지션 존재", "system:trade"),
+            ]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"bot_delete": multi_validator},
+        )
+        await svc.initialize()
+
+        with pytest.raises(ApprovalValidationError, match="봇이 running 상태"):
+            await svc.create(
+                type="bot_delete",
+                requester="agent",
+                title="봇 삭제",
+                params={"bot_id": "bot-1"},
+            )
+
+    async def test_warn_persisted_to_db(self, db, eventbus):
+        """warn reviews가 DB에 영속화된다."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("warn", "잔액 주의", "system:treasury")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="예산 변경",
+            params={"bot_id": "bot-1", "amount": 20000000, "current": 10000000},
+        )
+
+        fetched = await svc.get(req.id)
+        assert fetched is not None
+        assert len(fetched.reviews) == 1
+        assert fetched.reviews[0]["result"] == "warn"
+
+    async def test_warn_with_reviewed_at(self, db, eventbus):
+        """warn review에 reviewed_at 시각이 포함된다."""
+
+        def warn_validator(params: dict) -> list[ValidationResult]:
+            return [ValidationResult("warn", "잔액 부족", "system:treasury")]
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            validators={"budget_change": warn_validator},
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="budget_change",
+            requester="agent",
+            title="예산 변경",
+            params={"bot_id": "bot-1", "amount": 20000000},
+        )
+
+        assert "reviewed_at" in req.reviews[0]
+        assert req.reviews[0]["reviewed_at"] != ""
+
+
+# ── 모델 추가분 (US-9) ──────────────────────────────
+
+
+class TestValidationModels:
+    def test_validation_result_frozen(self):
+        """ValidationResult는 불변이다."""
+        result = ValidationResult("fail", "테스트", "system:test")
+        with pytest.raises(AttributeError):
+            result.grade = "pass"  # type: ignore[misc]
+
+    def test_approval_validation_error(self):
+        """ApprovalValidationError에 detail 속성이 있다."""
+        error = ApprovalValidationError("검증 실패")
+        assert error.detail == "검증 실패"
+        assert str(error) == "검증 실패"
+
+    def test_approval_type_new_values(self):
+        """새로 추가된 ApprovalType 값."""
+        assert ApprovalType.STRATEGY_RETIRE == "strategy_retire"
+        assert ApprovalType.BOT_ASSIGN_STRATEGY == "bot_assign_strategy"
+        assert ApprovalType.BOT_CHANGE_STRATEGY == "bot_change_strategy"
+        assert ApprovalType.BOT_RESUME == "bot_resume"
+        assert ApprovalType.BOT_DELETE == "bot_delete"

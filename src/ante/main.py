@@ -415,6 +415,7 @@ async def _init_feed(s: Services) -> None:
     # ApprovalService
     from ante.approval import ApprovalService
     from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
+    from ante.approval.models import ValidationResult
 
     async def _exec_rule_change(params: dict) -> None:
         s.rule_engine.update_rules(params["bot_id"], params["rules"])
@@ -445,6 +446,139 @@ async def _init_feed(s: Services) -> None:
         "rule_change": _exec_rule_change,
     }
 
+    # 사전 검증 validator 정의
+    from ante.bot.config import BotStatus
+
+    def _validate_strategy_retire(params: dict) -> list[ValidationResult]:
+        """전략 폐기 사전 검증: 사용 중인 봇 존재 여부."""
+        strategy_id = params.get("strategy_id", "")
+        bots = [
+            b for b in s.bot_manager.list_bots() if b.get("strategy_id") == strategy_id
+        ]
+        if bots:
+            return [
+                ValidationResult(
+                    "fail",
+                    f"전략을 사용 중인 봇 {len(bots)}개 존재",
+                    "system:bot_manager",
+                )
+            ]
+        return [ValidationResult("pass", "", "system:bot_manager")]
+
+    def _validate_bot_create(params: dict) -> list[ValidationResult]:
+        """봇 생성 사전 검증: 전략 adopted 상태, 동일 봇 미존재."""
+        results: list[ValidationResult] = []
+        bot_id = params.get("bot_id", "")
+        if bot_id and s.bot_manager.get_bot(bot_id):
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"동일 ID의 봇이 이미 존재: {bot_id}",
+                    "system:bot_manager",
+                )
+            )
+        strategy_id = params.get("strategy_id", "")
+        if strategy_id:
+            # strategy_id로 리포트 확인은 비동기 — 동기 호출 불가이므로
+            # 이 검증은 executor 2단계 검증에 위임
+            pass
+        return results or [ValidationResult("pass", "", "system:bot_manager")]
+
+    def _validate_bot_delete(params: dict) -> list[ValidationResult]:
+        """봇 삭제 사전 검증: stopped 상태, 보유 포지션 없음."""
+        results: list[ValidationResult] = []
+        bot_id = params.get("bot_id", "")
+        bot = s.bot_manager.get_bot(bot_id)
+        if not bot:
+            return [
+                ValidationResult("fail", "봇이 존재하지 않음", "system:bot_manager")
+            ]
+        if bot.status != BotStatus.STOPPED:
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"봇이 {bot.status} 상태 (stopped 필요)",
+                    "system:bot_manager",
+                )
+            )
+        positions = s.position_history.get_positions_sync(bot_id)
+        if positions:
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"보유 포지션 {len(positions)}건 존재",
+                    "system:trade",
+                )
+            )
+        return results or [ValidationResult("pass", "", "system:bot_manager")]
+
+    def _validate_bot_change_strategy(params: dict) -> list[ValidationResult]:
+        """봇 전략 변경 사전 검증: stopped 상태 확인."""
+        bot_id = params.get("bot_id", "")
+        bot = s.bot_manager.get_bot(bot_id)
+        if not bot:
+            return [
+                ValidationResult("fail", "봇이 존재하지 않음", "system:bot_manager")
+            ]
+        if bot.status != BotStatus.STOPPED:
+            return [
+                ValidationResult(
+                    "fail",
+                    f"봇이 {bot.status} 상태 (stopped 필요)",
+                    "system:bot_manager",
+                )
+            ]
+        return [ValidationResult("pass", "", "system:bot_manager")]
+
+    def _validate_bot_assign_strategy(params: dict) -> list[ValidationResult]:
+        """봇 전략 배정 사전 검증: 전략 adopted 상태 확인."""
+        # 전략 상태 확인은 비동기 조회가 필요하므로 executor 2단계에 위임
+        return [ValidationResult("pass", "", "system:report_store")]
+
+    def _validate_bot_resume(params: dict) -> list[ValidationResult]:
+        """봇 재개 사전 검증: stopped/error 상태 확인."""
+        bot_id = params.get("bot_id", "")
+        bot = s.bot_manager.get_bot(bot_id)
+        if not bot:
+            return [
+                ValidationResult("fail", "봇이 존재하지 않음", "system:bot_manager")
+            ]
+        if bot.status not in (BotStatus.STOPPED, BotStatus.ERROR):
+            return [
+                ValidationResult(
+                    "fail",
+                    f"봇이 {bot.status} 상태 (stopped/error 필요)",
+                    "system:bot_manager",
+                )
+            ]
+        return [ValidationResult("pass", "", "system:bot_manager")]
+
+    def _validate_budget_change(params: dict) -> list[ValidationResult]:
+        """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn)."""
+        amount = float(params.get("amount", 0))
+        current = float(params.get("current", 0))
+        amount_diff = amount - current
+        if amount_diff > 0 and amount_diff > s.treasury.unallocated:
+            return [
+                ValidationResult(
+                    "warn",
+                    f"미할당 잔액({s.treasury.unallocated:,.0f}원) "
+                    f"< 증액분({amount_diff:,.0f}원)",
+                    "system:treasury",
+                )
+            ]
+        return [ValidationResult("pass", "", "system:treasury")]
+
+    approval_validators: dict = {
+        "strategy_retire": _validate_strategy_retire,
+        "bot_create": _validate_bot_create,
+        "bot_delete": _validate_bot_delete,
+        "bot_change_strategy": _validate_bot_change_strategy,
+        "bot_assign_strategy": _validate_bot_assign_strategy,
+        "bot_resume": _validate_bot_resume,
+        "budget_change": _validate_budget_change,
+    }
+
     # 전결 설정 로딩
     auto_approve_raw = s.config.get("approval.auto_approve", {})
     auto_approve_config = AutoApproveConfig.from_dict(
@@ -458,6 +592,7 @@ async def _init_feed(s: Services) -> None:
         db=s.db,
         eventbus=s.eventbus,
         executors=approval_executors,
+        validators=approval_validators,
         auto_approve_evaluator=auto_approve_evaluator,
     )
     await s.approval_service.initialize()
