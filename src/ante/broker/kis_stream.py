@@ -391,8 +391,8 @@ class KISStreamClient:
         if self._ws:
             try:
                 await self._ws.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("WebSocket 종료 실패: %s", e)
             self._ws = None
 
     async def _publish_connected(self) -> None:

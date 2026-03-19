@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import click
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+
+logger = logging.getLogger(__name__)
 
 
 async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
@@ -19,8 +22,8 @@ async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
         al = AuditLogger(db=db)
         await al.initialize()
         await al.log(**kwargs)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("감사 로그 기록 실패: %s", e)
 
 
 @click.group()
