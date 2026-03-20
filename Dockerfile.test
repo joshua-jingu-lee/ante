@@ -7,6 +7,7 @@ WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+COPY pyproject.toml /pyproject.toml
 RUN npm run build
 
 # Stage 2: Python 런타임 (테스트용)

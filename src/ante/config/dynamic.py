@@ -50,13 +50,15 @@ class DynamicConfigService:
         """스키마 생성."""
         await self._db.execute_script(DYNAMIC_CONFIG_SCHEMA)
 
-    async def get(self, key: str, default: Any = None) -> Any:
+    _MISSING = object()
+
+    async def get(self, key: str, default: Any = _MISSING) -> Any:
         """동적 설정 값 조회. JSON 역직렬화하여 반환."""
         row = await self._db.fetch_one(
             "SELECT value FROM dynamic_config WHERE key = ?", (key,)
         )
         if row is None:
-            if default is not None:
+            if default is not self._MISSING:
                 return default
             raise ConfigError(f"Dynamic config not found: {key}")
         return json.loads(row["value"])
