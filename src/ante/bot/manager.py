@@ -13,6 +13,7 @@ from ante.bot.config import BotConfig, BotStatus
 from ante.bot.exceptions import BotError
 
 if TYPE_CHECKING:
+    from ante.account.service import AccountService
     from ante.bot.context_factory import StrategyContextFactory
     from ante.bot.signal_key import SignalKeyManager  # noqa: F811
     from ante.core.database import Database
@@ -52,6 +53,7 @@ class BotManager:
         snapshot: StrategySnapshot | None = None,
         rule_engine: RuleEngine | None = None,
         strategy_rule_configs: dict[str, list[dict[str, Any]]] | None = None,
+        account_service: AccountService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -60,6 +62,7 @@ class BotManager:
         self._snapshot = snapshot
         self._rule_engine = rule_engine
         self._strategy_rule_configs = strategy_rule_configs or {}
+        self._account_service = account_service
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
@@ -190,6 +193,20 @@ class BotManager:
                     f"'{existing_bot.bot_id}'에서 사용 중입니다. "
                     f"파라미터가 다른 전략은 별도 파일로 작성하세요."
                 )
+
+        # exchange 호환성 검증
+        if self._account_service and hasattr(strategy_cls, "meta"):
+            strategy_exchange = getattr(strategy_cls.meta, "exchange", "KRX")
+            strategy_name = getattr(strategy_cls.meta, "name", config.strategy_id)
+            account = await self._account_service.get(config.account_id)
+            from ante.strategy.validator import validate_exchange
+
+            validate_exchange(
+                strategy_exchange=strategy_exchange,
+                account_exchange=account.exchange,
+                strategy_name=strategy_name,
+                account_name=account.name,
+            )
 
         # 전략 파일 스냅샷 생성
         if self._snapshot and source_path:

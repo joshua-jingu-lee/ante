@@ -19,10 +19,12 @@ from ante.strategy import (
     StrategyValidator,
 )
 from ante.strategy.exceptions import (
+    IncompatibleExchangeError,
     StrategyError,
     StrategyFileAccessError,
     StrategyLoadError,
 )
+from ante.strategy.validator import validate_exchange
 
 # ── Test fixtures ─────────────────────────────────
 
@@ -704,3 +706,138 @@ class TestStrategyRegistry:
         await registry.register(filepath, meta)
 
         assert await registry.exists("momentum_v1.0.0")
+
+
+# ── Exchange 호환성 검증 테스트 ──────────────────────
+
+
+class TestValidateExchange:
+    """validate_exchange() 런타임 검증 테스트."""
+
+    def test_same_exchange_allowed(self):
+        """동일 exchange는 허용."""
+        validate_exchange("KRX", "KRX")  # should not raise
+
+    def test_wildcard_allows_any(self):
+        """전략 exchange='*'이면 모든 계좌 허용."""
+        validate_exchange("*", "KRX")
+        validate_exchange("*", "NYSE")
+        validate_exchange("*", "TEST")
+
+    def test_different_exchange_rejected(self):
+        """다른 exchange 조합은 거부."""
+        with pytest.raises(IncompatibleExchangeError):
+            validate_exchange("KRX", "NYSE")
+
+    def test_different_exchange_rejected_reverse(self):
+        """NYSE 전략 + KRX 계좌 거부."""
+        with pytest.raises(IncompatibleExchangeError):
+            validate_exchange("NYSE", "KRX")
+
+    def test_error_message_includes_names(self):
+        """에러 메시지에 전략명·계좌명 포함."""
+        with pytest.raises(IncompatibleExchangeError, match="momentum") as exc_info:
+            validate_exchange(
+                "KRX",
+                "NYSE",
+                strategy_name="momentum",
+                account_name="미국계좌",
+            )
+        assert "미국계좌" in str(exc_info.value)
+
+    def test_invalid_strategy_exchange(self):
+        """유효하지 않은 전략 exchange → ValueError."""
+        with pytest.raises(ValueError, match="유효하지 않은 전략"):
+            validate_exchange("INVALID", "KRX")
+
+    def test_invalid_account_exchange(self):
+        """유효하지 않은 계좌 exchange → ValueError."""
+        with pytest.raises(ValueError, match="유효하지 않은 계좌"):
+            validate_exchange("KRX", "INVALID")
+
+    def test_account_wildcard_rejected(self):
+        """계좌 exchange에 '*'는 허용하지 않음."""
+        with pytest.raises(ValueError, match="유효하지 않은 계좌"):
+            validate_exchange("KRX", "*")
+
+    def test_all_valid_exchanges(self):
+        """모든 유효한 exchange 조합 테스트."""
+        for exchange in ("KRX", "NYSE", "NASDAQ", "AMEX", "TEST"):
+            validate_exchange(exchange, exchange)  # same → OK
+            validate_exchange("*", exchange)  # wildcard → OK
+
+
+class TestValidatorExchangeCheck:
+    """StrategyValidator AST 기반 exchange 유효성 검증 테스트."""
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def _write_strategy(self, tmp_path: Path, code: str) -> Path:
+        filepath = tmp_path / "test_strategy.py"
+        filepath.write_text(code)
+        return filepath
+
+    def test_valid_exchange(self, validator, tmp_path):
+        """유효한 exchange 값은 검증 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="NYSE",
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_invalid_exchange(self, validator, tmp_path):
+        """유효하지 않은 exchange 값 → 에러."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="INVALID",
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Invalid exchange" in e for e in result.errors)
+
+    def test_wildcard_exchange(self, validator, tmp_path):
+        """exchange='*' 범용 전략은 검증 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test", exchange="*")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_no_exchange_specified(self, validator, tmp_path):
+        """exchange 미지정 시 기본값(KRX) 사용 — 검증 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid

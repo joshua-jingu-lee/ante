@@ -6,6 +6,8 @@ import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 
+VALID_EXCHANGES: set[str] = {"KRX", "NYSE", "NASDAQ", "AMEX", "TEST", "*"}
+
 
 @dataclass
 class ValidationResult:
@@ -97,7 +99,16 @@ class StrategyValidator:
                     "implement on_data() — external signals will use default handler"
                 )
 
-        # 4. 금지 모듈 import
+        # 4. exchange 유효성 검증
+        if len(strategy_classes) == 1:
+            exchange_value = self._extract_meta_exchange(strategy_classes[0])
+            if exchange_value is not None and exchange_value not in VALID_EXCHANGES:
+                errors.append(
+                    f"Invalid exchange value: '{exchange_value}'. "
+                    f"Valid values: {sorted(VALID_EXCHANGES)}"
+                )
+
+        # 5. 금지 모듈 import
         forbidden = self._find_forbidden_imports(tree)
         for module in forbidden:
             errors.append(f"Forbidden import: {module}")
@@ -148,6 +159,22 @@ class StrategyValidator:
                 if node.name == name:
                     return True
         return False
+
+    def _extract_meta_exchange(self, cls: ast.ClassDef) -> str | None:
+        """meta에서 exchange 값을 추출. 없으면 None 반환."""
+        for node in cls.body:
+            if isinstance(node, ast.Assign | ast.AnnAssign):
+                target = (
+                    node.targets[0] if isinstance(node, ast.Assign) else node.target
+                )
+                if not isinstance(target, ast.Name) or target.id != "meta":
+                    continue
+                value = node.value
+                if isinstance(value, ast.Call):
+                    for kw in value.keywords:
+                        if kw.arg == "exchange" and isinstance(kw.value, ast.Constant):
+                            return str(kw.value.value)
+        return None
 
     def _has_accepts_external_signals(self, cls: ast.ClassDef) -> bool:
         """meta에 accepts_external_signals=True 설정 여부 탐지."""
@@ -238,3 +265,46 @@ class StrategyValidator:
         warnings: list[str] = []
         # open()은 FORBIDDEN_BUILTINS로 승격되어 에러로 처리됨
         return warnings
+
+
+def validate_exchange(
+    strategy_exchange: str,
+    account_exchange: str,
+    *,
+    strategy_name: str = "",
+    account_name: str = "",
+) -> None:
+    """전략의 exchange와 계좌의 exchange 호환성을 런타임 검증.
+
+    전략 exchange가 "*"이면 모든 계좌와 호환된다.
+    그 외에는 전략 exchange와 계좌 exchange가 정확히 일치해야 한다.
+
+    Raises:
+        IncompatibleExchangeError: 호환되지 않는 경우.
+        ValueError: 유효하지 않은 exchange 값인 경우.
+    """
+    from ante.strategy.exceptions import IncompatibleExchangeError
+
+    if strategy_exchange not in VALID_EXCHANGES:
+        raise ValueError(
+            f"유효하지 않은 전략 exchange: '{strategy_exchange}'. "
+            f"허용 값: {sorted(VALID_EXCHANGES)}"
+        )
+
+    if account_exchange not in VALID_EXCHANGES or account_exchange == "*":
+        raise ValueError(
+            f"유효하지 않은 계좌 exchange: '{account_exchange}'. "
+            f"허용 값: {sorted(VALID_EXCHANGES - {'*'})}"
+        )
+
+    if strategy_exchange == "*":
+        return
+
+    if strategy_exchange != account_exchange:
+        strategy_desc = f"'{strategy_name}'" if strategy_name else "전략"
+        account_desc = f"'{account_name}'" if account_name else "계좌"
+        raise IncompatibleExchangeError(
+            f"{strategy_desc}의 exchange({strategy_exchange})와 "
+            f"{account_desc}의 exchange({account_exchange})가 "
+            f"호환되지 않습니다."
+        )

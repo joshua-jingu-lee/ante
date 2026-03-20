@@ -886,3 +886,117 @@ class TestBotManager:
 
         assert len(received) >= 1
         assert received[0].account_id == "acct-1"
+
+
+# ── Exchange 호환성 검증 (BotManager) ───────────────
+
+
+class TestBotManagerExchangeValidation:
+    """BotManager.create_bot() exchange 호환성 검증 테스트."""
+
+    @pytest.fixture
+    async def db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        await database.connect()
+        yield database
+        try:
+            await asyncio.wait_for(database.close(), timeout=5.0)
+        except TimeoutError:
+            pass
+
+    @pytest.fixture
+    async def account_service(self, db, eventbus):
+        from ante.account.service import AccountService
+
+        svc = AccountService(db=db, eventbus=eventbus)
+        await svc.initialize()
+        return svc
+
+    @pytest.fixture
+    async def manager_with_account(self, eventbus, db, account_service):
+        m = BotManager(eventbus=eventbus, db=db, account_service=account_service)
+        await m.initialize()
+        yield m
+        for bot in list(m._bots.values()):
+            if bot._task and not bot._task.done():
+                bot._task.cancel()
+        try:
+            await asyncio.wait_for(m.stop_all(), timeout=5.0)
+        except TimeoutError:
+            pass
+
+    async def test_compatible_exchange_allowed(
+        self, manager_with_account, account_service, ctx
+    ):
+        """동일 exchange 조합은 봇 생성 허용."""
+        from ante.account.models import Account
+
+        account = Account(
+            account_id="krx-acct",
+            name="국내계좌",
+            exchange="KRX",
+            currency="KRW",
+            broker_type="test",
+        )
+        await account_service.create(account)
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="krx-acct")
+        # SimpleStrategy.meta.exchange는 기본값 "KRX"
+        bot = await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+        assert bot.status == BotStatus.CREATED
+
+    async def test_incompatible_exchange_rejected(
+        self, manager_with_account, account_service, ctx
+    ):
+        """KRX 전략 + NYSE 계좌 → IncompatibleExchangeError."""
+        from ante.account.models import Account
+        from ante.strategy.exceptions import IncompatibleExchangeError
+
+        account = Account(
+            account_id="nyse-acct",
+            name="미국계좌",
+            exchange="NYSE",
+            currency="USD",
+            broker_type="test",
+        )
+        await account_service.create(account)
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="nyse-acct")
+        with pytest.raises(IncompatibleExchangeError, match="simple"):
+            await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+    async def test_wildcard_exchange_allowed(
+        self, manager_with_account, account_service, ctx
+    ):
+        """전략 exchange='*'이면 어떤 계좌든 허용."""
+        from ante.account.models import Account
+
+        class WildcardStrategy(Strategy):
+            meta = StrategyMeta(
+                name="wildcard",
+                version="1.0.0",
+                description="test",
+                exchange="*",
+            )
+
+            async def on_step(self, context):
+                return []
+
+        account = Account(
+            account_id="nyse-acct",
+            name="미국계좌",
+            exchange="NYSE",
+            currency="USD",
+            broker_type="test",
+        )
+        await account_service.create(account)
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="nyse-acct")
+        bot = await manager_with_account.create_bot(config, WildcardStrategy, ctx)
+        assert bot.status == BotStatus.CREATED
+
+    async def test_no_account_service_skips_validation(self, eventbus, db, ctx):
+        """AccountService 미주입 시 exchange 검증 스킵."""
+        manager = BotManager(eventbus=eventbus, db=db)
+        await manager.initialize()
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="any-acct")
+        # account_service가 없으므로 검증 스킵, 정상 생성
+        bot = await manager.create_bot(config, SimpleStrategy, ctx)
+        assert bot.status == BotStatus.CREATED

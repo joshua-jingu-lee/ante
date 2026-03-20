@@ -12,6 +12,7 @@ from ante.strategy.base import (
 )
 from ante.strategy.context import StrategyContext
 from ante.strategy.exceptions import (
+    IncompatibleExchangeError,
     StrategyError,
     StrategyFileAccessError,
     StrategyLoadError,
@@ -21,10 +22,16 @@ from ante.strategy.indicators import IndicatorCalculator
 from ante.strategy.loader import StrategyLoader
 from ante.strategy.registry import StrategyRecord, StrategyRegistry, StrategyStatus
 from ante.strategy.snapshot import StrategySnapshot
-from ante.strategy.validator import StrategyValidator, ValidationResult
+from ante.strategy.validator import (
+    VALID_EXCHANGES,
+    StrategyValidator,
+    ValidationResult,
+    validate_exchange,
+)
 
 __all__ = [
     "DataProvider",
+    "IncompatibleExchangeError",
     "IndicatorCalculator",
     "OrderAction",
     "OrderView",
@@ -44,5 +51,7 @@ __all__ = [
     "StrategyValidationError",
     "TradeHistoryView",
     "StrategyValidator",
+    "VALID_EXCHANGES",
     "ValidationResult",
+    "validate_exchange",
 ]
