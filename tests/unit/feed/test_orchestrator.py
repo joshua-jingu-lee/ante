@@ -659,7 +659,7 @@ async def test_fundamental_written_to_store(
     await orchestrator.run_daily(tmp_data_path, basic_config)
 
     # fundamental 디렉토리 확인
-    fund_path = tmp_data_path / "fundamental" / "krx"
+    fund_path = tmp_data_path / "fundamental" / "KRX"
     if fund_path.exists():
         symbol_dirs = list(fund_path.iterdir())
         assert len(symbol_dirs) > 0

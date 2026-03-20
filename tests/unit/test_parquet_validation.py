@@ -66,8 +66,12 @@ def _create_corrupted_parquet(path: Path) -> None:
 class TestParquetValidate:
     @pytest.mark.asyncio
     async def test_validate_all_valid(self, tmp_store, tmp_path):
-        _create_valid_parquet(tmp_path / "ohlcv" / "1d" / "005930" / "2026-01.parquet")
-        _create_valid_parquet(tmp_path / "ohlcv" / "1d" / "005930" / "2026-02.parquet")
+        _create_valid_parquet(
+            tmp_path / "ohlcv" / "1d" / "KRX" / "005930" / "2026-01.parquet"
+        )
+        _create_valid_parquet(
+            tmp_path / "ohlcv" / "1d" / "KRX" / "005930" / "2026-02.parquet"
+        )
 
         result = tmp_store.validate("005930", "1d")
 
@@ -78,9 +82,11 @@ class TestParquetValidate:
 
     @pytest.mark.asyncio
     async def test_validate_corrupted_file(self, tmp_store, tmp_path):
-        _create_valid_parquet(tmp_path / "ohlcv" / "1d" / "005930" / "2026-01.parquet")
+        _create_valid_parquet(
+            tmp_path / "ohlcv" / "1d" / "KRX" / "005930" / "2026-01.parquet"
+        )
         _create_corrupted_parquet(
-            tmp_path / "ohlcv" / "1d" / "005930" / "2026-02.parquet"
+            tmp_path / "ohlcv" / "1d" / "KRX" / "005930" / "2026-02.parquet"
         )
 
         result = tmp_store.validate("005930", "1d")
@@ -92,7 +98,9 @@ class TestParquetValidate:
 
     @pytest.mark.asyncio
     async def test_validate_fix_moves_corrupted(self, tmp_store, tmp_path):
-        corrupted_path = tmp_path / "ohlcv" / "1d" / "005930" / "2026-02.parquet"
+        corrupted_path = (
+            tmp_path / "ohlcv" / "1d" / "KRX" / "005930" / "2026-02.parquet"
+        )
         _create_corrupted_parquet(corrupted_path)
 
         result = tmp_store.validate("005930", "1d", fix=True)
@@ -111,7 +119,7 @@ class TestParquetValidate:
 
     @pytest.mark.asyncio
     async def test_validate_empty_directory(self, tmp_store, tmp_path):
-        (tmp_path / "ohlcv" / "1d" / "005930").mkdir(parents=True)
+        (tmp_path / "ohlcv" / "1d" / "KRX" / "005930").mkdir(parents=True)
 
         result = tmp_store.validate("005930", "1d")
 
