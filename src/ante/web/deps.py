@@ -88,6 +88,14 @@ def get_account_service(request: Request) -> Any:
     return svc
 
 
+def get_treasury_manager(request: Request) -> Any:
+    """Treasury 매니저 (필수)."""
+    svc = getattr(request.app.state, "treasury_manager", None)
+    if svc is None:
+        raise HTTPException(status_code=503, detail="Treasury manager not available")
+    return svc
+
+
 def get_notification_service(request: Request) -> Any:
     """알림 서비스 (필수)."""
     svc = getattr(request.app.state, "notification_service", None)
@@ -158,6 +166,11 @@ def get_report_store_optional(request: Request) -> Any | None:
 def get_account_service_optional(request: Request) -> Any | None:
     """계좌 서비스 (선택적). 없으면 None."""
     return getattr(request.app.state, "account_service", None)
+
+
+def get_treasury_manager_optional(request: Request) -> Any | None:
+    """Treasury 매니저 (선택적). 없으면 None."""
+    return getattr(request.app.state, "treasury_manager", None)
 
 
 def get_config(request: Request) -> Any | None:

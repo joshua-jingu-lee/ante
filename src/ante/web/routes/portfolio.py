@@ -8,7 +8,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from ante.web.deps import get_bot_manager, get_trade_service, get_treasury
+from ante.web.deps import (
+    get_bot_manager,
+    get_trade_service,
+    get_treasury,
+    get_treasury_manager_optional,
+)
 from ante.web.schemas import PortfolioHistoryResponse, PortfolioValueResponse
 
 logger = logging.getLogger(__name__)
@@ -23,9 +28,23 @@ router = APIRouter()
 )
 async def portfolio_value(
     treasury: Annotated[Any, Depends(get_treasury)],
+    treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
+    account_id: str | None = None,
 ) -> dict:
     """총 자산 가치 + 오늘 손익."""
-    summary = treasury.get_summary()
+    from fastapi import HTTPException
+
+    target_treasury = treasury
+    if account_id and treasury_manager is not None:
+        try:
+            target_treasury = treasury_manager.get(account_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계좌를 찾을 수 없습니다: {account_id}",
+            )
+
+    summary = target_treasury.get_summary()
     total_value = summary["total_evaluation"]
     daily_pnl = summary["total_profit_loss"]
     daily_pnl_pct = (daily_pnl / total_value * 100) if total_value else 0.0
@@ -58,6 +77,7 @@ _PERIOD_DAYS = {
 async def portfolio_history(
     trade_service: Annotated[Any, Depends(get_trade_service)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    account_id: str | None = None,
     period: str = Query(default="1m", pattern="^(1d|1w|1m|3m|all)$"),
 ) -> dict:
     """기간별 자산 추이."""
@@ -67,6 +87,17 @@ async def portfolio_history(
     feedback = PerformanceFeedback(trade_service, bot_manager)
 
     bots = bot_manager.list_bots() if hasattr(bot_manager, "list_bots") else []
+    if account_id:
+        bots = [
+            b
+            for b in bots
+            if (
+                b.get("account_id")
+                if isinstance(b, dict)
+                else getattr(b, "account_id", None)
+            )
+            == account_id
+        ]
     bot_ids = [b["bot_id"] if isinstance(b, dict) else b.bot_id for b in bots]
 
     # 봇이 없으면 빈 데이터

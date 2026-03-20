@@ -19,6 +19,7 @@ router = APIRouter()
 )
 async def list_trades(
     trade_service: Annotated[Any, Depends(get_trade_service)],
+    account_id: str | None = None,
     bot_id: str | None = None,
     symbol: str | None = None,
     limit: int = 20,
@@ -28,6 +29,7 @@ async def list_trades(
     from ante.web.pagination import paginate
 
     trades = await trade_service.get_trades(
+        account_id=account_id,
         bot_id=bot_id,
         symbol=symbol,
         limit=limit + 1,
@@ -36,6 +38,9 @@ async def list_trades(
         {
             "trade_id": t.trade_id,
             "bot_id": t.bot_id,
+            "account_id": str(a)
+            if isinstance(a := getattr(t, "account_id", ""), str)
+            else "",
             "symbol": t.symbol,
             "side": t.side,
             "quantity": t.quantity,
