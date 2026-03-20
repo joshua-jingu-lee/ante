@@ -34,10 +34,15 @@ Feature: 계좌 인증정보 관리
     And stdout JSON의 .app_key 는 null이 아니다
 
   Scenario: 인증정보 설정 후 봇 생성 및 시작 가능
+    When GET /api/strategies
+    Then 응답 상태는 200
+    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
     When POST /api/bots 요청:
-      | field      | value              |
-      | account_id | {account_id}       |
-      | name       | 인증정보 있는 봇   |
+      | field       | value              |
+      | bot_id      | qa-cred-bot-01     |
+      | account_id  | {account_id}       |
+      | name        | 인증정보 있는 봇   |
+      | strategy_id | {strategy_id}      |
     Then 응답 상태는 201
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
@@ -60,9 +65,11 @@ Feature: 계좌 인증정보 관리
     And 응답 body.account.account_id 를 {no_cred_account_id}로 저장한다
     # 봇 생성
     When POST /api/bots 요청:
-      | field      | value                 |
-      | account_id | {no_cred_account_id}  |
-      | name       | 인증정보 없는 봇      |
+      | field       | value                 |
+      | bot_id      | qa-no-cred-bot-01     |
+      | account_id  | {no_cred_account_id}  |
+      | name        | 인증정보 없는 봇      |
+      | strategy_id | {strategy_id}         |
     Then 응답 상태는 201
     And 응답 body.bot.bot_id 를 {no_cred_bot_id}로 저장한다
     # 봇 시작 시도 → 인증정보 미설정 에러

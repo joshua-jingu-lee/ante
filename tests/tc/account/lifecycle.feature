@@ -47,7 +47,7 @@ Feature: 계좌 생명주기
 
   Scenario: 계좌 삭제 (API)
     When DELETE /api/accounts/{account_id}
-    Then 응답 상태는 200
+    Then 응답 상태는 204
 
   Scenario: 삭제된 계좌 조회 시 상태 확인
     When GET /api/accounts/{account_id}
@@ -72,10 +72,15 @@ Feature: 계좌 생명주기
     And 응답 body.account.account_id 를 {suspended_account_id}로 저장한다
     When POST /api/accounts/{suspended_account_id}/suspend
     Then 응답 상태는 200
+    When GET /api/strategies
+    Then 응답 상태는 200
+    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
     When POST /api/bots 요청:
       | field      | value                  |
+      | bot_id     | qa-lifecycle-bot-01    |
       | account_id | {suspended_account_id} |
       | name       | 거부될 봇              |
+      | strategy_id| {strategy_id}          |
     Then 응답 상태는 409
 
   Scenario: 삭제된 계좌 재활성화 불가
@@ -94,7 +99,7 @@ Feature: 계좌 생명주기
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {deleted_account_id}로 저장한다
     When DELETE /api/accounts/{deleted_account_id}
-    Then 응답 상태는 200
+    Then 응답 상태는 204
     When POST /api/accounts/{deleted_account_id}/activate
     Then 응답 상태는 404 또는 응답 상태는 409
 
