@@ -74,21 +74,37 @@ Member ID: owner
 패스워드 확인: ••••••••
 ```
 
-### 2단계: 증권사 연동 (KIS)
+### 2단계: 계좌 등록
 
-한국투자증권 Open API 연동 정보를 입력합니다.
-건너뛰면 Test 증권사로 설정되며, 실제 매매 없이 시스템을 체험할 수 있습니다.
+실제 거래에 사용할 증권사 계좌를 등록합니다. 건너뛰면 테스트 계좌가 자동으로 생성되며, 실제 매매 없이 시스템을 체험할 수 있습니다.
 
-나중에 `~/.config/ante/secrets.env`에서 변경할 수 있습니다.
+나중에 `ante account create` 명령어로 계좌를 추가할 수 있습니다.
 
 ```
-── 2. 증권사 연동 (KIS) ────────────────────────
-KIS 연동 정보를 입력하시겠습니까? [y/N]: y
-APP KEY: PSxxxxxxxxxxx
-APP SECRET: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-계좌번호 (예: 50123456-01): 50123456-01
-모의투자 여부 [y/N]: n
+── [2/4] 계좌 설정 ─────────────────────────────
+  등록하지 않으면 테스트 계좌가 자동으로 생성됩니다.
+  나중에 `ante account create` 명령어로도 추가할 수 있습니다.
+실제 거래 계좌를 등록하시겠습니까? [y/N]: y
+
+  브로커를 선택하세요:
+    1) kis-domestic (KRX / KRW)
+  선택 [1]: 1
+  계좌 ID [domestic]: domestic
+  이름 [국내 주식]: 국내 주식
+  app_key: PSxxxxxxxxxxx
+  app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  account_no: 50123456-01
+  -> 계좌 "domestic" 등록 예정 (KRX / KRW / kis-domestic)
 ```
+
+각 계좌에는 **거래 모드(TradingMode)** 가 설정됩니다:
+
+| 모드 | 설명 |
+|------|------|
+| `VIRTUAL` | 가상거래 — 실제 주문이 나가지 않으며, 시스템 내부에서 체결을 시뮬레이션합니다. |
+| `LIVE` | 실제거래 — 증권사 API를 통해 실제 주문이 발생합니다. |
+
+등록 후에는 `ante account list`로 계좌 목록을 확인할 수 있습니다.
 
 ### 3단계: 텔레그램 알림 (선택)
 
@@ -116,15 +132,20 @@ ante feed config set ANTE_DART_API_KEY your_key_here
 초기 설정이 끝나면 토큰과 Recovery Key가 출력됩니다.
 
 ```
-✅ 초기 설정 완료
+── 완료 ────────────────────────────────────────
+
+초기 설정 완료
   설정 디렉토리: ~/.config/ante/
   Member ID   : owner
   이모지      : 🦊
-  브로커      : KIS (실투자)
+  계좌        : domestic (kis-domestic)
 
-🔑 토큰: ante_hk_8k2m9p4q...
+  토큰: ante_hk_8k2m9p4q...
 
-⚠️ Recovery Key: ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
+   셸 프로필에 추가하면 매번 입력하지 않아도 됩니다:
+   echo 'export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...' >> ~/.zshrc
+
+   Recovery Key: ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
    이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.
 ```
 
