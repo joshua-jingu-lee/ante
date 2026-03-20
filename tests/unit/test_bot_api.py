@@ -300,6 +300,126 @@ class TestGetBotWithPositions:
         assert "positions" not in resp.json()["bot"]
 
 
+class FakeAccount:
+    """테스트용 Account stub."""
+
+    def __init__(
+        self, account_id: str = "test", status: str = "active", exchange: str = "KRX"
+    ) -> None:
+        self.account_id = account_id
+        self.name = account_id
+        self.status = status
+        self.exchange = exchange
+
+
+class FakeAccountService:
+    """테스트용 AccountService stub."""
+
+    def __init__(self) -> None:
+        self._accounts: dict[str, FakeAccount] = {}
+
+    async def get(self, account_id: str) -> FakeAccount:
+        from ante.account.errors import AccountNotFoundError
+
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(f"Account not found: {account_id}")
+        return account
+
+
+class FakeStrategyRecord:
+    """테스트용 StrategyRecord stub."""
+
+    def __init__(self, strategy_id: str = "s1", filepath: str = "/tmp/s1.py") -> None:
+        self.strategy_id = strategy_id
+        self.filepath = filepath
+        self.name = strategy_id
+        self.version = "0.1.0"
+        self.author = "test"
+        self.description = "test strategy"
+
+
+class FakeStrategyRegistry:
+    """테스트용 StrategyRegistry stub."""
+
+    def __init__(self) -> None:
+        self._strategies: dict[str, FakeStrategyRecord] = {}
+
+    async def get(self, strategy_id: str) -> FakeStrategyRecord | None:
+        return self._strategies.get(strategy_id)
+
+
+class TestCreateBotAccountStatus:
+    """봇 생성 시 계좌 상태 검증 테스트."""
+
+    @pytest.fixture
+    def account_service(self):
+        svc = FakeAccountService()
+        svc._accounts["test"] = FakeAccount("test", status="active")
+        return svc
+
+    @pytest.fixture
+    def suspended_account_service(self):
+        svc = FakeAccountService()
+        svc._accounts["test"] = FakeAccount("test", status="suspended")
+        return svc
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["s1"] = FakeStrategyRecord("s1")
+        return reg
+
+    @pytest.fixture
+    def client_suspended(
+        self, bot_manager, suspended_account_service, strategy_registry
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=suspended_account_service,
+            strategy_registry=strategy_registry,
+        )
+        return TestClient(app)
+
+    def test_create_bot_suspended_account_returns_409(self, client_suspended):
+        """정지된 계좌에서 봇 생성 → 409 Conflict."""
+        resp = client_suspended.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-1",
+                "strategy_id": "s1",
+                "account_id": "test",
+            },
+        )
+        assert resp.status_code == 409
+        assert "suspended" in resp.json()["detail"]
+
+    def test_create_bot_deleted_account_returns_409(
+        self, bot_manager, strategy_registry
+    ):
+        """삭제된 계좌에서 봇 생성 → 409 Conflict."""
+        account_svc = FakeAccountService()
+        account_svc._accounts["deleted-acc"] = FakeAccount(
+            "deleted-acc", status="deleted"
+        )
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=account_svc,
+            strategy_registry=strategy_registry,
+        )
+        client = TestClient(app)
+        resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-1",
+                "strategy_id": "s1",
+                "account_id": "deleted-acc",
+            },
+        )
+        assert resp.status_code == 409
+        assert "deleted" in resp.json()["detail"]
+
+
 class TestBotLifecycle:
     def test_start_stop_lifecycle(self, client, bot_manager):
         """봇 시작 → 중지 lifecycle."""
