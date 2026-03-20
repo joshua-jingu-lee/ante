@@ -1,0 +1,24 @@
+services:
+  ante-qa:
+    build:
+      context: .
+      dockerfile: Dockerfile.qa
+    container_name: ante-qa
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTE_TEST_MODE=1
+      - TELEGRAM_BOT_TOKEN=dummy
+      - TELEGRAM_CHAT_ID=dummy
+    volumes:
+      - qa-db:/app/db
+      - qa-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  qa-db:
+  qa-data:

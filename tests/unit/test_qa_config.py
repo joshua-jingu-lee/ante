@@ -29,7 +29,16 @@ class TestSystemQaToml:
     def test_required_sections(self) -> None:
         with open(self.path, "rb") as f:
             config = tomllib.load(f)
-        required = ["system", "db", "web", "broker", "treasury"]
+        required = [
+            "system",
+            "db",
+            "web",
+            "broker",
+            "treasury",
+            "reconcile",
+            "audit",
+            "approval",
+        ]
         for section in required:
             assert section in config, f"[{section}] 섹션이 누락되었습니다"
 
