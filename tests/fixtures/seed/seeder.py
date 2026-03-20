@@ -18,13 +18,13 @@ SEED_SQL_PATH = SEED_DIR / "seed.sql"
 
 async def _ensure_schemas(db: Database) -> None:
     """모든 모듈의 DB 스키마를 생성한다."""
+    from ante.account.service import _CREATE_TABLE_SQL as ACCOUNT_SCHEMA
     from ante.approval.service import APPROVAL_SCHEMA
     from ante.audit.logger import AUDIT_SCHEMA
     from ante.bot.manager import BOT_SCHEMA
     from ante.bot.signal_key import SIGNAL_KEY_SCHEMA
     from ante.broker.order_registry import ORDER_REGISTRY_SCHEMA
     from ante.config.dynamic import DYNAMIC_CONFIG_SCHEMA
-    from ante.config.system_state import SYSTEM_STATE_SCHEMA
     from ante.eventbus.history import EVENT_LOG_SCHEMA
     from ante.member.service import MEMBER_SCHEMA
     from ante.report.store import REPORT_SCHEMA
@@ -34,8 +34,26 @@ async def _ensure_schemas(db: Database) -> None:
     from ante.treasury.treasury import TREASURY_SCHEMA
     from ante.web.session import SESSION_SCHEMA
 
+    # system_state 테이블은 즉시 DROP하지 않고 레거시로 유지
+    legacy_system_state_schema = """
+    CREATE TABLE IF NOT EXISTS system_state (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS system_state_history (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        old_state  TEXT NOT NULL,
+        new_state  TEXT NOT NULL,
+        reason     TEXT DEFAULT '',
+        changed_by TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    """
+
     schemas = [
-        SYSTEM_STATE_SCHEMA,
+        legacy_system_state_schema,
+        ACCOUNT_SCHEMA,
         DYNAMIC_CONFIG_SCHEMA,
         MEMBER_SCHEMA,
         STRATEGY_REGISTRY_SCHEMA,
@@ -87,7 +105,7 @@ async def inject_seed_data(db_path: str, data_dir: str | None = None) -> dict:
                 "bots",
                 "bot_budgets",
                 "treasury_state",
-                "system_state",
+                "accounts",
                 "members",
             ],
         }

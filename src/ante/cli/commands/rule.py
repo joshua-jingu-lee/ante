@@ -23,7 +23,6 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_rule_engine():  # noqa: ANN202
-    from ante.config.system_state import SystemState
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.rule.engine import RuleEngine
@@ -31,9 +30,7 @@ async def _create_rule_engine():  # noqa: ANN202
     db = Database("db/ante.db")
     await db.connect()
     eventbus = EventBus()
-    system_state = SystemState(db, eventbus)
-    await system_state.initialize()
-    engine = RuleEngine(eventbus, system_state)
+    engine = RuleEngine(eventbus=eventbus)
     return engine, db
 
 

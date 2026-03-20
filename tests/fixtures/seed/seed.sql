@@ -9,13 +9,13 @@ VALUES
     ('momentum-001', 'SimpleMomentum', '0.1.0', 'strategies/simple_momentum.py', 'registered', datetime('now'), '단순 모멘텀 전략 (E2E 테스트용)', 'seed');
 
 -- ── 봇 설정 ──────────────────────────────────────────
-INSERT OR IGNORE INTO bots (bot_id, name, strategy_id, bot_type, config_json, auto_start, status)
+INSERT OR IGNORE INTO bots (bot_id, name, strategy_id, account_id, config_json, auto_start, status)
 VALUES
-    ('seed-bot-live', 'Seed Live Bot', 'daily-buy-001', 'live',
-     '{"bot_id":"seed-bot-live","strategy_id":"daily-buy-001","name":"Seed Live Bot","bot_type":"live","interval_seconds":60,"exchange":"KRX"}',
+    ('seed-bot-live', 'Seed Live Bot', 'daily-buy-001', 'test',
+     '{"bot_id":"seed-bot-live","strategy_id":"daily-buy-001","name":"Seed Live Bot","account_id":"test","interval_seconds":60}',
      0, 'created'),
-    ('seed-bot-paper', 'Seed Paper Bot', 'daily-buy-001', 'paper',
-     '{"bot_id":"seed-bot-paper","strategy_id":"daily-buy-001","name":"Seed Paper Bot","bot_type":"paper","interval_seconds":60,"paper_initial_balance":10000000.0,"exchange":"KRX"}',
+    ('seed-bot-paper', 'Seed Paper Bot', 'daily-buy-001', 'test',
+     '{"bot_id":"seed-bot-paper","strategy_id":"daily-buy-001","name":"Seed Paper Bot","account_id":"test","interval_seconds":60,"paper_initial_balance":10000000.0}',
      0, 'created');
 
 -- ── 자금 배분 ────────────────────────────────────────
@@ -30,7 +30,7 @@ VALUES
     ('allocated', 15000000.0),
     ('unallocated', 85000000.0);
 
--- ── 시스템 상태 ──────────────────────────────────────
+-- ── 시스템 상태 (레거시, 즉시 DROP하지 않음) ──────────
 INSERT OR IGNORE INTO system_state (key, value)
 VALUES
     ('trading_state', 'active');

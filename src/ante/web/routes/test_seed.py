@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ante.web.deps import (
     get_bot_manager_optional,
     get_db,
-    get_system_state_optional,
     get_treasury_optional,
 )
 from ante.web.schemas import SeedResetResponse
@@ -73,7 +72,6 @@ BASE_SQL = SCENARIOS_DIR / "_base.sql"
 )
 async def reset_seed(
     db: Annotated[Any, Depends(get_db)],
-    system_state: Annotated[Any | None, Depends(get_system_state_optional)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     treasury: Annotated[Any | None, Depends(get_treasury_optional)],
     scenario: str = Query(..., description="시나리오 이름 (예: login-dashboard)"),
@@ -114,22 +112,17 @@ async def reset_seed(
     await db.execute_script(scenario_content)
 
     # 5. 메모리 기반 매니저 리로드
-    await _reload_managers(system_state, bot_manager, treasury)
+    await _reload_managers(bot_manager, treasury)
 
     logger.info("시드 리셋 완료: scenario=%s", scenario)
     return {"ok": True, "scenario": scenario}
 
 
 async def _reload_managers(
-    system_state: Any | None,
     bot_manager: Any | None,
     treasury: Any | None,
 ) -> None:
     """시딩 후 메모리 기반 매니저들을 DB에서 리로드한다."""
-    # SystemState (인메모리 trading_state 동기화)
-    if system_state is not None and hasattr(system_state, "_load_from_db"):
-        await system_state._load_from_db()  # noqa: SLF001
-
     # BotManager
     if bot_manager is not None:
         await bot_manager.load_from_db()

@@ -267,12 +267,24 @@ class AccountService:
             AccountNotFoundError: 계좌를 찾을 수 없음.
         """
         account = await self.get(account_id)
+        if account.status == AccountStatus.SUSPENDED:
+            return
         account.status = AccountStatus.SUSPENDED
         account.updated_at = datetime.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
             (AccountStatus.SUSPENDED, account.updated_at.isoformat(), account_id),
+        )
+
+        from ante.eventbus.events import AccountSuspendedEvent
+
+        await self._eventbus.publish(
+            AccountSuspendedEvent(
+                account_id=account_id,
+                reason=reason,
+                suspended_by=suspended_by,
+            )
         )
 
         logger.info(
@@ -294,6 +306,8 @@ class AccountService:
             raise AccountDeletedException(
                 f"삭제된 계좌 '{account_id}'는 활성화할 수 없습니다."
             )
+        if account.status == AccountStatus.ACTIVE:
+            return
 
         account.status = AccountStatus.ACTIVE
         account.updated_at = datetime.now(UTC)
@@ -301,6 +315,15 @@ class AccountService:
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
             (AccountStatus.ACTIVE, account.updated_at.isoformat(), account_id),
+        )
+
+        from ante.eventbus.events import AccountActivatedEvent
+
+        await self._eventbus.publish(
+            AccountActivatedEvent(
+                account_id=account_id,
+                activated_by=activated_by,
+            )
         )
 
         logger.info("계좌 활성화: %s (요청자: %s)", account_id, activated_by)

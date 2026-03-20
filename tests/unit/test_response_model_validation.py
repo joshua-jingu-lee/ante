@@ -63,7 +63,7 @@ class TestSystemResponseModels:
     """system.py 핸들러 반환값과 응답 모델 호환성."""
 
     def test_status_response_basic(self):
-        """GET /api/system/status — 기본 응답 (system_state 없음)."""
+        """GET /api/system/status — 기본 응답 (account_service 없음)."""
         data = {"status": "running", "version": "0.1.0"}
         model = StatusResponse.model_validate(data)
         assert model.status == "running"
@@ -71,7 +71,7 @@ class TestSystemResponseModels:
         assert model.trading_status is None
 
     def test_status_response_with_trading_status(self):
-        """GET /api/system/status — system_state가 있을 때."""
+        """GET /api/system/status — account_service가 있을 때."""
         data = {
             "status": "running",
             "version": "0.1.0",

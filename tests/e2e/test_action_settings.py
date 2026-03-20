@@ -56,9 +56,10 @@ def _find_config(configs: list[dict], key: str) -> dict | None:
 
 def _api_set_system_state(api_url: str, action: str, reason: str = "") -> None:
     """API로 시스템 상태를 변경한다."""
+    endpoint = "halt" if action == "halt" else "activate"
     resp = httpx.post(
-        f"{api_url}/system/kill-switch",
-        json={"action": action, "reason": reason},
+        f"{api_url}/system/{endpoint}",
+        json={"reason": reason},
         timeout=10,
     )
     assert resp.status_code == 200, f"시스템 상태 변경 실패: {resp.text}"

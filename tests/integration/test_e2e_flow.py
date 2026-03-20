@@ -17,7 +17,7 @@ import pytest
 from ante.bot.config import BotConfig
 from ante.bot.manager import BotManager
 from ante.broker.base import BrokerAdapter
-from ante.config import Config, DynamicConfigService, SystemState
+from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
 from ante.eventbus.events import (
@@ -244,10 +244,6 @@ async def system(tmp_path: Path):
     await event_history.initialize()
     eventbus.use(event_history.record)
 
-    # SystemState
-    system_state = SystemState(db=db, eventbus=eventbus)
-    await system_state.initialize()
-
     # DynamicConfig
     dynamic_config = DynamicConfigService(db=db, eventbus=eventbus)
     await dynamic_config.initialize()
@@ -257,7 +253,7 @@ async def system(tmp_path: Path):
     await strategy_registry.initialize()
 
     # RuleEngine
-    rule_engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+    rule_engine = RuleEngine(eventbus=eventbus)
     rule_engine.start()
 
     # Treasury
@@ -283,7 +279,10 @@ async def system(tmp_path: Path):
 
     # MockBroker + APIGateway
     broker = MockBrokerAdapter()
-    api_gateway = APIGateway(broker=broker, eventbus=eventbus)
+    from ante.gateway.gateway import _SingleBrokerAccountService
+
+    single_broker_svc = _SingleBrokerAccountService(broker)
+    api_gateway = APIGateway(account_service=single_broker_svc, eventbus=eventbus)
     api_gateway.start()
 
     # AutoFill 시뮬레이터
@@ -298,7 +297,6 @@ async def system(tmp_path: Path):
         "config": config,
         "db": db,
         "eventbus": eventbus,
-        "system_state": system_state,
         "strategy_registry": strategy_registry,
         "rule_engine": rule_engine,
         "treasury": treasury,
@@ -563,7 +561,6 @@ class TestE2EOrderFlow:
         config = BotConfig(
             bot_id=bot_id,
             strategy_id=strategy_id,
-            bot_type="paper",
             interval_seconds=3600,  # 1시간 — 한 번만 실행 후 대기
         )
         await bot_manager.create_bot(config, strategy_cls, ctx)
@@ -636,7 +633,6 @@ class TestE2EOrderFlow:
         config = BotConfig(
             bot_id=bot_id,
             strategy_id="buy_once_v1.0",
-            bot_type="paper",
             interval_seconds=3600,
         )
         await bot_manager.create_bot(config, strategy_cls, ctx)
@@ -678,7 +674,6 @@ class TestE2EPerformance:
         config = BotConfig(
             bot_id=bot_id,
             strategy_id="buy_once_v1.0",
-            bot_type="paper",
             interval_seconds=3600,
         )
         await bot_manager.create_bot(config, strategy_cls, ctx)
@@ -795,7 +790,6 @@ class TestE2EFullPipeline:
         bot_config = BotConfig(
             bot_id=bot_id,
             strategy_id=record.strategy_id,
-            bot_type="paper",
             interval_seconds=3600,
         )
         await bot_manager.create_bot(bot_config, strategy_cls, ctx)

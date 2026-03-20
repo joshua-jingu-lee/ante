@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ante.config import Config, DynamicConfigService, SystemState
+from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
 
@@ -54,7 +54,7 @@ class Services:
     db: Database | None = None
     eventbus: EventBus | None = None
     event_history: EventHistoryStore | None = None
-    system_state: SystemState | None = None
+    account_service: Any = None
     dynamic_config: DynamicConfigService | None = None
     audit_logger: Any = None
     member_service: Any = None
@@ -91,7 +91,7 @@ class Services:
 
 
 async def _init_core(s: Services) -> None:
-    """Config, Database, EventBus, SystemState, DynamicConfig 초기화."""
+    """Config, Database, EventBus, AccountService, DynamicConfig 초기화."""
     # Config
     s.config = Config.load()
     s.config.validate()
@@ -118,10 +118,12 @@ async def _init_core(s: Services) -> None:
     s.eventbus.use(s.event_history.record)
     logger.info("EventBus 초기화 완료 (history_size=%d)", history_size)
 
-    # SystemState (킬 스위치)
-    s.system_state = SystemState(db=s.db, eventbus=s.eventbus)
-    await s.system_state.initialize()
-    logger.info("SystemState 초기화 완료: %s", s.system_state.trading_state)
+    # AccountService
+    from ante.account import AccountService
+
+    s.account_service = AccountService(db=s.db, eventbus=s.eventbus)
+    await s.account_service.initialize()
+    logger.info("AccountService 초기화 완료")
 
     # DynamicConfigService
     s.dynamic_config = DynamicConfigService(db=s.db, eventbus=s.eventbus)
@@ -304,8 +306,8 @@ async def _init_broker(s: Services) -> None:
     stop_order_manager.start()
 
     if s.broker:
-        # AccountService가 초기화된 경우 account_service 기반 라우팅 사용
-        if hasattr(s, "account_service") and s.account_service is not None:
+        # AccountService 기반 라우팅 사용
+        if s.account_service is not None:
             account_svc = s.account_service
         else:
             # AccountService 미초기화 시 단일 브로커 래퍼로 폴백
@@ -880,7 +882,7 @@ async def _init_notification(s: Services) -> None:
             confirm_timeout=s.config.get("telegram.command.confirm_timeout", 30.0),
             bot_manager=s.bot_manager,
             treasury=s.treasury,
-            system_state=s.system_state,
+            account_service=s.account_service,
             approval_service=s.approval_service,
         )
         s.telegram_receiver.start()
@@ -917,7 +919,7 @@ async def _init_web(s: Services) -> None:
         strategy_registry=s.strategy_registry,
         dynamic_config=s.dynamic_config,
         approval_service=s.approval_service,
-        system_state=s.system_state,
+        account_service=s.account_service,
     )
 
     import uvicorn
@@ -1046,7 +1048,7 @@ async def main() -> None:
     """Main asyncio entrypoint.
 
     초기화 순서 (architecture.md 참조):
-    1. Core: Config, Database, EventBus, SystemState, DynamicConfig
+    1. Core: Config, Database, EventBus, AccountService, DynamicConfig
     2. Services: AuditLogger, MemberService, InstrumentService
     3. Trading: Strategy, Rule, Treasury, Trade, Bot, Broker, Gateway
     4. Feed: DataPipeline, Backtest, Report

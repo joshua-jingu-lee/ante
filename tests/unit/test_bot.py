@@ -8,6 +8,7 @@ from ante.bot import Bot, BotConfig, BotError, BotManager, BotStatus
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
+    AccountSuspendedEvent,
     BotErrorEvent,
     BotStartedEvent,
     BotStopEvent,
@@ -16,7 +17,6 @@ from ante.eventbus.events import (
     OrderFilledEvent,
     OrderRejectedEvent,
     OrderRequestEvent,
-    TradingStateChangedEvent,
 )
 from ante.strategy import (
     DataProvider,
@@ -588,17 +588,17 @@ class TestBotManager:
 
         assert manager.get_bot("bot1").status == BotStatus.STOPPED
 
-    async def test_halt_stops_all(self, manager, eventbus, ctx):
-        """TradingStateChanged → HALTED 시 전체 봇 중지."""
+    async def test_account_suspended_stops_bots(self, manager, eventbus, ctx):
+        """AccountSuspendedEvent 시 해당 계좌의 봇만 중지."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
         await eventbus.publish(
-            TradingStateChangedEvent(
-                old_state="active",
-                new_state="halted",
+            AccountSuspendedEvent(
+                account_id="test",
                 reason="critical",
+                suspended_by="system",
             )
         )
 

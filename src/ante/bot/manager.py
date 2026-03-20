@@ -151,17 +151,17 @@ class BotManager:
     def _subscribe_events(self) -> None:
         """시스템 이벤트 구독."""
         from ante.eventbus.events import (
+            AccountActivatedEvent,
+            AccountSuspendedEvent,
             BotErrorEvent,
             BotStartedEvent,
             BotStopEvent,
             BotStoppedEvent,
-            TradingStateChangedEvent,
         )
 
         self._eventbus.subscribe(BotStopEvent, self._on_bot_stop_request)
-        self._eventbus.subscribe(
-            TradingStateChangedEvent, self._on_trading_state_changed
-        )
+        self._eventbus.subscribe(AccountSuspendedEvent, self._on_account_suspended)
+        self._eventbus.subscribe(AccountActivatedEvent, self._on_account_activated)
         self._eventbus.subscribe(BotErrorEvent, self._on_bot_error)
         self._eventbus.subscribe(BotStartedEvent, self._on_bot_started)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped)
@@ -434,15 +434,33 @@ class BotManager:
         if event.bot_id in self._bots:
             await self.stop_bot(event.bot_id)
 
-    async def _on_trading_state_changed(self, event: object) -> None:
-        """킬 스위치 HALTED 시 전체 봇 중지."""
-        from ante.eventbus.events import TradingStateChangedEvent
+    async def _on_account_suspended(self, event: object) -> None:
+        """계좌 정지 시 해당 계좌의 봇만 중지."""
+        from ante.eventbus.events import AccountSuspendedEvent
 
-        if not isinstance(event, TradingStateChangedEvent):
+        if not isinstance(event, AccountSuspendedEvent):
             return
-        if event.new_state == "halted":
-            logger.warning("시스템 HALTED — 전체 봇 중지")
-            await self.stop_all()
+        account_id = event.account_id
+        stopped = []
+        for bot in list(self._bots.values()):
+            if bot.config.account_id == account_id and bot.status == BotStatus.RUNNING:
+                await bot.stop()
+                stopped.append(bot.bot_id)
+        if stopped:
+            logger.warning(
+                "계좌 정지 — 봇 %d개 중지: account=%s, bots=%s",
+                len(stopped),
+                account_id,
+                stopped,
+            )
+
+    async def _on_account_activated(self, event: object) -> None:
+        """계좌 활성화 시 로깅만 수행 (자동 재시작 안 함)."""
+        from ante.eventbus.events import AccountActivatedEvent
+
+        if not isinstance(event, AccountActivatedEvent):
+            return
+        logger.info("계좌 활성화: account=%s", event.account_id)
 
     async def _on_bot_started(self, event: object) -> None:
         """봇 시작 알림 발행."""

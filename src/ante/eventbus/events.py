@@ -271,16 +271,6 @@ class BotRestartExhaustedEvent(Event):
 
 
 @dataclass(frozen=True)
-class TradingStateChangedEvent(Event):
-    """SystemState → EventBus: 거래 상태(킬 스위치) 변경."""
-
-    old_state: str = ""
-    new_state: str = ""
-    reason: str = ""
-    changed_by: str = ""
-
-
-@dataclass(frozen=True)
 class SystemStartedEvent(Event):
     """Main → EventBus: 시스템 초기화 완료."""
 
