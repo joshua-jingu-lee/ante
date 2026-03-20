@@ -1,0 +1,47 @@
+# Ante QA 테스트 전용 설정
+# docker-compose.qa.yml에서 사용한다.
+# 프론트엔드 없이 백엔드 API + CLI만 검증하는 경량 환경.
+# Mock 브로커로 실제 거래소 연결 없이 전체 기능을 검증한다.
+
+[system]
+log_level = "DEBUG"
+timezone = "Asia/Seoul"
+
+[db]
+path = "/app/db/ante.db"
+
+[data]
+path = "/app/data/"
+
+[web]
+enabled = true
+host = "0.0.0.0"
+port = 8000
+
+[eventbus]
+history_size = 1000
+
+[broker]
+type = "mock"
+fill_mode = "immediate"
+initial_cash = 100000000.0
+default_price = 50000.0
+commission_rate = 0.00015
+sell_tax_rate = 0.0023
+
+[treasury]
+sync_interval_seconds = 60
+
+[reconcile]
+enabled = false
+
+[audit]
+retention_days = 30
+
+[approval.auto_approve]
+enabled = true
+
+[approval.auto_approve.rules]
+bot_stop = true
+bot_create_paper = true
+budget_change_max = 10000000
