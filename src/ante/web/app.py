@@ -49,8 +49,10 @@ def create_app(**services: Any) -> FastAPI:
     )
 
     from ante.web.middleware.audit import AuditMiddleware
+    from ante.web.middleware.token_auth import TokenAuthMiddleware
 
     app.add_middleware(AuditMiddleware)
+    app.add_middleware(TokenAuthMiddleware)
 
     for name, service in services.items():
         setattr(app.state, name, service)
