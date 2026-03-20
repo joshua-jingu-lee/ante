@@ -15,6 +15,7 @@ from ante.rule.global_rules import (
     TotalExposureLimitRule,
     TradingHoursRule,
 )
+from ante.rule.manager import RuleEngineManager
 from ante.rule.strategy_rules import (
     PositionSizeRule,
     TradeFrequencyRule,
@@ -30,6 +31,7 @@ __all__ = [
     "RuleConfigError",
     "RuleContext",
     "RuleEngine",
+    "RuleEngineManager",
     "RuleError",
     "RuleEvaluation",
     "RuleResult",

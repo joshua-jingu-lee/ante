@@ -185,7 +185,7 @@ async def _init_trading(s: Services) -> None:
     # RuleEngine
     from ante.rule import RuleEngine
 
-    s.rule_engine = RuleEngine(eventbus=s.eventbus, system_state=s.system_state)
+    s.rule_engine = RuleEngine(eventbus=s.eventbus)
     s.rule_engine.start()
 
     rule_configs = s.config.get("rules.global", [])
