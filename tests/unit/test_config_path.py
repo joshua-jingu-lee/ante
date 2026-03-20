@@ -1,14 +1,14 @@
 """Config 경로 탐색 및 ante init 테스트."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.config.config import resolve_config_dir
-from ante.member.models import Member, MemberRole, MemberType
+from ante.member.models import Member, MemberRole, MemberStatus, MemberType
 
 # ── resolve_config_dir ──────────────────────────
 
@@ -88,36 +88,72 @@ _MOCK_MASTER = Member(
     role=MemberRole.MASTER,
     org="default",
     name="Test Master",
-    status="active",
+    emoji="🦊",
+    status=MemberStatus.ACTIVE,
     scopes=[],
+    token_hash="hash",
+    password_hash="hash",
+    recovery_key_hash="hash",
+    created_at="2026-01-01 00:00:00",
+    created_by="system",
+    token_expires_at="2026-04-01 00:00:00",
 )
+
+_MOCK_TOKEN = "ante_hk_test_token_path"
+_MOCK_RECOVERY_KEY = "ANTE-RK-TEST-PATH-XXXX-YYYY"
+
+_INIT_INPUT = "\n".join(
+    [
+        "test-master",  # Member ID
+        "Test Master",  # 이름
+        "pass1234",  # 패스워드
+        "pass1234",  # 패스워드 확인
+        "n",  # KIS 스킵
+        "n",  # 텔레그램 스킵
+        "n",  # data.go.kr 스킵
+        "n",  # DART 스킵
+    ]
+)
+
+
+def _mock_bootstrap(*args, **kwargs):
+    return (
+        {"member_id": "test-master", "role": MemberRole.MASTER, "emoji": "🦊"},
+        _MOCK_TOKEN,
+        _MOCK_RECOVERY_KEY,
+    )
+
+
+def _patch_init():
+    return [
+        patch(
+            "ante.cli.commands.init._bootstrap_master",
+            new=AsyncMock(side_effect=_mock_bootstrap),
+        ),
+        patch("ante.cli.main.authenticate_member"),
+    ]
 
 
 class TestInitCommand:
     @pytest.fixture
     def runner(self):
-        r = CliRunner()
-        original_invoke = r.invoke
-
-        def _invoke_with_auth(cli_cmd, args=None, **kwargs):
-            with patch("ante.cli.main.authenticate_member") as mock_auth:
-
-                def _set_member(ctx):
-                    ctx.obj = ctx.obj or {}
-                    ctx.obj["member"] = _MOCK_MASTER
-
-                mock_auth.side_effect = _set_member
-                return original_invoke(cli_cmd, args, **kwargs)
-
-        r.invoke = _invoke_with_auth
-        return r
+        return CliRunner()
 
     def test_init_creates_files(self, runner, tmp_path: Path) -> None:
         """ante init이 설정 파일을 생성한다."""
         target = tmp_path / "new_config"
-        result = runner.invoke(cli, ["init", "--dir", str(target)])
-        assert result.exit_code == 0
-        assert "초기화 완료" in result.output
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(
+                cli, ["init", "--dir", str(target)], input=_INIT_INPUT
+            )
+        finally:
+            for p in patches:
+                p.stop()
+        assert result.exit_code == 0, result.output
+        assert "초기 설정 완료" in result.output
         assert (target / "system.toml").exists()
         assert (target / "secrets.env").exists()
 
@@ -127,12 +163,20 @@ class TestInitCommand:
         target.mkdir()
         (target / "system.toml").write_text("existing")
 
-        result = runner.invoke(cli, ["init", "--dir", str(target)])
+        with patch("ante.cli.main.authenticate_member"):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
         assert "이미 존재합니다" in result.output
 
     def test_init_default_dir(self, runner, tmp_path: Path) -> None:
         """--dir 미지정 시 ~/.config/ante/ 사용."""
-        with patch.object(Path, "home", return_value=tmp_path):
-            result = runner.invoke(cli, ["init"])
-        assert result.exit_code == 0
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            with patch.object(Path, "home", return_value=tmp_path):
+                result = runner.invoke(cli, ["init"], input=_INIT_INPUT)
+        finally:
+            for p in patches:
+                p.stop()
+        assert result.exit_code == 0, result.output
         assert (tmp_path / ".config" / "ante" / "system.toml").exists()
