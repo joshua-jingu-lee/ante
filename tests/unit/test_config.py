@@ -28,7 +28,7 @@ class TestConfigLoad:
         config = Config.load(config_dir=tmp_path)
 
         assert config.get("db.path") == "db/ante.db"
-        assert config.get("web.port") == 8000
+        assert config.get("web.port") == 3982
 
     def test_load_with_dotenv(self, tmp_path: Path) -> None:
         """.env 파일에서 비밀값을 로드한다."""

@@ -25,7 +25,7 @@ path = "db/ante.db"
 
 [web]
 host = "0.0.0.0"
-port = 8000
+port = 3982
 """
 
 SECRETS_ENV_TEMPLATE = """\

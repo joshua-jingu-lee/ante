@@ -43,7 +43,7 @@ playwright install chromium
 docker compose -f docker-compose.test.yml up --build -d ante-test
 
 # 호스트에서 테스트 실행
-pytest tests/e2e/ -m e2e --base-url http://localhost:8000 -v
+pytest tests/e2e/ -m e2e --base-url http://localhost:3982 -v
 
 # 정리
 docker compose -f docker-compose.test.yml down -v
