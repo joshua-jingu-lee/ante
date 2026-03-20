@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +13,7 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+from ante.web.middleware import token_auth as _ta_mod  # noqa: E402
 
 
 @dataclass
@@ -37,6 +39,11 @@ class FakeMember:
 
 class TestTokenAuthMiddleware:
     """TokenAuthMiddleware가 토큰 인증 성공 시 last_active_at을 갱신한다."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_throttle_cache(self) -> None:
+        """각 테스트 전에 스로틀링 캐시를 초기화한다."""
+        _ta_mod._last_updated.clear()
 
     @pytest.fixture
     def agent_member(self) -> FakeMember:
@@ -149,3 +156,40 @@ class TestTokenAuthMiddleware:
         # halt는 account_service 없어서 503이지만 미들웨어는 동작함
         member_service.authenticate.assert_called_once_with("ante_ak_test_token_123")
         member_service.update_last_active.assert_called_once_with("test-agent-01")
+
+    def test_throttle_skips_update_within_interval(
+        self,
+        client: TestClient,
+        member_service: AsyncMock,
+    ) -> None:
+        """5분 이내 재요청 시 update_last_active를 호출하지 않는다."""
+        headers = {"Authorization": "Bearer ante_ak_test_token_123"}
+
+        # 첫 번째 요청: 갱신 발생
+        client.get("/api/system/health", headers=headers)
+        assert member_service.update_last_active.call_count == 1
+
+        # 두 번째 요청: 5분 이내이므로 스킵
+        client.get("/api/system/health", headers=headers)
+        assert member_service.update_last_active.call_count == 1
+
+    def test_throttle_updates_after_interval(
+        self,
+        client: TestClient,
+        member_service: AsyncMock,
+    ) -> None:
+        """5분 경과 후 재요청 시 update_last_active를 다시 호출한다."""
+        headers = {"Authorization": "Bearer ante_ak_test_token_123"}
+
+        # 첫 번째 요청
+        client.get("/api/system/health", headers=headers)
+        assert member_service.update_last_active.call_count == 1
+
+        # 캐시를 6분 전으로 조작
+        _ta_mod._last_updated["test-agent-01"] = datetime.now(UTC) - timedelta(
+            minutes=6
+        )
+
+        # 두 번째 요청: 간격 초과이므로 갱신 발생
+        client.get("/api/system/health", headers=headers)
+        assert member_service.update_last_active.call_count == 2
