@@ -142,19 +142,24 @@ def status(ctx: click.Context) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_status() -> dict:
-        from ante.config.system_state import SystemState
+        from ante.account.service import AccountService
 
         db, eventbus = await _create_services()
         try:
-            state = SystemState(db, eventbus)
-            await state.initialize()
+            account_service = AccountService(db=db, eventbus=eventbus)
+            await account_service.initialize()
+
+            from ante.account.models import AccountStatus
+
+            accounts = await account_service.list()
+            suspended = [a for a in accounts if a.status == AccountStatus.SUSPENDED]
 
             # 봇 수 조회
             row = await db.fetch_one("SELECT count(*) as cnt FROM bots")
             bot_count = row["cnt"] if row else 0
 
             return {
-                "trading_state": state.trading_state.value,
+                "trading_state": "suspended" if suspended else "active",
                 "bot_count": bot_count,
             }
         finally:
@@ -180,13 +185,13 @@ def halt(ctx: click.Context, reason: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_halt() -> dict:
-        from ante.config.system_state import SystemState, TradingState
+        from ante.account.service import AccountService
 
         db, eventbus = await _create_services()
         try:
-            state = SystemState(db, eventbus)
-            await state.initialize()
-            await state.set_state(TradingState.HALTED, reason=reason, changed_by=actor)
+            account_service = AccountService(db=db, eventbus=eventbus)
+            await account_service.initialize()
+            count = await account_service.suspend_all(reason=reason, suspended_by=actor)
 
             await _audit_log(
                 db,
@@ -196,12 +201,12 @@ def halt(ctx: click.Context, reason: str) -> None:
                 detail=reason,
             )
 
-            return {"trading_state": state.trading_state.value}
+            return {"suspended_count": count}
         finally:
             await db.close()
 
     result = _run(_run_halt())
-    fmt.success("시스템 HALTED — 전체 거래 중지", result)
+    fmt.success(f"시스템 HALTED — {result['suspended_count']}개 계좌 거래 중지", result)
 
 
 @system.command()
@@ -215,13 +220,13 @@ def activate(ctx: click.Context, reason: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_activate() -> dict:
-        from ante.config.system_state import SystemState, TradingState
+        from ante.account.service import AccountService
 
         db, eventbus = await _create_services()
         try:
-            state = SystemState(db, eventbus)
-            await state.initialize()
-            await state.set_state(TradingState.ACTIVE, reason=reason, changed_by=actor)
+            account_service = AccountService(db=db, eventbus=eventbus)
+            await account_service.initialize()
+            count = await account_service.activate_all(activated_by=actor)
 
             await _audit_log(
                 db,
@@ -231,9 +236,9 @@ def activate(ctx: click.Context, reason: str) -> None:
                 detail=reason,
             )
 
-            return {"trading_state": state.trading_state.value}
+            return {"activated_count": count}
         finally:
             await db.close()
 
     result = _run(_run_activate())
-    fmt.success("시스템 ACTIVE — 거래 재개", result)
+    fmt.success(f"시스템 ACTIVE — {result['activated_count']}개 계좌 거래 재개", result)

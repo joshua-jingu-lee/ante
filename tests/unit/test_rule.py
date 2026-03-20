@@ -497,8 +497,8 @@ class TestRuleEngine:
         """RuleEngine에 account_id가 설정된다."""
         assert engine.account_id == "domestic"
 
-    def test_engine_no_system_state(self, eventbus):
-        """SystemState 없이 AccountService만으로 동작."""
+    def test_engine_with_account_service(self, eventbus):
+        """AccountService만으로 동작."""
         service = AsyncMock()
         engine = RuleEngine(
             eventbus=eventbus,

@@ -2,14 +2,14 @@
 
 from pathlib import Path
 
-from ante.config import Config, DynamicConfigService, SystemState, TradingState
+from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
 from ante.eventbus.events import OrderRequestEvent
 
 
 async def test_full_initialization(tmp_path: Path) -> None:
-    """Config → Database → EventBus → SystemState → DynamicConfig 초기화."""
+    """Config → Database → EventBus → AccountService → DynamicConfig 초기화."""
     # 1. Config
     toml = tmp_path / "system.toml"
     toml.write_text(
@@ -28,10 +28,11 @@ async def test_full_initialization(tmp_path: Path) -> None:
     await history_store.initialize()
     eventbus.use(history_store.record)
 
-    # 4. SystemState
-    system_state = SystemState(db=db, eventbus=eventbus)
-    await system_state.initialize()
-    assert system_state.trading_state == TradingState.ACTIVE
+    # 4. AccountService
+    from ante.account.service import AccountService
+
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
 
     # 5. DynamicConfigService
     dynamic_config = DynamicConfigService(db=db, eventbus=eventbus)
@@ -51,9 +52,9 @@ async def test_full_initialization(tmp_path: Path) -> None:
     assert len(db_history) == 1
     assert db_history[0]["event_type"] == "OrderRequestEvent"
 
-    # SystemState 상태 변경 → 이벤트 발행 + DB 영속화
-    await system_state.set_state(TradingState.HALTED, reason="test", changed_by="test")
-    assert system_state.trading_state == TradingState.HALTED
+    # AccountService 기본 동작
+    accounts = await account_service.list()
+    assert isinstance(accounts, list)
 
     # DynamicConfig CRUD
     await dynamic_config.set("test.key", 42, category="test")
@@ -113,9 +114,11 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     await event_history.initialize()
     eventbus.use(event_history.record)
 
-    # 4. SystemState
-    system_state = SystemState(db=db, eventbus=eventbus)
-    await system_state.initialize()
+    # 4. AccountService
+    from ante.account.service import AccountService
+
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
 
     # 5. DynamicConfigService
     dynamic_config = DynamicConfigService(db=db, eventbus=eventbus)
@@ -189,8 +192,9 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     await report_store.initialize()
 
     # ── 검증 ──
-    # SystemState 활성화 상태
-    assert system_state.trading_state == TradingState.ACTIVE
+    # AccountService 계좌 목록 (초기 빈 상태)
+    accounts = await account_service.list()
+    assert isinstance(accounts, list)
 
     # Treasury 초기 잔고
     assert treasury.account_balance == 0.0
@@ -235,9 +239,6 @@ async def test_composition_root_with_web_api(tmp_path: Path) -> None:
     db = Database(str(tmp_path / "test.db"))
     await db.connect()
     eventbus = EventBus(history_size=100)
-
-    system_state = SystemState(db=db, eventbus=eventbus)
-    await system_state.initialize()
 
     from ante.treasury import Treasury
 

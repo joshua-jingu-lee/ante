@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time as time_mod
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -67,17 +68,21 @@ def treasury():
 
 
 @pytest.fixture
-def system_state():
-    from ante.config.system_state import TradingState
+def account_service():
+    """AccountService mock (모든 계좌 SUSPENDED 상태)."""
+    from ante.account.models import AccountStatus
 
-    mock = MagicMock()
-    mock.trading_state = TradingState.HALTED
-    mock.set_state = AsyncMock()
+    mock = AsyncMock()
+    # 기본: ACTIVE 계좌 1개
+    active_account = SimpleNamespace(account_id="test", status=AccountStatus.ACTIVE)
+    mock.list.return_value = [active_account]
+    mock.suspend_all = AsyncMock(return_value=1)
+    mock.activate_all = AsyncMock(return_value=1)
     return mock
 
 
 @pytest.fixture
-def receiver(adapter, bot_manager, treasury, system_state):
+def receiver(adapter, bot_manager, treasury, account_service):
     return TelegramCommandReceiver(
         adapter=adapter,
         allowed_user_ids=[12345],
@@ -85,7 +90,7 @@ def receiver(adapter, bot_manager, treasury, system_state):
         confirm_timeout=30.0,
         bot_manager=bot_manager,
         treasury=treasury,
-        system_state=system_state,
+        account_service=account_service,
     )
 
 
@@ -146,20 +151,20 @@ class TestCommands:
         assert "/help" in result
 
     async def test_status(self, receiver):
-        result = receiver._cmd_status([])
+        result = await receiver._cmd_status([])
         assert "거래 상태" in result
-        assert "halted" in result
+        assert "active" in result
         assert "봇" in result
 
     async def test_status_no_manager(self, receiver):
         receiver._bot_manager = None
-        result = receiver._cmd_status([])
+        result = await receiver._cmd_status([])
         assert "거래 상태" in result
 
-    async def test_status_no_state(self, receiver):
-        receiver._system_state = None
+    async def test_status_no_service(self, receiver):
+        receiver._account_service = None
         receiver._bot_manager = None
-        result = receiver._cmd_status([])
+        result = await receiver._cmd_status([])
         assert "조회할 수 없습니다" in result
 
     async def test_bots(self, receiver):
@@ -209,7 +214,7 @@ class TestCommands:
         assert "봇 할당: 0원 (0개)" in result
 
     async def test_balance_negative_pl(self, receiver, treasury):
-        """손실 시 음수 부호 및 📉 이모지."""
+        """손실 시 음수 부호."""
         treasury.get_summary.return_value = {
             "account_balance": 10_000_000,
             "purchasable_amount": 7_000_000,
@@ -221,7 +226,6 @@ class TestCommands:
             "bot_count": 2,
         }
         result = receiver._cmd_balance([])
-        assert "📉" in result
         assert "-200,000원" in result
 
     async def test_balance_no_treasury(self, receiver):
@@ -233,23 +237,25 @@ class TestCommands:
         result = await receiver._execute("unknown", [], 12345, 100)
         assert "알 수 없는 명령" in result
 
-    async def test_activate(self, receiver, system_state):
+    async def test_activate(self, receiver, account_service):
+        from ante.account.models import AccountStatus
+
+        suspended_account = SimpleNamespace(
+            account_id="test", status=AccountStatus.SUSPENDED
+        )
+        account_service.list.return_value = [suspended_account]
         result = await receiver._cmd_activate([])
         assert "거래가 재개되었습니다" in result
-        system_state.set_state.assert_called_once()
-        call_kwargs = system_state.set_state.call_args
-        assert call_kwargs.kwargs.get("suppress_notification") is True
+        account_service.activate_all.assert_called_once_with(activated_by="telegram")
 
-    async def test_activate_already_active(self, receiver, system_state):
-        from ante.config.system_state import TradingState
-
-        system_state.trading_state = TradingState.ACTIVE
+    async def test_activate_already_active(self, receiver, account_service):
+        # fixture default is ACTIVE
         result = await receiver._cmd_activate([])
         assert "이미 거래가 활성 상태입니다" in result
-        system_state.set_state.assert_not_called()
+        account_service.activate_all.assert_not_called()
 
-    async def test_activate_no_state(self, receiver):
-        receiver._system_state = None
+    async def test_activate_no_service(self, receiver):
+        receiver._account_service = None
         result = await receiver._cmd_activate([])
         assert "연결되지 않았습니다" in result
 
@@ -338,16 +344,16 @@ class TestConfirmation:
         assert "/confirm" in result
         assert "bot-1" in result
 
-    async def test_confirm_executes_halt(self, receiver, system_state):
+    async def test_confirm_executes_halt(self, receiver, account_service):
         """confirm으로 halt가 실행된다."""
         # 먼저 halt 요청
         await receiver._execute("halt", ["점검"], 12345, 100)
         # confirm 실행
         result = await receiver._handle_confirm(12345)
         assert "중지되었습니다" in result
-        system_state.set_state.assert_called_once()
-        call_kwargs = system_state.set_state.call_args
-        assert call_kwargs.kwargs.get("suppress_notification") is True
+        account_service.suspend_all.assert_called_once_with(
+            reason="점검", suspended_by="telegram"
+        )
 
     async def test_confirm_executes_stop(self, receiver, bot_manager):
         """confirm으로 stop이 실행된다."""
@@ -370,7 +376,7 @@ class TestConfirmation:
         result = await receiver._handle_confirm(12345)
         assert "시간이 초과" in result
 
-    async def test_confirm_within_timeout(self, receiver, system_state):
+    async def test_confirm_within_timeout(self, receiver, account_service):
         """타임아웃 내에 확인하면 실행."""
         receiver._pending_confirm[12345] = ("halt", [], time_mod.time() - 5)
         result = await receiver._handle_confirm(12345)
@@ -485,7 +491,7 @@ class TestIntegrationFlow:
         reply_text = receiver._reply.call_args[0][1]
         assert "거래 상태" in reply_text
 
-    async def test_full_halt_confirm_flow(self, receiver, system_state):
+    async def test_full_halt_confirm_flow(self, receiver, account_service):
         """halt → confirm → 실제 실행 흐름."""
         receiver._reply = AsyncMock()
 
@@ -514,15 +520,19 @@ class TestIntegrationFlow:
         reply_text = receiver._reply.call_args[0][1]
         assert "중지되었습니다" in reply_text
         assert "/activate" in reply_text
-        system_state.set_state.assert_called_once()
-        call_kwargs = system_state.set_state.call_args
-        assert call_kwargs.kwargs.get("suppress_notification") is True
+        account_service.suspend_all.assert_called_once_with(
+            reason="긴급 점검", suspended_by="telegram"
+        )
 
-    async def test_halt_already_halted(self, receiver, system_state):
-        """이미 HALTED 상태이면 중복 메시지를 반환한다."""
-        from ante.config.system_state import TradingState
+    async def test_halt_already_halted(self, receiver, account_service):
+        """이미 모든 계좌가 SUSPENDED 상태이면 중복 메시지를 반환한다."""
+        from ante.account.models import AccountStatus
 
-        system_state.trading_state = TradingState.HALTED
+        suspended_account = SimpleNamespace(
+            account_id="test", status=AccountStatus.SUSPENDED
+        )
+        account_service.list.return_value = [suspended_account]
+
         receiver._reply = AsyncMock()
 
         halt_update = {
@@ -537,7 +547,7 @@ class TestIntegrationFlow:
         # confirm 없이 즉시 응답
         assert receiver._reply.call_count == 1
         assert "이미 거래가 중지된 상태입니다" in receiver._reply.call_args[0][1]
-        system_state.set_state.assert_not_called()
+        account_service.suspend_all.assert_not_called()
 
     async def test_reply_with_no_chat_id(self, receiver):
         """chat_id가 없어도 에러 없이 처리."""

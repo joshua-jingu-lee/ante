@@ -46,14 +46,24 @@ def runner():
 
 
 class TestSystemCommands:
-    def _mock_system_state(self, trading_state_value="active"):
-        from ante.config.system_state import TradingState
+    def _mock_account_service(self, suspended: bool = False):
+        from ante.account.models import AccountStatus
 
-        mock_state = AsyncMock()
-        mock_state.trading_state = TradingState(trading_state_value)
-        mock_state.initialize = AsyncMock()
-        mock_state.set_state = AsyncMock()
-        return mock_state
+        mock_svc = AsyncMock()
+        mock_svc.initialize = AsyncMock()
+        if suspended:
+            from types import SimpleNamespace
+
+            acct = SimpleNamespace(account_id="test", status=AccountStatus.SUSPENDED)
+            mock_svc.list = AsyncMock(return_value=[acct])
+        else:
+            from types import SimpleNamespace
+
+            acct = SimpleNamespace(account_id="test", status=AccountStatus.ACTIVE)
+            mock_svc.list = AsyncMock(return_value=[acct])
+        mock_svc.suspend_all = AsyncMock(return_value=1)
+        mock_svc.activate_all = AsyncMock(return_value=1)
+        return mock_svc
 
     def test_system_status(self, runner):
         with patch("ante.cli.commands.system._create_services") as mock_svc:
@@ -63,8 +73,8 @@ class TestSystemCommands:
             mock_svc.return_value = (mock_db, MagicMock())
 
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=self._mock_system_state("active"),
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=False),
             ):
                 result = runner.invoke(cli, ["system", "status"])
                 assert result.exit_code == 0
@@ -78,8 +88,8 @@ class TestSystemCommands:
             mock_svc.return_value = (mock_db, MagicMock())
 
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=self._mock_system_state("active"),
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=False),
             ):
                 result = runner.invoke(cli, ["--format", "json", "system", "status"])
                 assert result.exit_code == 0
@@ -93,10 +103,9 @@ class TestSystemCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_db, MagicMock())
 
-            mock_state = self._mock_system_state("halted")
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=mock_state,
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=True),
             ):
                 result = runner.invoke(cli, ["system", "halt", "--reason", "test halt"])
                 assert result.exit_code == 0
@@ -108,10 +117,9 @@ class TestSystemCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_db, MagicMock())
 
-            mock_state = self._mock_system_state("active")
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=mock_state,
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=False),
             ):
                 result = runner.invoke(cli, ["system", "activate"])
                 assert result.exit_code == 0

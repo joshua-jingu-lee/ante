@@ -1,6 +1,8 @@
-"""시스템 설정 API 테스트 (킬스위치 + 동적 설정)."""
+"""시스템 설정 API 테스트 (halt/activate + 동적 설정)."""
 
 from __future__ import annotations
+
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,27 +11,6 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
-
-
-class FakeSystemState:
-    """테스트용 SystemState stub."""
-
-    def __init__(self) -> None:
-        self._state = "active"
-
-    @property
-    def trading_state(self) -> FakeTradingState:
-        return FakeTradingState(self._state)
-
-    async def set_state(
-        self, state: object, reason: str = "", changed_by: str = ""
-    ) -> None:
-        self._state = state.value if hasattr(state, "value") else str(state)
-
-
-class FakeTradingState:
-    def __init__(self, value: str) -> None:
-        self.value = value
 
 
 class FakeDynamicConfig:
@@ -68,8 +49,11 @@ class FakeDynamicConfig:
 
 
 @pytest.fixture
-def system_state():
-    return FakeSystemState()
+def account_service():
+    mock = AsyncMock()
+    mock.suspend_all = AsyncMock(return_value=1)
+    mock.activate_all = AsyncMock(return_value=1)
+    return mock
 
 
 @pytest.fixture
@@ -78,53 +62,50 @@ def dynamic_config():
 
 
 @pytest.fixture
-def client(system_state, dynamic_config):
-    app = create_app(system_state=system_state, dynamic_config=dynamic_config)
+def client(account_service, dynamic_config):
+    app = create_app(account_service=account_service, dynamic_config=dynamic_config)
     return TestClient(app)
 
 
-class TestKillSwitch:
-    def test_halt(self, client, system_state):
-        """킬스위치 halt."""
+class TestHaltActivate:
+    def test_halt(self, client, account_service):
+        """POST /halt로 전체 거래 중지."""
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "halt", "reason": "긴급 중지"},
+            "/api/system/halt",
+            json={"reason": "긴급 중지"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "halted"
-        assert "changed_at" in resp.json()
+        data = resp.json()
+        assert "suspended" in data["status"]
+        assert "changed_at" in data
+        account_service.suspend_all.assert_called_once()
 
-    def test_activate(self, client, system_state):
-        """킬스위치 activate."""
-        system_state._state = "halted"
+    def test_activate(self, client, account_service):
+        """POST /activate로 거래 재개."""
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "activate", "reason": "재개"},
+            "/api/system/activate",
+            json={"reason": "재개"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "active"
+        data = resp.json()
+        assert "activated" in data["status"]
+        account_service.activate_all.assert_called_once()
 
-    def test_invalid_action(self, client):
-        """잘못된 action → 400."""
-        resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "invalid"},
-        )
-        assert resp.status_code == 400
-
-    def test_halt_activate_lifecycle(self, client, system_state):
+    def test_halt_activate_lifecycle(self, client, account_service):
         """halt → activate lifecycle."""
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "halt"},
+            "/api/system/halt",
+            json={"reason": ""},
         )
-        assert resp.json()["status"] == "halted"
+        assert resp.status_code == 200
+        assert "suspended" in resp.json()["status"]
 
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "activate"},
+            "/api/system/activate",
+            json={"reason": ""},
         )
-        assert resp.json()["status"] == "active"
+        assert resp.status_code == 200
+        assert "activated" in resp.json()["status"]
 
 
 class TestDynamicConfig:
