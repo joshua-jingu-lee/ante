@@ -43,6 +43,8 @@ class TradeRecord:
     timestamp: datetime | None = None
     order_id: str | None = None
     exchange: str = "KRX"
+    account_id: str = "default"
+    currency: str = "KRW"
 
 
 @dataclass
@@ -56,6 +58,7 @@ class PositionSnapshot:
     realized_pnl: float = 0.0
     updated_at: str = ""
     exchange: str = "KRX"
+    account_id: str = "default"
 
 
 @dataclass(frozen=True)

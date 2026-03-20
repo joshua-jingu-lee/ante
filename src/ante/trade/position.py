@@ -53,6 +53,7 @@ class PositionHistory:
         """스키마 생성 + 마이그레이션 + 캐시 워밍."""
         await self._db.execute_script(POSITION_SCHEMA)
         await self._migrate_exchange_column()
+        await self._migrate_account_id_column()
         await self._warm_cache()
         logger.info("PositionHistory 초기화 완료")
 
@@ -82,6 +83,18 @@ class PositionHistory:
             except Exception:
                 pass  # 이미 존재
 
+    async def _migrate_account_id_column(self) -> None:
+        """account_id 컬럼 마이그레이션."""
+        columns = await self._db.fetch_all("PRAGMA table_info(positions)")
+        col_names = {row["name"] for row in columns}
+
+        if "account_id" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE positions ADD COLUMN"
+                " account_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            logger.info("positions 테이블에 account_id 컬럼 추가")
+
     async def on_trade(self, record: TradeRecord) -> None:
         """체결 기록을 반영하여 포지션 상태 갱신."""
         if record.status != TradeStatus.FILLED:
@@ -102,6 +115,7 @@ class PositionHistory:
                 record.symbol,
                 quantity=new_quantity,
                 avg_entry_price=new_avg,
+                account_id=record.account_id,
             )
 
             await self._save_history(
@@ -127,6 +141,7 @@ class PositionHistory:
                 if new_quantity > 0
                 else 0.0,
                 realized_pnl_delta=pnl,
+                account_id=record.account_id,
             )
 
             await self._save_history(
@@ -229,17 +244,19 @@ class PositionHistory:
         quantity: float,
         avg_entry_price: float,
         realized_pnl_delta: float = 0.0,
+        account_id: str = "default",
     ) -> None:
         """포지션 상태 갱신."""
         await self._db.execute(
             """INSERT INTO positions
                (bot_id, symbol, quantity, avg_entry_price,
-                realized_pnl, updated_at)
-               VALUES (?, ?, ?, ?, ?, datetime('now'))
+                realized_pnl, updated_at, account_id)
+               VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
                ON CONFLICT(bot_id, symbol) DO UPDATE SET
                  quantity = ?,
                  avg_entry_price = ?,
                  realized_pnl = realized_pnl + ?,
+                 account_id = ?,
                  updated_at = datetime('now')""",
             (
                 bot_id,
@@ -247,14 +264,16 @@ class PositionHistory:
                 quantity,
                 avg_entry_price,
                 realized_pnl_delta,
+                account_id,
                 quantity,
                 avg_entry_price,
                 realized_pnl_delta,
+                account_id,
             ),
         )
         # 인메모리 캐시 갱신
         self._update_cache(
-            bot_id, symbol, quantity, avg_entry_price, realized_pnl_delta
+            bot_id, symbol, quantity, avg_entry_price, realized_pnl_delta, account_id
         )
 
     def _update_cache(
@@ -264,6 +283,7 @@ class PositionHistory:
         quantity: float,
         avg_entry_price: float,
         realized_pnl_delta: float = 0.0,
+        account_id: str = "default",
     ) -> None:
         """인메모리 포지션 캐시 갱신."""
         bot_cache = self._position_cache.setdefault(bot_id, {})
@@ -277,6 +297,7 @@ class PositionHistory:
                 quantity=quantity,
                 avg_entry_price=avg_entry_price,
                 realized_pnl=prev_pnl + realized_pnl_delta,
+                account_id=account_id,
             )
         else:
             bot_cache.pop(symbol, None)
@@ -310,4 +331,5 @@ class PositionHistory:
             avg_entry_price=float(row["avg_entry_price"]),
             realized_pnl=float(row.get("realized_pnl", 0)),
             updated_at=row.get("updated_at", ""),
+            account_id=row.get("account_id", "default"),
         )
