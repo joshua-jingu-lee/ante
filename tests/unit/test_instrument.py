@@ -227,12 +227,12 @@ class TestExchangeDefaults:
         filled = OrderFilledEvent(symbol="005930")
         assert filled.exchange == "KRX"
 
-    def test_bot_config_default_exchange(self):
-        """BotConfig exchange 기본값 KRX."""
+    def test_bot_config_default_account_id(self):
+        """BotConfig account_id 기본값 test (exchange는 Account에서 관리)."""
         from ante.bot.config import BotConfig
 
         config = BotConfig(bot_id="bot-1", strategy_id="strat-1")
-        assert config.exchange == "KRX"
+        assert config.account_id == "test"
 
     def test_strategy_meta_default_exchange(self):
         """StrategyMeta exchange 기본값 KRX."""

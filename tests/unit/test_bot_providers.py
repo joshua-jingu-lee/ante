@@ -483,9 +483,9 @@ class TestStrategyContextFactory:
         config = BotConfig(
             bot_id="paper1",
             strategy_id="s1",
-            bot_type="paper",
             paper_initial_balance=5_000_000.0,
         )
+        # AccountService 미설정 → VIRTUAL 모드(paper) 기본 동작
         ctx = factory.create(config)
 
         assert isinstance(ctx, StrategyContext)
@@ -499,8 +499,20 @@ class TestStrategyContextFactory:
         assert balance["allocated"] == 5_000_000.0
 
     def test_create_live_context(self, eventbus):
-        """Live 봇 StrategyContext 생성."""
+        """Live 봇 StrategyContext 생성 (Account.trading_mode=LIVE)."""
+        from ante.account.models import Account, TradingMode
         from ante.bot.providers.live import LiveOrderView, LivePortfolioView
+
+        # AccountService mock: get_sync가 LIVE 모드 Account를 반환
+        class FakeAccountService:
+            def get_sync(self, account_id):
+                return Account(
+                    account_id=account_id,
+                    name="test",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
 
         # 가짜 live providers
         class FakeLivePortfolio(LivePortfolioView):
@@ -522,11 +534,12 @@ class TestStrategyContextFactory:
 
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
+            account_service=FakeAccountService(),
             live_portfolio=FakeLivePortfolio(),
             live_order_view=FakeLiveOrders(),
         )
 
-        config = BotConfig(bot_id="live1", strategy_id="s1", bot_type="live")
+        config = BotConfig(bot_id="live1", strategy_id="s1", account_id="live-acct")
         ctx = factory.create(config)
 
         assert isinstance(ctx, StrategyContext)
@@ -534,8 +547,23 @@ class TestStrategyContextFactory:
 
     def test_live_without_providers_raises(self, eventbus):
         """Live providers 미설정 시 에러."""
-        factory = StrategyContextFactory(data_provider=FakeDataProvider())
-        config = BotConfig(bot_id="live1", strategy_id="s1", bot_type="live")
+        from ante.account.models import Account, TradingMode
+
+        class FakeAccountService:
+            def get_sync(self, account_id):
+                return Account(
+                    account_id=account_id,
+                    name="test",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
+
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            account_service=FakeAccountService(),
+        )
+        config = BotConfig(bot_id="live1", strategy_id="s1", account_id="live-acct")
 
         with pytest.raises(ValueError, match="Provider"):
             factory.create(config)
@@ -574,7 +602,6 @@ class TestBotManagerWithFactory:
         config = BotConfig(
             bot_id="paper1",
             strategy_id="s1",
-            bot_type="paper",
             paper_initial_balance=5_000_000.0,
         )
         bot = await manager.create_bot(config, SimpleStrategy)
@@ -645,7 +672,7 @@ class TestBotManagerWithFactory:
         manager = BotManager(eventbus=eventbus, db=db, context_factory=factory)
         await manager.initialize()
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1", bot_type="paper")
+        config = BotConfig(bot_id="paper1", strategy_id="s1")
         await manager.create_bot(config, SimpleStrategy)
         assert "paper1" in executor._portfolios
 

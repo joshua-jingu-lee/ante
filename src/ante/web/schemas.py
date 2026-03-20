@@ -87,7 +87,7 @@ class BotInfo(BaseModel):
     bot_id: str
     name: str = ""
     status: str = ""
-    bot_type: str = ""
+    account_id: str = ""
     strategy_id: str = ""
     interval_seconds: int = 60
     started_at: str | None = None

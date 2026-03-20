@@ -59,7 +59,7 @@ def bot_list(ctx: click.Context) -> None:
         db, _, _ = await _create_services()
         try:
             rows = await db.fetch_all(
-                "SELECT bot_id, name, strategy_id, bot_type, status, created_at"
+                "SELECT bot_id, name, strategy_id, account_id, status, created_at"
                 " FROM bots WHERE status != 'deleted'"
             )
             return [dict(r) for r in rows]
@@ -77,7 +77,7 @@ def bot_list(ctx: click.Context) -> None:
     else:
         fmt.table(
             result,
-            ["bot_id", "name", "strategy_id", "bot_type", "status", "created_at"],
+            ["bot_id", "name", "strategy_id", "account_id", "status", "created_at"],
         )
 
 
@@ -110,7 +110,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
         click.echo(f"  Bot ID    : {result['bot_id']}")
         click.echo(f"  이름      : {result['name']}")
         click.echo(f"  전략      : {result['strategy_id']}")
-        click.echo(f"  타입      : {result['bot_type']}")
+        click.echo(f"  계좌      : {result.get('account_id', 'test')}")
         click.echo(f"  상태      : {result['status']}")
         click.echo(f"  생성일    : {result['created_at']}")
 
@@ -134,11 +134,10 @@ def _parse_param(value: str) -> tuple[str, object]:
 @click.option("--name", required=True, help="봇 이름")
 @click.option("--strategy", required=True, help="전략 ID")
 @click.option(
-    "--type",
-    "bot_type",
-    type=click.Choice(["live", "paper"]),
-    default="live",
-    help="봇 타입",
+    "--account",
+    "account_id",
+    default="test",
+    help="계좌 ID",
 )
 @click.option(
     "--interval",
@@ -160,7 +159,7 @@ def bot_create(
     ctx: click.Context,
     name: str,
     strategy: str,
-    bot_type: str,
+    account_id: str,
     interval: int,
     bot_id: str,
     params: tuple[str, ...],
@@ -190,16 +189,16 @@ def bot_create(
                 "bot_id": bid,
                 "name": name,
                 "strategy_id": strategy,
-                "bot_type": bot_type,
+                "account_id": account_id,
                 "interval_seconds": interval,
             }
             if param_dict:
                 config_dict["params"] = param_dict
             await db.execute(
                 """INSERT INTO bots
-                   (bot_id, name, strategy_id, bot_type, config_json)
+                   (bot_id, name, strategy_id, account_id, config_json)
                    VALUES (?, ?, ?, ?, ?)""",
-                (bid, name, strategy, bot_type, json.dumps(config_dict)),
+                (bid, name, strategy, account_id, json.dumps(config_dict)),
             )
 
             await _audit_log(

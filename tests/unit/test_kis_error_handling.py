@@ -391,7 +391,6 @@ class TestBotCancelFailedHandling:
         config = BotConfig(
             bot_id="bot1",
             strategy_id="s1",
-            bot_type="paper",
         )
         bot = Bot(
             config=config,
