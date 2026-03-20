@@ -618,6 +618,7 @@ class TradeItem(BaseModel):
 
     trade_id: str
     bot_id: str
+    account_id: str = ""
     symbol: str
     side: str
     quantity: float
