@@ -87,8 +87,6 @@ class Services:
     web_task: asyncio.Task | None = None  # type: ignore[type-arg]
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
-    commission_rate: float = 0.00015
-    sell_tax_rate: float = 0.0023
     _cleanup_tasks: list[str] = field(default_factory=list)
 
 
@@ -198,13 +196,9 @@ async def _init_trading(s: Services) -> None:
     # Treasury
     from ante.treasury import Treasury
 
-    s.commission_rate = s.config.get("broker.commission_rate", 0.00015)
-    s.sell_tax_rate = s.config.get("broker.sell_tax_rate", 0.0023)
     s.treasury = Treasury(
         db=s.db,
         eventbus=s.eventbus,
-        commission_rate=s.commission_rate,
-        sell_tax_rate=s.sell_tax_rate,
     )
     await s.treasury.initialize()
     logger.info("Treasury 초기화 완료")
@@ -242,8 +236,6 @@ async def _init_trading(s: Services) -> None:
     s.paper_executor = PaperExecutor(
         eventbus=s.eventbus,
         gateway=None,  # APIGateway 연결 후 설정
-        commission_rate=s.commission_rate,
-        sell_tax_rate=s.sell_tax_rate,
     )
     s.paper_executor.subscribe()
 

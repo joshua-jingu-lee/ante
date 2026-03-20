@@ -21,9 +21,8 @@ history_size = 1000
 
 [broker]
 # KIS 모의투자 설정 — secrets.env 에서 앱키/시크릿/계좌번호 관리
+# commission_rate, sell_tax_rate → Account 모델로 이관됨
 is_paper = true             # true: 모의투자, false: 실전투자
-commission_rate = 0.00015   # 매매 수수료율
-sell_tax_rate = 0.0023      # 매도 세금율 (증권거래세+농특세)
 
 [treasury]
 sync_interval_seconds = 300 # 잔고 동기화 주기 (초)

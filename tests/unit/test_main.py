@@ -95,7 +95,6 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     toml.write_text(
         '[db]\npath = "{db}"\n\n'
         "[web]\nenabled = false\nport = 8000\n\n"
-        "[treasury]\ncommission_rate = 0.00015\n\n"
         '[data]\npath = "{data}"\n'.format(
             db=str(tmp_path / "test.db"),
             data=str(tmp_path / "data"),
@@ -137,7 +136,7 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     # 8. Treasury
     from ante.treasury import Treasury
 
-    treasury = Treasury(db=db, eventbus=eventbus, commission_rate=0.00015)
+    treasury = Treasury(db=db, eventbus=eventbus)
     await treasury.initialize()
 
     # 9. Trade

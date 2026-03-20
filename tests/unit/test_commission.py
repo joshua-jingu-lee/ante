@@ -184,19 +184,17 @@ class TestPaperExecutorCommission:
 
 
 class TestCommissionDefaults:
-    def test_defaults_include_commission_rate(self):
-        """config/defaults.py에 broker.commission_rate 포함."""
+    def test_defaults_no_longer_include_commission_rate(self):
+        """broker.commission_rate는 Account 모델로 이관되어 defaults에서 제거."""
         from ante.config.defaults import DEFAULTS
 
-        assert "broker.commission_rate" in DEFAULTS
-        assert DEFAULTS["broker.commission_rate"] == 0.00015
+        assert "broker.commission_rate" not in DEFAULTS
 
-    def test_defaults_include_sell_tax_rate(self):
-        """config/defaults.py에 broker.sell_tax_rate 포함."""
+    def test_defaults_no_longer_include_sell_tax_rate(self):
+        """broker.sell_tax_rate는 Account 모델로 이관되어 defaults에서 제거."""
         from ante.config.defaults import DEFAULTS
 
-        assert "broker.sell_tax_rate" in DEFAULTS
-        assert DEFAULTS["broker.sell_tax_rate"] == 0.0023
+        assert "broker.sell_tax_rate" not in DEFAULTS
 
 
 # ── US-4: Treasury 수수료 추정 통합 ──────────────
