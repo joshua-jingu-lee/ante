@@ -18,7 +18,7 @@ Feature: Treasury 예산 할당·회수
       | trading_hours_start | 09:00                  |
       | trading_hours_end   | 15:30                  |
       | trading_mode        | virtual                |
-      | broker_type         | mock                   |
+      | broker_type         | test                   |
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {account_id}로 저장한다
 
