@@ -44,6 +44,6 @@ COPY config/system.test.toml config/system.toml
 COPY scripts/e2e-entrypoint.sh /app/e2e-entrypoint.sh
 RUN chmod +x /app/e2e-entrypoint.sh
 
-EXPOSE 8000
+EXPOSE 3982
 
 ENTRYPOINT ["/app/e2e-entrypoint.sh"]

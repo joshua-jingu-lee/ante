@@ -2,10 +2,10 @@
 
 사용법:
     # Docker 내부 (e2e-runner 컨테이너)
-    pytest tests/e2e/ -m e2e --base-url http://ante-test:8000
+    pytest tests/e2e/ -m e2e --base-url http://ante-test:3982
 
     # 로컬 개발 (ante-test 컨테이너 실행 중)
-    pytest tests/e2e/ -m e2e --base-url http://localhost:8000
+    pytest tests/e2e/ -m e2e --base-url http://localhost:3982
 """
 
 from __future__ import annotations
@@ -43,12 +43,12 @@ def base_url(request: pytest.FixtureRequest) -> str:
         return cli_url
     if env_url:
         return env_url
-    return "http://localhost:8000"
+    return "http://localhost:3982"
 
 
 @pytest.fixture(scope="session")
 def api_url(base_url: str) -> str:
-    """API base URL (예: http://ante-test:8000/api)."""
+    """API base URL (예: http://ante-test:3982/api)."""
     return f"{base_url}/api"
 
 

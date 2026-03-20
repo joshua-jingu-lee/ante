@@ -2,7 +2,7 @@ services:
   ante:
     build: .
     ports:
-      - "8000:8000"
+      - "3982:3982"
     volumes:
       - ./config:/app/config
       - ante-data:/app/data

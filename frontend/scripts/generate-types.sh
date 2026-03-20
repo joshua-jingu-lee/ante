@@ -10,8 +10,8 @@
 #   2. 이 스크립트 실행
 #
 # 서버 기반:
-#   1. 백엔드 서버 실행 (기본: http://localhost:8000)
-#   2. npm run generate-types -- --url http://localhost:8000/openapi.json
+#   1. 백엔드 서버 실행 (기본: http://localhost:3982)
+#   2. npm run generate-types -- --url http://localhost:3982/openapi.json
 
 set -euo pipefail
 
@@ -53,9 +53,9 @@ else
   echo ""
   echo "다음 중 하나를 수행하세요:"
   echo "  1. frontend/openapi.json 파일 배치 후 재실행"
-  echo "     curl http://localhost:8000/openapi.json -o frontend/openapi.json"
+  echo "     curl http://localhost:3982/openapi.json -o frontend/openapi.json"
   echo "  2. 서버 URL 직접 지정"
-  echo "     npm run generate-types -- --url http://localhost:8000/openapi.json"
+  echo "     npm run generate-types -- --url http://localhost:3982/openapi.json"
   exit 1
 fi
 

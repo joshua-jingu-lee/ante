@@ -951,7 +951,7 @@ async def _init_web(s: Services) -> None:
     uv_config = uvicorn.Config(
         app,
         host=s.config.get("web.host", "0.0.0.0"),
-        port=s.config.get("web.port", 8000),
+        port=s.config.get("web.port", 3982),
         log_level="info",
     )
     server = uvicorn.Server(uv_config)

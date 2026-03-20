@@ -13,7 +13,7 @@ async def test_full_initialization(tmp_path: Path) -> None:
     # 1. Config
     toml = tmp_path / "system.toml"
     toml.write_text(
-        '[db]\npath = "{}"\n\n[web]\nport = 8000\n'.format(str(tmp_path / "test.db"))
+        '[db]\npath = "{}"\n\n[web]\nport = 3982\n'.format(str(tmp_path / "test.db"))
     )
     config = Config.load(config_dir=tmp_path)
     config.validate()
@@ -105,7 +105,7 @@ async def test_composition_root_account_based(tmp_path: Path) -> None:
     toml = tmp_path / "system.toml"
     toml.write_text(
         '[db]\npath = "{db}"\n\n'
-        "[web]\nenabled = false\nport = 8000\n\n"
+        "[web]\nenabled = false\nport = 3982\n\n"
         '[data]\npath = "{data}"\n'.format(
             db=str(tmp_path / "test.db"),
             data=str(tmp_path / "data"),

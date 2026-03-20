@@ -16,7 +16,7 @@ if [ -n "$FLOW" ]; then
     docker compose -f "$COMPOSE_FILE" up --build -d ante-test
     docker compose -f "$COMPOSE_FILE" run --rm e2e-runner \
         pytest "tests/e2e/${FLOW}.py" -m e2e -v --tb=short \
-        --base-url http://ante-test:8000 \
+        --base-url http://ante-test:3982 \
         --output=test-results \
         --junit-xml=test-results/e2e-results.xml
 else

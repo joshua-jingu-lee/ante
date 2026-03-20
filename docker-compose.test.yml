@@ -15,14 +15,14 @@ services:
       context: .
       dockerfile: Dockerfile.test
     ports:
-      - "8000:8000"
+      - "3982:3982"
     environment:
       - ANTE_CONFIG_DIR=/app/config
       - ANTE_TEST_MODE=1
       - TELEGRAM_BOT_TOKEN=dummy-token-for-test
       - TELEGRAM_CHAT_ID=dummy-chat-id-for-test
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3982/api/system/health')"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -41,7 +41,7 @@ services:
       ante-test:
         condition: service_healthy
     environment:
-      - E2E_BASE_URL=http://ante-test:8000
+      - E2E_BASE_URL=http://ante-test:3982
       - E2E_TEST_PASSWORD=test1234
     volumes:
       - ./test-results:/app/test-results
@@ -49,7 +49,7 @@ services:
       - e2e-net
     command: >
       tests/e2e/ -m e2e
-      --base-url http://ante-test:8000
+      --base-url http://ante-test:3982
       -v --tb=short
       --output=test-results
       --junit-xml=test-results/e2e-results.xml

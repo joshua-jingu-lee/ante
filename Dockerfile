@@ -39,6 +39,6 @@ COPY tests/fixtures/seed/scenarios/ tests/fixtures/seed/scenarios/
 COPY config/system.toml.example config/system.toml
 RUN sed -i 's/^enabled = false/enabled = true/' config/system.toml
 
-EXPOSE 8000
+EXPOSE 3982
 
 ENTRYPOINT ["python", "-m", "ante.main"]
