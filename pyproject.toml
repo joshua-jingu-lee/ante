@@ -30,12 +30,6 @@ dev = [
     "mypy>=1.13",
     "httpx>=0.27",
 ]
-e2e = [
-    "pytest>=8.0",
-    "pytest-playwright>=0.6",
-    "playwright>=1.52,<1.53",
-    "httpx>=0.27",
-]
 
 [tool.hatch.build]
 artifacts = ["src/ante/web/static/**"]
@@ -46,11 +40,7 @@ packages = ["src/ante"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = ["--import-mode=importlib", "-m", "not e2e and not playwright"]
-markers = [
-    "e2e: E2E 테스트 (Docker 환경 필요)",
-    "playwright: Playwright 브라우저 테스트",
-]
+addopts = ["--import-mode=importlib"]
 
 [tool.ruff]
 target-version = "py311"
