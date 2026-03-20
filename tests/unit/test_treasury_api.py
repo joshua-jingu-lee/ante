@@ -123,3 +123,50 @@ class TestSetBalance:
         )
         assert resp.status_code == 200
         assert resp.json()["total_balance"] == 0
+
+
+class FakeTreasuryManager:
+    """테스트용 TreasuryManager stub."""
+
+    def __init__(self, treasuries: list[FakeTreasury] | None = None) -> None:
+        self._treasuries: list[FakeTreasury] = treasuries or []
+
+    def list_all(self) -> list[FakeTreasury]:
+        return list(self._treasuries)
+
+    def get(self, account_id: str) -> FakeTreasury:
+        for t in self._treasuries:
+            if getattr(t, "account_id", None) == account_id:
+                return t
+        raise KeyError(f"Treasury not found: {account_id}")
+
+
+class TestTreasuryFallback:
+    """treasury_manager fallback 테스트 (이슈 #641)."""
+
+    def test_treasury_manager_fallback(self):
+        """treasury 미설정 시 treasury_manager에서 첫 번째 인스턴스 반환."""
+        fake_treasury = FakeTreasury()
+        manager = FakeTreasuryManager(treasuries=[fake_treasury])
+        app = create_app(treasury_manager=manager)
+        client = TestClient(app)
+
+        resp = client.get("/api/treasury/budgets")
+        assert resp.status_code == 200
+
+    def test_no_treasury_no_manager_returns_503(self):
+        """treasury도 treasury_manager도 없으면 503."""
+        app = create_app()
+        client = TestClient(app)
+
+        resp = client.get("/api/treasury/budgets")
+        assert resp.status_code == 503
+
+    def test_empty_manager_returns_503(self):
+        """treasury_manager에 Treasury가 없으면 503."""
+        manager = FakeTreasuryManager(treasuries=[])
+        app = create_app(treasury_manager=manager)
+        client = TestClient(app)
+
+        resp = client.get("/api/treasury/budgets")
+        assert resp.status_code == 503

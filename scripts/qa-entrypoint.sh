@@ -30,6 +30,39 @@ QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
 printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
     ante member bootstrap --id qa-admin --name "QA Admin" 2>/dev/null || true
 
+echo "[qa] QA 시드 계좌 확인 (Treasury 초기화 보장)..."
+# 계좌가 없으면 API로 테스트 계좌 생성 → 서버 재기동하여 Treasury 초기화
+ACCOUNT_COUNT=$(curl -sf http://localhost:8000/api/accounts | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('accounts',[])))" 2>/dev/null || echo "0")
+if [ "$ACCOUNT_COUNT" = "0" ]; then
+    echo "[qa] 계좌 없음 — 시드 계좌 생성 중..."
+    curl -sf -X POST http://localhost:8000/api/accounts \
+        -H "Content-Type: application/json" \
+        -d '{"account_id":"test","name":"QA Test","broker_type":"test","trading_mode":"virtual"}' \
+        > /dev/null 2>&1 || true
+
+    # 계좌 생성 후 서버 재기동하여 Treasury 초기화
+    echo "[qa] 서버 재기동 (Treasury 초기화)..."
+    kill $SERVER_PID 2>/dev/null || true
+    wait $SERVER_PID 2>/dev/null || true
+
+    python -m ante.main &
+    SERVER_PID=$!
+
+    for i in $(seq 1 30); do
+        if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')" 2>/dev/null; then
+            echo "[qa] 서버 재기동 완료 (${i}초)"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "[qa] 서버 재기동 헬스체크 타임아웃" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+else
+    echo "[qa] 계좌 ${ACCOUNT_COUNT}개 확인됨 — 시드 생략"
+fi
+
 echo "[qa] QA 테스트용 동적 설정 시드 등록..."
 sqlite3 db/ante.db "INSERT OR IGNORE INTO dynamic_config (key, value, category, updated_at) VALUES ('risk.test_qa_key', '0', 'risk', datetime('now'));"
 

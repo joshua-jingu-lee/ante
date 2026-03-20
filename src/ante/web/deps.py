@@ -49,11 +49,23 @@ def get_strategy_registry(request: Request) -> Any:
 
 
 def get_treasury(request: Request) -> Any:
-    """자금 관리 (필수)."""
+    """자금 관리 (필수).
+
+    app.state.treasury가 없으면 treasury_manager에서
+    첫 번째 Treasury 인스턴스를 fallback으로 반환한다.
+    """
     svc = getattr(request.app.state, "treasury", None)
-    if svc is None:
-        raise HTTPException(status_code=503, detail="Treasury not available")
-    return svc
+    if svc is not None:
+        return svc
+
+    # fallback: treasury_manager에서 첫 번째 Treasury 반환
+    manager = getattr(request.app.state, "treasury_manager", None)
+    if manager is not None:
+        treasuries = manager.list_all()
+        if treasuries:
+            return treasuries[0]
+
+    raise HTTPException(status_code=503, detail="Treasury not available")
 
 
 def get_trade_service(request: Request) -> Any:
