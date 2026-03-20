@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ante.web.deps import (
+    get_account_service,
     get_audit_logger_optional,
     get_bot_manager,
     get_strategy_registry,
@@ -78,14 +79,24 @@ async def create_bot(
     request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any, Depends(get_strategy_registry)],
+    account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 생성."""
     from pathlib import Path
 
+    from ante.account.models import AccountStatus
     from ante.bot.config import BotConfig
     from ante.bot.exceptions import BotError
     from ante.strategy.loader import StrategyLoader
+
+    # 계좌 상태 검증: active가 아니면 봇 생성 거부
+    account = await account_service.get(body.account_id)
+    if account.status != AccountStatus.ACTIVE:
+        raise HTTPException(
+            status_code=409,
+            detail=f"계좌가 '{account.status}' 상태이므로 봇을 생성할 수 없습니다",
+        )
 
     record = await registry.get(body.strategy_id)
     if not record:
