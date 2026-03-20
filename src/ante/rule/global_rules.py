@@ -1,4 +1,4 @@
-"""전역 룰 — 모든 봇에 적용되는 시스템 레벨 룰."""
+"""계좌 룰 — 계좌 레벨에서 모든 봇에 적용되는 룰."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleRe
 
 
 class DailyLossLimitRule(Rule):
-    """일일 손실 한도 초과 시 시스템 중지."""
+    """일일 손실 한도 초과 시 계좌 중지."""
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_daily_loss = self.config.get("max_daily_loss_percent", 0.05)
@@ -22,7 +22,7 @@ class DailyLossLimitRule(Rule):
                         rule_id=self.rule_id,
                         rule_name=self.name,
                         result=RuleResult.BLOCK,
-                        action=RuleAction.HALT_SYSTEM,
+                        action=RuleAction.HALT_ACCOUNT,
                         message=(
                             f"Daily loss limit exceeded: "
                             f"{daily_loss_percent:.2%} > {max_daily_loss:.2%}"

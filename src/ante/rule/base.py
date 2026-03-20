@@ -23,7 +23,7 @@ class RuleAction(StrEnum):
     LOG = "log"
     NOTIFY = "notify"
     STOP_BOT = "stop_bot"
-    HALT_SYSTEM = "halt_system"
+    HALT_ACCOUNT = "halt_account"
 
 
 @dataclass(frozen=True)
@@ -42,26 +42,28 @@ class RuleEvaluation:
 class RuleContext:
     """룰 평가 컨텍스트.
 
-    RuleEngine이 OrderRequestEvent와 시스템 상태를 조합하여 생성한다.
+    RuleEngine이 OrderRequestEvent와 계좌 상태를 조합하여 생성한다.
     """
 
     # 주문 정보
-    bot_id: str
-    strategy_id: str
-    symbol: str
-    side: str
-    quantity: float
-    order_type: str
+    bot_id: str = ""
+    account_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    quantity: float = 0.0
+    order_type: str = "market"
     price: float | None = None
     exchange: str = "KRX"
+    currency: str = "KRW"
 
     # 시장/포지션 정보
     current_price: float = 0.0
     current_position: float = 0.0
     available_balance: float = 0.0
 
-    # 시스템 상태
-    system_status: str = "active"
+    # 계좌 상태
+    account_status: str = "active"
     daily_pnl: float = 0.0
     total_pnl: float = 0.0
 

@@ -1,9 +1,10 @@
 """OrderModifyEvent 룰 검증 테스트."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
-from ante.config.system_state import SystemState
-from ante.core import Database
+from ante.account.models import Account, AccountStatus
 from ante.eventbus import EventBus
 from ante.eventbus.events import OrderModifyEvent, OrderModifyRejectedEvent
 from ante.rule import RuleEngine
@@ -37,30 +38,37 @@ class AlwaysPassRule(Rule):
 
 
 @pytest.fixture
-async def db(tmp_path):
-    database = Database(str(tmp_path / "test.db"))
-    await database.connect()
-    yield database
-    await database.close()
+def mock_account_service():
+    """AccountService 목 객체."""
+    service = AsyncMock()
+    account = Account(
+        account_id="domestic",
+        name="국내주식",
+        exchange="KRX",
+        currency="KRW",
+        broker_type="test",
+        status=AccountStatus.ACTIVE,
+    )
+    service.get = AsyncMock(return_value=account)
+    service.suspend = AsyncMock()
+    return service
 
 
 @pytest.fixture
-async def system_state(db):
-    state = SystemState(db=db, eventbus=EventBus())
-    await state.initialize()
-    return state
-
-
-@pytest.fixture
-async def engine(system_state):
+async def engine(mock_account_service):
     eventbus = EventBus()
-    engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+    engine = RuleEngine(
+        eventbus=eventbus,
+        account_id="domestic",
+        account_service=mock_account_service,
+    )
     engine.start()
     return engine
 
 
 def _make_modify_event(**kwargs):
     defaults = {
+        "account_id": "domestic",
         "bot_id": "bot1",
         "strategy_id": "s1",
         "order_id": "ord-1",
@@ -82,11 +90,11 @@ async def test_modify_passes_when_no_rules(engine):
 
 
 async def test_modify_rejected_by_global_rule(engine):
-    """전역 룰 위반 시 정정이 거부된다."""
+    """계좌 룰 위반 시 정정이 거부된다."""
     received = []
     engine._eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
 
-    engine.add_global_rule(AlwaysRejectRule("reject", {"type": "test"}))
+    engine.add_account_rule(AlwaysRejectRule("reject", {"type": "test"}))
     await engine._on_order_modify(_make_modify_event())
 
     assert len(received) == 1
@@ -99,7 +107,7 @@ async def test_modify_passes_with_pass_rule(engine):
     received = []
     engine._eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
 
-    engine.add_global_rule(AlwaysPassRule("pass", {"type": "test"}))
+    engine.add_account_rule(AlwaysPassRule("pass", {"type": "test"}))
     await engine._on_order_modify(_make_modify_event())
 
     assert len(received) == 0
@@ -110,7 +118,7 @@ async def test_modify_rejected_event_has_correct_fields(engine):
     received = []
     engine._eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
 
-    engine.add_global_rule(AlwaysRejectRule("reject", {"type": "test"}))
+    engine.add_account_rule(AlwaysRejectRule("reject", {"type": "test"}))
 
     event = _make_modify_event(
         bot_id="bot1",
@@ -155,6 +163,19 @@ async def test_other_strategy_rule_not_applied(engine):
     engine.add_strategy_rule("strat2", AlwaysRejectRule("reject", {"type": "test"}))
 
     event = _make_modify_event(strategy_id="strat1")
+    await engine._on_order_modify(event)
+
+    assert len(received) == 0
+
+
+async def test_modify_event_filtered_by_account_id(engine):
+    """다른 account_id의 OrderModifyEvent는 무시한다."""
+    received = []
+    engine._eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
+
+    engine.add_account_rule(AlwaysRejectRule("reject", {"type": "test"}))
+
+    event = _make_modify_event(account_id="us-stock")
     await engine._on_order_modify(event)
 
     assert len(received) == 0

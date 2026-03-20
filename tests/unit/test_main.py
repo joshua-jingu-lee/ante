@@ -130,7 +130,7 @@ async def test_composition_root_all_modules(tmp_path: Path) -> None:
     # 7. RuleEngine
     from ante.rule import RuleEngine
 
-    rule_engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+    rule_engine = RuleEngine(eventbus=eventbus)
     rule_engine.start()
 
     # 8. Treasury

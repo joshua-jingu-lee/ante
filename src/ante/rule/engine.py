@@ -26,7 +26,7 @@ from ante.rule.strategy_rules import (
 )
 
 if TYPE_CHECKING:
-    from ante.config.system_state import SystemState
+    from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -45,22 +45,31 @@ RULE_REGISTRY: dict[str, type[Rule]] = {
 class RuleEngine:
     """2계층 룰 평가 엔진.
 
-    전역 룰(모든 봇)과 전략별 룰을 순차 평가하여
+    계좌 룰(계좌 레벨)과 전략별 룰을 순차 평가하여
     OrderRequestEvent를 승인/거부한다.
+    각 RuleEngine은 특정 account_id에 바인딩되며,
+    해당 계좌의 이벤트만 처리한다.
     """
 
     def __init__(
         self,
         eventbus: EventBus,
-        system_state: SystemState,
+        account_id: str = "default",
+        account_service: AccountService | None = None,
         bot_strategy_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         self._eventbus = eventbus
-        self._system_state = system_state
+        self._account_id = account_id
+        self._account_service = account_service
         self._bot_strategy_resolver = bot_strategy_resolver
 
-        self._global_rules: list[Rule] = []
+        self._account_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
+
+    @property
+    def account_id(self) -> str:
+        """바인딩된 계좌 ID."""
+        return self._account_id
 
     def start(self) -> None:
         """EventBus 구독 등록."""
@@ -75,14 +84,18 @@ class RuleEngine:
         )
         self._eventbus.subscribe(OrderModifyEvent, self._on_order_modify, priority=100)
         self._eventbus.subscribe(ConfigChangedEvent, self._on_config_changed)
-        logger.info("RuleEngine 시작")
+        logger.info("RuleEngine 시작: account=%s", self._account_id)
 
     # ── 룰 관리 ─────────────────────────────────────
 
+    def add_account_rule(self, rule: Rule) -> None:
+        """계좌 룰 추가."""
+        self._account_rules.append(rule)
+        self._account_rules.sort(key=lambda r: r.priority)
+
     def add_global_rule(self, rule: Rule) -> None:
-        """전역 룰 추가."""
-        self._global_rules.append(rule)
-        self._global_rules.sort(key=lambda r: r.priority)
+        """전역 룰 추가. add_account_rule의 별칭 (하위 호환)."""
+        self.add_account_rule(rule)
 
     def add_strategy_rule(self, strategy_id: str, rule: Rule) -> None:
         """전략별 룰 추가."""
@@ -136,16 +149,16 @@ class RuleEngine:
 
     def clear_rules(self) -> None:
         """모든 룰 제거."""
-        self._global_rules.clear()
+        self._account_rules.clear()
         self._strategy_rules.clear()
 
     def load_rules_from_config(self, rule_configs: list[dict[str, Any]]) -> None:
-        """룰 설정 리스트에서 전역 룰 인스턴스 생성."""
+        """룰 설정 리스트에서 계좌 룰 인스턴스 생성."""
         for cfg in rule_configs:
             rule = self._create_rule(cfg)
             if rule is not None:
-                self._global_rules.append(rule)
-        self._global_rules.sort(key=lambda r: r.priority)
+                self._account_rules.append(rule)
+        self._account_rules.sort(key=lambda r: r.priority)
 
     def load_strategy_rules_from_config(
         self,
@@ -172,14 +185,21 @@ class RuleEngine:
         rule_id = config.get("id", rule_type)
         return rule_class(rule_id, config)
 
+    # ── 하위 호환 프로퍼티 ──────────────────────────────
+
+    @property
+    def _global_rules(self) -> list[Rule]:
+        """하위 호환: _global_rules → _account_rules."""
+        return self._account_rules
+
     # ── 룰 평가 ─────────────────────────────────────
 
     def evaluate(self, context: RuleContext) -> EvaluationResult:
-        """주문에 대한 룰 평가. 전역 → 전략별 순서로 평가."""
+        """주문에 대한 룰 평가. 계좌 룰 → 전략별 순서로 평가."""
         all_evaluations: list[RuleEvaluation] = []
 
-        # 전역 룰 평가
-        for rule in self._global_rules:
+        # 계좌 룰 평가
+        for rule in self._account_rules:
             if rule.is_applicable(context):
                 evaluation = rule.evaluate(context)
                 all_evaluations.append(evaluation)
@@ -187,7 +207,7 @@ class RuleEngine:
                 if evaluation.result in (RuleResult.BLOCK, RuleResult.REJECT):
                     break
 
-        # 전역 룰에서 차단되지 않았으면 전략별 룰 평가
+        # 계좌 룰에서 차단되지 않았으면 전략별 룰 평가
         if not any(
             e.result in (RuleResult.BLOCK, RuleResult.REJECT) for e in all_evaluations
         ):
@@ -256,8 +276,26 @@ class RuleEngine:
         if not isinstance(event, OrderRequestEvent):
             return
 
+        # account_id 필터링: 자기 계좌 이벤트만 처리
+        if event.account_id != self._account_id:
+            return
+
+        # 계좌 상태 조회
+        account_status = "active"
+        currency = "KRW"
+        if self._account_service is not None:
+            try:
+                account = await self._account_service.get(self._account_id)
+                account_status = account.status.value
+                currency = account.currency
+            except Exception:
+                logger.warning(
+                    "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
+                )
+
         context = RuleContext(
             bot_id=event.bot_id,
+            account_id=self._account_id,
             strategy_id=event.strategy_id,
             symbol=event.symbol,
             side=event.side,
@@ -265,7 +303,8 @@ class RuleEngine:
             order_type=event.order_type,
             price=event.price,
             current_price=event.price or 0.0,
-            system_status=self._system_state.trading_state.value,
+            account_status=account_status,
+            currency=currency,
         )
 
         try:
@@ -274,6 +313,7 @@ class RuleEngine:
             if result.overall_result in (RuleResult.PASS, RuleResult.WARN):
                 await self._eventbus.publish(
                     OrderValidatedEvent(
+                        account_id=self._account_id,
                         order_id=str(event.event_id),
                         bot_id=event.bot_id,
                         strategy_id=event.strategy_id,
@@ -299,6 +339,7 @@ class RuleEngine:
             else:
                 await self._eventbus.publish(
                     OrderRejectedEvent(
+                        account_id=self._account_id,
                         order_id=str(event.event_id),
                         bot_id=event.bot_id,
                         strategy_id=event.strategy_id,
@@ -316,6 +357,7 @@ class RuleEngine:
             logger.exception("룰 평가 실패: %s", event.event_id)
             await self._eventbus.publish(
                 OrderRejectedEvent(
+                    account_id=self._account_id,
                     order_id=str(event.event_id),
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
@@ -330,7 +372,6 @@ class RuleEngine:
 
     async def _execute_actions(self, actions: list[RuleAction], event: object) -> None:
         """룰 위반 조치 실행."""
-        from ante.config.system_state import TradingState
         from ante.eventbus.events import (
             BotStopEvent,
             NotificationEvent,
@@ -357,12 +398,18 @@ class RuleEngine:
                         reason="Rule violation",
                     )
                 )
-            elif action == RuleAction.HALT_SYSTEM:
-                await self._system_state.set_state(
-                    TradingState.HALTED,
-                    reason="Critical rule violation",
-                    changed_by="rule_engine",
-                )
+            elif action == RuleAction.HALT_ACCOUNT:
+                if self._account_service is not None:
+                    await self._account_service.suspend(
+                        self._account_id,
+                        reason="Critical rule violation",
+                        suspended_by="rule_engine",
+                    )
+                else:
+                    logger.warning(
+                        "HALT_ACCOUNT 액션이지만 AccountService가 없어 실행 불가: %s",
+                        self._account_id,
+                    )
 
     async def _on_order_modify(self, event: object) -> None:
         """OrderModifyEvent 수신 시 룰 평가. 위반 시 거부 이벤트 발행."""
@@ -374,8 +421,26 @@ class RuleEngine:
         if not isinstance(event, OrderModifyEvent):
             return
 
+        # account_id 필터링
+        if event.account_id != self._account_id:
+            return
+
+        # 계좌 상태 조회
+        account_status = "active"
+        currency = "KRW"
+        if self._account_service is not None:
+            try:
+                account = await self._account_service.get(self._account_id)
+                account_status = account.status.value
+                currency = account.currency
+            except Exception:
+                logger.warning(
+                    "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
+                )
+
         context = RuleContext(
             bot_id=event.bot_id,
+            account_id=self._account_id,
             strategy_id=event.strategy_id,
             symbol=event.symbol,
             side=event.side,
@@ -383,7 +448,8 @@ class RuleEngine:
             order_type="limit" if event.price else "market",
             price=event.price,
             current_price=event.price or 0.0,
-            system_status=self._system_state.trading_state.value,
+            account_status=account_status,
+            currency=currency,
         )
 
         try:
@@ -433,7 +499,7 @@ class RuleEngine:
     async def _on_config_changed(self, event: object) -> None:
         """설정 변경 시 룰 재로딩.
 
-        category가 ``"rule"`` 또는 ``"global_rule"``이면 전역 룰을 재로드하고,
+        category가 ``"rule"`` 또는 ``"global_rule"``이면 계좌 룰을 재로드하고,
         ``"strategy_rule"``이면 해당 전략 룰을 재로드한다.
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
@@ -460,9 +526,9 @@ class RuleEngine:
             return
 
         if event.category in ("rule", "global_rule"):
-            self._global_rules.clear()
+            self._account_rules.clear()
             self.load_rules_from_config(new_rules)
-            logger.info("전역 룰 재로드 완료: %d건", len(self._global_rules))
+            logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
         elif event.category == "strategy_rule":
             # key 형식: "rules.strategy.<strategy_id>" 또는 strategy_id 직접
             parts = event.key.rsplit(".", 1)
