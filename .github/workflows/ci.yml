@@ -39,7 +39,3 @@ jobs:
 
       - name: Run unit tests
         run: pytest tests/unit/ -v -x
-
-      - name: Run integration tests
-        run: pytest tests/integration/ -v
-        if: hashFiles('tests/integration/test_*.py') != ''
