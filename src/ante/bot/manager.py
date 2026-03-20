@@ -13,6 +13,7 @@ from ante.bot.config import BotConfig, BotStatus
 from ante.bot.exceptions import BotError
 
 if TYPE_CHECKING:
+    from ante.account.service import AccountService
     from ante.bot.context_factory import StrategyContextFactory
     from ante.bot.signal_key import SignalKeyManager  # noqa: F811
     from ante.core.database import Database
@@ -29,13 +30,14 @@ CREATE TABLE IF NOT EXISTS bots (
     bot_id       TEXT PRIMARY KEY,
     name         TEXT NOT NULL DEFAULT '',
     strategy_id  TEXT NOT NULL,
-    bot_type     TEXT NOT NULL DEFAULT 'live',
+    account_id   TEXT NOT NULL DEFAULT 'test',
     config_json  TEXT NOT NULL,
     auto_start   BOOLEAN DEFAULT 0,
     status       TEXT DEFAULT 'created',
     created_at   TEXT DEFAULT (datetime('now')),
     updated_at   TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_bots_account_id ON bots(account_id);
 """
 
 
@@ -51,6 +53,7 @@ class BotManager:
         snapshot: StrategySnapshot | None = None,
         rule_engine: RuleEngine | None = None,
         strategy_rule_configs: dict[str, list[dict[str, Any]]] | None = None,
+        account_service: AccountService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -59,6 +62,7 @@ class BotManager:
         self._snapshot = snapshot
         self._rule_engine = rule_engine
         self._strategy_rule_configs = strategy_rule_configs or {}
+        self._account_service = account_service
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
@@ -66,14 +70,25 @@ class BotManager:
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성 + EventBus 구독 + 잔존 스냅샷 정리."""
+        """스키마 생성 + 마이그레이션 + EventBus 구독 + 잔존 스냅샷 정리."""
         await self._db.execute_script(BOT_SCHEMA)
+        await self._migrate_schema()
         self._subscribe_events()
         if self._snapshot:
             cleaned = self._snapshot.cleanup_all()
             if cleaned:
                 logger.info("잔존 전략 스냅샷 %d건 정리", cleaned)
         logger.info("BotManager 초기화 완료")
+
+    async def _migrate_schema(self) -> None:
+        """기존 bots 테이블에 account_id 컬럼이 없으면 추가한다."""
+        columns = await self._db.fetch_all("PRAGMA table_info(bots)")
+        col_names = {col["name"] for col in columns}
+        if "account_id" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE bots ADD COLUMN account_id TEXT NOT NULL DEFAULT 'test'"
+            )
+            logger.info("bots 테이블에 account_id 컬럼 추가 (마이그레이션)")
 
     async def load_from_db(self) -> int:
         """DB에서 봇 설정을 읽어 메모리에 로드한다 (테스트용).
@@ -98,17 +113,22 @@ class BotManager:
         self._bots.clear()
 
         rows = await self._db.fetch_all(
-            "SELECT bot_id, name, strategy_id, bot_type, config_json, status"
+            "SELECT bot_id, name, strategy_id, account_id, config_json, status"
             " FROM bots WHERE status != 'deleted'"
         )
 
         for row in rows:
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
+            # 마이그레이션: 기존 config에 account_id가 없으면 기본값 사용
+            account_id = row.get("account_id") or config_data.get("account_id", "test")
+            # bot_type, exchange 키는 무시 (BotConfig에서 제거됨)
+            config_data.pop("bot_type", None)
+            config_data.pop("exchange", None)
             config = BotConfig(
                 bot_id=row["bot_id"],
                 strategy_id=row["strategy_id"],
                 name=row["name"] or config_data.get("name", row["bot_id"]),
-                bot_type=row["bot_type"] or "live",
+                account_id=account_id,
                 interval_seconds=config_data.get("interval_seconds", 60),
             )
             bot = Bot(
@@ -131,17 +151,17 @@ class BotManager:
     def _subscribe_events(self) -> None:
         """시스템 이벤트 구독."""
         from ante.eventbus.events import (
+            AccountActivatedEvent,
+            AccountSuspendedEvent,
             BotErrorEvent,
             BotStartedEvent,
             BotStopEvent,
             BotStoppedEvent,
-            TradingStateChangedEvent,
         )
 
         self._eventbus.subscribe(BotStopEvent, self._on_bot_stop_request)
-        self._eventbus.subscribe(
-            TradingStateChangedEvent, self._on_trading_state_changed
-        )
+        self._eventbus.subscribe(AccountSuspendedEvent, self._on_account_suspended)
+        self._eventbus.subscribe(AccountActivatedEvent, self._on_account_activated)
         self._eventbus.subscribe(BotErrorEvent, self._on_bot_error)
         self._eventbus.subscribe(BotStartedEvent, self._on_bot_started)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped)
@@ -173,6 +193,20 @@ class BotManager:
                     f"'{existing_bot.bot_id}'에서 사용 중입니다. "
                     f"파라미터가 다른 전략은 별도 파일로 작성하세요."
                 )
+
+        # exchange 호환성 검증
+        if self._account_service and hasattr(strategy_cls, "meta"):
+            strategy_exchange = getattr(strategy_cls.meta, "exchange", "KRX")
+            strategy_name = getattr(strategy_cls.meta, "name", config.strategy_id)
+            account = await self._account_service.get(config.account_id)
+            from ante.strategy.validator import validate_exchange
+
+            validate_exchange(
+                strategy_exchange=strategy_exchange,
+                account_exchange=account.exchange,
+                strategy_name=strategy_name,
+                account_name=account.name,
+            )
 
         # 전략 파일 스냅샷 생성
         if self._snapshot and source_path:
@@ -313,12 +347,8 @@ class BotManager:
 
         self._unregister_bot_events(bot)
 
-        # Paper 봇 PaperExecutor 등록 해제
-        if (
-            self._context_factory
-            and self._context_factory._paper_executor
-            and bot.config.bot_type == "paper"
-        ):
+        # PaperExecutor 등록 해제 (봇이 등록되어 있는 경우)
+        if self._context_factory and self._context_factory._paper_executor:
             self._context_factory._paper_executor.unregister_bot(bot_id)
 
         # 시그널 키 폐기
@@ -404,15 +434,33 @@ class BotManager:
         if event.bot_id in self._bots:
             await self.stop_bot(event.bot_id)
 
-    async def _on_trading_state_changed(self, event: object) -> None:
-        """킬 스위치 HALTED 시 전체 봇 중지."""
-        from ante.eventbus.events import TradingStateChangedEvent
+    async def _on_account_suspended(self, event: object) -> None:
+        """계좌 정지 시 해당 계좌의 봇만 중지."""
+        from ante.eventbus.events import AccountSuspendedEvent
 
-        if not isinstance(event, TradingStateChangedEvent):
+        if not isinstance(event, AccountSuspendedEvent):
             return
-        if event.new_state == "halted":
-            logger.warning("시스템 HALTED — 전체 봇 중지")
-            await self.stop_all()
+        account_id = event.account_id
+        stopped = []
+        for bot in list(self._bots.values()):
+            if bot.config.account_id == account_id and bot.status == BotStatus.RUNNING:
+                await bot.stop()
+                stopped.append(bot.bot_id)
+        if stopped:
+            logger.warning(
+                "계좌 정지 — 봇 %d개 중지: account=%s, bots=%s",
+                len(stopped),
+                account_id,
+                stopped,
+            )
+
+    async def _on_account_activated(self, event: object) -> None:
+        """계좌 활성화 시 로깅만 수행 (자동 재시작 안 함)."""
+        from ante.eventbus.events import AccountActivatedEvent
+
+        if not isinstance(event, AccountActivatedEvent):
+            return
+        logger.info("계좌 활성화: account=%s", event.account_id)
 
     async def _on_bot_started(self, event: object) -> None:
         """봇 시작 알림 발행."""
@@ -658,13 +706,13 @@ class BotManager:
             "bot_id": config.bot_id,
             "name": config.name,
             "strategy_id": config.strategy_id,
-            "bot_type": config.bot_type,
+            "account_id": config.account_id,
             "interval_seconds": config.interval_seconds,
             "paper_initial_balance": config.paper_initial_balance,
         }
         await self._db.execute(
             """INSERT INTO bots
-               (bot_id, name, strategy_id, bot_type, config_json)
+               (bot_id, name, strategy_id, account_id, config_json)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(bot_id) DO UPDATE SET
                  name = excluded.name,
@@ -674,7 +722,7 @@ class BotManager:
                 config.bot_id,
                 config.name,
                 config.strategy_id,
-                config.bot_type,
+                config.account_id,
                 json.dumps(config_dict),
             ),
         )

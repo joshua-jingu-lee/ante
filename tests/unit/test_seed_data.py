@@ -47,7 +47,7 @@ def test_write_sample_parquet(tmp_path: Path) -> None:
     filepath = write_sample_parquet(tmp_path)
     assert filepath.exists()
     assert filepath.suffix == ".parquet"
-    assert "ohlcv/1d/005930" in str(filepath)
+    assert "ohlcv/1d/KRX/005930" in str(filepath)
 
 
 # ── 시드 데이터 주입 테스트 ───────────────────────────
@@ -105,10 +105,10 @@ async def test_inject_seed_data_db_only(tmp_path: Path) -> None:
         assert len(budgets) == 2
 
         state = await db.fetch_one(
-            "SELECT value FROM system_state WHERE key='trading_state'"
+            "SELECT * FROM treasury_state WHERE account_id='test'"
         )
         assert state is not None
-        assert state["value"] == "active"
+        assert state["account_balance"] == 100000000.0
 
         members = await db.fetch_all("SELECT * FROM members")
         assert len(members) == 1

@@ -1,10 +1,11 @@
 """Rule Engine 모듈 단위 테스트."""
 
 from datetime import time
+from unittest.mock import AsyncMock
 
 import pytest
 
-from ante.core import Database
+from ante.account.models import Account, AccountStatus
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
     OrderRejectedEvent,
@@ -17,6 +18,7 @@ from ante.rule import (
     RuleAction,
     RuleContext,
     RuleEngine,
+    RuleEngineManager,
     RuleEvaluation,
     RuleResult,
     TotalExposureLimitRule,
@@ -33,6 +35,7 @@ def base_context():
     """기본 RuleContext."""
     return RuleContext(
         bot_id="bot1",
+        account_id="domestic",
         strategy_id="momentum_v1",
         symbol="005930",
         side="buy",
@@ -41,10 +44,27 @@ def base_context():
         current_price=50000.0,
         current_position=0.0,
         available_balance=1000000.0,
-        system_status="active",
+        account_status="active",
         daily_pnl=0.0,
         total_pnl=100000.0,
     )
+
+
+@pytest.fixture
+def mock_account_service():
+    """AccountService 목 객체."""
+    service = AsyncMock()
+    account = Account(
+        account_id="domestic",
+        name="국내주식",
+        exchange="KRX",
+        currency="KRW",
+        broker_type="test",
+        status=AccountStatus.ACTIVE,
+    )
+    service.get = AsyncMock(return_value=account)
+    service.suspend = AsyncMock()
+    return service
 
 
 # ── RuleResult / RuleEvaluation ──────────────────
@@ -57,6 +77,12 @@ class TestRuleDataModels:
         assert RuleResult.WARN == "warn"
         assert RuleResult.BLOCK == "block"
         assert RuleResult.REJECT == "reject"
+
+    def test_rule_action_halt_account(self):
+        """RuleAction에 HALT_ACCOUNT이 존재한다."""
+        assert RuleAction.HALT_ACCOUNT == "halt_account"
+        # HALT_SYSTEM은 더 이상 존재하지 않아야 함
+        assert not hasattr(RuleAction, "HALT_SYSTEM")
 
     def test_rule_evaluation_frozen(self):
         """RuleEvaluation은 불변 객체."""
@@ -74,6 +100,7 @@ class TestRuleDataModels:
         """RuleContext는 가변 객체 (엔진이 필드를 채우므로)."""
         ctx = RuleContext(
             bot_id="b1",
+            account_id="domestic",
             strategy_id="s1",
             symbol="005930",
             side="buy",
@@ -82,6 +109,29 @@ class TestRuleDataModels:
         )
         ctx.current_price = 50000.0
         assert ctx.current_price == 50000.0
+
+    def test_rule_context_account_fields(self):
+        """RuleContext에 account_id, currency, account_status 필드가 있다."""
+        ctx = RuleContext(
+            bot_id="b1",
+            account_id="domestic",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            currency="KRW",
+            account_status="active",
+        )
+        assert ctx.account_id == "domestic"
+        assert ctx.currency == "KRW"
+        assert ctx.account_status == "active"
+
+    def test_rule_context_no_system_status(self):
+        """RuleContext에 system_status 필드가 없다 (account_status로 대체)."""
+        ctx = RuleContext()
+        assert not hasattr(ctx, "system_status")
+        assert hasattr(ctx, "account_status")
 
 
 # ── DailyLossLimitRule ───────────────────────────
@@ -107,12 +157,12 @@ class TestDailyLossLimitRule:
         assert result.result == RuleResult.PASS
 
     def test_block_exceeds_limit(self, rule, base_context):
-        """손실이 한도 초과하면 BLOCK."""
+        """손실이 한도 초과하면 BLOCK + HALT_ACCOUNT."""
         base_context.daily_pnl = -10000.0
         base_context.total_pnl = 100000.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.BLOCK
-        assert result.action == RuleAction.HALT_SYSTEM
+        assert result.action == RuleAction.HALT_ACCOUNT
 
     def test_pass_zero_total_pnl(self, rule, base_context):
         """총 수익이 0이면 통과 (0으로 나누기 방지)."""
@@ -307,27 +357,16 @@ class TestTradeFrequencyRule:
 
 class TestRuleEngine:
     @pytest.fixture
-    async def db(self, tmp_path):
-        database = Database(str(tmp_path / "test.db"))
-        await database.connect()
-        yield database
-        await database.close()
-
-    @pytest.fixture
     def eventbus(self):
         return EventBus()
 
     @pytest.fixture
-    async def system_state(self, db, eventbus):
-        from ante.config.system_state import SystemState
-
-        state = SystemState(db=db, eventbus=eventbus)
-        await state.initialize()
-        return state
-
-    @pytest.fixture
-    def engine(self, eventbus, system_state):
-        return RuleEngine(eventbus=eventbus, system_state=system_state)
+    def engine(self, eventbus, mock_account_service):
+        return RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
 
     def test_evaluate_no_rules(self, engine, base_context):
         """룰이 없으면 PASS."""
@@ -335,17 +374,25 @@ class TestRuleEngine:
         assert result.overall_result == RuleResult.PASS
         assert len(result.evaluations) == 0
 
+    def test_evaluate_account_rule_pass(self, engine, base_context):
+        """계좌 룰 통과."""
+        engine.add_account_rule(
+            DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05})
+        )
+        result = engine.evaluate(base_context)
+        assert result.overall_result == RuleResult.PASS
+
     def test_evaluate_global_rule_pass(self, engine, base_context):
-        """전역 룰 통과."""
+        """add_global_rule 하위 호환 테스트."""
         engine.add_global_rule(
             DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05})
         )
         result = engine.evaluate(base_context)
         assert result.overall_result == RuleResult.PASS
 
-    def test_evaluate_global_rule_block(self, engine, base_context):
-        """전역 룰 차단 시 전략별 룰은 평가하지 않음."""
-        engine.add_global_rule(
+    def test_evaluate_account_rule_block(self, engine, base_context):
+        """계좌 룰 차단 시 전략별 룰은 평가하지 않음."""
+        engine.add_account_rule(
             DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05})
         )
         engine.add_strategy_rule(
@@ -358,7 +405,7 @@ class TestRuleEngine:
         result = engine.evaluate(base_context)
 
         assert result.overall_result == RuleResult.BLOCK
-        # 전역 룰만 평가됨
+        # 계좌 룰만 평가됨
         assert len(result.evaluations) == 1
         assert result.evaluations[0].rule_id == "dl"
 
@@ -386,8 +433,8 @@ class TestRuleEngine:
         rule_high = TradingHoursRule(
             "high", {"priority": 1, "allowed_hours": "09:00-15:30"}
         )
-        engine.add_global_rule(rule_low)
-        engine.add_global_rule(rule_high)
+        engine.add_account_rule(rule_low)
+        engine.add_account_rule(rule_high)
 
         base_context.metadata["current_time"] = time(10, 0)
         result = engine.evaluate(base_context)
@@ -423,7 +470,7 @@ class TestRuleEngine:
 
     def test_clear_rules(self, engine):
         """룰 초기화."""
-        engine.add_global_rule(
+        engine.add_account_rule(
             DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05})
         )
         engine.add_strategy_rule(
@@ -439,12 +486,36 @@ class TestRuleEngine:
             "dl",
             {"enabled": False, "max_daily_loss_percent": 0.001},
         )
-        engine.add_global_rule(rule)
+        engine.add_account_rule(rule)
         base_context.daily_pnl = -5000.0
         base_context.total_pnl = 100000.0
         result = engine.evaluate(base_context)
         assert result.overall_result == RuleResult.PASS
         assert len(result.evaluations) == 0
+
+    def test_engine_account_id(self, engine):
+        """RuleEngine에 account_id가 설정된다."""
+        assert engine.account_id == "domestic"
+
+    def test_engine_with_account_service(self, eventbus):
+        """AccountService만으로 동작."""
+        service = AsyncMock()
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="test",
+            account_service=service,
+        )
+        ctx = RuleContext(
+            bot_id="b1",
+            account_id="test",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="market",
+        )
+        result = engine.evaluate(ctx)
+        assert result.overall_result == RuleResult.PASS
 
 
 # ── RuleEngine EventBus 통합 ─────────────────────
@@ -452,27 +523,16 @@ class TestRuleEngine:
 
 class TestRuleEngineEventBus:
     @pytest.fixture
-    async def db(self, tmp_path):
-        database = Database(str(tmp_path / "test.db"))
-        await database.connect()
-        yield database
-        await database.close()
-
-    @pytest.fixture
     def eventbus(self):
         return EventBus()
 
     @pytest.fixture
-    async def system_state(self, db, eventbus):
-        from ante.config.system_state import SystemState
-
-        state = SystemState(db=db, eventbus=eventbus)
-        await state.initialize()
-        return state
-
-    @pytest.fixture
-    async def engine(self, eventbus, system_state):
-        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+    async def engine(self, eventbus, mock_account_service):
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
         engine.start()
         return engine
 
@@ -482,6 +542,7 @@ class TestRuleEngineEventBus:
         eventbus.subscribe(OrderValidatedEvent, lambda e: received.append(e))
 
         order = OrderRequestEvent(
+            account_id="domestic",
             bot_id="bot1",
             strategy_id="s1",
             symbol="005930",
@@ -494,30 +555,23 @@ class TestRuleEngineEventBus:
 
         assert len(received) == 1
         assert received[0].bot_id == "bot1"
+        assert received[0].account_id == "domestic"
 
     async def test_order_rejected_on_block(self, engine, eventbus):
         """룰 차단 시 OrderRejectedEvent 발행."""
-        engine.add_global_rule(
-            DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.001})
-        )
-
-        received = []
-        eventbus.subscribe(OrderRejectedEvent, lambda e: received.append(e))
-
-        # 손실 상태를 context에 전달하기 위해 직접 evaluate 방식이 아닌,
-        # _on_order_request에서는 기본 context가 생성되므로
-        # 전역에서 항상 BLOCK하는 룰을 추가
-        # DailyLossLimitRule은 pnl이 0이면 pass하므로, 다른 방식 사용
-        # TradingHoursRule로 시간 외 거래 차단
         engine.clear_rules()
-        engine.add_global_rule(
+        engine.add_account_rule(
             TradingHoursRule(
                 "hours",
                 {"allowed_hours": "00:00-00:01"},  # 거의 항상 차단
             )
         )
 
+        received = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: received.append(e))
+
         order = OrderRequestEvent(
+            account_id="domestic",
             bot_id="bot1",
             strategy_id="s1",
             symbol="005930",
@@ -531,6 +585,59 @@ class TestRuleEngineEventBus:
         assert len(received) == 1
         assert "Trading not allowed" in received[0].reason
 
+    async def test_event_filtering_different_account(self, engine, eventbus):
+        """다른 account_id의 OrderRequestEvent는 무시한다."""
+        received_validated = []
+        received_rejected = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: received_validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: received_rejected.append(e))
+
+        # 다른 계좌의 주문
+        order = OrderRequestEvent(
+            account_id="us-stock",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="AAPL",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=150.0,
+        )
+        await eventbus.publish(order)
+
+        assert len(received_validated) == 0
+        assert len(received_rejected) == 0
+
+    async def test_halt_account_action(self, engine, eventbus, mock_account_service):
+        """HALT_ACCOUNT 발동 시 AccountService.suspend() 호출."""
+        engine.add_account_rule(
+            DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.001})
+        )
+
+        # context에서 손실을 탐지하도록 metadata 설정
+        # DailyLossLimitRule은 context.daily_pnl과 total_pnl로 판단
+        # _on_order_request에서 기본 context는 pnl=0이므로,
+        # 직접 _execute_actions 테스트
+        from ante.eventbus.events import OrderRequestEvent
+
+        event = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await engine._execute_actions([RuleAction.HALT_ACCOUNT], event)
+
+        mock_account_service.suspend.assert_awaited_once_with(
+            "domestic",
+            reason="Critical rule violation",
+            suspended_by="rule_engine",
+        )
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
@@ -539,23 +646,8 @@ class TestRuleEngineUpdateRules:
     """RuleEngine.update_rules() 단위 테스트."""
 
     @pytest.fixture
-    async def db(self, tmp_path):
-        database = Database(str(tmp_path / "test.db"))
-        await database.connect()
-        yield database
-        await database.close()
-
-    @pytest.fixture
     def eventbus(self):
         return EventBus()
-
-    @pytest.fixture
-    async def system_state(self, db, eventbus):
-        from ante.config.system_state import SystemState
-
-        state = SystemState(db=db, eventbus=eventbus)
-        await state.initialize()
-        return state
 
     @pytest.fixture
     def bot_strategies(self):
@@ -563,10 +655,11 @@ class TestRuleEngineUpdateRules:
         return {"bot1": "momentum_v1", "bot2": "mean_revert_v1"}
 
     @pytest.fixture
-    def engine(self, eventbus, system_state, bot_strategies):
+    def engine(self, eventbus, mock_account_service, bot_strategies):
         return RuleEngine(
             eventbus=eventbus,
-            system_state=system_state,
+            account_id="domestic",
+            account_service=mock_account_service,
             bot_strategy_resolver=lambda bid: bot_strategies.get(bid),
         )
 
@@ -601,11 +694,15 @@ class TestRuleEngineUpdateRules:
         assert "new_freq" in rule_ids
         assert "old_ps" not in rule_ids
 
-    def test_update_rules_no_resolver_raises(self, eventbus, system_state):
+    def test_update_rules_no_resolver_raises(self, eventbus, mock_account_service):
         """resolver 미설정 시 RuleError."""
         from ante.rule.exceptions import RuleError
 
-        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
         with pytest.raises(RuleError, match="bot_strategy_resolver"):
             engine.update_rules("bot1", [])
 
@@ -655,9 +752,13 @@ class TestRuleEngineUpdateRules:
         assert len(engine._strategy_rules["mean_revert_v1"]) == 1
         assert engine._strategy_rules["mean_revert_v1"][0].rule_id == "freq1"
 
-    def test_set_bot_strategy_resolver(self, eventbus, system_state):
+    def test_set_bot_strategy_resolver(self, eventbus, mock_account_service):
         """set_bot_strategy_resolver로 resolver를 나중에 설정할 수 있다."""
-        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
         engine.set_bot_strategy_resolver(lambda bid: "strat_a" if bid == "b1" else None)
 
         engine.update_rules(
@@ -686,6 +787,7 @@ class TestRuleEngineUpdateRules:
 
         context = RuleContext(
             bot_id="bot1",
+            account_id="domestic",
             strategy_id="momentum_v1",
             symbol="005930",
             side="buy",
@@ -693,7 +795,7 @@ class TestRuleEngineUpdateRules:
             order_type="market",
             current_price=50000.0,
             available_balance=1_000_000.0,
-            system_status="active",
+            account_status="active",
         )
         result = engine.evaluate(context)
         assert result.overall_result == RuleResult.PASS
@@ -715,47 +817,36 @@ class TestRuleEngineUpdateRules:
 
 
 class TestRuleEngineConfigReload:
-    """RuleEngine._on_config_changed() 전역/전략 룰 재로드 테스트."""
-
-    @pytest.fixture
-    async def db(self, tmp_path):
-        database = Database(str(tmp_path / "test.db"))
-        await database.connect()
-        yield database
-        await database.close()
+    """RuleEngine._on_config_changed() 계좌/전략 룰 재로드 테스트."""
 
     @pytest.fixture
     def eventbus(self):
         return EventBus()
 
     @pytest.fixture
-    async def system_state(self, db, eventbus):
-        from ante.config.system_state import SystemState
-
-        state = SystemState(db=db, eventbus=eventbus)
-        await state.initialize()
-        return state
-
-    @pytest.fixture
-    async def engine(self, eventbus, system_state):
-        engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+    async def engine(self, eventbus, mock_account_service):
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
         engine.start()
         return engine
 
     async def test_global_rule_reload_on_config_changed(self, engine, eventbus):
-        """category='global_rule' ConfigChangedEvent 발행 시 전역 룰이 재로드된다."""
+        """category='global_rule' ConfigChangedEvent 발행 시 계좌 룰이 재로드된다."""
         import json
 
         from ante.eventbus.events import ConfigChangedEvent
 
-        # 초기 전역 룰 설정
+        # 초기 계좌 룰 설정
         engine.load_rules_from_config(
             [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
         )
         assert len(engine._global_rules) == 1
         assert engine._global_rules[0].rule_id == "dl"
 
-        # ConfigChangedEvent로 전역 룰 교체
+        # ConfigChangedEvent로 계좌 룰 교체
         new_rules = [
             {"type": "total_exposure_limit", "id": "exp", "max_exposure_percent": 0.20},
             {
@@ -779,7 +870,7 @@ class TestRuleEngineConfigReload:
         assert "dl" not in rule_ids
 
     async def test_rule_category_reload(self, engine, eventbus):
-        """category='rule'도 전역 룰 재로드를 트리거한다."""
+        """category='rule'도 계좌 룰 재로드를 트리거한다."""
         import json
 
         from ante.eventbus.events import ConfigChangedEvent
@@ -902,3 +993,80 @@ class TestRuleEngineConfigReload:
         # 기존 룰 변경 없음
         assert len(engine._global_rules) == 1
         assert engine._global_rules[0].rule_id == "dl"
+
+
+# ── RuleEngineManager ────────────────────────────
+
+
+class TestRuleEngineManager:
+    """RuleEngineManager 단위 테스트."""
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    def manager(self, eventbus, mock_account_service):
+        return RuleEngineManager(
+            eventbus=eventbus, account_service=mock_account_service
+        )
+
+    def test_create_engine(self, manager):
+        """계좌별 RuleEngine을 생성할 수 있다."""
+        engine = manager.create_engine("domestic")
+        assert engine.account_id == "domestic"
+
+    def test_create_engine_with_rules(self, manager):
+        """룰 설정과 함께 RuleEngine을 생성할 수 있다."""
+        configs = [
+            {"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05},
+        ]
+        engine = manager.create_engine("domestic", configs)
+        assert len(engine._global_rules) == 1
+
+    def test_get_engine(self, manager):
+        """생성된 RuleEngine을 account_id로 조회한다."""
+        manager.create_engine("domestic")
+        engine = manager.get("domestic")
+        assert engine.account_id == "domestic"
+
+    def test_get_engine_not_found(self, manager):
+        """존재하지 않는 account_id 조회 시 KeyError."""
+        with pytest.raises(KeyError, match="RuleEngine이 존재하지 않습니다"):
+            manager.get("nonexistent")
+
+    async def test_initialize_all(self, manager):
+        """모든 계좌의 RuleEngine을 초기화한다."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="test",
+            ),
+            Account(
+                account_id="us-stock",
+                name="미국주식",
+                exchange="NYSE",
+                currency="USD",
+                broker_type="test",
+            ),
+        ]
+        await manager.initialize_all(accounts)
+
+        assert len(manager.engines) == 2
+        assert manager.get("domestic").account_id == "domestic"
+        assert manager.get("us-stock").account_id == "us-stock"
+
+    def test_multiple_engines_isolation(self, manager):
+        """2개 계좌의 RuleEngine이 서로 간섭하지 않는다."""
+        engine1 = manager.create_engine("domestic")
+        engine2 = manager.create_engine("us-stock")
+
+        engine1.add_account_rule(
+            DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05})
+        )
+
+        assert len(engine1._global_rules) == 1
+        assert len(engine2._global_rules) == 0

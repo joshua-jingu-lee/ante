@@ -789,3 +789,185 @@ class TestModels:
         assert m.total_trades == 0
         assert m.sharpe_ratio is None
         assert m.first_trade_at is None
+
+
+# ── Account ID 관련 테스트 ──────────────────────────
+
+
+class TestAccountIdFields:
+    """#563: TradeRecord, PositionSnapshot에 account_id, currency 필드 추가."""
+
+    def test_trade_record_with_account(self):
+        """account_id, currency 필드 포함 TradeRecord 생성."""
+        record = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+            account_id="my-account",
+            currency="USD",
+        )
+        assert record.account_id == "my-account"
+        assert record.currency == "USD"
+
+    def test_trade_record_default_values(self):
+        """기본값 'default', 'KRW' 확인."""
+        record = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+        )
+        assert record.account_id == "default"
+        assert record.currency == "KRW"
+
+    def test_position_snapshot_with_account(self):
+        """account_id 필드 포함 PositionSnapshot 생성."""
+        snapshot = PositionSnapshot(
+            bot_id="bot1",
+            symbol="005930",
+            quantity=10,
+            avg_entry_price=50000,
+            account_id="my-account",
+        )
+        assert snapshot.account_id == "my-account"
+
+    def test_position_snapshot_default_account(self):
+        """PositionSnapshot 기본 account_id 확인."""
+        snapshot = PositionSnapshot(
+            bot_id="bot1",
+            symbol="005930",
+            quantity=10,
+            avg_entry_price=50000,
+        )
+        assert snapshot.account_id == "default"
+
+
+class TestAccountIdDbMigration:
+    """#563: DB 마이그레이션으로 account_id, currency 컬럼 추가."""
+
+    async def test_trades_migration_adds_columns(self, db, recorder):
+        """trades 테이블에 account_id, currency 컬럼 존재 확인."""
+        columns = await db.fetch_all("PRAGMA table_info(trades)")
+        col_names = {row["name"] for row in columns}
+        assert "account_id" in col_names
+        assert "currency" in col_names
+
+    async def test_positions_migration_adds_column(self, db, position_history):
+        """positions 테이블에 account_id 컬럼 존재 확인."""
+        columns = await db.fetch_all("PRAGMA table_info(positions)")
+        col_names = {row["name"] for row in columns}
+        assert "account_id" in col_names
+
+    async def test_trade_record_saved_with_account_id(self, recorder, db):
+        """account_id, currency가 DB에 저장되는지 확인."""
+        record = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+            account_id="acct-kr",
+            currency="KRW",
+            timestamp=datetime.now(UTC),
+        )
+        await recorder.save(record)
+
+        rows = await db.fetch_all("SELECT * FROM trades")
+        assert len(rows) == 1
+        assert rows[0]["account_id"] == "acct-kr"
+        assert rows[0]["currency"] == "KRW"
+
+    async def test_trade_record_read_with_account_id(self, recorder):
+        """조회한 TradeRecord에 account_id, currency가 포함되는지 확인."""
+        record = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+            account_id="acct-kr",
+            currency="USD",
+            timestamp=datetime.now(UTC),
+        )
+        await recorder.save(record)
+
+        trades = await recorder.get_trades(bot_id="bot1")
+        assert len(trades) == 1
+        assert trades[0].account_id == "acct-kr"
+        assert trades[0].currency == "USD"
+
+    async def test_get_trades_filter_by_account_id(self, recorder):
+        """account_id로 거래 필터링."""
+        for acct in ("acct-1", "acct-2"):
+            record = TradeRecord(
+                trade_id=uuid4(),
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                price=50000,
+                status=TradeStatus.FILLED,
+                account_id=acct,
+                timestamp=datetime.now(UTC),
+            )
+            await recorder.save(record)
+
+        trades = await recorder.get_trades(account_id="acct-1")
+        assert len(trades) == 1
+        assert trades[0].account_id == "acct-1"
+
+    async def test_position_saved_with_account_id(self, position_history):
+        """포지션 갱신 시 account_id가 DB에 저장되는지 확인."""
+        record = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+            account_id="acct-kr",
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(record)
+
+        positions = await position_history.get_positions("bot1")
+        assert len(positions) == 1
+        assert positions[0].account_id == "acct-kr"
+
+    async def test_position_cache_has_account_id(self, position_history):
+        """인메모리 캐시에도 account_id가 반영되는지 확인."""
+        record = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+            account_id="acct-us",
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(record)
+
+        cached = position_history.get_positions_sync("bot1")
+        assert len(cached) == 1
+        assert cached[0].account_id == "acct-us"

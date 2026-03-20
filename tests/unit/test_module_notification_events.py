@@ -194,47 +194,6 @@ class TestTradeRecorderNotifications:
         assert "Already filled" in notifications[0].message
 
 
-# ── config/system_state.py (1건) ──────────────────────────
-
-
-class TestSystemStateNotification:
-    """SystemState: 거래 상태 변경 (킬 스위치)."""
-
-    @pytest.fixture
-    def eventbus(self):
-        return EventBus()
-
-    @pytest.fixture
-    def notifications(self, eventbus):
-        return _collect_notifications(eventbus)
-
-    @pytest.fixture
-    async def system_state(self, eventbus, tmp_path):
-        from ante.config.system_state import SystemState
-        from ante.core.database import Database
-
-        db = Database(str(tmp_path / "test.db"))
-        await db.connect()
-        ss = SystemState(db=db, eventbus=eventbus)
-        await ss.initialize()
-        return ss
-
-    async def test_trading_state_changed_notification(
-        self, system_state, notifications
-    ):
-        """거래 상태 변경 시 NotificationEvent 발행 (CRITICAL)."""
-        from ante.config.system_state import TradingState
-
-        await system_state.set_state(
-            TradingState.HALTED, reason="일일 손실 한도 초과", changed_by="rule_engine"
-        )
-        assert len(notifications) == 1
-        assert notifications[0].level == "critical"
-        assert notifications[0].category == "system"
-        assert "거래 상태 변경" in notifications[0].title
-        assert "halted" in notifications[0].message
-
-
 # ── main.py (2건) ──────────────────────────
 
 

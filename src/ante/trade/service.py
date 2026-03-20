@@ -39,6 +39,7 @@ class TradeService:
 
     async def get_trades(
         self,
+        account_id: str | None = None,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         symbol: str | None = None,
@@ -50,6 +51,7 @@ class TradeService:
     ) -> list[TradeRecord]:
         """거래 기록 조회."""
         return await self._recorder.get_trades(
+            account_id=account_id,
             bot_id=bot_id,
             strategy_id=strategy_id,
             symbol=symbol,
@@ -92,6 +94,7 @@ class TradeService:
 
     async def get_performance(
         self,
+        account_id: str | None = None,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         from_date: datetime | None = None,
@@ -99,6 +102,7 @@ class TradeService:
     ) -> PerformanceMetrics:
         """성과 지표 조회."""
         return await self._performance.calculate(
+            account_id=account_id,
             bot_id=bot_id,
             strategy_id=strategy_id,
             from_date=from_date,

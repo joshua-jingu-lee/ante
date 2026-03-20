@@ -278,8 +278,8 @@ async def test_get_instruments(broker: MockBrokerAdapter) -> None:
 async def test_get_commission_info(broker: MockBrokerAdapter) -> None:
     """수수료 정보를 반환한다."""
     info = broker.get_commission_info()
-    assert info.commission_rate == 0.00015
-    assert info.sell_tax_rate == 0.0023
+    assert info.buy_commission_rate == 0.00015
+    assert info.sell_commission_rate == 0.00195
 
 
 @pytest.mark.asyncio

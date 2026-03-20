@@ -136,8 +136,8 @@ class PaperExecutor:
         self._eventbus = eventbus
         self._gateway = gateway
         self._commission_info = CommissionInfo(
-            commission_rate=commission_rate,
-            sell_tax_rate=sell_tax_rate,
+            buy_commission_rate=commission_rate,
+            sell_commission_rate=commission_rate + sell_tax_rate,
         )
         self._slippage_rate = slippage_rate
         self._portfolios: dict[str, PaperPortfolioView] = {}

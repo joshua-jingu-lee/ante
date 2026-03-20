@@ -4,11 +4,12 @@ Refs #498
 """
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
+from ante.account.models import Account, AccountStatus
 from ante.bot import BotConfig, BotManager, BotStatus
-from ante.config.system_state import SystemState
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.rule.engine import RuleEngine
@@ -85,15 +86,29 @@ async def db(tmp_path):
 
 
 @pytest.fixture
-async def system_state(db, eventbus):
-    state = SystemState(db=db, eventbus=eventbus)
-    await state.initialize()
-    return state
+def mock_account_service():
+    """AccountService 목 객체."""
+    service = AsyncMock()
+    account = Account(
+        account_id="default",
+        name="테스트",
+        exchange="KRX",
+        currency="KRW",
+        broker_type="test",
+        status=AccountStatus.ACTIVE,
+    )
+    service.get = AsyncMock(return_value=account)
+    service.suspend = AsyncMock()
+    return service
 
 
 @pytest.fixture
-def rule_engine(eventbus, system_state):
-    engine = RuleEngine(eventbus=eventbus, system_state=system_state)
+def rule_engine(eventbus, mock_account_service):
+    engine = RuleEngine(
+        eventbus=eventbus,
+        account_id="default",
+        account_service=mock_account_service,
+    )
     return engine
 
 

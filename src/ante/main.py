@@ -3,6 +3,17 @@
 Composition Root: 모든 모듈을 조립하고 시스템을 부팅한다.
 각 _init_*() 함수가 독립적 초기화 단위를 담당하고,
 main()은 조율만 수행한다.
+
+초기화 순서 (Account 중심):
+1. Core: Config, Database, EventBus
+2. Services: AuditLogger, MemberService, InstrumentService
+3. Account: AccountService, 테스트 계좌 자동 생성
+4. Trading: StrategyRegistry, Trade, TreasuryManager, RuleEngineManager, BotManager
+5. Gateway: APIGateway(account_service 주입)
+6. Feed: DataPipeline, Backtest, Report
+7. Approval: ApprovalService
+8. Notification: Telegram(account_service 주입)
+9. Web: FastAPI(account_service 주입)
 """
 
 import asyncio
@@ -13,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ante.config import Config, DynamicConfigService, SystemState
+from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
 
@@ -48,20 +59,26 @@ def read_pid_file() -> int | None:
 
 @dataclass
 class Services:
-    """초기화된 서비스 인스턴스를 전달하는 컨테이너."""
+    """초기화된 서비스 인스턴스를 전달하는 컨테이너.
+
+    Account 중심 구조:
+    - account_service: 계좌 CRUD 및 BrokerAdapter 관리
+    - treasury_manager: 계좌별 Treasury 인스턴스 관리
+    - rule_engine_manager: 계좌별 RuleEngine 인스턴스 관리
+    """
 
     config: Any = None
     db: Database | None = None
     eventbus: EventBus | None = None
     event_history: EventHistoryStore | None = None
-    system_state: SystemState | None = None
     dynamic_config: DynamicConfigService | None = None
     audit_logger: Any = None
     member_service: Any = None
     instrument_service: Any = None
+    account_service: Any = None
     strategy_registry: Any = None
-    rule_engine: Any = None
-    treasury: Any = None
+    treasury_manager: Any = None
+    rule_engine_manager: Any = None
     trade_recorder: Any = None
     position_history: Any = None
     performance_tracker: Any = None
@@ -71,7 +88,6 @@ class Services:
     live_portfolio: Any = None
     live_order_view: Any = None
     strategy_snapshot: Any = None
-    broker: Any = None
     api_gateway: Any = None
     stream_integration: Any = None
     reconcile_scheduler: Any = None
@@ -87,13 +103,11 @@ class Services:
     web_task: asyncio.Task | None = None  # type: ignore[type-arg]
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
-    commission_rate: float = 0.00015
-    sell_tax_rate: float = 0.0023
     _cleanup_tasks: list[str] = field(default_factory=list)
 
 
 async def _init_core(s: Services) -> None:
-    """Config, Database, EventBus, SystemState, DynamicConfig 초기화."""
+    """Config, Database, EventBus, DynamicConfig 초기화."""
     # Config
     s.config = Config.load()
     s.config.validate()
@@ -119,11 +133,6 @@ async def _init_core(s: Services) -> None:
     await s.event_history.initialize()
     s.eventbus.use(s.event_history.record)
     logger.info("EventBus 초기화 완료 (history_size=%d)", history_size)
-
-    # SystemState (킬 스위치)
-    s.system_state = SystemState(db=s.db, eventbus=s.eventbus)
-    await s.system_state.initialize()
-    logger.info("SystemState 초기화 완료: %s", s.system_state.trading_state)
 
     # DynamicConfigService
     s.dynamic_config = DynamicConfigService(db=s.db, eventbus=s.eventbus)
@@ -176,38 +185,29 @@ async def _init_services(s: Services) -> None:
     await s.instrument_service.initialize()
 
 
+async def _init_account(s: Services) -> None:
+    """AccountService 초기화. 계좌 없으면 테스트 계좌 자동 생성."""
+    from ante.account import AccountService
+
+    s.account_service = AccountService(db=s.db, eventbus=s.eventbus)
+    await s.account_service.initialize()
+
+    # 계좌가 하나도 없으면 테스트 계좌 자동 생성
+    accounts = await s.account_service.list()
+    if not accounts:
+        await s.account_service.create_default_test_account()
+        logger.info("테스트 계좌 자동 생성: account_id=test")
+
+    logger.info("AccountService 초기화 완료")
+
+
 async def _init_trading(s: Services) -> None:
-    """StrategyRegistry, RuleEngine, Treasury, Trade, BotManager 초기화."""
+    """Strategy, Trade, TreasuryManager, RuleEngineManager, BotManager."""
     from ante.strategy import StrategyRegistry
 
     s.strategy_registry = StrategyRegistry(db=s.db)
     await s.strategy_registry.initialize()
     logger.info("StrategyRegistry 초기화 완료")
-
-    # RuleEngine
-    from ante.rule import RuleEngine
-
-    s.rule_engine = RuleEngine(eventbus=s.eventbus, system_state=s.system_state)
-    s.rule_engine.start()
-
-    rule_configs = s.config.get("rules.global", [])
-    if rule_configs:
-        s.rule_engine.load_rules_from_config(rule_configs)
-    logger.info("RuleEngine 초기화 완료")
-
-    # Treasury
-    from ante.treasury import Treasury
-
-    s.commission_rate = s.config.get("broker.commission_rate", 0.00015)
-    s.sell_tax_rate = s.config.get("broker.sell_tax_rate", 0.0023)
-    s.treasury = Treasury(
-        db=s.db,
-        eventbus=s.eventbus,
-        commission_rate=s.commission_rate,
-        sell_tax_rate=s.sell_tax_rate,
-    )
-    await s.treasury.initialize()
-    logger.info("Treasury 초기화 완료")
 
     # Trade
     from ante.trade import (
@@ -233,102 +233,129 @@ async def _init_trading(s: Services) -> None:
     )
     logger.info("Trade 모듈 초기화 완료")
 
-    # BotManager + StrategyContextFactory
-    from ante.bot import BotManager, StrategyContextFactory  # noqa: F401
-    from ante.bot.providers.live import LiveOrderView, LivePortfolioView
+    # TreasuryManager — 계좌별 Treasury 인스턴스 관리
+    from ante.treasury import TreasuryManager
+
+    s.treasury_manager = TreasuryManager(db=s.db, eventbus=s.eventbus)
+    accounts = await s.account_service.list()
+    await s.treasury_manager.initialize_all(accounts)
+    logger.info("TreasuryManager 초기화 완료: %d개 계좌", len(accounts))
+
+    # RuleEngineManager — 계좌별 RuleEngine 인스턴스 관리
+    from ante.rule import RuleEngineManager
+
+    s.rule_engine_manager = RuleEngineManager(
+        eventbus=s.eventbus,
+        account_service=s.account_service,
+    )
+    await s.rule_engine_manager.initialize_all(accounts, config=s.config)
+    logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(accounts))
+
+    # BotManager
+    from ante.bot import BotManager  # noqa: F401
     from ante.bot.providers.paper import PaperExecutor
     from ante.strategy.snapshot import StrategySnapshot
 
     s.paper_executor = PaperExecutor(
         eventbus=s.eventbus,
         gateway=None,  # APIGateway 연결 후 설정
-        commission_rate=s.commission_rate,
-        sell_tax_rate=s.sell_tax_rate,
     )
     s.paper_executor.subscribe()
 
-    s.live_portfolio = LivePortfolioView(
-        treasury=s.treasury,
-        position_history=s.position_history,
-    )
+    from ante.bot.providers.live import LiveOrderView
+
     s.live_order_view = LiveOrderView(order_registry=None)  # Broker 연결 후 설정
 
     strategies_dir = Path(s.config.get("strategy.dir", "strategies"))
     s.strategy_snapshot = StrategySnapshot(strategies_dir)
-
-    # 전략별 룰 설정 로딩
-    strategy_rule_configs_raw = s.config.get("rules.strategy", {})
-    strategy_rule_configs = (
-        strategy_rule_configs_raw if isinstance(strategy_rule_configs_raw, dict) else {}
-    )
 
     s.bot_manager = BotManager(
         eventbus=s.eventbus,
         db=s.db,
         context_factory=None,  # APIGateway 연결 후 갱신
         snapshot=s.strategy_snapshot,
-        rule_engine=s.rule_engine,
-        strategy_rule_configs=strategy_rule_configs,
+        account_service=s.account_service,
     )
     await s.bot_manager.initialize()
 
-    # Treasury에 봇 상태 확인 콜백 연결
-    def _get_bot_status(bot_id: str) -> str:
-        bot = s.bot_manager.get_bot(bot_id)
-        return bot.status if bot else ""
+    # 각 계좌의 Treasury에 봇 상태 확인 콜백 연결
+    for treasury in s.treasury_manager.list_all():
 
-    s.treasury.set_bot_status_checker(_get_bot_status)
+        def _get_bot_status(bot_id: str, _treasury: Any = treasury) -> str:
+            bot = s.bot_manager.get_bot(bot_id)
+            return bot.status if bot else ""
+
+        treasury.set_bot_status_checker(_get_bot_status)
+
     logger.info("BotManager 초기화 완료")
 
-    # Broker + APIGateway
-    await _init_broker(s)
 
-    # StrategyContextFactory 완성 (Broker 연결 이후)
-    _init_context_factory(s)
-
-    # Treasury 잔고 동기화 (Broker 연결 이후)
-    _init_treasury_sync(s)
-
-
-async def _init_broker(s: Services) -> None:
-    """Broker, APIGateway, StreamIntegration 연결 및 종목 마스터 동기화."""
+async def _init_gateway(s: Services) -> None:
+    """APIGateway(account_service 주입), StreamIntegration, 종목 동기화."""
     from ante.gateway import APIGateway
     from ante.gateway.stop_order import StopOrderManager
-
-    broker_config = s.config.get("broker", {})
-    broker_type = (
-        broker_config.get("type", "kis") if isinstance(broker_config, dict) else "kis"
-    )
-
-    if broker_type == "mock":
-        await _connect_mock_broker(s, broker_config)
-    elif broker_type == "test":
-        await _connect_test_broker(s, broker_config)
-    else:
-        await _connect_kis_broker(s, broker_config)
 
     # StopOrderManager 초기화
     stop_order_manager = StopOrderManager(eventbus=s.eventbus)
     stop_order_manager.start()
 
-    if s.broker:
-        s.api_gateway = APIGateway(
-            broker=s.broker,
-            eventbus=s.eventbus,
-            stop_order_manager=stop_order_manager,
-        )
-        s.api_gateway.start()
-        logger.info("APIGateway 시작 완료")
+    # APIGateway — AccountService 기반 계좌별 라우팅
+    s.api_gateway = APIGateway(
+        account_service=s.account_service,
+        eventbus=s.eventbus,
+        stop_order_manager=stop_order_manager,
+    )
+    s.api_gateway.start()
+    logger.info("APIGateway 시작 완료")
 
-    # KIS 브로커일 때 StreamIntegration 초기화
-    if s.broker and broker_type == "kis":
-        await _init_stream_integration(s, broker_config, stop_order_manager)
+    # 각 계좌의 Broker 연결 시도
+    accounts = await s.account_service.list()
+    connected_count = 0
+    for account in accounts:
+        try:
+            broker = await s.account_service.get_broker(account.account_id)
+            await broker.connect()
+            connected_count += 1
+            logger.info(
+                "Broker 연결: account=%s, type=%s",
+                account.account_id,
+                account.broker_type,
+            )
+        except Exception:
+            logger.warning(
+                "Broker 연결 실패: account=%s — 건너뜀",
+                account.account_id,
+                exc_info=True,
+            )
+    if connected_count:
+        logger.info("Broker 연결 완료: %d/%d개 계좌", connected_count, len(accounts))
 
-    if s.broker:
-        await _sync_instruments(s)
+    # KIS 브로커 계좌의 StreamIntegration 초기화
+    for account in accounts:
+        if account.broker_type == "kis":
+            try:
+                broker = await s.account_service.get_broker(account.account_id)
+                broker_config = account.credentials
+                await _init_stream_integration(s, broker_config, stop_order_manager)
+            except Exception:
+                logger.warning(
+                    "StreamIntegration 초기화 실패: account=%s",
+                    account.account_id,
+                    exc_info=True,
+                )
+
+    # 종목 마스터 동기화 (연결된 첫 번째 Broker 사용)
+    if connected_count:
+        await _sync_instruments(s, accounts)
+
+    # StrategyContextFactory 완성 (Gateway 연결 이후)
+    _init_context_factory(s)
+
+    # Treasury 잔고 동기화 (Broker 연결 이후)
+    await _init_treasury_sync(s, accounts)
 
     # ReconcileScheduler 초기화
-    if s.broker and s.trade_service:
+    if connected_count and s.trade_service:
         await _init_reconcile_scheduler(s)
 
     # DailyReportScheduler 초기화
@@ -357,9 +384,23 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         eventbus=s.eventbus,
     )
 
+    # 첫 번째 연결된 Broker를 ReconcileScheduler에 사용
+    broker = None
+    accounts = await s.account_service.list()
+    for account in accounts:
+        try:
+            broker = await s.account_service.get_broker(account.account_id)
+            break
+        except Exception:
+            continue
+
+    if not broker:
+        logger.info("ReconcileScheduler 건너뜀 — 연결된 Broker 없음")
+        return
+
     s.reconcile_scheduler = ReconcileScheduler(
         reconciler=reconciler,
-        broker=s.broker,
+        broker=broker,
         bot_manager=s.bot_manager,
         eventbus=s.eventbus,
         interval_seconds=interval,
@@ -380,59 +421,6 @@ async def _init_daily_report_scheduler(s: Services) -> None:
     )
     await s.daily_report_scheduler.start()
     logger.info("DailyReportScheduler 시작 완료")
-
-
-async def _connect_mock_broker(s: Services, broker_config: dict) -> None:
-    """MockBrokerAdapter 연결."""
-    from ante.broker.mock import MockBrokerAdapter
-
-    s.broker = MockBrokerAdapter(
-        broker_config if isinstance(broker_config, dict) else {}
-    )
-    await s.broker.connect()
-    logger.info("MockBrokerAdapter 연결 완료")
-
-
-async def _connect_test_broker(s: Services, broker_config: dict) -> None:
-    """TestBrokerAdapter 연결."""
-    from ante.broker import TestBrokerAdapter
-
-    test_config = (
-        broker_config.get("test", {}) if isinstance(broker_config, dict) else {}
-    )
-    merged = {
-        **(broker_config if isinstance(broker_config, dict) else {}),
-        **test_config,
-    }
-    s.broker = TestBrokerAdapter(merged)
-    await s.broker.connect()
-    logger.info("TestBrokerAdapter 연결 완료 (seed=%s)", merged.get("seed", 42))
-
-
-async def _connect_kis_broker(s: Services, broker_config: dict) -> None:
-    """KISAdapter 연결 (비밀값 없으면 건너뜀)."""
-    from ante.broker import KISAdapter
-
-    try:
-        broker_config["app_key"] = s.config.secret("KIS_APP_KEY")
-        broker_config["app_secret"] = s.config.secret("KIS_APP_SECRET")
-        broker_config["account_no"] = s.config.secret("KIS_ACCOUNT_NO")
-    except Exception:
-        return  # 비밀값 없으면 브로커 미사용
-
-    if not broker_config.get("app_key"):
-        return
-
-    s.broker = KISAdapter(config=broker_config, eventbus=s.eventbus)
-    try:
-        await s.broker.connect()
-        logger.info(
-            "KISAdapter 연결 완료 (paper=%s)",
-            broker_config.get("is_paper", True),
-        )
-    except Exception:
-        logger.warning("KISAdapter 연결 실패 — 브로커 없이 시작", exc_info=True)
-        s.broker = None
 
 
 async def _init_stream_integration(
@@ -477,33 +465,45 @@ async def _init_stream_integration(
         s.stream_integration = None
 
 
-async def _sync_instruments(s: Services) -> None:
-    """종목 마스터 동기화."""
-    try:
-        raw_instruments = await s.broker.get_instruments()
-        if not raw_instruments:
-            return
-        from ante.instrument.models import Instrument
+async def _sync_instruments(s: Services, accounts: list) -> None:
+    """종목 마스터 동기화 (연결된 첫 번째 Broker 사용)."""
+    for account in accounts:
+        try:
+            broker = await s.account_service.get_broker(account.account_id)
+            raw_instruments = await broker.get_instruments()
+            if not raw_instruments:
+                continue
+            from ante.instrument.models import Instrument
 
-        instruments_to_upsert = [
-            Instrument(
-                symbol=item["symbol"],
-                exchange="KRX",
-                name=item.get("name", ""),
-                name_en=item.get("name_en", ""),
-                instrument_type=item.get("instrument_type", ""),
-                listed=item.get("listed", True),
+            instruments_to_upsert = [
+                Instrument(
+                    symbol=item["symbol"],
+                    exchange=account.exchange,
+                    name=item.get("name", ""),
+                    name_en=item.get("name_en", ""),
+                    instrument_type=item.get("instrument_type", ""),
+                    listed=item.get("listed", True),
+                )
+                for item in raw_instruments
+            ]
+            count = await s.instrument_service.bulk_upsert(instruments_to_upsert)
+            logger.info(
+                "종목 동기화 완료: account=%s, %d건 갱신",
+                account.account_id,
+                count,
             )
-            for item in raw_instruments
-        ]
-        count = await s.instrument_service.bulk_upsert(instruments_to_upsert)
-        logger.info("종목 동기화 완료: %d건 갱신", count)
-    except Exception:
-        logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영", exc_info=True)
+            return  # 첫 번째 성공한 Broker로 동기화
+        except Exception:
+            logger.warning(
+                "종목 동기화 실패: account=%s — 다음 계좌 시도",
+                account.account_id,
+                exc_info=True,
+            )
+    logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영")
 
 
 def _init_context_factory(s: Services) -> None:
-    """StrategyContextFactory 완성 (Broker/APIGateway 연결 이후)."""
+    """StrategyContextFactory 완성 (Gateway 연결 이후)."""
     from ante.bot import StrategyContextFactory
     from ante.bot.providers.live import LiveTradeHistoryView
     from ante.gateway.data_provider import LiveDataProvider
@@ -529,28 +529,43 @@ def _init_context_factory(s: Services) -> None:
         logger.info("StrategyContextFactory 설정 완료")
 
 
-def _init_treasury_sync(s: Services) -> None:
-    """Treasury 잔고 동기화 시작 (Broker 연결 이후)."""
-    if not s.broker:
-        return
-
-    account_no = getattr(s.broker, "account_no", "")
-    is_paper = getattr(s.broker, "is_paper", False)
-    formatted_account = (
-        f"{account_no[:8]}-{account_no[8:]}" if len(account_no) >= 10 else account_no
-    )
-    s.treasury.set_account_info(
-        account_number=formatted_account,
-        is_demo_trading=is_paper,
-    )
-
+async def _init_treasury_sync(s: Services, accounts: list) -> None:
+    """각 계좌의 Treasury 잔고 동기화 시작 (Broker 연결 이후)."""
     sync_interval = s.config.get("treasury.sync_interval_seconds", 300)
-    s.treasury.start_sync(
-        broker=s.broker,
-        position_history=s.position_history,
-        interval_seconds=sync_interval,
-    )
-    logger.info("Treasury 잔고 동기화 시작 (주기: %d초)", sync_interval)
+
+    for account in accounts:
+        try:
+            broker = await s.account_service.get_broker(account.account_id)
+            treasury = s.treasury_manager.get(account.account_id)
+
+            account_no = getattr(broker, "account_no", "")
+            is_paper = getattr(broker, "is_paper", False)
+            formatted_account = (
+                f"{account_no[:8]}-{account_no[8:]}"
+                if len(account_no) >= 10
+                else account_no
+            )
+            treasury.set_account_info(
+                account_number=formatted_account,
+                is_demo_trading=is_paper,
+            )
+
+            treasury.start_sync(
+                broker=broker,
+                position_history=s.position_history,
+                interval_seconds=sync_interval,
+            )
+            logger.info(
+                "Treasury 잔고 동기화 시작: account=%s (주기: %d초)",
+                account.account_id,
+                sync_interval,
+            )
+        except Exception:
+            logger.warning(
+                "Treasury 동기화 시작 실패: account=%s — 건너뜀",
+                account.account_id,
+                exc_info=True,
+            )
 
 
 async def _init_feed(s: Services) -> None:
@@ -603,7 +618,9 @@ async def _init_approval(s: Services) -> None:
     from ante.approval.models import ValidationResult
 
     async def _exec_rule_change(params: dict) -> None:
-        s.rule_engine.update_rules(params["bot_id"], params["rules"])
+        account_id = params.get("account_id", "test")
+        engine = s.rule_engine_manager.get(account_id)
+        engine.update_rules(params["bot_id"], params["rules"])
 
     approval_executors: dict = {
         # 전략 관련
@@ -625,9 +642,9 @@ async def _init_approval(s: Services) -> None:
         "bot_resume": lambda params: s.bot_manager.resume_bot(params["bot_id"]),
         "bot_delete": lambda params: s.bot_manager.delete_bot(params["bot_id"]),
         # 자금·규칙
-        "budget_change": lambda params: s.treasury.update_budget(
-            params["bot_id"], params["amount"]
-        ),
+        "budget_change": lambda params: s.treasury_manager.get(
+            params.get("account_id", "test")
+        ).update_budget(params["bot_id"], params["amount"]),
         "rule_change": _exec_rule_change,
     }
 
@@ -740,14 +757,25 @@ async def _init_approval(s: Services) -> None:
 
     def _validate_budget_change(params: dict) -> list[ValidationResult]:
         """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn)."""
+        account_id = params.get("account_id", "test")
+        try:
+            treasury = s.treasury_manager.get(account_id)
+        except KeyError:
+            return [
+                ValidationResult(
+                    "fail",
+                    f"계좌 '{account_id}'의 Treasury 없음",
+                    "system:treasury",
+                )
+            ]
         amount = float(params.get("amount", 0))
         current = float(params.get("current", 0))
         amount_diff = amount - current
-        if amount_diff > 0 and amount_diff > s.treasury.unallocated:
+        if amount_diff > 0 and amount_diff > treasury.unallocated:
             return [
                 ValidationResult(
                     "warn",
-                    f"미할당 잔액({s.treasury.unallocated:,.0f}원) "
+                    f"미할당 잔액({treasury.unallocated:,.0f}원) "
                     f"< 증액분({amount_diff:,.0f}원)",
                     "system:treasury",
                 )
@@ -879,8 +907,7 @@ async def _init_notification(s: Services) -> None:
             polling_interval=s.config.get("telegram.command.polling_interval", 3.0),
             confirm_timeout=s.config.get("telegram.command.confirm_timeout", 30.0),
             bot_manager=s.bot_manager,
-            treasury=s.treasury,
-            system_state=s.system_state,
+            account_service=s.account_service,
             approval_service=s.approval_service,
         )
         s.telegram_receiver.start()
@@ -907,8 +934,7 @@ async def _init_web(s: Services) -> None:
         eventbus=s.eventbus,
         bot_manager=s.bot_manager,
         trade_service=s.trade_service,
-        treasury=s.treasury,
-        broker=s.broker,
+        treasury_manager=s.treasury_manager,
         report_store=s.report_store,
         data_store=s.parquet_store,
         audit_logger=s.audit_logger,
@@ -917,7 +943,7 @@ async def _init_web(s: Services) -> None:
         strategy_registry=s.strategy_registry,
         dynamic_config=s.dynamic_config,
         approval_service=s.approval_service,
-        system_state=s.system_state,
+        account_service=s.account_service,
     )
 
     import uvicorn
@@ -970,7 +996,19 @@ async def _run(s: Services) -> None:
 
 
 async def _shutdown(s: Services) -> None:
-    """종료 정리 (역순)."""
+    """종료 정리 (역순).
+
+    종료 순서:
+    1. Telegram, 스케줄러 태스크 취소
+    2. Web API 종료
+    3. DailyReportScheduler, ReconcileScheduler 종료
+    4. 각 계좌의 Treasury sync 중지
+    5. BotManager 전체 봇 중지
+    6. StreamIntegration 종료
+    7. APIGateway 종료
+    8. 각 계좌의 BrokerAdapter disconnect
+    9. Database 종료
+    """
     logger.info("Ante 종료 시작")
 
     from ante.eventbus.events import NotificationEvent
@@ -1021,10 +1059,22 @@ async def _shutdown(s: Services) -> None:
         await s.reconcile_scheduler.stop()
         logger.info("ReconcileScheduler 종료")
 
-    await s.treasury.stop_sync()
+    # 각 계좌의 Treasury sync 중지
+    if s.treasury_manager:
+        for treasury in s.treasury_manager.list_all():
+            try:
+                await treasury.stop_sync()
+            except Exception:
+                logger.warning(
+                    "Treasury sync 중지 실패: account=%s",
+                    treasury.account_id,
+                    exc_info=True,
+                )
+        logger.info("Treasury 잔고 동기화 종료")
 
-    await s.bot_manager.stop_all()
-    logger.info("BotManager 종료 — 모든 봇 중지")
+    if s.bot_manager:
+        await s.bot_manager.stop_all()
+        logger.info("BotManager 종료 — 모든 봇 중지")
 
     if s.stream_integration:
         await s.stream_integration.stop()
@@ -1034,25 +1084,39 @@ async def _shutdown(s: Services) -> None:
         s.api_gateway.stop()
         logger.info("APIGateway 종료")
 
-    if s.broker:
-        await s.broker.disconnect()
-        logger.info("Broker 연결 해제")
+    # 각 계좌의 BrokerAdapter disconnect
+    if s.account_service:
+        accounts = await s.account_service.list()
+        for account in accounts:
+            try:
+                broker = await s.account_service.get_broker(account.account_id)
+                await broker.disconnect()
+                logger.info("Broker 연결 해제: account=%s", account.account_id)
+            except Exception:
+                logger.warning(
+                    "Broker 연결 해제 실패: account=%s",
+                    account.account_id,
+                    exc_info=True,
+                )
 
-    await s.db.close()
+    if s.db:
+        await s.db.close()
     logger.info("Ante 종료 완료")
 
 
 async def main() -> None:
     """Main asyncio entrypoint.
 
-    초기화 순서 (architecture.md 참조):
-    1. Core: Config, Database, EventBus, SystemState, DynamicConfig
+    초기화 순서 (Account 중심):
+    1. Core: Config, Database, EventBus, DynamicConfig
     2. Services: AuditLogger, MemberService, InstrumentService
-    3. Trading: Strategy, Rule, Treasury, Trade, Bot, Broker, Gateway
-    4. Feed: DataPipeline, Backtest, Report
-    5. Approval: ApprovalService, Executor, Validator, 전결, 만료 스케줄러
-    6. Notification: Telegram
-    7. Web: FastAPI + uvicorn
+    3. Account: AccountService, 테스트 계좌 자동 생성
+    4. Trading: StrategyRegistry, Trade, TreasuryManager, RuleEngineManager, BotManager
+    5. Gateway: APIGateway(account_service 주입)
+    6. Feed: DataPipeline, Backtest, Report
+    7. Approval: ApprovalService
+    8. Notification: Telegram(account_service 주입)
+    9. Web: FastAPI(account_service 주입)
 
     종료 순서: 역순 (상위 소비자부터 정리)
     """
@@ -1062,7 +1126,9 @@ async def main() -> None:
     try:
         await _init_core(s)
         await _init_services(s)
+        await _init_account(s)
         await _init_trading(s)
+        await _init_gateway(s)
         await _init_feed(s)
         await _init_approval(s)
         await _init_notification(s)

@@ -45,17 +45,62 @@ _MOCK_RESULT = {
 }
 
 
+_MOCK_TEST_ACCOUNT = [
+    {
+        "account_id": "test",
+        "broker_type": "test",
+        "exchange": "TEST",
+    }
+]
+
+
 def _mock_bootstrap(*args, **kwargs):
     """bootstrap_master mock — 3-tuple (dict, token, recovery_key) 반환."""
     return _MOCK_RESULT, _MOCK_TOKEN, _MOCK_RECOVERY_KEY
 
 
+def _mock_create_accounts_test_only(*args, **kwargs):
+    """_create_accounts mock — 테스트 계좌만 생성."""
+    return _MOCK_TEST_ACCOUNT
+
+
+def _mock_create_accounts_with_real(*args, **kwargs):
+    """_create_accounts mock — 테스트 + 실제 계좌."""
+    return [
+        *_MOCK_TEST_ACCOUNT,
+        {
+            "account_id": "domestic",
+            "broker_type": "kis-domestic",
+            "exchange": "KRX",
+        },
+    ]
+
+
 def _patch_bootstrap_and_auth():
-    """bootstrap_master + authenticate_member + DB를 모두 mock."""
+    """bootstrap_master + _create_accounts + authenticate_member mock."""
     return [
         patch(
             "ante.cli.commands.init._bootstrap_master",
             new=AsyncMock(side_effect=_mock_bootstrap),
+        ),
+        patch(
+            "ante.cli.commands.init._create_accounts",
+            new=AsyncMock(side_effect=_mock_create_accounts_test_only),
+        ),
+        patch("ante.cli.main.authenticate_member"),
+    ]
+
+
+def _patch_with_real_account():
+    """실제 계좌 등록 포함 mock."""
+    return [
+        patch(
+            "ante.cli.commands.init._bootstrap_master",
+            new=AsyncMock(side_effect=_mock_bootstrap),
+        ),
+        patch(
+            "ante.cli.commands.init._create_accounts",
+            new=AsyncMock(side_effect=_mock_create_accounts_with_real),
         ),
         patch("ante.cli.main.authenticate_member"),
     ]
@@ -64,8 +109,8 @@ def _patch_bootstrap_and_auth():
 class TestInitInteractive:
     """ante init 대화형 통합 흐름 테스트."""
 
-    def test_init_full_with_kis(self, runner, tmp_path):
-        """KIS 연동 입력 시 secrets.env에 키가 기록된다."""
+    def test_init_skip_account_creates_test(self, runner, tmp_path):
+        """계좌 등록 스킵 시 테스트 계좌만 생성된다."""
         target = tmp_path / "config"
         input_lines = "\n".join(
             [
@@ -73,11 +118,7 @@ class TestInitInteractive:
                 "홈트레이더",  # 이름
                 "pass1234",  # 패스워드
                 "pass1234",  # 패스워드 확인
-                "y",  # KIS 연동? y
-                "PSxxxxxxx",  # APP KEY
-                "secretkey123",  # APP SECRET
-                "50123456-01",  # 계좌번호
-                "n",  # 모의투자? n
+                "n",  # 실제 계좌 등록? n
                 "n",  # 텔레그램? n
                 "n",  # data.go.kr? n
                 "n",  # DART? n
@@ -97,19 +138,50 @@ class TestInitInteractive:
 
         assert result.exit_code == 0, result.output
         assert "초기 설정 완료" in result.output
+        assert "test (테스트 계좌만)" in result.output
         assert _MOCK_TOKEN in result.output
         assert _MOCK_RECOVERY_KEY in result.output
 
-        # secrets.env에 KIS 키가 기록됨
-        secrets_env = target / "secrets.env"
-        assert secrets_env.exists()
-        content = secrets_env.read_text()
-        assert "KIS_APP_KEY=PSxxxxxxx" in content
-        assert "KIS_APP_SECRET=secretkey123" in content
-        assert "KIS_ACCOUNT_NO=50123456-01" in content
+    def test_init_with_real_account(self, runner, tmp_path):
+        """실제 계좌 등록 시 계좌 정보가 표시된다."""
+        target = tmp_path / "config"
+        input_lines = "\n".join(
+            [
+                "owner",  # Member ID
+                "홈트레이더",  # 이름
+                "pass1234",  # 패스워드
+                "pass1234",  # 패스워드 확인
+                "y",  # 실제 계좌 등록? y
+                "1",  # 브로커 선택 (kis-domestic)
+                "domestic",  # 계좌 ID
+                "국내 주식",  # 이름
+                "PSxxxxxxxx",  # app_key
+                "secretkey123",  # app_secret
+                "50123456-01",  # account_no
+                "n",  # 추가 계좌? n
+                "n",  # 텔레그램? n
+                "n",  # data.go.kr? n
+                "n",  # DART? n
+            ]
+        )
 
-    def test_init_skip_kis_sets_test_broker(self, runner, tmp_path):
-        """KIS 스킵 시 system.toml에 broker.type = 'test' 설정."""
+        patches = _patch_with_real_account()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(
+                cli, ["init", "--dir", str(target)], input=input_lines
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert "초기 설정 완료" in result.output
+        assert _MOCK_TOKEN in result.output
+
+    def test_init_no_kis_keys_in_secrets_env(self, runner, tmp_path):
+        """계좌 스킵 시 secrets.env에 KIS 키가 없다 (Account.credentials로 이동)."""
         target = tmp_path / "config"
         input_lines = "\n".join(
             [
@@ -117,7 +189,7 @@ class TestInitInteractive:
                 "홈트레이더",
                 "pass1234",
                 "pass1234",
-                "n",  # KIS 스킵
+                "n",  # 계좌 스킵
                 "n",  # 텔레그램 스킵
                 "n",  # data.go.kr 스킵
                 "n",  # DART 스킵
@@ -136,12 +208,46 @@ class TestInitInteractive:
                 p.stop()
 
         assert result.exit_code == 0, result.output
-        assert "Test" in result.output
+        secrets_env = target / "secrets.env"
+        content = secrets_env.read_text()
+        # KIS 관련 키가 secrets.env에 없어야 함
+        assert "KIS_APP_KEY" not in content
+        assert "KIS_APP_SECRET" not in content
+        assert "KIS_ACCOUNT_NO" not in content
 
+    def test_init_no_broker_in_system_toml(self, runner, tmp_path):
+        """계좌 스킵 시 system.toml에 [broker] 섹션이 추가되지 않는다."""
+        target = tmp_path / "config"
+        input_lines = "\n".join(
+            [
+                "owner",
+                "홈트레이더",
+                "pass1234",
+                "pass1234",
+                "n",  # 계좌 스킵
+                "n",  # 텔레그램 스킵
+                "n",  # data.go.kr 스킵
+                "n",  # DART 스킵
+            ]
+        )
+
+        patches = _patch_bootstrap_and_auth()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(
+                cli, ["init", "--dir", str(target)], input=input_lines
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
         system_toml = target / "system.toml"
         content = system_toml.read_text()
-        assert "[broker]" in content
-        assert 'type = "test"' in content
+        # 이전에는 KIS 스킵 시 [broker] type = "test" 추가했으나,
+        # 이제는 Account 모델로 관리하므로 system.toml에 [broker] 없어야 함
+        assert "[broker]" not in content
 
     def test_init_skip_telegram(self, runner, tmp_path):
         """텔레그램 스킵 시 secrets.env에 텔레그램 키가 없다."""
@@ -152,7 +258,7 @@ class TestInitInteractive:
                 "홈트레이더",
                 "pass1234",
                 "pass1234",
-                "n",  # KIS 스킵
+                "n",  # 계좌 스킵
                 "n",  # 텔레그램 스킵
                 "n",  # data.go.kr 스킵
                 "n",  # DART 스킵
@@ -184,7 +290,7 @@ class TestInitInteractive:
                 "홈트레이더",
                 "pass1234",
                 "pass1234",
-                "n",  # KIS 스킵
+                "n",  # 계좌 스킵
                 "y",  # 텔레그램? y
                 "bot123token",  # 봇 토큰
                 "12345678",  # 채팅 ID
@@ -219,7 +325,7 @@ class TestInitInteractive:
                 "홈트레이더",
                 "pass1234",
                 "pass1234",
-                "n",  # KIS 스킵
+                "n",  # 계좌 스킵
                 "n",  # 텔레그램 스킵
                 "y",  # data.go.kr? y
                 "datagokr_key",  # data.go.kr API 키
@@ -257,7 +363,7 @@ class TestInitInteractive:
                 "홈트레이더",
                 "pass1234",
                 "pass1234",
-                "n",  # KIS 스킵
+                "n",  # 계좌 스킵
                 "n",  # 텔레그램 스킵
                 "n",  # data.go.kr 스킵
                 "n",  # DART 스킵
@@ -280,7 +386,7 @@ class TestInitInteractive:
         assert not feed_env.exists()
 
     def test_init_json_output(self, runner, tmp_path):
-        """--format json 시 JSON 출력."""
+        """--format json 시 JSON 출력에 accounts 포함."""
         target = tmp_path / "config"
         input_lines = "\n".join(
             [
@@ -311,7 +417,6 @@ class TestInitInteractive:
         assert result.exit_code == 0, result.output
         # JSON 출력은 대화형 프롬프트 텍스트 뒤에 위치
         lines = result.output.strip().splitlines()
-        # 마지막 }를 포함하는 JSON 블록 추출
         json_start = None
         for i, line in enumerate(lines):
             if line.strip().startswith("{"):
@@ -323,6 +428,8 @@ class TestInitInteractive:
         assert data["member_id"] == "owner"
         assert data["token"] == _MOCK_TOKEN
         assert data["recovery_key"] == _MOCK_RECOVERY_KEY
+        assert "accounts" in data
+        assert data["accounts"][0]["account_id"] == "test"
 
 
 class TestInitIdempotent:
@@ -338,6 +445,20 @@ class TestInitIdempotent:
 
         assert result.exit_code == 0
         assert "이미 존재합니다" in result.output
+
+
+class TestPromptAccount:
+    """_prompt_account / _get_available_brokers 단위 테스트."""
+
+    def test_kis_overseas_excluded(self):
+        """kis-overseas가 브로커 선택지에서 제외된다."""
+        from ante.cli.commands.init import _get_available_brokers
+
+        brokers = _get_available_brokers()
+        broker_types = [bt for bt, _ in brokers]
+        assert "kis-overseas" not in broker_types
+        assert "test" not in broker_types
+        assert "kis-domestic" in broker_types
 
 
 class TestBootstrapTokenReturn:

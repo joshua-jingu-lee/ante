@@ -15,34 +15,34 @@ class TestCommissionInfo:
     def test_defaults(self):
         """기본 수수료율."""
         info = CommissionInfo()
-        assert info.commission_rate == 0.00015
-        assert info.sell_tax_rate == 0.0023
+        assert info.buy_commission_rate == 0.00015
+        assert info.sell_commission_rate == 0.00195
 
     def test_custom_rates(self):
         """커스텀 수수료율."""
-        info = CommissionInfo(commission_rate=0.0001, sell_tax_rate=0.0018)
-        assert info.commission_rate == 0.0001
-        assert info.sell_tax_rate == 0.0018
+        info = CommissionInfo(buy_commission_rate=0.0001, sell_commission_rate=0.002)
+        assert info.buy_commission_rate == 0.0001
+        assert info.sell_commission_rate == 0.002
 
     def test_frozen(self):
         """불변 객체."""
         info = CommissionInfo()
         with pytest.raises(AttributeError):
-            info.commission_rate = 0.001  # type: ignore[misc]
+            info.buy_commission_rate = 0.001  # type: ignore[misc]
 
 
 class TestCommissionCalculation:
     def test_buy_commission(self):
-        """매수 수수료: filled_value × commission_rate."""
-        info = CommissionInfo(commission_rate=0.00015, sell_tax_rate=0.0023)
+        """매수 수수료: filled_value × buy_commission_rate."""
+        info = CommissionInfo(buy_commission_rate=0.00015, sell_commission_rate=0.00245)
         commission = info.calculate("buy", 1_000_000.0)
         assert commission == pytest.approx(150.0)
 
-    def test_sell_commission_includes_tax(self):
-        """매도 수수료: filled_value × (commission_rate + sell_tax_rate)."""
-        info = CommissionInfo(commission_rate=0.00015, sell_tax_rate=0.0023)
+    def test_sell_commission(self):
+        """매도 수수료: filled_value × sell_commission_rate."""
+        info = CommissionInfo(buy_commission_rate=0.00015, sell_commission_rate=0.00245)
         commission = info.calculate("sell", 1_000_000.0)
-        expected = 1_000_000.0 * (0.00015 + 0.0023)
+        expected = 1_000_000.0 * 0.00245
         assert commission == pytest.approx(expected)
 
     def test_sell_commission_higher_than_buy(self):
@@ -58,41 +58,41 @@ class TestCommissionCalculation:
         assert info.calculate("buy", 0.0) == 0.0
         assert info.calculate("sell", 0.0) == 0.0
 
-    def test_kosdaq_tax_rate(self):
-        """코스닥 세율 적용 (0.0018)."""
-        info = CommissionInfo(commission_rate=0.00015, sell_tax_rate=0.0018)
+    def test_kosdaq_sell_rate(self):
+        """코스닥 매도 수수료율 적용."""
+        info = CommissionInfo(buy_commission_rate=0.00015, sell_commission_rate=0.00195)
         commission = info.calculate("sell", 1_000_000.0)
-        expected = 1_000_000.0 * (0.00015 + 0.0018)
+        expected = 1_000_000.0 * 0.00195
         assert commission == pytest.approx(expected)
 
 
-# ── US-1: KISAdapter.get_commission_info ──────────
+# ── US-1: KISDomesticAdapter.get_commission_info ──────────
 
 
 class TestKISCommissionInfo:
     def test_kis_default_commission(self):
-        """KISAdapter 기본 수수료율."""
-        from ante.broker.kis import KISAdapter
+        """KISDomesticAdapter 기본 수수료율."""
+        from ante.broker.kis import KISDomesticAdapter
 
-        adapter = KISAdapter.__new__(KISAdapter)
-        adapter._commission_rate = 0.00015
-        adapter._sell_tax_rate = 0.0023
+        adapter = KISDomesticAdapter.__new__(KISDomesticAdapter)
+        adapter._buy_commission_rate = 0.00015
+        adapter._sell_commission_rate = 0.00195
 
         info = adapter.get_commission_info()
-        assert info.commission_rate == 0.00015
-        assert info.sell_tax_rate == 0.0023
+        assert info.buy_commission_rate == 0.00015
+        assert info.sell_commission_rate == 0.00195
 
     def test_kis_custom_commission_from_config(self):
-        """KISAdapter config에서 수수료율 읽기."""
-        from ante.broker.kis import KISAdapter
+        """KISDomesticAdapter config에서 수수료율 읽기."""
+        from ante.broker.kis import KISDomesticAdapter
 
-        adapter = KISAdapter.__new__(KISAdapter)
-        adapter._commission_rate = 0.0001
-        adapter._sell_tax_rate = 0.0018
+        adapter = KISDomesticAdapter.__new__(KISDomesticAdapter)
+        adapter._buy_commission_rate = 0.0001
+        adapter._sell_commission_rate = 0.002
 
         info = adapter.get_commission_info()
-        assert info.commission_rate == 0.0001
-        assert info.sell_tax_rate == 0.0018
+        assert info.buy_commission_rate == 0.0001
+        assert info.sell_commission_rate == 0.002
 
 
 # ── US-2: PaperExecutor 매도 세금 반영 ────────────
@@ -100,7 +100,7 @@ class TestKISCommissionInfo:
 
 class TestPaperExecutorCommission:
     async def test_buy_commission(self):
-        """PaperExecutor 매수 수수료 = commission_rate만 적용."""
+        """PaperExecutor 매수 수수료 = buy_commission_rate만 적용."""
         from ante.bot.providers.paper import PaperExecutor, PaperPortfolioView
 
         eventbus = EventBus()
@@ -184,19 +184,17 @@ class TestPaperExecutorCommission:
 
 
 class TestCommissionDefaults:
-    def test_defaults_include_commission_rate(self):
-        """config/defaults.py에 broker.commission_rate 포함."""
+    def test_defaults_no_longer_include_commission_rate(self):
+        """broker.commission_rate는 Account 모델로 이관되어 defaults에서 제거."""
         from ante.config.defaults import DEFAULTS
 
-        assert "broker.commission_rate" in DEFAULTS
-        assert DEFAULTS["broker.commission_rate"] == 0.00015
+        assert "broker.commission_rate" not in DEFAULTS
 
-    def test_defaults_include_sell_tax_rate(self):
-        """config/defaults.py에 broker.sell_tax_rate 포함."""
+    def test_defaults_no_longer_include_sell_tax_rate(self):
+        """broker.sell_tax_rate는 Account 모델로 이관되어 defaults에서 제거."""
         from ante.config.defaults import DEFAULTS
 
-        assert "broker.sell_tax_rate" in DEFAULTS
-        assert DEFAULTS["broker.sell_tax_rate"] == 0.0023
+        assert "broker.sell_tax_rate" not in DEFAULTS
 
 
 # ── US-4: Treasury 수수료 추정 통합 ──────────────
@@ -216,23 +214,23 @@ def eventbus():
 
 
 class TestTreasuryCommission:
-    async def test_treasury_accepts_sell_tax_rate(self, db, eventbus):
-        """Treasury가 sell_tax_rate 파라미터를 수용."""
+    async def test_treasury_accepts_commission_rates(self, db, eventbus):
+        """Treasury가 buy/sell_commission_rate 파라미터를 수용."""
         t = Treasury(
             db=db,
             eventbus=eventbus,
-            commission_rate=0.00015,
-            sell_tax_rate=0.0023,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
         )
         await t.initialize()
-        assert t.commission_rate == 0.00015
-        assert t.sell_tax_rate == 0.0023
+        assert t.buy_commission_rate == 0.00015
+        assert t.sell_commission_rate == 0.00195
 
-    async def test_treasury_default_sell_tax_rate(self, db, eventbus):
-        """Treasury 기본 sell_tax_rate = 0.0023."""
+    async def test_treasury_default_sell_commission_rate(self, db, eventbus):
+        """Treasury 기본 sell_commission_rate = 0.00195."""
         t = Treasury(db=db, eventbus=eventbus)
         await t.initialize()
-        assert t.sell_tax_rate == 0.0023
+        assert t.sell_commission_rate == 0.00195
 
     async def test_update_commission_rates(self, db, eventbus):
         """수수료율 동적 업데이트."""
@@ -240,18 +238,18 @@ class TestTreasuryCommission:
         await t.initialize()
 
         t.update_commission_rates(0.0001, 0.0018)
-        assert t.commission_rate == 0.0001
-        assert t.sell_tax_rate == 0.0018
+        assert t.buy_commission_rate == 0.0001
+        assert t.sell_commission_rate == 0.0018
 
     async def test_buy_reservation_uses_commission_rate(self, db, eventbus):
-        """매수 예약 시 commission_rate 사용."""
+        """매수 예약 시 buy_commission_rate 사용."""
         from ante.eventbus.events import OrderApprovedEvent, OrderValidatedEvent
 
         t = Treasury(
             db=db,
             eventbus=eventbus,
-            commission_rate=0.001,  # 높은 수수료율로 테스트
-            sell_tax_rate=0.0023,
+            buy_commission_rate=0.001,  # 높은 수수료율로 테스트
+            sell_commission_rate=0.002,
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)

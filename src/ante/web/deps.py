@@ -80,11 +80,19 @@ def get_dynamic_config(request: Request) -> Any:
     return svc
 
 
-def get_system_state(request: Request) -> Any:
-    """시스템 상태 (필수)."""
-    svc = getattr(request.app.state, "system_state", None)
+def get_account_service(request: Request) -> Any:
+    """계좌 서비스 (필수)."""
+    svc = getattr(request.app.state, "account_service", None)
     if svc is None:
-        raise HTTPException(status_code=503, detail="System state not available")
+        raise HTTPException(status_code=503, detail="Account service not available")
+    return svc
+
+
+def get_treasury_manager(request: Request) -> Any:
+    """Treasury 매니저 (필수)."""
+    svc = getattr(request.app.state, "treasury_manager", None)
+    if svc is None:
+        raise HTTPException(status_code=503, detail="Treasury manager not available")
     return svc
 
 
@@ -155,9 +163,14 @@ def get_report_store_optional(request: Request) -> Any | None:
     return getattr(request.app.state, "report_store", None)
 
 
-def get_system_state_optional(request: Request) -> Any | None:
-    """시스템 상태 (선택적). 없으면 None."""
-    return getattr(request.app.state, "system_state", None)
+def get_account_service_optional(request: Request) -> Any | None:
+    """계좌 서비스 (선택적). 없으면 None."""
+    return getattr(request.app.state, "account_service", None)
+
+
+def get_treasury_manager_optional(request: Request) -> Any | None:
+    """Treasury 매니저 (선택적). 없으면 None."""
+    return getattr(request.app.state, "treasury_manager", None)
 
 
 def get_config(request: Request) -> Any | None:

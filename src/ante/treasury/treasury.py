@@ -1,4 +1,4 @@
-"""Treasury — 중앙 자금(예산) 관리."""
+"""Treasury -- 계좌별 중앙 자금(예산) 관리."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 TREASURY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_budgets (
     bot_id       TEXT PRIMARY KEY,
+    account_id   TEXT NOT NULL DEFAULT '',
     allocated    REAL NOT NULL DEFAULT 0.0,
     available    REAL NOT NULL DEFAULT 0.0,
     reserved     REAL NOT NULL DEFAULT 0.0,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS bot_budgets (
 CREATE TABLE IF NOT EXISTS treasury_transactions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     bot_id           TEXT,
+    account_id       TEXT DEFAULT '',
     transaction_type TEXT NOT NULL,
     amount           REAL NOT NULL,
     description      TEXT DEFAULT '',
@@ -39,31 +41,80 @@ CREATE TABLE IF NOT EXISTS treasury_transactions (
 );
 
 CREATE TABLE IF NOT EXISTS treasury_state (
-    key   TEXT PRIMARY KEY,
-    value REAL NOT NULL
+    account_id         TEXT PRIMARY KEY,
+    account_balance    REAL NOT NULL DEFAULT 0,
+    purchasable_amount REAL NOT NULL DEFAULT 0,
+    total_evaluation   REAL NOT NULL DEFAULT 0,
+    currency           TEXT NOT NULL DEFAULT 'KRW',
+    last_synced_at     TEXT
 );
+"""
+
+# 기존 key-value 테이블에서 계좌별 행 구조로 마이그레이션
+TREASURY_MIGRATION_V2 = """
+-- bot_budgets에 account_id 컬럼 추가 (이미 존재하면 무시)
+ALTER TABLE bot_budgets ADD COLUMN account_id TEXT NOT NULL DEFAULT '';
+"""
+
+TREASURY_MIGRATION_V2_STATE = """
+-- treasury_state 재생성: key-value -> 계좌별 행 구조
+CREATE TABLE IF NOT EXISTS treasury_state_new (
+    account_id         TEXT PRIMARY KEY,
+    account_balance    REAL NOT NULL DEFAULT 0,
+    purchasable_amount REAL NOT NULL DEFAULT 0,
+    total_evaluation   REAL NOT NULL DEFAULT 0,
+    currency           TEXT NOT NULL DEFAULT 'KRW',
+    last_synced_at     TEXT
+);
+
+-- 기존 데이터 마이그레이션
+INSERT OR IGNORE INTO treasury_state_new (
+    account_id, account_balance,
+    purchasable_amount, total_evaluation
+)
+SELECT 'default',
+    COALESCE(
+        (SELECT value FROM treasury_state
+         WHERE key = 'account_balance'), 0),
+    COALESCE(
+        (SELECT value FROM treasury_state
+         WHERE key = 'purchasable_amount'), 0),
+    COALESCE(
+        (SELECT value FROM treasury_state
+         WHERE key = 'total_evaluation'), 0);
+
+DROP TABLE IF EXISTS treasury_state;
+ALTER TABLE treasury_state_new RENAME TO treasury_state;
+"""
+
+TREASURY_TRANSACTIONS_MIGRATION = """
+ALTER TABLE treasury_transactions ADD COLUMN account_id TEXT DEFAULT '';
 """
 
 
 class Treasury:
-    """중앙 자금(예산) 관리자.
+    """계좌별 중앙 자금(예산) 관리자.
 
-    전체 계좌 잔고를 소유하고, 봇별로 예산을 배분하며,
-    예산 범위 내에서 거래가 이루어지도록 관리한다.
+    각 계좌(Account)에 대해 하나의 인스턴스가 생성되며,
+    해당 계좌의 잔고를 소유하고, 봇별로 예산을 배분한다.
     """
 
     def __init__(
         self,
         db: Database,
         eventbus: EventBus,
-        commission_rate: float = 0.00015,
-        sell_tax_rate: float = 0.0023,
+        account_id: str = "default",
+        currency: str = "KRW",
+        buy_commission_rate: float = 0.00015,
+        sell_commission_rate: float = 0.00195,
         bot_status_checker: Callable[[str], str] | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
-        self._commission_rate = commission_rate
-        self._sell_tax_rate = sell_tax_rate
+        self._account_id = account_id
+        self._currency = currency
+        self._buy_commission_rate = buy_commission_rate
+        self._sell_commission_rate = sell_commission_rate
         self._bot_status_checker = bot_status_checker
 
         self._account_balance: float = 0.0
@@ -78,7 +129,7 @@ class Treasury:
         self._unallocated: float = 0.0
         self._reservations: dict[
             str, tuple[str, float]
-        ] = {}  # order_id → (bot_id, amount)
+        ] = {}  # order_id -> (bot_id, amount)
         self._sync_task: asyncio.Task[None] | None = None
 
         # KIS 계좌 메타 정보 (broker 연결 후 set_account_info로 설정)
@@ -86,12 +137,37 @@ class Treasury:
         self._is_demo_trading: bool = False
         self._last_synced_at: datetime | None = None
 
+    @property
+    def account_id(self) -> str:
+        """이 Treasury가 관리하는 계좌 ID."""
+        return self._account_id
+
     async def initialize(self) -> None:
         """스키마 생성 + DB 복원 + EventBus 구독."""
-        await self._db.execute_script(TREASURY_SCHEMA)
+        await self._ensure_schema()
         await self._load_from_db()
         self._subscribe_events()
-        logger.info("Treasury 초기화 완료")
+        logger.info(
+            "Treasury 초기화 완료: account_id=%s, currency=%s",
+            self._account_id,
+            self._currency,
+        )
+
+    async def _ensure_schema(self) -> None:
+        """DB 스키마 생성 및 마이그레이션."""
+        await self._db.execute_script(TREASURY_SCHEMA)
+
+        # 마이그레이션: bot_budgets에 account_id 컬럼 추가
+        try:
+            await self._db.execute_script(TREASURY_MIGRATION_V2)
+        except Exception:
+            pass  # 이미 컬럼이 존재하면 무시
+
+        # 마이그레이션: treasury_transactions에 account_id 컬럼 추가
+        try:
+            await self._db.execute_script(TREASURY_TRANSACTIONS_MIGRATION)
+        except Exception:
+            pass  # 이미 컬럼이 존재하면 무시
 
     def _subscribe_events(self) -> None:
         """EventBus 이벤트 구독."""
@@ -113,7 +189,7 @@ class Treasury:
         self._eventbus.subscribe(OrderFailedEvent, self._on_order_failed, priority=80)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped, priority=80)
 
-    # ── 계좌 잔고 ───────────────────────────────────
+    # -- 계좌 잔고 -----------------------------------------------
 
     async def set_account_balance(self, balance: float) -> None:
         """계좌 잔고 설정. 미할당 자금을 자동 재계산."""
@@ -121,7 +197,7 @@ class Treasury:
         total_allocated = sum(b.allocated for b in self._budgets.values())
         self._unallocated = balance - total_allocated
         await self._save_state()
-        logger.info("계좌 잔고 설정: %s", balance)
+        logger.info("계좌 잔고 설정: %s (account=%s)", balance, self._account_id)
 
     @property
     def account_balance(self) -> float:
@@ -132,12 +208,16 @@ class Treasury:
         return self._unallocated
 
     @property
-    def commission_rate(self) -> float:
-        return self._commission_rate
+    def buy_commission_rate(self) -> float:
+        return self._buy_commission_rate
 
     @property
-    def sell_tax_rate(self) -> float:
-        return self._sell_tax_rate
+    def sell_commission_rate(self) -> float:
+        return self._sell_commission_rate
+
+    @property
+    def currency(self) -> str:
+        return self._currency
 
     @property
     def last_synced_at(self) -> datetime | None:
@@ -171,18 +251,18 @@ class Treasury:
         self._bot_status_checker = checker
 
     def update_commission_rates(
-        self, commission_rate: float, sell_tax_rate: float
+        self, buy_commission_rate: float, sell_commission_rate: float
     ) -> None:
         """수수료율 업데이트 (DynamicConfig 변경 시 호출)."""
-        self._commission_rate = commission_rate
-        self._sell_tax_rate = sell_tax_rate
+        self._buy_commission_rate = buy_commission_rate
+        self._sell_commission_rate = sell_commission_rate
         logger.info(
-            "수수료율 갱신: commission=%s, sell_tax=%s",
-            commission_rate,
-            sell_tax_rate,
+            "수수료율 갱신: buy=%s, sell=%s",
+            buy_commission_rate,
+            sell_commission_rate,
         )
 
-    # ── 예산 조회 ───────────────────────────────────
+    # -- 예산 조회 -----------------------------------------------
 
     def get_available(self, bot_id: str) -> float:
         """봇의 가용 예산 조회."""
@@ -197,7 +277,7 @@ class Treasury:
         """봇의 예산 상태 동기 조회 (인메모리). PortfolioView용."""
         return self._budgets.get(bot_id)
 
-    # ── 예산 할당/회수 ──────────────────────────────
+    # -- 예산 할당/회수 ------------------------------------------
 
     def _check_bot_stopped(self, bot_id: str) -> None:
         """봇이 중지 상태인지 확인. 운용 중이면 BotNotStoppedError."""
@@ -219,7 +299,9 @@ class Treasury:
             return False
 
         if bot_id not in self._budgets:
-            self._budgets[bot_id] = BotBudget(bot_id=bot_id)
+            self._budgets[bot_id] = BotBudget(
+                bot_id=bot_id, account_id=self._account_id
+            )
 
         budget = self._budgets[bot_id]
         budget.allocated += amount
@@ -230,7 +312,9 @@ class Treasury:
         await self._save_budget(budget)
         await self._save_state()
         await self._log_transaction(bot_id, "allocate", amount)
-        logger.info("예산 할당: %s → %s", bot_id, amount)
+        logger.info(
+            "예산 할당: %s -> %s (account=%s)", bot_id, amount, self._account_id
+        )
         return True
 
     async def deallocate(self, bot_id: str, amount: float) -> bool:
@@ -248,7 +332,9 @@ class Treasury:
         await self._save_budget(budget)
         await self._save_state()
         await self._log_transaction(bot_id, "deallocate", amount)
-        logger.info("예산 회수: %s ← %s", bot_id, amount)
+        logger.info(
+            "예산 회수: %s <- %s (account=%s)", bot_id, amount, self._account_id
+        )
         return True
 
     async def update_budget(self, bot_id: str, target_amount: float) -> None:
@@ -301,7 +387,7 @@ class Treasury:
                 )
 
         logger.info(
-            "예산 변경: %s — %s → %s (차이: %s%s)",
+            "예산 변경: %s -- %s -> %s (차이: %s%s)",
             bot_id,
             f"{current:,.0f}",
             f"{target_amount:,.0f}",
@@ -309,7 +395,7 @@ class Treasury:
             f"{diff:,.0f}",
         )
 
-    # ── 주문 자금 예약/해제 ─────────────────────────
+    # -- 주문 자금 예약/해제 -------------------------------------
 
     async def reserve_for_order(
         self, bot_id: str, order_id: str, amount: float
@@ -351,10 +437,18 @@ class Treasury:
             oid: amt for oid, (bid, amt) in self._reservations.items() if bid == bot_id
         }
 
-    # ── 이벤트 핸들러 ───────────────────────────────
+    # -- 이벤트 핸들러 -------------------------------------------
+
+    def _is_my_event(self, event: object) -> bool:
+        """이벤트가 이 Treasury의 계좌에 해당하는지 확인."""
+        account_id = getattr(event, "account_id", "")
+        # account_id가 비어있으면 (하위 호환) 처리
+        if not account_id:
+            return True
+        return account_id == self._account_id
 
     async def _on_order_validated(self, event: object) -> None:
-        """룰 검증 통과 후 자금 예약 → 승인/거부 발행."""
+        """룰 검증 통과 후 자금 예약 -> 승인/거부 발행."""
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderRejectedEvent,
@@ -364,9 +458,12 @@ class Treasury:
         if not isinstance(event, OrderValidatedEvent):
             return
 
+        if not self._is_my_event(event):
+            return
+
         price = event.price or 0.0
         estimated_cost = event.quantity * price
-        commission_estimate = estimated_cost * self._commission_rate
+        commission_estimate = estimated_cost * self._buy_commission_rate
         total_reserve = estimated_cost + commission_estimate
 
         if event.side == "buy":
@@ -385,6 +482,7 @@ class Treasury:
                         quantity=event.quantity,
                         price=event.price,
                         order_type=event.order_type,
+                        account_id=self._account_id,
                         reason=(
                             f"insufficient_budget: need {total_reserve:,.0f}, "
                             f"available {available:,.0f}"
@@ -405,14 +503,18 @@ class Treasury:
                 order_type=event.order_type,
                 stop_price=event.stop_price,
                 reserved_amount=(total_reserve if event.side == "buy" else 0.0),
+                account_id=self._account_id,
             )
         )
 
     async def _on_order_filled(self, event: object) -> None:
-        """체결 이벤트 처리 — 예약 자금 정산."""
+        """체결 이벤트 처리 -- 예약 자금 정산."""
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
+            return
+
+        if not self._is_my_event(event):
             return
 
         budget = self._budgets.get(event.bot_id)
@@ -453,6 +555,10 @@ class Treasury:
 
         if not isinstance(event, OrderCancelledEvent):
             return
+
+        if not self._is_my_event(event):
+            return
+
         await self.release_reservation(event.bot_id, event.order_id)
 
     async def _on_order_failed(self, event: object) -> None:
@@ -461,6 +567,10 @@ class Treasury:
 
         if not isinstance(event, OrderFailedEvent):
             return
+
+        if not self._is_my_event(event):
+            return
+
         await self.release_reservation(event.bot_id, event.order_id)
 
     async def _on_bot_stopped(self, event: object) -> None:
@@ -468,6 +578,9 @@ class Treasury:
         from ante.eventbus.events import BotStoppedEvent
 
         if not isinstance(event, BotStoppedEvent):
+            return
+
+        if not self._is_my_event(event):
             return
 
         bot_id = event.bot_id
@@ -494,13 +607,13 @@ class Treasury:
             description=f"{len(pending)}건 예약 해제",
         )
         logger.info(
-            "봇 중지 예약 해제: %s — %d건, %s원",
+            "봇 중지 예약 해제: %s -- %d건, %s원",
             bot_id,
             len(pending),
             f"{total_released:,.0f}",
         )
 
-    # ── 잔고 동기화 ────────────────────────────────
+    # -- 잔고 동기화 ---------------------------------------------
 
     def start_sync(
         self,
@@ -515,9 +628,13 @@ class Treasury:
 
         self._sync_task = asyncio.create_task(
             self._sync_loop(broker, position_history, interval_seconds),
-            name="treasury-balance-sync",
+            name=f"treasury-balance-sync-{self._account_id}",
         )
-        logger.info("잔고 동기화 시작 (주기: %d초)", interval_seconds)
+        logger.info(
+            "잔고 동기화 시작 (주기: %d초, account=%s)",
+            interval_seconds,
+            self._account_id,
+        )
 
     async def stop_sync(self) -> None:
         """잔고 동기화 중지."""
@@ -544,7 +661,7 @@ class Treasury:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.warning("잔고 동기화 실패 — 이전 값 유지", exc_info=True)
+                    logger.warning("잔고 동기화 실패 -- 이전 값 유지", exc_info=True)
                 await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
             raise
@@ -584,6 +701,7 @@ class Treasury:
         # 3) 이벤트 발행
         await self._eventbus.publish(
             BalanceSyncedEvent(
+                account_id=self._account_id,
                 account_balance=self._account_balance,
                 purchasable_amount=self._purchasable_amount,
                 total_evaluation=self._total_evaluation,
@@ -592,10 +710,11 @@ class Treasury:
             )
         )
         logger.info(
-            "잔고 동기화 완료: 예수금=%s, 매수가능=%s, 외부종목=%d건",
+            "잔고 동기화 완료: 예수금=%s, 매수가능=%s, 외부종목=%d건 (account=%s)",
             f"{self._account_balance:,.0f}",
             f"{self._purchasable_amount:,.0f}",
             sum(1 for pos in broker_positions if pos["symbol"] not in internal_symbols),
+            self._account_id,
         )
 
     async def sync_balance(self, balance_data: dict[str, float]) -> None:
@@ -621,7 +740,7 @@ class Treasury:
 
         await self._save_state()
 
-    # ── 모니터링 ────────────────────────────────────
+    # -- 모니터링 -------------------------------------------------
 
     def list_budgets(self) -> list[BotBudget]:
         """전체 봇 예산 목록 반환."""
@@ -642,6 +761,7 @@ class Treasury:
         )
 
         return {
+            "currency": self._currency,
             "account_balance": self._account_balance,
             "purchasable_amount": self._purchasable_amount,
             "total_evaluation": self._total_evaluation,
@@ -664,19 +784,7 @@ class Treasury:
             "last_sync_time": self.last_sync_time,
         }
 
-    # ── DB 영속화 ───────────────────────────────────
-
-    _STATE_FIELDS = (
-        "account_balance",
-        "unallocated",
-        "purchasable_amount",
-        "total_evaluation",
-        "purchase_amount",
-        "eval_amount",
-        "total_profit_loss",
-        "external_purchase_amount",
-        "external_eval_amount",
-    )
+    # -- DB 영속화 -----------------------------------------------
 
     async def load_from_db(self) -> None:
         """DB에서 자금 상태 복원 (테스트용 리로드 포함).
@@ -689,24 +797,26 @@ class Treasury:
 
     async def _load_from_db(self) -> None:
         """DB에서 자금 상태 복원."""
-        rows = await self._db.fetch_all("SELECT key, value FROM treasury_state")
-        state = {r["key"]: float(r["value"]) for r in rows}
+        # 계좌별 상태 로드
+        rows = await self._db.fetch_all(
+            "SELECT * FROM treasury_state WHERE account_id = ?",
+            (self._account_id,),
+        )
+        if rows:
+            r = rows[0]
+            self._account_balance = float(r["account_balance"])
+            self._purchasable_amount = float(r["purchasable_amount"])
+            self._total_evaluation = float(r["total_evaluation"])
 
-        self._account_balance = state.get("account_balance", 0.0)
-        self._unallocated = state.get("unallocated", 0.0)
-        self._purchasable_amount = state.get("purchasable_amount", 0.0)
-        self._total_evaluation = state.get("total_evaluation", 0.0)
-        self._purchase_amount = state.get("purchase_amount", 0.0)
-        self._eval_amount = state.get("eval_amount", 0.0)
-        self._total_profit_loss = state.get("total_profit_loss", 0.0)
-        self._external_purchase_amount = state.get("external_purchase_amount", 0.0)
-        self._external_eval_amount = state.get("external_eval_amount", 0.0)
-
-        # 봇 예산
-        rows = await self._db.fetch_all("SELECT * FROM bot_budgets")
+        # 봇 예산 (계좌별 필터링)
+        rows = await self._db.fetch_all(
+            "SELECT * FROM bot_budgets WHERE account_id = ?",
+            (self._account_id,),
+        )
         for r in rows:
             self._budgets[r["bot_id"]] = BotBudget(
                 bot_id=r["bot_id"],
+                account_id=r["account_id"],
                 allocated=float(r["allocated"]),
                 available=float(r["available"]),
                 reserved=float(r["reserved"]),
@@ -715,35 +825,40 @@ class Treasury:
                 last_updated=datetime.fromisoformat(r["last_updated"]),
             )
 
+        # 미할당 재계산
+        total_allocated = sum(b.allocated for b in self._budgets.values())
+        self._unallocated = self._account_balance - total_allocated
+
     async def _save_state(self) -> None:
         """계좌 상태 저장."""
-        field_map = {
-            "account_balance": self._account_balance,
-            "unallocated": self._unallocated,
-            "purchasable_amount": self._purchasable_amount,
-            "total_evaluation": self._total_evaluation,
-            "purchase_amount": self._purchase_amount,
-            "eval_amount": self._eval_amount,
-            "total_profit_loss": self._total_profit_loss,
-            "external_purchase_amount": self._external_purchase_amount,
-            "external_eval_amount": self._external_eval_amount,
-        }
-        for key, value in field_map.items():
-            await self._db.execute(
-                """INSERT INTO treasury_state (key, value)
-                   VALUES (?, ?)
-                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-                (key, value),
-            )
+        await self._db.execute(
+            """INSERT INTO treasury_state
+               (account_id, account_balance, purchasable_amount,
+                total_evaluation, currency)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(account_id) DO UPDATE SET
+                 account_balance = excluded.account_balance,
+                 purchasable_amount = excluded.purchasable_amount,
+                 total_evaluation = excluded.total_evaluation,
+                 currency = excluded.currency""",
+            (
+                self._account_id,
+                self._account_balance,
+                self._purchasable_amount,
+                self._total_evaluation,
+                self._currency,
+            ),
+        )
 
     async def _save_budget(self, budget: BotBudget) -> None:
         """봇 예산 저장."""
         await self._db.execute(
             """INSERT INTO bot_budgets
-               (bot_id, allocated, available, reserved,
+               (bot_id, account_id, allocated, available, reserved,
                 spent, returned, last_updated)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(bot_id) DO UPDATE SET
+                 account_id = excluded.account_id,
                  allocated = excluded.allocated,
                  available = excluded.available,
                  reserved = excluded.reserved,
@@ -752,6 +867,7 @@ class Treasury:
                  last_updated = excluded.last_updated""",
             (
                 budget.bot_id,
+                budget.account_id,
                 budget.allocated,
                 budget.available,
                 budget.reserved,
@@ -771,7 +887,7 @@ class Treasury:
         """자금 거래 이력 기록."""
         await self._db.execute(
             """INSERT INTO treasury_transactions
-               (bot_id, transaction_type, amount, description)
-               VALUES (?, ?, ?, ?)""",
-            (bot_id, tx_type, amount, description),
+               (bot_id, account_id, transaction_type, amount, description)
+               VALUES (?, ?, ?, ?, ?)""",
+            (bot_id, self._account_id, tx_type, amount, description),
         )

@@ -54,7 +54,6 @@ def _make_bot(
     config = BotConfig(
         bot_id="bot-test",
         strategy_id="stg-test",
-        bot_type="paper",
         interval_seconds=interval,
         step_timeout_seconds=step_timeout,
         max_signals_per_step=max_signals,

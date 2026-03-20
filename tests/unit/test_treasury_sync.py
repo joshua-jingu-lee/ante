@@ -28,7 +28,7 @@ def eventbus():
 
 @pytest.fixture
 async def treasury(db, eventbus):
-    t = Treasury(db=db, eventbus=eventbus, commission_rate=0.00015)
+    t = Treasury(db=db, eventbus=eventbus, buy_commission_rate=0.00015)
     await t.initialize()
     return t
 
@@ -152,16 +152,13 @@ class TestSyncBalance:
             }
         )
 
-        # 새 인스턴스로 복원 확인
+        # 새 인스턴스로 복원 확인 (계좌별 행 구조 — 핵심 필드만 영속화)
         t2 = Treasury(db=db, eventbus=eventbus)
         await t2.initialize()
 
         assert t2._account_balance == 5_000_000.0
         assert t2._purchasable_amount == 4_800_000.0
         assert t2._total_evaluation == 12_000_000.0
-        assert t2._purchase_amount == 7_000_000.0
-        assert t2._eval_amount == 7_200_000.0
-        assert t2._total_profit_loss == 200_000.0
 
     async def test_purchasable_amount_in_kis(self):
         """KIS get_account_balance에 purchasable_amount 포함 확인."""
@@ -344,8 +341,8 @@ class TestExternalPositions:
         assert treasury._external_purchase_amount == 3_000_000.0
         assert treasury._external_eval_amount == 3_100_000.0
 
-    async def test_external_amounts_persist(self, treasury, db, eventbus):
-        """외부 종목 금액이 DB에 저장되어 재시작 후 복원."""
+    async def test_external_amounts_in_memory(self, treasury):
+        """외부 종목 금액이 인메모리에 보관된다."""
         broker = FakeBroker(
             positions=[
                 {
@@ -362,12 +359,8 @@ class TestExternalPositions:
         await asyncio.sleep(0.05)
         await treasury.stop_sync()
 
-        # 새 인스턴스
-        t2 = Treasury(db=db, eventbus=eventbus)
-        await t2.initialize()
-
-        assert t2._external_purchase_amount == 3_000_000.0
-        assert t2._external_eval_amount == 3_100_000.0
+        assert treasury._external_purchase_amount == 3_000_000.0
+        assert treasury._external_eval_amount == 3_100_000.0
 
     async def test_sync_event_includes_external(self, treasury, eventbus):
         """BalanceSyncedEvent에 외부 종목 금액 포함."""

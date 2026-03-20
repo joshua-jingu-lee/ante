@@ -40,7 +40,7 @@ class TestAuditMiddleware:
 
     def test_post_success_logged(self, client, audit_logger):
         """POST 성공 시 미들웨어가 api:post 액션으로 기록한다."""
-        # system/kill-switch는 system_state 없이 503 → 미들웨어 기록 안 됨
+        # system/halt는 account_service 없이 503 → 미들웨어 기록 안 됨
         # health는 GET → 미들웨어 기록 안 됨
         # 503은 성공이 아니므로 기록 안 됨
         resp = client.get("/api/system/health")
@@ -65,10 +65,10 @@ class TestAuditMiddleware:
 
     def test_failed_request_not_logged(self, client, audit_logger):
         """실패(4xx/5xx) 응답은 미들웨어가 기록하지 않는다."""
-        # system_state가 없으므로 503 → 기록 안 됨
+        # account_service가 없으므로 503 → 기록 안 됨
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "halt"},
+            "/api/system/halt",
+            json={"reason": "test"},
         )
         assert resp.status_code == 503
         middleware_calls = [
@@ -156,22 +156,20 @@ class TestHandlerAuditLog:
         assert len(handler_calls) == 1
         assert handler_calls[0].kwargs["member_id"] == "user-01"
 
-    def test_kill_switch_halt_audit(self, audit_logger):
-        """킬 스위치 halt 시 system.halt 감사 로그가 기록된다."""
-        system_state_mock = AsyncMock()
-        system_state_mock.set_state = AsyncMock()
-        system_state_mock.trading_state = AsyncMock()
-        system_state_mock.trading_state.value = "halted"
+    def test_halt_audit(self, audit_logger):
+        """halt 시 system.halt 감사 로그가 기록된다."""
+        account_service_mock = AsyncMock()
+        account_service_mock.suspend_all = AsyncMock(return_value=1)
 
         app = create_app(
             audit_logger=audit_logger,
-            system_state=system_state_mock,
+            account_service=account_service_mock,
         )
         client = TestClient(app)
 
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "halt", "reason": "emergency"},
+            "/api/system/halt",
+            json={"reason": "emergency"},
         )
         assert resp.status_code == 200
 
@@ -184,22 +182,20 @@ class TestHandlerAuditLog:
         assert handler_calls[0].kwargs["resource"] == "system:kill_switch"
         assert handler_calls[0].kwargs["detail"] == "emergency"
 
-    def test_kill_switch_activate_audit(self, audit_logger):
-        """킬 스위치 activate 시 system.activate 감사 로그가 기록된다."""
-        system_state_mock = AsyncMock()
-        system_state_mock.set_state = AsyncMock()
-        system_state_mock.trading_state = AsyncMock()
-        system_state_mock.trading_state.value = "active"
+    def test_activate_audit(self, audit_logger):
+        """activate 시 system.activate 감사 로그가 기록된다."""
+        account_service_mock = AsyncMock()
+        account_service_mock.activate_all = AsyncMock(return_value=1)
 
         app = create_app(
             audit_logger=audit_logger,
-            system_state=system_state_mock,
+            account_service=account_service_mock,
         )
         client = TestClient(app)
 
         resp = client.post(
-            "/api/system/kill-switch",
-            json={"action": "activate", "reason": "recovered"},
+            "/api/system/activate",
+            json={"reason": "recovered"},
         )
         assert resp.status_code == 200
 

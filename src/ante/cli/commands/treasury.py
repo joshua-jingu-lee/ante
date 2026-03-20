@@ -19,7 +19,8 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_treasury():  # noqa: ANN202
+async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
+    from ante.account.service import AccountService
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.treasury.treasury import Treasury
@@ -27,21 +28,37 @@ async def _create_treasury():  # noqa: ANN202
     db = Database("db/ante.db")
     await db.connect()
     eventbus = EventBus()
-    t = Treasury(db, eventbus)
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
+
+    if account_id:
+        account = await account_service.get(account_id)
+        t = Treasury(
+            db,
+            eventbus,
+            account_id=account.account_id,
+            currency=account.currency,
+            buy_commission_rate=float(account.buy_commission_rate),
+            sell_commission_rate=float(account.sell_commission_rate),
+        )
+    else:
+        t = Treasury(db, eventbus)
+
     await t.initialize()
     return t, db
 
 
 @treasury.command()
+@click.option("--account", "account_id", default=None, help="계좌 ID로 필터링")
 @click.pass_context
 @require_auth
 @require_scope("treasury:read")
-def status(ctx: click.Context) -> None:
+def status(ctx: click.Context, account_id: str | None) -> None:
     """자금 현황 요약."""
     fmt = get_formatter(ctx)
 
     async def _run_status() -> dict:
-        t, db = await _create_treasury()
+        t, db = await _create_treasury(account_id)
         try:
             return t.get_summary()
         finally:

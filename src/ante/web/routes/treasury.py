@@ -10,9 +10,8 @@ from pydantic import BaseModel
 
 from ante.web.deps import (
     get_audit_logger_optional,
-    get_broker,
-    get_config,
     get_treasury,
+    get_treasury_manager_optional,
 )
 from ante.web.schemas import (
     BalanceSetResponse,
@@ -42,30 +41,53 @@ class BalanceSetRequest(BaseModel):
     "",
     response_model=TreasurySummaryResponse,
     response_model_exclude_none=True,
-    responses={503: {"description": "Treasury not available"}},
+    responses={
+        404: {"description": "Account not found"},
+        503: {"description": "Treasury not available"},
+    },
 )
 async def get_summary(
+    request: Request,
     treasury: Annotated[Any, Depends(get_treasury)],
-    broker: Annotated[Any | None, Depends(get_broker)],
-    config: Annotated[Any | None, Depends(get_config)],
+    treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
+    account_id: str | None = None,
 ) -> dict:
-    """자금 현황 요약."""
-    summary = treasury.get_summary()
-    summary["commission_rate"] = getattr(treasury, "commission_rate", 0.00015)
-    summary["sell_tax_rate"] = getattr(treasury, "sell_tax_rate", 0.0023)
+    """자금 현황 요약.
 
-    # 브로커 메타정보
+    account_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.
+    미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).
+    """
+    target_treasury = treasury
+    if account_id and treasury_manager is not None:
+        try:
+            target_treasury = treasury_manager.get(account_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계좌를 찾을 수 없습니다: {account_id}",
+            )
+
+    summary = target_treasury.get_summary()
+    summary["account_id"] = getattr(target_treasury, "account_id", None)
+    summary["currency"] = getattr(target_treasury, "currency", "KRW")
+    summary["commission_rate"] = getattr(
+        target_treasury, "buy_commission_rate", 0.00015
+    )
+    summary["sell_tax_rate"] = getattr(target_treasury, "sell_commission_rate", 0.00195)
+
+    # 브로커 메타정보 (하위 호환)
+    broker = getattr(request.app.state, "broker", None)
     if broker is not None:
         summary["broker_id"] = broker.broker_id
         summary["broker_name"] = broker.broker_name
         summary["broker_short_name"] = broker.broker_short_name
         summary["exchange"] = broker.exchange
 
-    # KIS 계좌 헤더 정보
+    # KIS 계좌 헤더 정보 (하위 호환)
+    config = getattr(request.app.state, "config", None)
     if config is not None:
         try:
             account_no = config.secret("KIS_ACCOUNT_NO")
-            # "1234567801" -> "12345678-01" 포맷 변환
             if account_no and len(account_no) == 10:
                 summary["account_no"] = f"{account_no[:8]}-{account_no[8:]}"
             elif account_no:
@@ -76,7 +98,7 @@ async def get_summary(
         if isinstance(broker_config, dict):
             summary["is_virtual"] = broker_config.get("is_paper", True)
 
-    last_synced = getattr(treasury, "last_synced_at", None)
+    last_synced = getattr(target_treasury, "last_synced_at", None)
     if last_synced is not None:
         summary["synced_at"] = last_synced.isoformat()
 
@@ -90,6 +112,7 @@ async def get_summary(
 )
 async def list_transactions(
     treasury: Annotated[Any, Depends(get_treasury)],
+    account_id: str | None = None,
     type: str | None = None,
     bot_id: str | None = None,
     limit: int = 20,
@@ -103,6 +126,9 @@ async def list_transactions(
     where_clauses: list[str] = []
     params: list[str | int] = []
 
+    if account_id:
+        where_clauses.append("account_id = ?")
+        params.append(account_id)
     if type:
         where_clauses.append("transaction_type = ?")
         params.append(type)

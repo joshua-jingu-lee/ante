@@ -8,6 +8,7 @@ from ante.bot import Bot, BotConfig, BotError, BotManager, BotStatus
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
+    AccountSuspendedEvent,
     BotErrorEvent,
     BotStartedEvent,
     BotStopEvent,
@@ -16,7 +17,6 @@ from ante.eventbus.events import (
     OrderFilledEvent,
     OrderRejectedEvent,
     OrderRequestEvent,
-    TradingStateChangedEvent,
 )
 from ante.strategy import (
     DataProvider,
@@ -145,7 +145,7 @@ class TestBotConfig:
         """BotConfig 기본값."""
         c = BotConfig(bot_id="b1", strategy_id="s1")
         assert c.name == ""
-        assert c.bot_type == "live"
+        assert c.account_id == "test"
         assert c.interval_seconds == 60
 
     def test_name_field(self):
@@ -588,17 +588,17 @@ class TestBotManager:
 
         assert manager.get_bot("bot1").status == BotStatus.STOPPED
 
-    async def test_halt_stops_all(self, manager, eventbus, ctx):
-        """TradingStateChanged → HALTED 시 전체 봇 중지."""
+    async def test_account_suspended_stops_bots(self, manager, eventbus, ctx):
+        """AccountSuspendedEvent 시 해당 계좌의 봇만 중지."""
         config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
         await eventbus.publish(
-            TradingStateChangedEvent(
-                old_state="active",
-                new_state="halted",
+            AccountSuspendedEvent(
+                account_id="test",
                 reason="critical",
+                suspended_by="system",
             )
         )
 
@@ -698,3 +698,305 @@ class TestBotManager:
         row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
         assert row is not None
         assert row["name"] == "모멘텀 봇"
+
+    async def test_bot_config_account_id(self, manager, eventbus, ctx, db):
+        """account_id 필드 존재 및 기본값."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        assert config.account_id == "test"
+
+        config2 = BotConfig(bot_id="bot2", strategy_id="s2", account_id="domestic")
+        assert config2.account_id == "domestic"
+
+    async def test_bot_config_no_bot_type(self):
+        """BotConfig에서 bot_type, exchange 필드가 제거되었음."""
+        config = BotConfig(bot_id="b1", strategy_id="s1")
+        assert not hasattr(config, "bot_type")
+        assert not hasattr(config, "exchange")
+
+    async def test_create_bot_with_account(self, manager, eventbus, ctx, db):
+        """BotManager.create_bot()에 account_id 전달 및 DB 저장."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="domestic")
+        bot = await manager.create_bot(config, SimpleStrategy, ctx)
+        assert bot.config.account_id == "domestic"
+
+        row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
+        assert row is not None
+        assert row["account_id"] == "domestic"
+
+    async def test_order_request_has_account(self, eventbus, ctx):
+        """OrderRequestEvent에 account_id 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="buy_v1.0.0",
+            account_id="my-account",
+            interval_seconds=10,
+        )
+        received = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=BuyStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+            exchange="KRX",
+        )
+        await bot.start()
+        await asyncio.sleep(0.05)
+        await bot.stop()
+
+        assert len(received) >= 1
+        assert received[0].account_id == "my-account"
+        assert received[0].exchange == "KRX"
+
+    async def test_load_bot_from_db_with_account(self, manager, eventbus, ctx, db):
+        """DB 복원 시 account_id 유지."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="domestic")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        # 새 매니저로 DB에서 로드
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        count = await manager2.load_from_db()
+        assert count == 1
+
+        bot = manager2.get_bot("bot1")
+        assert bot is not None
+        assert bot.config.account_id == "domestic"
+
+    async def test_load_bot_migration_old_format(self, manager, eventbus, db):
+        """기존 bot_type/exchange 포함 config_json → account_id 마이그레이션."""
+        import json
+
+        # 기존 형식으로 직접 DB에 삽입
+        old_config = json.dumps(
+            {
+                "bot_id": "old-bot",
+                "strategy_id": "s1",
+                "bot_type": "paper",
+                "exchange": "KRX",
+                "interval_seconds": 60,
+            }
+        )
+        await db.execute(
+            """INSERT INTO bots
+               (bot_id, name, strategy_id, account_id, config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("old-bot", "old", "s1", "test", old_config, "created"),
+        )
+
+        # 새 매니저로 로드 — bot_type/exchange 무시, account_id 사용
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        count = await manager2.load_from_db()
+        assert count >= 1
+
+        bot = manager2.get_bot("old-bot")
+        assert bot is not None
+        assert bot.config.account_id == "test"
+        # bot_type, exchange는 BotConfig에 없으므로 속성 자체가 존재하지 않음
+        assert not hasattr(bot.config, "bot_type")
+        assert not hasattr(bot.config, "exchange")
+
+    async def test_bot_get_info_has_account(self, eventbus, ctx, simple_config):
+        """get_info()에 account_id 포함, bot_type 없음."""
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        assert "account_id" in info
+        assert info["account_id"] == "test"
+        assert "bot_type" not in info
+
+    async def test_bot_started_event_has_account_id(self, eventbus, ctx):
+        """봇 시작 시 BotStartedEvent에 account_id 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            account_id="my-account",
+            interval_seconds=999,
+        )
+        received = []
+        eventbus.subscribe(BotStartedEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        assert len(received) == 1
+        assert received[0].account_id == "my-account"
+        await bot.stop()
+
+    async def test_bot_stopped_event_has_account_id(self, eventbus, ctx):
+        """봇 중지 시 BotStoppedEvent에 account_id 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            account_id="my-account",
+            interval_seconds=999,
+        )
+        received = []
+        eventbus.subscribe(BotStoppedEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        await bot.stop()
+        assert len(received) == 1
+        assert received[0].account_id == "my-account"
+
+    async def test_cancel_event_has_account_id(self, eventbus, ctx):
+        """OrderCancelEvent에 account_id 포함."""
+
+        class CancelStrategy(Strategy):
+            meta = StrategyMeta(name="c", version="1.0.0", description="c")
+
+            async def on_step(self, context):
+                self.ctx.cancel_order("ord1", reason="test cancel")
+                return []
+
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="c_v1.0.0",
+            account_id="acct-1",
+            interval_seconds=10,
+        )
+        received = []
+        eventbus.subscribe(OrderCancelEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=CancelStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        await asyncio.sleep(0.05)
+        await bot.stop()
+
+        assert len(received) >= 1
+        assert received[0].account_id == "acct-1"
+
+
+# ── Exchange 호환성 검증 (BotManager) ───────────────
+
+
+class TestBotManagerExchangeValidation:
+    """BotManager.create_bot() exchange 호환성 검증 테스트."""
+
+    @pytest.fixture
+    async def db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        await database.connect()
+        yield database
+        try:
+            await asyncio.wait_for(database.close(), timeout=5.0)
+        except TimeoutError:
+            pass
+
+    @pytest.fixture
+    async def account_service(self, db, eventbus):
+        from ante.account.service import AccountService
+
+        svc = AccountService(db=db, eventbus=eventbus)
+        await svc.initialize()
+        return svc
+
+    @pytest.fixture
+    async def manager_with_account(self, eventbus, db, account_service):
+        m = BotManager(eventbus=eventbus, db=db, account_service=account_service)
+        await m.initialize()
+        yield m
+        for bot in list(m._bots.values()):
+            if bot._task and not bot._task.done():
+                bot._task.cancel()
+        try:
+            await asyncio.wait_for(m.stop_all(), timeout=5.0)
+        except TimeoutError:
+            pass
+
+    async def test_compatible_exchange_allowed(
+        self, manager_with_account, account_service, ctx
+    ):
+        """동일 exchange 조합은 봇 생성 허용."""
+        from ante.account.models import Account
+
+        account = Account(
+            account_id="krx-acct",
+            name="국내계좌",
+            exchange="KRX",
+            currency="KRW",
+            broker_type="test",
+        )
+        await account_service.create(account)
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="krx-acct")
+        # SimpleStrategy.meta.exchange는 기본값 "KRX"
+        bot = await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+        assert bot.status == BotStatus.CREATED
+
+    async def test_incompatible_exchange_rejected(
+        self, manager_with_account, account_service, ctx
+    ):
+        """KRX 전략 + NYSE 계좌 → IncompatibleExchangeError."""
+        from ante.account.models import Account
+        from ante.strategy.exceptions import IncompatibleExchangeError
+
+        account = Account(
+            account_id="nyse-acct",
+            name="미국계좌",
+            exchange="NYSE",
+            currency="USD",
+            broker_type="test",
+        )
+        await account_service.create(account)
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="nyse-acct")
+        with pytest.raises(IncompatibleExchangeError, match="simple"):
+            await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+    async def test_wildcard_exchange_allowed(
+        self, manager_with_account, account_service, ctx
+    ):
+        """전략 exchange='*'이면 어떤 계좌든 허용."""
+        from ante.account.models import Account
+
+        class WildcardStrategy(Strategy):
+            meta = StrategyMeta(
+                name="wildcard",
+                version="1.0.0",
+                description="test",
+                exchange="*",
+            )
+
+            async def on_step(self, context):
+                return []
+
+        account = Account(
+            account_id="nyse-acct",
+            name="미국계좌",
+            exchange="NYSE",
+            currency="USD",
+            broker_type="test",
+        )
+        await account_service.create(account)
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="nyse-acct")
+        bot = await manager_with_account.create_bot(config, WildcardStrategy, ctx)
+        assert bot.status == BotStatus.CREATED
+
+    async def test_no_account_service_skips_validation(self, eventbus, db, ctx):
+        """AccountService 미주입 시 exchange 검증 스킵."""
+        manager = BotManager(eventbus=eventbus, db=db)
+        await manager.initialize()
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="any-acct")
+        # account_service가 없으므로 검증 스킵, 정상 생성
+        bot = await manager.create_bot(config, SimpleStrategy, ctx)
+        assert bot.status == BotStatus.CREATED

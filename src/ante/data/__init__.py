@@ -21,7 +21,7 @@ from ante.data.schemas import (
     TICK_SCHEMA,
     TIMEFRAMES,
 )
-from ante.data.store import ParquetStore
+from ante.data.store import ParquetStore, migrate_parquet_paths
 
 __all__ = [
     "BaseNormalizer",
@@ -41,5 +41,6 @@ __all__ = [
     "TIMEFRAMES",
     "YahooNormalizer",
     "get_normalizer",
+    "migrate_parquet_paths",
     "register_normalizer",
 ]

@@ -26,6 +26,7 @@ class Event:
 class OrderRequestEvent(Event):
     """봇 → EventBus: 신규 주문 요청."""
 
+    account_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
     symbol: str = ""
@@ -42,6 +43,7 @@ class OrderRequestEvent(Event):
 class OrderCancelEvent(Event):
     """봇 → EventBus: 주문 취소 요청."""
 
+    account_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
     order_id: str = ""
@@ -52,6 +54,7 @@ class OrderCancelEvent(Event):
 class OrderModifyEvent(Event):
     """봇 → EventBus: 주문 정정 요청."""
 
+    account_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
     order_id: str = ""
@@ -66,6 +69,7 @@ class OrderModifyEvent(Event):
 class OrderModifyRejectedEvent(Event):
     """RuleEngine → EventBus: 주문 정정 룰 위반으로 거부."""
 
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -80,6 +84,7 @@ class OrderModifyRejectedEvent(Event):
 class OrderValidatedEvent(Event):
     """RuleEngine → EventBus: 룰 검증 통과."""
 
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -97,6 +102,7 @@ class OrderValidatedEvent(Event):
 class OrderRejectedEvent(Event):
     """RuleEngine/Treasury → EventBus: 주문 거부."""
 
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -113,6 +119,7 @@ class OrderRejectedEvent(Event):
 class OrderApprovedEvent(Event):
     """Treasury → EventBus: 자금 확보 완료, 주문 실행 허가."""
 
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -130,6 +137,7 @@ class OrderApprovedEvent(Event):
 class OrderSubmittedEvent(Event):
     """APIGateway → EventBus: 증권사에 주문 전송됨."""
 
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -145,6 +153,7 @@ class OrderSubmittedEvent(Event):
 class OrderFilledEvent(Event):
     """BrokerAdapter → EventBus: 체결 완료."""
 
+    account_id: str = ""
     order_id: str = ""
     broker_order_id: str = ""
     bot_id: str = ""
@@ -165,6 +174,7 @@ class OrderFilledEvent(Event):
 class OrderCancelledEvent(Event):
     """BrokerAdapter → EventBus: 취소 완료."""
 
+    account_id: str = ""
     order_id: str = ""
     broker_order_id: str = ""
     bot_id: str = ""
@@ -181,6 +191,7 @@ class OrderCancelledEvent(Event):
 class OrderFailedEvent(Event):
     """BrokerAdapter → EventBus: 주문 실패."""
 
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -221,6 +232,7 @@ class OrderUpdateEvent(Event):
 class BotStartedEvent(Event):
     """BotManager → EventBus: 봇 시작."""
 
+    account_id: str = ""
     bot_id: str = ""
 
 
@@ -236,6 +248,7 @@ class BotStopEvent(Event):
 class BotStoppedEvent(Event):
     """BotManager → EventBus: 봇 중지 완료."""
 
+    account_id: str = ""
     bot_id: str = ""
 
 
@@ -243,6 +256,7 @@ class BotStoppedEvent(Event):
 class BotErrorEvent(Event):
     """BotManager → EventBus: 봇 에러 발생."""
 
+    account_id: str = ""
     bot_id: str = ""
     error_message: str = ""
 
@@ -254,16 +268,6 @@ class BotRestartExhaustedEvent(Event):
     bot_id: str = ""
     restart_attempts: int = 0
     last_error: str = ""
-
-
-@dataclass(frozen=True)
-class TradingStateChangedEvent(Event):
-    """SystemState → EventBus: 거래 상태(킬 스위치) 변경."""
-
-    old_state: str = ""
-    new_state: str = ""
-    reason: str = ""
-    changed_by: str = ""
 
 
 @dataclass(frozen=True)
@@ -430,6 +434,7 @@ class MemberAuthFailedEvent(Event):
 class BalanceSyncedEvent(Event):
     """Treasury → EventBus: 계좌 잔고 동기화 완료."""
 
+    account_id: str = ""
     account_balance: float = 0.0
     purchasable_amount: float = 0.0
     total_evaluation: float = 0.0
@@ -524,3 +529,31 @@ class StreamDisconnectedEvent(Event):
 
     broker: str = ""
     reason: str = ""
+
+
+# ── 계좌 (Account) ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class AccountSuspendedEvent(Event):
+    """AccountService → EventBus: 계좌 정지."""
+
+    account_id: str = ""
+    reason: str = ""
+    suspended_by: str = ""
+
+
+@dataclass(frozen=True)
+class AccountActivatedEvent(Event):
+    """AccountService → EventBus: 계좌 활성화."""
+
+    account_id: str = ""
+    activated_by: str = ""
+
+
+@dataclass(frozen=True)
+class AccountDeletedEvent(Event):
+    """AccountService → EventBus: 계좌 삭제."""
+
+    account_id: str = ""
+    deleted_by: str = ""

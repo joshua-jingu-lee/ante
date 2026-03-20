@@ -17,6 +17,86 @@ class ErrorResponse(BaseModel):
     instance: str = ""
 
 
+# ── 계좌 ──────────────────────────────────────────────
+
+
+class AccountResponse(BaseModel):
+    """계좌 응답. credentials는 보안상 포함하지 않는다."""
+
+    account_id: str
+    name: str
+    exchange: str
+    currency: str
+    timezone: str
+    trading_hours_start: str
+    trading_hours_end: str
+    trading_mode: str
+    broker_type: str
+    buy_commission_rate: float
+    sell_commission_rate: float
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class AccountListResponse(BaseModel):
+    """계좌 목록 응답."""
+
+    accounts: list[AccountResponse]
+
+
+class AccountDetailResponse(BaseModel):
+    """계좌 상세 응답."""
+
+    account: AccountResponse
+
+
+class AccountCreateRequest(BaseModel):
+    """계좌 생성 요청."""
+
+    account_id: str
+    name: str
+    exchange: str = ""
+    currency: str = ""
+    timezone: str = ""
+    trading_hours_start: str = ""
+    trading_hours_end: str = ""
+    trading_mode: str = "virtual"
+    broker_type: str = "test"
+    credentials: dict[str, str] = {}
+    buy_commission_rate: float = 0.0
+    sell_commission_rate: float = 0.0
+
+
+class AccountUpdateRequest(BaseModel):
+    """계좌 수정 요청."""
+
+    name: str | None = None
+    exchange: str | None = None
+    currency: str | None = None
+    timezone: str | None = None
+    trading_hours_start: str | None = None
+    trading_hours_end: str | None = None
+    trading_mode: str | None = None
+    broker_type: str | None = None
+    credentials: dict[str, str] | None = None
+    buy_commission_rate: float | None = None
+    sell_commission_rate: float | None = None
+
+
+class AccountSuspendRequest(BaseModel):
+    """계좌 정지 요청."""
+
+    reason: str = ""
+
+
+class AccountActionResponse(BaseModel):
+    """계좌 상태 변경 응답."""
+
+    account: AccountResponse
+    message: str
+
+
 # ── 시스템 ──────────────────────────────────────────────
 
 
@@ -87,7 +167,7 @@ class BotInfo(BaseModel):
     bot_id: str
     name: str = ""
     status: str = ""
-    bot_type: str = ""
+    account_id: str = ""
     strategy_id: str = ""
     interval_seconds: int = 60
     started_at: str | None = None
@@ -538,6 +618,7 @@ class TradeItem(BaseModel):
 
     trade_id: str
     bot_id: str
+    account_id: str = ""
     symbol: str
     side: str
     quantity: float

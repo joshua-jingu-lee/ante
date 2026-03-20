@@ -28,7 +28,7 @@ class BotCreateRequest(BaseModel):
     bot_id: str
     strategy_id: str
     name: str = ""
-    bot_type: str = "live"
+    account_id: str = "test"
     interval_seconds: int = Field(default=60, ge=10, le=3600)
 
 
@@ -39,6 +39,7 @@ class BotCreateRequest(BaseModel):
 )
 async def list_bots(
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    account_id: str | None = None,
     limit: int = 20,
     cursor: str | None = None,
 ) -> dict:
@@ -46,6 +47,17 @@ async def list_bots(
     from ante.web.pagination import paginate
 
     bots = bot_manager.list_bots()
+    if account_id:
+        bots = [
+            b
+            for b in bots
+            if (
+                b.get("account_id")
+                if isinstance(b, dict)
+                else getattr(b, "account_id", None)
+            )
+            == account_id
+        ]
     result = paginate(bots, cursor_field="bot_id", limit=limit, cursor=cursor)
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
 
@@ -88,7 +100,7 @@ async def create_bot(
         bot_id=body.bot_id,
         strategy_id=body.strategy_id,
         name=body.name or body.bot_id,
-        bot_type=body.bot_type,
+        account_id=body.account_id,
         interval_seconds=body.interval_seconds,
     )
 

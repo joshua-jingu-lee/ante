@@ -93,8 +93,8 @@ class MockBrokerAdapter(BrokerAdapter):
         self._default_price: float = config.get("default_price", 50_000.0)
 
         self._commission = CommissionInfo(
-            commission_rate=config.get("commission_rate", 0.00015),
-            sell_tax_rate=config.get("sell_tax_rate", 0.0023),
+            buy_commission_rate=config.get("buy_commission_rate", 0.00015),
+            sell_commission_rate=config.get("sell_commission_rate", 0.00195),
         )
 
     # ── 연결 ──────────────────────────────────────────

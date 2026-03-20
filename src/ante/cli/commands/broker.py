@@ -19,7 +19,31 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_broker():  # noqa: ANN202
+async def _create_account_service():  # noqa: ANN202
+    from ante.account.service import AccountService
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
+
+    db = Database("db/ante.db")
+    await db.connect()
+    eventbus = EventBus()
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
+    return account_service, db
+
+
+async def _get_broker(account_id: str | None = None):  # noqa: ANN202
+    """AccountService를 통해 브로커 어댑터를 획득한다.
+
+    account_id가 None이면 기존 Config 기반 폴백을 사용한다.
+    """
+    if account_id:
+        account_service, db = await _create_account_service()
+        adapter = await account_service.get_broker(account_id)
+        await adapter.connect()
+        return adapter, db
+
+    # 폴백: 기존 Config 기반 브로커 생성
     from ante.config.config import Config
 
     config = Config.load()
@@ -33,35 +57,40 @@ async def _create_broker():  # noqa: ANN202
 
         adapter = KISAdapter(broker_config)
         await adapter.connect()
-        return adapter
+        return adapter, None
     elif broker_type == "mock":
         from ante.broker.mock import MockBrokerAdapter
 
         adapter = MockBrokerAdapter(broker_config)
         await adapter.connect()
-        return adapter
+        return adapter, None
     else:
         msg = f"지원하지 않는 브로커: {broker_type}"
         raise ValueError(msg)
 
 
 @broker.command()
+@click.option("--account", "account_id", default=None, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def status(ctx: click.Context) -> None:
+def status(ctx: click.Context, account_id: str | None) -> None:
     """증권사 연결 상태 조회."""
     fmt = get_formatter(ctx)
 
     async def _run_status() -> dict:
         try:
-            adapter = await _create_broker()
-            healthy = await adapter.health_check()
-            return {
-                "connected": adapter.is_connected,
-                "healthy": healthy,
-                "exchange": adapter.exchange,
-            }
+            adapter, db = await _get_broker(account_id)
+            try:
+                healthy = await adapter.health_check()
+                return {
+                    "connected": adapter.is_connected,
+                    "healthy": healthy,
+                    "exchange": adapter.exchange,
+                }
+            finally:
+                if db:
+                    await db.close()
         except Exception as e:
             return {
                 "connected": False,
@@ -85,19 +114,22 @@ def status(ctx: click.Context) -> None:
 
 
 @broker.command()
+@click.option("--account", "account_id", default=None, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def balance(ctx: click.Context) -> None:
+def balance(ctx: click.Context, account_id: str | None) -> None:
     """증권사 계좌 잔고 조회."""
     fmt = get_formatter(ctx)
 
     async def _run_balance() -> dict:
-        adapter = await _create_broker()
+        adapter, db = await _get_broker(account_id)
         try:
             return await adapter.get_account_balance()
         finally:
             await adapter.disconnect()
+            if db:
+                await db.close()
 
     try:
         result = _run(_run_balance())
@@ -116,19 +148,22 @@ def balance(ctx: click.Context) -> None:
 
 
 @broker.command()
+@click.option("--account", "account_id", default=None, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def positions(ctx: click.Context) -> None:
+def positions(ctx: click.Context, account_id: str | None) -> None:
     """증권사 보유 종목 조회."""
     fmt = get_formatter(ctx)
 
     async def _run_positions() -> list[dict]:
-        adapter = await _create_broker()
+        adapter, db = await _get_broker(account_id)
         try:
             return await adapter.get_positions()
         finally:
             await adapter.disconnect()
+            if db:
+                await db.close()
 
     try:
         result = _run(_run_positions())
@@ -148,13 +183,14 @@ def positions(ctx: click.Context) -> None:
 
 
 @broker.command()
+@click.option("--account", "account_id", default=None, help="계좌 ID")
 @click.option(
     "--fix", is_flag=True, default=False, help="불일치 발견 시 자동 보정 수행"
 )
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def reconcile(ctx: click.Context, fix: bool) -> None:
+def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
     """내부 데이터와 증권사 데이터 대사."""
     fmt = get_formatter(ctx)
 
@@ -167,9 +203,10 @@ def reconcile(ctx: click.Context, fix: bool) -> None:
         from ante.trade.recorder import TradeRecorder
         from ante.trade.service import TradeService
 
-        adapter = await _create_broker()
-        db = Database("db/ante.db")
-        await db.connect()
+        adapter, adapter_db = await _get_broker(account_id)
+        db = adapter_db or Database("db/ante.db")
+        if not adapter_db:
+            await db.connect()
         try:
             eventbus = EventBus()
             position_history = PositionHistory(db)

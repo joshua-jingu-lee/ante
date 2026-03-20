@@ -4,29 +4,34 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from ante.web.deps import (
+    get_account_service,
+    get_account_service_optional,
     get_audit_logger_optional,
-    get_system_state,
-    get_system_state_optional,
 )
 from ante.web.schemas import HealthResponse, KillSwitchResponse, StatusResponse
 
 router = APIRouter()
 
 
-class KillSwitchRequest(BaseModel):
-    """킬 스위치 제어 요청."""
+class HaltRequest(BaseModel):
+    """거래 중지 요청."""
 
-    action: str  # "halt" | "activate"
+    reason: str = ""
+
+
+class ActivateRequest(BaseModel):
+    """거래 재개 요청."""
+
     reason: str = ""
 
 
 @router.get("/status", response_model=StatusResponse)
 async def get_system_status(
-    system_state: Annotated[Any | None, Depends(get_system_state_optional)],
+    account_service: Annotated[Any | None, Depends(get_account_service_optional)],
 ) -> dict:
     """시스템 상태 조회."""
     result: dict = {
@@ -34,30 +39,17 @@ async def get_system_status(
         "version": "0.1.0",
     }
 
-    if system_state is not None:
-        result["trading_status"] = system_state.trading_state.value.upper()
+    if account_service is not None:
+        from ante.account.models import AccountStatus
 
-        # HALTED 상태이면 최근 halt 이력에서 시각·사유를 가져옴
-        if system_state.trading_state.value == "halted":
-            halt_info = await _get_last_halt_info(system_state)
-            if halt_info:
-                result["halt_time"] = halt_info.get("created_at")
-                result["halt_reason"] = halt_info.get("reason", "")
+        accounts = await account_service.list()
+        suspended = [a for a in accounts if a.status == AccountStatus.SUSPENDED]
+        if suspended:
+            result["trading_status"] = "SUSPENDED"
+        else:
+            result["trading_status"] = "ACTIVE"
 
     return result
-
-
-async def _get_last_halt_info(system_state: object) -> dict | None:
-    """system_state_history에서 마지막 HALTED 전환 정보를 가져온다."""
-    db = getattr(system_state, "_db", None)
-    if db is None:
-        return None
-    row = await db.fetch_one(
-        "SELECT reason, changed_by, created_at FROM system_state_history"
-        " WHERE new_state = 'halted'"
-        " ORDER BY id DESC LIMIT 1"
-    )
-    return dict(row) if row else None
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -67,47 +59,67 @@ async def health_check() -> dict:
 
 
 @router.post(
-    "/kill-switch",
+    "/halt",
     response_model=KillSwitchResponse,
     responses={
-        400: {"description": "Invalid action value"},
-        503: {"description": "System state not available"},
+        503: {"description": "Account service not available"},
     },
 )
-async def kill_switch(
-    body: KillSwitchRequest,
+async def halt(
+    body: HaltRequest,
     request: Request,
-    system_state: Annotated[Any, Depends(get_system_state)],
+    account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """킬 스위치 제어 (halt/activate)."""
+    """전체 거래 중지 (모든 계좌 SUSPENDED)."""
     from datetime import UTC, datetime
 
-    from ante.config.system_state import TradingState
+    reason = body.reason or "dashboard"
+    count = await account_service.suspend_all(reason=reason, suspended_by="dashboard")
 
-    if body.action == "halt":
-        target = TradingState.HALTED
-    elif body.action == "activate":
-        target = TradingState.ACTIVE
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="action은 'halt' 또는 'activate'만 허용됩니다",
-        )
-
-    await system_state.set_state(target, reason=body.reason, changed_by="dashboard")
-
-    action = "system.halt" if body.action == "halt" else "system.activate"
     if audit_logger:
         await audit_logger.log(
             member_id=getattr(request.state, "member_id", "dashboard"),
-            action=action,
+            action="system.halt",
             resource="system:kill_switch",
             detail=body.reason,
             ip=request.client.host if request.client else "",
         )
 
     return {
-        "status": system_state.trading_state.value,
+        "status": f"suspended ({count} accounts)",
+        "changed_at": datetime.now(UTC).isoformat(),
+    }
+
+
+@router.post(
+    "/activate",
+    response_model=KillSwitchResponse,
+    responses={
+        503: {"description": "Account service not available"},
+    },
+)
+async def activate(
+    body: ActivateRequest,
+    request: Request,
+    account_service: Annotated[Any, Depends(get_account_service)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+) -> dict:
+    """전체 거래 재개 (모든 계좌 ACTIVE)."""
+    from datetime import UTC, datetime
+
+    count = await account_service.activate_all(activated_by="dashboard")
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "dashboard"),
+            action="system.activate",
+            resource="system:kill_switch",
+            detail=body.reason,
+            ip=request.client.host if request.client else "",
+        )
+
+    return {
+        "status": f"activated ({count} accounts)",
         "changed_at": datetime.now(UTC).isoformat(),
     }

@@ -31,9 +31,11 @@ class Bot:
         strategy_cls: type[Strategy],
         ctx: StrategyContext,
         eventbus: EventBus,
+        exchange: str = "",
     ) -> None:
         self.config = config
         self.bot_id = config.bot_id
+        self.exchange = exchange
         self._strategy_cls = strategy_cls
         self._ctx = ctx
         self._eventbus = eventbus
@@ -61,7 +63,9 @@ class Bot:
             name=f"bot_{self.bot_id}",
         )
 
-        await self._eventbus.publish(BotStartedEvent(bot_id=self.bot_id))
+        await self._eventbus.publish(
+            BotStartedEvent(bot_id=self.bot_id, account_id=self.config.account_id)
+        )
         logger.info("봇 시작: %s", self.bot_id)
 
     async def stop(self) -> None:
@@ -86,7 +90,9 @@ class Bot:
         self.status = BotStatus.STOPPED
         self.stopped_at = datetime.now(UTC)
 
-        await self._eventbus.publish(BotStoppedEvent(bot_id=self.bot_id))
+        await self._eventbus.publish(
+            BotStoppedEvent(bot_id=self.bot_id, account_id=self.config.account_id)
+        )
         logger.info("봇 중지: %s", self.bot_id)
 
     async def _run_loop(self) -> None:
@@ -141,6 +147,7 @@ class Bot:
                     await self._eventbus.publish(
                         BotErrorEvent(
                             bot_id=self.bot_id,
+                            account_id=self.config.account_id,
                             error_message=msg,
                         )
                     )
@@ -173,6 +180,7 @@ class Bot:
             await self._eventbus.publish(
                 BotErrorEvent(
                     bot_id=self.bot_id,
+                    account_id=self.config.account_id,
                     error_message=str(e),
                 )
             )
@@ -297,6 +305,7 @@ class Bot:
             await self._eventbus.publish(
                 OrderRequestEvent(
                     bot_id=self.bot_id,
+                    account_id=self.config.account_id,
                     strategy_id=self.config.strategy_id,
                     symbol=signal.symbol,
                     side=signal.side,
@@ -305,7 +314,7 @@ class Bot:
                     price=signal.price,
                     stop_price=signal.stop_price,
                     reason=signal.reason,
-                    exchange=self.config.exchange,
+                    exchange=self.exchange,
                 )
             )
 
@@ -318,6 +327,7 @@ class Bot:
                 await self._eventbus.publish(
                     OrderCancelEvent(
                         bot_id=self.bot_id,
+                        account_id=self.config.account_id,
                         order_id=action.order_id,
                         reason=action.reason,
                     )
@@ -326,6 +336,7 @@ class Bot:
                 await self._eventbus.publish(
                     OrderModifyEvent(
                         bot_id=self.bot_id,
+                        account_id=self.config.account_id,
                         order_id=action.order_id,
                         quantity=action.quantity or 0.0,
                         price=action.price,
@@ -339,7 +350,7 @@ class Bot:
             "bot_id": self.bot_id,
             "name": self.config.name,
             "status": self.status.value,
-            "bot_type": self.config.bot_type,
+            "account_id": self.config.account_id,
             "strategy_id": self.config.strategy_id,
             "interval_seconds": self.config.interval_seconds,
             "started_at": (self.started_at.isoformat() if self.started_at else None),

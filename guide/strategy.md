@@ -42,7 +42,7 @@ class MyStrategy(Strategy):
 | `author` | - | `"agent"` | 작성자 |
 | `symbols` | - | `None` | 대상 종목 코드 (`None`이면 봇 설정에서 지정) |
 | `timeframe` | - | `"1d"` | 기본 타임프레임 |
-| `exchange` | - | `"KRX"` | 거래소 |
+| `exchange` | - | `"KRX"` | 대상 거래소. `"KRX"`, `"NYSE"`, `"NASDAQ"` 또는 `"*"`(모든 거래소) |
 | `accepts_external_signals` | - | `False` | 외부 시그널 수신 여부 |
 
 ### 시그널
@@ -143,7 +143,7 @@ self.ctx.modify_order(order_id="ORD-001", price=59000, reason="지정가 수정"
 
 핵심은 **전략은 시그널만 반환하고, 실제 주문은 시스템이 처리한다**는 점입니다. 전략이 반환한 시그널은 Rule Engine을 거치며, 전역 손실 한도, 포지션 크기 제한 등의 안전 규칙에 위배되면 주문이 차단됩니다.
 
-봇은 `live`(실투자)와 `paper`(모의투자) 두 가지 타입이 있습니다. 전략 코드는 동일하게 동작하며, 봇 타입에 따라 실제 주문이 나가거나 가상으로 체결됩니다.
+봇은 계좌에 연결되어 동작합니다. 계좌의 거래 모드(TradingMode)에 따라 실제 주문이 나가거나(`LIVE`) 가상으로 체결됩니다(`VIRTUAL`). 전략 코드는 어떤 모드에서든 동일하게 동작합니다.
 
 ## 백테스팅
 
@@ -303,12 +303,12 @@ class AgentRelay(Strategy):
 # 1. 중계 전략 등록
 ante strategy submit strategies/agent_relay.py
 
-# 2. 모의투자 봇 생성 (시그널 키 자동 발급)
+# 2. 봇 생성 (VIRTUAL 계좌에 연결, 시그널 키 자동 발급)
 ante bot create \
   --id news-trader-01 \
   --name "뉴스 트레이더" \
   --strategy agent_relay_v1.0.0 \
-  --type paper \
+  --account test \
   --interval 60
 
 # 3. 시그널 키 확인
@@ -433,32 +433,33 @@ ante strategy submit strategies/my_strategy.py
 등록된 전략을 봇에 연결하여 실행합니다.
 
 ```bash
-# 모의투자 봇으로 먼저 검증
+# VIRTUAL 계좌로 먼저 검증
 ante bot create \
   --id bot-momentum-01 \
   --name "모멘텀 봇 1호" \
   --strategy momentum_breakout_v1.0.0 \
-  --type paper \
+  --account test \
   --interval 60
 ```
 
 | 옵션 | 설명 |
 |------|------|
 | `--strategy` | 등록된 전략 ID |
-| `--type paper` | 모의투자 (실제 주문 없음) |
-| `--type live` | 실투자 (실제 주문 발생) |
+| `--account` | 연결할 계좌 ID. 미지정 시 대화형으로 선택 |
 | `--interval` | `on_step()` 호출 주기 (초, 10~3600) |
+
+봇의 거래 모드는 연결된 계좌의 TradingMode에 의해 결정됩니다. VIRTUAL 계좌에 연결하면 모의투자, LIVE 계좌에 연결하면 실투자가 됩니다.
 
 ### 4단계: 실투자 전환
 
-모의투자로 충분히 검증한 뒤, 실투자 봇을 만들어 투입합니다. 실투자 전환은 결재(Approval)를 거칩니다.
+VIRTUAL 계좌에서 충분히 검증한 뒤, LIVE 계좌에 연결된 봇을 만들어 투입합니다. 실투자 전환은 결재(Approval)를 거칩니다.
 
 ```bash
 # 에이전트가 결재 요청
 ante approval request \
   --type strategy_adopt \
   --title "momentum_breakout v1.0.0 실투자 채택" \
-  --body "paper 봇 30일 운용 결과: 수익률 +12.3%, MDD -3.1%"
+  --body "VIRTUAL 계좌 30일 운용 결과: 수익률 +12.3%, MDD -3.1%"
 
 # 사용자가 승인
 ante approval approve <approval_id>

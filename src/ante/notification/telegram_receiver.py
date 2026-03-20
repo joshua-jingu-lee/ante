@@ -9,9 +9,9 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ante.account.service import AccountService
     from ante.approval.service import ApprovalService
     from ante.bot.manager import BotManager
-    from ante.config.system_state import SystemState
     from ante.notification.telegram import TelegramAdapter
     from ante.treasury.treasury import Treasury
 
@@ -33,7 +33,7 @@ class TelegramCommandReceiver:
         confirm_timeout: float = 30.0,
         bot_manager: BotManager | None = None,
         treasury: Treasury | None = None,
-        system_state: SystemState | None = None,
+        account_service: AccountService | None = None,
         approval_service: ApprovalService | None = None,
     ) -> None:
         self._adapter = adapter
@@ -42,7 +42,7 @@ class TelegramCommandReceiver:
         self._confirm_timeout = confirm_timeout
         self._bot_manager = bot_manager
         self._treasury = treasury
-        self._system_state = system_state
+        self._account_service = account_service
         self._approval_service = approval_service
 
         self._offset: int = 0
@@ -267,10 +267,9 @@ class TelegramCommandReceiver:
 
         # 위험 명령 → 확인 절차 (이미 해당 상태이면 즉시 반환)
         if command in _DANGEROUS_COMMANDS:
-            if command == "halt" and self._system_state:
-                from ante.config.system_state import TradingState
-
-                if self._system_state.trading_state == TradingState.HALTED:
+            if command == "halt" and self._account_service:
+                all_suspended = await self._all_accounts_suspended()
+                if all_suspended:
                     return "이미 거래가 중지된 상태입니다."
             return self._request_confirmation(command, args, user_id)
 
@@ -332,6 +331,19 @@ class TelegramCommandReceiver:
 
         return "알 수 없는 명령입니다."
 
+    # ── 헬퍼 ───────────────────────────────────────
+
+    async def _all_accounts_suspended(self) -> bool:
+        """모든 계좌가 SUSPENDED 상태인지 확인."""
+        if not self._account_service:
+            return False
+        from ante.account.models import AccountStatus
+
+        accounts = await self._account_service.list()
+        if not accounts:
+            return False
+        return all(a.status == AccountStatus.SUSPENDED for a in accounts)
+
     # ── 명령 핸들러 ─────────────────────────────────
 
     def _cmd_help(self, args: list[str]) -> str:
@@ -349,13 +361,19 @@ class TelegramCommandReceiver:
             "/help — 이 도움말"
         )
 
-    def _cmd_status(self, args: list[str]) -> str:
+    async def _cmd_status(self, args: list[str]) -> str:
         """시스템 상태 요약."""
         parts = []
 
-        if self._system_state:
-            state = self._system_state.trading_state
-            parts.append(f"거래 상태: {state.value}")
+        if self._account_service:
+            from ante.account.models import AccountStatus
+
+            accounts = await self._account_service.list()
+            suspended = [a for a in accounts if a.status == AccountStatus.SUSPENDED]
+            if suspended:
+                parts.append("거래 상태: suspended")
+            else:
+                parts.append("거래 상태: active")
 
         if self._bot_manager:
             bots = self._bot_manager.list_bots()
@@ -518,20 +536,17 @@ class TelegramCommandReceiver:
 
     async def _cmd_halt(self, args: list[str]) -> str:
         """전체 거래 중지."""
-        if not self._system_state:
-            return "SystemState가 연결되지 않았습니다."
+        if not self._account_service:
+            return "AccountService가 연결되지 않았습니다."
 
-        from ante.config.system_state import TradingState
-
-        if self._system_state.trading_state == TradingState.HALTED:
+        all_suspended = await self._all_accounts_suspended()
+        if all_suspended:
             return "이미 거래가 중지된 상태입니다."
 
         reason = " ".join(args) if args else "텔레그램 명령"
-        await self._system_state.set_state(
-            TradingState.HALTED,
+        await self._account_service.suspend_all(
             reason=reason,
-            changed_by="telegram",
-            suppress_notification=True,
+            suspended_by="telegram",
         )
         return (
             "\U0001f6a8 전체 거래가 중지되었습니다.\n"
@@ -541,20 +556,17 @@ class TelegramCommandReceiver:
 
     async def _cmd_activate(self, args: list[str]) -> str:
         """거래 재개."""
-        if not self._system_state:
-            return "SystemState가 연결되지 않았습니다."
+        if not self._account_service:
+            return "AccountService가 연결되지 않았습니다."
 
-        from ante.config.system_state import TradingState
+        from ante.account.models import AccountStatus
 
-        if self._system_state.trading_state == TradingState.ACTIVE:
+        accounts = await self._account_service.list()
+        all_active = all(a.status == AccountStatus.ACTIVE for a in accounts)
+        if all_active:
             return "이미 거래가 활성 상태입니다."
 
-        await self._system_state.set_state(
-            TradingState.ACTIVE,
-            reason="텔레그램 명령",
-            changed_by="telegram",
-            suppress_notification=True,
-        )
+        await self._account_service.activate_all(activated_by="telegram")
         return "✅ 거래가 재개되었습니다."
 
     async def _cmd_stop(self, args: list[str]) -> str:

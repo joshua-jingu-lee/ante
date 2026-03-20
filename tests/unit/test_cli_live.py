@@ -46,14 +46,24 @@ def runner():
 
 
 class TestSystemCommands:
-    def _mock_system_state(self, trading_state_value="active"):
-        from ante.config.system_state import TradingState
+    def _mock_account_service(self, suspended: bool = False):
+        from ante.account.models import AccountStatus
 
-        mock_state = AsyncMock()
-        mock_state.trading_state = TradingState(trading_state_value)
-        mock_state.initialize = AsyncMock()
-        mock_state.set_state = AsyncMock()
-        return mock_state
+        mock_svc = AsyncMock()
+        mock_svc.initialize = AsyncMock()
+        if suspended:
+            from types import SimpleNamespace
+
+            acct = SimpleNamespace(account_id="test", status=AccountStatus.SUSPENDED)
+            mock_svc.list = AsyncMock(return_value=[acct])
+        else:
+            from types import SimpleNamespace
+
+            acct = SimpleNamespace(account_id="test", status=AccountStatus.ACTIVE)
+            mock_svc.list = AsyncMock(return_value=[acct])
+        mock_svc.suspend_all = AsyncMock(return_value=1)
+        mock_svc.activate_all = AsyncMock(return_value=1)
+        return mock_svc
 
     def test_system_status(self, runner):
         with patch("ante.cli.commands.system._create_services") as mock_svc:
@@ -63,8 +73,8 @@ class TestSystemCommands:
             mock_svc.return_value = (mock_db, MagicMock())
 
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=self._mock_system_state("active"),
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=False),
             ):
                 result = runner.invoke(cli, ["system", "status"])
                 assert result.exit_code == 0
@@ -78,8 +88,8 @@ class TestSystemCommands:
             mock_svc.return_value = (mock_db, MagicMock())
 
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=self._mock_system_state("active"),
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=False),
             ):
                 result = runner.invoke(cli, ["--format", "json", "system", "status"])
                 assert result.exit_code == 0
@@ -93,10 +103,9 @@ class TestSystemCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_db, MagicMock())
 
-            mock_state = self._mock_system_state("halted")
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=mock_state,
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=True),
             ):
                 result = runner.invoke(cli, ["system", "halt", "--reason", "test halt"])
                 assert result.exit_code == 0
@@ -108,10 +117,9 @@ class TestSystemCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_db, MagicMock())
 
-            mock_state = self._mock_system_state("active")
             with patch(
-                "ante.config.system_state.SystemState",
-                return_value=mock_state,
+                "ante.account.service.AccountService",
+                return_value=self._mock_account_service(suspended=False),
             ):
                 result = runner.invoke(cli, ["system", "activate"])
                 assert result.exit_code == 0
@@ -127,7 +135,7 @@ class TestBotCommands:
             mock_db = AsyncMock()
             mock_db.fetch_all = AsyncMock(return_value=[])
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(cli, ["bot", "list"])
             assert result.exit_code == 0
@@ -141,14 +149,14 @@ class TestBotCommands:
                         "bot_id": "bot-1",
                         "name": "테스트봇",
                         "strategy_id": "stg-1",
-                        "bot_type": "paper",
+                        "account_id": "test",
                         "status": "created",
                         "created_at": "2026-01-01",
                     }
                 ]
             )
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(cli, ["--format", "json", "bot", "list"])
             assert result.exit_code == 0
@@ -161,7 +169,7 @@ class TestBotCommands:
             mock_db = AsyncMock()
             mock_db.fetch_one = AsyncMock(return_value=None)
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(cli, ["bot", "info", "nonexistent"])
             assert result.exit_code == 0
@@ -175,7 +183,7 @@ class TestBotCommands:
                     "bot_id": "bot-1",
                     "name": "테스트봇",
                     "strategy_id": "stg-1",
-                    "bot_type": "live",
+                    "account_id": "test",
                     "status": "running",
                     "created_at": "2026-01-01",
                     "config_json": "{}",
@@ -184,7 +192,7 @@ class TestBotCommands:
                 }
             )
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(cli, ["bot", "info", "bot-1"])
             assert result.exit_code == 0
@@ -195,7 +203,7 @@ class TestBotCommands:
             mock_db = AsyncMock()
             mock_db.execute = AsyncMock()
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(
                 cli,
@@ -206,8 +214,8 @@ class TestBotCommands:
                     "테스트봇",
                     "--strategy",
                     "stg-1",
-                    "--type",
-                    "paper",
+                    "--account",
+                    "test",
                 ],
             )
             assert result.exit_code == 0
@@ -386,19 +394,19 @@ class TestRuleCommands:
 
 class TestBrokerCommands:
     def test_broker_status_connected(self, runner):
-        with patch("ante.cli.commands.broker._create_broker") as mock_create:
+        with patch("ante.cli.commands.broker._get_broker") as mock_create:
             mock_adapter = AsyncMock()
             mock_adapter.is_connected = True
             mock_adapter.health_check = AsyncMock(return_value=True)
             mock_adapter.exchange = "KRX"
-            mock_create.return_value = mock_adapter
+            mock_create.return_value = (mock_adapter, None)
 
             result = runner.invoke(cli, ["broker", "status"])
             assert result.exit_code == 0
             assert "연결됨" in result.output
 
     def test_broker_status_error(self, runner):
-        with patch("ante.cli.commands.broker._create_broker") as mock_create:
+        with patch("ante.cli.commands.broker._get_broker") as mock_create:
             mock_create.side_effect = Exception("connection failed")
 
             result = runner.invoke(cli, ["broker", "status"])
@@ -406,13 +414,13 @@ class TestBrokerCommands:
             assert "미연결" in result.output
 
     def test_broker_balance(self, runner):
-        with patch("ante.cli.commands.broker._create_broker") as mock_create:
+        with patch("ante.cli.commands.broker._get_broker") as mock_create:
             mock_adapter = AsyncMock()
             mock_adapter.get_account_balance = AsyncMock(
                 return_value={"cash": 10000000.0, "total_assets": 15000000.0}
             )
             mock_adapter.disconnect = AsyncMock()
-            mock_create.return_value = mock_adapter
+            mock_create.return_value = (mock_adapter, None)
 
             result = runner.invoke(cli, ["--format", "json", "broker", "balance"])
             assert result.exit_code == 0
@@ -420,11 +428,11 @@ class TestBrokerCommands:
             assert data["cash"] == 10000000.0
 
     def test_broker_positions_empty(self, runner):
-        with patch("ante.cli.commands.broker._create_broker") as mock_create:
+        with patch("ante.cli.commands.broker._get_broker") as mock_create:
             mock_adapter = AsyncMock()
             mock_adapter.get_positions = AsyncMock(return_value=[])
             mock_adapter.disconnect = AsyncMock()
-            mock_create.return_value = mock_adapter
+            mock_create.return_value = (mock_adapter, None)
 
             result = runner.invoke(cli, ["broker", "positions"])
             assert result.exit_code == 0
