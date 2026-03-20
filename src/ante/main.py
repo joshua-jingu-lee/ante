@@ -304,8 +304,16 @@ async def _init_broker(s: Services) -> None:
     stop_order_manager.start()
 
     if s.broker:
+        # AccountService가 초기화된 경우 account_service 기반 라우팅 사용
+        if hasattr(s, "account_service") and s.account_service is not None:
+            account_svc = s.account_service
+        else:
+            # AccountService 미초기화 시 단일 브로커 래퍼로 폴백
+            from ante.gateway.gateway import _SingleBrokerAccountService
+
+            account_svc = _SingleBrokerAccountService(s.broker)
         s.api_gateway = APIGateway(
-            broker=s.broker,
+            account_service=account_svc,
             eventbus=s.eventbus,
             stop_order_manager=stop_order_manager,
         )
