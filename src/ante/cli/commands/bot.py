@@ -23,6 +23,7 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_services():  # noqa: ANN202
+    from ante.account.service import AccountService
     from ante.bot.manager import BotManager
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
@@ -30,9 +31,11 @@ async def _create_services():  # noqa: ANN202
     db = Database("db/ante.db")
     await db.connect()
     eventbus = EventBus()
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
     manager = BotManager(eventbus=eventbus, db=db)
     await manager.initialize()
-    return db, eventbus, manager
+    return db, eventbus, manager, account_service
 
 
 async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
@@ -48,20 +51,28 @@ async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
 
 
 @bot.command("list")
+@click.option("--account", "account_id", default=None, help="계좌 ID로 필터링")
 @click.pass_context
 @require_auth
 @require_scope("bot:read")
-def bot_list(ctx: click.Context) -> None:
+def bot_list(ctx: click.Context, account_id: str | None) -> None:
     """봇 목록 조회."""
     fmt = get_formatter(ctx)
 
     async def _run_list() -> list[dict]:
-        db, _, _ = await _create_services()
+        db, _, _, _ = await _create_services()
         try:
-            rows = await db.fetch_all(
-                "SELECT bot_id, name, strategy_id, account_id, status, created_at"
-                " FROM bots WHERE status != 'deleted'"
-            )
+            if account_id:
+                rows = await db.fetch_all(
+                    "SELECT bot_id, name, strategy_id, account_id, status, created_at"
+                    " FROM bots WHERE status != 'deleted' AND account_id = ?",
+                    (account_id,),
+                )
+            else:
+                rows = await db.fetch_all(
+                    "SELECT bot_id, name, strategy_id, account_id, status, created_at"
+                    " FROM bots WHERE status != 'deleted'"
+                )
             return [dict(r) for r in rows]
         finally:
             await db.close()
@@ -91,7 +102,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        db, _, _ = await _create_services()
+        db, _, _, _ = await _create_services()
         try:
             row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = ?", (bot_id,))
             return dict(row) if row else None
@@ -130,14 +141,34 @@ def _parse_param(value: str) -> tuple[str, object]:
     return key.strip(), parsed
 
 
+def _select_account_interactive(accounts: list) -> str:
+    """활성 계좌 목록에서 대화형으로 계좌를 선택한다."""
+    if not accounts:
+        click.echo("활성 계좌가 없습니다. 먼저 계좌를 등록하세요.")
+        raise SystemExit(1)
+
+    if len(accounts) == 1:
+        selected = accounts[0]
+        msg = f"계좌 자동 선택: {selected.account_id}"
+        msg += f" ({selected.exchange} / {selected.currency})"
+        click.echo(msg)
+        return selected.account_id
+
+    click.echo("계좌를 선택하세요:")
+    for i, acc in enumerate(accounts, 1):
+        click.echo(f"  {i}) {acc.account_id} ({acc.exchange} / {acc.currency})")
+    choice = click.prompt("", type=click.IntRange(1, len(accounts)))
+    return accounts[choice - 1].account_id
+
+
 @bot.command("create")
 @click.option("--name", required=True, help="봇 이름")
 @click.option("--strategy", required=True, help="전략 ID")
 @click.option(
     "--account",
     "account_id",
-    default="test",
-    help="계좌 ID",
+    default=None,
+    help="계좌 ID (미지정 시 대화형 선택)",
 )
 @click.option(
     "--interval",
@@ -159,7 +190,7 @@ def bot_create(
     ctx: click.Context,
     name: str,
     strategy: str,
-    account_id: str,
+    account_id: str | None,
     interval: int,
     bot_id: str,
     params: tuple[str, ...],
@@ -178,18 +209,31 @@ def bot_create(
             fmt.error(str(e))
             return
 
+    # 계좌 미지정 시 대화형 선택
+    if account_id is None:
+        from ante.account.models import AccountStatus
+
+        async def _list_accounts() -> list:
+            _, _, _, account_service = await _create_services()
+            return await account_service.list(status=AccountStatus.ACTIVE)
+
+        accounts = _run(_list_accounts())
+        account_id = _select_account_interactive(accounts)
+
+    resolved_account_id = account_id
+
     async def _run_create() -> dict:
         import json
         from uuid import uuid4
 
-        db, _, _ = await _create_services()
+        db, _, _, _ = await _create_services()
         try:
             bid = bot_id or f"bot-{uuid4().hex[:8]}"
             config_dict: dict = {
                 "bot_id": bid,
                 "name": name,
                 "strategy_id": strategy,
-                "account_id": account_id,
+                "account_id": resolved_account_id,
                 "interval_seconds": interval,
             }
             if param_dict:
@@ -198,7 +242,7 @@ def bot_create(
                 """INSERT INTO bots
                    (bot_id, name, strategy_id, account_id, config_json)
                    VALUES (?, ?, ?, ?, ?)""",
-                (bid, name, strategy, account_id, json.dumps(config_dict)),
+                (bid, name, strategy, resolved_account_id, json.dumps(config_dict)),
             )
 
             await _audit_log(
@@ -206,7 +250,7 @@ def bot_create(
                 member_id=actor,
                 action="bot.create",
                 resource=f"bot:{bid}",
-                detail=f"strategy={strategy}",
+                detail=f"strategy={strategy}, account={resolved_account_id}",
             )
 
             return config_dict
@@ -234,7 +278,7 @@ def bot_remove(ctx: click.Context, bot_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_remove() -> bool:
-        db, _, _ = await _create_services()
+        db, _, _, _ = await _create_services()
         try:
             row = await db.fetch_one(
                 "SELECT bot_id FROM bots WHERE bot_id = ? AND status != 'deleted'",
@@ -279,7 +323,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     async def _run_signal_key() -> dict:
         from ante.bot.signal_key import SignalKeyManager
 
-        db, _, _ = await _create_services()
+        db, _, _, _ = await _create_services()
         try:
             skm = SignalKeyManager(db)
             await skm.initialize()
