@@ -44,6 +44,7 @@ def get_formatter(ctx: click.Context) -> OutputFormatter:
 
 
 # 서브커맨드 등록
+from ante.cli.commands.account import account  # noqa: E402
 from ante.cli.commands.approval import approval  # noqa: E402
 from ante.cli.commands.audit import audit  # noqa: E402
 from ante.cli.commands.backtest import backtest  # noqa: E402
@@ -64,6 +65,7 @@ from ante.cli.commands.trade import trade  # noqa: E402
 from ante.cli.commands.treasury import treasury  # noqa: E402
 from ante.feed.cli import feed  # noqa: E402
 
+cli.add_command(account)
 cli.add_command(audit)
 cli.add_command(approval)
 cli.add_command(init)
