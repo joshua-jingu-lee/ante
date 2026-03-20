@@ -45,6 +45,7 @@ class StreamIntegration:
         stream_client: KISStreamClient,
         cache: ResponseCache,
         eventbus: EventBus,
+        account_id: str = "",
         stop_order_manager: StopOrderManager | None = None,
         gateway: APIGateway | None = None,
         bot_manager: BotManager | None = None,
@@ -54,6 +55,7 @@ class StreamIntegration:
         self._stream = stream_client
         self._cache = cache
         self._eventbus = eventbus
+        self._account_id = account_id
         self._stop_order_manager = stop_order_manager
         self._gateway = gateway
         self._bot_manager = bot_manager
@@ -140,11 +142,11 @@ class StreamIntegration:
         """실시간 시세 수신 콜백.
 
         KIS WebSocket ──시세수신──> 콜백
-            +-> ResponseCache.set("price:KRX:{symbol}", ...)
+            +-> ResponseCache.set("{account_id}:price:{symbol}", ...)
             +-> StopOrderManager.on_price_update(symbol, price)
         """
-        # 캐시 적재
-        cache_key = f"price:KRX:{symbol}"
+        # 캐시 적재 (account_id 기반 네임스페이스)
+        cache_key = f"{self._account_id}:price:{symbol}"
         self._cache.set(cache_key, price, ttl=5)
 
         # StopOrderManager 시세 전달
@@ -162,18 +164,20 @@ class StreamIntegration:
         캐시 무효화 + OrderFilledEvent 발행.
         """
         symbol = execution.get("symbol", "")
+        account_id = execution.get("account_id", self._account_id)
 
-        # 캐시 무효화: balance, positions, 해당 종목 시세
-        self._cache.invalidate("balance")
-        self._cache.invalidate("positions")
+        # 캐시 무효화: account_id 범위 내 balance, positions, 해당 종목 시세
+        self._cache.invalidate(f"{account_id}:balance")
+        self._cache.invalidate(f"{account_id}:positions")
         if symbol:
-            self._cache.invalidate(f"price:KRX:{symbol}")
+            self._cache.invalidate(f"{account_id}:price:{symbol}")
 
         # 체결 이벤트 발행
         from ante.eventbus.events import OrderFilledEvent
 
         await self._eventbus.publish(
             OrderFilledEvent(
+                account_id=account_id,
                 order_id=execution.get("order_id", ""),
                 symbol=symbol,
                 side=execution.get("side", ""),
@@ -235,8 +239,10 @@ class StreamIntegration:
                     if not self._fallback_active or not self._running:
                         return
                     try:
-                        price = await self._gateway.get_current_price(symbol)
-                        cache_key = f"price:KRX:{symbol}"
+                        price = await self._gateway.get_current_price(
+                            symbol, account_id=self._account_id
+                        )
+                        cache_key = f"{self._account_id}:price:{symbol}"
                         self._cache.set(cache_key, price, ttl=5)
 
                         if self._stop_order_manager:

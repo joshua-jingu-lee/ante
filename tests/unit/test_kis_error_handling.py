@@ -351,8 +351,10 @@ class TestGatewayCancelFailed:
         eventbus = EventBus()
         mock_broker = AsyncMock()
         mock_broker.cancel_order = AsyncMock(side_effect=Exception("network error"))
+        mock_account_service = AsyncMock()
+        mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
 
-        gw = APIGateway(broker=mock_broker, eventbus=eventbus)
+        gw = APIGateway(account_service=mock_account_service, eventbus=eventbus)
         gw.start()
 
         received: list[OrderCancelFailedEvent] = []

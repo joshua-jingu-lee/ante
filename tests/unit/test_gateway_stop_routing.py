@@ -23,6 +23,14 @@ def broker() -> MagicMock:
 
 
 @pytest.fixture
+def account_service(broker: MagicMock) -> MagicMock:
+    """AccountService mock."""
+    svc = MagicMock()
+    svc.get_broker = AsyncMock(return_value=broker)
+    return svc
+
+
+@pytest.fixture
 def eventbus() -> MagicMock:
     """EventBus mock."""
     bus = MagicMock()
@@ -41,20 +49,20 @@ def stop_manager(eventbus: MagicMock) -> MagicMock:
 
 @pytest.fixture
 def gateway(
-    broker: MagicMock, eventbus: MagicMock, stop_manager: MagicMock
+    account_service: MagicMock, eventbus: MagicMock, stop_manager: MagicMock
 ) -> APIGateway:
     """APIGateway with StopOrderManager."""
     return APIGateway(
-        broker=broker,
+        account_service=account_service,
         eventbus=eventbus,
         stop_order_manager=stop_manager,
     )
 
 
 @pytest.fixture
-def gateway_no_stop(broker: MagicMock, eventbus: MagicMock) -> APIGateway:
+def gateway_no_stop(account_service: MagicMock, eventbus: MagicMock) -> APIGateway:
     """APIGateway without StopOrderManager."""
-    return APIGateway(broker=broker, eventbus=eventbus)
+    return APIGateway(account_service=account_service, eventbus=eventbus)
 
 
 class TestStopOrderRouting:

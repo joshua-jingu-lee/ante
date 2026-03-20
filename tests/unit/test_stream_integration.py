@@ -124,6 +124,7 @@ def integration(
         stream_client=stream_client,
         cache=cache,
         eventbus=eventbus,
+        account_id="acc-001",
         stop_order_manager=stop_order_manager,
         gateway=gateway_mock,
         bot_manager=bot_manager_mock,
@@ -146,7 +147,7 @@ async def test_price_callback_updates_cache(
     try:
         await stream_client.fire_price("005930", 72000.0)
 
-        cached = cache.get("price:KRX:005930")
+        cached = cache.get("acc-001:price:005930")
         assert cached == 72000.0
     finally:
         await integration.stop()
@@ -199,10 +200,10 @@ async def test_execution_callback_invalidates_cache(
     """체결 통보 시 balance, positions, 해당 종목 시세 캐시가 무효화된다."""
     await integration.start()
     try:
-        # 캐시 사전 적재
-        cache.set("balance", {"total": 1000000}, ttl=30)
-        cache.set("positions", [{"symbol": "005930"}], ttl=30)
-        cache.set("price:KRX:005930", 70000.0, ttl=5)
+        # 캐시 사전 적재 (account_id 기반 네임스페이스)
+        cache.set("acc-001:balance", {"total": 1000000}, ttl=30)
+        cache.set("acc-001:positions", [{"symbol": "005930"}], ttl=30)
+        cache.set("acc-001:price:005930", 70000.0, ttl=5)
 
         execution = {
             "symbol": "005930",
@@ -213,9 +214,9 @@ async def test_execution_callback_invalidates_cache(
         }
         await stream_client.fire_execution(execution)
 
-        assert cache.get("balance") is None
-        assert cache.get("positions") is None
-        assert cache.get("price:KRX:005930") is None
+        assert cache.get("acc-001:balance") is None
+        assert cache.get("acc-001:positions") is None
+        assert cache.get("acc-001:price:005930") is None
     finally:
         await integration.stop()
 
@@ -330,8 +331,8 @@ async def test_fallback_polls_prices(
         ]
         assert "005930" in call_args
 
-        # 캐시에 가격 적재 확인
-        cached = cache.get("price:KRX:005930")
+        # 캐시에 가격 적재 확인 (account_id 기반 네임스페이스)
+        cached = cache.get("acc-001:price:005930")
         assert cached == 50000.0
     finally:
         await integration.stop()
