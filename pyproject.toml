@@ -30,6 +30,7 @@ dev = [
     "mypy>=1.13",
     "httpx>=0.27",
 ]
+
 [tool.hatch.build]
 artifacts = ["src/ante/web/static/**"]
 
