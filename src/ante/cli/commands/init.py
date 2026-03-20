@@ -32,11 +32,6 @@ SECRETS_ENV_TEMPLATE = """\
 # Ante 비밀값 설정
 # 환경변수가 이 파일보다 우선합니다.
 
-# KIS 증권 API
-# KIS_APP_KEY=
-# KIS_APP_SECRET=
-# KIS_ACCOUNT_NO=
-
 # 텔레그램 알림 (선택)
 # TELEGRAM_BOT_TOKEN=
 # TELEGRAM_CHAT_ID=
@@ -79,47 +74,91 @@ def _write_secrets_env(config_path: Path, entries: dict[str, str]) -> None:
         secrets_env.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
 
 
-def _set_broker_test(config_path: Path) -> None:
-    """system.toml에 broker.type = 'test'를 추가한다."""
-    system_toml = config_path / _SYSTEM_TOML_FILENAME
-    content = system_toml.read_text()
-    if "[broker]" not in content:
-        content += '\n[broker]\ntype = "test"\n'
-        system_toml.write_text(content)
-
-
 def _prompt_master_account() -> tuple[str, str, str]:
     """Master 계정 정보를 대화형으로 입력받는다."""
-    click.echo("\n── 1. Master 계정 ──────────────────────────────")
+    click.echo("\n── [1/4] Master 계정 ───────────────────────────")
     member_id = click.prompt("Member ID")
     name = click.prompt("이름")
     password = click.prompt("패스워드", hide_input=True, confirmation_prompt=True)
     return member_id, name, password
 
 
-def _prompt_kis() -> dict[str, str] | None:
-    """KIS 연동 정보를 입력받는다. 스킵 시 None 반환."""
-    click.echo("\n── 2. 증권사 연동 (KIS) ────────────────────────")
-    click.echo("  건너뛰면 Test 증권사로 설정됩니다.")
-    click.echo("  나중에 secrets.env에서 변경할 수 있습니다.")
-    if not click.confirm("KIS 연동 정보를 입력하시겠습니까?", default=False):
-        return None
+def _get_available_brokers() -> list[tuple[str, str]]:
+    """등록 가능한 브로커 목록을 반환한다. kis-overseas 제외.
 
-    app_key = click.prompt("APP KEY")
-    app_secret = click.prompt("APP SECRET")
-    account_no = click.prompt("계좌번호 (예: 50123456-01)")
-    is_virtual = click.confirm("모의투자 여부", default=False)
-    return {
-        "KIS_APP_KEY": app_key,
-        "KIS_APP_SECRET": app_secret,
-        "KIS_ACCOUNT_NO": account_no,
-        "KIS_VIRTUAL": "1" if is_virtual else "0",
-    }
+    Returns:
+        (broker_type, display_label) 튜플 리스트.
+    """
+    from ante.account.presets import BROKER_PRESETS
+
+    excluded = {"test", "kis-overseas"}
+    result = []
+    for broker_type, preset in BROKER_PRESETS.items():
+        if broker_type in excluded:
+            continue
+        label = f"{broker_type} ({preset.exchange} / {preset.currency})"
+        result.append((broker_type, label))
+    return result
+
+
+def _prompt_account() -> list[dict[str, str]]:
+    """계좌 등록 정보를 대화형으로 입력받는다.
+
+    Returns:
+        등록할 계좌 정보 딕셔너리 리스트. 빈 리스트면 테스트 계좌만 생성.
+    """
+    from ante.account.presets import BROKER_PRESETS
+
+    click.echo("\n── [2/4] 계좌 설정 ─────────────────────────────")
+    click.echo("  등록하지 않으면 테스트 계좌가 자동으로 생성됩니다.")
+    click.echo("  나중에 `ante account create` 명령어로도 추가할 수 있습니다.")
+
+    accounts: list[dict[str, str]] = []
+    brokers = _get_available_brokers()
+
+    while True:
+        if not click.confirm("실제 거래 계좌를 등록하시겠습니까?", default=False):
+            break
+
+        # 브로커 선택
+        click.echo("\n  브로커를 선택하세요:")
+        for i, (_, label) in enumerate(brokers, 1):
+            click.echo(f"    {i}) {label}")
+
+        choice = click.prompt("  선택", type=click.IntRange(1, len(brokers)), default=1)
+        broker_type = brokers[choice - 1][0]
+        preset = BROKER_PRESETS[broker_type]
+
+        # 계좌 ID, 이름
+        account_id = click.prompt("  계좌 ID", default=preset.default_account_id)
+        account_name = click.prompt("  이름", default=preset.default_name)
+
+        # 인증 정보 입력
+        credentials: dict[str, str] = {}
+        for cred_key in preset.required_credentials:
+            value = click.prompt(f"  {cred_key}")
+            credentials[cred_key] = value
+
+        accounts.append(
+            {
+                "account_id": account_id,
+                "name": account_name,
+                "broker_type": broker_type,
+                "credentials": credentials,
+            }
+        )
+
+        click.echo(
+            f'  -> 계좌 "{account_id}" 등록 예정 '
+            f"({preset.exchange} / {preset.currency} / {broker_type})"
+        )
+
+    return accounts
 
 
 def _prompt_telegram() -> dict[str, str] | None:
     """Telegram 연동 정보를 입력받는다. 스킵 시 None 반환."""
-    click.echo("\n── 3. 텔레그램 알림 (선택) ─────────────────────")
+    click.echo("\n── [3/4] 텔레그램 알림 (선택) ──────────────────")
     click.echo("  나중에 secrets.env에서 설정할 수 있습니다.")
     if not click.confirm("텔레그램 알림을 설정하시겠습니까?", default=False):
         return None
@@ -134,7 +173,7 @@ def _prompt_telegram() -> dict[str, str] | None:
 
 def _prompt_datafeed(config_path: Path) -> None:
     """DataFeed API 키를 입력받아 .feed/.env에 저장한다."""
-    click.echo("\n── 4. 데이터 수집 API (선택) ───────────────────")
+    click.echo("\n── [4/4] 데이터 수집 API (선택) ────────────────")
     click.echo("  설정하면 백테스팅용 KRX 시세·재무 데이터를 자동 수집할 수 있습니다.")
     click.echo("  data.go.kr과 DART의 Open API Key가 필요합니다.")
     click.echo("  나중에 `ante feed config set` 명령어로도 설정할 수 있습니다.")
@@ -180,6 +219,74 @@ async def _bootstrap_master(
             token,
             recovery_key,
         )
+    finally:
+        await db.close()
+
+
+async def _create_accounts(
+    db_path: str,
+    account_inputs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """AccountService를 통해 계좌를 생성한다.
+
+    테스트 계좌는 항상 생성되고, account_inputs가 있으면 실제 계좌도 생성한다.
+
+    Returns:
+        생성된 계좌 정보 딕셔너리 리스트 (account_id, broker_type 포함).
+    """
+    from ante.account.models import Account, TradingMode
+    from ante.account.presets import BROKER_PRESETS
+    from ante.account.service import AccountService
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
+
+    db = Database(db_path)
+    await db.connect()
+    try:
+        eventbus = EventBus()
+        service = AccountService(db, eventbus)
+        await service.initialize()
+
+        created: list[dict[str, str]] = []
+
+        # 테스트 계좌 자동 생성
+        test_account = await service.create_default_test_account()
+        created.append(
+            {
+                "account_id": test_account.account_id,
+                "broker_type": test_account.broker_type,
+                "exchange": test_account.exchange,
+            }
+        )
+
+        # 실제 계좌 생성
+        for info in account_inputs:
+            broker_type = info["broker_type"]
+            preset = BROKER_PRESETS[broker_type]
+            account = Account(
+                account_id=info["account_id"],
+                name=info["name"],
+                exchange=preset.exchange,
+                currency=preset.currency,
+                timezone=preset.timezone,
+                trading_hours_start=preset.trading_hours_start,
+                trading_hours_end=preset.trading_hours_end,
+                trading_mode=TradingMode.LIVE,
+                broker_type=broker_type,
+                credentials=info["credentials"],
+                buy_commission_rate=preset.buy_commission_rate,
+                sell_commission_rate=preset.sell_commission_rate,
+            )
+            await service.create(account)
+            created.append(
+                {
+                    "account_id": account.account_id,
+                    "broker_type": broker_type,
+                    "exchange": preset.exchange,
+                }
+            )
+
+        return created
     finally:
         await db.close()
 
@@ -231,16 +338,8 @@ def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
     # 2. Master 계정 입력
     member_id, name, password = _prompt_master_account()
 
-    # 3. KIS 연동
-    kis_info = _prompt_kis()
-    if kis_info:
-        _write_secrets_env(config_path, kis_info)
-        broker_label = (
-            "KIS (모의투자)" if kis_info.get("KIS_VIRTUAL") == "1" else "KIS (실투자)"
-        )
-    else:
-        _set_broker_test(config_path)
-        broker_label = "Test"
+    # 3. 계좌 설정
+    account_inputs = _prompt_account()
 
     # 4. Telegram 연동
     telegram_info = _prompt_telegram()
@@ -262,7 +361,21 @@ def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
         fmt.error(str(e))
         return
 
-    # 7. 결과 출력
+    # 7. 계좌 생성 (테스트 계좌 자동 + 실제 계좌)
+    try:
+        created_accounts = _run(_create_accounts(db_path, account_inputs))
+    except Exception as e:
+        fmt.error(f"계좌 생성 실패: {e}")
+        return
+
+    # 계좌 라벨 생성
+    if account_inputs:
+        labels = [f"{a['account_id']} ({a['broker_type']})" for a in created_accounts]
+        account_label = ", ".join(labels)
+    else:
+        account_label = "test (테스트 계좌만)"
+
+    # 8. 결과 출력
     click.echo("\n── 완료 ────────────────────────────────────────")
 
     if fmt.is_json:
@@ -270,26 +383,26 @@ def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
             {
                 **result,
                 "config_dir": str(config_path),
-                "broker": broker_label,
+                "accounts": created_accounts,
                 "token": token,
                 "recovery_key": recovery_key,
             }
         )
         return
 
-    click.echo("\n✅ 초기 설정 완료")
+    click.echo("\n초기 설정 완료")
     click.echo(f"  설정 디렉토리: {config_path}")
     click.echo(f"  Member ID   : {result['member_id']}")
     click.echo(f"  이모지      : {result['emoji']}")
-    click.echo(f"  브로커      : {broker_label}")
-    click.echo(f"\n🔑 토큰: {token}")
+    click.echo(f"  계좌        : {account_label}")
+    click.echo(f"\n  토큰: {token}")
     click.echo("\n   셸 프로필에 추가하면 매번 입력하지 않아도 됩니다:")
     click.echo(f"   echo 'export ANTE_MEMBER_TOKEN={token}' >> ~/.zshrc")
     click.echo("\n   또는 현재 세션에서만 사용:")
     click.echo(f"   export ANTE_MEMBER_TOKEN={token}")
     click.echo("\n   이제 시스템을 시작할 수 있습니다:")
     click.echo("   ante system start")
-    click.echo(f"\n⚠️  Recovery Key: {recovery_key}")
+    click.echo(f"\n   Recovery Key: {recovery_key}")
     click.echo("   이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.")
 
 
