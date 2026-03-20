@@ -47,7 +47,7 @@ def test_write_sample_parquet(tmp_path: Path) -> None:
     filepath = write_sample_parquet(tmp_path)
     assert filepath.exists()
     assert filepath.suffix == ".parquet"
-    assert "ohlcv/1d/005930" in str(filepath)
+    assert "ohlcv/1d/KRX/005930" in str(filepath)
 
 
 # ── 시드 데이터 주입 테스트 ───────────────────────────

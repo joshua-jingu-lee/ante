@@ -60,7 +60,7 @@ def generate_sample_ohlcv(
 def write_sample_parquet(output_dir: Path, symbol: str = "005930") -> Path:
     """샘플 OHLCV Parquet 파일을 생성하고 경로를 반환한다."""
     df = generate_sample_ohlcv(symbol=symbol)
-    parquet_dir = output_dir / "ohlcv" / "1d" / symbol
+    parquet_dir = output_dir / "ohlcv" / "1d" / "KRX" / symbol
     parquet_dir.mkdir(parents=True, exist_ok=True)
     filepath = parquet_dir / "2026-03.parquet"
     df.write_parquet(filepath, compression="snappy")

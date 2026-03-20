@@ -30,6 +30,7 @@ class DataCollector:
         buffer_size: int = 100,
         flush_interval: float = 300.0,
         collect_interval: float = 60.0,
+        exchange: str = "KRX",
     ) -> None:
         self._store = store
         self._eventbus = eventbus
@@ -37,6 +38,7 @@ class DataCollector:
         self._buffer_size = buffer_size
         self._flush_interval = flush_interval
         self._collect_interval = collect_interval
+        self._exchange = exchange
         self._symbols: list[str] = []
         self._timeframes: list[str] = []
         self._collect_task: asyncio.Task | None = None
@@ -145,7 +147,7 @@ class DataCollector:
             return
         symbol, tf = key.split(":")
         try:
-            self._store.append(symbol, tf, rows)
+            self._store.append(symbol, tf, rows, exchange=self._exchange)
             logger.debug("Flushed %d rows for %s/%s", len(rows), symbol, tf)
         except Exception as e:
             logger.error("Failed to flush data for %s/%s: %s", symbol, tf, e)

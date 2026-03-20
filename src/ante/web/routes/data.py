@@ -158,7 +158,7 @@ async def delete_dataset(
     if data_type == "fundamental":
         path = store._resolve_path(symbol, "", data_type="fundamental")
     else:
-        path = store.base_path / "ohlcv" / timeframe / symbol
+        path = store._resolve_path(symbol, timeframe, data_type="ohlcv")
 
     if not path.exists():
         raise HTTPException(status_code=404, detail="데이터셋을 찾을 수 없습니다")

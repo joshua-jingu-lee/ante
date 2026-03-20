@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import shutil
 from pathlib import Path
 
 import polars as pl
@@ -15,6 +17,87 @@ _TIME_COLUMN: dict[str, str] = {
     "fundamental": "date",
     "tick": "timestamp",
 }
+
+# 알려진 거래소 이름 — 마이그레이션 시 이미 exchange 디렉토리인지 판별용
+_KNOWN_EXCHANGES: frozenset[str] = frozenset({"KRX", "NYSE", "NASDAQ", "AMEX", "TEST"})
+
+# KRX 심볼 형식: 6자리 숫자
+_KRX_SYMBOL_PATTERN: re.Pattern[str] = re.compile(r"^\d{6}$")
+
+
+def _get_actual_dir_name(parent: Path, name: str) -> str | None:
+    """파일시스템 상의 실제 디렉토리 이름을 반환.
+
+    case-insensitive FS에서 krx/KRX 구분을 위해 사용한다.
+    """
+    if not parent.exists():
+        return None
+    for entry in parent.iterdir():
+        if entry.is_dir() and entry.name.lower() == name.lower():
+            return entry.name
+    return None
+
+
+def migrate_parquet_paths(data_path: Path) -> int:
+    """기존 exchange 없는 경로를 KRX/ 하위로 이동.
+
+    Args:
+        data_path: 데이터 저장소 루트 경로 (예: data/)
+
+    Returns:
+        이동된 디렉토리 수
+    """
+    moved = 0
+
+    # ohlcv 디렉토리 마이그레이션
+    ohlcv_path = data_path / "ohlcv"
+    if ohlcv_path.exists():
+        for timeframe_dir in ohlcv_path.iterdir():
+            if not timeframe_dir.is_dir():
+                continue
+            for symbol_dir in list(timeframe_dir.iterdir()):
+                if not symbol_dir.is_dir():
+                    continue
+                # 이미 exchange 디렉토리면 스킵
+                if symbol_dir.name in _KNOWN_EXCHANGES:
+                    continue
+                # KRX 심볼은 6자리 숫자 형식 검증
+                if not _KRX_SYMBOL_PATTERN.match(symbol_dir.name):
+                    logger.warning(
+                        "마이그레이션 스킵: %s — KRX 심볼 형식(6자리 숫자)이 아님",
+                        symbol_dir,
+                    )
+                    continue
+                target = timeframe_dir / "KRX" / symbol_dir.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(symbol_dir), str(target))
+                moved += 1
+                logger.info("마이그레이션: %s → %s", symbol_dir, target)
+
+    # fundamental/tick 디렉토리 마이그레이션 (krx → KRX)
+    for dtype in ("fundamental", "tick"):
+        dtype_path = data_path / dtype
+        if not dtype_path.exists():
+            continue
+        krx_lower = dtype_path / "krx"
+        if not krx_lower.exists():
+            continue
+        # case-insensitive FS에서는 krx == KRX이므로 실제 이름 확인
+        actual_name = _get_actual_dir_name(dtype_path, "krx")
+        if actual_name == "KRX":
+            # 이미 대문자 → 스킵
+            continue
+        # case-sensitive FS에서 krx → KRX 이동
+        target = dtype_path / "KRX"
+        if not target.exists():
+            shutil.move(str(krx_lower), str(target))
+            moved += 1
+            logger.info("마이그레이션: %s → %s", krx_lower, target)
+
+    if moved > 0:
+        logger.info("마이그레이션 완료: %d개 디렉토리 이동", moved)
+
+    return moved
 
 
 class ParquetStore:
@@ -31,22 +114,26 @@ class ParquetStore:
         return self._base
 
     def _resolve_path(
-        self, symbol: str, timeframe: str, data_type: str = "ohlcv"
+        self,
+        symbol: str,
+        timeframe: str,
+        data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> Path:
         """data_type에 따라 저장 경로를 결정.
 
-        - ohlcv: {base}/ohlcv/{timeframe}/{symbol}/
-        - fundamental: {base}/fundamental/krx/{symbol}/
-        - tick: {base}/tick/krx/{symbol}/
+        - ohlcv: {base}/ohlcv/{timeframe}/{exchange}/{symbol}/
+        - fundamental: {base}/fundamental/{exchange}/{symbol}/
+        - tick: {base}/tick/{exchange}/{symbol}/
         """
         if data_type == "ohlcv":
-            return self._base / "ohlcv" / timeframe / symbol
+            return self._base / "ohlcv" / timeframe / exchange / symbol
         elif data_type == "fundamental":
-            return self._base / "fundamental" / "krx" / symbol
+            return self._base / "fundamental" / exchange / symbol
         elif data_type == "tick":
-            return self._base / "tick" / "krx" / symbol
+            return self._base / "tick" / exchange / symbol
         else:
-            return self._base / data_type / timeframe / symbol
+            return self._base / data_type / timeframe / exchange / symbol
 
     def read(
         self,
@@ -56,6 +143,7 @@ class ParquetStore:
         end: str | None = None,
         limit: int | None = None,
         data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> pl.DataFrame:
         """Parquet에서 데이터 읽기.
 
@@ -66,8 +154,9 @@ class ParquetStore:
             end: 종료 시간 (ISO 형식, inclusive)
             limit: 최근 N건만 반환
             data_type: 데이터 타입 (ohlcv, fundamental, tick)
+            exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
         """
-        path = self._resolve_path(symbol, timeframe, data_type)
+        path = self._resolve_path(symbol, timeframe, data_type, exchange)
         if not path.exists():
             return pl.DataFrame()
 
@@ -112,12 +201,13 @@ class ParquetStore:
         timeframe: str,
         data: pl.DataFrame,
         data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> None:
         """데이터를 Parquet에 기록. 월별 파티셔닝, 중복 제거(merge)."""
         if data.is_empty():
             return
 
-        path = self._resolve_path(symbol, timeframe, data_type)
+        path = self._resolve_path(symbol, timeframe, data_type, exchange)
         path.mkdir(parents=True, exist_ok=True)
 
         time_col = _TIME_COLUMN.get(data_type, "timestamp")
@@ -178,40 +268,52 @@ class ParquetStore:
         timeframe: str,
         rows: list[dict],
         data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> None:
         """버퍼 데이터를 기존 Parquet에 추가."""
         df = pl.DataFrame(rows)
-        self.write(symbol, timeframe, df, data_type=data_type)
+        self.write(symbol, timeframe, df, data_type=data_type, exchange=exchange)
 
     def list_symbols(
-        self, timeframe: str = "1d", data_type: str = "ohlcv"
+        self,
+        timeframe: str = "1d",
+        data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> list[str]:
         """보유 데이터의 종목 목록."""
         if data_type == "ohlcv":
-            path = self._base / "ohlcv" / timeframe
+            path = self._base / "ohlcv" / timeframe / exchange
         elif data_type in ("fundamental", "tick"):
-            path = self._base / data_type / "krx"
+            path = self._base / data_type / exchange
         else:
-            path = self._base / data_type / timeframe
+            path = self._base / data_type / timeframe / exchange
         if not path.exists():
             return []
         return sorted([d.name for d in path.iterdir() if d.is_dir()])
 
     def get_date_range(
-        self, symbol: str, timeframe: str, data_type: str = "ohlcv"
+        self,
+        symbol: str,
+        timeframe: str,
+        data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> tuple[str, str] | None:
         """종목의 데이터 기간 조회. (첫 파일 stem, 마지막 파일 stem) 반환."""
-        path = self._resolve_path(symbol, timeframe, data_type)
+        path = self._resolve_path(symbol, timeframe, data_type, exchange)
         files = sorted(path.glob("*.parquet")) if path.exists() else []
         if not files:
             return None
         return files[0].stem, files[-1].stem
 
     def get_row_count(
-        self, symbol: str, timeframe: str, data_type: str = "ohlcv"
+        self,
+        symbol: str,
+        timeframe: str,
+        data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> int:
         """종목의 총 행 수 조회. Parquet 메타데이터만 읽어 빠르게 반환."""
-        path = self._resolve_path(symbol, timeframe, data_type)
+        path = self._resolve_path(symbol, timeframe, data_type, exchange)
         if not path.exists():
             return 0
         files = sorted(path.glob("*.parquet"))
@@ -249,6 +351,7 @@ class ParquetStore:
         timeframe: str,
         fix: bool = False,
         data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> dict:
         """Parquet 파일 무결성 검증.
 
@@ -257,12 +360,13 @@ class ParquetStore:
             timeframe: 타임프레임
             fix: True이면 손상 파일을 .corrupted 확장자로 이동
             data_type: 데이터 타입 (ohlcv, fundamental, tick)
+            exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
 
         Returns:
             {"symbol": str, "timeframe": str, "total": int,
              "valid": int, "corrupted": int, "corrupted_files": list[str]}
         """
-        path = self._resolve_path(symbol, timeframe, data_type)
+        path = self._resolve_path(symbol, timeframe, data_type, exchange)
         result: dict = {
             "symbol": symbol,
             "timeframe": timeframe,
@@ -294,10 +398,15 @@ class ParquetStore:
         return result
 
     def delete_file(
-        self, symbol: str, timeframe: str, month: str, data_type: str = "ohlcv"
+        self,
+        symbol: str,
+        timeframe: str,
+        month: str,
+        data_type: str = "ohlcv",
+        exchange: str = "KRX",
     ) -> bool:
         """특정 Parquet 파일 삭제. 성공 여부 반환."""
-        path = self._resolve_path(symbol, timeframe, data_type)
+        path = self._resolve_path(symbol, timeframe, data_type, exchange)
         filepath = path / f"{month}.parquet"
         if filepath.exists():
             filepath.unlink()

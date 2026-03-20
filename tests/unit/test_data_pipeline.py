@@ -146,7 +146,7 @@ class TestParquetStore:
         df = _make_ohlcv_df()
         store.write("005930", "1m", df)
 
-        parquet_path = data_dir / "ohlcv" / "1m" / "005930" / "2026-03.parquet"
+        parquet_path = data_dir / "ohlcv" / "1m" / "KRX" / "005930" / "2026-03.parquet"
         assert parquet_path.exists()
 
     async def test_write_merge_dedup(self, store):
@@ -266,8 +266,8 @@ class TestParquetStore:
         )
         store.write("005930", "1m", df)
 
-        march_file = data_dir / "ohlcv" / "1m" / "005930" / "2026-03.parquet"
-        april_file = data_dir / "ohlcv" / "1m" / "005930" / "2026-04.parquet"
+        march_file = data_dir / "ohlcv" / "1m" / "KRX" / "005930" / "2026-03.parquet"
+        april_file = data_dir / "ohlcv" / "1m" / "KRX" / "005930" / "2026-04.parquet"
         assert march_file.exists()
         assert april_file.exists()
 
@@ -290,7 +290,7 @@ class TestParquetStore:
         assert result["market_cap"][0] == 500000000000
 
     async def test_fundamental_path_structure(self, store, data_dir):
-        """fundamental은 {base}/fundamental/krx/{symbol}/ 경로."""
+        """fundamental은 {base}/fundamental/KRX/{symbol}/ 경로."""
         from datetime import date
 
         df = pl.DataFrame(
@@ -301,7 +301,7 @@ class TestParquetStore:
             }
         )
         store.write("005930", "", df, data_type="fundamental")
-        path = data_dir / "fundamental" / "krx" / "005930"
+        path = data_dir / "fundamental" / "KRX" / "005930"
         assert path.exists()
         assert list(path.glob("*.parquet"))
 
@@ -814,8 +814,8 @@ class TestRetentionPolicy:
         )
         store.write("005930", "", df, data_type="fundamental")
 
-        # fundamental/krx/005930/ 경로에 파일이 생성되었는지 확인
-        fundamental_path = data_dir / "fundamental" / "krx" / "005930"
+        # fundamental/KRX/005930/ 경로에 파일이 생성되었는지 확인
+        fundamental_path = data_dir / "fundamental" / "KRX" / "005930"
         assert fundamental_path.exists()
         assert len(list(fundamental_path.glob("*.parquet"))) == 2
 
