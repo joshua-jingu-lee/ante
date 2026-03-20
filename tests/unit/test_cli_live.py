@@ -237,6 +237,50 @@ class TestTradeCommands:
             result = runner.invoke(cli, ["trade", "list"])
             assert result.exit_code == 0
 
+    def test_create_trade_service_constructor_args(self):
+        """_create_trade_service가 올바른 생성자 시그니처로 호출되는지 검증.
+
+        이전 버전에서는 EventBus를 잘못된 인자로 전달하여 hang이 발생했다.
+        Refs #642.
+        """
+        import asyncio
+
+        with (
+            patch("ante.core.database.Database") as mock_db_cls,
+            patch("ante.trade.position.PositionHistory") as mock_ph_cls,
+            patch("ante.trade.recorder.TradeRecorder") as mock_rec_cls,
+            patch("ante.trade.performance.PerformanceTracker") as mock_perf_cls,
+            patch("ante.trade.service.TradeService") as mock_svc_cls,
+        ):
+            mock_db = AsyncMock()
+            mock_db.connect = AsyncMock()
+            mock_db_cls.return_value = mock_db
+
+            mock_ph = AsyncMock()
+            mock_ph.initialize = AsyncMock()
+            mock_ph_cls.return_value = mock_ph
+
+            mock_rec = AsyncMock()
+            mock_rec.initialize = AsyncMock()
+            mock_rec_cls.return_value = mock_rec
+
+            mock_perf = MagicMock()
+            mock_perf_cls.return_value = mock_perf
+
+            mock_service = MagicMock()
+            mock_svc_cls.return_value = mock_service
+
+            from ante.cli.commands.trade import _create_trade_service
+
+            service, db = asyncio.run(_create_trade_service())
+
+            # PositionHistory는 db만 받아야 한다
+            mock_ph_cls.assert_called_once_with(db=mock_db)
+            # TradeRecorder는 db + position_history를 받아야 한다
+            mock_rec_cls.assert_called_once_with(db=mock_db, position_history=mock_ph)
+            # PerformanceTracker는 db만 받아야 한다
+            mock_perf_cls.assert_called_once_with(db=mock_db)
+
     def test_trade_info_not_found(self, runner):
         with patch("ante.core.database.Database") as mock_db_cls:
             mock_db = AsyncMock()

@@ -23,7 +23,6 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 async def _create_trade_service():  # noqa: ANN202
     from ante.core.database import Database
-    from ante.eventbus.bus import EventBus
     from ante.trade.performance import PerformanceTracker
     from ante.trade.position import PositionHistory
     from ante.trade.recorder import TradeRecorder
@@ -31,13 +30,11 @@ async def _create_trade_service():  # noqa: ANN202
 
     db = Database("db/ante.db")
     await db.connect()
-    eventbus = EventBus()
-    recorder = TradeRecorder(db, eventbus)
-    await recorder.initialize()
-    position_history = PositionHistory(db, eventbus)
+    position_history = PositionHistory(db=db)
     await position_history.initialize()
-    performance = PerformanceTracker(db)
-    await performance.initialize()
+    recorder = TradeRecorder(db=db, position_history=position_history)
+    await recorder.initialize()
+    performance = PerformanceTracker(db=db)
     service = TradeService(recorder, position_history, performance)
     return service, db
 
