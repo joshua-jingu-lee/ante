@@ -30,6 +30,9 @@ QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
 printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
     ante member bootstrap --id qa-admin --name "QA Admin" 2>/dev/null || true
 
+echo "[qa] QA 테스트용 동적 설정 시드 등록..."
+sqlite3 db/ante.db "INSERT OR IGNORE INTO dynamic_config (key, value, category, updated_at) VALUES ('risk.test_qa_key', '0', 'risk', datetime('now'));"
+
 echo "[qa] 엔트리포인트 초기화 완료"
 
 # 서버 포그라운드 전환
