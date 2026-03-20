@@ -23,3 +23,9 @@ class StrategyFileAccessError(StrategyError):
     """전략 파일 접근 오류."""
 
     pass
+
+
+class IncompatibleExchangeError(StrategyError):
+    """전략의 exchange와 계좌의 exchange가 호환되지 않음."""
+
+    pass
