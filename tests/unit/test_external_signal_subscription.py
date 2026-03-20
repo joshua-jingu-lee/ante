@@ -84,7 +84,6 @@ def _make_config(bot_id: str = "bot-001") -> BotConfig:
     return BotConfig(
         bot_id=bot_id,
         strategy_id="stg-001",
-        bot_type="paper",
         interval_seconds=60,
     )
 

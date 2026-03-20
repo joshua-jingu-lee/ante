@@ -145,7 +145,7 @@ class TestBotConfig:
         """BotConfig 기본값."""
         c = BotConfig(bot_id="b1", strategy_id="s1")
         assert c.name == ""
-        assert c.bot_type == "live"
+        assert c.account_id == "test"
         assert c.interval_seconds == 60
 
     def test_name_field(self):
@@ -698,3 +698,191 @@ class TestBotManager:
         row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
         assert row is not None
         assert row["name"] == "모멘텀 봇"
+
+    async def test_bot_config_account_id(self, manager, eventbus, ctx, db):
+        """account_id 필드 존재 및 기본값."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        assert config.account_id == "test"
+
+        config2 = BotConfig(bot_id="bot2", strategy_id="s2", account_id="domestic")
+        assert config2.account_id == "domestic"
+
+    async def test_bot_config_no_bot_type(self):
+        """BotConfig에서 bot_type, exchange 필드가 제거되었음."""
+        config = BotConfig(bot_id="b1", strategy_id="s1")
+        assert not hasattr(config, "bot_type")
+        assert not hasattr(config, "exchange")
+
+    async def test_create_bot_with_account(self, manager, eventbus, ctx, db):
+        """BotManager.create_bot()에 account_id 전달 및 DB 저장."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="domestic")
+        bot = await manager.create_bot(config, SimpleStrategy, ctx)
+        assert bot.config.account_id == "domestic"
+
+        row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = 'bot1'")
+        assert row is not None
+        assert row["account_id"] == "domestic"
+
+    async def test_order_request_has_account(self, eventbus, ctx):
+        """OrderRequestEvent에 account_id 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="buy_v1.0.0",
+            account_id="my-account",
+            interval_seconds=10,
+        )
+        received = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=BuyStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+            exchange="KRX",
+        )
+        await bot.start()
+        await asyncio.sleep(0.05)
+        await bot.stop()
+
+        assert len(received) >= 1
+        assert received[0].account_id == "my-account"
+        assert received[0].exchange == "KRX"
+
+    async def test_load_bot_from_db_with_account(self, manager, eventbus, ctx, db):
+        """DB 복원 시 account_id 유지."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="domestic")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        # 새 매니저로 DB에서 로드
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        count = await manager2.load_from_db()
+        assert count == 1
+
+        bot = manager2.get_bot("bot1")
+        assert bot is not None
+        assert bot.config.account_id == "domestic"
+
+    async def test_load_bot_migration_old_format(self, manager, eventbus, db):
+        """기존 bot_type/exchange 포함 config_json → account_id 마이그레이션."""
+        import json
+
+        # 기존 형식으로 직접 DB에 삽입
+        old_config = json.dumps(
+            {
+                "bot_id": "old-bot",
+                "strategy_id": "s1",
+                "bot_type": "paper",
+                "exchange": "KRX",
+                "interval_seconds": 60,
+            }
+        )
+        await db.execute(
+            """INSERT INTO bots
+               (bot_id, name, strategy_id, account_id, config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("old-bot", "old", "s1", "test", old_config, "created"),
+        )
+
+        # 새 매니저로 로드 — bot_type/exchange 무시, account_id 사용
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        count = await manager2.load_from_db()
+        assert count >= 1
+
+        bot = manager2.get_bot("old-bot")
+        assert bot is not None
+        assert bot.config.account_id == "test"
+        # bot_type, exchange는 BotConfig에 없으므로 속성 자체가 존재하지 않음
+        assert not hasattr(bot.config, "bot_type")
+        assert not hasattr(bot.config, "exchange")
+
+    async def test_bot_get_info_has_account(self, eventbus, ctx, simple_config):
+        """get_info()에 account_id 포함, bot_type 없음."""
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        assert "account_id" in info
+        assert info["account_id"] == "test"
+        assert "bot_type" not in info
+
+    async def test_bot_started_event_has_account_id(self, eventbus, ctx):
+        """봇 시작 시 BotStartedEvent에 account_id 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            account_id="my-account",
+            interval_seconds=999,
+        )
+        received = []
+        eventbus.subscribe(BotStartedEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        assert len(received) == 1
+        assert received[0].account_id == "my-account"
+        await bot.stop()
+
+    async def test_bot_stopped_event_has_account_id(self, eventbus, ctx):
+        """봇 중지 시 BotStoppedEvent에 account_id 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            account_id="my-account",
+            interval_seconds=999,
+        )
+        received = []
+        eventbus.subscribe(BotStoppedEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        await bot.stop()
+        assert len(received) == 1
+        assert received[0].account_id == "my-account"
+
+    async def test_cancel_event_has_account_id(self, eventbus, ctx):
+        """OrderCancelEvent에 account_id 포함."""
+
+        class CancelStrategy(Strategy):
+            meta = StrategyMeta(name="c", version="1.0.0", description="c")
+
+            async def on_step(self, context):
+                self.ctx.cancel_order("ord1", reason="test cancel")
+                return []
+
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="c_v1.0.0",
+            account_id="acct-1",
+            interval_seconds=10,
+        )
+        received = []
+        eventbus.subscribe(OrderCancelEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=CancelStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        await asyncio.sleep(0.05)
+        await bot.stop()
+
+        assert len(received) >= 1
+        assert received[0].account_id == "acct-1"

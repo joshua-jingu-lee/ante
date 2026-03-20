@@ -158,7 +158,7 @@ def _make_bot(strategy_cls: type[Strategy]) -> MagicMock:
     config = MagicMock()
     config.bot_id = "bot-001"
     config.strategy_id = "stg-001"
-    config.exchange = "KRX"
+    config.account_id = "test"
 
     ctx = MagicMock()
     ctx.get_positions.return_value = {}

@@ -29,13 +29,14 @@ CREATE TABLE IF NOT EXISTS bots (
     bot_id       TEXT PRIMARY KEY,
     name         TEXT NOT NULL DEFAULT '',
     strategy_id  TEXT NOT NULL,
-    bot_type     TEXT NOT NULL DEFAULT 'live',
+    account_id   TEXT NOT NULL DEFAULT 'test',
     config_json  TEXT NOT NULL,
     auto_start   BOOLEAN DEFAULT 0,
     status       TEXT DEFAULT 'created',
     created_at   TEXT DEFAULT (datetime('now')),
     updated_at   TEXT DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_bots_account_id ON bots(account_id);
 """
 
 
@@ -66,14 +67,25 @@ class BotManager:
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성 + EventBus 구독 + 잔존 스냅샷 정리."""
+        """스키마 생성 + 마이그레이션 + EventBus 구독 + 잔존 스냅샷 정리."""
         await self._db.execute_script(BOT_SCHEMA)
+        await self._migrate_schema()
         self._subscribe_events()
         if self._snapshot:
             cleaned = self._snapshot.cleanup_all()
             if cleaned:
                 logger.info("잔존 전략 스냅샷 %d건 정리", cleaned)
         logger.info("BotManager 초기화 완료")
+
+    async def _migrate_schema(self) -> None:
+        """기존 bots 테이블에 account_id 컬럼이 없으면 추가한다."""
+        columns = await self._db.fetch_all("PRAGMA table_info(bots)")
+        col_names = {col["name"] for col in columns}
+        if "account_id" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE bots ADD COLUMN account_id TEXT NOT NULL DEFAULT 'test'"
+            )
+            logger.info("bots 테이블에 account_id 컬럼 추가 (마이그레이션)")
 
     async def load_from_db(self) -> int:
         """DB에서 봇 설정을 읽어 메모리에 로드한다 (테스트용).
@@ -98,17 +110,22 @@ class BotManager:
         self._bots.clear()
 
         rows = await self._db.fetch_all(
-            "SELECT bot_id, name, strategy_id, bot_type, config_json, status"
+            "SELECT bot_id, name, strategy_id, account_id, config_json, status"
             " FROM bots WHERE status != 'deleted'"
         )
 
         for row in rows:
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
+            # 마이그레이션: 기존 config에 account_id가 없으면 기본값 사용
+            account_id = row.get("account_id") or config_data.get("account_id", "test")
+            # bot_type, exchange 키는 무시 (BotConfig에서 제거됨)
+            config_data.pop("bot_type", None)
+            config_data.pop("exchange", None)
             config = BotConfig(
                 bot_id=row["bot_id"],
                 strategy_id=row["strategy_id"],
                 name=row["name"] or config_data.get("name", row["bot_id"]),
-                bot_type=row["bot_type"] or "live",
+                account_id=account_id,
                 interval_seconds=config_data.get("interval_seconds", 60),
             )
             bot = Bot(
@@ -313,12 +330,8 @@ class BotManager:
 
         self._unregister_bot_events(bot)
 
-        # Paper 봇 PaperExecutor 등록 해제
-        if (
-            self._context_factory
-            and self._context_factory._paper_executor
-            and bot.config.bot_type == "paper"
-        ):
+        # PaperExecutor 등록 해제 (봇이 등록되어 있는 경우)
+        if self._context_factory and self._context_factory._paper_executor:
             self._context_factory._paper_executor.unregister_bot(bot_id)
 
         # 시그널 키 폐기
@@ -658,13 +671,13 @@ class BotManager:
             "bot_id": config.bot_id,
             "name": config.name,
             "strategy_id": config.strategy_id,
-            "bot_type": config.bot_type,
+            "account_id": config.account_id,
             "interval_seconds": config.interval_seconds,
             "paper_initial_balance": config.paper_initial_balance,
         }
         await self._db.execute(
             """INSERT INTO bots
-               (bot_id, name, strategy_id, bot_type, config_json)
+               (bot_id, name, strategy_id, account_id, config_json)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(bot_id) DO UPDATE SET
                  name = excluded.name,
@@ -674,7 +687,7 @@ class BotManager:
                 config.bot_id,
                 config.name,
                 config.strategy_id,
-                config.bot_type,
+                config.account_id,
                 json.dumps(config_dict),
             ),
         )

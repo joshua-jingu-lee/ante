@@ -29,10 +29,9 @@ class BotConfig:
     bot_id: str
     strategy_id: str
     name: str = ""
-    bot_type: str = "live"
+    account_id: str = "test"
     interval_seconds: int = 60
     paper_initial_balance: float = 10_000_000.0
-    exchange: str = "KRX"
     auto_restart: bool = True
     max_restart_attempts: int = 3
     restart_cooldown_seconds: int = 60

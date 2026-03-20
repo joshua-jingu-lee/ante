@@ -30,7 +30,7 @@ class FakeBot:
             "bot_id": self.bot_id,
             "name": self.bot_id,
             "status": self._status,
-            "bot_type": "paper",
+            "account_id": "test",
             "strategy_id": self._strategy_id,
             "interval_seconds": 60,
             "started_at": None,

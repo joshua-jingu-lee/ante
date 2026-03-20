@@ -174,6 +174,13 @@ class AccountService:
             raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
         return _row_to_account(row)
 
+    def get_sync(self, account_id: str) -> Account | None:
+        """동기 캐시 조회. 인메모리에 있는 계좌만 반환, 없으면 None.
+
+        ContextFactory 등 동기 컨텍스트에서 사용한다.
+        """
+        return self._accounts.get(account_id)
+
     async def list(self, status: AccountStatus | None = None) -> list[Account]:
         """계좌 목록 조회. DELETED 제외가 기본."""
         if status is not None:

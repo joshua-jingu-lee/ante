@@ -141,7 +141,7 @@ class TestBotCommands:
                         "bot_id": "bot-1",
                         "name": "테스트봇",
                         "strategy_id": "stg-1",
-                        "bot_type": "paper",
+                        "account_id": "test",
                         "status": "created",
                         "created_at": "2026-01-01",
                     }
@@ -175,7 +175,7 @@ class TestBotCommands:
                     "bot_id": "bot-1",
                     "name": "테스트봇",
                     "strategy_id": "stg-1",
-                    "bot_type": "live",
+                    "account_id": "test",
                     "status": "running",
                     "created_at": "2026-01-01",
                     "config_json": "{}",
@@ -206,8 +206,8 @@ class TestBotCommands:
                     "테스트봇",
                     "--strategy",
                     "stg-1",
-                    "--type",
-                    "paper",
+                    "--account",
+                    "test",
                 ],
             )
             assert result.exit_code == 0
