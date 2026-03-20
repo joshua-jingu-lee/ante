@@ -138,15 +138,15 @@ class TestTestBrokerConfigMerge:
         """broker 섹션의 수수료율이 TestBrokerAdapter에 전달된다."""
         broker_config = {
             "type": "test",
-            "commission_rate": 0.0002,
-            "sell_tax_rate": 0.003,
+            "buy_commission_rate": 0.0002,
+            "sell_commission_rate": 0.003,
             "test": {"seed": 42},
         }
         broker = await _create_broker_from_config(broker_config)
         assert isinstance(broker, TestBrokerAdapter)
         info = broker.get_commission_info()
-        assert info.commission_rate == 0.0002
-        assert info.sell_tax_rate == 0.003
+        assert info.buy_commission_rate == 0.0002
+        assert info.sell_commission_rate == 0.003
         await broker.disconnect()
 
     @pytest.mark.asyncio

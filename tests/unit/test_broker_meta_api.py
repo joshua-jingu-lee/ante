@@ -81,9 +81,9 @@ class TestBrokerAdapterMetaDefaults:
         assert adapter.broker_short_name == "MOCK"
 
     def test_kis_adapter_meta(self) -> None:
-        """KISAdapter 메타정보가 올바르다 (클래스 속성)."""
-        from ante.broker.kis import KISAdapter
+        """KISDomesticAdapter 메타정보가 올바르다 (클래스 속성)."""
+        from ante.broker.kis import KISDomesticAdapter
 
-        assert KISAdapter.broker_id == "kis"
-        assert KISAdapter.broker_name == "한국투자증권"
-        assert KISAdapter.broker_short_name == "KIS"
+        assert KISDomesticAdapter.broker_id == "kis-domestic"
+        assert KISDomesticAdapter.broker_name == "한국투자증권 국내"
+        assert KISDomesticAdapter.broker_short_name == "KIS"

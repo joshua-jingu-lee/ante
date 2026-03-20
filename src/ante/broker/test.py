@@ -221,7 +221,8 @@ class TestBrokerAdapter(BrokerAdapter):
     broker_short_name: str = "TEST"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        config.setdefault("exchange", "KRX")
+        config.setdefault("exchange", "TEST")
+        config.setdefault("currency", "KRW")
         super().__init__(config)
 
         self._seed: int = config.get("seed", 42)
@@ -237,10 +238,10 @@ class TestBrokerAdapter(BrokerAdapter):
         self._positions: dict[str, _TestPosition] = {}
         self._orders: dict[str, _TestOrder] = {}
 
-        # 수수료 (KIS 동일)
+        # 수수료 (buy/sell 분리)
         self._commission = CommissionInfo(
-            commission_rate=config.get("commission_rate", 0.00015),
-            sell_tax_rate=config.get("sell_tax_rate", 0.0023),
+            buy_commission_rate=config.get("buy_commission_rate", 0.0),
+            sell_commission_rate=config.get("sell_commission_rate", 0.0),
         )
 
     # ── 연결 ──────────────────────────────────────────────

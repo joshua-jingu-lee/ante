@@ -15,34 +15,34 @@ class TestCommissionInfo:
     def test_defaults(self):
         """기본 수수료율."""
         info = CommissionInfo()
-        assert info.commission_rate == 0.00015
-        assert info.sell_tax_rate == 0.0023
+        assert info.buy_commission_rate == 0.00015
+        assert info.sell_commission_rate == 0.00195
 
     def test_custom_rates(self):
         """커스텀 수수료율."""
-        info = CommissionInfo(commission_rate=0.0001, sell_tax_rate=0.0018)
-        assert info.commission_rate == 0.0001
-        assert info.sell_tax_rate == 0.0018
+        info = CommissionInfo(buy_commission_rate=0.0001, sell_commission_rate=0.002)
+        assert info.buy_commission_rate == 0.0001
+        assert info.sell_commission_rate == 0.002
 
     def test_frozen(self):
         """불변 객체."""
         info = CommissionInfo()
         with pytest.raises(AttributeError):
-            info.commission_rate = 0.001  # type: ignore[misc]
+            info.buy_commission_rate = 0.001  # type: ignore[misc]
 
 
 class TestCommissionCalculation:
     def test_buy_commission(self):
-        """매수 수수료: filled_value × commission_rate."""
-        info = CommissionInfo(commission_rate=0.00015, sell_tax_rate=0.0023)
+        """매수 수수료: filled_value × buy_commission_rate."""
+        info = CommissionInfo(buy_commission_rate=0.00015, sell_commission_rate=0.00245)
         commission = info.calculate("buy", 1_000_000.0)
         assert commission == pytest.approx(150.0)
 
-    def test_sell_commission_includes_tax(self):
-        """매도 수수료: filled_value × (commission_rate + sell_tax_rate)."""
-        info = CommissionInfo(commission_rate=0.00015, sell_tax_rate=0.0023)
+    def test_sell_commission(self):
+        """매도 수수료: filled_value × sell_commission_rate."""
+        info = CommissionInfo(buy_commission_rate=0.00015, sell_commission_rate=0.00245)
         commission = info.calculate("sell", 1_000_000.0)
-        expected = 1_000_000.0 * (0.00015 + 0.0023)
+        expected = 1_000_000.0 * 0.00245
         assert commission == pytest.approx(expected)
 
     def test_sell_commission_higher_than_buy(self):
@@ -58,41 +58,41 @@ class TestCommissionCalculation:
         assert info.calculate("buy", 0.0) == 0.0
         assert info.calculate("sell", 0.0) == 0.0
 
-    def test_kosdaq_tax_rate(self):
-        """코스닥 세율 적용 (0.0018)."""
-        info = CommissionInfo(commission_rate=0.00015, sell_tax_rate=0.0018)
+    def test_kosdaq_sell_rate(self):
+        """코스닥 매도 수수료율 적용."""
+        info = CommissionInfo(buy_commission_rate=0.00015, sell_commission_rate=0.00195)
         commission = info.calculate("sell", 1_000_000.0)
-        expected = 1_000_000.0 * (0.00015 + 0.0018)
+        expected = 1_000_000.0 * 0.00195
         assert commission == pytest.approx(expected)
 
 
-# ── US-1: KISAdapter.get_commission_info ──────────
+# ── US-1: KISDomesticAdapter.get_commission_info ──────────
 
 
 class TestKISCommissionInfo:
     def test_kis_default_commission(self):
-        """KISAdapter 기본 수수료율."""
-        from ante.broker.kis import KISAdapter
+        """KISDomesticAdapter 기본 수수료율."""
+        from ante.broker.kis import KISDomesticAdapter
 
-        adapter = KISAdapter.__new__(KISAdapter)
-        adapter._commission_rate = 0.00015
-        adapter._sell_tax_rate = 0.0023
+        adapter = KISDomesticAdapter.__new__(KISDomesticAdapter)
+        adapter._buy_commission_rate = 0.00015
+        adapter._sell_commission_rate = 0.00195
 
         info = adapter.get_commission_info()
-        assert info.commission_rate == 0.00015
-        assert info.sell_tax_rate == 0.0023
+        assert info.buy_commission_rate == 0.00015
+        assert info.sell_commission_rate == 0.00195
 
     def test_kis_custom_commission_from_config(self):
-        """KISAdapter config에서 수수료율 읽기."""
-        from ante.broker.kis import KISAdapter
+        """KISDomesticAdapter config에서 수수료율 읽기."""
+        from ante.broker.kis import KISDomesticAdapter
 
-        adapter = KISAdapter.__new__(KISAdapter)
-        adapter._commission_rate = 0.0001
-        adapter._sell_tax_rate = 0.0018
+        adapter = KISDomesticAdapter.__new__(KISDomesticAdapter)
+        adapter._buy_commission_rate = 0.0001
+        adapter._sell_commission_rate = 0.002
 
         info = adapter.get_commission_info()
-        assert info.commission_rate == 0.0001
-        assert info.sell_tax_rate == 0.0018
+        assert info.buy_commission_rate == 0.0001
+        assert info.sell_commission_rate == 0.002
 
 
 # ── US-2: PaperExecutor 매도 세금 반영 ────────────
@@ -100,7 +100,7 @@ class TestKISCommissionInfo:
 
 class TestPaperExecutorCommission:
     async def test_buy_commission(self):
-        """PaperExecutor 매수 수수료 = commission_rate만 적용."""
+        """PaperExecutor 매수 수수료 = buy_commission_rate만 적용."""
         from ante.bot.providers.paper import PaperExecutor, PaperPortfolioView
 
         eventbus = EventBus()

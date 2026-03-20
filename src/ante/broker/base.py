@@ -24,6 +24,7 @@ class BrokerAdapter(ABC):
         self.config = config
         self.is_connected: bool = False
         self.exchange: str = config.get("exchange", "KRX")
+        self.currency: str = config.get("currency", "KRW")
 
     @abstractmethod
     async def connect(self) -> None:

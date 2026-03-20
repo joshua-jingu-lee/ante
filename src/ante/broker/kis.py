@@ -2,12 +2,18 @@
 
 KIS REST API를 통해 주문, 조회를 처리한다.
 실행 시 aiohttp 패키지가 필요하다.
+
+계층 구조:
+    BrokerAdapter (ABC)
+    └── KISBaseAdapter (ABC) — KIS 공통 레이어 (인증, HTTP, 에러 처리)
+        └── KISDomesticAdapter — 국내주식 전용
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from abc import abstractmethod
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -154,27 +160,27 @@ class KISRetryHandler:
         await asyncio.sleep(wait)
 
 
-class KISAdapter(BrokerAdapter):
-    """한국투자증권 Open API 어댑터."""
+# ── KISBaseAdapter — KIS 공통 레이어 ─────────────────────
 
-    broker_id: str = "kis"
-    broker_name: str = "한국투자증권"
-    broker_short_name: str = "KIS"
+
+class KISBaseAdapter(BrokerAdapter):
+    """KIS Open API 공통 레이어 (인증, HTTP, 에러 처리, 재시도, 서킷브레이커).
+
+    국내/해외 공통 로직을 추상화하는 중간 계층.
+    시장별 서브클래스(KISDomesticAdapter, KISOverseasAdapter)가 이를 상속한다.
+    """
 
     def __init__(
         self,
         config: dict[str, Any],
         eventbus: EventBus | None = None,
     ) -> None:
-        config.setdefault("exchange", "KRX")
         super().__init__(config)
 
         self.app_key: str = config["app_key"]
         self.app_secret: str = config["app_secret"]
         self.account_no: str = config["account_no"]
         self.is_paper: bool = config.get("is_paper", False)
-        self._commission_rate: float = config.get("commission_rate", 0.00015)
-        self._sell_tax_rate: float = config.get("sell_tax_rate", 0.0023)
         self._eventbus = eventbus
 
         # API 엔드포인트
@@ -236,6 +242,8 @@ class KISAdapter(BrokerAdapter):
     def circuit_breaker(self) -> CircuitBreaker:
         """Circuit breaker 접근자."""
         return self._circuit_breaker
+
+    # ── 연결 ───────────────────────────────────────
 
     async def connect(self) -> None:
         """KIS API 연결 및 인증."""
@@ -428,6 +436,111 @@ class KISAdapter(BrokerAdapter):
                     url, headers=headers, json=json_data
                 ) as resp:
                     return await self._handle_response(resp)
+
+    # ── 서브클래스 확장 포인트 ──────────────────────
+
+    @abstractmethod
+    async def get_account_balance(self) -> dict[str, float]:
+        """계좌 잔고 조회."""
+        ...
+
+    @abstractmethod
+    async def get_positions(self) -> list[dict[str, Any]]:
+        """보유 포지션 조회."""
+        ...
+
+    @abstractmethod
+    async def get_current_price(self, symbol: str) -> float:
+        """현재가 조회."""
+        ...
+
+    @abstractmethod
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        price: float | None = None,
+        stop_price: float | None = None,
+    ) -> str:
+        """주문 접수."""
+        ...
+
+    @abstractmethod
+    async def cancel_order(self, order_id: str) -> bool:
+        """주문 취소."""
+        ...
+
+    @abstractmethod
+    async def get_order_status(self, order_id: str) -> dict[str, Any]:
+        """주문 상태 조회."""
+        ...
+
+    @abstractmethod
+    async def get_pending_orders(self) -> list[dict[str, Any]]:
+        """미체결 주문 목록 조회."""
+        ...
+
+    @abstractmethod
+    async def get_account_positions(self) -> list[dict[str, Any]]:
+        """대사용 보유 잔고 조회."""
+        ...
+
+    @abstractmethod
+    async def get_order_history(
+        self,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """주문/체결 이력 조회."""
+        ...
+
+    @abstractmethod
+    async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
+        """종목 마스터 데이터 조회."""
+        ...
+
+    @abstractmethod
+    def get_commission_info(self) -> CommissionInfo:
+        """수수료율 정보 반환."""
+        ...
+
+
+# ── KISDomesticAdapter — 국내주식 전용 ────────────────────
+
+
+class KISDomesticAdapter(KISBaseAdapter):
+    """한국투자증권 국내주식 전용 어댑터.
+
+    KISBaseAdapter를 상속하여 국내주식 API 경로, 주문 파라미터,
+    시세 조회, 수수료 등 국내 전용 로직을 구현한다.
+    """
+
+    broker_id: str = "kis-domestic"
+    broker_name: str = "한국투자증권 국내"
+    broker_short_name: str = "KIS"
+
+    def __init__(
+        self,
+        config: dict[str, Any],
+        eventbus: EventBus | None = None,
+    ) -> None:
+        config.setdefault("exchange", "KRX")
+        config.setdefault("currency", "KRW")
+        super().__init__(config, eventbus)
+
+        # 수수료율 (buy/sell 분리)
+        self._buy_commission_rate: float = config.get(
+            "buy_commission_rate",
+            config.get("commission_rate", 0.00015),
+        )
+        self._sell_commission_rate: float = config.get(
+            "sell_commission_rate",
+            # 하위호환: commission_rate + sell_tax_rate
+            config.get("commission_rate", 0.00015)
+            + config.get("sell_tax_rate", 0.0018),
+        )
 
     # ── 계좌 정보 조회 ─────────────────────────────
 
@@ -759,10 +872,10 @@ class KISAdapter(BrokerAdapter):
     # ── 수수료 ────────────────────────────────────────
 
     def get_commission_info(self) -> CommissionInfo:
-        """KIS 수수료율 정보 반환."""
+        """KIS 국내 수수료율 정보 반환."""
         return CommissionInfo(
-            commission_rate=self._commission_rate,
-            sell_tax_rate=self._sell_tax_rate,
+            buy_commission_rate=self._buy_commission_rate,
+            sell_commission_rate=self._sell_commission_rate,
         )
 
     # ── 대사용 조회 ────────────────────────────────
@@ -824,3 +937,8 @@ class KISAdapter(BrokerAdapter):
                 }
             )
         return history
+
+
+# ── 하위호환 별칭 ─────────────────────────────────────
+# 기존 코드에서 KISAdapter를 참조하는 곳이 있으므로 별칭을 유지한다.
+KISAdapter = KISDomesticAdapter
