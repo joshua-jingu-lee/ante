@@ -67,12 +67,21 @@ Feature: 멤버 관리
     And 응답 body.member.status 는 "revoked"
 
   # ── 비밀번호 변경 ──
+  # qa-admin은 bootstrap으로 생성되어 비밀번호(qa-password)가 설정된 멤버
 
   Scenario: 비밀번호 변경 (API)
-    When PATCH /api/members/qa-test-human-01/password 요청:
+    When PATCH /api/members/qa-admin/password 요청:
       | field        | value        |
       | old_password | qa-password  |
       | new_password | new-password |
+    Then 응답 상태는 200
+    And 응답 body.ok 는 true
+
+  Scenario: 변경된 비밀번호 복구 (API)
+    When PATCH /api/members/qa-admin/password 요청:
+      | field        | value        |
+      | old_password | new-password |
+      | new_password | qa-password  |
     Then 응답 상태는 200
     And 응답 body.ok 는 true
 
