@@ -397,10 +397,10 @@ class TestCommission:
         assert isinstance(info, CommissionInfo)
 
     def test_default_rates(self, broker: TestBrokerAdapter) -> None:
-        """KIS 동일 수수료율이 설정된다."""
+        """테스트 브로커 기본 수수료율은 0 (무료)."""
         info = broker.get_commission_info()
-        assert info.commission_rate == 0.00015
-        assert info.sell_tax_rate == 0.0023
+        assert info.buy_commission_rate == 0.0
+        assert info.sell_commission_rate == 0.0
 
 
 # ── 시드 재현성 ──────────────────────────────────────────────
