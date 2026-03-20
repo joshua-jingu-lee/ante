@@ -52,6 +52,7 @@ class TradeRecorder:
         """스키마 생성 + 마이그레이션."""
         await self._db.execute_script(TRADE_SCHEMA)
         await self._migrate_exchange_column()
+        await self._migrate_account_columns()
         logger.info("TradeRecorder 초기화 완료")
 
     async def _migrate_exchange_column(self) -> None:
@@ -63,6 +64,24 @@ class TradeRecorder:
             logger.info("trades 테이블에 exchange 컬럼 추가")
         except Exception:
             pass  # 이미 존재
+
+    async def _migrate_account_columns(self) -> None:
+        """account_id, currency 컬럼 마이그레이션."""
+        columns = await self._db.fetch_all("PRAGMA table_info(trades)")
+        col_names = {row["name"] for row in columns}
+
+        if "account_id" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE trades ADD COLUMN"
+                " account_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            logger.info("trades 테이블에 account_id 컬럼 추가")
+
+        if "currency" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE trades ADD COLUMN currency TEXT NOT NULL DEFAULT 'KRW'"
+            )
+            logger.info("trades 테이블에 currency 컬럼 추가")
 
     def subscribe(self, eventbus: EventBus) -> None:
         """이벤트 구독 등록."""
@@ -213,8 +232,9 @@ class TradeRecorder:
         await self._db.execute(
             """INSERT OR IGNORE INTO trades
                (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
-                status, order_type, reason, commission, timestamp, order_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                status, order_type, reason, commission, timestamp, order_id,
+                account_id, currency)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(record.trade_id),
                 record.bot_id,
@@ -229,6 +249,8 @@ class TradeRecorder:
                 record.commission,
                 record.timestamp.isoformat() if record.timestamp else None,
                 record.order_id,
+                record.account_id,
+                record.currency,
             ),
         )
 
@@ -262,6 +284,7 @@ class TradeRecorder:
 
     async def get_trades(
         self,
+        account_id: str | None = None,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         symbol: str | None = None,
@@ -275,6 +298,9 @@ class TradeRecorder:
         conditions: list[str] = []
         params: list[Any] = []
 
+        if account_id:
+            conditions.append("account_id = ?")
+            params.append(account_id)
         if bot_id:
             conditions.append("bot_id = ?")
             params.append(bot_id)
@@ -324,4 +350,6 @@ class TradeRecorder:
             commission=float(row.get("commission", 0)),
             timestamp=datetime.fromisoformat(ts) if ts else None,
             order_id=row.get("order_id"),
+            account_id=row.get("account_id", "default"),
+            currency=row.get("currency", "KRW"),
         )

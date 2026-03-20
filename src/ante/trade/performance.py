@@ -41,6 +41,7 @@ class PerformanceTracker:
 
     async def calculate(
         self,
+        account_id: str | None = None,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         from_date: datetime | None = None,
@@ -48,9 +49,10 @@ class PerformanceTracker:
     ) -> PerformanceMetrics:
         """성과 지표 계산.
 
-        bot_id 또는 strategy_id 중 하나 이상 필수.
+        account_id, bot_id, strategy_id 중 하나 이상 필수.
         """
         trades = await self._get_filled_trades(
+            account_id=account_id,
             bot_id=bot_id,
             strategy_id=strategy_id,
             from_date=from_date,
@@ -309,6 +311,7 @@ class PerformanceTracker:
 
     async def _get_filled_trades(
         self,
+        account_id: str | None = None,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         from_date: datetime | None = None,
@@ -318,6 +321,9 @@ class PerformanceTracker:
         conditions: list[str] = ["status = ?"]
         params: list[Any] = [TradeStatus.FILLED.value]
 
+        if account_id:
+            conditions.append("account_id = ?")
+            params.append(account_id)
         if bot_id:
             conditions.append("bot_id = ?")
             params.append(bot_id)
@@ -384,6 +390,8 @@ class PerformanceTracker:
             commission=float(row.get("commission", 0)),
             timestamp=datetime.fromisoformat(ts) if ts else None,
             order_id=row.get("order_id"),
+            account_id=row.get("account_id", "default"),
+            currency=row.get("currency", "KRW"),
         )
 
     @staticmethod
