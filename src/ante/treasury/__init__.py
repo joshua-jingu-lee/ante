@@ -1,10 +1,11 @@
-"""Treasury — 중앙 자금(예산) 관리."""
+"""Treasury -- 중앙 자금(예산) 관리."""
 
 from ante.treasury.exceptions import (
     BotNotStoppedError,
     InsufficientFundsError,
     TreasuryError,
 )
+from ante.treasury.manager import TreasuryManager
 from ante.treasury.models import BotBudget
 from ante.treasury.treasury import Treasury
 
@@ -14,4 +15,5 @@ __all__ = [
     "InsufficientFundsError",
     "Treasury",
     "TreasuryError",
+    "TreasuryManager",
 ]
