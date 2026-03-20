@@ -231,29 +231,29 @@ class TestOrderCancelFailedEvent:
 
 
 class TestTimeoutConfig:
-    def test_default_timeout_values(self):
-        """config/defaults.py에 타임아웃 기본값 포함."""
+    def test_timeout_keys_removed_from_defaults(self):
+        """broker timeout 키는 Account로 이관되어 제거됨."""
         from ante.config.defaults import DEFAULTS
 
-        assert DEFAULTS["broker.timeout.order"] == 10
-        assert DEFAULTS["broker.timeout.query"] == 5
-        assert DEFAULTS["broker.timeout.auth"] == 10
+        assert "broker.timeout.order" not in DEFAULTS
+        assert "broker.timeout.query" not in DEFAULTS
+        assert "broker.timeout.auth" not in DEFAULTS
 
-    def test_default_retry_values(self):
-        """config/defaults.py에 재시도 기본값 포함."""
+    def test_retry_keys_removed_from_defaults(self):
+        """broker retry 키는 Account로 이관되어 defaults에서 제거됨."""
         from ante.config.defaults import DEFAULTS
 
-        assert DEFAULTS["broker.retry.max_retries_order"] == 3
-        assert DEFAULTS["broker.retry.max_retries_query"] == 2
-        assert DEFAULTS["broker.retry.max_retries_auth"] == 2
-        assert DEFAULTS["broker.retry.backoff_base_seconds"] == 1.0
+        assert "broker.retry.max_retries_order" not in DEFAULTS
+        assert "broker.retry.max_retries_query" not in DEFAULTS
+        assert "broker.retry.max_retries_auth" not in DEFAULTS
+        assert "broker.retry.backoff_base_seconds" not in DEFAULTS
 
-    def test_default_circuit_breaker_values(self):
-        """config/defaults.py에 circuit breaker 기본값 포함."""
+    def test_circuit_breaker_keys_removed_from_defaults(self):
+        """broker circuit_breaker 키는 Account로 이관되어 defaults에서 제거됨."""
         from ante.config.defaults import DEFAULTS
 
-        assert DEFAULTS["broker.circuit_breaker.failure_threshold"] == 5
-        assert DEFAULTS["broker.circuit_breaker.recovery_timeout"] == 60
+        assert "broker.circuit_breaker.failure_threshold" not in DEFAULTS
+        assert "broker.circuit_breaker.recovery_timeout" not in DEFAULTS
 
 
 # ── US-1: 재시도 로직 (KISAdapter._request 단위) ────
