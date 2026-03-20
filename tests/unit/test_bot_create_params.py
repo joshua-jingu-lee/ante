@@ -81,7 +81,7 @@ class TestBotCreateWithParams:
             mock_db = AsyncMock()
             mock_db.execute = AsyncMock()
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(
                 cli,
@@ -92,6 +92,8 @@ class TestBotCreateWithParams:
                     "테스트봇",
                     "--strategy",
                     "stg-1",
+                    "--account",
+                    "test",
                     "--param",
                     "lookback=20",
                     "--param",
@@ -119,11 +121,20 @@ class TestBotCreateWithParams:
             mock_db = AsyncMock()
             mock_db.execute = AsyncMock()
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(
                 cli,
-                ["bot", "create", "--name", "테스트봇", "--strategy", "stg-1"],
+                [
+                    "bot",
+                    "create",
+                    "--name",
+                    "테스트봇",
+                    "--strategy",
+                    "stg-1",
+                    "--account",
+                    "test",
+                ],
             )
             assert result.exit_code == 0
 
@@ -159,7 +170,7 @@ class TestBotCreateWithParams:
             mock_db = AsyncMock()
             mock_db.execute = AsyncMock()
             mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock())
+            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(
                 cli,
@@ -172,6 +183,8 @@ class TestBotCreateWithParams:
                     "테스트봇",
                     "--strategy",
                     "stg-1",
+                    "--account",
+                    "test",
                     "--param",
                     "window=30",
                 ],
