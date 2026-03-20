@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -154,6 +155,7 @@ def account_create(ctx: click.Context) -> None:
     default=None,
     help="상태 필터 (active/suspended/deleted)",
 )
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("account:read")
@@ -196,6 +198,7 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
 
 @account.command("info")
 @click.argument("account_id")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("account:read")
@@ -288,13 +291,20 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
 
 @account.command("delete")
 @click.argument("account_id")
+@click.option(
+    "--yes", "skip_confirm", is_flag=True, default=False, help="확인 없이 삭제"
+)
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("account:write")
-def account_delete(ctx: click.Context, account_id: str) -> None:
+def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> None:
     """계좌 삭제 (소프트 딜리트)."""
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
+
+    if not skip_confirm:
+        click.confirm(f'계좌 "{account_id}"를 삭제하시겠습니까?', abort=True)
 
     async def _do_delete() -> None:
         svc, db = await _create_account_service()
@@ -317,6 +327,7 @@ def account_delete(ctx: click.Context, account_id: str) -> None:
 
 @account.command("credentials")
 @click.argument("account_id")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("account:read")
@@ -356,11 +367,19 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
 
 @account.command("set-credentials")
 @click.argument("account_id")
+@click.option("--app-key", default=None, help="APP_KEY (비대화형)")
+@click.option("--app-secret", default=None, help="APP_SECRET (비대화형)")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("account:write")
-def account_set_credentials(ctx: click.Context, account_id: str) -> None:
-    """인증 정보 재설정 (대화형)."""
+def account_set_credentials(
+    ctx: click.Context,
+    account_id: str,
+    app_key: str | None,
+    app_secret: str | None,
+) -> None:
+    """인증 정보 재설정 (대화형 또는 --app-key/--app-secret 옵션)."""
     fmt = get_formatter(ctx)
 
     from ante.account.presets import BROKER_PRESETS
@@ -375,12 +394,24 @@ def account_set_credentials(ctx: click.Context, account_id: str) -> None:
                 fmt.output({"message": msg})
                 return
 
-            new_credentials: dict[str, str] = {}
-            click.echo(f"\n인증 정보 재설정 ({account_id})")
-            for cred_key in preset.required_credentials:
-                hide = cred_key.lower() in ("app_secret", "secret", "password")
-                value = click.prompt(cred_key.upper(), hide_input=hide)
-                new_credentials[cred_key] = value
+            # CLI 옵션으로 전달된 인증 정보가 있으면 비대화형 처리
+            cli_creds: dict[str, str] = {}
+            if app_key is not None:
+                cli_creds["app_key"] = app_key
+            if app_secret is not None:
+                cli_creds["app_secret"] = app_secret
+
+            if cli_creds:
+                # CLI 옵션으로 전달된 값 사용
+                new_credentials = cli_creds
+            else:
+                # 대화형 입력
+                new_credentials = {}
+                click.echo(f"\n인증 정보 재설정 ({account_id})")
+                for cred_key in preset.required_credentials:
+                    hide = cred_key.lower() in ("app_secret", "secret", "password")
+                    value = click.prompt(cred_key.upper(), hide_input=hide)
+                    new_credentials[cred_key] = value
 
             await svc.update(account_id, credentials=new_credentials)
             fmt.success(f'계좌 "{account_id}" 인증 정보 재설정 완료')

@@ -7,6 +7,7 @@ import json
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -96,6 +97,7 @@ def _render_list(result: list[dict], fmt) -> None:  # noqa: ANN001
 
 @config.command("get")
 @click.argument("key", required=False, default=None)
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("config:read")
@@ -123,6 +125,7 @@ def config_get(ctx: click.Context, key: str | None) -> None:
 @config.command("set")
 @click.argument("key")
 @click.argument("value")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("config:write")
@@ -185,6 +188,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 @config.command("history")
 @click.argument("key")
 @click.option("--limit", "-n", default=20, help="조회 건수 (기본 20)")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("config:read")
