@@ -51,8 +51,8 @@ async def get_summary(
 ) -> dict:
     """자금 현황 요약."""
     summary = treasury.get_summary()
-    summary["commission_rate"] = getattr(treasury, "commission_rate", 0.00015)
-    summary["sell_tax_rate"] = getattr(treasury, "sell_tax_rate", 0.0023)
+    summary["commission_rate"] = getattr(treasury, "buy_commission_rate", 0.00015)
+    summary["sell_tax_rate"] = getattr(treasury, "sell_commission_rate", 0.00195)
 
     # 브로커 메타정보
     if broker is not None:

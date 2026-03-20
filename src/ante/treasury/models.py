@@ -11,6 +11,7 @@ class BotBudget:
     """봇별 예산 상태."""
 
     bot_id: str
+    account_id: str = ""
     allocated: float = 0.0
     available: float = 0.0
     reserved: float = 0.0

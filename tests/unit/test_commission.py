@@ -214,23 +214,23 @@ def eventbus():
 
 
 class TestTreasuryCommission:
-    async def test_treasury_accepts_sell_tax_rate(self, db, eventbus):
-        """Treasury가 sell_tax_rate 파라미터를 수용."""
+    async def test_treasury_accepts_commission_rates(self, db, eventbus):
+        """Treasury가 buy/sell_commission_rate 파라미터를 수용."""
         t = Treasury(
             db=db,
             eventbus=eventbus,
-            commission_rate=0.00015,
-            sell_tax_rate=0.0023,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
         )
         await t.initialize()
-        assert t.commission_rate == 0.00015
-        assert t.sell_tax_rate == 0.0023
+        assert t.buy_commission_rate == 0.00015
+        assert t.sell_commission_rate == 0.00195
 
-    async def test_treasury_default_sell_tax_rate(self, db, eventbus):
-        """Treasury 기본 sell_tax_rate = 0.0023."""
+    async def test_treasury_default_sell_commission_rate(self, db, eventbus):
+        """Treasury 기본 sell_commission_rate = 0.00195."""
         t = Treasury(db=db, eventbus=eventbus)
         await t.initialize()
-        assert t.sell_tax_rate == 0.0023
+        assert t.sell_commission_rate == 0.00195
 
     async def test_update_commission_rates(self, db, eventbus):
         """수수료율 동적 업데이트."""
@@ -238,18 +238,18 @@ class TestTreasuryCommission:
         await t.initialize()
 
         t.update_commission_rates(0.0001, 0.0018)
-        assert t.commission_rate == 0.0001
-        assert t.sell_tax_rate == 0.0018
+        assert t.buy_commission_rate == 0.0001
+        assert t.sell_commission_rate == 0.0018
 
     async def test_buy_reservation_uses_commission_rate(self, db, eventbus):
-        """매수 예약 시 commission_rate 사용."""
+        """매수 예약 시 buy_commission_rate 사용."""
         from ante.eventbus.events import OrderApprovedEvent, OrderValidatedEvent
 
         t = Treasury(
             db=db,
             eventbus=eventbus,
-            commission_rate=0.001,  # 높은 수수료율로 테스트
-            sell_tax_rate=0.0023,
+            buy_commission_rate=0.001,  # 높은 수수료율로 테스트
+            sell_commission_rate=0.002,
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)
