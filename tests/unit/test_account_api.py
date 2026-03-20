@@ -370,6 +370,20 @@ class TestSuspendAccount:
         ]
         assert len(route_logs) == 1
 
+    def test_suspend_without_body(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """body 없이 POST 호출 시에도 200을 반환해야 한다 (GH-640)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post("/api/accounts/test-account/suspend")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["account"]["status"] == "suspended"
+
     def test_suspend_not_found(self, client: TestClient) -> None:
         resp = client.post(
             "/api/accounts/nonexistent/suspend",

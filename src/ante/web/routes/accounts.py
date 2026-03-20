@@ -237,15 +237,15 @@ async def update_account(
 @router.post("/{account_id}/suspend", response_model=AccountActionResponse)
 async def suspend_account(
     account_id: str,
-    body: AccountSuspendRequest,
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+    body: AccountSuspendRequest | None = None,
 ) -> dict[str, Any]:
     """계좌 정지."""
     from ante.account.errors import AccountNotFoundError
 
-    reason = body.reason or "dashboard"
+    reason = (body.reason if body else None) or "dashboard"
     suspended_by = getattr(request.state, "member_id", "dashboard")
 
     try:
