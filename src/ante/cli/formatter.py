@@ -2,9 +2,41 @@
 
 from __future__ import annotations
 
+import functools
 import json
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+def format_option(fn: Callable) -> Callable:
+    """서브커맨드용 --format 옵션 데코레이터.
+
+    루트 그룹의 --format 보다 서브커맨드의 --format이 우선한다.
+    ``ante account list --format json`` 형태 호출을 지원한다.
+    """
+
+    @click.option(
+        "--format",
+        "output_format",
+        type=click.Choice(["text", "json"]),
+        default=None,
+        help="출력 형식 (text 또는 json)",
+    )
+    @functools.wraps(fn)
+    def wrapper(
+        *args: object, output_format: str | None = None, **kwargs: object
+    ) -> object:
+        if output_format is not None:
+            ctx = click.get_current_context()
+            ctx.obj["format"] = output_format
+            ctx.obj["formatter"] = OutputFormatter(output_format)
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class OutputFormatter:

@@ -6,6 +6,7 @@ import asyncio
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -50,6 +51,7 @@ async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
 
 @treasury.command()
 @click.option("--account", "account_id", default=None, help="계좌 ID로 필터링")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("treasury:read")

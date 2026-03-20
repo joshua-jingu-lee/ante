@@ -6,6 +6,7 @@ import asyncio
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -90,6 +91,7 @@ def bootstrap(ctx: click.Context, member_id: str, name: str) -> None:
 @click.option(
     "--status", type=click.Choice(["active", "suspended", "revoked"]), help="상태 필터"
 )
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("member:read")
@@ -202,6 +204,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
 @click.option("--org", default="default", help="소속 조직")
 @click.option("--name", default="", help="표시 이름")
 @click.option("--scopes", default="", help="권한 범위 (쉼표 구분)")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("member:admin")

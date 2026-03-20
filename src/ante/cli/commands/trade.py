@@ -7,6 +7,7 @@ from datetime import datetime
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -46,6 +47,7 @@ async def _create_trade_service():  # noqa: ANN202
 @click.option("--from", "from_date", default=None, help="시작일 (YYYY-MM-DD)")
 @click.option("--to", "to_date", default=None, help="종료일 (YYYY-MM-DD)")
 @click.option("--limit", default=50, help="최대 조회 수")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("trade:read")
@@ -100,6 +102,7 @@ def trade_list(
 
 @trade.command("info")
 @click.argument("trade_id")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("trade:read")

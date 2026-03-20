@@ -8,6 +8,7 @@ from pathlib import Path
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -170,6 +171,7 @@ def submit(ctx: click.Context, path: str) -> None:
 @click.option(
     "--status", default=None, help="상태 필터 (registered/active/inactive/archived)"
 )
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
@@ -216,6 +218,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
 
 @strategy.command("info")
 @click.argument("name")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
