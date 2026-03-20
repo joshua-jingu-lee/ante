@@ -254,8 +254,8 @@ class MemberService:
         password: str,
         name: str = "",
         emoji: str | None = None,
-    ) -> tuple[Member, str]:
-        """master 생성 + recovery key 반환. 최초 1회만 가능."""
+    ) -> tuple[Member, str, str]:
+        """master 생성 + (token, recovery_key) 반환. 최초 1회만 가능."""
         existing = await self._db.fetch_one(
             "SELECT member_id FROM members WHERE role = ?",
             (MemberRole.MASTER,),
@@ -270,6 +270,7 @@ class MemberService:
             self._validate_emoji_format(emoji)
             await self._validate_emoji_unique(emoji)
 
+        token, t_hash, expires_at = self._token_manager.create_token(MemberType.HUMAN)
         recovery_key = generate_recovery_key()
         now = _now()
 
@@ -282,19 +283,20 @@ class MemberService:
             emoji=emoji,
             status=MemberStatus.ACTIVE,
             scopes=[],
-            token_hash="",
+            token_hash=t_hash,
             password_hash=hash_password(password),
             recovery_key_hash=hash_recovery_key(recovery_key),
             created_at=now,
             created_by="system",
+            token_expires_at=expires_at,
         )
 
         await self._db.execute(
             """INSERT INTO members
                (member_id, type, role, org, name, emoji, status, scopes,
                 token_hash, password_hash, recovery_key_hash,
-                created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                created_at, created_by, token_expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 member.member_id,
                 member.type,
@@ -309,6 +311,7 @@ class MemberService:
                 member.recovery_key_hash,
                 member.created_at,
                 member.created_by,
+                member.token_expires_at,
             ),
         )
 
@@ -324,7 +327,7 @@ class MemberService:
         )
 
         logger.info("Master 멤버 생성 완료: %s", member.member_id)
-        return member, recovery_key
+        return member, token, recovery_key
 
     # ── 멤버 등록 ──────────────────────────────────────
 

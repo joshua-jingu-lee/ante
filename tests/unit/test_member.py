@@ -132,13 +132,14 @@ class TestAuth:
 
 class TestBootstrapMaster:
     async def test_bootstrap_creates_master(self, service):
-        member, recovery_key = await service.bootstrap_master(
+        member, token, recovery_key = await service.bootstrap_master(
             member_id="owner", password="pass123", name="대표"
         )
         assert member.member_id == "owner"
         assert member.type == MemberType.HUMAN
         assert member.role == MemberRole.MASTER
         assert member.name == "대표"
+        assert token.startswith("ante_hk_")
         assert recovery_key.startswith("ANTE-RK-")
 
     async def test_bootstrap_twice_fails(self, service):
@@ -329,7 +330,7 @@ class TestPasswordManagement:
             await service.change_password("owner", "wrong", "newpass")
 
     async def test_reset_password_with_recovery_key(self, service):
-        _, recovery_key = await service.bootstrap_master("owner", "pass123")
+        _, _, recovery_key = await service.bootstrap_master("owner", "pass123")
         await service.reset_password("owner", recovery_key, "resetpass")
         m = await service.authenticate_password("owner", "resetpass")
         assert m.member_id == "owner"
@@ -342,7 +343,7 @@ class TestPasswordManagement:
             )
 
     async def test_regenerate_recovery_key(self, service):
-        _, old_key = await service.bootstrap_master("owner", "pass123")
+        _, _, old_key = await service.bootstrap_master("owner", "pass123")
         new_key = await service.regenerate_recovery_key("owner", "pass123")
         assert new_key != old_key
         assert new_key.startswith("ANTE-RK-")
@@ -415,12 +416,12 @@ class TestEmojiField:
         assert member.emoji == "🎸"
 
     async def test_bootstrap_auto_assigns_emoji(self, service):
-        member, _ = await service.bootstrap_master("owner", "pass123")
+        member, _, _ = await service.bootstrap_master("owner", "pass123")
         assert member.emoji != ""
         assert member.emoji in ANIMAL_EMOJI_POOL
 
     async def test_bootstrap_with_explicit_emoji(self, service):
-        member, _ = await service.bootstrap_master("owner", "pass123", emoji="👑")
+        member, _, _ = await service.bootstrap_master("owner", "pass123", emoji="👑")
         assert member.emoji == "👑"
 
     async def test_emoji_persisted_in_db(self, service):

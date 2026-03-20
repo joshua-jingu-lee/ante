@@ -43,34 +43,40 @@ def bootstrap(ctx: click.Context, member_id: str, name: str) -> None:
     fmt = get_formatter(ctx)
     password = click.prompt("패스워드", hide_input=True, confirmation_prompt=True)
 
-    async def _run_bootstrap() -> tuple[dict, str]:
+    async def _run_bootstrap() -> tuple[dict, str, str]:
         service, db = await _create_service()
         try:
-            m, recovery_key = await service.bootstrap_master(
+            m, token, recovery_key = await service.bootstrap_master(
                 member_id=member_id,
                 password=password,
                 name=name,
             )
-            return {
-                "member_id": m.member_id,
-                "role": m.role,
-                "emoji": m.emoji,
-            }, recovery_key
+            return (
+                {
+                    "member_id": m.member_id,
+                    "role": m.role,
+                    "emoji": m.emoji,
+                },
+                token,
+                recovery_key,
+            )
         finally:
             await db.close()
 
     try:
-        result, recovery_key = _run(_run_bootstrap())
+        result, token, recovery_key = _run(_run_bootstrap())
     except ValueError as e:
         fmt.error(str(e))
         return
 
     if fmt.is_json:
-        fmt.output({**result, "recovery_key": recovery_key})
+        fmt.output({**result, "token": token, "recovery_key": recovery_key})
     else:
         fmt.success("master 계정 생성 완료", result)
-        click.echo(f"\n  Recovery Key: {recovery_key}")
-        click.echo("  이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.")
+        click.echo(f"\n🔑 토큰: {token}")
+        click.echo(f"   export ANTE_MEMBER_TOKEN={token}")
+        click.echo(f"\n⚠️  Recovery Key: {recovery_key}")
+        click.echo("   이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.")
 
 
 @member.command("list")
