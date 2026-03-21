@@ -3,6 +3,7 @@ CLAUDE.md
 AGENT.md
 .claude/*
 !.claude/skills/
+!.claude/agents/
 docs/
 
 # Runtime data (루트 디렉토리만 — src/ante/data/ 는 소스코드)
