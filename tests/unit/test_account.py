@@ -90,6 +90,17 @@ async def test_create_duplicate_raises(service):
 
 
 @pytest.mark.asyncio
+async def test_create_soft_deleted_duplicate_raises(service):
+    """soft-delete된 계좌와 동일 ID로 생성 시 AccountAlreadyExistsError."""
+    await service.create(_make_account())
+    await service.delete("test", deleted_by="system")
+
+    # 메모리에서는 제거되었지만 DB에 deleted 상태로 남아 있음
+    with pytest.raises(AccountAlreadyExistsError, match="삭제 상태"):
+        await service.create(_make_account())
+
+
+@pytest.mark.asyncio
 async def test_create_invalid_broker_type_raises(service):
     """잘못된 broker_type 생성 시 에러."""
     account = _make_account(broker_type="nonexistent-broker")
