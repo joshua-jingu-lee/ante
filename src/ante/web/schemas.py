@@ -242,6 +242,7 @@ class StrategyDetailResponse(BaseModel):
 
     strategy: StrategyInfo
     bot: BotInfo | None = None
+    status: str | None = None
 
 
 class EquityCurvePoint(BaseModel):

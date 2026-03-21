@@ -137,7 +137,11 @@ async def get_strategy(
                 bot_info = b
                 break
 
-    return {"strategy": strategy_dict, "bot": bot_info}
+    return {
+        "strategy": strategy_dict,
+        "bot": bot_info,
+        "status": strategy_dict["status"],
+    }
 
 
 @router.get(
