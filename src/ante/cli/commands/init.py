@@ -186,7 +186,11 @@ def _prompt_datafeed(config_path: Path) -> None:
         key = click.prompt("data.go.kr API 키")
         feed_cfg.set_api_key("ANTE_DATAGOKR_API_KEY", key)
 
-    if click.confirm("DART API 키를 입력하시겠습니까?", default=False):
+    try:
+        want_dart = click.confirm("DART API 키를 입력하시겠습니까?", default=False)
+    except (click.Abort, EOFError):
+        want_dart = False
+    if want_dart:
         key = click.prompt("DART API 키")
         feed_cfg.set_api_key("ANTE_DART_API_KEY", key)
 
