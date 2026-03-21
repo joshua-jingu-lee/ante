@@ -179,6 +179,23 @@ class TestGetStrategy:
         assert data["strategy"]["strategy_id"] == "ma_cross_v1"
         assert data["strategy"]["description"] == "이동평균 크로스"
 
+    def test_root_level_status(self, client, registry):
+        """응답 root level에 status 필드 포함 (#672)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] is not None
+        assert data["status"] == "registered"
+        assert data["status"] == data["strategy"]["status"]
+
     def test_get_nonexistent(self, client):
         """존재하지 않는 전략 → 404."""
         resp = client.get("/api/strategies/nonexistent")
