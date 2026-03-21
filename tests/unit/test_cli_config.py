@@ -123,61 +123,65 @@ class TestConfigGet:
 
 
 class TestConfigSet:
-    def test_set_dynamic_key(self, runner):
-        with patch("ante.cli.commands.config._create_services") as mock_svc:
-            mock_config = MagicMock()
-            mock_config.get.return_value = None
-            mock_dynamic = AsyncMock()
-            mock_dynamic.exists = AsyncMock(return_value=False)
-            mock_dynamic.set = AsyncMock()
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_config, mock_dynamic, mock_db)
+    """config set은 IPC 경유로 전환됨. IPCClient를 mock한다."""
 
+    def _patch_ipc(self, return_value):
+        mock_client = AsyncMock()
+        mock_client.send.return_value = return_value
+        ipc_cls = patch(
+            "ante.cli.commands.ipc_helpers.IPCClient",
+            return_value=mock_client,
+        )
+        socket = patch(
+            "ante.cli.commands.ipc_helpers.get_socket_path",
+            return_value="/tmp/test.sock",
+        )
+        return mock_client, ipc_cls, socket
+
+    def test_set_dynamic_key(self, runner):
+        _, ipc_cls, socket = self._patch_ipc(
+            {
+                "id": "r1",
+                "status": "ok",
+                "result": {"key": "custom.key", "value": "hello"},
+            }
+        )
+        with ipc_cls, socket:
             result = runner.invoke(cli, ["config", "set", "custom.key", "hello"])
             assert result.exit_code == 0
             assert "변경 완료" in result.output
 
     def test_set_static_key_rejected(self, runner):
-        with patch("ante.cli.commands.config._create_services") as mock_svc:
-            mock_config = MagicMock()
-            mock_config.get.return_value = "INFO"
-            mock_dynamic = AsyncMock()
-            mock_dynamic.exists = AsyncMock(return_value=False)
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_config, mock_dynamic, mock_db)
-
+        _, ipc_cls, socket = self._patch_ipc(
+            {
+                "id": "r1",
+                "status": "error",
+                "error": {"code": "STATIC_CONFIG", "message": "정적 설정입니다"},
+            }
+        )
+        with ipc_cls, socket:
             result = runner.invoke(cli, ["config", "set", "system.log_level", "DEBUG"])
-            assert result.exit_code == 0
+            assert result.exit_code != 0
             assert "정적 설정" in result.output
 
     def test_set_json_value(self, runner):
-        with patch("ante.cli.commands.config._create_services") as mock_svc:
-            mock_config = MagicMock()
-            mock_config.get.return_value = None
-            mock_dynamic = AsyncMock()
-            mock_dynamic.exists = AsyncMock(return_value=False)
-            mock_dynamic.set = AsyncMock()
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_config, mock_dynamic, mock_db)
-
+        _, ipc_cls, socket = self._patch_ipc(
+            {"id": "r1", "status": "ok", "result": {"key": "custom.count", "value": 42}}
+        )
+        with ipc_cls, socket:
             result = runner.invoke(cli, ["config", "set", "custom.count", "42"])
             assert result.exit_code == 0
             assert "변경 완료" in result.output
 
     def test_set_json_format(self, runner):
-        with patch("ante.cli.commands.config._create_services") as mock_svc:
-            mock_config = MagicMock()
-            mock_config.get.return_value = None
-            mock_dynamic = AsyncMock()
-            mock_dynamic.exists = AsyncMock(return_value=False)
-            mock_dynamic.set = AsyncMock()
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_config, mock_dynamic, mock_db)
-
+        _, ipc_cls, socket = self._patch_ipc(
+            {
+                "id": "r1",
+                "status": "ok",
+                "result": {"success": True, "key": "custom.flag", "value": True},
+            }
+        )
+        with ipc_cls, socket:
             result = runner.invoke(
                 cli,
                 ["--format", "json", "config", "set", "custom.flag", "true"],

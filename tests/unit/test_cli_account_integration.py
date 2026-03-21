@@ -195,10 +195,10 @@ class TestBotCreateAccountOption:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path",
+                "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             result = runner.invoke(
                 cli,
@@ -233,10 +233,10 @@ class TestBotCreateAccountOption:
         with (
             patch("ante.cli.commands.bot._create_services") as mock_cs,
             patch(
-                "ante.cli.commands._ipc._get_socket_path",
+                "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             mock_cs.return_value = (
                 _make_mock_db(),
@@ -268,10 +268,10 @@ class TestBotCreateAccountOption:
         with (
             patch("ante.cli.commands.bot._create_services") as mock_cs,
             patch(
-                "ante.cli.commands._ipc._get_socket_path",
+                "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             mock_cs.return_value = (
                 _make_mock_db(),

@@ -135,52 +135,23 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_set() -> dict:
-        from ante.config.defaults import DEFAULTS
+        from ante.cli.commands.ipc_helpers import ipc_send
 
-        static_config, dynamic, db = await _create_services()
-        try:
-            # 정적 설정 키인지 확인
-            if key in DEFAULTS or static_config.get(key) is not None:
-                if not await dynamic.exists(key):
-                    return {
-                        "success": False,
-                        "error": (
-                            f"'{key}'는 정적 설정입니다. "
-                            "config/system.toml을 직접 수정해 주세요."
-                        ),
-                    }
+        return await ipc_send("config.set", {"key": key, "value": value}, actor=actor)
 
-            # 값 파싱 (JSON 시도, 실패하면 문자열)
-            try:
-                parsed = json.loads(value)
-            except json.JSONDecodeError:
-                parsed = value
-
-            # 카테고리 추론
-            category = key.split(".")[0] if "." in key else "general"
-
-            await dynamic.set(key, parsed, category, changed_by=f"cli:{actor}")
-            return {
-                "success": True,
-                "key": key,
-                "value": parsed,
-                "category": category,
-                "changed_by": actor,
-            }
-        finally:
-            await db.close()
-
-    result = _run(_run_set())
-
-    if not result["success"]:
-        fmt.error(result["error"])
+    try:
+        result = _run(_run_set())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        fmt.error(str(e))
         return
 
     if fmt.is_json:
         fmt.output(result)
     else:
         fmt.success(
-            f"설정 변경 완료: {result['key']} = {result['value']}",
+            f"설정 변경 완료: {result.get('key', key)} = {result.get('value', value)}",
             result,
         )
 

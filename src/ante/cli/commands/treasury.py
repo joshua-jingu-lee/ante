@@ -95,7 +95,7 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
     actor = _get_member_id(ctx)
 
     async def _run_allocate() -> dict:
-        from ante.cli.commands._ipc import ipc_send
+        from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
             "treasury.allocate",
@@ -135,7 +135,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
     actor = _get_member_id(ctx)
 
     async def _run_deallocate() -> dict:
-        from ante.cli.commands._ipc import ipc_send
+        from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
             "treasury.deallocate",
