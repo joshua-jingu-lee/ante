@@ -178,7 +178,7 @@ class TestConfigSet:
             {
                 "id": "r1",
                 "status": "ok",
-                "result": {"success": True, "key": "custom.flag", "value": True},
+                "result": {"key": "custom.flag", "value": True},
             }
         )
         with ipc_cls, socket:
@@ -188,6 +188,7 @@ class TestConfigSet:
             )
             assert result.exit_code == 0
             data = json.loads(result.output)
-            assert data["success"] is True
+            assert data["status"] == "success"
+            assert "success" in result.output
             assert data["key"] == "custom.flag"
             assert data["value"] is True
