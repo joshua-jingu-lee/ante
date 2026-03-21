@@ -23,13 +23,13 @@ Feature: 최초 설치 및 초기화
   Scenario: 3. QA Admin 멤버 존재 확인
     When GET /api/members
     Then 응답 상태는 200
-    And 응답 body 배열 길이는 1 이상이다
+    And 응답 body.members 배열 길이는 1 이상이다
 
   Scenario: 4. QA Admin 로그인
     When POST /api/auth/login 요청:
       | field     | value        |
       | member_id | qa-admin     |
-      | password  | qaadmin123!  |
+      | password  | qa-password  |
     Then 응답 상태는 200
     And 응답 body.member_id 는 "qa-admin"
 
@@ -43,10 +43,10 @@ Feature: 최초 설치 및 초기화
   Scenario: 6. test 계좌 상세 확인
     When GET /api/accounts/test
     Then 응답 상태는 200
-    And 응답 body.account_id 는 "test"
-    And 응답 body.broker_type 는 "test"
-    And 응답 body.exchange 는 "TEST"
-    And 응답 body.status 는 "active"
+    And 응답 body.account.account_id 는 "test"
+    And 응답 body.account.broker_type 는 "test"
+    And 응답 body.account.exchange 는 "TEST"
+    And 응답 body.account.status 는 "active"
 
   # ── Treasury 초기화 ──────────────────────────────────
 
@@ -65,8 +65,8 @@ Feature: 최초 설치 및 초기화
   Scenario: 9. QA 전략 등록 확인
     When GET /api/strategies
     Then 응답 상태는 200
-    And 응답 body 배열 길이는 1 이상이다
-    And 첫 번째 항목의 strategy_id 를 {strategy_id}로 저장한다
+    And 응답 body.strategies 배열 길이는 1 이상이다
+    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
 
   Scenario: 10. QA 전략 상세 확인
     When GET /api/strategies/{strategy_id}
