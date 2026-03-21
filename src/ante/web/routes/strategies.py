@@ -166,6 +166,9 @@ async def get_strategy_performance(
     metrics = await tracker.calculate(strategy_id=strategy_id)
 
     result = asdict(metrics)
+    # sharpe_ratio가 None이면 응답 모델(float)과 호환되도록 0.0으로 변환
+    if result.get("sharpe_ratio") is None:
+        result["sharpe_ratio"] = 0.0
 
     # equity curve: bot_id가 있으면 추가
     equity_curve: list[dict] = []

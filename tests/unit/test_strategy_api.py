@@ -236,3 +236,72 @@ class TestStrategyTrades:
         data = resp.json()
         assert len(data["trades"]) == 2
         assert data["next_cursor"] is not None
+
+
+class TestStrategyPerformance:
+    """전략 성과 조회 API 테스트."""
+
+    def test_performance_no_trades_table(self, registry):
+        """trades 테이블이 없을 때 500이 아닌 200 반환 (#659)."""
+        import sqlite3
+        from unittest.mock import AsyncMock
+
+        fake_db = AsyncMock()
+        fake_db.fetch_all = AsyncMock(
+            side_effect=sqlite3.OperationalError("no such table: trades")
+        )
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+        )
+        client = TestClient(app)
+
+        resp = client.get("/api/strategies/s1/performance")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_trades"] == 0
+        assert data["win_rate"] == 0.0
+        assert data["total_pnl"] == 0.0
+        assert data["equity_curve"] == []
+
+    def test_performance_empty_trades(self, registry):
+        """trades 테이블은 있지만 거래가 없을 때 200 반환."""
+        from unittest.mock import AsyncMock
+
+        fake_db = AsyncMock()
+        fake_db.fetch_all = AsyncMock(return_value=[])
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+        )
+        client = TestClient(app)
+
+        resp = client.get("/api/strategies/s1/performance")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_trades"] == 0
+        assert data["equity_curve"] == []
+
+    def test_performance_nonexistent_strategy(self, registry):
+        """존재하지 않는 전략 성과 → 404."""
+        from unittest.mock import AsyncMock
+
+        fake_db = AsyncMock()
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+        )
+        client = TestClient(app)
+
+        resp = client.get("/api/strategies/nonexistent/performance")
+        assert resp.status_code == 404
