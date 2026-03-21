@@ -78,7 +78,7 @@ Feature: 최초 설치 및 초기화
   Scenario: 11. CLI 시스템 상태 확인
     When 컨테이너에서 실행: ante system status --format json
     Then 종료 코드는 0
-    And stdout JSON의 .status 는 null이 아니다
+    And stdout JSON의 .trading_state 는 null이 아니다
 
   Scenario: 12. CLI 계좌 목록 확인
     When 컨테이너에서 실행: ante account list --format json
