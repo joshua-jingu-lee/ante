@@ -204,6 +204,7 @@ async def get_bot(
     responses={
         404: {"description": "Bot not found"},
         409: {"description": "Bot state conflict"},
+        422: {"description": "Account credentials not configured"},
         503: {"description": "Bot manager not available"},
     },
 )
@@ -211,6 +212,7 @@ async def start_bot(
     bot_id: str,
     request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 시작."""
@@ -219,6 +221,14 @@ async def start_bot(
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
+
+    # 계좌 인증정보 검증: app_key가 없으면 봇 시작 거부
+    account = await account_service.get(bot.config.account_id)
+    if not account.credentials.get("app_key"):
+        raise HTTPException(
+            status_code=422,
+            detail="계좌에 인증정보(app_key)가 설정되지 않았습니다",
+        )
 
     try:
         await bot_manager.start_bot(bot_id)

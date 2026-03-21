@@ -11,15 +11,33 @@ from fastapi.testclient import TestClient  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
 
 
+class FakeBotConfig:
+    """테스트용 BotConfig stub."""
+
+    def __init__(
+        self, bot_id: str, account_id: str = "test", strategy_id: str = "s1"
+    ) -> None:
+        self.bot_id = bot_id
+        self.account_id = account_id
+        self.strategy_id = strategy_id
+
+
 class FakeBot:
     """테스트용 Bot stub."""
 
     def __init__(
-        self, bot_id: str, status: str = "created", strategy_id: str = "s1"
+        self,
+        bot_id: str,
+        status: str = "created",
+        strategy_id: str = "s1",
+        account_id: str = "test",
     ) -> None:
         self.bot_id = bot_id
         self._status = status
         self._strategy_id = strategy_id
+        self.config = FakeBotConfig(
+            bot_id, account_id=account_id, strategy_id=strategy_id
+        )
 
     @property
     def status(self) -> str:
@@ -30,7 +48,7 @@ class FakeBot:
             "bot_id": self.bot_id,
             "name": self.bot_id,
             "status": self._status,
-            "account_id": "test",
+            "account_id": self.config.account_id,
             "strategy_id": self._strategy_id,
             "interval_seconds": 60,
             "started_at": None,
@@ -153,17 +171,33 @@ def trade_service():
 
 
 @pytest.fixture
-def client(bot_manager):
-    app = create_app(bot_manager=bot_manager)
+def default_account_service():
+    """기본 테스트 계좌(인증정보 포함) AccountService."""
+    svc = FakeAccountService()
+    svc._accounts["test"] = FakeAccount(
+        "test",
+        status="active",
+        credentials={"app_key": "test-key", "app_secret": "test-secret"},
+    )
+    return svc
+
+
+@pytest.fixture
+def client(bot_manager, default_account_service):
+    app = create_app(
+        bot_manager=bot_manager,
+        account_service=default_account_service,
+    )
     return TestClient(app)
 
 
 @pytest.fixture
-def client_with_services(bot_manager, treasury, trade_service):
+def client_with_services(bot_manager, treasury, trade_service, default_account_service):
     app = create_app(
         bot_manager=bot_manager,
         treasury=treasury,
         trade_service=trade_service,
+        account_service=default_account_service,
     )
     return TestClient(app)
 
@@ -222,6 +256,53 @@ class TestStartStopBot:
         """존재하지 않는 봇 중지 → 404."""
         resp = client.post("/api/bots/nonexistent/stop")
         assert resp.status_code == 404
+
+
+class TestStartBotCredentialCheck:
+    """봇 시작 시 계좌 인증정보 검증 테스트."""
+
+    @pytest.fixture
+    def no_credentials_account_service(self):
+        """인증정보 없는 계좌 AccountService."""
+        svc = FakeAccountService()
+        svc._accounts["test"] = FakeAccount("test", status="active", credentials={})
+        return svc
+
+    @pytest.fixture
+    def client_no_credentials(self, bot_manager, no_credentials_account_service):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=no_credentials_account_service,
+        )
+        return TestClient(app)
+
+    def test_start_bot_without_credentials_returns_422(
+        self, client_no_credentials, bot_manager
+    ):
+        """인증정보 없는 계좌의 봇 시작 → 422."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="created")
+        resp = client_no_credentials.post("/api/bots/bot-1/start")
+        assert resp.status_code == 422
+        assert "app_key" in resp.json()["detail"]
+
+    def test_start_bot_with_empty_app_key_returns_422(self, bot_manager):
+        """app_key가 빈 문자열인 계좌의 봇 시작 → 422."""
+        svc = FakeAccountService()
+        svc._accounts["test"] = FakeAccount(
+            "test", status="active", credentials={"app_key": ""}
+        )
+        app = create_app(bot_manager=bot_manager, account_service=svc)
+        client = TestClient(app)
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="created")
+        resp = client.post("/api/bots/bot-1/start")
+        assert resp.status_code == 422
+
+    def test_start_bot_with_credentials_succeeds(self, client, bot_manager):
+        """인증정보 있는 계좌의 봇 시작 → 200."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="created")
+        resp = client.post("/api/bots/bot-1/start")
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["status"] == "running"
 
 
 class TestDeleteBot:
@@ -304,12 +385,17 @@ class FakeAccount:
     """테스트용 Account stub."""
 
     def __init__(
-        self, account_id: str = "test", status: str = "active", exchange: str = "KRX"
+        self,
+        account_id: str = "test",
+        status: str = "active",
+        exchange: str = "KRX",
+        credentials: dict | None = None,
     ) -> None:
         self.account_id = account_id
         self.name = account_id
         self.status = status
         self.exchange = exchange
+        self.credentials = credentials if credentials is not None else {}
 
 
 class FakeAccountService:
