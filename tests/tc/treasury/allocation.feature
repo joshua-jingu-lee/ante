@@ -36,10 +36,11 @@ Feature: Treasury 예산 할당·회수
 
   Scenario: 할당 테스트용 봇 생성 (API)
     When POST /api/bots 요청:
-      | field       | value            |
-      | account_id  | {account_id}     |
-      | strategy_id | {strategy_id}    |
-      | name        | 할당 테스트 봇   |
+      | field       | value                |
+      | bot_id      | qa-alloc-bot-01      |
+      | account_id  | {account_id}         |
+      | strategy_id | {strategy_id}        |
+      | name        | 할당 테스트 봇       |
     Then 응답 상태는 201
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
