@@ -858,7 +858,7 @@ class TestPortfolioResponseModels:
         data = {
             "total_value": 10500000.0,
             "daily_pnl": 50000.0,
-            "daily_pnl_pct": 0.4784,
+            "daily_return": 0.4784,
             "updated_at": "2026-03-19T10:00:00Z",
         }
         model = PortfolioValueResponse.model_validate(data)
