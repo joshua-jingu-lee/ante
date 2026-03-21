@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -707,23 +707,41 @@ class Treasury:
 
     def start_sync(
         self,
-        broker: BrokerAdapter,
+        broker: BrokerAdapter | None,
         position_history: PositionHistory,
         interval_seconds: int = 300,
+        trading_mode: str = "live",
+        price_resolver: Callable[[str], Awaitable[float]] | None = None,
     ) -> None:
-        """KIS 계좌 잔고 주기적 동기화 시작."""
+        """계좌 잔고 주기적 동기화 시작.
+
+        Args:
+            broker: 브로커 어댑터. Virtual 모드에서는 None 허용.
+            position_history: 포지션 이력 관리자.
+            interval_seconds: 동기화 주기 (초).
+            trading_mode: "live" 또는 "virtual".
+            price_resolver: Virtual 모드에서 종목 현재가를 조회하는 콜백.
+                None이면 avg_entry_price를 fallback으로 사용.
+        """
         if self._sync_task and not self._sync_task.done():
             logger.warning("이미 동기화 루프가 실행 중입니다")
             return
 
         self._sync_task = asyncio.create_task(
-            self._sync_loop(broker, position_history, interval_seconds),
+            self._sync_loop(
+                broker,
+                position_history,
+                interval_seconds,
+                trading_mode=trading_mode,
+                price_resolver=price_resolver,
+            ),
             name=f"treasury-balance-sync-{self._account_id}",
         )
         logger.info(
-            "잔고 동기화 시작 (주기: %d초, account=%s)",
+            "잔고 동기화 시작 (주기: %d초, account=%s, mode=%s)",
             interval_seconds,
             self._account_id,
+            trading_mode,
         )
 
     async def stop_sync(self) -> None:
@@ -739,15 +757,21 @@ class Treasury:
 
     async def _sync_loop(
         self,
-        broker: BrokerAdapter,
+        broker: BrokerAdapter | None,
         position_history: PositionHistory,
         interval_seconds: int,
+        trading_mode: str = "live",
+        price_resolver: Callable[[str], Awaitable[float]] | None = None,
     ) -> None:
         """주기적 잔고 동기화 루프."""
         try:
             while True:
                 try:
-                    await self._do_sync(broker, position_history)
+                    if trading_mode == "virtual":
+                        await self._do_sync_virtual(position_history, price_resolver)
+                    else:
+                        assert broker is not None, "Live 모드에서는 broker가 필수입니다"
+                        await self._do_sync(broker, position_history)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -761,7 +785,7 @@ class Treasury:
         broker: BrokerAdapter,
         position_history: PositionHistory,
     ) -> None:
-        """한 번의 잔고 동기화 수행."""
+        """한 번의 잔고 동기화 수행 (Live 모드)."""
         from ante.eventbus.events import BalanceSyncedEvent
 
         # 1) KIS 계좌 잔고 (output2)
@@ -804,6 +828,64 @@ class Treasury:
             f"{self._account_balance:,.0f}",
             f"{self._purchasable_amount:,.0f}",
             sum(1 for pos in broker_positions if pos["symbol"] not in internal_symbols),
+            self._account_id,
+        )
+
+    async def _do_sync_virtual(
+        self,
+        position_history: PositionHistory,
+        price_resolver: Callable[[str], Awaitable[float]] | None = None,
+    ) -> None:
+        """한 번의 잔고 동기화 수행 (Virtual 모드).
+
+        Trade DB의 포지션 데이터로 purchase/eval 금액을 직접 계산한다.
+        브로커 연결 없이 동작하므로 외부 종목은 항상 0이다.
+        """
+        from ante.eventbus.events import BalanceSyncedEvent
+
+        positions = await position_history.get_all_positions()
+
+        purchase_amount = 0.0
+        eval_amount = 0.0
+        for pos in positions:
+            purchase_amount += pos.avg_entry_price * pos.quantity
+            if price_resolver:
+                try:
+                    current_price = await price_resolver(pos.symbol)
+                except Exception:
+                    logger.debug(
+                        "Virtual 시세 조회 실패: %s — avg_entry_price 사용",
+                        pos.symbol,
+                    )
+                    current_price = pos.avg_entry_price
+            else:
+                current_price = pos.avg_entry_price
+            eval_amount += current_price * pos.quantity
+
+        self._purchase_amount = purchase_amount
+        self._eval_amount = eval_amount
+        self._external_purchase_amount = 0.0
+        self._external_eval_amount = 0.0
+        await self._save_state()
+
+        self._last_synced_at = datetime.now(UTC)
+
+        # 이벤트 발행
+        await self._eventbus.publish(
+            BalanceSyncedEvent(
+                account_id=self._account_id,
+                account_balance=self._account_balance,
+                purchasable_amount=self._purchasable_amount,
+                total_evaluation=self._total_evaluation,
+                external_purchase_amount=0.0,
+                external_eval_amount=0.0,
+            )
+        )
+        logger.info(
+            "Virtual 잔고 동기화 완료: 매수금=%s, 평가금=%s, 포지션=%d건 (account=%s)",
+            f"{purchase_amount:,.0f}",
+            f"{eval_amount:,.0f}",
+            len(positions),
             self._account_id,
         )
 
