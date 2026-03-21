@@ -11,6 +11,7 @@ import sys
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -134,6 +135,7 @@ def stop(ctx: click.Context) -> None:
 
 
 @system.command()
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("system:read")
