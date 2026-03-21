@@ -37,5 +37,11 @@ class AccountDeletedError(AccountError):
     pass
 
 
+class AccountImmutableFieldError(AccountError):
+    """불변 필드 수정 시도."""
+
+    pass
+
+
 # 하위 호환용 별칭
 AccountDeletedException = AccountDeletedError

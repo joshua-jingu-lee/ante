@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
+    AccountImmutableFieldError,
     AccountNotFoundError,
     InvalidBrokerTypeError,
 )
@@ -205,12 +206,18 @@ class AccountService:
         # 기본: DELETED 제외 (메모리 캐시에는 DELETED가 없음)
         return list(self._accounts.values())
 
+    # 생성 후 변경 불가능한 필드
+    IMMUTABLE_FIELDS: frozenset[str] = frozenset(
+        {"exchange", "currency", "trading_mode", "broker_type"}
+    )
+
     async def update(self, account_id: str, **fields: Any) -> Account:
         """계좌 부분 수정. updated_at 자동 갱신.
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
             AccountDeletedException: DELETED 계좌는 수정 불가.
+            AccountImmutableFieldError: 불변 필드 수정 시도.
         """
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
@@ -218,15 +225,18 @@ class AccountService:
                 f"삭제된 계좌 '{account_id}'는 수정할 수 없습니다."
             )
 
+        # 불변 필드 수정 시도 차단
+        attempted_immutable = set(fields.keys()) & self.IMMUTABLE_FIELDS
+        if attempted_immutable:
+            raise AccountImmutableFieldError(
+                f"다음 필드는 수정할 수 없습니다: {sorted(attempted_immutable)}"
+            )
+
         updatable = {
             "name",
-            "exchange",
-            "currency",
             "timezone",
             "trading_hours_start",
             "trading_hours_end",
-            "trading_mode",
-            "broker_type",
             "credentials",
             "buy_commission_rate",
             "sell_commission_rate",

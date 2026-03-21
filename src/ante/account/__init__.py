@@ -4,6 +4,7 @@ from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
     AccountError,
+    AccountImmutableFieldError,
     AccountNotFoundError,
     InvalidBrokerTypeError,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "AccountAlreadyExistsError",
     "AccountDeletedException",
     "AccountError",
+    "AccountImmutableFieldError",
     "AccountNotFoundError",
     "AccountService",
     "AccountStatus",
