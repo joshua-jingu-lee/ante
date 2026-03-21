@@ -148,7 +148,8 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
         return
 
     if fmt.is_json:
-        fmt.output(result)
+        output = {"status": "success", **result}
+        fmt.output(output)
     else:
         fmt.success(
             f"설정 변경 완료: {result.get('key', key)} = {result.get('value', value)}",
