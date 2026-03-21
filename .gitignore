@@ -1,9 +1,7 @@
 # Agent 참고 자료 (설계 문서, 스펙, 런북 — 로컬 관리)
 CLAUDE.md
 AGENT.md
-.claude/*
-!.claude/skills/
-!.claude/agents/
+.claude/
 docs/
 
 # Runtime data (루트 디렉토리만 — src/ante/data/ 는 소스코드)
