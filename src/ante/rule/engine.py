@@ -305,6 +305,8 @@ class RuleEngine:
             current_price=event.price or 0.0,
             account_status=account_status,
             currency=currency,
+            # TODO: AccountService에서 전일 총 자산을 조회하여 주입 (#708)
+            prev_day_total_asset=0.0,
         )
 
         try:
@@ -450,6 +452,8 @@ class RuleEngine:
             current_price=event.price or 0.0,
             account_status=account_status,
             currency=currency,
+            # TODO: AccountService에서 전일 총 자산을 조회하여 주입 (#708)
+            prev_day_total_asset=0.0,
         )
 
         try:

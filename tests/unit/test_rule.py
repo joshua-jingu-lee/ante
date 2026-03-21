@@ -150,26 +150,41 @@ class TestDailyLossLimitRule:
         assert result.result == RuleResult.PASS
 
     def test_pass_within_limit(self, rule, base_context):
-        """손실이 한도 내면 통과."""
+        """손실이 한도 내면 통과 (분모: 전일 총 자산)."""
         base_context.daily_pnl = -3000.0
-        base_context.total_pnl = 100000.0
+        base_context.prev_day_total_asset = 100000.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
     def test_block_exceeds_limit(self, rule, base_context):
-        """손실이 한도 초과하면 BLOCK + HALT_ACCOUNT."""
+        """손실이 한도 초과하면 BLOCK + HALT_ACCOUNT (분모: 전일 총 자산)."""
         base_context.daily_pnl = -10000.0
-        base_context.total_pnl = 100000.0
+        base_context.prev_day_total_asset = 100000.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.BLOCK
         assert result.action == RuleAction.HALT_ACCOUNT
 
-    def test_pass_zero_total_pnl(self, rule, base_context):
-        """총 수익이 0이면 통과 (0으로 나누기 방지)."""
+    def test_pass_zero_prev_day_total_asset(self, rule, base_context):
+        """전일 총 자산이 0이면 통과 (0으로 나누기 방지)."""
         base_context.daily_pnl = -1000.0
-        base_context.total_pnl = 0.0
+        base_context.prev_day_total_asset = 0.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
+
+    def test_pass_large_asset_small_loss(self, rule, base_context):
+        """자산 1억, 손실 50만 -> 0.5% < 5% -> PASS (기존 구현 오탐 검증)."""
+        base_context.daily_pnl = -500000.0
+        base_context.prev_day_total_asset = 100000000.0
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_block_small_asset_large_loss(self, rule, base_context):
+        """자산 100만, 손실 10만 -> 10% > 5% -> BLOCK."""
+        base_context.daily_pnl = -100000.0
+        base_context.prev_day_total_asset = 1000000.0
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.BLOCK
+        assert result.action == RuleAction.HALT_ACCOUNT
 
 
 # ── TotalExposureLimitRule ───────────────────────
@@ -401,7 +416,7 @@ class TestRuleEngine:
         )
 
         base_context.daily_pnl = -10000.0
-        base_context.total_pnl = 100000.0
+        base_context.prev_day_total_asset = 100000.0
         result = engine.evaluate(base_context)
 
         assert result.overall_result == RuleResult.BLOCK
