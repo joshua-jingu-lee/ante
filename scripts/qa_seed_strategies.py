@@ -36,6 +36,14 @@ def _extract_meta_from_file(filepath: Path) -> StrategyMeta | None:
         logger.warning("구문 오류 — 건너뜀: %s", filepath)
         return None
 
+    # 모듈 수준 상수 수집 (STRATEGY_VERSION 등)
+    module_vars: dict[str, Any] = {}
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and isinstance(node.value, ast.Constant):
+                    module_vars[t.id] = node.value.value
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
@@ -62,30 +70,34 @@ def _extract_meta_from_file(filepath: Path) -> StrategyMeta | None:
                     continue
                 if not isinstance(value, ast.Call):
                     continue
-                return _parse_strategy_meta_call(value)
+                return _parse_strategy_meta_call(value, module_vars)
 
     logger.warning("StrategyMeta를 찾을 수 없음 — 건너뜀: %s", filepath)
     return None
 
 
-def _parse_strategy_meta_call(call: ast.Call) -> StrategyMeta:
+def _parse_strategy_meta_call(
+    call: ast.Call, module_vars: dict[str, Any] | None = None
+) -> StrategyMeta:
     """ast.Call 노드에서 StrategyMeta 키워드 인자를 파싱."""
     kwargs: dict[str, Any] = {}
     for kw in call.keywords:
         if kw.arg is None:
             continue
-        value = _eval_constant(kw.value)
+        value = _eval_constant(kw.value, module_vars)
         if value is not None:
             kwargs[kw.arg] = value
     return StrategyMeta(**kwargs)
 
 
-def _eval_constant(node: ast.expr) -> Any:
+def _eval_constant(node: ast.expr, module_vars: dict[str, Any] | None = None) -> Any:
     """AST 상수 노드를 Python 값으로 변환한다."""
     if isinstance(node, ast.Constant):
         return node.value
     if isinstance(node, ast.List):
-        return [_eval_constant(elt) for elt in node.elts]
+        return [_eval_constant(elt, module_vars) for elt in node.elts]
+    if isinstance(node, ast.Name) and module_vars and node.id in module_vars:
+        return module_vars[node.id]
     return None
 
 
