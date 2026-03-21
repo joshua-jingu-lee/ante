@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.treasury import TreasuryManager as TreasuryManagerType
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,15 @@ logger = logging.getLogger(__name__)
 class RuleEngineManager:
     """계좌별 RuleEngine 인스턴스를 관리하는 상위 계층."""
 
-    def __init__(self, eventbus: EventBus, account_service: AccountService) -> None:
+    def __init__(
+        self,
+        eventbus: EventBus,
+        account_service: AccountService,
+        treasury_manager: TreasuryManagerType | None = None,
+    ) -> None:
         self._eventbus = eventbus
         self._account_service = account_service
+        self._treasury_manager = treasury_manager
         self._engines: dict[str, RuleEngine] = {}
 
     def create_engine(
@@ -37,10 +44,18 @@ class RuleEngineManager:
         Returns:
             생성된 RuleEngine 인스턴스.
         """
+        treasury = None
+        if self._treasury_manager is not None:
+            try:
+                treasury = self._treasury_manager.get(account_id)
+            except KeyError:
+                logger.warning("Treasury 없음: account=%s", account_id)
+
         engine = RuleEngine(
             eventbus=self._eventbus,
             account_id=account_id,
             account_service=self._account_service,
+            treasury=treasury,
         )
 
         if rule_configs:
