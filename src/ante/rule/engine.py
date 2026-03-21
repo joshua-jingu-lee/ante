@@ -265,6 +265,56 @@ class RuleEngine:
 
         return overall, reason, actions
 
+    # ── Treasury 조회 ──────────────────────────────
+
+    async def _query_treasury_data(self) -> dict[str, float]:
+        """Treasury에서 자산/손익 데이터를 조회한다.
+
+        Returns:
+            daily_pnl, total_pnl, prev_day_total_asset,
+            total_asset, total_exposure 딕셔너리.
+            조회 실패 시 각 값은 0.0.
+        """
+        result = {
+            "daily_pnl": 0.0,
+            "total_pnl": 0.0,
+            "prev_day_total_asset": 0.0,
+            "total_asset": 0.0,
+            "total_exposure": 0.0,
+        }
+        if self._treasury is None:
+            return result
+
+        # get_summary()는 동기 메서드
+        try:
+            summary = self._treasury.get_summary()
+            result["total_pnl"] = summary.get("total_profit_loss", 0.0)
+            result["total_asset"] = summary.get("total_evaluation", 0.0)
+            result["total_exposure"] = summary.get("ante_eval_amount", 0.0)
+        except Exception:
+            logger.warning("Treasury summary 조회 실패: %s", self._account_id)
+
+        # get_daily_snapshot()은 비동기 메서드
+        try:
+            from datetime import date, timedelta
+
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            snapshot = await self._treasury.get_daily_snapshot(yesterday)
+            if snapshot is not None:
+                result["prev_day_total_asset"] = snapshot.get("total_asset", 0.0)
+        except Exception:
+            logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
+
+        # daily_pnl: 최신 스냅샷에서 조회
+        try:
+            latest = await self._treasury.get_latest_snapshot()
+            if latest is not None:
+                result["daily_pnl"] = latest.get("daily_pnl", 0.0)
+        except Exception:
+            logger.warning("Treasury 최신 스냅샷 조회 실패: %s", self._account_id)
+
+        return result
+
     # ── EventBus 핸들러 ──────────────────────────────
 
     async def _on_order_request(self, event: object) -> None:
@@ -297,23 +347,7 @@ class RuleEngine:
                 )
 
         # Treasury 데이터 조회
-        total_pnl = 0.0
-        prev_day_total_asset = 0.0
-        if self._treasury is not None:
-            try:
-                summary = self._treasury.get_summary()
-                total_pnl = summary.get("total_profit_loss", 0.0)
-            except Exception:
-                logger.warning("Treasury summary 조회 실패: %s", self._account_id)
-            try:
-                from datetime import date, timedelta
-
-                yesterday = (date.today() - timedelta(days=1)).isoformat()
-                snapshot = await self._treasury.get_daily_snapshot(yesterday)
-                if snapshot is not None:
-                    prev_day_total_asset = snapshot.get("total_asset", 0.0)
-            except Exception:
-                logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
+        treasury_data = await self._query_treasury_data()
 
         context = RuleContext(
             bot_id=event.bot_id,
@@ -327,8 +361,11 @@ class RuleEngine:
             current_price=event.price or 0.0,
             account_status=account_status,
             currency=currency,
-            total_pnl=total_pnl,
-            prev_day_total_asset=prev_day_total_asset,
+            daily_pnl=treasury_data["daily_pnl"],
+            total_pnl=treasury_data["total_pnl"],
+            prev_day_total_asset=treasury_data["prev_day_total_asset"],
+            total_asset=treasury_data["total_asset"],
+            total_exposure=treasury_data["total_exposure"],
         )
 
         try:
@@ -463,23 +500,7 @@ class RuleEngine:
                 )
 
         # Treasury 데이터 조회
-        total_pnl = 0.0
-        prev_day_total_asset = 0.0
-        if self._treasury is not None:
-            try:
-                summary = self._treasury.get_summary()
-                total_pnl = summary.get("total_profit_loss", 0.0)
-            except Exception:
-                logger.warning("Treasury summary 조회 실패: %s", self._account_id)
-            try:
-                from datetime import date, timedelta
-
-                yesterday = (date.today() - timedelta(days=1)).isoformat()
-                snapshot = await self._treasury.get_daily_snapshot(yesterday)
-                if snapshot is not None:
-                    prev_day_total_asset = snapshot.get("total_asset", 0.0)
-            except Exception:
-                logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
+        treasury_data = await self._query_treasury_data()
 
         context = RuleContext(
             bot_id=event.bot_id,
@@ -493,8 +514,11 @@ class RuleEngine:
             current_price=event.price or 0.0,
             account_status=account_status,
             currency=currency,
-            total_pnl=total_pnl,
-            prev_day_total_asset=prev_day_total_asset,
+            daily_pnl=treasury_data["daily_pnl"],
+            total_pnl=treasury_data["total_pnl"],
+            prev_day_total_asset=treasury_data["prev_day_total_asset"],
+            total_asset=treasury_data["total_asset"],
+            total_exposure=treasury_data["total_exposure"],
         )
 
         try:
