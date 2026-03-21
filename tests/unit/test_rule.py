@@ -1086,3 +1086,58 @@ class TestRuleEngineManager:
 
         assert len(engine1._global_rules) == 1
         assert len(engine2._global_rules) == 0
+
+
+# ── RuleEngine Treasury 연동 ────────────────────
+
+
+class TestRuleEngineTreasuryIntegration:
+    """RuleEngine ↔ Treasury 연동 테스트."""
+
+    @pytest.fixture
+    def mock_treasury(self):
+        """Treasury mock."""
+        from unittest.mock import MagicMock
+
+        treasury = MagicMock()
+        treasury.get_summary.return_value = {
+            "total_profit_loss": 500000.0,
+            "total_evaluation": 100000000.0,
+            "ante_eval_amount": 20000000.0,
+        }
+        treasury.get_daily_snapshot = AsyncMock(
+            return_value={
+                "total_asset": 99000000.0,
+            }
+        )
+        treasury.get_latest_snapshot = AsyncMock(
+            return_value={
+                "daily_pnl": -300000.0,
+            }
+        )
+        return treasury
+
+    async def test_query_treasury_data(self, mock_treasury):
+        """Treasury에서 자산/손익 데이터를 정상 조회."""
+        engine = RuleEngine(eventbus=EventBus(), treasury=mock_treasury)
+        data = await engine._query_treasury_data()
+        assert data["total_pnl"] == 500000.0
+        assert data["total_asset"] == 100000000.0
+        assert data["total_exposure"] == 20000000.0
+        assert data["prev_day_total_asset"] == 99000000.0
+        assert data["daily_pnl"] == -300000.0
+
+    async def test_query_treasury_data_none(self):
+        """Treasury가 None이면 기본값 반환."""
+        engine = RuleEngine(eventbus=EventBus(), treasury=None)
+        data = await engine._query_treasury_data()
+        assert all(v == 0.0 for v in data.values())
+
+    async def test_query_treasury_data_exception(self, mock_treasury):
+        """Treasury 조회 실패 시 기본값 fallback."""
+        mock_treasury.get_summary.side_effect = Exception("DB error")
+        mock_treasury.get_daily_snapshot = AsyncMock(side_effect=Exception("DB error"))
+        mock_treasury.get_latest_snapshot = AsyncMock(side_effect=Exception("DB error"))
+        engine = RuleEngine(eventbus=EventBus(), treasury=mock_treasury)
+        data = await engine._query_treasury_data()
+        assert all(v == 0.0 for v in data.values())
