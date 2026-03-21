@@ -411,17 +411,47 @@ async def _init_reconcile_scheduler(s: Services) -> None:
 
 
 async def _init_daily_report_scheduler(s: Services) -> None:
-    """DailyReportScheduler 생성 및 시작."""
-    from ante.trade.daily_report import DailyReportScheduler
-
-    s.daily_report_scheduler = DailyReportScheduler(
-        performance_tracker=s.performance_tracker,
-        trade_recorder=s.trade_recorder,
-        position_history=s.position_history,
-        eventbus=s.eventbus,
+    """DailyReportScheduler 생성 및 시작 (Account 기반 실행 시각)."""
+    from ante.trade.daily_report import (
+        DailyReportScheduler,
+        compute_report_time,
     )
+
+    # 첫 번째 활성 계좌 기반으로 report_time, account_id, currency 결정
+    accounts = await s.account_service.list() if s.account_service else []
+    account = accounts[0] if accounts else None
+
+    report_time = compute_report_time(account.trading_hours_end) if account else None
+    account_id = account.account_id if account else ""
+    currency = account.currency if account else "KRW"
+
+    # Treasury 인스턴스 조회
+    treasury = None
+    if s.treasury_manager and account_id:
+        try:
+            treasury = s.treasury_manager.get(account_id)
+        except KeyError:
+            logger.warning("Treasury not found for account_id=%s", account_id)
+
+    kwargs: dict = {
+        "performance_tracker": s.performance_tracker,
+        "trade_recorder": s.trade_recorder,
+        "position_history": s.position_history,
+        "eventbus": s.eventbus,
+        "account_id": account_id,
+        "currency": currency,
+        "treasury": treasury,
+    }
+    if report_time is not None:
+        kwargs["report_time"] = report_time
+
+    s.daily_report_scheduler = DailyReportScheduler(**kwargs)
     await s.daily_report_scheduler.start()
-    logger.info("DailyReportScheduler 시작 완료")
+    logger.info(
+        "DailyReportScheduler 시작 완료 (account=%s, currency=%s)",
+        account_id,
+        currency,
+    )
 
 
 async def _init_stream_integration(

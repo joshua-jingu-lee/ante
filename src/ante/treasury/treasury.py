@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS treasury_state (
     currency           TEXT NOT NULL DEFAULT 'KRW',
     last_synced_at     TEXT
 );
+
+CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
+    account_id         TEXT NOT NULL,
+    snapshot_date      TEXT NOT NULL,
+    ante_eval_amount   REAL NOT NULL DEFAULT 0,
+    ante_purchase_amount REAL NOT NULL DEFAULT 0,
+    created_at         TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (account_id, snapshot_date)
+);
 """
 
 # 기존 key-value 테이블에서 계좌별 행 구조로 마이그레이션
@@ -920,6 +929,50 @@ class Treasury:
                 budget.last_updated.isoformat(),
             ),
         )
+
+    async def save_daily_snapshot(self, snapshot_date: str) -> None:
+        """당일 ante_eval_amount, ante_purchase_amount 스냅샷 저장.
+
+        Args:
+            snapshot_date: YYYY-MM-DD 형식의 날짜 문자열.
+        """
+        summary = self.get_summary()
+        await self._db.execute(
+            """INSERT INTO treasury_daily_snapshots
+               (account_id, snapshot_date, ante_eval_amount, ante_purchase_amount)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(account_id, snapshot_date) DO UPDATE SET
+                 ante_eval_amount = excluded.ante_eval_amount,
+                 ante_purchase_amount = excluded.ante_purchase_amount""",
+            (
+                self._account_id,
+                snapshot_date,
+                summary.get("ante_eval_amount", 0.0),
+                summary.get("ante_purchase_amount", 0.0),
+            ),
+        )
+
+    async def get_daily_snapshot(self, snapshot_date: str) -> dict[str, float] | None:
+        """특정 날짜의 스냅샷 조회.
+
+        Args:
+            snapshot_date: YYYY-MM-DD 형식의 날짜 문자열.
+
+        Returns:
+            {"ante_eval_amount": ..., "ante_purchase_amount": ...} 또는 None.
+        """
+        rows = await self._db.fetch_all(
+            """SELECT ante_eval_amount, ante_purchase_amount
+               FROM treasury_daily_snapshots
+               WHERE account_id = ? AND snapshot_date = ?""",
+            (self._account_id, snapshot_date),
+        )
+        if not rows:
+            return None
+        return {
+            "ante_eval_amount": float(rows[0]["ante_eval_amount"]),
+            "ante_purchase_amount": float(rows[0]["ante_purchase_amount"]),
+        }
 
     async def _log_transaction(
         self,
