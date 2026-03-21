@@ -86,6 +86,25 @@ When 컨테이너에서 실행: ante account list --format json
 docker exec ante-qa ante account list --format json
 ```
 
+### 별도 컨테이너 실행 (일회용)
+
+`When 별도 컨테이너에서 실행: {명령}` 패턴의 Step은 `docker run`으로 변환한다.
+기존 QA 컨테이너(ante-qa)와 독립된 일회용 컨테이너에서 실행되며, 종료 후 자동 삭제된다.
+주로 `ante init` 등 깨끗한 환경이 필요한 설치 프로세스 검증에 사용한다.
+
+```gherkin
+When 별도 컨테이너에서 실행: printf 'input\n' | ante init --dir /tmp/test
+```
+
+변환 결과:
+
+```bash
+docker run -i --rm ante-qa sh -c "printf 'input\n' | ante init --dir /tmp/test"
+```
+
+**주의:** 각 Scenario마다 새 컨테이너가 생성되는 것이 아니라, Feature 내에서 동일 컨테이너를 유지해야 하는 경우 `docker run -d` + `docker exec` + `docker rm` 패턴을 사용한다.
+단, install.feature처럼 각 시나리오가 독립적인 경우는 매번 `docker run --rm`으로 충분하다.
+
 ### 실행 결과 캡처
 
 CLI 실행 결과에서 다음을 캡처한다:

@@ -34,7 +34,8 @@ tests/tc/
 ├── trade/
 │   └── query.feature             # 거래 조회
 └── scenario/
-    ├── init.feature              # 최초 설치 및 초기화 검증 (전수 검사 시 최우선)
+    ├── install.feature           # 대화형 설치 프로세스 (ante init, 별도 컨테이너)
+    ├── init.feature              # 설치 후 초기화 상태 검증 (전수 검사 시 최우선)
     ├── full-pipeline.feature     # 계좌→전략→봇→거래→성과
     └── multi-account.feature     # 복수 계좌 독립성
 ```
