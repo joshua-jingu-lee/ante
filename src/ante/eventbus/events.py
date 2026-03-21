@@ -427,6 +427,23 @@ class MemberAuthFailedEvent(Event):
     reason: str = ""
 
 
+# ── 일일 리포트 (DailyReport) ──────────────────────
+
+
+@dataclass(frozen=True)
+class DailyReportEvent(Event):
+    """DailyReportScheduler → EventBus: 일일 성과 리포트 발행."""
+
+    account_id: str = ""
+    report_date: str = ""  # YYYY-MM-DD
+    trade_count: int = 0
+    has_trades: bool = False
+    daily_pnl: float = 0.0
+    daily_return: float = 0.0
+    net_trade_amount: float = 0.0
+    unrealized_pnl: float = 0.0
+
+
 # ── 잔고 동기화 (Treasury) ──────────────────────
 
 
