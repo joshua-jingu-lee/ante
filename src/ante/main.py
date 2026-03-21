@@ -100,6 +100,7 @@ class Services:
     approval_service: Any = None
     notification_service: Any = None
     telegram_receiver: Any = None
+    ipc_server: Any = None
     web_task: asyncio.Task | None = None  # type: ignore[type-arg]
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -978,6 +979,39 @@ async def _init_notification(s: Services) -> None:
         logger.info("TelegramCommandReceiver 건너뜀 — allowed_user_ids 비어있음")
 
 
+async def _init_ipc(s: Services) -> None:
+    """IPC 서버 초기화 — Unix 도메인 소켓 기반 프로세스 간 통신."""
+    from ante.core.registry import ServiceRegistry
+    from ante.ipc.registry import CommandRegistry, register_all_handlers
+    from ante.ipc.server import IPCServer
+    from ante.trade.reconciler import PositionReconciler
+
+    # PositionReconciler 인스턴스 생성
+    reconciler = PositionReconciler(
+        trade_service=s.trade_service,
+        eventbus=s.eventbus,
+    )
+
+    service_registry = ServiceRegistry(
+        account=s.account_service,
+        bot_manager=s.bot_manager,
+        treasury_manager=s.treasury_manager,
+        dynamic_config=s.dynamic_config,
+        approval=s.approval_service,
+        reconciler=reconciler,
+        eventbus=s.eventbus,
+    )
+
+    command_registry = CommandRegistry()
+    register_all_handlers(command_registry)
+
+    db_path = s.config.get("db.path", "db/ante.db")
+    socket_path = str(Path(db_path).parent / "ante.sock")
+    s.ipc_server = IPCServer(socket_path, service_registry, command_registry)
+    await s.ipc_server.start()
+    logger.info("IPC 서버 초기화 완료: %s", socket_path)
+
+
 async def _init_web(s: Services) -> None:
     """FastAPI 앱 생성 및 uvicorn 서버 시작."""
     web_enabled = s.config.get("web.enabled", False)
@@ -1113,6 +1147,10 @@ async def _shutdown(s: Services) -> None:
             pass
         logger.info("Web API 종료")
 
+    if s.ipc_server:
+        await s.ipc_server.stop()
+        logger.info("IPCServer 종료")
+
     if s.daily_report_scheduler:
         await s.daily_report_scheduler.stop()
         logger.info("DailyReportScheduler 종료")
@@ -1178,7 +1216,8 @@ async def main() -> None:
     6. Feed: DataPipeline, Backtest, Report
     7. Approval: ApprovalService
     8. Notification: Telegram(account_service 주입)
-    9. Web: FastAPI(account_service 주입)
+    9. IPC: Unix 도메인 소켓 서버
+    10. Web: FastAPI(account_service 주입)
 
     종료 순서: 역순 (상위 소비자부터 정리)
     """
@@ -1194,6 +1233,7 @@ async def main() -> None:
         await _init_feed(s)
         await _init_approval(s)
         await _init_notification(s)
+        await _init_ipc(s)
         await _init_web(s)
         await _run(s)
     finally:
