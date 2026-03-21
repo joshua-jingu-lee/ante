@@ -223,7 +223,7 @@ def bot_create(
     resolved_account_id = account_id
 
     async def _run_create() -> dict:
-        from ante.cli.commands._ipc import ipc_send
+        from ante.cli.commands.ipc_helpers import ipc_send
 
         args: dict = {
             "name": name,
@@ -260,7 +260,7 @@ def bot_remove(ctx: click.Context, bot_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_remove() -> dict:
-        from ante.cli.commands._ipc import ipc_send
+        from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("bot.remove", {"bot_id": bot_id}, actor=actor)
 

@@ -361,18 +361,22 @@ class TestConfigSetFormatOption:
     """ante config set KEY VALUE --format json."""
 
     def test_format_after_subcommand(self, runner: CliRunner) -> None:
-        mock_config = MagicMock()
-        mock_config.get.return_value = None
-        mock_dynamic = AsyncMock()
-        mock_dynamic.exists = AsyncMock(return_value=False)
-        mock_dynamic.set = AsyncMock()
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"success": True, "key": "custom.key", "value": "hello"},
+        }
 
-        with patch(
-            "ante.cli.commands.config._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_config, mock_dynamic, mock_db),
+        with (
+            patch(
+                "ante.cli.commands.ipc_helpers.IPCClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
         ):
             result = runner.invoke(
                 cli, ["config", "set", "custom.key", "hello", "--format", "json"]

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import click
 import pytest
 
-from ante.cli.commands._ipc import ipc_send
+from ante.cli.commands.ipc_helpers import ipc_send
 from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 
 # ── ipc_send 헬퍼 테스트 ──────────────────────────────
@@ -32,9 +32,10 @@ class TestIpcSend:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock"
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             result = await ipc_send("bot.create", {"name": "test"}, actor="user1")
 
@@ -51,9 +52,10 @@ class TestIpcSend:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock"
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             with pytest.raises(click.ClickException, match="서버가 실행 중이 아닙니다"):
                 await ipc_send("bot.create", {})
@@ -66,9 +68,10 @@ class TestIpcSend:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock"
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             with pytest.raises(click.ClickException, match="서버 응답 시간 초과"):
                 await ipc_send("bot.create", {})
@@ -85,9 +88,10 @@ class TestIpcSend:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock"
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             with pytest.raises(click.ClickException, match="EXECUTION_ERROR"):
                 await ipc_send("bot.remove", {"bot_id": "x"})
@@ -137,8 +141,10 @@ class TestBotCreateIpc:
     """bot create 커맨드가 IPC를 통해 서버에 전달되는지 검증."""
 
     @patch("ante.cli.commands.bot._create_services")
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_create_ipc(self, mock_ipc_cls, mock_socket, mock_services) -> None:
         """bot create가 bot.create IPC 커맨드를 전송한다."""
         mock_client = AsyncMock()
@@ -180,8 +186,10 @@ class TestBotCreateIpc:
         assert sent_args["account_id"] == "acc-1"
         assert sent_args["interval_seconds"] == 120
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_create_with_params(self, mock_ipc_cls, mock_socket) -> None:
         """--param 옵션이 IPC args에 포함된다."""
         mock_client = AsyncMock()
@@ -217,8 +225,10 @@ class TestBotCreateIpc:
 class TestBotRemoveIpc:
     """bot remove 커맨드가 IPC를 통해 서버에 전달되는지 검증."""
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_remove_ipc(self, mock_ipc_cls, mock_socket) -> None:
         """bot remove가 bot.remove IPC 커맨드를 전송한다."""
         mock_client = AsyncMock()
@@ -239,8 +249,10 @@ class TestBotRemoveIpc:
         assert call_args[0][0] == "bot.remove"
         assert call_args[0][1] == {"bot_id": "bot-abc"}
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_remove_server_error(self, mock_ipc_cls, mock_socket) -> None:
         """서버 에러 시 사용자에게 에러 메시지를 출력한다."""
         mock_client = AsyncMock()
@@ -262,8 +274,10 @@ class TestBotRemoveIpc:
 class TestTreasuryAllocateIpc:
     """treasury allocate 커맨드가 IPC를 통해 서버에 전달되는지 검증."""
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_allocate_ipc(self, mock_ipc_cls, mock_socket) -> None:
         """treasury allocate가 treasury.allocate IPC 커맨드를 전송한다."""
         mock_client = AsyncMock()
@@ -300,8 +314,10 @@ class TestTreasuryAllocateIpc:
         assert sent_args["bot_id"] == "bot-1"
         assert sent_args["amount"] == 100000.0
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_allocate_failure(self, mock_ipc_cls, mock_socket) -> None:
         """할당 실패 시(success=False) 에러 메시지를 출력한다."""
         mock_client = AsyncMock()
@@ -334,8 +350,10 @@ class TestTreasuryAllocateIpc:
 class TestTreasuryDeallocateIpc:
     """treasury deallocate 커맨드가 IPC를 통해 서버에 전달되는지 검증."""
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_deallocate_ipc(self, mock_ipc_cls, mock_socket) -> None:
         """treasury deallocate가 treasury.deallocate IPC 커맨드를 전송한다."""
         mock_client = AsyncMock()
@@ -372,8 +390,10 @@ class TestTreasuryDeallocateIpc:
         assert sent_args["bot_id"] == "bot-1"
         assert sent_args["amount"] == 50000.0
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_deallocate_failure(self, mock_ipc_cls, mock_socket) -> None:
         """회수 실패 시(success=False) 에러 메시지를 출력한다."""
         mock_client = AsyncMock()
@@ -409,8 +429,10 @@ class TestTreasuryDeallocateIpc:
 class TestServerNotRunning:
     """서버 미실행 시 사용자 친화적 메시지 테스트."""
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_create_server_not_running(self, mock_ipc_cls, mock_socket) -> None:
         """서버 미실행 시 사용자 친화적 에러 메시지를 출력한다."""
         mock_client = AsyncMock()
@@ -432,8 +454,10 @@ class TestServerNotRunning:
         assert result.exit_code != 0
         assert "서버가 실행 중이 아닙니다" in result.output
 
-    @patch("ante.cli.commands._ipc._get_socket_path", return_value="/tmp/test.sock")
-    @patch("ante.cli.commands._ipc.IPCClient")
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_allocate_server_not_running(
         self, mock_ipc_cls, mock_socket
     ) -> None:

@@ -86,10 +86,10 @@ class TestBotCreateWithParams:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path",
+                "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             result = runner.invoke(
                 cli,
@@ -126,10 +126,10 @@ class TestBotCreateWithParams:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path",
+                "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             result = runner.invoke(
                 cli,
@@ -176,10 +176,10 @@ class TestBotCreateWithParams:
 
         with (
             patch(
-                "ante.cli.commands._ipc._get_socket_path",
+                "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
-            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
             result = runner.invoke(
                 cli,

@@ -4,26 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 
 import click
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
-
-logger = logging.getLogger(__name__)
-
-
-async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
-    """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
-    try:
-        from ante.audit import AuditLogger
-
-        al = AuditLogger(db=db)
-        await al.initialize()
-        await al.log(**kwargs)
-    except Exception as e:
-        logger.warning("감사 로그 기록 실패: %s", e)
 
 
 @click.group()
@@ -38,7 +23,6 @@ def approval() -> None:
 @click.option("--params", "params_json", default="{}", help="실행 파라미터 (JSON)")
 @click.option("--reference-id", default="", help="참조 ID (report_id 등)")
 @click.option("--expires-in", default="", help="만료 기한 (예: 72h, 7d)")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
@@ -50,7 +34,6 @@ def request(
     params_json: str,
     reference_id: str,
     expires_in: str,
-    db_path: str,
 ) -> None:
     """결재 요청 생성."""
     fmt = get_formatter(ctx)
@@ -65,36 +48,27 @@ def request(
     expires_at = _parse_expires_in(expires_in) if expires_in else ""
 
     async def _create() -> dict:
-        from ante.approval import ApprovalService
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
+        from ante.cli.commands.ipc_helpers import ipc_send
 
-        db = Database(db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
-
-        req = await service.create(
-            type=approval_type,
-            requester=requester,
-            title=title,
-            body=body,
-            params=params,
-            reference_id=reference_id,
-            expires_at=expires_at,
+        return await ipc_send(
+            "approval.request",
+            {
+                "type": approval_type,
+                "requester": requester,
+                "title": title,
+                "body": body,
+                "params": params,
+                "reference_id": reference_id,
+                "expires_at": expires_at,
+            },
+            actor=requester,
         )
-        await db.close()
-        return {
-            "id": req.id,
-            "type": req.type,
-            "status": req.status,
-            "title": req.title,
-        }
 
     try:
         result = asyncio.run(_create())
-        fmt.success(f"결재 요청 생성: {result['id']}", result)
+        fmt.success(f"결재 요청 생성: {result.get('id', '')}", result)
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e
@@ -265,7 +239,6 @@ def review(
     default=None,
     help="수정할 파라미터 (JSON, 미지정 시 기존 값 유지)",
 )
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
@@ -274,7 +247,6 @@ def reopen(
     id: str,
     body: str | None,
     params_json: str | None,
-    db_path: str,
 ) -> None:
     """거절된 결재 재상신."""
     fmt = get_formatter(ctx)
@@ -289,33 +261,20 @@ def reopen(
             raise SystemExit(1) from e
 
     async def _reopen() -> dict:
-        from ante.approval import ApprovalService
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
+        from ante.cli.commands.ipc_helpers import ipc_send
 
-        db = Database(db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
-
-        req = await service.reopen(
-            id=id,
-            requester=requester,
-            body=body,
-            params=params,
-        )
-        await db.close()
-        return {
-            "id": req.id,
-            "type": req.type,
-            "status": req.status,
-            "title": req.title,
-        }
+        args: dict = {"approval_id": id}
+        if body is not None:
+            args["body"] = body
+        if params is not None:
+            args["params"] = params
+        return await ipc_send("approval.reopen", args, actor=requester)
 
     try:
         result = asyncio.run(_reopen())
-        fmt.success(f"결재 재상신: {result['id']}", result)
+        fmt.success(f"결재 재상신: {result.get('id', id)}", result)
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e
@@ -323,41 +282,24 @@ def reopen(
 
 @approval.command("cancel")
 @click.argument("id")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
-def cancel(ctx: click.Context, id: str, db_path: str) -> None:
+def cancel(ctx: click.Context, id: str) -> None:
     """결재 철회 (요청자만 가능)."""
     fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
 
     async def _cancel() -> dict:
-        from ante.approval import ApprovalService
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
+        from ante.cli.commands.ipc_helpers import ipc_send
 
-        db = Database(db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
-
-        req = await service.cancel(id=id, requester=requester)
-
-        await _audit_log(
-            db,
-            member_id=requester,
-            action="approval.cancel",
-            resource=f"approval:{id}",
-        )
-
-        await db.close()
-        return {"id": req.id, "status": req.status}
+        return await ipc_send("approval.cancel", {"approval_id": id}, actor=requester)
 
     try:
         result = asyncio.run(_cancel())
-        fmt.success(f"결재 철회: {result['id']}", result)
+        fmt.success(f"결재 철회: {result.get('id', id)}", result)
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e
@@ -365,41 +307,24 @@ def cancel(ctx: click.Context, id: str, db_path: str) -> None:
 
 @approval.command("approve")
 @click.argument("id")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
-def approve(ctx: click.Context, id: str, db_path: str) -> None:
+def approve(ctx: click.Context, id: str) -> None:
     """결재 승인."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _approve() -> dict:
-        from ante.approval import ApprovalService
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
+        from ante.cli.commands.ipc_helpers import ipc_send
 
-        db = Database(db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
-
-        req = await service.approve(id=id)
-
-        await _audit_log(
-            db,
-            member_id=actor,
-            action="approval.approve",
-            resource=f"approval:{id}",
-        )
-
-        await db.close()
-        return {"id": req.id, "status": req.status, "type": req.type}
+        return await ipc_send("approval.approve", {"approval_id": id}, actor=actor)
 
     try:
         result = asyncio.run(_approve())
-        fmt.success(f"결재 승인: {result['id']}", result)
+        fmt.success(f"결재 승인: {result.get('id', id)}", result)
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e
@@ -408,42 +333,28 @@ def approve(ctx: click.Context, id: str, db_path: str) -> None:
 @approval.command("reject")
 @click.argument("id")
 @click.option("--reason", default="", help="거절 사유")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
-def reject(ctx: click.Context, id: str, reason: str, db_path: str) -> None:
+def reject(ctx: click.Context, id: str, reason: str) -> None:
     """결재 거절."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _reject() -> dict:
-        from ante.approval import ApprovalService
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
+        from ante.cli.commands.ipc_helpers import ipc_send
 
-        db = Database(db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
-
-        req = await service.reject(id=id, reject_reason=reason)
-
-        await _audit_log(
-            db,
-            member_id=actor,
-            action="approval.reject",
-            resource=f"approval:{id}",
-            detail=reason,
+        return await ipc_send(
+            "approval.reject",
+            {"approval_id": id, "reason": reason},
+            actor=actor,
         )
-
-        await db.close()
-        return {"id": req.id, "status": req.status, "reject_reason": reason}
 
     try:
         result = asyncio.run(_reject())
-        fmt.success(f"결재 거절: {result['id']}", result)
+        fmt.success(f"결재 거절: {result.get('id', id)}", result)
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e

@@ -192,99 +192,101 @@ def positions(ctx: click.Context, account_id: str | None) -> None:
 @require_scope("broker:read")
 def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
     """내부 데이터와 증권사 데이터 대사."""
+    from ante.cli.middleware import get_member_id
+
     fmt = get_formatter(ctx)
 
-    async def _run_reconcile() -> dict:
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
-        from ante.trade.performance import PerformanceTracker
-        from ante.trade.position import PositionHistory
-        from ante.trade.reconciler import PositionReconciler
-        from ante.trade.recorder import TradeRecorder
-        from ante.trade.service import TradeService
+    # --fix 옵션이 있으면 IPC로 서버에 위임 (상태 변경)
+    if fix:
+        actor = get_member_id(ctx)
 
-        adapter, adapter_db = await _get_broker(account_id)
-        db = adapter_db or Database("db/ante.db")
-        if not adapter_db:
-            await db.connect()
+        async def _run_fix() -> dict:
+            from ante.cli.commands.ipc_helpers import ipc_send
+
+            args: dict = {"fix": True}
+            if account_id:
+                args["account_id"] = account_id
+            return await ipc_send("broker.reconcile", args, actor=actor)
+
         try:
-            eventbus = EventBus()
-            position_history = PositionHistory(db)
-            await position_history.initialize()
-            recorder = TradeRecorder(db, position_history)
-            await recorder.initialize()
-            performance = PerformanceTracker(db)
-            await performance.initialize()
-            trade_service = TradeService(recorder, position_history, performance)
+            result = _run(_run_fix())
+        except click.ClickException:
+            raise
+        except Exception as e:
+            fmt.error(str(e))
+            return
+    else:
+        # 읽기 전용: 기존 오프라인 방식 유지
+        async def _run_reconcile() -> dict:
+            from ante.core.database import Database
+            from ante.trade.performance import PerformanceTracker
+            from ante.trade.position import PositionHistory
+            from ante.trade.recorder import TradeRecorder
+            from ante.trade.service import TradeService
 
-            broker_positions = await adapter.get_account_positions()
-            internal_positions = await trade_service.get_all_positions()
+            adapter, adapter_db = await _get_broker(account_id)
+            db = adapter_db or Database("db/ante.db")
+            if not adapter_db:
+                await db.connect()
+            try:
+                position_history = PositionHistory(db)
+                await position_history.initialize()
+                recorder = TradeRecorder(db, position_history)
+                await recorder.initialize()
+                performance = PerformanceTracker(db)
+                await performance.initialize()
+                trade_service = TradeService(recorder, position_history, performance)
 
-            broker_map = {p["symbol"]: p for p in broker_positions}
-            internal_map = {p.symbol: p for p in internal_positions}
+                broker_positions = await adapter.get_account_positions()
+                internal_positions = await trade_service.get_all_positions()
 
-            all_symbols = set(broker_map.keys()) | set(internal_map.keys())
-            discrepancies = []
-            for symbol in sorted(all_symbols):
-                bp = broker_map.get(symbol)
-                ip = internal_map.get(symbol)
-                broker_qty = float(bp.get("quantity", 0)) if bp else 0.0
-                internal_qty = ip.quantity if ip else 0.0
-                if broker_qty != internal_qty:
-                    discrepancies.append(
-                        {
-                            "symbol": symbol,
-                            "broker_qty": broker_qty,
-                            "internal_qty": internal_qty,
-                            "diff": broker_qty - internal_qty,
-                        }
-                    )
+                broker_map = {p["symbol"]: p for p in broker_positions}
+                internal_map = {p.symbol: p for p in internal_positions}
 
-            corrections: list[dict] = []
-            if fix and discrepancies:
-                reconciler = PositionReconciler(
-                    trade_service=trade_service,
-                    eventbus=eventbus,
-                )
-                # 전체 봇 대사: 모든 봇 ID 수집
-                bot_ids = {p.bot_id for p in internal_positions if p.quantity > 0}
-                # 봇이 없어도 외부 매수가 있을 수 있으므로 기본 봇 사용
-                if not bot_ids:
-                    bot_ids = {"default"}
-                for bot_id in bot_ids:
-                    bot_corrections = await reconciler.reconcile(
-                        bot_id=bot_id,
-                        broker_positions=broker_positions,
-                    )
-                    corrections.extend(bot_corrections)
+                all_symbols = set(broker_map.keys()) | set(internal_map.keys())
+                discrepancies = []
+                for symbol in sorted(all_symbols):
+                    bp = broker_map.get(symbol)
+                    ip = internal_map.get(symbol)
+                    broker_qty = float(bp.get("quantity", 0)) if bp else 0.0
+                    internal_qty = ip.quantity if ip else 0.0
+                    if broker_qty != internal_qty:
+                        discrepancies.append(
+                            {
+                                "symbol": symbol,
+                                "broker_qty": broker_qty,
+                                "internal_qty": internal_qty,
+                                "diff": broker_qty - internal_qty,
+                            }
+                        )
 
-            return {
-                "total_symbols": len(all_symbols),
-                "discrepancies": discrepancies,
-                "match": len(discrepancies) == 0,
-                "fix_applied": fix and len(corrections) > 0,
-                "corrections": len(corrections),
-            }
-        finally:
-            await adapter.disconnect()
-            await db.close()
+                return {
+                    "total_symbols": len(all_symbols),
+                    "discrepancies": discrepancies,
+                    "match": len(discrepancies) == 0,
+                    "fix_applied": False,
+                    "corrections": 0,
+                }
+            finally:
+                await adapter.disconnect()
+                await db.close()
 
-    try:
-        result = _run(_run_reconcile())
-    except Exception as e:
-        fmt.error(str(e))
-        return
+        try:
+            result = _run(_run_reconcile())
+        except Exception as e:
+            fmt.error(str(e))
+            return
 
     if fmt.is_json:
         fmt.output(result)
     else:
-        click.echo(f"  총 종목 수     : {result['total_symbols']}")
-        click.echo(f"  대사 결과      : {'일치' if result['match'] else '불일치'}")
-        if result["discrepancies"]:
+        click.echo(f"  총 종목 수     : {result.get('total_symbols', 0)}")
+        click.echo(f"  대사 결과      : {'일치' if result.get('match') else '불일치'}")
+        if result.get("discrepancies"):
             click.echo("  불일치 종목:")
             fmt.table(
                 result["discrepancies"],
                 ["symbol", "broker_qty", "internal_qty", "diff"],
             )
         if result.get("fix_applied"):
-            click.echo(f"  자동 보정      : {result['corrections']}건 수행")
+            click.echo(f"  자동 보정      : {result.get('corrections', 0)}건 수행")
