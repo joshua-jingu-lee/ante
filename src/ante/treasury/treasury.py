@@ -337,6 +337,50 @@ class Treasury:
         )
         return True
 
+    async def release_budget(self, bot_id: str) -> float:
+        """봇의 할당액 전액을 미할당으로 환수하고 budget 레코드를 삭제한다.
+
+        봇 삭제 시 호출된다. bot_status_checker를 우회하여 어떤 상태에서든
+        환수가 가능하다 (delete_bot에서 이미 봇을 중지한 뒤 호출하므로).
+
+        Args:
+            bot_id: 대상 봇 ID.
+
+        Returns:
+            환수된 금액. budget이 없으면 0.0.
+        """
+        budget = self._budgets.pop(bot_id, None)
+        if not budget:
+            return 0.0
+
+        released = budget.allocated
+        self._unallocated += released
+
+        # DB에서 budget 레코드 삭제
+        await self._db.execute(
+            "DELETE FROM bot_budgets WHERE bot_id = ?",
+            (bot_id,),
+        )
+        await self._save_state()
+        await self._log_transaction(
+            bot_id, "release", released, "봇 삭제에 의한 예산 전액 환수"
+        )
+
+        # 해당 봇의 미체결 예약도 정리
+        pending_orders = [
+            oid for oid, (bid, _) in self._reservations.items() if bid == bot_id
+        ]
+        for oid in pending_orders:
+            self._reservations.pop(oid, None)
+
+        logger.info(
+            "예산 전액 환수: %s -- %s (account=%s)",
+            bot_id,
+            f"{released:,.0f}",
+            self._account_id,
+        )
+        return released
+
     async def update_budget(self, bot_id: str, target_amount: float) -> None:
         """봇의 예산을 목표 금액으로 변경.
 
