@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ante.strategy.base import Strategy
     from ante.strategy.context import StrategyContext
     from ante.strategy.snapshot import StrategySnapshot
+    from ante.treasury.manager import TreasuryManager  # noqa: F811
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class BotManager:
         rule_engine: RuleEngine | None = None,
         strategy_rule_configs: dict[str, list[dict[str, Any]]] | None = None,
         account_service: AccountService | None = None,
+        treasury_manager: TreasuryManager | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -63,6 +65,7 @@ class BotManager:
         self._rule_engine = rule_engine
         self._strategy_rule_configs = strategy_rule_configs or {}
         self._account_service = account_service
+        self._treasury_manager = treasury_manager
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
@@ -358,6 +361,23 @@ class BotManager:
         # 전략 스냅샷 정리
         if self._snapshot:
             self._snapshot.cleanup(bot_id)
+
+        # Treasury budget 환수
+        if self._treasury_manager:
+            try:
+                treasury = self._treasury_manager.get(bot.config.account_id)
+                released = await treasury.release_budget(bot_id)
+                if released > 0:
+                    logger.info(
+                        "봇 삭제 시 예산 환수: %s -- %s",
+                        bot_id,
+                        f"{released:,.0f}",
+                    )
+            except KeyError:
+                logger.debug(
+                    "봇 삭제 시 Treasury 미존재: account_id=%s",
+                    bot.config.account_id,
+                )
 
         bot.status = BotStatus.DELETED
         del self._bots[bot_id]

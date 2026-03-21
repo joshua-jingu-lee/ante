@@ -275,6 +275,7 @@ async def _init_trading(s: Services) -> None:
         context_factory=None,  # APIGateway 연결 후 갱신
         snapshot=s.strategy_snapshot,
         account_service=s.account_service,
+        treasury_manager=s.treasury_manager,
     )
     await s.bot_manager.initialize()
 
