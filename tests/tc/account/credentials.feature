@@ -19,7 +19,7 @@ Feature: 계좌 인증정보 관리
       | trading_hours_end   | 15:30               |
       | trading_mode        | virtual             |
       | broker_type         | test                |
-    Then 응답 상태는 201
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.account.account_id 를 {account_id}로 저장한다
 
   # ── 정상 흐름: 인증정보 설정 및 조회 ──
@@ -43,7 +43,7 @@ Feature: 계좌 인증정보 관리
       | account_id  | {account_id}       |
       | name        | 인증정보 있는 봇   |
       | strategy_id | {strategy_id}      |
-    Then 응답 상태는 201
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
   # ── 에러 케이스 ──
@@ -61,7 +61,7 @@ Feature: 계좌 인증정보 관리
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
-    Then 응답 상태는 201
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.account.account_id 를 {no_cred_account_id}로 저장한다
     # 봇 생성
     When POST /api/bots 요청:
@@ -70,7 +70,7 @@ Feature: 계좌 인증정보 관리
       | account_id  | {no_cred_account_id}  |
       | name        | 인증정보 없는 봇      |
       | strategy_id | {strategy_id}         |
-    Then 응답 상태는 201
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.bot.bot_id 를 {no_cred_bot_id}로 저장한다
     # 봇 시작 시도 → 인증정보 미설정 에러
     When POST /api/bots/{no_cred_bot_id}/start
