@@ -1082,6 +1082,22 @@ class Treasury:
             return None
         return self._row_to_snapshot(rows[0])
 
+    async def get_latest_snapshot(self) -> dict[str, Any] | None:
+        """가장 최근 일별 스냅샷 조회.
+
+        Returns:
+            최신 스냅샷 딕셔너리 또는 None.
+        """
+        rows = await self._db.fetch_all(
+            """SELECT * FROM treasury_daily_snapshots
+               WHERE account_id = ?
+               ORDER BY snapshot_date DESC LIMIT 1""",
+            (self._account_id,),
+        )
+        if not rows:
+            return None
+        return self._row_to_snapshot(rows[0])
+
     async def get_snapshots(
         self, start_date: str, end_date: str
     ) -> list[dict[str, Any]]:
