@@ -231,25 +231,27 @@ def account_info(ctx: click.Context, account_id: str) -> None:
 
 @account.command("suspend")
 @click.argument("account_id")
+@click.option("--reason", default="CLI 수동 정지", help="정지 사유")
 @click.pass_context
 @require_auth
 @require_scope("account:write")
-def account_suspend(ctx: click.Context, account_id: str) -> None:
+def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
     """계좌 거래 정지."""
+    from ante.cli.commands.ipc_helpers import ipc_send
+
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
-    async def _do_suspend() -> None:
-        svc, db = await _create_account_service()
-        try:
-            await svc.suspend(
-                account_id, reason="CLI 수동 정지", suspended_by=member_id
-            )
-        finally:
-            await db.close()
-
     try:
-        _run(_do_suspend())
+        _run(
+            ipc_send(
+                "account.suspend",
+                {"account_id": account_id, "reason": reason},
+                actor=member_id,
+            )
+        )
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
@@ -267,18 +269,21 @@ def account_suspend(ctx: click.Context, account_id: str) -> None:
 @require_scope("account:write")
 def account_activate(ctx: click.Context, account_id: str) -> None:
     """계좌 활성화."""
+    from ante.cli.commands.ipc_helpers import ipc_send
+
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
-    async def _do_activate() -> None:
-        svc, db = await _create_account_service()
-        try:
-            await svc.activate(account_id, activated_by=member_id)
-        finally:
-            await db.close()
-
     try:
-        _run(_do_activate())
+        _run(
+            ipc_send(
+                "account.activate",
+                {"account_id": account_id},
+                actor=member_id,
+            )
+        )
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e))
         raise SystemExit(1) from e

@@ -278,19 +278,47 @@ class TestAccountCreate:
 class TestAccountStateTransitions:
     """계좌 상태 전이 커맨드 테스트."""
 
-    def test_suspend(self, mock_account_service: AsyncMock) -> None:
-        """계좌 정지."""
-        result = _invoke(["account", "suspend", "domestic"])
+    def test_suspend(self) -> None:
+        """계좌 정지 (IPC 전환)."""
+        mock_response = {"status": "ok", "data": {}}
+
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = _invoke(["account", "suspend", "domestic"])
+
         assert result.exit_code == 0
         assert "정지 완료" in result.output
-        mock_account_service.suspend.assert_called_once()
+        mock_client.send.assert_called_once()
 
-    def test_activate(self, mock_account_service: AsyncMock) -> None:
-        """계좌 활성화."""
-        result = _invoke(["account", "activate", "domestic"])
+    def test_activate(self) -> None:
+        """계좌 활성화 (IPC 전환)."""
+        mock_response = {"status": "ok", "data": {}}
+
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = _invoke(["account", "activate", "domestic"])
+
         assert result.exit_code == 0
         assert "활성화 완료" in result.output
-        mock_account_service.activate.assert_called_once()
+        mock_client.send.assert_called_once()
 
     def test_delete_with_yes(self, mock_account_service: AsyncMock) -> None:
         """계좌 삭제 (--yes 옵션)."""

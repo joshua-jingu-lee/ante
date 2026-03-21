@@ -283,47 +283,51 @@ class TestBotCreateAccountOption:
         assert "활성 계좌가 없습니다" in result.output
 
 
-# ── system halt/activate ────────────────────────────────
+# ── system halt/activate (IPC) ──────────────────────────
 
 
 class TestSystemHaltActivate:
-    def test_system_halt_uses_account_service(self, runner):
-        """system halt가 AccountService.suspend_all() 호출."""
-        mock_account_svc = _make_mock_account_service()
-        mock_db = _make_mock_db()
+    def test_system_halt_sends_ipc(self, runner):
+        """system halt가 IPC system.halt 커맨드 전송."""
+        mock_response = {"status": "ok", "data": {"suspended_count": 2}}
 
-        with (
-            patch("ante.cli.commands.system._create_services") as mock_cs,
-            patch(
-                "ante.account.service.AccountService",
-                return_value=mock_account_svc,
-            ),
-        ):
-            mock_cs.return_value = (mock_db, MagicMock())
-            result = runner.invoke(cli, ["system", "halt"])
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = runner.invoke(cli, ["system", "halt"])
 
         assert result.exit_code == 0
         assert "HALTED" in result.output
-        mock_account_svc.suspend_all.assert_called_once()
+        mock_client.send.assert_called_once()
 
-    def test_system_activate_uses_account_service(self, runner):
-        """system activate가 AccountService.activate_all() 호출."""
-        mock_account_svc = _make_mock_account_service()
-        mock_db = _make_mock_db()
+    def test_system_activate_sends_ipc(self, runner):
+        """system activate가 IPC system.activate 커맨드 전송."""
+        mock_response = {"status": "ok", "data": {"activated_count": 2}}
 
-        with (
-            patch("ante.cli.commands.system._create_services") as mock_cs,
-            patch(
-                "ante.account.service.AccountService",
-                return_value=mock_account_svc,
-            ),
-        ):
-            mock_cs.return_value = (mock_db, MagicMock())
-            result = runner.invoke(cli, ["system", "activate"])
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = runner.invoke(cli, ["system", "activate"])
 
         assert result.exit_code == 0
         assert "ACTIVE" in result.output
-        mock_account_svc.activate_all.assert_called_once()
+        mock_client.send.assert_called_once()
 
 
 # ── treasury status --account ───────────────────────────

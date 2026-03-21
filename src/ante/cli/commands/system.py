@@ -27,28 +27,6 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_services():  # noqa: ANN202
-    from ante.core.database import Database
-    from ante.eventbus.bus import EventBus
-
-    db = Database("db/ante.db")
-    await db.connect()
-    eventbus = EventBus()
-    return db, eventbus
-
-
-async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
-    """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
-    try:
-        from ante.audit import AuditLogger
-
-        al = AuditLogger(db=db)
-        await al.initialize()
-        await al.log(**kwargs)
-    except Exception as e:
-        logger.warning("감사 로그 기록 실패: %s", e)
-
-
 def _is_process_alive(pid: int) -> bool:
     """프로세스가 살아있는지 확인."""
     try:
@@ -134,6 +112,17 @@ def stop(ctx: click.Context) -> None:
     fmt.success("종료 시그널 전송 완료", {"pid": pid})
 
 
+async def _create_services():  # noqa: ANN202
+    """오프라인 커맨드용 DB/EventBus 생성 헬퍼."""
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
+
+    db = Database("db/ante.db")
+    await db.connect()
+    eventbus = EventBus()
+    return db, eventbus
+
+
 @system.command()
 @format_option
 @click.pass_context
@@ -183,32 +172,15 @@ def status(ctx: click.Context) -> None:
 @require_scope("system:admin")
 def halt(ctx: click.Context, reason: str) -> None:
     """킬 스위치 발동 (전체 거래 중지)."""
+    from ante.cli.commands.ipc_helpers import ipc_send
+
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_halt() -> dict:
-        from ante.account.service import AccountService
-
-        db, eventbus = await _create_services()
-        try:
-            account_service = AccountService(db=db, eventbus=eventbus)
-            await account_service.initialize()
-            count = await account_service.suspend_all(reason=reason, suspended_by=actor)
-
-            await _audit_log(
-                db,
-                member_id=actor,
-                action="system.halt",
-                resource="system:kill_switch",
-                detail=reason,
-            )
-
-            return {"suspended_count": count}
-        finally:
-            await db.close()
-
-    result = _run(_run_halt())
-    fmt.success(f"시스템 HALTED — {result['suspended_count']}개 계좌 거래 중지", result)
+    result = _run(ipc_send("system.halt", {"reason": reason}, actor=actor))
+    data = result.get("data", result)
+    count = data.get("suspended_count", 0)
+    fmt.success(f"시스템 HALTED — {count}개 계좌 거래 중지", data)
 
 
 @system.command()
@@ -218,29 +190,12 @@ def halt(ctx: click.Context, reason: str) -> None:
 @require_scope("system:admin")
 def activate(ctx: click.Context, reason: str) -> None:
     """킬 스위치 해제 (거래 재개)."""
+    from ante.cli.commands.ipc_helpers import ipc_send
+
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_activate() -> dict:
-        from ante.account.service import AccountService
-
-        db, eventbus = await _create_services()
-        try:
-            account_service = AccountService(db=db, eventbus=eventbus)
-            await account_service.initialize()
-            count = await account_service.activate_all(activated_by=actor)
-
-            await _audit_log(
-                db,
-                member_id=actor,
-                action="system.activate",
-                resource="system:kill_switch",
-                detail=reason,
-            )
-
-            return {"activated_count": count}
-        finally:
-            await db.close()
-
-    result = _run(_run_activate())
-    fmt.success(f"시스템 ACTIVE — {result['activated_count']}개 계좌 거래 재개", result)
+    result = _run(ipc_send("system.activate", {"reason": reason}, actor=actor))
+    data = result.get("data", result)
+    count = data.get("activated_count", 0)
+    fmt.success(f"시스템 ACTIVE — {count}개 계좌 거래 재개", data)
