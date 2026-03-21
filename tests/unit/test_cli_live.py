@@ -199,12 +199,20 @@ class TestBotCommands:
             assert "bot-1" in result.output
 
     def test_bot_create(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.execute = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123"},
+        }
 
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -342,38 +350,67 @@ class TestTreasuryCommands:
             assert data["account_balance"] == 10000000.0
 
     def test_treasury_allocate_success(self, runner):
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_svc:
-            mock_treasury = AsyncMock()
-            mock_treasury.allocate = AsyncMock(return_value=True)
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_treasury, mock_db)
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"account_id": "acc-1", "bot_id": "bot-1", "success": True},
+        }
 
-            result = runner.invoke(cli, ["treasury", "allocate", "bot-1", "1000000"])
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
+            result = runner.invoke(
+                cli, ["treasury", "allocate", "bot-1", "1000000", "--account", "acc-1"]
+            )
             assert result.exit_code == 0
             assert "할당 완료" in result.output
 
     def test_treasury_allocate_fail(self, runner):
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_svc:
-            mock_treasury = AsyncMock()
-            mock_treasury.allocate = AsyncMock(return_value=False)
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_treasury, mock_db)
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"account_id": "acc-1", "bot_id": "bot-1", "success": False},
+        }
 
-            result = runner.invoke(cli, ["treasury", "allocate", "bot-1", "999999999"])
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
+            result = runner.invoke(
+                cli,
+                ["treasury", "allocate", "bot-1", "999999999", "--account", "acc-1"],
+            )
             assert result.exit_code == 0
             assert "실패" in result.output
 
     def test_treasury_deallocate_success(self, runner):
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_svc:
-            mock_treasury = AsyncMock()
-            mock_treasury.deallocate = AsyncMock(return_value=True)
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_treasury, mock_db)
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"account_id": "acc-1", "bot_id": "bot-1", "success": True},
+        }
 
-            result = runner.invoke(cli, ["treasury", "deallocate", "bot-1", "500000"])
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
+            result = runner.invoke(
+                cli,
+                ["treasury", "deallocate", "bot-1", "500000", "--account", "acc-1"],
+            )
             assert result.exit_code == 0
             assert "회수 완료" in result.output
 
