@@ -15,7 +15,7 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
         sell_commission_rate=Decimal("0"),
         default_account_id="test",
         default_name="테스트",
-        required_credentials=[],
+        required_credentials=["app_key", "app_secret"],
     ),
     "kis-domestic": BrokerPreset(
         exchange="KRX",
