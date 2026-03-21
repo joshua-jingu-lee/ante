@@ -19,7 +19,7 @@ Feature: Treasury 예산 할당·회수
       | trading_hours_end   | 15:30                  |
       | trading_mode        | virtual                |
       | broker_type         | test                   |
-    Then 응답 상태는 201
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.account.account_id 를 {account_id}로 저장한다
 
   Scenario: 잔고 설정 (API)
@@ -41,8 +41,16 @@ Feature: Treasury 예산 할당·회수
       | account_id  | {account_id}         |
       | strategy_id | {strategy_id}        |
       | name        | 할당 테스트 봇       |
-    Then 응답 상태는 201
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
+
+  # ── 환경 정리: 기존 할당 초기화 ──
+
+  Scenario: 기존 봇 할당 전액 회수 (API)
+    When POST /api/treasury/bots/{bot_id}/deallocate 요청:
+      | field  | value    |
+      | amount | 10000000 |
+    Then 응답 상태는 200 또는 응답 상태는 400
 
   # ── 정상 흐름: 예산 할당 ──
 

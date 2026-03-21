@@ -9,7 +9,7 @@ Feature: 대화형 설치 프로세스 (ante init)
 
   Scenario: 1. 대화형 초기 설정 실행
     # stdin: member_id / name / password / password확인 / 계좌등록(n) / 텔레그램(n) / data.go.kr(n) / DART(n)
-    When 별도 컨테이너에서 실행: printf 'qa-admin\nQA Admin\nqa-password\nqa-password\nn\nn\nn\n' | ante init --dir /tmp/test-init
+    When 별도 컨테이너에서 실행: printf 'qa-admin\nQA Admin\nqa-password\nqa-password\nn\nn\nn\nn\n' | ante init --dir /tmp/test-init
     Then 종료 코드는 0
     And stdout에 "초기 설정 완료" 가 포함되어 있다
     And stdout에 "qa-admin" 가 포함되어 있다
@@ -23,7 +23,7 @@ Feature: 대화형 설치 프로세스 (ante init)
     Then 종료 코드는 0
 
   Scenario: 4. 토큰 발급 확인
-    When 별도 컨테이너에서 실행: printf 'qa-admin\nQA Admin\nqa-password\nqa-password\nn\nn\nn\n' | ante init --dir /tmp/test-init2
+    When 별도 컨테이너에서 실행: printf 'qa-admin\nQA Admin\nqa-password\nqa-password\nn\nn\nn\nn\n' | ante init --dir /tmp/test-init2
     Then 종료 코드는 0
     And stdout에 "토큰" 가 포함되어 있다
     And stdout에 "Recovery Key" 가 포함되어 있다
