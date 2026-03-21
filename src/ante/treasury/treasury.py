@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ante.treasury.models import BotBudget
@@ -50,11 +50,20 @@ CREATE TABLE IF NOT EXISTS treasury_state (
 );
 
 CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
-    account_id         TEXT NOT NULL,
-    snapshot_date      TEXT NOT NULL,
-    ante_eval_amount   REAL NOT NULL DEFAULT 0,
-    ante_purchase_amount REAL NOT NULL DEFAULT 0,
-    created_at         TEXT DEFAULT (datetime('now')),
+    account_id           TEXT    NOT NULL,
+    snapshot_date        TEXT    NOT NULL,
+    total_asset          REAL    NOT NULL DEFAULT 0,
+    ante_eval_amount     REAL    NOT NULL DEFAULT 0,
+    ante_purchase_amount REAL    NOT NULL DEFAULT 0,
+    unallocated          REAL    NOT NULL DEFAULT 0,
+    account_balance      REAL    NOT NULL DEFAULT 0,
+    total_allocated      REAL    NOT NULL DEFAULT 0,
+    bot_count            INTEGER NOT NULL DEFAULT 0,
+    daily_pnl            REAL    DEFAULT 0.0,
+    daily_return         REAL    DEFAULT 0.0,
+    net_trade_amount     REAL    DEFAULT 0.0,
+    unrealized_pnl       REAL    DEFAULT 0.0,
+    created_at           TEXT    DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, snapshot_date)
 );
 """
@@ -99,6 +108,22 @@ ALTER TABLE treasury_state_new RENAME TO treasury_state;
 TREASURY_TRANSACTIONS_MIGRATION = """
 ALTER TABLE treasury_transactions ADD COLUMN account_id TEXT DEFAULT '';
 """
+
+# daily_snapshots 성과 필드 추가 마이그레이션
+_SNAPSHOT_MIGRATION_COLUMNS = [
+    ("total_asset", "REAL NOT NULL DEFAULT 0"),
+    ("unallocated", "REAL NOT NULL DEFAULT 0"),
+    ("account_balance", "REAL NOT NULL DEFAULT 0"),
+    ("total_allocated", "REAL NOT NULL DEFAULT 0"),
+    ("bot_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("daily_pnl", "REAL DEFAULT 0.0"),
+    ("daily_return", "REAL DEFAULT 0.0"),
+    ("net_trade_amount", "REAL DEFAULT 0.0"),
+    ("unrealized_pnl", "REAL DEFAULT 0.0"),
+]
+
+# 5년 초과 스냅샷 자동 삭제 기준
+_SNAPSHOT_RETENTION_DAYS = 365 * 5
 
 
 class Treasury:
@@ -178,10 +203,21 @@ class Treasury:
         except Exception:
             pass  # 이미 컬럼이 존재하면 무시
 
+        # 마이그레이션: daily_snapshots 성과 필드 추가
+        for col_name, col_def in _SNAPSHOT_MIGRATION_COLUMNS:
+            try:
+                await self._db.execute_script(
+                    f"ALTER TABLE treasury_daily_snapshots "
+                    f"ADD COLUMN {col_name} {col_def};"
+                )
+            except Exception:
+                pass  # 이미 컬럼이 존재하면 무시
+
     def _subscribe_events(self) -> None:
         """EventBus 이벤트 구독."""
         from ante.eventbus.events import (
             BotStoppedEvent,
+            DailyReportEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
@@ -197,6 +233,7 @@ class Treasury:
         )
         self._eventbus.subscribe(OrderFailedEvent, self._on_order_failed, priority=80)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped, priority=80)
+        self._eventbus.subscribe(DailyReportEvent, self._on_daily_report, priority=70)
 
     # -- 계좌 잔고 -----------------------------------------------
 
@@ -931,7 +968,10 @@ class Treasury:
         )
 
     async def save_daily_snapshot(self, snapshot_date: str) -> None:
-        """당일 ante_eval_amount, ante_purchase_amount 스냅샷 저장.
+        """당일 자산 현황만 스냅샷에 저장 (하위 호환).
+
+        DailyReportEvent 기반의 take_snapshot()이 주 진입점이며,
+        이 메서드는 이벤트 발행 전 자산 현황만 먼저 기록할 때 사용한다.
 
         Args:
             snapshot_date: YYYY-MM-DD 형식의 날짜 문자열.
@@ -939,40 +979,171 @@ class Treasury:
         summary = self.get_summary()
         await self._db.execute(
             """INSERT INTO treasury_daily_snapshots
-               (account_id, snapshot_date, ante_eval_amount, ante_purchase_amount)
-               VALUES (?, ?, ?, ?)
+               (account_id, snapshot_date, total_asset,
+                ante_eval_amount, ante_purchase_amount,
+                unallocated, account_balance, total_allocated, bot_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(account_id, snapshot_date) DO UPDATE SET
+                 total_asset = excluded.total_asset,
                  ante_eval_amount = excluded.ante_eval_amount,
-                 ante_purchase_amount = excluded.ante_purchase_amount""",
+                 ante_purchase_amount = excluded.ante_purchase_amount,
+                 unallocated = excluded.unallocated,
+                 account_balance = excluded.account_balance,
+                 total_allocated = excluded.total_allocated,
+                 bot_count = excluded.bot_count""",
             (
                 self._account_id,
                 snapshot_date,
+                summary.get("total_evaluation", 0.0),
                 summary.get("ante_eval_amount", 0.0),
                 summary.get("ante_purchase_amount", 0.0),
+                summary.get("unallocated", 0.0),
+                summary.get("account_balance", 0.0),
+                summary.get("total_allocated", 0.0),
+                summary.get("bot_count", 0),
             ),
         )
 
-    async def get_daily_snapshot(self, snapshot_date: str) -> dict[str, float] | None:
+    async def take_snapshot(self, event: object) -> None:
+        """DailyReportEvent 수신 시 자산 현황 + 성과 필드를 합쳐 스냅샷 저장.
+
+        Args:
+            event: DailyReportEvent 인스턴스.
+        """
+        from ante.eventbus.events import DailyReportEvent
+
+        if not isinstance(event, DailyReportEvent):
+            return
+
+        snapshot_date = event.report_date
+        summary = self.get_summary()
+
+        await self._db.execute(
+            """INSERT INTO treasury_daily_snapshots
+               (account_id, snapshot_date, total_asset,
+                ante_eval_amount, ante_purchase_amount,
+                unallocated, account_balance, total_allocated, bot_count,
+                daily_pnl, daily_return, net_trade_amount, unrealized_pnl)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(account_id, snapshot_date) DO UPDATE SET
+                 total_asset = excluded.total_asset,
+                 ante_eval_amount = excluded.ante_eval_amount,
+                 ante_purchase_amount = excluded.ante_purchase_amount,
+                 unallocated = excluded.unallocated,
+                 account_balance = excluded.account_balance,
+                 total_allocated = excluded.total_allocated,
+                 bot_count = excluded.bot_count,
+                 daily_pnl = excluded.daily_pnl,
+                 daily_return = excluded.daily_return,
+                 net_trade_amount = excluded.net_trade_amount,
+                 unrealized_pnl = excluded.unrealized_pnl""",
+            (
+                self._account_id,
+                snapshot_date,
+                summary.get("total_evaluation", 0.0),
+                summary.get("ante_eval_amount", 0.0),
+                summary.get("ante_purchase_amount", 0.0),
+                summary.get("unallocated", 0.0),
+                summary.get("account_balance", 0.0),
+                summary.get("total_allocated", 0.0),
+                summary.get("bot_count", 0),
+                event.daily_pnl,
+                event.daily_return,
+                event.net_trade_amount,
+                event.unrealized_pnl,
+            ),
+        )
+
+        # 오래된 스냅샷 자동 삭제
+        await self._cleanup_old_snapshots()
+
+        logger.info(
+            "일별 스냅샷 저장: account=%s, date=%s, pnl=%.0f",
+            self._account_id,
+            snapshot_date,
+            event.daily_pnl,
+        )
+
+    async def get_daily_snapshot(self, snapshot_date: str) -> dict[str, Any] | None:
         """특정 날짜의 스냅샷 조회.
 
         Args:
             snapshot_date: YYYY-MM-DD 형식의 날짜 문자열.
 
         Returns:
-            {"ante_eval_amount": ..., "ante_purchase_amount": ...} 또는 None.
+            스냅샷 딕셔너리 또는 None.
         """
         rows = await self._db.fetch_all(
-            """SELECT ante_eval_amount, ante_purchase_amount
-               FROM treasury_daily_snapshots
+            """SELECT * FROM treasury_daily_snapshots
                WHERE account_id = ? AND snapshot_date = ?""",
             (self._account_id, snapshot_date),
         )
         if not rows:
             return None
+        return self._row_to_snapshot(rows[0])
+
+    async def get_snapshots(
+        self, start_date: str, end_date: str
+    ) -> list[dict[str, Any]]:
+        """날짜 범위의 스냅샷 조회.
+
+        Args:
+            start_date: 시작 날짜 (YYYY-MM-DD, 포함).
+            end_date: 종료 날짜 (YYYY-MM-DD, 포함).
+
+        Returns:
+            스냅샷 딕셔너리 리스트 (날짜순 정렬).
+        """
+        rows = await self._db.fetch_all(
+            """SELECT * FROM treasury_daily_snapshots
+               WHERE account_id = ? AND snapshot_date >= ? AND snapshot_date <= ?
+               ORDER BY snapshot_date ASC""",
+            (self._account_id, start_date, end_date),
+        )
+        return [self._row_to_snapshot(r) for r in rows]
+
+    async def _cleanup_old_snapshots(self) -> None:
+        """5년 초과 스냅샷 자동 삭제."""
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=_SNAPSHOT_RETENTION_DAYS)
+        ).strftime("%Y-%m-%d")
+        await self._db.execute(
+            """DELETE FROM treasury_daily_snapshots
+               WHERE account_id = ? AND snapshot_date < ?""",
+            (self._account_id, cutoff),
+        )
+
+    @staticmethod
+    def _row_to_snapshot(row: Any) -> dict[str, Any]:
+        """DB 행을 스냅샷 딕셔너리로 변환."""
         return {
-            "ante_eval_amount": float(rows[0]["ante_eval_amount"]),
-            "ante_purchase_amount": float(rows[0]["ante_purchase_amount"]),
+            "account_id": row["account_id"],
+            "snapshot_date": row["snapshot_date"],
+            "total_asset": float(row["total_asset"]),
+            "ante_eval_amount": float(row["ante_eval_amount"]),
+            "ante_purchase_amount": float(row["ante_purchase_amount"]),
+            "unallocated": float(row["unallocated"]),
+            "account_balance": float(row["account_balance"]),
+            "total_allocated": float(row["total_allocated"]),
+            "bot_count": int(row["bot_count"]),
+            "daily_pnl": float(row["daily_pnl"]),
+            "daily_return": float(row["daily_return"]),
+            "net_trade_amount": float(row["net_trade_amount"]),
+            "unrealized_pnl": float(row["unrealized_pnl"]),
+            "created_at": row["created_at"],
         }
+
+    async def _on_daily_report(self, event: object) -> None:
+        """DailyReportEvent 핸들러 -- 일별 스냅샷 저장."""
+        from ante.eventbus.events import DailyReportEvent
+
+        if not isinstance(event, DailyReportEvent):
+            return
+
+        if not self._is_my_event(event):
+            return
+
+        await self.take_snapshot(event)
 
     async def _log_transaction(
         self,
