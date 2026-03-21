@@ -125,11 +125,30 @@ async def logout(
     },
 )
 async def me(
+    request: Request,
     member_service: Annotated[Any, Depends(get_member_service)],
     session_service: Annotated[Any, Depends(get_session_service)],
     ante_session: str | None = Cookie(default=None),
 ) -> MeResponse:
-    """현재 로그인 사용자 정보."""
+    """현재 로그인 사용자 정보.
+
+    Bearer 토큰 또는 세션 쿠키로 인증한다.
+    - Bearer 토큰: TokenAuthMiddleware가 request.state.member에 설정
+    - 세션 쿠키: ante_session 쿠키로 세션 조회
+    """
+    # 1) Bearer 토큰 인증 (미들웨어가 설정)
+    token_member = getattr(request.state, "member", None)
+    if token_member is not None:
+        return MeResponse(
+            member_id=token_member.member_id,
+            name=token_member.name,
+            type=token_member.type,
+            emoji=token_member.emoji,
+            role=token_member.role,
+            login_at="",
+        )
+
+    # 2) 세션 쿠키 인증
     if not ante_session:
         raise HTTPException(status_code=401, detail="인증이 필요합니다")
 

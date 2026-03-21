@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
@@ -10,6 +12,29 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
 from ante.web.session import SessionService  # noqa: E402
+
+
+@dataclass
+class FakeMember:
+    """Bearer 토큰 인증 테스트용 가짜 멤버."""
+
+    member_id: str
+    type: str = "agent"
+    role: str = "default"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = field(default_factory=list)
+    token_hash: str = ""
+    password_hash: str = ""
+    recovery_key_hash: str = ""
+    created_at: str = ""
+    created_by: str = ""
+    last_active_at: str = ""
+    suspended_at: str = ""
+    revoked_at: str = ""
+    token_expires_at: str = ""
 
 
 @pytest.fixture
@@ -205,3 +230,85 @@ class TestSessionService:
         await svc.create(member_id="user2")
         count = await svc.cleanup_expired()
         assert count >= 2
+
+
+# ── /me Bearer 토큰 인증 ─────────────────────────────
+
+
+class TestMeBearerToken:
+    """Bearer 토큰으로 /api/auth/me를 호출하는 테스트."""
+
+    @pytest.fixture
+    def agent_member(self) -> FakeMember:
+        return FakeMember(
+            member_id="agent-01",
+            type="agent",
+            role="default",
+            name="테스트 에이전트",
+            emoji="🤖",
+        )
+
+    @pytest.fixture
+    def mock_member_service(self, agent_member: FakeMember):
+        from unittest.mock import AsyncMock
+
+        svc = AsyncMock()
+        svc.authenticate = AsyncMock(return_value=agent_member)
+        svc.update_last_active = AsyncMock()
+        return svc
+
+    @pytest.fixture
+    def mock_session_service(self):
+        from unittest.mock import AsyncMock
+
+        svc = AsyncMock()
+        svc.validate = AsyncMock(return_value=None)
+        return svc
+
+    @pytest.fixture
+    def bearer_client(self, mock_member_service, mock_session_service):
+        app = create_app(
+            member_service=mock_member_service,
+            session_service=mock_session_service,
+        )
+        return TestClient(app)
+
+    def test_me_with_bearer_token(self, bearer_client, agent_member):
+        """Bearer 토큰으로 /me 호출 시 200과 멤버 정보 반환."""
+        resp = bearer_client.get(
+            "/api/auth/me",
+            headers={"Authorization": "Bearer ante_ak_test_token"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["member_id"] == "agent-01"
+        assert data["name"] == "테스트 에이전트"
+        assert data["type"] == "agent"
+        assert data["emoji"] == "🤖"
+        assert data["role"] == "default"
+
+    def test_me_with_invalid_bearer_token(
+        self, mock_member_service, mock_session_service
+    ):
+        """유효하지 않은 Bearer 토큰으로 /me 호출 시 401."""
+        from unittest.mock import AsyncMock
+
+        mock_member_service.authenticate = AsyncMock(
+            side_effect=PermissionError("인증 실패")
+        )
+        app = create_app(
+            member_service=mock_member_service,
+            session_service=mock_session_service,
+        )
+        client = TestClient(app)
+
+        resp = client.get(
+            "/api/auth/me",
+            headers={"Authorization": "Bearer invalid_token"},
+        )
+        assert resp.status_code == 401
+
+    def test_me_no_auth_returns_401(self, bearer_client):
+        """인증 수단 없이 /me 호출 시 401."""
+        resp = bearer_client.get("/api/auth/me")
+        assert resp.status_code == 401
