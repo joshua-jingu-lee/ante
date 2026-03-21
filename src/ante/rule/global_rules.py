@@ -11,28 +11,26 @@ class DailyLossLimitRule(Rule):
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_daily_loss = self.config.get("max_daily_loss_percent", 0.05)
 
-        if context.daily_pnl < 0 and context.total_pnl != 0:
-            daily_loss_amount = abs(context.daily_pnl)
-            base = context.total_pnl + daily_loss_amount
-            if base > 0:
-                daily_loss_percent = daily_loss_amount / base
+        if context.daily_pnl < 0 and context.prev_day_total_asset > 0:
+            daily_loss_percent = abs(context.daily_pnl) / context.prev_day_total_asset
 
-                if daily_loss_percent > max_daily_loss:
-                    return RuleEvaluation(
-                        rule_id=self.rule_id,
-                        rule_name=self.name,
-                        result=RuleResult.BLOCK,
-                        action=RuleAction.HALT_ACCOUNT,
-                        message=(
-                            f"Daily loss limit exceeded: "
-                            f"{daily_loss_percent:.2%} > {max_daily_loss:.2%}"
-                        ),
-                        metadata={
-                            "daily_loss_percent": daily_loss_percent,
-                            "max_daily_loss_percent": max_daily_loss,
-                            "daily_pnl": context.daily_pnl,
-                        },
-                    )
+            if daily_loss_percent > max_daily_loss:
+                return RuleEvaluation(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    result=RuleResult.BLOCK,
+                    action=RuleAction.HALT_ACCOUNT,
+                    message=(
+                        f"Daily loss limit exceeded: "
+                        f"{daily_loss_percent:.2%} > {max_daily_loss:.2%}"
+                    ),
+                    metadata={
+                        "daily_loss_percent": daily_loss_percent,
+                        "max_daily_loss_percent": max_daily_loss,
+                        "daily_pnl": context.daily_pnl,
+                        "prev_day_total_asset": context.prev_day_total_asset,
+                    },
+                )
 
         return RuleEvaluation(
             rule_id=self.rule_id,

@@ -66,6 +66,7 @@ class RuleContext:
     account_status: str = "active"
     daily_pnl: float = 0.0
     total_pnl: float = 0.0
+    prev_day_total_asset: float = 0.0
 
     # 추가 메타데이터
     metadata: dict[str, Any] = field(default_factory=dict)
