@@ -417,6 +417,39 @@ class BalanceSetResponse(BaseModel):
     updated_at: str
 
 
+class SnapshotItem(BaseModel):
+    """일별 자산 스냅샷 아이템."""
+
+    account_id: str
+    snapshot_date: str
+    total_asset: float
+    ante_eval_amount: float
+    ante_purchase_amount: float
+    unallocated: float
+    account_balance: float
+    total_allocated: float
+    bot_count: int
+    daily_pnl: float
+    daily_return: float
+    net_trade_amount: float
+    unrealized_pnl: float
+    created_at: str
+
+    model_config = ConfigDict(extra="allow")
+
+
+class SnapshotResponse(BaseModel):
+    """단일 스냅샷 응답."""
+
+    snapshot: SnapshotItem
+
+
+class SnapshotListResponse(BaseModel):
+    """스냅샷 목록 응답."""
+
+    snapshots: list[SnapshotItem]
+
+
 # ── 리포트 ──────────────────────────────────────────────
 
 

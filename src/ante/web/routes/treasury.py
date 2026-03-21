@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -328,3 +329,90 @@ async def set_balance(
         "total_balance": treasury.account_balance,
         "updated_at": datetime.now(UTC).isoformat(),
     }
+
+
+# ── 일별 자산 스냅샷 ──────────────────────────────────────
+
+
+def _resolve_treasury(
+    treasury: Any,
+    treasury_manager: Any | None,
+    account_id: str | None,
+) -> Any:
+    """account_id가 주어지면 해당 계좌의 Treasury를 반환한다."""
+    if account_id and treasury_manager is not None:
+        try:
+            return treasury_manager.get(account_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"계좌를 찾을 수 없습니다: {account_id}",
+            )
+    return treasury
+
+
+@router.get(
+    "/snapshots/latest",
+    responses={
+        404: {"description": "No snapshot found"},
+        503: {"description": "Treasury not available"},
+    },
+)
+async def get_latest_snapshot(
+    treasury: Annotated[Any, Depends(get_treasury)],
+    treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
+    account_id: str | None = None,
+) -> dict:
+    """가장 최근 일별 스냅샷 조회."""
+    target = _resolve_treasury(treasury, treasury_manager, account_id)
+    snapshot = await target.get_latest_snapshot()
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="스냅샷이 없습니다")
+    return {"snapshot": snapshot}
+
+
+@router.get(
+    "/snapshots",
+    responses={503: {"description": "Treasury not available"}},
+)
+async def list_snapshots(
+    treasury: Annotated[Any, Depends(get_treasury)],
+    treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
+    account_id: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """기간별 일별 스냅샷 목록."""
+    target = _resolve_treasury(treasury, treasury_manager, account_id)
+
+    if start_date is None:
+        start_date = "2000-01-01"
+    if end_date is None:
+        end_date = datetime.now(UTC).strftime("%Y-%m-%d")
+
+    snapshots = await target.get_snapshots(start_date, end_date)
+    return {"snapshots": snapshots}
+
+
+@router.get(
+    "/snapshots/{date}",
+    responses={
+        404: {"description": "Snapshot not found"},
+        503: {"description": "Treasury not available"},
+    },
+)
+async def get_snapshot_by_date(
+    date: str,
+    treasury: Annotated[Any, Depends(get_treasury)],
+    treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
+    account_id: str | None = None,
+) -> dict:
+    """특정일 스냅샷 조회."""
+    target = _resolve_treasury(treasury, treasury_manager, account_id)
+    snapshot = await target.get_daily_snapshot(date)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"스냅샷을 찾을 수 없습니다: {date}",
+        )
+    return {"snapshot": snapshot}
