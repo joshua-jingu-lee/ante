@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from ante.web.deps import (
     get_audit_logger_optional,
+    get_bot_manager_optional,
     get_treasury,
     get_treasury_manager_optional,
 )
@@ -168,6 +169,7 @@ async def list_transactions(
     response_model=BudgetOperationResponse,
     responses={
         400: {"description": "Insufficient funds or invalid amount"},
+        404: {"description": "Bot not found"},
         409: {"description": "Bot not stopped"},
         503: {"description": "Treasury not available"},
     },
@@ -177,10 +179,17 @@ async def allocate(
     body: BudgetChangeRequest,
     request: Request,
     treasury: Annotated[Any, Depends(get_treasury)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇에 예산 할당."""
     from ante.treasury.exceptions import BotNotStoppedError
+
+    if bot_manager is not None and bot_manager.get_bot(bot_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"봇을 찾을 수 없습니다: {bot_id}",
+        )
 
     try:
         success = await treasury.allocate(bot_id, body.amount)
@@ -218,6 +227,7 @@ async def allocate(
     response_model=BudgetOperationResponse,
     responses={
         400: {"description": "Insufficient available budget"},
+        404: {"description": "Bot not found"},
         409: {"description": "Bot not stopped"},
         503: {"description": "Treasury not available"},
     },
@@ -227,10 +237,17 @@ async def deallocate(
     body: BudgetChangeRequest,
     request: Request,
     treasury: Annotated[Any, Depends(get_treasury)],
+    bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 예산 회수."""
     from ante.treasury.exceptions import BotNotStoppedError
+
+    if bot_manager is not None and bot_manager.get_bot(bot_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"봇을 찾을 수 없습니다: {bot_id}",
+        )
 
     try:
         success = await treasury.deallocate(bot_id, body.amount)
