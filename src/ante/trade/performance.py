@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import statistics
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -141,7 +142,10 @@ class PerformanceTracker:
             ORDER BY trade_date ASC
         """
 
-        rows = await self._db.fetch_all(query, tuple(params))
+        try:
+            rows = await self._db.fetch_all(query, tuple(params))
+        except sqlite3.OperationalError:
+            return []
         return [
             DailySummary(
                 date=row["trade_date"],
@@ -192,7 +196,10 @@ class PerformanceTracker:
             ORDER BY week_start ASC
         """
 
-        rows = await self._db.fetch_all(query, tuple(params))
+        try:
+            rows = await self._db.fetch_all(query, tuple(params))
+        except sqlite3.OperationalError:
+            return []
         return [
             WeeklySummary(
                 week_start=row["week_start"],
@@ -247,7 +254,10 @@ class PerformanceTracker:
             ORDER BY yr ASC, mo ASC
         """
 
-        rows = await self._db.fetch_all(query, tuple(params))
+        try:
+            rows = await self._db.fetch_all(query, tuple(params))
+        except sqlite3.OperationalError:
+            return []
         return [
             MonthlySummary(
                 year=int(row["yr"]),
@@ -340,7 +350,11 @@ class PerformanceTracker:
         where = " AND ".join(conditions)
         query = f"SELECT * FROM trades WHERE {where} ORDER BY timestamp ASC"
 
-        rows = await self._db.fetch_all(query, tuple(params))
+        try:
+            rows = await self._db.fetch_all(query, tuple(params))
+        except sqlite3.OperationalError:
+            logger.debug("trades 테이블 없음 — 빈 목록 반환")
+            return []
         return [self._row_to_record(row) for row in rows]
 
     async def _calculate_pnl_per_trade(
@@ -356,13 +370,16 @@ class PerformanceTracker:
         pnl_list: list[float] = []
         for trade in sell_trades:
             # position_history에서 해당 거래의 pnl 조회
-            row = await self._db.fetch_one(
-                """SELECT pnl FROM position_history
-                   WHERE bot_id = ? AND symbol = ? AND action = 'sell'
-                     AND price = ? AND quantity = ?
-                   ORDER BY created_at DESC LIMIT 1""",
-                (trade.bot_id, trade.symbol, trade.price, trade.quantity),
-            )
+            try:
+                row = await self._db.fetch_one(
+                    """SELECT pnl FROM position_history
+                       WHERE bot_id = ? AND symbol = ? AND action = 'sell'
+                         AND price = ? AND quantity = ?
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (trade.bot_id, trade.symbol, trade.price, trade.quantity),
+                )
+            except sqlite3.OperationalError:
+                row = None
             if row:
                 pnl_list.append(float(row["pnl"]))
             else:
