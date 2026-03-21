@@ -98,28 +98,36 @@ class TestSystemCommands:
                 assert data["bot_count"] == 2
 
     def test_system_halt(self, runner):
-        with patch("ante.cli.commands.system._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock())
+        mock_response = {"status": "ok", "data": {"suspended_count": 2}}
+
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
 
             with patch(
-                "ante.account.service.AccountService",
-                return_value=self._mock_account_service(suspended=True),
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
             ):
                 result = runner.invoke(cli, ["system", "halt", "--reason", "test halt"])
                 assert result.exit_code == 0
                 assert "HALTED" in result.output
 
     def test_system_activate(self, runner):
-        with patch("ante.cli.commands.system._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock())
+        mock_response = {"status": "ok", "data": {"activated_count": 2}}
+
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
 
             with patch(
-                "ante.account.service.AccountService",
-                return_value=self._mock_account_service(suspended=False),
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
             ):
                 result = runner.invoke(cli, ["system", "activate"])
                 assert result.exit_code == 0
