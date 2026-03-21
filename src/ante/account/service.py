@@ -268,7 +268,11 @@ class AccountService:
         """
         account = await self.get(account_id)
         if account.status == AccountStatus.SUSPENDED:
-            return
+            from ante.account.errors import AccountAlreadySuspendedError
+
+            raise AccountAlreadySuspendedError(
+                f"이미 정지된 계좌입니다: '{account_id}'"
+            )
         account.status = AccountStatus.SUSPENDED
         account.updated_at = datetime.now(UTC)
 
