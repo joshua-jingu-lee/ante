@@ -12,6 +12,10 @@ from ante.web.deps import (
     get_treasury,
     get_treasury_manager_optional,
 )
+from ante.web.schemas import (
+    PortfolioHistoryResponse,
+    PortfolioValueResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +41,9 @@ def _resolve_treasury(
 
 @router.get(
     "/value",
+    response_model=PortfolioValueResponse,
+    response_model_exclude_none=True,
     responses={
-        404: {"description": "No snapshot found"},
         503: {"description": "Treasury not available"},
     },
 )
@@ -50,21 +55,34 @@ async def portfolio_value(
     """총 자산 가치 + 당일 손익 + 수익률 + 미실현 손익 (최신 스냅샷 기반)."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
     snapshot = await target.get_latest_snapshot()
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="스냅샷이 없습니다")
+    if snapshot is not None:
+        daily_return = snapshot["daily_return"]
+        return {
+            "total_value": snapshot["total_asset"],
+            "daily_pnl": snapshot["daily_pnl"],
+            "daily_pnl_pct": daily_return,
+            "daily_return": daily_return,
+            "unrealized_pnl": snapshot["unrealized_pnl"],
+            "snapshot_date": snapshot["snapshot_date"],
+            "updated_at": snapshot["created_at"],
+        }
 
+    # 스냅샷 미존재 시 get_summary() fallback (시스템 초기 구동)
+    summary = target.get_summary()
+    now = datetime.now(UTC).isoformat()
     return {
-        "total_value": snapshot["total_asset"],
-        "daily_pnl": snapshot["daily_pnl"],
-        "daily_return": snapshot["daily_return"],
-        "unrealized_pnl": snapshot["unrealized_pnl"],
-        "snapshot_date": snapshot["snapshot_date"],
-        "updated_at": snapshot["created_at"],
+        "total_value": summary.get("total_evaluation", 0.0),
+        "daily_pnl": 0.0,
+        "daily_pnl_pct": 0.0,
+        "daily_return": 0.0,
+        "unrealized_pnl": 0.0,
+        "updated_at": now,
     }
 
 
 @router.get(
     "/history",
+    response_model=PortfolioHistoryResponse,
     responses={
         503: {"description": "Treasury not available"},
     },

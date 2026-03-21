@@ -19,6 +19,8 @@ from ante.web.schemas import (
     BalanceSetResponse,
     BudgetListResponse,
     BudgetOperationResponse,
+    SnapshotListResponse,
+    SnapshotResponse,
     TransactionListResponse,
     TreasurySummaryResponse,
 )
@@ -353,8 +355,8 @@ def _resolve_treasury(
 
 @router.get(
     "/snapshots/latest",
+    response_model=SnapshotResponse,
     responses={
-        404: {"description": "No snapshot found"},
         503: {"description": "Treasury not available"},
     },
 )
@@ -366,13 +368,36 @@ async def get_latest_snapshot(
     """가장 최근 일별 스냅샷 조회."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
     snapshot = await target.get_latest_snapshot()
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="스냅샷이 없습니다")
-    return {"snapshot": snapshot}
+    if snapshot is not None:
+        return {"snapshot": snapshot}
+
+    # 스냅샷 미존재 시 get_summary() fallback (시스템 초기 구동)
+    summary = target.get_summary()
+    now = datetime.now(UTC)
+    today = now.strftime("%Y-%m-%d")
+    return {
+        "snapshot": {
+            "account_id": getattr(target, "account_id", ""),
+            "snapshot_date": today,
+            "total_asset": summary.get("total_evaluation", 0.0),
+            "ante_eval_amount": summary.get("ante_eval_amount", 0.0),
+            "ante_purchase_amount": summary.get("ante_purchase_amount", 0.0),
+            "unallocated": summary.get("unallocated", 0.0),
+            "account_balance": summary.get("account_balance", 0.0),
+            "total_allocated": summary.get("total_allocated", 0.0),
+            "bot_count": summary.get("bot_count", 0),
+            "daily_pnl": 0.0,
+            "daily_return": 0.0,
+            "net_trade_amount": 0.0,
+            "unrealized_pnl": 0.0,
+            "created_at": now.isoformat(),
+        }
+    }
 
 
 @router.get(
     "/snapshots",
+    response_model=SnapshotListResponse,
     responses={503: {"description": "Treasury not available"}},
 )
 async def list_snapshots(
@@ -396,6 +421,7 @@ async def list_snapshots(
 
 @router.get(
     "/snapshots/{date}",
+    response_model=SnapshotResponse,
     responses={
         404: {"description": "Snapshot not found"},
         503: {"description": "Treasury not available"},

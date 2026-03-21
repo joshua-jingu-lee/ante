@@ -53,6 +53,7 @@ _SNAPSHOT_20260319 = {
 @pytest.fixture
 def treasury():
     mock = MagicMock()
+    mock.account_id = "acc-001"
     mock.get_summary.return_value = {
         "total_evaluation": 50_000_000.0,
         "total_profit_loss": 500_000.0,
@@ -90,11 +91,17 @@ class TestTreasurySnapshotLatest:
         assert data["snapshot"]["daily_pnl"] == 500_000.0
         treasury.get_latest_snapshot.assert_awaited_once()
 
-    def test_returns_404_when_no_snapshot(self, client, treasury):
-        """스냅샷이 없으면 404."""
+    def test_fallback_to_summary_when_no_snapshot(self, client, treasury):
+        """스냅샷이 없으면 get_summary() fallback으로 기본 응답을 반환한다."""
         treasury.get_latest_snapshot = AsyncMock(return_value=None)
         resp = client.get("/api/treasury/snapshots/latest")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        snapshot = data["snapshot"]
+        assert snapshot["total_asset"] == 50_000_000.0
+        assert snapshot["daily_pnl"] == 0.0
+        assert snapshot["daily_return"] == 0.0
+        treasury.get_summary.assert_called_once()
 
 
 class TestTreasurySnapshotList:
@@ -153,16 +160,23 @@ class TestPortfolioValue:
         assert data["total_value"] == 50_000_000.0
         assert data["daily_pnl"] == 500_000.0
         assert data["daily_return"] == 1.01
+        assert data["daily_pnl_pct"] == 1.01
         assert data["unrealized_pnl"] == 2_000_000.0
         assert data["snapshot_date"] == "2026-03-20"
         assert "updated_at" in data
         treasury.get_latest_snapshot.assert_awaited_once()
 
-    def test_returns_404_when_no_snapshot(self, client, treasury):
-        """스냅샷이 없으면 404."""
+    def test_fallback_to_summary_when_no_snapshot(self, client, treasury):
+        """스냅샷이 없으면 get_summary() fallback으로 기본 응답을 반환한다."""
         treasury.get_latest_snapshot = AsyncMock(return_value=None)
         resp = client.get("/api/portfolio/value")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 50_000_000.0
+        assert data["daily_pnl"] == 0.0
+        assert data["daily_pnl_pct"] == 0.0
+        assert data["daily_return"] == 0.0
+        treasury.get_summary.assert_called()
 
 
 class TestPortfolioHistory:

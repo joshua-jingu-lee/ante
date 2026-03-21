@@ -747,26 +747,33 @@ class ConfigUpdateResponse(BaseModel):
 
 
 class PortfolioValueResponse(BaseModel):
-    """총 자산 가치 응답."""
+    """총 자산 가치 응답 (스냅샷 기반)."""
 
     total_value: float
     daily_pnl: float
     daily_pnl_pct: float
+    daily_return: float
+    unrealized_pnl: float = 0.0
+    snapshot_date: str | None = None
     updated_at: str
 
 
 class PortfolioHistoryPoint(BaseModel):
-    """자산 추이 데이터 포인트."""
+    """자산 추이 데이터 포인트 (스냅샷 기반)."""
 
     date: str
-    value: float
+    total_asset: float
+    daily_pnl: float
+    daily_return: float
+    unrealized_pnl: float
 
 
 class PortfolioHistoryResponse(BaseModel):
     """기간별 자산 추이 응답."""
 
     data: list[PortfolioHistoryPoint]
-    period: str
+    start_date: str
+    end_date: str
 
 
 # ── 감사 로그 ──────────────────────────────────────────────

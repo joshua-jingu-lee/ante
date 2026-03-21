@@ -72,11 +72,26 @@ class TestPortfolioValue:
         assert data["unrealized_pnl"] == 2_000_000.0
         assert data["snapshot_date"] == "2026-03-20"
 
-    def test_no_snapshot_returns_404(self, client, treasury):
-        """스냅샷이 없으면 404."""
+    def test_daily_pnl_pct_backward_compat(self, client):
+        """daily_pnl_pct 하위 호환 필드가 daily_return과 동일 값으로 포함된다."""
+        resp = client.get("/api/portfolio/value")
+        data = resp.json()
+        assert data["daily_pnl_pct"] == data["daily_return"]
+        assert data["daily_pnl_pct"] == 1.01
+
+    def test_no_snapshot_fallback_to_summary(self, client, treasury):
+        """스냅샷이 없으면 get_summary() fallback으로 기본 응답을 반환한다."""
         treasury.get_latest_snapshot = AsyncMock(return_value=None)
         resp = client.get("/api/portfolio/value")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_value"] == 50_000_000.0
+        assert data["daily_pnl"] == 0.0
+        assert data["daily_pnl_pct"] == 0.0
+        assert data["daily_return"] == 0.0
+        assert data["unrealized_pnl"] == 0.0
+        assert "updated_at" in data
+        treasury.get_summary.assert_called_once()
 
 
 class TestPortfolioHistory:
