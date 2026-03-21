@@ -341,6 +341,29 @@ class TestExternalPositions:
         assert treasury._external_purchase_amount == 3_000_000.0
         assert treasury._external_eval_amount == 3_100_000.0
 
+    async def test_live_mode_explicit(self, treasury):
+        """trading_mode='live' 명시해도 기존 동작과 동일."""
+        broker = FakeBroker(
+            positions=[
+                {
+                    "symbol": "035720",
+                    "quantity": 50.0,
+                    "avg_price": 60000.0,
+                    "eval_amount": 3_100_000.0,
+                },
+            ]
+        )
+        pos_history = FakePositionHistory(positions=[])
+
+        treasury.start_sync(
+            broker, pos_history, interval_seconds=100, trading_mode="live"
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        assert treasury._external_purchase_amount == 3_000_000.0
+        assert treasury._external_eval_amount == 3_100_000.0
+
     async def test_external_amounts_in_memory(self, treasury):
         """외부 종목 금액이 인메모리에 보관된다."""
         broker = FakeBroker(
@@ -452,3 +475,207 @@ class TestAntePurePerformance:
         assert summary["total_profit_loss"] == 200_000.0
         assert summary["external_purchase_amount"] == 0.0
         assert summary["external_eval_amount"] == 0.0
+
+
+# ── US-5: Virtual 모드 동기화 ──────────────────────
+
+
+class TestVirtualSync:
+    async def test_virtual_sync_calculates_from_positions(self, treasury):
+        """Virtual 모드에서 Trade DB 포지션 기반으로 purchase/eval 계산."""
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=70000.0,
+                ),
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="035720",
+                    quantity=50.0,
+                    avg_entry_price=60000.0,
+                ),
+            ]
+        )
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        # price_resolver 없으면 avg_entry_price 사용 -> eval == purchase
+        assert treasury._purchase_amount == 10_000_000.0  # 100*70000 + 50*60000
+        assert treasury._eval_amount == 10_000_000.0
+        assert treasury._external_purchase_amount == 0.0
+        assert treasury._external_eval_amount == 0.0
+
+    async def test_virtual_sync_with_price_resolver(self, treasury):
+        """Virtual 모드에서 price_resolver 사용 시 eval 금액이 시세 반영."""
+        prices = {"005930": 75000.0, "035720": 62000.0}
+
+        async def mock_price_resolver(symbol: str) -> float:
+            return prices[symbol]
+
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=70000.0,
+                ),
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="035720",
+                    quantity=50.0,
+                    avg_entry_price=60000.0,
+                ),
+            ]
+        )
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+            price_resolver=mock_price_resolver,
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        assert treasury._purchase_amount == 10_000_000.0  # 100*70000 + 50*60000
+        assert treasury._eval_amount == 10_600_000.0  # 100*75000 + 50*62000
+
+    async def test_virtual_sync_price_resolver_fallback(self, treasury):
+        """price_resolver 실패 시 avg_entry_price로 fallback."""
+
+        async def failing_resolver(symbol: str) -> float:
+            raise ConnectionError("시세 조회 실패")
+
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=70000.0,
+                ),
+            ]
+        )
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+            price_resolver=failing_resolver,
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        # fallback: avg_entry_price 사용
+        assert treasury._purchase_amount == 7_000_000.0
+        assert treasury._eval_amount == 7_000_000.0
+
+    async def test_virtual_sync_empty_positions(self, treasury):
+        """Virtual 모드에서 포지션이 없으면 0."""
+        pos_history = FakePositionHistory(positions=[])
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        assert treasury._purchase_amount == 0.0
+        assert treasury._eval_amount == 0.0
+
+    async def test_virtual_sync_get_summary_reflects_values(self, treasury):
+        """Virtual 동기화 후 get_summary()에 ante 필드가 정상 반영."""
+        prices = {"005930": 75000.0}
+
+        async def mock_resolver(symbol: str) -> float:
+            return prices[symbol]
+
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=70000.0,
+                ),
+            ]
+        )
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+            price_resolver=mock_resolver,
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        summary = treasury.get_summary()
+
+        # Virtual 모드: external = 0 이므로 ante = total
+        assert summary["ante_purchase_amount"] == 7_000_000.0  # 100 * 70000
+        assert summary["ante_eval_amount"] == 7_500_000.0  # 100 * 75000
+        assert summary["ante_profit_loss"] == 500_000.0  # 7.5M - 7M
+
+    async def test_virtual_sync_publishes_event(self, treasury, eventbus):
+        """Virtual 동기화 성공 시 BalanceSyncedEvent 발행."""
+        received = []
+        eventbus.subscribe(BalanceSyncedEvent, lambda e: received.append(e))
+
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot1",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=70000.0,
+                ),
+            ]
+        )
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        assert len(received) == 1
+        assert received[0].external_purchase_amount == 0.0
+        assert received[0].external_eval_amount == 0.0
+
+    async def test_virtual_sync_updates_last_synced(self, treasury):
+        """Virtual 동기화 후 last_synced_at 갱신."""
+        pos_history = FakePositionHistory(positions=[])
+
+        assert treasury.last_synced_at is None
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        assert treasury.last_synced_at is not None

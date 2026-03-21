@@ -562,35 +562,66 @@ def _init_context_factory(s: Services) -> None:
 
 async def _init_treasury_sync(s: Services, accounts: list) -> None:
     """각 계좌의 Treasury 잔고 동기화 시작 (Broker 연결 이후)."""
+    from ante.account.models import TradingMode
+
     sync_interval = s.config.get("treasury.sync_interval_seconds", 300)
 
     for account in accounts:
         try:
-            broker = await s.account_service.get_broker(account.account_id)
             treasury = s.treasury_manager.get(account.account_id)
+            trading_mode = getattr(account, "trading_mode", TradingMode.VIRTUAL)
+            is_virtual = trading_mode == TradingMode.VIRTUAL
 
-            account_no = getattr(broker, "account_no", "")
-            is_paper = getattr(broker, "is_paper", False)
-            formatted_account = (
-                f"{account_no[:8]}-{account_no[8:]}"
-                if len(account_no) >= 10
-                else account_no
-            )
-            treasury.set_account_info(
-                account_number=formatted_account,
-                is_demo_trading=is_paper,
-            )
+            if is_virtual:
+                # Virtual 모드: 브로커 없이 Trade DB 기반 동기화
+                price_resolver = None
+                if s.api_gateway:
+                    gateway = s.api_gateway
 
-            treasury.start_sync(
-                broker=broker,
-                position_history=s.position_history,
-                interval_seconds=sync_interval,
-            )
-            logger.info(
-                "Treasury 잔고 동기화 시작: account=%s (주기: %d초)",
-                account.account_id,
-                sync_interval,
-            )
+                    async def _resolve_price(symbol: str) -> float:
+                        return await gateway.get_current_price(symbol)
+
+                    price_resolver = _resolve_price
+
+                treasury.start_sync(
+                    broker=None,
+                    position_history=s.position_history,
+                    interval_seconds=sync_interval,
+                    trading_mode="virtual",
+                    price_resolver=price_resolver,
+                )
+                logger.info(
+                    "Treasury Virtual 동기화 시작: account=%s (주기: %d초)",
+                    account.account_id,
+                    sync_interval,
+                )
+            else:
+                # Live 모드: 브로커 기반 동기화
+                broker = await s.account_service.get_broker(account.account_id)
+
+                account_no = getattr(broker, "account_no", "")
+                is_paper = getattr(broker, "is_paper", False)
+                formatted_account = (
+                    f"{account_no[:8]}-{account_no[8:]}"
+                    if len(account_no) >= 10
+                    else account_no
+                )
+                treasury.set_account_info(
+                    account_number=formatted_account,
+                    is_demo_trading=is_paper,
+                )
+
+                treasury.start_sync(
+                    broker=broker,
+                    position_history=s.position_history,
+                    interval_seconds=sync_interval,
+                    trading_mode="live",
+                )
+                logger.info(
+                    "Treasury Live 동기화 시작: account=%s (주기: %d초)",
+                    account.account_id,
+                    sync_interval,
+                )
         except Exception:
             logger.warning(
                 "Treasury 동기화 시작 실패: account=%s — 건너뜀",
