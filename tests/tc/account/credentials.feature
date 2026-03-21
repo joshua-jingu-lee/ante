@@ -31,7 +31,7 @@ Feature: 계좌 인증정보 관리
   Scenario: 인증정보 조회 (CLI)
     When 컨테이너에서 실행: ante account credentials {account_id} --format json
     Then 종료 코드는 0
-    And stdout JSON의 .app_key 는 null이 아니다
+    And stdout JSON의 .credentials.app_key 는 null이 아니다
 
   Scenario: 인증정보 설정 후 봇 생성 및 시작 가능
     When GET /api/strategies
@@ -49,7 +49,7 @@ Feature: 계좌 인증정보 관리
   # ── 에러 케이스 ──
 
   Scenario: 인증정보 없는 계좌로 봇 시작 시 에러
-    # 인증정보 없는 새 계좌 생성
+    # 인증정보 없는 새 계좌 생성 (test 브로커, virtual 모드)
     When POST /api/accounts 요청:
       | field               | value                |
       | account_id          | qa-cred-acct-02      |
@@ -59,8 +59,8 @@ Feature: 계좌 인증정보 관리
       | timezone            | Asia/Seoul           |
       | trading_hours_start | 09:00                |
       | trading_hours_end   | 15:30                |
-      | trading_mode        | live                 |
-      | broker_type         | kis                  |
+      | trading_mode        | virtual              |
+      | broker_type         | test                 |
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {no_cred_account_id}로 저장한다
     # 봇 생성
