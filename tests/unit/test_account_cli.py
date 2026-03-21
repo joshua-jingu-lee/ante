@@ -263,8 +263,9 @@ class TestAccountCreate:
         created = _mock_account("test", "테스트", "TEST", "KRW", "test")
         mock_account_service.create.return_value = created
 
-        # 입력: 브로커 1(test), 계좌ID(기본), 이름(기본), 거래모드 1(virtual)
-        input_text = "1\n\n\n1\n"
+        # 입력: 브로커 1(test), 계좌ID(기본), 이름(기본), 거래모드 1(virtual),
+        # 인증정보: app_key=test, app_secret=test
+        input_text = "1\n\n\n1\ntest\ntest\n"
         result = _invoke(["account", "create"], input_text=input_text)
         assert result.exit_code == 0
         assert "생성 완료" in result.output
