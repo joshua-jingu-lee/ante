@@ -385,6 +385,40 @@ class TestInitInteractive:
         feed_env = target / "data" / ".feed" / ".env"
         assert not feed_env.exists()
 
+    def test_init_dart_prompt_eof_defaults_no(self, runner, tmp_path):
+        """DART 프롬프트에서 EOF 수신 시 Abort 없이 기본값 'N'으로 처리된다 (#673)."""
+        target = tmp_path / "config"
+        # 7개 입력만 제공 — DART 프롬프트에서 EOF 발생
+        input_lines = "\n".join(
+            [
+                "owner",  # Member ID
+                "홈트레이더",  # 이름
+                "pass1234",  # 패스워드
+                "pass1234",  # 패스워드 확인
+                "n",  # 계좌 등록? n
+                "n",  # 텔레그램? n
+                "n",  # data.go.kr? n
+                # DART 입력 없음 → EOF
+            ]
+        )
+
+        patches = _patch_bootstrap_and_auth()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(
+                cli, ["init", "--dir", str(target)], input=input_lines
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert "초기 설정 완료" in result.output
+        # DART 키가 저장되지 않아야 함
+        feed_env = target / "data" / ".feed" / ".env"
+        assert not feed_env.exists()
+
     def test_init_json_output(self, runner, tmp_path):
         """--format json 시 JSON 출력에 accounts 포함."""
         target = tmp_path / "config"
