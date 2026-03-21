@@ -177,19 +177,19 @@ async def update_account(
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
     """계좌 수정."""
-    from ante.account.errors import AccountDeletedError, AccountNotFoundError
+    from ante.account.errors import (
+        AccountDeletedError,
+        AccountImmutableFieldError,
+        AccountNotFoundError,
+    )
 
     # None이 아닌 필드만 업데이트 대상
     fields: dict[str, Any] = {}
     for field_name in (
         "name",
-        "exchange",
-        "currency",
         "timezone",
         "trading_hours_start",
         "trading_hours_end",
-        "trading_mode",
-        "broker_type",
         "credentials",
         "buy_commission_rate",
         "sell_commission_rate",
@@ -200,16 +200,12 @@ async def update_account(
                 from decimal import Decimal
 
                 value = Decimal(str(value))
-            elif field_name == "trading_mode":
-                from ante.account.models import TradingMode
+            fields[field_name] = value
 
-                try:
-                    value = TradingMode(value)
-                except ValueError:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"유효하지 않은 trading_mode: '{value}'",
-                    )
+    # 불변 필드가 요청에 포함된 경우 서비스 레이어에서 차단하도록 전달
+    for field_name in ("exchange", "currency", "trading_mode", "broker_type"):
+        value = getattr(body, field_name, None)
+        if value is not None:
             fields[field_name] = value
 
     if not fields:
@@ -221,6 +217,8 @@ async def update_account(
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except AccountImmutableFieldError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if audit_logger:
         await audit_logger.log(
