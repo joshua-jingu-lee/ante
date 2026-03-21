@@ -17,8 +17,11 @@ RUN pip install --no-cache-dir .
 # 런타임 디렉토리
 RUN mkdir -p config data db strategies
 
-# QA용 샘플 전략 파일
-COPY strategies/qa_sample.py strategies/
+# QA용 전략 파일 (qa_*.py)
+COPY strategies/qa_*.py strategies/
+
+# QA 전략 시딩 스크립트
+COPY scripts/qa_seed_strategies.py scripts/
 
 # QA용 설정
 COPY config/system.qa.toml config/system.toml

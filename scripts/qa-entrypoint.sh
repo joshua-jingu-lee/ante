@@ -63,6 +63,9 @@ else
     echo "[qa] 계좌 ${ACCOUNT_COUNT}개 확인됨 — 시드 생략"
 fi
 
+echo "[qa] QA 전략 레지스트리 시딩..."
+python scripts/qa_seed_strategies.py --strategies-dir strategies --db-path db/ante.db
+
 echo "[qa] QA 테스트용 동적 설정 시드 등록..."
 sqlite3 db/ante.db "INSERT OR IGNORE INTO dynamic_config (key, value, category, updated_at) VALUES ('risk.test_qa_key', '0', 'risk', datetime('now'));"
 
