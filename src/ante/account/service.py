@@ -109,6 +109,16 @@ class AccountService:
                 f"계좌 '{account.account_id}'가 이미 존재합니다."
             )
 
+        # DB에서 soft-delete된 동일 ID 존재 여부 확인
+        deleted = await self._db.fetch_one(
+            "SELECT account_id FROM accounts WHERE account_id = ? AND status = ?",
+            (account.account_id, AccountStatus.DELETED),
+        )
+        if deleted:
+            raise AccountAlreadyExistsError(
+                f"계좌 '{account.account_id}'가 이미 존재합니다 (삭제 상태)."
+            )
+
         # broker_type 유효성 검증 (프리셋에 정의된 것만 허용)
         if account.broker_type not in BROKER_PRESETS:
             raise InvalidBrokerTypeError(
