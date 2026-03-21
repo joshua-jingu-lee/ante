@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -77,12 +77,20 @@ class TestParseParam:
 
 class TestBotCreateWithParams:
     def test_create_with_params(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.execute = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123"},
+        }
 
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -103,26 +111,26 @@ class TestBotCreateWithParams:
             assert result.exit_code == 0
             assert "생성 완료" in result.output
 
-            # DB에 저장된 config_json에 params 포함 확인
-            # INSERT INTO bots 호출을 찾기 (audit 로그 호출과 구분)
-            bot_insert = [
-                c
-                for c in mock_db.execute.call_args_list
-                if "INSERT INTO bots" in str(c[0][0])
-            ]
-            assert len(bot_insert) == 1
-            config_json = bot_insert[0][0][1][4]
-            config = json.loads(config_json)
-            assert config["params"]["lookback"] == 20
-            assert config["params"]["threshold"] == 0.5
+            # IPC로 전달된 args에 params 포함 확인
+            sent_args = mock_client.send.call_args[0][1]
+            assert sent_args["params"]["lookback"] == 20
+            assert sent_args["params"]["threshold"] == 0.5
 
     def test_create_without_params(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.execute = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123"},
+        }
 
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -139,15 +147,8 @@ class TestBotCreateWithParams:
             assert result.exit_code == 0
 
             # params 키가 없어야 함
-            bot_insert = [
-                c
-                for c in mock_db.execute.call_args_list
-                if "INSERT INTO bots" in str(c[0][0])
-            ]
-            assert len(bot_insert) == 1
-            config_json = bot_insert[0][0][1][4]
-            config = json.loads(config_json)
-            assert "params" not in config
+            sent_args = mock_client.send.call_args[0][1]
+            assert "params" not in sent_args
 
     def test_create_invalid_param_format(self, runner):
         result = runner.invoke(
@@ -166,12 +167,20 @@ class TestBotCreateWithParams:
         assert "잘못된 파라미터 형식" in result.output
 
     def test_create_with_json_output(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.execute = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123", "params": {"window": 30}},
+        }
 
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             result = runner.invoke(
                 cli,
                 [

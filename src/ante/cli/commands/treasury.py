@@ -8,6 +8,7 @@ import click
 
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
+from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
 
 
@@ -84,32 +85,36 @@ def status(ctx: click.Context, account_id: str | None) -> None:
 @treasury.command()
 @click.argument("bot_id")
 @click.argument("amount", type=float)
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("treasury:admin")
-def allocate(ctx: click.Context, bot_id: str, amount: float) -> None:
+def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) -> None:
     """봇에 예산 할당."""
     fmt = get_formatter(ctx)
+    actor = _get_member_id(ctx)
 
-    from ante.treasury.exceptions import BotNotStoppedError
+    async def _run_allocate() -> dict:
+        from ante.cli.commands._ipc import ipc_send
 
-    async def _run_allocate() -> bool:
-        t, db = await _create_treasury()
-        try:
-            return await t.allocate(bot_id, amount)
-        finally:
-            await db.close()
+        return await ipc_send(
+            "treasury.allocate",
+            {"account_id": account_id, "bot_id": bot_id, "amount": amount},
+            actor=actor,
+        )
 
     try:
-        success = _run(_run_allocate())
-    except BotNotStoppedError as e:
+        result = _run(_run_allocate())
+    except click.ClickException:
+        raise
+    except Exception as e:
         fmt.error(str(e))
         return
 
-    if success:
+    if result.get("success"):
         fmt.success(
-            f"예산 할당 완료: {bot_id} ← {amount:,.0f}원",
-            {"bot_id": bot_id, "amount": amount},
+            f"예산 할당 완료: {bot_id} <- {amount:,.0f}원",
+            {"bot_id": bot_id, "amount": amount, "account_id": account_id},
         )
     else:
         fmt.error(
@@ -120,32 +125,36 @@ def allocate(ctx: click.Context, bot_id: str, amount: float) -> None:
 @treasury.command()
 @click.argument("bot_id")
 @click.argument("amount", type=float)
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("treasury:admin")
-def deallocate(ctx: click.Context, bot_id: str, amount: float) -> None:
+def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) -> None:
     """봇 예산 회수."""
     fmt = get_formatter(ctx)
+    actor = _get_member_id(ctx)
 
-    from ante.treasury.exceptions import BotNotStoppedError
+    async def _run_deallocate() -> dict:
+        from ante.cli.commands._ipc import ipc_send
 
-    async def _run_deallocate() -> bool:
-        t, db = await _create_treasury()
-        try:
-            return await t.deallocate(bot_id, amount)
-        finally:
-            await db.close()
+        return await ipc_send(
+            "treasury.deallocate",
+            {"account_id": account_id, "bot_id": bot_id, "amount": amount},
+            actor=actor,
+        )
 
     try:
-        success = _run(_run_deallocate())
-    except BotNotStoppedError as e:
+        result = _run(_run_deallocate())
+    except click.ClickException:
+        raise
+    except Exception as e:
         fmt.error(str(e))
         return
 
-    if success:
+    if result.get("success"):
         fmt.success(
-            f"예산 회수 완료: {bot_id} → {amount:,.0f}원",
-            {"bot_id": bot_id, "amount": amount},
+            f"예산 회수 완료: {bot_id} -> {amount:,.0f}원",
+            {"bot_id": bot_id, "amount": amount, "account_id": account_id},
         )
     else:
         fmt.error(f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)")

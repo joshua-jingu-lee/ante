@@ -223,47 +223,29 @@ def bot_create(
     resolved_account_id = account_id
 
     async def _run_create() -> dict:
-        import json
-        from uuid import uuid4
+        from ante.cli.commands._ipc import ipc_send
 
-        db, _, _, _ = await _create_services()
-        try:
-            bid = bot_id or f"bot-{uuid4().hex[:8]}"
-            config_dict: dict = {
-                "bot_id": bid,
-                "name": name,
-                "strategy_id": strategy,
-                "account_id": resolved_account_id,
-                "interval_seconds": interval,
-            }
-            if param_dict:
-                config_dict["params"] = param_dict
-            await db.execute(
-                """INSERT INTO bots
-                   (bot_id, name, strategy_id, account_id, config_json)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (bid, name, strategy, resolved_account_id, json.dumps(config_dict)),
-            )
-
-            await _audit_log(
-                db,
-                member_id=actor,
-                action="bot.create",
-                resource=f"bot:{bid}",
-                detail=f"strategy={strategy}, account={resolved_account_id}",
-            )
-
-            return config_dict
-        finally:
-            await db.close()
+        args: dict = {
+            "name": name,
+            "strategy_id": strategy,
+            "account_id": resolved_account_id,
+            "interval_seconds": interval,
+        }
+        if bot_id:
+            args["bot_id"] = bot_id
+        if param_dict:
+            args["params"] = param_dict
+        return await ipc_send("bot.create", args, actor=actor)
 
     try:
         result = _run(_run_create())
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e))
         return
 
-    fmt.success(f"봇 생성 완료: {result['bot_id']}", result)
+    fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
 
 
 @bot.command("remove")
@@ -277,37 +259,23 @@ def bot_remove(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_remove() -> bool:
-        db, _, _, _ = await _create_services()
-        try:
-            row = await db.fetch_one(
-                "SELECT bot_id FROM bots WHERE bot_id = ? AND status != 'deleted'",
-                (bot_id,),
-            )
-            if not row:
-                return False
-            await db.execute(
-                "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
-                " WHERE bot_id = ?",
-                (bot_id,),
-            )
+    async def _run_remove() -> dict:
+        from ante.cli.commands._ipc import ipc_send
 
-            await _audit_log(
-                db,
-                member_id=actor,
-                action="bot.delete",
-                resource=f"bot:{bot_id}",
-            )
+        return await ipc_send("bot.remove", {"bot_id": bot_id}, actor=actor)
 
-            return True
-        finally:
-            await db.close()
-
-    if not _run(_run_remove()):
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+    try:
+        result = _run(_run_remove())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        fmt.error(str(e))
         return
 
-    fmt.success(f"봇 삭제 완료: {bot_id}")
+    if result.get("removed"):
+        fmt.success(f"봇 삭제 완료: {bot_id}")
+    else:
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
 
 
 @bot.command("signal-key")

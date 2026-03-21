@@ -186,16 +186,20 @@ class TestBotListAccountFilter:
 class TestBotCreateAccountOption:
     def test_bot_create_with_account_option(self, runner):
         """--account 옵션으로 계좌 지정."""
-        mock_db = _make_mock_db()
-        mock_account_svc = _make_mock_account_service()
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123"},
+        }
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
-            mock_cs.return_value = (
-                mock_db,
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
+        with (
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -212,19 +216,30 @@ class TestBotCreateAccountOption:
 
         assert result.exit_code == 0
         assert "봇 생성 완료" in result.output
-        # 첫 번째 execute 호출이 INSERT (audit_log 이전)
-        insert_call = mock_db.execute.call_args_list[0]
-        insert_args = insert_call[0][1]
-        assert insert_args[3] == "domestic"
+        # IPC로 전달된 account_id 확인
+        sent_args = mock_client.send.call_args[0][1]
+        assert sent_args["account_id"] == "domestic"
 
     def test_bot_create_interactive_single_account(self, runner):
         """계좌 미지정 + 활성 계좌 1개 → 자동 선택."""
-        mock_db = _make_mock_db()
         mock_account_svc = _make_mock_account_service([_MOCK_ACCOUNT_1])
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123"},
+        }
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
+        with (
+            patch("ante.cli.commands.bot._create_services") as mock_cs,
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             mock_cs.return_value = (
-                mock_db,
+                _make_mock_db(),
                 MagicMock(),
                 MagicMock(),
                 mock_account_svc,
@@ -240,14 +255,26 @@ class TestBotCreateAccountOption:
 
     def test_bot_create_interactive_multiple_accounts(self, runner):
         """계좌 미지정 + 활성 계좌 여러 개 → 대화형 선택."""
-        mock_db = _make_mock_db()
         mock_account_svc = _make_mock_account_service(
             [_MOCK_ACCOUNT_1, _MOCK_ACCOUNT_2]
         )
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"bot_id": "bot-abc123"},
+        }
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
+        with (
+            patch("ante.cli.commands.bot._create_services") as mock_cs,
+            patch(
+                "ante.cli.commands._ipc._get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands._ipc.IPCClient", return_value=mock_client),
+        ):
             mock_cs.return_value = (
-                mock_db,
+                _make_mock_db(),
                 MagicMock(),
                 MagicMock(),
                 mock_account_svc,
