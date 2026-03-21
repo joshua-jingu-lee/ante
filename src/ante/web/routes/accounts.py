@@ -220,7 +220,7 @@ async def update_account(
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e))
 
     if audit_logger:
         await audit_logger.log(
@@ -291,7 +291,7 @@ async def activate_account(
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e))
 
     account = await account_service.get(account_id)
 
