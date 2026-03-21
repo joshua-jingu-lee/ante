@@ -75,6 +75,12 @@ class FakeAccountService:
     async def suspend(self, account_id: str, reason: str, suspended_by: str) -> None:
         if account_id not in self._accounts:
             raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
+        from ante.account.errors import AccountAlreadySuspendedError
+
+        if self._accounts[account_id].status == AccountStatus.SUSPENDED:
+            raise AccountAlreadySuspendedError(
+                f"이미 정지된 계좌입니다: '{account_id}'"
+            )
         self._accounts[account_id].status = AccountStatus.SUSPENDED
 
     async def activate(self, account_id: str, activated_by: str) -> None:
@@ -390,6 +396,24 @@ class TestSuspendAccount:
             json={"reason": "없는 계좌"},
         )
         assert resp.status_code == 404
+
+    def test_suspend_already_suspended_returns_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """이미 정지된 계좌를 재정지하면 409 Conflict를 반환해야 한다 (GH-651)."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post(
+            "/api/accounts/test-account/suspend",
+            json={"reason": "재정지 시도"},
+        )
+        assert resp.status_code == 409
+        data = resp.json()
+        assert "이미 정지된 계좌" in data["detail"]
 
 
 class TestActivateAccount:

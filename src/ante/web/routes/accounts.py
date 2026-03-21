@@ -243,7 +243,7 @@ async def suspend_account(
     body: AccountSuspendRequest | None = None,
 ) -> dict[str, Any]:
     """계좌 정지."""
-    from ante.account.errors import AccountNotFoundError
+    from ante.account.errors import AccountAlreadySuspendedError, AccountNotFoundError
 
     reason = (body.reason if body else None) or "dashboard"
     suspended_by = getattr(request.state, "member_id", "dashboard")
@@ -254,6 +254,8 @@ async def suspend_account(
         )
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except AccountAlreadySuspendedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
     account = await account_service.get(account_id)
 

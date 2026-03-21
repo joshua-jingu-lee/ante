@@ -25,6 +25,12 @@ class InvalidBrokerTypeError(AccountError):
     pass
 
 
+class AccountAlreadySuspendedError(AccountError):
+    """이미 정지 상태인 계좌에 대한 재정지 시도."""
+
+    pass
+
+
 class AccountDeletedError(AccountError):
     """DELETED 상태 계좌에 대한 수정/활성화 시도."""
 
