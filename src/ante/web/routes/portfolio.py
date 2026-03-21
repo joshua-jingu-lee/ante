@@ -60,7 +60,6 @@ async def portfolio_value(
         return {
             "total_value": snapshot["total_asset"],
             "daily_pnl": snapshot["daily_pnl"],
-            "daily_pnl_pct": daily_return,
             "daily_return": daily_return,
             "unrealized_pnl": snapshot["unrealized_pnl"],
             "snapshot_date": snapshot["snapshot_date"],
@@ -73,7 +72,6 @@ async def portfolio_value(
     return {
         "total_value": summary.get("total_evaluation", 0.0),
         "daily_pnl": 0.0,
-        "daily_pnl_pct": 0.0,
         "daily_return": 0.0,
         "unrealized_pnl": 0.0,
         "updated_at": now,

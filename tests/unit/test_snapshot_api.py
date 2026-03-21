@@ -160,7 +160,6 @@ class TestPortfolioValue:
         assert data["total_value"] == 50_000_000.0
         assert data["daily_pnl"] == 500_000.0
         assert data["daily_return"] == 1.01
-        assert data["daily_pnl_pct"] == 1.01
         assert data["unrealized_pnl"] == 2_000_000.0
         assert data["snapshot_date"] == "2026-03-20"
         assert "updated_at" in data
@@ -174,7 +173,6 @@ class TestPortfolioValue:
         data = resp.json()
         assert data["total_value"] == 50_000_000.0
         assert data["daily_pnl"] == 0.0
-        assert data["daily_pnl_pct"] == 0.0
         assert data["daily_return"] == 0.0
         treasury.get_summary.assert_called()
 

@@ -751,7 +751,6 @@ class PortfolioValueResponse(BaseModel):
 
     total_value: float
     daily_pnl: float
-    daily_pnl_pct: float
     daily_return: float
     unrealized_pnl: float = 0.0
     snapshot_date: str | None = None
