@@ -5,7 +5,7 @@ Feature: Treasury 예산 할당·회수
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
 
-  # ── 사전 준비: 계좌 + 잔고 + 봇 생성 ──
+  # ── 사전 준비: 계좌 + 잔고 + 전략 확보 + 봇 생성 ──
 
   Scenario: 할당 테스트용 계좌 생성 (API)
     When POST /api/accounts 요청:
@@ -29,11 +29,17 @@ Feature: Treasury 예산 할당·회수
     Then 응답 상태는 200
     And 응답 body.total_balance 는 10000000
 
+  Scenario: QA 전략 확보
+    When GET /api/strategies
+    Then 응답 상태는 200
+    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
+
   Scenario: 할당 테스트용 봇 생성 (API)
     When POST /api/bots 요청:
-      | field      | value            |
-      | account_id | {account_id}     |
-      | name       | 할당 테스트 봇   |
+      | field       | value            |
+      | account_id  | {account_id}     |
+      | strategy_id | {strategy_id}    |
+      | name        | 할당 테스트 봇   |
     Then 응답 상태는 201
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
