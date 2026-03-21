@@ -44,13 +44,21 @@ Feature: Treasury 예산 할당·회수
     Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
-  # ── 환경 정리: 기존 할당 초기화 ──
+  # ── 환경 정리: 기존 봇 삭제 후 재생성 (할당 초기화) ──
 
-  Scenario: 기존 봇 할당 전액 회수 (API)
-    When POST /api/treasury/bots/{bot_id}/deallocate 요청:
-      | field  | value    |
-      | amount | 10000000 |
-    Then 응답 상태는 200 또는 응답 상태는 400
+  Scenario: 기존 할당 봇 삭제 (API)
+    When DELETE /api/bots/{bot_id}
+    Then 응답 상태는 204 또는 응답 상태는 404
+
+  Scenario: 할당 테스트 봇 재생성 (API)
+    When POST /api/bots 요청:
+      | field       | value                |
+      | bot_id      | qa-alloc-bot-01      |
+      | account_id  | {account_id}         |
+      | strategy_id | {strategy_id}        |
+      | name        | 할당 테스트 봇       |
+    Then 응답 상태는 201
+    And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
   # ── 정상 흐름: 예산 할당 ──
 
