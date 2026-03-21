@@ -353,7 +353,7 @@ def test_broker_preset_test_values():
     assert preset.currency == "KRW"
     assert preset.buy_commission_rate == Decimal("0")
     assert preset.sell_commission_rate == Decimal("0")
-    assert preset.required_credentials == []
+    assert preset.required_credentials == ["app_key", "app_secret"]
 
 
 def test_broker_preset_kis_domestic_values():
