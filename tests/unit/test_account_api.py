@@ -442,6 +442,18 @@ class TestActivateAccount:
         resp = client.post("/api/accounts/nonexistent/activate")
         assert resp.status_code == 404
 
+    def test_activate_deleted_returns_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account.status = AccountStatus.DELETED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post("/api/accounts/test-account/activate")
+        assert resp.status_code == 409
+
 
 class TestDeleteAccount:
     """DELETE /api/accounts/:id."""
