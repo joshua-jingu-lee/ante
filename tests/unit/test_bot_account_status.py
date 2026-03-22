@@ -57,6 +57,13 @@ class SimpleStrategy(Strategy):
         return []
 
 
+class NoMetaStrategy(Strategy):
+    """meta 속성이 없는 전략 (exchange 검증 불가, 상태 검증은 여전히 필요)."""
+
+    async def on_step(self, context):
+        return []
+
+
 # ── Fixtures ─────────────────────────────────────
 
 
@@ -168,3 +175,26 @@ class TestBotAccountStatusValidation:
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="deleted-acct")
         with pytest.raises(AccountDeletedException, match="삭제된 계좌"):
             await manager.create_bot(config, SimpleStrategy, ctx)
+
+    async def test_no_meta_strategy_still_validates_status(
+        self, manager, account_service, ctx
+    ):
+        """meta 속성이 없는 전략이라도 계좌 상태 검증은 수행되어야 한다."""
+        account = Account(
+            account_id="suspended-acct2",
+            name="정지계좌2",
+            exchange="KRX",
+            currency="KRW",
+            broker_type="test",
+            status=AccountStatus.ACTIVE,
+        )
+        await account_service.create(account)
+        await account_service.suspend(
+            "suspended-acct2", reason="test", suspended_by="test"
+        )
+
+        config = BotConfig(
+            bot_id="bot-no-meta", strategy_id="s1", account_id="suspended-acct2"
+        )
+        with pytest.raises(AccountSuspendedError, match="정지된 계좌"):
+            await manager.create_bot(config, NoMetaStrategy, ctx)

@@ -197,18 +197,16 @@ class BotManager:
                     f"파라미터가 다른 전략은 별도 파일로 작성하세요."
                 )
 
-        # 계좌 상태 및 exchange 호환성 검증
-        if self._account_service and hasattr(strategy_cls, "meta"):
-            strategy_exchange = getattr(strategy_cls.meta, "exchange", "KRX")
-            strategy_name = getattr(strategy_cls.meta, "name", config.strategy_id)
-            account = await self._account_service.get(config.account_id)
-
-            # 상태 검증 (exchange 검증보다 선행)
+        # 계좌 상태 검증 (strategy meta 유무와 무관하게 독립 실행)
+        account = None
+        if self._account_service:
             from ante.account.errors import (
                 AccountDeletedException,
                 AccountSuspendedError,
             )
             from ante.account.models import AccountStatus
+
+            account = await self._account_service.get(config.account_id)
 
             if account.status == AccountStatus.DELETED:
                 raise AccountDeletedException(
@@ -218,6 +216,11 @@ class BotManager:
                 raise AccountSuspendedError(
                     f"정지된 계좌 '{config.account_id}'에는 봇을 생성할 수 없습니다."
                 )
+
+        # exchange 호환성 검증 (strategy meta 필요)
+        if account and hasattr(strategy_cls, "meta"):
+            strategy_exchange = getattr(strategy_cls.meta, "exchange", "KRX")
+            strategy_name = getattr(strategy_cls.meta, "name", config.strategy_id)
 
             from ante.strategy.validator import validate_exchange
 
