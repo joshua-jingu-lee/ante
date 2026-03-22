@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from ante.backtest.config import DatasetInfo
 from ante.backtest.exceptions import BacktestDataError
 from ante.strategy.base import DataProvider
 
@@ -36,6 +37,7 @@ class BacktestDataProvider(DataProvider):
         self._end = end_date
         self._cache: dict[str, pl.DataFrame] = {}
         self._current_idx: int = 0
+        self._loaded_datasets: list[DatasetInfo] = []
 
     @property
     def current_idx(self) -> int:
@@ -49,11 +51,30 @@ class BacktestDataProvider(DataProvider):
     def end(self) -> str:
         return self._end
 
+    @property
+    def loaded_datasets(self) -> list[DatasetInfo]:
+        """로드된 데이터셋 메타정보 목록."""
+        return list(self._loaded_datasets)
+
     def load(self, symbol: str, timeframe: str) -> int:
         """데이터를 캐시에 로드. 로드된 행 수 반환."""
         key = f"{symbol}:{timeframe}"
         df = self._store.read(symbol, timeframe, start=self._start, end=self._end)
         self._cache[key] = df
+
+        data_dir = self._store.resolve_path(symbol, timeframe)
+        file_count = len(list(data_dir.glob("*.parquet"))) if data_dir.exists() else 0
+        info = DatasetInfo(
+            symbol=symbol,
+            timeframe=timeframe,
+            row_count=len(df),
+            start_date=str(df["timestamp"][0]) if len(df) > 0 else "",
+            end_date=str(df["timestamp"][-1]) if len(df) > 0 else "",
+            data_dir=str(data_dir),
+            file_count=file_count,
+        )
+        self._loaded_datasets.append(info)
+
         return len(df)
 
     async def get_ohlcv(
@@ -117,3 +138,4 @@ class BacktestDataProvider(DataProvider):
     def reset(self) -> None:
         """인덱스 초기화."""
         self._current_idx = 0
+        self._loaded_datasets.clear()

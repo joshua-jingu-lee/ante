@@ -81,6 +81,40 @@ class TestResolvePathWithExchange:
         assert "KRX" in path.parts
 
 
+class TestResolvePath:
+    """resolve_path() public 메서드 검증."""
+
+    def test_resolve_path_ohlcv(self, tmp_store: ParquetStore) -> None:
+        """OHLCV 경로: {base}/ohlcv/{timeframe}/{exchange}/{symbol}/"""
+        path = tmp_store.resolve_path("005930", "1d", "ohlcv", "KRX")
+        assert path == tmp_store.base_path / "ohlcv" / "1d" / "KRX" / "005930"
+
+    def test_resolve_path_fundamental(self, tmp_store: ParquetStore) -> None:
+        """Fundamental 경로: {base}/fundamental/{exchange}/{symbol}/"""
+        path = tmp_store.resolve_path("005930", "", "fundamental", "KRX")
+        assert path == tmp_store.base_path / "fundamental" / "KRX" / "005930"
+
+    def test_resolve_path_tick(self, tmp_store: ParquetStore) -> None:
+        """Tick 경로: {base}/tick/{exchange}/{symbol}/"""
+        path = tmp_store.resolve_path("005930", "", "tick", "KRX")
+        assert path == tmp_store.base_path / "tick" / "KRX" / "005930"
+
+    def test_resolve_path_different_exchange(self, tmp_store: ParquetStore) -> None:
+        """다른 거래소 경로 생성."""
+        path = tmp_store.resolve_path("AAPL", "1d", "ohlcv", "NYSE")
+        assert path == tmp_store.base_path / "ohlcv" / "1d" / "NYSE" / "AAPL"
+
+    def test_resolve_path_matches_private(self, tmp_store: ParquetStore) -> None:
+        """resolve_path()는 _resolve_path()와 동일한 결과를 반환한다."""
+        for args in [
+            ("005930", "1d", "ohlcv", "KRX"),
+            ("AAPL", "5m", "ohlcv", "NYSE"),
+            ("005930", "", "fundamental", "KRX"),
+            ("005930", "", "tick", "KRX"),
+        ]:
+            assert tmp_store.resolve_path(*args) == tmp_store._resolve_path(*args)
+
+
 class TestReadWriteWithExchange:
     """exchange 파라미터를 사용한 읽기/쓰기 검증."""
 

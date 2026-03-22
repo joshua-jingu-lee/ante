@@ -1,5 +1,6 @@
 """Backtest Engine — 전략 검증 시뮬레이션."""
 
+from ante.backtest.config import BacktestConfig, DatasetInfo
 from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.exceptions import (
     BacktestConfigError,
@@ -13,6 +14,7 @@ from ante.backtest.run_store import BacktestRun, BacktestRunStore
 from ante.backtest.service import BacktestService
 
 __all__ = [
+    "BacktestConfig",
     "BacktestConfigError",
     "BacktestDataError",
     "BacktestDataProvider",
@@ -23,5 +25,6 @@ __all__ = [
     "BacktestRunStore",
     "BacktestService",
     "BacktestTrade",
+    "DatasetInfo",
     "calculate_metrics",
 ]

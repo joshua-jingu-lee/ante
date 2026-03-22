@@ -8,6 +8,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
+from ante.backtest.config import BacktestConfig
 from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.exceptions import BacktestConfigError, BacktestError
 from ante.backtest.executor import BacktestExecutor
@@ -42,33 +43,36 @@ class BacktestService:
         progress_callback: Any | None = None,
     ) -> BacktestResult:
         """백테스트를 in-process로 실행."""
-        self._validate_config(config)
-
         from pathlib import Path
 
-        strategy_cls = StrategyLoader.load(Path(config["strategy_path"]))
+        validated = self._validate_config(config)
 
-        store = ParquetStore(base_path=config.get("data_path", self._data_path))
+        strategy_cls = StrategyLoader.load(Path(validated.strategy_path))
+
+        store = ParquetStore(
+            base_path=config.get("data_path", self._data_path),
+        )
         data_provider = BacktestDataProvider(
             store=store,
-            start_date=config["start_date"],
-            end_date=config["end_date"],
+            start_date=validated.start_date,
+            end_date=validated.end_date,
         )
 
-        symbols = config.get("symbols", [])
-        timeframe = config.get("timeframe", "1d")
-        for symbol in symbols:
-            data_provider.load(symbol, timeframe)
+        for symbol in validated.symbols:
+            data_provider.load(symbol, validated.timeframe)
 
         executor = BacktestExecutor(
             strategy_cls=strategy_cls,
             data_provider=data_provider,
-            initial_balance=config.get("initial_balance", 10_000_000),
-            commission_rate=config.get("commission_rate", 0.00015),
-            slippage_rate=config.get("slippage_rate", 0.001),
+            initial_balance=validated.initial_balance,
+            buy_commission_rate=validated.buy_commission_rate,
+            sell_commission_rate=validated.sell_commission_rate,
+            slippage_rate=validated.slippage_rate,
         )
 
         result = await executor.run(progress_callback=progress_callback)
+        result.config = validated
+        result.datasets = data_provider.loaded_datasets
 
         # BacktestCompleteEvent 발행
         await self._publish_complete_event(result, config)
@@ -118,10 +122,31 @@ class BacktestService:
         await self._eventbus.publish(event)
         logger.info("BacktestCompleteEvent 발행: %s", strategy_id)
 
-    def _validate_config(self, config: dict[str, Any]) -> None:
-        """설정 검증."""
+    def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
+        """설정 검증 후 BacktestConfig를 반환."""
         required = ["strategy_path", "start_date", "end_date"]
         missing = [k for k in required if k not in config]
         if missing:
             msg = f"Missing required config keys: {missing}"
             raise BacktestConfigError(msg)
+
+        data_paths = config.get(
+            "data_paths",
+            [config.get("data_path", self._data_path)],
+        )
+
+        return BacktestConfig(
+            strategy_path=config["strategy_path"],
+            symbols=config.get("symbols", []),
+            timeframe=config.get("timeframe", "1d"),
+            start_date=config.get("start_date", ""),
+            end_date=config.get("end_date", ""),
+            initial_balance=config.get("initial_balance", 10_000_000.0),
+            buy_commission_rate=config.get(
+                "buy_commission_rate",
+                config.get("commission_rate", 0.00015),
+            ),
+            sell_commission_rate=config.get("sell_commission_rate", 0.00195),
+            slippage_rate=config.get("slippage_rate", 0.001),
+            data_paths=data_paths,
+        )

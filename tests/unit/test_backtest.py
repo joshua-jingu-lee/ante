@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 
 import polars as pl
 import pytest
 
+from ante.backtest.config import BacktestConfig, DatasetInfo
 from ante.backtest.context import BacktestStrategyContext
 from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.exceptions import (
@@ -169,6 +171,8 @@ class TestBacktestResult:
         assert d["strategy"] == "test_v1.0"
         assert d["total_return_pct"] == 5.0
         assert d["total_trades"] == 0
+        assert "config" in d
+        assert "datasets" in d
 
     def test_result_to_dict_with_trades(self):
         trade = BacktestTrade(
@@ -254,6 +258,64 @@ class TestBacktestDataProvider:
             data_provider.advance()
         df = await data_provider.get_indicator("005930", "sma", {"period": 5})
         assert len(df) > 0
+
+    async def test_loaded_datasets_empty_on_init(self, loaded_store):
+        """초기 상태에서 loaded_datasets는 빈 리스트."""
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        assert provider.loaded_datasets == []
+
+    async def test_loaded_datasets_after_single_load(self, loaded_store):
+        """load() 1회 호출 후 DatasetInfo 1건 기록."""
+
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        datasets = provider.loaded_datasets
+        assert len(datasets) == 1
+        info = datasets[0]
+        assert isinstance(info, DatasetInfo)
+        assert info.symbol == "005930"
+        assert info.timeframe == "1d"
+        assert info.row_count == 10
+        assert info.start_date != ""
+        assert info.end_date != ""
+        assert info.file_count >= 1
+
+    async def test_loaded_datasets_after_multiple_loads(self, loaded_store):
+        """load() 여러 번 호출 시 DatasetInfo가 누적된다."""
+        # 두 번째 심볼 데이터도 적재
+        df = _make_ohlcv_df(symbol="000660", n=5, base_price=100000.0)
+        loaded_store.write("000660", "1d", df)
+
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        datasets = provider.loaded_datasets
+        assert len(datasets) == 2
+        assert datasets[0].symbol == "005930"
+        assert datasets[0].row_count == 10
+        assert datasets[1].symbol == "000660"
+        assert datasets[1].row_count == 5
+
+    async def test_loaded_datasets_after_reset(self, data_provider):
+        """reset() 호출 시 loaded_datasets가 초기화된다."""
+        assert len(data_provider.loaded_datasets) >= 1
+        data_provider.reset()
+        assert data_provider.loaded_datasets == []
+
+    async def test_loaded_datasets_returns_copy(self, data_provider):
+        """loaded_datasets는 내부 리스트의 복사본을 반환한다."""
+        datasets1 = data_provider.loaded_datasets
+        datasets2 = data_provider.loaded_datasets
+        assert datasets1 == datasets2
+        assert datasets1 is not datasets2
 
 
 # ── BacktestStrategyContext 테스트 ─────────────────
@@ -343,7 +405,8 @@ class TestBacktestExecutor:
             strategy_cls=BuyAndHoldStrategy,
             data_provider=data_provider,
             initial_balance=10_000_000,
-            commission_rate=0.0,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
             slippage_rate=0.0,
         )
         result = await executor.run()
@@ -359,7 +422,8 @@ class TestBacktestExecutor:
             strategy_cls=BuySellStrategy,
             data_provider=data_provider,
             initial_balance=10_000_000,
-            commission_rate=0.0,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
             slippage_rate=0.0,
         )
         result = await executor.run()
@@ -372,7 +436,8 @@ class TestBacktestExecutor:
         executor = BacktestExecutor(
             strategy_cls=BuyAndHoldStrategy,
             data_provider=data_provider,
-            commission_rate=0.01,
+            buy_commission_rate=0.01,
+            sell_commission_rate=0.01,
             slippage_rate=0.0,
         )
         result = await executor.run()
@@ -383,7 +448,8 @@ class TestBacktestExecutor:
         executor = BacktestExecutor(
             strategy_cls=BuyAndHoldStrategy,
             data_provider=data_provider,
-            commission_rate=0.0,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
             slippage_rate=0.01,
         )
         result = await executor.run()
@@ -403,7 +469,8 @@ class TestBacktestExecutor:
         executor = BacktestExecutor(
             strategy_cls=BuySellStrategy,
             data_provider=data_provider,
-            commission_rate=0.0,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
             slippage_rate=0.0,
         )
         result = await executor.run()
@@ -434,6 +501,8 @@ class TestBacktestExecutor:
         assert "strategy" in d
         assert "total_return_pct" in d
         assert "trades" in d
+        assert "config" in d
+        assert "datasets" in d
 
     async def test_insufficient_balance_skips_buy(self, data_provider):
         data_provider.reset()
@@ -467,12 +536,45 @@ class TestBacktestExecutor:
         executor = BacktestExecutor(
             strategy_cls=SellTooMuch,
             data_provider=data_provider,
-            commission_rate=0.0,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
             slippage_rate=0.0,
         )
         result = await executor.run()
         assert len(result.trades) == 2
         # 매도 거래는 실제로 실행됨 (보유량 5주만 매도)
+
+    async def test_executor_split_commission(self, data_provider):
+        """매수/매도 수수료율이 각각 독립 적용되는지 검증."""
+        data_provider.reset()
+        buy_rate = 0.001
+        sell_rate = 0.005
+        executor = BacktestExecutor(
+            strategy_cls=BuySellStrategy,
+            data_provider=data_provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=buy_rate,
+            sell_commission_rate=sell_rate,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+        assert len(result.trades) == 2
+
+        buy_trade = result.trades[0]
+        sell_trade = result.trades[1]
+        assert buy_trade.side == "buy"
+        assert sell_trade.side == "sell"
+
+        # 매수 수수료 = price * qty * buy_rate
+        expected_buy_comm = buy_trade.price * buy_trade.quantity * buy_rate
+        assert abs(buy_trade.commission - expected_buy_comm) < 0.01
+
+        # 매도 수수료 = price * qty * sell_rate
+        expected_sell_comm = sell_trade.price * sell_trade.quantity * sell_rate
+        assert abs(sell_trade.commission - expected_sell_comm) < 0.01
+
+        # 매수/매도 수수료율이 다르므로 수수료 비율도 다름
+        assert buy_trade.commission != sell_trade.commission
 
 
 # ── BacktestService 테스트 ─────────────────────────
@@ -484,15 +586,113 @@ class TestBacktestService:
         with pytest.raises(BacktestConfigError, match="strategy_path"):
             service._validate_config({"start_date": "2026-01-01"})
 
-    def test_validate_config_valid(self):
+    def test_validate_config_returns_backtest_config(self):
+
         service = BacktestService()
-        service._validate_config(
+        result = service._validate_config(
+            {
+                "strategy_path": "test.py",
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-30",
+                "symbols": ["005930"],
+            }
+        )
+        assert isinstance(result, BacktestConfig)
+        assert result.strategy_path == "test.py"
+        assert result.start_date == "2026-01-01"
+        assert result.end_date == "2026-06-30"
+        assert result.symbols == ["005930"]
+
+    def test_validate_config_default_values(self):
+        """buy/sell commission 기본값 검증."""
+        service = BacktestService()
+        result = service._validate_config(
             {
                 "strategy_path": "test.py",
                 "start_date": "2026-01-01",
                 "end_date": "2026-06-30",
             }
         )
+        assert result.buy_commission_rate == 0.00015
+        assert result.sell_commission_rate == 0.00195
+        assert result.slippage_rate == 0.001
+        assert result.initial_balance == 10_000_000.0
+        assert result.timeframe == "1d"
+
+    def test_validate_config_commission_rate_backward_compat(self):
+        """기존 commission_rate 키가 buy_commission_rate로 매핑."""
+        service = BacktestService()
+        result = service._validate_config(
+            {
+                "strategy_path": "test.py",
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-30",
+                "commission_rate": 0.005,
+            }
+        )
+        assert result.buy_commission_rate == 0.005
+        assert result.sell_commission_rate == 0.00195
+
+    def test_validate_config_data_path_backward_compat(self):
+        """data_path -> data_paths 하위호환."""
+        service = BacktestService(data_path="default/")
+        result = service._validate_config(
+            {
+                "strategy_path": "test.py",
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-30",
+                "data_path": "custom/data/",
+            }
+        )
+        assert result.data_paths == ["custom/data/"]
+
+    def test_validate_config_data_paths_preferred(self):
+        """data_paths가 있으면 data_path보다 우선."""
+        service = BacktestService()
+        result = service._validate_config(
+            {
+                "strategy_path": "test.py",
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-30",
+                "data_path": "ignored/",
+                "data_paths": ["a/", "b/"],
+            }
+        )
+        assert result.data_paths == ["a/", "b/"]
+
+    async def test_run_injects_config_and_datasets(self, loaded_store, data_dir):
+        """run() 후 result.config=BacktestConfig, datasets=list[DatasetInfo]."""
+        service = BacktestService(data_path=str(data_dir))
+
+        config = {
+            "strategy_path": "dummy.py",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "1d",
+            "data_path": str(data_dir),
+        }
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+            return_value=EmptyStrategy,
+        ):
+            result = await service.run(config)
+
+        # config는 BacktestConfig 인스턴스
+        assert isinstance(result.config, BacktestConfig)
+        assert result.config.strategy_path == "dummy.py"
+        assert result.config.symbols == ["005930"]
+        assert result.config.start_date == "2026-01-01"
+        assert result.config.end_date == "2026-12-31"
+
+        # datasets는 list이고 DatasetInfo 원소를 포함
+        assert isinstance(result.datasets, list)
+        assert len(result.datasets) == 1
+        assert isinstance(result.datasets[0], DatasetInfo)
+        assert result.datasets[0].symbol == "005930"
+        assert result.datasets[0].timeframe == "1d"
+        assert result.datasets[0].row_count > 0
 
 
 # ── Exceptions 테스트 ──────────────────────────────
@@ -506,3 +706,109 @@ class TestExceptions:
     def test_backtest_error_message(self):
         err = BacktestError("test error")
         assert str(err) == "test error"
+
+
+# ── BacktestResult config/datasets 필드 테스트 ────
+
+
+class TestBacktestResultConfigFields:
+    def test_result_default_config(self):
+        """기본 생성 시 config == BacktestConfig(), datasets == []."""
+        from ante.backtest.config import BacktestConfig  # noqa: F811
+
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_000_000,
+            total_return=0.0,
+        )
+        assert result.config == BacktestConfig()
+        assert result.datasets == []
+
+    def test_result_to_dict_with_config(self):
+        """config 설정된 결과의 to_dict() 검증."""
+
+        cfg = BacktestConfig(
+            strategy_path="strategies/ma_cross.py",
+            symbols=["005930"],
+            timeframe="1d",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000.0,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
+            slippage_rate=0.001,
+        )
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+            config=cfg,
+        )
+        d = result.to_dict()
+        assert d["config"]["strategy_path"] == "strategies/ma_cross.py"
+        assert d["config"]["symbols"] == ["005930"]
+        assert d["config"]["timeframe"] == "1d"
+        assert d["config"]["initial_balance"] == 10_000_000.0
+
+    def test_result_to_dict_with_datasets(self):
+        """datasets 포함된 결과의 to_dict() 검증."""
+
+        ds = DatasetInfo(
+            symbol="005930",
+            timeframe="1d",
+            row_count=1200,
+            start_date="2020-01-02",
+            end_date="2024-12-30",
+            data_dir="data/ohlcv/1d/KRX/005930",
+            file_count=60,
+        )
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+            datasets=[ds],
+        )
+        d = result.to_dict()
+        assert len(d["datasets"]) == 1
+        assert d["datasets"][0]["symbol"] == "005930"
+        assert d["datasets"][0]["row_count"] == 1200
+        assert d["datasets"][0]["file_count"] == 60
+
+    def test_result_backward_compatible(self):
+        """기존 키들이 여전히 존재하는지 확인."""
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+        )
+        d = result.to_dict()
+        expected_keys = {
+            "strategy",
+            "period",
+            "initial_balance",
+            "final_balance",
+            "total_return_pct",
+            "total_trades",
+            "metrics",
+            "equity_curve",
+            "trades",
+            "config",
+            "datasets",
+        }
+        assert set(d.keys()) == expected_keys
