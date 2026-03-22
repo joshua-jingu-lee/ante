@@ -157,8 +157,15 @@ class TestTokenExpiryOnRegister:
     @pytest.mark.asyncio
     async def test_register_sets_expiry(self):
         """멤버 등록 시 토큰 만료 시각 설정."""
+        master_row = _make_member_row(
+            member_id="admin",
+            member_type=MemberType.HUMAN,
+        )
+        master_row["role"] = "master"
+
         db = AsyncMock()
-        db.fetch_one = AsyncMock(return_value=None)
+        db.fetch_one = AsyncMock(side_effect=[master_row, None])
+        db.fetch_all = AsyncMock(return_value=[])
         db.execute = AsyncMock()
         eventbus = MagicMock()
         eventbus.publish = AsyncMock()
