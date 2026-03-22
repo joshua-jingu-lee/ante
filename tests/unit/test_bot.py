@@ -443,6 +443,10 @@ class TestBot:
         assert info["bot_id"] == "bot1"
         assert info["name"] == ""
         assert info["status"] == "created"
+        # 기본값: 빈 문자열
+        assert info["trading_mode"] == ""
+        assert info["exchange"] == ""
+        assert info["currency"] == ""
 
     def test_get_info_with_name(self, eventbus, ctx):
         """이름이 설정된 봇의 정보 반환."""
@@ -460,6 +464,27 @@ class TestBot:
         )
         info = bot.get_info()
         assert info["name"] == "모멘텀 봇"
+
+    def test_get_info_includes_trading_mode_exchange_currency(self, eventbus, ctx):
+        """get_info()에 trading_mode, exchange, currency 포함."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            interval_seconds=10,
+        )
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+            exchange="KRX",
+            trading_mode="live",
+            currency="KRW",
+        )
+        info = bot.get_info()
+        assert info["trading_mode"] == "live"
+        assert info["exchange"] == "KRX"
+        assert info["currency"] == "KRW"
 
 
 # ── BotManager ───────────────────────────────────

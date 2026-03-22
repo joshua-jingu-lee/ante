@@ -32,10 +32,14 @@ class Bot:
         ctx: StrategyContext,
         eventbus: EventBus,
         exchange: str = "",
+        trading_mode: str = "",
+        currency: str = "",
     ) -> None:
         self.config = config
         self.bot_id = config.bot_id
         self.exchange = exchange
+        self.trading_mode = trading_mode
+        self.currency = currency
         self._strategy_cls = strategy_cls
         self._ctx = ctx
         self._eventbus = eventbus
@@ -353,6 +357,9 @@ class Bot:
             "account_id": self.config.account_id,
             "strategy_id": self.config.strategy_id,
             "interval_seconds": self.config.interval_seconds,
+            "trading_mode": self.trading_mode,
+            "exchange": self.exchange,
+            "currency": self.currency,
             "started_at": (self.started_at.isoformat() if self.started_at else None),
             "stopped_at": (self.stopped_at.isoformat() if self.stopped_at else None),
             "error_message": self.error_message,

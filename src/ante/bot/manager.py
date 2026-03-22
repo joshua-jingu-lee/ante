@@ -254,6 +254,9 @@ class BotManager:
             strategy_cls=strategy_cls,
             ctx=ctx,
             eventbus=self._eventbus,
+            exchange=account.exchange if account else "",
+            trading_mode=account.trading_mode.value if account else "",
+            currency=account.currency if account else "",
         )
 
         self._register_bot_events(bot)
