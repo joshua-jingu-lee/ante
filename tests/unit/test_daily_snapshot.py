@@ -164,6 +164,20 @@ class TestTakeSnapshot:
         expected = snap["ante_eval_amount"] + snap["unallocated"]
         assert snap["total_asset"] == expected
 
+    async def test_take_snapshot_returns_dict(self, treasury):
+        """take_snapshot은 저장된 스냅샷 dict를 반환한다."""
+        event = _make_event()
+        result = await treasury.take_snapshot(event)
+        assert isinstance(result, dict)
+        assert result["account_id"] == ACCOUNT_ID
+        assert result["snapshot_date"] == "2026-03-21"
+        assert result["daily_pnl"] == 50_000.0
+        assert result["daily_return"] == 0.005
+        assert result["net_trade_amount"] == 1_000_000.0
+        assert result["unrealized_pnl"] == 150_000.0
+        assert result["account_balance"] == 10_000_000.0
+        assert result["bot_count"] == 0
+
     async def test_take_snapshot_ignores_non_daily_report_event(self, treasury):
         """DailyReportEvent가 아닌 이벤트는 무시한다."""
         await treasury.take_snapshot("not an event")

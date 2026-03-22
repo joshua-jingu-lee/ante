@@ -1128,19 +1128,39 @@ class Treasury:
             ),
         )
 
-    async def take_snapshot(self, event: object) -> None:
+    async def take_snapshot(self, event: object) -> dict[str, Any] | None:
         """DailyReportEvent 수신 시 자산 현황 + 성과 필드를 합쳐 스냅샷 저장.
 
         Args:
             event: DailyReportEvent 인스턴스.
+
+        Returns:
+            저장된 스냅샷 dict. DailyReportEvent가 아닌 경우 None.
         """
         from ante.eventbus.events import DailyReportEvent
 
         if not isinstance(event, DailyReportEvent):
-            return
+            return None
 
         snapshot_date = event.report_date
         summary = self.get_summary()
+
+        snapshot_data: dict[str, Any] = {
+            "account_id": self._account_id,
+            "snapshot_date": snapshot_date,
+            "total_asset": summary.get("ante_eval_amount", 0.0)
+            + summary.get("unallocated", 0.0),
+            "ante_eval_amount": summary.get("ante_eval_amount", 0.0),
+            "ante_purchase_amount": summary.get("ante_purchase_amount", 0.0),
+            "unallocated": summary.get("unallocated", 0.0),
+            "account_balance": summary.get("account_balance", 0.0),
+            "total_allocated": summary.get("total_allocated", 0.0),
+            "bot_count": summary.get("bot_count", 0),
+            "daily_pnl": event.daily_pnl,
+            "daily_return": event.daily_return,
+            "net_trade_amount": event.net_trade_amount,
+            "unrealized_pnl": event.unrealized_pnl,
+        }
 
         await self._db.execute(
             """INSERT INTO treasury_daily_snapshots
@@ -1162,19 +1182,19 @@ class Treasury:
                  net_trade_amount = excluded.net_trade_amount,
                  unrealized_pnl = excluded.unrealized_pnl""",
             (
-                self._account_id,
-                snapshot_date,
-                summary.get("ante_eval_amount", 0.0) + summary.get("unallocated", 0.0),
-                summary.get("ante_eval_amount", 0.0),
-                summary.get("ante_purchase_amount", 0.0),
-                summary.get("unallocated", 0.0),
-                summary.get("account_balance", 0.0),
-                summary.get("total_allocated", 0.0),
-                summary.get("bot_count", 0),
-                event.daily_pnl,
-                event.daily_return,
-                event.net_trade_amount,
-                event.unrealized_pnl,
+                snapshot_data["account_id"],
+                snapshot_data["snapshot_date"],
+                snapshot_data["total_asset"],
+                snapshot_data["ante_eval_amount"],
+                snapshot_data["ante_purchase_amount"],
+                snapshot_data["unallocated"],
+                snapshot_data["account_balance"],
+                snapshot_data["total_allocated"],
+                snapshot_data["bot_count"],
+                snapshot_data["daily_pnl"],
+                snapshot_data["daily_return"],
+                snapshot_data["net_trade_amount"],
+                snapshot_data["unrealized_pnl"],
             ),
         )
 
@@ -1187,6 +1207,8 @@ class Treasury:
             snapshot_date,
             event.daily_pnl,
         )
+
+        return snapshot_data
 
     async def get_daily_snapshot(self, snapshot_date: str) -> dict[str, Any] | None:
         """특정 날짜의 스냅샷 조회.
