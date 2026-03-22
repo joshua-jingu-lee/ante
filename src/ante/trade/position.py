@@ -126,6 +126,7 @@ class PositionHistory:
                 price=record.price,
                 pnl=0.0,
                 timestamp=record.timestamp,
+                exchange=record.exchange,
             )
 
         elif record.side == "sell":
@@ -152,6 +153,7 @@ class PositionHistory:
                 price=record.price,
                 pnl=pnl,
                 timestamp=record.timestamp,
+                exchange=record.exchange,
             )
 
     async def get_positions(
@@ -313,14 +315,15 @@ class PositionHistory:
         price: float,
         pnl: float,
         timestamp: object | None,
+        exchange: str = "KRX",
     ) -> None:
         """포지션 변동 이력 저장."""
         ts = timestamp.isoformat() if hasattr(timestamp, "isoformat") else None
         await self._db.execute(
             """INSERT INTO position_history
-               (bot_id, symbol, action, quantity, price, pnl, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (bot_id, symbol, action, quantity, price, pnl, ts),
+               (bot_id, symbol, action, quantity, price, pnl, timestamp, exchange)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (bot_id, symbol, action, quantity, price, pnl, ts, exchange),
         )
 
     @staticmethod

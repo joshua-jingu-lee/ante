@@ -121,6 +121,7 @@ class TradeRecorder:
             commission=event.commission,
             timestamp=event.timestamp,
             order_id=event.order_id,
+            exchange=event.exchange,
         )
         await self._save(record)
         await self._position_history.on_trade(record)
@@ -233,8 +234,8 @@ class TradeRecorder:
             """INSERT OR IGNORE INTO trades
                (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
                 status, order_type, reason, commission, timestamp, order_id,
-                account_id, currency)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                account_id, currency, exchange)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(record.trade_id),
                 record.bot_id,
@@ -251,6 +252,7 @@ class TradeRecorder:
                 record.order_id,
                 record.account_id,
                 record.currency,
+                record.exchange,
             ),
         )
 
