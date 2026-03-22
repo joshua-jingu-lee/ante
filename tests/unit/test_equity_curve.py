@@ -200,3 +200,192 @@ async def test_feedback_get_equity_curve_no_trades():
     curve = await fb.get_equity_curve("bot1")
 
     assert curve == []
+
+
+# ── resample_equity_curve_daily ──
+
+
+def test_resample_below_threshold_returns_original():
+    """포인트 수가 임계값 이하이면 리샘플링을 생략한다."""
+    from ante.backtest.result import resample_equity_curve_daily
+
+    curve = [
+        {"timestamp": f"2025-01-01 {h:02d}:00:00", "equity": 10_000_000 + h * 1000}
+        for h in range(24)
+    ]
+    result = resample_equity_curve_daily(curve)
+    assert result is curve  # 동일 객체 반환
+
+
+def test_resample_picks_last_point_per_day():
+    """동일 날짜의 마지막 포인트만 남긴다."""
+    from ante.backtest.result import resample_equity_curve_daily
+
+    # 임계값을 넘기 위해 600개 포인트 생성 (3일 x 200포인트)
+    curve = []
+    for day in range(3):
+        for i in range(200):
+            curve.append(
+                {
+                    "timestamp": f"2025-01-{day + 1:02d} {i % 24:02d}:{i % 60:02d}:00",
+                    "equity": 10_000_000 + day * 100_000 + i,
+                }
+            )
+    assert len(curve) == 600
+
+    result = resample_equity_curve_daily(curve)
+    assert len(result) == 3
+    # 각 날짜의 마지막 포인트(i=199)가 선택되어야 함
+    assert result[0]["equity"] == 10_000_000 + 0 * 100_000 + 199
+    assert result[1]["equity"] == 10_000_000 + 1 * 100_000 + 199
+    assert result[2]["equity"] == 10_000_000 + 2 * 100_000 + 199
+
+
+def test_resample_with_date_key():
+    """date 키를 사용하는 표준 포맷도 리샘플링한다."""
+    from ante.backtest.result import resample_equity_curve_daily
+
+    curve = []
+    for day in range(3):
+        for i in range(200):
+            curve.append(
+                {
+                    "date": f"2025-01-{day + 1:02d}",
+                    "value": 10_000_000 + day * 100_000 + i,
+                }
+            )
+
+    result = resample_equity_curve_daily(curve)
+    assert len(result) == 3
+    # 각 날짜의 마지막 포인트
+    assert result[0]["value"] == 10_000_000 + 199
+    assert result[1]["value"] == 10_000_000 + 100_000 + 199
+    assert result[2]["value"] == 10_000_000 + 200_000 + 199
+
+
+def test_resample_empty_curve():
+    """빈 리스트는 빈 리스트를 반환한다."""
+    from ante.backtest.result import resample_equity_curve_daily
+
+    assert resample_equity_curve_daily([]) == []
+
+
+def test_resample_custom_threshold():
+    """사용자 지정 임계값을 사용할 수 있다."""
+    from ante.backtest.result import resample_equity_curve_daily
+
+    # 10포인트, threshold=5이면 리샘플링 실행
+    curve = [
+        {"timestamp": f"2025-01-01 {h:02d}:00:00", "equity": 10_000_000 + h}
+        for h in range(10)
+    ]
+    result = resample_equity_curve_daily(curve, threshold=5)
+    # 모두 같은 날짜이므로 1개로 줄어야 함
+    assert len(result) == 1
+    assert result[0]["equity"] == 10_000_000 + 9  # 마지막 포인트
+
+
+# ── BacktestResult.to_dict resample_equity ──
+
+
+def test_to_dict_resample_equity_false_preserves_all():
+    """resample_equity=False이면 원본 그대로 반환한다."""
+    from ante.backtest.result import BacktestResult
+
+    curve = [
+        {"timestamp": f"2025-01-01 {h:02d}:00:00", "equity": 10_000_000 + h}
+        for h in range(600)
+    ]
+    result = BacktestResult(
+        strategy_name="test",
+        strategy_version="1.0",
+        start_date="2025-01-01",
+        end_date="2025-01-02",
+        initial_balance=10_000_000,
+        final_balance=10_000_000,
+        total_return=0.0,
+        equity_curve=curve,
+    )
+    d = result.to_dict(resample_equity=False)
+    assert len(d["equity_curve"]) == 600
+
+
+def test_to_dict_resample_equity_true_resamples():
+    """resample_equity=True이면 일봉 리샘플링한다."""
+    from ante.backtest.result import BacktestResult
+
+    curve = []
+    for day in range(3):
+        for i in range(200):
+            curve.append(
+                {
+                    "timestamp": f"2025-01-{day + 1:02d} {i % 24:02d}:{i % 60:02d}:00",
+                    "equity": 10_000_000 + day * 100_000 + i,
+                }
+            )
+
+    result = BacktestResult(
+        strategy_name="test",
+        strategy_version="1.0",
+        start_date="2025-01-01",
+        end_date="2025-01-03",
+        initial_balance=10_000_000,
+        final_balance=10_200_199,
+        total_return=2.0,
+        equity_curve=curve,
+    )
+    d = result.to_dict(resample_equity=True)
+    assert len(d["equity_curve"]) == 3
+
+
+# ── generate_draft 리샘플링 통합 ──
+
+
+def test_generate_draft_resamples_large_curve():
+    """generate_draft()는 임계값 초과 시 equity_curve를 리샘플링한다."""
+    # 600포인트 (3일 x 200) - 임계값 500 초과
+    raw_curve = []
+    for day in range(3):
+        for i in range(200):
+            raw_curve.append(
+                {
+                    "timestamp": f"2025-01-{day + 1:02d} {i % 24:02d}:{i % 60:02d}:00",
+                    "equity": 10_000_000 + day * 100_000 + i,
+                }
+            )
+
+    result_data = {
+        "strategy": "momentum_v1.0.0",
+        "period": "2025-01-01 ~ 2025-01-03",
+        "total_return_pct": 2.0,
+        "total_trades": 10,
+        "metrics": {},
+        "equity_curve": raw_curve,
+        "trades": [],
+    }
+    report = ReportDraftGenerator.generate_draft(result_data, "strat1")
+    detail = json.loads(report.detail_json)
+    curve = detail["equity_curve"]
+    assert len(curve) == 3  # 3일로 리샘플링
+
+
+def test_generate_draft_skips_resample_for_daily():
+    """일봉 데이터(500포인트 이하)는 리샘플링하지 않는다."""
+    raw_curve = [
+        {"timestamp": f"2025-01-{d + 1:02d} 15:00:00", "equity": 10_000_000 + d * 1000}
+        for d in range(250)
+    ]
+
+    result_data = {
+        "strategy": "daily_v1.0.0",
+        "period": "2025-01 ~ 2025-09",
+        "total_return_pct": 5.0,
+        "total_trades": 50,
+        "metrics": {},
+        "equity_curve": raw_curve,
+        "trades": [],
+    }
+    report = ReportDraftGenerator.generate_draft(result_data, "strat1")
+    detail = json.loads(report.detail_json)
+    curve = detail["equity_curve"]
+    assert len(curve) == 250  # 원본 유지

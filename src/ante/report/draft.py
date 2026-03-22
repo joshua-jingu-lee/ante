@@ -114,10 +114,13 @@ class ReportDraftGenerator:
             f"거래: {total_trades}건"
         )
 
-        # equity_curve를 표준 포맷으로 변환
+        # equity_curve를 표준 포맷으로 변환 후 일봉 리샘플링
+        from ante.backtest.result import resample_equity_curve_daily
+
         detail = dict(result_data)
         raw_curve = detail.get("equity_curve", [])
-        detail["equity_curve"] = _standardize_equity_curve(raw_curve)
+        standardized = _standardize_equity_curve(raw_curve)
+        detail["equity_curve"] = resample_equity_curve_daily(standardized)
 
         return StrategyReport(
             report_id=str(uuid.uuid4()),
