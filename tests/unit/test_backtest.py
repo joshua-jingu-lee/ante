@@ -255,6 +255,65 @@ class TestBacktestDataProvider:
         df = await data_provider.get_indicator("005930", "sma", {"period": 5})
         assert len(df) > 0
 
+    async def test_loaded_datasets_empty_on_init(self, loaded_store):
+        """초기 상태에서 loaded_datasets는 빈 리스트."""
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        assert provider.loaded_datasets == []
+
+    async def test_loaded_datasets_after_single_load(self, loaded_store):
+        """load() 1회 호출 후 DatasetInfo 1건 기록."""
+        from ante.backtest.config import DatasetInfo
+
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        datasets = provider.loaded_datasets
+        assert len(datasets) == 1
+        info = datasets[0]
+        assert isinstance(info, DatasetInfo)
+        assert info.symbol == "005930"
+        assert info.timeframe == "1d"
+        assert info.row_count == 10
+        assert info.start_date != ""
+        assert info.end_date != ""
+        assert info.file_count >= 1
+
+    async def test_loaded_datasets_after_multiple_loads(self, loaded_store):
+        """load() 여러 번 호출 시 DatasetInfo가 누적된다."""
+        # 두 번째 심볼 데이터도 적재
+        df = _make_ohlcv_df(symbol="000660", n=5, base_price=100000.0)
+        loaded_store.write("000660", "1d", df)
+
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        datasets = provider.loaded_datasets
+        assert len(datasets) == 2
+        assert datasets[0].symbol == "005930"
+        assert datasets[0].row_count == 10
+        assert datasets[1].symbol == "000660"
+        assert datasets[1].row_count == 5
+
+    async def test_loaded_datasets_after_reset(self, data_provider):
+        """reset() 호출 시 loaded_datasets가 초기화된다."""
+        assert len(data_provider.loaded_datasets) >= 1
+        data_provider.reset()
+        assert data_provider.loaded_datasets == []
+
+    async def test_loaded_datasets_returns_copy(self, data_provider):
+        """loaded_datasets는 내부 리스트의 복사본을 반환한다."""
+        datasets1 = data_provider.loaded_datasets
+        datasets2 = data_provider.loaded_datasets
+        assert datasets1 == datasets2
+        assert datasets1 is not datasets2
+
 
 # ── BacktestStrategyContext 테스트 ─────────────────
 
