@@ -220,6 +220,8 @@ class PositionHistory:
                  updated_at = excluded.updated_at""",
             (bot_id, symbol, quantity, avg_entry_price),
         )
+        # 인메모리 캐시 갱신
+        self._update_cache(bot_id, symbol, quantity, avg_entry_price)
 
     async def _get_current(self, bot_id: str, symbol: str) -> dict:
         """현재 포지션 조회. 없으면 빈 포지션 반환."""

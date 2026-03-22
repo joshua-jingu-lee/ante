@@ -500,6 +500,29 @@ class TestPositionHistory:
         assert pos["quantity"] == 100
         assert pos["avg_entry_price"] == 45000
 
+    async def test_force_update_syncs_cache(self, position_history):
+        """force_update() 후 get_positions_sync()가 갱신된 값을 반환."""
+        await position_history.force_update(
+            bot_id="bot1",
+            symbol="005930",
+            quantity=50,
+            avg_entry_price=60000,
+        )
+
+        cached = position_history.get_positions_sync("bot1")
+        assert len(cached) == 1
+        assert cached[0].quantity == 50
+        assert cached[0].avg_entry_price == 60000
+
+        # 수량 0으로 갱신하면 캐시에서 제거
+        await position_history.force_update(
+            bot_id="bot1",
+            symbol="005930",
+            quantity=0,
+            avg_entry_price=0,
+        )
+        assert position_history.get_positions_sync("bot1") == []
+
     async def test_get_history(self, position_history):
         """포지션 변동 이력 조회."""
         buy = TradeRecord(
