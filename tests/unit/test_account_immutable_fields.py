@@ -112,3 +112,30 @@ async def test_update_mutable_with_immutable_raises(service):
     await service.create(_make_account())
     with pytest.raises(AccountImmutableFieldError, match="exchange"):
         await service.update("test", name="새이름", exchange="NYSE")
+
+
+# ── 미인식 필드 거부 ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_unrecognized_field_raises(service):
+    """updatable에도 IMMUTABLE_FIELDS에도 없는 필드는 ValueError 발생."""
+    await service.create(_make_account())
+    with pytest.raises(ValueError, match="foo"):
+        await service.update("test", foo="bar")
+
+
+@pytest.mark.asyncio
+async def test_update_multiple_unrecognized_fields_raises(service):
+    """여러 미인식 필드 전달 시 모든 필드명이 에러 메시지에 포함."""
+    await service.create(_make_account())
+    with pytest.raises(ValueError, match="abc.*xyz|xyz.*abc"):
+        await service.update("test", abc="1", xyz="2")
+
+
+@pytest.mark.asyncio
+async def test_update_unrecognized_with_valid_raises(service):
+    """유효한 필드와 미인식 필드를 함께 보내면 ValueError 발생."""
+    await service.create(_make_account())
+    with pytest.raises(ValueError, match="unknown"):
+        await service.update("test", name="새이름", unknown="value")
