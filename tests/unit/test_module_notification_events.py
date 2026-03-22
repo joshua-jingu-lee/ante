@@ -93,7 +93,7 @@ class TestBotManagerNotifications:
         self, manager, eventbus, notifications
     ):
         """재시작 한도 소진 시 NotificationEvent 발행."""
-        await manager._on_restart_exhausted("bot-1", 3, "Crash")
+        await manager._on_restart_exhausted("bot-1", "account-1", 3, "Crash")
         assert len(notifications) == 1
         assert notifications[0].level == "error"
         assert notifications[0].category == "bot"
