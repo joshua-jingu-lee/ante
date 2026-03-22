@@ -87,6 +87,9 @@ class FakeTreasury:
     def get_budget(self, bot_id: str) -> None:
         return None
 
+    async def get_latest_snapshot(self) -> None:
+        return None
+
 
 class FakeTreasuryManager:
     """테스트용 TreasuryManager stub."""
@@ -315,7 +318,6 @@ class TestPortfolioAccountFilter:
         assert resp.status_code == 404
 
     def test_history_with_nonexistent_account(self, client):
-        """존재하지 않는 account_id로 필터하면 빈 데이터 (봇 없음)."""
+        """존재하지 않는 account_id로 필터하면 404."""
         resp = client.get("/api/portfolio/history?account_id=nonexistent")
-        assert resp.status_code == 200
-        assert resp.json()["data"] == []
+        assert resp.status_code == 404

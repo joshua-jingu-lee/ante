@@ -47,6 +47,9 @@ class FakeTreasury:
     def get_summary(self) -> dict:
         return {"account_balance": self._balance}
 
+    async def get_latest_snapshot(self) -> None:
+        return None
+
 
 @pytest.fixture
 def treasury():

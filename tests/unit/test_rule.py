@@ -204,22 +204,43 @@ class TestTotalExposureLimitRule:
         )
 
     def test_pass_within_limit(self, rule, base_context):
-        """노출이 한도 내면 통과."""
-        base_context.quantity = 1.0
+        """노출이 한도 내면 통과 (분모: 총 자산)."""
+        base_context.total_asset = 1000000.0  # 총 자산 100만
+        base_context.total_exposure = 100000.0  # 전 봇 노출 10만
+        base_context.quantity = 1.0  # 주문 5만 -> 합산 15만 < min(50만, 20만) = 20만
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
     def test_reject_exceeds_amount(self, rule, base_context):
-        """금액 한도 초과 시 REJECT."""
-        base_context.quantity = 20.0  # 20 * 50000 = 1,000,000 > 200,000
+        """절대 금액 한도 초과 시 REJECT."""
+        base_context.total_asset = 10000000.0  # 총 자산 1000만 -> 비율 한도 200만
+        base_context.total_exposure = 400000.0  # 전 봇 노출 40만
+        base_context.quantity = 3.0  # 주문 15만 -> 합산 55만 > min(50만, 200만) = 50만
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.REJECT
         assert result.action == RuleAction.NOTIFY
 
     def test_reject_exceeds_percent(self, rule, base_context):
-        """비율 한도 초과 시 REJECT."""
-        base_context.available_balance = 100000.0  # 20% = 20,000
-        base_context.quantity = 1.0  # 50,000 > 20,000
+        """비율 한도 초과 시 REJECT (분모: 총 자산)."""
+        base_context.total_asset = 200000.0  # 총 자산 20만 -> 20% = 4만
+        base_context.total_exposure = 30000.0  # 전 봇 노출 3만
+        base_context.quantity = 1.0  # 주문 5만 -> 합산 8만 > min(50만, 4만) = 4만
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.REJECT
+
+    def test_pass_zero_total_asset(self, rule, base_context):
+        """총 자산이 0이면 PASS (검사 불가)."""
+        base_context.total_asset = 0.0
+        base_context.total_exposure = 50000.0
+        base_context.quantity = 1.0
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_reject_multi_bot_combined_exposure(self, rule, base_context):
+        """다수 봇 합산 노출이 한도 초과 시 REJECT (핵심 버그 검증)."""
+        base_context.total_asset = 1000000.0  # 총 자산 100만
+        base_context.total_exposure = 180000.0  # 봇 A 9만 + 봇 B 9만 = 18만
+        base_context.quantity = 1.0  # 주문 5만 -> 합산 23만 > 20만
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.REJECT
 

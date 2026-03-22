@@ -57,6 +57,9 @@ class FakeTreasury:
         self._unallocated -= amount
         return True
 
+    async def get_latest_snapshot(self) -> None:
+        return None
+
     async def deallocate(self, bot_id: str, amount: float) -> bool:
         budget = self._budgets.get(bot_id)
         if not budget or amount <= 0 or budget.available < amount:

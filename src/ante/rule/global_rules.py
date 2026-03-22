@@ -49,28 +49,31 @@ class TotalExposureLimitRule(Rule):
         max_exposure_amount = self.config.get("max_exposure_amount", float("inf"))
 
         order_value = context.quantity * context.current_price
-        current_exposure = abs(context.current_position * context.current_price)
-        expected_exposure = current_exposure + order_value
+        expected_exposure = context.total_exposure + order_value
 
-        balance_limit = context.available_balance * max_exposure_percent
-        exposure_limit = min(max_exposure_amount, balance_limit)
-
-        if expected_exposure > exposure_limit > 0:
-            return RuleEvaluation(
-                rule_id=self.rule_id,
-                rule_name=self.name,
-                result=RuleResult.REJECT,
-                action=RuleAction.NOTIFY,
-                message=(
-                    f"Total exposure would exceed limit: "
-                    f"{expected_exposure:.2f} > {exposure_limit:.2f}"
-                ),
-                metadata={
-                    "current_exposure": current_exposure,
-                    "expected_exposure": expected_exposure,
-                    "exposure_limit": exposure_limit,
-                },
+        if context.total_asset > 0:
+            exposure_limit = min(
+                max_exposure_amount,
+                context.total_asset * max_exposure_percent,
             )
+
+            if expected_exposure > exposure_limit:
+                return RuleEvaluation(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    result=RuleResult.REJECT,
+                    action=RuleAction.NOTIFY,
+                    message=(
+                        f"Total exposure would exceed limit: "
+                        f"{expected_exposure:.2f} > {exposure_limit:.2f}"
+                    ),
+                    metadata={
+                        "total_exposure": context.total_exposure,
+                        "expected_exposure": expected_exposure,
+                        "exposure_limit": exposure_limit,
+                        "total_asset": context.total_asset,
+                    },
+                )
 
         return RuleEvaluation(
             rule_id=self.rule_id,
