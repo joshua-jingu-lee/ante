@@ -754,7 +754,6 @@ class BotManager:
             "strategy_id": config.strategy_id,
             "account_id": config.account_id,
             "interval_seconds": config.interval_seconds,
-            "paper_initial_balance": config.paper_initial_balance,
         }
         await self._db.execute(
             """INSERT INTO bots

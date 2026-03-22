@@ -483,7 +483,6 @@ class TestStrategyContextFactory:
         config = BotConfig(
             bot_id="paper1",
             strategy_id="s1",
-            paper_initial_balance=5_000_000.0,
         )
         # AccountService 미설정 → VIRTUAL 모드(paper) 기본 동작
         ctx = factory.create(config)
@@ -494,9 +493,9 @@ class TestStrategyContextFactory:
         # Paper 봇이 PaperExecutor에 등록되었는지 확인
         assert "paper1" in executor._portfolios
 
-        # 초기 잔고 확인
+        # Treasury 미설정 시 초기 잔고 0
         balance = ctx.get_balance()
-        assert balance["allocated"] == 5_000_000.0
+        assert balance["allocated"] == 0.0
 
     def test_create_live_context(self, eventbus):
         """Live 봇 StrategyContext 생성 (Account.trading_mode=LIVE)."""
@@ -544,6 +543,53 @@ class TestStrategyContextFactory:
 
         assert isinstance(ctx, StrategyContext)
         assert ctx.bot_id == "live1"
+
+    def test_resolve_paper_balance_with_budget(self, eventbus):
+        """TreasuryManager 존재 + BotBudget 배정 시 allocated 값 반환."""
+        from ante.treasury.models import BotBudget
+
+        class FakeTreasury:
+            def get_budget(self, bot_id):
+                if bot_id == "paper1":
+                    return BotBudget(bot_id="paper1", allocated=2_000_000.0)
+                return None
+
+        class FakeTreasuryManager:
+            def get(self, account_id):
+                return FakeTreasury()
+
+        executor = PaperExecutor(eventbus=eventbus)
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            paper_executor=executor,
+            treasury_manager=FakeTreasuryManager(),
+        )
+
+        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acct1")
+        ctx = factory.create(config)
+
+        balance = ctx.get_balance()
+        assert balance["allocated"] == 2_000_000.0
+
+    def test_resolve_paper_balance_key_error(self, eventbus):
+        """TreasuryManager 존재하나 bot_id 미배정 시 0.0 반환."""
+
+        class FakeTreasuryManager:
+            def get(self, account_id):
+                raise KeyError(account_id)
+
+        executor = PaperExecutor(eventbus=eventbus)
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            paper_executor=executor,
+            treasury_manager=FakeTreasuryManager(),
+        )
+
+        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="no-acct")
+        ctx = factory.create(config)
+
+        balance = ctx.get_balance()
+        assert balance["allocated"] == 0.0
 
     def test_live_without_providers_raises(self, eventbus):
         """Live providers 미설정 시 에러."""
@@ -602,7 +648,6 @@ class TestBotManagerWithFactory:
         config = BotConfig(
             bot_id="paper1",
             strategy_id="s1",
-            paper_initial_balance=5_000_000.0,
         )
         bot = await manager.create_bot(config, SimpleStrategy)
 

@@ -116,9 +116,10 @@ class StrategyContextFactory:
 
     def _create_paper_context(self, config: BotConfig) -> StrategyContext:
         """Paper 봇용 StrategyContext 생성."""
+        initial_balance = self._resolve_paper_balance(config)
         paper_portfolio = PaperPortfolioView(
             bot_id=config.bot_id,
-            initial_balance=config.paper_initial_balance,
+            initial_balance=initial_balance,
         )
         paper_order_view = PaperOrderView(portfolio=paper_portfolio)
 
@@ -135,6 +136,26 @@ class StrategyContextFactory:
         logger.info(
             "Paper StrategyContext 생성: %s (잔고: %s)",
             config.bot_id,
-            config.paper_initial_balance,
+            initial_balance,
         )
         return ctx
+
+    def _resolve_paper_balance(self, config: BotConfig) -> float:
+        """Paper 봇의 초기 잔고를 Account 레벨(Treasury)에서 조회.
+
+        Treasury에 해당 봇의 예산이 배정되어 있으면 allocated 값을 사용하고,
+        Treasury가 없으면 0.0을 반환한다.
+        """
+        if self._treasury_manager is not None:
+            try:
+                treasury = self._treasury_manager.get(config.account_id)
+                budget = treasury.get_budget(config.bot_id)
+                if budget is not None:
+                    return budget.allocated
+            except KeyError:
+                logger.warning(
+                    "Paper 봇 '%s': 계좌 '%s'의 Treasury 미발견 -- 잔고 0",
+                    config.bot_id,
+                    config.account_id,
+                )
+        return 0.0
