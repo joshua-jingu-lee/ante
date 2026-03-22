@@ -364,3 +364,5 @@ class TestBacktestResultToDict:
         assert "equity_curve" in d
         assert len(d["equity_curve"]) == 1
         assert "metrics" in d
+        assert "config" in d
+        assert "datasets" in d
