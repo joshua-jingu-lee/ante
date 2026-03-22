@@ -233,7 +233,7 @@ class Treasury:
         )
         self._eventbus.subscribe(OrderFailedEvent, self._on_order_failed, priority=80)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped, priority=80)
-        self._eventbus.subscribe(DailyReportEvent, self._on_daily_report, priority=70)
+        self._eventbus.subscribe(DailyReportEvent, self._on_daily_report, priority=80)
 
     # -- 계좌 잔고 -----------------------------------------------
 
