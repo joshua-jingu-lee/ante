@@ -135,6 +135,7 @@ class TestBotAutoRestart:
 
         assert len(exhausted) == 1
         assert exhausted[0].bot_id == "b1"
+        assert exhausted[0].account_id == "test"
         assert exhausted[0].restart_attempts == 2
 
     async def test_restart_count_increments(self, manager, eventbus):
@@ -254,9 +255,16 @@ class TestBotRestartExhaustedEvent:
         """이벤트 필드 확인."""
         event = BotRestartExhaustedEvent(
             bot_id="b1",
+            account_id="acc-1",
             restart_attempts=3,
             last_error="connection lost",
         )
         assert event.bot_id == "b1"
+        assert event.account_id == "acc-1"
         assert event.restart_attempts == 3
         assert event.last_error == "connection lost"
+
+    def test_account_id_default_empty(self):
+        """account_id 기본값은 빈 문자열."""
+        event = BotRestartExhaustedEvent(bot_id="b1")
+        assert event.account_id == ""
