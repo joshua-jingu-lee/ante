@@ -1186,3 +1186,41 @@ class TestRuleEngineTreasuryIntegration:
         engine = RuleEngine(eventbus=EventBus(), treasury=mock_treasury)
         data = await engine._query_treasury_data()
         assert all(v == 0.0 for v in data.values())
+
+
+# ── RuleEngine.start() 시그니처 회귀 테스트 ──────────────
+
+
+class TestRuleEngineStartSync:
+    """RuleEngine.start()가 sync 메서드임을 보장하는 회귀 테스트. Refs #742."""
+
+    def test_start_is_sync(self):
+        """start()는 coroutine이 아닌 일반 동기 메서드여야 한다."""
+        import asyncio
+        import inspect
+
+        assert not inspect.iscoroutinefunction(RuleEngine.start), (
+            "RuleEngine.start()는 sync 메서드여야 합니다 (스펙 일치)"
+        )
+
+        # 실제 호출 시 coroutine을 반환하지 않음을 확인
+        engine = RuleEngine(eventbus=EventBus())
+        result = engine.start()
+        assert not asyncio.iscoroutine(result), (
+            "start() 호출 결과가 coroutine이면 안 됩니다"
+        )
+
+    def test_start_subscribes_events(self):
+        """start() 호출 후 EventBus에 핸들러가 등록된다."""
+        eventbus = EventBus()
+        engine = RuleEngine(eventbus=eventbus, account_id="test")
+        engine.start()
+
+        # subscribe가 등록되었는지 간접 확인:
+        # OrderRequestEvent 핸들러가 있어야 한다
+        from ante.eventbus.events import OrderRequestEvent
+
+        handlers = eventbus._handlers.get(OrderRequestEvent, [])
+        assert len(handlers) >= 1, (
+            "start() 후 OrderRequestEvent 핸들러가 등록되어야 합니다"
+        )
