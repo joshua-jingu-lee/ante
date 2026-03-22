@@ -158,6 +158,7 @@ class TestBootstrapMaster:
 
 class TestRegister:
     async def test_register_agent(self, service):
+        await service.bootstrap_master("owner", "pass123")
         member, token = await service.register(
             member_id="agent-01",
             member_type=MemberType.AGENT,
@@ -212,6 +213,7 @@ class TestAuthenticate:
 
     async def test_authenticate_type_mismatch(self, service, db):
         """agent 토큰으로 human 멤버를 인증할 수 없다."""
+        await service.bootstrap_master("owner", "pass123")
         _, token = await service.register(
             "human-01", MemberType.HUMAN, registered_by="owner"
         )
@@ -356,6 +358,7 @@ class TestPasswordManagement:
 
 class TestScopes:
     async def test_update_scopes(self, service):
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         m = await service.update_scopes(
             "agent-01", ["strategy:write", "data:read"], updated_by="owner"
@@ -364,6 +367,82 @@ class TestScopes:
         # DB에 반영 확인
         fetched = await service.get("agent-01")
         assert fetched.scopes == ["strategy:write", "data:read"]
+
+
+class TestMasterPermissionCheck:
+    """register/update_scopes에서 master 권한 검증 테스트."""
+
+    async def test_register_by_agent_fails(self, service):
+        """agent 역할의 멤버가 register 호출 시 PermissionDeniedError."""
+        from ante.member.errors import PermissionDeniedError
+
+        await service.register("agent-caller", MemberType.AGENT)
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.register(
+                "new-agent", MemberType.AGENT, registered_by="agent-caller"
+            )
+
+    async def test_register_by_default_human_fails(self, service):
+        """default 역할의 human이 register 호출 시 PermissionDeniedError."""
+        from ante.member.errors import PermissionDeniedError
+
+        await service.bootstrap_master("owner", "pass123")
+        await service.register(
+            "human-default",
+            MemberType.HUMAN,
+            role=MemberRole.DEFAULT,
+            registered_by="owner",
+        )
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.register(
+                "new-agent", MemberType.AGENT, registered_by="human-default"
+            )
+
+    async def test_register_by_master_succeeds(self, service):
+        """master 역할이면 register 정상 수행."""
+        await service.bootstrap_master("owner", "pass123")
+        member, token = await service.register(
+            "agent-01", MemberType.AGENT, registered_by="owner"
+        )
+        assert member.member_id == "agent-01"
+
+    async def test_register_by_nonexistent_caller_fails(self, service):
+        """존재하지 않는 호출자로 register 호출 시 PermissionDeniedError."""
+        from ante.member.errors import PermissionDeniedError
+
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.register("new-agent", MemberType.AGENT, registered_by="ghost")
+
+    async def test_register_without_caller_succeeds(self, service):
+        """registered_by가 빈 문자열(내부 호출)이면 검증 스킵."""
+        member, token = await service.register("agent-01", MemberType.AGENT)
+        assert member.member_id == "agent-01"
+
+    async def test_update_scopes_by_agent_fails(self, service):
+        """agent 역할의 멤버가 update_scopes 호출 시 PermissionDeniedError."""
+        from ante.member.errors import PermissionDeniedError
+
+        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-caller", MemberType.AGENT)
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.update_scopes(
+                "agent-01", ["strategy:write"], updated_by="agent-caller"
+            )
+
+    async def test_update_scopes_by_master_succeeds(self, service):
+        """master 역할이면 update_scopes 정상 수행."""
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT)
+        m = await service.update_scopes(
+            "agent-01", ["strategy:write"], updated_by="owner"
+        )
+        assert m.scopes == ["strategy:write"]
+
+    async def test_update_scopes_without_caller_succeeds(self, service):
+        """updated_by가 빈 문자열(내부 호출)이면 검증 스킵."""
+        await service.register("agent-01", MemberType.AGENT)
+        m = await service.update_scopes("agent-01", ["data:read"])
+        assert m.scopes == ["data:read"]
 
 
 class TestList:
