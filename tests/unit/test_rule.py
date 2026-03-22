@@ -157,14 +157,26 @@ class TestDailyLossLimitRule:
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
-    def test_block_exceeds_limit(self, rule, base_context):
-        """손실이 한도 초과하면 BLOCK + HALT_ACCOUNT."""
+    def test_reject_buy_exceeds_limit(self, rule, base_context):
+        """손실이 한도 초과하면 매수는 REJECT + NOTIFY (매도는 허용)."""
         base_context.daily_pnl = -10000.0
         base_context.prev_day_total_asset = 100000.0
+        base_context.side = "buy"
         result = rule.evaluate(base_context)
-        assert result.result == RuleResult.BLOCK
-        assert result.action == RuleAction.HALT_ACCOUNT
+        assert result.result == RuleResult.REJECT
+        assert result.action == RuleAction.NOTIFY
         assert result.metadata["prev_day_total_asset"] == 100000.0
+        assert "Buy orders blocked" in result.message
+        assert "Sell orders are still allowed" in result.message
+
+    def test_pass_sell_during_loss_limit(self, rule, base_context):
+        """손실 한도 초과 상태에서도 매도(손절)는 PASS."""
+        base_context.daily_pnl = -10000.0
+        base_context.prev_day_total_asset = 100000.0
+        base_context.side = "sell"
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+        assert "sell order is allowed" in result.message
 
     def test_pass_zero_prev_day_total_asset(self, rule, base_context):
         """전일 총 자산이 0이면 통과 (0으로 나누기 방지)."""
@@ -180,12 +192,14 @@ class TestDailyLossLimitRule:
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
-    def test_block_small_asset_large_loss(self, rule, base_context):
-        """자산 100만, 손실 10만 -> 10% > 5% -> BLOCK."""
+    def test_reject_small_asset_large_loss(self, rule, base_context):
+        """자산 100만, 손실 10만 -> 10% > 5% -> REJECT + NOTIFY."""
         base_context.daily_pnl = -100000.0
         base_context.prev_day_total_asset = 1000000.0
+        base_context.side = "buy"
         result = rule.evaluate(base_context)
-        assert result.result == RuleResult.BLOCK
+        assert result.result == RuleResult.REJECT
+        assert result.action == RuleAction.NOTIFY
 
 
 # ── TotalExposureLimitRule ───────────────────────
@@ -243,6 +257,16 @@ class TestTotalExposureLimitRule:
         base_context.quantity = 1.0  # 주문 5만 -> 합산 23만 > 20만
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.REJECT
+
+    def test_pass_sell_during_exposure_limit(self, rule, base_context):
+        """노출 한도 초과 상태에서도 매도(손절)는 PASS."""
+        base_context.total_asset = 1000000.0
+        base_context.total_exposure = 180000.0
+        base_context.quantity = 1.0
+        base_context.side = "sell"
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+        assert "Sell order is always allowed" in result.message
 
 
 # ── TradingHoursRule ─────────────────────────────
@@ -441,7 +465,7 @@ class TestRuleEngine:
         base_context.prev_day_total_asset = 100000.0
         result = engine.evaluate(base_context)
 
-        assert result.overall_result == RuleResult.BLOCK
+        assert result.overall_result == RuleResult.REJECT
         # 계좌 룰만 평가됨
         assert len(result.evaluations) == 1
         assert result.evaluations[0].rule_id == "dl"
