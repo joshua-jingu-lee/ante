@@ -87,6 +87,9 @@ class FakeTreasury:
     def get_budget(self, bot_id: str) -> None:
         return None
 
+    async def get_latest_snapshot(self) -> None:
+        return None
+
 
 class FakeTreasuryManager:
     """테스트용 TreasuryManager stub."""

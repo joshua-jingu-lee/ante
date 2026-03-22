@@ -30,6 +30,9 @@ class FakeTreasury:
             "bot_count": 0,
         }
 
+    async def get_latest_snapshot(self) -> None:
+        return None
+
 
 class TestBrokerMetaInTreasury:
     """GET /api/treasury 응답에 브로커 메타정보가 포함된다."""
