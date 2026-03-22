@@ -483,7 +483,6 @@ class TestStrategyContextFactory:
         config = BotConfig(
             bot_id="paper1",
             strategy_id="s1",
-            paper_initial_balance=5_000_000.0,
         )
         # AccountService 미설정 → VIRTUAL 모드(paper) 기본 동작
         ctx = factory.create(config)
@@ -494,9 +493,9 @@ class TestStrategyContextFactory:
         # Paper 봇이 PaperExecutor에 등록되었는지 확인
         assert "paper1" in executor._portfolios
 
-        # 초기 잔고 확인
+        # Treasury 미설정 시 초기 잔고 0
         balance = ctx.get_balance()
-        assert balance["allocated"] == 5_000_000.0
+        assert balance["allocated"] == 0.0
 
     def test_create_live_context(self, eventbus):
         """Live 봇 StrategyContext 생성 (Account.trading_mode=LIVE)."""
@@ -602,7 +601,6 @@ class TestBotManagerWithFactory:
         config = BotConfig(
             bot_id="paper1",
             strategy_id="s1",
-            paper_initial_balance=5_000_000.0,
         )
         bot = await manager.create_bot(config, SimpleStrategy)
 

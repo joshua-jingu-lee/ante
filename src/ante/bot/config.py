@@ -31,7 +31,6 @@ class BotConfig:
     name: str = ""
     account_id: str = "test"
     interval_seconds: int = 60
-    paper_initial_balance: float = 10_000_000.0
     auto_restart: bool = True
     max_restart_attempts: int = 3
     restart_cooldown_seconds: int = 60
