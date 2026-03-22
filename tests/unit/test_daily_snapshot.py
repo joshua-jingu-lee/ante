@@ -142,6 +142,28 @@ class TestTakeSnapshot:
         assert snap["unallocated"] == 7_000_000.0
         assert snap["bot_count"] == 1
 
+    async def test_total_asset_equals_ante_eval_plus_unallocated(self, treasury):
+        """total_asset은 ante_eval_amount + unallocated 이어야 한다 (#743)."""
+        await treasury.allocate("bot1", 3_000_000.0)
+
+        event = _make_event()
+        await treasury.take_snapshot(event)
+
+        snap = await treasury.get_daily_snapshot("2026-03-21")
+        assert snap is not None
+        expected = snap["ante_eval_amount"] + snap["unallocated"]
+        assert snap["total_asset"] == expected
+
+    async def test_save_daily_snapshot_total_asset_formula(self, treasury):
+        """save_daily_snapshot도 total_asset = ante_eval_amount + unallocated (#743)."""
+        await treasury.allocate("bot1", 2_000_000.0)
+        await treasury.save_daily_snapshot("2026-03-21")
+
+        snap = await treasury.get_daily_snapshot("2026-03-21")
+        assert snap is not None
+        expected = snap["ante_eval_amount"] + snap["unallocated"]
+        assert snap["total_asset"] == expected
+
     async def test_take_snapshot_ignores_non_daily_report_event(self, treasury):
         """DailyReportEvent가 아닌 이벤트는 무시한다."""
         await treasury.take_snapshot("not an event")
