@@ -328,3 +328,113 @@ class TestScopesUpdate:
         )
         assert resp.status_code == 200
         assert resp.json()["member"]["scopes"] == ["trade:read", "trade:write"]
+
+
+class TestCallerIdPropagation:
+    """request.state.member_id가 서비스 호출로 전달되는지 검증."""
+
+    def test_register_passes_caller_id(self, member_service):
+        """인증된 사용자의 member_id가 registered_by로 전달."""
+        captured: dict[str, str] = {}
+        original_register = member_service.register
+
+        async def spy_register(**kwargs):
+            captured["registered_by"] = kwargs.get("registered_by", "")
+            return await original_register(**kwargs)
+
+        member_service.register = spy_register
+
+        app = create_app(member_service=member_service)
+
+        @app.middleware("http")
+        async def inject_member_id(request, call_next):
+            request.state.member_id = "master-user"
+            return await call_next(request)
+
+        client = TestClient(app)
+        resp = client.post(
+            "/api/members",
+            json={"member_id": "new-agent", "member_type": "agent"},
+        )
+        assert resp.status_code == 201
+        assert captured["registered_by"] == "master-user"
+
+    def test_update_scopes_passes_caller_id(self, member_service):
+        """인증된 사용자의 member_id가 updated_by로 전달."""
+        captured: dict[str, str] = {}
+        original_update = member_service.update_scopes
+
+        async def spy_update(member_id, scopes, updated_by=""):
+            captured["updated_by"] = updated_by
+            return await original_update(member_id, scopes, updated_by=updated_by)
+
+        member_service.update_scopes = spy_update
+        member_service._members["agent-01"] = FakeMember(member_id="agent-01")
+
+        app = create_app(member_service=member_service)
+
+        @app.middleware("http")
+        async def inject_member_id(request, call_next):
+            request.state.member_id = "master-user"
+            return await call_next(request)
+
+        client = TestClient(app)
+        resp = client.put(
+            "/api/members/agent-01/scopes",
+            json={"scopes": ["trade:read"]},
+        )
+        assert resp.status_code == 200
+        assert captured["updated_by"] == "master-user"
+
+    def test_no_auth_passes_empty_string(self, client, member_service):
+        """인증 컨텍스트 없을 때 빈 문자열 전달 (내부 호출)."""
+        captured: dict[str, str] = {}
+        original_register = member_service.register
+
+        async def spy_register(**kwargs):
+            captured["registered_by"] = kwargs.get("registered_by", "")
+            return await original_register(**kwargs)
+
+        member_service.register = spy_register
+        resp = client.post(
+            "/api/members",
+            json={"member_id": "new-agent", "member_type": "agent"},
+        )
+        assert resp.status_code == 201
+        assert captured["registered_by"] == ""
+
+
+class TestPermissionDeniedErrorHandling:
+    """PermissionDeniedError가 403으로 처리되는지 검증."""
+
+    def test_register_permission_denied(self, client, member_service):
+        """PermissionDeniedError → 403."""
+        from ante.member.errors import PermissionDeniedError
+
+        async def raise_pde(**kwargs):
+            raise PermissionDeniedError("'register'은(는) master만 수행할 수 있습니다.")
+
+        member_service.register = raise_pde
+        resp = client.post(
+            "/api/members",
+            json={"member_id": "new-agent", "member_type": "agent"},
+        )
+        assert resp.status_code == 403
+
+    def test_update_scopes_permission_denied(self, client, member_service):
+        """update_scopes PermissionDeniedError → 403."""
+        from ante.member.errors import PermissionDeniedError
+
+        member_service._members["agent-01"] = FakeMember(member_id="agent-01")
+
+        async def raise_pde(member_id, scopes, updated_by=""):
+            raise PermissionDeniedError(
+                "'update_scopes'은(는) master만 수행할 수 있습니다."
+            )
+
+        member_service.update_scopes = raise_pde
+        resp = client.put(
+            "/api/members/agent-01/scopes",
+            json={"scopes": ["trade:read"]},
+        )
+        assert resp.status_code == 403
