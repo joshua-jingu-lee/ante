@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from ante.account.crypto import decrypt_credentials, encrypt_credentials
 from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
@@ -148,7 +148,7 @@ class AccountService:
                 account.trading_hours_end,
                 account.trading_mode.value,
                 account.broker_type,
-                json.dumps(account.credentials),
+                encrypt_credentials(account.credentials),
                 float(account.buy_commission_rate),
                 float(account.sell_commission_rate),
                 account.status.value,
@@ -266,7 +266,7 @@ class AccountService:
                 account.trading_hours_end,
                 account.trading_mode.value,
                 account.broker_type,
-                json.dumps(account.credentials),
+                encrypt_credentials(account.credentials),
                 float(account.buy_commission_rate),
                 float(account.sell_commission_rate),
                 now.isoformat(),
@@ -503,9 +503,11 @@ class AccountService:
 
 def _row_to_account(row: dict[str, Any]) -> Account:
     """DB 행을 Account 객체로 변환."""
-    credentials = row.get("credentials", "{}")
-    if isinstance(credentials, str):
-        credentials = json.loads(credentials)
+    credentials_raw = row.get("credentials", "{}")
+    if isinstance(credentials_raw, str):
+        credentials = decrypt_credentials(credentials_raw)
+    else:
+        credentials = credentials_raw
 
     return Account(
         account_id=row["account_id"],
