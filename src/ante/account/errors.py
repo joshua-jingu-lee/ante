@@ -37,6 +37,12 @@ class AccountDeletedError(AccountError):
     pass
 
 
+class AccountSuspendedError(AccountError):
+    """정지(SUSPENDED) 상태 계좌에 대한 작업 시도."""
+
+    pass
+
+
 class AccountImmutableFieldError(AccountError):
     """불변 필드 수정 시도."""
 
