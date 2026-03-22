@@ -11,6 +11,7 @@ services:
       - TELEGRAM_BOT_TOKEN=dummy
       - TELEGRAM_CHAT_ID=dummy
       - QA_ADMIN_PASSWORD=qa-password
+      - ANTE_DB_ENCRYPTION_KEY=sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk=
     volumes:
       - qa-db:/app/db
       - qa-data:/app/data
