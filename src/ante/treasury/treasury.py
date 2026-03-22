@@ -1076,7 +1076,7 @@ class Treasury:
             (
                 self._account_id,
                 snapshot_date,
-                summary.get("total_evaluation", 0.0),
+                summary.get("ante_eval_amount", 0.0) + summary.get("unallocated", 0.0),
                 summary.get("ante_eval_amount", 0.0),
                 summary.get("ante_purchase_amount", 0.0),
                 summary.get("unallocated", 0.0),
@@ -1122,7 +1122,7 @@ class Treasury:
             (
                 self._account_id,
                 snapshot_date,
-                summary.get("total_evaluation", 0.0),
+                summary.get("ante_eval_amount", 0.0) + summary.get("unallocated", 0.0),
                 summary.get("ante_eval_amount", 0.0),
                 summary.get("ante_purchase_amount", 0.0),
                 summary.get("unallocated", 0.0),
