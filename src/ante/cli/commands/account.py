@@ -305,21 +305,24 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
 @require_scope("account:write")
 def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> None:
     """계좌 삭제 (소프트 딜리트)."""
+    from ante.cli.commands.ipc_helpers import ipc_send
+
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
     if not skip_confirm:
         click.confirm(f'계좌 "{account_id}"를 삭제하시겠습니까?', abort=True)
 
-    async def _do_delete() -> None:
-        svc, db = await _create_account_service()
-        try:
-            await svc.delete(account_id, deleted_by=member_id)
-        finally:
-            await db.close()
-
     try:
-        _run(_do_delete())
+        _run(
+            ipc_send(
+                "account.delete",
+                {"account_id": account_id},
+                actor=member_id,
+            )
+        )
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
