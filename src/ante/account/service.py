@@ -285,6 +285,7 @@ class AccountService:
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
+            AccountDeletedException: 삭제된 계좌.
         """
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
@@ -361,6 +362,7 @@ class AccountService:
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
+            AccountDeletedException: 삭제된 계좌.
         """
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
