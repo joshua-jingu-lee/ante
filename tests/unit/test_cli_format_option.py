@@ -202,32 +202,46 @@ class TestAccountDeleteYes:
     """ante account delete {id} --yes."""
 
     def test_delete_with_yes_skips_confirm(self, runner: CliRunner) -> None:
-        svc = AsyncMock()
-        db = _mock_db()
+        mock_response = {"status": "ok", "data": {}}
 
         with patch(
-            "ante.cli.commands.account._create_account_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
-            result = runner.invoke(cli, ["account", "delete", "test-acct", "--yes"])
-            assert result.exit_code == 0
-            assert "삭제 완료" in result.output
-            svc.delete.assert_called_once()
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = runner.invoke(cli, ["account", "delete", "test-acct", "--yes"])
+
+        assert result.exit_code == 0
+        assert "삭제 완료" in result.output
+        mock_client.send.assert_called_once()
 
     def test_delete_without_yes_prompts(self, runner: CliRunner) -> None:
         """--yes 없이 호출하면 확인 프롬프트가 나타남."""
-        svc = AsyncMock()
-        db = _mock_db()
+        mock_response = {"status": "ok", "data": {}}
 
         with patch(
-            "ante.cli.commands.account._create_account_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
-            result = runner.invoke(cli, ["account", "delete", "test-acct"], input="y\n")
-            assert result.exit_code == 0
-            assert "삭제 완료" in result.output
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = runner.invoke(
+                    cli, ["account", "delete", "test-acct"], input="y\n"
+                )
+
+        assert result.exit_code == 0
+        assert "삭제 완료" in result.output
 
 
 # ── treasury status --format json ─────────────────────────
