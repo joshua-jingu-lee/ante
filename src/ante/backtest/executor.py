@@ -27,13 +27,15 @@ class BacktestExecutor:
         strategy_cls: type[Strategy],
         data_provider: BacktestDataProvider,
         initial_balance: float = 10_000_000,
-        commission_rate: float = 0.00015,
+        buy_commission_rate: float = 0.00015,
+        sell_commission_rate: float = 0.00195,
         slippage_rate: float = 0.001,
     ) -> None:
         self._strategy_cls = strategy_cls
         self._data = data_provider
         self._initial_balance = initial_balance
-        self._commission_rate = commission_rate
+        self._buy_commission_rate = buy_commission_rate
+        self._sell_commission_rate = sell_commission_rate
         self._slippage_rate = slippage_rate
 
         self._balance = initial_balance
@@ -120,7 +122,12 @@ class BacktestExecutor:
         else:
             exec_price = price * (1 - self._slippage_rate)
 
-        commission = exec_price * signal.quantity * self._commission_rate
+        rate = (
+            self._buy_commission_rate
+            if signal.side == "buy"
+            else self._sell_commission_rate
+        )
+        commission = exec_price * signal.quantity * rate
 
         if signal.side == "buy":
             cost = exec_price * signal.quantity + commission

@@ -15,7 +15,8 @@ class BacktestConfig:
     start_date: str = ""
     end_date: str = ""
     initial_balance: float = 10_000_000.0
-    commission_rate: float = 0.00015
+    buy_commission_rate: float = 0.00015
+    sell_commission_rate: float = 0.00195
     slippage_rate: float = 0.001
     data_paths: list[str] = field(default_factory=lambda: ["data/"])
 
