@@ -109,6 +109,15 @@ TREASURY_TRANSACTIONS_MIGRATION = """
 ALTER TABLE treasury_transactions ADD COLUMN account_id TEXT DEFAULT '';
 """
 
+# treasury_state에 평가액/매입액 필드 추가 마이그레이션
+_STATE_MIGRATION_COLUMNS = [
+    ("purchase_amount", "REAL NOT NULL DEFAULT 0"),
+    ("eval_amount", "REAL NOT NULL DEFAULT 0"),
+    ("total_profit_loss", "REAL NOT NULL DEFAULT 0"),
+    ("external_purchase_amount", "REAL NOT NULL DEFAULT 0"),
+    ("external_eval_amount", "REAL NOT NULL DEFAULT 0"),
+]
+
 # daily_snapshots 성과 필드 추가 마이그레이션
 _SNAPSHOT_MIGRATION_COLUMNS = [
     ("total_asset", "REAL NOT NULL DEFAULT 0"),
@@ -202,6 +211,15 @@ class Treasury:
             await self._db.execute_script(TREASURY_TRANSACTIONS_MIGRATION)
         except Exception:
             pass  # 이미 컬럼이 존재하면 무시
+
+        # 마이그레이션: treasury_state 평가액/매입액 필드 추가
+        for col_name, col_def in _STATE_MIGRATION_COLUMNS:
+            try:
+                await self._db.execute_script(
+                    f"ALTER TABLE treasury_state ADD COLUMN {col_name} {col_def};"
+                )
+            except Exception:
+                pass  # 이미 컬럼이 존재하면 무시
 
         # 마이그레이션: daily_snapshots 성과 필드 추가
         for col_name, col_def in _SNAPSHOT_MIGRATION_COLUMNS:
@@ -979,6 +997,15 @@ class Treasury:
             self._account_balance = float(r["account_balance"])
             self._purchasable_amount = float(r["purchasable_amount"])
             self._total_evaluation = float(r["total_evaluation"])
+            self._purchase_amount = float(r["purchase_amount"])
+            self._eval_amount = float(r["eval_amount"])
+            self._total_profit_loss = float(r["total_profit_loss"])
+            self._external_purchase_amount = float(r["external_purchase_amount"])
+            self._external_eval_amount = float(r["external_eval_amount"])
+            last_synced = r["last_synced_at"]
+            self._last_synced_at = (
+                datetime.fromisoformat(last_synced) if last_synced else None
+            )
 
         # 봇 예산 (계좌별 필터링)
         rows = await self._db.fetch_all(
@@ -1006,19 +1033,34 @@ class Treasury:
         await self._db.execute(
             """INSERT INTO treasury_state
                (account_id, account_balance, purchasable_amount,
-                total_evaluation, currency)
-               VALUES (?, ?, ?, ?, ?)
+                total_evaluation, currency,
+                purchase_amount, eval_amount, total_profit_loss,
+                external_purchase_amount, external_eval_amount,
+                last_synced_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(account_id) DO UPDATE SET
                  account_balance = excluded.account_balance,
                  purchasable_amount = excluded.purchasable_amount,
                  total_evaluation = excluded.total_evaluation,
-                 currency = excluded.currency""",
+                 currency = excluded.currency,
+                 purchase_amount = excluded.purchase_amount,
+                 eval_amount = excluded.eval_amount,
+                 total_profit_loss = excluded.total_profit_loss,
+                 external_purchase_amount = excluded.external_purchase_amount,
+                 external_eval_amount = excluded.external_eval_amount,
+                 last_synced_at = excluded.last_synced_at""",
             (
                 self._account_id,
                 self._account_balance,
                 self._purchasable_amount,
                 self._total_evaluation,
                 self._currency,
+                self._purchase_amount,
+                self._eval_amount,
+                self._total_profit_loss,
+                self._external_purchase_amount,
+                self._external_eval_amount,
+                self._last_synced_at.isoformat() if self._last_synced_at else None,
             ),
         )
 

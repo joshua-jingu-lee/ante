@@ -745,6 +745,74 @@ class TestTreasuryPersistence:
         assert t2_new.account_balance == 5_000.0
         assert t2_new.get_budget("bot1") is None
 
+    async def test_persists_evaluation_fields(self, db, eventbus):
+        """재시작 후 평가액/매입액/손익/외부 필드가 복원된다."""
+        t1 = Treasury(db=db, eventbus=eventbus, account_id=ACCOUNT_ID)
+        await t1.initialize()
+        await t1.set_account_balance(10_000_000.0)
+
+        # sync_balance로 평가액 필드 설정
+        await t1.sync_balance(
+            {
+                "cash": 10_000_000.0,
+                "purchasable_amount": 8_000_000.0,
+                "total_assets": 12_000_000.0,
+                "purchase_amount": 7_000_000.0,
+                "eval_amount": 7_200_000.0,
+                "total_profit_loss": 200_000.0,
+            }
+        )
+
+        # 외부 종목 금액 설정을 위해 내부 속성 직접 설정 후 저장
+        t1._external_purchase_amount = 1_000_000.0
+        t1._external_eval_amount = 1_100_000.0
+        await t1._save_state()
+
+        # 새 인스턴스로 복원
+        t2 = Treasury(db=db, eventbus=eventbus, account_id=ACCOUNT_ID)
+        await t2.initialize()
+
+        summary = t2.get_summary()
+        assert summary["account_balance"] == 10_000_000.0
+        assert summary["purchasable_amount"] == 8_000_000.0
+        assert summary["total_evaluation"] == 12_000_000.0
+        assert summary["purchase_amount"] == 7_000_000.0
+        assert summary["eval_amount"] == 7_200_000.0
+        assert summary["total_profit_loss"] == 200_000.0
+        assert summary["external_purchase_amount"] == 1_000_000.0
+        assert summary["external_eval_amount"] == 1_100_000.0
+
+    async def test_persists_last_synced_at(self, db, eventbus):
+        """재시작 후 last_synced_at이 복원된다."""
+        from datetime import UTC, datetime
+
+        t1 = Treasury(db=db, eventbus=eventbus, account_id=ACCOUNT_ID)
+        await t1.initialize()
+
+        # last_synced_at 설정 후 저장
+        now = datetime.now(UTC)
+        t1._last_synced_at = now
+        await t1._save_state()
+
+        # 새 인스턴스로 복원
+        t2 = Treasury(db=db, eventbus=eventbus, account_id=ACCOUNT_ID)
+        await t2.initialize()
+
+        assert t2.last_synced_at is not None
+        assert t2.last_synced_at.isoformat() == now.isoformat()
+
+    async def test_persists_last_synced_at_none(self, db, eventbus):
+        """last_synced_at이 None이면 복원 후에도 None이다."""
+        t1 = Treasury(db=db, eventbus=eventbus, account_id=ACCOUNT_ID)
+        await t1.initialize()
+        await t1.set_account_balance(1_000_000.0)
+
+        # 새 인스턴스로 복원
+        t2 = Treasury(db=db, eventbus=eventbus, account_id=ACCOUNT_ID)
+        await t2.initialize()
+
+        assert t2.last_synced_at is None
+
 
 # -- update_budget -------------------------------------------
 
