@@ -343,6 +343,8 @@ class MemberService:
         registered_by: str = "",
     ) -> tuple[Member, str]:
         """멤버 등록 + 토큰 반환."""
+        if registered_by:
+            await self._assert_master(registered_by, "register")
         self._assert_type_role(member_type, role)
 
         existing = await self.get(member_id)
@@ -579,6 +581,8 @@ class MemberService:
         self, member_id: str, scopes: list[str], updated_by: str = ""
     ) -> Member:
         """권한 범위 변경."""
+        if updated_by:
+            await self._assert_master(updated_by, "update_scopes")
         member = await self._get_or_raise(member_id)
         self._assert_active(member, "update_scopes")
 
@@ -601,6 +605,16 @@ class MemberService:
         )
 
     # ── 내부 헬퍼 ──────────────────────────────────────
+
+    async def _assert_master(self, caller_id: str, action: str) -> None:
+        """호출자가 master인지 검증."""
+        from ante.member.errors import PermissionDeniedError
+
+        caller = await self.get(caller_id)
+        if not caller or caller.role != MemberRole.MASTER:
+            raise PermissionDeniedError(
+                f"'{action}'은(는) master만 수행할 수 있습니다."
+            )
 
     async def _get_or_raise(self, member_id: str) -> Member:
         """멤버 조회. 없으면 ValueError."""
