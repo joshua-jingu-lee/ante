@@ -40,8 +40,17 @@ class BacktestResult:
     config: BacktestConfig = field(default_factory=BacktestConfig)
     datasets: list[DatasetInfo] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
-        """결과를 딕셔너리로 변환."""
+    def to_dict(self, *, resample_equity: bool = False) -> dict:
+        """결과를 딕셔너리로 변환.
+
+        Args:
+            resample_equity: True이면 equity_curve를 일봉 기준으로
+                리샘플링한다. 포인트 수가 ``_RESAMPLE_THRESHOLD`` 이하이면
+                리샘플링을 생략한다.
+        """
+        curve = self.equity_curve
+        if resample_equity:
+            curve = resample_equity_curve_daily(curve)
         return {
             "strategy": f"{self.strategy_name}_v{self.strategy_version}",
             "period": f"{self.start_date} ~ {self.end_date}",
@@ -50,7 +59,7 @@ class BacktestResult:
             "total_return_pct": round(self.total_return, 2),
             "total_trades": len(self.trades),
             "metrics": self.metrics,
-            "equity_curve": self.equity_curve,
+            "equity_curve": curve,
             "trades": [
                 {
                     "timestamp": str(t.timestamp),
@@ -67,3 +76,41 @@ class BacktestResult:
             "config": asdict(self.config),
             "datasets": [asdict(d) for d in self.datasets],
         }
+
+
+# 포인트 수가 이 값 이하이면 리샘플링을 생략한다 (일봉 2년치 ~ 500).
+_RESAMPLE_THRESHOLD = 500
+
+
+def resample_equity_curve_daily(
+    curve: list[dict],
+    *,
+    threshold: int = _RESAMPLE_THRESHOLD,
+) -> list[dict]:
+    """equity_curve를 일봉 기준으로 리샘플링한다.
+
+    동일 날짜에 여러 포인트가 있으면 마지막 포인트(종가 시점)만 남긴다.
+    포인트 수가 *threshold* 이하이면 원본을 그대로 반환한다.
+
+    ``timestamp`` 키가 있으면 앞 10자(YYYY-MM-DD)를 날짜로 사용하고,
+    ``date`` 키가 있으면 그대로 사용한다.
+    """
+    if len(curve) <= threshold:
+        return curve
+
+    # 동일 날짜의 마지막 포인트를 대표값으로 선택
+    daily: dict[str, dict] = {}
+    for point in curve:
+        date_key = _extract_date(point)
+        if date_key:
+            daily[date_key] = point
+
+    return list(daily.values())
+
+
+def _extract_date(point: dict) -> str:
+    """포인트에서 날짜 문자열(YYYY-MM-DD)을 추출."""
+    if "date" in point:
+        return str(point["date"])[:10]
+    ts = point.get("timestamp", "")
+    return str(ts)[:10] if ts else ""
