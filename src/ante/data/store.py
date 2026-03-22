@@ -135,6 +135,16 @@ class ParquetStore:
         else:
             return self._base / data_type / timeframe / exchange / symbol
 
+    def resolve_path(
+        self,
+        symbol: str,
+        timeframe: str,
+        data_type: str = "ohlcv",
+        exchange: str = "KRX",
+    ) -> Path:
+        """데이터 경로를 해석한다. _resolve_path()의 public 인터페이스."""
+        return self._resolve_path(symbol, timeframe, data_type, exchange)
+
     def read(
         self,
         symbol: str,
