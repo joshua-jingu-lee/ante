@@ -320,22 +320,49 @@ class TestAccountStateTransitions:
         assert "활성화 완료" in result.output
         mock_client.send.assert_called_once()
 
-    def test_delete_with_yes(self, mock_account_service: AsyncMock) -> None:
-        """계좌 삭제 (--yes 옵션)."""
-        result = _invoke(["account", "delete", "domestic", "--yes"])
+    def test_delete_with_yes(self) -> None:
+        """계좌 삭제 (--yes 옵션, IPC 전환)."""
+        mock_response = {"status": "ok", "data": {}}
+
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = _invoke(["account", "delete", "domestic", "--yes"])
+
         assert result.exit_code == 0
         assert "삭제 완료" in result.output
-        mock_account_service.delete.assert_called_once()
+        mock_client.send.assert_called_once()
 
-    def test_delete_with_confirm(self, mock_account_service: AsyncMock) -> None:
-        """계좌 삭제 (확인 프롬프트 y 입력)."""
-        result = _invoke(["account", "delete", "domestic"], input_text="y\n")
+    def test_delete_with_confirm(self) -> None:
+        """계좌 삭제 (확인 프롬프트 y 입력, IPC 전환)."""
+        mock_response = {"status": "ok", "data": {}}
+
+        with patch(
+            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
+        ) as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = mock_response
+            mock_cls.return_value = mock_client
+
+            with patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ):
+                result = _invoke(["account", "delete", "domestic"], input_text="y\n")
+
         assert result.exit_code == 0
         assert "삭제 완료" in result.output
-        mock_account_service.delete.assert_called_once()
+        mock_client.send.assert_called_once()
 
-    def test_delete_abort(self, mock_account_service: AsyncMock) -> None:
+    def test_delete_abort(self) -> None:
         """계좌 삭제 취소 (확인 프롬프트 n 입력)."""
         result = _invoke(["account", "delete", "domestic"], input_text="n\n")
         assert result.exit_code == 1
-        mock_account_service.delete.assert_not_called()

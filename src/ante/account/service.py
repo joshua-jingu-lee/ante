@@ -359,12 +359,32 @@ class AccountService:
             AccountNotFoundError: 계좌를 찾을 수 없음.
         """
         account = await self.get(account_id)
+
+        # 소속 봇 중지 트리거 (이미 SUSPENDED/DELETED면 스킵)
+        if account.status not in (AccountStatus.SUSPENDED, AccountStatus.DELETED):
+            from ante.eventbus.events import AccountSuspendedEvent
+
+            await self._eventbus.publish(
+                AccountSuspendedEvent(
+                    account_id=account_id,
+                    reason="Account deletion",
+                    suspended_by=deleted_by,
+                )
+            )
+
         account.status = AccountStatus.DELETED
         account.updated_at = datetime.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
             (AccountStatus.DELETED, account.updated_at.isoformat(), account_id),
+        )
+
+        # 삭제 완료 이벤트
+        from ante.eventbus.events import AccountDeletedEvent
+
+        await self._eventbus.publish(
+            AccountDeletedEvent(account_id=account_id, deleted_by=deleted_by)
         )
 
         # 메모리 캐시에서 제거
