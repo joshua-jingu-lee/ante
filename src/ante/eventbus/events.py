@@ -266,6 +266,7 @@ class BotRestartExhaustedEvent(Event):
     """BotManager → EventBus: 봇 재시작 한도 소진."""
 
     bot_id: str = ""
+    account_id: str = ""
     restart_attempts: int = 0
     last_error: str = ""
 

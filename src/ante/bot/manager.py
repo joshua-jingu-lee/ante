@@ -562,7 +562,9 @@ class BotManager:
         count = self._restart_counts.get(event.bot_id, 0)
 
         if count >= config.max_restart_attempts:
-            await self._on_restart_exhausted(event.bot_id, count, event.error_message)
+            await self._on_restart_exhausted(
+                event.bot_id, config.account_id, count, event.error_message
+            )
             return
 
         self._restart_counts[event.bot_id] = count + 1
@@ -642,7 +644,7 @@ class BotManager:
         self._restart_reset_tasks.pop(bot_id, None)
 
     async def _on_restart_exhausted(
-        self, bot_id: str, attempts: int, last_error: str
+        self, bot_id: str, account_id: str, attempts: int, last_error: str
     ) -> None:
         """재시작 한도 소진 시 이벤트 + 알림 발행."""
         from ante.eventbus.events import BotRestartExhaustedEvent, NotificationEvent
@@ -655,6 +657,7 @@ class BotManager:
         await self._eventbus.publish(
             BotRestartExhaustedEvent(
                 bot_id=bot_id,
+                account_id=account_id,
                 restart_attempts=attempts,
                 last_error=last_error,
             )
