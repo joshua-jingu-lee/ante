@@ -214,6 +214,26 @@ async def test_activate_deleted_raises(service):
         await service.activate("test", activated_by="admin")
 
 
+@pytest.mark.asyncio
+async def test_suspend_deleted_account_raises(service):
+    """DELETED 계좌에 suspend 시도 시 AccountDeletedException."""
+    await service.create(_make_account())
+    await service.delete("test", deleted_by="system")
+
+    with pytest.raises(AccountDeletedException):
+        await service.suspend("test", reason="테스트", suspended_by="system")
+
+
+@pytest.mark.asyncio
+async def test_delete_already_deleted_account_raises(service):
+    """이미 DELETED 계좌에 delete 시도 시 AccountDeletedException."""
+    await service.create(_make_account())
+    await service.delete("test", deleted_by="system")
+
+    with pytest.raises(AccountDeletedException):
+        await service.delete("test", deleted_by="system")
+
+
 # ── 삭제 (delete) ──────────────────────────────────
 
 
