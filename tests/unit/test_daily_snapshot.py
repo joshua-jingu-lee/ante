@@ -258,7 +258,7 @@ class TestDailyReportSubscription:
 class TestDailyReportSubscriptionPriority:
     async def test_daily_report_priority_is_80(self, treasury, eventbus):
         """Treasury의 DailyReportEvent 구독 priority는 80이어야 한다 (스펙 일치)."""
-        handlers = eventbus._handlers.get(DailyReportEvent, [])
+        handlers = eventbus.get_handlers(DailyReportEvent)
         assert len(handlers) >= 1
         for priority, _handler in handlers:
             assert priority == 80, (
