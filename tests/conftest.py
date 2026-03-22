@@ -8,6 +8,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _set_encryption_key(monkeypatch):
+    """테스트용 Fernet 키 자동 설정."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+
+@pytest.fixture(autouse=True)
 async def _cleanup_tasks():
     """각 async 테스트 후 잔여 asyncio 태스크를 강제 정리.
 
