@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+
+from ante.backtest.config import BacktestConfig, DatasetInfo
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,8 @@ class BacktestResult:
     trades: list[BacktestTrade] = field(default_factory=list)
     equity_curve: list[dict] = field(default_factory=list)
     metrics: dict = field(default_factory=dict)
+    config: BacktestConfig = field(default_factory=BacktestConfig)
+    datasets: list[DatasetInfo] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """결과를 딕셔너리로 변환."""
@@ -60,4 +64,6 @@ class BacktestResult:
                 }
                 for t in self.trades
             ],
+            "config": asdict(self.config),
+            "datasets": [asdict(d) for d in self.datasets],
         }

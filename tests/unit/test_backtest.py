@@ -169,6 +169,8 @@ class TestBacktestResult:
         assert d["strategy"] == "test_v1.0"
         assert d["total_return_pct"] == 5.0
         assert d["total_trades"] == 0
+        assert "config" in d
+        assert "datasets" in d
 
     def test_result_to_dict_with_trades(self):
         trade = BacktestTrade(
@@ -434,6 +436,8 @@ class TestBacktestExecutor:
         assert "strategy" in d
         assert "total_return_pct" in d
         assert "trades" in d
+        assert "config" in d
+        assert "datasets" in d
 
     async def test_insufficient_balance_skips_buy(self, data_provider):
         data_provider.reset()
@@ -506,3 +510,110 @@ class TestExceptions:
     def test_backtest_error_message(self):
         err = BacktestError("test error")
         assert str(err) == "test error"
+
+
+# ── BacktestResult config/datasets 필드 테스트 ────
+
+
+class TestBacktestResultConfigFields:
+    def test_result_default_config(self):
+        """기본 생성 시 config == BacktestConfig(), datasets == []."""
+        from ante.backtest.config import BacktestConfig  # noqa: F811
+
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_000_000,
+            total_return=0.0,
+        )
+        assert result.config == BacktestConfig()
+        assert result.datasets == []
+
+    def test_result_to_dict_with_config(self):
+        """config 설정된 결과의 to_dict() 검증."""
+        from ante.backtest.config import BacktestConfig
+
+        cfg = BacktestConfig(
+            strategy_path="strategies/ma_cross.py",
+            symbols=["005930"],
+            timeframe="1d",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000.0,
+            commission_rate=0.00015,
+            slippage_rate=0.001,
+        )
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+            config=cfg,
+        )
+        d = result.to_dict()
+        assert d["config"]["strategy_path"] == "strategies/ma_cross.py"
+        assert d["config"]["symbols"] == ["005930"]
+        assert d["config"]["timeframe"] == "1d"
+        assert d["config"]["initial_balance"] == 10_000_000.0
+
+    def test_result_to_dict_with_datasets(self):
+        """datasets 포함된 결과의 to_dict() 검증."""
+        from ante.backtest.config import DatasetInfo
+
+        ds = DatasetInfo(
+            symbol="005930",
+            timeframe="1d",
+            row_count=1200,
+            start_date="2020-01-02",
+            end_date="2024-12-30",
+            data_dir="data/ohlcv/1d/KRX/005930",
+            file_count=60,
+        )
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+            datasets=[ds],
+        )
+        d = result.to_dict()
+        assert len(d["datasets"]) == 1
+        assert d["datasets"][0]["symbol"] == "005930"
+        assert d["datasets"][0]["row_count"] == 1200
+        assert d["datasets"][0]["file_count"] == 60
+
+    def test_result_backward_compatible(self):
+        """기존 키들이 여전히 존재하는지 확인."""
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+        )
+        d = result.to_dict()
+        expected_keys = {
+            "strategy",
+            "period",
+            "initial_balance",
+            "final_balance",
+            "total_return_pct",
+            "total_trades",
+            "metrics",
+            "equity_curve",
+            "trades",
+            "config",
+            "datasets",
+        }
+        assert set(d.keys()) == expected_keys
