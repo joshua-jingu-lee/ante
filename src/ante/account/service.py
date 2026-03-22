@@ -241,6 +241,9 @@ class AccountService:
             "buy_commission_rate",
             "sell_commission_rate",
         }
+        unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
+        if unrecognized:
+            raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
         for key, value in fields.items():
             if key not in updatable:
                 continue
