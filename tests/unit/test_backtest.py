@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 
 import polars as pl
 import pytest
 
+from ante.backtest.config import BacktestConfig, DatasetInfo
 from ante.backtest.context import BacktestStrategyContext
 from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.exceptions import (
@@ -266,7 +268,6 @@ class TestBacktestDataProvider:
 
     async def test_loaded_datasets_after_single_load(self, loaded_store):
         """load() 1회 호출 후 DatasetInfo 1건 기록."""
-        from ante.backtest.config import DatasetInfo
 
         provider = BacktestDataProvider(
             store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
@@ -586,7 +587,6 @@ class TestBacktestService:
             service._validate_config({"start_date": "2026-01-01"})
 
     def test_validate_config_returns_backtest_config(self):
-        from ante.backtest.config import BacktestConfig
 
         service = BacktestService()
         result = service._validate_config(
@@ -660,6 +660,40 @@ class TestBacktestService:
         )
         assert result.data_paths == ["a/", "b/"]
 
+    async def test_run_injects_config_and_datasets(self, loaded_store, data_dir):
+        """run() 후 result.config=BacktestConfig, datasets=list[DatasetInfo]."""
+        service = BacktestService(data_path=str(data_dir))
+
+        config = {
+            "strategy_path": "dummy.py",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "1d",
+            "data_path": str(data_dir),
+        }
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+            return_value=EmptyStrategy,
+        ):
+            result = await service.run(config)
+
+        # config는 BacktestConfig 인스턴스
+        assert isinstance(result.config, BacktestConfig)
+        assert result.config.strategy_path == "dummy.py"
+        assert result.config.symbols == ["005930"]
+        assert result.config.start_date == "2026-01-01"
+        assert result.config.end_date == "2026-12-31"
+
+        # datasets는 list이고 DatasetInfo 원소를 포함
+        assert isinstance(result.datasets, list)
+        assert len(result.datasets) == 1
+        assert isinstance(result.datasets[0], DatasetInfo)
+        assert result.datasets[0].symbol == "005930"
+        assert result.datasets[0].timeframe == "1d"
+        assert result.datasets[0].row_count > 0
+
 
 # ── Exceptions 테스트 ──────────────────────────────
 
@@ -696,7 +730,6 @@ class TestBacktestResultConfigFields:
 
     def test_result_to_dict_with_config(self):
         """config 설정된 결과의 to_dict() 검증."""
-        from ante.backtest.config import BacktestConfig
 
         cfg = BacktestConfig(
             strategy_path="strategies/ma_cross.py",
@@ -727,7 +760,6 @@ class TestBacktestResultConfigFields:
 
     def test_result_to_dict_with_datasets(self):
         """datasets 포함된 결과의 to_dict() 검증."""
-        from ante.backtest.config import DatasetInfo
 
         ds = DatasetInfo(
             symbol="005930",
