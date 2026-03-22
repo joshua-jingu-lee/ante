@@ -287,6 +287,10 @@ class AccountService:
             AccountNotFoundError: 계좌를 찾을 수 없음.
         """
         account = await self.get(account_id)
+        if account.status == AccountStatus.DELETED:
+            raise AccountDeletedException(
+                f"삭제된 계좌 '{account_id}'는 정지할 수 없습니다."
+            )
         if account.status == AccountStatus.SUSPENDED:
             from ante.account.errors import AccountAlreadySuspendedError
 
@@ -359,6 +363,8 @@ class AccountService:
             AccountNotFoundError: 계좌를 찾을 수 없음.
         """
         account = await self.get(account_id)
+        if account.status == AccountStatus.DELETED:
+            raise AccountDeletedException(f"이미 삭제된 계좌입니다: '{account_id}'")
 
         # 소속 봇 중지 트리거 (이미 SUSPENDED/DELETED면 스킵)
         if account.status not in (AccountStatus.SUSPENDED, AccountStatus.DELETED):
