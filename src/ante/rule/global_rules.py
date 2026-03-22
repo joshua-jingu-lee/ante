@@ -15,14 +15,35 @@ class DailyLossLimitRule(Rule):
             daily_loss_percent = abs(context.daily_pnl) / context.prev_day_total_asset
 
             if daily_loss_percent > max_daily_loss:
+                # 매도(손절)는 항상 허용 — 포지션 정리를 차단하면 안 됨
+                if context.side == "sell":
+                    return RuleEvaluation(
+                        rule_id=self.rule_id,
+                        rule_name=self.name,
+                        result=RuleResult.PASS,
+                        action=RuleAction.LOG,
+                        message=(
+                            f"Daily loss limit exceeded "
+                            f"({daily_loss_percent:.2%} > {max_daily_loss:.2%}) "
+                            f"but sell order is allowed for position liquidation"
+                        ),
+                        metadata={
+                            "daily_loss_percent": daily_loss_percent,
+                            "max_daily_loss_percent": max_daily_loss,
+                            "daily_pnl": context.daily_pnl,
+                            "prev_day_total_asset": context.prev_day_total_asset,
+                        },
+                    )
+
                 return RuleEvaluation(
                     rule_id=self.rule_id,
                     rule_name=self.name,
-                    result=RuleResult.BLOCK,
-                    action=RuleAction.HALT_ACCOUNT,
+                    result=RuleResult.REJECT,
+                    action=RuleAction.NOTIFY,
                     message=(
                         f"Daily loss limit exceeded: "
-                        f"{daily_loss_percent:.2%} > {max_daily_loss:.2%}"
+                        f"{daily_loss_percent:.2%} > {max_daily_loss:.2%}. "
+                        f"Buy orders blocked. Sell orders are still allowed."
                     ),
                     metadata={
                         "daily_loss_percent": daily_loss_percent,
@@ -45,6 +66,16 @@ class TotalExposureLimitRule(Rule):
     """총 포지션 노출 한도 초과 시 거래 제한."""
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
+        # 매도(손절)는 항상 허용 — 포지션 정리를 차단하면 안 됨
+        if context.side == "sell":
+            return RuleEvaluation(
+                rule_id=self.rule_id,
+                rule_name=self.name,
+                result=RuleResult.PASS,
+                action=RuleAction.LOG,
+                message="Sell order is always allowed for position liquidation",
+            )
+
         max_exposure_percent = self.config.get("max_exposure_percent", 0.20)
         max_exposure_amount = self.config.get("max_exposure_amount", float("inf"))
 
@@ -65,7 +96,8 @@ class TotalExposureLimitRule(Rule):
                     action=RuleAction.NOTIFY,
                     message=(
                         f"Total exposure would exceed limit: "
-                        f"{expected_exposure:.2f} > {exposure_limit:.2f}"
+                        f"{expected_exposure:.2f} > {exposure_limit:.2f}. "
+                        f"Buy orders blocked. Sell orders are still allowed."
                     ),
                     metadata={
                         "total_exposure": context.total_exposure,
