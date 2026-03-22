@@ -868,18 +868,32 @@ class TestPortfolioResponseModels:
         """GET /api/portfolio/history."""
         data = {
             "data": [
-                {"date": "2026-03-01", "value": 10000000.0},
-                {"date": "2026-03-19", "value": 10500000.0},
+                {
+                    "date": "2026-03-01",
+                    "total_asset": 10000000.0,
+                    "daily_pnl": 0.0,
+                    "daily_return": 0.0,
+                    "unrealized_pnl": 0.0,
+                },
+                {
+                    "date": "2026-03-19",
+                    "total_asset": 10500000.0,
+                    "daily_pnl": 500000.0,
+                    "daily_return": 5.0,
+                    "unrealized_pnl": 300000.0,
+                },
             ],
-            "period": "1m",
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-19",
         }
         model = PortfolioHistoryResponse.model_validate(data)
-        assert model.period == "1m"
+        assert model.start_date == "2026-03-01"
+        assert model.end_date == "2026-03-19"
         assert len(model.data) == 2
 
     def test_portfolio_history_response_empty(self):
         """GET /api/portfolio/history — 봇 없음."""
-        data = {"data": [], "period": "1m"}
+        data = {"data": [], "start_date": "2026-03-01", "end_date": "2026-03-19"}
         model = PortfolioHistoryResponse.model_validate(data)
         assert len(model.data) == 0
 
