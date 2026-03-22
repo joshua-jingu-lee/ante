@@ -20,7 +20,8 @@ class TestBacktestConfig:
         assert cfg.start_date == ""
         assert cfg.end_date == ""
         assert cfg.initial_balance == 10_000_000.0
-        assert cfg.commission_rate == 0.00015
+        assert cfg.buy_commission_rate == 0.00015
+        assert cfg.sell_commission_rate == 0.00195
         assert cfg.slippage_rate == 0.001
         assert cfg.data_paths == ["data/"]
 
@@ -32,7 +33,8 @@ class TestBacktestConfig:
             start_date="2025-01-01",
             end_date="2025-12-31",
             initial_balance=50_000_000.0,
-            commission_rate=0.0003,
+            buy_commission_rate=0.0003,
+            sell_commission_rate=0.002,
             slippage_rate=0.002,
             data_paths=["data/kr/", "data/us/"],
         )
@@ -42,7 +44,8 @@ class TestBacktestConfig:
         assert cfg.start_date == "2025-01-01"
         assert cfg.end_date == "2025-12-31"
         assert cfg.initial_balance == 50_000_000.0
-        assert cfg.commission_rate == 0.0003
+        assert cfg.buy_commission_rate == 0.0003
+        assert cfg.sell_commission_rate == 0.002
         assert cfg.slippage_rate == 0.002
         assert cfg.data_paths == ["data/kr/", "data/us/"]
 
