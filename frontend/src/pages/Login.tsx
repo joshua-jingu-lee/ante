@@ -6,7 +6,7 @@ export default function Login() {
   const { data: user, isLoading } = useUser()
 
   if (!isLoading && user) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/treasury" replace />
   }
 
   return (
@@ -18,7 +18,7 @@ export default function Login() {
           <img src="/logo-t.svg" alt="T" className="w-14 h-14" />
           <img src="/logo-e.svg" alt="E" className="w-14 h-14" />
         </div>
-        <div className="text-[13px] text-text-muted mb-8">AI-Native Trading Engine</div>
+        <div className="text-[13px] text-text-muted mb-8">Ante Up. Agents Do the Rest.</div>
         <LoginForm />
       </div>
     </div>
