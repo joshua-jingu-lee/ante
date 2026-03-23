@@ -365,6 +365,7 @@ async def delete_bot(
     responses={
         404: {"description": "Bot not found"},
         409: {"description": "Bot state conflict (not stopped)"},
+        422: {"description": "Budget update failed (e.g. insufficient funds)"},
         503: {"description": "Bot manager not available"},
     },
 )
@@ -377,6 +378,7 @@ async def update_bot(
 ) -> dict:
     """봇 설정 수정. 중지 상태에서만 허용."""
     from ante.bot.exceptions import BotError
+    from ante.treasury.exceptions import TreasuryError
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
@@ -390,6 +392,8 @@ async def update_bot(
         bot = await bot_manager.update_bot(bot_id, **updates)
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except TreasuryError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     if audit_logger:
         await audit_logger.log(

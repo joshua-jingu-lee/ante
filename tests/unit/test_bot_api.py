@@ -818,3 +818,38 @@ class TestUpdateBot:
         assert resp.status_code == 422
         resp = client.put("/api/bots/bot-1", json={"budget": -100})
         assert resp.status_code == 422
+
+    def test_budget_treasury_error_returns_422(
+        self, bot_manager, default_account_service
+    ):
+        """budget 변경 시 TreasuryError 발생하면 500이 아닌 422 반환."""
+        from ante.treasury.exceptions import InsufficientFundsError
+
+        async def update_bot_with_treasury_error(bot_id, **kwargs):
+            bot = bot_manager._bots.get(bot_id)
+            if bot is None:
+                from ante.bot.exceptions import BotError
+
+                raise BotError(f"Bot not found: {bot_id}")
+            if "budget" in kwargs:
+                raise InsufficientFundsError(
+                    "미할당 잔액 부족: 필요 2,000,000, 가용 500,000"
+                )
+            return bot
+
+        bot_manager.update_bot = update_bot_with_treasury_error
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+        )
+        client = TestClient(app)
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"budget": 2000000})
+        assert resp.status_code == 422
+        assert "잔액 부족" in resp.json()["detail"]
+
+    def test_budget_update_success(self, client, bot_manager):
+        """budget 변경 성공 시 200 반환."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"budget": 2000000})
+        assert resp.status_code == 200
