@@ -509,6 +509,9 @@ class Treasury:
         self, bot_id: str, order_id: str, amount: float
     ) -> bool:
         """주문 제출 시 자금 예약."""
+        if amount <= 0:
+            raise ValueError("amount must be positive")
+
         budget = self._budgets.get(bot_id)
         if not budget or budget.available < amount:
             return False
