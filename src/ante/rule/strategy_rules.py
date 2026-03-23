@@ -16,7 +16,7 @@ class PositionSizeRule(Rule):
         order_value = context.quantity * context.current_price
         total_position_value = current_position_value + order_value
 
-        balance_limit = context.available_balance * max_position_percent
+        balance_limit = context.bot_allocated_budget * max_position_percent
         position_limit = min(max_position_amount, balance_limit)
 
         if total_position_value > position_limit > 0:

@@ -61,6 +61,7 @@ class RuleContext:
     current_price: float = 0.0
     current_position: float = 0.0
     available_balance: float = 0.0
+    bot_allocated_budget: float = 0.0
 
     # 계좌 상태
     account_status: str = "active"
