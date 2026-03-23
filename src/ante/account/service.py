@@ -16,6 +16,7 @@ from ante.account.errors import (
     AccountNotFoundError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
+    MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
@@ -106,6 +107,7 @@ class AccountService:
             AccountAlreadyExistsError: 동일 account_id가 이미 존재.
             InvalidAccountIdError: account_id 형식이 올바르지 않음.
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
+            MissingCredentialsError: 필수 credentials 키 누락.
         """
         # account_id 형식 검증
         if not re.fullmatch(r"[a-zA-Z0-9\-]{3,30}", account.account_id):
@@ -134,6 +136,18 @@ class AccountService:
             raise InvalidBrokerTypeError(
                 f"유효하지 않은 broker_type: '{account.broker_type}'. "
                 f"가능한 값: {list(BROKER_PRESETS.keys())}"
+            )
+
+        # credentials 필수 키 검증
+        preset = BROKER_PRESETS[account.broker_type]
+        missing = [
+            k for k in preset.required_credentials if k not in account.credentials
+        ]
+        if missing:
+            raise MissingCredentialsError(
+                f"필수 credentials 누락: {missing}. "
+                f"broker_type '{account.broker_type}'에 필요: "
+                f"{preset.required_credentials}"
             )
 
         now = datetime.now(UTC)
@@ -503,7 +517,7 @@ class AccountService:
             trading_hours_end=preset.trading_hours_end,
             trading_mode=TradingMode.VIRTUAL,
             broker_type="test",
-            credentials={},
+            credentials={k: "test" for k in preset.required_credentials},
             buy_commission_rate=preset.buy_commission_rate,
             sell_commission_rate=preset.sell_commission_rate,
         )

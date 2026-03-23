@@ -25,6 +25,12 @@ class InvalidBrokerTypeError(AccountError):
     pass
 
 
+class MissingCredentialsError(AccountError):
+    """필수 credentials 키 누락."""
+
+    pass
+
+
 class AccountAlreadySuspendedError(AccountError):
     """이미 정지 상태인 계좌에 대한 재정지 시도."""
 

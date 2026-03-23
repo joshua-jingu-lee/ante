@@ -46,6 +46,8 @@ def _make_account(
     **kwargs,
 ) -> Account:
     """테스트용 Account 생성 헬퍼."""
+    if "credentials" not in kwargs:
+        kwargs["credentials"] = {"app_key": "test", "app_secret": "test"}
     return Account(
         account_id=account_id,
         name=name,

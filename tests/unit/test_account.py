@@ -11,6 +11,7 @@ from ante.account.errors import (
     AccountNotFoundError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
+    MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
@@ -52,6 +53,8 @@ def _make_account(
     **kwargs,
 ) -> Account:
     """테스트용 Account 생성 헬퍼."""
+    if "credentials" not in kwargs:
+        kwargs["credentials"] = {"app_key": "test", "app_secret": "test"}
     return Account(
         account_id=account_id,
         name=name,
@@ -108,6 +111,39 @@ async def test_create_invalid_broker_type_raises(service):
 
     with pytest.raises(InvalidBrokerTypeError):
         await service.create(account)
+
+
+# ── credentials 필수 키 검증 ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_missing_credentials_raises(service):
+    """필수 credentials 키 누락 시 MissingCredentialsError."""
+    account = _make_account(credentials={})
+
+    with pytest.raises(MissingCredentialsError, match="app_key"):
+        await service.create(account)
+
+
+@pytest.mark.asyncio
+async def test_create_partial_credentials_raises(service):
+    """일부 credentials 키만 제공 시 누락 키를 메시지에 포함."""
+    account = _make_account(credentials={"app_key": "key1"})
+
+    with pytest.raises(MissingCredentialsError, match="app_secret"):
+        await service.create(account)
+
+
+@pytest.mark.asyncio
+async def test_create_full_credentials_passes(service):
+    """모든 필수 credentials 제공 시 정상 생성."""
+    account = _make_account(
+        credentials={"app_key": "key1", "app_secret": "secret1"},
+    )
+    result = await service.create(account)
+
+    assert result.account_id == "test"
+    assert result.credentials["app_key"] == "key1"
 
 
 # ── account_id 형식 검증 ──────────────────────────────

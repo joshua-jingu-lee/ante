@@ -41,6 +41,7 @@ def _make_account(account_id: str = "test") -> Account:
         exchange="TEST",
         currency="KRW",
         broker_type="test",
+        credentials={"app_key": "test", "app_secret": "test"},
     )
 
 

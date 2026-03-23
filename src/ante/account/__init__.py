@@ -9,6 +9,7 @@ from ante.account.errors import (
     AccountSuspendedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
+    MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, BrokerPreset, TradingMode
 from ante.account.presets import BROKER_PRESETS
@@ -28,5 +29,6 @@ __all__ = [
     "BROKER_PRESETS",
     "BrokerPreset",
     "InvalidBrokerTypeError",
+    "MissingCredentialsError",
     "TradingMode",
 ]
