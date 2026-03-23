@@ -11,6 +11,8 @@ from ante.web.deps import (
     get_account_service,
     get_audit_logger_optional,
     get_bot_manager,
+    get_event_history_store_optional,
+    get_eventbus_optional,
     get_strategy_registry,
     get_strategy_registry_optional,
     get_trade_service_optional,
@@ -318,3 +320,65 @@ async def delete_bot(
             resource=f"bot:{bot_id}",
             ip=request.client.host if request.client else "",
         )
+
+
+@router.get(
+    "/{bot_id}/logs",
+    responses={
+        404: {"description": "Bot not found"},
+        503: {"description": "Event history store not available"},
+    },
+)
+async def get_bot_logs(
+    bot_id: str,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    event_history_store: Annotated[
+        Any | None, Depends(get_event_history_store_optional)
+    ],
+    eventbus: Annotated[Any | None, Depends(get_eventbus_optional)],
+    limit: int = 50,
+) -> dict:
+    """봇 실행 로그 조회.
+
+    BotStepCompletedEvent 이력을 반환한다.
+    event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
+    없으면 EventBus 인메모리 히스토리에서 조회한다.
+    """
+    bot = bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
+
+    logs: list[dict] = []
+
+    if event_history_store is not None:
+        rows = await event_history_store.query(
+            event_type="BotStepCompletedEvent",
+            limit=limit,
+        )
+        for row in rows:
+            payload = row.get("payload", {})
+            if payload.get("bot_id") == bot_id:
+                logs.append(
+                    {
+                        "event_id": row.get("event_id", ""),
+                        "timestamp": row.get("timestamp", ""),
+                        "result": payload.get("result", ""),
+                        "message": payload.get("message", ""),
+                    }
+                )
+    elif eventbus is not None:
+        from ante.eventbus.events import BotStepCompletedEvent
+
+        history = eventbus.get_history(event_type=BotStepCompletedEvent, limit=limit)
+        for evt in history:
+            if evt.bot_id == bot_id:
+                logs.append(
+                    {
+                        "event_id": str(evt.event_id),
+                        "timestamp": evt.timestamp.isoformat(),
+                        "result": evt.result,
+                        "message": evt.message,
+                    }
+                )
+
+    return {"bot_id": bot_id, "logs": logs}
