@@ -154,6 +154,7 @@ class SignalChannel:
     def _subscribe_events(self) -> None:
         """체결/주문 상태 이벤트 구독."""
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
@@ -167,12 +168,14 @@ class SignalChannel:
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderCancelFailedEvent,
         ):
             self._eventbus.subscribe(evt, self._on_order_update)
 
     def _unsubscribe_events(self) -> None:
         """이벤트 구독 해제."""
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
@@ -186,6 +189,7 @@ class SignalChannel:
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderCancelFailedEvent,
         ):
             self._eventbus.unsubscribe(evt, self._on_order_update)
 
@@ -224,6 +228,7 @@ class SignalChannel:
             return
 
         from ante.eventbus.events import (
+            OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderRejectedEvent,
@@ -242,6 +247,9 @@ class SignalChannel:
             reason = event.reason
         elif isinstance(event, OrderFailedEvent):
             status = "failed"
+            reason = event.error_message
+        elif isinstance(event, OrderCancelFailedEvent):
+            status = "cancel_failed"
             reason = event.error_message
 
         if status:
