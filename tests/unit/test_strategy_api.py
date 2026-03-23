@@ -26,6 +26,8 @@ class FakeStrategyRecord:
     description: str = ""
     author: str = "agent"
     validation_warnings: list[str] = field(default_factory=list)
+    rationale: str = ""
+    risks: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -293,6 +295,93 @@ class TestGetStrategy:
         """존재하지 않는 전략 → 404."""
         resp = client.get("/api/strategies/nonexistent")
         assert resp.status_code == 404
+
+    def test_detail_includes_rationale_risks(self, client, registry):
+        """응답에 rationale, risks 포함 (#802)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                rationale="모멘텀 기반 매매 전략",
+                risks=["급락장에서 큰 손실 가능", "거래량 부족 종목 슬리피지"],
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["rationale"] == "모멘텀 기반 매매 전략"
+        assert data["risks"] == ["급락장에서 큰 손실 가능", "거래량 부족 종목 슬리피지"]
+        # strategy 객체에도 포함
+        assert data["strategy"]["rationale"] == "모멘텀 기반 매매 전략"
+        assert data["strategy"]["risks"] == [
+            "급락장에서 큰 손실 가능",
+            "거래량 부족 종목 슬리피지",
+        ]
+
+    def test_detail_includes_params_defaults(self, client, registry):
+        """params, param_schema는 전략 로드 실패 시 빈 dict (#802)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                filepath="/nonexistent/path.py",
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["params"] == {}
+        assert data["param_schema"] == {}
+
+    def test_detail_params_from_strategy_file(self, client, registry, tmp_path):
+        """전략 파일이 존재하면 params/param_schema를 런타임 추출 (#802)."""
+        code = """
+from ante.strategy.base import Strategy, StrategyMeta, Signal
+
+class TestStrat(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+
+    def get_params(self):
+        return {"lookback": 20, "threshold": 0.05}
+
+    def get_param_schema(self):
+        return {"lookback": "되돌아볼 기간", "threshold": "매매 임계값"}
+"""
+        filepath = tmp_path / "test_strat.py"
+        filepath.write_text(code)
+
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                filepath=str(filepath),
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["params"] == {"lookback": 20, "threshold": 0.05}
+        assert data["param_schema"] == {
+            "lookback": "되돌아볼 기간",
+            "threshold": "매매 임계값",
+        }
+
+    def test_detail_rationale_risks_defaults(self, client, registry):
+        """rationale, risks 미설정 시 기본값 (#802)."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["rationale"] == ""
+        assert data["risks"] == []
 
 
 class TestStrategyTrades:

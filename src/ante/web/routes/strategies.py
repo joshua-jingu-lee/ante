@@ -169,10 +169,38 @@ async def get_strategy(
                 bot_info = b
                 break
 
+    # 전략 클래스에서 params/param_schema 런타임 추출
+    params: dict[str, Any] = {}
+    param_schema: dict[str, str] = {}
+    filepath = record.filepath
+    if filepath:
+        try:
+            from ante.strategy.loader import StrategyLoader
+
+            strategy_cls = StrategyLoader.load(Path(filepath))
+            instance = strategy_cls(ctx=None)
+            params = instance.get_params()
+            param_schema = instance.get_param_schema()
+        except Exception:
+            _logger.debug(
+                "전략 %s params 추출 실패 (filepath=%s)",
+                strategy_id,
+                filepath,
+                exc_info=True,
+            )
+
+    # rationale, risks: StrategyRecord에서 추출
+    rationale = getattr(record, "rationale", "") or ""
+    risks = getattr(record, "risks", []) or []
+
     return {
         "strategy": strategy_dict,
         "bot": bot_info,
         "status": strategy_dict["status"],
+        "params": params,
+        "param_schema": param_schema,
+        "rationale": rationale,
+        "risks": risks,
     }
 
 

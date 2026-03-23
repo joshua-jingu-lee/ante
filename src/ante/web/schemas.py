@@ -248,6 +248,8 @@ class StrategyInfo(BaseModel):
     description: str = ""
     author: str = "agent"
     validation_warnings: list[str] = []
+    rationale: str = ""
+    risks: list[str] = []
 
     # asdict(StrategyRecord) 변환 시 추가 필드 허용
     model_config = ConfigDict(extra="allow")
@@ -259,6 +261,10 @@ class StrategyDetailResponse(BaseModel):
     strategy: StrategyInfo
     bot: BotInfo | None = None
     status: str | None = None
+    params: dict[str, Any] = {}
+    param_schema: dict[str, str] = {}
+    rationale: str = ""
+    risks: list[str] = []
 
 
 class EquityCurvePoint(BaseModel):
