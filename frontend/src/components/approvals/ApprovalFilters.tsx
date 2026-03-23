@@ -10,9 +10,13 @@ const STATUS_OPTIONS: { key: ApprovalStatus | 'all'; label: string }[] = [
 const TYPE_OPTIONS: { key: ApprovalType | 'all'; label: string }[] = [
   { key: 'all', label: '전체 유형' },
   { key: 'strategy_adopt', label: '전략 채택' },
+  { key: 'strategy_report', label: '전략 리포트' },
   { key: 'budget_change', label: '예산 변경' },
+  { key: 'budget_allocate', label: '예산 할당' },
   { key: 'bot_create', label: '봇 생성' },
   { key: 'bot_stop', label: '봇 중지' },
+  { key: 'live_switch', label: '실전 전환' },
+  { key: 'risk_alert', label: '위험 알림' },
   { key: 'rule_change', label: '규칙 변경' },
 ]
 

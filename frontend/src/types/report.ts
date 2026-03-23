@@ -16,6 +16,22 @@ export interface ReportSymbol {
   rows: number
 }
 
+export interface BacktestConfig {
+  initial_balance?: number
+  timeframe?: string
+  buy_commission_rate?: number
+  sell_commission_rate?: number
+  slippage_rate?: number
+}
+
+export interface DatasetInfo {
+  symbol: string
+  symbol_name?: string
+  timeframe?: string
+  start_date?: string
+  end_date?: string
+}
+
 export interface ReportDetail {
   report_id: string
   strategy_name: string
@@ -41,4 +57,6 @@ export interface ReportDetail {
   symbols: ReportSymbol[]
   user_notes: string
   reviewed_at: string | null
+  config?: BacktestConfig
+  datasets?: DatasetInfo[]
 }

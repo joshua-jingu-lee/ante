@@ -1,49 +1,49 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
-import type { DataType } from '../api/data'
+import type { Dataset } from '../api/data'
 import { formatNumber, formatDate } from '../utils/formatters'
-import { TableSkeleton } from '../components/common/Skeleton'
+import { Skeleton } from '../components/common/Skeleton'
 import FeedStatusPanel from '../components/data/FeedStatusPanel'
 
-const LIMIT = 15
-const TF_OPTIONS = ['all', '1d', '1h', '1m'] as const
-const TF_LABELS: Record<string, string> = { '1d': '1일', '1h': '1시간', '1m': '1분' }
+const TF_LABELS: Record<string, string> = { '1d': '1일', '1h': '1시간', '1m': '1분', quarterly: '분기', annual: '연간' }
 
-const DATA_TYPE_OPTIONS: { value: DataType; label: string }[] = [
-  { value: 'ohlcv', label: 'OHLCV (시세)' },
-  { value: 'fundamental', label: 'Fundamental (재무)' },
-]
+type DirPath = string[]
+
+interface FileEntry {
+  name: string
+  isDir: boolean
+  meta?: string
+  dataset?: Dataset
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(0)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${bytes} B`
+}
+
+function pathToString(path: DirPath): string {
+  if (path.length === 0) return '~/data'
+  return `~/data/${path.join('/')}`
+}
 
 export default function BacktestData() {
+  const [currentPath, setCurrentPath] = useState<DirPath>([])
+  const [focusIndex, setFocusIndex] = useState(0)
+  const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
   const [search, setSearch] = useState('')
-  const [dataType, setDataType] = useState<DataType>('ohlcv')
-  const [timeframe, setTimeframe] = useState<string>('all')
-  const [offset, setOffset] = useState(0)
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; symbol: string; timeframe: string; data_type: DataType; start_date: string; end_date: string; row_count: number } | null>(null)
+  const [isSearching, setIsSearching] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Dataset | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const fileListRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
-  /* 자동완성용: 전체 데이터셋에서 고유 종목 목록 추출 */
-  const { data: allDatasets } = useQuery({
-    queryKey: ['datasets-all-symbols', dataType],
-    queryFn: () => getDatasets({ data_type: dataType, limit: 1000 }),
-  })
-
-  const symbolOptions = useMemo(() => {
-    if (!allDatasets?.items) return []
-    return [...new Set(allDatasets.items.map((ds) => ds.symbol))]
-  }, [allDatasets])
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['datasets', search, dataType, timeframe, offset],
-    queryFn: () =>
-      getDatasets({
-        symbol: search || undefined,
-        data_type: dataType,
-        timeframe: dataType === 'ohlcv' && timeframe !== 'all' ? timeframe : undefined,
-        offset,
-        limit: LIMIT,
-      }),
+  // Fetch all datasets for building the directory tree
+  const { data: allData, isLoading } = useQuery({
+    queryKey: ['datasets-all'],
+    queryFn: () => getDatasets({ limit: 10000 }),
   })
 
   const { data: storage } = useQuery({
@@ -52,149 +52,272 @@ export default function BacktestData() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (target: { id: string; data_type: DataType }) => deleteDataset(target.id, target.data_type),
+    mutationFn: (target: Dataset) => deleteDataset(target.id, target.data_type),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['datasets'] })
-      queryClient.invalidateQueries({ queryKey: ['datasets-all-symbols'] })
+      queryClient.invalidateQueries({ queryKey: ['datasets-all'] })
       queryClient.invalidateQueries({ queryKey: ['storage'] })
       setDeleteTarget(null)
+      setSelectedDataset(null)
     },
   })
 
-  const isFundamental = dataType === 'fundamental'
+  const allDatasets = allData?.items ?? []
+
+  // Build directory tree from datasets
+  const entries = useMemo((): FileEntry[] => {
+    // If searching, return flat list of matching files
+    if (isSearching && search.trim()) {
+      const q = search.trim().toLowerCase()
+      const matched = allDatasets.filter((ds) =>
+        ds.symbol.toLowerCase().includes(q),
+      )
+      return matched.map((ds) => ({
+        name: `${ds.data_type}/${ds.symbol}/${ds.timeframe}.parquet`,
+        isDir: false,
+        meta: `${formatNumber(ds.row_count)}`,
+        dataset: ds,
+      }))
+    }
+
+    const depth = currentPath.length
+
+    if (depth === 0) {
+      // Root: show ohlcv/ and fundamental/ dirs
+      const types = new Set(allDatasets.map((ds) => ds.data_type))
+      return Array.from(types).sort().map((t) => ({
+        name: `${t}/`,
+        isDir: true,
+      }))
+    }
+
+    if (depth === 1) {
+      // Type level: show symbol dirs
+      const dataType = currentPath[0]
+      const symbols = new Set(
+        allDatasets.filter((ds) => ds.data_type === dataType).map((ds) => ds.symbol),
+      )
+      return Array.from(symbols).sort().map((sym) => ({
+        name: `${sym}/`,
+        isDir: true,
+      }))
+    }
+
+    if (depth === 2) {
+      // Symbol level: show timeframe files
+      const [dataType, symbol] = currentPath
+      const files = allDatasets.filter(
+        (ds) => ds.data_type === dataType && ds.symbol === symbol,
+      )
+      return files
+        .sort((a, b) => a.timeframe.localeCompare(b.timeframe))
+        .map((ds) => ({
+          name: `${ds.timeframe}.parquet`,
+          isDir: false,
+          meta: `${formatNumber(ds.row_count)}`,
+          dataset: ds,
+        }))
+    }
+
+    return []
+  }, [allDatasets, currentPath, isSearching, search])
+
+  // Full list including parent entry
+  const fullList = useMemo(() => {
+    if (isSearching && search.trim()) return entries
+    const showParent = currentPath.length > 0
+    return showParent ? [{ name: '../', isDir: true } as FileEntry, ...entries] : entries
+  }, [entries, currentPath, isSearching, search])
+
+  // Reset focus on path/search change
+  useEffect(() => {
+    setFocusIndex(0)
+  }, [currentPath, isSearching, search])
+
+  const navigateUp = useCallback(() => {
+    if (currentPath.length > 0) {
+      setCurrentPath((prev) => prev.slice(0, -1))
+      setSelectedDataset(null)
+    }
+  }, [currentPath])
+
+  const handleEntryClick = useCallback((entry: FileEntry, index: number) => {
+    setFocusIndex(index)
+    if (entry.name === '../') {
+      navigateUp()
+    } else if (entry.isDir) {
+      const dirName = entry.name.replace(/\/$/, '')
+      setCurrentPath((prev) => [...prev, dirName])
+      setSelectedDataset(null)
+    } else if (entry.dataset) {
+      // If from search results, navigate to the file's directory
+      if (isSearching && search.trim()) {
+        const ds = entry.dataset
+        setCurrentPath([ds.data_type, ds.symbol])
+        setIsSearching(false)
+        setSearch('')
+      }
+      setSelectedDataset(entry.dataset)
+    }
+  }, [navigateUp, isSearching, search])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === '/') {
+      e.preventDefault()
+      searchRef.current?.focus()
+      setIsSearching(true)
+      return
+    }
+
+    if (e.key === 'Escape' && isSearching) {
+      setIsSearching(false)
+      setSearch('')
+      fileListRef.current?.focus()
+      return
+    }
+
+    if (e.key === 'Backspace' && !isSearching) {
+      e.preventDefault()
+      navigateUp()
+      return
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setFocusIndex((prev) => Math.max(0, prev - 1))
+      return
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setFocusIndex((prev) => Math.min(fullList.length - 1, prev + 1))
+      return
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const entry = fullList[focusIndex]
+      if (entry) handleEntryClick(entry, focusIndex)
+      return
+    }
+  }, [fullList, focusIndex, handleEntryClick, navigateUp, isSearching])
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setIsSearching(false)
+      setSearch('')
+      fileListRef.current?.focus()
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      fileListRef.current?.focus()
+    }
+  }
+
+  // Storage info string
+  const storageStr = storage
+    ? `전체 ${formatSize(storage.total_bytes ?? storage.total_mb * 1024 * 1024)}`
+      + (storage.by_timeframe && Object.keys(storage.by_timeframe).length > 0
+        ? ` — ${Object.entries(storage.by_timeframe).map(([tf, bytes]) => `${TF_LABELS[tf] ?? tf} ${formatSize(bytes)}`).join(' · ')}`
+        : '')
+    : ''
 
   return (
     <>
-      {/* 안내 배너 */}
-      <div className="bg-info-bg rounded px-3.5 py-2.5 mb-4 text-[12px] text-info">
-        {'\u{1f4a1}'} 데이터 수집은 Agent에게 요청하거나 CLI(<code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed</code>)를 사용하세요.
-      </div>
-
-      {/* Feed 파이프라인 상태 (BD-6) */}
+      {/* Feed 파이프라인 상태 */}
       <FeedStatusPanel />
 
-      {/* 데이터셋 카드 */}
-      <div className="bg-surface border border-border rounded-lg p-5">
-        {/* 카드 헤더: 타이틀 + 필터를 한 줄 배치 */}
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-[15px] font-semibold text-text">데이터셋</span>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setOffset(0) }}
-              list="symbol-list"
-              placeholder="종목 검색"
-              className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] w-40 placeholder:text-text-muted focus:outline-none focus:border-primary"
-            />
-            <datalist id="symbol-list">
-              {symbolOptions.map((sym) => (
-                <option key={sym} value={sym} />
-              ))}
-            </datalist>
-            <select
-              value={dataType}
-              onChange={(e) => { setDataType(e.target.value as DataType); setTimeframe('all'); setOffset(0) }}
-              className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] cursor-pointer focus:outline-none focus:border-primary"
+      {/* 터미널 파일 탐색기 */}
+      <div
+        className="flex flex-col border border-border rounded-lg overflow-hidden font-mono"
+        onKeyDown={handleKeyDown}
+      >
+        {/* 상단: 검색 바 + 용량 */}
+        <div className="flex items-center gap-3 px-3.5 py-2.5 border-b border-border bg-surface">
+          <input
+            ref={searchRef}
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              if (e.target.value.trim()) setIsSearching(true)
+              else setIsSearching(false)
+            }}
+            onFocus={() => { if (search.trim()) setIsSearching(true) }}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="검색 (종목명 또는 코드)"
+            className="w-[260px] px-2.5 py-1.5 text-[13px] bg-transparent border border-border rounded text-text font-mono placeholder:text-text-muted focus:outline-none focus:border-primary"
+          />
+          <span className="text-[11px] text-text-muted ml-auto whitespace-nowrap">
+            {storageStr}
+          </span>
+        </div>
+
+        {/* 하단: 2열 (파일 브라우저 + 상세 패널) */}
+        <div className="flex min-h-[480px]">
+          {/* 왼쪽: 파일 브라우저 */}
+          <div className="w-[320px] min-w-[320px] border-r border-border flex flex-col bg-bg">
+            {/* 경로 */}
+            <div className="px-3.5 py-2 border-b border-border text-[12px] text-text-muted">
+              <span className="text-primary">{pathToString(currentPath)}</span>
+            </div>
+
+            {/* 파일 리스트 */}
+            <div
+              ref={fileListRef}
+              className="flex-1 overflow-y-auto py-1 focus:outline-none"
+              tabIndex={0}
             >
-              {DATA_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            {!isFundamental && (
-              <select
-                value={timeframe}
-                onChange={(e) => { setTimeframe(e.target.value); setOffset(0) }}
-                className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] cursor-pointer focus:outline-none focus:border-primary"
-              >
-                <option value="all">전체 타임프레임</option>
-                {TF_OPTIONS.filter((tf) => tf !== 'all').map((tf) => (
-                  <option key={tf} value={tf}>{TF_LABELS[tf] ?? tf}</option>
-                ))}
-              </select>
+              {isLoading ? (
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-5 w-full" />
+                  <Skeleton className="h-5 w-3/4" />
+                  <Skeleton className="h-5 w-5/6" />
+                </div>
+              ) : fullList.length === 0 ? (
+                <div className="px-3.5 py-4 text-[13px] text-text-muted text-center">
+                  {isSearching ? '검색 결과 없음' : '항목 없음'}
+                </div>
+              ) : (
+                fullList.map((entry, idx) => {
+                  const isFocused = idx === focusIndex
+                  const isActive = !entry.isDir && entry.dataset?.id === selectedDataset?.id
+                  const isParent = entry.name === '../'
+                  return (
+                    <div
+                      key={`${entry.name}-${idx}`}
+                      onClick={() => handleEntryClick(entry, idx)}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 text-[13px] cursor-pointer border-l-2 ${
+                        isActive
+                          ? 'text-positive border-l-positive'
+                          : isFocused
+                            ? 'bg-surface-hover border-l-primary'
+                            : 'border-l-transparent'
+                      } ${isParent ? 'text-text-muted' : entry.isDir ? 'text-primary' : 'text-text-muted'} hover:bg-surface-hover`}
+                    >
+                      <span className="flex-1 truncate">{entry.name}</span>
+                      {entry.meta && (
+                        <span className="text-[11px] text-text-muted shrink-0">{entry.meta}</span>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          {/* 오른쪽: 터미널 스타일 상세 패널 */}
+          <div className="flex-1 overflow-y-auto p-4 bg-bg text-[12px] leading-relaxed text-text-muted font-mono">
+            {selectedDataset ? (
+              <DatasetDetailPanel dataset={selectedDataset} onDelete={setDeleteTarget} />
+            ) : (
+              <pre>
+                <span className="text-positive">$</span>{' '}
+                <span className="text-text opacity-40">_</span>
+              </pre>
             )}
           </div>
         </div>
-        {isLoading ? (
-          <TableSkeleton rows={5} cols={isFundamental ? 5 : 6} />
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">종목</th>
-                    {!isFundamental && (
-                      <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">타임프레임</th>
-                    )}
-                    <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">시작일</th>
-                    <th className="text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">종료일</th>
-                    <th className="text-right px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">행 수</th>
-                    <th className="text-right px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(data?.items ?? []).length === 0 ? (
-                    <tr><td colSpan={isFundamental ? 5 : 6} className="px-3 py-8 text-center text-text-muted text-[13px]">데이터셋이 없습니다</td></tr>
-                  ) : (
-                    (data?.items ?? []).map((ds, idx, arr) => {
-                      const isLast = idx === arr.length - 1
-                      const borderCls = isLast ? '' : 'border-b border-border'
-                      return (
-                      <tr key={ds.id} className="hover:bg-surface-hover">
-                        <td className={`px-3 py-3 ${borderCls} text-[13px] font-mono font-medium`}>{ds.symbol}</td>
-                        {!isFundamental && (
-                          <td className={`px-3 py-3 ${borderCls} text-[13px]`}>{TF_LABELS[ds.timeframe] ?? ds.timeframe}</td>
-                        )}
-                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-text-muted`}>{formatDate(ds.start_date)}</td>
-                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-text-muted`}>{formatDate(ds.end_date)}</td>
-                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-right`}>{formatNumber(ds.row_count)}</td>
-                        <td className={`px-3 py-3 ${borderCls} text-[13px] text-right`}>
-                          <button
-                            onClick={() => setDeleteTarget({ id: ds.id, symbol: ds.symbol, timeframe: ds.timeframe, data_type: ds.data_type, start_date: ds.start_date, end_date: ds.end_date, row_count: ds.row_count })}
-                            className="px-2.5 py-1 rounded text-[12px] bg-transparent text-negative border border-border cursor-pointer hover:bg-surface-hover hover:text-text"
-                          >
-                            삭제
-                          </button>
-                        </td>
-                      </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex items-center justify-between pt-3 text-[13px] text-text-muted">
-              <span>
-                총 {formatNumber(data?.total ?? 0)}건
-                {(data?.total ?? 0) > 0 && ` 중 ${offset + 1}-${Math.min(offset + LIMIT, data?.total ?? 0)}`}
-                {storage && ` · 전체 ${storage.total_mb >= 1024 ? `${(storage.total_mb / 1024).toFixed(1)} GB` : `${storage.total_mb.toFixed(1)} MB`}`}
-                {storage?.by_timeframe && Object.keys(storage.by_timeframe).length > 0 && (
-                  <> ({Object.entries(storage.by_timeframe).map(([tf, bytes], i) => (
-                    <span key={tf}>{i > 0 && ' · '}{TF_LABELS[tf] ?? tf} {(bytes / 1024 / 1024).toFixed(0)} MB</span>
-                  ))})</>
-                )}
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-                  disabled={offset <= 0}
-                  className="px-2.5 py-1 rounded text-[12px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  &larr; 이전
-                </button>
-                <button
-                  onClick={() => setOffset(offset + LIMIT)}
-                  disabled={offset + LIMIT >= (data?.total ?? 0)}
-                  className="px-2.5 py-1 rounded text-[12px] font-medium border border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  다음 &rarr;
-                </button>
-              </div>
-            </div>
-          </>
-        )}
       </div>
 
       {/* 삭제 확인 모달 */}
@@ -216,7 +339,7 @@ export default function BacktestData() {
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text">취소</button>
               <button
-                onClick={() => deleteMutation.mutate({ id: deleteTarget.id, data_type: deleteTarget.data_type })}
+                onClick={() => deleteMutation.mutate(deleteTarget)}
                 disabled={deleteMutation.isPending}
                 className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-white border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
               >
@@ -227,5 +350,52 @@ export default function BacktestData() {
         </div>
       )}
     </>
+  )
+}
+
+/* ── 상세 패널 ── */
+function DatasetDetailPanel({ dataset, onDelete }: { dataset: Dataset; onDelete: (ds: Dataset) => void }) {
+  const ds = dataset
+  const filePath = `${ds.data_type}/${ds.symbol}/${ds.timeframe}.parquet`
+  const typeLabel = ds.data_type === 'ohlcv' ? 'OHLCV' : 'Fundamental'
+  const isOhlcv = ds.data_type === 'ohlcv'
+
+  const separator = '\u2500'.repeat(65)
+  const headerCols = isOhlcv
+    ? 'date         open     high     low      close    volume'
+    : 'quarter      revenue       op_profit     net_profit    eps      roe'
+
+  return (
+    <div className="space-y-4">
+      <pre className="m-0 whitespace-pre overflow-x-auto">
+        <span className="text-positive">$</span>{' '}
+        <span className="text-text">ante data show {filePath}</span>
+      </pre>
+      <pre className="m-0 whitespace-pre overflow-x-auto">
+        <span className="text-text font-semibold">{'File'}</span>{'       '}{filePath}{'\n'}
+        <span className="text-text font-semibold">{'Symbol'}</span>{'     '}{ds.symbol}{'\n'}
+        <span className="text-text font-semibold">{'Type'}</span>{'       '}{typeLabel}{'\n'}
+        <span className="text-text font-semibold">{'Timeframe'}</span>{'  '}{ds.timeframe}{'\n'}
+        <span className="text-text font-semibold">{'Period'}</span>{'     '}{ds.start_date} ~ {ds.end_date}{'\n'}
+        <span className="text-text font-semibold">{'Rows'}</span>{'       '}<span className="text-text">{formatNumber(ds.row_count)}</span>{'\n'}
+        <span className="text-text font-semibold">{'Size'}</span>{'       '}<span className="text-text">-</span>
+      </pre>
+      <pre className="m-0 whitespace-pre overflow-x-auto text-text-muted">
+        <span className="text-border">{separator}</span>{'\n'}
+        <span className="text-text font-semibold">{headerCols}</span>{'\n'}
+        <span className="text-border">{separator}</span>{'\n'}
+        <span className="text-text-muted opacity-50">  데이터 미리보기는 API 확장 후 제공됩니다</span>{'\n'}
+        <span className="text-border">{separator}</span>
+      </pre>
+      <pre className="m-0 whitespace-pre overflow-x-auto">
+        <span className="text-positive">$</span>{' '}
+        <button
+          onClick={() => onDelete(ds)}
+          className="text-negative bg-transparent border-none cursor-pointer font-mono text-[12px] underline p-0"
+        >
+          삭제
+        </button>
+      </pre>
+    </div>
   )
 }
