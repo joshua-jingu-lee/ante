@@ -107,18 +107,23 @@ class TestStepTimeout:
         ]
         assert len(order_calls) == 0
 
-    async def test_consecutive_timeout_stops_bot(self) -> None:
-        """연속 3회 타임아웃 시 봇 중지."""
+    async def test_consecutive_timeout_transitions_to_error(self) -> None:
+        """연속 3회 타임아웃 시 ERROR 상태 전이 + BotErrorEvent 발행."""
         bot = _make_bot(_SlowStrategy, step_timeout=1, interval=10)
         bot.strategy = _SlowStrategy(ctx=MagicMock())
         bot.status = BotStatus.RUNNING
 
-        # stop()이 호출되는지 확인
-        with patch.object(bot, "stop", new_callable=AsyncMock) as mock_stop:
-            await bot._run_loop()
-            mock_stop.assert_called_once()
+        await bot._run_loop()
 
+        assert bot.status == BotStatus.ERROR
         assert bot._consecutive_failures >= 3
+        # BotErrorEvent 발행 검증
+        error_calls = [
+            c
+            for c in bot._eventbus.publish.call_args_list
+            if "BotErrorEvent" in str(type(c[0][0]))
+        ]
+        assert len(error_calls) >= 1
 
     async def test_normal_execution_resets_counter(self) -> None:
         """정상 실행 시 카운터 리셋."""

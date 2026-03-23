@@ -126,11 +126,23 @@ class Bot:
                         self._max_consecutive_failures,
                     )
                     if self._consecutive_failures >= self._max_consecutive_failures:
+                        msg = (
+                            f"연속 타임아웃 한도 초과 "
+                            f"({self._consecutive_failures}/{self._max_consecutive_failures})"
+                        )
                         logger.error(
-                            "연속 타임아웃 한도 초과 — 봇 중지: %s",
+                            "연속 타임아웃 한도 초과 — 봇 ERROR 전이: %s",
                             self.bot_id,
                         )
-                        await self.stop()
+                        self.status = BotStatus.ERROR
+                        self.error_message = msg
+                        await self._eventbus.publish(
+                            BotErrorEvent(
+                                bot_id=self.bot_id,
+                                account_id=self.config.account_id,
+                                error_message=msg,
+                            )
+                        )
                         return
                     await asyncio.sleep(self.config.interval_seconds)
                     continue
