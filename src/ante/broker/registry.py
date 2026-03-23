@@ -31,7 +31,6 @@ def _build_registry() -> dict[str, type[BrokerAdapter]]:
     return {
         "test": TestBrokerAdapter,
         "kis-domestic": KISDomesticAdapter,
-        # "kis-overseas"는 1.1에서 등록. 현재 미등록.
     }
 
 

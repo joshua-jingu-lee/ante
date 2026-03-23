@@ -84,14 +84,14 @@ def _prompt_master_account() -> tuple[str, str, str]:
 
 
 def _get_available_brokers() -> list[tuple[str, str]]:
-    """등록 가능한 브로커 목록을 반환한다. kis-overseas 제외.
+    """등록 가능한 브로커 목록을 반환한다.
 
     Returns:
         (broker_type, display_label) 튜플 리스트.
     """
     from ante.account.presets import BROKER_PRESETS
 
-    excluded = {"test", "kis-overseas"}
+    excluded = {"test"}
     result = []
     for broker_type, preset in BROKER_PRESETS.items():
         if broker_type in excluded:

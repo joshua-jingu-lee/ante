@@ -133,7 +133,7 @@ async def create_account(
         raise HTTPException(status_code=409, detail=str(e))
 
     # 브로커 어댑터 인스턴스 생성 가능 여부 검증
-    # kis-overseas 등 BROKER_REGISTRY에 미등록된 타입은 생성 직후 롤백
+    # BROKER_REGISTRY에 미등록된 타입은 생성 직후 롤백
     try:
         await account_service.get_broker(created.account_id)
     except InvalidBrokerTypeError as e:

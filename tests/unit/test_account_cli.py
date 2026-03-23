@@ -249,15 +249,6 @@ class TestAccountCredentials:
 class TestAccountCreate:
     """ante account create 테스트."""
 
-    def test_create_excludes_overseas(self) -> None:
-        """_get_selectable_broker_types가 kis-overseas를 제외한다."""
-        from ante.cli.commands.account import _get_selectable_broker_types
-
-        selectable = _get_selectable_broker_types()
-        assert "kis-overseas" not in selectable
-        assert "test" in selectable
-        assert "kis-domestic" in selectable
-
     def test_create_interactive(self, mock_account_service: AsyncMock) -> None:
         """대화형 생성 흐름이 정상 동작한다."""
         created = _mock_account("test", "테스트", "TEST", "KRW", "test")

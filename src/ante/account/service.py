@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # 브로커 어댑터 레지스트리 — broker_type → 어댑터 클래스
-# kis-overseas는 1.1에서 등록 예정
 _BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {}
 
 _CREATE_TABLE_SQL = """\

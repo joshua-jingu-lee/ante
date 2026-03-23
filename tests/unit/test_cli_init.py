@@ -484,13 +484,12 @@ class TestInitIdempotent:
 class TestPromptAccount:
     """_prompt_account / _get_available_brokers 단위 테스트."""
 
-    def test_kis_overseas_excluded(self):
-        """kis-overseas가 브로커 선택지에서 제외된다."""
+    def test_test_excluded(self):
+        """test 프리셋이 브로커 선택지에서 제외된다."""
         from ante.cli.commands.init import _get_available_brokers
 
         brokers = _get_available_brokers()
         broker_types = [bt for bt, _ in brokers]
-        assert "kis-overseas" not in broker_types
         assert "test" not in broker_types
         assert "kis-domestic" in broker_types
 

@@ -101,7 +101,7 @@ class FakeAccountService:
         del self._accounts[account_id]
 
     async def get_broker(self, account_id: str) -> Any:
-        """브로커 인스턴스 반환 모의. kis-overseas는 미등록."""
+        """브로커 인스턴스 반환 모의."""
         account = await self.get(account_id)
         # test, kis-domestic만 등록됨
         if account.broker_type not in ("test", "kis-domestic"):
@@ -256,20 +256,6 @@ class TestCreateAccount:
             },
         )
         assert resp.status_code == 409
-
-    def test_create_overseas_account_rejected(self, client: TestClient) -> None:
-        """kis-overseas broker_type은 BROKER_REGISTRY에 미등록이므로 거부."""
-        resp = client.post(
-            "/api/accounts",
-            json={
-                "account_id": "us-stock",
-                "name": "미국 주식",
-                "broker_type": "kis-overseas",
-            },
-        )
-        assert resp.status_code == 400
-        data = resp.json()
-        assert "BROKER_REGISTRY" in data["detail"]
 
 
 class TestGetAccount:
