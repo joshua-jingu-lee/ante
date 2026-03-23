@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
 
 
 class DailyLossLimitRule(Rule):
     """일일 손실 한도 초과 시 계좌 중지."""
+
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "max_daily_loss_percent" in params:
+            v = params["max_daily_loss_percent"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_daily_loss_percent must be >= 0")
+            elif v > 1:
+                errors.append("max_daily_loss_percent must be <= 1")
+        return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_daily_loss = self.config.get("max_daily_loss_percent", 0.05)
@@ -65,6 +78,21 @@ class DailyLossLimitRule(Rule):
 class TotalExposureLimitRule(Rule):
     """총 포지션 노출 한도 초과 시 거래 제한."""
 
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "max_exposure_percent" in params:
+            v = params["max_exposure_percent"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_exposure_percent must be >= 0")
+            elif v > 1:
+                errors.append("max_exposure_percent must be <= 1")
+        if "max_exposure_amount" in params:
+            v = params["max_exposure_amount"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_exposure_amount must be >= 0")
+        return errors
+
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         # 매도(손절)는 항상 허용 — 포지션 정리를 차단하면 안 됨
         if context.side == "sell":
@@ -122,6 +150,32 @@ class TradingHoursRule(Rule):
     테스트 용이성을 위해 현재 시각을 context.metadata["current_time"]에서
     받을 수 있다. 없으면 실제 시각을 사용한다.
     """
+
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        from datetime import time
+
+        errors: list[str] = []
+        for key in ("allowed_hours_start", "allowed_hours_end"):
+            if key in params:
+                try:
+                    time.fromisoformat(params[key])
+                except (TypeError, ValueError):
+                    errors.append(f"{key} must be a valid time (HH:MM)")
+        if "allowed_hours" in params:
+            v = params["allowed_hours"]
+            if isinstance(v, str) and "-" in v:
+                parts = v.split("-")
+                if len(parts) == 2:
+                    for part in parts:
+                        try:
+                            time.fromisoformat(part.strip())
+                        except (TypeError, ValueError):
+                            errors.append("allowed_hours must be 'HH:MM-HH:MM' format")
+                            break
+            elif isinstance(v, str) and v:
+                errors.append("allowed_hours must be 'HH:MM-HH:MM' format")
+        return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         from datetime import datetime, time

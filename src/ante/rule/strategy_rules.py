@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
 
 
 class PositionSizeRule(Rule):
     """포지션 사이즈 제한."""
+
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "max_position_percent" in params:
+            v = params["max_position_percent"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_position_percent must be >= 0")
+            elif v > 1:
+                errors.append("max_position_percent must be <= 1")
+        if "max_position_amount" in params:
+            v = params["max_position_amount"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_position_amount must be >= 0")
+        return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_position_percent = self.config.get("max_position_percent", 0.10)
@@ -53,6 +70,17 @@ class UnrealizedLossLimitRule(Rule):
     context.unrealized_pnl과 context.bot_allocated_budget을 참조.
     """
 
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "max_unrealized_loss_percent" in params:
+            v = params["max_unrealized_loss_percent"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_unrealized_loss_percent must be >= 0")
+            elif v > 1:
+                errors.append("max_unrealized_loss_percent must be <= 1")
+        return errors
+
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_loss_pct = self.config.get("max_unrealized_loss_percent", 0.10)
 
@@ -92,6 +120,15 @@ class TradeFrequencyRule(Rule):
 
     context.metadata["recent_trade_count"]에서 최근 거래 수를 참조.
     """
+
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "max_trades_per_hour" in params:
+            v = params["max_trades_per_hour"]
+            if not isinstance(v, int | float) or v < 0:
+                errors.append("max_trades_per_hour must be >= 0")
+        return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_trades = self.config.get("max_trades_per_hour", 10)

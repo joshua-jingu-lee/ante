@@ -109,6 +109,18 @@ class Rule(ABC):
         """룰 평가 로직."""
         ...
 
+    @classmethod
+    def validate_config(cls, params: dict[str, Any]) -> list[str]:
+        """룰 파라미터의 유효성을 검증한다.
+
+        Args:
+            params: 검증할 config 파라미터 딕셔너리.
+
+        Returns:
+            에러 메시지 리스트. 비어 있으면 유효.
+        """
+        return []
+
     def is_applicable(self, context: RuleContext) -> bool:
         """이 룰이 해당 상황에 적용되는지 확인."""
         return self.enabled

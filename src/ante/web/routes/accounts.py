@@ -458,6 +458,15 @@ async def update_account_rule(
             f"가능한 값: {list(RULE_REGISTRY.keys())}",
         )
 
+    # config 파라미터 범위 검증
+    rule_class = RULE_REGISTRY[rule_type]
+    validation_errors = rule_class.validate_config(body.params)
+    if validation_errors:
+        raise HTTPException(
+            status_code=422,
+            detail=f"룰 config 검증 실패: {'; '.join(validation_errors)}",
+        )
+
     key = _config_key(account_id)
 
     # 기존 룰 설정 조회
