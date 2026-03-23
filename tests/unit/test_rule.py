@@ -15,6 +15,7 @@ from ante.eventbus.events import (
 from ante.rule import (
     DailyLossLimitRule,
     PositionSizeRule,
+    Rule,
     RuleAction,
     RuleContext,
     RuleEngine,
@@ -1537,3 +1538,193 @@ class TestTradingHoursRuleContextFields:
         # current_time이 직접 주입되어 timezone은 실제 시각 조회에만 영향
         # 09:00-15:30 범위 내이므로 통과
         assert result.result == RuleResult.PASS
+
+
+# ── WARN 경로 단위 테스트 (#806) ─────────────────────
+
+
+class _WarnRule(Rule):
+    """테스트용 WARN 반환 룰."""
+
+    def evaluate(self, context: RuleContext) -> RuleEvaluation:
+        return RuleEvaluation(
+            rule_id=self.rule_id,
+            rule_name=self.name,
+            result=RuleResult.WARN,
+            action=RuleAction.NOTIFY,
+            message="Warning threshold reached",
+        )
+
+
+class TestRuleEngineWarnPath:
+    """RuleEngine WARN 결과 경로 테스트. Refs #806."""
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    def engine(self, eventbus, mock_account_service):
+        return RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
+
+    def test_warn_rule_returns_warn_evaluation(self, base_context):
+        """_WarnRule이 WARN 결과를 반환한다."""
+        rule = _WarnRule("warn_test", {"name": "Warn Test"})
+        evaluation = rule.evaluate(base_context)
+        assert evaluation.result == RuleResult.WARN
+        assert evaluation.action == RuleAction.NOTIFY
+
+    def test_engine_evaluate_warn_overall(self, engine, base_context):
+        """WARN 룰만 있으면 overall_result가 WARN이다."""
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        result = engine.evaluate(base_context)
+        assert result.overall_result == RuleResult.WARN
+
+    def test_warn_included_in_evaluations(self, engine, base_context):
+        """WARN 결과가 EvaluationResult.evaluations에 포함된다."""
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        result = engine.evaluate(base_context)
+        assert len(result.evaluations) == 1
+        assert result.evaluations[0].result == RuleResult.WARN
+        assert result.evaluations[0].rule_id == "w1"
+
+    def test_warn_no_rejection_reason(self, engine, base_context):
+        """WARN은 rejection_reason을 설정하지 않는다."""
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        result = engine.evaluate(base_context)
+        assert result.rejection_reason == ""
+
+    def test_warn_actions_collected(self, engine, base_context):
+        """WARN 룰의 action(NOTIFY)이 actions 목록에 포함된다."""
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        result = engine.evaluate(base_context)
+        assert RuleAction.NOTIFY in result.actions
+
+    def test_warn_with_pass_overall_warn(self, engine, base_context):
+        """PASS + WARN 조합 시 overall은 WARN이다."""
+        engine.add_account_rule(
+            DailyLossLimitRule("dl", {"max_daily_loss_percent": 0.05})
+        )
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1", "priority": 10}))
+        result = engine.evaluate(base_context)
+        assert result.overall_result == RuleResult.WARN
+        assert len(result.evaluations) == 2
+
+    def test_multiple_warns(self, engine, base_context):
+        """다수 WARN 룰 시 overall은 WARN, 모든 evaluation 포함."""
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        engine.add_account_rule(_WarnRule("w2", {"name": "Warn2", "priority": 5}))
+        result = engine.evaluate(base_context)
+        assert result.overall_result == RuleResult.WARN
+        assert len(result.evaluations) == 2
+        warn_ids = {e.rule_id for e in result.evaluations}
+        assert warn_ids == {"w1", "w2"}
+
+
+class TestRuleEngineWarnEventBus:
+    """WARN 경로의 EventBus 이벤트 발행 테스트. Refs #806."""
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    async def engine(self, eventbus, mock_account_service):
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+        )
+        engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
+        engine.start()
+        return engine
+
+    async def test_warn_publishes_order_validated(self, engine, eventbus):
+        """WARN 시 OrderValidatedEvent가 발행된다."""
+        received = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: received.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await eventbus.publish(order)
+
+        assert len(received) == 1
+        assert received[0].bot_id == "bot1"
+        assert received[0].account_id == "domestic"
+
+    async def test_warn_does_not_publish_rejected(self, engine, eventbus):
+        """WARN 시 OrderRejectedEvent는 발행되지 않는다."""
+        rejected = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+
+    async def test_warn_publishes_notification(self, engine, eventbus):
+        """WARN 시 NotificationEvent(level='warning')가 발행된다."""
+        from ante.eventbus.events import NotificationEvent
+
+        notifications = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await eventbus.publish(order)
+
+        assert len(notifications) == 1
+        assert notifications[0].level == "warning"
+        assert "Warning threshold reached" in notifications[0].title
+
+    async def test_warn_multiple_notifications(self, engine, eventbus):
+        """다수 WARN 룰 시 각 WARN마다 NotificationEvent가 발행된다."""
+        from ante.eventbus.events import NotificationEvent
+
+        engine.add_account_rule(_WarnRule("w2", {"name": "Warn2", "priority": 10}))
+
+        notifications = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await eventbus.publish(order)
+
+        assert len(notifications) == 2
