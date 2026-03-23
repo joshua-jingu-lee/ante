@@ -54,6 +54,7 @@ class PositionHistory:
         await self._db.execute_script(POSITION_SCHEMA)
         await self._migrate_exchange_column()
         await self._migrate_account_id_column()
+        await self._migrate_trade_id_column()
         await self._warm_cache()
         logger.info("PositionHistory 초기화 완료")
 
@@ -82,6 +83,16 @@ class PositionHistory:
                 logger.info("%s 테이블에 exchange 컬럼 추가", table)
             except Exception:
                 pass  # 이미 존재
+
+    async def _migrate_trade_id_column(self) -> None:
+        """position_history에 trade_id 컬럼 마이그레이션."""
+        try:
+            await self._db.execute(
+                "ALTER TABLE position_history ADD COLUMN trade_id TEXT"
+            )
+            logger.info("position_history 테이블에 trade_id 컬럼 추가")
+        except Exception:
+            pass  # 이미 존재
 
     async def _migrate_account_id_column(self) -> None:
         """account_id 컬럼 마이그레이션."""
@@ -127,6 +138,7 @@ class PositionHistory:
                 pnl=0.0,
                 timestamp=record.timestamp,
                 exchange=record.exchange,
+                trade_id=str(record.trade_id),
             )
 
         elif record.side == "sell":
@@ -168,6 +180,7 @@ class PositionHistory:
                 pnl=pnl,
                 timestamp=record.timestamp,
                 exchange=record.exchange,
+                trade_id=str(record.trade_id),
             )
 
     async def get_positions(
@@ -330,14 +343,16 @@ class PositionHistory:
         pnl: float,
         timestamp: object | None,
         exchange: str = "KRX",
+        trade_id: str | None = None,
     ) -> None:
         """포지션 변동 이력 저장."""
         ts = timestamp.isoformat() if hasattr(timestamp, "isoformat") else None
         await self._db.execute(
             """INSERT INTO position_history
-               (bot_id, symbol, action, quantity, price, pnl, timestamp, exchange)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (bot_id, symbol, action, quantity, price, pnl, ts, exchange),
+               (bot_id, symbol, action, quantity, price, pnl, timestamp,
+                exchange, trade_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (bot_id, symbol, action, quantity, price, pnl, ts, exchange, trade_id),
         )
 
     @staticmethod

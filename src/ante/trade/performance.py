@@ -27,11 +27,8 @@ _COND_STATUS_FILLED = "t.status = ?"
 _COND_SIDE_SELL = "t.side = 'sell'"
 _COND_BOT_ID = "t.bot_id = ?"
 _JOIN_POSITION_HISTORY = """LEFT JOIN position_history ph
-                ON ph.bot_id = t.bot_id
-                AND ph.symbol = t.symbol
-                AND ph.action = 'sell'
-                AND ph.price = t.price
-                AND ph.quantity = t.quantity"""
+                ON ph.trade_id = CAST(t.trade_id AS TEXT)
+                AND ph.action = 'sell'"""
 
 
 class PerformanceTracker:
@@ -378,14 +375,13 @@ class PerformanceTracker:
         """
         pnl_list: list[float] = []
         for trade in sell_trades:
-            # position_history에서 해당 거래의 pnl 조회
+            # position_history에서 trade_id 기반으로 pnl 조회
             try:
                 row = await self._db.fetch_one(
                     """SELECT pnl FROM position_history
-                       WHERE bot_id = ? AND symbol = ? AND action = 'sell'
-                         AND price = ? AND quantity = ?
-                       ORDER BY created_at DESC LIMIT 1""",
-                    (trade.bot_id, trade.symbol, trade.price, trade.quantity),
+                       WHERE trade_id = ? AND action = 'sell'
+                       LIMIT 1""",
+                    (str(trade.trade_id),),
                 )
             except sqlite3.OperationalError:
                 row = None
