@@ -47,6 +47,7 @@ class PerformanceTracker:
         strategy_id: str | None = None,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
+        bot_allocated_budget: float = 0.0,
     ) -> PerformanceMetrics:
         """성과 지표 계산.
 
@@ -78,7 +79,9 @@ class PerformanceTracker:
         total_loss = abs(sum(losing)) if losing else 0.0
         total_commission = sum(t.commission for t in trades)
 
-        max_drawdown, max_drawdown_amount = self._calculate_mdd(pnl_list)
+        max_drawdown, max_drawdown_amount = self._calculate_mdd(
+            pnl_list, bot_allocated_budget
+        )
 
         return PerformanceMetrics(
             total_trades=total_trades,
@@ -274,31 +277,40 @@ class PerformanceTracker:
         ]
 
     @staticmethod
-    def _calculate_mdd(pnl_list: list[float]) -> tuple[float, float]:
-        """MDD 계산. 누적 손익의 고점 대비 최대 하락.
+    def _calculate_mdd(
+        pnl_list: list[float],
+        bot_allocated_budget: float = 0.0,
+    ) -> tuple[float, float]:
+        """MDD 계산. equity curve (할당 예산 + 누적 PnL) 기반 고점 대비 최대 하락.
+
+        Args:
+            pnl_list: 거래별 실현 손익 리스트
+            bot_allocated_budget: 봇에 할당된 예산 (equity curve 기준점)
 
         Returns:
-            (비율, 금액) 튜플
+            (비율, 금액) 튜플. 비율 = (Peak - Trough) / Peak
         """
         if not pnl_list:
             return 0.0, 0.0
 
-        cumulative: list[float] = []
+        # equity curve 구축: 할당 예산 + 누적 PnL
+        equity: list[float] = []
         running = 0.0
         for pnl in pnl_list:
             running += pnl
-            cumulative.append(running)
+            equity.append(bot_allocated_budget + running)
 
-        peak = cumulative[0]
+        peak = equity[0]
         max_dd_amount = 0.0
 
-        for value in cumulative:
+        for value in equity:
             if value > peak:
                 peak = value
             drawdown = peak - value
             if drawdown > max_dd_amount:
                 max_dd_amount = drawdown
 
+        # MDD% = (Peak - Trough) / Peak; peak <= 0이면 비율 산출 불가
         max_dd_rate = max_dd_amount / peak if peak > 0 else 0.0
         return max_dd_rate, max_dd_amount
 

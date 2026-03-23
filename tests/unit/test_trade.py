@@ -775,14 +775,14 @@ class TestPerformanceTracker:
         assert metrics.win_rate == pytest.approx(0.5)
 
     async def test_mdd_calculation(self, performance):
-        """MDD 계산 정확성."""
-        # 고점 후 하락 → 회복 → 재하락
+        """MDD 계산 정확성 — equity curve 기반."""
+        budget = 1000.0
         pnl_list = [100, 50, -200, 150, -300]
-        rate, amount = performance._calculate_mdd(pnl_list)
-        # cumulative: [100, 150, -50, 100, -200]
-        # peak: 150, max drawdown: 150 - (-200) = 350
+        rate, amount = performance._calculate_mdd(pnl_list, budget)
+        # equity: [1100, 1150, 950, 1100, 800]
+        # peak: 1150, trough: 800, drawdown: 350
         assert amount == pytest.approx(350.0)
-        assert rate == pytest.approx(350.0 / 150.0)
+        assert rate == pytest.approx(350.0 / 1150.0)
 
     async def test_mdd_empty(self, performance):
         """빈 리스트 MDD = 0."""
@@ -792,8 +792,28 @@ class TestPerformanceTracker:
 
     async def test_mdd_only_profits(self, performance):
         """수익만 있으면 MDD = 0."""
-        rate, amount = performance._calculate_mdd([100, 200, 300])
+        rate, amount = performance._calculate_mdd([100, 200, 300], 1000.0)
         assert amount == 0.0
+
+    async def test_mdd_all_loss(self, performance):
+        """전 구간 손실 케이스 — equity curve 기반 MDD."""
+        budget = 1000.0
+        pnl_list = [-100, -200, -150]
+        rate, amount = performance._calculate_mdd(pnl_list, budget)
+        # equity: [900, 700, 550]
+        # peak: 900 (첫 값), trough: 550, drawdown: 350
+        assert amount == pytest.approx(350.0)
+        assert rate == pytest.approx(350.0 / 900.0)
+
+    async def test_mdd_no_budget_backward_compat(self, performance):
+        """bot_allocated_budget=0 (기본값) 시 기존 누적PnL 기반 동작."""
+        pnl_list = [100, 50, -200, 150, -300]
+        rate, amount = performance._calculate_mdd(pnl_list)
+        # equity (budget=0): [100, 150, -50, 100, -200]
+        # peak: 150, trough: -200, drawdown amount: 350
+        assert amount == pytest.approx(350.0)
+        # peak > 0이므로 비율 산출 가능
+        assert rate == pytest.approx(350.0 / 150.0)
 
     async def test_sharpe_under_30_returns_none(self, performance):
         """30건 미만이면 None."""
