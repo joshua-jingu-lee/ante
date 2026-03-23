@@ -28,6 +28,7 @@ from ante.rule.strategy_rules import (
 if TYPE_CHECKING:
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.trade.service import TradeService
     from ante.treasury.treasury import Treasury
 
 logger = logging.getLogger(__name__)
@@ -59,12 +60,14 @@ class RuleEngine:
         account_service: AccountService | None = None,
         bot_strategy_resolver: Callable[[str], str | None] | None = None,
         treasury: Treasury | None = None,
+        trade_service: TradeService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._account_id = account_id
         self._account_service = account_service
         self._bot_strategy_resolver = bot_strategy_resolver
         self._treasury = treasury
+        self._trade_service = trade_service
 
         self._account_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
@@ -328,6 +331,40 @@ class RuleEngine:
 
         return result
 
+    # ── Trade 조회 ─────────────────────────────────
+
+    async def _calculate_bot_unrealized_pnl(
+        self, bot_id: str, current_price: float, order_symbol: str
+    ) -> float:
+        """봇의 전체 미실현 손익을 계산한다.
+
+        현재 주문 대상 종목은 current_price를 사용하고,
+        그 외 종목은 avg_entry_price를 현재가로 간주한다 (미실현=0 근사).
+
+        Args:
+            bot_id: 봇 ID.
+            current_price: 주문 대상 종목의 현재 가격.
+            order_symbol: 주문 대상 종목 코드.
+
+        Returns:
+            미실현 손익 합계.
+        """
+        if self._trade_service is None:
+            return 0.0
+
+        try:
+            positions = await self._trade_service.get_positions(bot_id)
+            total = 0.0
+            for pos in positions:
+                if pos.symbol == order_symbol:
+                    # 주문 대상 종목: current_price로 미실현 손익 계산
+                    total += (current_price - pos.avg_entry_price) * pos.quantity
+                # 그 외 종목: 시세 정보 없으므로 미실현 손익 0으로 근사
+            return total
+        except Exception:
+            logger.warning("미실현 손익 계산 실패: bot=%s", bot_id)
+            return 0.0
+
     # ── EventBus 핸들러 ──────────────────────────────
 
     async def _on_order_request(self, event: object) -> None:
@@ -362,6 +399,14 @@ class RuleEngine:
         # Treasury 데이터 조회
         treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
+        # 미실현 손익 조회
+        current_price = event.price or 0.0
+        unrealized_pnl = await self._calculate_bot_unrealized_pnl(
+            bot_id=event.bot_id,
+            current_price=current_price,
+            order_symbol=event.symbol,
+        )
+
         context = RuleContext(
             bot_id=event.bot_id,
             account_id=self._account_id,
@@ -371,9 +416,10 @@ class RuleEngine:
             quantity=event.quantity,
             order_type=event.order_type,
             price=event.price,
-            current_price=event.price or 0.0,
+            current_price=current_price,
             account_status=account_status,
             currency=currency,
+            unrealized_pnl=unrealized_pnl,
             daily_pnl=treasury_data["daily_pnl"],
             total_pnl=treasury_data["total_pnl"],
             prev_day_total_asset=treasury_data["prev_day_total_asset"],
@@ -516,6 +562,14 @@ class RuleEngine:
         # Treasury 데이터 조회
         treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
+        # 미실현 손익 조회
+        modify_price = event.price or 0.0
+        unrealized_pnl = await self._calculate_bot_unrealized_pnl(
+            bot_id=event.bot_id,
+            current_price=modify_price,
+            order_symbol=event.symbol,
+        )
+
         context = RuleContext(
             bot_id=event.bot_id,
             account_id=self._account_id,
@@ -525,9 +579,10 @@ class RuleEngine:
             quantity=event.quantity,
             order_type="limit" if event.price else "market",
             price=event.price,
-            current_price=event.price or 0.0,
+            current_price=modify_price,
             account_status=account_status,
             currency=currency,
+            unrealized_pnl=unrealized_pnl,
             daily_pnl=treasury_data["daily_pnl"],
             total_pnl=treasury_data["total_pnl"],
             prev_day_total_asset=treasury_data["prev_day_total_asset"],
