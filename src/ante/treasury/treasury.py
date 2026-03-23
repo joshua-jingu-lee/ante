@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS bot_budgets (
 CREATE TABLE IF NOT EXISTS treasury_transactions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     bot_id           TEXT,
-    account_id       TEXT DEFAULT '',
+    account_id       TEXT NOT NULL,
     transaction_type TEXT NOT NULL,
     amount           REAL NOT NULL,
     description      TEXT DEFAULT '',
