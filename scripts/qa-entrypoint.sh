@@ -27,8 +27,32 @@ echo "[qa] QA Admin 멤버 부트스트랩..."
 # bootstrap은 대화형 패스워드 프롬프트를 사용하므로
 # confirmation_prompt=True → 패스워드를 2번 입력해야 한다
 QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
-printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
-    ante member bootstrap --id qa-admin --name "QA Admin" 2>/dev/null || true
+BOOTSTRAP_OUTPUT=$(printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
+    ante member bootstrap --id qa-admin --name "QA Admin" 2>/dev/null || true)
+QA_TOKEN=$(echo "$BOOTSTRAP_OUTPUT" | grep -oE 'ante_[a-z]+_[A-Za-z0-9_-]+' | head -1)
+
+if [ -z "$QA_TOKEN" ]; then
+    # 이미 bootstrap 완료된 경우 (재기동) — 로그인 후 rotate-token으로 재발급
+    echo "[qa] 기존 master 계정 감지 — 토큰 재발급 중..."
+    LOGIN_RESP=$(curl -sf -X POST http://localhost:8000/api/auth/login \
+        -H "Content-Type: application/json" \
+        -d "{\"member_id\":\"qa-admin\",\"password\":\"$QA_PASSWORD\"}" \
+        -c - 2>/dev/null || true)
+    SESSION_COOKIE=$(echo "$LOGIN_RESP" | grep 'ante_session' | awk '{print $NF}')
+    if [ -n "$SESSION_COOKIE" ]; then
+        ROTATE_RESP=$(curl -sf -X POST http://localhost:8000/api/members/qa-admin/rotate-token \
+            -b "ante_session=$SESSION_COOKIE" 2>/dev/null || true)
+        QA_TOKEN=$(echo "$ROTATE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+    fi
+fi
+
+if [ -n "$QA_TOKEN" ]; then
+    export ANTE_MEMBER_TOKEN="$QA_TOKEN"
+    echo "export ANTE_MEMBER_TOKEN=\"$QA_TOKEN\"" >> /root/.bashrc
+    echo "[qa] ANTE_MEMBER_TOKEN 설정 완료"
+else
+    echo "[qa] WARNING: ANTE_MEMBER_TOKEN 설정 실패" >&2
+fi
 
 echo "[qa] QA 시드 계좌 확인 (Treasury 초기화 보장)..."
 # 계좌가 없으면 API로 테스트 계좌 생성 → 서버 재기동하여 Treasury 초기화
