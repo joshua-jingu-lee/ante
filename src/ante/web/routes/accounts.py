@@ -95,6 +95,7 @@ async def create_account(
     from ante.account.errors import (
         AccountAlreadyExistsError,
         InvalidBrokerTypeError,
+        MissingCredentialsError,
     )
     from ante.account.models import Account, TradingMode
     from ante.account.presets import BROKER_PRESETS
@@ -139,6 +140,8 @@ async def create_account(
         raise HTTPException(status_code=400, detail=str(e))
     except AccountAlreadyExistsError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except MissingCredentialsError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     # 브로커 어댑터 인스턴스 생성 가능 여부 검증
     # BROKER_REGISTRY에 미등록된 타입은 생성 직후 롤백
