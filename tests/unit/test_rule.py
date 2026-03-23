@@ -1446,3 +1446,94 @@ class TestRuleEngineStartSync:
         assert len(handlers) >= 1, (
             "start() 후 OrderRequestEvent 핸들러가 등록되어야 합니다"
         )
+
+
+# ── TradingHoursRule: 계좌별 거래시간 컨텍스트 주입 (#781) ────
+
+
+class TestTradingHoursRuleContextFields:
+    """TradingHoursRule이 RuleContext의 trading_hours 필드를 사용하는지 검증."""
+
+    def test_context_fields_override_config(self, base_context):
+        """context 필드가 config의 allowed_hours보다 우선한다."""
+        rule = TradingHoursRule(
+            "hours",
+            {"name": "Trading Hours", "allowed_hours": "09:00-15:30"},
+        )
+        # 계좌가 08:00~16:00 거래 시간 설정
+        base_context.trading_hours_start = "08:00"
+        base_context.trading_hours_end = "16:00"
+        base_context.metadata["current_time"] = time(8, 30)
+
+        result = rule.evaluate(base_context)
+        # config는 09:00-15:30이지만 context가 08:00-16:00이므로 통과
+        assert result.result == RuleResult.PASS
+
+    def test_context_fields_reject_outside(self, base_context):
+        """context 필드의 거래시간 밖이면 차단."""
+        rule = TradingHoursRule(
+            "hours",
+            {"name": "Trading Hours", "allowed_hours": "09:00-15:30"},
+        )
+        # 계좌가 10:00~14:00 으로 좁은 거래 시간 설정
+        base_context.trading_hours_start = "10:00"
+        base_context.trading_hours_end = "14:00"
+        base_context.metadata["current_time"] = time(9, 30)
+
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.REJECT
+
+    def test_default_context_fields_with_config_allowed_hours(self, base_context):
+        """context가 기본값이면 config의 allowed_hours가 사용된다."""
+        rule = TradingHoursRule(
+            "hours",
+            {"name": "Trading Hours", "allowed_hours": "10:00-14:00"},
+        )
+        # context 필드는 기본값 (09:00, 15:30)
+        base_context.metadata["current_time"] = time(9, 30)
+
+        result = rule.evaluate(base_context)
+        # config의 10:00-14:00이 적용되어 09:30은 차단
+        assert result.result == RuleResult.REJECT
+
+    def test_different_accounts_different_hours(self, base_context):
+        """서로 다른 계좌의 거래시간이 독립적으로 적용된다."""
+        rule = TradingHoursRule("hours", {"name": "Trading Hours"})
+
+        # 국내 계좌: 09:00-15:30
+        base_context.trading_hours_start = "09:00"
+        base_context.trading_hours_end = "15:30"
+        base_context.metadata["current_time"] = time(10, 0)
+        result_kr = rule.evaluate(base_context)
+        assert result_kr.result == RuleResult.PASS
+
+        # 미국 계좌: 22:30-05:00 (단순화하여 22:30-23:59 테스트)
+        base_context.trading_hours_start = "22:30"
+        base_context.trading_hours_end = "23:59"
+        base_context.metadata["current_time"] = time(10, 0)
+        result_us = rule.evaluate(base_context)
+        assert result_us.result == RuleResult.REJECT
+
+        base_context.metadata["current_time"] = time(23, 0)
+        result_us2 = rule.evaluate(base_context)
+        assert result_us2.result == RuleResult.PASS
+
+    def test_rule_context_has_trading_hours_fields(self):
+        """RuleContext에 trading_hours 필드가 존재하고 기본값이 올바르다."""
+        ctx = RuleContext()
+        assert ctx.trading_hours_start == "09:00"
+        assert ctx.trading_hours_end == "15:30"
+        assert ctx.timezone == "Asia/Seoul"
+
+    def test_context_timezone_field(self, base_context):
+        """context의 timezone 필드가 TradingHoursRule에 전달된다."""
+        rule = TradingHoursRule("hours", {"name": "Trading Hours"})
+        base_context.trading_hours_start = "09:00"
+        base_context.trading_hours_end = "15:30"
+        base_context.timezone = "US/Eastern"
+        base_context.metadata["current_time"] = time(10, 0)
+
+        result = rule.evaluate(base_context)
+        # current_time이 직접 주입되어 timezone은 실제 시각 조회에만 영향
+        # 09:00-15:30 범위 내이므로 통과
+        assert result.result == RuleResult.PASS

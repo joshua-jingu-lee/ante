@@ -386,11 +386,17 @@ class RuleEngine:
         # 계좌 상태 조회
         account_status = "active"
         currency = "KRW"
+        trading_hours_start = "09:00"
+        trading_hours_end = "15:30"
+        timezone = "Asia/Seoul"
         if self._account_service is not None:
             try:
                 account = await self._account_service.get(self._account_id)
                 account_status = account.status.value
                 currency = account.currency
+                trading_hours_start = account.trading_hours_start
+                trading_hours_end = account.trading_hours_end
+                timezone = account.timezone
             except Exception:
                 logger.warning(
                     "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
@@ -426,6 +432,9 @@ class RuleEngine:
             total_asset=treasury_data["total_asset"],
             total_exposure=treasury_data["total_exposure"],
             bot_allocated_budget=treasury_data["bot_allocated_budget"],
+            trading_hours_start=trading_hours_start,
+            trading_hours_end=trading_hours_end,
+            timezone=timezone,
         )
 
         try:
@@ -549,11 +558,17 @@ class RuleEngine:
         # 계좌 상태 조회
         account_status = "active"
         currency = "KRW"
+        trading_hours_start = "09:00"
+        trading_hours_end = "15:30"
+        timezone = "Asia/Seoul"
         if self._account_service is not None:
             try:
                 account = await self._account_service.get(self._account_id)
                 account_status = account.status.value
                 currency = account.currency
+                trading_hours_start = account.trading_hours_start
+                trading_hours_end = account.trading_hours_end
+                timezone = account.timezone
             except Exception:
                 logger.warning(
                     "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
@@ -589,6 +604,9 @@ class RuleEngine:
             total_asset=treasury_data["total_asset"],
             total_exposure=treasury_data["total_exposure"],
             bot_allocated_budget=treasury_data["bot_allocated_budget"],
+            trading_hours_start=trading_hours_start,
+            trading_hours_end=trading_hours_end,
+            timezone=timezone,
         )
 
         try:
