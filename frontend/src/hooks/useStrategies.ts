@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary, getStrategyTradesPaginated } from '../api/strategies'
 
-export function useStrategies() {
+export function useStrategies(params?: { search?: string }) {
   return useQuery({
-    queryKey: ['strategies'],
-    queryFn: getStrategies,
+    queryKey: ['strategies', params],
+    queryFn: () => getStrategies(params),
   })
 }
 

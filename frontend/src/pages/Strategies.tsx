@@ -10,14 +10,16 @@ const STATUS_FILTERS: { key: StrategyStatus | 'all'; label: string }[] = [
   { key: 'active', label: '운용중' },
   { key: 'registered', label: '대기' },
   { key: 'inactive', label: '중지' },
+  { key: 'archived', label: '보관' },
 ]
 
-const PAGE_SIZE = 5
+const PAGE_SIZE = 15
 
 export default function Strategies() {
   const [statusFilter, setStatusFilter] = useState<StrategyStatus | 'all'>('all')
+  const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
-  const { data: strategies, isLoading } = useStrategies()
+  const { data: strategies, isLoading } = useStrategies({ search })
 
   const filtered = (strategies ?? []).filter(
     (s) => statusFilter === 'all' || s.status === statusFilter,
@@ -30,24 +32,38 @@ export default function Strategies() {
     setOffset(0)
   }
 
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
+    setOffset(0)
+  }
+
   return (
     <>
-      <div className="flex gap-1 bg-bg rounded-lg p-0.5 mb-4 w-fit">
-        {STATUS_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => handleFilterChange(f.key)}
-            className={`px-3.5 py-1.5 rounded text-[12px] font-medium border-none cursor-pointer ${
-              statusFilter === f.key ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:text-text'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex gap-1 bg-bg rounded-lg p-0.5 w-fit">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => handleFilterChange(f.key)}
+              className={`px-3.5 py-1.5 rounded text-[12px] font-medium border-none cursor-pointer ${
+                statusFilter === f.key ? 'bg-surface text-text' : 'bg-transparent text-text-muted hover:text-text'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="전략명 검색"
+          className="px-3 py-1.5 rounded-lg border border-border bg-surface text-text text-[13px] outline-none placeholder:text-text-muted w-48 focus:border-primary"
+        />
       </div>
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <TableSkeleton rows={5} cols={6} />
+          <TableSkeleton rows={15} cols={6} />
         ) : (
           <>
             <StrategyTable items={paged} />

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { formatKRW, formatPercent } from '../../utils/formatters'
 import type { DailySummary, WeeklySummary, MonthlySummary } from '../../types/strategy'
 
@@ -28,7 +29,7 @@ export default function PeriodPerformance({ daily, weekly, monthly, strategyId }
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-[15px] font-semibold">기간별 성과</h3>
         {strategyId && (
-          <span className="text-[13px] text-primary cursor-pointer hover:underline">더 보기 &rarr;</span>
+          <Link to={`/strategies/${strategyId}/performance`} className="text-[13px] text-primary no-underline hover:underline">더 보기 &rarr;</Link>
         )}
       </div>
       <div className="flex gap-1 bg-bg rounded-lg p-0.5 w-fit mb-4">
