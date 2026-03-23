@@ -63,6 +63,9 @@ class RuleContext:
     available_balance: float = 0.0
     bot_allocated_budget: float = 0.0
 
+    # 봇 미실현 손익
+    unrealized_pnl: float = 0.0
+
     # 계좌 상태
     account_status: str = "active"
     daily_pnl: float = 0.0

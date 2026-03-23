@@ -50,14 +50,14 @@ class UnrealizedLossLimitRule(Rule):
     """봇의 미실현 손실이 한도를 초과하면 추가 매수 차단.
 
     매도는 허용하여 포지션 정리가 가능하도록 한다.
-    context.metadata에서 unrealized_pnl, allocated_budget을 참조.
+    context.unrealized_pnl과 context.bot_allocated_budget을 참조.
     """
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         max_loss_pct = self.config.get("max_unrealized_loss_percent", 0.10)
 
-        unrealized_pnl = context.metadata.get("unrealized_pnl", 0.0)
-        allocated_budget = context.metadata.get("allocated_budget", 0.0)
+        unrealized_pnl = context.unrealized_pnl
+        allocated_budget = context.bot_allocated_budget
 
         if allocated_budget > 0 and unrealized_pnl < 0 and context.side == "buy":
             loss_pct = abs(unrealized_pnl) / allocated_budget

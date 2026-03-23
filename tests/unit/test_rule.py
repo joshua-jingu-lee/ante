@@ -397,26 +397,53 @@ class TestUnrealizedLossLimitRule:
 
     def test_pass_no_loss(self, rule, base_context):
         """손실 없으면 통과."""
-        base_context.metadata["unrealized_pnl"] = 5000.0
-        base_context.metadata["allocated_budget"] = 100000.0
+        base_context.unrealized_pnl = 5000.0
+        base_context.bot_allocated_budget = 100000.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
     def test_reject_buy_exceeds_loss(self, rule, base_context):
         """미실현 손실 한도 초과 + 매수 시 REJECT."""
         base_context.side = "buy"
-        base_context.metadata["unrealized_pnl"] = -15000.0
-        base_context.metadata["allocated_budget"] = 100000.0
+        base_context.unrealized_pnl = -15000.0
+        base_context.bot_allocated_budget = 100000.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.REJECT
 
     def test_pass_sell_exceeds_loss(self, rule, base_context):
         """미실현 손실 한도 초과 + 매도 시 통과 (포지션 정리 허용)."""
         base_context.side = "sell"
-        base_context.metadata["unrealized_pnl"] = -15000.0
-        base_context.metadata["allocated_budget"] = 100000.0
+        base_context.unrealized_pnl = -15000.0
+        base_context.bot_allocated_budget = 100000.0
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
+
+    def test_pass_loss_within_limit(self, rule, base_context):
+        """미실현 손실이 한도 이내면 통과."""
+        base_context.side = "buy"
+        base_context.unrealized_pnl = -5000.0
+        base_context.bot_allocated_budget = 100000.0
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_pass_no_budget(self, rule, base_context):
+        """할당 예산이 0이면 비율 계산 불가, 통과."""
+        base_context.side = "buy"
+        base_context.unrealized_pnl = -15000.0
+        base_context.bot_allocated_budget = 0.0
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_reject_metadata_contains_details(self, rule, base_context):
+        """REJECT 시 metadata에 상세 정보 포함."""
+        base_context.side = "buy"
+        base_context.unrealized_pnl = -15000.0
+        base_context.bot_allocated_budget = 100000.0
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.REJECT
+        assert result.metadata["unrealized_pnl"] == -15000.0
+        assert result.metadata["loss_percent"] == pytest.approx(0.15)
+        assert result.metadata["limit_percent"] == 0.10
 
 
 # ── TradeFrequencyRule ───────────────────────────
@@ -1225,6 +1252,165 @@ class TestRuleEngineTreasuryIntegration:
 
 
 # ── RuleEngine.start() 시그니처 회귀 테스트 ──────────────
+
+
+class TestRuleEngineUnrealizedPnl:
+    """RuleEngine 미실현 손익 주입 테스트. Refs #783."""
+
+    @pytest.fixture
+    def eventbus(self):
+        return EventBus()
+
+    @pytest.fixture
+    def mock_trade_service(self):
+        """TradeService 목 객체."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakePosition:
+            bot_id: str
+            symbol: str
+            quantity: float
+            avg_entry_price: float
+            realized_pnl: float = 0.0
+
+        service = AsyncMock()
+        service.get_positions = AsyncMock(
+            return_value=[
+                FakePosition(
+                    bot_id="bot1",
+                    symbol="005930",
+                    quantity=10.0,
+                    avg_entry_price=60000.0,
+                ),
+            ]
+        )
+        return service
+
+    @pytest.fixture
+    def engine(self, eventbus, mock_account_service, mock_trade_service):
+        return RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+            trade_service=mock_trade_service,
+        )
+
+    @pytest.mark.asyncio
+    async def test_calculate_unrealized_pnl_with_loss(self, engine, mock_trade_service):
+        """보유 종목 현재가 < 평단가일 때 음수 미실현 손익."""
+        result = await engine._calculate_bot_unrealized_pnl(
+            bot_id="bot1",
+            current_price=50000.0,  # 평단가 60000 대비 하락
+            order_symbol="005930",
+        )
+        # (50000 - 60000) * 10 = -100000
+        assert result == pytest.approx(-100000.0)
+
+    @pytest.mark.asyncio
+    async def test_calculate_unrealized_pnl_with_profit(
+        self, engine, mock_trade_service
+    ):
+        """보유 종목 현재가 > 평단가일 때 양수 미실현 손익."""
+        result = await engine._calculate_bot_unrealized_pnl(
+            bot_id="bot1",
+            current_price=70000.0,
+            order_symbol="005930",
+        )
+        # (70000 - 60000) * 10 = 100000
+        assert result == pytest.approx(100000.0)
+
+    @pytest.mark.asyncio
+    async def test_calculate_unrealized_pnl_different_symbol(
+        self, engine, mock_trade_service
+    ):
+        """주문 대상과 다른 종목 보유 시 미실현 손익은 0으로 근사."""
+        result = await engine._calculate_bot_unrealized_pnl(
+            bot_id="bot1",
+            current_price=50000.0,
+            order_symbol="035720",  # 다른 종목
+        )
+        assert result == pytest.approx(0.0)
+
+    @pytest.mark.asyncio
+    async def test_calculate_unrealized_pnl_no_trade_service(self, eventbus):
+        """TradeService 없으면 0.0 반환."""
+        engine = RuleEngine(eventbus=eventbus, account_id="domestic")
+        result = await engine._calculate_bot_unrealized_pnl(
+            bot_id="bot1",
+            current_price=50000.0,
+            order_symbol="005930",
+        )
+        assert result == 0.0
+
+    @pytest.mark.asyncio
+    async def test_calculate_unrealized_pnl_exception(self, engine, mock_trade_service):
+        """조회 실패 시 0.0 반환."""
+        mock_trade_service.get_positions = AsyncMock(
+            side_effect=RuntimeError("DB error")
+        )
+        result = await engine._calculate_bot_unrealized_pnl(
+            bot_id="bot1",
+            current_price=50000.0,
+            order_symbol="005930",
+        )
+        assert result == 0.0
+
+    @pytest.mark.asyncio
+    async def test_order_request_injects_unrealized_pnl(
+        self, engine, eventbus, mock_trade_service
+    ):
+        """OrderRequestEvent 처리 시 context에 unrealized_pnl이 주입된다."""
+        # UnrealizedLossLimitRule 추가
+        engine.add_strategy_rule(
+            "momentum_v1",
+            UnrealizedLossLimitRule(
+                "ul",
+                {
+                    "name": "UL",
+                    "max_unrealized_loss_percent": 0.05,
+                },
+            ),
+        )
+        engine.start()
+
+        # 이벤트 발행 후 결과 확인
+        validated = []
+        rejected = []
+
+        async def on_validated(event):
+            validated.append(event)
+
+        async def on_rejected(event):
+            rejected.append(event)
+
+        from ante.eventbus.events import (
+            OrderRejectedEvent,
+            OrderRequestEvent,
+            OrderValidatedEvent,
+        )
+
+        eventbus.subscribe(OrderValidatedEvent, on_validated)
+        eventbus.subscribe(OrderRejectedEvent, on_rejected)
+
+        # 현재가 50000, 평단가 60000 → 미실현 -100000
+        # 봇 예산 조회를 위한 Treasury 설정 없음 → bot_allocated_budget=0
+        # allocated_budget=0이면 룰 통과
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="momentum_v1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=50000.0,
+                order_type="limit",
+            )
+        )
+
+        # budget=0이므로 룰 통과
+        assert len(validated) == 1
 
 
 class TestRuleEngineStartSync:
