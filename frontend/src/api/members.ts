@@ -44,3 +44,7 @@ export async function changePassword(id: string, oldPassword: string, newPasswor
 export async function updateScopes(id: string, scopes: string[]): Promise<void> {
   await client.put(`/api/members/${id}/scopes`, { scopes })
 }
+
+export async function updateMemberInfo(id: string, data: { name: string; org: string }): Promise<void> {
+  await client.patch(`/api/members/${id}`, data)
+}

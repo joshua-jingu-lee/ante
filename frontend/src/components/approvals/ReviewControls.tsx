@@ -65,6 +65,7 @@ function ApproveModalSummary({ type, params }: { type?: ApprovalType; params?: R
 export default function ReviewControls({ approvalId, isPending, title, reviews, type, params }: ReviewControlsProps) {
   const [showApprove, setShowApprove] = useState(false)
   const [showReject, setShowReject] = useState(false)
+  const [approveMemo, setApproveMemo] = useState('')
   const [rejectReason, setRejectReason] = useState('')
   const updateStatus = useUpdateApprovalStatus()
 
@@ -73,8 +74,8 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
   const hasWarnings = reviews?.some((r) => r.result === 'warn' || r.result === 'fail') ?? false
 
   const handleApprove = () => {
-    updateStatus.mutate({ id: approvalId, status: 'approved' }, {
-      onSuccess: () => setShowApprove(false),
+    updateStatus.mutate({ id: approvalId, status: 'approved', memo: approveMemo.trim() || undefined }, {
+      onSuccess: () => { setShowApprove(false); setApproveMemo('') },
     })
   }
 
@@ -119,6 +120,17 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
             {'\u26A0'} 검토 의견에 <strong>warn</strong> 또는 <strong>fail</strong> 결과가 포함되어 있습니다. 검증 내용을 확인하세요.
           </div>
         )}
+        <div className="mb-4">
+          <label className="block text-[12px] font-semibold text-text-muted mb-1.5">메모 (선택)</label>
+          <textarea
+            value={approveMemo}
+            onChange={(e) => setApproveMemo(e.target.value)}
+            placeholder="승인 사유 또는 코멘트를 남겨주세요"
+            aria-label="승인 메모"
+            rows={3}
+            className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-[13px] focus:outline-none focus:border-primary resize-none"
+          />
+        </div>
         <div className="flex justify-end gap-2 mt-4">
           <button
             onClick={() => setShowApprove(false)}

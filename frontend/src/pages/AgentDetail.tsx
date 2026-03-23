@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMemberDetail, useMemberControl } from '../hooks/useMembers'
 import StatusBadge from '../components/common/StatusBadge'
+import AgentEditModal from '../components/agents/AgentEditModal'
 import { PageSkeleton } from '../components/common/Skeleton'
 import { formatDateTime } from '../utils/formatters'
 import { MEMBER_STATUS_LABELS } from '../utils/constants'
-import { ALL_SCOPES, type MemberStatus } from '../types/member'
+import type { MemberStatus } from '../types/member'
 
 const STATUS_VARIANT: Record<MemberStatus, string> = {
   active: 'positive', suspended: 'warning', revoked: 'negative',
@@ -14,17 +15,24 @@ const STATUS_VARIANT: Record<MemberStatus, string> = {
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>()
   const { data: member, isLoading } = useMemberDetail(id!)
-  const { suspend, reactivate, revoke, rotateToken, updateScopes } = useMemberControl()
+  const { suspend, reactivate, revoke, rotateToken, updateScopes, updateInfo } = useMemberControl()
   const [newToken, setNewToken] = useState<string | null>(null)
-  const [editingScopes, setEditingScopes] = useState(false)
-  const [scopesDraft, setScopesDraft] = useState<string[]>([])
+  const [showEditModal, setShowEditModal] = useState(false)
 
   if (isLoading) return <PageSkeleton />
   if (!member) return <div className="text-text-muted text-center py-12">에이전트를 찾을 수 없습니다</div>
 
-  const startEditScopes = () => {
-    setScopesDraft([...member.scopes])
-    setEditingScopes(true)
+  const handleEditSave = async (data: { name: string; org: string; scopes: string[] }) => {
+    const scopesChanged = JSON.stringify([...data.scopes].sort()) !== JSON.stringify([...member.scopes].sort())
+    const infoChanged = data.name !== member.name || data.org !== member.org
+
+    if (infoChanged) {
+      await updateInfo.mutateAsync({ id: member.member_id, name: data.name, org: data.org })
+    }
+    if (scopesChanged) {
+      await updateScopes.mutateAsync({ id: member.member_id, scopes: data.scopes })
+    }
+    setShowEditModal(false)
   }
 
   const handleRotateToken = () => {
@@ -47,14 +55,17 @@ export default function AgentDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          {member.status !== 'revoked' && (
+            <button onClick={() => setShowEditModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">정보 수정</button>
+          )}
           {member.status === 'active' && (
-            <button onClick={() => suspend.mutate(member.member_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">정지</button>
+            <button onClick={() => suspend.mutate(member.member_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">일시 정지</button>
           )}
           {member.status === 'suspended' && (
             <button onClick={() => reactivate.mutate(member.member_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
           )}
           {member.status !== 'revoked' && (
-            <button onClick={() => { if (confirm('영구 폐기하시겠습니까?')) revoke.mutate(member.member_id) }} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover">폐기</button>
+            <button onClick={() => { if (confirm('이 작업은 되돌릴 수 없습니다. 정말 삭제하시겠습니까?')) revoke.mutate(member.member_id) }} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-negative border border-border cursor-pointer hover:bg-surface-hover">삭제</button>
           )}
         </div>
       </div>
@@ -139,41 +150,24 @@ export default function AgentDetail() {
       <div className="bg-surface border border-border rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-[15px] font-semibold">권한 범위 (Scopes)</h3>
-          {!editingScopes ? (
-            <button onClick={startEditScopes} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">편집</button>
-          ) : null}
         </div>
 
         {/* 현재 scope 표시 */}
-        <div className="flex flex-wrap gap-1 mb-4">
+        <div className="flex flex-wrap gap-1">
           {member.scopes.map((s) => (
             <span key={s} className="text-[11px] px-1.5 py-[1px] rounded-sm bg-bg border border-border text-text-muted font-mono">{s}</span>
           ))}
         </div>
-
-        {/* scope 편집 (토글) */}
-        {editingScopes && (
-          <div className="border-t border-border pt-4">
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {ALL_SCOPES.map((scope) => (
-                <label key={scope} className="flex items-center gap-2 text-[13px] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={scopesDraft.includes(scope)}
-                    onChange={() => setScopesDraft((prev) => prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope])}
-                    className="accent-primary"
-                  />
-                  <span className="font-mono text-[12px]">{scope}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => { updateScopes.mutate({ id: member.member_id, scopes: scopesDraft }); setEditingScopes(false) }} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">저장</button>
-              <button onClick={() => setEditingScopes(false)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* 정보 수정 모달 */}
+      <AgentEditModal
+        open={showEditModal}
+        member={member}
+        onClose={() => setShowEditModal(false)}
+        onSave={handleEditSave}
+        isPending={updateInfo.isPending || updateScopes.isPending}
+      />
 
       {/* 토큰 표시 모달 */}
       {newToken && (

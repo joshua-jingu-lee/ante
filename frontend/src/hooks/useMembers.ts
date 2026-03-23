@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getMembers, getMemberDetail, createMember, suspendMember, reactivateMember, revokeMember, rotateToken, changePassword, updateScopes } from '../api/members'
+import { getMembers, getMemberDetail, createMember, suspendMember, reactivateMember, revokeMember, rotateToken, changePassword, updateScopes, updateMemberInfo } from '../api/members'
 import type { MemberCreateRequest } from '../types/member'
 
 export function useMembers(params?: { type?: string; org?: string; status?: string }) {
@@ -49,6 +49,10 @@ export function useMemberControl() {
     }),
     updateScopes: useMutation({
       mutationFn: ({ id, scopes }: { id: string; scopes: string[] }) => updateScopes(id, scopes),
+      onSuccess: () => queryClient.invalidateQueries({ queryKey: ['members'] }),
+    }),
+    updateInfo: useMutation({
+      mutationFn: ({ id, name, org }: { id: string; name: string; org: string }) => updateMemberInfo(id, { name, org }),
       onSuccess: () => queryClient.invalidateQueries({ queryKey: ['members'] }),
     }),
   }
