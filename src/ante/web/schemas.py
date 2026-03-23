@@ -227,6 +227,7 @@ class StrategyListItem(BaseModel):
     author: str
     bot_id: str | None = None
     bot_status: str | None = None
+    cumulative_return: float | None = None
 
 
 class StrategyListResponse(BaseModel):
