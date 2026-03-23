@@ -42,6 +42,19 @@ class FakeAccountService:
             raise InvalidBrokerTypeError(
                 f"유효하지 않은 broker_type: '{account.broker_type}'"
             )
+        # credentials 필수 키 검증
+        preset = BROKER_PRESETS[account.broker_type]
+        missing = [
+            k for k in preset.required_credentials if k not in account.credentials
+        ]
+        if missing:
+            from ante.account.errors import MissingCredentialsError
+
+            raise MissingCredentialsError(
+                f"필수 credentials 누락: {missing}. "
+                f"broker_type '{account.broker_type}'에 필요: "
+                f"{preset.required_credentials}"
+            )
         now = datetime.now(UTC)
         account.created_at = now
         account.updated_at = now
@@ -227,6 +240,7 @@ class TestCreateAccount:
                 "account_id": "new-test",
                 "name": "새 테스트 계좌",
                 "broker_type": "test",
+                "credentials": {"app_key": "key", "app_secret": "secret"},
             },
         )
         assert resp.status_code == 201
@@ -256,6 +270,24 @@ class TestCreateAccount:
             },
         )
         assert resp.status_code == 409
+
+    def test_create_missing_credentials_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
+        """credentials 누락 시 422 Validation Error를 반환해야 한다 (GH-848)."""
+        resp = client.post(
+            "/api/accounts",
+            json={
+                "account_id": "no-creds",
+                "name": "크레덴셜 누락 계좌",
+                "broker_type": "test",
+                "credentials": {},
+            },
+        )
+        assert resp.status_code == 422
+        data = resp.json()
+        assert "credentials" in data["detail"].lower() or "누락" in data["detail"]
 
 
 class TestGetAccount:
