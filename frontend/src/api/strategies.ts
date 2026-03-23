@@ -1,8 +1,8 @@
 import client from './client'
 import type { Strategy, StrategyDetail, StrategyPerformance, Trade, DailySummary, WeeklySummary, MonthlySummary } from '../types/strategy'
 
-export async function getStrategies(): Promise<Strategy[]> {
-  const res = await client.get('/api/strategies')
+export async function getStrategies(params?: { search?: string }): Promise<Strategy[]> {
+  const res = await client.get('/api/strategies', { params })
   return res.data.strategies ?? res.data
 }
 
