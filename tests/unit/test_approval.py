@@ -1442,3 +1442,86 @@ class TestSuppressNotification:
         await service.reject(req.id)
 
         assert len(notifications) == 1
+
+
+class TestListSearch:
+    """list() search 파라미터 테스트."""
+
+    async def test_search_by_title(self, service):
+        """title LIKE 검색."""
+        await service.create(
+            type="budget_change", requester="agent-01", title="예산 증액 요청"
+        )
+        await service.create(
+            type="strategy_adopt", requester="agent-02", title="전략 채택 요청"
+        )
+
+        results = await service.list(search="예산")
+        assert len(results) == 1
+        assert results[0].title == "예산 증액 요청"
+
+    async def test_search_by_requester(self, service):
+        """requester LIKE 검색."""
+        await service.create(
+            type="budget_change", requester="agent-alpha", title="요청 A"
+        )
+        await service.create(
+            type="budget_change", requester="agent-beta", title="요청 B"
+        )
+
+        results = await service.list(search="alpha")
+        assert len(results) == 1
+        assert results[0].requester == "agent-alpha"
+
+    async def test_search_matches_title_or_requester(self, service):
+        """title 또는 requester 중 하나라도 매치되면 반환."""
+        await service.create(
+            type="budget_change", requester="agent-01", title="검색어포함"
+        )
+        await service.create(
+            type="budget_change", requester="검색어포함", title="일반 제목"
+        )
+        await service.create(
+            type="budget_change", requester="agent-02", title="관련 없는 제목"
+        )
+
+        results = await service.list(search="검색어포함")
+        assert len(results) == 2
+
+    async def test_search_no_match(self, service):
+        """매치 없으면 빈 목록."""
+        await service.create(
+            type="budget_change", requester="agent-01", title="예산 요청"
+        )
+
+        results = await service.list(search="존재하지않는키워드")
+        assert len(results) == 0
+
+    async def test_search_empty_string(self, service):
+        """빈 문자열이면 전체 반환 (search 미지정과 동일)."""
+        await service.create(type="budget_change", requester="agent-01", title="요청 1")
+        await service.create(type="budget_change", requester="agent-02", title="요청 2")
+
+        results = await service.list(search="")
+        assert len(results) == 2
+
+    async def test_search_combined_with_status_filter(self, service):
+        """search와 status 필터 조합."""
+        req = await service.create(
+            type="budget_change", requester="agent-01", title="승인될 요청"
+        )
+        await service.create(
+            type="budget_change", requester="agent-01", title="대기 중 요청"
+        )
+        await service.approve(req.id)
+
+        results = await service.list(search="요청", status="pending")
+        assert len(results) == 1
+        assert results[0].title == "대기 중 요청"
+
+    async def test_search_none_returns_all(self, service):
+        """search=None이면 기존 동작 (전체 반환)."""
+        await service.create(type="budget_change", requester="agent-01", title="요청 1")
+
+        results = await service.list(search=None)
+        assert len(results) == 1
