@@ -238,6 +238,53 @@ class TestBot:
         await bot.stop()  # 두 번째 호출은 무시
         assert bot.status == BotStatus.STOPPED
 
+    async def test_stop_from_error_state(self, eventbus, ctx, simple_config):
+        """ERROR 상태의 봇을 stop()으로 STOPPED 전이."""
+        received = []
+        eventbus.subscribe(BotStoppedEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        # ERROR 상태를 직접 설정 (run_loop 예외 시 발생하는 상태)
+        bot.status = BotStatus.ERROR
+        bot.error_message = "some error"
+        bot.strategy = SimpleStrategy(ctx=ctx)
+
+        await bot.stop()
+
+        assert bot.status == BotStatus.STOPPED
+        assert bot.stopped_at is not None
+        assert len(received) == 1
+        # on_stop()이 호출되어 리소스 정리가 수행되었는지 검증
+        assert bot.strategy is not None  # strategy 참조는 유지
+
+    async def test_stop_from_error_cleans_task(self, eventbus, ctx):
+        """ERROR 상태 봇의 stop()이 실행 중인 태스크를 정리."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="error_v1.0.0",
+            interval_seconds=10,
+        )
+        bot = Bot(
+            config=config,
+            strategy_cls=ErrorStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        # ErrorStrategy가 즉시 예외를 던져 ERROR 상태로 전이될 때까지 대기
+        await asyncio.sleep(0.1)
+        assert bot.status == BotStatus.ERROR
+
+        await bot.stop()
+
+        assert bot.status == BotStatus.STOPPED
+        assert bot.stopped_at is not None
+
     async def test_signal_to_order_event(self, eventbus, ctx):
         """전략 Signal → OrderRequestEvent 변환."""
         config = BotConfig(

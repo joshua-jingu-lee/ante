@@ -76,7 +76,7 @@ class Bot:
         """봇 중지. 실행 루프 취소 + 전략 정리."""
         from ante.eventbus.events import BotStoppedEvent
 
-        if self.status != BotStatus.RUNNING:
+        if self.status not in (BotStatus.RUNNING, BotStatus.ERROR):
             return
 
         self.status = BotStatus.STOPPING
