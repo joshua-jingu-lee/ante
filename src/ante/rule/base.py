@@ -74,6 +74,11 @@ class RuleContext:
     total_asset: float = 0.0
     total_exposure: float = 0.0
 
+    # 거래 시간 (Account에서 주입)
+    trading_hours_start: str = "09:00"
+    trading_hours_end: str = "15:30"
+    timezone: str = "Asia/Seoul"
+
     # 추가 메타데이터
     metadata: dict[str, Any] = field(default_factory=dict)
 

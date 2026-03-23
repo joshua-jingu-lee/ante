@@ -127,8 +127,28 @@ class TradingHoursRule(Rule):
         from datetime import datetime, time
         from zoneinfo import ZoneInfo
 
-        allowed_hours: str = self.config.get("allowed_hours", "09:00-15:30")
-        timezone_str: str = self.config.get("timezone", "Asia/Seoul")
+        # context 필드가 기본값이 아니면 context 우선, 그렇지 않으면 config fallback
+        _default_start, _default_end = "09:00", "15:30"
+        context_overridden = (
+            context.trading_hours_start != _default_start
+            or context.trading_hours_end != _default_end
+        )
+
+        if context_overridden:
+            start_str = context.trading_hours_start
+            end_str = context.trading_hours_end
+        else:
+            # 하위 호환: config의 allowed_hours 파싱
+            allowed_hours_cfg = self.config.get("allowed_hours", "")
+            if allowed_hours_cfg:
+                parts = allowed_hours_cfg.split("-")
+                start_str = parts[0].strip() if len(parts) == 2 else _default_start
+                end_str = parts[1].strip() if len(parts) == 2 else _default_end
+            else:
+                start_str = _default_start
+                end_str = _default_end
+
+        timezone_str = context.timezone or self.config.get("timezone", "Asia/Seoul")
 
         # 테스트 주입 또는 실제 시각
         now = context.metadata.get("current_time")
@@ -138,9 +158,9 @@ class TradingHoursRule(Rule):
 
         current_time = now.time() if isinstance(now, datetime) else now
 
-        start_str, end_str = allowed_hours.split("-")
-        start_time = time.fromisoformat(start_str.strip())
-        end_time = time.fromisoformat(end_str.strip())
+        start_time = time.fromisoformat(start_str)
+        end_time = time.fromisoformat(end_str)
+        allowed_hours = f"{start_str}-{end_str}"
 
         if not (start_time <= current_time <= end_time):
             return RuleEvaluation(
