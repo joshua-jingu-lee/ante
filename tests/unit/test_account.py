@@ -9,6 +9,7 @@ from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
     AccountNotFoundError,
+    InvalidAccountIdError,
     InvalidBrokerTypeError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
@@ -107,6 +108,49 @@ async def test_create_invalid_broker_type_raises(service):
 
     with pytest.raises(InvalidBrokerTypeError):
         await service.create(account)
+
+
+# ── account_id 형식 검증 ──────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "",
+        "ab",
+        "a" * 31,
+        "has space",
+        "has_under",
+        "id@#$",
+    ],
+)
+async def test_create_invalid_account_id_raises(service, bad_id):
+    """형식 미준수 account_id로 생성 시 InvalidAccountIdError."""
+    account = _make_account(account_id=bad_id)
+
+    with pytest.raises(InvalidAccountIdError):
+        await service.create(account)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "good_id",
+    [
+        "abc",
+        "a" * 30,
+        "test",
+        "my-account-01",
+        "ABC",
+        "Test-123",
+    ],
+)
+async def test_create_valid_account_id_passes(service, good_id):
+    """형식 준수 account_id로 생성 시 정상 통과."""
+    account = _make_account(account_id=good_id)
+    result = await service.create(account)
+
+    assert result.account_id == good_id
 
 
 # ── 조회 (get / list) ──────────────────────────────

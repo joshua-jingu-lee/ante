@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -13,6 +14,7 @@ from ante.account.errors import (
     AccountDeletedException,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    InvalidAccountIdError,
     InvalidBrokerTypeError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
@@ -102,8 +104,16 @@ class AccountService:
 
         Raises:
             AccountAlreadyExistsError: 동일 account_id가 이미 존재.
+            InvalidAccountIdError: account_id 형식이 올바르지 않음.
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
         """
+        # account_id 형식 검증
+        if not re.fullmatch(r"[a-zA-Z0-9\-]{3,30}", account.account_id):
+            raise InvalidAccountIdError(
+                f"account_id 형식이 올바르지 않습니다: '{account.account_id}'. "
+                "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다."
+            )
+
         if account.account_id in self._accounts:
             raise AccountAlreadyExistsError(
                 f"계좌 '{account.account_id}'가 이미 존재합니다."

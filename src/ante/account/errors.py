@@ -43,6 +43,12 @@ class AccountSuspendedError(AccountError):
     pass
 
 
+class InvalidAccountIdError(AccountError):
+    """account_id 형식이 올바르지 않음."""
+
+    pass
+
+
 class AccountImmutableFieldError(AccountError):
     """불변 필드 수정 시도."""
 

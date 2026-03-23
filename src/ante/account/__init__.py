@@ -7,6 +7,7 @@ from ante.account.errors import (
     AccountImmutableFieldError,
     AccountNotFoundError,
     AccountSuspendedError,
+    InvalidAccountIdError,
     InvalidBrokerTypeError,
 )
 from ante.account.models import Account, AccountStatus, BrokerPreset, TradingMode
@@ -21,6 +22,7 @@ __all__ = [
     "AccountImmutableFieldError",
     "AccountNotFoundError",
     "AccountSuspendedError",
+    "InvalidAccountIdError",
     "AccountService",
     "AccountStatus",
     "BROKER_PRESETS",
