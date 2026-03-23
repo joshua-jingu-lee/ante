@@ -49,6 +49,7 @@ class RecoveryKeyManager:
             "UPDATE members SET password_hash = ? WHERE member_id = ?",
             (hash_password(new_password), member.member_id),
         )
+        await self._invalidate_token(member.member_id)
         logger.info("패스워드 변경 완료: %s", member.member_id)
 
     async def reset_password(
@@ -68,6 +69,7 @@ class RecoveryKeyManager:
             "UPDATE members SET password_hash = ? WHERE member_id = ?",
             (hash_password(new_password), member.member_id),
         )
+        await self._invalidate_token(member.member_id)
         logger.info("패스워드 리셋 완료 (recovery key): %s", member.member_id)
 
     async def regenerate_recovery_key(self, member: Member, password: str) -> str:
@@ -88,6 +90,15 @@ class RecoveryKeyManager:
         )
         logger.info("Recovery key 재발급 완료: %s", member.member_id)
         return recovery_key
+
+    async def _invalidate_token(self, member_id: str) -> None:
+        """기존 토큰 무효화 (token_hash, token_expires_at 삭제)."""
+        await self._db.execute(
+            "UPDATE members SET token_hash = NULL, "
+            "token_expires_at = NULL WHERE member_id = ?",
+            (member_id,),
+        )
+        logger.info("기존 토큰 무효화 완료: %s", member_id)
 
     async def _publish_auth_failed(self, member_id: str, reason: str) -> None:
         """인증 실패 이벤트 발행."""
