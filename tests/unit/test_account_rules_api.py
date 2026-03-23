@@ -419,3 +419,143 @@ class TestUpdateAccountRule:
         assert len(stored) == 1
         assert stored[0]["max_exposure_percent"] == 0.30
         assert stored[0]["enabled"] is False
+
+
+class TestRuleConfigValidation:
+    """PUT /api/accounts/{id}/rules/{type} — config 값 범위 검증."""
+
+    def test_negative_max_daily_loss_percent_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """음수 max_daily_loss_percent는 422로 거부된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": -1}},
+        )
+        assert resp.status_code == 422
+        assert "max_daily_loss_percent" in resp.json()["detail"]
+
+    def test_over_one_max_daily_loss_percent_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """1 초과 max_daily_loss_percent는 422로 거부된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": 1.5}},
+        )
+        assert resp.status_code == 422
+
+    def test_valid_max_daily_loss_percent_accepted(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """유효한 max_daily_loss_percent(0~1)는 정상 수락된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": 0.05}},
+        )
+        assert resp.status_code == 200
+
+    def test_zero_max_daily_loss_percent_accepted(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """max_daily_loss_percent=0은 유효하다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": 0}},
+        )
+        assert resp.status_code == 200
+
+    def test_negative_max_exposure_percent_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/total_exposure_limit",
+            json={"enabled": True, "params": {"max_exposure_percent": -0.5}},
+        )
+        assert resp.status_code == 422
+        assert "max_exposure_percent" in resp.json()["detail"]
+
+    def test_negative_max_exposure_amount_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/total_exposure_limit",
+            json={"enabled": True, "params": {"max_exposure_amount": -1000}},
+        )
+        assert resp.status_code == 422
+        assert "max_exposure_amount" in resp.json()["detail"]
+
+    def test_negative_max_position_percent_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/position_size",
+            json={"enabled": True, "params": {"max_position_percent": -0.1}},
+        )
+        assert resp.status_code == 422
+        assert "max_position_percent" in resp.json()["detail"]
+
+    def test_negative_unrealized_loss_percent_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/unrealized_loss_limit",
+            json={
+                "enabled": True,
+                "params": {"max_unrealized_loss_percent": -0.05},
+            },
+        )
+        assert resp.status_code == 422
+        assert "max_unrealized_loss_percent" in resp.json()["detail"]
+
+    def test_negative_max_trades_per_hour_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/trade_frequency",
+            json={"enabled": True, "params": {"max_trades_per_hour": -5}},
+        )
+        assert resp.status_code == 422
+        assert "max_trades_per_hour" in resp.json()["detail"]
+
+    def test_empty_params_accepted(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """params가 비어 있으면 검증을 통과한다 (기본값 사용)."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {}},
+        )
+        assert resp.status_code == 200
+
+    def test_string_value_for_numeric_param_rejected(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """숫자 파라미터에 문자열이 전달되면 422로 거부된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": "abc"}},
+        )
+        assert resp.status_code == 422
