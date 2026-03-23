@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ErrorResponse(BaseModel):
@@ -178,6 +178,19 @@ class BotInfo(BaseModel):
 
     # 봇 상세 조회 시 추가되는 동적 필드 (strategy, budget, positions 등)
     model_config = ConfigDict(extra="allow")
+
+
+class BotUpdateRequest(BaseModel):
+    """봇 설정 수정 요청. None인 필드는 변경하지 않는다."""
+
+    name: str | None = None
+    interval_seconds: int | None = Field(default=None, ge=10, le=3600)
+    budget: float | None = Field(default=None, gt=0)
+    auto_restart: bool | None = None
+    max_restart_attempts: int | None = None
+    restart_cooldown_seconds: int | None = None
+    step_timeout_seconds: int | None = None
+    max_signals_per_step: int | None = None
 
 
 class BotListResponse(BaseModel):

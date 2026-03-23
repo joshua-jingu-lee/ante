@@ -346,3 +346,116 @@ class TestStopBotSuppressNotification:
 
         assert len(stopped_events) == 1
         assert stopped_events[0].bot_id == "bot1"
+
+
+# ── update_bot ──────────────────────────────────
+
+
+class TestUpdateBot:
+    async def test_update_name(self, manager, ctx):
+        """중지 상태 봇의 이름 변경."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager.update_bot("bot1", name="new-name")
+
+        assert bot.config.name == "new-name"
+
+    async def test_update_interval(self, manager, ctx):
+        """실행 간격 변경."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=60)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager.update_bot("bot1", interval_seconds=120)
+
+        assert bot.config.interval_seconds == 120
+
+    async def test_update_multiple_fields(self, manager, ctx):
+        """여러 필드 동시 변경."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager.update_bot(
+            "bot1",
+            name="updated",
+            interval_seconds=300,
+            auto_restart=False,
+            max_restart_attempts=5,
+        )
+
+        assert bot.config.name == "updated"
+        assert bot.config.interval_seconds == 300
+        assert bot.config.auto_restart is False
+        assert bot.config.max_restart_attempts == 5
+
+    async def test_update_preserves_unchanged_fields(self, manager, ctx):
+        """변경하지 않은 필드는 기존 값 유지."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            name="original",
+            interval_seconds=60,
+            auto_restart=True,
+        )
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        await manager.update_bot("bot1", name="updated")
+
+        bot = manager.get_bot("bot1")
+        assert bot.config.name == "updated"
+        assert bot.config.interval_seconds == 60
+        assert bot.config.auto_restart is True
+        assert bot.config.strategy_id == "s1"
+
+    async def test_update_running_raises(self, manager, ctx):
+        """running 상태에서 수정 시 예외."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await manager.start_bot("bot1")
+
+        with pytest.raises(BotError, match="중지 상태"):
+            await manager.update_bot("bot1", name="x")
+
+    async def test_update_created_allowed(self, manager, ctx):
+        """created 상태에서 수정 허용."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        assert manager.get_bot("bot1").status == BotStatus.CREATED
+
+        bot = await manager.update_bot("bot1", name="updated")
+        assert bot.config.name == "updated"
+
+    async def test_update_error_allowed(self, manager, ctx):
+        """error 상태에서 수정 허용."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        manager.get_bot("bot1").status = BotStatus.ERROR
+
+        bot = await manager.update_bot("bot1", name="fixed")
+        assert bot.config.name == "fixed"
+
+    async def test_update_saves_to_db(self, manager, ctx, db):
+        """수정 결과가 DB에 반영된다."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", name="old")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        await manager.update_bot("bot1", name="new")
+
+        row = await db.fetch_one("SELECT config_json FROM bots WHERE bot_id = 'bot1'")
+        import json
+
+        saved = json.loads(row["config_json"])
+        assert saved["name"] == "new"
+
+    async def test_update_not_found_raises(self, manager):
+        """존재하지 않는 봇 수정 시 예외."""
+        with pytest.raises(BotError, match="not found"):
+            await manager.update_bot("nonexistent", name="x")
+
+    async def test_update_no_changes_returns_bot(self, manager, ctx):
+        """변경 사항 없으면 그대로 반환."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager.update_bot("bot1")
+        assert bot.config.bot_id == "bot1"

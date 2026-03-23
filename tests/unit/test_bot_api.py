@@ -35,6 +35,8 @@ class FakeBot:
         self.bot_id = bot_id
         self._status = status
         self._strategy_id = strategy_id
+        self._name = bot_id
+        self._interval_seconds = 60
         self.config = FakeBotConfig(
             bot_id, account_id=account_id, strategy_id=strategy_id
         )
@@ -46,11 +48,11 @@ class FakeBot:
     def get_info(self) -> dict:
         return {
             "bot_id": self.bot_id,
-            "name": self.bot_id,
+            "name": self._name,
             "status": self._status,
             "account_id": self.config.account_id,
             "strategy_id": self._strategy_id,
-            "interval_seconds": 60,
+            "interval_seconds": self._interval_seconds,
             "trading_mode": "",
             "exchange": "",
             "currency": "",
@@ -98,6 +100,26 @@ class FakeBotManager:
     async def delete_bot(self, bot_id: str) -> None:
         if bot_id in self._bots:
             del self._bots[bot_id]
+
+    async def update_bot(self, bot_id: str, **kwargs: object) -> FakeBot:
+        from ante.bot.exceptions import BotError
+
+        bot = self._bots.get(bot_id)
+        if bot is None:
+            raise BotError(f"Bot not found: {bot_id}")
+        if bot._status not in ("created", "stopped", "error"):
+            raise BotError(
+                f"봇 설정은 중지 상태에서만 수정할 수 있습니다: {bot_id} "
+                f"(현재: {bot._status})"
+            )
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+        if "name" in updates:
+            bot.config.bot_id = bot.config.bot_id  # keep bot_id
+            # Update the name returned by get_info
+            bot._name = updates["name"]
+        if "interval_seconds" in updates:
+            bot._interval_seconds = updates["interval_seconds"]
+        return bot
 
 
 class FakeBotBudget:
@@ -638,3 +660,72 @@ class TestGetBotStrategyName:
         bot = resp.json()["bot"]
         assert bot["strategy_name"] is None
         assert bot["strategy_author_name"] is None
+
+
+class TestUpdateBot:
+    """PUT /api/bots/{bot_id} 봇 설정 수정 테스트."""
+
+    def test_update_name(self, client, bot_manager):
+        """이름 변경."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"name": "새 이름"})
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["name"] == "새 이름"
+
+    def test_update_interval_seconds(self, client, bot_manager):
+        """실행 간격 변경."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"interval_seconds": 120})
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["interval_seconds"] == 120
+
+    def test_update_nonexistent_bot_returns_404(self, client):
+        """존재하지 않는 봇 수정 -> 404."""
+        resp = client.put("/api/bots/nonexistent", json={"name": "x"})
+        assert resp.status_code == 404
+
+    def test_update_running_bot_returns_409(self, client, bot_manager):
+        """실행 중인 봇 수정 -> 409."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="running")
+        resp = client.put("/api/bots/bot-1", json={"name": "x"})
+        assert resp.status_code == 409
+        assert "중지 상태" in resp.json()["detail"]
+
+    def test_update_created_bot_allowed(self, client, bot_manager):
+        """created 상태 봇 수정 허용."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="created")
+        resp = client.put("/api/bots/bot-1", json={"name": "updated"})
+        assert resp.status_code == 200
+
+    def test_update_error_bot_allowed(self, client, bot_manager):
+        """error 상태 봇 수정 허용."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="error")
+        resp = client.put("/api/bots/bot-1", json={"name": "fixed"})
+        assert resp.status_code == 200
+
+    def test_empty_body_returns_current(self, client, bot_manager):
+        """빈 body면 현재 상태 반환."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={})
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["bot_id"] == "bot-1"
+
+    def test_interval_below_min_returns_422(self, client, bot_manager):
+        """interval_seconds < 10 -> 422 (validation error)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"interval_seconds": 5})
+        assert resp.status_code == 422
+
+    def test_interval_above_max_returns_422(self, client, bot_manager):
+        """interval_seconds > 3600 -> 422 (validation error)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"interval_seconds": 7200})
+        assert resp.status_code == 422
+
+    def test_budget_zero_or_negative_returns_422(self, client, bot_manager):
+        """budget <= 0 -> 422 (validation error)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"budget": 0})
+        assert resp.status_code == 422
+        resp = client.put("/api/bots/bot-1", json={"budget": -100})
+        assert resp.status_code == 422
