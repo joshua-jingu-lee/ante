@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { login, logout, getMe } from '../api/auth'
 import type { LoginRequest } from '../types/auth'
 
@@ -15,12 +15,14 @@ export function useUser() {
 export function useLogin() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   return useMutation({
     mutationFn: (data: LoginRequest) => login(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
-      navigate('/', { replace: true })
+      const redirect = searchParams.get('redirect') || '/treasury'
+      navigate(redirect, { replace: true })
     },
   })
 }
