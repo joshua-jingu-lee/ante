@@ -161,6 +161,99 @@ class TestListStrategies:
         assert data["bot_id"] == "bot-1"
         assert data["bot_status"] == "running"
 
+    def test_cumulative_return_null_without_db(self, client, registry):
+        """DB 없으면 cumulative_return은 null."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        resp = client.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+
+    def test_cumulative_return_null_no_trades(self, registry):
+        """거래 없으면 cumulative_return은 null."""
+        from unittest.mock import AsyncMock
+
+        fake_db = AsyncMock()
+        fake_db.fetch_all = AsyncMock(return_value=[])
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        resp = c.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+
+    def test_cumulative_return_with_trades(self, registry, bot_manager):
+        """거래가 있으면 cumulative_return에 net_pnl 값 반환."""
+        from unittest.mock import AsyncMock, patch
+
+        from ante.trade.models import PerformanceMetrics
+
+        fake_db = AsyncMock()
+        fake_metrics = PerformanceMetrics(
+            total_trades=5,
+            net_pnl=12345.0,
+        )
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        bot_manager._bots = [
+            {
+                "bot_id": "bot-1",
+                "strategy_id": "s1",
+                "status": "running",
+                "account_id": "acc-1",
+            },
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            bot_manager=bot_manager,
+            db=fake_db,
+        )
+        c = TestClient(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            return_value=fake_metrics,
+        ):
+            resp = c.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] == 12345.0
+
+    def test_cumulative_return_db_error_graceful(self, registry):
+        """DB 에러 시 cumulative_return은 null (500 아님)."""
+        from unittest.mock import AsyncMock, patch
+
+        fake_db = AsyncMock()
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            side_effect=Exception("DB error"),
+        ):
+            resp = c.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+
 
 class TestGetStrategy:
     def test_get_existing(self, client, registry):
