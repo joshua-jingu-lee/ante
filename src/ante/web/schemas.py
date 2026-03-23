@@ -169,6 +169,8 @@ class BotInfo(BaseModel):
     status: str = ""
     account_id: str = ""
     strategy_id: str = ""
+    strategy_name: str | None = None
+    strategy_author_name: str | None = None
     interval_seconds: int = 60
     started_at: str | None = None
     stopped_at: str | None = None

@@ -422,12 +422,18 @@ class FakeAccountService:
 class FakeStrategyRecord:
     """테스트용 StrategyRecord stub."""
 
-    def __init__(self, strategy_id: str = "s1", filepath: str = "/tmp/s1.py") -> None:
+    def __init__(
+        self,
+        strategy_id: str = "s1",
+        filepath: str = "/tmp/s1.py",
+        name: str = "",
+        author: str = "test",
+    ) -> None:
         self.strategy_id = strategy_id
         self.filepath = filepath
-        self.name = strategy_id
+        self.name = name or strategy_id
         self.version = "0.1.0"
-        self.author = "test"
+        self.author = author
         self.description = "test strategy"
 
 
@@ -530,3 +536,105 @@ class TestBotLifecycle:
         # delete
         resp = client.delete("/api/bots/bot-1")
         assert resp.status_code == 204
+
+
+class TestListBotsStrategyName:
+    """list_bots 응답에 strategy_name, strategy_author_name 포함 테스트."""
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["s1"] = FakeStrategyRecord(
+            "s1", name="MyStrategy", author="alice"
+        )
+        return reg
+
+    @pytest.fixture
+    def client_with_registry(
+        self, bot_manager, default_account_service, strategy_registry
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            strategy_registry=strategy_registry,
+        )
+        return TestClient(app)
+
+    def test_strategy_name_included(self, client_with_registry, bot_manager):
+        """봇 목록에 strategy_name, strategy_author_name 포함."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client_with_registry.get("/api/bots")
+        assert resp.status_code == 200
+        bot = resp.json()["bots"][0]
+        assert bot["strategy_name"] == "MyStrategy"
+        assert bot["strategy_author_name"] == "alice"
+
+    def test_strategy_not_found_returns_null(self, client_with_registry, bot_manager):
+        """레지스트리에 없는 전략이면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="unknown")
+        resp = client_with_registry.get("/api/bots")
+        assert resp.status_code == 200
+        bot = resp.json()["bots"][0]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+    def test_no_registry_returns_null(self, client, bot_manager):
+        """레지스트리 없으면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client.get("/api/bots")
+        assert resp.status_code == 200
+        bot = resp.json()["bots"][0]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+
+class TestGetBotStrategyName:
+    """get_bot 응답에 strategy_name, strategy_author_name 포함 테스트."""
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["s1"] = FakeStrategyRecord(
+            "s1", name="MyStrategy", author="alice"
+        )
+        return reg
+
+    @pytest.fixture
+    def client_with_registry(
+        self, bot_manager, default_account_service, strategy_registry
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            strategy_registry=strategy_registry,
+        )
+        return TestClient(app)
+
+    def test_strategy_name_included(self, client_with_registry, bot_manager):
+        """봇 상세 조회에 strategy_name, strategy_author_name 포함."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client_with_registry.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["strategy_name"] == "MyStrategy"
+        assert bot["strategy_author_name"] == "alice"
+        # strategy 상세 객체도 여전히 포함
+        assert bot["strategy"]["name"] == "MyStrategy"
+
+    def test_strategy_not_found_returns_null(self, client_with_registry, bot_manager):
+        """레지스트리에 없는 전략이면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="unknown")
+        resp = client_with_registry.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+    def test_no_registry_returns_null(self, client, bot_manager):
+        """레지스트리 없으면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None

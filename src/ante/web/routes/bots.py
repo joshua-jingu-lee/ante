@@ -42,6 +42,7 @@ class BotCreateRequest(BaseModel):
 )
 async def list_bots(
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     account_id: str | None = None,
     limit: int = 20,
     cursor: str | None = None,
@@ -61,6 +62,25 @@ async def list_bots(
             )
             == account_id
         ]
+
+    # 전략 이름/작성자 조인
+    if registry is not None:
+        for bot_info in bots:
+            sid = (
+                bot_info.get("strategy_id", "")
+                if isinstance(bot_info, dict)
+                else getattr(bot_info, "strategy_id", "")
+            )
+            if sid:
+                record = await registry.get(sid)
+                if record:
+                    if isinstance(bot_info, dict):
+                        bot_info["strategy_name"] = record.name
+                        bot_info["strategy_author_name"] = record.author
+                    else:
+                        bot_info.strategy_name = record.name
+                        bot_info.strategy_author_name = record.author
+
     result = paginate(bots, cursor_field="bot_id", limit=limit, cursor=cursor)
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
 
@@ -164,6 +184,8 @@ async def get_bot(
     if registry is not None:
         record = await registry.get(info.get("strategy_id", ""))
         if record:
+            info["strategy_name"] = record.name
+            info["strategy_author_name"] = record.author
             info["strategy"] = {
                 "name": record.name,
                 "version": record.version,
