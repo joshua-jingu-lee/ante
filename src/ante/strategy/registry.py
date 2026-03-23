@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS strategies (
     registered_at        TEXT NOT NULL,
     description          TEXT DEFAULT '',
     author               TEXT DEFAULT 'agent',
-    validation_warnings  TEXT DEFAULT '[]'
+    validation_warnings  TEXT DEFAULT '[]',
+    rationale            TEXT DEFAULT '',
+    risks                TEXT DEFAULT '[]'
 );
 """
 
@@ -55,6 +57,8 @@ class StrategyRecord:
     description: str = ""
     author: str = "agent"
     validation_warnings: list[str] = field(default_factory=list)
+    rationale: str = ""
+    risks: list[str] = field(default_factory=list)
 
 
 class StrategyRegistry:
@@ -66,12 +70,31 @@ class StrategyRegistry:
     async def initialize(self) -> None:
         """스키마 생성."""
         await self._db.execute_script(STRATEGY_REGISTRY_SCHEMA)
+        await self._migrate_rationale_risks()
+
+    async def _migrate_rationale_risks(self) -> None:
+        """기존 strategies 테이블에 rationale, risks 컬럼이 없으면 추가한다."""
+        columns = await self._db.fetch_all("PRAGMA table_info(strategies)")
+        col_names = {col["name"] for col in columns}
+        if "rationale" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE strategies ADD COLUMN rationale TEXT DEFAULT ''"
+            )
+            logger.info("strategies 테이블에 rationale 컬럼 추가 (마이그레이션)")
+        if "risks" not in col_names:
+            await self._db.execute(
+                "ALTER TABLE strategies ADD COLUMN risks TEXT DEFAULT '[]'"
+            )
+            logger.info("strategies 테이블에 risks 컬럼 추가 (마이그레이션)")
 
     async def register(
         self,
         filepath: Path,
         meta: StrategyMeta,
         warnings: list[str] | None = None,
+        *,
+        rationale: str = "",
+        risks: list[str] | None = None,
     ) -> StrategyRecord:
         """전략 등록."""
         strategy_id = f"{meta.name}_v{meta.version}"
@@ -90,14 +113,16 @@ class StrategyRegistry:
             description=meta.description,
             author=meta.author,
             validation_warnings=warnings or [],
+            rationale=rationale,
+            risks=risks or [],
         )
 
         await self._db.execute(
             """INSERT INTO strategies
                (strategy_id, name, version, filepath, status,
                 registered_at, description, author,
-                validation_warnings)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                validation_warnings, rationale, risks)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.strategy_id,
                 record.name,
@@ -108,6 +133,8 @@ class StrategyRegistry:
                 record.description,
                 record.author,
                 json.dumps(record.validation_warnings),
+                record.rationale,
+                json.dumps(record.risks),
             ),
         )
         logger.info("전략 등록: %s", strategy_id)
@@ -178,4 +205,6 @@ class StrategyRegistry:
             description=row["description"],
             author=row["author"],
             validation_warnings=json.loads(row["validation_warnings"]),
+            rationale=row.get("rationale", ""),
+            risks=json.loads(row["risks"]) if row.get("risks") else [],
         )

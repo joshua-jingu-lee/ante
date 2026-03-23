@@ -707,6 +707,65 @@ class TestStrategyRegistry:
 
         assert await registry.exists("momentum_v1.0.0")
 
+    async def test_register_with_rationale_risks(self, registry, meta, tmp_path):
+        """rationale, risks를 포함하여 등록한다 (#802)."""
+        filepath = tmp_path / "test.py"
+        filepath.write_text("")
+
+        record = await registry.register(
+            filepath,
+            meta,
+            rationale="모멘텀 팩터 기반 전략",
+            risks=["급락장 리스크", "유동성 리스크"],
+        )
+        assert record.rationale == "모멘텀 팩터 기반 전략"
+        assert record.risks == ["급락장 리스크", "유동성 리스크"]
+
+        # DB에서 다시 읽어도 동일
+        loaded = await registry.get("momentum_v1.0.0")
+        assert loaded is not None
+        assert loaded.rationale == "모멘텀 팩터 기반 전략"
+        assert loaded.risks == ["급락장 리스크", "유동성 리스크"]
+
+    async def test_register_without_rationale_risks(self, registry, meta, tmp_path):
+        """rationale, risks 미지정 시 기본값 (#802)."""
+        filepath = tmp_path / "test.py"
+        filepath.write_text("")
+
+        record = await registry.register(filepath, meta)
+        assert record.rationale == ""
+        assert record.risks == []
+
+    async def test_migrate_rationale_risks_columns(self, db, tmp_path):
+        """기존 테이블에 rationale, risks 컬럼이 없어도 마이그레이션으로 추가 (#802)."""
+        # rationale, risks 없는 구식 스키마 생성
+        await db.execute_script("""
+            CREATE TABLE IF NOT EXISTS strategies (
+                strategy_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                filepath TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'registered',
+                registered_at TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                author TEXT DEFAULT 'agent',
+                validation_warnings TEXT DEFAULT '[]'
+            );
+        """)
+
+        registry = StrategyRegistry(db=db)
+        await registry.initialize()
+
+        # 마이그레이션 후 등록이 정상 동작
+        meta = StrategyMeta(name="test", version="1.0.0", description="test")
+        filepath = tmp_path / "test.py"
+        filepath.write_text("")
+        record = await registry.register(
+            filepath, meta, rationale="test rationale", risks=["risk1"]
+        )
+        assert record.rationale == "test rationale"
+        assert record.risks == ["risk1"]
+
 
 # ── Exchange 호환성 검증 테스트 ──────────────────────
 
