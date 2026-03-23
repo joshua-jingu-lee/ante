@@ -1,3 +1,11 @@
+/**
+ * Member 도메인 타입.
+ *
+ * 백엔드가 dict 기반(extra="allow") 응답을 반환하므로
+ * 프론트엔드에서 상세 필드를 명시적으로 정의한다.
+ */
+
+// ── 프론트엔드 전용 타입 ──────────────────────────────────
 export type MemberStatus = 'active' | 'suspended' | 'revoked'
 export type MemberType = 'human' | 'agent'
 export type HumanRole = 'owner' | 'master' | 'admin'

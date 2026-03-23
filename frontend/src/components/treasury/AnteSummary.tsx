@@ -2,15 +2,21 @@ import { formatKRW, formatPercent } from '../../utils/formatters'
 import type { TreasurySummary } from '../../types/treasury'
 
 export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
-  const anteProfitColor = summary.ante_profit_loss >= 0 ? 'text-positive' : 'text-negative'
-  const anteProfitPercent = summary.ante_purchase_amount > 0
-    ? summary.ante_profit_loss / summary.ante_purchase_amount
+  const anteProfitLoss = summary.ante_profit_loss ?? 0
+  const antePurchaseAmount = summary.ante_purchase_amount ?? 0
+  const anteEvalAmount = summary.ante_eval_amount ?? 0
+  const totalReserved = summary.total_reserved ?? 0
+  const totalAvailable = summary.total_available ?? 0
+
+  const anteProfitColor = anteProfitLoss >= 0 ? 'text-positive' : 'text-negative'
+  const anteProfitPercent = antePurchaseAmount > 0
+    ? anteProfitLoss / antePurchaseAmount
     : 0
 
-  const holdingPnl = summary.ante_eval_amount - summary.ante_purchase_amount
+  const holdingPnl = anteEvalAmount - antePurchaseAmount
   const holdingProfitColor = holdingPnl >= 0 ? 'text-positive' : 'text-negative'
-  const holdingProfitPercent = summary.ante_purchase_amount > 0
-    ? holdingPnl / summary.ante_purchase_amount
+  const holdingProfitPercent = antePurchaseAmount > 0
+    ? holdingPnl / antePurchaseAmount
     : 0
 
   return (
@@ -21,7 +27,7 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
           <span className="bg-positive text-white text-[11px] font-bold px-2 py-0.5 rounded">Ante</span>
           <span className="text-[14px] font-semibold">관리 자금</span>
         </div>
-        <span className="text-[13px] text-text-muted">Bot {summary.bot_count}개 운용 중</span>
+        <span className="text-[13px] text-text-muted">Bot {summary.bot_count ?? 0}개 운용 중</span>
         {summary.budget_exceeds_purchasable && (
           <div className="ml-auto flex items-center gap-1.5 bg-warning-bg text-warning px-3 py-1 rounded text-[12px]">
             ⚠ 잔여예산이 매수가능금액을 초과합니다
@@ -33,11 +39,11 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
       <div className="grid grid-cols-4 border-b border-border">
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">Ante 관리자산 평가</div>
-          <div className="text-[22px] font-bold">{formatKRW(summary.ante_eval_amount)}</div>
+          <div className="text-[22px] font-bold">{formatKRW(anteEvalAmount)}</div>
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">Ante 관리자산 손익</div>
-          <div className={`text-[22px] font-bold ${anteProfitColor}`}>{formatKRW(summary.ante_profit_loss)}</div>
+          <div className={`text-[22px] font-bold ${anteProfitColor}`}>{formatKRW(anteProfitLoss)}</div>
           {anteProfitPercent !== 0 && (
             <div className={`text-[13px] ${anteProfitColor}`}>({formatPercent(anteProfitPercent)})</div>
           )}
@@ -48,7 +54,7 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">잔여예산</div>
-          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.total_available)}</div>
+          <div className="text-[22px] font-bold text-text-muted">{formatKRW(totalAvailable)}</div>
         </div>
       </div>
 
@@ -56,7 +62,7 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
       <div className="grid grid-cols-4">
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">보유종목 평가금액</div>
-          <div className="text-[22px] font-bold">{formatKRW(summary.ante_eval_amount)}</div>
+          <div className="text-[22px] font-bold">{formatKRW(anteEvalAmount)}</div>
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">보유종목 손익</div>
@@ -67,7 +73,7 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">체결대기 자금</div>
-          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.total_reserved)}</div>
+          <div className="text-[22px] font-bold text-text-muted">{formatKRW(totalReserved)}</div>
         </div>
       </div>
     </div>

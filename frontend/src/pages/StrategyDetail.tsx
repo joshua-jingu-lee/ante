@@ -39,7 +39,7 @@ export default function StrategyDetail() {
       <div className="mb-6">
         <h2 className="text-[20px] font-bold">{strategy.name}</h2>
         <div className="flex gap-3 items-center mt-1">
-          <StatusBadge variant={STATUS_VARIANT[strategy.status] as 'positive'}>
+          <StatusBadge variant={(STATUS_VARIANT[strategy.status as StrategyStatus] ?? 'muted') as 'positive'}>
             {STRATEGY_STATUS_LABELS[strategy.status]}
           </StatusBadge>
           <span className="text-text-muted text-[13px]">v{strategy.version}</span>

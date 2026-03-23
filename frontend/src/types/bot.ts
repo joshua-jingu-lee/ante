@@ -1,3 +1,11 @@
+/**
+ * Bot 도메인 타입.
+ *
+ * API 응답 타입은 api.generated.ts에서 자동 생성된 타입을 사용한다.
+ * 백엔드가 dict 기반(extra="allow") 응답을 반환하므로 상세 필드를 프론트엔드에서 명시한다.
+ */
+
+// ── 프론트엔드 전용 타입 ──────────────────────────────────
 export type BotStatus = 'created' | 'running' | 'stopping' | 'stopped' | 'error' | 'deleted'
 export type BotMode = 'live' | 'paper'
 
