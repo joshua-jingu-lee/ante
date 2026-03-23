@@ -131,6 +131,7 @@ class TestBotAccountStatusValidation:
             currency="KRW",
             broker_type="test",
             status=AccountStatus.ACTIVE,
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="active-acct")
@@ -146,6 +147,7 @@ class TestBotAccountStatusValidation:
             currency="KRW",
             broker_type="test",
             status=AccountStatus.ACTIVE,
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         await account_service.suspend(
@@ -165,6 +167,7 @@ class TestBotAccountStatusValidation:
             currency="KRW",
             broker_type="test",
             status=AccountStatus.ACTIVE,
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         await account_service.suspend(
@@ -187,6 +190,7 @@ class TestBotAccountStatusValidation:
             currency="KRW",
             broker_type="test",
             status=AccountStatus.ACTIVE,
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         await account_service.suspend(

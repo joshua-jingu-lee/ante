@@ -962,6 +962,7 @@ class TestBotManagerExchangeValidation:
             exchange="KRX",
             currency="KRW",
             broker_type="test",
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="krx-acct")
@@ -982,6 +983,7 @@ class TestBotManagerExchangeValidation:
             exchange="NYSE",
             currency="USD",
             broker_type="test",
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="nyse-acct")
@@ -1011,6 +1013,7 @@ class TestBotManagerExchangeValidation:
             exchange="NYSE",
             currency="USD",
             broker_type="test",
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="nyse-acct")
