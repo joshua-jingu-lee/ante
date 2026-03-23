@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { useAllocateBudget, useDeallocateBudget } from '../../hooks/useTreasury'
+import { useBots } from '../../hooks/useBots'
+import { showToast } from '../common/Toast'
 import { formatKRW } from '../../utils/formatters'
+import { BOT_STATUS_LABELS } from '../../utils/constants'
 import type { BotBudget } from '../../types/treasury'
+import type { AxiosError } from 'axios'
 
 interface AllocationFormProps {
   budgets: BotBudget[]
 }
+
+/** Bot statuses that are considered "running" and block budget changes. */
+const RUNNING_STATUSES = new Set(['running', 'stopping'])
 
 export default function AllocationForm({ budgets }: AllocationFormProps) {
   const [botId, setBotId] = useState(budgets[0]?.bot_id ?? '')
@@ -13,17 +20,34 @@ export default function AllocationForm({ budgets }: AllocationFormProps) {
   const [showConfirm, setShowConfirm] = useState(false)
   const allocate = useAllocateBudget()
   const deallocate = useDeallocateBudget()
+  const { data: botsData } = useBots()
+
+  const bots = botsData?.items ?? []
+  const selectedBot = bots.find((b) => b.bot_id === botId)
+  const isBotRunning = selectedBot ? RUNNING_STATUSES.has(selectedBot.status) : false
 
   const selectedBudget = budgets.find((b) => b.bot_id === botId)
   const numAmount = Number(amount.replace(/,/g, ''))
 
+  const handleError = (error: unknown) => {
+    const axiosErr = error as AxiosError<{ detail?: string }>
+    if (axiosErr.response?.status === 409) {
+      showToast(axiosErr.response.data?.detail ?? '봇이 실행 중이므로 예산을 변경할 수 없습니다.', 'error')
+    }
+    setShowConfirm(false)
+  }
+
   const handleSubmit = () => {
     if (!selectedBudget || !numAmount) return
     const diff = numAmount - selectedBudget.allocated
+    const callbacks = {
+      onSuccess: () => { setAmount(''); setShowConfirm(false) },
+      onError: handleError,
+    }
     if (diff > 0) {
-      allocate.mutate({ botId, amount: diff }, { onSuccess: () => { setAmount(''); setShowConfirm(false) } })
+      allocate.mutate({ botId, amount: diff }, callbacks)
     } else if (diff < 0) {
-      deallocate.mutate({ botId, amount: Math.abs(diff) }, { onSuccess: () => { setAmount(''); setShowConfirm(false) } })
+      deallocate.mutate({ botId, amount: Math.abs(diff) }, callbacks)
     } else {
       setShowConfirm(false)
     }
@@ -45,9 +69,15 @@ export default function AllocationForm({ budgets }: AllocationFormProps) {
               onChange={(e) => setBotId(e.target.value)}
               className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-text text-[14px] h-[38px]"
             >
-              {budgets.map((b) => (
-                <option key={b.bot_id} value={b.bot_id}>{b.bot_id}</option>
-              ))}
+              {budgets.map((b) => {
+                const bot = bots.find((bt) => bt.bot_id === b.bot_id)
+                const statusLabel = bot ? BOT_STATUS_LABELS[bot.status] ?? bot.status : ''
+                return (
+                  <option key={b.bot_id} value={b.bot_id}>
+                    {b.bot_id}{statusLabel ? ` (${statusLabel})` : ''}
+                  </option>
+                )
+              })}
             </select>
           </div>
 
@@ -69,9 +99,15 @@ export default function AllocationForm({ budgets }: AllocationFormProps) {
             />
           </div>
 
+          {isBotRunning && (
+            <div className="text-[12px] text-warning">
+              봇이 중지된 상태에서만 예산을 변경할 수 있습니다.
+            </div>
+          )}
+
           <button
             onClick={() => numAmount > 0 && botId && setShowConfirm(true)}
-            disabled={!botId || !numAmount}
+            disabled={!botId || !numAmount || isBotRunning}
             className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
           >
             예산 변경
