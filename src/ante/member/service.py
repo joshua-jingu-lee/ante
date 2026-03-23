@@ -504,6 +504,15 @@ class MemberService:
             (MemberStatus.ACTIVE, member_id),
         )
 
+        from ante.eventbus.events import MemberReactivatedEvent
+
+        await self._eventbus.publish(
+            MemberReactivatedEvent(
+                member_id=member_id,
+                reactivated_by=reactivated_by,
+            )
+        )
+
         logger.info("멤버 재활성화: %s (by %s)", member_id, reactivated_by)
         member.status = MemberStatus.ACTIVE
         return member

@@ -298,6 +298,18 @@ class TestSuspendReactivateRevoke:
         assert len(events) == 1
         assert events[0].member_id == "agent-01"
 
+    async def test_reactivate_publishes_event(self, service, eventbus):
+        from ante.eventbus.events import MemberReactivatedEvent
+
+        events: list = []
+        eventbus.subscribe(MemberReactivatedEvent, events.append)
+        await service.register("agent-01", MemberType.AGENT)
+        await service.suspend("agent-01", suspended_by="owner")
+        await service.reactivate("agent-01", reactivated_by="owner")
+        assert len(events) == 1
+        assert events[0].member_id == "agent-01"
+        assert events[0].reactivated_by == "owner"
+
     async def test_revoke_publishes_event(self, service, eventbus):
         events = []
         eventbus.subscribe(MemberRevokedEvent, events.append)
