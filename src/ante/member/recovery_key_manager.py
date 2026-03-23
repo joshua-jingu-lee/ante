@@ -137,11 +137,20 @@ class RecoveryKeyManager:
         )
 
     async def _publish_auth_failed(self, member_id: str, reason: str) -> None:
-        """인증 실패 이벤트 발행."""
-        from ante.eventbus.events import MemberAuthFailedEvent
+        """인증 실패 이벤트 + 알림 발행."""
+        from ante.eventbus.events import MemberAuthFailedEvent, NotificationEvent
 
         await self._eventbus.publish(
             MemberAuthFailedEvent(member_id=member_id, reason=reason)
+        )
+        target = f"멤버 `{member_id}`" if member_id else "알 수 없는 멤버"
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="warning",
+                title="인증 실패",
+                message=f"{target}\n사유: {reason}",
+                category="member",
+            )
         )
 
     @staticmethod
