@@ -41,12 +41,13 @@ async def list_approvals(
     approval_service: Annotated[Any, Depends(get_approval_service)],
     status: str | None = Query(default=None),
     type: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict:
     """결재 목록 조회."""
     approvals = await approval_service.list(
-        status=status, type=type, limit=limit, offset=offset
+        status=status, type=type, search=search, limit=limit, offset=offset
     )
 
     return {
