@@ -413,6 +413,14 @@ class MemberSuspendedEvent(Event):
 
 
 @dataclass(frozen=True)
+class MemberReactivatedEvent(Event):
+    """MemberService → EventBus: 멤버 재활성화."""
+
+    member_id: str = ""
+    reactivated_by: str = ""
+
+
+@dataclass(frozen=True)
 class MemberRevokedEvent(Event):
     """MemberService → EventBus: 멤버 폐기."""
 
