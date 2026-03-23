@@ -55,7 +55,7 @@ def mask_value(key: str, value: str) -> str:
 
 
 def _get_selectable_broker_types() -> list[str]:
-    """BROKER_REGISTRY에 등록된 broker_type만 반환 (kis-overseas 제외)."""
+    """BROKER_REGISTRY에 등록된 broker_type만 반환."""
     from ante.broker.registry import BROKER_REGISTRY
 
     return list(BROKER_REGISTRY.keys())

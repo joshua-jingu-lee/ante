@@ -323,10 +323,6 @@ class TestBrokerRegistry:
         assert "kis-domestic" in BROKER_REGISTRY
         assert BROKER_REGISTRY["kis-domestic"] is KISDomesticAdapter
 
-    def test_registry_not_contains_kis_overseas(self):
-        """kis-overseas는 1.1 범위이므로 미등록."""
-        assert "kis-overseas" not in BROKER_REGISTRY
-
     def test_registry_size(self):
         """현재 2개만 등록."""
         assert len(BROKER_REGISTRY) == 2

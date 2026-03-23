@@ -307,24 +307,6 @@ async def test_get_broker_cached(service):
     assert broker1 is broker2
 
 
-@pytest.mark.asyncio
-async def test_get_broker_kis_overseas_raises(service):
-    """kis-overseas broker_type으로 get_broker 호출 시 에러 (REGISTRY 미등록)."""
-    account = _make_account(
-        account_id="us-stock",
-        exchange="NYSE",
-        currency="USD",
-        broker_type="kis-overseas",
-        timezone="America/New_York",
-        trading_hours_start="09:30",
-        trading_hours_end="16:00",
-    )
-    await service.create(account)
-
-    with pytest.raises(InvalidBrokerTypeError):
-        await service.get_broker("us-stock")
-
-
 # ── 기본 테스트 계좌 ──────────────────────────────────
 
 
@@ -371,10 +353,9 @@ async def test_db_persistence(db, eventbus):
 
 
 def test_broker_presets_defined():
-    """test, kis-domestic, kis-overseas 프리셋이 정의되어 있음."""
+    """test, kis-domestic 프리셋이 정의되어 있음."""
     assert "test" in BROKER_PRESETS
     assert "kis-domestic" in BROKER_PRESETS
-    assert "kis-overseas" in BROKER_PRESETS
 
 
 def test_broker_preset_test_values():
