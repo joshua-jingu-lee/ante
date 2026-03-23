@@ -281,3 +281,22 @@ class TestEventForwarding:
 
         resp = json.loads(output.getvalue().strip())
         assert resp["status"] == "cancelled"
+
+    async def test_order_cancel_failed_forwarded(
+        self, channel: SignalChannel, output: io.StringIO
+    ) -> None:
+        """주문 취소 실패 → 외부 전달."""
+        from ante.eventbus.events import OrderCancelFailedEvent
+
+        event = OrderCancelFailedEvent(
+            order_id="ORD-005",
+            bot_id="bot-001",
+            error_message="cancel_rejected",
+        )
+
+        await channel._on_order_update(event)
+
+        resp = json.loads(output.getvalue().strip())
+        assert resp["type"] == "order_update"
+        assert resp["status"] == "cancel_failed"
+        assert resp["reason"] == "cancel_rejected"
