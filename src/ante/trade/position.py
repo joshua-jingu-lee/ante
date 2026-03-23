@@ -130,9 +130,23 @@ class PositionHistory:
             )
 
         elif record.side == "sell":
-            pnl = (record.price - position["avg_entry_price"]) * record.quantity
+            held_qty = position["quantity"]
+            effective_qty = min(record.quantity, held_qty)
+
+            if record.quantity > held_qty:
+                logger.warning(
+                    "초과 매도 감지: bot=%s symbol=%s 보유=%s 요청=%s → "
+                    "유효 수량 %s로 클램핑 (Reconciler 개입 필요)",
+                    record.bot_id,
+                    record.symbol,
+                    held_qty,
+                    record.quantity,
+                    effective_qty,
+                )
+
+            pnl = (record.price - position["avg_entry_price"]) * effective_qty
             pnl -= record.commission
-            new_quantity = position["quantity"] - record.quantity
+            new_quantity = held_qty - record.quantity
 
             await self._update_position(
                 record.bot_id,
@@ -149,7 +163,7 @@ class PositionHistory:
                 bot_id=record.bot_id,
                 symbol=record.symbol,
                 action="sell",
-                quantity=record.quantity,
+                quantity=effective_qty,
                 price=record.price,
                 pnl=pnl,
                 timestamp=record.timestamp,

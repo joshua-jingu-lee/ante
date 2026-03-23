@@ -553,6 +553,145 @@ class TestPositionHistory:
         history = await position_history.get_history("bot1", "005930")
         assert len(history) == 2  # buy + sell
 
+    async def test_oversell_clamps_pnl_to_held_quantity(self, position_history):
+        """초과 매도 시 PnL은 보유 수량 기준으로 계산 (#769)."""
+        # 50주 매수 @ 50000
+        buy = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=50,
+            price=50000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(buy)
+
+        # 100주 매도 시도 (보유 50주 초과)
+        sell = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=100,
+            price=55000,
+            status=TradeStatus.FILLED,
+            commission=0.0,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(sell)
+
+        pos = await position_history.get_current("bot1", "005930")
+        # 포지션은 0으로 클램핑
+        assert pos["quantity"] == 0
+        assert pos["avg_entry_price"] == 0.0
+        # PnL은 보유 50주 기준: (55000 - 50000) * 50 = 250000
+        # 100주 기준이면 500000이 되므로, 반드시 250000이어야 함
+        assert pos["realized_pnl"] == pytest.approx(250000.0)
+
+    async def test_oversell_logs_warning(self, position_history, caplog):
+        """초과 매도 시 경고 로그 발행 (#769)."""
+        import logging
+
+        buy = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=50,
+            price=50000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(buy)
+
+        sell = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=100,
+            price=55000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+        )
+        with caplog.at_level(logging.WARNING, logger="ante.trade.position"):
+            await position_history.on_trade(sell)
+
+        assert any("초과 매도 감지" in msg for msg in caplog.messages)
+
+    async def test_oversell_history_records_effective_qty(self, position_history):
+        """초과 매도 시 이력에는 유효 수량만 기록 (#769)."""
+        buy = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=50,
+            price=50000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(buy)
+
+        sell = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=100,
+            price=55000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(sell)
+
+        history = await position_history.get_history("bot1", "005930")
+        sell_entry = [h for h in history if h["action"] == "sell"][0]
+        # 이력의 quantity는 유효 수량(50)이어야 함
+        assert sell_entry["quantity"] == 50
+
+    async def test_normal_sell_unaffected(self, position_history):
+        """정상 매도는 기존 동작과 동일 (#769 회귀 방지)."""
+        buy = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=100,
+            price=50000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(buy)
+
+        sell = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=30,
+            price=55000,
+            status=TradeStatus.FILLED,
+            commission=100,
+            timestamp=datetime.now(UTC),
+        )
+        await position_history.on_trade(sell)
+
+        pos = await position_history.get_current("bot1", "005930")
+        assert pos["quantity"] == 70
+        # pnl = (55000 - 50000) * 30 - 100 = 149900
+        assert pos["realized_pnl"] == pytest.approx(149900.0)
+
 
 # ── PerformanceTracker ───────────────────────────────
 
