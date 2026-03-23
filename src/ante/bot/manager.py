@@ -282,6 +282,74 @@ class BotManager:
         logger.info("봇 생성: %s (전략: %s)", config.bot_id, config.strategy_id)
         return bot
 
+    async def update_bot(self, bot_id: str, **kwargs: Any) -> Bot:
+        """봇 설정 수정. 중지 상태에서만 허용.
+
+        BotConfig를 재생성하고 DB를 갱신한다.
+        budget이 변경되면 TreasuryManager를 통해 예산을 조정한다.
+
+        Args:
+            bot_id: 대상 봇 ID.
+            **kwargs: 변경할 설정 필드 (None 값은 무시).
+
+        Returns:
+            수정된 Bot 인스턴스.
+
+        Raises:
+            BotError: 봇이 중지 상태가 아닌 경우.
+        """
+        bot = self._get_bot(bot_id)
+        allowed_statuses = {BotStatus.CREATED, BotStatus.STOPPED, BotStatus.ERROR}
+        if bot.status not in allowed_statuses:
+            raise BotError(
+                f"봇 설정은 중지 상태에서만 수정할 수 있습니다: {bot_id} "
+                f"(현재: {bot.status})"
+            )
+
+        # budget은 BotConfig 필드가 아니므로 별도 처리
+        new_budget = kwargs.pop("budget", None)
+
+        # None이 아닌 값만 필터
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+
+        if not updates and new_budget is None:
+            return bot
+
+        # BotConfig 재생성
+        old_config = bot.config
+        config_fields = {
+            "bot_id": old_config.bot_id,
+            "strategy_id": old_config.strategy_id,
+            "name": old_config.name,
+            "account_id": old_config.account_id,
+            "interval_seconds": old_config.interval_seconds,
+            "auto_restart": old_config.auto_restart,
+            "max_restart_attempts": old_config.max_restart_attempts,
+            "restart_cooldown_seconds": old_config.restart_cooldown_seconds,
+            "step_timeout_seconds": old_config.step_timeout_seconds,
+            "max_signals_per_step": old_config.max_signals_per_step,
+        }
+        config_fields.update(updates)
+        new_config = BotConfig(**config_fields)
+        bot.config = new_config
+
+        # DB 갱신
+        await self._save_bot_config(new_config)
+
+        # budget 변경 시 Treasury 연동
+        if new_budget is not None and self._treasury_manager:
+            try:
+                treasury = self._treasury_manager.get(new_config.account_id)
+                await treasury.update_budget(bot_id, new_budget)
+            except KeyError:
+                logger.debug(
+                    "봇 수정 시 Treasury 미존재: account_id=%s",
+                    new_config.account_id,
+                )
+
+        logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
+        return bot
+
     async def assign_strategy(self, bot_id: str, strategy_id: str) -> None:
         """봇에 전략 배정.
 
