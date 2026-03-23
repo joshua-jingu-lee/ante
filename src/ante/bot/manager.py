@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ante.strategy.base import Strategy
     from ante.strategy.context import StrategyContext
     from ante.strategy.snapshot import StrategySnapshot
+    from ante.trade.service import TradeService
     from ante.treasury.manager import TreasuryManager  # noqa: F811
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class BotManager:
         strategy_rule_configs: dict[str, list[dict[str, Any]]] | None = None,
         account_service: AccountService | None = None,
         treasury_manager: TreasuryManager | None = None,
+        trade_service: TradeService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -66,6 +68,7 @@ class BotManager:
         self._strategy_rule_configs = strategy_rule_configs or {}
         self._account_service = account_service
         self._treasury_manager = treasury_manager
+        self._trade_service = trade_service
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
@@ -279,6 +282,74 @@ class BotManager:
         logger.info("봇 생성: %s (전략: %s)", config.bot_id, config.strategy_id)
         return bot
 
+    async def update_bot(self, bot_id: str, **kwargs: Any) -> Bot:
+        """봇 설정 수정. 중지 상태에서만 허용.
+
+        BotConfig를 재생성하고 DB를 갱신한다.
+        budget이 변경되면 TreasuryManager를 통해 예산을 조정한다.
+
+        Args:
+            bot_id: 대상 봇 ID.
+            **kwargs: 변경할 설정 필드 (None 값은 무시).
+
+        Returns:
+            수정된 Bot 인스턴스.
+
+        Raises:
+            BotError: 봇이 중지 상태가 아닌 경우.
+        """
+        bot = self._get_bot(bot_id)
+        allowed_statuses = {BotStatus.CREATED, BotStatus.STOPPED, BotStatus.ERROR}
+        if bot.status not in allowed_statuses:
+            raise BotError(
+                f"봇 설정은 중지 상태에서만 수정할 수 있습니다: {bot_id} "
+                f"(현재: {bot.status})"
+            )
+
+        # budget은 BotConfig 필드가 아니므로 별도 처리
+        new_budget = kwargs.pop("budget", None)
+
+        # None이 아닌 값만 필터
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+
+        if not updates and new_budget is None:
+            return bot
+
+        # BotConfig 재생성
+        old_config = bot.config
+        config_fields = {
+            "bot_id": old_config.bot_id,
+            "strategy_id": old_config.strategy_id,
+            "name": old_config.name,
+            "account_id": old_config.account_id,
+            "interval_seconds": old_config.interval_seconds,
+            "auto_restart": old_config.auto_restart,
+            "max_restart_attempts": old_config.max_restart_attempts,
+            "restart_cooldown_seconds": old_config.restart_cooldown_seconds,
+            "step_timeout_seconds": old_config.step_timeout_seconds,
+            "max_signals_per_step": old_config.max_signals_per_step,
+        }
+        config_fields.update(updates)
+        new_config = BotConfig(**config_fields)
+        bot.config = new_config
+
+        # DB 갱신
+        await self._save_bot_config(new_config)
+
+        # budget 변경 시 Treasury 연동
+        if new_budget is not None and self._treasury_manager:
+            try:
+                treasury = self._treasury_manager.get(new_config.account_id)
+                await treasury.update_budget(bot_id, new_budget)
+            except KeyError:
+                logger.debug(
+                    "봇 수정 시 Treasury 미존재: account_id=%s",
+                    new_config.account_id,
+                )
+
+        logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
+        return bot
+
     async def assign_strategy(self, bot_id: str, strategy_id: str) -> None:
         """봇에 전략 배정.
 
@@ -365,11 +436,28 @@ class BotManager:
         await bot.stop()
         self._remove_strategy_rules(bot.config.strategy_id)
 
-    async def delete_bot(self, bot_id: str) -> None:
-        """봇 소프트 딜리트. 실행 중이면 먼저 중지."""
+    async def delete_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
+        """봇 소프트 딜리트. 실행 중이면 먼저 중지.
+
+        Args:
+            bot_id: 삭제할 봇 ID.
+            handle_positions: 포지션 처리 방식.
+                - ``keep`` (기본): 포지션을 유지한 채 봇만 삭제.
+                - ``liquidate``: 보유 종목 시장가 매도 주문 발행 후 삭제.
+        """
+        if handle_positions not in ("keep", "liquidate"):
+            raise BotError(
+                f"잘못된 handle_positions 값: {handle_positions!r} "
+                f"(허용: keep, liquidate)"
+            )
+
         bot = self._get_bot(bot_id)
         if bot.status == BotStatus.RUNNING:
             await bot.stop()
+
+        # liquidate: 보유 포지션 시장가 매도 주문 발행
+        if handle_positions == "liquidate":
+            await self._liquidate_positions(bot)
 
         self._unregister_bot_events(bot)
 
@@ -411,9 +499,57 @@ class BotManager:
         )
         logger.info("봇 삭제 (soft delete): %s", bot_id)
 
-    async def remove_bot(self, bot_id: str) -> None:
+    async def remove_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
         """봇 삭제. delete_bot()의 별칭 (하위 호환)."""
-        await self.delete_bot(bot_id)
+        await self.delete_bot(bot_id, handle_positions=handle_positions)
+
+    async def _liquidate_positions(self, bot: Bot) -> None:
+        """봇의 보유 포지션에 대해 시장가 매도 주문을 발행한다.
+
+        체결 완료를 기다리지 않고 주문 발행 시점에서 반환한다.
+        TradeService가 없으면 경고 로그만 남기고 건너뛴다.
+        """
+        if not self._trade_service:
+            logger.warning(
+                "TradeService 미설정 — 포지션 청산 건너뜀: bot=%s",
+                bot.bot_id,
+            )
+            return
+
+        from ante.eventbus.events import OrderRequestEvent
+
+        positions = await self._trade_service.get_positions(bot_id=bot.bot_id)
+        open_positions = [p for p in positions if p.quantity > 0]
+
+        if not open_positions:
+            logger.info("청산 대상 포지션 없음: bot=%s", bot.bot_id)
+            return
+
+        for pos in open_positions:
+            event = OrderRequestEvent(
+                account_id=bot.config.account_id,
+                bot_id=bot.bot_id,
+                strategy_id=bot.config.strategy_id,
+                symbol=pos.symbol,
+                side="sell",
+                quantity=pos.quantity,
+                order_type="market",
+                reason=f"봇 삭제 청산 (bot={bot.bot_id})",
+                exchange=getattr(pos, "exchange", "KRX"),
+            )
+            await self._eventbus.publish(event)
+            logger.info(
+                "청산 주문 발행: bot=%s symbol=%s qty=%.4f",
+                bot.bot_id,
+                pos.symbol,
+                pos.quantity,
+            )
+
+        logger.info(
+            "봇 삭제 청산 주문 %d건 발행 완료: bot=%s",
+            len(open_positions),
+            bot.bot_id,
+        )
 
     async def stop_all(self) -> None:
         """모든 봇 중지."""

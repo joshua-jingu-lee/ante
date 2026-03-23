@@ -18,7 +18,7 @@ from ante.web.deps import (
     get_trade_service_optional,
     get_treasury_optional,
 )
-from ante.web.schemas import BotDetailResponse, BotListResponse
+from ante.web.schemas import BotDetailResponse, BotListResponse, BotUpdateRequest
 
 router = APIRouter()
 
@@ -42,6 +42,7 @@ class BotCreateRequest(BaseModel):
 )
 async def list_bots(
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     account_id: str | None = None,
     limit: int = 20,
     cursor: str | None = None,
@@ -61,6 +62,25 @@ async def list_bots(
             )
             == account_id
         ]
+
+    # 전략 이름/작성자 조인
+    if registry is not None:
+        for bot_info in bots:
+            sid = (
+                bot_info.get("strategy_id", "")
+                if isinstance(bot_info, dict)
+                else getattr(bot_info, "strategy_id", "")
+            )
+            if sid:
+                record = await registry.get(sid)
+                if record:
+                    if isinstance(bot_info, dict):
+                        bot_info["strategy_name"] = record.name
+                        bot_info["strategy_author_name"] = record.author
+                    else:
+                        bot_info.strategy_name = record.name
+                        bot_info.strategy_author_name = record.author
+
     result = paginate(bots, cursor_field="bot_id", limit=limit, cursor=cursor)
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
 
@@ -164,6 +184,8 @@ async def get_bot(
     if registry is not None:
         record = await registry.get(info.get("strategy_id", ""))
         if record:
+            info["strategy_name"] = record.name
+            info["strategy_author_name"] = record.author
             info["strategy"] = {
                 "name": record.name,
                 "version": record.version,
@@ -292,6 +314,7 @@ async def stop_bot(
     responses={
         404: {"description": "Bot not found"},
         409: {"description": "Bot state conflict"},
+        422: {"description": "Invalid handle_positions value"},
         503: {"description": "Bot manager not available"},
     },
 )
@@ -300,16 +323,29 @@ async def delete_bot(
     request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+    handle_positions: str = "keep",
 ) -> None:
-    """봇 삭제."""
+    """봇 삭제.
+
+    handle_positions:
+        - keep (기본): 포지션을 유지한 채 봇만 삭제.
+        - liquidate: 보유 종목 시장가 매도 주문 발행 후 삭제.
+    """
     from ante.bot.exceptions import BotError
+
+    if handle_positions not in ("keep", "liquidate"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"잘못된 handle_positions 값: {handle_positions!r} "
+            f"(허용: keep, liquidate)",
+        )
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
     try:
-        await bot_manager.delete_bot(bot_id)
+        await bot_manager.delete_bot(bot_id, handle_positions=handle_positions)
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
@@ -318,8 +354,53 @@ async def delete_bot(
             member_id=getattr(request.state, "member_id", "anonymous"),
             action="bot.delete",
             resource=f"bot:{bot_id}",
+            detail=f"handle_positions={handle_positions}",
             ip=request.client.host if request.client else "",
         )
+
+
+@router.put(
+    "/{bot_id}",
+    response_model=BotDetailResponse,
+    responses={
+        404: {"description": "Bot not found"},
+        409: {"description": "Bot state conflict (not stopped)"},
+        503: {"description": "Bot manager not available"},
+    },
+)
+async def update_bot(
+    bot_id: str,
+    body: BotUpdateRequest,
+    request: Request,
+    bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+) -> dict:
+    """봇 설정 수정. 중지 상태에서만 허용."""
+    from ante.bot.exceptions import BotError
+
+    bot = bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
+
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        return {"bot": bot.get_info()}
+
+    try:
+        bot = await bot_manager.update_bot(bot_id, **updates)
+    except BotError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=getattr(request.state, "member_id", "anonymous"),
+            action="bot.update",
+            resource=f"bot:{bot_id}",
+            detail=f"fields={list(updates.keys())}",
+            ip=request.client.host if request.client else "",
+        )
+
+    return {"bot": bot.get_info()}
 
 
 @router.get(

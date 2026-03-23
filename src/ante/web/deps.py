@@ -145,6 +145,11 @@ def get_db(request: Request) -> Any:
 # ── 선택적 의존성 ───────────────────────────────────────
 
 
+def get_db_optional(request: Request) -> Any | None:
+    """데이터베이스 (선택적). 없으면 None."""
+    return getattr(request.app.state, "db", None)
+
+
 def get_data_store(request: Request) -> Any | None:
     """데이터 저장소 (선택적). 없으면 None."""
     return getattr(request.app.state, "data_store", None)

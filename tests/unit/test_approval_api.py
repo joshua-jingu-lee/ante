@@ -92,6 +92,40 @@ class TestListApprovals:
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
+    async def test_search_by_title(self, client, sample_approval):
+        """search 파라미터로 title 검색."""
+        resp = client.get("/api/approvals?search=전략 채택")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_search_by_requester(self, client, sample_approval):
+        """search 파라미터로 requester 검색."""
+        resp = client.get("/api/approvals?search=agent-01")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_search_no_match(self, client, sample_approval):
+        """search 매치 없으면 빈 목록."""
+        resp = client.get("/api/approvals?search=존재하지않는키워드")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    def test_search_without_data(self, client):
+        """데이터 없을 때 search 파라미터."""
+        resp = client.get("/api/approvals?search=anything")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    async def test_search_combined_with_status(self, client, sample_approval):
+        """search와 status 필터 조합."""
+        resp = client.get("/api/approvals?search=전략&status=pending")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+        resp = client.get("/api/approvals?search=전략&status=approved")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
 
 class TestGetApproval:
     async def test_get_existing(self, client, sample_approval):

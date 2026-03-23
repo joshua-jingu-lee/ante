@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ante.web.deps import (
     get_bot_manager_optional,
     get_db,
+    get_db_optional,
     get_strategy_registry,
     get_trade_service,
     get_trade_service_optional,
@@ -29,6 +31,7 @@ from ante.web.schemas import (
 router = APIRouter()
 
 _STRATEGY_NOT_FOUND = "전략을 찾을 수 없습니다"
+_logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -72,6 +75,7 @@ async def validate_strategy(body: dict) -> dict:
 async def list_strategies(
     registry: Annotated[Any, Depends(get_strategy_registry)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
+    db: Annotated[Any | None, Depends(get_db_optional)],
     status: str | None = Query(default=None),
 ) -> dict:
     """전략 목록 조회."""
@@ -83,6 +87,33 @@ async def list_strategies(
             sid = bot_info.get("strategy_id", "")
             if sid:
                 bots_by_strategy[sid] = bot_info
+
+    # 전략별 cumulative_return 일괄 조회
+    cumulative_returns: dict[str, float | None] = {}
+    if db is not None:
+        from ante.trade.performance import PerformanceTracker
+
+        tracker = PerformanceTracker(db)
+        for r in records:
+            bot_info_for_perf = bots_by_strategy.get(r.strategy_id)
+            account_id = (
+                bot_info_for_perf.get("account_id", "default")
+                if bot_info_for_perf
+                else "default"
+            )
+            try:
+                metrics = await tracker.calculate(
+                    account_id=account_id, strategy_id=r.strategy_id
+                )
+                if metrics.total_trades > 0:
+                    cumulative_returns[r.strategy_id] = metrics.net_pnl
+                else:
+                    cumulative_returns[r.strategy_id] = None
+            except Exception:
+                _logger.debug(
+                    "전략 %s cumulative_return 계산 실패", r.strategy_id, exc_info=True
+                )
+                cumulative_returns[r.strategy_id] = None
 
     strategies = []
     for r in records:
@@ -98,6 +129,7 @@ async def list_strategies(
                 "author": r.author,
                 "bot_id": bot_info["bot_id"] if bot_info else None,
                 "bot_status": bot_info["status"] if bot_info else None,
+                "cumulative_return": cumulative_returns.get(r.strategy_id),
             }
         )
 
@@ -126,7 +158,7 @@ async def get_strategy(
     strategy_dict["status"] = (
         record.status.value if hasattr(record.status, "value") else str(record.status)
     )
-    # datetime → str 변환 (response_model 호환)
+    # datetime -> str 변환 (response_model 호환)
     if hasattr(record.registered_at, "isoformat"):
         strategy_dict["registered_at"] = record.registered_at.isoformat()
 
@@ -137,10 +169,38 @@ async def get_strategy(
                 bot_info = b
                 break
 
+    # 전략 클래스에서 params/param_schema 런타임 추출
+    params: dict[str, Any] = {}
+    param_schema: dict[str, str] = {}
+    filepath = record.filepath
+    if filepath:
+        try:
+            from ante.strategy.loader import StrategyLoader
+
+            strategy_cls = StrategyLoader.load(Path(filepath))
+            instance = strategy_cls(ctx=None)
+            params = instance.get_params()
+            param_schema = instance.get_param_schema()
+        except Exception:
+            _logger.debug(
+                "전략 %s params 추출 실패 (filepath=%s)",
+                strategy_id,
+                filepath,
+                exc_info=True,
+            )
+
+    # rationale, risks: StrategyRecord에서 추출
+    rationale = getattr(record, "rationale", "") or ""
+    risks = getattr(record, "risks", []) or []
+
     return {
         "strategy": strategy_dict,
         "bot": bot_info,
         "status": strategy_dict["status"],
+        "params": params,
+        "param_schema": param_schema,
+        "rationale": rationale,
+        "risks": risks,
     }
 
 

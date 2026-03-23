@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ErrorResponse(BaseModel):
@@ -169,6 +169,8 @@ class BotInfo(BaseModel):
     status: str = ""
     account_id: str = ""
     strategy_id: str = ""
+    strategy_name: str | None = None
+    strategy_author_name: str | None = None
     interval_seconds: int = 60
     started_at: str | None = None
     stopped_at: str | None = None
@@ -176,6 +178,19 @@ class BotInfo(BaseModel):
 
     # 봇 상세 조회 시 추가되는 동적 필드 (strategy, budget, positions 등)
     model_config = ConfigDict(extra="allow")
+
+
+class BotUpdateRequest(BaseModel):
+    """봇 설정 수정 요청. None인 필드는 변경하지 않는다."""
+
+    name: str | None = None
+    interval_seconds: int | None = Field(default=None, ge=10, le=3600)
+    budget: float | None = Field(default=None, gt=0)
+    auto_restart: bool | None = None
+    max_restart_attempts: int | None = None
+    restart_cooldown_seconds: int | None = None
+    step_timeout_seconds: int | None = None
+    max_signals_per_step: int | None = None
 
 
 class BotListResponse(BaseModel):
@@ -212,6 +227,7 @@ class StrategyListItem(BaseModel):
     author: str
     bot_id: str | None = None
     bot_status: str | None = None
+    cumulative_return: float | None = None
 
 
 class StrategyListResponse(BaseModel):
@@ -232,6 +248,8 @@ class StrategyInfo(BaseModel):
     description: str = ""
     author: str = "agent"
     validation_warnings: list[str] = []
+    rationale: str = ""
+    risks: list[str] = []
 
     # asdict(StrategyRecord) 변환 시 추가 필드 허용
     model_config = ConfigDict(extra="allow")
@@ -243,6 +261,10 @@ class StrategyDetailResponse(BaseModel):
     strategy: StrategyInfo
     bot: BotInfo | None = None
     status: str | None = None
+    params: dict[str, Any] = {}
+    param_schema: dict[str, str] = {}
+    rationale: str = ""
+    risks: list[str] = []
 
 
 class EquityCurvePoint(BaseModel):
@@ -553,6 +575,13 @@ class DatasetListResponse(BaseModel):
     total: int
 
 
+class DatasetDetailResponse(BaseModel):
+    """데이터셋 상세 응답 (메타데이터 + 미리보기)."""
+
+    dataset: DatasetItem
+    preview: list[dict[str, Any]] = []
+
+
 class DataSchemaResponse(BaseModel):
     """데이터 스키마 응답 (동적 키-값)."""
 
@@ -808,3 +837,36 @@ class SeedResetResponse(BaseModel):
 
     ok: bool
     scenario: str
+
+
+# ── 리스크 룰 ──────────────────────────────────────────────
+
+
+class RuleItem(BaseModel):
+    """룰 설정 아이템."""
+
+    type: str
+    enabled: bool = True
+    params: dict[str, Any] = {}
+
+
+class RuleListResponse(BaseModel):
+    """계좌 룰 목록 응답."""
+
+    account_id: str
+    rules: list[RuleItem]
+
+
+class RuleUpdateRequest(BaseModel):
+    """룰 설정 변경 요청."""
+
+    enabled: bool = True
+    params: dict[str, Any] = {}
+
+
+class RuleUpdateResponse(BaseModel):
+    """룰 설정 변경 응답."""
+
+    account_id: str
+    rule_type: str
+    rule: RuleItem

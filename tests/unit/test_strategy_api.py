@@ -26,6 +26,8 @@ class FakeStrategyRecord:
     description: str = ""
     author: str = "agent"
     validation_warnings: list[str] = field(default_factory=list)
+    rationale: str = ""
+    risks: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -161,6 +163,99 @@ class TestListStrategies:
         assert data["bot_id"] == "bot-1"
         assert data["bot_status"] == "running"
 
+    def test_cumulative_return_null_without_db(self, client, registry):
+        """DB 없으면 cumulative_return은 null."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        resp = client.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+
+    def test_cumulative_return_null_no_trades(self, registry):
+        """거래 없으면 cumulative_return은 null."""
+        from unittest.mock import AsyncMock
+
+        fake_db = AsyncMock()
+        fake_db.fetch_all = AsyncMock(return_value=[])
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        resp = c.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+
+    def test_cumulative_return_with_trades(self, registry, bot_manager):
+        """거래가 있으면 cumulative_return에 net_pnl 값 반환."""
+        from unittest.mock import AsyncMock, patch
+
+        from ante.trade.models import PerformanceMetrics
+
+        fake_db = AsyncMock()
+        fake_metrics = PerformanceMetrics(
+            total_trades=5,
+            net_pnl=12345.0,
+        )
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        bot_manager._bots = [
+            {
+                "bot_id": "bot-1",
+                "strategy_id": "s1",
+                "status": "running",
+                "account_id": "acc-1",
+            },
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            bot_manager=bot_manager,
+            db=fake_db,
+        )
+        c = TestClient(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            return_value=fake_metrics,
+        ):
+            resp = c.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] == 12345.0
+
+    def test_cumulative_return_db_error_graceful(self, registry):
+        """DB 에러 시 cumulative_return은 null (500 아님)."""
+        from unittest.mock import AsyncMock, patch
+
+        fake_db = AsyncMock()
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            side_effect=Exception("DB error"),
+        ):
+            resp = c.get("/api/strategies")
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+
 
 class TestGetStrategy:
     def test_get_existing(self, client, registry):
@@ -200,6 +295,93 @@ class TestGetStrategy:
         """존재하지 않는 전략 → 404."""
         resp = client.get("/api/strategies/nonexistent")
         assert resp.status_code == 404
+
+    def test_detail_includes_rationale_risks(self, client, registry):
+        """응답에 rationale, risks 포함 (#802)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                rationale="모멘텀 기반 매매 전략",
+                risks=["급락장에서 큰 손실 가능", "거래량 부족 종목 슬리피지"],
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["rationale"] == "모멘텀 기반 매매 전략"
+        assert data["risks"] == ["급락장에서 큰 손실 가능", "거래량 부족 종목 슬리피지"]
+        # strategy 객체에도 포함
+        assert data["strategy"]["rationale"] == "모멘텀 기반 매매 전략"
+        assert data["strategy"]["risks"] == [
+            "급락장에서 큰 손실 가능",
+            "거래량 부족 종목 슬리피지",
+        ]
+
+    def test_detail_includes_params_defaults(self, client, registry):
+        """params, param_schema는 전략 로드 실패 시 빈 dict (#802)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                filepath="/nonexistent/path.py",
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["params"] == {}
+        assert data["param_schema"] == {}
+
+    def test_detail_params_from_strategy_file(self, client, registry, tmp_path):
+        """전략 파일이 존재하면 params/param_schema를 런타임 추출 (#802)."""
+        code = """
+from ante.strategy.base import Strategy, StrategyMeta, Signal
+
+class TestStrat(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+
+    def get_params(self):
+        return {"lookback": 20, "threshold": 0.05}
+
+    def get_param_schema(self):
+        return {"lookback": "되돌아볼 기간", "threshold": "매매 임계값"}
+"""
+        filepath = tmp_path / "test_strat.py"
+        filepath.write_text(code)
+
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                filepath=str(filepath),
+            ),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["params"] == {"lookback": 20, "threshold": 0.05}
+        assert data["param_schema"] == {
+            "lookback": "되돌아볼 기간",
+            "threshold": "매매 임계값",
+        }
+
+    def test_detail_rationale_risks_defaults(self, client, registry):
+        """rationale, risks 미설정 시 기본값 (#802)."""
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        resp = client.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["rationale"] == ""
+        assert data["risks"] == []
 
 
 class TestStrategyTrades:

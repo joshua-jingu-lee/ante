@@ -592,6 +592,7 @@ class ApprovalService:
         self,
         status: str | None = None,
         type: str | None = None,
+        search: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[ApprovalRequest]:
@@ -605,6 +606,10 @@ class ApprovalService:
         if type:
             conditions.append("type = ?")
             params.append(type)
+        if search:
+            conditions.append("(title LIKE ? OR requester LIKE ?)")
+            like_pattern = f"%{search}%"
+            params.extend([like_pattern, like_pattern])
 
         where = " AND ".join(conditions) if conditions else "1=1"
         query = (

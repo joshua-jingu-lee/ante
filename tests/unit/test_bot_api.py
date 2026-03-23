@@ -35,6 +35,8 @@ class FakeBot:
         self.bot_id = bot_id
         self._status = status
         self._strategy_id = strategy_id
+        self._name = bot_id
+        self._interval_seconds = 60
         self.config = FakeBotConfig(
             bot_id, account_id=account_id, strategy_id=strategy_id
         )
@@ -46,11 +48,11 @@ class FakeBot:
     def get_info(self) -> dict:
         return {
             "bot_id": self.bot_id,
-            "name": self.bot_id,
+            "name": self._name,
             "status": self._status,
             "account_id": self.config.account_id,
             "strategy_id": self._strategy_id,
-            "interval_seconds": 60,
+            "interval_seconds": self._interval_seconds,
             "trading_mode": "",
             "exchange": "",
             "currency": "",
@@ -95,9 +97,30 @@ class FakeBotManager:
         if bot:
             bot._status = "stopped"
 
-    async def delete_bot(self, bot_id: str) -> None:
+    async def delete_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
+        self.last_delete_handle_positions = handle_positions
         if bot_id in self._bots:
             del self._bots[bot_id]
+
+    async def update_bot(self, bot_id: str, **kwargs: object) -> FakeBot:
+        from ante.bot.exceptions import BotError
+
+        bot = self._bots.get(bot_id)
+        if bot is None:
+            raise BotError(f"Bot not found: {bot_id}")
+        if bot._status not in ("created", "stopped", "error"):
+            raise BotError(
+                f"봇 설정은 중지 상태에서만 수정할 수 있습니다: {bot_id} "
+                f"(현재: {bot._status})"
+            )
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+        if "name" in updates:
+            bot.config.bot_id = bot.config.bot_id  # keep bot_id
+            # Update the name returned by get_info
+            bot._name = updates["name"]
+        if "interval_seconds" in updates:
+            bot._interval_seconds = updates["interval_seconds"]
+        return bot
 
 
 class FakeBotBudget:
@@ -422,12 +445,18 @@ class FakeAccountService:
 class FakeStrategyRecord:
     """테스트용 StrategyRecord stub."""
 
-    def __init__(self, strategy_id: str = "s1", filepath: str = "/tmp/s1.py") -> None:
+    def __init__(
+        self,
+        strategy_id: str = "s1",
+        filepath: str = "/tmp/s1.py",
+        name: str = "",
+        author: str = "test",
+    ) -> None:
         self.strategy_id = strategy_id
         self.filepath = filepath
-        self.name = strategy_id
+        self.name = name or strategy_id
         self.version = "0.1.0"
-        self.author = "test"
+        self.author = author
         self.description = "test strategy"
 
 
@@ -530,3 +559,262 @@ class TestBotLifecycle:
         # delete
         resp = client.delete("/api/bots/bot-1")
         assert resp.status_code == 204
+
+
+class TestListBotsStrategyName:
+    """list_bots 응답에 strategy_name, strategy_author_name 포함 테스트."""
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["s1"] = FakeStrategyRecord(
+            "s1", name="MyStrategy", author="alice"
+        )
+        return reg
+
+    @pytest.fixture
+    def client_with_registry(
+        self, bot_manager, default_account_service, strategy_registry
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            strategy_registry=strategy_registry,
+        )
+        return TestClient(app)
+
+    def test_strategy_name_included(self, client_with_registry, bot_manager):
+        """봇 목록에 strategy_name, strategy_author_name 포함."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client_with_registry.get("/api/bots")
+        assert resp.status_code == 200
+        bot = resp.json()["bots"][0]
+        assert bot["strategy_name"] == "MyStrategy"
+        assert bot["strategy_author_name"] == "alice"
+
+    def test_strategy_not_found_returns_null(self, client_with_registry, bot_manager):
+        """레지스트리에 없는 전략이면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="unknown")
+        resp = client_with_registry.get("/api/bots")
+        assert resp.status_code == 200
+        bot = resp.json()["bots"][0]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+    def test_no_registry_returns_null(self, client, bot_manager):
+        """레지스트리 없으면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client.get("/api/bots")
+        assert resp.status_code == 200
+        bot = resp.json()["bots"][0]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+
+class TestGetBotStrategyName:
+    """get_bot 응답에 strategy_name, strategy_author_name 포함 테스트."""
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["s1"] = FakeStrategyRecord(
+            "s1", name="MyStrategy", author="alice"
+        )
+        return reg
+
+    @pytest.fixture
+    def client_with_registry(
+        self, bot_manager, default_account_service, strategy_registry
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            strategy_registry=strategy_registry,
+        )
+        return TestClient(app)
+
+    def test_strategy_name_included(self, client_with_registry, bot_manager):
+        """봇 상세 조회에 strategy_name, strategy_author_name 포함."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client_with_registry.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["strategy_name"] == "MyStrategy"
+        assert bot["strategy_author_name"] == "alice"
+        # strategy 상세 객체도 여전히 포함
+        assert bot["strategy"]["name"] == "MyStrategy"
+
+    def test_strategy_not_found_returns_null(self, client_with_registry, bot_manager):
+        """레지스트리에 없는 전략이면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="unknown")
+        resp = client_with_registry.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+    def test_no_registry_returns_null(self, client, bot_manager):
+        """레지스트리 없으면 strategy_name은 null."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", strategy_id="s1")
+        resp = client.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["strategy_name"] is None
+        assert bot["strategy_author_name"] is None
+
+
+class TestDeleteBotHandlePositions:
+    """DELETE /api/bots/{id}?handle_positions 테스트."""
+
+    def test_delete_keep_default(self, client, bot_manager):
+        """기본값(keep)으로 봇 삭제."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1")
+        assert resp.status_code == 204
+        assert bot_manager.last_delete_handle_positions == "keep"
+
+    def test_delete_keep_explicit(self, client, bot_manager):
+        """handle_positions=keep 명시적 전달."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1?handle_positions=keep")
+        assert resp.status_code == 204
+        assert bot_manager.last_delete_handle_positions == "keep"
+
+    def test_delete_liquidate(self, client, bot_manager):
+        """handle_positions=liquidate로 봇 삭제."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1?handle_positions=liquidate")
+        assert resp.status_code == 204
+        assert bot_manager.last_delete_handle_positions == "liquidate"
+
+    def test_delete_invalid_handle_positions(self, client, bot_manager):
+        """잘못된 handle_positions 값 -> 422."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1?handle_positions=invalid")
+        assert resp.status_code == 422
+        assert "handle_positions" in resp.json()["detail"]
+
+    def test_delete_nonexistent_with_liquidate(self, client):
+        """존재하지 않는 봇에 liquidate -> 404."""
+        resp = client.delete("/api/bots/nonexistent?handle_positions=liquidate")
+        assert resp.status_code == 404
+
+
+class TestDeleteBotAuditLog:
+    """봇 삭제 감사 로그에 handle_positions 기록 테스트."""
+
+    @pytest.fixture
+    def audit_logs(self):
+        return []
+
+    @pytest.fixture
+    def fake_audit_logger(self, audit_logs):
+        class _FakeAuditLogger:
+            async def log(self, **kwargs):
+                audit_logs.append(kwargs)
+
+        return _FakeAuditLogger()
+
+    @pytest.fixture
+    def client_with_audit(
+        self, bot_manager, default_account_service, fake_audit_logger
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            audit_logger=fake_audit_logger,
+        )
+        return TestClient(app)
+
+    def test_audit_log_records_keep(self, client_with_audit, bot_manager, audit_logs):
+        """감사 로그에 handle_positions=keep 기록."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client_with_audit.delete("/api/bots/bot-1")
+        assert resp.status_code == 204
+        delete_logs = [
+            entry for entry in audit_logs if entry.get("action") == "bot.delete"
+        ]
+        assert len(delete_logs) == 1
+        assert delete_logs[0]["detail"] == "handle_positions=keep"
+
+    def test_audit_log_records_liquidate(
+        self, client_with_audit, bot_manager, audit_logs
+    ):
+        """감사 로그에 handle_positions=liquidate 기록."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client_with_audit.delete("/api/bots/bot-1?handle_positions=liquidate")
+        assert resp.status_code == 204
+        delete_logs = [
+            entry for entry in audit_logs if entry.get("action") == "bot.delete"
+        ]
+        assert len(delete_logs) == 1
+        assert delete_logs[0]["detail"] == "handle_positions=liquidate"
+
+
+class TestUpdateBot:
+    """PUT /api/bots/{bot_id} 봇 설정 수정 테스트."""
+
+    def test_update_name(self, client, bot_manager):
+        """이름 변경."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"name": "새 이름"})
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["name"] == "새 이름"
+
+    def test_update_interval_seconds(self, client, bot_manager):
+        """실행 간격 변경."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"interval_seconds": 120})
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["interval_seconds"] == 120
+
+    def test_update_nonexistent_bot_returns_404(self, client):
+        """존재하지 않는 봇 수정 -> 404."""
+        resp = client.put("/api/bots/nonexistent", json={"name": "x"})
+        assert resp.status_code == 404
+
+    def test_update_running_bot_returns_409(self, client, bot_manager):
+        """실행 중인 봇 수정 -> 409."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="running")
+        resp = client.put("/api/bots/bot-1", json={"name": "x"})
+        assert resp.status_code == 409
+        assert "중지 상태" in resp.json()["detail"]
+
+    def test_update_created_bot_allowed(self, client, bot_manager):
+        """created 상태 봇 수정 허용."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="created")
+        resp = client.put("/api/bots/bot-1", json={"name": "updated"})
+        assert resp.status_code == 200
+
+    def test_update_error_bot_allowed(self, client, bot_manager):
+        """error 상태 봇 수정 허용."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="error")
+        resp = client.put("/api/bots/bot-1", json={"name": "fixed"})
+        assert resp.status_code == 200
+
+    def test_empty_body_returns_current(self, client, bot_manager):
+        """빈 body면 현재 상태 반환."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={})
+        assert resp.status_code == 200
+        assert resp.json()["bot"]["bot_id"] == "bot-1"
+
+    def test_interval_below_min_returns_422(self, client, bot_manager):
+        """interval_seconds < 10 -> 422 (validation error)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"interval_seconds": 5})
+        assert resp.status_code == 422
+
+    def test_interval_above_max_returns_422(self, client, bot_manager):
+        """interval_seconds > 3600 -> 422 (validation error)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"interval_seconds": 7200})
+        assert resp.status_code == 422
+
+    def test_budget_zero_or_negative_returns_422(self, client, bot_manager):
+        """budget <= 0 -> 422 (validation error)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"budget": 0})
+        assert resp.status_code == 422
+        resp = client.put("/api/bots/bot-1", json={"budget": -100})
+        assert resp.status_code == 422
