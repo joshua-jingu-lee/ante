@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getTreasurySummary, getBotBudgets, allocateBudget, deallocateBudget, getTreasuryTransactions } from '../api/treasury'
+import { getTreasurySummary, getBotBudgets, allocateBudget, deallocateBudget, getTreasuryTransactions, getTreasurySnapshots } from '../api/treasury'
 
 export function useTreasurySummary() {
   return useQuery({
@@ -32,6 +32,17 @@ export function useDeallocateBudget() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['treasury'] })
     },
+  })
+}
+
+export function useTreasurySnapshots(params: {
+  account_id?: string
+  start_date?: string
+  end_date?: string
+}) {
+  return useQuery({
+    queryKey: ['treasury', 'snapshots', params],
+    queryFn: () => getTreasurySnapshots(params),
   })
 }
 

@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { formatKRW, formatPercent } from '../../utils/formatters'
 import type { TreasurySummary } from '../../types/treasury'
 
-export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
+export default function AnteSummary({ summary, children }: { summary: TreasurySummary; children?: ReactNode }) {
   const anteProfitLoss = summary.ante_profit_loss ?? 0
   const antePurchaseAmount = summary.ante_purchase_amount ?? 0
   const anteEvalAmount = summary.ante_eval_amount ?? 0
@@ -76,6 +77,8 @@ export default function AnteSummary({ summary }: { summary: TreasurySummary }) {
           <div className="text-[22px] font-bold text-text-muted">{formatKRW(totalReserved)}</div>
         </div>
       </div>
+
+      {children}
     </div>
   )
 }

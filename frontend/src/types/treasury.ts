@@ -54,3 +54,21 @@ export interface BotBudget {
 }
 
 export type TransactionType = 'allocate' | 'deallocate' | 'fill' | 'bot_stopped_release'
+
+/** 일별 자산 스냅샷 -- 백엔드 SnapshotItem 대응 */
+export interface TreasurySnapshot {
+  account_id: string
+  snapshot_date: string
+  total_asset: number
+  ante_eval_amount: number
+  ante_purchase_amount: number
+  unallocated: number
+  account_balance: number
+  total_allocated: number
+  bot_count: number
+  daily_pnl: number
+  daily_return: number
+  net_trade_amount: number
+  unrealized_pnl: number
+  created_at: string
+}

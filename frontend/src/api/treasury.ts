@@ -1,9 +1,18 @@
 import client from './client'
-import type { TreasurySummary, BotBudget, TreasuryTransaction } from '../types/treasury'
+import type { TreasurySummary, BotBudget, TreasuryTransaction, TreasurySnapshot } from '../types/treasury'
 
 export async function getTreasurySummary(): Promise<TreasurySummary> {
   const res = await client.get('/api/treasury')
   return res.data
+}
+
+export async function getTreasurySnapshots(params: {
+  account_id?: string
+  start_date?: string
+  end_date?: string
+}): Promise<TreasurySnapshot[]> {
+  const res = await client.get('/api/treasury/snapshots', { params })
+  return res.data.snapshots ?? []
 }
 
 export async function getBotBudgets(): Promise<BotBudget[]> {
