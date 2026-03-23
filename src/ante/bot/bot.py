@@ -101,7 +101,7 @@ class Bot:
 
     async def _run_loop(self) -> None:
         """메인 실행 루프."""
-        from ante.eventbus.events import BotErrorEvent
+        from ante.eventbus.events import BotErrorEvent, BotStepCompletedEvent
 
         try:
             while self.status == BotStatus.RUNNING:
@@ -119,11 +119,23 @@ class Bot:
                     )
                 except TimeoutError:
                     self._consecutive_failures += 1
+                    timeout_msg = (
+                        f"on_step timeout "
+                        f"({self._consecutive_failures}/{self._max_consecutive_failures})"
+                    )
                     logger.warning(
                         "on_step 타임아웃: %s (%d/%d)",
                         self.bot_id,
                         self._consecutive_failures,
                         self._max_consecutive_failures,
+                    )
+                    await self._eventbus.publish(
+                        BotStepCompletedEvent(
+                            bot_id=self.bot_id,
+                            account_id=self.config.account_id,
+                            result="timeout",
+                            message=timeout_msg,
+                        )
                     )
                     if self._consecutive_failures >= self._max_consecutive_failures:
                         msg = (
@@ -151,6 +163,9 @@ class Bot:
                 max_signals = self.config.max_signals_per_step
                 if len(signals) > max_signals:
                     self._consecutive_failures += 1
+                    overflow_msg = (
+                        f"Signal count exceeded: {len(signals)} > {max_signals}"
+                    )
                     logger.warning(
                         "Signal 수 초과: %s (%d > %d, 연속 %d/%d)",
                         self.bot_id,
@@ -159,12 +174,19 @@ class Bot:
                         self._consecutive_failures,
                         self._max_consecutive_failures,
                     )
-                    msg = f"Signal count exceeded: {len(signals)} > {max_signals}"
+                    await self._eventbus.publish(
+                        BotStepCompletedEvent(
+                            bot_id=self.bot_id,
+                            account_id=self.config.account_id,
+                            result="signal_overflow",
+                            message=overflow_msg,
+                        )
+                    )
                     await self._eventbus.publish(
                         BotErrorEvent(
                             bot_id=self.bot_id,
                             account_id=self.config.account_id,
-                            error_message=msg,
+                            error_message=overflow_msg,
                         )
                     )
                     if self._consecutive_failures >= self._max_consecutive_failures:
@@ -185,6 +207,15 @@ class Bot:
                 actions = self._ctx._drain_actions()
                 await self._publish_actions(actions)
 
+                await self._eventbus.publish(
+                    BotStepCompletedEvent(
+                        bot_id=self.bot_id,
+                        account_id=self.config.account_id,
+                        result="success",
+                        message=f"signals={len(signals)}",
+                    )
+                )
+
                 await asyncio.sleep(self.config.interval_seconds)
 
         except asyncio.CancelledError:
@@ -193,6 +224,14 @@ class Bot:
             self.status = BotStatus.ERROR
             self.error_message = str(e)
             logger.exception("봇 오류: %s", self.bot_id)
+            await self._eventbus.publish(
+                BotStepCompletedEvent(
+                    bot_id=self.bot_id,
+                    account_id=self.config.account_id,
+                    result="error",
+                    message=str(e),
+                )
+            )
             await self._eventbus.publish(
                 BotErrorEvent(
                     bot_id=self.bot_id,

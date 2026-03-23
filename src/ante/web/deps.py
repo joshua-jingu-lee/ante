@@ -198,3 +198,21 @@ def get_broker(request: Request) -> Any | None:
 def get_audit_logger_optional(request: Request) -> Any | None:
     """감사 로거 (선택적). 없으면 None."""
     return getattr(request.app.state, "audit_logger", None)
+
+
+def get_event_history_store(request: Request) -> Any:
+    """이벤트 히스토리 저장소 (필수)."""
+    svc = getattr(request.app.state, "event_history_store", None)
+    if svc is None:
+        raise HTTPException(status_code=503, detail="Event history store not available")
+    return svc
+
+
+def get_event_history_store_optional(request: Request) -> Any | None:
+    """이벤트 히스토리 저장소 (선택적). 없으면 None."""
+    return getattr(request.app.state, "event_history_store", None)
+
+
+def get_eventbus_optional(request: Request) -> Any | None:
+    """EventBus (선택적). 없으면 None."""
+    return getattr(request.app.state, "eventbus", None)

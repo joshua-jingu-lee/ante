@@ -262,6 +262,20 @@ class BotErrorEvent(Event):
 
 
 @dataclass(frozen=True)
+class BotStepCompletedEvent(Event):
+    """Bot → EventBus: 봇 실행 사이클 완료.
+
+    매 on_step() 호출 후 결과를 기록한다.
+    result 값: success, timeout, signal_overflow, error
+    """
+
+    bot_id: str = ""
+    account_id: str = ""
+    result: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class BotRestartExhaustedEvent(Event):
     """BotManager → EventBus: 봇 재시작 한도 소진."""
 
