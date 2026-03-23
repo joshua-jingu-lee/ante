@@ -7,7 +7,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ante.web.deps import get_account_service, get_audit_logger_optional
+from ante.web.deps import (
+    get_account_service,
+    get_audit_logger_optional,
+    get_config,
+    get_dynamic_config,
+)
 from ante.web.schemas import (
     AccountActionResponse,
     AccountCreateRequest,
@@ -15,6 +20,9 @@ from ante.web.schemas import (
     AccountListResponse,
     AccountSuspendRequest,
     AccountUpdateRequest,
+    RuleListResponse,
+    RuleUpdateRequest,
+    RuleUpdateResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -333,3 +341,167 @@ async def delete_account(
             detail="계좌 삭제",
             ip=request.client.host if request.client else "",
         )
+
+
+# ── 리스크 룰 ─────────────────────────────────────────
+
+
+def _config_key(account_id: str) -> str:
+    """계좌별 룰 설정 Config 키."""
+    return f"accounts.{account_id}.rules"
+
+
+def _rule_config_to_item(cfg: dict[str, Any]) -> dict[str, Any]:
+    """룰 설정 dict를 RuleItem 호환 dict로 변환.
+
+    config dict에서 type, enabled를 분리하고 나머지를 params로 묶는다.
+    """
+    params = {k: v for k, v in cfg.items() if k not in ("type", "id", "enabled")}
+    return {
+        "type": cfg.get("type", ""),
+        "enabled": cfg.get("enabled", True),
+        "params": params,
+    }
+
+
+def _item_to_rule_config(
+    rule_type: str, enabled: bool, params: dict[str, Any]
+) -> dict[str, Any]:
+    """RuleItem 데이터를 룰 설정 dict로 변환."""
+    cfg: dict[str, Any] = {"type": rule_type, "enabled": enabled}
+    cfg.update(params)
+    return cfg
+
+
+@router.get("/{account_id}/rules", response_model=RuleListResponse)
+async def get_account_rules(
+    account_id: str,
+    account_service: Annotated[Any, Depends(get_account_service)],
+    config: Annotated[Any | None, Depends(get_config)],
+    dynamic_config: Annotated[Any | None, Depends(get_dynamic_config)],
+) -> dict[str, Any]:
+    """계좌 리스크 룰 목록 조회.
+
+    DynamicConfig를 우선 조회하고, 없으면 정적 Config에서 읽는다.
+    RULE_REGISTRY에 등록된 룰 타입만 구조화하여 반환한다.
+    """
+    from ante.account.errors import AccountNotFoundError
+    from ante.rule.engine import RULE_REGISTRY
+
+    # 계좌 존재 확인
+    try:
+        await account_service.get(account_id)
+    except AccountNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    key = _config_key(account_id)
+    raw_rules: list[dict[str, Any]] = []
+
+    # 1) DynamicConfig에서 조회
+    if dynamic_config is not None:
+        try:
+            value = await dynamic_config.get(key)
+            if isinstance(value, list):
+                raw_rules = value
+        except Exception:
+            pass
+
+    # 2) 정적 Config fallback
+    if not raw_rules and config is not None and hasattr(config, "get"):
+        value = config.get(key)
+        if isinstance(value, list):
+            raw_rules = value
+
+    # RULE_REGISTRY에 등록된 타입만 필터링
+    rules = []
+    for cfg in raw_rules:
+        rule_type = cfg.get("type", "")
+        if rule_type in RULE_REGISTRY:
+            rules.append(_rule_config_to_item(cfg))
+
+    return {"account_id": account_id, "rules": rules}
+
+
+@router.put("/{account_id}/rules/{rule_type}", response_model=RuleUpdateResponse)
+async def update_account_rule(
+    account_id: str,
+    rule_type: str,
+    body: RuleUpdateRequest,
+    request: Request,
+    account_service: Annotated[Any, Depends(get_account_service)],
+    config: Annotated[Any | None, Depends(get_config)],
+    dynamic_config: Annotated[Any, Depends(get_dynamic_config)],
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+) -> dict[str, Any]:
+    """계좌 리스크 룰 개별 수정.
+
+    RULE_REGISTRY에 등록된 타입만 허용하며,
+    DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
+    """
+    from ante.account.errors import AccountNotFoundError
+    from ante.rule.engine import RULE_REGISTRY
+
+    # 계좌 존재 확인
+    try:
+        await account_service.get(account_id)
+    except AccountNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # 룰 타입 유효성 검증
+    if rule_type not in RULE_REGISTRY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"알 수 없는 룰 타입: '{rule_type}'. "
+            f"가능한 값: {list(RULE_REGISTRY.keys())}",
+        )
+
+    key = _config_key(account_id)
+
+    # 기존 룰 설정 조회
+    raw_rules: list[dict[str, Any]] = []
+
+    # DynamicConfig에서 조회
+    try:
+        value = await dynamic_config.get(key)
+        if isinstance(value, list):
+            raw_rules = value
+    except Exception:
+        pass
+
+    # 정적 Config fallback
+    if not raw_rules and config is not None and hasattr(config, "get"):
+        value = config.get(key)
+        if isinstance(value, list):
+            raw_rules = list(value)  # 복사
+
+    # 해당 rule_type 찾아서 업데이트 또는 새로 추가
+    new_config = _item_to_rule_config(rule_type, body.enabled, body.params)
+    updated = False
+    for i, cfg in enumerate(raw_rules):
+        if cfg.get("type") == rule_type:
+            raw_rules[i] = new_config
+            updated = True
+            break
+
+    if not updated:
+        raw_rules.append(new_config)
+
+    # DynamicConfig에 저장 (ConfigChangedEvent 발행됨)
+    changed_by = getattr(request.state, "member_id", "dashboard")
+    await dynamic_config.set(key, raw_rules, category="rule", changed_by=changed_by)
+
+    if audit_logger:
+        await audit_logger.log(
+            member_id=changed_by,
+            action="account.rule.update",
+            resource=f"account:{account_id}:rule:{rule_type}",
+            detail=f"룰 수정: {rule_type} enabled={body.enabled}",
+            ip=request.client.host if request.client else "",
+        )
+
+    rule_item = _rule_config_to_item(new_config)
+    return {
+        "account_id": account_id,
+        "rule_type": rule_type,
+        "rule": rule_item,
+    }

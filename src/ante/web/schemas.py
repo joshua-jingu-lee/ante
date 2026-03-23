@@ -823,3 +823,36 @@ class SeedResetResponse(BaseModel):
 
     ok: bool
     scenario: str
+
+
+# ── 리스크 룰 ──────────────────────────────────────────────
+
+
+class RuleItem(BaseModel):
+    """룰 설정 아이템."""
+
+    type: str
+    enabled: bool = True
+    params: dict[str, Any] = {}
+
+
+class RuleListResponse(BaseModel):
+    """계좌 룰 목록 응답."""
+
+    account_id: str
+    rules: list[RuleItem]
+
+
+class RuleUpdateRequest(BaseModel):
+    """룰 설정 변경 요청."""
+
+    enabled: bool = True
+    params: dict[str, Any] = {}
+
+
+class RuleUpdateResponse(BaseModel):
+    """룰 설정 변경 응답."""
+
+    account_id: str
+    rule_type: str
+    rule: RuleItem
