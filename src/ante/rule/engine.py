@@ -267,12 +267,15 @@ class RuleEngine:
 
     # ── Treasury 조회 ──────────────────────────────
 
-    async def _query_treasury_data(self) -> dict[str, float]:
+    async def _query_treasury_data(self, bot_id: str = "") -> dict[str, float]:
         """Treasury에서 자산/손익 데이터를 조회한다.
+
+        Args:
+            bot_id: 봇 할당 예산 조회를 위한 봇 ID.
 
         Returns:
             daily_pnl, total_pnl, prev_day_total_asset,
-            total_asset, total_exposure 딕셔너리.
+            total_asset, total_exposure, bot_allocated_budget 딕셔너리.
             조회 실패 시 각 값은 0.0.
         """
         result = {
@@ -281,6 +284,7 @@ class RuleEngine:
             "prev_day_total_asset": 0.0,
             "total_asset": 0.0,
             "total_exposure": 0.0,
+            "bot_allocated_budget": 0.0,
         }
         if self._treasury is None:
             return result
@@ -293,6 +297,15 @@ class RuleEngine:
             result["total_exposure"] = summary.get("ante_eval_amount", 0.0)
         except Exception:
             logger.warning("Treasury summary 조회 실패: %s", self._account_id)
+
+        # 봇 할당 예산 조회
+        if bot_id:
+            try:
+                budget = self._treasury.get_budget(bot_id)
+                if budget is not None:
+                    result["bot_allocated_budget"] = budget.allocated
+            except Exception:
+                logger.warning("Treasury 봇 예산 조회 실패: bot=%s", bot_id)
 
         # get_daily_snapshot()은 비동기 메서드
         try:
@@ -347,7 +360,7 @@ class RuleEngine:
                 )
 
         # Treasury 데이터 조회
-        treasury_data = await self._query_treasury_data()
+        treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
         context = RuleContext(
             bot_id=event.bot_id,
@@ -366,6 +379,7 @@ class RuleEngine:
             prev_day_total_asset=treasury_data["prev_day_total_asset"],
             total_asset=treasury_data["total_asset"],
             total_exposure=treasury_data["total_exposure"],
+            bot_allocated_budget=treasury_data["bot_allocated_budget"],
         )
 
         try:
@@ -500,7 +514,7 @@ class RuleEngine:
                 )
 
         # Treasury 데이터 조회
-        treasury_data = await self._query_treasury_data()
+        treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
         context = RuleContext(
             bot_id=event.bot_id,
@@ -519,6 +533,7 @@ class RuleEngine:
             prev_day_total_asset=treasury_data["prev_day_total_asset"],
             total_asset=treasury_data["total_asset"],
             total_exposure=treasury_data["total_exposure"],
+            bot_allocated_budget=treasury_data["bot_allocated_budget"],
         )
 
         try:

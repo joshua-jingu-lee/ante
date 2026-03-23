@@ -44,6 +44,7 @@ def base_context():
         current_price=50000.0,
         current_position=0.0,
         available_balance=1000000.0,
+        bot_allocated_budget=1000000.0,
         account_status="active",
         daily_pnl=0.0,
         total_pnl=100000.0,
@@ -344,6 +345,40 @@ class TestPositionSizeRule:
         # 총 150,000 > 100,000
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.REJECT
+
+    def test_uses_bot_allocated_budget_not_available_balance(self, rule, base_context):
+        """분모가 bot_allocated_budget이며 available_balance가 아님을 검증."""
+        # available_balance가 크더라도 bot_allocated_budget이 작으면 REJECT
+        base_context.available_balance = 10_000_000.0  # 1천만 (큰 값)
+        base_context.bot_allocated_budget = 500_000.0  # 50만
+        base_context.quantity = 2.0  # 주문가치 100,000
+        base_context.current_position = 0.0
+        # balance_limit = 500,000 * 0.10 = 50,000
+        # position_limit = min(200,000, 50,000) = 50,000
+        # total_position_value = 100,000 > 50,000 → REJECT
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.REJECT
+
+    def test_stable_denominator_across_purchases(self, rule, base_context):
+        """매수로 가용잔고가 줄어도 bot_allocated_budget은 변하지 않아 비율이 안정적."""
+        base_context.bot_allocated_budget = 1_000_000.0
+        base_context.available_balance = 200_000.0  # 이미 많이 매수함
+        base_context.quantity = 1.0  # 50,000
+        base_context.current_position = 0.0
+        # balance_limit = 1,000,000 * 0.10 = 100,000
+        # position_limit = min(200,000, 100,000) = 100,000
+        # total_position_value = 50,000 < 100,000 → PASS
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_zero_budget_skips_percent_check(self, rule, base_context):
+        """budget 0이면 limit>0 불충족으로 PASS."""
+        base_context.bot_allocated_budget = 0.0
+        base_context.quantity = 100.0  # 큰 주문
+        result = rule.evaluate(base_context)
+        # position_limit = min(200000, 0) = 0
+        # total > 0 > 0 → False (0 is not > 0) → PASS
+        assert result.result == RuleResult.PASS
 
 
 # ── UnrealizedLossLimitRule ──────────────────────
@@ -856,6 +891,7 @@ class TestRuleEngineUpdateRules:
             order_type="market",
             current_price=50000.0,
             available_balance=1_000_000.0,
+            bot_allocated_budget=1_000_000.0,
             account_status="active",
         )
         result = engine.evaluate(context)
