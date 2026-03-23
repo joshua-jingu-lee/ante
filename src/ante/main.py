@@ -279,6 +279,7 @@ async def _init_trading(s: Services) -> None:
         snapshot=s.strategy_snapshot,
         account_service=s.account_service,
         treasury_manager=s.treasury_manager,
+        trade_service=s.trade_service,
     )
     await s.bot_manager.initialize()
 
