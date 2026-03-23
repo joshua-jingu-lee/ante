@@ -699,7 +699,7 @@ class TestPositionHistory:
 class TestPerformanceTracker:
     async def test_empty_trades_returns_empty_metrics(self, performance):
         """거래 없으면 빈 지표."""
-        metrics = await performance.calculate(bot_id="nonexistent")
+        metrics = await performance.calculate(account_id="acc1", bot_id="nonexistent")
         assert metrics.total_trades == 0
         assert metrics.win_rate == 0.0
         assert metrics.net_pnl == 0.0
@@ -768,7 +768,7 @@ class TestPerformanceTracker:
         )
         await recorder._on_filled(sell2)
 
-        metrics = await performance.calculate(bot_id="bot1")
+        metrics = await performance.calculate(account_id="default", bot_id="bot1")
         assert metrics.total_trades == 2  # 매도 2건
         assert metrics.winning_trades == 1
         assert metrics.losing_trades == 1
@@ -833,7 +833,7 @@ class TestPerformanceTracker:
         )
         await recorder._on_filled(sell)
 
-        metrics = await performance.calculate(bot_id="bot1")
+        metrics = await performance.calculate(account_id="default", bot_id="bot1")
         assert metrics.profit_factor == float("inf")
 
 
@@ -847,7 +847,7 @@ class TestTradeService:
             _make_filled_event(side="buy", quantity=10, price=50000)
         )
 
-        summary = await service.get_summary("bot1")
+        summary = await service.get_summary("bot1", account_id="default")
         assert "positions" in summary
         assert "performance" in summary
         assert "recent_trades" in summary
@@ -924,7 +924,7 @@ class TestTradeService:
 
     async def test_get_performance_delegates(self, service):
         """성과 조회 위임."""
-        metrics = await service.get_performance(bot_id="bot1")
+        metrics = await service.get_performance(account_id="default", bot_id="bot1")
         assert isinstance(metrics, PerformanceMetrics)
 
 

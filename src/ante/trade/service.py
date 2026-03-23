@@ -94,7 +94,7 @@ class TradeService:
 
     async def get_performance(
         self,
-        account_id: str | None = None,
+        account_id: str,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         from_date: datetime | None = None,
@@ -111,10 +111,10 @@ class TradeService:
 
     # ── 요약 ──────────────────────────────────────
 
-    async def get_summary(self, bot_id: str) -> dict:
+    async def get_summary(self, bot_id: str, account_id: str) -> dict:
         """봇 요약 정보 (대시보드용)."""
         positions = await self.get_positions(bot_id)
-        performance = await self.get_performance(bot_id=bot_id)
+        performance = await self.get_performance(account_id=account_id, bot_id=bot_id)
         recent_trades = await self.get_trades(bot_id=bot_id, limit=10)
 
         return {

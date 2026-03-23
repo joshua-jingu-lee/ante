@@ -42,7 +42,7 @@ class PerformanceTracker:
 
     async def calculate(
         self,
-        account_id: str | None = None,
+        account_id: str,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         from_date: datetime | None = None,
@@ -50,7 +50,7 @@ class PerformanceTracker:
     ) -> PerformanceMetrics:
         """성과 지표 계산.
 
-        account_id, bot_id, strategy_id 중 하나 이상 필수.
+        account_id는 필수. 계좌를 섞어 계산한 성과 지표는 의미가 없다.
         """
         trades = await self._get_filled_trades(
             account_id=account_id,
@@ -321,19 +321,16 @@ class PerformanceTracker:
 
     async def _get_filled_trades(
         self,
-        account_id: str | None = None,
+        account_id: str,
         bot_id: str | None = None,
         strategy_id: str | None = None,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
     ) -> list[TradeRecord]:
         """체결 완료 거래 조회."""
-        conditions: list[str] = ["status = ?"]
-        params: list[Any] = [TradeStatus.FILLED.value]
+        conditions: list[str] = ["status = ?", "account_id = ?"]
+        params: list[Any] = [TradeStatus.FILLED.value, account_id]
 
-        if account_id:
-            conditions.append("account_id = ?")
-            params.append(account_id)
         if bot_id:
             conditions.append("bot_id = ?")
             params.append(bot_id)
