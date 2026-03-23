@@ -288,6 +288,18 @@ class TestReservation:
         assert budget.available == 500_000.0
         assert budget.reserved == 500_000.0
 
+    async def test_reserve_zero_amount_raises(self, treasury):
+        """amount가 0이면 ValueError 발생."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        with pytest.raises(ValueError, match="amount must be positive"):
+            await treasury.reserve_for_order("bot1", "ord1", 0)
+
+    async def test_reserve_negative_amount_raises(self, treasury):
+        """음수 amount이면 ValueError 발생."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        with pytest.raises(ValueError, match="amount must be positive"):
+            await treasury.reserve_for_order("bot1", "ord1", -100_000.0)
+
     async def test_reserve_insufficient(self, treasury):
         """가용 예산 부족 시 예약 실패."""
         await treasury.allocate("bot1", 100_000.0)
