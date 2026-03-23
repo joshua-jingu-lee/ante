@@ -300,6 +300,7 @@ async def test_init_account_skips_when_accounts_exist(tmp_path: Path) -> None:
         exchange="KRX",
         trading_mode=TradingMode.LIVE,
         currency="KRW",
+        credentials={"app_key": "test", "app_secret": "test", "account_no": "test"},
     )
     await account_service.create(existing)
 
@@ -492,6 +493,7 @@ async def test_treasury_manager_multi_account(tmp_path: Path) -> None:
             exchange="TEST",
             trading_mode=TradingMode.VIRTUAL,
             currency="KRW",
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
 
@@ -531,6 +533,7 @@ async def test_rule_engine_manager_multi_account(tmp_path: Path) -> None:
             exchange="TEST",
             trading_mode=TradingMode.VIRTUAL,
             currency="KRW",
+            credentials={"app_key": "test", "app_secret": "test"},
         )
         await account_service.create(account)
 
