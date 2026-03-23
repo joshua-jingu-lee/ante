@@ -56,11 +56,11 @@ export default function AccountSummary({ summary }: { summary: TreasurySummary }
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">예수금</div>
-          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.account_balance)}</div>
+          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.account_balance ?? 0)}</div>
         </div>
         <div className="px-5 py-4">
           <div className="text-[12px] text-text-muted mb-1">매수가능금액</div>
-          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.purchasable_amount)}</div>
+          <div className="text-[22px] font-bold text-text-muted">{formatKRW(summary.purchasable_amount ?? 0)}</div>
         </div>
       </div>
     </div>

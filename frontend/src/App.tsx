@@ -1,11 +1,10 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import ToastContainer from './components/common/Toast'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import Layout from './components/layout/Layout'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
 import Approvals from './pages/Approvals'
 import ApprovalDetail from './pages/ApprovalDetail'
 import Treasury from './pages/Treasury'
@@ -47,7 +46,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Dashboard />} />
+              <Route index element={<Navigate to="/treasury" replace />} />
               <Route path="approvals" element={<Approvals />} />
               <Route path="approvals/:id" element={<ApprovalDetail />} />
               <Route path="treasury" element={<Treasury />} />
@@ -60,8 +59,8 @@ export default function App() {
               <Route path="bots/:id" element={<BotDetail />} />
               <Route path="reports/:id" element={<ReportDetail />} />
               <Route path="backtest-data" element={<BacktestData />} />
-              <Route path="members" element={<Agents />} />
-              <Route path="members/:id" element={<AgentDetail />} />
+              <Route path="agents" element={<Agents />} />
+              <Route path="agents/:id" element={<AgentDetail />} />
               <Route path="settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
             </Route>

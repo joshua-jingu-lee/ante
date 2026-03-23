@@ -1,3 +1,11 @@
+/**
+ * Feed 도메인 타입.
+ *
+ * generated FeedStatusResponse는 내부 배열을 { [key: string]: unknown }[]로 선언하므로
+ * 프론트엔드에서 상세 필드를 명시적으로 정의한다.
+ */
+
+// ── 프론트엔드 전용 타입 ──────────────────────────────────
 export interface FeedCheckpoint {
   source: string
   data_type: string

@@ -3,13 +3,12 @@ import { NavLink } from 'react-router-dom'
 import { useApprovals } from '../../hooks/useApprovals'
 
 const NAV_ITEMS = [
-  { path: '/', icon: '⭐', label: '대시보드' },
-  { path: '/approvals', icon: '📋', label: '결재함', showBadge: true },
   { path: '/treasury', icon: '💰', label: '자금관리' },
-  { path: '/strategies', icon: '📈', label: '전략과 성과' },
+  { path: '/approvals', icon: '📋', label: '결재함', showBadge: true },
   { path: '/bots', icon: '🤖', label: '봇 관리' },
-  { path: '/backtest-data', icon: '📁', label: '백테스트 데이터' },
+  { path: '/strategies', icon: '📈', label: '전략과 성과' },
   { path: '/agents', icon: '🧑‍💼', label: '에이전트 관리' },
+  { path: '/backtest-data', icon: '📁', label: '백테스트 데이터' },
 ]
 
 export default function Sidebar() {
@@ -56,7 +55,7 @@ export default function Sidebar() {
             <NavLink
               key={item.path}
               to={item.path}
-              end={item.path === '/'}
+              end
               onClick={() => setMobileOpen(false)}
               className={({ isActive }) =>
                 `flex items-center gap-[10px] px-3 py-[10px] rounded-lg text-[15px] font-medium no-underline transition-colors ${

@@ -43,7 +43,7 @@ export default function StrategyTable({ items }: { items: Strategy[] }) {
                   )}
                 </td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">
-                  <StatusBadge variant={STATUS_VARIANT[s.status] as 'positive'}>{STRATEGY_STATUS_LABELS[s.status] || s.status}</StatusBadge>
+                  <StatusBadge variant={(STATUS_VARIANT[s.status as StrategyStatus] ?? 'muted') as 'positive'}>{STRATEGY_STATUS_LABELS[s.status] || s.status}</StatusBadge>
                 </td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">
                   {s.bot_id ? (

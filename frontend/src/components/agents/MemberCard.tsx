@@ -42,7 +42,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
 
   return (
     <div
-      onClick={() => isAgent ? navigate(`/members/${member.member_id}`) : undefined}
+      onClick={() => isAgent ? navigate(`/agents/${member.member_id}`) : undefined}
       className={`bg-surface border border-border rounded-lg p-5 flex gap-5 transition-colors${isRevoked ? ' opacity-50' : ''}${isAgent ? ' cursor-pointer hover:border-primary/50' : ''}`}
     >
       {/* 프로필 아바타 */}

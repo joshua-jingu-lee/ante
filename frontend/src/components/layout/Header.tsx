@@ -4,14 +4,13 @@ import { useUser, useLogout } from '../../hooks/useAuth'
 import { useSystemStatus } from '../../hooks/useSystemStatus'
 
 const PAGE_TITLES: Record<string, string> = {
-  '/': '대시보드',
   '/approvals': '결재함',
   '/treasury': '자금관리',
   '/treasury/history': '자금 변동 이력',
   '/strategies': '전략과 성과',
   '/bots': '봇 관리',
   '/backtest-data': '백테스트 데이터',
-  '/members': '멤버 관리',
+  '/agents': '에이전트 관리',
   '/settings': '설정',
 }
 
@@ -20,12 +19,12 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/approvals/')) return '결재 상세'
   if (pathname.startsWith('/strategies/')) return '전략 상세'
   if (pathname.startsWith('/bots/')) return '봇 상세'
-  if (pathname.startsWith('/members/')) return '멤버 상세'
-  return '대시보드'
+  if (pathname.startsWith('/agents/')) return '에이전트 상세'
+  return '자금관리'
 }
 
 function isDetailPage(pathname: string): boolean {
-  return /^\/(approvals|strategies|bots|members)\/[^/]+/.test(pathname) || pathname === '/treasury/history'
+  return /^\/(approvals|strategies|bots|agents)\/[^/]+/.test(pathname) || pathname === '/treasury/history'
 }
 
 export default function Header() {

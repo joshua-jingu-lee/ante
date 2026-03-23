@@ -26,18 +26,25 @@ export default function PerformancePanel({ perf }: { perf: StrategyPerformance |
     )
   }
 
+  const netPnl = perf.net_pnl ?? perf.total_pnl ?? 0
+  const totalCommission = perf.total_commission ?? 0
+  const avgProfit = perf.avg_profit ?? perf.avg_pnl ?? 0
+  const avgLoss = perf.avg_loss ?? 0
+  const realizedPnl = perf.realized_pnl ?? 0
+  const activeDays = perf.active_days ?? 0
+
   const row1: StatItem[] = [
     {
       label: '순손익',
-      value: formatKRW(perf.net_pnl),
+      value: formatKRW(netPnl),
       hint: '실현 손익 + 미실현 손익의 합계',
-      color: perf.net_pnl >= 0 ? 'text-positive' : 'text-negative',
-      sub: perf.net_pnl !== 0 ? `(${perf.net_pnl >= 0 ? '+' : ''}${formatPercent(perf.win_rate).replace(/^[+-]/, perf.net_pnl >= 0 ? '+' : '-')})` : undefined,
-      subColor: perf.net_pnl >= 0 ? 'text-positive' : 'text-negative',
+      color: netPnl >= 0 ? 'text-positive' : 'text-negative',
+      sub: netPnl !== 0 ? `(${netPnl >= 0 ? '+' : ''}${formatPercent(perf.win_rate).replace(/^[+-]/, netPnl >= 0 ? '+' : '-')})` : undefined,
+      subColor: netPnl >= 0 ? 'text-positive' : 'text-negative',
     },
     { label: '총 거래 수', value: formatNumber(perf.total_trades), hint: '전체 거래 횟수' },
     { label: '승률', value: formatPercent(perf.win_rate), hint: '수익을 낸 거래 수 / 전체 거래 수' },
-    { label: '활성 거래일', value: `${perf.active_days}일`, hint: '실제 매매가 발생한 날의 수' },
+    { label: '활성 거래일', value: `${activeDays}일`, hint: '실제 매매가 발생한 날의 수' },
   ]
 
   const row2: StatItem[] = [
@@ -51,13 +58,13 @@ export default function PerformancePanel({ perf }: { perf: StrategyPerformance |
       sub: perf.max_drawdown_amount ? `(${formatKRW(-Math.abs(perf.max_drawdown_amount))})` : undefined,
       subColor: 'text-negative',
     },
-    { label: '수수료 합계', value: formatKRW(perf.total_commission), hint: '총 거래 수수료', color: 'text-text-muted' },
+    { label: '수수료 합계', value: formatKRW(totalCommission), hint: '총 거래 수수료', color: 'text-text-muted' },
   ]
 
   const row3: StatItem[] = [
-    { label: '평균 수익', value: formatKRW(perf.avg_profit), hint: '수익 거래의 평균 이익 금액', color: 'text-positive' },
-    { label: '평균 손실', value: formatKRW(perf.avg_loss), hint: '손실 거래의 평균 손실 금액', color: 'text-negative' },
-    { label: '실현 손익', value: formatKRW(perf.realized_pnl), hint: '매도 완료된 거래의 확정 손익', color: perf.realized_pnl >= 0 ? 'text-positive' : 'text-negative' },
+    { label: '평균 수익', value: formatKRW(avgProfit), hint: '수익 거래의 평균 이익 금액', color: 'text-positive' },
+    { label: '평균 손실', value: formatKRW(avgLoss), hint: '손실 거래의 평균 손실 금액', color: 'text-negative' },
+    { label: '실현 손익', value: formatKRW(realizedPnl), hint: '매도 완료된 거래의 확정 손익', color: realizedPnl >= 0 ? 'text-positive' : 'text-negative' },
     { label: '미실현 손익', value: '-', hint: '보유 중인 종목의 평가 손익 (미확정)' },
   ]
 
