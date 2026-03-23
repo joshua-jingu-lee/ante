@@ -347,10 +347,11 @@ def _load_strategy_params(filepath: str) -> dict | None:
 
 @strategy.command("performance")
 @click.argument("name")
+@click.option("--account-id", default=None, help="계좌 ID (미지정 시 'default')")
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
-def strategy_performance(ctx: click.Context, name: str) -> None:
+def strategy_performance(ctx: click.Context, name: str, account_id: str | None) -> None:
     """전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용)."""
     fmt = get_formatter(ctx)
 
@@ -370,7 +371,10 @@ def strategy_performance(ctx: click.Context, name: str) -> None:
             tracker = PerformanceTracker(db)
             # 최신 버전의 strategy_id 기준으로 성과 계산
             record = records[0]
-            metrics = await tracker.calculate(strategy_id=record.name)
+            resolved = account_id or "default"
+            metrics = await tracker.calculate(
+                account_id=resolved, strategy_id=record.name
+            )
 
             return {
                 "strategy_name": record.name,

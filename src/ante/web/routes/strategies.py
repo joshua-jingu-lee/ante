@@ -158,16 +158,29 @@ async def get_strategy_performance(
     db: Annotated[Any, Depends(get_db)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     trade_service: Annotated[Any | None, Depends(get_trade_service_optional)],
+    account_id: str | None = None,
 ) -> dict:
     """전략 성과 지표 조회."""
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
+    # account_id 결정: 쿼리 파라미터 우선, 없으면 봇에서 추출
+    resolved_account_id = account_id
+    if not resolved_account_id and bot_manager is not None:
+        for b in bot_manager.list_bots():
+            if b.get("strategy_id") == strategy_id:
+                resolved_account_id = b.get("account_id")
+                break
+    if not resolved_account_id:
+        resolved_account_id = "default"
+
     from ante.trade.performance import PerformanceTracker
 
     tracker = PerformanceTracker(db)
-    metrics = await tracker.calculate(strategy_id=strategy_id)
+    metrics = await tracker.calculate(
+        account_id=resolved_account_id, strategy_id=strategy_id
+    )
 
     result = asdict(metrics)
     # sharpe_ratio가 None이면 응답 모델(float)과 호환되도록 0.0으로 변환

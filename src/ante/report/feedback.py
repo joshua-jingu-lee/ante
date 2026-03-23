@@ -22,7 +22,11 @@ class PerformanceFeedback:
 
     async def get_bot_performance(self, bot_id: str) -> dict:
         """봇의 실전 성과 조회."""
-        metrics = await self._trade.get_performance(bot_id=bot_id)
+        bot = self._bots.get_bot(bot_id)
+        account_id = bot.config.account_id if bot else "default"
+        metrics = await self._trade.get_performance(
+            account_id=account_id, bot_id=bot_id
+        )
         positions = await self._trade.get_positions(bot_id)
         return {
             "bot_id": bot_id,
