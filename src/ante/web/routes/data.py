@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from ante.web.deps import get_audit_logger_optional, get_data_store
 from ante.web.schemas import (
     DataSchemaResponse,
+    DatasetDetailResponse,
     DatasetListResponse,
     FeedStatusResponse,
     StorageSummaryResponse,
@@ -87,6 +88,73 @@ async def list_datasets(
     total = len(all_datasets)
     items = all_datasets[offset : offset + limit]
     return {"items": items, "total": total}
+
+
+@router.get("/datasets/{dataset_id}", response_model=DatasetDetailResponse)
+async def get_dataset_detail(
+    dataset_id: str,
+    store: Annotated[Any | None, Depends(get_data_store)],
+) -> dict:
+    """데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기).
+
+    dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
+    """
+    if store is None:
+        raise HTTPException(status_code=503, detail="Data store not available")
+
+    parts = dataset_id.split("__", 1)
+    if len(parts) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail="dataset_id는 '{symbol}__{timeframe}' 형식이어야 합니다",
+        )
+
+    symbol, timeframe = parts
+
+    # fundamental 타입 판별
+    is_fundamental = timeframe == "fundamental"
+    data_type = "fundamental" if is_fundamental else "ohlcv"
+    tf_for_store = "" if is_fundamental else timeframe
+
+    # 존재 여부 확인
+    path = store._resolve_path(symbol, tf_for_store, data_type=data_type)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="데이터셋을 찾을 수 없습니다")
+
+    # 메타데이터
+    date_range = store.get_date_range(symbol, tf_for_store, data_type=data_type)
+    row_count = 0 if is_fundamental else store.get_row_count(symbol, tf_for_store)
+
+    dataset_meta = {
+        "id": dataset_id,
+        "symbol": symbol,
+        "timeframe": timeframe if not is_fundamental else "",
+        "data_type": data_type,
+        "start_date": date_range[0] if date_range else None,
+        "end_date": date_range[1] if date_range else None,
+        "row_count": row_count,
+    }
+
+    # 최근 5행 미리보기
+    preview: list[dict[str, Any]] = []
+    try:
+        df = store.read(symbol, tf_for_store, limit=5, data_type=data_type)
+        if not df.is_empty():
+            # DataFrame → list[dict] 변환 (날짜/시간 → ISO 문자열)
+            for row in df.iter_rows(named=True):
+                record: dict[str, Any] = {}
+                for k, v in row.items():
+                    if hasattr(v, "isoformat"):
+                        record[k] = v.isoformat()
+                    elif isinstance(v, float) and (v != v):  # NaN check
+                        record[k] = None
+                    else:
+                        record[k] = v
+                preview.append(record)
+    except Exception:
+        logger.warning("데이터셋 미리보기 로드 실패: %s", dataset_id)
+
+    return {"dataset": dataset_meta, "preview": preview}
 
 
 @router.get("/schema", response_model=DataSchemaResponse)

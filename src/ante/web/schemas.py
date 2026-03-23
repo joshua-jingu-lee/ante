@@ -569,6 +569,13 @@ class DatasetListResponse(BaseModel):
     total: int
 
 
+class DatasetDetailResponse(BaseModel):
+    """데이터셋 상세 응답 (메타데이터 + 미리보기)."""
+
+    dataset: DatasetItem
+    preview: list[dict[str, Any]] = []
+
+
 class DataSchemaResponse(BaseModel):
     """데이터 스키마 응답 (동적 키-값)."""
 
