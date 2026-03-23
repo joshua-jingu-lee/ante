@@ -50,6 +50,7 @@ class RecoveryKeyManager:
             (hash_password(new_password), member.member_id),
         )
         await self._invalidate_token(member.member_id)
+        await self._publish_password_changed(member.member_id)
         logger.info("패스워드 변경 완료: %s", member.member_id)
 
     async def reset_password(
@@ -70,6 +71,7 @@ class RecoveryKeyManager:
             (hash_password(new_password), member.member_id),
         )
         await self._invalidate_token(member.member_id)
+        await self._publish_password_reset(member.member_id)
         logger.info("패스워드 리셋 완료 (recovery key): %s", member.member_id)
 
     async def regenerate_recovery_key(self, member: Member, password: str) -> str:
@@ -99,6 +101,40 @@ class RecoveryKeyManager:
             (member_id,),
         )
         logger.info("기존 토큰 무효화 완료: %s", member_id)
+
+    async def _publish_password_changed(self, member_id: str) -> None:
+        """패스워드 변경 알림 발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="warning",
+                title="패스워드 변경",
+                message=(
+                    f"멤버 `{member_id}`의 패스워드가 변경되었습니다.\n"
+                    "기존 세션이 무효화되었습니다.\n"
+                    "본인이 아닌 경우 즉시 토큰을 재발급하세요."
+                ),
+                category="security",
+            )
+        )
+
+    async def _publish_password_reset(self, member_id: str) -> None:
+        """패스워드 리셋 알림 발행."""
+        from ante.eventbus.events import NotificationEvent
+
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="warning",
+                title="패스워드 리셋",
+                message=(
+                    f"멤버 `{member_id}`의 패스워드가 recovery key로 리셋되었습니다.\n"
+                    "기존 세션이 무효화되었습니다.\n"
+                    "본인이 아닌 경우 즉시 recovery key를 재발급하세요."
+                ),
+                category="security",
+            )
+        )
 
     async def _publish_auth_failed(self, member_id: str, reason: str) -> None:
         """인증 실패 이벤트 발행."""
