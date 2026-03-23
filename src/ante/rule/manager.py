@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.trade.service import TradeService
     from ante.treasury import TreasuryManager as TreasuryManagerType
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,12 @@ class RuleEngineManager:
         eventbus: EventBus,
         account_service: AccountService,
         treasury_manager: TreasuryManagerType | None = None,
+        trade_service: TradeService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._account_service = account_service
         self._treasury_manager = treasury_manager
+        self._trade_service = trade_service
         self._engines: dict[str, RuleEngine] = {}
 
     def create_engine(
@@ -56,6 +59,7 @@ class RuleEngineManager:
             account_id=account_id,
             account_service=self._account_service,
             treasury=treasury,
+            trade_service=self._trade_service,
         )
 
         if rule_configs:
