@@ -8,7 +8,7 @@ import { PageSkeleton } from '../components/common/Skeleton'
 import BotStopModal from '../components/bots/BotStopModal'
 import { formatKRW, formatDateTime, formatPercent } from '../utils/formatters'
 import { BOT_STATUS_LABELS } from '../utils/constants'
-import type { BotStatus, BotMode, BotDetail as BotDetailType } from '../types/bot'
+import type { BotStatus, BotDetail as BotDetailType, BotLogResult } from '../types/bot'
 
 const STATUS_VARIANT: Record<BotStatus, string> = {
   created: 'muted', running: 'positive', stopping: 'warning', stopped: 'warning', error: 'negative', deleted: 'muted',
@@ -86,12 +86,6 @@ export default function BotDetail() {
         <div className="bg-surface border border-border rounded-lg p-5">
           <h3 className="text-[15px] font-semibold mb-3">실행 설정</h3>
           <div className="space-y-2">
-            <div className="flex justify-between py-1.5 text-[13px]">
-              <span className="text-text-muted">모드</span>
-              <StatusBadge variant={bot.mode === 'live' ? 'primary' : 'warning'}>
-                {bot.mode === 'live' ? '실전' : '모의'}
-              </StatusBadge>
-            </div>
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">상태</span>
               <StatusBadge variant={STATUS_VARIANT[bot.status] as 'positive'}>
@@ -197,15 +191,18 @@ export default function BotDetail() {
           <div className="py-4 text-text-muted text-[13px] text-center">로그가 없습니다</div>
         ) : (
           <div className="space-y-0">
-            {bot.logs.slice(0, 10).map((log, i) => (
-              <div key={i} className="flex gap-3 py-2 border-b border-border text-[13px]">
-                <span className="text-text-muted font-mono text-[12px] whitespace-nowrap">{formatDateTime(log.timestamp)}</span>
-                <StatusBadge variant={log.success ? 'positive' : 'negative'}>
-                  {log.success ? '성공' : '실패'}
-                </StatusBadge>
-                {log.message && <span className={log.success ? '' : 'text-negative'}>{log.message}</span>}
-              </div>
-            ))}
+            {bot.logs.slice(0, 10).map((log, i) => {
+              const result: BotLogResult = log.result ?? (log.success ? 'success' : 'failure')
+              const variant = result === 'success' ? 'positive' : result === 'stopped' ? 'warning' : 'negative'
+              const label = result === 'success' ? '성공' : result === 'stopped' ? '중지' : '실패'
+              return (
+                <div key={i} className="flex gap-3 py-2 border-b border-border text-[13px]">
+                  <span className="text-text-muted font-mono text-[12px] whitespace-nowrap">{formatDateTime(log.timestamp)}</span>
+                  <StatusBadge variant={variant}>{label}</StatusBadge>
+                  {log.message && <span className={result === 'failure' ? 'text-negative' : ''}>{log.message}</span>}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
@@ -233,7 +230,6 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
   const { data: treasury } = useTreasurySummary()
   const [name, setName] = useState(bot.name || '')
   const [strategyName, setStrategyName] = useState(bot.strategy_name || '')
-  const [mode, setMode] = useState<BotMode>(bot.mode)
   const [intervalSeconds, setIntervalSeconds] = useState(bot.interval_seconds)
   const [budget, setBudget] = useState(bot.allocated_budget)
 
@@ -280,35 +276,6 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
                 <option key={s.id} value={s.name}>{s.name}</option>
               ))}
             </select>
-          </div>
-
-          {/* Bot 유형 */}
-          <div>
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Bot 유형</label>
-            <div className="inline-flex rounded-lg border border-border overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setMode('paper')}
-                className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${
-                  mode === 'paper'
-                    ? 'bg-primary text-white'
-                    : 'bg-transparent text-text-muted hover:bg-surface-hover'
-                }`}
-              >
-                모의투자
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('live')}
-                className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${
-                  mode === 'live'
-                    ? 'bg-primary text-white'
-                    : 'bg-transparent text-text-muted hover:bg-surface-hover'
-                }`}
-              >
-                실전투자
-              </button>
-            </div>
           </div>
 
           {/* 실행 간격 */}

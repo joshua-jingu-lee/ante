@@ -3,7 +3,6 @@ import { useCreateBot } from '../../hooks/useBots'
 import { useStrategies } from '../../hooks/useStrategies'
 import { useTreasurySummary } from '../../hooks/useTreasury'
 import { formatNumber } from '../../utils/formatters'
-import type { BotMode } from '../../types/bot'
 
 interface BotCreateFormProps {
   onClose: () => void
@@ -15,7 +14,6 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [botId, setBotId] = useState('')
   const [name, setName] = useState('')
   const [strategyName, setStrategyName] = useState('')
-  const [mode, setMode] = useState<BotMode>('paper')
   const [interval, setInterval] = useState('60')
   const [budget, setBudget] = useState('')
   const [botIdError, setBotIdError] = useState('')
@@ -47,7 +45,6 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
         bot_id: botId,
         name,
         strategy_name: strategyName,
-        mode,
         interval_seconds: Number(interval),
         budget: Number(budget.replace(/,/g, '')),
         symbols: [],
@@ -83,13 +80,6 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
                 <option key={s.id} value={s.name}>{s.name} {s.version}</option>
               ))}
             </select>
-          </div>
-          <div className="mb-4">
-            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">봇 유형</label>
-            <div className="inline-flex rounded-lg border border-border overflow-hidden">
-              <button type="button" onClick={() => setMode('paper')} className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${mode === 'paper' ? 'bg-primary text-white' : 'bg-transparent text-text-muted hover:bg-surface-hover'}`}>모의투자</button>
-              <button type="button" onClick={() => setMode('live')} className={`px-4 py-2 text-[13px] font-medium border-none cursor-pointer ${mode === 'live' ? 'bg-primary text-white' : 'bg-transparent text-text-muted hover:bg-surface-hover'}`}>실전투자</button>
-            </div>
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">실행 간격 (초)</label>
