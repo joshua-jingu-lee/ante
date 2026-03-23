@@ -9,9 +9,6 @@ const STATUS_VARIANT: Record<BotStatus, string> = {
 
 interface BotCardProps {
   bot: Bot
-  onStart: (id: string) => void
-  onStop: (id: string) => void
-  onDelete: (id: string) => void
 }
 
 function BotIcon({ status }: { status: BotStatus }) {
@@ -54,7 +51,7 @@ function BotIcon({ status }: { status: BotStatus }) {
   )
 }
 
-export default function BotCard({ bot, onStart, onStop, onDelete }: BotCardProps) {
+export default function BotCard({ bot }: BotCardProps) {
   const navigate = useNavigate()
 
   return (
@@ -68,31 +65,16 @@ export default function BotCard({ bot, onStart, onStop, onDelete }: BotCardProps
         <div className="text-[13px] text-text-muted mb-3">
           <a onClick={() => navigate(`/bots/${bot.bot_id}`)} className="hover:text-primary cursor-pointer">{bot.bot_id}</a>
         </div>
-        <div className="flex flex-col gap-1.5 text-[13px] text-text-muted mb-4">
+        <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
           <div className="flex justify-between">
             <span>전략</span>
             <span>{bot.strategy_name ? <a onClick={() => navigate(`/strategies/${bot.strategy_name}`)} className="text-primary hover:underline cursor-pointer">{bot.strategy_name}</a> : '-'}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>모드</span>
-            <StatusBadge variant={bot.mode === 'live' ? 'primary' : 'warning'}>{bot.mode === 'live' ? '실전' : '모의'}</StatusBadge>
           </div>
           {bot.interval_seconds != null && (
             <div className="flex justify-between">
               <span>실행 간격</span>
               <span>{bot.interval_seconds}초</span>
             </div>
-          )}
-        </div>
-        <div className="flex gap-2 justify-end">
-          {(bot.status === 'stopped' || bot.status === 'created' || bot.status === 'error') && (
-            <>
-              <button onClick={() => onStart(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">시작</button>
-              <button onClick={() => onDelete(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-negative border-none cursor-pointer hover:underline">삭제</button>
-            </>
-          )}
-          {bot.status === 'running' && (
-            <button onClick={() => onStop(bot.bot_id)} className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-transparent text-negative border border-negative cursor-pointer hover:bg-negative-bg">중지</button>
           )}
         </div>
       </div>

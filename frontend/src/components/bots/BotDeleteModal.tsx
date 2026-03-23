@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Bot } from '../../types/bot'
 
-export type DeleteOption = 'force_liquidate' | 'manual_liquidate'
+export type DeleteOption = 'force_liquidate' | 'keep'
 
 interface BotDeleteModalProps {
   bot: Bot & {
@@ -15,7 +15,7 @@ interface BotDeleteModalProps {
 export default function BotDeleteModal({ bot, onConfirm, onClose, isPending }: BotDeleteModalProps) {
   const positions = bot.positions?.filter((p) => p.quantity > 0) ?? []
   const hasPositions = positions.length > 0
-  const [deleteOption, setDeleteOption] = useState<DeleteOption>('manual_liquidate')
+  const [deleteOption, setDeleteOption] = useState<DeleteOption>('keep')
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]" onClick={onClose}>
@@ -25,8 +25,14 @@ export default function BotDeleteModal({ bot, onConfirm, onClose, isPending }: B
         <div className="text-[13px] text-text-muted mb-4">
           {hasPositions
             ? '보유 종목이 있습니다. 삭제 전 포지션 처리 방법을 선택해주세요.'
-            : <>Bot을 삭제하면 더 이상 실행할 수 없습니다.<br />거래 이력과 성과 기록은 보존됩니다.</>
+            : 'Bot을 삭제하면 더 이상 실행할 수 없습니다.'
           }
+        </div>
+
+        {/* 거래 이력 보존 안내 */}
+        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-info-bg border border-info/25 text-info text-[13px] mb-4">
+          <span className="text-[15px]">&#9432;</span>
+          <span>거래 이력과 성과 기록은 보존됩니다.</span>
         </div>
 
         {/* Bot 정보 */}
@@ -64,13 +70,13 @@ export default function BotDeleteModal({ bot, onConfirm, onClose, isPending }: B
               <input
                 type="radio"
                 name="deleteOption"
-                checked={deleteOption === 'manual_liquidate'}
-                onChange={() => setDeleteOption('manual_liquidate')}
+                checked={deleteOption === 'keep'}
+                onChange={() => setDeleteOption('keep')}
                 className="mt-0.5"
               />
               <div>
-                <div className="text-[13px] font-medium">직접 청산</div>
-                <div className="text-[12px] text-text-muted">보유 종목을 먼저 청산한 후 삭제할 수 있습니다</div>
+                <div className="text-[13px] font-medium">포지션 유지 후 삭제</div>
+                <div className="text-[12px] text-text-muted">보유 종목을 유지한 채 Bot만 삭제합니다. 포지션은 운영자가 직접 관리해야 합니다.</div>
               </div>
             </label>
           </div>

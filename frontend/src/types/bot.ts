@@ -51,9 +51,12 @@ export interface BotDetail extends Bot {
   positions?: BotPosition[]
 }
 
+export type BotLogResult = 'success' | 'failure' | 'stopped'
+
 export interface BotLog {
   timestamp: string
   success: boolean
+  result?: BotLogResult
   message?: string
 }
 
@@ -61,7 +64,6 @@ export interface BotCreateRequest {
   bot_id: string
   name: string
   strategy_name: string
-  mode: BotMode
   interval_seconds: number
   budget: number
   symbols: string[]
