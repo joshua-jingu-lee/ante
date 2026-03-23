@@ -128,15 +128,32 @@ class TradeRecorder:
 
         side_label = "매수" if event.side == "buy" else "매도"
         if self._eventbus:
+            position = await self._position_history.get_current(
+                event.bot_id, event.symbol
+            )
+            base_msg = (
+                f"봇 `{event.bot_id}`\n"
+                f"종목: `{event.symbol}`\n"
+                f"{side_label} {event.quantity}주 @ {event.price:,.0f}원"
+            )
+            if event.side == "buy":
+                base_msg += (
+                    f"\n누적 {position['quantity']:.0f}주"
+                    f" · 평단가 {position['avg_entry_price']:,.0f}원"
+                )
+            else:
+                pnl = position["realized_pnl"]
+                pnl_sign = "+" if pnl >= 0 else ""
+                base_msg += (
+                    f"\n잔여 {position['quantity']:.0f}주"
+                    f" · 평단가 {position['avg_entry_price']:,.0f}원"
+                    f"\n실현 손익 {pnl_sign}{pnl:,.0f}원"
+                )
             await self._eventbus.publish(
                 NotificationEvent(
                     level="info",
                     title=f"체결 완료 ({side_label})",
-                    message=(
-                        f"봇 `{event.bot_id}`\n"
-                        f"종목: `{event.symbol}`\n"
-                        f"{side_label} {event.quantity}주 @ {event.price:,.0f}원"
-                    ),
+                    message=base_msg,
                     category="trade",
                 )
             )

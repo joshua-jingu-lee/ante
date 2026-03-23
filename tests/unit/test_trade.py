@@ -249,6 +249,45 @@ class TestTradeRecorder:
         trades = await recorder.get_trades()
         assert len(trades) == 1
 
+    async def test_on_filled_buy_notification_includes_cumulative(
+        self, recorder, eventbus
+    ):
+        """매수 알림에 누적 수량, 평단가 포함."""
+        from ante.eventbus.events import NotificationEvent
+
+        captured: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: captured.append(e))
+        recorder.subscribe(eventbus)
+
+        await eventbus.publish(_make_filled_event(side="buy", quantity=10, price=50000))
+        await eventbus.publish(_make_filled_event(side="buy", quantity=20, price=60000))
+
+        assert len(captured) == 2
+        # 2차 매수 알림: 누적 30주, 평단가 = (10*50000+20*60000)/30 ≈ 56667
+        msg = captured[1].message
+        assert "누적 30주" in msg
+        assert "평단가" in msg
+
+    async def test_on_filled_sell_notification_includes_pnl(self, recorder, eventbus):
+        """매도 알림에 잔여 수량, 평단가, 실현 손익 포함."""
+        from ante.eventbus.events import NotificationEvent
+
+        captured: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: captured.append(e))
+        recorder.subscribe(eventbus)
+
+        # 매수 10주 @ 50,000
+        await eventbus.publish(_make_filled_event(side="buy", quantity=10, price=50000))
+        # 매도 5주 @ 60,000 → 실현 손익 = (60000 - 50000) * 5 = 50,000
+        await eventbus.publish(_make_filled_event(side="sell", quantity=5, price=60000))
+
+        assert len(captured) == 2
+        sell_msg = captured[1].message
+        assert "잔여 5주" in sell_msg
+        assert "평단가" in sell_msg
+        assert "실현 손익" in sell_msg
+        assert "+50,000원" in sell_msg
+
 
 # ── PositionHistory ──────────────────────────────────
 
