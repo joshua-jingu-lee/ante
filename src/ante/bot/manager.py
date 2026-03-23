@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ante.strategy.base import Strategy
     from ante.strategy.context import StrategyContext
     from ante.strategy.snapshot import StrategySnapshot
+    from ante.trade.service import TradeService
     from ante.treasury.manager import TreasuryManager  # noqa: F811
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class BotManager:
         strategy_rule_configs: dict[str, list[dict[str, Any]]] | None = None,
         account_service: AccountService | None = None,
         treasury_manager: TreasuryManager | None = None,
+        trade_service: TradeService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -66,6 +68,7 @@ class BotManager:
         self._strategy_rule_configs = strategy_rule_configs or {}
         self._account_service = account_service
         self._treasury_manager = treasury_manager
+        self._trade_service = trade_service
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
@@ -365,11 +368,28 @@ class BotManager:
         await bot.stop()
         self._remove_strategy_rules(bot.config.strategy_id)
 
-    async def delete_bot(self, bot_id: str) -> None:
-        """봇 소프트 딜리트. 실행 중이면 먼저 중지."""
+    async def delete_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
+        """봇 소프트 딜리트. 실행 중이면 먼저 중지.
+
+        Args:
+            bot_id: 삭제할 봇 ID.
+            handle_positions: 포지션 처리 방식.
+                - ``keep`` (기본): 포지션을 유지한 채 봇만 삭제.
+                - ``liquidate``: 보유 종목 시장가 매도 주문 발행 후 삭제.
+        """
+        if handle_positions not in ("keep", "liquidate"):
+            raise BotError(
+                f"잘못된 handle_positions 값: {handle_positions!r} "
+                f"(허용: keep, liquidate)"
+            )
+
         bot = self._get_bot(bot_id)
         if bot.status == BotStatus.RUNNING:
             await bot.stop()
+
+        # liquidate: 보유 포지션 시장가 매도 주문 발행
+        if handle_positions == "liquidate":
+            await self._liquidate_positions(bot)
 
         self._unregister_bot_events(bot)
 
@@ -411,9 +431,57 @@ class BotManager:
         )
         logger.info("봇 삭제 (soft delete): %s", bot_id)
 
-    async def remove_bot(self, bot_id: str) -> None:
+    async def remove_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
         """봇 삭제. delete_bot()의 별칭 (하위 호환)."""
-        await self.delete_bot(bot_id)
+        await self.delete_bot(bot_id, handle_positions=handle_positions)
+
+    async def _liquidate_positions(self, bot: Bot) -> None:
+        """봇의 보유 포지션에 대해 시장가 매도 주문을 발행한다.
+
+        체결 완료를 기다리지 않고 주문 발행 시점에서 반환한다.
+        TradeService가 없으면 경고 로그만 남기고 건너뛴다.
+        """
+        if not self._trade_service:
+            logger.warning(
+                "TradeService 미설정 — 포지션 청산 건너뜀: bot=%s",
+                bot.bot_id,
+            )
+            return
+
+        from ante.eventbus.events import OrderRequestEvent
+
+        positions = await self._trade_service.get_positions(bot_id=bot.bot_id)
+        open_positions = [p for p in positions if p.quantity > 0]
+
+        if not open_positions:
+            logger.info("청산 대상 포지션 없음: bot=%s", bot.bot_id)
+            return
+
+        for pos in open_positions:
+            event = OrderRequestEvent(
+                account_id=bot.config.account_id,
+                bot_id=bot.bot_id,
+                strategy_id=bot.config.strategy_id,
+                symbol=pos.symbol,
+                side="sell",
+                quantity=pos.quantity,
+                order_type="market",
+                reason=f"봇 삭제 청산 (bot={bot.bot_id})",
+                exchange=getattr(pos, "exchange", "KRX"),
+            )
+            await self._eventbus.publish(event)
+            logger.info(
+                "청산 주문 발행: bot=%s symbol=%s qty=%.4f",
+                bot.bot_id,
+                pos.symbol,
+                pos.quantity,
+            )
+
+        logger.info(
+            "봇 삭제 청산 주문 %d건 발행 완료: bot=%s",
+            len(open_positions),
+            bot.bot_id,
+        )
 
     async def stop_all(self) -> None:
         """모든 봇 중지."""

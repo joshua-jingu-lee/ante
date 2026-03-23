@@ -314,6 +314,7 @@ async def stop_bot(
     responses={
         404: {"description": "Bot not found"},
         409: {"description": "Bot state conflict"},
+        422: {"description": "Invalid handle_positions value"},
         503: {"description": "Bot manager not available"},
     },
 )
@@ -322,16 +323,29 @@ async def delete_bot(
     request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+    handle_positions: str = "keep",
 ) -> None:
-    """봇 삭제."""
+    """봇 삭제.
+
+    handle_positions:
+        - keep (기본): 포지션을 유지한 채 봇만 삭제.
+        - liquidate: 보유 종목 시장가 매도 주문 발행 후 삭제.
+    """
     from ante.bot.exceptions import BotError
+
+    if handle_positions not in ("keep", "liquidate"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"잘못된 handle_positions 값: {handle_positions!r} "
+            f"(허용: keep, liquidate)",
+        )
 
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
     try:
-        await bot_manager.delete_bot(bot_id)
+        await bot_manager.delete_bot(bot_id, handle_positions=handle_positions)
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
@@ -340,6 +354,7 @@ async def delete_bot(
             member_id=getattr(request.state, "member_id", "anonymous"),
             action="bot.delete",
             resource=f"bot:{bot_id}",
+            detail=f"handle_positions={handle_positions}",
             ip=request.client.host if request.client else "",
         )
 

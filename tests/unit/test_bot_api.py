@@ -95,7 +95,8 @@ class FakeBotManager:
         if bot:
             bot._status = "stopped"
 
-    async def delete_bot(self, bot_id: str) -> None:
+    async def delete_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
+        self.last_delete_handle_positions = handle_positions
         if bot_id in self._bots:
             del self._bots[bot_id]
 
@@ -638,3 +639,91 @@ class TestGetBotStrategyName:
         bot = resp.json()["bot"]
         assert bot["strategy_name"] is None
         assert bot["strategy_author_name"] is None
+
+
+class TestDeleteBotHandlePositions:
+    """DELETE /api/bots/{id}?handle_positions 테스트."""
+
+    def test_delete_keep_default(self, client, bot_manager):
+        """기본값(keep)으로 봇 삭제."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1")
+        assert resp.status_code == 204
+        assert bot_manager.last_delete_handle_positions == "keep"
+
+    def test_delete_keep_explicit(self, client, bot_manager):
+        """handle_positions=keep 명시적 전달."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1?handle_positions=keep")
+        assert resp.status_code == 204
+        assert bot_manager.last_delete_handle_positions == "keep"
+
+    def test_delete_liquidate(self, client, bot_manager):
+        """handle_positions=liquidate로 봇 삭제."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1?handle_positions=liquidate")
+        assert resp.status_code == 204
+        assert bot_manager.last_delete_handle_positions == "liquidate"
+
+    def test_delete_invalid_handle_positions(self, client, bot_manager):
+        """잘못된 handle_positions 값 -> 422."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.delete("/api/bots/bot-1?handle_positions=invalid")
+        assert resp.status_code == 422
+        assert "handle_positions" in resp.json()["detail"]
+
+    def test_delete_nonexistent_with_liquidate(self, client):
+        """존재하지 않는 봇에 liquidate -> 404."""
+        resp = client.delete("/api/bots/nonexistent?handle_positions=liquidate")
+        assert resp.status_code == 404
+
+
+class TestDeleteBotAuditLog:
+    """봇 삭제 감사 로그에 handle_positions 기록 테스트."""
+
+    @pytest.fixture
+    def audit_logs(self):
+        return []
+
+    @pytest.fixture
+    def fake_audit_logger(self, audit_logs):
+        class _FakeAuditLogger:
+            async def log(self, **kwargs):
+                audit_logs.append(kwargs)
+
+        return _FakeAuditLogger()
+
+    @pytest.fixture
+    def client_with_audit(
+        self, bot_manager, default_account_service, fake_audit_logger
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            audit_logger=fake_audit_logger,
+        )
+        return TestClient(app)
+
+    def test_audit_log_records_keep(self, client_with_audit, bot_manager, audit_logs):
+        """감사 로그에 handle_positions=keep 기록."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client_with_audit.delete("/api/bots/bot-1")
+        assert resp.status_code == 204
+        delete_logs = [
+            entry for entry in audit_logs if entry.get("action") == "bot.delete"
+        ]
+        assert len(delete_logs) == 1
+        assert delete_logs[0]["detail"] == "handle_positions=keep"
+
+    def test_audit_log_records_liquidate(
+        self, client_with_audit, bot_manager, audit_logs
+    ):
+        """감사 로그에 handle_positions=liquidate 기록."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client_with_audit.delete("/api/bots/bot-1?handle_positions=liquidate")
+        assert resp.status_code == 204
+        delete_logs = [
+            entry for entry in audit_logs if entry.get("action") == "bot.delete"
+        ]
+        assert len(delete_logs) == 1
+        assert delete_logs[0]["detail"] == "handle_positions=liquidate"
