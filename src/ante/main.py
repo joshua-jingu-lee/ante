@@ -139,15 +139,33 @@ async def _init_core(s: Services) -> None:
     s.dynamic_config = DynamicConfigService(db=s.db, eventbus=s.eventbus)
     await s.dynamic_config.initialize()
 
+    from ante.config.defaults import DEFAULTS
     from ante.config.dynamic import _on_log_level_changed
     from ante.eventbus.events import ConfigChangedEvent
 
+    category_map = {
+        "rule": "trading",
+        "risk": "trading",
+        "bot": "trading",
+        "broker": "trading",
+        "notification": "notification",
+        "display": "display",
+        "system": "system",
+    }
+
+    # system.log_level은 CLI 인자 우선이므로 DEFAULTS보다 먼저 등록
     await s.dynamic_config.register_default(
         "system.log_level", log_level, category="system"
     )
     await s.dynamic_config.register_default(
         "display.currency_position", "suffix", category="display"
     )
+
+    for key, value in DEFAULTS.items():
+        prefix = key.split(".")[0]
+        category = category_map.get(prefix, "system")
+        await s.dynamic_config.register_default(key, str(value), category=category)
+
     s.eventbus.subscribe(ConfigChangedEvent, _on_log_level_changed)
     logger.info("DynamicConfigService 초기화 완료")
 
