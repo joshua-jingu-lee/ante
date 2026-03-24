@@ -502,11 +502,14 @@ class TestLiveDataProvider:
 
     async def test_get_ohlcv_delegates_to_gateway_without_store(self):
         """ParquetStore 미주입 시 gateway.get_ohlcv()를 호출한다."""
+        import polars as pl
+
         mock_gateway = AsyncMock()
         mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
         provider = LiveDataProvider(mock_gateway)
         result = await provider.get_ohlcv("005930")
-        assert result == [{"close": 50000.0}]
+        assert isinstance(result, pl.DataFrame)
+        assert result.to_dicts() == [{"close": 50000.0}]
         mock_gateway.get_ohlcv.assert_called_once_with(
             "005930", timeframe="1d", limit=100
         )
@@ -532,8 +535,9 @@ class TestLiveDataProvider:
         provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
         result = await provider.get_ohlcv("005930", timeframe="1d", limit=50)
 
+        assert isinstance(result, pl.DataFrame)
         assert len(result) == 1
-        assert result[0]["close"] == 50000.0
+        assert result["close"][0] == 50000.0
         mock_store.read.assert_called_once_with("005930", "1d", limit=50)
         mock_gateway.get_ohlcv.assert_not_called()
 
@@ -549,12 +553,15 @@ class TestLiveDataProvider:
         provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
         result = await provider.get_ohlcv("005930")
 
-        assert result == [{"close": 50000.0}]
+        assert isinstance(result, pl.DataFrame)
+        assert result.to_dicts() == [{"close": 50000.0}]
         mock_store.read.assert_called_once()
         mock_gateway.get_ohlcv.assert_called_once()
 
     async def test_get_ohlcv_fallback_to_gateway_on_store_error(self):
         """ParquetStore 읽기 실패 시 APIGateway로 폴백한다."""
+        import polars as pl
+
         mock_gateway = AsyncMock()
         mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
         mock_store = MagicMock()
@@ -563,7 +570,8 @@ class TestLiveDataProvider:
         provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
         result = await provider.get_ohlcv("005930")
 
-        assert result == [{"close": 50000.0}]
+        assert isinstance(result, pl.DataFrame)
+        assert result.to_dicts() == [{"close": 50000.0}]
         mock_gateway.get_ohlcv.assert_called_once()
 
     async def test_get_indicator_returns_empty_when_no_ohlcv(self):

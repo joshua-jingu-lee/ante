@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from ante.strategy.base import OrderAction
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from ante.backtest.data_provider import BacktestDataProvider
     from ante.backtest.executor import BacktestExecutor
 
@@ -38,8 +40,12 @@ class BacktestStrategyContext:
         symbol: str,
         timeframe: str = "1d",
         limit: int = 100,
-    ) -> Any:
-        """OHLCV 데이터 조회."""
+    ) -> pl.DataFrame:
+        """OHLCV 데이터 조회.
+
+        Returns:
+            Polars DataFrame with columns: timestamp, open, high, low, close, volume.
+        """
         return await self._data.get_ohlcv(symbol, timeframe, limit)
 
     async def get_current_price(self, symbol: str) -> float:

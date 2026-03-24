@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    pass
+    import polars as pl
 
 
 # ── 메타데이터 ────────────────────────────────────
@@ -67,8 +67,12 @@ class DataProvider(ABC):
         symbol: str,
         timeframe: str = "1d",
         limit: int = 100,
-    ) -> Any:
-        """OHLCV 데이터 조회."""
+    ) -> pl.DataFrame:
+        """OHLCV 데이터 조회.
+
+        Returns:
+            Polars DataFrame with columns: timestamp, open, high, low, close, volume.
+        """
         ...
 
     @abstractmethod

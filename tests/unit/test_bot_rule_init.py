@@ -27,7 +27,9 @@ from ante.strategy import (
 
 class FakeDataProvider(DataProvider):
     async def get_ohlcv(self, symbol, timeframe="1d", limit=100):
-        return [{"close": 100.0}]
+        import polars as pl
+
+        return pl.DataFrame({"close": [100.0]})
 
     async def get_current_price(self, symbol):
         return 100.0
