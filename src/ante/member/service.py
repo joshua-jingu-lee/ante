@@ -466,6 +466,33 @@ class MemberService:
         )
         return [_row_to_member(row) for row in rows]
 
+    async def count(
+        self,
+        member_type: str | None = None,
+        org: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        """필터 조건에 맞는 전체 건수를 반환한다."""
+        conditions: list[str] = []
+        params: list[str] = []
+
+        if member_type:
+            conditions.append("type = ?")
+            params.append(member_type)
+        if org:
+            conditions.append("org = ?")
+            params.append(org)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        row = await self._db.fetch_one(
+            f"SELECT COUNT(*) AS cnt FROM members{where}",  # noqa: S608
+            tuple(params),
+        )
+        return row["cnt"] if row else 0
+
     # ── 상태 변경 ──────────────────────────────────────
 
     async def suspend(self, member_id: str, suspended_by: str = "") -> Member:

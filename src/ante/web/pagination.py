@@ -36,14 +36,12 @@ def paginate(
     """
     if cursor:
         decoded = decode_cursor(cursor)
-        filtered = []
-        found = False
-        for item in items:
-            if found:
-                filtered.append(item)
-            elif str(item[cursor_field]) == decoded:
-                found = True
-        items = filtered
+        start_idx = 0
+        for i, item in enumerate(items):
+            if str(item[cursor_field]) == decoded:
+                start_idx = i + 1
+                break
+        items = items[start_idx:]
 
     page = items[:limit]
     next_cursor = None

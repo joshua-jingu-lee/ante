@@ -72,6 +72,22 @@ class TestListApprovals:
         assert data["approvals"][0]["id"] == sample_approval.id
         assert data["approvals"][0]["type"] == "strategy_adopt"
 
+    async def test_total_is_full_count_not_page_size(self, client, approval_service):
+        """total은 페이지 크기가 아닌 전체 건수를 반환해야 한다."""
+        for i in range(5):
+            await approval_service.create(
+                type="strategy_adopt",
+                requester="agent-01",
+                title=f"전략 채택 요청 {i}",
+                body="테스트",
+                reference_id=f"report-{i:03d}",
+            )
+        resp = client.get("/api/approvals?limit=2&offset=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["approvals"]) == 2
+        assert data["total"] == 5
+
     async def test_filter_by_status(self, client, sample_approval):
         """상태 필터."""
         resp = client.get("/api/approvals?status=pending")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from pathlib import Path
@@ -32,6 +33,16 @@ router = APIRouter()
 
 _STRATEGY_NOT_FOUND = "전략을 찾을 수 없습니다"
 _logger = logging.getLogger(__name__)
+
+
+def _find_bot_for_strategy(bot_manager: Any, strategy_id: str) -> dict | None:
+    """bot_manager에서 strategy_id에 매칭되는 봇을 찾아 반환한다."""
+    if bot_manager is None:
+        return None
+    for b in bot_manager.list_bots():
+        if b.get("strategy_id") == strategy_id:
+            return b
+    return None
 
 
 @router.post(
@@ -94,25 +105,28 @@ async def list_strategies(
         from ante.trade.performance import PerformanceTracker
 
         tracker = PerformanceTracker(db)
-        for r in records:
-            bot_info_for_perf = bots_by_strategy.get(r.strategy_id)
-            account_id = (
-                bot_info_for_perf.get("account_id", "default")
-                if bot_info_for_perf
-                else "default"
-            )
-            try:
-                metrics = await tracker.calculate(
-                    account_id=account_id, strategy_id=r.strategy_id
-                )
-                if metrics.total_trades > 0:
-                    cumulative_returns[r.strategy_id] = metrics.net_pnl
-                else:
-                    cumulative_returns[r.strategy_id] = None
-            except Exception:
+
+        # N+1 해소: asyncio.gather 로 병렬 호출
+        def _account_id_for(r: Any) -> str:
+            bi = bots_by_strategy.get(r.strategy_id)
+            return bi.get("account_id", "default") if bi else "default"
+
+        tasks = [
+            tracker.calculate(account_id=_account_id_for(r), strategy_id=r.strategy_id)
+            for r in records
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r, result in zip(records, results):
+            if isinstance(result, Exception):
                 _logger.debug(
-                    "전략 %s cumulative_return 계산 실패", r.strategy_id, exc_info=True
+                    "전략 %s cumulative_return 계산 실패",
+                    r.strategy_id,
+                    exc_info=result,
                 )
+                cumulative_returns[r.strategy_id] = None
+            elif result.total_trades > 0:
+                cumulative_returns[r.strategy_id] = result.net_pnl
+            else:
                 cumulative_returns[r.strategy_id] = None
 
     strategies = []
@@ -162,12 +176,7 @@ async def get_strategy(
     if hasattr(record.registered_at, "isoformat"):
         strategy_dict["registered_at"] = record.registered_at.isoformat()
 
-    bot_info = None
-    if bot_manager is not None:
-        for b in bot_manager.list_bots():
-            if b.get("strategy_id") == strategy_id:
-                bot_info = b
-                break
+    bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
 
     # 전략 클래스에서 params/param_schema 런타임 추출
     params: dict[str, Any] = {}
@@ -227,11 +236,10 @@ async def get_strategy_performance(
 
     # account_id 결정: 쿼리 파라미터 우선, 없으면 봇에서 추출
     resolved_account_id = account_id
-    if not resolved_account_id and bot_manager is not None:
-        for b in bot_manager.list_bots():
-            if b.get("strategy_id") == strategy_id:
-                resolved_account_id = b.get("account_id")
-                break
+    if not resolved_account_id:
+        bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
+        if bot_info:
+            resolved_account_id = bot_info.get("account_id")
     if not resolved_account_id:
         resolved_account_id = "default"
 
@@ -249,17 +257,16 @@ async def get_strategy_performance(
 
     # equity curve: bot_id가 있으면 추가
     equity_curve: list[dict] = []
-    if bot_manager is not None and trade_service is not None:
-        for b in bot_manager.list_bots():
-            if b.get("strategy_id") == strategy_id:
-                from ante.report.feedback import PerformanceFeedback
+    if trade_service is not None:
+        bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
+        if bot_info:
+            from ante.report.feedback import PerformanceFeedback
 
-                feedback = PerformanceFeedback(
-                    trade_service=trade_service,
-                    bot_manager=bot_manager,
-                )
-                equity_curve = await feedback.get_equity_curve(b["bot_id"])
-                break
+            feedback = PerformanceFeedback(
+                trade_service=trade_service,
+                bot_manager=bot_manager,
+            )
+            equity_curve = await feedback.get_equity_curve(bot_info["bot_id"])
 
     result["equity_curve"] = equity_curve
     return result
@@ -289,12 +296,8 @@ async def get_strategy_daily_summary(
     tracker = PerformanceTracker(db)
 
     # strategy에 연결된 bot_id 찾기
-    bot_id = None
-    if bot_manager is not None:
-        for b in bot_manager.list_bots():
-            if b.get("strategy_id") == strategy_id:
-                bot_id = b["bot_id"]
-                break
+    bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
+    bot_id = bot_info["bot_id"] if bot_info else None
 
     summaries = await tracker.get_daily_summary(bot_id=bot_id)
     return {
@@ -333,12 +336,8 @@ async def get_strategy_weekly_summary(
 
     tracker = PerformanceTracker(db)
 
-    bot_id = None
-    if bot_manager is not None:
-        for b in bot_manager.list_bots():
-            if b.get("strategy_id") == strategy_id:
-                bot_id = b["bot_id"]
-                break
+    bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
+    bot_id = bot_info["bot_id"] if bot_info else None
 
     summaries = await tracker.get_weekly_summary(bot_id=bot_id)
     return {
@@ -379,12 +378,8 @@ async def get_strategy_monthly_summary(
 
     tracker = PerformanceTracker(db)
 
-    bot_id = None
-    if bot_manager is not None:
-        for b in bot_manager.list_bots():
-            if b.get("strategy_id") == strategy_id:
-                bot_id = b["bot_id"]
-                break
+    bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
+    bot_id = bot_info["bot_id"] if bot_info else None
 
     summaries = await tracker.get_monthly_summary(bot_id=bot_id)
     return {
