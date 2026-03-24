@@ -20,6 +20,7 @@ Feature: 계좌 리스크 룰 관리
       | trading_hours_end   | 15:30              |
       | trading_mode        | virtual            |
       | broker_type         | test               |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201 또는 응답 상태는 409
     # 409 시 body.account 가 없으므로 리터럴 account_id를 직접 사용한다
 
@@ -29,7 +30,7 @@ Feature: 계좌 리스크 룰 관리
     When PUT /api/accounts/qa-rules-acct-01/rules/daily_loss_limit 요청:
       | field   | value |
       | enabled | true  |
-      | config  | {"max_loss_pct": 5.0} |
+      | params  | {"max_loss_pct": 5.0} |
     Then 응답 상태는 200
     And 응답 body.rule.type 은 "daily_loss_limit"
     And 응답 body.rule.enabled 는 true
@@ -61,12 +62,12 @@ Feature: 계좌 리스크 룰 관리
     When PUT /api/accounts/qa-rules-acct-01/rules/nonexistent_rule 요청:
       | field   | value |
       | enabled | true  |
-      | config  | {}    |
+      | params  | {}    |
     Then 응답 상태는 400
 
-  Scenario: 유효하지 않은 룰 config (API)
+  Scenario: 유효하지 않은 룰 params (API)
     When PUT /api/accounts/qa-rules-acct-01/rules/daily_loss_limit 요청:
       | field   | value |
       | enabled | true  |
-      | config  | {"max_loss_pct": -1} |
+      | params  | {"max_loss_pct": -1} |
     Then 응답 상태는 422

@@ -433,6 +433,84 @@ def seed(db_path: str) -> None:
         conn.close()
 
 
+def seed_parquet(data_path: str = "data/") -> None:
+    """ParquetStore에 최소 OHLCV 데이터셋을 시딩한다.
+
+    dataset.feature TC에서 데이터셋 목록/상세 조회를 검증하려면
+    실제 Parquet 파일이 필요하다.
+    심볼 000001 (test 브로커 가상 종목), 타임프레임 1d, 30일분.
+    """
+    try:
+        import polars as pl
+    except ImportError:
+        logger.warning("polars 미설치 — Parquet 시딩 건너뜀")
+        return
+
+    from pathlib import Path
+
+    base = Path(data_path)
+    symbol = "000001"
+    timeframe = "1d"
+    exchange = "KRX"
+
+    # ohlcv/{timeframe}/{exchange}/{symbol}/ 구조
+    target_dir = base / "ohlcv" / timeframe / exchange / symbol
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # 이미 파일이 있으면 건너뛴다
+    existing = list(target_dir.glob("*.parquet"))
+    if existing:
+        logger.info("Parquet 데이터셋 이미 존재 (%d개 파일) — 건너뜀", len(existing))
+        return
+
+    # 30일분 가상 OHLCV 생성
+    base_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = []
+    base_price = 50000.0
+    for i in range(30):
+        dt = base_date - timedelta(days=29 - i)
+        # 약간의 변동 시뮬레이션
+        o = base_price + (i % 7 - 3) * 100
+        h = o + 500
+        low = o - 300
+        c = o + (i % 5 - 2) * 150
+        vol = 100000 + i * 5000
+        rows.append(
+            {
+                "timestamp": dt,
+                "open": o,
+                "high": h,
+                "low": low,
+                "close": c,
+                "volume": vol,
+            }
+        )
+
+    df = pl.DataFrame(rows)
+    # timestamp를 Datetime으로 변환
+    df = df.with_columns(pl.col("timestamp").cast(pl.Datetime("us")))
+
+    # 월별 파티셔닝 (단순히 파일 하나로 기록)
+    month_groups: dict[str, list[int]] = {}
+    for idx, row in enumerate(rows):
+        month_key = row["timestamp"].strftime("%Y-%m")
+        month_groups.setdefault(month_key, []).append(idx)
+
+    for month_key, indices in month_groups.items():
+        partition = df[indices]
+        filepath = target_dir / f"{month_key}.parquet"
+        partition.write_parquet(str(filepath))
+
+    logger.info(
+        "Parquet 데이터셋 시딩 완료: %s/%s/%s (%d행, %d파일)",
+        exchange,
+        symbol,
+        timeframe,
+        len(rows),
+        len(month_groups),
+    )
+
+
 def main() -> None:
     """CLI 진입점."""
     parser = argparse.ArgumentParser(description="QA 데이터셋 시딩")
@@ -442,6 +520,12 @@ def main() -> None:
         default="db/ante.db",
         help="SQLite DB 경로 (기본: db/ante.db)",
     )
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default="data/",
+        help="Parquet 데이터 저장소 경로 (기본: data/)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -450,6 +534,7 @@ def main() -> None:
     )
 
     seed(args.db_path)
+    seed_parquet(args.data_path)
 
 
 if __name__ == "__main__":
