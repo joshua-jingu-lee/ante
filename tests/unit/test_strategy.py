@@ -736,36 +736,6 @@ class TestStrategyRegistry:
         assert record.rationale == ""
         assert record.risks == []
 
-    async def test_migrate_rationale_risks_columns(self, db, tmp_path):
-        """기존 테이블에 rationale, risks 컬럼이 없어도 마이그레이션으로 추가 (#802)."""
-        # rationale, risks 없는 구식 스키마 생성
-        await db.execute_script("""
-            CREATE TABLE IF NOT EXISTS strategies (
-                strategy_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                version TEXT NOT NULL,
-                filepath TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'registered',
-                registered_at TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                author TEXT DEFAULT 'agent',
-                validation_warnings TEXT DEFAULT '[]'
-            );
-        """)
-
-        registry = StrategyRegistry(db=db)
-        await registry.initialize()
-
-        # 마이그레이션 후 등록이 정상 동작
-        meta = StrategyMeta(name="test", version="1.0.0", description="test")
-        filepath = tmp_path / "test.py"
-        filepath.write_text("")
-        record = await registry.register(
-            filepath, meta, rationale="test rationale", risks=["risk1"]
-        )
-        assert record.rationale == "test rationale"
-        assert record.risks == ["risk1"]
-
 
 # ── Exchange 호환성 검증 테스트 ──────────────────────
 

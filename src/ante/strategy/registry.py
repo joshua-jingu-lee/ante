@@ -70,22 +70,6 @@ class StrategyRegistry:
     async def initialize(self) -> None:
         """스키마 생성."""
         await self._db.execute_script(STRATEGY_REGISTRY_SCHEMA)
-        await self._migrate_rationale_risks()
-
-    async def _migrate_rationale_risks(self) -> None:
-        """기존 strategies 테이블에 rationale, risks 컬럼이 없으면 추가한다."""
-        columns = await self._db.fetch_all("PRAGMA table_info(strategies)")
-        col_names = {col["name"] for col in columns}
-        if "rationale" not in col_names:
-            await self._db.execute(
-                "ALTER TABLE strategies ADD COLUMN rationale TEXT DEFAULT ''"
-            )
-            logger.info("strategies 테이블에 rationale 컬럼 추가 (마이그레이션)")
-        if "risks" not in col_names:
-            await self._db.execute(
-                "ALTER TABLE strategies ADD COLUMN risks TEXT DEFAULT '[]'"
-            )
-            logger.info("strategies 테이블에 risks 컬럼 추가 (마이그레이션)")
 
     async def register(
         self,
