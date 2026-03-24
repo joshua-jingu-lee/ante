@@ -68,7 +68,8 @@ async def list_members(
     members = await svc.list(
         member_type=type, org=org, status=status, limit=limit, offset=offset
     )
-    return {"members": [asdict(m) for m in members], "total": len(members)}
+    total = await svc.count(member_type=type, org=org, status=status)
+    return {"members": [asdict(m) for m in members], "total": total}
 
 
 @router.post(

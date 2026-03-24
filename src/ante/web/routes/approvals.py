@@ -49,10 +49,11 @@ async def list_approvals(
     approvals = await approval_service.list(
         status=status, type=type, search=search, limit=limit, offset=offset
     )
+    total = await approval_service.count(status=status, type=type, search=search)
 
     return {
         "approvals": [asdict(a) for a in approvals],
-        "total": len(approvals),
+        "total": total,
     }
 
 

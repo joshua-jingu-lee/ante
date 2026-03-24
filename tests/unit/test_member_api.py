@@ -49,6 +49,23 @@ class FakeMemberService:
         limit: int = 100,
         offset: int = 0,
     ) -> list[FakeMember]:
+        result = self._filtered(member_type=member_type, org=org, status=status)
+        return result[offset : offset + limit]
+
+    async def count(
+        self,
+        member_type: str | None = None,
+        org: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        return len(self._filtered(member_type=member_type, org=org, status=status))
+
+    def _filtered(
+        self,
+        member_type: str | None = None,
+        org: str | None = None,
+        status: str | None = None,
+    ) -> list[FakeMember]:
         result = list(self._members.values())
         if member_type:
             result = [m for m in result if m.type == member_type]
@@ -56,7 +73,7 @@ class FakeMemberService:
             result = [m for m in result if m.org == org]
         if status:
             result = [m for m in result if m.status == status]
-        return result[offset : offset + limit]
+        return result
 
     async def register(
         self,
@@ -169,6 +186,18 @@ class TestListMembers:
         resp = client.get("/api/members")
         assert resp.status_code == 200
         assert len(resp.json()["members"]) == 1
+
+    def test_total_is_full_count_not_page_size(self, client, member_service):
+        """total은 페이지 크기가 아닌 전체 건수를 반환해야 한다."""
+        for i in range(5):
+            member_service._members[f"agent-{i:02d}"] = FakeMember(
+                member_id=f"agent-{i:02d}", type="agent"
+            )
+        resp = client.get("/api/members?limit=2&offset=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["members"]) == 2
+        assert data["total"] == 5
 
     def test_filter_by_type(self, client, member_service):
         """타입 필터."""

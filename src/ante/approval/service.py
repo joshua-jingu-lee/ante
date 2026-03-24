@@ -622,6 +622,33 @@ class ApprovalService:
         rows = await self._db.fetch_all(query, tuple(params))
         return [self._row_to_request(row) for row in rows]
 
+    async def count(
+        self,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+    ) -> int:
+        """필터 조건에 맞는 전체 건수를 반환한다."""
+        conditions: list[str] = []
+        params: list[object] = []
+
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if type:
+            conditions.append("type = ?")
+            params.append(type)
+        if search:
+            conditions.append("(title LIKE ? OR requester LIKE ?)")
+            like_pattern = f"%{search}%"
+            params.extend([like_pattern, like_pattern])
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+        query = f"SELECT COUNT(*) AS cnt FROM approvals WHERE {where}"  # noqa: S608
+
+        row = await self._db.fetch_one(query, tuple(params))
+        return row["cnt"] if row else 0
+
     def _validate_params(
         self,
         type: str,
