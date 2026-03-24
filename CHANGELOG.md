@@ -2,6 +2,961 @@
 
 <!-- version list -->
 
+## v0.7.0 (2026-03-24)
+
+### Bug Fixes
+
+- Dockerfile.test 프론트 빌드 및 DynamicConfig default=None 처리 수정
+  ([`28f134b`](https://github.com/joshua-jingu-lee/ante/commit/28f134b0ed4fd3bf0f7e703e3834df5c7d0f092c))
+
+- QA 전수 검사에서 발견된 버그 4건 수정
+  ([`b3cd466`](https://github.com/joshua-jingu-lee/ante/commit/b3cd466f9828ca5c7ef51ac8182913280ef11678))
+
+- 에픽 통합 시 DDL 누락 컬럼 반영 및 테스트 호환성 수정 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- 인증정보 없는 계좌의 봇 시작 시 422 에러 반환 (#670) ([#676](https://github.com/joshua-jingu-lee/ante/pull/676),
+  [`d121eb8`](https://github.com/joshua-jingu-lee/ante/commit/d121eb86a3dbef86f64462150815d45b6bf2db4b))
+
+- **account**: Create()에서 account_id 형식 검증 추가
+  ([#789](https://github.com/joshua-jingu-lee/ante/pull/789),
+  [`2379f56`](https://github.com/joshua-jingu-lee/ante/commit/2379f567b10e8aeb3640eaa6ff25e718097ccd9d))
+
+- **account**: Create()에서 required_credentials 검증 추가
+  ([#803](https://github.com/joshua-jingu-lee/ante/pull/803),
+  [`67e228c`](https://github.com/joshua-jingu-lee/ante/commit/67e228c4a08b0bb6d3f3e3f90525eedf0e987904))
+
+- **account**: Create()에서 required_credentials 검증 추가 #775
+  ([#803](https://github.com/joshua-jingu-lee/ante/pull/803),
+  [`67e228c`](https://github.com/joshua-jingu-lee/ante/commit/67e228c4a08b0bb6d3f3e3f90525eedf0e987904))
+
+- **account**: Credentials Fernet 암호화 적용 #721
+  ([#740](https://github.com/joshua-jingu-lee/ante/pull/740),
+  [`8a89127`](https://github.com/joshua-jingu-lee/ante/commit/8a891273311f7ee7de0ca7fe5896142090d8f049))
+
+- **account**: Credentials Fernet 암호화 적용 — 평문 DB 저장 제거
+  ([#740](https://github.com/joshua-jingu-lee/ante/pull/740),
+  [`8a89127`](https://github.com/joshua-jingu-lee/ante/commit/8a891273311f7ee7de0ca7fe5896142090d8f049))
+
+- **account**: Delete()에서 이벤트 발행 및 CLI IPC 전환
+  ([#720](https://github.com/joshua-jingu-lee/ante/pull/720),
+  [`dd45dc1`](https://github.com/joshua-jingu-lee/ante/commit/dd45dc128214aeabbf1bb3ca2164639c54e1acbc))
+
+- **account**: Delete()에서 이벤트 발행 및 CLI IPC 전환 #717
+  ([#720](https://github.com/joshua-jingu-lee/ante/pull/720),
+  [`dd45dc1`](https://github.com/joshua-jingu-lee/ante/commit/dd45dc128214aeabbf1bb3ca2164639c54e1acbc))
+
+- **account**: DELETED 계좌 suspend/delete 상태 전이 가드 추가 #718
+  ([#725](https://github.com/joshua-jingu-lee/ante/pull/725),
+  [`9309429`](https://github.com/joshua-jingu-lee/ante/commit/9309429cddb91dd42bd4713849d8b07ef72f212d))
+
+- **account**: DELETED 계좌에 suspend/delete 상태 전이 가드 추가
+  ([#725](https://github.com/joshua-jingu-lee/ante/pull/725),
+  [`9309429`](https://github.com/joshua-jingu-lee/ante/commit/9309429cddb91dd42bd4713849d8b07ef72f212d))
+
+- **account**: Kis-overseas 프리셋 제거 — 미구현 브로커 타입 생성 차단 #770
+  ([#780](https://github.com/joshua-jingu-lee/ante/pull/780),
+  [`f5c58c7`](https://github.com/joshua-jingu-lee/ante/commit/f5c58c7d0f4fdb693cc322f4702b38f2e67123cc))
+
+- **account**: MissingCredentialsError를 422로 매핑 Refs #848
+  ([#850](https://github.com/joshua-jingu-lee/ante/pull/850),
+  [`93a26af`](https://github.com/joshua-jingu-lee/ante/commit/93a26afde7d58e8db9791cbaa3c27d547b5bcd8c))
+
+- **account**: Soft-delete된 계좌 ID 충돌 시 409 반환
+  ([#680](https://github.com/joshua-jingu-lee/ante/pull/680),
+  [`e0efb2c`](https://github.com/joshua-jingu-lee/ante/commit/e0efb2c5262f952cfb1d19adc755c6ccc2d2cf28))
+
+- **account**: Test 브로커 required_credentials 추가
+  ([#656](https://github.com/joshua-jingu-lee/ante/pull/656),
+  [`2d7da9a`](https://github.com/joshua-jingu-lee/ante/commit/2d7da9a2e0527f96a221f21e200343712e967d8d))
+
+- **account**: Update()에서 미인식 필드 전달 시 ValueError 발생 (#748)
+  ([#756](https://github.com/joshua-jingu-lee/ante/pull/756),
+  [`193762c`](https://github.com/joshua-jingu-lee/ante/commit/193762c85d624f6812ab42c8414806bb40bc4962))
+
+- **account**: 불변 필드(exchange, currency, trading_mode, broker_type) 수정 차단 (#690)
+  ([#691](https://github.com/joshua-jingu-lee/ante/pull/691),
+  [`0a32f1d`](https://github.com/joshua-jingu-lee/ante/commit/0a32f1d0cf4fb0fcefc90235647b4cf06c88420d))
+
+- **account**: 삭제된 계좌 활성화 시 409 반환 (#660)
+  ([#666](https://github.com/joshua-jingu-lee/ante/pull/666),
+  [`94c8ab9`](https://github.com/joshua-jingu-lee/ante/commit/94c8ab99fc3f2d5791a8e4689753de50f3910ff0))
+
+- **account**: 이미 정지된 계좌 재정지 시 409 반환 ([#655](https://github.com/joshua-jingu-lee/ante/pull/655),
+  [`cf234dd`](https://github.com/joshua-jingu-lee/ante/commit/cf234dd168490902797228c28c8bce1d5b24b225))
+
+- **api**: Body 없는 POST /accounts/{id}/suspend 422 해결
+  ([#646](https://github.com/joshua-jingu-lee/ante/pull/646),
+  [`ea4305c`](https://github.com/joshua-jingu-lee/ante/commit/ea4305c38a6f0d378425b94676e2162b91baca4d))
+
+- **api**: 전략 상세 응답에 root-level status 필드 추가 (#672)
+  ([#674](https://github.com/joshua-jingu-lee/ante/pull/674),
+  [`1f752df`](https://github.com/joshua-jingu-lee/ante/commit/1f752df5260c58e02884d37769f780cde542888d))
+
+- **bot**: Bot 생성 시 Account 상태(active) 검증 추가 #736
+  ([#746](https://github.com/joshua-jingu-lee/ante/pull/746),
+  [`352917c`](https://github.com/joshua-jingu-lee/ante/commit/352917c480c3fc43a80b7ed8c6f2384ef1bcb83e))
+
+- **bot**: Bot.stop()에서 ERROR→STOPPED 상태 전이 허용
+  ([#809](https://github.com/joshua-jingu-lee/ante/pull/809),
+  [`e26ca99`](https://github.com/joshua-jingu-lee/ante/commit/e26ca99019b317721462349baa7a324659e3b660))
+
+- **bot**: BotConfig.paper_initial_balance 필드 제거 #747
+  ([#766](https://github.com/joshua-jingu-lee/ante/pull/766),
+  [`b5c5d41`](https://github.com/joshua-jingu-lee/ante/commit/b5c5d4149fb44b818f8cdca9bed966e36737a05d))
+
+- **bot**: Get_info()에 trading_mode, exchange, currency 필드 추가 #750
+  ([#761](https://github.com/joshua-jingu-lee/ante/pull/761),
+  [`3d42939`](https://github.com/joshua-jingu-lee/ante/commit/3d42939e8237d80d167b540e6d4376e92a3792e6))
+
+- **bot**: PUT /api/bots/{id} budget 수정 시 TreasuryError를 422로 반환
+  ([#853](https://github.com/joshua-jingu-lee/ante/pull/853),
+  [`9aebeca`](https://github.com/joshua-jingu-lee/ante/commit/9aebecaa076547c5ac4734e2adf32715d2a5062d))
+
+- **bot**: SignalChannel에 OrderCancelFailedEvent 구독 추가 #779
+  ([#816](https://github.com/joshua-jingu-lee/ante/pull/816),
+  [`bdabbc6`](https://github.com/joshua-jingu-lee/ante/commit/bdabbc69af18d9c39057d08c61c41bca42abbc8f))
+
+- **bot**: 계좌 상태 검증을 strategy meta 조건에서 분리
+  ([#746](https://github.com/joshua-jingu-lee/ante/pull/746),
+  [`352917c`](https://github.com/joshua-jingu-lee/ante/commit/352917c480c3fc43a80b7ed8c6f2384ef1bcb83e))
+
+- **bot**: 연속 타임아웃 초과 시 ERROR 상태 전이 및 BotErrorEvent 발행 #793
+  ([#811](https://github.com/joshua-jingu-lee/ante/pull/811),
+  [`c89b952`](https://github.com/joshua-jingu-lee/ante/commit/c89b9527f2fd03c12ae630e153bbc749e0d3b298))
+
+- **bot**: 정지된 계좌에서 봇 생성 시 409 반환 ([#654](https://github.com/joshua-jingu-lee/ante/pull/654),
+  [`77efd2c`](https://github.com/joshua-jingu-lee/ante/commit/77efd2cf8ac5e55d177207f6becd50ff16519e54))
+
+- **broker**: AccountService.get_broker()에 is_paper 주입 — KIS 모의투자 모드 수정
+  ([#897](https://github.com/joshua-jingu-lee/ante/pull/897),
+  [`e5ad5b8`](https://github.com/joshua-jingu-lee/ante/commit/e5ad5b8f82ed3206af0e6cbb1db316c62f65fffe))
+
+- **cli**: Broker CLI IPC 우선 전환으로 토큰 재발급 방지
+  ([#898](https://github.com/joshua-jingu-lee/ante/pull/898),
+  [`272cccb`](https://github.com/joshua-jingu-lee/ante/commit/272cccba4d3fa213466e5eba79dc78886ab749dd))
+
+- **cli**: Config set JSON 출력에 status 필드 복원 #705
+  ([#707](https://github.com/joshua-jingu-lee/ante/pull/707),
+  [`4b0d7aa`](https://github.com/joshua-jingu-lee/ante/commit/4b0d7aaffc4e4de445e39fe13bcd3d442cd24109))
+
+- **cli**: DART API 키 프롬프트 EOF 수신 시 Abort 대신 기본값 처리 (#673)
+  ([#675](https://github.com/joshua-jingu-lee/ante/pull/675),
+  [`3739108`](https://github.com/joshua-jingu-lee/ante/commit/3739108276744f5661fab1440130f5e55e37ee14))
+
+- **cli**: Trade CLI hang 해결 — 서비스 생성자 인자 수정
+  ([#649](https://github.com/joshua-jingu-lee/ante/pull/649),
+  [`1ba6321`](https://github.com/joshua-jingu-lee/ante/commit/1ba6321fafd799bca10289f0fb9ef6e9bdd61fcc))
+
+- **config**: 웹 대시보드 기본 포트를 8000에서 3982로 변경
+  ([#600](https://github.com/joshua-jingu-lee/ante/pull/600),
+  [`3f194ae`](https://github.com/joshua-jingu-lee/ante/commit/3f194aea4b69df11959a112d5ecfc2f011c40c86))
+
+- **event**: BotRestartExhaustedEvent에 account_id 필드 추가
+  ([#757](https://github.com/joshua-jingu-lee/ante/pull/757),
+  [`bf8997d`](https://github.com/joshua-jingu-lee/ante/commit/bf8997da15d102f3e0f63c8bd0c43f4acaafe143))
+
+- **event**: BotRestartExhaustedEvent에 account_id 필드 추가 #749
+  ([#757](https://github.com/joshua-jingu-lee/ante/pull/757),
+  [`bf8997d`](https://github.com/joshua-jingu-lee/ante/commit/bf8997da15d102f3e0f63c8bd0c43f4acaafe143))
+
+- **frontend**: BotEditModal 전략 변경이 서버에 전송되지 않는 버그 수정
+  ([#899](https://github.com/joshua-jingu-lee/ante/pull/899),
+  [`94590c3`](https://github.com/joshua-jingu-lee/ante/commit/94590c385d8118576422148991eb79f1cb24ae09))
+
+- **frontend**: Revoked 에이전트 목록 숨김 및 suspended 아바타 dimmed 적용
+  ([#901](https://github.com/joshua-jingu-lee/ante/pull/901),
+  [`ce49851`](https://github.com/joshua-jingu-lee/ante/commit/ce49851f561039b8bf68da7c7e44c19ea3ac1fce))
+
+- **frontend**: 결재 승인 완료 시 positive 배너 추가
+  ([#901](https://github.com/joshua-jingu-lee/ante/pull/901),
+  [`ce49851`](https://github.com/joshua-jingu-lee/ante/commit/ce49851f561039b8bf68da7c7e44c19ea3ac1fce))
+
+- **frontend**: 디자인 토큰 위반 일괄 수정 — 시맨틱 토큰으로 치환
+  ([#873](https://github.com/joshua-jingu-lee/ante/pull/873),
+  [`b4904a3`](https://github.com/joshua-jingu-lee/ante/commit/b4904a394bdbd581cc2918dcd83a2319f0cdc1d5))
+
+- **frontend**: 리포트 rejected 라벨 '미채택'으로 변경 및 수행자 ID 병기
+  ([#901](https://github.com/joshua-jingu-lee/ante/pull/901),
+  [`ce49851`](https://github.com/joshua-jingu-lee/ante/commit/ce49851f561039b8bf68da7c7e44c19ea3ac1fce))
+
+- **frontend**: 설정 페이지 필드 누락 및 리스크 규칙 레이아웃 구분
+  ([#909](https://github.com/joshua-jingu-lee/ante/pull/909),
+  [`f5d1314`](https://github.com/joshua-jingu-lee/ante/commit/f5d1314f5a418d8685cf3f5b625e3034c50d86c2))
+
+- **frontend**: 에이전트 등록 폼 개선 및 상태 버튼 상세 전용 전환
+  ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- **frontend**: 에이전트 등록 폼 소속 자유입력 및 Agent ID 정규식 검증 추가
+  ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- **frontend**: 에이전트 상태 전환 버튼을 카드에서 제거하여 상세 페이지에서만 노출
+  ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- **frontend**: 유저스토리 라벨·문구 스펙 불일치 5건 수정 (#900)
+  ([#901](https://github.com/joshua-jingu-lee/ante/pull/901),
+  [`ce49851`](https://github.com/joshua-jingu-lee/ante/commit/ce49851f561039b8bf68da7c7e44c19ea3ac1fce))
+
+- **frontend**: 전략 상태 뱃지 archived 라벨 '보관됨' → '보관' 수정
+  ([#901](https://github.com/joshua-jingu-lee/ante/pull/901),
+  [`ce49851`](https://github.com/joshua-jingu-lee/ante/commit/ce49851f561039b8bf68da7c7e44c19ea3ac1fce))
+
+- **member**: Reactivate()에 MemberReactivatedEvent 발행 추가 #797
+  ([#813](https://github.com/joshua-jingu-lee/ante/pull/813),
+  [`f281fb0`](https://github.com/joshua-jingu-lee/ante/commit/f281fb02db1ccc0d21ad6d0af414175f9992fed1))
+
+- **member**: RecoveryKeyManager 인증 실패 시 NotificationEvent 발행 추가 #807
+  ([#814](https://github.com/joshua-jingu-lee/ante/pull/814),
+  [`c08fe22`](https://github.com/joshua-jingu-lee/ante/commit/c08fe22089efe977807d725e9c80afdcaa5edaae))
+
+- **member**: Register/update_scopes master 권한 검증 추가
+  ([#763](https://github.com/joshua-jingu-lee/ante/pull/763),
+  [`58ed8bd`](https://github.com/joshua-jingu-lee/ante/commit/58ed8bdd49233bf502c8d4540fd460823748b004))
+
+- **member**: Register/update_scopes에 master 권한 검증 추가 #739
+  ([#763](https://github.com/joshua-jingu-lee/ante/pull/763),
+  [`58ed8bd`](https://github.com/joshua-jingu-lee/ante/commit/58ed8bdd49233bf502c8d4540fd460823748b004))
+
+- **member**: 패스워드 변경/리셋 시 NotificationEvent 발행 추가
+  ([#787](https://github.com/joshua-jingu-lee/ante/pull/787),
+  [`4b3f1df`](https://github.com/joshua-jingu-lee/ante/commit/4b3f1df6bc1ff55bac2ce1b2cef746e96f95b876))
+
+- **member**: 패스워드 변경/리셋 시 기존 토큰 무효화 추가 ([#784](https://github.com/joshua-jingu-lee/ante/pull/784),
+  [`d97dce1`](https://github.com/joshua-jingu-lee/ante/commit/d97dce10dc4b83fc70d15946173c7a5c5362c0da))
+
+- **qa**: Docker exec 시 CLI 토큰 파일 폴백으로 인증 실패 해결 Refs #854
+  ([#858](https://github.com/joshua-jingu-lee/ante/pull/858),
+  [`d3c1894`](https://github.com/joshua-jingu-lee/ante/commit/d3c18948b1b18874a7a648a224f9c991a9f66f8d))
+
+- **qa**: QA TC 환경 결함 5건 수정 — 토큰·credentials·allocation·데이터셋·룰 params
+  ([#868](https://github.com/joshua-jingu-lee/ante/pull/868),
+  [`055f578`](https://github.com/joshua-jingu-lee/ante/commit/055f578b8af2564ea1b0111f6af0b0a6a227ed16))
+
+- **qa**: QA 엔트리포인트에 risk.test_qa_key 동적 설정 시드 등록
+  ([#638](https://github.com/joshua-jingu-lee/ante/pull/638),
+  [`0f9daec`](https://github.com/joshua-jingu-lee/ante/commit/0f9daec0cde9e552ce23e94baebb3726cf2af10d))
+
+- **qa**: QA 전략 레지스트리 시딩 구현 ([#657](https://github.com/joshua-jingu-lee/ante/pull/657),
+  [`5ae41ac`](https://github.com/joshua-jingu-lee/ante/commit/5ae41ac3230bc0622af809e80468259127112d7f))
+
+- **qa**: QA 컨테이너에 ANTE_MEMBER_TOKEN 설정 — CLI TC 인증 실패 해결
+  ([#849](https://github.com/joshua-jingu-lee/ante/pull/849),
+  [`4cfe4ff`](https://github.com/joshua-jingu-lee/ante/commit/4cfe4ff46874f4ffa05c851d7974fa6cf2868a6b))
+
+- **qa**: QA 환경에 qa_sample.py 전략 파일 추가 ([#637](https://github.com/joshua-jingu-lee/ante/pull/637),
+  [`4d123eb`](https://github.com/joshua-jingu-lee/ante/commit/4d123eb6e4b8f41fe5b52fd0eef016e888b600fa))
+
+- **qa**: Treasury 503 — get_treasury fallback 및 QA 시드 계좌 추가
+  ([#648](https://github.com/joshua-jingu-lee/ante/pull/648),
+  [`14bf435`](https://github.com/joshua-jingu-lee/ante/commit/14bf435e9c7813735b7496e0697ed0b0f988a2c6))
+
+- **qa**: 전략 시딩 스크립트 모듈 수준 변수 참조 지원
+  ([`d222323`](https://github.com/joshua-jingu-lee/ante/commit/d222323b55c9b4f0507b1f0c8cd7680800e7c56d))
+
+- **rule**: DailyLossLimitRule 손실률 분모를 전일 총 자산으로 수정
+  ([#712](https://github.com/joshua-jingu-lee/ante/pull/712),
+  [`89bb965`](https://github.com/joshua-jingu-lee/ante/commit/89bb965017bb23f5272b36c48bcd65febdbdb92e))
+
+- **rule**: DailyLossLimitRule/TotalExposureLimitRule 매도(손절) 허용 및 알림 전환
+  ([#716](https://github.com/joshua-jingu-lee/ante/pull/716),
+  [`c912271`](https://github.com/joshua-jingu-lee/ante/commit/c912271b8a6fa58ffe3f89481662caf9a7e8ff38))
+
+- **rule**: PositionSizeRule 분모를 봇 할당 예산으로 수정 (#771)
+  ([#782](https://github.com/joshua-jingu-lee/ante/pull/782),
+  [`cc51989`](https://github.com/joshua-jingu-lee/ante/commit/cc5198940019e17c094c875f301fc0825438946f))
+
+- **rule**: RuleEngine.start() sync 시그니처 확인 및 회귀 테스트 추가 #742
+  ([#760](https://github.com/joshua-jingu-lee/ante/pull/760),
+  [`26bfbf5`](https://github.com/joshua-jingu-lee/ante/commit/26bfbf517c6ee0d273e0bac4f590c18f94de16a5))
+
+- **rule**: TotalExposureLimitRule 노출률을 전 봇 합산/총 자산으로 수정
+  ([#714](https://github.com/joshua-jingu-lee/ante/pull/714),
+  [`5c20546`](https://github.com/joshua-jingu-lee/ante/commit/5c20546479b8cce36c6ac6978860eb2566c29399))
+
+- **rule**: TotalExposureLimitRule 노출률을 전 봇 합산/총 자산으로 수정 #710
+  ([#714](https://github.com/joshua-jingu-lee/ante/pull/714),
+  [`5c20546`](https://github.com/joshua-jingu-lee/ante/commit/5c20546479b8cce36c6ac6978860eb2566c29399))
+
+- **rule**: TradingHoursRule이 Account의 거래시간을 RuleContext 경유로 사용 #781
+  ([#818](https://github.com/joshua-jingu-lee/ante/pull/818),
+  [`be6ec32`](https://github.com/joshua-jingu-lee/ante/commit/be6ec32fbe351c2e204b30a00ff2ed32c1821e2f))
+
+- **rule**: UnrealizedLossLimitRule metadata 경유 제거 및 데이터 주입 구현 #783
+  ([#810](https://github.com/joshua-jingu-lee/ante/pull/810),
+  [`47590a1`](https://github.com/joshua-jingu-lee/ante/commit/47590a13b9757c16cf1b5c461381abb49e4d7629))
+
+- **rule**: 계좌 리스크 룰 config validation 추가 — 음수 값 거부
+  ([#851](https://github.com/joshua-jingu-lee/ante/pull/851),
+  [`3942c2a`](https://github.com/joshua-jingu-lee/ante/commit/3942c2abf6b86e63003a5a93233997a2a4a8dfd4))
+
+- **strategy**: 전략 성과 조회 500 에러 수정 (#659)
+  ([#665](https://github.com/joshua-jingu-lee/ante/pull/665),
+  [`eba47a3`](https://github.com/joshua-jingu-lee/ante/commit/eba47a3a7b707231f7a40ab8399fbf6a90f5021c))
+
+- **tc**: Account create 대화형 테스트에 인증정보 입력 추가
+  ([`b2f6e42`](https://github.com/joshua-jingu-lee/ante/commit/b2f6e42add84da157c44c1a54b54248ad3b5a6bf))
+
+- **tc**: Account/rules TC 재실행 시 409 Conflict 실패 수정
+  ([#861](https://github.com/joshua-jingu-lee/ante/pull/861),
+  [`ed3daff`](https://github.com/joshua-jingu-lee/ante/commit/ed3daff0138ed0444045c1517cd99689b4992785))
+
+- **tc**: Allocation.feature 멱등성 확보 — 봇 삭제 후 재생성 방식
+  ([`fb1aa0f`](https://github.com/joshua-jingu-lee/ante/commit/fb1aa0fd1d512d3f7d2ebffcdb62f67b76cc5448))
+
+- **tc**: Allocation.feature 봇 생성에 bot_id 필드 추가
+  ([`de96a76`](https://github.com/joshua-jingu-lee/ante/commit/de96a76aa0d0ee33b9e39e8de58dbc3701c244f1))
+
+- **tc**: Allocation.feature 봇 생성에 strategy_id 누락 수정
+  ([`ed09b08`](https://github.com/joshua-jingu-lee/ante/commit/ed09b089b04f23e750bb325544a5814ac9103895))
+
+- **tc**: Broker_type mock → test로 일괄 변경 ([#636](https://github.com/joshua-jingu-lee/ante/pull/636),
+  [`f22562d`](https://github.com/joshua-jingu-lee/ante/commit/f22562dad19f7c1dba79d522a92795ec2c5cde30))
+
+- **tc**: Credentials.feature broker_type 재설계 (#662)
+  ([#669](https://github.com/joshua-jingu-lee/ante/pull/669),
+  [`58d3259`](https://github.com/joshua-jingu-lee/ante/commit/58d325982d5f86dcadbf5def08ab79c42f7939e3))
+
+- **tc**: Credentials.feature 멱등성 확보 — 계좌/봇 생성 시 409 허용
+  ([`92f25fa`](https://github.com/joshua-jingu-lee/ante/commit/92f25fa8f9934d9a125e2d7311a079eba0930148))
+
+- **tc**: Init.feature CLI 시스템 상태 필드명 수정
+  ([`9698c97`](https://github.com/joshua-jingu-lee/ante/commit/9698c976e3cdc1cf03a28e30f6199f4c62efc4f1))
+
+- **tc**: Init.feature 응답 구조 및 환경값 불일치 수정 (#661)
+  ([#668](https://github.com/joshua-jingu-lee/ante/pull/668),
+  [`8a905a5`](https://github.com/joshua-jingu-lee/ante/commit/8a905a52b6635cfeb768adc0243a872b4da5ab2f))
+
+- **tc**: Install.feature DART 프롬프트 입력 추가 및 allocation.feature 멱등성 보강
+  ([`363798c`](https://github.com/joshua-jingu-lee/ante/commit/363798c5e902a9b3c1ddc88248d5cb6e02f66cf3))
+
+- **tc**: TC 데이터 보완 — DELETE 204, 봇 필수필드, 비밀번호 불일치
+  ([#647](https://github.com/joshua-jingu-lee/ante/pull/647),
+  [`82eedf2`](https://github.com/joshua-jingu-lee/ante/commit/82eedf2e6b7620920135ce246eb5197a304cb962))
+
+- **tc**: Treasury TC credentials API 404 수정 및 allocation 정리 추가
+  ([#859](https://github.com/joshua-jingu-lee/ante/pull/859),
+  [`a8620ae`](https://github.com/joshua-jingu-lee/ante/commit/a8620ae9f3d4ae1fa5807607e82a872b31c8703d))
+
+- **test**: _on_restart_exhausted 호출에 account_id 파라미터 추가
+  ([#757](https://github.com/joshua-jingu-lee/ante/pull/757),
+  [`bf8997d`](https://github.com/joshua-jingu-lee/ante/commit/bf8997da15d102f3e0f63c8bd0c43f4acaafe143))
+
+- **test**: Account delete 테스트 mock 대상을 IPC로 전환
+  ([#720](https://github.com/joshua-jingu-lee/ante/pull/720),
+  [`dd45dc1`](https://github.com/joshua-jingu-lee/ante/commit/dd45dc128214aeabbf1bb3ca2164639c54e1acbc))
+
+- **test**: Account 생성 시 credentials 누락된 테스트 일괄 수정 #803
+  ([#803](https://github.com/joshua-jingu-lee/ante/pull/803),
+  [`67e228c`](https://github.com/joshua-jingu-lee/ante/commit/67e228c4a08b0bb6d3f3e3f90525eedf0e987904))
+
+- **test**: BacktestConfig 테스트에서 commission_rate를 buy/sell로 분리 반영 #734
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **test**: FakeTreasury에 get_latest_snapshot 메서드 추가
+  ([#714](https://github.com/joshua-jingu-lee/ante/pull/714),
+  [`5c20546`](https://github.com/joshua-jingu-lee/ante/commit/5c20546479b8cce36c6ac6978860eb2566c29399))
+
+- **test**: IPC 핸들러 등록 테스트 기대값 15 → 16으로 수정
+  ([#720](https://github.com/joshua-jingu-lee/ante/pull/720),
+  [`dd45dc1`](https://github.com/joshua-jingu-lee/ante/commit/dd45dc128214aeabbf1bb3ca2164639c54e1acbc))
+
+- **test**: Portfolio history 존재하지 않는 account_id 테스트 기대값을 404로 수정
+  ([#714](https://github.com/joshua-jingu-lee/ante/pull/714),
+  [`5c20546`](https://github.com/joshua-jingu-lee/ante/commit/5c20546479b8cce36c6ac6978860eb2566c29399))
+
+- **test**: PortfolioHistoryResponse 테스트 mock 데이터를 현행 모델에 맞게 갱신
+  ([#714](https://github.com/joshua-jingu-lee/ante/pull/714),
+  [`5c20546`](https://github.com/joshua-jingu-lee/ante/commit/5c20546479b8cce36c6ac6978860eb2566c29399))
+
+- **test**: Replace private _handlers access with public get_handlers() API
+  ([#758](https://github.com/joshua-jingu-lee/ante/pull/758),
+  [`946a7ed`](https://github.com/joshua-jingu-lee/ante/commit/946a7edcaffea13703d5ca5083a6a6ade2810cd2))
+
+- **test**: Test_config_path를 대화형 init 흐름에 맞게 수정
+  ([`9636743`](https://github.com/joshua-jingu-lee/ante/commit/9636743c01c257d5b23e6a90e0cc3dc2e5c570b5))
+
+- **test**: Test_consecutive_timeout_stops_bot를 ERROR 전이 검증으로 수정 #793
+  ([#811](https://github.com/joshua-jingu-lee/ante/pull/811),
+  [`c89b952`](https://github.com/joshua-jingu-lee/ante/commit/c89b9527f2fd03c12ae630e153bbc749e0d3b298))
+
+- **test**: Test_register_sets_expiry에 master 조회 mock 추가
+  ([#763](https://github.com/joshua-jingu-lee/ante/pull/763),
+  [`58ed8bd`](https://github.com/joshua-jingu-lee/ante/commit/58ed8bdd49233bf502c8d4540fd460823748b004))
+
+- **test**: TestBotManagerExchangeValidation에 credentials 추가 #803
+  ([#803](https://github.com/joshua-jingu-lee/ante/pull/803),
+  [`67e228c`](https://github.com/joshua-jingu-lee/ante/commit/67e228c4a08b0bb6d3f3e3f90525eedf0e987904))
+
+- **test**: 에픽 브랜치 통합 후 테스트 수정 ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **trade**: Force_update() 후 인메모리 캐시 갱신 누락 수정
+  ([#754](https://github.com/joshua-jingu-lee/ante/pull/754),
+  [`0742e38`](https://github.com/joshua-jingu-lee/ante/commit/0742e382cb138ee0a66dac4e4180a45eb09c2157))
+
+- **trade**: INSERT문에 exchange 컬럼 누락 수정 (#737)
+  ([#764](https://github.com/joshua-jingu-lee/ante/pull/764),
+  [`0830c1d`](https://github.com/joshua-jingu-lee/ante/commit/0830c1ddac6d645efd9db99813c6187cd5d89a7c))
+
+- **trade**: MDD 비율 계산을 equity curve 기반으로 전환 #788
+  ([#815](https://github.com/joshua-jingu-lee/ante/pull/815),
+  [`bd9aed3`](https://github.com/joshua-jingu-lee/ante/commit/bd9aed30b0441bac702c14cfedd83de963af187c))
+
+- **trade**: PerformanceTracker JOIN 조건을 trade_id FK 기반으로 변경 #785
+  ([#817](https://github.com/joshua-jingu-lee/ante/pull/817),
+  [`1519d14`](https://github.com/joshua-jingu-lee/ante/commit/1519d1415ee2747ba7e097488fbacdc24781dcce))
+
+- **trade**: PerformanceTracker.calculate()에서 account_id 필수 검증 추가
+  ([#805](https://github.com/joshua-jingu-lee/ante/pull/805),
+  [`d49117c`](https://github.com/joshua-jingu-lee/ante/commit/d49117cf84d8801cb15160b91d031b7442d01f72))
+
+- **trade**: QA 시드 데이터 trade_id UUID 파싱 실패 수정 Refs #865
+  ([#867](https://github.com/joshua-jingu-lee/ante/pull/867),
+  [`06afba0`](https://github.com/joshua-jingu-lee/ante/commit/06afba02e3e5646c2a452f3e74b7143e4221a30a))
+
+- **trade**: 체결 알림에 누적 수량/평단가/손익 추가 #777 ([#819](https://github.com/joshua-jingu-lee/ante/pull/819),
+  [`3aec7b7`](https://github.com/joshua-jingu-lee/ante/commit/3aec7b70b5773247b85d680cc43b1dd2ab2cc798))
+
+- **trade**: 초과 매도 시 보유 수량 기준으로 PnL 계산 #769
+  ([#778](https://github.com/joshua-jingu-lee/ante/pull/778),
+  [`a686bd0`](https://github.com/joshua-jingu-lee/ante/commit/a686bd064472aa2c6630534ac59d1dd54d4c3d15))
+
+- **treasury**: DailyReportEvent 구독 priority 70→80 통일
+  ([#758](https://github.com/joshua-jingu-lee/ante/pull/758),
+  [`946a7ed`](https://github.com/joshua-jingu-lee/ante/commit/946a7edcaffea13703d5ca5083a6a6ade2810cd2))
+
+- **treasury**: DailyReportEvent 구독 priority 70→80 통일 #751
+  ([#758](https://github.com/joshua-jingu-lee/ante/pull/758),
+  [`946a7ed`](https://github.com/joshua-jingu-lee/ante/commit/946a7edcaffea13703d5ca5083a6a6ade2810cd2))
+
+- **treasury**: Reserve_for_order()에 amount <= 0 입력 검증 추가
+  ([#808](https://github.com/joshua-jingu-lee/ante/pull/808),
+  [`ff56e99`](https://github.com/joshua-jingu-lee/ante/commit/ff56e99598ccc0e290aaf6ec6b3da8e3b4ce9ec3))
+
+- **treasury**: Take_snapshot()이 스냅샷 dict를 반환하도록 수정 #752
+  ([#759](https://github.com/joshua-jingu-lee/ante/pull/759),
+  [`cba10bb`](https://github.com/joshua-jingu-lee/ante/commit/cba10bbbd0c39561a92dde94a7a35de1f7a06f8e))
+
+- **treasury**: Total_asset 산식을 ante_eval_amount + unallocated로 수정
+  ([#755](https://github.com/joshua-jingu-lee/ante/pull/755),
+  [`54201f9`](https://github.com/joshua-jingu-lee/ante/commit/54201f9ff20106aa9ae35d350815a3ac1e5e1900))
+
+- **treasury**: Treasury_state 테이블에 누락 필드 추가하여 재시작 시 평가액 데이터 복원
+  ([#765](https://github.com/joshua-jingu-lee/ante/pull/765),
+  [`9e5e2de`](https://github.com/joshua-jingu-lee/ante/commit/9e5e2de31b6551399994cc7c9956e254d6959edf))
+
+- **treasury**: Treasury_transactions account_id DEFAULT 제거, NOT NULL 강제
+  ([#812](https://github.com/joshua-jingu-lee/ante/pull/812),
+  [`c411495`](https://github.com/joshua-jingu-lee/ante/commit/c411495acb75f4cf82cecc83ff674230d10054a1))
+
+- **treasury**: 봇 삭제 시 Treasury budget 환수 및 정리
+  ([#679](https://github.com/joshua-jingu-lee/ante/pull/679),
+  [`273c9ea`](https://github.com/joshua-jingu-lee/ante/commit/273c9eae93972dae445598ae6e565760ae11d3a8))
+
+- **treasury**: 존재하지 않는 봇 예산 할당 시 404 반환 (#658)
+  ([#664](https://github.com/joshua-jingu-lee/ante/pull/664),
+  [`bd6caf8`](https://github.com/joshua-jingu-lee/ante/commit/bd6caf8b7a8c92b20efca64124550b47e0916b4f))
+
+- **ui**: 타이포그래피 위반 22건 + 인라인 스타일 1건 수정 ([#872](https://github.com/joshua-jingu-lee/ante/pull/872),
+  [`0960bd2`](https://github.com/joshua-jingu-lee/ante/commit/0960bd2bb9c10522f64f1fbe896a37761157547f))
+
+- **web**: /api/auth/me 엔드포인트에 Bearer 토큰 인증 지원 추가 #704
+  ([#706](https://github.com/joshua-jingu-lee/ante/pull/706),
+  [`170babe`](https://github.com/joshua-jingu-lee/ante/commit/170babef129a8b8f68f283815d4b0ac58d3b5351))
+
+- **web**: PR #688 리뷰 지적 사항 반영 — 하위 호환성 및 response_model 추가
+  ([#688](https://github.com/joshua-jingu-lee/ante/pull/688),
+  [`272857f`](https://github.com/joshua-jingu-lee/ante/commit/272857fd62a75f077483b5311413cf8b0cd6685d))
+
+- **web**: 멤버 API 라우트 caller_id를 request.state.member_id에서 취득 #767
+  ([#768](https://github.com/joshua-jingu-lee/ante/pull/768),
+  [`c63f094`](https://github.com/joshua-jingu-lee/ante/commit/c63f0940e733f5b08baf46022677bde2b6b6ef26))
+
+### Chores
+
+- .claude/ 전체 gitignore 처리
+  ([`2a1d9fd`](https://github.com/joshua-jingu-lee/ante/commit/2a1d9fd580af869ead7d66245cb561c813a8de8a))
+
+- Dockerfile 테스트 시드 제거 및 대시보드 기본 활성화
+  ([`62eb08a`](https://github.com/joshua-jingu-lee/ante/commit/62eb08adad3dcdb29691f7aad9dc1ff1df834e53))
+
+- Trigger CI ([#740](https://github.com/joshua-jingu-lee/ante/pull/740),
+  [`8a89127`](https://github.com/joshua-jingu-lee/ante/commit/8a891273311f7ee7de0ca7fe5896142090d8f049))
+
+- 스킬 파일 정리 및 QA 환경 설정 보완
+  ([`e40f507`](https://github.com/joshua-jingu-lee/ante/commit/e40f5079885fea6a6e4187c2a13bbfc43e5554a2))
+
+- **ci**: CI/QA에 ANTE_DB_ENCRYPTION_KEY 환경변수 추가
+  ([#744](https://github.com/joshua-jingu-lee/ante/pull/744),
+  [`3d7a5be`](https://github.com/joshua-jingu-lee/ante/commit/3d7a5bee325b0e25e31b7120dd76321b97c965ca))
+
+- **deps**: Add cryptography package for Fernet encryption
+  ([#735](https://github.com/joshua-jingu-lee/ante/pull/735),
+  [`fe219a0`](https://github.com/joshua-jingu-lee/ante/commit/fe219a0cf85dfbf7621b0d5549507c296e332ea5))
+
+- **tc**: Credentials.feature 사전 정리 단계 추가 — API+DB 2단계 클린업
+  ([`b138c20`](https://github.com/joshua-jingu-lee/ante/commit/b138c206215c619395fb319d49562a3995cc2a7c))
+
+### Code Style
+
+- Pyproject.toml 섹션 간 빈 줄 추가 ([#609](https://github.com/joshua-jingu-lee/ante/pull/609),
+  [`1072c26`](https://github.com/joshua-jingu-lee/ante/commit/1072c262bd7e170aefff20f3b8f4a75d8305a183))
+
+### Continuous Integration
+
+- PyPI 배포 워크플로우 추가 Refs #919 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- Semantic-release에서 Docker 빌드·push 단계 제거
+  ([`4e146a4`](https://github.com/joshua-jingu-lee/ante/commit/4e146a44c81b260fcefb2154ffc8af9d9e1b812b))
+
+### Documentation
+
+- Getting Started 가이드 작성 및 ante init 스펙 갱신
+  ([`76ec15a`](https://github.com/joshua-jingu-lee/ante/commit/76ec15a60fa5d6bdfd142c4871b0b4c4f6dbd38c))
+
+- README.md 간결화 및 태그라인 수정
+  ([`8bef8c9`](https://github.com/joshua-jingu-lee/ante/commit/8bef8c93b3098b3e9e9b024ec68e5578882ffa64))
+
+- 공개용 사용자 가이드 디렉토리 초기 구조 생성
+  ([`2ddaddd`](https://github.com/joshua-jingu-lee/ante/commit/2ddaddd056c77206a739492d538b4d157bfe2831))
+
+- **account**: Suspend/delete docstring에 AccountDeletedException 누락 보완
+  ([#725](https://github.com/joshua-jingu-lee/ante/pull/725),
+  [`9309429`](https://github.com/joshua-jingu-lee/ante/commit/9309429cddb91dd42bd4713849d8b07ef72f212d))
+
+- **cli**: 헤더를 사용자 친화적 소개 문구로 변경
+  ([`141eb4f`](https://github.com/joshua-jingu-lee/ante/commit/141eb4f16f57b4efe685087f806df3c16c6b7b06))
+
+- **guide**: Account 모델 반영하여 가이드 문서 업데이트 (#576)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **guide**: Docker 설치 섹션 제거 및 플랫폼 요구사항 명시
+  ([`078a405`](https://github.com/joshua-jingu-lee/ante/commit/078a405a7dee2e4c5c7874fbf5495a32637ae1c0))
+
+- **guide**: Treasury snapshot 커맨드를 cli.md에 등록
+  ([#687](https://github.com/joshua-jingu-lee/ante/pull/687),
+  [`057283b`](https://github.com/joshua-jingu-lee/ante/commit/057283ba662fde219b17f0231ac7a7fee483227d))
+
+- **guide**: 대시보드·보안 가이드 포트 번호 수정 (8000 → 3982)
+  ([`119797b`](https://github.com/joshua-jingu-lee/ante/commit/119797ba497e716b1b793a0bdde6f8ac7da926c7))
+
+- **guide**: 대시보드·보안·전략 가이드 문서 작성
+  ([`a2a2356`](https://github.com/joshua-jingu-lee/ante/commit/a2a235674f906347d8967935d19c1a95ae078769))
+
+- **tc**: Gherkin TC 컨벤션 가이드 작성 ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+### Features
+
+- 결재함 서버사이드 검색 + 스토리지 유형별 용량 표시 (#905) ([#906](https://github.com/joshua-jingu-lee/ante/pull/906),
+  [`ca4a0da`](https://github.com/joshua-jingu-lee/ante/commit/ca4a0da81cc483696ff2be404c44b63d8a888cb8))
+
+- 자금 거래내역 날짜 필터, 데이터셋 파일크기/미리보기, 검색 debounce
+  ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- 프로젝트 에이전트 6종 추가 (.claude/agents/)
+  ([`ee67b52`](https://github.com/joshua-jingu-lee/ante/commit/ee67b526b9dc4b21d03474129e04f5cbc209fe1c))
+
+- **account**: Account 모델·서비스·DB 스키마 생성 (#560)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **approval**: GET /api/approvals에 search 쿼리 파라미터 추가 #794
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **approval**: 결재함 제목 검색을 서버사이드로 전환 ([#906](https://github.com/joshua-jingu-lee/ante/pull/906),
+  [`ca4a0da`](https://github.com/joshua-jingu-lee/ante/commit/ca4a0da81cc483696ff2be404c44b63d8a888cb8))
+
+- **backtest**: _validate_config() -> BacktestConfig 통합 + 수수료 분리 #727
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **backtest**: BacktestConfig/DatasetInfo 데이터클래스 생성 Refs #722
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **backtest**: BacktestDataProvider에 loaded_datasets 이력 기록 Refs #726
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **backtest**: BacktestResult에 config/datasets 필드 추가 Refs #723
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **bot**: BotConfig에 account_id 추가, bot_type·exchange 제거 (#564)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **bot**: BotStepCompletedEvent 추가 및 봇 실행 로그 API #786
+  ([#821](https://github.com/joshua-jingu-lee/ante/pull/821),
+  [`d5b6ba6`](https://github.com/joshua-jingu-lee/ante/commit/d5b6ba6263283193c8d3bb12d223a1836d965d7e))
+
+- **bot**: DELETE /api/bots/{id}에 handle_positions 옵션 추가 #796
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **bot**: GET /api/bots 응답에 strategy_name, strategy_author_name 추가 #792
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **bot**: PUT /api/bots/{bot_id} 봇 설정 수정 API #795
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **cli**: Ante account 명령어 그룹 구현 (#571) ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **cli**: Ante init 대화형 통합 초기 설정 ([#557](https://github.com/joshua-jingu-lee/ante/pull/557),
+  [`cc3c301`](https://github.com/joshua-jingu-lee/ante/commit/cc3c301d04ddf663009bd26f334d0a431fc92d73))
+
+- **cli**: Ante update --format json 지원 Refs #920
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **cli**: Ante update 명령 구현 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **cli**: CLI 레퍼런스 문서에 자동 목차 생성 추가
+  ([`0f9adb7`](https://github.com/joshua-jingu-lee/ante/commit/0f9adb7b1ef82c2931692384bdda9953b9f90a9e))
+
+- **cli**: CLI 버전을 importlib.metadata에서 자동 읽기 Refs #911
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **cli**: CLI 전 커맨드에 --format json 서브커맨드 옵션 추가 (#632)
+  ([#639](https://github.com/joshua-jingu-lee/ante/pull/639),
+  [`4e4151a`](https://github.com/joshua-jingu-lee/ante/commit/4e4151a93da2b008e7b96400ccd196c9fc0a4516))
+
+- **cli**: System status --format json 옵션 추가 (#663)
+  ([#667](https://github.com/joshua-jingu-lee/ante/pull/667),
+  [`a900322`](https://github.com/joshua-jingu-lee/ante/commit/a900322109a46de7e7d74ebb15c72df21c392575))
+
+- **cli**: Treasury snapshot 커맨드 구현 ([#687](https://github.com/joshua-jingu-lee/ante/pull/687),
+  [`057283b`](https://github.com/joshua-jingu-lee/ante/commit/057283ba662fde219b17f0231ac7a7fee483227d))
+
+- **cli**: 기존 CLI 명령어에 --account 옵션 추가 (#573)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **cli**: 서버 실행 중 확인 유틸 함수 추가 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **dashboard**: 결재함·에이전트·백테스트·리포트 보완 (Phase 5) Refs #838
+  ([#845](https://github.com/joshua-jingu-lee/ante/pull/845),
+  [`e5423ae`](https://github.com/joshua-jingu-lee/ante/commit/e5423aef16462f6cbd53e5050fbdec16302292a3))
+
+- **dashboard**: 리포트 상세 페이지 자산 커브 차트 연동 #838
+  ([#864](https://github.com/joshua-jingu-lee/ante/pull/864),
+  [`e529169`](https://github.com/joshua-jingu-lee/ante/commit/e5291692ffa1fc4ad81398fc491ee98222979906))
+
+- **dashboard**: 봇 관리 실행 설정·수정·삭제 API 연동 (Phase 3b) #835
+  ([#862](https://github.com/joshua-jingu-lee/ante/pull/862),
+  [`2a2bcbe`](https://github.com/joshua-jingu-lee/ante/commit/2a2bcbe528a62ee49a0492e0510f1f36601c2365))
+
+- **dashboard**: 전략 목록 UI 보강 — PAGE_SIZE 15, 검색, 보관 탭, 더보기 링크 #836
+  ([#843](https://github.com/joshua-jingu-lee/ante/pull/843),
+  [`585dfcf`](https://github.com/joshua-jingu-lee/ante/commit/585dfcfd4f25a4f4ebe2d1646ee3228f46384361))
+
+- **dashboard**: 전략과 성과 Phase 4b — 차트·성과·필터·상태 전환 Refs #837
+  ([#863](https://github.com/joshua-jingu-lee/ante/pull/863),
+  [`96c1993`](https://github.com/joshua-jingu-lee/ante/commit/96c19939e02c1d32beaf2fa81fb10164570a42db))
+
+- **data**: Parquet 경로에 exchange 차원 추가 (#577)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **data**: ParquetStore.resolve_path() public 노출
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **data**: 데이터셋 파일 크기 연동 및 미리보기 구현 ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- **data**: 스토리지 현황에 유형별(OHLCV/Fundamental) 용량 표시 추가
+  ([#906](https://github.com/joshua-jingu-lee/ante/pull/906),
+  [`ca4a0da`](https://github.com/joshua-jingu-lee/ante/commit/ca4a0da81cc483696ff2be404c44b63d8a888cb8))
+
+- **db**: Database 트랜잭션 컨텍스트 매니저 추가 Refs #912
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **db**: Parquet 마이그레이션을 중앙 러너에 통합 Refs #924
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **db**: Schema_version 테이블 + 중앙 마이그레이션 러너 Refs #913
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **eventbus**: Account 이벤트 3종 추가 및 기존 이벤트 account_id 확장 (#562)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **frontend**: 데이터셋 파일크기/미리보기 UI 및 종목 검색 debounce 적용
+  ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- **frontend**: 로그인 스펙 정합성 보완 (Phase 1) Refs #832
+  ([#841](https://github.com/joshua-jingu-lee/ante/pull/841),
+  [`fd7e389`](https://github.com/joshua-jingu-lee/ante/commit/fd7e389ab122999a95795ed27daa2b029631e8ac))
+
+- **frontend**: 리포트 상세 듀얼 차트·마크다운·수익률% 병기 Refs #892
+  ([#909](https://github.com/joshua-jingu-lee/ante/pull/909),
+  [`f5d1314`](https://github.com/joshua-jingu-lee/ante/commit/f5d1314f5a418d8685cf3f5b625e3034c50d86c2))
+
+- **frontend**: 봇 관리 카드·UI 정리 (Phase 3a) Refs #834
+  ([#844](https://github.com/joshua-jingu-lee/ante/pull/844),
+  [`e1f8a35`](https://github.com/joshua-jingu-lee/ante/commit/e1f8a35e58d1adb4187a58f60a479cb28f8f4283))
+
+- **frontend**: 자금관리 Phase 2 — 가상 거래 배너 + 자산 추이 차트 + 예산 가드
+  ([#842](https://github.com/joshua-jingu-lee/ante/pull/842),
+  [`98c01af`](https://github.com/joshua-jingu-lee/ante/commit/98c01af86042150aeabf731c8cce9fa417e4ba41))
+
+- **infra**: 백엔드 전용 QA Docker 이미지 작성 (#606)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **ipc**: IPC 인프라 구축 — ServiceRegistry, 프로토콜, IPCServer/Client #695
+  ([#700](https://github.com/joshua-jingu-lee/ante/pull/700),
+  [`3002f10`](https://github.com/joshua-jingu-lee/ante/commit/3002f10f4dc691954cd948081dc61f95a6a17021))
+
+- **qa**: QA 데이터셋 시드 스크립트 추가 Refs #856 ([#860](https://github.com/joshua-jingu-lee/ante/pull/860),
+  [`262f33b`](https://github.com/joshua-jingu-lee/ante/commit/262f33bcc6a40bc7c7165c023cc17c7cb9a8be72))
+
+- **qa**: QA 서버 설정 및 엔트리포인트 작성 (#607) ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **qa**: 자동 버그 리포팅 및 --fix 수정 연동, night-mode QA 통합 (#618)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **rule**: RuleContext 자산/노출 필드 추가 및 Treasury 조회 헬퍼 추출
+  ([#713](https://github.com/joshua-jingu-lee/ante/pull/713),
+  [`639bfc9`](https://github.com/joshua-jingu-lee/ante/commit/639bfc9d1ba2ec3513ff556e1e7c1f86a676058a))
+
+- **skill**: QA 테스트 에이전트 스킬 작성 (.claude/skills/qa-tester/)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **strategy**: Exchange 호환성 검증 추가 (#570)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **system**: 서버 시작 시 최신 버전 확인 로그 Refs #923
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **tc**: 대화형 설치 프로세스 검증 TC 추가 (install.feature)
+  ([`8de7a59`](https://github.com/joshua-jingu-lee/ante/commit/8de7a59661e15255df08ce88deba95cecbad7f77))
+
+- **tc**: 최초 설치 검증 TC 및 QA 환경 가이드 추가
+  ([`8a673ff`](https://github.com/joshua-jingu-lee/ante/commit/8a673ff204295452aa48c2dfaea3cb2ad848330e))
+
+- **trade**: DailyReportScheduler Account 기반 실행 시각 + DailyReportEvent 신설
+  ([#683](https://github.com/joshua-jingu-lee/ante/pull/683),
+  [`ffd7a68`](https://github.com/joshua-jingu-lee/ante/commit/ffd7a68e20da579626119815a54935e2974c1645))
+
+- **trade**: TradeRecord·PositionSnapshot에 account_id, currency 필드 추가
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **treasury**: Treasury 계좌별 인스턴스 전환 및 TreasuryManager 도입
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **treasury**: Virtual 모드 자산 평가 동기화 — Trade DB 기반 계산 (#692)
+  ([#693](https://github.com/joshua-jingu-lee/ante/pull/693),
+  [`d4b3e7d`](https://github.com/joshua-jingu-lee/ante/commit/d4b3e7d9a1bf31cead4b345ac258095e2407bc08))
+
+- **treasury**: 일별 자산 스냅샷 확장 — 성과 필드, 범위 조회, 자동 삭제 (#682)
+  ([#686](https://github.com/joshua-jingu-lee/ante/pull/686),
+  [`16c5788`](https://github.com/joshua-jingu-lee/ante/commit/16c57887ed7bd250c284424bbedc0ffaebd6aac0))
+
+- **treasury**: 자금 거래내역 기간(날짜) 필터 추가 ([#904](https://github.com/joshua-jingu-lee/ante/pull/904),
+  [`cd2f469`](https://github.com/joshua-jingu-lee/ante/commit/cd2f469d5de218bcafbfe75324b8477e0a0189ba))
+
+- **update**: DB 안전 백업 함수 구현 Refs #916 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **update**: 디스크 공간 사전 검사 Refs #922 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **update**: 마이그레이션 실패 시 자동 롤백 Refs #918
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **update**: 업데이트 전 의존성 스냅샷 저장 Refs #921
+  ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **web**: Account CRUD REST API 엔드포인트 추가 (#574)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **web**: Agent 토큰 인증 시 last_active_at 갱신 (5분 스로틀링)
+  ([#604](https://github.com/joshua-jingu-lee/ante/pull/604),
+  [`4a48b97`](https://github.com/joshua-jingu-lee/ante/commit/4a48b976275dbcc1c382390378d977698f4f0090))
+
+- **web**: Agent 토큰 인증 시 last_active_at 갱신 미들웨어 추가
+  ([#604](https://github.com/joshua-jingu-lee/ante/pull/604),
+  [`4a48b97`](https://github.com/joshua-jingu-lee/ante/commit/4a48b976275dbcc1c382390378d977698f4f0090))
+
+- **web**: GET /api/data/datasets/{dataset_id} 데이터셋 상세 API #799
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **web**: GET /api/strategies 응답에 cumulative_return 추가 #800
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **web**: GET /api/strategies/{id} 응답에 params, rationale, risks 추가 #802
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **web**: GET/PUT /api/accounts/{id}/rules 리스크 룰 조회·수정 API #798
+  ([#830](https://github.com/joshua-jingu-lee/ante/pull/830),
+  [`4319fe6`](https://github.com/joshua-jingu-lee/ante/commit/4319fe6768222600fc56da96da97415f8b598c02))
+
+- **web**: 기존 API 엔드포인트에 account_id 필터 및 응답 필드 추가 (#575)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **web**: 일별 자산 스냅샷 Web API 엔드포인트 (#684)
+  ([#688](https://github.com/joshua-jingu-lee/ante/pull/688),
+  [`272857f`](https://github.com/joshua-jingu-lee/ante/commit/272857fd62a75f077483b5311413cf8b0cd6685d))
+
+- **web**: 일별 자산 스냅샷 Web API 엔드포인트 구현 ([#688](https://github.com/joshua-jingu-lee/ante/pull/688),
+  [`272857f`](https://github.com/joshua-jingu-lee/ante/commit/272857fd62a75f077483b5311413cf8b0cd6685d))
+
+### Performance Improvements
+
+- **backtest**: Equity_curve 일봉 리샘플링으로 detail_json 저장 최적화 #741
+  ([#762](https://github.com/joshua-jingu-lee/ante/pull/762),
+  [`d5d96c5`](https://github.com/joshua-jingu-lee/ante/commit/d5d96c5d11632c629ed82597fe0814a6bc78f53e))
+
+### Refactoring
+
+- CLI 레퍼런스 출력 경로를 guide/cli.md로 일원화
+  ([`3d17074`](https://github.com/joshua-jingu-lee/ante/commit/3d17074ad90a8aaf205eb82d2e0972646936e2dc))
+
+- **account**: Account 모델에 broker_config 필드 추가
+  ([#941](https://github.com/joshua-jingu-lee/ante/pull/941),
+  [`ce4f312`](https://github.com/joshua-jingu-lee/ante/commit/ce4f312f77a56aea3e94a18a00cc9f862fce6d9e))
+
+- **broker**: KISAdapter → KISBaseAdapter + KISDomesticAdapter 분리 (#561)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **cli**: Ante init 흐름에서 KIS 연동을 Account 등록으로 교체
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **cli**: Bot/Treasury 커맨드 IPC 전환 #697 ([#702](https://github.com/joshua-jingu-lee/ante/pull/702),
+  [`bc7316b`](https://github.com/joshua-jingu-lee/ante/commit/bc7316b0d809cedeceb71b1a898bd76f73910a86))
+
+- **cli**: CLI 레퍼런스 정렬을 알파벳순에서 등록순으로 변경
+  ([`2d5fb24`](https://github.com/joshua-jingu-lee/ante/commit/2d5fb24a60d2605a9b1155fd5fd85ba3a7d56e63))
+
+- **cli**: Config/Approval/Broker 커맨드 IPC 전환 및 IPC 헬퍼 통합 #698
+  ([#703](https://github.com/joshua-jingu-lee/ante/pull/703),
+  [`a61fc8c`](https://github.com/joshua-jingu-lee/ante/commit/a61fc8c8c16dca4a04ccfe5dd563a89f83452513))
+
+- **cli**: System/Account 커맨드 IPC 전환 #696
+  ([#701](https://github.com/joshua-jingu-lee/ante/pull/701),
+  [`1449a20`](https://github.com/joshua-jingu-lee/ante/commit/1449a2030691b28a25edced7d5e7d422f174788c))
+
+- **config**: Account 모델로 이관되는 broker 설정 키 제거
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **core**: SystemState 제거 및 Kill Switch를 Account.status 기반으로 일원화 (#568)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **db**: 기존 분산 _migrate_*() 메서드 제거 ([#940](https://github.com/joshua-jingu-lee/ante/pull/940),
+  [`6958fd8`](https://github.com/joshua-jingu-lee/ante/commit/6958fd854787db2e6bf8c3ee8bcb0021d7276ae8))
+
+- **frontend**: BacktestData 페이지 데이터 흐름 컨벤션 준수 (api → hooks → pages)
+  ([#882](https://github.com/joshua-jingu-lee/ante/pull/882),
+  [`3bbe5a8`](https://github.com/joshua-jingu-lee/ante/commit/3bbe5a8c331084546607e7ec7336ac9737b31de0))
+
+- **frontend**: 라우팅·사이드바·대시보드 정리 (Phase 0) Refs #831
+  ([#840](https://github.com/joshua-jingu-lee/ante/pull/840),
+  [`8e95cf1`](https://github.com/joshua-jingu-lee/ante/commit/8e95cf1c25e48c88a3802188693612fd44edabc9))
+
+- **gateway**: APIGateway 계좌 라우팅 전환 (#567)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **main**: Account 중심 Composition Root 재구성 (#578)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **rule**: Rule Engine 계좌별 인스턴스 전환 (#566)
+  ([#598](https://github.com/joshua-jingu-lee/ante/pull/598),
+  [`6ddd4c6`](https://github.com/joshua-jingu-lee/ante/commit/6ddd4c6fdb7aa5d753bd5f217c402cacd1989b41))
+
+- **test**: E2E/Integration 테스트 인프라 및 Docker 테스트 설정 제거
+  ([#609](https://github.com/joshua-jingu-lee/ante/pull/609),
+  [`1072c26`](https://github.com/joshua-jingu-lee/ante/commit/1072c262bd7e170aefff20f3b8f4a75d8305a183))
+
+- **test**: E2E/Integration 테스트 인프라 제거 ([#609](https://github.com/joshua-jingu-lee/ante/pull/609),
+  [`1072c26`](https://github.com/joshua-jingu-lee/ante/commit/1072c262bd7e170aefff20f3b8f4a75d8305a183))
+
+- **web**: Portfolio API에서 daily_pnl_pct 하위호환 필드 제거
+  ([#689](https://github.com/joshua-jingu-lee/ante/pull/689),
+  [`fbd6b3c`](https://github.com/joshua-jingu-lee/ante/commit/fbd6b3c3a9b4ba0a2007ef359a75afe524e58b14))
+
+- **web**: 토큰 인증 last_active_at 갱신에 5분 스로틀링 추가
+  ([#604](https://github.com/joshua-jingu-lee/ante/pull/604),
+  [`4a48b97`](https://github.com/joshua-jingu-lee/ante/commit/4a48b976275dbcc1c382390378d977698f4f0090))
+
+### Testing
+
+- QA 테스트 케이스 추가 (approval, bot, data)
+  ([`038d7e2`](https://github.com/joshua-jingu-lee/ante/commit/038d7e2ac5620e57fcdc5f414a8aefde38d66a38))
+
+- **backtest**: Run() 실행 후 config/datasets 주입 검증 테스트 추가
+  ([#734](https://github.com/joshua-jingu-lee/ante/pull/734),
+  [`91c7e4e`](https://github.com/joshua-jingu-lee/ante/commit/91c7e4e1fbd56cc0f571a16df027c761bd1f209a))
+
+- **bot**: _resolve_paper_balance 정상/KeyError 경로 테스트 추가
+  ([#766](https://github.com/joshua-jingu-lee/ante/pull/766),
+  [`b5c5d41`](https://github.com/joshua-jingu-lee/ante/commit/b5c5d4149fb44b818f8cdca9bed966e36737a05d))
+
+- **rule**: RuleEngine WARN 결과 경로 단위 테스트 추가 #806
+  ([#820](https://github.com/joshua-jingu-lee/ante/pull/820),
+  [`730231e`](https://github.com/joshua-jingu-lee/ante/commit/730231ecb11612f27cbc8aa8bb577d9fdc8e8969))
+
+- **tc**: Account 모듈 TC 확장 — lifecycle + credentials (#612)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **tc**: Member 모듈 TC 작성 (auth + management)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **tc**: Strategy + Config + Trade 모듈 TC 작성
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **tc**: Treasury 모듈 TC 작성 (balance + allocation) (#615)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+- **tc**: 계좌 CRUD 파일럿 TC 작성 (account/crud.feature)
+  ([#631](https://github.com/joshua-jingu-lee/ante/pull/631),
+  [`e83058d`](https://github.com/joshua-jingu-lee/ante/commit/e83058df9e9dd151441f078f7b431f6178f9f57f))
+
+
 ## v0.6.1 (2026-03-19)
 
 ### Bug Fixes
