@@ -485,6 +485,7 @@ class AccountService:
         config: dict[str, Any] = {
             "exchange": account.exchange,
             "trading_mode": account.trading_mode.value,
+            "is_paper": account.trading_mode == TradingMode.VIRTUAL,
             "buy_commission_rate": float(account.buy_commission_rate),
             "sell_commission_rate": float(account.sell_commission_rate),
             **account.credentials,
