@@ -13,7 +13,9 @@ from ante.strategy.context import StrategyContext
 
 class FakeDataProvider(DataProvider):
     async def get_ohlcv(self, symbol, timeframe="1d", limit=100):
-        return []
+        import polars as pl
+
+        return pl.DataFrame()
 
     async def get_current_price(self, symbol):
         return 0.0

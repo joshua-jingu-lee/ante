@@ -2,6 +2,7 @@
 
 import asyncio
 
+import polars as pl
 import pytest
 
 from ante.bot import Bot, BotConfig, BotError, BotManager, BotStatus
@@ -33,7 +34,7 @@ from ante.strategy import (
 
 class FakeDataProvider(DataProvider):
     async def get_ohlcv(self, symbol, timeframe="1d", limit=100):
-        return [{"close": 100.0}]
+        return pl.DataFrame({"close": [100.0]})
 
     async def get_current_price(self, symbol):
         return 100.0
