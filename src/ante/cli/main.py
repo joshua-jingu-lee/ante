@@ -7,6 +7,13 @@ import click
 from ante.cli.formatter import OutputFormatter
 from ante.cli.middleware import authenticate_member
 
+try:
+    from importlib.metadata import version as pkg_version
+
+    __version__ = pkg_version("ante")
+except Exception:
+    __version__ = "dev"
+
 
 @click.group()
 @click.option(
@@ -24,7 +31,7 @@ from ante.cli.middleware import authenticate_member
     envvar="ANTE_CONFIG_DIR",
     help="설정 디렉토리 경로 (기본: ~/.config/ante/ 또는 ./config/)",
 )
-@click.version_option(version="0.1.0", prog_name="ante")
+@click.version_option(version=__version__, prog_name="ante")
 @click.pass_context
 def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
     """Ante — AI-Native Trading Engine CLI."""
