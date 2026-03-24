@@ -26,13 +26,19 @@ _BOT_NOT_FOUND = "봇을 찾을 수 없습니다"
 
 
 class BotCreateRequest(BaseModel):
-    """봇 생성 요청."""
+    """봇 생성 요청.
+
+    strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
+    strategy_name만 전달하면 최신 버전의 strategy_id로 자동 변환된다.
+    """
 
     bot_id: str
-    strategy_id: str
+    strategy_id: str | None = None
+    strategy_name: str | None = None
     name: str = ""
-    account_id: str = "test"
+    account_id: str | None = None
     interval_seconds: int = Field(default=60, ge=10, le=3600)
+    budget: float | None = Field(default=None, gt=0)
 
 
 @router.get(
@@ -93,6 +99,7 @@ async def list_bots(
         400: {"description": "Strategy loading failed"},
         404: {"description": "Strategy not found"},
         409: {"description": "Bot already exists or conflict"},
+        422: {"description": "strategy_id/strategy_name both missing or budget error"},
         503: {"description": "Bot manager or strategy registry not available"},
     },
 )
@@ -112,15 +119,53 @@ async def create_bot(
     from ante.bot.exceptions import BotError
     from ante.strategy.loader import StrategyLoader
 
+    # strategy_id / strategy_name 해석 ─────────────────────
+    strategy_id = body.strategy_id
+    if strategy_id is None and body.strategy_name is not None:
+        # strategy_name → 최신 버전 strategy_id 자동 변환
+        records = await registry.get_by_name(body.strategy_name)
+        if not records:
+            raise HTTPException(
+                status_code=404,
+                detail=f"전략을 찾을 수 없습니다: {body.strategy_name}",
+            )
+        strategy_id = records[0].strategy_id
+    if strategy_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="strategy_id 또는 strategy_name 중 하나를 전달해야 합니다",
+        )
+
+    # account_id 기본값: 첫 번째 active 계좌 ───────────────
+    account_id = body.account_id
+    if account_id is None:
+        accounts = await account_service.list()
+        active = [
+            a
+            for a in accounts
+            if (a.status if hasattr(a, "status") else a.get("status"))
+            == AccountStatus.ACTIVE
+        ]
+        if not active:
+            raise HTTPException(
+                status_code=422,
+                detail="활성 계좌가 없습니다. 계좌를 먼저 등록하세요",
+            )
+        account_id = (
+            active[0].account_id
+            if hasattr(active[0], "account_id")
+            else active[0]["account_id"]
+        )
+
     # 계좌 상태 검증: active가 아니면 봇 생성 거부
-    account = await account_service.get(body.account_id)
+    account = await account_service.get(account_id)
     if account.status != AccountStatus.ACTIVE:
         raise HTTPException(
             status_code=409,
             detail=f"계좌가 '{account.status}' 상태이므로 봇을 생성할 수 없습니다",
         )
 
-    record = await registry.get(body.strategy_id)
+    record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail="전략을 찾을 수 없습니다")
 
@@ -131,9 +176,9 @@ async def create_bot(
 
     config = BotConfig(
         bot_id=body.bot_id,
-        strategy_id=body.strategy_id,
+        strategy_id=strategy_id,
         name=body.name or body.bot_id,
-        account_id=body.account_id,
+        account_id=account_id,
         interval_seconds=body.interval_seconds,
     )
 
@@ -146,12 +191,19 @@ async def create_bot(
     except BotError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
+    # budget이 지정된 경우 예산 배정 ────────────────────────
+    if body.budget is not None:
+        try:
+            await bot_manager.update_bot(body.bot_id, budget=body.budget)
+        except Exception:
+            pass  # 봇은 이미 생성됨, budget 배정 실패는 무시 (이후 수정 가능)
+
     if audit_logger:
         await audit_logger.log(
             member_id=getattr(request.state, "member_id", "anonymous"),
             action="bot.create",
             resource=f"bot:{body.bot_id}",
-            detail=f"strategy={body.strategy_id}",
+            detail=f"strategy={strategy_id}",
             ip=request.client.host if request.client else "",
         )
 
