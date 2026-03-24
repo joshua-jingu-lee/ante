@@ -34,13 +34,15 @@ async def list_datasets(
     store: Annotated[Any | None, Depends(get_data_store)],
     symbol: str | None = None,
     timeframe: str | None = None,
-    data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+    data_type: str | None = Query(
+        None, description="데이터 유형 (ohlcv, fundamental, 미지정 시 전체)"
+    ),
     offset: int = 0,
     limit: int = 50,
 ) -> dict:
     """보유 데이터셋 목록 (페이지네이션 지원).
 
-    data_type에 따라 해당 유형의 데이터셋만 반환한다.
+    data_type 미지정 시 모든 유형을 반환하고, 지정 시 해당 유형만 반환한다.
 
     종목 목록만 먼저 수집하여 페이지네이션을 적용한 뒤,
     해당 페이지의 종목에 대해서만 date_range를 계산한다.
@@ -57,7 +59,9 @@ async def list_datasets(
     def _collect_datasets() -> list[dict[str, Any]]:
         """종목 목록만 수집 (동기 I/O를 스레드에서 수행)."""
         datasets: list[dict[str, Any]] = []
-        if data_type == "fundamental":
+
+        # fundamental 수집 (data_type이 None 또는 "fundamental"일 때)
+        if data_type is None or data_type == "fundamental":
             symbols = store.list_symbols(data_type="fundamental")
             for sym in symbols:
                 if symbol and sym != symbol:
@@ -70,7 +74,9 @@ async def list_datasets(
                         "data_type": "fundamental",
                     }
                 )
-        else:
+
+        # ohlcv 수집 (data_type이 None 또는 "ohlcv"일 때)
+        if data_type is None or data_type == "ohlcv":
             from ante.data.schemas import TIMEFRAMES
 
             tf_list = [timeframe] if timeframe else TIMEFRAMES
