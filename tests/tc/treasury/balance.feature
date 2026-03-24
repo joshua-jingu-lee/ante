@@ -19,7 +19,8 @@ Feature: Treasury 잔고 관리
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
-    Then 응답 상태는 201
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
+    Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.account.account_id 를 {account_id}로 저장한다
 
   # ── 정상 흐름: 잔고 조회 및 설정 ──

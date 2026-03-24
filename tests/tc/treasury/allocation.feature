@@ -5,6 +5,14 @@ Feature: Treasury 예산 할당·회수
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
 
+  # ── 환경 정리: 이전 실행 잔여 할당 회수 ──
+
+  Scenario: 기존 할당 정리
+    When POST /api/treasury/bots/qa-alloc-bot-01/deallocate 요청:
+      | field  | value     |
+      | amount | 999999999 |
+    Then 응답 상태는 200 또는 응답 상태는 404
+
   # ── 사전 준비: 계좌 + 잔고 + 전략 확보 + 봇 생성 ──
 
   Scenario: 할당 테스트용 계좌 생성 (API)
@@ -19,6 +27,7 @@ Feature: Treasury 예산 할당·회수
       | trading_hours_end   | 15:30                  |
       | trading_mode        | virtual                |
       | broker_type         | test                   |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201 또는 응답 상태는 409
     And 응답 body.account.account_id 를 {account_id}로 저장한다
 
