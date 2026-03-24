@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
-import type { Dataset } from '../api/data'
+import type { Dataset } from '../types/data'
+import { useDatasets, useStorageInfo, useDeleteDataset } from '../hooks/useBacktestData'
 import { formatNumber, formatDate } from '../utils/formatters'
 import { Skeleton } from '../components/common/Skeleton'
 import FeedStatusPanel from '../components/data/FeedStatusPanel'
@@ -38,29 +37,11 @@ export default function BacktestData() {
   const [deleteTarget, setDeleteTarget] = useState<Dataset | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const fileListRef = useRef<HTMLDivElement>(null)
-  const queryClient = useQueryClient()
 
   // Fetch all datasets for building the directory tree
-  const { data: allData, isLoading } = useQuery({
-    queryKey: ['datasets-all'],
-    queryFn: () => getDatasets({ limit: 10000 }),
-  })
-
-  const { data: storage } = useQuery({
-    queryKey: ['storage'],
-    queryFn: getStorageInfo,
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (target: Dataset) => deleteDataset(target.id, target.data_type),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['datasets'] })
-      queryClient.invalidateQueries({ queryKey: ['datasets-all'] })
-      queryClient.invalidateQueries({ queryKey: ['storage'] })
-      setDeleteTarget(null)
-      setSelectedDataset(null)
-    },
-  })
+  const { data: allData, isLoading } = useDatasets({ limit: 10000 })
+  const { data: storage } = useStorageInfo()
+  const deleteMutation = useDeleteDataset()
 
   const allDatasets = allData?.items ?? []
 
@@ -339,7 +320,9 @@ export default function BacktestData() {
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text">취소</button>
               <button
-                onClick={() => deleteMutation.mutate(deleteTarget)}
+                onClick={() => deleteMutation.mutate(deleteTarget, {
+                  onSuccess: () => { setDeleteTarget(null); setSelectedDataset(null) },
+                })}
                 disabled={deleteMutation.isPending}
                 className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-on-primary border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
               >

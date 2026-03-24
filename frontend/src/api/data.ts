@@ -1,23 +1,8 @@
 import client from './client'
 import type { FeedStatus } from '../types/feed'
+import type { DataType, Dataset, StorageInfo } from '../types/data'
 
-export type DataType = 'ohlcv' | 'fundamental'
-
-export interface Dataset {
-  id: string
-  symbol: string
-  timeframe: string
-  data_type: DataType
-  start_date: string
-  end_date: string
-  row_count: number
-}
-
-export interface StorageInfo {
-  total_bytes: number
-  total_mb: number
-  by_timeframe: Record<string, number>
-}
+export type { DataType, Dataset, StorageInfo }
 
 export async function getDatasets(params?: {
   symbol?: string
