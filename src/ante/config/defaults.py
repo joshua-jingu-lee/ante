@@ -16,4 +16,21 @@ DEFAULTS: dict[str, object] = {
     "audit.retention_days": 90,
     "telegram.command.polling_interval": 3.0,
     "telegram.command.confirm_timeout": 30.0,
+    # ── 리스크 관리 ──
+    "rule.daily_loss_limit": 0.05,
+    "rule.max_exposure_percent": 0.20,
+    "rule.max_unrealized_loss": 0.10,
+    "rule.max_trades_per_hour": 10,
+    "rule.allowed_hours": "09:00-15:30",
+    "risk.max_mdd_pct": 0.10,
+    "risk.max_position_pct": 0.10,
+    # ── 봇 기본 ──
+    "bot.default_interval_sec": 60,
+    # ── 거래 비용 ──
+    "broker.commission_rate": 0.00015,
+    "broker.sell_tax_rate": 0.0018,
+    # ── 알림 ──
+    "notification.telegram_level": "important",
+    "notification.fill_alert": "true",
+    "notification.daily_report": "true",
 }
