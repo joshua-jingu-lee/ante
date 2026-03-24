@@ -597,6 +597,7 @@ class StorageSummaryResponse(BaseModel):
     total_bytes: int
     total_mb: float
     by_timeframe: dict[str, float]
+    by_data_type: dict[str, float] | None = None
 
 
 class FeedStatusResponse(BaseModel):

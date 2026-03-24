@@ -208,11 +208,14 @@ export default function BacktestData() {
   }
 
   // Storage info string
+  const DATA_TYPE_LABELS: Record<string, string> = { ohlcv: 'OHLCV', fundamental: 'Fundamental' }
   const storageStr = storage
     ? `전체 ${formatSize(storage.total_bytes ?? storage.total_mb * 1024 * 1024)}`
-      + (storage.by_timeframe && Object.keys(storage.by_timeframe).length > 0
-        ? ` — ${Object.entries(storage.by_timeframe).map(([tf, bytes]) => `${TF_LABELS[tf] ?? tf} ${formatSize(bytes)}`).join(' · ')}`
-        : '')
+      + (storage.by_data_type && Object.keys(storage.by_data_type).length > 0
+        ? ` — ${Object.entries(storage.by_data_type).map(([dt, mb]) => `${DATA_TYPE_LABELS[dt] ?? dt} ${mb.toFixed(1)} MB`).join(' · ')}`
+        : storage.by_timeframe && Object.keys(storage.by_timeframe).length > 0
+          ? ` — ${Object.entries(storage.by_timeframe).map(([tf, mb]) => `${TF_LABELS[tf] ?? tf} ${mb.toFixed(1)} MB`).join(' · ')}`
+          : '')
     : ''
 
   return (
