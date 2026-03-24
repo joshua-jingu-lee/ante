@@ -19,6 +19,15 @@ export interface Bot {
   created_at: string
 }
 
+export interface BotConfig {
+  interval_seconds: number
+  auto_restart: boolean
+  max_restart_attempts: number
+  restart_cooldown_seconds: number
+  step_timeout_seconds: number
+  max_signals_per_step: number
+}
+
 export interface BotStrategy {
   name: string
   version: string
@@ -47,6 +56,9 @@ export interface BotDetail extends Bot {
   allocated_budget: number
   logs: BotLog[]
   strategy?: BotStrategy
+  strategy_author_name?: string
+  strategy_author_id?: string
+  config?: BotConfig
   budget?: BotBudgetDetail
   positions?: BotPosition[]
 }
@@ -68,3 +80,16 @@ export interface BotCreateRequest {
   budget: number
   symbols: string[]
 }
+
+export interface BotUpdateRequest {
+  name?: string
+  interval_seconds?: number
+  budget?: number
+  auto_restart?: boolean
+  max_restart_attempts?: number
+  restart_cooldown_seconds?: number
+  step_timeout_seconds?: number
+  max_signals_per_step?: number
+}
+
+export type HandlePositions = 'keep' | 'liquidate'
