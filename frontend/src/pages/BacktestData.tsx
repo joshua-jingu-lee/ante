@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { Dataset } from '../types/data'
-import { useDatasets, useStorageInfo, useDeleteDataset } from '../hooks/useBacktestData'
+import { useDatasets, useDatasetDetail, useStorageInfo, useDeleteDataset } from '../hooks/useBacktestData'
 import { formatNumber, formatDate } from '../utils/formatters'
 import { Skeleton } from '../components/common/Skeleton'
 import FeedStatusPanel from '../components/data/FeedStatusPanel'
@@ -32,6 +32,7 @@ export default function BacktestData() {
   const [currentPath, setCurrentPath] = useState<DirPath>([])
   const [focusIndex, setFocusIndex] = useState(0)
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null)
+  const [inputValue, setInputValue] = useState('')
   const [search, setSearch] = useState('')
   const [isSearching, setIsSearching] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Dataset | null>(null)
@@ -56,7 +57,7 @@ export default function BacktestData() {
       return matched.map((ds) => ({
         name: `${ds.data_type}/${ds.symbol}/${ds.timeframe}.parquet`,
         isDir: false,
-        meta: `${formatNumber(ds.row_count)}`,
+        meta: `${formatNumber(ds.row_count)}${ds.file_size ? ' · ' + formatSize(ds.file_size) : ''}`,
         dataset: ds,
       }))
     }
@@ -95,7 +96,7 @@ export default function BacktestData() {
         .map((ds) => ({
           name: `${ds.timeframe}.parquet`,
           isDir: false,
-          meta: `${formatNumber(ds.row_count)}`,
+          meta: `${formatNumber(ds.row_count)}${ds.file_size ? ' · ' + formatSize(ds.file_size) : ''}`,
           dataset: ds,
         }))
     }
@@ -109,6 +110,14 @@ export default function BacktestData() {
     const showParent = currentPath.length > 0
     return showParent ? [{ name: '../', isDir: true } as FileEntry, ...entries] : entries
   }, [entries, currentPath, isSearching, search])
+
+  // Debounce search input (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(inputValue)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [inputValue])
 
   // Reset focus on path/search change
   useEffect(() => {
@@ -136,6 +145,7 @@ export default function BacktestData() {
         const ds = entry.dataset
         setCurrentPath([ds.data_type, ds.symbol])
         setIsSearching(false)
+        setInputValue('')
         setSearch('')
       }
       setSelectedDataset(entry.dataset)
@@ -152,6 +162,7 @@ export default function BacktestData() {
 
     if (e.key === 'Escape' && isSearching) {
       setIsSearching(false)
+      setInputValue('')
       setSearch('')
       fileListRef.current?.focus()
       return
@@ -186,6 +197,7 @@ export default function BacktestData() {
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       setIsSearching(false)
+      setInputValue('')
       setSearch('')
       fileListRef.current?.focus()
     }
@@ -218,15 +230,15 @@ export default function BacktestData() {
           <input
             ref={searchRef}
             type="text"
-            value={search}
+            value={inputValue}
             onChange={(e) => {
-              setSearch(e.target.value)
+              setInputValue(e.target.value)
               if (e.target.value.trim()) setIsSearching(true)
               else setIsSearching(false)
             }}
-            onFocus={() => { if (search.trim()) setIsSearching(true) }}
+            onFocus={() => { if (inputValue.trim()) setIsSearching(true) }}
             onKeyDown={handleSearchKeyDown}
-            placeholder="검색 (종목명 또는 코드)"
+            placeholder="종목 코드 검색"
             className="w-[260px] px-2.5 py-1.5 text-[13px] bg-transparent border border-border rounded text-text font-mono placeholder:text-text-muted focus:outline-none focus:border-primary"
           />
           <span className="text-[11px] text-text-muted ml-auto whitespace-nowrap">
@@ -341,12 +353,15 @@ function DatasetDetailPanel({ dataset, onDelete }: { dataset: Dataset; onDelete:
   const ds = dataset
   const filePath = `${ds.data_type}/${ds.symbol}/${ds.timeframe}.parquet`
   const typeLabel = ds.data_type === 'ohlcv' ? 'OHLCV' : 'Fundamental'
-  const isOhlcv = ds.data_type === 'ohlcv'
+
+  const { data: detail } = useDatasetDetail(ds.id)
+  const preview = detail?.preview ?? []
+  const fileSize = detail?.dataset?.file_size ?? ds.file_size
 
   const separator = '\u2500'.repeat(65)
-  const headerCols = isOhlcv
-    ? 'date         open     high     low      close    volume'
-    : 'quarter      revenue       op_profit     net_profit    eps      roe'
+
+  // Build preview table from actual data
+  const previewColumns = preview.length > 0 ? Object.keys(preview[0]) : []
 
   return (
     <div className="space-y-4">
@@ -361,13 +376,25 @@ function DatasetDetailPanel({ dataset, onDelete }: { dataset: Dataset; onDelete:
         <span className="text-text font-semibold">{'Timeframe'}</span>{'  '}{ds.timeframe}{'\n'}
         <span className="text-text font-semibold">{'Period'}</span>{'     '}{ds.start_date} ~ {ds.end_date}{'\n'}
         <span className="text-text font-semibold">{'Rows'}</span>{'       '}<span className="text-text">{formatNumber(ds.row_count)}</span>{'\n'}
-        <span className="text-text font-semibold">{'Size'}</span>{'       '}<span className="text-text">-</span>
+        <span className="text-text font-semibold">{'Size'}</span>{'       '}<span className="text-text">{fileSize ? formatSize(fileSize) : '-'}</span>
       </pre>
       <pre className="m-0 whitespace-pre overflow-x-auto text-text-muted">
         <span className="text-border">{separator}</span>{'\n'}
-        <span className="text-text font-semibold">{headerCols}</span>{'\n'}
-        <span className="text-border">{separator}</span>{'\n'}
-        <span className="text-text-muted opacity-50">  데이터 미리보기는 API 확장 후 제공됩니다</span>{'\n'}
+        {preview.length > 0 ? (
+          <>
+            <span className="text-text font-semibold">{previewColumns.map((c) => c.padEnd(14)).join('')}</span>{'\n'}
+            <span className="text-border">{separator}</span>{'\n'}
+            {preview.map((row, i) => (
+              <span key={i}>
+                {previewColumns.map((c) => String(row[c] ?? '').padEnd(14)).join('')}{'\n'}
+              </span>
+            ))}
+          </>
+        ) : (
+          <>
+            <span className="text-text-muted opacity-50">  미리보기 데이터가 없습니다</span>{'\n'}
+          </>
+        )}
         <span className="text-border">{separator}</span>
       </pre>
       <pre className="m-0 whitespace-pre overflow-x-auto">

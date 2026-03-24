@@ -17,6 +17,8 @@ const TYPE_TABS = [
 export default function TreasuryHistory() {
   const [typeFilter, setTypeFilter] = useState('')
   const [botFilter, setBotFilter] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [offset, setOffset] = useState(0)
 
   const { data: budgets } = useBotBudgets()
@@ -27,6 +29,8 @@ export default function TreasuryHistory() {
     limit: LIMIT,
     type: typeFilter || undefined,
     bot_id: botFilter || undefined,
+    start_date: startDate || undefined,
+    end_date: endDate || undefined,
   })
 
   const handleTypeChange = (t: string) => { setTypeFilter(t); setOffset(0) }
@@ -61,6 +65,21 @@ export default function TreasuryHistory() {
             <option key={id} value={id}>{id}</option>
           ))}
         </select>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => { setStartDate(e.target.value); setOffset(0) }}
+            className="bg-bg border border-border rounded-lg px-2.5 py-1.5 text-text text-[13px]"
+          />
+          <span className="text-text-muted text-[13px]">~</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => { setEndDate(e.target.value); setOffset(0) }}
+            className="bg-bg border border-border rounded-lg px-2.5 py-1.5 text-text text-[13px]"
+          />
+        </div>
       </div>
 
       {/* 이력 테이블 */}

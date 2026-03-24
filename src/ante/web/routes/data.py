@@ -51,6 +51,15 @@ async def list_datasets(
             if symbol and sym != symbol:
                 continue
             date_range = store.get_date_range(sym, "", data_type="fundamental")
+            file_size = 0
+            try:
+                p = store._resolve_path(sym, "", data_type="fundamental")
+                if p.exists():
+                    file_size = sum(
+                        f.stat().st_size for f in p.rglob("*") if f.is_file()
+                    )
+            except Exception:
+                pass
             all_datasets.append(
                 {
                     "id": f"{sym}__fundamental",
@@ -60,6 +69,7 @@ async def list_datasets(
                     "start_date": date_range[0] if date_range else None,
                     "end_date": date_range[1] if date_range else None,
                     "row_count": 0,
+                    "file_size": file_size,
                 }
             )
     else:
@@ -73,6 +83,15 @@ async def list_datasets(
                     continue
                 date_range = store.get_date_range(sym, tf)
                 row_count = store.get_row_count(sym, tf)
+                file_size = 0
+                try:
+                    p = store._resolve_path(sym, tf, data_type="ohlcv")
+                    if p.exists():
+                        file_size = sum(
+                            f.stat().st_size for f in p.rglob("*") if f.is_file()
+                        )
+                except Exception:
+                    pass
                 all_datasets.append(
                     {
                         "id": f"{sym}__{tf}",
@@ -82,6 +101,7 @@ async def list_datasets(
                         "start_date": date_range[0] if date_range else None,
                         "end_date": date_range[1] if date_range else None,
                         "row_count": row_count,
+                        "file_size": file_size,
                     }
                 )
 
@@ -124,6 +144,12 @@ async def get_dataset_detail(
     # 메타데이터
     date_range = store.get_date_range(symbol, tf_for_store, data_type=data_type)
     row_count = 0 if is_fundamental else store.get_row_count(symbol, tf_for_store)
+    file_size = 0
+    try:
+        if path.exists():
+            file_size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    except Exception:
+        pass
 
     dataset_meta = {
         "id": dataset_id,
@@ -133,6 +159,7 @@ async def get_dataset_detail(
         "start_date": date_range[0] if date_range else None,
         "end_date": date_range[1] if date_range else None,
         "row_count": row_count,
+        "file_size": file_size,
     }
 
     # 최근 5행 미리보기

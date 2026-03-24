@@ -51,6 +51,8 @@ export function useTreasuryTransactions(params: {
   limit?: number
   type?: string
   bot_id?: string
+  start_date?: string
+  end_date?: string
 }) {
   return useQuery({
     queryKey: ['treasury', 'transactions', params],

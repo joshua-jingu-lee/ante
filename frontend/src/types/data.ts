@@ -8,6 +8,7 @@ export interface Dataset {
   start_date: string
   end_date: string
   row_count: number
+  file_size?: number
 }
 
 export interface StorageInfo {
