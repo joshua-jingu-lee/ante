@@ -26,7 +26,7 @@ def eventbus() -> MagicMock:
 def stream_client(eventbus: MagicMock) -> KISStreamClient:
     """KISStreamClient 인스턴스."""
     return KISStreamClient(
-        websocket_url="ws://ops.koreainvestment.com:21000",
+        websocket_url="ws://ops.koreainvestment.com:31000",
         app_key="test_key",
         app_secret="test_secret",
         approval_key="test_approval",
@@ -38,19 +38,19 @@ class TestKISStreamClientInit:
     """초기화 테스트."""
 
     def test_init_paper(self, stream_client: KISStreamClient) -> None:
-        assert stream_client._url == "ws://ops.koreainvestment.com:21000"
+        assert stream_client._url == "ws://ops.koreainvestment.com:31000"
         assert not stream_client.is_connected
         assert len(stream_client.subscribed_symbols) == 0
 
     def test_init_real(self, eventbus: MagicMock) -> None:
         client = KISStreamClient(
-            websocket_url="ws://ops.koreainvestment.com:31000",
+            websocket_url="ws://ops.koreainvestment.com:21000",
             app_key="key",
             app_secret="secret",
             approval_key="approval",
             eventbus=eventbus,
         )
-        assert client._url == "ws://ops.koreainvestment.com:31000"
+        assert client._url == "ws://ops.koreainvestment.com:21000"
 
 
 class TestSubscription:

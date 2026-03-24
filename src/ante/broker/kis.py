@@ -186,10 +186,10 @@ class KISBaseAdapter(BrokerAdapter):
         # API 엔드포인트
         if self.is_paper:
             self.base_url = "https://openapivts.koreainvestment.com:29443"
-            self.websocket_url = "ws://ops.koreainvestment.com:21000"
+            self.websocket_url = "ws://ops.koreainvestment.com:31000"
         else:
             self.base_url = "https://openapi.koreainvestment.com:9443"
-            self.websocket_url = "ws://ops.koreainvestment.com:31000"
+            self.websocket_url = "ws://ops.koreainvestment.com:21000"
 
         # 인증
         self.access_token: str | None = None
