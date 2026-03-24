@@ -1229,6 +1229,13 @@ async def main() -> None:
 
     try:
         await _init_core(s)
+
+        from ante.db.migrations import run_migrations
+
+        applied = await run_migrations(s.db)
+        if applied:
+            logger.info("DB 마이그레이션 적용: %s", ", ".join(applied))
+
         await _init_services(s)
         await _init_account(s)
         await _init_trading(s)
