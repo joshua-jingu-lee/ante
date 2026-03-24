@@ -397,9 +397,16 @@ class PerformanceTracker:
         """DB row → TradeRecord."""
         from uuid import UUID
 
+        raw_id = row["trade_id"]
+        try:
+            trade_id = UUID(raw_id)
+        except (ValueError, AttributeError):
+            logger.warning("trade_id UUID 파싱 실패, 문자열 그대로 사용: %s", raw_id)
+            trade_id = raw_id  # type: ignore[assignment]
+
         ts = row.get("timestamp")
         return TradeRecord(
-            trade_id=UUID(row["trade_id"]),
+            trade_id=trade_id,
             bot_id=row["bot_id"],
             strategy_id=row["strategy_id"],
             symbol=row["symbol"],
