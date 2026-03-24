@@ -22,6 +22,7 @@
   --color-info-bg: rgba(167, 139, 250, 0.10);
   --color-primary: #1E8EFF;
   --color-primary-hover: #0A7AEE;
+  --color-on-primary: #ffffff;
 
   --spacing-sidebar: 220px;
   --spacing-header: 56px;
@@ -49,6 +50,10 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+a.no-underline:hover {
+  text-decoration: none;
 }
 
 /* Bot icon running animations */
