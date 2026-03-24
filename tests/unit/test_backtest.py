@@ -90,9 +90,12 @@ def _make_ohlcv_df(
     base_price: float = 50000.0,
 ) -> pl.DataFrame:
     """테스트용 OHLCV DataFrame."""
+    from datetime import timedelta
+
+    start = datetime(2026, 1, 2, 9, 0, tzinfo=UTC)
     timestamps = pl.datetime_range(
-        datetime(2026, 1, 2, 9, 0, tzinfo=UTC),
-        datetime(2026, 1, 2 + n - 1, 9, 0, tzinfo=UTC),
+        start,
+        start + timedelta(days=n - 1),
         interval="1d",
         eager=True,
         time_zone="UTC",
@@ -253,11 +256,52 @@ class TestBacktestDataProvider:
         df = await data_provider.get_ohlcv("005930", "1d", limit=100)
         assert len(df) == 2
 
-    async def test_get_indicator_returns_data(self, data_provider):
-        for _ in range(5):
+    async def test_get_indicator_returns_computed_values(self, data_provider):
+        """get_indicator()가 실제 지표 값을 계산하여 반환."""
+        # 기본 데이터 10행, 모두 전진
+        for _ in range(9):
             data_provider.advance()
-        df = await data_provider.get_indicator("005930", "sma", {"period": 5})
-        assert len(df) > 0
+        result = await data_provider.get_indicator("005930", "sma", {"length": 5})
+        assert isinstance(result, dict)
+        assert "sma" in result
+        assert len(result["sma"]) == 10  # 10 rows visible
+
+    async def test_get_indicator_rsi(self, loaded_store):
+        """RSI 지표 계산 확인."""
+        # RSI length=14 이므로 충분한 데이터 필요
+        df = _make_ohlcv_df(n=30)
+        loaded_store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        for _ in range(29):
+            provider.advance()
+        result = await provider.get_indicator("005930", "rsi", {"length": 14})
+        assert isinstance(result, dict)
+        assert "rsi" in result
+
+    async def test_get_indicator_multi_output(self, loaded_store):
+        """MACD 등 다중 출력 지표 계산 확인."""
+        df = _make_ohlcv_df(n=40)
+        loaded_store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        for _ in range(39):
+            provider.advance()
+        result = await provider.get_indicator("005930", "macd")
+        assert isinstance(result, dict)
+        assert "macd" in result
+        assert "signal" in result
+        assert "hist" in result
+
+    async def test_get_indicator_unknown_raises(self, data_provider):
+        """미지원 지표는 ValueError 발생."""
+        data_provider.advance()
+        with pytest.raises(ValueError, match="Unknown indicator"):
+            await data_provider.get_indicator("005930", "unknown_indicator")
 
     async def test_loaded_datasets_empty_on_init(self, loaded_store):
         """초기 상태에서 loaded_datasets는 빈 리스트."""
