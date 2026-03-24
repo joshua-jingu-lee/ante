@@ -43,7 +43,7 @@ export default function Sidebar() {
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } md:translate-x-0`}
       >
-        <div className="h-header flex items-center justify-center gap-0 px-5 border-b border-border">
+        <div className="h-header flex items-center gap-0 px-5 border-b border-border">
           <img src="/logo-a.svg" alt="A" className="w-8 h-8" />
           <img src="/logo-n.svg" alt="N" className="w-8 h-8" />
           <img src="/logo-t.svg" alt="T" className="w-8 h-8" />
