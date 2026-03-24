@@ -12,7 +12,6 @@ type DirPath = string[]
 interface FileEntry {
   name: string
   isDir: boolean
-  meta?: string
   dataset?: Dataset
 }
 
@@ -57,7 +56,6 @@ export default function BacktestData() {
       return matched.map((ds) => ({
         name: `${ds.data_type}/${ds.symbol}/${ds.timeframe}.parquet`,
         isDir: false,
-        meta: `${formatNumber(ds.row_count)}${ds.file_size ? ' · ' + formatSize(ds.file_size) : ''}`,
         dataset: ds,
       }))
     }
@@ -96,7 +94,6 @@ export default function BacktestData() {
         .map((ds) => ({
           name: `${ds.timeframe}.parquet`,
           isDir: false,
-          meta: `${formatNumber(ds.row_count)}${ds.file_size ? ' · ' + formatSize(ds.file_size) : ''}`,
           dataset: ds,
         }))
     }
@@ -292,9 +289,6 @@ export default function BacktestData() {
                       } ${isParent ? 'text-text-muted' : entry.isDir ? 'text-primary' : 'text-text-muted'} hover:bg-surface-hover`}
                     >
                       <span className="flex-1 truncate">{entry.name}</span>
-                      {entry.meta && (
-                        <span className="text-[11px] text-text-muted shrink-0">{entry.meta}</span>
-                      )}
                     </div>
                   )
                 })
@@ -318,36 +312,54 @@ export default function BacktestData() {
 
       {/* 삭제 확인 모달 */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
-          <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
-            <h3 className="text-[18px] font-bold mb-5 text-negative">데이터셋 삭제</h3>
-            <div className="mb-4 text-[13px] text-text-muted">
-              <strong className="text-text">
-                {deleteTarget.symbol}
-                {deleteTarget.data_type === 'fundamental' ? ' — Fundamental' : ` — ${TF_LABELS[deleteTarget.timeframe] ?? deleteTarget.timeframe}`}
-              </strong><br />
-              기간: {formatDate(deleteTarget.start_date)} ~ {formatDate(deleteTarget.end_date)} · {formatNumber(deleteTarget.row_count)}건<br /><br />
-              삭제된 데이터는 복구할 수 없습니다.
-            </div>
-            <div className="bg-warning-bg text-warning px-3.5 py-2.5 rounded text-[12px] mb-4">
-              이 데이터를 사용 중인 백테스트가 있을 수 있습니다.
-            </div>
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
-              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text">취소</button>
-              <button
-                onClick={() => deleteMutation.mutate(deleteTarget, {
-                  onSuccess: () => { setDeleteTarget(null); setSelectedDataset(null) },
-                })}
-                disabled={deleteMutation.isPending}
-                className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-on-primary border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
-              >
-                삭제
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteConfirmModal
+          deleteTarget={deleteTarget}
+          deleteMutation={deleteMutation}
+          onCancel={() => setDeleteTarget(null)}
+          onSuccess={() => { setDeleteTarget(null); setSelectedDataset(null) }}
+        />
       )}
     </>
+  )
+}
+
+/* ── 삭제 확인 모달 ── */
+function DeleteConfirmModal({ deleteTarget, deleteMutation, onCancel, onSuccess }: {
+  deleteTarget: Dataset
+  deleteMutation: ReturnType<typeof useDeleteDataset>
+  onCancel: () => void
+  onSuccess: () => void
+}) {
+  const { data: detail } = useDatasetDetail(deleteTarget.id)
+  const rowCount = detail?.dataset?.row_count ?? deleteTarget.row_count
+
+  return (
+    <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
+      <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
+        <h3 className="text-[18px] font-bold mb-5 text-negative">데이터셋 삭제</h3>
+        <div className="mb-4 text-[13px] text-text-muted">
+          <strong className="text-text">
+            {deleteTarget.symbol}
+            {deleteTarget.data_type === 'fundamental' ? ' — Fundamental' : ` — ${TF_LABELS[deleteTarget.timeframe] ?? deleteTarget.timeframe}`}
+          </strong><br />
+          기간: {formatDate(deleteTarget.start_date)} ~ {formatDate(deleteTarget.end_date)}{rowCount ? ` · ${formatNumber(rowCount)}건` : ''}<br /><br />
+          삭제된 데이터는 복구할 수 없습니다.
+        </div>
+        <div className="bg-warning-bg text-warning px-3.5 py-2.5 rounded text-[12px] mb-4">
+          이 데이터를 사용 중인 백테스트가 있을 수 있습니다.
+        </div>
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+          <button onClick={onCancel} className="px-4 py-2 rounded text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text">취소</button>
+          <button
+            onClick={() => deleteMutation.mutate(deleteTarget, { onSuccess })}
+            disabled={deleteMutation.isPending}
+            className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-on-primary border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
+          >
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -359,7 +371,9 @@ function DatasetDetailPanel({ dataset, onDelete }: { dataset: Dataset; onDelete:
 
   const { data: detail } = useDatasetDetail(ds.id)
   const preview = detail?.preview ?? []
-  const fileSize = detail?.dataset?.file_size ?? ds.file_size
+  const detailDs = detail?.dataset
+  const rowCount = detailDs?.row_count ?? ds.row_count
+  const fileSize = detailDs?.file_size ?? ds.file_size
 
   const separator = '\u2500'.repeat(65)
 
@@ -378,7 +392,7 @@ function DatasetDetailPanel({ dataset, onDelete }: { dataset: Dataset; onDelete:
         <span className="text-text font-semibold">{'Type'}</span>{'       '}{typeLabel}{'\n'}
         <span className="text-text font-semibold">{'Timeframe'}</span>{'  '}{ds.timeframe}{'\n'}
         <span className="text-text font-semibold">{'Period'}</span>{'     '}{ds.start_date} ~ {ds.end_date}{'\n'}
-        <span className="text-text font-semibold">{'Rows'}</span>{'       '}<span className="text-text">{formatNumber(ds.row_count)}</span>{'\n'}
+        <span className="text-text font-semibold">{'Rows'}</span>{'       '}<span className="text-text">{rowCount ? formatNumber(rowCount) : '-'}</span>{'\n'}
         <span className="text-text font-semibold">{'Size'}</span>{'       '}<span className="text-text">{fileSize ? formatSize(fileSize) : '-'}</span>
       </pre>
       <pre className="m-0 whitespace-pre overflow-x-auto text-text-muted">
