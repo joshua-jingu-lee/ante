@@ -6,6 +6,9 @@ import os
 
 import click
 
+from ante.cli.formatter import format_option
+from ante.cli.main import get_formatter
+
 
 def check_server_running() -> bool:
     """서버가 실행 중인지 PID 파일로 확인. stale PID는 무시."""
@@ -28,7 +31,15 @@ def check_server_running() -> bool:
 )
 @click.option("--yes", "-y", is_flag=True, help="확인 프롬프트 건너뛰기")
 @click.option("--force", is_flag=True, help="서버 실행 중이면 자동 중지")
-def update(check: bool, target_version: str | None, yes: bool, force: bool) -> None:
+@format_option
+@click.pass_context
+def update(
+    ctx: click.Context,
+    check: bool,
+    target_version: str | None,
+    yes: bool,
+    force: bool,
+) -> None:
     """ante를 최신 버전으로 업데이트합니다."""
     from ante.update.checker import (
         get_current_version,
@@ -36,28 +47,42 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
         is_update_available,
     )
 
+    fmt = get_formatter(ctx)
+
     # 서버 실행 중 확인
     if check_server_running():
         if force:
-            click.echo("서버를 중지합니다...")
+            if fmt.is_json:
+                pass  # JSON 모드에서는 중간 메시지 생략
+            else:
+                click.echo("서버를 중지합니다...")
             # TODO: graceful shutdown
         else:
-            click.echo(
+            fmt.error(
                 "서버가 실행 중입니다. "
-                "먼저 서버를 중지하거나 --force 옵션을 사용하세요.",
-                err=True,
+                "먼저 서버를 중지하거나 --force 옵션을 사용하세요."
             )
             raise SystemExit(1)
 
     current = get_current_version()
-    click.echo(f"현재 버전: {current}")
+    if not fmt.is_json:
+        click.echo(f"현재 버전: {current}")
 
     if check:
         latest = get_latest_version()
         if latest is None:
-            click.echo("PyPI 버전 확인 실패", err=True)
+            fmt.error("PyPI 버전 확인 실패")
             raise SystemExit(1)
-        if is_update_available(current, latest):
+        available = is_update_available(current, latest)
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "current_version": current,
+                    "latest_version": latest,
+                    "update_available": available,
+                }
+            )
+        elif available:
             click.echo(f"업데이트 가능: {current} → {latest}")
         else:
             click.echo("이미 최신 버전입니다")
@@ -66,11 +91,20 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
     # 업데이트 실행
     latest = target_version or get_latest_version()
     if latest is None:
-        click.echo("PyPI 버전 확인 실패", err=True)
+        fmt.error("PyPI 버전 확인 실패")
         raise SystemExit(1)
 
     if not target_version and not is_update_available(current, latest):
-        click.echo("이미 최신 버전입니다")
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "current_version": current,
+                    "latest_version": latest,
+                    "update_available": False,
+                }
+            )
+        else:
+            click.echo("이미 최신 버전입니다")
         return
 
     if not yes:
@@ -90,28 +124,47 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
 
     db_path = Path("db/ante.db")
     if db_path.exists():
-        click.echo("DB 백업 중...")
+        if not fmt.is_json:
+            click.echo("DB 백업 중...")
         backup_db(db_path, current)
 
-    click.echo(f"업데이트 중: {current} → {latest}...")
+    if not fmt.is_json:
+        click.echo(f"업데이트 중: {current} → {latest}...")
     if not pip_upgrade(target_version):
-        click.echo("업데이트 실패", err=True)
+        fmt.error("업데이트 실패")
         raise SystemExit(1)
 
     # Phase B: 마이그레이션
-    click.echo("DB 마이그레이션 실행 중...")
+    if not fmt.is_json:
+        click.echo("DB 마이그레이션 실행 중...")
     if not run_post_update_migrations():
-        click.echo("마이그레이션 실패. 자동 롤백 시도 중...", err=True)
+        if not fmt.is_json:
+            click.echo("마이그레이션 실패. 자동 롤백 시도 중...", err=True)
         backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"
         if rollback_update(current, backup_path):
-            click.echo(f"롤백 완료: {current}으로 복원됨")
+            if fmt.is_json:
+                fmt.error("마이그레이션 실패. 롤백 완료.", code="migration_failed")
+            else:
+                click.echo(f"롤백 완료: {current}으로 복원됨")
         else:
-            click.echo(
-                f"자동 롤백 실패. 수동 복구 필요:\n"
-                f"  pip install ante=={current}\n"
-                f"  cp {backup_path} db/ante.db",
-                err=True,
-            )
+            if fmt.is_json:
+                fmt.error("마이그레이션 실패. 자동 롤백 실패.", code="rollback_failed")
+            else:
+                click.echo(
+                    f"자동 롤백 실패. 수동 복구 필요:\n"
+                    f"  pip install ante=={current}\n"
+                    f"  cp {backup_path} db/ante.db",
+                    err=True,
+                )
         raise SystemExit(1)
 
-    click.echo(f"업데이트 완료: {latest}")
+    if fmt.is_json:
+        fmt.success(
+            "업데이트 완료",
+            {
+                "previous_version": current,
+                "current_version": latest,
+            },
+        )
+    else:
+        click.echo(f"업데이트 완료: {latest}")

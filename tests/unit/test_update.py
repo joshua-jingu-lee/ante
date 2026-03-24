@@ -7,12 +7,26 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from ante.cli.commands.update import update
+from ante.cli.main import cli
 
 
-@pytest.fixture
+@pytest.fixture()
 def runner() -> CliRunner:
-    return CliRunner()
+    """인증 우회 CliRunner."""
+    r = CliRunner()
+    original_invoke = r.invoke
+
+    def _invoke_with_auth(cli_cmd, args=None, **kwargs):  # noqa: ANN001, ANN202
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+            def _set_member(ctx):  # noqa: ANN001
+                ctx.obj = ctx.obj or {}
+
+            mock_auth.side_effect = _set_member
+            return original_invoke(cli_cmd, args, **kwargs)
+
+    r.invoke = _invoke_with_auth
+    return r
 
 
 class TestUpdateCheckFlag:
@@ -25,7 +39,7 @@ class TestUpdateCheckFlag:
             patch("ante.update.checker.get_current_version", return_value="1.0.0"),
             patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
         ):
-            result = runner.invoke(update, ["--check"])
+            result = runner.invoke(cli, ["update", "--check"])
 
         assert result.exit_code == 0
         assert "현재 버전: 1.0.0" in result.output
@@ -39,7 +53,7 @@ class TestUpdateCheckFlag:
             patch("ante.update.checker.get_current_version", return_value="2.0.0"),
             patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
         ):
-            result = runner.invoke(update, ["--check"])
+            result = runner.invoke(cli, ["update", "--check"])
 
         assert result.exit_code == 0
         assert "이미 최신 버전입니다" in result.output
@@ -51,7 +65,7 @@ class TestServerRunningBlock:
     def test_server_running_blocks_update(self, runner: CliRunner) -> None:
         """서버가 실행 중이면 exit code 1로 종료한다."""
         with patch("ante.cli.commands.update.check_server_running", return_value=True):
-            result = runner.invoke(update, ["--check"])
+            result = runner.invoke(cli, ["update", "--check"])
 
         assert result.exit_code == 1
         assert "서버가 실행 중입니다" in result.output

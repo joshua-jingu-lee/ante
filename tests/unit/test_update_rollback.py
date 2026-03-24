@@ -8,13 +8,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from ante.cli.commands.update import update
+from ante.cli.main import cli
 from ante.update.executor import rollback_update
 
 
-@pytest.fixture
+@pytest.fixture()
 def runner() -> CliRunner:
-    return CliRunner()
+    """인증 우회 CliRunner."""
+    r = CliRunner()
+    original_invoke = r.invoke
+
+    def _invoke_with_auth(cli_cmd, args=None, **kwargs):  # noqa: ANN001, ANN202
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+            def _set_member(ctx):  # noqa: ANN001
+                ctx.obj = ctx.obj or {}
+
+            mock_auth.side_effect = _set_member
+            return original_invoke(cli_cmd, args, **kwargs)
+
+    r.invoke = _invoke_with_auth
+    return r
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +149,7 @@ class TestUpdateMigrationFailureRollback:
             patches[6],
             patches[7],
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 1
         mock_rollback.assert_called_once()
@@ -156,7 +170,7 @@ class TestUpdateMigrationFailureRollback:
             patches[6],
             patches[7],
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 1
         assert "자동 롤백 실패" in result.output
@@ -175,7 +189,7 @@ class TestUpdateMigrationFailureRollback:
             patches[6],
             patches[7],
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 0
         mock_rollback.assert_not_called()
