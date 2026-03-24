@@ -43,7 +43,9 @@ def ctx() -> MagicMock:
     c.get_balance.return_value = {"available": 5000000.0}
     c.get_open_orders.return_value = []
     c.get_current_price = AsyncMock(return_value=58500.0)
-    c.get_ohlcv = AsyncMock(return_value=[{"close": 58200}])
+    import polars as pl
+
+    c.get_ohlcv = AsyncMock(return_value=pl.DataFrame({"close": [58200]}))
     return c
 
 

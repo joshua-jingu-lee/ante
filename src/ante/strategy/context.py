@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ante.strategy.base import (
     DataProvider,
@@ -14,6 +14,9 @@ from ante.strategy.base import (
     TradeHistoryView,
 )
 from ante.strategy.exceptions import StrategyFileAccessError
+
+if TYPE_CHECKING:
+    import polars as pl
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +55,12 @@ class StrategyContext:
         symbol: str,
         timeframe: str = "1d",
         limit: int = 100,
-    ) -> Any:
-        """OHLCV 데이터 조회."""
+    ) -> pl.DataFrame:
+        """OHLCV 데이터 조회.
+
+        Returns:
+            Polars DataFrame with columns: timestamp, open, high, low, close, volume.
+        """
         return await self._data.get_ohlcv(symbol, timeframe, limit)
 
     async def get_current_price(self, symbol: str) -> float:

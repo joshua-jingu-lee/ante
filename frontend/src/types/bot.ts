@@ -74,11 +74,12 @@ export interface BotLog {
 
 export interface BotCreateRequest {
   bot_id: string
-  name: string
-  strategy_name: string
-  interval_seconds: number
-  budget: number
-  symbols: string[]
+  name?: string
+  strategy_id?: string
+  strategy_name?: string
+  account_id?: string
+  interval_seconds?: number
+  budget?: number
 }
 
 export interface BotUpdateRequest {

@@ -521,6 +521,8 @@ class ReportDetailResponse(BaseModel):
     metrics: dict[str, Any] = {}
     initial_balance: float | None = None
     final_balance: float | None = None
+    config: dict[str, Any] | None = None
+    datasets: list[dict[str, Any]] = []
     symbols: list[str | dict[str, Any]] = []
     user_notes: str = ""
     reviewed_at: str | None = None

@@ -8,7 +8,17 @@ export async function getStrategies(params?: { search?: string }): Promise<Strat
 
 export async function getStrategyDetail(id: string): Promise<StrategyDetail> {
   const res = await client.get(`/api/strategies/${id}`)
-  return res.data.strategy ?? res.data
+  const { strategy, params, param_schema, rationale, risks, ...rest } = res.data
+  if (strategy) {
+    return {
+      ...strategy,
+      params: params ?? strategy.params,
+      param_schema: param_schema ?? strategy.param_schema,
+      rationale: rationale ?? strategy.rationale,
+      risks: risks ?? strategy.risks,
+    }
+  }
+  return rest
 }
 
 export async function getStrategyPerformance(id: string): Promise<StrategyPerformance> {

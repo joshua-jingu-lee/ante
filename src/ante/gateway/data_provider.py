@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+import polars as pl
+
 from ante.strategy.base import DataProvider
 
 if TYPE_CHECKING:
@@ -12,6 +14,16 @@ if TYPE_CHECKING:
     from ante.gateway.gateway import APIGateway
 
 logger = logging.getLogger(__name__)
+
+# OHLCV DataFrame 표준 컬럼 (DataProvider 프로토콜)
+_OHLCV_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume")
+
+
+def _dicts_to_ohlcv_df(records: list[dict[str, Any]]) -> pl.DataFrame:
+    """list[dict] → Polars DataFrame 변환 (OHLCV 표준 컬럼만 추출)."""
+    if not records:
+        return pl.DataFrame(schema={col: pl.Float64 for col in _OHLCV_COLUMNS})
+    return pl.DataFrame(records)
 
 
 class LiveDataProvider(DataProvider):
@@ -36,18 +48,21 @@ class LiveDataProvider(DataProvider):
         symbol: str,
         timeframe: str = "1d",
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> pl.DataFrame:
         """OHLCV 데이터 조회 (ParquetStore 우선, APIGateway 폴백).
 
         1. ParquetStore가 주입되어 있으면 과거 봉 데이터를 읽는다.
         2. ParquetStore에 데이터가 없으면 APIGateway 경유로 폴백한다.
-        3. 둘 다 데이터가 없으면 빈 리스트를 반환한다.
+        3. 둘 다 데이터가 없으면 빈 DataFrame을 반환한다.
+
+        Returns:
+            Polars DataFrame with columns: timestamp, open, high, low, close, volume.
         """
         if self._store is not None:
             try:
                 df = self._store.read(symbol, timeframe, limit=limit)
                 if not df.is_empty():
-                    return df.to_dicts()
+                    return df
                 logger.warning(
                     "ParquetStore 데이터 없음 — APIGateway 폴백: %s %s",
                     symbol,
@@ -61,7 +76,10 @@ class LiveDataProvider(DataProvider):
                     exc_info=True,
                 )
 
-        return await self._gateway.get_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        records = await self._gateway.get_ohlcv(
+            symbol, timeframe=timeframe, limit=limit
+        )
+        return _dicts_to_ohlcv_df(records)
 
     async def get_current_price(self, symbol: str) -> float:
         """현재가 조회 (APIGateway 캐시 활용)."""
@@ -82,7 +100,7 @@ class LiveDataProvider(DataProvider):
         from ante.strategy.indicators import IndicatorCalculator, ohlcv_to_dataframe
 
         ohlcv_data = await self.get_ohlcv(symbol, limit=500)
-        if not ohlcv_data:
+        if ohlcv_data.is_empty():
             logger.warning(
                 "OHLCV 데이터 없음 — 지표 계산 불가: %s %s", symbol, indicator
             )

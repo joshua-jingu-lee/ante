@@ -117,13 +117,13 @@ export default function StrategyDetail() {
             <span className="text-text-muted">설명</span>
             <span className="text-[12px] text-text-muted">{strategy.description || '-'}</span>
           </div>
-          {strategy.rationale && (
+          {strategy.rationale && strategy.rationale.length > 0 && (
             <div className="mt-3">
               <div className="text-[12px] text-text-muted font-semibold mb-1">투자 근거</div>
               <div className="text-[12px] text-text-muted leading-relaxed whitespace-pre-line">{strategy.rationale}</div>
             </div>
           )}
-          {strategy.risks && (
+          {strategy.risks && strategy.risks.length > 0 && (
             <div className="mt-3 pt-3 border-t border-border">
               <div className="text-[12px] text-text-muted font-semibold mb-1">리스크</div>
               <div className="text-[12px] text-text-muted leading-relaxed whitespace-pre-line">{strategy.risks}</div>

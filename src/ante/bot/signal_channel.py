@@ -136,11 +136,12 @@ class SignalChannel:
                 symbol = params.get("symbol", "")
                 data = await self._ctx.get_current_price(symbol)
             elif method == "ohlcv":
-                data = await self._ctx.get_ohlcv(
+                df = await self._ctx.get_ohlcv(
                     symbol=params.get("symbol", ""),
                     timeframe=params.get("timeframe", "1d"),
                     limit=params.get("limit", 100),
                 )
+                data = df.to_dicts()
             else:
                 self._write({"type": "error", "message": f"Unknown method: {method}"})
                 return

@@ -89,7 +89,7 @@ class TestListDatasets:
         assert "start_date" in ds
         assert "end_date" in ds
         assert isinstance(ds["row_count"], int)
-        # 목록 API는 성능 최적화로 row_count=0 반환 (상세 조회 전용, Refs #962)
+        # 목록 API에서는 성능상 row_count=0을 반환 (#950), 상세 조회에서만 실제 값
         assert ds["row_count"] == 0
 
     async def test_pagination(self, client, store):

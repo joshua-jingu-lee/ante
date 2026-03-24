@@ -43,8 +43,9 @@ export interface Strategy {
 export interface StrategyDetail extends Strategy {
   description?: string
   rationale?: string
-  risks?: string
+  risks?: string | string[]
   params?: Record<string, StrategyParam | unknown>
+  param_schema?: Record<string, string>
   budget_allocated?: number
   unrealized_pnl?: number
 }

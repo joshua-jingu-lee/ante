@@ -185,14 +185,14 @@ class TestPaperExecutorCommission:
 
 class TestCommissionDefaults:
     def test_defaults_include_commission_rate(self):
-        """broker.commission_rate가 Config 기본값에 시드 등록되어 있다 (Refs #965)."""
+        """broker.commission_rate가 Config 서비스 기본값에 시드 등록되어 있음 (#965)."""
         from ante.config.defaults import DEFAULTS
 
         assert "broker.commission_rate" in DEFAULTS
         assert DEFAULTS["broker.commission_rate"] == 0.00015
 
     def test_defaults_include_sell_tax_rate(self):
-        """broker.sell_tax_rate가 Config 기본값에 시드 등록되어 있다 (Refs #965)."""
+        """broker.sell_tax_rate가 Config 서비스 기본값에 시드 등록되어 있음 (#965)."""
         from ante.config.defaults import DEFAULTS
 
         assert "broker.sell_tax_rate" in DEFAULTS

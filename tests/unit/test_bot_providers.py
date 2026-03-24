@@ -25,7 +25,9 @@ from ante.treasury.treasury import Treasury
 
 class FakeDataProvider(DataProvider):
     async def get_ohlcv(self, symbol, timeframe="1d", limit=100):
-        return [{"close": 50000.0}]
+        import polars as pl
+
+        return pl.DataFrame({"close": [50000.0]})
 
     async def get_current_price(self, symbol):
         return 50000.0

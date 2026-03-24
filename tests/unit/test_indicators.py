@@ -278,7 +278,7 @@ async def test_context_get_indicator_computes_directly():
     class FakeDataProvider:
         async def get_ohlcv(
             self, symbol: str, timeframe: str = "1d", limit: int = 100
-        ) -> list[dict[str, float]]:
+        ) -> pl.DataFrame:
             rng = np.random.default_rng(42)
             n = limit
             close = 50000.0 + np.cumsum(rng.normal(0, 100, n))
@@ -286,16 +286,15 @@ async def test_context_get_indicator_computes_directly():
             low = close - rng.uniform(50, 200, n)
             open_ = close + rng.normal(0, 50, n)
             volume = rng.uniform(1000, 10000, n)
-            return [
+            return pl.DataFrame(
                 {
-                    "open": float(open_[i]),
-                    "high": float(high[i]),
-                    "low": float(low[i]),
-                    "close": float(close[i]),
-                    "volume": float(volume[i]),
+                    "open": open_.tolist(),
+                    "high": high.tolist(),
+                    "low": low.tolist(),
+                    "close": close.tolist(),
+                    "volume": volume.tolist(),
                 }
-                for i in range(n)
-            ]
+            )
 
         async def get_current_price(self, symbol: str) -> float:
             return 50000.0
@@ -394,7 +393,7 @@ async def test_live_data_provider_get_indicator_empty_ohlcv():
 
 
 async def test_live_data_provider_get_ohlcv():
-    """LiveDataProvider.get_ohlcv()가 gateway를 경유한다."""
+    """LiveDataProvider.get_ohlcv()가 gateway를 경유하고 pl.DataFrame을 반환한다."""
     expected_data = [
         {"open": 100, "high": 110, "low": 90, "close": 105, "volume": 1000}
     ]
@@ -415,4 +414,5 @@ async def test_live_data_provider_get_ohlcv():
 
     provider = LiveDataProvider(gateway=FakeGateway())  # type: ignore[arg-type]
     result = await provider.get_ohlcv("005930")
-    assert result == expected_data
+    assert isinstance(result, pl.DataFrame)
+    assert result.to_dicts() == expected_data
