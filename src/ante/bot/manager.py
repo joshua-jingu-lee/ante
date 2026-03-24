@@ -76,25 +76,14 @@ class BotManager:
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성 + 마이그레이션 + EventBus 구독 + 잔존 스냅샷 정리."""
+        """스키마 생성 + EventBus 구독 + 잔존 스냅샷 정리."""
         await self._db.execute_script(BOT_SCHEMA)
-        await self._migrate_schema()
         self._subscribe_events()
         if self._snapshot:
             cleaned = self._snapshot.cleanup_all()
             if cleaned:
                 logger.info("잔존 전략 스냅샷 %d건 정리", cleaned)
         logger.info("BotManager 초기화 완료")
-
-    async def _migrate_schema(self) -> None:
-        """기존 bots 테이블에 account_id 컬럼이 없으면 추가한다."""
-        columns = await self._db.fetch_all("PRAGMA table_info(bots)")
-        col_names = {col["name"] for col in columns}
-        if "account_id" not in col_names:
-            await self._db.execute(
-                "ALTER TABLE bots ADD COLUMN account_id TEXT NOT NULL DEFAULT 'test'"
-            )
-            logger.info("bots 테이블에 account_id 컬럼 추가 (마이그레이션)")
 
     async def load_from_db(self) -> int:
         """DB에서 봇 설정을 읽어 메모리에 로드한다 (테스트용).
