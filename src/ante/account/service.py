@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import UTC, datetime
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS accounts (
         CHECK(trading_mode IN ('virtual', 'live')),
     broker_type  TEXT NOT NULL,
     credentials  TEXT NOT NULL DEFAULT '{}',
+    broker_config TEXT NOT NULL DEFAULT '{}',
     buy_commission_rate  REAL NOT NULL DEFAULT 0,
     sell_commission_rate REAL NOT NULL DEFAULT 0,
     status       TEXT NOT NULL DEFAULT 'active'
@@ -158,9 +160,10 @@ class AccountService:
             """INSERT INTO accounts
                (account_id, name, exchange, currency, timezone,
                 trading_hours_start, trading_hours_end, trading_mode,
-                broker_type, credentials, buy_commission_rate, sell_commission_rate,
+                broker_type, credentials, broker_config,
+                buy_commission_rate, sell_commission_rate,
                 status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 account.account_id,
                 account.name,
@@ -172,6 +175,7 @@ class AccountService:
                 account.trading_mode.value,
                 account.broker_type,
                 encrypt_credentials(account.credentials),
+                json.dumps(account.broker_config),
                 float(account.buy_commission_rate),
                 float(account.sell_commission_rate),
                 account.status.value,
@@ -261,6 +265,7 @@ class AccountService:
             "trading_hours_start",
             "trading_hours_end",
             "credentials",
+            "broker_config",
             "buy_commission_rate",
             "sell_commission_rate",
         }
@@ -279,7 +284,7 @@ class AccountService:
             """UPDATE accounts SET
                name=?, exchange=?, currency=?, timezone=?,
                trading_hours_start=?, trading_hours_end=?, trading_mode=?,
-               broker_type=?, credentials=?,
+               broker_type=?, credentials=?, broker_config=?,
                buy_commission_rate=?, sell_commission_rate=?,
                updated_at=?
                WHERE account_id=?""",
@@ -293,6 +298,7 @@ class AccountService:
                 account.trading_mode.value,
                 account.broker_type,
                 encrypt_credentials(account.credentials),
+                json.dumps(account.broker_config),
                 float(account.buy_commission_rate),
                 float(account.sell_commission_rate),
                 now.isoformat(),
@@ -485,10 +491,10 @@ class AccountService:
         config: dict[str, Any] = {
             "exchange": account.exchange,
             "trading_mode": account.trading_mode.value,
-            "is_paper": account.trading_mode == TradingMode.VIRTUAL,
             "buy_commission_rate": float(account.buy_commission_rate),
             "sell_commission_rate": float(account.sell_commission_rate),
             **account.credentials,
+            **account.broker_config,
         }
 
         broker = broker_cls(config)
@@ -536,6 +542,13 @@ def _row_to_account(row: dict[str, Any]) -> Account:
     else:
         credentials = credentials_raw
 
+    broker_config_raw = row.get("broker_config", "{}")
+    broker_config: dict[str, Any] = (
+        json.loads(broker_config_raw)
+        if isinstance(broker_config_raw, str)
+        else (broker_config_raw or {})
+    )
+
     return Account(
         account_id=row["account_id"],
         name=row["name"],
@@ -547,6 +560,7 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         trading_mode=TradingMode(row["trading_mode"]),
         broker_type=row["broker_type"],
         credentials=credentials,
+        broker_config=broker_config,
         buy_commission_rate=Decimal(str(row["buy_commission_rate"])),
         sell_commission_rate=Decimal(str(row["sell_commission_rate"])),
         status=AccountStatus(row["status"]),

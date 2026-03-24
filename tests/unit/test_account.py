@@ -388,33 +388,34 @@ async def test_get_broker_cached(service):
 
 
 @pytest.mark.asyncio
-async def test_get_broker_injects_is_paper_virtual(service):
-    """VIRTUAL 계좌 → config에 is_paper=True 주입."""
-    await service.create(_make_account(trading_mode=TradingMode.VIRTUAL))
+async def test_get_broker_uses_broker_config(service):
+    """broker_config={"is_paper": True} -> config에 전달."""
+    await service.create(
+        _make_account(broker_config={"is_paper": True}),
+    )
     broker = await service.get_broker("test")
     assert broker.config.get("is_paper") is True
 
 
 @pytest.mark.asyncio
-async def test_get_broker_injects_is_paper_live(service):
-    """LIVE 계좌 → config에 is_paper=False 주입."""
-    await service.create(_make_account(trading_mode=TradingMode.LIVE))
+async def test_get_broker_broker_config_default(service):
+    """broker_config={} -> is_paper 키 없음 (KIS 기본값 사용)."""
+    await service.create(_make_account())
     broker = await service.get_broker("test")
-    assert broker.config.get("is_paper") is False
+    assert "is_paper" not in broker.config
 
 
 @pytest.mark.asyncio
-async def test_get_broker_credentials_override_is_paper(service):
-    """credentials에 is_paper 명시 시 우선 적용."""
-    await service.create(
-        _make_account(
-            trading_mode=TradingMode.VIRTUAL,
-            credentials={"app_key": "k", "app_secret": "s", "is_paper": False},
-        )
-    )
-    broker = await service.get_broker("test")
-    # credentials spread가 뒤에 위치하므로 is_paper=False로 덮어씀
-    assert broker.config.get("is_paper") is False
+async def test_create_account_with_broker_config(service):
+    """생성 시 broker_config가 DB에 저장/로드."""
+    account = _make_account(broker_config={"is_paper": True, "hts_id": "myid"})
+    created = await service.create(account)
+
+    assert created.broker_config == {"is_paper": True, "hts_id": "myid"}
+
+    # DB에서 다시 로드
+    fetched = await service.get("test")
+    assert fetched.broker_config == {"is_paper": True, "hts_id": "myid"}
 
 
 # ── 기본 테스트 계좌 ──────────────────────────────────

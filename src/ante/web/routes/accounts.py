@@ -49,6 +49,7 @@ def _account_to_response(account: Any) -> dict[str, Any]:
             else str(account.trading_mode)
         ),
         "broker_type": account.broker_type,
+        "broker_config": account.broker_config,
         "buy_commission_rate": float(account.buy_commission_rate),
         "sell_commission_rate": float(account.sell_commission_rate),
         "status": (
@@ -126,6 +127,7 @@ async def create_account(
         trading_mode=trading_mode,
         broker_type=body.broker_type,
         credentials=body.credentials,
+        broker_config=body.broker_config,
         buy_commission_rate=Decimal(str(body.buy_commission_rate))
         if body.buy_commission_rate
         else (preset.buy_commission_rate if preset else Decimal("0")),
@@ -202,6 +204,7 @@ async def update_account(
         "trading_hours_start",
         "trading_hours_end",
         "credentials",
+        "broker_config",
         "buy_commission_rate",
         "sell_commission_rate",
     ):

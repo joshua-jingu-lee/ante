@@ -32,6 +32,7 @@ class AccountResponse(BaseModel):
     trading_hours_end: str
     trading_mode: str
     broker_type: str
+    broker_config: dict[str, Any] = {}
     buy_commission_rate: float
     sell_commission_rate: float
     status: str
@@ -64,6 +65,7 @@ class AccountCreateRequest(BaseModel):
     trading_mode: str = "virtual"
     broker_type: str = "test"
     credentials: dict[str, str] = {}
+    broker_config: dict[str, Any] = {}
     buy_commission_rate: float = 0.0
     sell_commission_rate: float = 0.0
 
@@ -80,6 +82,7 @@ class AccountUpdateRequest(BaseModel):
     trading_mode: str | None = None
     broker_type: str | None = None
     credentials: dict[str, str] | None = None
+    broker_config: dict[str, Any] | None = None
     buy_commission_rate: float | None = None
     sell_commission_rate: float | None = None
 

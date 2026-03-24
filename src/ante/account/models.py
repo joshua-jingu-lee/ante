@@ -1,9 +1,12 @@
 """Account 데이터 모델."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 
 class AccountStatus(StrEnum):
@@ -45,6 +48,7 @@ class Account:
     # --- 브로커 ---
     broker_type: str = "test"
     credentials: dict[str, str] = field(default_factory=dict)
+    broker_config: dict[str, Any] = field(default_factory=dict)
 
     # --- 비용 ---
     buy_commission_rate: Decimal = Decimal("0")
