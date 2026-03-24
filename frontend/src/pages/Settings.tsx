@@ -3,18 +3,33 @@ import { useSystemStatus, useKillSwitch, useConfigs, useUpdateConfig } from '../
 import { PageSkeleton } from '../components/common/Skeleton'
 import ApiKeyStatusPanel from '../components/data/ApiKeyStatusPanel'
 
-/** 거래 설정 고정 항목 */
-const TRADING_CONFIGS = [
-  { key: 'risk.max_mdd_pct', label: '최대 낙폭 제한 (%)', desc: '이 비율 초과 시 거래 자동 중지 · 예: 15 → 고점 대비 15% 하락 시 정지' },
-  { key: 'risk.max_position_pct', label: '종목당 최대 비중 (%)', desc: '단일 종목에 투입 가능한 최대 예산 비율 · 예: 30 → 예산의 30%까지 한 종목에 투자' },
-  { key: 'rule.daily_loss_limit', label: '일일 손실 한도 (%)', desc: '일일 손실이 이 비율 초과 시 전체 거래 정지 · 예: 5 → 당일 손실 5% 초과 시 정지' },
-  { key: 'rule.max_exposure_percent', label: '총 노출 한도 (%)', desc: '잔고 대비 최대 투자 비율 · 예: 20 → 총 잔고의 20%까지만 투자' },
-  { key: 'rule.max_unrealized_loss', label: '미실현 손실 한도 (%)', desc: '배정 예산 대비 미실현 손실 초과 시 추가 매수 차단 · 예: 10 → 평가손실 10% 초과 시 매수 불가' },
-  { key: 'rule.max_trades_per_hour', label: '시간당 최대 거래 수', desc: '봇당 시간당 거래 횟수 제한 · 예: 10 → 봇 1개가 1시간에 최대 10회 거래' },
-  { key: 'rule.allowed_hours', label: '거래 허용 시간', desc: '장중 거래 허용 시간대 (KST) · 예: 09:00-15:30 → 오전 9시~오후 3시 30분만 거래' },
-  { key: 'bot.default_interval_sec', label: '봇 기본 실행 간격 (초)', desc: '봇 생성 시 기본값 (10~3600) · 예: 60 → 봇이 60초마다 전략 실행' },
-  { key: 'broker.commission_rate', label: '매매 수수료율 (%)', desc: '매수/매도 시 증권사 수수료 · 예: 0.015 → 100만원 거래 시 수수료 150원' },
-  { key: 'broker.sell_tax_rate', label: '매도 세금율 (%)', desc: '증권거래세 + 농특세 · 예: 0.23 → 100만원 매도 시 세금 2,300원' },
+/** 거래 설정: 섹션별 그룹 */
+const TRADING_CONFIG_GROUPS = [
+  {
+    title: '리스크 관리',
+    configs: [
+      { key: 'risk.max_mdd_pct', label: '최대 낙폭 제한 (%)', desc: '이 비율 초과 시 거래 자동 중지 · 예: 15 → 고점 대비 15% 하락 시 정지' },
+      { key: 'risk.max_position_pct', label: '종목당 최대 비중 (%)', desc: '단일 종목에 투입 가능한 최대 예산 비율 · 예: 30 → 예산의 30%까지 한 종목에 투자' },
+      { key: 'rule.daily_loss_limit', label: '일일 손실 한도 (%)', desc: '일일 손실이 이 비율 초과 시 전체 거래 정지 · 예: 5 → 당일 손실 5% 초과 시 정지' },
+      { key: 'rule.max_exposure_percent', label: '총 노출 한도 (%)', desc: '잔고 대비 최대 투자 비율 · 예: 20 → 총 잔고의 20%까지만 투자' },
+      { key: 'rule.max_unrealized_loss', label: '미실현 손실 한도 (%)', desc: '배정 예산 대비 미실현 손실 초과 시 추가 매수 차단 · 예: 10 → 평가손실 10% 초과 시 매수 불가' },
+      { key: 'rule.max_trades_per_hour', label: '시간당 최대 거래 수', desc: '봇당 시간당 거래 횟수 제한 · 예: 10 → 봇 1개가 1시간에 최대 10회 거래' },
+      { key: 'rule.allowed_hours', label: '거래 허용 시간', desc: '장중 거래 허용 시간대 (KST) · 예: 09:00-15:30 → 오전 9시~오후 3시 30분만 거래' },
+    ],
+  },
+  {
+    title: '봇 기본 설정',
+    configs: [
+      { key: 'bot.default_interval_sec', label: '봇 기본 실행 간격 (초)', desc: '봇 생성 시 기본값 (10~3600) · 예: 60 → 봇이 60초마다 전략 실행' },
+    ],
+  },
+  {
+    title: '거래 비용',
+    configs: [
+      { key: 'broker.commission_rate', label: '매매 수수료율 (%)', desc: '매수/매도 시 증권사 수수료 · 예: 0.015 → 100만원 거래 시 수수료 150원' },
+      { key: 'broker.sell_tax_rate', label: '매도 세금율 (%)', desc: '증권거래세 + 농특세 · 예: 0.23 → 100만원 매도 시 세금 2,300원' },
+    ],
+  },
 ]
 
 /** 표시 및 알림 설정 */
@@ -108,14 +123,26 @@ export default function Settings() {
               <span>한국투자증권</span>
             </div>
             <div className="flex justify-between py-2 border-b border-border text-[13px]">
+              <span className="text-text-muted">거래소</span>
+              <span>{getConfigValue('broker.exchange') || 'KRX (한국거래소)'}</span>
+            </div>
+            <div className="flex justify-between py-2 border-b border-border text-[13px]">
+              <span className="text-text-muted">통화</span>
+              <span>{getConfigValue('broker.currency') || 'KRW'}</span>
+            </div>
+            <div className="flex justify-between py-2 border-b border-border text-[13px]">
               <span className="text-text-muted">거래 모드</span>
               <span className="inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold bg-primary/15 text-primary">
                 {getConfigValue('broker.mode') || '실전'}
               </span>
             </div>
-            <div className="flex justify-between py-2 text-[13px]">
+            <div className="flex justify-between py-2 border-b border-border text-[13px]">
               <span className="text-text-muted">계좌번호</span>
               <span className="font-mono text-[12px]">{getConfigValue('broker.account_no') || '-'}</span>
+            </div>
+            <div className="flex justify-between py-2 text-[13px]">
+              <span className="text-text-muted">수수료율</span>
+              <span>{getConfigValue('broker.commission_rate') ? `${getConfigValue('broker.commission_rate')}%` : '-'}</span>
             </div>
           </div>
         </div>
@@ -139,29 +166,38 @@ export default function Settings() {
               </tr>
             </thead>
             <tbody>
-              {TRADING_CONFIGS.map((cfg) => (
-                <tr key={cfg.key} className="hover:bg-surface-hover">
-                  <td className="px-3 py-3 border-b border-border">
-                    <div className="text-[13px] font-medium">{cfg.label}</div>
-                    <div className="text-[11px] text-text-muted mt-0.5">{cfg.key} · {cfg.desc}</div>
-                  </td>
-                  <td className="px-3 py-3 border-b border-border">
-                    <input
-                      value={getRowValue(cfg.key)}
-                      onChange={(e) => setRowValue(cfg.key, e.target.value)}
-                      className="w-[120px] bg-bg border border-border rounded px-2 py-1 text-text text-[13px] focus:outline-none focus:border-primary"
-                      onKeyDown={(e) => e.key === 'Enter' && saveRow(cfg.key)}
-                    />
-                  </td>
-                  <td className="px-3 py-3 border-b border-border text-right">
-                    <button
-                      onClick={() => saveRow(cfg.key)}
-                      className="px-2.5 py-1 rounded text-[12px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text"
-                    >
-                      저장
-                    </button>
-                  </td>
-                </tr>
+              {TRADING_CONFIG_GROUPS.map((group) => (
+                <>
+                  <tr key={`section-${group.title}`}>
+                    <td colSpan={3} className="px-3 pt-5 pb-2 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border">
+                      {group.title}
+                    </td>
+                  </tr>
+                  {group.configs.map((cfg) => (
+                    <tr key={cfg.key} className="hover:bg-surface-hover">
+                      <td className="px-3 py-3 border-b border-border">
+                        <div className="text-[13px] font-medium">{cfg.label}</div>
+                        <div className="text-[11px] text-text-muted mt-0.5">{cfg.key} · {cfg.desc}</div>
+                      </td>
+                      <td className="px-3 py-3 border-b border-border">
+                        <input
+                          value={getRowValue(cfg.key)}
+                          onChange={(e) => setRowValue(cfg.key, e.target.value)}
+                          className="w-[120px] bg-bg border border-border rounded px-2 py-1 text-text text-[13px] focus:outline-none focus:border-primary"
+                          onKeyDown={(e) => e.key === 'Enter' && saveRow(cfg.key)}
+                        />
+                      </td>
+                      <td className="px-3 py-3 border-b border-border text-right">
+                        <button
+                          onClick={() => saveRow(cfg.key)}
+                          className="px-2.5 py-1 rounded text-[12px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover hover:text-text"
+                        >
+                          저장
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </>
               ))}
             </tbody>
           </table>
