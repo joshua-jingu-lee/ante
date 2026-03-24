@@ -33,6 +33,8 @@ export async function getTreasuryTransactions(params: {
   limit?: number
   type?: string
   bot_id?: string
+  start_date?: string
+  end_date?: string
 }): Promise<{ items: TreasuryTransaction[]; total: number }> {
   const res = await client.get('/api/treasury/transactions', { params })
   return res.data
