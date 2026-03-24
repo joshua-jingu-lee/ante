@@ -184,6 +184,7 @@ class BotUpdateRequest(BaseModel):
     """봇 설정 수정 요청. None인 필드는 변경하지 않는다."""
 
     name: str | None = None
+    strategy_name: str | None = None
     interval_seconds: int | None = Field(default=None, ge=10, le=3600)
     budget: float | None = Field(default=None, gt=0)
     auto_restart: bool | None = None

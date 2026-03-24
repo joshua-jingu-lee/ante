@@ -374,6 +374,7 @@ async def update_bot(
     body: BotUpdateRequest,
     request: Request,
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
+    registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """봇 설정 수정. 중지 상태에서만 허용."""
@@ -387,6 +388,20 @@ async def update_bot(
     updates = body.model_dump(exclude_none=True)
     if not updates:
         return {"bot": bot.get_info()}
+
+    # strategy_name → strategy_id 변환
+    strategy_name = updates.pop("strategy_name", None)
+    if strategy_name is not None:
+        if registry is None:
+            raise HTTPException(
+                status_code=503, detail="전략 레지스트리를 사용할 수 없습니다"
+            )
+        records = await registry.get_by_name(strategy_name)
+        if not records:
+            raise HTTPException(
+                status_code=404, detail=f"전략을 찾을 수 없습니다: {strategy_name}"
+            )
+        updates["strategy_id"] = records[0].strategy_id
 
     try:
         bot = await bot_manager.update_bot(bot_id, **updates)
