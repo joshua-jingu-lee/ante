@@ -22,8 +22,18 @@ import argparse
 import logging
 import sqlite3
 from datetime import datetime, timedelta
+from uuid import UUID, uuid5
 
 logger = logging.getLogger(__name__)
+
+# QA 시드 데이터 전용 UUID 네임스페이스 (결정적 생성으로 멱등성 보장)
+_QA_NS = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+
+def _qa_trade_id(name: str) -> str:
+    """결정적 UUID5를 문자열로 반환한다."""
+    return str(uuid5(_QA_NS, name))
+
 
 # ---------------------------------------------------------------------------
 # 상수
@@ -64,7 +74,7 @@ def _trade_timestamp(day_offset: int, hour: int = 10, minute: int = 0) -> str:
 TRADES = [
     # bot-01: 삼성전자 매수 5건, 매도 2건
     (
-        "qa-trade-001",
+        _qa_trade_id("qa-trade-001"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -78,7 +88,7 @@ TRADES = [
         _trade_timestamp(0, 9, 30),
     ),
     (
-        "qa-trade-002",
+        _qa_trade_id("qa-trade-002"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -92,7 +102,7 @@ TRADES = [
         _trade_timestamp(1, 10, 0),
     ),
     (
-        "qa-trade-003",
+        _qa_trade_id("qa-trade-003"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -106,7 +116,7 @@ TRADES = [
         _trade_timestamp(3, 14, 0),
     ),
     (
-        "qa-trade-004",
+        _qa_trade_id("qa-trade-004"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -120,7 +130,7 @@ TRADES = [
         _trade_timestamp(5, 11, 30),
     ),
     (
-        "qa-trade-005",
+        _qa_trade_id("qa-trade-005"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -134,7 +144,7 @@ TRADES = [
         _trade_timestamp(7, 13, 0),
     ),
     (
-        "qa-trade-006",
+        _qa_trade_id("qa-trade-006"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -148,7 +158,7 @@ TRADES = [
         _trade_timestamp(9, 10, 30),
     ),
     (
-        "qa-trade-007",
+        _qa_trade_id("qa-trade-007"),
         "qa-test-bot-01",
         STRATEGY_IDS[0],
         "005930",
@@ -163,7 +173,7 @@ TRADES = [
     ),
     # bot-02: SK하이닉스 매수 3건, 매도 2건
     (
-        "qa-trade-008",
+        _qa_trade_id("qa-trade-008"),
         "qa-test-bot-02",
         STRATEGY_IDS[1],
         "000660",
@@ -177,7 +187,7 @@ TRADES = [
         _trade_timestamp(0, 10, 0),
     ),
     (
-        "qa-trade-009",
+        _qa_trade_id("qa-trade-009"),
         "qa-test-bot-02",
         STRATEGY_IDS[1],
         "000660",
@@ -191,7 +201,7 @@ TRADES = [
         _trade_timestamp(2, 14, 30),
     ),
     (
-        "qa-trade-010",
+        _qa_trade_id("qa-trade-010"),
         "qa-test-bot-02",
         STRATEGY_IDS[1],
         "000660",
@@ -205,7 +215,7 @@ TRADES = [
         _trade_timestamp(4, 11, 0),
     ),
     (
-        "qa-trade-011",
+        _qa_trade_id("qa-trade-011"),
         "qa-test-bot-02",
         STRATEGY_IDS[1],
         "000660",
@@ -219,7 +229,7 @@ TRADES = [
         _trade_timestamp(8, 13, 30),
     ),
     (
-        "qa-trade-012",
+        _qa_trade_id("qa-trade-012"),
         "qa-test-bot-02",
         STRATEGY_IDS[1],
         "000660",
