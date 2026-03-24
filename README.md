@@ -17,29 +17,9 @@ Ante는 이 결합을 분리합니다.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    User["  👤 사용자  \n "]
-
-    subgraph Server["<b>🖥️ 홈서버</b>"]
-        direction TB
-        Agent["<b>🤖 AI Agent</b>\n시장조사 · 전략고안 · 매매판단"]
-        Ante["<b>⚙️ Ante</b>\n검증 · 봇 운영  · 리스크 관리"]
-        Agent <-- "전략 제공\n성과 피드백" --> Ante
-    end
-
-    Market["📈 증권사"]
-
-    User <-- "AI 관리\n대시보드 · 리포트 · 알림" --> Server
-    Ante <-- "API 기반\n시세조회 · 주문 · 체결 관리" --> Market
-
-
-    style User fill:#e8e8e8,stroke:#999,color:#333
-    style Ante fill:#d0d0d0,stroke:#888,color:#222
-    style Agent fill:#e8e8e8,stroke:#999,color:#333
-    style Market fill:#e8e8e8,stroke:#999,color:#333
-    style Server fill:#f5f5f5,stroke:#aaa,color:#555
-```
+<p align="center">
+  <img src="guide/assets/how-it-works.svg" alt="How Ante works" width="720"/>
+</p>
 
 Ante와 AI Agent 그리고 사용자는 위와 같은 역할을 맡아 서로 협력합니다.
 
