@@ -120,6 +120,9 @@ class FakeBotManager:
             bot._name = updates["name"]
         if "interval_seconds" in updates:
             bot._interval_seconds = updates["interval_seconds"]
+        if "strategy_id" in updates:
+            bot._strategy_id = updates["strategy_id"]
+            bot.config.strategy_id = updates["strategy_id"]
         return bot
 
 
@@ -468,6 +471,9 @@ class FakeStrategyRegistry:
 
     async def get(self, strategy_id: str) -> FakeStrategyRecord | None:
         return self._strategies.get(strategy_id)
+
+    async def get_by_name(self, name: str) -> list[FakeStrategyRecord]:
+        return [r for r in self._strategies.values() if r.name == name]
 
 
 class TestCreateBotAccountStatus:
@@ -853,3 +859,53 @@ class TestUpdateBot:
         bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
         resp = client.put("/api/bots/bot-1", json={"budget": 2000000})
         assert resp.status_code == 200
+
+
+class TestUpdateBotStrategy:
+    """PUT /api/bots/{bot_id} 전략 변경 테스트."""
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["s1"] = FakeStrategyRecord("s1", name="OldStrategy")
+        reg._strategies["s2"] = FakeStrategyRecord("s2", name="NewStrategy")
+        return reg
+
+    @pytest.fixture
+    def client_with_registry(
+        self, bot_manager, strategy_registry, default_account_service
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            strategy_registry=strategy_registry,
+            account_service=default_account_service,
+        )
+        return TestClient(app)
+
+    def test_update_strategy_name(
+        self, client_with_registry, bot_manager, strategy_registry
+    ):
+        """strategy_name으로 전략 변경 성공."""
+        bot_manager._bots["bot-1"] = FakeBot(
+            "bot-1", status="stopped", strategy_id="s1"
+        )
+        resp = client_with_registry.put(
+            "/api/bots/bot-1", json={"strategy_name": "NewStrategy"}
+        )
+        assert resp.status_code == 200
+        assert bot_manager._bots["bot-1"]._strategy_id == "s2"
+
+    def test_update_strategy_name_not_found(self, client_with_registry, bot_manager):
+        """존재하지 않는 전략 이름 -> 404."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client_with_registry.put(
+            "/api/bots/bot-1", json={"strategy_name": "NonExistent"}
+        )
+        assert resp.status_code == 404
+        assert "전략을 찾을 수 없습니다" in resp.json()["detail"]
+
+    def test_update_strategy_without_registry(self, client, bot_manager):
+        """strategy_registry가 없을 때 strategy_name 전달 -> 503."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        resp = client.put("/api/bots/bot-1", json={"strategy_name": "SomeStrategy"})
+        assert resp.status_code == 503

@@ -83,6 +83,7 @@ export interface BotCreateRequest {
 
 export interface BotUpdateRequest {
   name?: string
+  strategy_name?: string
   interval_seconds?: number
   budget?: number
   auto_restart?: boolean

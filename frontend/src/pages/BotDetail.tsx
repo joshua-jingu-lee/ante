@@ -300,6 +300,7 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
         botId: bot.bot_id,
         data: {
           name,
+          strategy_name: strategyName,
           interval_seconds: intervalSeconds,
           budget,
           auto_restart: autoRestart,
