@@ -56,3 +56,60 @@ async def test_not_connected_raises():
     db = Database(":memory:")
     with pytest.raises(RuntimeError, match="DB 연결되지 않음"):
         await db.execute("SELECT 1")
+
+
+# --- 트랜잭션 컨텍스트 매니저 테스트 ---
+
+
+async def test_transaction_commit(db):
+    """트랜잭션 내 INSERT 2건이 context 탈출 후 정상 커밋된다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    async with db.transaction():
+        await db.execute("INSERT INTO t (val) VALUES (?)", ("a",))
+        await db.execute("INSERT INTO t (val) VALUES (?)", ("b",))
+
+    rows = await db.fetch_all("SELECT * FROM t ORDER BY val")
+    assert len(rows) == 2
+    assert rows[0]["val"] == "a"
+    assert rows[1]["val"] == "b"
+
+
+async def test_transaction_rollback_on_exception(db):
+    """트랜잭션 내 예외 발생 시 INSERT가 롤백된다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    with pytest.raises(ValueError, match="의도적 예외"):
+        async with db.transaction():
+            await db.execute("INSERT INTO t (val) VALUES (?)", ("a",))
+            raise ValueError("의도적 예외")
+
+    rows = await db.fetch_all("SELECT * FROM t")
+    assert len(rows) == 0
+
+
+async def test_transaction_nested_raises(db):
+    """이미 트랜잭션 중 재진입 시 RuntimeError가 발생한다."""
+    async with db.transaction():
+        with pytest.raises(RuntimeError, match="중첩 트랜잭션은 지원하지 않습니다"):
+            async with db.transaction():
+                pass  # pragma: no cover
+
+
+async def test_transaction_ddl(db):
+    """ALTER TABLE 2건을 하나의 트랜잭션으로 묶어 실행한다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, col_a TEXT);")
+
+    async with db.transaction():
+        await db.execute("ALTER TABLE t ADD COLUMN col_b TEXT")
+        await db.execute("ALTER TABLE t ADD COLUMN col_c TEXT")
+
+    # 추가된 컬럼에 값을 삽입하여 DDL이 정상 적용되었는지 검증
+    await db.execute(
+        "INSERT INTO t (col_a, col_b, col_c) VALUES (?, ?, ?)",
+        ("a", "b", "c"),
+    )
+    row = await db.fetch_one("SELECT * FROM t WHERE col_a = ?", ("a",))
+    assert row is not None
+    assert row["col_b"] == "b"
+    assert row["col_c"] == "c"
