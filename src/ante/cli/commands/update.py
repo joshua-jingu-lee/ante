@@ -86,12 +86,21 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
         pip_upgrade,
         rollback_update,
         run_post_update_migrations,
+        snapshot_dependencies,
     )
 
     db_path = Path("db/ante.db")
     if db_path.exists():
         click.echo("DB 백업 중...")
         backup_db(db_path, current)
+
+    # 의존성 스냅샷 저장
+    click.echo("의존성 스냅샷 저장 중...")
+    snapshot_path = snapshot_dependencies(current)
+    if snapshot_path:
+        click.echo(f"스냅샷 저장 완료: {snapshot_path}")
+    else:
+        click.echo("의존성 스냅샷 저장 실패 (계속 진행)", err=True)
 
     click.echo(f"업데이트 중: {current} → {latest}...")
     if not pip_upgrade(target_version):
@@ -105,10 +114,15 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
         backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"
         if rollback_update(current, backup_path):
             click.echo(f"롤백 완료: {current}으로 복원됨")
+            if snapshot_path:
+                click.echo(f"의존성 복원: pip install -r {snapshot_path}")
         else:
+            restore_hint = f"  pip install ante=={current}"
+            if snapshot_path:
+                restore_hint += f"\n  pip install -r {snapshot_path}"
             click.echo(
                 f"자동 롤백 실패. 수동 복구 필요:\n"
-                f"  pip install ante=={current}\n"
+                f"{restore_hint}\n"
                 f"  cp {backup_path} db/ante.db",
                 err=True,
             )
