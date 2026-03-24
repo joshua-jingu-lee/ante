@@ -52,7 +52,9 @@ if [ -n "$QA_TOKEN" ]; then
     # docker exec는 컨테이너의 환경변수를 상속하지 않으므로
     # 토큰을 파일로도 저장하여 CLI가 자동으로 읽을 수 있게 한다
     echo -n "$QA_TOKEN" > /run/ante-token
-    chmod 600 /run/ante-token
+    chmod 644 /run/ante-token
+    # docker exec에서 CLI가 토큰 파일을 찾을 수 있도록 환경변수 파일에도 기록
+    echo "ANTE_TOKEN_FILE=/run/ante-token" >> /etc/environment
     echo "[qa] ANTE_MEMBER_TOKEN 설정 완료 (환경변수 + /run/ante-token)"
 else
     echo "[qa] WARNING: ANTE_MEMBER_TOKEN 설정 실패" >&2
@@ -65,7 +67,7 @@ if [ "$ACCOUNT_COUNT" = "0" ]; then
     echo "[qa] 계좌 없음 — 시드 계좌 생성 중..."
     curl -sf -X POST http://localhost:8000/api/accounts \
         -H "Content-Type: application/json" \
-        -d '{"account_id":"test","name":"QA Test","broker_type":"test","trading_mode":"virtual"}' \
+        -d '{"account_id":"test","name":"QA Test","broker_type":"test","trading_mode":"virtual","credentials":{"app_key":"test","app_secret":"test"}}' \
         > /dev/null 2>&1 || true
 
     # 계좌 생성 후 서버 재기동하여 Treasury 초기화
@@ -94,8 +96,8 @@ fi
 echo "[qa] QA 전략 레지스트리 시딩..."
 python scripts/qa_seed_strategies.py --strategies-dir strategies --db-path db/ante.db
 
-echo "[qa] QA 데이터셋 시딩 (봇, 거래, 성과)..."
-python scripts/qa_seed_datasets.py --db-path db/ante.db
+echo "[qa] QA 데이터셋 시딩 (봇, 거래, 성과, Parquet)..."
+python scripts/qa_seed_datasets.py --db-path db/ante.db --data-path data/
 
 echo "[qa] QA 테스트용 동적 설정 시드 등록..."
 sqlite3 db/ante.db "INSERT OR IGNORE INTO dynamic_config (key, value, category, updated_at) VALUES ('risk.test_qa_key', '0', 'risk', datetime('now'));"

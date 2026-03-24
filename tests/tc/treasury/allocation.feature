@@ -69,6 +69,13 @@ Feature: Treasury 예산 할당·회수
     Then 응답 상태는 201
     And 응답 body.bot.bot_id 를 {bot_id}로 저장한다
 
+  Scenario: 잔고 재설정 (할당 초기화 보장)
+    When POST /api/treasury/balance 요청:
+      | field   | value    |
+      | balance | 10000000 |
+    Then 응답 상태는 200
+    And 응답 body.total_balance 는 10000000
+
   # ── 정상 흐름: 예산 할당 ──
 
   Scenario: 봇 예산 할당 (API)

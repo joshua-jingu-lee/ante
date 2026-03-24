@@ -19,6 +19,7 @@ Feature: 계좌 생명주기
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201
     And 응답 body.account.status 는 "active"
     And 응답 body.account.account_id 를 {account_id}로 저장한다
@@ -68,6 +69,7 @@ Feature: 계좌 생명주기
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {suspended_account_id}로 저장한다
     When POST /api/accounts/{suspended_account_id}/suspend
@@ -96,6 +98,7 @@ Feature: 계좌 생명주기
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {deleted_account_id}로 저장한다
     When DELETE /api/accounts/{deleted_account_id}
@@ -115,6 +118,7 @@ Feature: 계좌 생명주기
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {dup_suspend_id}로 저장한다
     When POST /api/accounts/{dup_suspend_id}/suspend

@@ -1,5 +1,5 @@
 Feature: 계좌 인증정보 관리
-  계좌의 인증정보(credentials) 설정, 조회, 미설정 시 봇 시작 에러를 검증한다.
+  계좌의 인증정보(credentials) 설정, 조회, 필수 누락 에러를 검증한다.
 
   Background:
     Given ante-qa 컨테이너가 실행 중이다
@@ -38,6 +38,7 @@ Feature: 계좌 인증정보 관리
       | trading_hours_end   | 15:30               |
       | trading_mode        | virtual             |
       | broker_type         | test                |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201
     And 응답 body.account.account_id 를 {account_id}로 저장한다
 
@@ -67,8 +68,8 @@ Feature: 계좌 인증정보 관리
 
   # ── 에러 케이스 ──
 
-  Scenario: 인증정보 없는 계좌로 봇 시작 시 에러
-    # 인증정보 없는 새 계좌 생성 (test 브로커, virtual 모드)
+  Scenario: 인증정보 누락 계좌 생성 시 422 에러
+    # PR #850 이후 credentials 필수 — 누락 시 422 반환
     When POST /api/accounts 요청:
       | field               | value                |
       | account_id          | qa-cred-acct-02      |
@@ -80,17 +81,4 @@ Feature: 계좌 인증정보 관리
       | trading_hours_end   | 15:30                |
       | trading_mode        | virtual              |
       | broker_type         | test                 |
-    Then 응답 상태는 201
-    And 응답 body.account.account_id 를 {no_cred_account_id}로 저장한다
-    # 봇 생성
-    When POST /api/bots 요청:
-      | field       | value                 |
-      | bot_id      | qa-no-cred-bot-01     |
-      | account_id  | {no_cred_account_id}  |
-      | name        | 인증정보 없는 봇      |
-      | strategy_id | {strategy_id}         |
-    Then 응답 상태는 201
-    And 응답 body.bot.bot_id 를 {no_cred_bot_id}로 저장한다
-    # 봇 시작 시도 → 인증정보 미설정 에러
-    When POST /api/bots/{no_cred_bot_id}/start
     Then 응답 상태는 422

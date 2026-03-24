@@ -17,6 +17,7 @@ Feature: 계좌 CRUD
       | trading_hours_end   | 15:30              |
       | trading_mode        | virtual            |
       | broker_type         | test               |
+      | credentials         | {"app_key": "test", "app_secret": "test"} |
     Then 응답 상태는 201
     And 응답 body.account.account_id 는 null이 아니다
     And 응답 body.account.name 은 "QA 테스트 계좌"
