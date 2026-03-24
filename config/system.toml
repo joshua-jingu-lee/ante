@@ -12,7 +12,7 @@ path = "db/ante.db"
 path = "data/"
 
 [web]
-enabled = false             # 대시보드 활성화 시 true
+enabled = true              # 대시보드 활성화 시 true
 host = "0.0.0.0"
 port = 3982
 

@@ -28,13 +28,6 @@ RUN pip install --no-cache-dir .
 # 런타임 디렉토리
 RUN mkdir -p config data db
 
-# 테스트 시드 파일 복사 (ANTE_TEST_MODE 사용 시 필요)
-COPY tests/__init__.py tests/__init__.py
-COPY tests/fixtures/__init__.py tests/fixtures/__init__.py
-COPY tests/fixtures/seed/__init__.py tests/fixtures/seed/__init__.py
-COPY tests/fixtures/seed/seeder.py tests/fixtures/seed/seeder.py
-COPY tests/fixtures/seed/scenarios/ tests/fixtures/seed/scenarios/
-
 # 기본 설정 파일 복사 (Docker에서는 웹 대시보드 기본 활성화)
 COPY config/system.toml.example config/system.toml
 RUN sed -i 's/^enabled = false/enabled = true/' config/system.toml
