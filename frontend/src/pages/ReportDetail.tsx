@@ -11,7 +11,7 @@ const STATUS_BADGE: Record<ReportStatus, { label: string; variant: string }> = {
   submitted: { label: '제출됨', variant: 'warning' },
   reviewed: { label: '검토됨', variant: 'info' },
   adopted: { label: '채택됨', variant: 'positive' },
-  rejected: { label: '거부됨', variant: 'negative' },
+  rejected: { label: '미채택', variant: 'negative' },
   archived: { label: '보관됨', variant: 'muted' },
 }
 
@@ -45,7 +45,7 @@ function ReportInfoCard({ report }: { report: ReportDetailType }) {
       <InfoRow label="전략명" value={<span className="font-mono text-[12px]">{report.strategy_name}</span>} />
       <InfoRow label="버전" value={report.strategy_version} />
       <InfoRow label="상태" value={<StatusBadge variant={status.variant as 'info'}>{status.label}</StatusBadge>} />
-      <InfoRow label="수행자" value={report.submitted_by} />
+      <InfoRow label="수행자" value={report.submitted_by_id ? `${report.submitted_by} (${report.submitted_by_id})` : report.submitted_by} />
       <InfoRow label="수행일" value={formatDateTime(report.submitted_at)} />
     </div>
   )

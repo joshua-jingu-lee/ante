@@ -16,7 +16,7 @@ export const STRATEGY_STATUS_LABELS: Record<string, string> = {
   registered: '대기',
   active: '운용중',
   inactive: '중지',
-  archived: '보관됨',
+  archived: '보관',
 }
 
 /** 결재 상태 라벨 */

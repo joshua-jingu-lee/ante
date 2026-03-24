@@ -40,6 +40,7 @@ export interface ReportDetail {
   status: ReportStatus
   submitted_at: string
   submitted_by: string
+  submitted_by_id?: string
   backtest_period: string
   total_return_pct: number
   total_trades: number
