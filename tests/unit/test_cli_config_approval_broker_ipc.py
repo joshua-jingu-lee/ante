@@ -231,6 +231,172 @@ class TestApprovalReopenIPC:
         )
 
 
+# ── Broker status/balance/positions IPC ────────────
+
+
+class TestBrokerStatusIPC:
+    def test_status_sends_ipc(self, runner: CliRunner) -> None:
+        """broker status가 IPC로 broker.status 커맨드를 전송한다."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {
+                "connected": True,
+                "healthy": True,
+                "exchange": "KRX",
+            },
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "status", "--account", "acc-1"])
+
+        assert result.exit_code == 0, result.output
+        assert "연결됨" in result.output
+        assert "정상" in result.output
+        mock_client.send.assert_called_once()
+        call_args = mock_client.send.call_args
+        assert call_args[0][0] == "broker.status"
+        sent = call_args[0][1]
+        assert sent["account_id"] == "acc-1"
+
+    def test_status_without_account(self, runner: CliRunner) -> None:
+        """broker status (계좌 미지정) IPC 전송."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {
+                "connected": True,
+                "healthy": True,
+                "exchange": "KRX",
+            },
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "status"])
+
+        assert result.exit_code == 0, result.output
+        sent = mock_client.send.call_args[0][1]
+        assert "account_id" not in sent
+
+    def test_status_fallback_on_server_not_running(self, runner: CliRunner) -> None:
+        """서버 미실행 시 직접 연결 폴백. 폴백도 실패하면 에러 표시."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.side_effect = ServerNotRunningError("no server")
+
+        with ipc_cls_patch, socket_patch:
+            # 폴백 시 _get_broker가 실패하면 error 키로 표시
+            with patch(
+                "ante.cli.commands.broker._get_broker",
+                side_effect=Exception("no broker"),
+            ):
+                result = runner.invoke(cli, ["broker", "status"])
+
+        assert result.exit_code == 0
+        assert "미연결" in result.output
+
+
+class TestBrokerBalanceIPC:
+    def test_balance_sends_ipc(self, runner: CliRunner) -> None:
+        """broker balance가 IPC로 broker.balance 커맨드를 전송한다."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {
+                "total_balance": 1000000.0,
+                "available_cash": 500000.0,
+            },
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "balance", "--account", "acc-1"])
+
+        assert result.exit_code == 0, result.output
+        mock_client.send.assert_called_once()
+        call_args = mock_client.send.call_args
+        assert call_args[0][0] == "broker.balance"
+        sent = call_args[0][1]
+        assert sent["account_id"] == "acc-1"
+
+    def test_balance_without_account(self, runner: CliRunner) -> None:
+        """broker balance (계좌 미지정) IPC 전송."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"total_balance": 1000000.0},
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "balance"])
+
+        assert result.exit_code == 0, result.output
+        sent = mock_client.send.call_args[0][1]
+        assert "account_id" not in sent
+
+
+class TestBrokerPositionsIPC:
+    def test_positions_sends_ipc(self, runner: CliRunner) -> None:
+        """broker positions가 IPC로 broker.positions 커맨드를 전송한다."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {
+                "positions": [
+                    {
+                        "symbol": "005930",
+                        "quantity": 10,
+                        "avg_price": 70000.0,
+                        "eval_amount": 700000.0,
+                    }
+                ]
+            },
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "positions", "--account", "acc-1"])
+
+        assert result.exit_code == 0, result.output
+        mock_client.send.assert_called_once()
+        call_args = mock_client.send.call_args
+        assert call_args[0][0] == "broker.positions"
+        sent = call_args[0][1]
+        assert sent["account_id"] == "acc-1"
+
+    def test_positions_empty(self, runner: CliRunner) -> None:
+        """보유 종목이 없으면 안내 메시지를 출력한다."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"positions": []},
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "positions"])
+
+        assert result.exit_code == 0, result.output
+
+    def test_positions_without_account(self, runner: CliRunner) -> None:
+        """broker positions (계좌 미지정) IPC 전송."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "ok",
+            "result": {"positions": []},
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["broker", "positions"])
+
+        assert result.exit_code == 0, result.output
+        sent = mock_client.send.call_args[0][1]
+        assert "account_id" not in sent
+
+
 # ── Broker reconcile --fix IPC ────────────────────
 
 

@@ -179,6 +179,35 @@ async def _handle_approval_reopen(
     return {"id": request.id, "status": str(request.status)}
 
 
+async def _handle_broker_status(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    account_id = args.get("account_id", "")
+    broker = await svc.account.get_broker(account_id)
+    healthy = await broker.health_check()
+    return {
+        "connected": broker.is_connected,
+        "healthy": healthy,
+        "exchange": broker.exchange,
+    }
+
+
+async def _handle_broker_balance(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    account_id = args.get("account_id", "")
+    broker = await svc.account.get_broker(account_id)
+    return await broker.get_account_balance()
+
+
+async def _handle_broker_positions(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    account_id = args.get("account_id", "")
+    broker = await svc.account.get_broker(account_id)
+    return {"positions": await broker.get_positions()}
+
+
 async def _handle_broker_reconcile(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -189,7 +218,7 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """15개 런타임 커맨드 핸들러를 일괄 등록."""
+    """18개 런타임 커맨드 핸들러를 일괄 등록."""
     registry.register("system.halt", _handle_system_halt)
     registry.register("system.activate", _handle_system_activate)
     registry.register("account.suspend", _handle_account_suspend)
@@ -205,4 +234,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     registry.register("approval.reject", _handle_approval_reject)
     registry.register("approval.cancel", _handle_approval_cancel)
     registry.register("approval.reopen", _handle_approval_reopen)
+    registry.register("broker.status", _handle_broker_status)
+    registry.register("broker.balance", _handle_broker_balance)
+    registry.register("broker.positions", _handle_broker_positions)
     registry.register("broker.reconcile", _handle_broker_reconcile)

@@ -37,10 +37,10 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 16개 핸들러를 등록."""
+    """register_all_handlers가 19개 핸들러를 등록."""
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 16
+    assert len(registry.commands) == 19
 
     expected = {
         "system.halt",
@@ -58,6 +58,9 @@ def test_register_all_handlers() -> None:
         "approval.reject",
         "approval.cancel",
         "approval.reopen",
+        "broker.status",
+        "broker.balance",
+        "broker.positions",
         "broker.reconcile",
     }
     assert set(registry.commands) == expected
