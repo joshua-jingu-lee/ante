@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { useBotDetail, useBotControl } from '../hooks/useBots'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useBotDetail, useBotControl, useBotUpdate } from '../hooks/useBots'
 import { useStrategies } from '../hooks/useStrategies'
 import { useTreasurySummary } from '../hooks/useTreasury'
 import StatusBadge from '../components/common/StatusBadge'
+import HintTooltip from '../components/common/HintTooltip'
 import { PageSkeleton } from '../components/common/Skeleton'
 import BotStopModal from '../components/bots/BotStopModal'
+import BotDeleteModal from '../components/bots/BotDeleteModal'
 import { formatKRW, formatDateTime, formatPercent } from '../utils/formatters'
 import { BOT_STATUS_LABELS } from '../utils/constants'
-import type { BotStatus, BotDetail as BotDetailType, BotLogResult } from '../types/bot'
+import type { BotStatus, BotDetail as BotDetailType, BotLogResult, HandlePositions } from '../types/bot'
 
 const STATUS_VARIANT: Record<BotStatus, string> = {
   created: 'muted', running: 'positive', stopping: 'warning', stopped: 'warning', error: 'negative', deleted: 'muted',
@@ -16,10 +18,12 @@ const STATUS_VARIANT: Record<BotStatus, string> = {
 
 export default function BotDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { data: bot, isLoading } = useBotDetail(id!)
-  const { start, stop } = useBotControl()
+  const { start, stop, remove } = useBotControl()
   const [showEditModal, setShowEditModal] = useState(false)
   const [showStopModal, setShowStopModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   if (isLoading) return <PageSkeleton />
   if (!bot) return <div className="text-text-muted text-center py-12">봇을 찾을 수 없습니다</div>
@@ -45,6 +49,9 @@ export default function BotDetail() {
           </h2>
         </div>
         <div className="flex gap-2">
+          {canEdit && (
+            <button onClick={() => setShowDeleteModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-negative border border-negative cursor-pointer hover:bg-negative-bg">삭제</button>
+          )}
           {canEdit && (
             <button onClick={() => setShowEditModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">설정 수정</button>
           )}
@@ -73,7 +80,12 @@ export default function BotDetail() {
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">작성자</span>
-              <span>{bot.strategy?.author || '-'}</span>
+              <span>
+                {bot.strategy_author_name || bot.strategy?.author || '-'}
+                {bot.strategy_author_id && (
+                  <span className="text-text-muted text-[12px] ml-1">({bot.strategy_author_id})</span>
+                )}
+              </span>
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">설명</span>
@@ -94,7 +106,31 @@ export default function BotDetail() {
             </div>
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">실행 간격</span>
-              <span>{bot.interval_seconds}초</span>
+              <span>{bot.config?.interval_seconds ?? bot.interval_seconds}초</span>
+            </div>
+            <div className="flex justify-between py-1.5 text-[13px]">
+              <span className="text-text-muted">자동 재시작</span>
+              {bot.config ? (
+                <StatusBadge variant={bot.config.auto_restart ? 'positive' : 'muted'}>
+                  {bot.config.auto_restart ? 'ON' : 'OFF'}
+                </StatusBadge>
+              ) : <span>-</span>}
+            </div>
+            <div className="flex justify-between py-1.5 text-[13px]">
+              <span className="text-text-muted">최대 재시작</span>
+              <span>{bot.config ? `${bot.config.max_restart_attempts}회` : '-'}</span>
+            </div>
+            <div className="flex justify-between py-1.5 text-[13px]">
+              <span className="text-text-muted flex items-center">재시작 쿨다운<HintTooltip text="재시작 시도 사이의 대기 시간" /></span>
+              <span>{bot.config ? `${bot.config.restart_cooldown_seconds}초` : '-'}</span>
+            </div>
+            <div className="flex justify-between py-1.5 text-[13px]">
+              <span className="text-text-muted flex items-center">스텝 타임아웃<HintTooltip text="전략의 1회 실행(on_step)이 이 시간을 초과하면 경고" /></span>
+              <span>{bot.config ? `${bot.config.step_timeout_seconds}초` : '-'}</span>
+            </div>
+            <div className="flex justify-between py-1.5 text-[13px]">
+              <span className="text-text-muted flex items-center">스텝당 최대 시그널<HintTooltip text="전략의 1회 실행에서 발생할 수 있는 매매 신호 수 상한" /></span>
+              <span>{bot.config?.max_signals_per_step ?? '-'}</span>
             </div>
           </div>
         </div>
@@ -219,6 +255,22 @@ export default function BotDetail() {
         />
       )}
 
+      {/* 삭제 확인 모달 */}
+      {showDeleteModal && (
+        <BotDeleteModal
+          bot={bot}
+          onConfirm={(option) => {
+            const handlePositions: HandlePositions | undefined = option === 'force_liquidate' ? 'liquidate' : option === 'keep' ? 'keep' : undefined
+            remove.mutate(
+              { botId: bot.bot_id, handlePositions },
+              { onSuccess: () => navigate('/bots') },
+            )
+          }}
+          onClose={() => setShowDeleteModal(false)}
+          isPending={remove.isPending}
+        />
+      )}
+
       {/* 설정 수정 모달 */}
       {showEditModal && <BotEditModal bot={bot} onClose={() => setShowEditModal(false)} />}
     </>
@@ -228,17 +280,44 @@ export default function BotDetail() {
 function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => void }) {
   const { data: strategies } = useStrategies()
   const { data: treasury } = useTreasurySummary()
+  const updateMutation = useBotUpdate()
   const [name, setName] = useState(bot.name || '')
   const [strategyName, setStrategyName] = useState(bot.strategy_name || '')
-  const [intervalSeconds, setIntervalSeconds] = useState(bot.interval_seconds)
+  const [intervalSeconds, setIntervalSeconds] = useState(bot.config?.interval_seconds ?? bot.interval_seconds)
   const [budget, setBudget] = useState(bot.allocated_budget)
+  const [autoRestart, setAutoRestart] = useState(bot.config?.auto_restart ?? true)
+  const [maxRestartAttempts, setMaxRestartAttempts] = useState(bot.config?.max_restart_attempts ?? 3)
+  const [restartCooldownSeconds, setRestartCooldownSeconds] = useState(bot.config?.restart_cooldown_seconds ?? 60)
+  const [stepTimeoutSeconds, setStepTimeoutSeconds] = useState(bot.config?.step_timeout_seconds ?? 30)
+  const [maxSignalsPerStep, setMaxSignalsPerStep] = useState(bot.config?.max_signals_per_step ?? 50)
 
   const currentBudget = bot.allocated_budget
   const maxPossible = treasury ? currentBudget + treasury.unallocated : currentBudget
 
+  const handleSave = () => {
+    updateMutation.mutate(
+      {
+        botId: bot.bot_id,
+        data: {
+          name,
+          interval_seconds: intervalSeconds,
+          budget,
+          auto_restart: autoRestart,
+          max_restart_attempts: maxRestartAttempts,
+          restart_cooldown_seconds: restartCooldownSeconds,
+          step_timeout_seconds: stepTimeoutSeconds,
+          max_signals_per_step: maxSignalsPerStep,
+        },
+      },
+      { onSuccess: () => onClose() },
+    )
+  }
+
+  const inputClass = 'w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary'
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
-      <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-[18px] font-bold mb-5">Bot 설정 수정</h2>
         <div className="space-y-4">
           {/* Bot ID (읽기 전용) */}
@@ -259,7 +338,7 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+              className={inputClass}
             />
           </div>
 
@@ -269,7 +348,7 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
             <select
               value={strategyName}
               onChange={(e) => setStrategyName(e.target.value)}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+              className={inputClass}
             >
               <option value="">전략을 선택하세요</option>
               {(strategies ?? []).map((s) => (
@@ -287,7 +366,7 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
               onChange={(e) => setIntervalSeconds(Number(e.target.value))}
               min={10}
               max={3600}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+              className={inputClass}
             />
             <div className="text-[11px] text-text-muted mt-1">최소 10초 ~ 최대 3,600초 (1시간)</div>
           </div>
@@ -299,16 +378,101 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
               type="number"
               value={budget}
               onChange={(e) => setBudget(Number(e.target.value))}
-              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary"
+              className={inputClass}
             />
             <div className="text-[11px] text-text-muted mt-1">
               현재 배정예산: {formatKRW(currentBudget)} · 최대 가능: {formatKRW(maxPossible)}
             </div>
           </div>
+
+          {/* 자동 재시작 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">자동 재시작</label>
+            <button
+              type="button"
+              onClick={() => setAutoRestart(!autoRestart)}
+              className={`px-4 py-2.5 rounded-lg text-[14px] font-medium border cursor-pointer w-full text-left ${
+                autoRestart
+                  ? 'bg-positive-bg text-positive border-positive/25'
+                  : 'bg-bg text-text-muted border-border'
+              }`}
+            >
+              {autoRestart ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          {/* 최대 재시작 횟수 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">최대 재시작 횟수</label>
+            <input
+              type="number"
+              value={maxRestartAttempts}
+              onChange={(e) => setMaxRestartAttempts(Number(e.target.value))}
+              min={1}
+              max={10}
+              className={inputClass}
+            />
+            <div className="text-[11px] text-text-muted mt-1">1~10회</div>
+          </div>
+
+          {/* 재시작 쿨다운 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5 flex items-center">
+              재시작 쿨다운 (초)<HintTooltip text="재시작 시도 사이의 대기 시간" />
+            </label>
+            <input
+              type="number"
+              value={restartCooldownSeconds}
+              onChange={(e) => setRestartCooldownSeconds(Number(e.target.value))}
+              min={10}
+              max={600}
+              className={inputClass}
+            />
+            <div className="text-[11px] text-text-muted mt-1">10~600초</div>
+          </div>
+
+          {/* 스텝 타임아웃 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5 flex items-center">
+              스텝 타임아웃 (초)<HintTooltip text="전략의 1회 실행(on_step)이 이 시간을 초과하면 경고" />
+            </label>
+            <input
+              type="number"
+              value={stepTimeoutSeconds}
+              onChange={(e) => setStepTimeoutSeconds(Number(e.target.value))}
+              min={5}
+              max={120}
+              className={inputClass}
+            />
+            <div className="text-[11px] text-text-muted mt-1">5~120초</div>
+          </div>
+
+          {/* 스텝당 최대 시그널 */}
+          <div>
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5 flex items-center">
+              스텝당 최대 시그널<HintTooltip text="전략의 1회 실행에서 발생할 수 있는 매매 신호 수 상한" />
+            </label>
+            <input
+              type="number"
+              value={maxSignalsPerStep}
+              onChange={(e) => setMaxSignalsPerStep(Number(e.target.value))}
+              min={1}
+              max={200}
+              className={inputClass}
+            />
+            <div className="text-[11px] text-text-muted mt-1">1~200</div>
+          </div>
         </div>
         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">저장</button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={updateMutation.isPending}
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
+          >
+            {updateMutation.isPending ? '저장 중...' : '저장'}
+          </button>
         </div>
       </div>
     </div>

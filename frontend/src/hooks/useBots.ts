@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getBots, getBotDetail, createBot, startBot, stopBot, deleteBot } from '../api/bots'
-import type { BotCreateRequest } from '../types/bot'
+import { getBots, getBotDetail, createBot, updateBot, startBot, stopBot, deleteBot } from '../api/bots'
+import type { BotCreateRequest, BotUpdateRequest, HandlePositions } from '../types/bot'
 
 export function useBots() {
   return useQuery({
@@ -25,6 +25,17 @@ export function useCreateBot() {
   })
 }
 
+export function useBotUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ botId, data }: { botId: string; data: BotUpdateRequest }) => updateBot(botId, data),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['bots', variables.botId] })
+      queryClient.invalidateQueries({ queryKey: ['bots'] })
+    },
+  })
+}
+
 export function useBotControl() {
   const queryClient = useQueryClient()
   return {
@@ -37,7 +48,8 @@ export function useBotControl() {
       onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bots'] }),
     }),
     remove: useMutation({
-      mutationFn: deleteBot,
+      mutationFn: ({ botId, handlePositions }: { botId: string; handlePositions?: HandlePositions }) =>
+        deleteBot(botId, handlePositions),
       onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bots'] }),
     }),
   }
