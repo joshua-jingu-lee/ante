@@ -1,8 +1,10 @@
 import { useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
 import { useReportDetail } from '../hooks/useReports'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
 import EquityCurveChart from '../components/charts/EquityCurveChart'
+import DailyReturnChart from '../components/charts/DailyReturnChart'
 import { formatDateTime } from '../utils/formatters'
 import type { ReportDetail as ReportDetailType, ReportStatus } from '../types/report'
 
@@ -135,8 +137,26 @@ function PerformanceCard({ report }: { report: ReportDetailType }) {
           </span>
         }
       />
-      <InfoRow label="평균 수익" value={<span className="text-positive">{formatCurrency(report.metrics?.avg_profit ? Math.round(report.metrics.avg_profit) : null)}</span>} />
-      <InfoRow label="평균 손실" value={<span className="text-negative">{formatCurrency(report.metrics?.avg_loss ? Math.round(report.metrics.avg_loss) : null)}</span>} />
+      <InfoRow
+        label="평균 수익"
+        value={
+          <span className="text-positive">
+            {report.metrics?.avg_profit != null && initialBalance
+              ? `${formatCurrency(Math.round(report.metrics.avg_profit))} (${((report.metrics.avg_profit / initialBalance) * 100).toFixed(2)}%)`
+              : formatCurrency(report.metrics?.avg_profit ? Math.round(report.metrics.avg_profit) : null)}
+          </span>
+        }
+      />
+      <InfoRow
+        label="평균 손실"
+        value={
+          <span className="text-negative">
+            {report.metrics?.avg_loss != null && initialBalance
+              ? `${formatCurrency(Math.round(report.metrics.avg_loss))} (${((report.metrics.avg_loss / initialBalance) * 100).toFixed(2)}%)`
+              : formatCurrency(report.metrics?.avg_loss ? Math.round(report.metrics.avg_loss) : null)}
+          </span>
+        }
+      />
       <InfoRow label="수수료 합계" value={<span className="text-text-muted">{formatCurrency(report.metrics?.total_commission ? Math.round(report.metrics.total_commission) : null)}</span>} />
       <InfoRow label="활성 거래일" value={report.metrics?.active_days ? `${report.metrics.active_days}일` : '-'} />
     </div>
@@ -177,6 +197,18 @@ export default function ReportDetail() {
         )}
       </div>
 
+      {/* 일별 수익률 차트 */}
+      <div className="bg-surface border border-border rounded-lg p-5 mb-6">
+        <h3 className="text-[15px] font-semibold mb-3">일별 수익률</h3>
+        {report.equity_curve && report.equity_curve.length > 1 ? (
+          <DailyReturnChart data={report.equity_curve} className="h-[180px]" />
+        ) : (
+          <div className="h-[180px] bg-bg-elevated rounded flex items-center justify-center text-text-muted text-[13px]">
+            일별 수익률 데이터가 없습니다
+          </div>
+        )}
+      </div>
+
       {/* 4행: 전략 요약 | 리스크 분석 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-surface border border-border rounded-lg p-5">
@@ -185,13 +217,17 @@ export default function ReportDetail() {
             {report.summary && (
               <div>
                 <div className="text-text font-semibold mb-1">요약</div>
-                <p>{report.summary}</p>
+                <div className="prose prose-sm prose-invert max-w-none text-[13px] text-text-muted">
+                  <ReactMarkdown>{report.summary}</ReactMarkdown>
+                </div>
               </div>
             )}
             {report.rationale && (
               <div>
                 <div className="text-text font-semibold mb-1">근거</div>
-                <p>{report.rationale}</p>
+                <div className="prose prose-sm prose-invert max-w-none text-[13px] text-text-muted">
+                  <ReactMarkdown>{report.rationale}</ReactMarkdown>
+                </div>
               </div>
             )}
           </div>
