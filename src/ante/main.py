@@ -1232,7 +1232,8 @@ async def main() -> None:
 
         from ante.db.migrations import run_migrations
 
-        applied = await run_migrations(s.db)
+        data_path = Path(s.config.get("data.path", "data/"))
+        applied = await run_migrations(s.db, data_path=data_path)
         if applied:
             logger.info("DB 마이그레이션 적용: %s", ", ".join(applied))
 
