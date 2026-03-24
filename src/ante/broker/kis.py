@@ -180,7 +180,7 @@ class KISBaseAdapter(BrokerAdapter):
         self.app_key: str = config["app_key"]
         self.app_secret: str = config["app_secret"]
         self.account_no: str = config["account_no"]
-        self.is_paper: bool = config.get("is_paper", False)
+        self.is_paper: bool = config.get("is_paper", True)
         self._eventbus = eventbus
 
         # API 엔드포인트
