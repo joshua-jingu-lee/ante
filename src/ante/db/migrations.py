@@ -50,3 +50,19 @@ async def run_migrations(db: Database) -> list[str]:
                 )
             newly_applied.append(f"{seq:03d}_{version}")
     return newly_applied
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main() -> None:
+        db = Database("db/ante.db")
+        await db.initialize()
+        applied = await run_migrations(db)
+        if applied:
+            print(f"마이그레이션 적용: {', '.join(applied)}")
+        else:
+            print("적용할 마이그레이션이 없습니다")
+        await db.close()
+
+    asyncio.run(main())
