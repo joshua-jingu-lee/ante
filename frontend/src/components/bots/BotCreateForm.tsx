@@ -47,7 +47,6 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
         strategy_name: strategyName,
         interval_seconds: Number(interval),
         budget: Number(budget.replace(/,/g, '')),
-        symbols: [],
       },
       { onSuccess: onClose },
     )

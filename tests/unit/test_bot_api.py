@@ -444,6 +444,9 @@ class FakeAccountService:
             raise AccountNotFoundError(f"Account not found: {account_id}")
         return account
 
+    async def list(self, status: object = None) -> list[FakeAccount]:
+        return list(self._accounts.values())
+
 
 class FakeStrategyRecord:
     """테스트용 StrategyRecord stub."""
@@ -909,3 +912,126 @@ class TestUpdateBotStrategy:
         bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
         resp = client.put("/api/bots/bot-1", json={"strategy_name": "SomeStrategy"})
         assert resp.status_code == 503
+
+
+class TestCreateBotStrategyName:
+    """POST /api/bots strategy_name 기반 봇 생성 테스트."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_strategy_loader(self, monkeypatch):
+        """StrategyLoader.load를 모킹하여 파일 시스템 의존성 제거."""
+
+        class _FakeStrategy:
+            pass
+
+        monkeypatch.setattr(
+            "ante.strategy.loader.StrategyLoader.load",
+            staticmethod(lambda path: _FakeStrategy),
+        )
+
+    @pytest.fixture
+    def strategy_registry(self):
+        reg = FakeStrategyRegistry()
+        reg._strategies["vol-breakout_v1.0.0"] = FakeStrategyRecord(
+            "vol-breakout_v1.0.0", name="volume-breakout"
+        )
+        return reg
+
+    @pytest.fixture
+    def client_with_registry(
+        self, bot_manager, default_account_service, strategy_registry
+    ):
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            strategy_registry=strategy_registry,
+        )
+        return TestClient(app)
+
+    def test_create_bot_with_strategy_name(self, client_with_registry):
+        """strategy_name으로 봇 생성 성공."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-1",
+                "strategy_name": "volume-breakout",
+                "account_id": "test",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["bot"]["bot_id"] == "bot-1"
+
+    def test_create_bot_with_strategy_id(self, client_with_registry):
+        """strategy_id로 봇 생성 (기존 방식) 성공."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-2",
+                "strategy_id": "vol-breakout_v1.0.0",
+                "account_id": "test",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["bot"]["bot_id"] == "bot-2"
+
+    def test_create_bot_without_strategy_returns_422(self, client_with_registry):
+        """strategy_id도 strategy_name도 없으면 422."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-3",
+                "account_id": "test",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_create_bot_strategy_name_not_found(self, client_with_registry):
+        """존재하지 않는 strategy_name -> 404."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-4",
+                "strategy_name": "non-existent-strategy",
+                "account_id": "test",
+            },
+        )
+        assert resp.status_code == 404
+        assert "전략을 찾을 수 없습니다" in resp.json()["detail"]
+
+    def test_create_bot_default_account(self, client_with_registry):
+        """account_id 미전달 시 첫 번째 active 계좌 사용."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-5",
+                "strategy_name": "volume-breakout",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["bot"]["bot_id"] == "bot-5"
+
+    def test_create_bot_with_budget(self, client_with_registry):
+        """budget 필드를 포함한 봇 생성."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-6",
+                "strategy_name": "volume-breakout",
+                "account_id": "test",
+                "budget": 5000000,
+            },
+        )
+        assert resp.status_code == 201
+
+    def test_create_bot_budget_zero_returns_422(self, client_with_registry):
+        """budget <= 0 -> 422."""
+        resp = client_with_registry.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-7",
+                "strategy_name": "volume-breakout",
+                "account_id": "test",
+                "budget": 0,
+            },
+        )
+        assert resp.status_code == 422
