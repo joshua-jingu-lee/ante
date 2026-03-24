@@ -15,6 +15,11 @@ export async function getDatasets(params?: {
   return res.data
 }
 
+export async function getDatasetDetail(id: string): Promise<{ dataset: Dataset; preview: Record<string, unknown>[] }> {
+  const res = await client.get(`/api/data/datasets/${id}`)
+  return res.data
+}
+
 export async function getStorageInfo(): Promise<StorageInfo> {
   const res = await client.get('/api/data/storage')
   return res.data
