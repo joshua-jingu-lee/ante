@@ -3,11 +3,47 @@
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 
 import click
 
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
+
+# pip 다운로드 등 임시 파일을 위한 최소 여유 공간
+_MIN_FREE_MB = 100
+
+
+def check_disk_space(db_path: Path) -> tuple[bool, str]:
+    """디스크 여유 공간이 업데이트에 충분한지 확인한다.
+
+    필요 공간 = DB 크기 × 2 (백업 + 임시) + 100 MB (pip 다운로드).
+    DB 파일이 없으면 100 MB만 확인한다.
+
+    Returns:
+        (통과 여부, 안내 메시지) 튜플.
+    """
+    if db_path.exists():
+        db_size = db_path.stat().st_size
+        required = db_size * 2 + _MIN_FREE_MB * 1024 * 1024
+    else:
+        db_size = 0
+        required = _MIN_FREE_MB * 1024 * 1024
+
+    free = shutil.disk_usage(
+        db_path.parent if db_path.parent.exists() else Path(".")
+    ).free
+
+    if free >= required:
+        return True, ""
+
+    required_mb = required / (1024 * 1024)
+    free_mb = free / (1024 * 1024)
+    return False, (
+        f"디스크 공간 부족: 필요 {required_mb:.0f}MB, 여유 {free_mb:.0f}MB. "
+        "불필요한 파일을 정리한 후 다시 시도하세요."
+    )
 
 
 def check_server_running() -> bool:
@@ -52,9 +88,7 @@ def update(
     # 서버 실행 중 확인
     if check_server_running():
         if force:
-            if fmt.is_json:
-                pass  # JSON 모드에서는 중간 메시지 생략
-            else:
+            if not fmt.is_json:
                 click.echo("서버를 중지합니다...")
             # TODO: graceful shutdown
         else:
@@ -107,26 +141,43 @@ def update(
             click.echo("이미 최신 버전입니다")
         return
 
+    # 디스크 공간 사전 검사
+    db_path = Path("db/ante.db")
+    ok, msg = check_disk_space(db_path)
+    if not ok:
+        click.echo(msg, err=True)
+        raise SystemExit(1)
+
     if not yes:
         if not click.confirm(f"{current} → {latest}로 업데이트하시겠습니까?"):
             click.echo("업데이트를 취소했습니다")
             return
 
     # Phase A: 백업 + pip upgrade
-    from pathlib import Path
 
     from ante.db.backup import backup_db
     from ante.update.executor import (
         pip_upgrade,
         rollback_update,
         run_post_update_migrations,
+        snapshot_dependencies,
     )
 
-    db_path = Path("db/ante.db")
     if db_path.exists():
         if not fmt.is_json:
             click.echo("DB 백업 중...")
         backup_db(db_path, current)
+
+    # 의존성 스냅샷 저장
+    if not fmt.is_json:
+        click.echo("의존성 스냅샷 저장 중...")
+    snapshot_path = snapshot_dependencies(current)
+    if snapshot_path:
+        if not fmt.is_json:
+            click.echo(f"스냅샷 저장 완료: {snapshot_path}")
+    else:
+        if not fmt.is_json:
+            click.echo("의존성 스냅샷 저장 실패 (계속 진행)", err=True)
 
     if not fmt.is_json:
         click.echo(f"업데이트 중: {current} → {latest}...")
@@ -146,13 +197,18 @@ def update(
                 fmt.error("마이그레이션 실패. 롤백 완료.", code="migration_failed")
             else:
                 click.echo(f"롤백 완료: {current}으로 복원됨")
+                if snapshot_path:
+                    click.echo(f"의존성 복원: pip install -r {snapshot_path}")
         else:
+            restore_hint = f"  pip install ante=={current}"
+            if snapshot_path:
+                restore_hint += f"\n  pip install -r {snapshot_path}"
             if fmt.is_json:
                 fmt.error("마이그레이션 실패. 자동 롤백 실패.", code="rollback_failed")
             else:
                 click.echo(
                     f"자동 롤백 실패. 수동 복구 필요:\n"
-                    f"  pip install ante=={current}\n"
+                    f"{restore_hint}\n"
                     f"  cp {backup_path} db/ante.db",
                     err=True,
                 )
