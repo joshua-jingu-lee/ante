@@ -10,15 +10,22 @@ from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleRe
 class DailyLossLimitRule(Rule):
     """일일 손실 한도 초과 시 계좌 중지."""
 
+    # 키 이름 → 상한값 매핑 (비율 0~1 vs 퍼센트 0~100)
+    _PARAM_LIMITS: dict[str, float] = {
+        "max_daily_loss_percent": 1,  # 0.0 ~ 1.0 (비율)
+        "max_loss_pct": 100,  # 0.0 ~ 100.0 (퍼센트)
+    }
+
     @classmethod
     def validate_config(cls, params: dict[str, Any]) -> list[str]:
         errors: list[str] = []
-        if "max_daily_loss_percent" in params:
-            v = params["max_daily_loss_percent"]
-            if not isinstance(v, int | float) or v < 0:
-                errors.append("max_daily_loss_percent must be >= 0")
-            elif v > 1:
-                errors.append("max_daily_loss_percent must be <= 1")
+        for key, upper in cls._PARAM_LIMITS.items():
+            if key in params:
+                v = params[key]
+                if not isinstance(v, int | float) or v < 0:
+                    errors.append(f"{key} must be >= 0")
+                elif v > upper:
+                    errors.append(f"{key} must be <= {upper}")
         return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:

@@ -690,7 +690,7 @@ class TradeItem(BaseModel):
     quantity: float
     price: float
     status: str
-    created_at: str
+    timestamp: str | None = None
 
 
 class TradeListResponse(BaseModel):

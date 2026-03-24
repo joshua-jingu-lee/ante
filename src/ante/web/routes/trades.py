@@ -36,8 +36,8 @@ async def list_trades(
     )
     items = [
         {
-            "trade_id": t.trade_id,
-            "bot_id": t.bot_id,
+            "trade_id": str(t.trade_id),
+            "bot_id": str(t.bot_id) if t.bot_id else "",
             "account_id": str(a)
             if isinstance(a := getattr(t, "account_id", ""), str)
             else "",
@@ -46,7 +46,7 @@ async def list_trades(
             "quantity": t.quantity,
             "price": t.price,
             "status": t.status.value if hasattr(t.status, "value") else str(t.status),
-            "created_at": str(t.created_at),
+            "timestamp": str(t.timestamp) if t.timestamp else None,
         }
         for t in trades
     ]

@@ -430,7 +430,7 @@ async def get_strategy_trades(
 
     items = [
         {
-            "trade_id": t.trade_id,
+            "trade_id": str(t.trade_id),
             "bot_id": t.bot_id,
             "symbol": t.symbol,
             "side": t.side,

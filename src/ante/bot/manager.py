@@ -475,19 +475,22 @@ class BotManager:
 
         # Treasury budget 환수
         if self._treasury_manager:
+            released = 0.0
             try:
                 treasury = self._treasury_manager.get(bot.config.account_id)
                 released = await treasury.release_budget(bot_id)
-                if released > 0:
-                    logger.info(
-                        "봇 삭제 시 예산 환수: %s -- %s",
-                        bot_id,
-                        f"{released:,.0f}",
-                    )
             except KeyError:
-                logger.debug(
-                    "봇 삭제 시 Treasury 미존재: account_id=%s",
-                    bot.config.account_id,
+                # 봇 account_id와 Treasury account_id가 다를 수 있음
+                # 모든 Treasury에서 해당 봇의 budget을 찾아 환수
+                for t in self._treasury_manager.list_all():
+                    released = await t.release_budget(bot_id)
+                    if released > 0:
+                        break
+            if released > 0:
+                logger.info(
+                    "봇 삭제 시 예산 환수: %s -- %s",
+                    bot_id,
+                    f"{released:,.0f}",
                 )
 
         bot.status = BotStatus.DELETED
