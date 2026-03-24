@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS positions (
     avg_entry_price  REAL NOT NULL DEFAULT 0.0,
     realized_pnl     REAL NOT NULL DEFAULT 0.0,
     updated_at       TEXT DEFAULT (datetime('now')),
+    account_id       TEXT NOT NULL DEFAULT 'default',
     PRIMARY KEY (bot_id, symbol)
 );
 
@@ -35,7 +36,10 @@ CREATE TABLE IF NOT EXISTS position_history (
     price          REAL NOT NULL,
     pnl            REAL DEFAULT 0.0,
     timestamp      TEXT,
-    created_at     TEXT DEFAULT (datetime('now'))
+    created_at     TEXT DEFAULT (datetime('now')),
+    account_id     TEXT NOT NULL DEFAULT 'default',
+    exchange       TEXT DEFAULT 'KRX',
+    trade_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_position_history_bot
     ON position_history(bot_id, timestamp);
@@ -50,11 +54,8 @@ class PositionHistory:
         self._position_cache: dict[str, dict[str, PositionSnapshot]] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성 + 마이그레이션 + 캐시 워밍."""
+        """스키마 생성 + 캐시 워밍."""
         await self._db.execute_script(POSITION_SCHEMA)
-        await self._migrate_exchange_column()
-        await self._migrate_account_id_column()
-        await self._migrate_trade_id_column()
         await self._warm_cache()
         logger.info("PositionHistory 초기화 완료")
 
@@ -72,39 +73,6 @@ class PositionHistory:
         """봇의 현재 포지션 동기 조회 (인메모리 캐시). PortfolioView용."""
         bot_positions = self._position_cache.get(bot_id, {})
         return list(bot_positions.values())
-
-    async def _migrate_exchange_column(self) -> None:
-        """exchange 컬럼 마이그레이션 (v0.2)."""
-        for table in ("positions", "position_history"):
-            try:
-                await self._db.execute(
-                    f"ALTER TABLE {table} ADD COLUMN exchange TEXT DEFAULT 'KRX'"  # noqa: S608
-                )
-                logger.info("%s 테이블에 exchange 컬럼 추가", table)
-            except Exception:
-                pass  # 이미 존재
-
-    async def _migrate_trade_id_column(self) -> None:
-        """position_history에 trade_id 컬럼 마이그레이션."""
-        try:
-            await self._db.execute(
-                "ALTER TABLE position_history ADD COLUMN trade_id TEXT"
-            )
-            logger.info("position_history 테이블에 trade_id 컬럼 추가")
-        except Exception:
-            pass  # 이미 존재
-
-    async def _migrate_account_id_column(self) -> None:
-        """account_id 컬럼 마이그레이션."""
-        columns = await self._db.fetch_all("PRAGMA table_info(positions)")
-        col_names = {row["name"] for row in columns}
-
-        if "account_id" not in col_names:
-            await self._db.execute(
-                "ALTER TABLE positions ADD COLUMN"
-                " account_id TEXT NOT NULL DEFAULT 'default'"
-            )
-            logger.info("positions 테이블에 account_id 컬럼 추가")
 
     async def on_trade(self, record: TradeRecord) -> None:
         """체결 기록을 반영하여 포지션 상태 갱신."""

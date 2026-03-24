@@ -169,7 +169,7 @@ class TestCLIBasic:
     def test_version(self, runner):
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert "ante, version" in result.output
 
     def test_format_option(self, runner):
         result = runner.invoke(cli, ["--format", "json", "--help"])

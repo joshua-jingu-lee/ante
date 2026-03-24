@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS trades (
     commission     REAL DEFAULT 0.0,
     timestamp      TEXT,
     order_id       TEXT,
-    created_at     TEXT DEFAULT (datetime('now'))
+    created_at     TEXT DEFAULT (datetime('now')),
+    account_id     TEXT NOT NULL DEFAULT 'default',
+    currency       TEXT DEFAULT 'KRW',
+    exchange       TEXT DEFAULT 'KRX'
 );
 CREATE INDEX IF NOT EXISTS idx_trades_bot ON trades(bot_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy_id, timestamp);
@@ -49,39 +52,9 @@ class TradeRecorder:
         self._eventbus: EventBus | None = None
 
     async def initialize(self) -> None:
-        """스키마 생성 + 마이그레이션."""
+        """스키마 생성."""
         await self._db.execute_script(TRADE_SCHEMA)
-        await self._migrate_exchange_column()
-        await self._migrate_account_columns()
         logger.info("TradeRecorder 초기화 완료")
-
-    async def _migrate_exchange_column(self) -> None:
-        """exchange 컬럼 마이그레이션 (v0.2)."""
-        try:
-            await self._db.execute(
-                "ALTER TABLE trades ADD COLUMN exchange TEXT DEFAULT 'KRX'"
-            )
-            logger.info("trades 테이블에 exchange 컬럼 추가")
-        except Exception:
-            pass  # 이미 존재
-
-    async def _migrate_account_columns(self) -> None:
-        """account_id, currency 컬럼 마이그레이션."""
-        columns = await self._db.fetch_all("PRAGMA table_info(trades)")
-        col_names = {row["name"] for row in columns}
-
-        if "account_id" not in col_names:
-            await self._db.execute(
-                "ALTER TABLE trades ADD COLUMN"
-                " account_id TEXT NOT NULL DEFAULT 'default'"
-            )
-            logger.info("trades 테이블에 account_id 컬럼 추가")
-
-        if "currency" not in col_names:
-            await self._db.execute(
-                "ALTER TABLE trades ADD COLUMN currency TEXT NOT NULL DEFAULT 'KRW'"
-            )
-            logger.info("trades 테이블에 currency 컬럼 추가")
 
     def subscribe(self, eventbus: EventBus) -> None:
         """이벤트 구독 등록."""

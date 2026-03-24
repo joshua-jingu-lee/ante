@@ -7,6 +7,13 @@ import click
 from ante.cli.formatter import OutputFormatter
 from ante.cli.middleware import authenticate_member
 
+try:
+    from importlib.metadata import version as pkg_version
+
+    __version__ = pkg_version("ante")
+except Exception:
+    __version__ = "dev"
+
 
 @click.group()
 @click.option(
@@ -24,7 +31,7 @@ from ante.cli.middleware import authenticate_member
     envvar="ANTE_CONFIG_DIR",
     help="설정 디렉토리 경로 (기본: ~/.config/ante/ 또는 ./config/)",
 )
-@click.version_option(version="0.1.0", prog_name="ante")
+@click.version_option(version=__version__, prog_name="ante")
 @click.pass_context
 def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
     """Ante — AI-Native Trading Engine CLI."""
@@ -63,6 +70,7 @@ from ante.cli.commands.strategy import strategy  # noqa: E402
 from ante.cli.commands.system import system  # noqa: E402
 from ante.cli.commands.trade import trade  # noqa: E402
 from ante.cli.commands.treasury import treasury  # noqa: E402
+from ante.cli.commands.update import update  # noqa: E402
 from ante.feed.cli import feed  # noqa: E402
 
 cli.add_command(account)
@@ -84,4 +92,5 @@ cli.add_command(signal)
 cli.add_command(system)
 cli.add_command(trade)
 cli.add_command(treasury)
+cli.add_command(update)
 cli.add_command(feed)
