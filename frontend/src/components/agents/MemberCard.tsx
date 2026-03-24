@@ -43,7 +43,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
   return (
     <div
       onClick={() => isAgent ? navigate(`/agents/${member.member_id}`) : undefined}
-      className={`bg-surface border border-border rounded-lg p-5 flex gap-5 transition-colors${isRevoked ? ' opacity-50' : ''}${isAgent ? ' cursor-pointer hover:border-primary/50' : ''}`}
+      className={`bg-surface border border-border rounded-lg p-5 flex gap-5 transition-colors${isAgent ? ' cursor-pointer hover:border-primary/50' : ''}`}
     >
       {/* 프로필 아바타 */}
       <div className="relative shrink-0 flex items-start justify-center">
@@ -52,7 +52,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
             {'👑'}
           </div>
         )}
-        <div className={`w-[72px] h-[72px] rounded-full flex items-center justify-center text-[45px] shrink-0 transition-transform hover:scale-[1.15] hover:-rotate-[8deg] cursor-default ${avatarColorClass}${isRevoked ? ' opacity-50' : ''}`}>
+        <div className={`w-[72px] h-[72px] rounded-full flex items-center justify-center text-[45px] shrink-0 transition-transform hover:scale-[1.15] hover:-rotate-[8deg] cursor-default ${avatarColorClass}${member.status === 'suspended' ? ' opacity-50' : ''}`}>
           {member.emoji || (isHuman ? '👤' : '🤖')}
         </div>
       </div>

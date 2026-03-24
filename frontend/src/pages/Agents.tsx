@@ -10,7 +10,6 @@ const STATUS_TABS: { label: string; value: MemberStatus | 'all' }[] = [
   { label: '전체', value: 'all' },
   { label: 'active', value: 'active' },
   { label: 'suspended', value: 'suspended' },
-  { label: 'revoked', value: 'revoked' },
 ]
 
 export default function Agents() {
@@ -36,7 +35,7 @@ export default function Agents() {
     orgFilter === 'all' ? items : items.filter((m) => m.org === orgFilter)
 
   const filterAgents = (items: typeof allItems) => {
-    let filtered = filterByOrg(items)
+    let filtered = filterByOrg(items).filter(m => m.status !== 'revoked')
     if (statusFilter !== 'all') {
       filtered = filtered.filter((m) => m.status === statusFilter)
     }

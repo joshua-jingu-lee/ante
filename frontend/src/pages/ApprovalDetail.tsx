@@ -170,6 +170,17 @@ export default function ApprovalDetail() {
         {isPending && <ReviewControls approvalId={approval.id} isPending={isPending} title={approval.title} reviews={approval.reviews} type={approval.type} params={approval.params} />}
       </div>
 
+      {/* 승인 완료 배너 */}
+      {approval.status === 'approved' && (
+        <div className="bg-positive/10 text-positive rounded-lg px-[18px] py-[14px] mb-6 flex items-start gap-2.5 text-[13px]">
+          <span className="text-[15px] leading-none mt-0.5">{'\u2713'}</span>
+          <div>
+            <div className="font-semibold mb-1">승인 완료</div>
+            {approval.memo && <div className="text-[12px]">{approval.memo}</div>}
+          </div>
+        </div>
+      )}
+
       {/* 거부 사유 배너 */}
       {approval.status === 'rejected' && approval.reject_reason && (
         <div className="bg-negative/10 text-negative rounded-lg px-[18px] py-[14px] mb-6 flex items-start gap-2.5 text-[13px]">
