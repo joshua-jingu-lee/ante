@@ -105,7 +105,7 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
 
       {/* 승인 확인 모달 */}
       <Modal open={showApprove} onClose={() => setShowApprove(false)}>
-        <div className="text-[16px] font-semibold text-positive mb-4">결재 승인</div>
+        <div className="text-[15px] font-semibold text-positive mb-4">결재 승인</div>
         <div className="text-[13px] text-text-muted mb-4">
           <strong className="text-text">{title}</strong>을 승인하시겠습니까?
         </div>
@@ -150,7 +150,7 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
 
       {/* 거부 확인 모달 */}
       <Modal open={showReject} onClose={() => setShowReject(false)}>
-        <div className="text-[16px] font-semibold text-negative mb-4">결재 거부</div>
+        <div className="text-[15px] font-semibold text-negative mb-4">결재 거부</div>
         <div className="text-[13px] text-text-muted mb-4">
           <strong className="text-text">{title}</strong>을 거부하시겠습니까?
         </div>

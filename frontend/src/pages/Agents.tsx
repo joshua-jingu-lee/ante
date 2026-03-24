@@ -156,7 +156,7 @@ export default function Agents() {
 
             <div className="mb-2">
               <div className="text-[12px] font-semibold text-text-muted">Agent ID</div>
-              <div className="text-[16px] font-semibold">{createdToken.agentId}</div>
+              <div className="text-[15px] font-semibold">{createdToken.agentId}</div>
             </div>
 
             <div className="my-5">

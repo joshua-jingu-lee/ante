@@ -29,7 +29,7 @@ export default class ErrorBoundary extends Component<Props, State> {
         <div className="flex items-center justify-center min-h-screen bg-bg">
           <div className="text-center max-w-md px-6">
             <div className="text-[48px] mb-4">💥</div>
-            <h1 className="text-[20px] font-semibold mb-2">예기치 않은 오류가 발생했습니다</h1>
+            <h1 className="text-[18px] font-semibold mb-2">예기치 않은 오류가 발생했습니다</h1>
             <p className="text-text-muted text-[14px] mb-6">
               {this.state.error?.message || '알 수 없는 오류'}
             </p>

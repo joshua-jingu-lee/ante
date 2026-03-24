@@ -103,7 +103,7 @@ function StatsRow({ items, last }: { items: StatItem[]; last?: boolean }) {
             {m.label}
             <HintTooltip text={m.hint} />
           </div>
-          <div className={`text-[20px] font-bold ${m.color ?? ''}`}>{m.value}</div>
+          <div className={`text-[18px] font-bold ${m.color ?? ''}`}>{m.value}</div>
           {m.sub && (
             <div className={`text-[13px] mt-[-4px] ${m.subColor ?? 'text-text-muted'}`}>{m.sub}</div>
           )}

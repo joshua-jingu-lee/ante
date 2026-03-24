@@ -69,7 +69,7 @@ export default function StrategyDetail() {
       {/* 전략 정보 헤더 */}
       <div className="mb-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-[20px] font-bold">{strategy.name}</h2>
+          <h2 className="text-[18px] font-bold">{strategy.name}</h2>
           <StatusActionButtons
             status={status}
             hasRunningBot={hasRunningBot}
@@ -158,7 +158,7 @@ export default function StrategyDetail() {
       </div>
 
       {/* 전략 성과 섹션 제목 */}
-      <h3 className="text-[16px] font-semibold mb-4">전략 성과</h3>
+      <h3 className="text-[15px] font-semibold mb-4">전략 성과</h3>
 
       {/* 자산 추이 (Equity Curve) */}
       <div className="bg-surface border border-border rounded-lg p-5 mb-6">

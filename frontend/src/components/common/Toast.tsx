@@ -74,7 +74,7 @@ function ToastMessage({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: 
       <span className="flex-1 break-words">{toast.message}</span>
       <button
         onClick={() => onDismiss(toast.id)}
-        className="bg-transparent border-none text-text-muted cursor-pointer text-[16px] p-0 leading-none hover:text-text"
+        className="bg-transparent border-none text-text-muted cursor-pointer text-[15px] p-0 leading-none hover:text-text"
       >
         x
       </button>

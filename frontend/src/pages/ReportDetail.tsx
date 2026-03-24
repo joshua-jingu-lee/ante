@@ -155,7 +155,7 @@ export default function ReportDetail() {
     <>
       {/* 헤더 */}
       <div className="mb-6">
-        <h2 className="text-[20px] font-bold">{report.strategy_name} {report.strategy_version} 검증 리포트</h2>
+        <h2 className="text-[18px] font-bold">{report.strategy_name} {report.strategy_version} 검증 리포트</h2>
       </div>
 
       {/* 1행: 리포트 정보 | 백테스트 설정 | 백테스트 성과 (3열) */}
