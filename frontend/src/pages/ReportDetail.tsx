@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom'
 import { useReportDetail } from '../hooks/useReports'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
+import EquityCurveChart from '../components/charts/EquityCurveChart'
 import { formatDateTime } from '../utils/formatters'
 import type { ReportDetail as ReportDetailType, ReportStatus } from '../types/report'
 
@@ -164,12 +165,16 @@ export default function ReportDetail() {
         <PerformanceCard report={report} />
       </div>
 
-      {/* 3행: 자산 곡선 차트 (플레이스홀더) */}
+      {/* 3행: 자산 곡선 차트 */}
       <div className="bg-surface border border-border rounded-lg p-5 mb-6">
         <h3 className="text-[15px] font-semibold mb-3">자산 곡선</h3>
-        <div className="h-[240px] bg-bg-elevated rounded flex items-center justify-center text-text-muted text-[13px]">
-          equity_curve 차트 영역 (detail_json.equity_curve 데이터 기반)
-        </div>
+        {report.equity_curve && report.equity_curve.length > 0 ? (
+          <EquityCurveChart data={report.equity_curve} className="h-[240px]" />
+        ) : (
+          <div className="h-[240px] bg-bg-elevated rounded flex items-center justify-center text-text-muted text-[13px]">
+            자산 곡선 데이터가 없습니다
+          </div>
+        )}
       </div>
 
       {/* 4행: 전략 요약 | 리스크 분석 */}
