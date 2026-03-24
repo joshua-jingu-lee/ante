@@ -105,9 +105,18 @@ class BacktestDataProvider(DataProvider):
         symbol: str,
         indicator: str,
         params: dict[str, Any] | None = None,
-    ) -> pl.DataFrame:
-        """기술 지표 계산 (현재는 원본 데이터 반환)."""
-        return await self.get_ohlcv(symbol, limit=500)
+    ) -> dict[str, Any]:
+        """기술 지표 계산.
+
+        OHLCV 데이터를 가져와 IndicatorCalculator로 지표를 계산한다.
+        라이브(StrategyContext)와 동일한 로직을 사용하여
+        백테스트-라이브 패리티를 보장한다.
+        """
+        from ante.strategy.indicators import IndicatorCalculator, ohlcv_to_dataframe
+
+        ohlcv_data = await self.get_ohlcv(symbol, limit=500)
+        arrays = ohlcv_to_dataframe(ohlcv_data)
+        return IndicatorCalculator.compute(indicator, arrays, **(params or {}))
 
     def advance(self) -> bool:
         """시뮬레이션 1스텝 전진. False면 데이터 끝."""
