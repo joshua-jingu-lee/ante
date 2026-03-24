@@ -4,6 +4,7 @@ import type { Approval, ApprovalDetail, ApprovalStatus, ApprovalType } from '../
 interface ApprovalsParams {
   status?: ApprovalStatus | 'all'
   type?: ApprovalType | 'all'
+  search?: string
   offset?: number
   limit?: number
 }
@@ -26,6 +27,7 @@ export async function getApprovals(params: ApprovalsParams): Promise<ApprovalsRe
   const query: Record<string, string | number> = {}
   if (params.status && params.status !== 'all') query.status = params.status
   if (params.type && params.type !== 'all') query.type = params.type
+  if (params.search) query.search = params.search
   if (params.offset) query.offset = params.offset
   if (params.limit) query.limit = params.limit
   const res = await client.get('/api/approvals', { params: query })
