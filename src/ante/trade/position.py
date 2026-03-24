@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS positions (
     avg_entry_price  REAL NOT NULL DEFAULT 0.0,
     realized_pnl     REAL NOT NULL DEFAULT 0.0,
     updated_at       TEXT DEFAULT (datetime('now')),
+    account_id       TEXT NOT NULL DEFAULT 'default',
     PRIMARY KEY (bot_id, symbol)
 );
 
@@ -35,7 +36,10 @@ CREATE TABLE IF NOT EXISTS position_history (
     price          REAL NOT NULL,
     pnl            REAL DEFAULT 0.0,
     timestamp      TEXT,
-    created_at     TEXT DEFAULT (datetime('now'))
+    created_at     TEXT DEFAULT (datetime('now')),
+    account_id     TEXT NOT NULL DEFAULT 'default',
+    exchange       TEXT DEFAULT 'KRX',
+    trade_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_position_history_bot
     ON position_history(bot_id, timestamp);

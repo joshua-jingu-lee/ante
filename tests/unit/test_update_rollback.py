@@ -134,6 +134,8 @@ class TestUpdateMigrationFailureRollback:
             ),
             patch("pathlib.Path.exists", return_value=db_exists),
             patch("ante.db.backup.backup_db"),
+            patch("ante.cli.commands.update.check_disk_space", return_value=(True, "")),
+            patch("ante.update.executor.snapshot_dependencies", return_value=None),
         ]
 
     def test_migration_failure_triggers_rollback(self, runner: CliRunner) -> None:
@@ -148,6 +150,8 @@ class TestUpdateMigrationFailureRollback:
             patches[5] as mock_rollback,
             patches[6],
             patches[7],
+            patches[8],
+            patches[9],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -169,6 +173,8 @@ class TestUpdateMigrationFailureRollback:
             patches[5],
             patches[6],
             patches[7],
+            patches[8],
+            patches[9],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -188,6 +194,8 @@ class TestUpdateMigrationFailureRollback:
             patches[5] as mock_rollback,
             patches[6],
             patches[7],
+            patches[8],
+            patches[9],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 

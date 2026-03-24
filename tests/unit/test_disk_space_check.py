@@ -88,7 +88,7 @@ class TestUpdateDiskSpaceIntegration:
 
     def test_disk_space_insufficient_blocks_update(self, runner: CliRunner) -> None:
         """디스크 공간 부족 시 exit code 1로 종료한다."""
-        from ante.cli.commands.update import update
+        from ante.cli.main import cli
 
         with (
             patch(
@@ -111,14 +111,14 @@ class TestUpdateDiskSpaceIntegration:
                 ),
             ),
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 1
         assert "디스크 공간 부족" in result.output
 
     def test_disk_space_sufficient_proceeds(self, runner: CliRunner) -> None:
         """디스크 공간 충분 시 업데이트를 계속 진행한다."""
-        from ante.cli.commands.update import update
+        from ante.cli.main import cli
 
         with (
             patch(
@@ -145,7 +145,7 @@ class TestUpdateDiskSpaceIntegration:
             ),
             patch("pathlib.Path.exists", return_value=False),
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 0
         assert "업데이트 완료" in result.output

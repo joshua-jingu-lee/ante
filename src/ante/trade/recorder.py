@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS trades (
     commission     REAL DEFAULT 0.0,
     timestamp      TEXT,
     order_id       TEXT,
-    created_at     TEXT DEFAULT (datetime('now'))
+    created_at     TEXT DEFAULT (datetime('now')),
+    account_id     TEXT NOT NULL DEFAULT 'default',
+    currency       TEXT DEFAULT 'KRW',
+    exchange       TEXT DEFAULT 'KRX'
 );
 CREATE INDEX IF NOT EXISTS idx_trades_bot ON trades(bot_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy_id, timestamp);

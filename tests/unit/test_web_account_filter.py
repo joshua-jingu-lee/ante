@@ -133,6 +133,14 @@ class FakeTradeRecord:
         self.price = price
         self.status = status
         self.created_at = created_at
+        self.timestamp = created_at
+        self.strategy_id = "s1"
+        self.order_type = "market"
+        self.reason = ""
+        self.commission = 0.0
+        self.order_id = None
+        self.currency = "KRW"
+        self.exchange = "KRX"
 
 
 class FakeTradeService:

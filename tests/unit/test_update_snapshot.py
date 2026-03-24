@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from ante.cli.commands.update import update
+from ante.cli.main import cli
 from ante.update.executor import snapshot_dependencies
 
 
@@ -116,6 +116,7 @@ class TestSnapshotInRollbackMessage:
                 "ante.update.executor.snapshot_dependencies",
                 return_value=snapshot_path,
             ),
+            patch("ante.cli.commands.update.check_disk_space", return_value=(True, "")),
         ]
 
     def test_rollback_message_includes_snapshot_path(self, runner: CliRunner) -> None:
@@ -131,8 +132,9 @@ class TestSnapshotInRollbackMessage:
             patches[6],
             patches[7],
             patches[8],
+            patches[9],
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 1
         assert "pip install -r" in result.output
@@ -151,8 +153,9 @@ class TestSnapshotInRollbackMessage:
             patches[6],
             patches[7],
             patches[8],
+            patches[9],
         ):
-            result = runner.invoke(update, ["-y"])
+            result = runner.invoke(cli, ["update", "-y"])
 
         assert result.exit_code == 1
         assert "pip install -r" in result.output
