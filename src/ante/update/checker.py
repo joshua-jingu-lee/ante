@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import urllib.request
@@ -39,3 +40,35 @@ def is_update_available(current: str, latest: str) -> bool:
         return Version(latest) > Version(current)
     except Exception:
         return False
+
+
+def _check_and_log() -> None:
+    """동기 버전 확인 + 로그 출력. 스레드에서 실행된다."""
+    current = get_current_version()
+    if current == "dev":
+        return
+
+    latest = get_latest_version()
+    if latest is None:
+        return
+
+    if is_update_available(current, latest):
+        logger.info(
+            "새 버전 사용 가능: v%s (현재 v%s). ante update 실행",
+            latest,
+            current,
+        )
+
+
+async def check_update_on_startup() -> None:
+    """서버 시작 시 비동기로 최신 버전을 확인한다.
+
+    블로킹 네트워크 I/O를 별도 스레드에서 실행하여
+    서버 시작을 지연시키지 않는다. 모든 예외를 무시한다.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, _check_and_log)
+    except Exception:
+        # 네트워크 오류 등 어떤 예외든 서버 시작을 방해하지 않는다
+        logger.debug("시작 시 버전 확인 실패 (무시)", exc_info=True)

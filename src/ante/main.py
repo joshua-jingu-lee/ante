@@ -1230,6 +1230,11 @@ async def main() -> None:
     try:
         await _init_core(s)
 
+        # 서버 시작 시 최신 버전 확인 (non-blocking, fire-and-forget)
+        from ante.update.checker import check_update_on_startup
+
+        asyncio.create_task(check_update_on_startup())
+
         from ante.db.migrations import run_migrations
 
         applied = await run_migrations(s.db)
