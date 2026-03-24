@@ -8,16 +8,11 @@ on:
         type: boolean
         default: false
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,21 +73,3 @@ jobs:
           files: dist/*
           generate_release_notes: true
 
-      # 5. Docker 이미지 빌드 + push
-      - name: Log in to GitHub Container Registry
-        if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.semrel.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
