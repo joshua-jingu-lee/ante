@@ -273,10 +273,7 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
             # 서버 미실행 — 기존 오프라인 방식 폴백
             async def _run_reconcile() -> dict:
                 from ante.core.database import Database
-                from ante.trade.performance import PerformanceTracker
                 from ante.trade.position import PositionHistory
-                from ante.trade.recorder import TradeRecorder
-                from ante.trade.service import TradeService
 
                 adapter, adapter_db = await _get_broker(account_id)
                 db = adapter_db or Database("db/ante.db")
@@ -285,16 +282,9 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
                 try:
                     position_history = PositionHistory(db)
                     await position_history.initialize()
-                    recorder = TradeRecorder(db, position_history)
-                    await recorder.initialize()
-                    performance = PerformanceTracker(db)
-                    await performance.initialize()
-                    trade_service = TradeService(
-                        recorder, position_history, performance
-                    )
 
                     broker_positions = await adapter.get_account_positions()
-                    internal_positions = await trade_service.get_all_positions()
+                    internal_positions = await position_history.get_all_positions()
 
                     broker_map = {p["symbol"]: p for p in broker_positions}
                     internal_map = {p.symbol: p for p in internal_positions}
