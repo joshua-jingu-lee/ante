@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -24,6 +26,8 @@ router = APIRouter()
 # 지원하는 데이터 유형
 DATA_TYPES = ["ohlcv", "fundamental"]
 
+_executor = ThreadPoolExecutor(max_workers=2)
+
 
 @router.get("/datasets", response_model=DatasetListResponse)
 async def list_datasets(
@@ -37,77 +41,82 @@ async def list_datasets(
     """보유 데이터셋 목록 (페이지네이션 지원).
 
     data_type에 따라 해당 유형의 데이터셋만 반환한다.
+
+    종목 목록만 먼저 수집하여 페이지네이션을 적용한 뒤,
+    해당 페이지의 종목에 대해서만 date_range를 계산한다.
+    row_count와 file_size는 상세 조회 전용이므로 기본값(0)을 반환한다.
+
     Returns:
         {items: [...], total: int}
     """
     if store is None:
         return {"items": [], "total": 0}
 
-    all_datasets = []
+    loop = asyncio.get_event_loop()
 
-    if data_type == "fundamental":
-        symbols = store.list_symbols(data_type="fundamental")
-        for sym in symbols:
-            if symbol and sym != symbol:
-                continue
-            date_range = store.get_date_range(sym, "", data_type="fundamental")
-            file_size = 0
-            try:
-                p = store._resolve_path(sym, "", data_type="fundamental")
-                if p.exists():
-                    file_size = sum(
-                        f.stat().st_size for f in p.rglob("*") if f.is_file()
-                    )
-            except Exception:
-                pass
-            all_datasets.append(
-                {
-                    "id": f"{sym}__fundamental",
-                    "symbol": sym,
-                    "timeframe": "",
-                    "data_type": "fundamental",
-                    "start_date": date_range[0] if date_range else None,
-                    "end_date": date_range[1] if date_range else None,
-                    "row_count": 0,
-                    "file_size": file_size,
-                }
-            )
-    else:
-        from ante.data.schemas import TIMEFRAMES
-
-        tf_list = [timeframe] if timeframe else TIMEFRAMES
-        for tf in tf_list:
-            symbols = store.list_symbols(tf)
+    def _collect_datasets() -> list[dict[str, Any]]:
+        """종목 목록만 수집 (동기 I/O를 스레드에서 수행)."""
+        datasets: list[dict[str, Any]] = []
+        if data_type == "fundamental":
+            symbols = store.list_symbols(data_type="fundamental")
             for sym in symbols:
                 if symbol and sym != symbol:
                     continue
-                date_range = store.get_date_range(sym, tf)
-                row_count = store.get_row_count(sym, tf)
-                file_size = 0
-                try:
-                    p = store._resolve_path(sym, tf, data_type="ohlcv")
-                    if p.exists():
-                        file_size = sum(
-                            f.stat().st_size for f in p.rglob("*") if f.is_file()
-                        )
-                except Exception:
-                    pass
-                all_datasets.append(
+                datasets.append(
                     {
-                        "id": f"{sym}__{tf}",
+                        "id": f"{sym}__fundamental",
                         "symbol": sym,
-                        "timeframe": tf,
-                        "data_type": "ohlcv",
-                        "start_date": date_range[0] if date_range else None,
-                        "end_date": date_range[1] if date_range else None,
-                        "row_count": row_count,
-                        "file_size": file_size,
+                        "timeframe": "",
+                        "data_type": "fundamental",
                     }
                 )
+        else:
+            from ante.data.schemas import TIMEFRAMES
 
+            tf_list = [timeframe] if timeframe else TIMEFRAMES
+            for tf in tf_list:
+                syms = store.list_symbols(tf)
+                for sym in syms:
+                    if symbol and sym != symbol:
+                        continue
+                    datasets.append(
+                        {
+                            "id": f"{sym}__{tf}",
+                            "symbol": sym,
+                            "timeframe": tf,
+                            "data_type": "ohlcv",
+                        }
+                    )
+        return datasets
+
+    all_datasets = await loop.run_in_executor(_executor, _collect_datasets)
     total = len(all_datasets)
-    items = all_datasets[offset : offset + limit]
-    return {"items": items, "total": total}
+
+    # 페이지네이션 적용 후 해당 페이지만 date_range 계산
+    paged = all_datasets[offset : offset + limit]
+
+    def _enrich(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """페이지 내 항목에 date_range만 보강 (동기 I/O)."""
+        for item in items:
+            dt = item["data_type"]
+            tf = item["timeframe"]
+            sym = item["symbol"]
+            try:
+                dr = store.get_date_range(
+                    sym, tf if dt == "ohlcv" else "", data_type=dt
+                )
+                item["start_date"] = dr[0] if dr else None
+                item["end_date"] = dr[1] if dr else None
+            except Exception:
+                item["start_date"] = None
+                item["end_date"] = None
+            # row_count, file_size는 상세 조회 전용 — 목록에서는 기본값 반환
+            item["row_count"] = 0
+            item["file_size"] = 0
+        return items
+
+    enriched = await loop.run_in_executor(_executor, _enrich, paged)
+    return {"items": enriched, "total": total}
 
 
 @router.get("/datasets/{dataset_id}", response_model=DatasetDetailResponse)
