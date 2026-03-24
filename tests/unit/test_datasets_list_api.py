@@ -203,3 +203,61 @@ async def test_list_datasets_no_resolve_path_called():
     )
 
     store._resolve_path.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_no_data_type_returns_all():
+    """data_type 미지정 시 ohlcv + fundamental 모두 반환한다."""
+    store = _make_store({"1d": ["005930"], "fundamental": ["005930", "000660"]})
+
+    result = await list_datasets(
+        store=store,
+        symbol=None,
+        timeframe="1d",
+        data_type=None,
+        offset=0,
+        limit=50,
+    )
+
+    types = {item["data_type"] for item in result["items"]}
+    assert types == {"ohlcv", "fundamental"}
+    # fundamental 2건 + ohlcv 1건
+    assert result["total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_data_type_ohlcv():
+    """data_type=ohlcv 지정 시 ohlcv만 반환한다."""
+    store = _make_store({"1d": ["005930"], "fundamental": ["005930"]})
+
+    result = await list_datasets(
+        store=store,
+        symbol=None,
+        timeframe="1d",
+        data_type="ohlcv",
+        offset=0,
+        limit=50,
+    )
+
+    types = {item["data_type"] for item in result["items"]}
+    assert types == {"ohlcv"}
+    assert result["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_data_type_fundamental():
+    """data_type=fundamental 지정 시 fundamental만 반환한다."""
+    store = _make_store({"1d": ["005930"], "fundamental": ["005930"]})
+
+    result = await list_datasets(
+        store=store,
+        symbol=None,
+        timeframe=None,
+        data_type="fundamental",
+        offset=0,
+        limit=50,
+    )
+
+    types = {item["data_type"] for item in result["items"]}
+    assert types == {"fundamental"}
+    assert result["total"] == 1
