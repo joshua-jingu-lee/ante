@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#999"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="460" fill="#fff" rx="8"/>
+
+  <!-- Home Server Box -->
+  <rect x="240" y="16" width="480" height="428" rx="12" fill="#f8f8f8" stroke="#ccc" stroke-width="1.5"/>
+  <text x="480" y="46" text-anchor="middle" font-size="13" font-weight="600" fill="#666">HOME SERVER</text>
+
+  <!-- === Top Row (y=70) === -->
+
+  <!-- User (top-left, outside server) -->
+  <rect x="30" y="70" width="170" height="120" rx="10" fill="#fff" stroke="#bbb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="115" y="108" text-anchor="middle" font-size="28">👤</text>
+  <text x="115" y="132" text-anchor="middle" font-size="14" font-weight="600" fill="#333">사용자</text>
+  <text x="115" y="152" text-anchor="middle" font-size="11" fill="#777">전략 채택 · 봇 운용</text>
+  <text x="115" y="168" text-anchor="middle" font-size="11" fill="#777">리스크 설정 · 모니터링</text>
+
+  <!-- AI Agent (top-right, inside server) -->
+  <rect x="290" y="70" width="380" height="120" rx="10" fill="#fff" stroke="#bbb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="480" y="108" text-anchor="middle" font-size="28">🤖</text>
+  <text x="480" y="132" text-anchor="middle" font-size="14" font-weight="600" fill="#333">AI Agent</text>
+  <text x="480" y="152" text-anchor="middle" font-size="11" fill="#777">시장 분석 · 전략 설계 · 매매 판단 · 전략 개선</text>
+  <text x="480" y="168" text-anchor="middle" font-size="11" fill="#777">뉴스, 재무, 기술적 지표를 자유롭게 활용</text>
+
+  <!-- === Bottom Row (y=280) === -->
+
+  <!-- Ante (bottom-left, inside server) -->
+  <rect x="290" y="280" width="380" height="120" rx="10" fill="#f0f0f0" stroke="#999" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="480" y="318" text-anchor="middle" font-size="28">⚙️</text>
+  <text x="480" y="342" text-anchor="middle" font-size="14" font-weight="700" fill="#222">Ante</text>
+  <text x="480" y="362" text-anchor="middle" font-size="11" fill="#555">전략 검증 · 봇 운영 · 매매 실행 · 리스크 관리</text>
+  <text x="480" y="380" text-anchor="middle" font-size="11" fill="#555">성과 지표 축적 · 전략 개선 피드백 제공</text>
+
+  <!-- Market (bottom-right, outside server) -->
+  <rect x="760" y="280" width="170" height="120" rx="10" fill="#fff" stroke="#bbb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="845" y="318" text-anchor="middle" font-size="28">📈</text>
+  <text x="845" y="342" text-anchor="middle" font-size="14" font-weight="600" fill="#333">증권사</text>
+  <text x="845" y="362" text-anchor="middle" font-size="11" fill="#777">시세 조회 · 주문 체결</text>
+  <text x="845" y="378" text-anchor="middle" font-size="11" fill="#777">KIS Open API</text>
+
+  <!-- === Arrows === -->
+
+  <!-- User -> Agent (horizontal, top) -->
+  <line x1="200" y1="130" x2="290" y2="130" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="245" y="123" text-anchor="middle" font-size="10" fill="#888">AI 관리</text>
+
+  <!-- Ante -> User (elbow: left from Ante, then up to User) -->
+  <polyline points="290,340 115,340 115,190" fill="none" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="196" y="334" text-anchor="middle" font-size="10" fill="#888">대시보드 · 알림</text>
+
+  <!-- Agent <-> Ante (vertical, inside server) -->
+  <line x1="440" y1="190" x2="440" y2="280" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="520" y1="280" x2="520" y2="190" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="410" y="240" text-anchor="end" font-size="10" fill="#888">전략 제출</text>
+  <text x="550" y="240" text-anchor="start" font-size="10" fill="#888">성과 피드백</text>
+
+  <!-- Ante <-> Market (horizontal, bottom) -->
+  <line x1="670" y1="325" x2="760" y2="325" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="760" y1="355" x2="670" y2="355" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="715" y="318" text-anchor="middle" font-size="10" fill="#888">주문</text>
+  <text x="715" y="372" text-anchor="middle" font-size="10" fill="#888">체결 결과</text>
+</svg>
