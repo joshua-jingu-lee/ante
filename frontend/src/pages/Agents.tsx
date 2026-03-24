@@ -22,7 +22,7 @@ export default function Agents() {
   const { data: allMembers, isLoading } = useMembers({})
   const { data: humanMembers } = useMembers({ type: 'human' })
   const { data: agentMembers } = useMembers({ type: 'agent' })
-  const { suspend, reactivate, revoke } = useMemberControl()
+  const { suspend } = useMemberControl()
 
   const humans = humanMembers ?? []
   const agents = agentMembers ?? []
@@ -122,9 +122,6 @@ export default function Agents() {
                   <MemberCard
                     key={m.member_id}
                     member={m}
-                    onSuspend={(id) => suspend.mutate(id)}
-                    onReactivate={(id) => reactivate.mutate(id)}
-                    onRevoke={(id) => { if (confirm('이 에이전트를 영구 폐기하시겠습니까?')) revoke.mutate(id) }}
                   />
                 ))}
               </div>
