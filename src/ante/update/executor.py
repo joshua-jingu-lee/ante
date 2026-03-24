@@ -11,6 +11,33 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def snapshot_dependencies(version: str, db_dir: Path | None = None) -> Path | None:
+    """현재 pip freeze 결과를 파일로 저장한다.
+
+    저장 경로: ``{db_dir}/pip_freeze_v{version}.txt``
+
+    Returns:
+        저장된 파일의 Path. 실패 시 None.
+    """
+    if db_dir is None:
+        db_dir = Path("db")
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "pip", "freeze"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error("pip freeze 실패: %s", result.stderr)
+        return None
+
+    snapshot_path = db_dir / f"pip_freeze_v{version}.txt"
+    snapshot_path.write_text(result.stdout, encoding="utf-8")
+    logger.info("의존성 스냅샷 저장: %s", snapshot_path)
+    return snapshot_path
+
+
 def pip_upgrade(version: str | None = None) -> bool:
     """pip으로 ante 패키지를 업그레이드한다. 성공 시 True."""
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade"]
