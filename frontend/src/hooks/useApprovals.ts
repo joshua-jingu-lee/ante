@@ -5,6 +5,7 @@ import type { ApprovalStatus, ApprovalType } from '../types/approval'
 export function useApprovals(params: {
   status?: ApprovalStatus | 'all'
   type?: ApprovalType | 'all'
+  search?: string
   offset?: number
   limit?: number
 }) {

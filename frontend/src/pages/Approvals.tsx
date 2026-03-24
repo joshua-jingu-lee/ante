@@ -14,13 +14,10 @@ export default function Approvals() {
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
 
-  const { data, isLoading } = useApprovals({ status, type, offset, limit: LIMIT })
+  const { data, isLoading } = useApprovals({ status, type, search: search || undefined, offset, limit: LIMIT })
   const pendingQuery = useApprovals({ status: 'pending', limit: 0 })
 
   const allItems = data?.items ?? []
-  const filtered = search
-    ? allItems.filter((item) => item.title.toLowerCase().includes(search.toLowerCase()))
-    : allItems
 
   return (
     <>
@@ -38,7 +35,7 @@ export default function Approvals() {
           <TableSkeleton rows={5} cols={6} />
         ) : (
           <>
-            <ApprovalTable items={filtered} />
+            <ApprovalTable items={allItems} />
             {(data?.total ?? 0) > LIMIT && (
               <Pagination
                 total={data?.total ?? 0}

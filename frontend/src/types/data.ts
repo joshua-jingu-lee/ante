@@ -15,4 +15,5 @@ export interface StorageInfo {
   total_bytes: number
   total_mb: number
   by_timeframe: Record<string, number>
+  by_data_type?: Record<string, number>
 }

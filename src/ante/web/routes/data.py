@@ -205,15 +205,31 @@ async def get_storage_summary(
 ) -> dict:
     """저장 용량 현황."""
     if store is None:
-        return {"total_bytes": 0, "total_mb": 0.0, "by_timeframe": {}}
+        return {
+            "total_bytes": 0,
+            "total_mb": 0.0,
+            "by_timeframe": {},
+            "by_data_type": {},
+        }
     usage = store.get_storage_usage()
     total = sum(usage.values())
+
+    # 유형별 용량 집계: ohlcv = timeframe 키들의 합, 나머지는 그대로
+    ohlcv_keys = {"fundamental", "tick"}
+    ohlcv_total = sum(v for k, v in usage.items() if k not in ohlcv_keys)
+    by_data_type: dict[str, float] = {}
+    if ohlcv_total > 0:
+        by_data_type["ohlcv"] = round(ohlcv_total / 1024 / 1024, 1)
+    if usage.get("fundamental", 0) > 0:
+        by_data_type["fundamental"] = round(usage["fundamental"] / 1024 / 1024, 1)
+
     return {
         "total_bytes": total,
         "total_mb": round(total / 1024 / 1024, 1),
         "by_timeframe": {
             tf: round(size / 1024 / 1024, 1) for tf, size in usage.items()
         },
+        "by_data_type": by_data_type,
     }
 
 
