@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useStrategyTradesPaginated } from '../hooks/useStrategies'
+import { useStrategies, useStrategyTradesPaginated } from '../hooks/useStrategies'
 import { PageSkeleton } from '../components/common/Skeleton'
 import StatusBadge from '../components/common/StatusBadge'
 import Pagination from '../components/common/Pagination'
@@ -9,14 +9,25 @@ import { formatKRW, formatDateTime } from '../utils/formatters'
 const PAGE_SIZE = 15
 
 export default function Trades() {
-  const { id = '' } = useParams<{ id: string }>()
+  const { id: routeId = '' } = useParams<{ id: string }>()
+  const [selectedStrategyId, setSelectedStrategyId] = useState(routeId)
+  const [strategySearch, setStrategySearch] = useState('')
   const [offset, setOffset] = useState(0)
   const [sideFilter, setSideFilter] = useState<string>('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [appliedStartDate, setAppliedStartDate] = useState('')
+  const [appliedEndDate, setAppliedEndDate] = useState('')
 
-  const { data, isLoading } = useStrategyTradesPaginated(id, {
+  const strategyId = selectedStrategyId || routeId
+
+  const { data: strategies } = useStrategies()
+  const { data, isLoading } = useStrategyTradesPaginated(strategyId, {
     offset,
     limit: PAGE_SIZE,
     side: sideFilter || undefined,
+    start_date: appliedStartDate || undefined,
+    end_date: appliedEndDate || undefined,
   })
 
   if (isLoading && !data) return <PageSkeleton />
@@ -24,12 +35,27 @@ export default function Trades() {
   const trades = data?.items ?? []
   const total = data?.total ?? 0
 
+  const handleQuery = () => {
+    setAppliedStartDate(startDate)
+    setAppliedEndDate(endDate)
+    setOffset(0)
+  }
+
+  const handleStrategySelect = (value: string) => {
+    setStrategySearch(value)
+    const match = (strategies ?? []).find((s) => s.name === value)
+    if (match) {
+      setSelectedStrategyId(String(match.id))
+      setOffset(0)
+    }
+  }
+
   return (
     <>
       {/* 헤더 */}
       <div className="flex items-center gap-3 mb-6">
         <Link
-          to={`/strategies/${id}`}
+          to={`/strategies/${strategyId}`}
           className="text-[13px] text-text-muted no-underline hover:text-text"
         >
           &larr; 전략 상세
@@ -40,6 +66,22 @@ export default function Trades() {
       {/* 필터 바 */}
       <div className="bg-surface border border-border rounded-lg p-5 mb-6">
         <div className="flex items-center gap-4 flex-wrap">
+          <div>
+            <label className="text-[12px] text-text-muted block mb-1">전략</label>
+            <input
+              type="text"
+              list="strategy-list-trades"
+              value={strategySearch}
+              onChange={(e) => handleStrategySelect(e.target.value)}
+              placeholder="전략명 검색"
+              className="h-8 px-3 rounded-lg border border-border bg-bg text-[13px] text-text w-48 outline-none placeholder:text-text-muted focus:border-primary"
+            />
+            <datalist id="strategy-list-trades">
+              {(strategies ?? []).map((s) => (
+                <option key={s.id} value={s.name} />
+              ))}
+            </datalist>
+          </div>
           <div>
             <label className="text-[12px] text-text-muted block mb-1">매매</label>
             <select
@@ -54,6 +96,32 @@ export default function Trades() {
               <option value="buy">매수</option>
               <option value="sell">매도</option>
             </select>
+          </div>
+          <div>
+            <label className="text-[12px] text-text-muted block mb-1">시작일</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-8 px-3 rounded-lg border border-border bg-bg text-[13px] text-text outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="text-[12px] text-text-muted block mb-1">종료일</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="h-8 px-3 rounded-lg border border-border bg-bg text-[13px] text-text outline-none focus:border-primary"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleQuery}
+              className="h-8 px-4 rounded-lg bg-primary text-text text-[13px] font-medium border-none cursor-pointer hover:opacity-90 mt-4"
+            >
+              조회
+            </button>
           </div>
         </div>
       </div>

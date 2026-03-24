@@ -39,6 +39,13 @@ export async function getStrategyMonthlySummary(id: string): Promise<MonthlySumm
   return res.data.items
 }
 
+export async function updateStrategyStatus(
+  id: string,
+  status: string,
+): Promise<void> {
+  await client.patch(`/api/strategies/${id}/status`, { status })
+}
+
 export async function getStrategyTradesPaginated(
   id: string,
   params?: { offset?: number; limit?: number; side?: string; start_date?: string; end_date?: string },

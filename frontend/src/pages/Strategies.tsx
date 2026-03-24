@@ -63,7 +63,7 @@ export default function Strategies() {
       </div>
       <div className="bg-surface border border-border rounded-lg p-5">
         {isLoading ? (
-          <TableSkeleton rows={15} cols={6} />
+          <TableSkeleton rows={15} cols={7} />
         ) : (
           <>
             <StrategyTable items={paged} />

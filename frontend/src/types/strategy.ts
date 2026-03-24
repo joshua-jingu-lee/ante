@@ -34,6 +34,8 @@ export interface Strategy {
   bot_id?: string | null
   bot_status?: string | null
   cumulative_return?: number
+  backtest_return?: number | null
+  budget_allocated?: number
   created_at?: string
 }
 
@@ -43,6 +45,8 @@ export interface StrategyDetail extends Strategy {
   rationale?: string
   risks?: string
   params?: Record<string, StrategyParam | unknown>
+  budget_allocated?: number
+  unrealized_pnl?: number
 }
 
 export interface StrategyParam {
@@ -72,6 +76,8 @@ export interface StrategyPerformance {
   sharpe_ratio: number | null
   active_days?: number
   realized_pnl?: number
+  unrealized_pnl?: number
+  budget_allocated?: number
   equity_curve: { date: string; value: number }[]
 }
 

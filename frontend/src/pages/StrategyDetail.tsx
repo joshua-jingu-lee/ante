@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useStrategyDetail, useStrategyPerformance, useStrategyTrades, useStrategyDailySummary, useStrategyWeeklySummary, useStrategyMonthlySummary } from '../hooks/useStrategies'
+import { useStrategyDetail, useStrategyPerformance, useStrategyTrades, useStrategyDailySummary, useStrategyWeeklySummary, useStrategyMonthlySummary, useStrategyStatusTransition } from '../hooks/useStrategies'
 import PerformancePanel from '../components/strategies/PerformancePanel'
 import PeriodPerformance from '../components/strategies/PeriodPerformance'
+import EquityCurveChart from '../components/charts/EquityCurveChart'
 import StatusBadge from '../components/common/StatusBadge'
+import HintTooltip from '../components/common/HintTooltip'
 import { PageSkeleton } from '../components/common/Skeleton'
 import { formatNumber } from '../utils/formatters'
 import { STRATEGY_STATUS_LABELS } from '../utils/constants'
@@ -19,6 +21,16 @@ function isStrategyParam(v: unknown): v is StrategyParam {
   return typeof v === 'object' && v !== null && 'value' in v
 }
 
+function getPeriodDates(period: EquityCurvePeriod): { start?: Date } {
+  if (period === 'all') return {}
+  const now = new Date()
+  const start = new Date(now)
+  if (period === '1w') start.setDate(start.getDate() - 7)
+  else if (period === '1m') start.setMonth(start.getMonth() - 1)
+  else if (period === '3m') start.setMonth(start.getMonth() - 3)
+  return { start }
+}
+
 export default function StrategyDetail() {
   const { id = '' } = useParams<{ id: string }>()
   const [equityPeriod, setEquityPeriod] = useState<EquityCurvePeriod>('1m')
@@ -29,17 +41,44 @@ export default function StrategyDetail() {
   const { data: dailySummary } = useStrategyDailySummary(id)
   const { data: weeklySummary } = useStrategyWeeklySummary(id)
   const { data: monthlySummary } = useStrategyMonthlySummary(id)
+  const statusTransition = useStrategyStatusTransition()
+
+  const equityCurveData = useMemo(() => {
+    const raw = performance?.equity_curve ?? []
+    if (raw.length === 0) return []
+    const { start } = getPeriodDates(equityPeriod)
+    if (!start) return raw
+    const startStr = start.toISOString().slice(0, 10)
+    return raw.filter((p) => p.date >= startStr)
+  }, [performance?.equity_curve, equityPeriod])
 
   if (isLoading) return <PageSkeleton />
   if (!strategy) return <div className="text-text-muted text-center py-12">전략을 찾을 수 없습니다</div>
+
+  const status = strategy.status as StrategyStatus
+  const hasRunningBot = !!strategy.bot_id && strategy.bot_status === 'running'
+  const budgetAllocated = strategy.budget_allocated
+  const unrealizedPnl = strategy.unrealized_pnl
+
+  const handleStatusTransition = (newStatus: string) => {
+    statusTransition.mutate({ id, status: newStatus })
+  }
 
   return (
     <>
       {/* 전략 정보 헤더 */}
       <div className="mb-6">
-        <h2 className="text-[20px] font-bold">{strategy.name}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-[20px] font-bold">{strategy.name}</h2>
+          <StatusActionButtons
+            status={status}
+            hasRunningBot={hasRunningBot}
+            isPending={statusTransition.isPending}
+            onTransition={handleStatusTransition}
+          />
+        </div>
         <div className="flex gap-3 items-center mt-1">
-          <StatusBadge variant={(STATUS_VARIANT[strategy.status as StrategyStatus] ?? 'muted') as 'positive'}>
+          <StatusBadge variant={(STATUS_VARIANT[status] ?? 'muted') as 'positive'}>
             {STRATEGY_STATUS_LABELS[strategy.status]}
           </StatusBadge>
           <span className="text-text-muted text-[13px]">v{strategy.version}</span>
@@ -137,19 +176,15 @@ export default function StrategyDetail() {
             ))}
           </div>
         </div>
-        {!performance || performance.total_trades === 0 ? (
-          <div className="py-8 text-center text-text-muted text-[13px]">
-            아직 자산 추이 데이터가 없습니다
-          </div>
-        ) : (
-          <div className="h-[240px] bg-bg border border-dashed border-border rounded-lg flex items-center justify-center text-text-muted text-[13px]">
-            Equity Curve — 전략 자산 가치 변화
-          </div>
-        )}
+        <EquityCurveChart data={equityCurveData} className="h-[240px]" />
       </div>
 
       {/* 성과 지표 */}
-      <PerformancePanel perf={performance} />
+      <PerformancePanel
+        perf={performance}
+        budgetAllocated={budgetAllocated}
+        unrealizedPnl={unrealizedPnl}
+      />
 
       {/* 2열 그리드: 기간별 성과 + 최근 거래 */}
       <div className="grid grid-cols-2 gap-4">
@@ -229,4 +264,52 @@ function formatShortDateTime(dateStr: string | undefined | null): string {
   const hh = String(d.getHours()).padStart(2, '0')
   const min = String(d.getMinutes()).padStart(2, '0')
   return `${mm}-${dd} ${hh}:${min}`
+}
+
+/** 전략 상태별 액션 버튼 */
+function StatusActionButtons({
+  status,
+  hasRunningBot,
+  isPending,
+  onTransition,
+}: {
+  status: StrategyStatus
+  hasRunningBot: boolean
+  isPending: boolean
+  onTransition: (newStatus: string) => void
+}) {
+  if (status === 'archived') return null
+
+  if (status === 'active') {
+    const disabled = hasRunningBot || isPending
+    return (
+      <div className="relative">
+        <button
+          disabled={disabled}
+          onClick={() => onTransition('inactive')}
+          className={`px-3 py-1.5 rounded-lg border text-[12px] font-medium ${
+            disabled
+              ? 'border-border text-text-muted cursor-not-allowed opacity-50'
+              : 'border-warning text-warning cursor-pointer hover:bg-warning-bg'
+          }`}
+        >
+          비활성화
+        </button>
+        {hasRunningBot && (
+          <HintTooltip text="실행 중인 봇을 먼저 중지하세요" />
+        )}
+      </div>
+    )
+  }
+
+  // registered or inactive -> archive
+  return (
+    <button
+      disabled={isPending}
+      onClick={() => onTransition('archived')}
+      className="px-3 py-1.5 rounded-lg border border-border text-text-muted text-[12px] font-medium cursor-pointer hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      보관
+    </button>
+  )
 }

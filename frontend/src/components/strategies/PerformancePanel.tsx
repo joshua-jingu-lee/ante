@@ -11,7 +11,13 @@ interface StatItem {
   subColor?: string
 }
 
-export default function PerformancePanel({ perf }: { perf: StrategyPerformance | null | undefined }) {
+interface PerformancePanelProps {
+  perf: StrategyPerformance | null | undefined
+  budgetAllocated?: number
+  unrealizedPnl?: number
+}
+
+export default function PerformancePanel({ perf, budgetAllocated, unrealizedPnl }: PerformancePanelProps) {
   const isEmpty = !perf || perf.total_trades === 0
 
   if (isEmpty) {
@@ -26,12 +32,18 @@ export default function PerformancePanel({ perf }: { perf: StrategyPerformance |
     )
   }
 
-  const netPnl = perf.net_pnl ?? perf.total_pnl ?? 0
+  const totalPnl = perf.total_pnl ?? 0
+  const resolvedUnrealizedPnl = unrealizedPnl ?? perf.unrealized_pnl ?? 0
+  const netPnl = totalPnl + resolvedUnrealizedPnl
   const totalCommission = perf.total_commission ?? 0
   const avgProfit = perf.avg_profit ?? perf.avg_pnl ?? 0
   const avgLoss = perf.avg_loss ?? 0
-  const realizedPnl = perf.realized_pnl ?? 0
+  const realizedPnl = perf.realized_pnl ?? totalPnl
   const activeDays = perf.active_days ?? 0
+  const resolvedBudget = budgetAllocated ?? perf.budget_allocated ?? 0
+
+  // 순손익 수익률: (total_pnl + unrealized_pnl) / budget.allocated * 100
+  const netReturnPct = resolvedBudget > 0 ? (netPnl / resolvedBudget) : null
 
   const row1: StatItem[] = [
     {
@@ -39,7 +51,7 @@ export default function PerformancePanel({ perf }: { perf: StrategyPerformance |
       value: formatKRW(netPnl),
       hint: '실현 손익 + 미실현 손익의 합계',
       color: netPnl >= 0 ? 'text-positive' : 'text-negative',
-      sub: netPnl !== 0 ? `(${netPnl >= 0 ? '+' : ''}${formatPercent(perf.win_rate).replace(/^[+-]/, netPnl >= 0 ? '+' : '-')})` : undefined,
+      sub: netReturnPct != null ? `(${netReturnPct >= 0 ? '+' : ''}${(netReturnPct * 100).toFixed(2)}%)` : undefined,
       subColor: netPnl >= 0 ? 'text-positive' : 'text-negative',
     },
     { label: '총 거래 수', value: formatNumber(perf.total_trades), hint: '전체 거래 횟수' },
@@ -65,7 +77,12 @@ export default function PerformancePanel({ perf }: { perf: StrategyPerformance |
     { label: '평균 수익', value: formatKRW(avgProfit), hint: '수익 거래의 평균 이익 금액', color: 'text-positive' },
     { label: '평균 손실', value: formatKRW(avgLoss), hint: '손실 거래의 평균 손실 금액', color: 'text-negative' },
     { label: '실현 손익', value: formatKRW(realizedPnl), hint: '매도 완료된 거래의 확정 손익', color: realizedPnl >= 0 ? 'text-positive' : 'text-negative' },
-    { label: '미실현 손익', value: '-', hint: '보유 중인 종목의 평가 손익 (미확정)' },
+    {
+      label: '미실현 손익',
+      value: resolvedUnrealizedPnl !== 0 ? formatKRW(resolvedUnrealizedPnl) : '-',
+      hint: '보유 중인 종목의 평가 손익 (미확정)',
+      color: resolvedUnrealizedPnl > 0 ? 'text-positive' : resolvedUnrealizedPnl < 0 ? 'text-negative' : undefined,
+    },
   ]
 
   return (
