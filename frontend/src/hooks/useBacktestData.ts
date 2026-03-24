@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDatasets, getStorageInfo, deleteDataset } from '../api/data'
+import { getDatasets, getDatasetDetail, getStorageInfo, deleteDataset } from '../api/data'
 import type { Dataset } from '../types/data'
 
 export function useDatasets(params?: {
@@ -12,6 +12,14 @@ export function useDatasets(params?: {
   return useQuery({
     queryKey: ['datasets-all', params],
     queryFn: () => getDatasets(params),
+  })
+}
+
+export function useDatasetDetail(datasetId: string | null) {
+  return useQuery({
+    queryKey: ['dataset-detail', datasetId],
+    queryFn: () => getDatasetDetail(datasetId!),
+    enabled: !!datasetId,
   })
 }
 

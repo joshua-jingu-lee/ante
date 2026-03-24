@@ -567,6 +567,7 @@ class DatasetItem(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
     row_count: int = 0
+    file_size: int = 0
 
 
 class DatasetListResponse(BaseModel):

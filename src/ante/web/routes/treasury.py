@@ -119,6 +119,8 @@ async def list_transactions(
     account_id: str | None = None,
     type: str | None = None,
     bot_id: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -139,6 +141,12 @@ async def list_transactions(
     if bot_id:
         where_clauses.append("bot_id = ?")
         params.append(bot_id)
+    if start_date:
+        where_clauses.append("created_at >= ?")
+        params.append(start_date)
+    if end_date:
+        where_clauses.append("created_at <= ?")
+        params.append(end_date + " 23:59:59")
 
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
