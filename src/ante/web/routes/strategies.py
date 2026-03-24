@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from pathlib import Path
@@ -94,25 +95,28 @@ async def list_strategies(
         from ante.trade.performance import PerformanceTracker
 
         tracker = PerformanceTracker(db)
-        for r in records:
-            bot_info_for_perf = bots_by_strategy.get(r.strategy_id)
-            account_id = (
-                bot_info_for_perf.get("account_id", "default")
-                if bot_info_for_perf
-                else "default"
-            )
-            try:
-                metrics = await tracker.calculate(
-                    account_id=account_id, strategy_id=r.strategy_id
-                )
-                if metrics.total_trades > 0:
-                    cumulative_returns[r.strategy_id] = metrics.net_pnl
-                else:
-                    cumulative_returns[r.strategy_id] = None
-            except Exception:
+
+        # N+1 해소: asyncio.gather 로 병렬 호출
+        def _account_id_for(r: Any) -> str:
+            bi = bots_by_strategy.get(r.strategy_id)
+            return bi.get("account_id", "default") if bi else "default"
+
+        tasks = [
+            tracker.calculate(account_id=_account_id_for(r), strategy_id=r.strategy_id)
+            for r in records
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r, result in zip(records, results):
+            if isinstance(result, Exception):
                 _logger.debug(
-                    "전략 %s cumulative_return 계산 실패", r.strategy_id, exc_info=True
+                    "전략 %s cumulative_return 계산 실패",
+                    r.strategy_id,
+                    exc_info=result,
                 )
+                cumulative_returns[r.strategy_id] = None
+            elif result.total_trades > 0:
+                cumulative_returns[r.strategy_id] = result.net_pnl
+            else:
                 cumulative_returns[r.strategy_id] = None
 
     strategies = []
