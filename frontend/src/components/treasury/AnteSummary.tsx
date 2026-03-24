@@ -25,7 +25,7 @@ export default function AnteSummary({ summary, children }: { summary: TreasurySu
       {/* Ante 헤더 */}
       <div className="flex items-center gap-4 px-5 py-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <span className="bg-positive text-white text-[11px] font-bold px-2 py-0.5 rounded">Ante</span>
+          <span className="bg-positive text-on-primary text-[11px] font-bold px-2 py-0.5 rounded">Ante</span>
           <span className="text-[14px] font-semibold">관리 자금</span>
         </div>
         <span className="text-[13px] text-text-muted">Bot {summary.bot_count ?? 0}개 운용 중</span>

@@ -17,7 +17,7 @@ export default function AccountSummary({ summary }: { summary: TreasurySummary }
       {/* 브로커 헤더 */}
       <div className="flex items-center gap-4 px-5 py-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <span className="bg-primary text-white text-[11px] font-bold px-2 py-0.5 rounded">{summary.broker_short_name || 'KIS'}</span>
+          <span className="bg-primary text-on-primary text-[11px] font-bold px-2 py-0.5 rounded">{summary.broker_short_name || 'KIS'}</span>
           <span className="text-[14px] font-semibold">{summary.broker_name || '한국투자증권'}</span>
           {summary.exchange && (
             <span className="text-[11px] text-text-muted border border-border px-1.5 py-0.5 rounded">{summary.exchange}</span>

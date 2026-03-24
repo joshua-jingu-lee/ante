@@ -72,7 +72,7 @@ export default function Settings() {
               <div className="text-[13px] text-text-muted">현재 모든 봇의 거래가 정상 운용 중입니다.</div>
               <button
                 onClick={() => setShowHaltModal(true)}
-                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover whitespace-nowrap"
+                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-on-primary border-none cursor-pointer hover:bg-negative-hover whitespace-nowrap"
               >
                 비상 거래 정지
               </button>
@@ -91,7 +91,7 @@ export default function Settings() {
               </div>
               <button
                 onClick={handleActivate}
-                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover whitespace-nowrap"
+                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover whitespace-nowrap"
               >
                 거래 재개
               </button>
@@ -223,7 +223,7 @@ export default function Settings() {
                     getConfigValue(cfg.key) === 'true' ? 'bg-positive' : 'bg-border'
                   }`}
                 >
-                  <span className={`absolute top-[2px] w-[18px] h-[18px] bg-white rounded-full transition-transform ${
+                  <span className={`absolute top-[2px] w-[18px] h-[18px] bg-on-primary rounded-full transition-transform ${
                     getConfigValue(cfg.key) === 'true' ? 'left-[20px]' : 'left-[2px]'
                   }`} />
                 </button>
@@ -235,7 +235,7 @@ export default function Settings() {
 
       {/* 비상 거래 정지 모달 */}
       {showHaltModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
             <h3 className="text-[18px] font-bold text-negative mb-5">비상 거래 정지</h3>
             <p className="text-[13px] text-text-muted mb-4">
@@ -257,7 +257,7 @@ export default function Settings() {
             </div>
             <div className="flex justify-end gap-2 pt-4 border-t border-border mt-6">
               <button onClick={() => { setShowHaltModal(false); setHaltReason('') }} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-              <button onClick={handleHalt} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover">거래 정지 확인</button>
+              <button onClick={handleHalt} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-on-primary border-none cursor-pointer hover:bg-negative-hover">거래 정지 확인</button>
             </div>
           </div>
         </div>
@@ -272,7 +272,7 @@ function CurrencyFormatButton({ label, active, onClick }: { label: string; activ
       onClick={onClick}
       className={`px-2.5 py-1 rounded-lg text-[12px] font-medium border cursor-pointer transition-colors ${
         active
-          ? 'bg-primary text-white border-primary'
+          ? 'bg-primary text-on-primary border-primary'
           : 'bg-transparent text-text-muted border-border hover:bg-surface-hover'
       }`}
     >

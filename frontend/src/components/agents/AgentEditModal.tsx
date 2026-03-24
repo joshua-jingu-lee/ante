@@ -91,7 +91,7 @@ export default function AgentEditModal({ open, member, onClose, onSave, isPendin
         <button
           onClick={handleSave}
           disabled={isPending || !name.trim()}
-          className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
+          className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
         >
           저장
         </button>

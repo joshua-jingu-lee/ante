@@ -9,7 +9,7 @@ export default function ServiceUnavailable() {
         </p>
         <button
           onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-primary text-white rounded-lg border-none cursor-pointer text-[14px] hover:bg-primary-hover"
+          className="px-4 py-2 bg-primary text-on-primary rounded-lg border-none cursor-pointer text-[14px] hover:bg-primary-hover"
         >
           새로고침
         </button>

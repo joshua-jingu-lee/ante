@@ -52,7 +52,7 @@ export default function FeedStatusPanel() {
 
       {!initialized ? (
         <div className="text-[13px] text-text-muted">
-          Feed가 초기화되지 않았습니다. <code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed init</code> 명령으로 초기화하세요.
+          Feed가 초기화되지 않았습니다. <code className="bg-code-bg px-1.5 py-0.5 rounded-sm text-[12px]">ante feed init</code> 명령으로 초기화하세요.
         </div>
       ) : (
         <div className="space-y-4">
@@ -73,7 +73,7 @@ export default function FeedStatusPanel() {
 
           {checkpoints.length === 0 && !latestReport && (
             <div className="text-[13px] text-text-muted">
-              아직 수집이 실행되지 않았습니다. <code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed run daily</code> 또는 <code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed run backfill</code> 명령으로 수집을 시작하세요.
+              아직 수집이 실행되지 않았습니다. <code className="bg-code-bg px-1.5 py-0.5 rounded-sm text-[12px]">ante feed run daily</code> 또는 <code className="bg-code-bg px-1.5 py-0.5 rounded-sm text-[12px]">ante feed run backfill</code> 명령으로 수집을 시작하세요.
             </div>
           )}
         </div>

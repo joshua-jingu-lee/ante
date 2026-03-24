@@ -76,7 +76,7 @@ export default function Treasury() {
                     onClick={() => setPeriod(p.key)}
                     className={`px-3 py-1 rounded text-[12px] font-medium cursor-pointer border-none ${
                       period === p.key
-                        ? 'bg-primary text-white'
+                        ? 'bg-primary text-on-primary'
                         : 'bg-transparent text-text-muted hover:text-text'
                     }`}
                   >

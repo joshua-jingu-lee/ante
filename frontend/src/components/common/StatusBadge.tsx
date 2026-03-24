@@ -3,7 +3,7 @@ const VARIANT_CLASSES: Record<string, string> = {
   negative: 'bg-negative-bg text-negative',
   warning: 'bg-warning-bg text-warning',
   info: 'bg-info-bg text-info',
-  muted: 'bg-[rgba(139,143,163,0.15)] text-text-muted',
+  muted: 'bg-muted-bg text-text-muted',
   primary: 'bg-positive-bg text-primary',
 }
 

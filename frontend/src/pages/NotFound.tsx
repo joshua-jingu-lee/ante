@@ -11,7 +11,7 @@ export default function NotFound() {
         </p>
         <Link
           to="/"
-          className="inline-block px-4 py-2 bg-primary text-white rounded-lg no-underline text-[14px] hover:bg-primary-hover"
+          className="inline-block px-4 py-2 bg-primary text-on-primary rounded-lg no-underline text-[14px] hover:bg-primary-hover"
         >
           대시보드로 돌아가기
         </Link>

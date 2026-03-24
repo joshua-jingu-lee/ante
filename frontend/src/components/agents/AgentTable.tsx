@@ -52,7 +52,7 @@ export default function AgentTable({ items, onSuspend, onReactivate, onRevoke }:
                       <button onClick={() => onSuspend(m.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-warning border border-border cursor-pointer hover:bg-warning-bg">정지</button>
                     )}
                     {m.status === 'suspended' && (
-                      <button onClick={() => onReactivate(m.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
+                      <button onClick={() => onReactivate(m.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
                     )}
                     {m.status !== 'revoked' && (
                       <button onClick={() => onRevoke(m.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-negative border border-border cursor-pointer hover:bg-negative-bg">폐기</button>
