@@ -700,6 +700,7 @@ async def _init_approval(s: Services) -> None:
     from ante.approval import ApprovalService
     from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
     from ante.approval.models import ValidationResult
+    from ante.report.models import ReportStatus
 
     async def _exec_rule_change(params: dict) -> None:
         account_id = params.get("account_id", "test")
@@ -709,10 +710,10 @@ async def _init_approval(s: Services) -> None:
     approval_executors: dict = {
         # 전략 관련
         "strategy_adopt": lambda params: s.report_store.update_status(
-            params["report_id"], "adopted"
+            params["report_id"], ReportStatus.ADOPTED
         ),
         "strategy_retire": lambda params: s.report_store.update_status(
-            params["report_id"], "retired"
+            params["report_id"], ReportStatus.ARCHIVED
         ),
         # 봇 생명주기
         "bot_create": lambda params: s.bot_manager.create_bot(**params),
