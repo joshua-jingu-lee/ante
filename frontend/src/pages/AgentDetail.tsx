@@ -45,7 +45,7 @@ export default function AgentDetail() {
       {/* 에이전트 정보 헤더 — 목업 detail-header 기준 */}
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-border">
         <div>
-          <h2 className="text-[20px] font-bold font-mono mb-1">{member.member_id}</h2>
+          <h2 className="text-[18px] font-bold font-mono mb-1">{member.member_id}</h2>
           <div className="flex gap-2 items-center">
             <StatusBadge variant={STATUS_VARIANT[member.status] as 'positive'}>
               {MEMBER_STATUS_LABELS[member.status]}

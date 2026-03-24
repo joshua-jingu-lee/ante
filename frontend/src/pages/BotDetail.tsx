@@ -43,9 +43,9 @@ export default function BotDetail() {
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-[20px] font-bold flex items-center gap-2">
+          <h2 className="text-[18px] font-bold flex items-center gap-2">
             {bot.name || bot.bot_id}
-            {bot.name && <span className="text-[16px] font-normal text-text-muted">{bot.bot_id}</span>}
+            {bot.name && <span className="text-[15px] font-normal text-text-muted">{bot.bot_id}</span>}
           </h2>
         </div>
         <div className="flex gap-2">

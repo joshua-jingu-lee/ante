@@ -48,7 +48,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
       {/* 프로필 아바타 */}
       <div className="relative shrink-0 flex items-start justify-center">
         {isOwner && (
-          <div className="absolute -top-[13px] left-1/2 -translate-x-1/2 text-[16px] leading-none">
+          <div className="absolute -top-[13px] left-1/2 -translate-x-1/2 text-[15px] leading-none">
             {'👑'}
           </div>
         )}

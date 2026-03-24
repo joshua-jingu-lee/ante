@@ -60,7 +60,7 @@ export default function Header() {
             ←
           </button>
         )}
-        <h1 className="text-[16px] font-semibold">{title}</h1>
+        <h1 className="text-[15px] font-semibold">{title}</h1>
       </div>
 
       <div className="flex items-center gap-2 md:gap-4">

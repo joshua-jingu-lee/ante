@@ -166,14 +166,14 @@ export default function ApprovalDetail() {
     <>
       {/* 상세 헤더 */}
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-[20px] font-bold">{approval.title}</h2>
+        <h2 className="text-[18px] font-bold">{approval.title}</h2>
         {isPending && <ReviewControls approvalId={approval.id} isPending={isPending} title={approval.title} reviews={approval.reviews} type={approval.type} params={approval.params} />}
       </div>
 
       {/* 거부 사유 배너 */}
       {approval.status === 'rejected' && approval.reject_reason && (
         <div className="bg-negative/10 text-negative rounded-lg px-[18px] py-[14px] mb-6 flex items-start gap-2.5 text-[13px]">
-          <span className="text-[16px] leading-none mt-0.5">{'\u2715'}</span>
+          <span className="text-[15px] leading-none mt-0.5">{'\u2715'}</span>
           <div>
             <div className="font-semibold mb-1">거부 사유</div>
             <div className="text-[12px]">{approval.reject_reason}</div>

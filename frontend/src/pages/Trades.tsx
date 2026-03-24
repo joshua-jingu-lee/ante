@@ -60,7 +60,7 @@ export default function Trades() {
         >
           &larr; 전략 상세
         </Link>
-        <h2 className="text-[20px] font-bold">거래 내역</h2>
+        <h2 className="text-[18px] font-bold">거래 내역</h2>
       </div>
 
       {/* 필터 바 */}

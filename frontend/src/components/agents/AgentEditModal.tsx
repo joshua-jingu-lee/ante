@@ -35,7 +35,7 @@ export default function AgentEditModal({ open, member, onClose, onSave, isPendin
 
   return (
     <Modal open={open} onClose={onClose}>
-      <div className="text-[16px] font-semibold mb-5">정보 수정</div>
+      <div className="text-[15px] font-semibold mb-5">정보 수정</div>
 
       <div className="mb-4">
         <label className="block text-[12px] font-semibold text-text-muted mb-1.5">Agent ID</label>

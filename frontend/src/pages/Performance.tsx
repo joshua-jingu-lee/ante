@@ -16,7 +16,7 @@ function StatCard({ label, value, colorClass }: { label: string; value: string; 
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
       <div className="text-[12px] text-text-muted mb-1">{label}</div>
-      <div className={`text-[20px] font-bold ${colorClass ?? ''}`}>{value}</div>
+      <div className={`text-[18px] font-bold ${colorClass ?? ''}`}>{value}</div>
     </div>
   )
 }
@@ -206,7 +206,7 @@ export default function Performance() {
         >
           &larr; 전략 상세
         </Link>
-        <h2 className="text-[20px] font-bold">기간별 성과</h2>
+        <h2 className="text-[18px] font-bold">기간별 성과</h2>
       </div>
 
       {/* 필터 바 */}

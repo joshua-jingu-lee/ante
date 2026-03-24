@@ -65,7 +65,7 @@ export default function Sidebar() {
                 }`
               }
             >
-              <span className="text-[16px] w-5 text-center">{item.icon}</span>
+              <span className="text-[15px] w-5 text-center">{item.icon}</span>
               <span className="leading-none">{item.label}</span>
               {item.showBadge && pendingCount > 0 && (
                 <span className="ml-auto bg-negative text-white text-[11px] px-1.5 py-px rounded-[10px] font-semibold">

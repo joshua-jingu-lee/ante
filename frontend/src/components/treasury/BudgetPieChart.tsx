@@ -50,7 +50,7 @@ export default function BudgetPieChart({ budgets }: Props) {
     <div className="flex items-center gap-6 h-[240px]">
       {/* SVG Pie Chart */}
       <div className="flex-shrink-0">
-        <svg width="180" height="180" viewBox="-1 -1 2 2" style={{ transform: 'rotate(-90deg)' }}>
+        <svg width="180" height="180" viewBox="-1 -1 2 2" className="-rotate-90">
           {slices.map((slice) => {
             if (slice.percentage >= 99.99) {
               // Full circle
