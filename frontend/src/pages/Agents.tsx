@@ -79,7 +79,7 @@ export default function Agents() {
               <div className="ml-auto">
                 <button
                   onClick={() => setShowRegister(true)}
-                  className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
+                  className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover"
                 >
                   + 에이전트 등록
                 </button>
@@ -95,7 +95,7 @@ export default function Agents() {
                     onClick={() => setStatusFilter(tab.value)}
                     className={`px-3 py-1.5 rounded-lg text-[13px] font-medium border cursor-pointer transition-colors ${
                       statusFilter === tab.value
-                        ? 'bg-primary text-white border-primary'
+                        ? 'bg-primary text-on-primary border-primary'
                         : 'bg-transparent text-text-muted border-border hover:bg-surface-hover'
                     }`}
                   >
@@ -150,7 +150,7 @@ export default function Agents() {
 
       {/* 토큰 표시 모달 — 목업 tokenModal 기준 */}
       {createdToken && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[480px] text-center">
             <h3 className="text-[18px] font-bold mb-4 text-positive">{'✓'} 에이전트 등록 완료</h3>
 
@@ -173,7 +173,7 @@ export default function Agents() {
             <div className="flex justify-center gap-2">
               <button
                 onClick={() => navigator.clipboard.writeText(createdToken.token)}
-                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
+                className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover"
               >
                 토큰 복사
               </button>

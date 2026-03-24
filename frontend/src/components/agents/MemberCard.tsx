@@ -9,7 +9,7 @@ const STATUS_VARIANT: Record<MemberStatus, string> = {
 
 const ROLE_BADGE_STYLE: Record<HumanRole, string> = {
   owner: 'bg-primary/15 text-primary',
-  master: 'bg-purple-500/15 text-purple-400',
+  master: 'bg-info-bg text-info',
   admin: 'bg-border text-text-muted',
 }
 
@@ -137,7 +137,7 @@ export default function MemberCard({ member, onSuspend, onReactivate, onRevoke, 
               <button onClick={() => onSuspend(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">정지</button>
             )}
             {member.status === 'suspended' && onReactivate && (
-              <button onClick={() => onReactivate(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
+              <button onClick={() => onReactivate(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
             )}
             {onRevoke && (
               <button onClick={() => onRevoke(member.member_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-negative border-none cursor-pointer hover:bg-negative-bg">폐기</button>

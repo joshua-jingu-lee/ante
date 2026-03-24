@@ -51,7 +51,7 @@ export default function BotTable({ items, onStart, onStop, onDelete }: BotTableP
                 <td className="px-3 py-3 border-b border-border text-[13px] text-right">
                   <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
                     {bot.status === 'stopped' || bot.status === 'created' ? (
-                      <button onClick={() => onStart(bot.bot_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">시작</button>
+                      <button onClick={() => onStart(bot.bot_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover">시작</button>
                     ) : bot.status === 'running' ? (
                       <button onClick={() => onStop(bot.bot_id)} className="px-2.5 py-1 rounded-lg text-[12px] bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">중지</button>
                     ) : null}

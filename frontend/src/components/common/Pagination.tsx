@@ -14,7 +14,7 @@ export default function Pagination({ total, offset, limit, onPageChange }: Pagin
   const btnBase =
     'w-8 h-8 flex items-center justify-center rounded-lg text-[13px] font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
   const btnOutline = `${btnBase} border-border bg-transparent text-text-muted hover:bg-surface-hover hover:text-text`
-  const btnActive = `${btnBase} border-primary bg-primary text-white`
+  const btnActive = `${btnBase} border-primary bg-primary text-on-primary`
 
   // Build visible page numbers: show up to 5 pages centered around current
   const getPageNumbers = (): number[] => {

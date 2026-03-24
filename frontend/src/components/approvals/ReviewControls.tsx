@@ -97,7 +97,7 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
         </button>
         <button
           onClick={() => setShowApprove(true)}
-          className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover"
+          className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover"
         >
           승인
         </button>
@@ -141,7 +141,7 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
           <button
             onClick={handleApprove}
             disabled={updateStatus.isPending}
-            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover disabled:opacity-50"
           >
             승인
           </button>
@@ -175,7 +175,7 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
           <button
             onClick={handleReject}
             disabled={updateStatus.isPending || !rejectReason.trim()}
-            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative-hover disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-on-primary border-none cursor-pointer hover:bg-negative-hover disabled:opacity-50"
           >
             거부
           </button>

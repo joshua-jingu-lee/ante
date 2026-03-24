@@ -24,7 +24,7 @@ export default function Modal({ open, onClose, children }: ModalProps) {
     <div
       ref={overlayRef}
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
     >
       <div className="bg-surface border border-border rounded-lg p-6 w-full max-w-[440px] shadow-lg">
         {children}

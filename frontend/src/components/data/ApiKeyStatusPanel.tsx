@@ -67,7 +67,7 @@ export default function ApiKeyStatusPanel() {
       </div>
       {api_keys.some((k) => !k.set) && (
         <div className="bg-info-bg rounded px-3.5 py-2.5 mt-3 text-[12px] text-info">
-          API 키 설정: <code className="bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 rounded-sm text-[12px]">ante feed config set {'<KEY>'} {'<VALUE>'}</code>
+          API 키 설정: <code className="bg-code-bg px-1.5 py-0.5 rounded-sm text-[12px]">ante feed config set {'<KEY>'} {'<VALUE>'}</code>
         </div>
       )}
     </div>

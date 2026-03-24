@@ -34,7 +34,7 @@ export default function AgentRegisterForm({ onClose, onTokenCreated }: AgentRegi
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+    <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
       <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto">
         <h2 className="text-[18px] font-bold mb-5">에이전트 등록</h2>
         <form onSubmit={handleSubmit}>
@@ -77,7 +77,7 @@ export default function AgentRegisterForm({ onClose, onTokenCreated }: AgentRegi
           </div>
           <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-            <button type="submit" disabled={createMember.isPending} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50">등록</button>
+            <button type="submit" disabled={createMember.isPending} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50">등록</button>
           </div>
         </form>
       </div>

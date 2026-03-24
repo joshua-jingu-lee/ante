@@ -32,7 +32,7 @@ export default function Sidebar() {
       {/* 모바일 오버레이 */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-[100] md:hidden"
+          className="fixed inset-0 bg-overlay z-[100] md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
@@ -60,7 +60,7 @@ export default function Sidebar() {
               className={({ isActive }) =>
                 `flex items-center gap-[10px] px-3 py-[10px] rounded-lg text-[15px] font-medium no-underline transition-colors ${
                   isActive
-                    ? 'bg-primary !text-white'
+                    ? 'bg-primary !text-on-primary'
                     : 'text-text-muted hover:bg-surface-hover hover:text-text'
                 }`
               }
@@ -68,7 +68,7 @@ export default function Sidebar() {
               <span className="text-[15px] w-5 text-center">{item.icon}</span>
               <span className="leading-none">{item.label}</span>
               {item.showBadge && pendingCount > 0 && (
-                <span className="ml-auto bg-negative text-white text-[11px] px-1.5 py-px rounded-[10px] font-semibold">
+                <span className="ml-auto bg-negative text-on-primary text-[11px] px-1.5 py-px rounded-[10px] font-semibold">
                   {pendingCount}
                 </span>
               )}

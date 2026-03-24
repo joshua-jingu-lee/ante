@@ -56,7 +56,7 @@ export default function BotDetail() {
             <button onClick={() => setShowEditModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">설정 수정</button>
           )}
           {canStart && (
-            <button onClick={() => start.mutate(bot.bot_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">시작</button>
+            <button onClick={() => start.mutate(bot.bot_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover">시작</button>
           )}
           {canStop && (
             <button onClick={() => setShowStopModal(true)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-negative border border-negative cursor-pointer hover:bg-negative-bg">중지</button>
@@ -316,7 +316,7 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
   const inputClass = 'w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary'
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]" onClick={onClose}>
+    <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]" onClick={onClose}>
       <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-[18px] font-bold mb-5">Bot 설정 수정</h2>
         <div className="space-y-4">
@@ -469,7 +469,7 @@ function BotEditModal({ bot, onClose }: { bot: BotDetailType; onClose: () => voi
             type="button"
             onClick={handleSave}
             disabled={updateMutation.isPending}
-            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
           >
             {updateMutation.isPending ? '저장 중...' : '저장'}
           </button>

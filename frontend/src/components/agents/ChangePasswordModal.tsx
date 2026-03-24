@@ -44,7 +44,7 @@ export default function ChangePasswordModal({ memberId, onClose }: ChangePasswor
 
   if (success) {
     return (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+      <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
         <div className="bg-surface border border-border rounded-lg p-6 w-[400px] text-center">
           <h3 className="text-[18px] font-bold mb-4 text-positive">비밀번호 변경 완료</h3>
           <p className="text-[13px] text-text-muted mb-5">
@@ -52,7 +52,7 @@ export default function ChangePasswordModal({ memberId, onClose }: ChangePasswor
           </p>
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover"
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover"
           >
             닫기
           </button>
@@ -62,7 +62,7 @@ export default function ChangePasswordModal({ memberId, onClose }: ChangePasswor
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+    <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
       <div className="bg-surface border border-border rounded-lg p-6 w-[400px]">
         <h2 className="text-[18px] font-bold mb-5">비밀번호 변경</h2>
         <p className="text-[13px] text-text-muted mb-4">
@@ -114,7 +114,7 @@ export default function ChangePasswordModal({ memberId, onClose }: ChangePasswor
             <button
               type="submit"
               disabled={changePassword.isPending}
-              className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
+              className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
             >
               {changePassword.isPending ? '변경 중...' : '변경'}
             </button>

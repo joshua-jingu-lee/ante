@@ -322,7 +322,7 @@ export default function BacktestData() {
 
       {/* 삭제 확인 모달 */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
             <h3 className="text-[18px] font-bold mb-5 text-negative">데이터셋 삭제</h3>
             <div className="mb-4 text-[13px] text-text-muted">
@@ -341,7 +341,7 @@ export default function BacktestData() {
               <button
                 onClick={() => deleteMutation.mutate(deleteTarget)}
                 disabled={deleteMutation.isPending}
-                className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-white border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
+                className="px-4 py-2 rounded text-[13px] font-medium bg-negative text-on-primary border border-negative cursor-pointer hover:bg-negative-hover disabled:opacity-50"
               >
                 삭제
               </button>

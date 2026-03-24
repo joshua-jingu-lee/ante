@@ -38,7 +38,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 this.setState({ hasError: false, error: null })
                 window.location.href = '/'
               }}
-              className="px-4 py-2 bg-primary text-white rounded-lg border-none cursor-pointer text-[14px] hover:bg-primary-hover"
+              className="px-4 py-2 bg-primary text-on-primary rounded-lg border-none cursor-pointer text-[14px] hover:bg-primary-hover"
             >
               대시보드로 돌아가기
             </button>

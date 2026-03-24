@@ -62,7 +62,7 @@ export default function AgentDetail() {
             <button onClick={() => suspend.mutate(member.member_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">일시 정지</button>
           )}
           {member.status === 'suspended' && (
-            <button onClick={() => reactivate.mutate(member.member_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-white border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
+            <button onClick={() => reactivate.mutate(member.member_id)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover">재활성화</button>
           )}
           {member.status !== 'revoked' && (
             <button onClick={() => { if (confirm('이 작업은 되돌릴 수 없습니다. 정말 삭제하시겠습니까?')) revoke.mutate(member.member_id) }} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-negative border border-border cursor-pointer hover:bg-surface-hover">삭제</button>
@@ -171,7 +171,7 @@ export default function AgentDetail() {
 
       {/* 토큰 표시 모달 */}
       {newToken && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[480px] text-center">
             <h3 className="text-[18px] font-bold mb-4 text-positive">{'✓'} 새 토큰 발급 완료</h3>
 
@@ -185,7 +185,7 @@ export default function AgentDetail() {
             </div>
 
             <div className="flex justify-center gap-2">
-              <button onClick={() => navigator.clipboard.writeText(newToken)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">토큰 복사</button>
+              <button onClick={() => navigator.clipboard.writeText(newToken)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover">토큰 복사</button>
               <button onClick={() => setNewToken(null)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">닫기</button>
             </div>
           </div>

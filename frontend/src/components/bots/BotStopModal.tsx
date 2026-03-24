@@ -18,7 +18,7 @@ export default function BotStopModal({ bot, onConfirm, onClose, isPending }: Bot
   const reserved = bot.budget?.reserved ?? 0
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]" onClick={onClose}>
+    <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]" onClick={onClose}>
       <div className="bg-surface border border-border rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-[18px] font-bold mb-4 text-negative">Bot 중지</h2>
 
@@ -64,7 +64,7 @@ export default function BotStopModal({ bot, onConfirm, onClose, isPending }: Bot
             type="button"
             onClick={onConfirm}
             disabled={isPending}
-            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-white border-none cursor-pointer hover:bg-negative/80 disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-on-primary border-none cursor-pointer hover:bg-negative/80 disabled:opacity-50"
           >
             {isPending ? '중지 중...' : '중지 확인'}
           </button>

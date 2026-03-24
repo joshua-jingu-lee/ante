@@ -108,7 +108,7 @@ export default function AllocationForm({ budgets }: AllocationFormProps) {
           <button
             onClick={() => numAmount > 0 && botId && setShowConfirm(true)}
             disabled={!botId || !numAmount || isBotRunning}
-            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover disabled:opacity-50"
           >
             예산 변경
           </button>
@@ -117,7 +117,7 @@ export default function AllocationForm({ budgets }: AllocationFormProps) {
 
       {/* 예산 변경 확인 모달 */}
       {showConfirm && selectedBudget && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200]">
+        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
           <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
             <h3 className="text-[18px] font-bold mb-5">예산 변경 확인</h3>
             <div className="text-[13px] text-text-muted mb-4">아래 내용으로 예산을 변경합니다.</div>
@@ -143,7 +143,7 @@ export default function AllocationForm({ budgets }: AllocationFormProps) {
             </div>
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
               <button onClick={() => setShowConfirm(false)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
-              <button onClick={handleSubmit} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-white border-none cursor-pointer hover:bg-primary-hover">변경 확인</button>
+              <button onClick={handleSubmit} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-primary text-on-primary border-none cursor-pointer hover:bg-primary-hover">변경 확인</button>
             </div>
           </div>
         </div>

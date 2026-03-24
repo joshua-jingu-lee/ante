@@ -9,7 +9,7 @@ export default function HintTooltip({ text }: { text: string }) {
       onMouseEnter={() => setShow(true)}
       onMouseLeave={() => setShow(false)}
     >
-      <span className="w-4 h-4 rounded-full bg-[rgba(139,143,163,0.15)] text-text-muted text-[11px] font-bold flex items-center justify-center">
+      <span className="w-4 h-4 rounded-full bg-muted-bg text-text-muted text-[11px] font-bold flex items-center justify-center">
         ?
       </span>
       {show && (
