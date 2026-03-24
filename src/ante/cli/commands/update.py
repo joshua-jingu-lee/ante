@@ -82,7 +82,11 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
     from pathlib import Path
 
     from ante.db.backup import backup_db
-    from ante.update.executor import pip_upgrade, run_post_update_migrations
+    from ante.update.executor import (
+        pip_upgrade,
+        rollback_update,
+        run_post_update_migrations,
+    )
 
     db_path = Path("db/ante.db")
     if db_path.exists():
@@ -97,7 +101,17 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
     # Phase B: 마이그레이션
     click.echo("DB 마이그레이션 실행 중...")
     if not run_post_update_migrations():
-        click.echo("마이그레이션 실패. 백업에서 복원하세요.", err=True)
+        click.echo("마이그레이션 실패. 자동 롤백 시도 중...", err=True)
+        backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"
+        if rollback_update(current, backup_path):
+            click.echo(f"롤백 완료: {current}으로 복원됨")
+        else:
+            click.echo(
+                f"자동 롤백 실패. 수동 복구 필요:\n"
+                f"  pip install ante=={current}\n"
+                f"  cp {backup_path} db/ante.db",
+                err=True,
+            )
         raise SystemExit(1)
 
     click.echo(f"업데이트 완료: {latest}")

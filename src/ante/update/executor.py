@@ -1,10 +1,12 @@
-"""업데이트 실행기 — pip 업그레이드 및 마이그레이션."""
+"""업데이트 실행기 — pip 업그레이드, 마이그레이션, 롤백."""
 
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -34,3 +36,29 @@ def run_post_update_migrations() -> bool:
         logger.error("마이그레이션 실패: %s", result.stderr)
         return False
     return True
+
+
+def rollback_update(previous_version: str, backup_path: Path | None = None) -> bool:
+    """업데이트 실패 시 롤백. pip 다운그레이드 + DB 복원."""
+    success = True
+
+    # pip 다운그레이드
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "pip", "install", f"ante=={previous_version}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error("pip 롤백 실패: %s", result.stderr)
+        success = False
+
+    # DB 복원
+    if backup_path and backup_path.exists():
+        db_path = Path("db/ante.db")
+        shutil.copy2(str(backup_path), str(db_path))
+        logger.info("DB 복원 완료: %s → %s", backup_path, db_path)
+    elif backup_path:
+        logger.warning("백업 파일 없음: %s", backup_path)
+        success = False
+
+    return success
