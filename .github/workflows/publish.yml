@@ -31,6 +31,7 @@ jobs:
         run: |
           npm ci
           npm run build
+          mkdir -p ../src/ante/web/static
           rm -rf ../src/ante/web/static/assets
           cp -r dist/* ../src/ante/web/static/
 
