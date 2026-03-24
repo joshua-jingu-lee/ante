@@ -25,8 +25,30 @@ _AUTH_EXEMPT_COMMANDS: set[str] = {
 }
 
 
+def _resolve_token() -> str:
+    """ANTE_MEMBER_TOKEN을 환경변수 또는 토큰 파일에서 확보한다.
+
+    우선순위:
+    1. ANTE_MEMBER_TOKEN 환경변수
+    2. ANTE_TOKEN_FILE 환경변수가 가리키는 파일
+    3. /run/ante-token 파일 (QA 컨테이너 기본 경로)
+    """
+    token = os.environ.get("ANTE_MEMBER_TOKEN", "")
+    if token:
+        return token
+
+    token_file = os.environ.get("ANTE_TOKEN_FILE", "/run/ante-token")
+    try:
+        with open(token_file) as f:
+            token = f.read().strip()
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    return token
+
+
 def authenticate_member(ctx: click.Context) -> None:
-    """ANTE_MEMBER_TOKEN 환경변수로 멤버 인증.
+    """ANTE_MEMBER_TOKEN 환경변수 또는 토큰 파일로 멤버 인증.
 
     인증된 Member를 ctx.obj["member"]에 저장한다.
     면제 커맨드이거나 --help 플래그가 있으면 건너뛴다.
@@ -40,7 +62,7 @@ def authenticate_member(ctx: click.Context) -> None:
         ctx.obj["member"] = None
         return
 
-    token = os.environ.get("ANTE_MEMBER_TOKEN", "")
+    token = _resolve_token()
     if not token:
         ctx.obj["member"] = None
         return

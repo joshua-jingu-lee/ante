@@ -49,7 +49,11 @@ fi
 if [ -n "$QA_TOKEN" ]; then
     export ANTE_MEMBER_TOKEN="$QA_TOKEN"
     echo "export ANTE_MEMBER_TOKEN=\"$QA_TOKEN\"" >> /root/.bashrc
-    echo "[qa] ANTE_MEMBER_TOKEN 설정 완료"
+    # docker exec는 컨테이너의 환경변수를 상속하지 않으므로
+    # 토큰을 파일로도 저장하여 CLI가 자동으로 읽을 수 있게 한다
+    echo -n "$QA_TOKEN" > /run/ante-token
+    chmod 600 /run/ante-token
+    echo "[qa] ANTE_MEMBER_TOKEN 설정 완료 (환경변수 + /run/ante-token)"
 else
     echo "[qa] WARNING: ANTE_MEMBER_TOKEN 설정 실패" >&2
 fi
