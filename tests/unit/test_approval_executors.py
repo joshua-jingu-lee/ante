@@ -12,6 +12,7 @@ import pytest
 from ante.approval.service import ApprovalService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
+from ante.report.models import ReportStatus
 
 
 @pytest.fixture
@@ -55,10 +56,10 @@ def _build_executors() -> tuple[dict, dict]:
 
     executors = {
         "strategy_adopt": lambda params: report_store.update_status(
-            params["report_id"], "adopted"
+            params["report_id"], ReportStatus.ADOPTED
         ),
         "strategy_retire": lambda params: report_store.update_status(
-            params["report_id"], "retired"
+            params["report_id"], ReportStatus.ARCHIVED
         ),
         "bot_create": lambda params: bot_manager.create_bot(**params),
         "bot_assign_strategy": lambda params: bot_manager.assign_strategy(
@@ -107,7 +108,7 @@ class TestStrategyAdoptExecutor:
         )
         await svc.approve(req.id)
         mocks["report_store"].update_status.assert_awaited_once_with(
-            "rpt-001", "adopted"
+            "rpt-001", ReportStatus.ADOPTED
         )
 
 
@@ -124,7 +125,7 @@ class TestStrategyRetireExecutor:
         )
         await svc.approve(req.id)
         mocks["report_store"].update_status.assert_awaited_once_with(
-            "rpt-002", "retired"
+            "rpt-002", ReportStatus.ARCHIVED
         )
 
 
