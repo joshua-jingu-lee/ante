@@ -20,8 +20,16 @@ from ante.feed.sources.dart import (
 
 logger = logging.getLogger(__name__)
 
-# DART 보고서 코드 (분기별)
+# DART 보고서 코드 (시간순: 1Q → 반기 → 3Q → 연간)
 REPRT_CODES = ["11013", "11012", "11014", "11011"]
+
+# REPRT_CODE → 분기 매핑
+REPRT_TO_QUARTER: dict[str, str] = {
+    "11013": "Q1",  # 1분기
+    "11012": "Q2",  # 반기
+    "11014": "Q3",  # 3분기
+    "11011": "Q4",  # 사업보고서(연간)
+}
 
 # 기본 설정 상수
 DEFAULT_BACKFILL_SINCE = "2015-01-01"
@@ -61,6 +69,7 @@ class DARTCollector:
 
         start_year, end_year = self._resolve_year_range(config)
         last_checkpoint = checkpoint.get_last_date()
+        last_checkpoint = self._migrate_checkpoint_key(last_checkpoint)
 
         return await self._collect_quarters(
             corp_code_map,
@@ -92,6 +101,15 @@ class DARTCollector:
         end_year = date.today().year
         return start_year, end_year
 
+    @staticmethod
+    def _migrate_checkpoint_key(last: str | None) -> str | None:
+        """기존 'YYYY-REPRT_CODE' -> 'YYYY-QN' 형식 변환."""
+        if last and "-" in last:
+            parts = last.split("-", 1)
+            if len(parts) == 2 and parts[1] in REPRT_TO_QUARTER:
+                return f"{parts[0]}-{REPRT_TO_QUARTER[parts[1]]}"
+        return last
+
     async def _collect_quarters(
         self,
         corp_code_map: dict[str, str],
@@ -109,7 +127,7 @@ class DARTCollector:
 
         for year in range(start_year, end_year + 1):
             for reprt_code in REPRT_CODES:
-                quarter_key = f"{year}-{reprt_code}"
+                quarter_key = f"{year}-{REPRT_TO_QUARTER[reprt_code]}"
                 if last_checkpoint and quarter_key <= last_checkpoint:
                     continue
 
