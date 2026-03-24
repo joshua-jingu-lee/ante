@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
-import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary, getStrategyTradesPaginated } from '../api/strategies'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary, getStrategyTradesPaginated, updateStrategyStatus } from '../api/strategies'
+import { showToast } from '../components/common/Toast'
 
 export function useStrategies(params?: { search?: string }) {
   return useQuery({
@@ -64,5 +65,22 @@ export function useStrategyTradesPaginated(
     queryKey: ['strategies', id, 'trades-paginated', params],
     queryFn: () => getStrategyTradesPaginated(id, params),
     enabled: !!id,
+  })
+}
+
+export function useStrategyStatusTransition() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      updateStrategyStatus(id, status),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['strategies'] })
+      queryClient.invalidateQueries({ queryKey: ['strategies', variables.id] })
+      showToast('전략 상태가 변경되었습니다.', 'success')
+    },
+    onError: () => {
+      showToast('전략 상태 변경에 실패했습니다.', 'error')
+    },
   })
 }
