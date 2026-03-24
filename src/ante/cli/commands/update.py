@@ -3,8 +3,44 @@
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 
 import click
+
+# pip 다운로드 등 임시 파일을 위한 최소 여유 공간
+_MIN_FREE_MB = 100
+
+
+def check_disk_space(db_path: Path) -> tuple[bool, str]:
+    """디스크 여유 공간이 업데이트에 충분한지 확인한다.
+
+    필요 공간 = DB 크기 × 2 (백업 + 임시) + 100 MB (pip 다운로드).
+    DB 파일이 없으면 100 MB만 확인한다.
+
+    Returns:
+        (통과 여부, 안내 메시지) 튜플.
+    """
+    if db_path.exists():
+        db_size = db_path.stat().st_size
+        required = db_size * 2 + _MIN_FREE_MB * 1024 * 1024
+    else:
+        db_size = 0
+        required = _MIN_FREE_MB * 1024 * 1024
+
+    free = shutil.disk_usage(
+        db_path.parent if db_path.parent.exists() else Path(".")
+    ).free
+
+    if free >= required:
+        return True, ""
+
+    required_mb = required / (1024 * 1024)
+    free_mb = free / (1024 * 1024)
+    return False, (
+        f"디스크 공간 부족: 필요 {required_mb:.0f}MB, 여유 {free_mb:.0f}MB. "
+        "불필요한 파일을 정리한 후 다시 시도하세요."
+    )
 
 
 def check_server_running() -> bool:
@@ -73,13 +109,19 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
         click.echo("이미 최신 버전입니다")
         return
 
+    # 디스크 공간 사전 검사
+    db_path = Path("db/ante.db")
+    ok, msg = check_disk_space(db_path)
+    if not ok:
+        click.echo(msg, err=True)
+        raise SystemExit(1)
+
     if not yes:
         if not click.confirm(f"{current} → {latest}로 업데이트하시겠습니까?"):
             click.echo("업데이트를 취소했습니다")
             return
 
     # Phase A: 백업 + pip upgrade
-    from pathlib import Path
 
     from ante.db.backup import backup_db
     from ante.update.executor import (
@@ -88,7 +130,6 @@ def update(check: bool, target_version: str | None, yes: bool, force: bool) -> N
         run_post_update_migrations,
     )
 
-    db_path = Path("db/ante.db")
     if db_path.exists():
         click.echo("DB 백업 중...")
         backup_db(db_path, current)
