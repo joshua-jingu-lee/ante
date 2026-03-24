@@ -103,6 +103,8 @@ async def report_view(
         "metrics": detail.get("metrics", {}),
         "initial_balance": detail.get("initial_balance"),
         "final_balance": detail.get("final_balance"),
+        "config": detail.get("config"),
+        "datasets": detail.get("datasets", []),
         "symbols": detail.get("symbols", []),
         "user_notes": report.user_notes,
         "reviewed_at": str(report.reviewed_at) if report.reviewed_at else None,

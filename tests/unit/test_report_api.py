@@ -79,6 +79,26 @@ async def sample_report(report_store):
                 },
                 "initial_balance": 10000000,
                 "final_balance": 14230000,
+                "config": {
+                    "strategy_path": "/strategies/momentum_breakout_v2.py",
+                    "symbols": ["005930", "000660"],
+                    "initial_balance": 10000000,
+                    "buy_commission_rate": 0.00015,
+                    "sell_commission_rate": 0.00195,
+                    "slippage_rate": 0.001,
+                },
+                "datasets": [
+                    {
+                        "symbol": "005930",
+                        "timeframe": "1d",
+                        "row_count": 543,
+                    },
+                    {
+                        "symbol": "000660",
+                        "timeframe": "1d",
+                        "row_count": 543,
+                    },
+                ],
                 "symbols": [
                     {
                         "symbol": "005930",
@@ -136,6 +156,28 @@ class TestGetReport:
         data = res.json()
         assert len(data["symbols"]) == 2
         assert data["symbols"][0]["symbol"] == "005930"
+
+    def test_get_config(self, client, sample_report):
+        """detail_json의 config 필드가 응답에 포함되는지 확인."""
+        res = client.get(f"/api/reports/{sample_report.report_id}")
+        data = res.json()
+        assert data["config"] is not None
+        assert data["config"]["strategy_path"] == "/strategies/momentum_breakout_v2.py"
+        assert data["config"]["symbols"] == ["005930", "000660"]
+        assert data["config"]["initial_balance"] == 10000000
+        assert data["config"]["buy_commission_rate"] == 0.00015
+        assert data["config"]["sell_commission_rate"] == 0.00195
+        assert data["config"]["slippage_rate"] == 0.001
+
+    def test_get_datasets(self, client, sample_report):
+        """detail_json의 datasets 필드가 응답에 포함되는지 확인."""
+        res = client.get(f"/api/reports/{sample_report.report_id}")
+        data = res.json()
+        assert len(data["datasets"]) == 2
+        assert data["datasets"][0]["symbol"] == "005930"
+        assert data["datasets"][0]["timeframe"] == "1d"
+        assert data["datasets"][0]["row_count"] == 543
+        assert data["datasets"][1]["symbol"] == "000660"
 
     def test_get_nonexistent(self, client):
         res = client.get("/api/reports/nonexistent-id")
