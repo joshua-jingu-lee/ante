@@ -1,5 +1,8 @@
 """SQLite WAL 모드 비동기 래퍼."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import aiosqlite
 
 
@@ -10,6 +13,7 @@ class Database:
         self._db_path = db_path
         self._writer: aiosqlite.Connection | None = None
         self._reader: aiosqlite.Connection | None = None
+        self._in_transaction: bool = False
 
     async def _init_conn(self) -> aiosqlite.Connection:
         """공통 PRAGMA 설정으로 연결 초기화."""
@@ -48,7 +52,8 @@ class Database:
         """INSERT/UPDATE/DELETE 실행."""
         conn = self._get_writer()
         await conn.execute(sql, params)
-        await conn.commit()
+        if not self._in_transaction:
+            await conn.commit()
 
     async def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         """단일 행 조회. dict(컬럼명 → 값) 반환."""
@@ -68,3 +73,20 @@ class Database:
         """DDL 스크립트 실행 (테이블 생성 등)."""
         conn = self._get_writer()
         await conn.executescript(sql)
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator["Database"]:
+        """트랜잭션 컨텍스트 매니저. 실패 시 자동 ROLLBACK."""
+        if self._in_transaction:
+            raise RuntimeError("중첩 트랜잭션은 지원하지 않습니다")
+        conn = self._get_writer()
+        self._in_transaction = True
+        try:
+            await conn.execute("BEGIN")
+            yield self
+            await conn.execute("COMMIT")
+        except Exception:
+            await conn.execute("ROLLBACK")
+            raise
+        finally:
+            self._in_transaction = False
