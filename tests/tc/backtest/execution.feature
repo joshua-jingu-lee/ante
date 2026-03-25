@@ -16,29 +16,29 @@ Feature: 백테스트 실행
   # --- 백테스트 실행 ---
 
   Scenario: 백테스트 실행 (기본 옵션)
-    When 컨테이너에서 실행: ante backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-12-31 --format json
+    When 컨테이너에서 실행: ante --format json backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-12-31
     Then 종료 코드는 0
     And stdout에 "run_id" 가 포함되어 있다
     And stdout JSON의 .run_id 를 {run_id}로 저장한다
 
   Scenario: 백테스트 실행 (초기 잔고 지정)
-    When 컨테이너에서 실행: ante backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-09-30 --balance 50000000 --format json
+    When 컨테이너에서 실행: ante --format json backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-09-30 --balance 50000000
     Then 종료 코드는 0
 
   Scenario: 백테스트 실행 (심볼 지정)
-    When 컨테이너에서 실행: ante backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-09-30 --symbols 005930 --format json
+    When 컨테이너에서 실행: ante --format json backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-09-30 --symbols 005930
     Then 종료 코드는 0
 
   # --- 이력 조회 ---
 
   Scenario: 백테스트 이력 조회
-    When 컨테이너에서 실행: ante backtest history qa_buy_signal --format json
+    When 컨테이너에서 실행: ante --format json backtest history qa_buy_signal
     Then 종료 코드는 0
 
   # --- 성과 지표 검증 ---
 
   Scenario: 성과 지표 필드 존재 확인
-    When 컨테이너에서 실행: ante backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-12-31 --format json
+    When 컨테이너에서 실행: ante --format json backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-12-31
     Then 종료 코드는 0
     And stdout에 "sharpe_ratio" 가 포함되어 있다
     And stdout에 "max_drawdown" 가 포함되어 있다

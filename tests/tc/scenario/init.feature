@@ -21,6 +21,7 @@ Feature: 최초 설치 및 초기화
   # ── Master 계정 ──────────────────────────────────────
 
   Scenario: 3. QA Admin 멤버 존재 확인
+    Given QA Admin 인증 토큰이 확보되어 있다
     When GET /api/members
     Then 응답 상태는 200
     And 응답 body.members 배열 길이는 1 이상이다
