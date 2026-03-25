@@ -8,6 +8,7 @@ import type { StrategyStatus } from '../types/strategy'
 const STATUS_FILTERS: { key: StrategyStatus | 'all'; label: string }[] = [
   { key: 'all', label: '전체' },
   { key: 'active', label: '운용중' },
+  { key: 'adopted', label: '채택' },
   { key: 'registered', label: '대기' },
   { key: 'inactive', label: '중지' },
   { key: 'archived', label: '보관' },

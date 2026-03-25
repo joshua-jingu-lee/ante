@@ -7,6 +7,7 @@ import type { Strategy, StrategyStatus } from '../../types/strategy'
 const STATUS_VARIANT: Record<StrategyStatus, string> = {
   active: 'positive',
   registered: 'warning',
+  adopted: 'primary',
   inactive: 'muted',
   archived: 'muted',
 }

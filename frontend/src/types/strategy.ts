@@ -18,7 +18,7 @@ export type MonthlySummary = MonthlySummaryItem
 export type { EquityCurvePoint }
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
-export type StrategyStatus = 'registered' | 'active' | 'inactive' | 'archived'
+export type StrategyStatus = 'registered' | 'adopted' | 'active' | 'inactive' | 'archived'
 
 /**
  * 전략 목록 아이템.
