@@ -13,7 +13,7 @@ const BOT_ID_PATTERN = /^[a-zA-Z0-9-]+$/
 export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [botId, setBotId] = useState('')
   const [name, setName] = useState('')
-  const [strategyName, setStrategyName] = useState('')
+  const [strategyId, setStrategyId] = useState('')
   const [interval, setInterval] = useState('60')
   const [budget, setBudget] = useState('')
   const [botIdError, setBotIdError] = useState('')
@@ -21,7 +21,7 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const { data: strategies } = useStrategies()
   const { data: treasury } = useTreasurySummary()
 
-  const activeStrategies = strategies?.filter((s) => s.status === 'active' || s.status === 'registered') ?? []
+  const adoptedStrategies = strategies?.filter((s) => s.status === 'adopted') ?? []
   const remainingBudget = treasury?.unallocated ?? 0
 
   const validateBotId = (value: string) => {
@@ -44,7 +44,7 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
       {
         bot_id: botId,
         name,
-        strategy_name: strategyName,
+        strategy_id: strategyId,
         interval_seconds: Number(interval),
         budget: Number(budget.replace(/,/g, '')),
       },
@@ -73,12 +73,15 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">전략 선택</label>
-            <select value={strategyName} onChange={(e) => setStrategyName(e.target.value)} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary appearance-none cursor-pointer" required>
-              <option value="">전략을 선택하세요</option>
-              {activeStrategies.map((s) => (
-                <option key={s.id} value={s.name}>{s.name} {s.version}</option>
+            <select value={strategyId} onChange={(e) => setStrategyId(e.target.value)} className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" required disabled={adoptedStrategies.length === 0}>
+              <option value="">{adoptedStrategies.length === 0 ? '채택된 전략이 없습니다' : '전략을 선택하세요'}</option>
+              {adoptedStrategies.map((s) => (
+                <option key={s.id} value={String(s.id)}>{s.name} {s.version} ({s.id})</option>
               ))}
             </select>
+            {adoptedStrategies.length === 0 && (
+              <div className="text-[11px] text-warning mt-1">봇을 생성하려면 먼저 전략을 채택해 주세요</div>
+            )}
           </div>
           <div className="mb-4">
             <label className="block text-[12px] font-semibold text-text-muted mb-1.5">실행 간격 (초)</label>
