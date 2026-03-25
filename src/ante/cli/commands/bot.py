@@ -338,7 +338,6 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
 
     async def _run_positions() -> list[dict]:
         from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
         from ante.trade.performance import PerformanceTracker
         from ante.trade.position import PositionHistory
         from ante.trade.recorder import TradeRecorder
@@ -347,13 +346,12 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
         db = Database("db/ante.db")
         await db.connect()
         try:
-            eventbus = EventBus()
-            recorder = TradeRecorder(db, eventbus)
-            await recorder.initialize()
-            position_history = PositionHistory(db, eventbus)
+            position_history = PositionHistory(db)
             await position_history.initialize()
+            recorder = TradeRecorder(db, position_history)
+            await recorder.initialize()
             performance = PerformanceTracker(db)
-            await performance.initialize()
+
             service = TradeService(recorder, position_history, performance)
             positions = await service.get_positions(bot_id)
             return [

@@ -132,9 +132,15 @@ def report_list(ctx: click.Context, status: str | None, db_path: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _list() -> list[dict]:
-        store = ReportStore(db_path=db_path)
+        from ante.core.database import Database
+        from ante.report.models import ReportStatus
+
+        db = Database(db_path)
+        await db.connect()
+        store = ReportStore(db=db)
         await store.initialize()
-        reports = await store.list_reports(status=status)
+        report_status = ReportStatus(status) if status else None
+        reports = await store.list_reports(status=report_status)
         return [
             {
                 "report_id": r.report_id,
@@ -189,17 +195,18 @@ def report_performance(
         try:
             tracker = PerformanceTracker(db)
             if period == "daily":
-                summaries = await tracker.get_daily_summary(
+                daily_summaries = await tracker.get_daily_summary(
                     bot_id=bot_id,
                     start_date=start,
                     end_date=end,
                 )
+                return [asdict(s) for s in daily_summaries]
             else:
-                summaries = await tracker.get_monthly_summary(
+                monthly_summaries = await tracker.get_monthly_summary(
                     bot_id=bot_id,
                     year=year,
                 )
-            return [asdict(s) for s in summaries]
+                return [asdict(s) for s in monthly_summaries]
         finally:
             await db.close()
 
