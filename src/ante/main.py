@@ -1006,12 +1006,18 @@ async def _init_notification(s: Services) -> None:
             if parsed:
                 quiet_start, quiet_end = parsed
 
+    telegram_enabled = await s.dynamic_config.get(
+        "notification.telegram_enabled", default="true"
+    )
+    telegram_enabled_bool = str(telegram_enabled) == "true"
+
     s.notification_service = NotificationService(
         adapter=adapter,
         eventbus=s.eventbus,
         min_level=NotificationLevel(min_level_str),
         quiet_start=quiet_start,
         quiet_end=quiet_end,
+        telegram_enabled=telegram_enabled_bool,
     )
     s.notification_service.subscribe()
     logger.info("NotificationService 초기화 완료 (Telegram)")
@@ -1019,12 +1025,17 @@ async def _init_notification(s: Services) -> None:
     # TelegramCommandReceiver
     from ante.notification import TelegramCommandReceiver
 
-    telegram_enabled = await s.dynamic_config.get(
-        "notification.telegram_enabled", default="true"
-    )
     chat_id_str = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if str(telegram_enabled) == "true" and chat_id_str:
-        chat_id = int(chat_id_str)
+    chat_id: int | None = None
+    if chat_id_str:
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            logger.warning(
+                "TELEGRAM_CHAT_ID 값이 올바른 정수가 아닙니다: %r — 무시합니다",
+                chat_id_str,
+            )
+    if telegram_enabled_bool and chat_id is not None:
         s.telegram_receiver = TelegramCommandReceiver(
             adapter=adapter,
             allowed_user_ids=[chat_id],
@@ -1036,7 +1047,7 @@ async def _init_notification(s: Services) -> None:
         )
         s.telegram_receiver.start()
         logger.info("TelegramCommandReceiver 시작 (chat_id=%s)", chat_id)
-    elif str(telegram_enabled) != "true":
+    elif not telegram_enabled_bool:
         logger.info("TelegramCommandReceiver 건너뜀 — telegram_enabled=false")
     else:
         logger.info("TelegramCommandReceiver 건너뜀 — TELEGRAM_CHAT_ID 미설정")
