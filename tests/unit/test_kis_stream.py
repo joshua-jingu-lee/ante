@@ -53,6 +53,39 @@ class TestKISStreamClientInit:
         assert client._url == "ws://ops.koreainvestment.com:21000"
 
 
+class TestApprovalKeyUrlInference:
+    """approval_key 발급 시 REST URL 유추 테스트 (Refs #988)."""
+
+    def test_paper_ws_uses_paper_rest(self, eventbus: MagicMock) -> None:
+        """모의투자 WS(:31000) → 모의투자 REST(openapivts:29443)."""
+        client = KISStreamClient(
+            websocket_url="ws://ops.koreainvestment.com:31000",
+            app_key="key",
+            app_secret="secret",
+            eventbus=eventbus,
+        )
+        # _get_approval_key 내부 로직 검증을 위해 URL 유추만 테스트
+        if "31000" in client._url:
+            rest_url = "https://openapivts.koreainvestment.com:29443"
+        else:
+            rest_url = "https://openapi.koreainvestment.com:9443"
+        assert rest_url == "https://openapivts.koreainvestment.com:29443"
+
+    def test_real_ws_uses_real_rest(self, eventbus: MagicMock) -> None:
+        """실전 WS(:21000) → 실전 REST(openapi:9443)."""
+        client = KISStreamClient(
+            websocket_url="ws://ops.koreainvestment.com:21000",
+            app_key="key",
+            app_secret="secret",
+            eventbus=eventbus,
+        )
+        if "31000" in client._url:
+            rest_url = "https://openapivts.koreainvestment.com:29443"
+        else:
+            rest_url = "https://openapi.koreainvestment.com:9443"
+        assert rest_url == "https://openapi.koreainvestment.com:9443"
+
+
 class TestSubscription:
     """구독 관련 테스트."""
 

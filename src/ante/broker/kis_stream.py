@@ -366,7 +366,7 @@ class KISStreamClient:
             raise ImportError("aiohttp 패키지가 필요합니다: pip install aiohttp") from e
 
         # WebSocket URL에서 REST URL 유추
-        if "21000" in self._url:
+        if "31000" in self._url:
             rest_url = "https://openapivts.koreainvestment.com:29443"
         else:
             rest_url = "https://openapi.koreainvestment.com:9443"
