@@ -35,7 +35,8 @@ _SAMPLE_RECORD = StrategyRecord(
     status=StrategyStatus.ACTIVE,
     registered_at=_NOW,
     description="모멘텀 전략",
-    author="agent",
+    author_name="agent",
+    author_id="agent",
     validation_warnings=[],
 )
 
@@ -47,7 +48,8 @@ _SAMPLE_RECORD_V2 = StrategyRecord(
     status=StrategyStatus.REGISTERED,
     registered_at=_NOW,
     description="모멘텀 전략 v2",
-    author="agent",
+    author_name="agent",
+    author_id="agent",
     validation_warnings=["warning1"],
 )
 
@@ -420,7 +422,8 @@ class TestStrategySubmit:
             status=StrategyStatus.REGISTERED,
             registered_at=_NOW,
             description="Test strategy",
-            author="agent",
+            author_name="agent",
+            author_id="agent",
             validation_warnings=[],
         )
 
@@ -448,7 +451,8 @@ class TestStrategySubmit:
             status=StrategyStatus.REGISTERED,
             registered_at=_NOW,
             description="Test strategy",
-            author="agent",
+            author_name="agent",
+            author_id="agent",
             validation_warnings=[],
         )
 

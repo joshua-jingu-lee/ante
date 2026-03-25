@@ -318,7 +318,8 @@ class TestStrategyInfoFormatOption:
             status=StrategyStatus.ACTIVE,
             registered_at=datetime(2026, 1, 1, tzinfo=UTC),
             description="테스트 전략",
-            author="agent",
+            author_name="agent",
+            author_id="agent",
             validation_warnings=[],
         )
         registry = MagicMock()
