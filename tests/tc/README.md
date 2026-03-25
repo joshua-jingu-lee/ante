@@ -32,6 +32,7 @@ tests/tc/
 ├── config/
 │   └── dynamic.feature           # 동적 설정 CRUD
 ├── trade/
+│   ├── execution.feature         # 거래 실행 및 포지션 반영
 │   └── query.feature             # 거래 조회
 └── scenario/
     ├── install.feature           # 대화형 설치 프로세스 (ante init, 별도 컨테이너)
