@@ -777,16 +777,18 @@ async def _init_approval(s: Services) -> None:
         rec = await s.strategy_registry.get(params["strategy_id"])
         name = rec.name if rec else params["strategy_id"]
         ver = rec.version if rec else "unknown"
-        await s.eventbus.publish(
-            NotificationEvent(
-                level="info",
-                title="전략 채택",
-                message=(
-                    f"전략 '{name}' (v{ver})이 채택되었습니다. 봇에 배정할 수 있습니다."
-                ),
-                category="strategy",
+        if s.eventbus is not None:
+            await s.eventbus.publish(
+                NotificationEvent(
+                    level="info",
+                    title="전략 채택",
+                    message=(
+                        f"전략 '{name}' (v{ver})이 채택되었습니다."
+                        " 봇에 배정할 수 있습니다."
+                    ),
+                    category="strategy",
+                )
             )
-        )
 
     async def _exec_strategy_retire(params: dict) -> None:
         await s.report_store.update_status(params["report_id"], ReportStatus.ARCHIVED)
@@ -798,14 +800,15 @@ async def _init_approval(s: Services) -> None:
         rec = await s.strategy_registry.get(params["strategy_id"])
         name = rec.name if rec else params["strategy_id"]
         ver = rec.version if rec else "unknown"
-        await s.eventbus.publish(
-            NotificationEvent(
-                level="info",
-                title="전략 폐기",
-                message=f"전략 '{name}' (v{ver})이 보관 처리되었습니다.",
-                category="strategy",
+        if s.eventbus is not None:
+            await s.eventbus.publish(
+                NotificationEvent(
+                    level="info",
+                    title="전략 폐기",
+                    message=f"전략 '{name}' (v{ver})이 보관 처리되었습니다.",
+                    category="strategy",
+                )
             )
-        )
 
     approval_executors: dict = {
         # 전략 관련
