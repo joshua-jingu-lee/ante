@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import stat
 from pathlib import Path
+from typing import Any, cast
 
 import click
 
@@ -101,7 +102,7 @@ def _get_available_brokers() -> list[tuple[str, str]]:
     return result
 
 
-def _prompt_account() -> list[dict[str, str]]:
+def _prompt_account() -> list[dict[str, Any]]:
     """계좌 등록 정보를 대화형으로 입력받는다.
 
     Returns:
@@ -113,7 +114,7 @@ def _prompt_account() -> list[dict[str, str]]:
     click.echo("  등록하지 않으면 테스트 계좌가 자동으로 생성됩니다.")
     click.echo("  나중에 `ante account create` 명령어로도 추가할 수 있습니다.")
 
-    accounts: list[dict[str, str]] = []
+    accounts: list[dict[str, Any]] = []
     brokers = _get_available_brokers()
 
     while True:
@@ -238,7 +239,7 @@ async def _bootstrap_master(
 
 async def _create_accounts(
     db_path: str,
-    account_inputs: list[dict[str, str]],
+    account_inputs: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     """AccountService를 통해 계좌를 생성한다.
 
@@ -274,11 +275,13 @@ async def _create_accounts(
 
         # 실제 계좌 생성
         for info in account_inputs:
-            broker_type = info["broker_type"]
+            broker_type = str(info["broker_type"])
             preset = BROKER_PRESETS[broker_type]
+            credentials = cast(dict[str, str], info["credentials"])
+            broker_config = cast(dict[str, Any], info.get("broker_config", {}))
             account = Account(
-                account_id=info["account_id"],
-                name=info["name"],
+                account_id=str(info["account_id"]),
+                name=str(info["name"]),
                 exchange=preset.exchange,
                 currency=preset.currency,
                 timezone=preset.timezone,
@@ -286,8 +289,8 @@ async def _create_accounts(
                 trading_hours_end=preset.trading_hours_end,
                 trading_mode=TradingMode.LIVE,
                 broker_type=broker_type,
-                credentials=info["credentials"],
-                broker_config=info.get("broker_config", {}),
+                credentials=credentials,
+                broker_config=broker_config,
                 buy_commission_rate=preset.buy_commission_rate,
                 sell_commission_rate=preset.sell_commission_rate,
             )

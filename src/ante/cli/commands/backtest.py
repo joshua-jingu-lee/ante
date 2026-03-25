@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from ante.cli.main import get_formatter
+
+if TYPE_CHECKING:
+    from ante.backtest.result import BacktestResult
 from ante.cli.middleware import require_auth, require_scope
 
 
@@ -56,7 +60,7 @@ def run(
         service = BacktestService(data_path=data_path)
         show_progress = not fmt.is_json
 
-        progress_bar = None
+        progress_bar: Any = None
 
         def _progress_callback(current: int, total: int) -> None:
             nonlocal progress_bar
@@ -107,7 +111,7 @@ def run(
 
 async def _save_backtest_run(
     db_path: str,
-    result: object,
+    result: BacktestResult,
     config: dict,
     metrics: dict,
 ) -> str:
