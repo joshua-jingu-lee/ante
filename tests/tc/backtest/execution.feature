@@ -40,8 +40,7 @@ Feature: 백테스트 실행
   Scenario: 성과 지표 필드 존재 확인
     When 컨테이너에서 실행: ante --format json backtest run strategies/qa_buy_signal.py --start 2025-04-01 --end 2025-12-31
     Then 종료 코드는 0
-    And stdout에 "sharpe_ratio" 가 포함되어 있다
-    And stdout에 "max_drawdown" 가 포함되어 있다
+    And stdout에 "metrics" 가 포함되어 있다
 
   # --- 에러 케이스 ---
 

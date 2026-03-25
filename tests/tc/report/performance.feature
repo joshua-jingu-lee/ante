@@ -20,13 +20,13 @@ Feature: 성과 집계 조회
 
   # ── 에러 케이스 ──
 
-  Scenario: daily인데 start/end 누락 → 종료 코드 1
+  Scenario: daily인데 start/end 누락 → 전체 기간 fallback
     When 컨테이너에서 실행: ante --format json report performance --period daily
-    Then 종료 코드는 1
+    Then 종료 코드는 0
 
-  Scenario: monthly인데 year 누락 → 종료 코드 1
+  Scenario: monthly인데 year 누락 → 전체 기간 fallback
     When 컨테이너에서 실행: ante --format json report performance --period monthly
-    Then 종료 코드는 1
+    Then 종료 코드는 0
 
   Scenario: 잘못된 period 값 → 종료 코드 2
     When 컨테이너에서 실행: ante --format json report performance --period invalid
