@@ -155,7 +155,7 @@ class NotificationService:
             return False
 
         if dedup_result:
-            message = message + dedup_result
+            message = message + str(dedup_result)
 
         try:
             return await self._adapter.send(level, message)
@@ -178,7 +178,7 @@ class NotificationService:
             return False
 
         if dedup_result:
-            body = (body or "") + dedup_result
+            body = (body or "") + str(dedup_result)
 
         try:
             return await self._adapter.send_rich(
@@ -202,7 +202,7 @@ class NotificationService:
             return False
 
         if dedup_result:
-            body = (body or "") + dedup_result
+            body = (body or "") + str(dedup_result)
 
         # 어댑터가 send_with_buttons를 지원하는 경우 사용, 아니면 send_rich fallback
         try:

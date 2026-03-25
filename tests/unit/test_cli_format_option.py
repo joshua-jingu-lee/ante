@@ -63,7 +63,7 @@ class TestMemberListFormatOption:
         """member list --format json 이 올바르게 JSON 출력."""
         svc = MagicMock()
         db = _mock_db()
-        svc.list = AsyncMock(return_value=[])
+        svc.list_members = AsyncMock(return_value=[])
 
         with patch(
             "ante.cli.commands.member._create_service",
@@ -79,7 +79,7 @@ class TestMemberListFormatOption:
         """--format json member list (루트 옵션) 도 여전히 동작."""
         svc = MagicMock()
         db = _mock_db()
-        svc.list = AsyncMock(return_value=[])
+        svc.list_members = AsyncMock(return_value=[])
 
         with patch(
             "ante.cli.commands.member._create_service",

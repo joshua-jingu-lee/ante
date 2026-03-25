@@ -10,6 +10,8 @@ from ante.member.models import Member, MemberStatus, MemberType
 from ante.member.token_manager import TokenManager
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
@@ -24,7 +26,7 @@ class AuthService:
         db: Database,
         eventbus: EventBus,
         token_manager: TokenManager,
-        get_member: object,
+        get_member: Callable[[str], Awaitable[Member | None]],
     ) -> None:
         self._db = db
         self._eventbus = eventbus

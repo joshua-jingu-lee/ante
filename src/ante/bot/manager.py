@@ -319,7 +319,7 @@ class BotManager:
             "max_signals_per_step": old_config.max_signals_per_step,
         }
         config_fields.update(updates)
-        new_config = BotConfig(**config_fields)
+        new_config = BotConfig(**config_fields)  # type: ignore[arg-type]
         bot.config = new_config
 
         # DB 갱신

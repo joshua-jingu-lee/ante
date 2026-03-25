@@ -104,7 +104,7 @@ def member_list(
     async def _run_list() -> list[dict]:
         service, db = await _create_service()
         try:
-            members = await service.list(
+            members = await service.list_members(
                 member_type=member_type, org=org, status=status
             )
             return [
@@ -411,7 +411,7 @@ def member_reset_password(ctx: click.Context, recovery_key: str) -> None:
     async def _run_reset() -> None:
         service, db = await _create_service()
         try:
-            members = await service.list(member_type="human")
+            members = await service.list_members(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
             if not master:
                 msg = "master 멤버가 존재하지 않습니다"
@@ -439,7 +439,7 @@ def member_regenerate_recovery_key(ctx: click.Context) -> None:
     async def _run_regen() -> str:
         service, db = await _create_service()
         try:
-            members = await service.list(member_type="human")
+            members = await service.list_members(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
             if not master:
                 msg = "master 멤버가 존재하지 않습니다"

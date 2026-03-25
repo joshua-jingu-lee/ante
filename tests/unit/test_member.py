@@ -461,20 +461,20 @@ class TestList:
     async def test_list_all(self, service):
         await service.register("agent-01", MemberType.AGENT)
         await service.register("agent-02", MemberType.AGENT, org="risk")
-        members = await service.list()
+        members = await service.list_members()
         assert len(members) == 2
 
     async def test_list_by_type(self, service):
         await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
-        humans = await service.list(member_type=MemberType.HUMAN)
+        humans = await service.list_members(member_type=MemberType.HUMAN)
         assert len(humans) == 1
         assert humans[0].type == MemberType.HUMAN
 
     async def test_list_by_org(self, service):
         await service.register("a1", MemberType.AGENT, org="strategy-lab")
         await service.register("a2", MemberType.AGENT, org="risk")
-        result = await service.list(org="risk")
+        result = await service.list_members(org="risk")
         assert len(result) == 1
         assert result[0].member_id == "a2"
 

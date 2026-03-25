@@ -64,14 +64,8 @@ ignore_missing_imports = true
 module = [
     "ante.cli.*",
     "ante.main",
-    "ante.feed.transform.validate",
-    "ante.notification.service",
-    "ante.member.*",
-    "ante.approval.service",
-    "ante.bot.*",
     "ante.report.store",
     "ante.strategy.registry",
-    "ante.web.routes.strategies",
 ]
 ignore_errors = true
 

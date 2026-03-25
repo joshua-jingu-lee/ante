@@ -435,7 +435,7 @@ class MemberService:
         )
         return _row_to_member(row) if row else None
 
-    async def list(
+    async def list_members(
         self,
         member_type: str | None = None,
         org: str | None = None,

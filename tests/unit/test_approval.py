@@ -170,7 +170,7 @@ class TestCreate:
         await service.create(type="bot_create", requester="agent", title="요청 2")
         await service.create(type="bot_stop", requester="agent", title="요청 3")
 
-        all_requests = await service.list()
+        all_requests = await service.list_approvals()
         assert len(all_requests) == 3
 
     async def test_list_filter_status(self, service):
@@ -181,10 +181,10 @@ class TestCreate:
         await service.create(type="bot_create", requester="agent", title="요청 2")
         await service.approve(req.id)
 
-        pending = await service.list(status="pending")
+        pending = await service.list_approvals(status="pending")
         assert len(pending) == 1
 
-        approved = await service.list(status="approved")
+        approved = await service.list_approvals(status="approved")
         assert len(approved) == 1
 
     async def test_list_filter_type(self, service):
@@ -192,7 +192,7 @@ class TestCreate:
         await service.create(type="budget_change", requester="agent", title="요청 1")
         await service.create(type="bot_create", requester="agent", title="요청 2")
 
-        budget = await service.list(type="budget_change")
+        budget = await service.list_approvals(type="budget_change")
         assert len(budget) == 1
         assert budget[0].type == "budget_change"
 
@@ -203,8 +203,8 @@ class TestCreate:
                 type="budget_change", requester="agent", title=f"요청 {i}"
             )
 
-        page1 = await service.list(limit=2, offset=0)
-        page2 = await service.list(limit=2, offset=2)
+        page1 = await service.list_approvals(limit=2, offset=0)
+        page2 = await service.list_approvals(limit=2, offset=2)
         assert len(page1) == 2
         assert len(page2) == 2
 
@@ -499,7 +499,7 @@ class TestExpire:
         count = await service.expire_stale()
         assert count == 1
 
-        requests = await service.list(status="expired")
+        requests = await service.list_approvals(status="expired")
         assert len(requests) == 1
         assert any(h["action"] == "expired" for h in requests[0].history)
 
@@ -697,7 +697,7 @@ class TestValidator:
             )
 
         # DB에 요청이 생성되지 않았는지 확인
-        all_requests = await svc.list()
+        all_requests = await svc.list_approvals()
         assert len(all_requests) == 0
 
     async def test_warn_attaches_review(self, db, eventbus):
@@ -1085,7 +1085,7 @@ class TestExecutionFailed:
         )
         await svc.approve(req.id)
 
-        failed_list = await svc.list(status="execution_failed")
+        failed_list = await svc.list_approvals(status="execution_failed")
         assert len(failed_list) == 1
         assert failed_list[0].status == "execution_failed"
 
@@ -1456,7 +1456,7 @@ class TestListSearch:
             type="strategy_adopt", requester="agent-02", title="전략 채택 요청"
         )
 
-        results = await service.list(search="예산")
+        results = await service.list_approvals(search="예산")
         assert len(results) == 1
         assert results[0].title == "예산 증액 요청"
 
@@ -1469,7 +1469,7 @@ class TestListSearch:
             type="budget_change", requester="agent-beta", title="요청 B"
         )
 
-        results = await service.list(search="alpha")
+        results = await service.list_approvals(search="alpha")
         assert len(results) == 1
         assert results[0].requester == "agent-alpha"
 
@@ -1485,7 +1485,7 @@ class TestListSearch:
             type="budget_change", requester="agent-02", title="관련 없는 제목"
         )
 
-        results = await service.list(search="검색어포함")
+        results = await service.list_approvals(search="검색어포함")
         assert len(results) == 2
 
     async def test_search_no_match(self, service):
@@ -1494,7 +1494,7 @@ class TestListSearch:
             type="budget_change", requester="agent-01", title="예산 요청"
         )
 
-        results = await service.list(search="존재하지않는키워드")
+        results = await service.list_approvals(search="존재하지않는키워드")
         assert len(results) == 0
 
     async def test_search_empty_string(self, service):
@@ -1502,7 +1502,7 @@ class TestListSearch:
         await service.create(type="budget_change", requester="agent-01", title="요청 1")
         await service.create(type="budget_change", requester="agent-02", title="요청 2")
 
-        results = await service.list(search="")
+        results = await service.list_approvals(search="")
         assert len(results) == 2
 
     async def test_search_combined_with_status_filter(self, service):
@@ -1515,7 +1515,7 @@ class TestListSearch:
         )
         await service.approve(req.id)
 
-        results = await service.list(search="요청", status="pending")
+        results = await service.list_approvals(search="요청", status="pending")
         assert len(results) == 1
         assert results[0].title == "대기 중 요청"
 
@@ -1523,5 +1523,5 @@ class TestListSearch:
         """search=None이면 기존 동작 (전체 반환)."""
         await service.create(type="budget_change", requester="agent-01", title="요청 1")
 
-        results = await service.list(search=None)
+        results = await service.list_approvals(search=None)
         assert len(results) == 1
