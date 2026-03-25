@@ -20,6 +20,9 @@ _collect_commands = _mod._collect_commands
 _format_param_type = _mod._format_param_type
 _format_default = _mod._format_default
 _get_params = _mod._get_params
+_get_required_scopes = _mod._get_required_scopes
+_format_scope_cell = _mod._format_scope_cell
+_format_token_cell = _mod._format_token_cell
 generate_cli_reference = _mod.generate_cli_reference
 
 # ── 헬퍼 함수 테스트 ─────────────────────────────────────────────────────────
@@ -149,6 +152,76 @@ class TestGetParams:
         assert "help" not in names
 
 
+class TestGetRequiredScopes:
+    """_get_required_scopes가 콜백 체인에서 scope를 올바르게 추출하는지 검증."""
+
+    def test_no_scope_returns_empty(self) -> None:
+        """scope 데코레이터가 없으면 빈 튜플 반환."""
+
+        @click.command()
+        def cmd() -> None:
+            pass
+
+        assert _get_required_scopes(cmd) == ()
+
+    def test_extracts_scope_from_callback(self) -> None:
+        """_required_scopes 속성이 있으면 추출."""
+        import functools
+
+        def inner() -> None:
+            pass
+
+        @functools.wraps(inner)
+        def wrapper() -> None:
+            pass
+
+        wrapper._required_scopes = ("strategy:read",)
+
+        cmd = click.Command("test", callback=wrapper)
+        assert _get_required_scopes(cmd) == ("strategy:read",)
+
+    def test_extracts_scope_from_wrapped_chain(self) -> None:
+        """__wrapped__ 체인을 따라가서 scope 추출."""
+        import functools
+
+        def inner() -> None:
+            pass
+
+        inner._required_scopes = ("data:write",)
+
+        @functools.wraps(inner)
+        def outer() -> None:
+            pass
+
+        cmd = click.Command("test", callback=outer)
+        assert _get_required_scopes(cmd) == ("data:write",)
+
+
+class TestFormatScopeCell:
+    """scope 셀 포맷팅 테스트."""
+
+    def test_empty_scopes(self) -> None:
+        assert _format_scope_cell(()) == "\u2014"
+
+    def test_single_scope(self) -> None:
+        assert _format_scope_cell(("strategy:write",)) == "`strategy:write`"
+
+    def test_multiple_scopes(self) -> None:
+        result = _format_scope_cell(("strategy:read", "data:read"))
+        assert "`strategy:read`" in result
+        assert "`data:read`" in result
+
+
+class TestFormatTokenCell:
+    """토큰 셀 포맷팅 테스트."""
+
+    def test_no_scope(self) -> None:
+        assert _format_token_cell(()) == "\u2014"
+
+    def test_with_scope(self) -> None:
+        assert _format_token_cell(("strategy:write",)) == "H\u00b7A"
+
+
 # ── 전체 생성 테스트 ─────────────────────────────────────────────────────────
 
 
@@ -181,7 +254,7 @@ class TestGenerateCliReference:
         content = buf.getvalue()
 
         assert "## 명령어 요약" in content
-        assert "| 명령 | 설명 |" in content
+        assert "| 명령 | 설명 | scope | 토큰 |" in content
 
     def test_contains_global_options(self) -> None:
         """글로벌 옵션 섹션이 포함된다."""
@@ -232,6 +305,27 @@ class TestGenerateCliReference:
         # bot create는 --name, --strategy 등 옵션이 많음
         assert "**Options:**" in content
 
+    def test_contains_scope_columns(self) -> None:
+        """요약 테이블에 scope·토큰 컬럼이 포함된다."""
+
+        buf = io.StringIO()
+        generate_cli_reference(buf)
+        content = buf.getvalue()
+
+        assert "| scope | 토큰 |" in content
+        # 범례가 포함되어야 한다
+        assert "**H**: Human 토큰" in content
+
+    def test_command_detail_has_scope_info(self) -> None:
+        """커맨드 상세에 scope·토큰 정보가 포함된다."""
+
+        buf = io.StringIO()
+        generate_cli_reference(buf)
+        content = buf.getvalue()
+
+        assert "**필요 scope**:" in content
+        assert "**토큰**:" in content
+
     def test_all_subcommands_have_description(self) -> None:
         """모든 서브커맨드에 설명(docstring)이 존재한다.
 
@@ -244,7 +338,7 @@ class TestGenerateCliReference:
         content = buf.getvalue()
 
         # 요약 테이블에서 명령어 행 추출
-        summary_rows = re.findall(r"\| `(ante [^`]+)` \| (.*?) \|", content)
+        summary_rows = re.findall(r"\| `(ante [^`]+)` \| (.*?) \| .* \| .* \|", content)
         assert len(summary_rows) > 0, "요약 테이블에서 명령어를 찾지 못함"
 
         blank = [cmd for cmd, desc in summary_rows if not desc.strip()]
