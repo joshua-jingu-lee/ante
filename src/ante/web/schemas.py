@@ -493,9 +493,19 @@ class ReportSubmitRequest(BaseModel):
 
     strategy_name: str
     strategy_version: str
-    backtest_result: dict
+    strategy_path: str
+    backtest_period: str = ""
+    total_return_pct: float = 0.0
+    total_trades: int = 0
+    sharpe_ratio: float | None = None
+    max_drawdown_pct: float | None = None
+    win_rate: float | None = None
     summary: str = ""
-    recommendation: str = ""
+    rationale: str = ""
+    risks: str = ""
+    recommendations: str = ""
+    detail_json: str = "{}"
+    sections: dict[str, Any] | None = None
 
 
 class ReportSubmitResponse(BaseModel):

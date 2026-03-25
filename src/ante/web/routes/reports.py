@@ -11,6 +11,7 @@ from ante.web.schemas import (
     ReportDetailResponse,
     ReportListResponse,
     ReportSchemaResponse,
+    ReportSubmitRequest,
     ReportSubmitResponse,
 )
 
@@ -33,13 +34,38 @@ async def get_report_schema() -> dict:
     responses={503: {"description": "Report store not available"}},
 )
 async def submit_report(
-    body: dict,
+    body: ReportSubmitRequest,
     request: Request,
     report_store: Annotated[Any, Depends(get_report_store)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """리포트 제출."""
-    report = await report_store.submit(body)
+    import uuid
+    from datetime import UTC, datetime
+
+    from ante.report.models import ReportStatus, StrategyReport
+
+    report = StrategyReport(
+        report_id=f"rpt-{uuid.uuid4().hex[:12]}",
+        strategy_name=body.strategy_name,
+        strategy_version=body.strategy_version,
+        strategy_path=body.strategy_path,
+        status=ReportStatus.SUBMITTED,
+        submitted_at=datetime.now(UTC),
+        submitted_by=getattr(request.state, "member_id", "agent"),
+        backtest_period=body.backtest_period,
+        total_return_pct=body.total_return_pct,
+        total_trades=body.total_trades,
+        sharpe_ratio=body.sharpe_ratio,
+        max_drawdown_pct=body.max_drawdown_pct,
+        win_rate=body.win_rate,
+        summary=body.summary,
+        rationale=body.rationale,
+        risks=body.risks,
+        recommendations=body.recommendations,
+        detail_json=body.detail_json,
+    )
+    await report_store.submit(report)
 
     if audit_logger:
         await audit_logger.log(

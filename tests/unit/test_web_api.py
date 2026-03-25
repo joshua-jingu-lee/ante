@@ -291,10 +291,26 @@ class TestReportRoutes:
         assert data["status"] == 503
 
     def test_submit_no_store(self, client):
-        resp = client.post("/api/reports", json={"test": True})
+        resp = client.post(
+            "/api/reports",
+            json={
+                "strategy_name": "test",
+                "strategy_version": "1.0.0",
+                "strategy_path": "strategies/test.py",
+            },
+        )
         assert resp.status_code == 503
         data = resp.json()
         assert data["type"] == "/errors/internal"
+
+    def test_submit_missing_fields(self):
+        from unittest.mock import AsyncMock
+
+        store = AsyncMock()
+        app = create_app(report_store=store)
+        c = TestClient(app)
+        resp = c.post("/api/reports", json={"strategy_name": "incomplete"})
+        assert resp.status_code == 422
 
 
 # ── RFC 7807 에러 응답 테스트 ────────────────────────
