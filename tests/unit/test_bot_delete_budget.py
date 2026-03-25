@@ -70,6 +70,9 @@ class FakeTreasuryManager:
             raise KeyError(f"Treasury not found: account_id={account_id}")
         return self._treasuries[account_id]
 
+    def list_all(self) -> list[Treasury]:
+        return list(self._treasuries.values())
+
 
 # -- Fixtures --
 
@@ -244,3 +247,80 @@ class TestDeleteBotBudgetRelease:
         budget = treasury.get_budget("bot1")
         assert budget.allocated == 100_000  # 이전 200_000이 누적되지 않음
         assert treasury.unallocated == 900_000
+
+
+class TestDeleteBotBudgetReleaseFallback:
+    """봇 삭제 시 인메모리에 budget이 없어도 DB fallback으로 환수되는지 검증.
+
+    Refs #982
+    """
+
+    async def test_release_budget_db_fallback_after_memory_clear(
+        self, manager, ctx, treasury, db
+    ):
+        """인메모리 _budgets에서 제거된 후에도 DB fallback으로 환수된다."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="test")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        await treasury.allocate("bot1", 200_000)
+
+        # 인메모리 _budgets에서만 제거 (서버 재시작 시뮬레이션)
+        treasury._budgets.pop("bot1", None)
+        assert treasury.get_budget("bot1") is None  # 인메모리에 없음
+
+        # 봇 삭제 -- DB fallback으로 환수되어야 함
+        await manager.delete_bot("bot1")
+
+        assert treasury.unallocated == 1_000_000
+        row = await db.fetch_one("SELECT * FROM bot_budgets WHERE bot_id = 'bot1'")
+        assert row is None
+
+    async def test_release_budget_db_fallback_cross_account(self, db, eventbus, ctx):
+        """봇 account_id와 예산 account_id가 달라도 fallback 루프로 환수된다.
+
+        Refs #982 -- 핵심 시나리오: 봇의 account_id가 treasury의 account_id와
+        다르지만, 예산은 다른 treasury에 할당되어 있는 경우.
+        """
+        # Treasury 2개 생성: 'default'와 'other'
+        treasury_default = Treasury(db=db, eventbus=eventbus, account_id="default")
+        await treasury_default.initialize()
+        await treasury_default.set_account_balance(1_000_000)
+
+        treasury_other = Treasury(db=db, eventbus=eventbus, account_id="other")
+        await treasury_other.initialize()
+        await treasury_other.set_account_balance(500_000)
+
+        # FakeTreasuryManager에 두 treasury 등록
+        tm = FakeTreasuryManager()
+        tm.register("default", treasury_default)
+        tm.register("other", treasury_other)
+
+        m = BotManager(eventbus=eventbus, db=db, treasury_manager=tm)
+        await m.initialize()
+
+        # 봇의 account_id='other'이지만, 예산은 'default' treasury에 할당
+        config = BotConfig(bot_id="bot-cross", strategy_id="s1", account_id="other")
+        cross_ctx = StrategyContext(
+            bot_id="bot-cross",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        await m.create_bot(config, SimpleStrategy, cross_ctx)
+        await treasury_default.allocate("bot-cross", 300_000)
+        assert treasury_default.unallocated == 700_000
+
+        # 인메모리에서 제거 (서버 재시작 시뮬레이션)
+        treasury_default._budgets.pop("bot-cross", None)
+
+        # 봇 삭제: get('other')는 treasury_other를 반환하고 budget 못 찾음
+        # -> fallback으로 모든 treasury 순회 -> treasury_default의 DB fallback이 동작
+        await m.delete_bot("bot-cross")
+
+        assert treasury_default.unallocated == 1_000_000
+        row = await db.fetch_one("SELECT * FROM bot_budgets WHERE bot_id = 'bot-cross'")
+        assert row is None
+
+        # cleanup
+        for bot in list(m._bots.values()):
+            if bot._task and not bot._task.done():
+                bot._task.cancel()

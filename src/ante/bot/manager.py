@@ -469,7 +469,9 @@ class BotManager:
                 treasury = self._treasury_manager.get(bot.config.account_id)
                 released = await treasury.release_budget(bot_id)
             except KeyError:
-                # 봇 account_id와 Treasury account_id가 다를 수 있음
+                pass
+            if released == 0.0:
+                # 봇 account_id와 예산의 account_id가 다를 수 있음 (Refs #982)
                 # 모든 Treasury에서 해당 봇의 budget을 찾아 환수
                 for t in self._treasury_manager.list_all():
                     released = await t.release_budget(bot_id)

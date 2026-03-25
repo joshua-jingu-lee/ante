@@ -415,7 +415,28 @@ class Treasury:
         """
         budget = self._budgets.pop(bot_id, None)
         if not budget:
-            return 0.0
+            # 인메모리에 없으면 DB에서 직접 조회 (서버 재시작 후 또는
+            # 봇 account_id와 Treasury account_id가 달라 로드되지 않은 경우)
+            # writer 커넥션으로 조회해야 직전 commit 결과를 확실히 볼 수 있음
+            writer = self._db._get_writer()
+            async with writer.execute(
+                "SELECT * FROM bot_budgets WHERE bot_id = ? AND account_id = ?",
+                (bot_id, self._account_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                budget = BotBudget(
+                    bot_id=row["bot_id"],
+                    account_id=row["account_id"],
+                    allocated=float(row["allocated"]),
+                    available=float(row["available"]),
+                    reserved=float(row["reserved"]),
+                    spent=float(row["spent"]),
+                    returned=float(row["returned"]),
+                    last_updated=datetime.fromisoformat(row["last_updated"]),
+                )
+            else:
+                return 0.0
 
         released = budget.allocated
         self._unallocated += released
