@@ -188,8 +188,8 @@ def _estimate_trade_pnl(trades: list[Any]) -> list[float]:
             pos["quantity"] += trade.quantity
             pos["total_cost"] += trade.price * trade.quantity
         elif trade.side == "sell":
-            pos = positions.get(symbol)
-            if pos and pos["quantity"] > 0:
+            pos = positions.get(symbol) or {}
+            if pos and pos.get("quantity", 0) > 0:
                 avg_cost = pos["total_cost"] / pos["quantity"]
                 pnl = (trade.price - avg_cost) * trade.quantity
                 pnl -= trade.commission

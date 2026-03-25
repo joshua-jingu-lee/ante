@@ -184,11 +184,14 @@ class RuleEngine:
     def _create_rule(config: dict[str, Any]) -> Rule | None:
         """룰 설정에서 룰 인스턴스 생성."""
         rule_type = config.get("type")
-        rule_class = RULE_REGISTRY.get(rule_type)  # type: ignore[arg-type]
+        if not isinstance(rule_type, str):
+            logger.warning("알 수 없는 룰 타입: %s", rule_type)
+            return None
+        rule_class = RULE_REGISTRY.get(rule_type)
         if rule_class is None:
             logger.warning("알 수 없는 룰 타입: %s", rule_type)
             return None
-        rule_id = config.get("id", rule_type)
+        rule_id: str = config.get("id", rule_type)  # type: ignore[assignment]
         return rule_class(rule_id, config)
 
     # ── 하위 호환 프로퍼티 ──────────────────────────────

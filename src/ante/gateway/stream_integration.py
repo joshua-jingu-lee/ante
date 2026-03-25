@@ -232,6 +232,9 @@ class StreamIntegration:
 
     async def _fallback_poll_loop(self) -> None:
         """스트림 해제 시 REST API로 시세 폴링."""
+        if self._gateway is None:
+            return
+        gateway = self._gateway
         while self._fallback_active and self._running:
             try:
                 symbols = self._get_monitored_symbols()
@@ -239,7 +242,7 @@ class StreamIntegration:
                     if not self._fallback_active or not self._running:
                         return
                     try:
-                        price = await self._gateway.get_current_price(
+                        price = await gateway.get_current_price(
                             symbol, account_id=self._account_id
                         )
                         cache_key = f"{self._account_id}:price:{symbol}"
