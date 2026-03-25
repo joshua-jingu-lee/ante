@@ -98,9 +98,24 @@ async def get_summary(
                 summary["account_no"] = account_no
         except Exception as e:
             logger.warning("KIS 계좌번호 조회 실패: %s", e)
-        broker_config = config.get("broker", {})
-        if isinstance(broker_config, dict):
-            summary["is_virtual"] = broker_config.get("is_paper", True)
+    # is_virtual: Account.trading_mode 기반 판정 (Refs #990)
+    acct_svc = getattr(request.app.state, "account_service", None)
+    target_account_id = getattr(target_treasury, "account_id", None) or account_id
+    if acct_svc is not None and target_account_id:
+        try:
+            account = await acct_svc.get(target_account_id)
+            if account is not None:
+                trading_mode = getattr(account, "trading_mode", None)
+                if trading_mode is not None:
+                    summary["is_virtual"] = trading_mode.value == "virtual"
+                else:
+                    summary["is_virtual"] = True
+            else:
+                summary["is_virtual"] = True
+        except Exception:
+            summary["is_virtual"] = True
+    else:
+        summary["is_virtual"] = True
 
     last_synced = getattr(target_treasury, "last_synced_at", None)
     if last_synced is not None:
