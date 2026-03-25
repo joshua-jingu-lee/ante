@@ -21,6 +21,7 @@ from ante.web.deps import (
 from ante.web.schemas import (
     DailySummaryResponse,
     MonthlySummaryResponse,
+    StatusUpdateRequest,
     StrategyDetailResponse,
     StrategyListResponse,
     StrategyPerformanceResponse,
@@ -32,6 +33,7 @@ from ante.web.schemas import (
 router = APIRouter()
 
 _STRATEGY_NOT_FOUND = "전략을 찾을 수 없습니다"
+_VALID_STATUS_FILTERS = {"registered", "adopted", "archived"}
 _logger = logging.getLogger(__name__)
 
 
@@ -90,6 +92,12 @@ async def list_strategies(
     status: str | None = Query(default=None),
 ) -> dict:
     """전략 목록 조회."""
+    if status is not None and status not in _VALID_STATUS_FILTERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"허용되지 않은 status 값: {status} "
+            f"(허용: {', '.join(sorted(_VALID_STATUS_FILTERS))})",
+        )
     records = await registry.list_strategies(status=status)
 
     bots_by_strategy: dict[str, dict] = {}
@@ -149,6 +157,40 @@ async def list_strategies(
         )
 
     return {"strategies": strategies}
+
+
+@router.patch(
+    "/{strategy_id}/status",
+    status_code=204,
+    responses={
+        400: {"description": "허용되지 않은 상태 전환"},
+        404: {"description": "Strategy not found"},
+    },
+)
+async def update_strategy_status(
+    strategy_id: str,
+    body: StatusUpdateRequest,
+    registry: Annotated[Any, Depends(get_strategy_registry)],
+) -> None:
+    """전략 상태 변경. 보관 전환용."""
+    from ante.strategy.exceptions import StrategyError
+    from ante.strategy.registry import StrategyStatus
+
+    try:
+        new_status = StrategyStatus(body.status)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"유효하지 않은 status 값: {body.status} "
+            f"(허용: {', '.join(s.value for s in StrategyStatus)})",
+        )
+
+    try:
+        await registry.update_status(strategy_id, new_status)
+    except StrategyError:
+        raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get(
