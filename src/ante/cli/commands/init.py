@@ -139,12 +139,21 @@ def _prompt_account() -> list[dict[str, str]]:
             value = click.prompt(f"  {cred_key}")
             credentials[cred_key] = value
 
+        # 브로커 설정 (broker_config)
+        broker_config: dict[str, object] = {}
+        if broker_type == "kis-domestic":
+            is_paper = click.confirm(
+                "  모의투자 모드로 사용하시겠습니까?", default=True
+            )
+            broker_config["is_paper"] = is_paper
+
         accounts.append(
             {
                 "account_id": account_id,
                 "name": account_name,
                 "broker_type": broker_type,
                 "credentials": credentials,
+                "broker_config": broker_config,
             }
         )
 
@@ -278,6 +287,7 @@ async def _create_accounts(
                 trading_mode=TradingMode.LIVE,
                 broker_type=broker_type,
                 credentials=info["credentials"],
+                broker_config=info.get("broker_config", {}),
                 buy_commission_rate=preset.buy_commission_rate,
                 sell_commission_rate=preset.sell_commission_rate,
             )

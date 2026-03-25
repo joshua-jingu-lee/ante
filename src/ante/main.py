@@ -219,6 +219,43 @@ async def _init_account(s: Services) -> None:
 
     logger.info("AccountService 초기화 완료")
 
+    # 레거시 system.toml [broker].is_paper → Account.broker_config 마이그레이션
+    await _migrate_is_paper_to_broker_config(s)
+
+
+async def _migrate_is_paper_to_broker_config(s: Services) -> None:
+    """system.toml [broker].is_paper를 Account.broker_config으로 1회성 이관한다.
+
+    조건: system.toml에 broker.is_paper가 존재하고,
+    KIS 계좌의 broker_config에 is_paper가 아직 없는 경우에만 이관한다.
+    """
+    legacy_is_paper = s.config.get("broker.is_paper")
+    if legacy_is_paper is None:
+        return
+
+    accounts = await s.account_service.list()
+    migrated: list[str] = []
+    for account in accounts:
+        if account.broker_type not in ("kis", "kis-domestic"):
+            continue
+        if "is_paper" in account.broker_config:
+            continue
+        new_broker_config = {**account.broker_config, "is_paper": legacy_is_paper}
+        await s.account_service.update(
+            account.account_id, broker_config=new_broker_config
+        )
+        migrated.append(account.account_id)
+
+    if migrated:
+        logger.info(
+            "[마이그레이션] system.toml [broker].is_paper=%s → "
+            "Account.broker_config으로 이관 완료: %s\n"
+            "  system.toml의 [broker].is_paper 설정은 더 이상 사용되지 않습니다. "
+            "제거해도 안전합니다.",
+            legacy_is_paper,
+            ", ".join(migrated),
+        )
+
 
 async def _init_trading(s: Services) -> None:
     """Strategy, Trade, TreasuryManager, RuleEngineManager, BotManager."""
@@ -358,7 +395,7 @@ async def _init_gateway(s: Services) -> None:
         if account.broker_type == "kis":
             try:
                 broker = await s.account_service.get_broker(account.account_id)
-                broker_config = account.credentials
+                broker_config = {**account.credentials, **account.broker_config}
                 await _init_stream_integration(s, broker_config, stop_order_manager)
             except Exception:
                 logger.warning(
