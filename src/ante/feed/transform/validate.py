@@ -257,7 +257,7 @@ def _check_ohlc_relationship(
     except (ValueError, TypeError):
         return  # 숫자 변환 실패는 스키마 계층에서 처리
 
-    if not all(v is not None for v in (o, h, low_val, c)):
+    if o is None or h is None or low_val is None or c is None:
         return
 
     if low_val > c:

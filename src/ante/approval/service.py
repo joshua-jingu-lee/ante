@@ -588,7 +588,7 @@ class ApprovalService:
             return None
         return self._row_to_request(row)
 
-    async def list(
+    async def list_approvals(
         self,
         status: str | None = None,
         type: str | None = None,

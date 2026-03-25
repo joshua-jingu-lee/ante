@@ -46,7 +46,7 @@ async def list_approvals(
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict:
     """결재 목록 조회."""
-    approvals = await approval_service.list(
+    approvals = await approval_service.list_approvals(
         status=status, type=type, search=search, limit=limit, offset=offset
     )
     total = await approval_service.count(status=status, type=type, search=search)
