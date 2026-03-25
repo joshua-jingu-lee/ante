@@ -14,8 +14,6 @@ DEFAULTS: dict[str, object] = {
     "instrument.cache_ttl_seconds": 3600,
     "treasury.sync_interval_seconds": 300,
     "audit.retention_days": 90,
-    "telegram.command.polling_interval": 3.0,
-    "telegram.command.confirm_timeout": 30.0,
     # ── 리스크 관리 ──
     "rule.daily_loss_limit": 0.05,
     "rule.max_exposure_percent": 0.20,
@@ -30,6 +28,7 @@ DEFAULTS: dict[str, object] = {
     "broker.commission_rate": 0.00015,
     "broker.sell_tax_rate": 0.0018,
     # ── 알림 ──
+    "notification.telegram_enabled": "true",
     "notification.telegram_level": "important",
     "notification.fill_alert": "true",
     "notification.daily_report": "true",

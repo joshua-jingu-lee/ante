@@ -562,3 +562,50 @@ class TestIntegrationFlow:
         receiver._reply = AsyncMock()
         await receiver._handle_update(update)
         # chat_id가 None이므로 _reply가 호출되지만 내부에서 early return
+
+
+# ── CHAT_ID 기반 초기화 ──────────────────────────
+
+
+class TestChatIdBasedInit:
+    """TELEGRAM_CHAT_ID 환경변수 기반 초기화 테스트 (Refs #997)."""
+
+    def test_chat_id_as_allowed_user(self, adapter):
+        """CHAT_ID를 allowed_user_ids로 사용하면 해당 ID가 인가된다."""
+        chat_id = 987654321
+        r = TelegramCommandReceiver(
+            adapter=adapter,
+            allowed_user_ids=[chat_id],
+            polling_interval=3.0,
+            confirm_timeout=30.0,
+        )
+        assert r._is_authorized(chat_id) is True
+        assert r._is_authorized(12345) is False
+
+    async def test_start_with_chat_id(self, adapter, bot_manager, account_service):
+        """chat_id가 설정되면 receiver가 정상 시작된다."""
+        r = TelegramCommandReceiver(
+            adapter=adapter,
+            allowed_user_ids=[111222333],
+            polling_interval=3.0,
+            confirm_timeout=30.0,
+            bot_manager=bot_manager,
+            account_service=account_service,
+        )
+        r.start()
+        assert r._task is not None
+        assert r._running is True
+        # 정리
+        r._running = False
+        r._task.cancel()
+
+    def test_empty_chat_id_no_start(self, adapter):
+        """allowed_user_ids가 비면 시작하지 않는다."""
+        r = TelegramCommandReceiver(
+            adapter=adapter,
+            allowed_user_ids=[],
+            polling_interval=3.0,
+            confirm_timeout=30.0,
+        )
+        r.start()
+        assert r._task is None

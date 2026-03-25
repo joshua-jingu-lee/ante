@@ -349,6 +349,95 @@ class TestNotificationService:
         param_names = list(sig.parameters.keys())
         assert "instrument_service" not in param_names
 
+    async def test_telegram_disabled_blocks_non_critical(self, adapter, eventbus):
+        """telegram_enabled=False이면 비긴급 알림을 발송하지 않는다 (Refs #997)."""
+        svc = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            telegram_enabled=False,
+        )
+        svc.subscribe()
+
+        await eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="테스트 알림",
+                message="발송되지 않아야 함",
+            )
+        )
+        assert len(adapter.sent_rich) == 0
+
+    async def test_telegram_disabled_allows_critical(self, adapter, eventbus):
+        """telegram_enabled=False여도 CRITICAL은 발송된다 (Refs #997)."""
+        svc = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            telegram_enabled=False,
+        )
+        svc.subscribe()
+
+        await eventbus.publish(
+            NotificationEvent(
+                level="critical",
+                title="긴급 알림",
+                message="이것은 발송되어야 함",
+            )
+        )
+        assert len(adapter.sent_rich) == 1
+
+    async def test_telegram_enabled_config_change(self, adapter, eventbus):
+        """ConfigChangedEvent로 telegram_enabled 동적 변경 (Refs #997)."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        svc = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            telegram_enabled=True,
+        )
+        svc.subscribe()
+
+        # telegram_enabled=false로 변경
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.telegram_enabled",
+                old_value='"true"',
+                new_value='"false"',
+                changed_by="test",
+            )
+        )
+        assert svc._telegram_enabled is False
+
+        # INFO 알림 발송 시도 — 차단됨
+        await eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="차단될 알림",
+            )
+        )
+        assert len(adapter.sent_rich) == 0
+
+        # 다시 true로 변경
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.telegram_enabled",
+                old_value='"false"',
+                new_value='"true"',
+                changed_by="test",
+            )
+        )
+        assert svc._telegram_enabled is True
+
+        # 이제 발송됨
+        await eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="발송될 알림",
+            )
+        )
+        assert len(adapter.sent_rich) == 1
+
 
 # ── parse_quiet_hours ─────────────────────────────
 

@@ -48,6 +48,7 @@ class NotificationService:
         quiet_start: time | None = None,
         quiet_end: time | None = None,
         dedup_window: float = 60.0,
+        telegram_enabled: bool = True,
     ) -> None:
         self._adapter = adapter
         self._eventbus = eventbus
@@ -55,6 +56,7 @@ class NotificationService:
         self._quiet_start = quiet_start
         self._quiet_end = quiet_end
         self._dedup_window = dedup_window
+        self._telegram_enabled = telegram_enabled
         # {dedup_key: (last_sent_timestamp, suppressed_count)}
         self._dedup_cache: dict[str, tuple[float, int]] = {}
 
@@ -66,11 +68,17 @@ class NotificationService:
         self._eventbus.subscribe(ConfigChangedEvent, self._on_config_changed)
 
     async def _on_config_changed(self, event: object) -> None:
-        """``notification.quiet_hours`` 키 변경 시 무음 시간대를 갱신한다."""
+        """``notification.*`` 키 변경 시 설정을 갱신한다."""
         from ante.eventbus.events import ConfigChangedEvent
 
         if not isinstance(event, ConfigChangedEvent):
             return
+
+        if event.key == "notification.telegram_enabled":
+            self._telegram_enabled = str(event.new_value).strip('"') == "true"
+            logger.info("telegram_enabled 갱신: %s", self._telegram_enabled)
+            return
+
         if event.key != "notification.quiet_hours":
             return
 
@@ -243,6 +251,9 @@ class NotificationService:
         """알림 발송 여부. CRITICAL은 항상 발송."""
         if level == NotificationLevel.CRITICAL:
             return True
+
+        if not self._telegram_enabled:
+            return False
 
         level_order = {
             NotificationLevel.CRITICAL: 0,

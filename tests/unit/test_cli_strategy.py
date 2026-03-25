@@ -233,6 +233,8 @@ class TestStrategyInfo:
                 return_value={
                     "params": {"period": 20},
                     "param_schema": {"period": "이동평균 기간"},
+                    "rationale": "모멘텀 기반 추세 추종",
+                    "risks": ["급반전 시 손실 확대"],
                 },
             ),
         ):
@@ -257,6 +259,8 @@ class TestStrategyInfo:
                 return_value={
                     "params": {"period": 20},
                     "param_schema": {"period": "이동평균 기간"},
+                    "rationale": "모멘텀 기반 추세 추종",
+                    "risks": ["급반전 시 손실 확대"],
                 },
             ),
         ):
@@ -268,6 +272,8 @@ class TestStrategyInfo:
             assert data["name"] == "momentum"
             assert data["params"] == {"period": 20}
             assert data["param_schema"] == {"period": "이동평균 기간"}
+            assert data["rationale"] == "모멘텀 기반 추세 추종"
+            assert data["risks"] == ["급반전 시 손실 확대"]
 
     def test_info_multiple_versions(self, runner):
         """동일 이름의 여러 버전이 있을 때 최신 버전 + 다른 버전 목록."""

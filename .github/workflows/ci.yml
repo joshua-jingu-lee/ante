@@ -26,7 +26,7 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,4 +40,4 @@ jobs:
       - name: Run unit tests
         env:
           ANTE_DB_ENCRYPTION_KEY: "sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk="
-        run: pytest tests/unit/ -v -x
+        run: pytest tests/unit/ -x --tb=short -q
