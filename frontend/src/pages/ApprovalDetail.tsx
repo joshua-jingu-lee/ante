@@ -1,7 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 import { useApprovalDetail } from '../hooks/useApprovals'
 import ReviewControls from '../components/approvals/ReviewControls'
-import ExecutionContent from '../components/approvals/ExecutionContent'
 import MarkdownBody from '../components/approvals/MarkdownBody'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
@@ -205,10 +204,7 @@ export default function ApprovalDetail() {
         </div>
       )}
 
-      {/* 3행: 실행 내용 */}
-      <ExecutionContent type={approval.type} params={approval.params} />
-
-      {/* 4행: 감사 이력 */}
+      {/* 3행: 감사 이력 */}
       <AuditHistoryCard history={approval.history ?? []} />
     </>
   )
