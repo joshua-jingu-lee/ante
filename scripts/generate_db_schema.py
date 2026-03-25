@@ -52,9 +52,6 @@ TABLE_DESCRIPTIONS: dict[str, str] = {
     "instruments": "종목 메타데이터",
     "sessions": "서버사이드 세션",
     "audit_log": "멤버 액션 감사 로그",
-    "notification_history": "알림 발송 이력",
-    "system_state": "시스템 상태 (킬스위치 등)",
-    "system_state_history": "시스템 상태 변경 이력",
 }
 
 # ── 보존 정책 매핑 ──────────────────────────────────────────────────────
@@ -64,11 +61,9 @@ RETENTION_POLICIES: dict[str, str] = {
     "position_history": "영구 보존",
     "trades": "영구 보존",
     "treasury_transactions": "영구 보존",
-    "system_state_history": "90일 후 삭제",
     "approvals": "영구 보존",
     "members": "영구 보존",
     "instruments": "영구 보존",
-    "notification_history": "30일 후 삭제",
     "signal_keys": "영구 보존",
     "dynamic_config_history": "90일 후 삭제",
     "sessions": "만료 후 삭제",
@@ -396,7 +391,7 @@ def _write_table_list(out: TextIO, tables: list[TableInfo]) -> None:
     out.write("|---|--------|------|------|---------|\n")
 
     for i, table in enumerate(tables, 1):
-        anchor = table.name.replace("_", "-")
+        anchor = table.name
         out.write(
             f"| {i} | [{table.name}](#{anchor}) | "
             f"`{table.module}` | {table.description} | {table.columns} |\n"
