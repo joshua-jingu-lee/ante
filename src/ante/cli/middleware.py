@@ -163,6 +163,7 @@ def require_scope(*scopes: str) -> Callable:
 
             return fn(*args, **kwargs)
 
+        wrapper._required_scopes = scopes  # type: ignore[attr-defined]
         return wrapper
 
     return decorator

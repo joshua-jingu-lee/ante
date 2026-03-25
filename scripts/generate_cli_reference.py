@@ -133,6 +133,37 @@ def _param_display_name(param: click.Parameter) -> str:
     return f"`{param.name}`"
 
 
+def _get_required_scopes(cmd: click.BaseCommand) -> tuple[str, ...]:
+    """커맨드의 콜백 체인에서 _required_scopes를 추출한다."""
+    cb = cmd.callback
+    while cb:
+        if hasattr(cb, "_required_scopes"):
+            return cb._required_scopes
+        cb = getattr(cb, "__wrapped__", None)
+    return ()
+
+
+def _format_scope_cell(scopes: tuple[str, ...]) -> str:
+    """scope 목록을 마크다운 셀 텍스트로 포맷팅한다."""
+    if not scopes:
+        return "\u2014"
+    return ", ".join(f"`{s}`" for s in scopes)
+
+
+def _format_token_cell(scopes: tuple[str, ...]) -> str:
+    """토큰 요구 사항을 마크다운 셀 텍스트로 포맷팅한다."""
+    if not scopes:
+        return "\u2014"
+    return "H\u00b7A"
+
+
+def _format_token_detail(scopes: tuple[str, ...]) -> str:
+    """커맨드 상세 섹션용 토큰 정보를 포맷팅한다."""
+    if not scopes:
+        return "인증 불필요"
+    return "\U0001f511 Human(무제한) / Agent(scope 필요)"
+
+
 # ── Markdown generation ──────────────────────────────────────────────────────
 
 
@@ -219,8 +250,8 @@ def _write_summary_table(
 ) -> None:
     """명령어 요약 테이블을 출력한다."""
     out.write("## 명령어 요약\n\n")
-    out.write("| 명령 | 설명 |\n")
-    out.write("|------|------|\n")
+    out.write("| 명령 | 설명 | scope | 토큰 |\n")
+    out.write("|------|------|-------|------|\n")
 
     for full_name, cmd in commands:
         # 그룹 자체는 요약 테이블에 표시하되 하위 명령어가 있으면 별도 표시
@@ -229,9 +260,21 @@ def _write_summary_table(
             # 첫 줄만 사용
             help_text = cmd.help.strip().split("\n")[0]
 
-        out.write(f"| `ante {full_name}` | {help_text} |\n")
+        scopes = _get_required_scopes(cmd)
+        scope_cell = _format_scope_cell(scopes)
+        token_cell = _format_token_cell(scopes)
 
-    out.write("\n---\n\n")
+        out.write(
+            f"| `ante {full_name}` | {help_text} | {scope_cell} | {token_cell} |\n"
+        )
+
+    out.write("\n")
+    out.write(
+        "> **H**: Human 토큰 (scope 무제한) · "
+        "**A**: Agent 토큰 (해당 scope 필요) · "
+        "**\u2014**: 인증 불필요\n\n"
+    )
+    out.write("---\n\n")
 
 
 def _write_command_detail(
@@ -249,6 +292,13 @@ def _write_command_detail(
     # 설명
     if cmd.help:
         out.write(f"{cmd.help.strip()}\n\n")
+
+    # scope·토큰 정보
+    scopes = _get_required_scopes(cmd)
+    scope_text = _format_scope_cell(scopes)
+    token_text = _format_token_detail(scopes)
+    out.write(f"- **필요 scope**: {scope_text}\n")
+    out.write(f"- **토큰**: {token_text}\n\n")
 
     params = _get_params(cmd)
     arguments = [p for p in params if isinstance(p, click.Argument)]
