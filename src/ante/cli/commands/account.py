@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -104,7 +104,13 @@ def account_create(ctx: click.Context) -> None:
         value = click.prompt(cred_key.upper(), hide_input=hide)
         credentials[cred_key] = value
 
-    # 5) Account 생성
+    # 5) 브로커 설정 (broker_config)
+    broker_config: dict[str, Any] = {}
+    if broker_type == "kis-domestic":
+        is_paper = click.confirm("모의투자 모드로 사용하시겠습니까?", default=True)
+        broker_config["is_paper"] = is_paper
+
+    # 6) Account 생성
     new_account = Account(
         account_id=account_id,
         name=name,
@@ -116,6 +122,7 @@ def account_create(ctx: click.Context) -> None:
         trading_mode=trading_mode,
         broker_type=broker_type,
         credentials=credentials,
+        broker_config=broker_config,
         buy_commission_rate=preset.buy_commission_rate,
         sell_commission_rate=preset.sell_commission_rate,
     )

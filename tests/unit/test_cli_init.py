@@ -158,6 +158,7 @@ class TestInitInteractive:
                 "PSxxxxxxxx",  # app_key
                 "secretkey123",  # app_secret
                 "50123456-01",  # account_no
+                "y",  # 모의투자 모드? y
                 "n",  # 추가 계좌? n
                 "n",  # 텔레그램? n
                 "n",  # data.go.kr? n
