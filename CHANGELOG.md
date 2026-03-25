@@ -2,6 +2,301 @@
 
 <!-- version list -->
 
+## v0.8.0 (2026-03-25)
+
+### Bug Fixes
+
+- Commission_rate 테스트를 Config 시드 등록(#965) 현행에 맞게 갱신
+  ([#978](https://github.com/joshua-jingu-lee/ante/pull/978),
+  [`f02f666`](https://github.com/joshua-jingu-lee/ante/commit/f02f6667bb6169ee49bd6c77c3370cae81be0e91))
+
+- DataProvider.get_ohlcv() 반환 타입을 pl.DataFrame으로 통일 Refs #970
+  ([#980](https://github.com/joshua-jingu-lee/ante/pull/980),
+  [`6a59db5`](https://github.com/joshua-jingu-lee/ante/commit/6a59db5ea4add15d899ee4dde7f0efc61339fb63))
+
+- Dataset 목록 API 테스트를 row_count=0 반환 현행에 맞게 갱신
+  ([#978](https://github.com/joshua-jingu-lee/ante/pull/978),
+  [`f02f666`](https://github.com/joshua-jingu-lee/ante/commit/f02f6667bb6169ee49bd6c77c3370cae81be0e91))
+
+- Strategy_adopt/retire 결재 실행기 ReportStatus enum 전달 Refs #974
+  ([#978](https://github.com/joshua-jingu-lee/ante/pull/978),
+  [`f02f666`](https://github.com/joshua-jingu-lee/ante/commit/f02f6667bb6169ee49bd6c77c3370cae81be0e91))
+
+- Strategy_adopt/retire 결재 실행기에 ReportStatus enum 전달
+  ([#978](https://github.com/joshua-jingu-lee/ante/pull/978),
+  [`f02f666`](https://github.com/joshua-jingu-lee/ante/commit/f02f6667bb6169ee49bd6c77c3370cae81be0e91))
+
+- 봇 생성 API 필드 불일치 해소 — strategy_name/account_id/budget 지원
+  ([#979](https://github.com/joshua-jingu-lee/ante/pull/979),
+  [`dc1e8d6`](https://github.com/joshua-jingu-lee/ante/commit/dc1e8d6de86aa0b5a98077cad1b21edad879c989))
+
+- **account**: Is_paper를 Account.broker_config으로 이관 Refs #989
+  ([#992](https://github.com/joshua-jingu-lee/ante/pull/992),
+  [`ab318e2`](https://github.com/joshua-jingu-lee/ante/commit/ab318e2dcd7773bb40f4bce3185b447c3005d594))
+
+- **api**: Approvals/members 목록 total을 전체 건수로 수정
+  ([#962](https://github.com/joshua-jingu-lee/ante/pull/962),
+  [`be497cf`](https://github.com/joshua-jingu-lee/ante/commit/be497cfc883e8c477306905aaa334a09e4f94230))
+
+- **api**: Datasets 목록 data_type 기본값을 None으로 변경하여 전체 타입 반환
+  ([#964](https://github.com/joshua-jingu-lee/ante/pull/964),
+  [`d340df7`](https://github.com/joshua-jingu-lee/ante/commit/d340df7f3de787310145f3fdc5d5c5ed6cf60766))
+
+- **api**: 리포트 상세 응답에 config/datasets 필드 추가
+  ([#976](https://github.com/joshua-jingu-lee/ante/pull/976),
+  [`450368b`](https://github.com/joshua-jingu-lee/ante/commit/450368bca38c370410553965aaeff98088889706))
+
+- **api**: 리포트 상세 응답에 config/datasets 필드 추가 Refs #971
+  ([#976](https://github.com/joshua-jingu-lee/ante/pull/976),
+  [`450368b`](https://github.com/joshua-jingu-lee/ante/commit/450368bca38c370410553965aaeff98088889706))
+
+- **approval**: CLI에서 ApprovalService.list → list_approvals 호출 누락 수정
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+- **approval**: ExecutionContent 컴포넌트 삭제 Refs #1010
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+- **approval**: 결재 승인 시 StrategyRegistry 상태도 함께 전환 Refs #1001
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+- **backtest**: Get_indicator() stub을 실제 지표 계산으로 교체 Refs #969
+  ([#977](https://github.com/joshua-jingu-lee/ante/pull/977),
+  [`6368596`](https://github.com/joshua-jingu-lee/ante/commit/6368596e61eeb7f6c261ed554b21f68060c294be))
+
+- **bot**: 봇 생성 모달 전략 셀렉트를 ADOPTED 상태만 필터링 (#1006)
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+- **broker**: KIS WebSocket approval_key REST URL 유추 로직 반전 수정 Refs #988
+  ([`37dcac7`](https://github.com/joshua-jingu-lee/ante/commit/37dcac7bbd21a12013c1e5e7439400cb136ce25b))
+
+- **broker**: KIS WebSocket 모의/실전 포트 번호 반전 수정
+  ([#943](https://github.com/joshua-jingu-lee/ante/pull/943),
+  [`e8ddc24`](https://github.com/joshua-jingu-lee/ante/commit/e8ddc2405a582f512a80524d55878f80dfc1039d))
+
+- **ci**: Mypy union-attr 오류 및 v004 마이그레이션 테스트 실패 수정
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+- **ci**: Publish.yml에서 static 디렉토리 생성 추가
+  ([`ca5f406`](https://github.com/joshua-jingu-lee/ante/commit/ca5f40653e7f2d7cfd1064ef2a60f79a92e72218))
+
+- **ci**: Test job timeout을 10분에서 15분으로 증가
+  ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- **cli**: Broker reconcile 오프라인 폴백에서 불필요한 의존성 제거
+  ([#947](https://github.com/joshua-jingu-lee/ante/pull/947),
+  [`281e65c`](https://github.com/joshua-jingu-lee/ante/commit/281e65c378518a5ea89a0d1d4ab6a12ba656cf93))
+
+- **cli**: Strategy info에서 rationale/risks 키 누락으로 인한 KeyError 수정
+  ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- **cli**: 잔여 mypy 오류 15건 해소 및 overrides 전체 삭제 (#1031)
+  ([#1032](https://github.com/joshua-jingu-lee/ante/pull/1032),
+  [`41ae2c1`](https://github.com/joshua-jingu-lee/ante/commit/41ae2c1c5fef61b17c3512c140b5651ff634c4a2))
+
+- **data**: DART 체크포인트 키 형식 수정 및 순서 비교 오류 해결
+  ([#945](https://github.com/joshua-jingu-lee/ante/pull/945),
+  [`1de7442`](https://github.com/joshua-jingu-lee/ante/commit/1de74422622601f7dc43cc9ad174ee4705dc4af5))
+
+- **db**: V003 마이그레이션에서 accounts 테이블 존재 여부 확인
+  ([`3f7ecb7`](https://github.com/joshua-jingu-lee/ante/commit/3f7ecb78d0c668926ee20ab352e6da484d33a7a5))
+
+- **frontend**: 데이터셋 목록에서 file_size/row_count 의존 제거
+  ([#952](https://github.com/joshua-jingu-lee/ante/pull/952),
+  [`dd80412`](https://github.com/joshua-jingu-lee/ante/commit/dd80412db1ec48935609c14010f359a52a741a9b))
+
+- **member**: Agent 기본 scope에서 비표준 approval:create/review를 표준 scope로 수정
+  ([#998](https://github.com/joshua-jingu-lee/ante/pull/998),
+  [`9015837`](https://github.com/joshua-jingu-lee/ante/commit/90158370f1027794a63a84fe53872271c5d8a8ca))
+
+- **notification**: Telegram_enabled 초기값 전달 및 chat_id 파싱 안전 처리
+  ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- **notification**: 텔레그램 명령 수신 설정을 dynamic_config로 통합 Refs #997
+  ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- **notification**: 텔레그램 명령 수신 설정을 dynamic_config로 통합 및 allowed_user_ids 제거
+  ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- **scripts**: 앵커 링크 버그 수정 및 미사용 테이블 항목 제거 Refs #987
+  ([#991](https://github.com/joshua-jingu-lee/ante/pull/991),
+  [`f8bec96`](https://github.com/joshua-jingu-lee/ante/commit/f8bec9662447d4874427d748d53f3a4e16803112))
+
+- **strategy**: 전략 상세 페이지 rationale·risks·params 미노출 수정
+  ([#995](https://github.com/joshua-jingu-lee/ante/pull/995),
+  [`788a1b8`](https://github.com/joshua-jingu-lee/ante/commit/788a1b862ca906251f79b2fd4bd228d45d3e3d07))
+
+- **test**: CI 기존 테스트 실패 2건 수정 ([#976](https://github.com/joshua-jingu-lee/ante/pull/976),
+  [`450368b`](https://github.com/joshua-jingu-lee/ante/commit/450368bca38c370410553965aaeff98088889706))
+
+- **test**: Commission defaults 테스트를 #965 시드 등록에 맞게 수정
+  ([#976](https://github.com/joshua-jingu-lee/ante/pull/976),
+  [`450368b`](https://github.com/joshua-jingu-lee/ante/commit/450368bca38c370410553965aaeff98088889706))
+
+- **test**: Config 시드 등록·목록 API 최적화에 맞게 테스트 3건 수정
+  ([`52fe3e5`](https://github.com/joshua-jingu-lee/ante/commit/52fe3e59d4e6847e34a6fbca5d5e35f7ab410460))
+
+- **test**: StrategyRecord author → author_name/author_id 변경 반영
+  ([#985](https://github.com/joshua-jingu-lee/ante/pull/985),
+  [`296853d`](https://github.com/joshua-jingu-lee/ante/commit/296853d9af346cabb037c2d3e815f4495f0f81d8))
+
+- **test**: Test_init_account에 Config 주입 누락 수정
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+- **treasury**: Is_virtual 판정을 Account.trading_mode 기반으로 변경
+  ([#993](https://github.com/joshua-jingu-lee/ante/pull/993),
+  [`7b158b1`](https://github.com/joshua-jingu-lee/ante/commit/7b158b1cafb0893b100c15faccef50b9bcd8126d))
+
+- **treasury**: Replace private _get_writer() with public fetch_one() in release_budget
+  ([#984](https://github.com/joshua-jingu-lee/ante/pull/984),
+  [`a658468`](https://github.com/joshua-jingu-lee/ante/commit/a658468d97d372974b019558d30ad6235e26546b))
+
+- **treasury**: 봇 삭제 시 인메모리에 없는 budget도 DB fallback으로 환수 Refs #982
+  ([#984](https://github.com/joshua-jingu-lee/ante/pull/984),
+  [`a658468`](https://github.com/joshua-jingu-lee/ante/commit/a658468d97d372974b019558d30ad6235e26546b))
+
+- **treasury**: 봇 삭제 시 할당 예산 DB fallback 환수 Refs #982
+  ([#984](https://github.com/joshua-jingu-lee/ante/pull/984),
+  [`a658468`](https://github.com/joshua-jingu-lee/ante/commit/a658468d97d372974b019558d30ad6235e26546b))
+
+- **typing**: Cli/main.py mypy has-type 오류 18건 inline ignore 처리
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+- **typing**: Mypy ignore 목록 단순 오류 14건 해소 Refs #1012
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+- **typing**: Mypy ignore 목록 중간 난이도 오류 27건 해소
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+- **typing**: Mypy ignore 목록 중복·타입 오류 27건 해소 Refs #1013
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+- **web**: BotStrategy 타입 author → author_name/author_id 누락 수정 Refs #983
+  ([`2a78af8`](https://github.com/joshua-jingu-lee/ante/commit/2a78af8a3d7213538be01ddbdd340deb7dd578a3))
+
+- **web**: 브라우저 탭 타이틀·파비콘 변경 Refs #963 ([#967](https://github.com/joshua-jingu-lee/ante/pull/967),
+  [`b1b327e`](https://github.com/joshua-jingu-lee/ante/commit/b1b327ee78c7880b7fd20131c3bb8043d91be0c7))
+
+- **web**: 사이드바 UI 버그 3건 수정 Refs #957 ([#966](https://github.com/joshua-jingu-lee/ante/pull/966),
+  [`272055b`](https://github.com/joshua-jingu-lee/ante/commit/272055bc98178b548875bc80c9d00e832005451c))
+
+- **web**: 전략 상세 페이지 파라미터 미표시 및 빈 값 렌더링 수정 Refs #972
+  ([#975](https://github.com/joshua-jingu-lee/ante/pull/975),
+  [`dbb4894`](https://github.com/joshua-jingu-lee/ante/commit/dbb489407e91ebac07157441c22e6eefd699aa21))
+
+### Chores
+
+- Config/system.toml을 .gitignore에 추가하고 추적 제거
+  ([`303f8d1`](https://github.com/joshua-jingu-lee/ante/commit/303f8d153172725544ed581b0e49588a792bf3e6))
+
+- Trigger CI ([#978](https://github.com/joshua-jingu-lee/ante/pull/978),
+  [`f02f666`](https://github.com/joshua-jingu-lee/ante/commit/f02f6667bb6169ee49bd6c77c3370cae81be0e91))
+
+### Continuous Integration
+
+- CI 파이프라인 개선 — 병렬화, 품질 게이트, 중복 실행 방지
+  ([`baf6d71`](https://github.com/joshua-jingu-lee/ante/commit/baf6d7195bbbf92e68e5905f7ffe1e265788bff8))
+
+- Test job timeout을 20분으로 증가 ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- Test job timeout을 30분으로 증가 ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- Test timeout 45분, pytest 출력 최소화로 CI 속도 개선
+  ([#1009](https://github.com/joshua-jingu-lee/ante/pull/1009),
+  [`8f17014`](https://github.com/joshua-jingu-lee/ante/commit/8f17014f9880ff5b5a0a8986accde212f9f48fdb))
+
+- Trigger CI re-run ([#978](https://github.com/joshua-jingu-lee/ante/pull/978),
+  [`f02f666`](https://github.com/joshua-jingu-lee/ante/commit/f02f6667bb6169ee49bd6c77c3370cae81be0e91))
+
+### Documentation
+
+- README에 Mermaid 아키텍처 다이어그램 추가
+  ([`9899f68`](https://github.com/joshua-jingu-lee/ante/commit/9899f684249a50dac760c1921025996a006e1d7b))
+
+- **guide**: README·getting-started·security 가이드 톤 통일 및 내용 보강
+  ([`93e3705`](https://github.com/joshua-jingu-lee/ante/commit/93e37053ad992918f4a9e74b2988c11482709b21))
+
+- **readme**: Mermaid 다이어그램을 SVG 이미지로 교체
+  ([`3da6d8e`](https://github.com/joshua-jingu-lee/ante/commit/3da6d8e714b69ba5aecac323a7016add068ab9bf))
+
+- **readme**: README 개선 및 How it works SVG 다이어그램 추가
+  ([`9260b3c`](https://github.com/joshua-jingu-lee/ante/commit/9260b3c1c52f242974da0e90cc87ad47438476b7))
+
+- **readme**: 역할별 섹션 보강 및 문서 링크 가이드로 전환
+  ([`5cc09dc`](https://github.com/joshua-jingu-lee/ante/commit/5cc09dcd4317d1dad37b6e43cbf9f9e73fb096d8))
+
+### Features
+
+- **cli**: CLI 레퍼런스 문서에 필요 scope·토큰 타입 자동 표시 Refs #981
+  ([#986](https://github.com/joshua-jingu-lee/ante/pull/986),
+  [`07dc04d`](https://github.com/joshua-jingu-lee/ante/commit/07dc04da94a92e74f2ac6c83c08554f13a0e0d91))
+
+- **config**: 트레이딩/리스크/알림 기본값을 Config 서비스에 시드 등록 Refs #965
+  ([#968](https://github.com/joshua-jingu-lee/ante/pull/968),
+  [`731bd0e`](https://github.com/joshua-jingu-lee/ante/commit/731bd0e12f41644b68d8f50a8b57dc7f77214803))
+
+- **scripts**: Db-schema.md 자동 생성 스크립트 구현 Refs #987
+  ([#991](https://github.com/joshua-jingu-lee/ante/pull/991),
+  [`f8bec96`](https://github.com/joshua-jingu-lee/ante/commit/f8bec9662447d4874427d748d53f3a4e16803112))
+
+- **strategy**: 전략 상태 변경 API 및 목록 필터 검증 구현 Refs #1003
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+- **strategy**: 전략 채택/폐기 executor에 NotificationEvent 발행 추가 Refs #1004
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+### Performance Improvements
+
+- **api**: Cursor 페이지네이션 순회 최적화 ([#962](https://github.com/joshua-jingu-lee/ante/pull/962),
+  [`be497cf`](https://github.com/joshua-jingu-lee/ante/commit/be497cfc883e8c477306905aaa334a09e4f94230))
+
+- **api**: Datasets 목록 API 이벤트 루프 블로킹 해소 ([#956](https://github.com/joshua-jingu-lee/ante/pull/956),
+  [`c71c0bd`](https://github.com/joshua-jingu-lee/ante/commit/c71c0bd9f137e8ba34947cb4ecb867f02b269c40))
+
+- **api**: Strategies 목록 N+1 조회를 asyncio.gather 병렬화 Refs #951
+  ([#962](https://github.com/joshua-jingu-lee/ante/pull/962),
+  [`be497cf`](https://github.com/joshua-jingu-lee/ante/commit/be497cfc883e8c477306905aaa334a09e4f94230))
+
+### Refactoring
+
+- **api**: 전략 상세 봇 탐색 중복 코드를 헬퍼 함수로 통합 ([#962](https://github.com/joshua-jingu-lee/ante/pull/962),
+  [`be497cf`](https://github.com/joshua-jingu-lee/ante/commit/be497cfc883e8c477306905aaa334a09e4f94230))
+
+- **strategy**: StrategyMeta author -> author_name/author_id 분리 Refs #983
+  ([#985](https://github.com/joshua-jingu-lee/ante/pull/985),
+  [`296853d`](https://github.com/joshua-jingu-lee/ante/commit/296853d9af346cabb037c2d3e815f4495f0f81d8))
+
+- **strategy**: StrategyMeta author 필드를 author_name/author_id 2필드로 분리 Refs #983
+  ([#985](https://github.com/joshua-jingu-lee/ante/pull/985),
+  [`296853d`](https://github.com/joshua-jingu-lee/ante/commit/296853d9af346cabb037c2d3e815f4495f0f81d8))
+
+- **strategy**: StrategyStatus 3단계 간소화 (REGISTERED/ADOPTED/ARCHIVED) Refs #1000
+  ([#1040](https://github.com/joshua-jingu-lee/ante/pull/1040),
+  [`e47f3b9`](https://github.com/joshua-jingu-lee/ante/commit/e47f3b9a1e0222f4f829b59b38379a50ac0e72a2))
+
+- **types**: Main.py Optional 필드 33건 assert 가드로 해소
+  ([#1020](https://github.com/joshua-jingu-lee/ante/pull/1020),
+  [`f510e6b`](https://github.com/joshua-jingu-lee/ante/commit/f510e6b2889a17339e42aea1798063c73ceb84ec))
+
+
 ## v0.7.0 (2026-03-24)
 
 ### Bug Fixes
