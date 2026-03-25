@@ -119,7 +119,17 @@ def submit(ctx: click.Context, path: str) -> None:
 
     meta = strategy_cls.meta
 
-    # 3. Registry 등록
+    # 3. 전략 인스턴스에서 rationale/risks 추출
+    rationale = ""
+    risks: list[str] = []
+    try:
+        instance = strategy_cls(ctx=None)
+        rationale = instance.get_rationale()
+        risks = instance.get_risks()
+    except Exception:
+        pass  # 인스턴스 생성 실패 시 빈 값 사용
+
+    # 4. Registry 등록
     async def _register() -> dict:
         registry, db = await _create_registry()
         try:
@@ -128,6 +138,8 @@ def submit(ctx: click.Context, path: str) -> None:
                 filepath=filepath,
                 meta=meta,
                 warnings=validation.warnings,
+                rationale=rationale,
+                risks=risks,
             )
             return {
                 "submitted": True,
@@ -256,6 +268,8 @@ def strategy_info(ctx: click.Context, name: str) -> None:
             if params is not None:
                 result["params"] = params["params"]
                 result["param_schema"] = params["param_schema"]
+                result["rationale"] = params["rationale"]
+                result["risks"] = params["risks"]
 
             # 동일 이름의 다른 버전 목록
             if len(records) > 1:
@@ -295,6 +309,8 @@ def _print_info_text(result: dict) -> None:
     click.echo(f"  {'파일 경로':15s}: {result['filepath']}")
     click.echo(f"  {'등록일':15s}: {result['registered_at']}")
     _print_info_warnings(result.get("validation_warnings"))
+    _print_info_rationale(result.get("rationale"))
+    _print_info_risks(result.get("risks"))
     _print_info_params(result.get("params"), result.get("param_schema", {}))
     _print_info_versions(result.get("other_versions"))
 
@@ -306,6 +322,22 @@ def _print_info_warnings(warnings: list[str] | None) -> None:
     click.echo(f"  {'검증 경고':15s}:")
     for w in warnings:
         click.echo(f"    - {w}")
+
+
+def _print_info_rationale(rationale: str | None) -> None:
+    """투자 근거 섹션 출력."""
+    if not rationale:
+        return
+    click.echo(f"  {'투자 근거':15s}: {rationale}")
+
+
+def _print_info_risks(risks: list[str] | None) -> None:
+    """리스크 섹션 출력."""
+    if not risks:
+        return
+    click.echo(f"  {'리스크':15s}:")
+    for r in risks:
+        click.echo(f"    - {r}")
 
 
 def _print_info_params(params: dict | None, schema: dict) -> None:
@@ -344,6 +376,8 @@ def _load_strategy_params(filepath: str) -> dict | None:
         return {
             "params": instance.get_params(),
             "param_schema": instance.get_param_schema(),
+            "rationale": instance.get_rationale(),
+            "risks": instance.get_risks(),
         }
     except Exception:
         return None

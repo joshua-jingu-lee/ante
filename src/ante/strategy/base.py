@@ -240,3 +240,11 @@ class Strategy(ABC):
     def get_param_schema(self) -> dict[str, str]:
         """파라미터 설명 반환. {파라미터명: 설명} 형식."""
         return {}
+
+    def get_rationale(self) -> str:
+        """투자 근거 반환."""
+        return ""
+
+    def get_risks(self) -> list[str]:
+        """리스크 항목 반환."""
+        return []
