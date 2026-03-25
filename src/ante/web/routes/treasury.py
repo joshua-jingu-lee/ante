@@ -72,6 +72,9 @@ async def get_summary(
             )
 
     summary = target_treasury.get_summary()
+    # account_balance → total_balance 매핑 (TreasurySummaryResponse 스키마 정합)
+    if "account_balance" in summary and "total_balance" not in summary:
+        summary["total_balance"] = summary["account_balance"]
     summary["account_id"] = getattr(target_treasury, "account_id", None)
     summary["currency"] = getattr(target_treasury, "currency", "KRW")
     summary["commission_rate"] = getattr(

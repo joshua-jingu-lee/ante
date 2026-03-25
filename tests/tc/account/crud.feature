@@ -35,7 +35,7 @@ Feature: 계좌 CRUD
   Scenario: 계좌 목록 조회 (CLI)
     When 컨테이너에서 실행: ante account list --format json
     Then 종료 코드는 0
-    And stdout JSON 배열 길이는 1 이상이다
+    And stdout JSON의 .accounts 배열 길이는 1 이상이다
 
   Scenario: 계좌 정보 조회 (CLI)
     When 컨테이너에서 실행: ante account info {account_id} --format json

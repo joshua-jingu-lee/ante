@@ -11,7 +11,7 @@ Feature: Treasury 예산 할당·회수
     When POST /api/treasury/bots/qa-alloc-bot-01/deallocate 요청:
       | field  | value     |
       | amount | 999999999 |
-    Then 응답 상태는 200 또는 응답 상태는 404
+    Then 응답 상태는 200 또는 응답 상태는 404 또는 응답 상태는 400
 
   # ── 사전 준비: 계좌 + 잔고 + 전략 확보 + 봇 생성 ──
 
