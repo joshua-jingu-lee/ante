@@ -65,6 +65,38 @@ class TestSignal:
         with pytest.raises(AttributeError):
             s.symbol = "other"  # type: ignore[misc]
 
+    def test_meta_author_backward_compat(self):
+        """author 키워드가 author_name/author_id로 매핑된다."""
+        m = StrategyMeta(name="x", version="1.0.0", description="x", author="alice")
+        assert m.author_name == "alice"
+        assert m.author_id == "alice"
+
+    def test_meta_author_name_id_explicit(self):
+        """author_name/author_id를 직접 지정할 수 있다."""
+        m = StrategyMeta(
+            name="x",
+            version="1.0.0",
+            description="x",
+            author_name="Alice",
+            author_id="alice",
+        )
+        assert m.author_name == "Alice"
+        assert m.author_id == "alice"
+
+    def test_meta_immutable(self):
+        """StrategyMeta는 불변 객체이다."""
+        m = StrategyMeta(name="x", version="1.0.0", description="x")
+        with pytest.raises(AttributeError):
+            m.name = "y"  # type: ignore[misc]
+
+    def test_meta_defaults(self):
+        """StrategyMeta 기본값."""
+        m = StrategyMeta(name="x", version="1.0.0", description="x")
+        assert m.author_name == "agent"
+        assert m.author_id == "agent"
+        assert m.timeframe == "1d"
+        assert m.exchange == "KRX"
+
     def test_signal_defaults(self):
         """Signal 기본값."""
         s = Signal(symbol="005930", side="buy", quantity=10.0)

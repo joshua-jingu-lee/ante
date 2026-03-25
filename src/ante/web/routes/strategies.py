@@ -140,7 +140,8 @@ async def list_strategies(
                 "status": r.status.value
                 if hasattr(r.status, "value")
                 else str(r.status),
-                "author": r.author,
+                "author_name": r.author_name,
+                "author_id": r.author_id,
                 "bot_id": bot_info["bot_id"] if bot_info else None,
                 "bot_status": bot_info["status"] if bot_info else None,
                 "cumulative_return": cumulative_returns.get(r.strategy_id),

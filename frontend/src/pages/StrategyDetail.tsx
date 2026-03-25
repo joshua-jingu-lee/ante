@@ -104,8 +104,8 @@ export default function StrategyDetail() {
           <div className="flex justify-between py-2 border-b border-border text-[13px]">
             <span className="text-text-muted">제출자</span>
             <span>
-              {strategy.author ? (
-                <>{strategy.author} {strategy.author_id && <span className="text-text-muted font-normal">{strategy.author_id}</span>}</>
+              {strategy.author_name ? (
+                <>{strategy.author_name} {strategy.author_id && strategy.author_id !== strategy.author_name && <span className="text-text-muted font-normal">{strategy.author_id}</span>}</>
               ) : '-'}
             </span>
           </div>

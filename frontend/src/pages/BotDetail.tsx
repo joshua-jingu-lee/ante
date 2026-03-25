@@ -81,8 +81,8 @@ export default function BotDetail() {
             <div className="flex justify-between py-1.5 text-[13px]">
               <span className="text-text-muted">작성자</span>
               <span>
-                {bot.strategy_author_name || bot.strategy?.author || '-'}
-                {bot.strategy_author_id && (
+                {bot.strategy_author_name || bot.strategy?.author_name || '-'}
+                {bot.strategy_author_id && bot.strategy_author_id !== (bot.strategy_author_name || bot.strategy?.author_name) && (
                   <span className="text-text-muted text-[12px] ml-1">({bot.strategy_author_id})</span>
                 )}
               </span>

@@ -29,8 +29,8 @@ export interface Strategy {
   name: string
   version: string
   status: string
-  author: string
-  author_id?: string
+  author_name: string
+  author_id: string
   bot_id?: string | null
   bot_status?: string | null
   cumulative_return?: number

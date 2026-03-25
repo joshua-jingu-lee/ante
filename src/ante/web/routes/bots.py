@@ -82,10 +82,12 @@ async def list_bots(
                 if record:
                     if isinstance(bot_info, dict):
                         bot_info["strategy_name"] = record.name
-                        bot_info["strategy_author_name"] = record.author
+                        bot_info["strategy_author_name"] = record.author_name
+                        bot_info["strategy_author_id"] = record.author_id
                     else:
                         bot_info.strategy_name = record.name
-                        bot_info.strategy_author_name = record.author
+                        bot_info.strategy_author_name = record.author_name
+                        bot_info.strategy_author_id = record.author_id
 
     result = paginate(bots, cursor_field="bot_id", limit=limit, cursor=cursor)
     return {"bots": result["items"], "next_cursor": result["next_cursor"]}
@@ -237,11 +239,13 @@ async def get_bot(
         record = await registry.get(info.get("strategy_id", ""))
         if record:
             info["strategy_name"] = record.name
-            info["strategy_author_name"] = record.author
+            info["strategy_author_name"] = record.author_name
+            info["strategy_author_id"] = record.author_id
             info["strategy"] = {
                 "name": record.name,
                 "version": record.version,
-                "author": record.author,
+                "author_name": record.author_name,
+                "author_id": record.author_id,
                 "description": record.description,
             }
 

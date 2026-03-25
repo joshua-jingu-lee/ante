@@ -13,18 +13,74 @@ if TYPE_CHECKING:
 # ── 메타데이터 ────────────────────────────────────
 
 
-@dataclass(frozen=True)
 class StrategyMeta:
-    """전략 메타데이터. 모든 전략이 클래스 변수로 선언해야 함."""
+    """전략 메타데이터. 모든 전략이 클래스 변수로 선언해야 함.
 
-    name: str
-    version: str
-    description: str
-    author: str = "agent"
-    symbols: list[str] | None = None
-    timeframe: str = "1d"
-    exchange: str = "KRX"
-    accepts_external_signals: bool = False
+    하위 호환: ``author`` 키워드 인자는 ``author_name``/``author_id``로 자동 매핑된다.
+    """
+
+    __slots__ = (
+        "name",
+        "version",
+        "description",
+        "author_name",
+        "author_id",
+        "symbols",
+        "timeframe",
+        "exchange",
+        "accepts_external_signals",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        version: str,
+        description: str,
+        *,
+        author_name: str = "agent",
+        author_id: str = "agent",
+        author: str | None = None,
+        symbols: list[str] | None = None,
+        timeframe: str = "1d",
+        exchange: str = "KRX",
+        accepts_external_signals: bool = False,
+    ) -> None:
+        # 하위 호환: author → author_name / author_id 매핑
+        if author is not None:
+            if author_name == "agent":
+                author_name = author
+            if author_id == "agent":
+                author_id = author
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "version", version)
+        object.__setattr__(self, "description", description)
+        object.__setattr__(self, "author_name", author_name)
+        object.__setattr__(self, "author_id", author_id)
+        object.__setattr__(self, "symbols", symbols)
+        object.__setattr__(self, "timeframe", timeframe)
+        object.__setattr__(self, "exchange", exchange)
+        object.__setattr__(self, "accepts_external_signals", accepts_external_signals)
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise AttributeError("StrategyMeta is immutable")
+
+    def __delattr__(self, _name: str) -> None:
+        raise AttributeError("StrategyMeta is immutable")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, StrategyMeta):
+            return NotImplemented
+        return all(
+            getattr(self, attr) == getattr(other, attr) for attr in self.__slots__
+        )
+
+    def __hash__(self) -> int:
+        return hash(tuple(getattr(self, attr) for attr in self.__slots__))
+
+    def __repr__(self) -> str:
+        fields = ", ".join(f"{a}={getattr(self, a)!r}" for a in self.__slots__)
+        return f"StrategyMeta({fields})"
 
 
 # ── 시그널 / 주문 액션 ────────────────────────────
