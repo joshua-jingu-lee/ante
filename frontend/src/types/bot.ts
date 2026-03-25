@@ -31,7 +31,8 @@ export interface BotConfig {
 export interface BotStrategy {
   name: string
   version: string
-  author: string
+  author_name: string
+  author_id: string
   description: string
 }
 
