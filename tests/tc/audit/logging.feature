@@ -30,11 +30,11 @@ Feature: 감사 로그
   # --- CLI ---
 
   Scenario: 감사 로그 조회 (CLI)
-    When 컨테이너에서 실행: ante audit list --format json
+    When 컨테이너에서 실행: ante --format json audit list
     Then 종료 코드는 0
 
   Scenario: 멤버별 조회 (CLI)
-    When 컨테이너에서 실행: ante audit list --member qa-admin --format json
+    When 컨테이너에서 실행: ante --format json audit list --member qa-admin
     Then 종료 코드는 0
 
   # --- 에러 케이스 ---

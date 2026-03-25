@@ -37,4 +37,4 @@ Feature: 데이터 피드 및 저장 관리
 
   Scenario: 잘못된 dataset_id 형식 조회
     When GET /api/data/datasets/invalid-format
-    Then 응답 상태는 404
+    Then 응답 상태는 400

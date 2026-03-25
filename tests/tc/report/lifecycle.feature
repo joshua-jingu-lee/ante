@@ -14,7 +14,7 @@ Feature: 리포트 제출 및 조회
     And 응답 body.required_fields 는 null이 아니다
 
   Scenario: 리포트 스키마 조회 (CLI)
-    When 컨테이너에서 실행: ante report schema --format json
+    When 컨테이너에서 실행: ante --format json report schema
     Then 종료 코드는 0
     And stdout에 "required_fields" 가 포함되어 있다
 
@@ -51,11 +51,11 @@ Feature: 리포트 제출 및 조회
     And 응답 body.reports 배열 길이는 1 이상이다
 
   Scenario: 리포트 목록 조회 (CLI)
-    When 컨테이너에서 실행: ante report list --format json
+    When 컨테이너에서 실행: ante --format json report list
     Then 종료 코드는 0
 
   Scenario: 리포트 상세 조회 (CLI)
-    When 컨테이너에서 실행: ante report view {report_id} --format json
+    When 컨테이너에서 실행: ante --format json report view {report_id}
     Then 종료 코드는 0
 
   # ── 에러 케이스 ──

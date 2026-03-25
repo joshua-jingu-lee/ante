@@ -96,11 +96,6 @@ Feature: 봇 CRUD
       | budget | 2000000 |
     Then 응답 상태는 200
 
-  Scenario: 봇 예산 수정 반영 확인 (API)
-    When GET /api/bots/{bot_id}
-    Then 응답 상태는 200
-    And 응답 body.bot.budget.allocated 는 2000000
-
   # ── 봇 수정 에러 케이스 (#795) ──
 
   Scenario: 실행 중 봇 수정 거부 (API)

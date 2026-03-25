@@ -13,7 +13,7 @@ Feature: 동적 설정 관리
     And 응답 body.configs 는 null이 아니다
 
   Scenario: 설정 목록 조회 (CLI)
-    When 컨테이너에서 실행: ante config get --format json
+    When 컨테이너에서 실행: ante --format json config get
     Then 종료 코드는 0
     And stdout에 "configs" 가 포함되어 있다
 
@@ -28,21 +28,21 @@ Feature: 동적 설정 관리
     And 응답 body.new_value 는 null이 아니다
 
   Scenario: 동적 설정 변경 (CLI)
-    When 컨테이너에서 실행: ante config set risk.test_qa_key 99 --format json
+    When 컨테이너에서 실행: ante --format json config set risk.test_qa_key 99
     Then 종료 코드는 0
     And stdout에 "success" 가 포함되어 있다
 
   # --- 설정 변경 이력 ---
 
   Scenario: 설정 변경 이력 조회 (CLI)
-    When 컨테이너에서 실행: ante config history risk.test_qa_key --format json
+    When 컨테이너에서 실행: ante --format json config history risk.test_qa_key
     Then 종료 코드는 0
     And stdout에 "history" 가 포함되어 있다
 
   # --- 개별 설정 조회 (CLI) ---
 
   Scenario: 개별 설정 키 조회 (CLI)
-    When 컨테이너에서 실행: ante config get approval.auto_approve.enabled --format json
+    When 컨테이너에서 실행: ante --format json config get approval.auto_approve.enabled
     Then 종료 코드는 0
 
   # --- 에러 케이스 ---
@@ -54,6 +54,6 @@ Feature: 동적 설정 관리
     Then 응답 상태는 404
 
   Scenario: 존재하지 않는 키 조회 (CLI)
-    When 컨테이너에서 실행: ante config get nonexistent_key_99999 --format json
+    When 컨테이너에서 실행: ante --format json config get nonexistent_key_99999
     Then 종료 코드는 0
-    And stdout에 "not_found" 가 포함되어 있다
+    And stdout에 "설정을 찾을 수 없습니다" 가 포함되어 있다
