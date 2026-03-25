@@ -32,7 +32,7 @@ _SAMPLE_RECORD = StrategyRecord(
     name="momentum",
     version="1.0",
     filepath="/strategies/momentum.py",
-    status=StrategyStatus.ACTIVE,
+    status=StrategyStatus.ADOPTED,
     registered_at=_NOW,
     description="모멘텀 전략",
     author_name="agent",
@@ -181,10 +181,10 @@ class TestStrategyList:
             new_callable=AsyncMock,
             return_value=(registry, db),
         ):
-            result = runner.invoke(cli, ["strategy", "list", "--status", "active"])
+            result = runner.invoke(cli, ["strategy", "list", "--status", "adopted"])
             assert result.exit_code == 0
             registry.list_strategies.assert_called_once_with(
-                status=StrategyStatus.ACTIVE,
+                status=StrategyStatus.ADOPTED,
             )
 
 

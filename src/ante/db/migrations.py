@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from ante.core.database import Database
-from ante.db.versions import v001_baseline, v002_parquet_migration, v003_broker_config
+from ante.db.versions import (
+    v001_baseline,
+    v002_parquet_migration,
+    v003_broker_config,
+    v004_strategy_status_simplify,
+)
 
 # 마이그레이션 함수 시그니처:
 #   async def migrate(db: Database) -> None                          (DB 전용)
@@ -23,6 +28,7 @@ MIGRATIONS: list[tuple[int, str, MigrateFn]] = [
     (1, "0.7.0", v001_baseline.migrate),
     (2, "0.7.0", v002_parquet_migration.migrate),
     (3, "0.8.0", v003_broker_config.migrate),
+    (4, "0.8.0", v004_strategy_status_simplify.migrate),
 ]
 
 

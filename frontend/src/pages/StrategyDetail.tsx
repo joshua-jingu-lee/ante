@@ -12,7 +12,7 @@ import { STRATEGY_STATUS_LABELS } from '../utils/constants'
 import type { StrategyStatus, StrategyParam } from '../types/strategy'
 
 const STATUS_VARIANT: Record<StrategyStatus, string> = {
-  active: 'positive', registered: 'warning', inactive: 'muted', archived: 'muted',
+  active: 'positive', registered: 'warning', adopted: 'primary', inactive: 'muted', archived: 'muted',
 }
 
 type EquityCurvePeriod = '1w' | '1m' | '3m' | 'all'

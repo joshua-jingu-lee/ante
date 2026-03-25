@@ -711,10 +711,10 @@ class TestStrategyRegistry:
         filepath.write_text("")
 
         await registry.register(filepath, meta)
-        await registry.update_status("momentum_v1.0.0", StrategyStatus.ACTIVE)
+        await registry.update_status("momentum_v1.0.0", StrategyStatus.ADOPTED)
 
-        active = await registry.list_strategies(status=StrategyStatus.ACTIVE)
-        assert len(active) == 1
+        adopted = await registry.list_strategies(status=StrategyStatus.ADOPTED)
+        assert len(adopted) == 1
 
         registered = await registry.list_strategies(status=StrategyStatus.REGISTERED)
         assert len(registered) == 0
@@ -725,11 +725,29 @@ class TestStrategyRegistry:
         filepath.write_text("")
 
         await registry.register(filepath, meta)
-        await registry.update_status("momentum_v1.0.0", StrategyStatus.ACTIVE)
+        await registry.update_status("momentum_v1.0.0", StrategyStatus.ADOPTED)
 
         record = await registry.get("momentum_v1.0.0")
         assert record is not None
-        assert record.status == StrategyStatus.ACTIVE
+        assert record.status == StrategyStatus.ADOPTED
+
+    async def test_update_status_invalid_transition(self, registry, meta, tmp_path):
+        """허용되지 않은 상태 전환 시 ValueError."""
+        filepath = tmp_path / "test.py"
+        filepath.write_text("")
+
+        await registry.register(filepath, meta)
+        await registry.update_status("momentum_v1.0.0", StrategyStatus.ARCHIVED)
+
+        with pytest.raises(ValueError, match="전환 불가"):
+            await registry.update_status("momentum_v1.0.0", StrategyStatus.ADOPTED)
+
+    async def test_update_status_not_found(self, registry):
+        """존재하지 않는 전략 상태 변경 시 StrategyError."""
+        from ante.strategy.exceptions import StrategyError
+
+        with pytest.raises(StrategyError, match="not found"):
+            await registry.update_status("nonexistent_v1.0.0", StrategyStatus.ADOPTED)
 
     async def test_exists(self, registry, meta, tmp_path):
         """존재 여부 확인."""

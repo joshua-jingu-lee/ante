@@ -181,9 +181,7 @@ def submit(ctx: click.Context, path: str) -> None:
 
 
 @strategy.command("list")
-@click.option(
-    "--status", default=None, help="상태 필터 (registered/active/inactive/archived)"
-)
+@click.option("--status", default=None, help="상태 필터 (registered/adopted/archived)")
 @format_option
 @click.pass_context
 @require_auth

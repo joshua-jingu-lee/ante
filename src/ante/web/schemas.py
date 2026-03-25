@@ -214,6 +214,12 @@ class BotDetailResponse(BaseModel):
 # ── 전략 ──────────────────────────────────────────────
 
 
+class StatusUpdateRequest(BaseModel):
+    """전략 상태 변경 요청."""
+
+    status: str  # "adopted" | "archived"
+
+
 class StrategyValidateResponse(BaseModel):
     """전략 검증 응답."""
 
