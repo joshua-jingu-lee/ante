@@ -765,14 +765,24 @@ async def _init_approval(s: Services) -> None:
         engine = s.rule_engine_manager.get(account_id)
         engine.update_rules(params["bot_id"], params["rules"])
 
+    from ante.strategy.registry import StrategyStatus
+
+    async def _exec_strategy_adopt(params: dict) -> None:
+        await s.report_store.update_status(params["report_id"], ReportStatus.ADOPTED)
+        await s.strategy_registry.update_status(
+            params["strategy_id"], StrategyStatus.ADOPTED
+        )
+
+    async def _exec_strategy_retire(params: dict) -> None:
+        await s.report_store.update_status(params["report_id"], ReportStatus.ARCHIVED)
+        await s.strategy_registry.update_status(
+            params["strategy_id"], StrategyStatus.ARCHIVED
+        )
+
     approval_executors: dict = {
         # 전략 관련
-        "strategy_adopt": lambda params: s.report_store.update_status(
-            params["report_id"], ReportStatus.ADOPTED
-        ),
-        "strategy_retire": lambda params: s.report_store.update_status(
-            params["report_id"], ReportStatus.ARCHIVED
-        ),
+        "strategy_adopt": _exec_strategy_adopt,
+        "strategy_retire": _exec_strategy_retire,
         # 봇 생명주기
         "bot_create": lambda params: s.bot_manager.create_bot(**params),
         "bot_assign_strategy": lambda params: s.bot_manager.assign_strategy(
@@ -794,21 +804,17 @@ async def _init_approval(s: Services) -> None:
     # 사전 검증 validator 정의
     from ante.bot.config import BotStatus
 
-    def _validate_strategy_retire(params: dict) -> list[ValidationResult]:
-        """전략 폐기 사전 검증: 사용 중인 봇 존재 여부."""
+    async def _validate_strategy_retire(params: dict) -> list[ValidationResult]:
+        """전략 폐기 사전 검증: 전략 상태 확인."""
         strategy_id = params.get("strategy_id", "")
-        bots = [
-            b for b in s.bot_manager.list_bots() if b.get("strategy_id") == strategy_id
-        ]
-        if bots:
-            return [
-                ValidationResult(
-                    "fail",
-                    f"전략을 사용 중인 봇 {len(bots)}개 존재",
-                    "system:bot_manager",
-                )
-            ]
-        return [ValidationResult("pass", "", "system:bot_manager")]
+        if not strategy_id:
+            return [ValidationResult("fail", "strategy_id가 누락되었습니다", "system")]
+        record = await s.strategy_registry.get(strategy_id)
+        if record is None:
+            return [ValidationResult("fail", "전략을 찾을 수 없습니다", "system")]
+        if record.status == StrategyStatus.ARCHIVED:
+            return [ValidationResult("fail", "이미 보관된 전략입니다", "system")]
+        return [ValidationResult("pass", "", "system")]
 
     def _validate_bot_create(params: dict) -> list[ValidationResult]:
         """봇 생성 사전 검증: 전략 adopted 상태, 동일 봇 미존재."""
