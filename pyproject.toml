@@ -62,7 +62,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "ante.cli.*",
+    "ante.cli.commands.backtest",
+    "ante.cli.commands.bot",
+    "ante.cli.commands.init",
+    "ante.cli.commands.report",
     "ante.main",
     "ante.report.store",
     "ante.strategy.registry",
