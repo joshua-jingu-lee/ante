@@ -87,7 +87,9 @@ self.ctx.cancel_order(order_id="ORD-001", reason="전략 조건 변경")
 self.ctx.modify_order(order_id="ORD-001", price=59000, reason="지정가 수정")
 ```
 
-**기술 지표:** `get_indicator()`로 15종의 기술 지표를 사용할 수 있습니다.
+**기술 지표:** `get_indicator()`로 기술 지표를 사용할 수 있습니다. 내부적으로 [pandas-ta](https://github.com/twopirllc/pandas-ta)를 사용하며, pandas-ta가 지원하는 130+ 지표를 모두 사용할 수 있습니다.
+
+자주 사용되는 지표:
 
 | 지표 | 이름 | 주요 파라미터 |
 |------|------|-------------|
@@ -101,11 +103,13 @@ self.ctx.modify_order(order_id="ORD-001", price=59000, reason="지정가 수정"
 | ADX | 평균방향지수 | `timeperiod` |
 | CCI | 상품채널지수 | `timeperiod` |
 | OBV | 거래량잔고 | — |
-| WMA | 가중이동평균 | `timeperiod` |
-| DEMA | 이중지수이동평균 | `timeperiod` |
-| TEMA | 삼중지수이동평균 | `timeperiod` |
-| WILLR | 윌리엄스 %R | `timeperiod` |
-| MFI | 자금흐름지수 | `timeperiod` |
+| VWAP | 거래량가중평균가 | — |
+| Ichimoku | 일목균형표 | `tenkan`, `kijun`, `senkou` |
+| Supertrend | 슈퍼트렌드 | `length`, `multiplier` |
+| ROC | 변화율 | `timeperiod` |
+| CMF | 차이킨자금흐름 | `timeperiod` |
+
+> 전체 지표 목록은 [pandas-ta 문서](https://github.com/twopirllc/pandas-ta#indicators-by-category)를 참조하세요.
 
 ### 라이프사이클 메서드
 
