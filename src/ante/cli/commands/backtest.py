@@ -43,9 +43,27 @@ def run(
     db_path: str,
 ) -> None:
     """백테스트 실행."""
+    import datetime
+
     from ante.backtest.service import BacktestService
 
     fmt = get_formatter(ctx)
+
+    # 시작일/종료일 검증
+    try:
+        start_date = datetime.date.fromisoformat(start)
+        end_date = datetime.date.fromisoformat(end)
+    except ValueError as e:
+        fmt.error(f"날짜 형식이 올바르지 않습니다: {e}", code="INVALID_DATE")
+        raise SystemExit(1) from e
+
+    if start_date > end_date:
+        fmt.error(
+            f"시작일({start})이 종료일({end}) 이후입니다.",
+            code="INVALID_DATE_RANGE",
+        )
+        raise SystemExit(1)
+
     config = {
         "strategy_path": strategy_path,
         "start_date": start,
