@@ -83,4 +83,4 @@ Feature: 최초 설치 및 초기화
   Scenario: 12. CLI 계좌 목록 확인
     When 컨테이너에서 실행: ante account list --format json
     Then 종료 코드는 0
-    And stdout JSON 배열 길이는 1 이상이다
+    And stdout JSON의 .accounts 배열 길이는 1 이상이다

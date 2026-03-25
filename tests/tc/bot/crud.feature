@@ -90,12 +90,16 @@ Feature: 봇 CRUD
     Then 응답 상태는 200
     And 응답 body.bot.interval_seconds 는 120
 
-  # TODO: API 응답에 budget 필드 미포함 — 봇 응답 DTO 확인 필요
   Scenario: 봇 예산 수정 (API)
     When PUT /api/bots/{bot_id} 요청:
       | field  | value   |
       | budget | 2000000 |
     Then 응답 상태는 200
+
+  Scenario: 봇 예산 수정 반영 확인 (API)
+    When GET /api/bots/{bot_id}
+    Then 응답 상태는 200
+    And 응답 body.bot.budget.allocated 는 2000000
 
   # ── 봇 수정 에러 케이스 (#795) ──
 

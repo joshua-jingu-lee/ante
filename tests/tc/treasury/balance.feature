@@ -28,7 +28,7 @@ Feature: Treasury 잔고 관리
   Scenario: Treasury 현황 조회 (API)
     When GET /api/treasury
     Then 응답 상태는 200
-    And 응답 body.account_balance 는 null이 아니다
+    And 응답 body.total_balance 는 null이 아니다
     And 응답 body.unallocated 는 null이 아니다
     And 응답 body.total_allocated 는 null이 아니다
 
@@ -48,4 +48,4 @@ Feature: Treasury 잔고 관리
   Scenario: 설정 후 잔고 반영 확인 (API)
     When GET /api/treasury
     Then 응답 상태는 200
-    And 응답 body.account_balance 는 10000000
+    And 응답 body.total_balance 는 10000000
