@@ -268,8 +268,10 @@ def strategy_info(ctx: click.Context, name: str) -> None:
             if params is not None:
                 result["params"] = params["params"]
                 result["param_schema"] = params["param_schema"]
-                result["rationale"] = params["rationale"]
-                result["risks"] = params["risks"]
+                if params.get("rationale"):
+                    result["rationale"] = params["rationale"]
+                if params.get("risks"):
+                    result["risks"] = params["risks"]
 
             # 동일 이름의 다른 버전 목록
             if len(records) > 1:
