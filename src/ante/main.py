@@ -1019,23 +1019,27 @@ async def _init_notification(s: Services) -> None:
     # TelegramCommandReceiver
     from ante.notification import TelegramCommandReceiver
 
-    allowed_ids_raw = s.config.get("telegram.command.allowed_user_ids", [])
-    allowed_user_ids = [int(uid) for uid in allowed_ids_raw] if allowed_ids_raw else []
-
-    if allowed_user_ids:
+    telegram_enabled = await s.dynamic_config.get(
+        "notification.telegram_enabled", default="true"
+    )
+    chat_id_str = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if str(telegram_enabled) == "true" and chat_id_str:
+        chat_id = int(chat_id_str)
         s.telegram_receiver = TelegramCommandReceiver(
             adapter=adapter,
-            allowed_user_ids=allowed_user_ids,
-            polling_interval=s.config.get("telegram.command.polling_interval", 3.0),
-            confirm_timeout=s.config.get("telegram.command.confirm_timeout", 30.0),
+            allowed_user_ids=[chat_id],
+            polling_interval=3.0,
+            confirm_timeout=30.0,
             bot_manager=s.bot_manager,
             account_service=s.account_service,
             approval_service=s.approval_service,
         )
         s.telegram_receiver.start()
-        logger.info("TelegramCommandReceiver 시작")
+        logger.info("TelegramCommandReceiver 시작 (chat_id=%s)", chat_id)
+    elif str(telegram_enabled) != "true":
+        logger.info("TelegramCommandReceiver 건너뜀 — telegram_enabled=false")
     else:
-        logger.info("TelegramCommandReceiver 건너뜀 — allowed_user_ids 비어있음")
+        logger.info("TelegramCommandReceiver 건너뜀 — TELEGRAM_CHAT_ID 미설정")
 
 
 async def _init_ipc(s: Services) -> None:

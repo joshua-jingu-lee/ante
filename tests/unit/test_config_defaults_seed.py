@@ -101,9 +101,21 @@ async def test_new_defaults_contain_trading_keys(service):
         "bot.default_interval_sec",
         "broker.commission_rate",
         "broker.sell_tax_rate",
+        "notification.telegram_enabled",
         "notification.telegram_level",
         "notification.fill_alert",
         "notification.daily_report",
     ]
     for key in expected_keys:
         assert key in DEFAULTS, f"키 '{key}'가 DEFAULTS에 없다"
+
+
+async def test_telegram_enabled_default_is_true():
+    """notification.telegram_enabled 기본값이 'true'이다 (Refs #997)."""
+    assert DEFAULTS["notification.telegram_enabled"] == "true"
+
+
+async def test_removed_telegram_command_keys():
+    """telegram.command.* 키가 DEFAULTS에서 제거되었다 (Refs #997)."""
+    assert "telegram.command.polling_interval" not in DEFAULTS
+    assert "telegram.command.confirm_timeout" not in DEFAULTS
