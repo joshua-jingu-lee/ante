@@ -266,7 +266,8 @@ async def test_init_account_creates_test_account(tmp_path: Path) -> None:
     await db.connect()
 
     eventbus = EventBus(history_size=100)
-    s = Services(db=db, eventbus=eventbus)
+    config = Config(static={}, secrets={})
+    s = Services(db=db, eventbus=eventbus, config=config)
 
     await _init_account(s)
 
@@ -305,7 +306,8 @@ async def test_init_account_skips_when_accounts_exist(tmp_path: Path) -> None:
     await account_service.create(existing)
 
     # _init_account 재실행
-    s = Services(db=db, eventbus=eventbus)
+    config = Config(static={}, secrets={})
+    s = Services(db=db, eventbus=eventbus, config=config)
     await _init_account(s)
 
     accounts = await s.account_service.list()
