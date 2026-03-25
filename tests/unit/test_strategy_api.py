@@ -61,6 +61,30 @@ class FakeRegistry:
                 return s
         return None
 
+    async def update_status(self, strategy_id: str, status: StrategyStatus) -> None:
+        from ante.strategy.exceptions import StrategyError
+
+        record = await self.get(strategy_id)
+        if record is None:
+            raise StrategyError(f"Strategy not found: {strategy_id}")
+
+        # 허용된 전환만 수행 (실제 registry와 동일한 로직)
+        _allowed: dict[StrategyStatus, set[StrategyStatus]] = {
+            StrategyStatus.REGISTERED: {
+                StrategyStatus.ADOPTED,
+                StrategyStatus.ARCHIVED,
+            },
+            StrategyStatus.ADOPTED: {StrategyStatus.ARCHIVED},
+            StrategyStatus.ARCHIVED: set(),
+        }
+        allowed = _allowed.get(record.status, set())
+        if status not in allowed:
+            raise ValueError(
+                f"전환 불가: {record.status.value} → {status.value} "
+                f"(허용: {', '.join(s.value for s in sorted(allowed))})"
+            )
+        record.status = status
+
 
 class FakeBotManager:
     def __init__(self) -> None:
@@ -505,3 +529,127 @@ class TestStrategyPerformance:
 
         resp = client.get("/api/strategies/nonexistent/performance")
         assert resp.status_code == 404
+
+
+class TestUpdateStrategyStatus:
+    """PATCH /api/strategies/{id}/status 테스트."""
+
+    def test_update_status_adopted(self, client, registry):
+        """registered -> adopted 전환 성공 시 204."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.patch("/api/strategies/s1/status", json={"status": "adopted"})
+        assert resp.status_code == 204
+        assert registry._strategies[0].status == StrategyStatus.ADOPTED
+
+    def test_update_status_archived(self, client, registry):
+        """adopted -> archived 전환 성공 시 204."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.ADOPTED,
+            ),
+        ]
+        resp = client.patch("/api/strategies/s1/status", json={"status": "archived"})
+        assert resp.status_code == 204
+        assert registry._strategies[0].status == StrategyStatus.ARCHIVED
+
+    def test_update_status_not_found(self, client):
+        """존재하지 않는 전략 -> 404."""
+        resp = client.patch(
+            "/api/strategies/nonexistent/status", json={"status": "adopted"}
+        )
+        assert resp.status_code == 404
+
+    def test_update_status_invalid_transition(self, client, registry):
+        """archived -> adopted 전환 불가 -> 400."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.ARCHIVED,
+            ),
+        ]
+        resp = client.patch("/api/strategies/s1/status", json={"status": "adopted"})
+        assert resp.status_code == 400
+        assert "전환 불가" in resp.json()["detail"]
+
+    def test_update_status_invalid_value(self, client, registry):
+        """유효하지 않은 status 값 -> 400."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.patch(
+            "/api/strategies/s1/status", json={"status": "invalid_status"}
+        )
+        assert resp.status_code == 400
+        assert "유효하지 않은 status" in resp.json()["detail"]
+
+
+class TestListStrategiesStatusFilter:
+    """GET /api/strategies?status= 필터 검증 테스트."""
+
+    def test_filter_active_rejected(self, client):
+        """deprecated status=active 전달 시 400."""
+        resp = client.get("/api/strategies?status=active")
+        assert resp.status_code == 400
+        assert "허용되지 않은 status" in resp.json()["detail"]
+
+    def test_filter_inactive_rejected(self, client):
+        """deprecated status=inactive 전달 시 400."""
+        resp = client.get("/api/strategies?status=inactive")
+        assert resp.status_code == 400
+
+    def test_filter_registered_accepted(self, client, registry):
+        """status=registered 허용."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.get("/api/strategies?status=registered")
+        assert resp.status_code == 200
+        assert len(resp.json()["strategies"]) == 1
+
+    def test_filter_adopted_accepted(self, client, registry):
+        """status=adopted 허용."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.ADOPTED,
+            ),
+        ]
+        resp = client.get("/api/strategies?status=adopted")
+        assert resp.status_code == 200
+
+    def test_filter_archived_accepted(self, client, registry):
+        """status=archived 허용."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.ARCHIVED,
+            ),
+        ]
+        resp = client.get("/api/strategies?status=archived")
+        assert resp.status_code == 200
