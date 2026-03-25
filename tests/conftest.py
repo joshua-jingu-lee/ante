@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _set_encryption_key(monkeypatch):
-    """테스트용 Fernet 키 자동 설정."""
+@pytest.fixture(autouse=True, scope="session")
+def _set_encryption_key():
+    """테스트용 Fernet 키 자동 설정 (session scope — 전체 세션에서 1회만 생성)."""
     from cryptography.fernet import Fernet
 
-    monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    key = Fernet.generate_key().decode()
+    os.environ["ANTE_DB_ENCRYPTION_KEY"] = key
+    yield
+    os.environ.pop("ANTE_DB_ENCRYPTION_KEY", None)
 
 
 @pytest.fixture(autouse=True)
