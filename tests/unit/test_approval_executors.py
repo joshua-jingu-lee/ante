@@ -34,8 +34,13 @@ def _build_executors() -> tuple[dict, dict]:
     Returns:
         (executors dict, mocks dict) — mocks에서 호출 검증 가능.
     """
+    from ante.strategy.registry import StrategyStatus
+
     report_store = MagicMock()
     report_store.update_status = AsyncMock()
+
+    strategy_registry = MagicMock()
+    strategy_registry.update_status = AsyncMock()
 
     bot_manager = MagicMock()
     bot_manager.create_bot = AsyncMock()
@@ -51,16 +56,24 @@ def _build_executors() -> tuple[dict, dict]:
     rule_engine = MagicMock()
     rule_engine.update_rules = MagicMock()  # sync
 
+    async def _exec_strategy_adopt(params: dict) -> None:
+        await report_store.update_status(params["report_id"], ReportStatus.ADOPTED)
+        await strategy_registry.update_status(
+            params["strategy_id"], StrategyStatus.ADOPTED
+        )
+
+    async def _exec_strategy_retire(params: dict) -> None:
+        await report_store.update_status(params["report_id"], ReportStatus.ARCHIVED)
+        await strategy_registry.update_status(
+            params["strategy_id"], StrategyStatus.ARCHIVED
+        )
+
     async def _exec_rule_change(params: dict) -> None:
         rule_engine.update_rules(params["bot_id"], params["rules"])
 
     executors = {
-        "strategy_adopt": lambda params: report_store.update_status(
-            params["report_id"], ReportStatus.ADOPTED
-        ),
-        "strategy_retire": lambda params: report_store.update_status(
-            params["report_id"], ReportStatus.ARCHIVED
-        ),
+        "strategy_adopt": _exec_strategy_adopt,
+        "strategy_retire": _exec_strategy_retire,
         "bot_create": lambda params: bot_manager.create_bot(**params),
         "bot_assign_strategy": lambda params: bot_manager.assign_strategy(
             params["bot_id"], params["strategy_id"]
@@ -79,6 +92,7 @@ def _build_executors() -> tuple[dict, dict]:
 
     mocks = {
         "report_store": report_store,
+        "strategy_registry": strategy_registry,
         "bot_manager": bot_manager,
         "treasury": treasury,
         "rule_engine": rule_engine,
@@ -99,16 +113,25 @@ class TestStrategyAdoptExecutor:
     """strategy_adopt executor 테스트."""
 
     async def test_approve_calls_update_status_adopted(self, service_with_executors):
+        from ante.strategy.registry import StrategyStatus
+
         svc, mocks = service_with_executors
         req = await svc.create(
             type="strategy_adopt",
             requester="agent",
             title="전략 채택",
-            params={"report_id": "rpt-001", "strategy_name": "momentum"},
+            params={
+                "report_id": "rpt-001",
+                "strategy_id": "strat-001",
+                "strategy_name": "momentum",
+            },
         )
         await svc.approve(req.id)
         mocks["report_store"].update_status.assert_awaited_once_with(
             "rpt-001", ReportStatus.ADOPTED
+        )
+        mocks["strategy_registry"].update_status.assert_awaited_once_with(
+            "strat-001", StrategyStatus.ADOPTED
         )
 
 
@@ -116,16 +139,25 @@ class TestStrategyRetireExecutor:
     """strategy_retire executor 테스트."""
 
     async def test_approve_calls_update_status_retired(self, service_with_executors):
+        from ante.strategy.registry import StrategyStatus
+
         svc, mocks = service_with_executors
         req = await svc.create(
             type="strategy_retire",
             requester="agent",
             title="전략 폐기",
-            params={"report_id": "rpt-002", "strategy_name": "mean_revert"},
+            params={
+                "report_id": "rpt-002",
+                "strategy_id": "strat-002",
+                "strategy_name": "mean_revert",
+            },
         )
         await svc.approve(req.id)
         mocks["report_store"].update_status.assert_awaited_once_with(
             "rpt-002", ReportStatus.ARCHIVED
+        )
+        mocks["strategy_registry"].update_status.assert_awaited_once_with(
+            "strat-002", StrategyStatus.ARCHIVED
         )
 
 

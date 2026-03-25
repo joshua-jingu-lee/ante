@@ -83,7 +83,7 @@ class ApprovalService:
         now = datetime.now(UTC).isoformat()
         params = params or {}
 
-        reviews = self._validate_params(type, params, now)
+        reviews = await self._validate_params(type, params, now)
 
         request = ApprovalRequest(
             id=str(uuid4()),
@@ -292,7 +292,7 @@ class ApprovalService:
 
         # 사전 검증(validator) 재실행
         now = datetime.now(UTC).isoformat()
-        warn_reviews = self._validate_params(request.type, request.params, now)
+        warn_reviews = await self._validate_params(request.type, request.params, now)
         request.reviews.extend(warn_reviews)
 
         # 상태 전환 + 이력 기록
@@ -649,19 +649,29 @@ class ApprovalService:
         row = await self._db.fetch_one(query, tuple(params))
         return row["cnt"] if row else 0
 
-    def _validate_params(
+    async def _validate_params(
         self,
         type: str,
         params: dict,
         now: str,
     ) -> list[dict]:
-        """사전 검증(validator)을 실행하고 warn reviews를 반환한다."""
+        """사전 검증(validator)을 실행하고 warn reviews를 반환한다.
+
+        validator가 async이면 await, 동기이면 그대로 호출한다.
+        """
+        import inspect
+
         reviews: list[dict] = []
         validator = self._validators.get(type)
         if not validator:
             return reviews
 
-        results = validator(params)
+        result_or_coro = validator(params)
+        if inspect.isawaitable(result_or_coro):
+            results = await result_or_coro
+        else:
+            results = result_or_coro
+
         for r in results:
             if r.grade == "fail":
                 logger.info("사전 검증 실패 (%s): %s — %s", type, r.reviewer, r.detail)
