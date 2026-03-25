@@ -21,7 +21,7 @@ class FakeStrategyRecord:
     name: str
     version: str
     filepath: str = ""
-    status: StrategyStatus = StrategyStatus.ACTIVE
+    status: StrategyStatus = StrategyStatus.ADOPTED
     registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     description: str = ""
     author_name: str = "agent"
@@ -125,7 +125,7 @@ class TestListStrategies:
                 strategy_id="ma_cross_v1",
                 name="ma_cross",
                 version="1",
-                status=StrategyStatus.ACTIVE,
+                status=StrategyStatus.ADOPTED,
             ),
         ]
         resp = client.get("/api/strategies")
@@ -134,19 +134,19 @@ class TestListStrategies:
         assert len(data["strategies"]) == 1
         assert data["strategies"][0]["id"] == "ma_cross_v1"
         assert data["strategies"][0]["name"] == "ma_cross"
-        assert data["strategies"][0]["status"] == "active"
+        assert data["strategies"][0]["status"] == "adopted"
 
     def test_filter_by_status(self, client, registry):
         """상태 필터."""
         registry._strategies = [
             FakeStrategyRecord(
-                strategy_id="s1", name="s1", version="1", status=StrategyStatus.ACTIVE
+                strategy_id="s1", name="s1", version="1", status=StrategyStatus.ADOPTED
             ),
             FakeStrategyRecord(
-                strategy_id="s2", name="s2", version="1", status=StrategyStatus.INACTIVE
+                strategy_id="s2", name="s2", version="1", status=StrategyStatus.ARCHIVED
             ),
         ]
-        resp = client.get("/api/strategies?status=active")
+        resp = client.get("/api/strategies?status=adopted")
         assert resp.status_code == 200
         assert len(resp.json()["strategies"]) == 1
         assert resp.json()["strategies"][0]["id"] == "s1"

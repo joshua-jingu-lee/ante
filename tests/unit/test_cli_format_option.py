@@ -315,7 +315,7 @@ class TestStrategyInfoFormatOption:
             name="test",
             version="1.0",
             filepath="/strats/test.py",
-            status=StrategyStatus.ACTIVE,
+            status=StrategyStatus.ADOPTED,
             registered_at=datetime(2026, 1, 1, tzinfo=UTC),
             description="테스트 전략",
             author_name="agent",
