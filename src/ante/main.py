@@ -172,6 +172,9 @@ async def _init_core(s: Services) -> None:
 
 async def _init_services(s: Services) -> None:
     """AuditLogger, MemberService, InstrumentService 초기화."""
+    assert s.db is not None
+    assert s.eventbus is not None
+
     from ante.audit import AuditLogger
 
     s.audit_logger = AuditLogger(db=s.db)
@@ -206,6 +209,9 @@ async def _init_services(s: Services) -> None:
 
 async def _init_account(s: Services) -> None:
     """AccountService 초기화. 계좌 없으면 테스트 계좌 자동 생성."""
+    assert s.db is not None
+    assert s.eventbus is not None
+
     from ante.account import AccountService
 
     s.account_service = AccountService(db=s.db, eventbus=s.eventbus)
@@ -259,6 +265,9 @@ async def _migrate_is_paper_to_broker_config(s: Services) -> None:
 
 async def _init_trading(s: Services) -> None:
     """Strategy, Trade, TreasuryManager, RuleEngineManager, BotManager."""
+    assert s.db is not None
+    assert s.eventbus is not None
+
     from ante.strategy import StrategyRegistry
 
     s.strategy_registry = StrategyRegistry(db=s.db)
@@ -322,7 +331,7 @@ async def _init_trading(s: Services) -> None:
 
     from ante.bot.providers.live import LiveOrderView
 
-    s.live_order_view = LiveOrderView(order_registry=None)  # Broker 연결 후 설정
+    s.live_order_view = LiveOrderView(order_registry=None)  # type: ignore[arg-type]  # Broker 연결 후 설정
 
     strategies_dir = Path(s.config.get("strategy.dir", "strategies"))
     s.strategy_snapshot = StrategySnapshot(strategies_dir)
@@ -352,6 +361,8 @@ async def _init_trading(s: Services) -> None:
 
 async def _init_gateway(s: Services) -> None:
     """APIGateway(account_service 주입), StreamIntegration, 종목 동기화."""
+    assert s.eventbus is not None
+
     from ante.gateway import APIGateway
     from ante.gateway.stop_order import StopOrderManager
 
@@ -425,6 +436,8 @@ async def _init_gateway(s: Services) -> None:
 
 async def _init_reconcile_scheduler(s: Services) -> None:
     """ReconcileScheduler 생성 및 시작."""
+    assert s.eventbus is not None
+
     from ante.broker.scheduler import ReconcileScheduler
     from ante.trade.reconciler import PositionReconciler
 
@@ -519,6 +532,8 @@ async def _init_stream_integration(
     stop_order_manager: Any,
 ) -> None:
     """KISStreamClient + StreamIntegration 초기화."""
+    assert s.eventbus is not None
+
     from ante.broker.kis_stream import KISStreamClient
     from ante.gateway.stream_integration import StreamIntegration
 
@@ -691,6 +706,9 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
 
 async def _init_feed(s: Services) -> None:
     """Data Pipeline, BacktestService, ReportStore 초기화."""
+    assert s.db is not None
+    assert s.eventbus is not None
+
     from ante.data import DataCollector, ParquetStore
 
     data_path = s.config.get("data.path", "data/")
@@ -734,6 +752,9 @@ async def _init_feed(s: Services) -> None:
 
 async def _init_approval(s: Services) -> None:
     """ApprovalService 초기화: Executor, Validator, 전결 설정, 만료 스케줄러."""
+    assert s.db is not None
+    assert s.eventbus is not None
+
     from ante.approval import ApprovalService
     from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
     from ante.approval.models import ValidationResult
@@ -978,6 +999,9 @@ async def _approval_expire_loop(
 
 async def _init_notification(s: Services) -> None:
     """NotificationService, TelegramCommandReceiver 초기화."""
+    assert s.eventbus is not None
+    assert s.dynamic_config is not None
+
     from ante.notification import (
         NotificationLevel,
         NotificationService,
@@ -1055,6 +1079,8 @@ async def _init_notification(s: Services) -> None:
 
 async def _init_ipc(s: Services) -> None:
     """IPC 서버 초기화 — Unix 도메인 소켓 기반 프로세스 간 통신."""
+    assert s.eventbus is not None
+
     from ante.core.registry import ServiceRegistry
     from ante.ipc.registry import CommandRegistry, register_all_handlers
     from ante.ipc.server import IPCServer
@@ -1088,6 +1114,9 @@ async def _init_ipc(s: Services) -> None:
 
 async def _init_web(s: Services) -> None:
     """FastAPI 앱 생성 및 uvicorn 서버 시작."""
+    assert s.db is not None
+    assert s.eventbus is not None
+
     web_enabled = s.config.get("web.enabled", False)
     if not web_enabled:
         return
@@ -1308,6 +1337,7 @@ async def main() -> None:
 
         from ante.db.migrations import run_migrations
 
+        assert s.db is not None
         data_path = Path(s.config.get("data.path", "data/"))
         applied = await run_migrations(s.db, data_path=data_path)
         if applied:
