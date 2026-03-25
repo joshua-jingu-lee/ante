@@ -15,6 +15,7 @@ services:
     volumes:
       - qa-db:/app/db
       - qa-data:/app/data
+      - ante_ante-data:/app/data-prod:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')"]
       interval: 3s
@@ -24,3 +25,5 @@ services:
 volumes:
   qa-db:
   qa-data:
+  ante_ante-data:
+    external: true
