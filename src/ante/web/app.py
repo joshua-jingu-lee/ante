@@ -120,11 +120,12 @@ def _mount_frontend(app: FastAPI) -> None:
         logger.info("프론트엔드 빌드 없음 — 정적 파일 서빙 비활성화")
         return
 
-    index_html = frontend_dir / "index.html"
-    logger.info("프론트엔드 정적 파일 서빙: %s", frontend_dir)
+    static_dir: Path = frontend_dir
+    index_html = static_dir / "index.html"
+    logger.info("프론트엔드 정적 파일 서빙: %s", static_dir)
 
     # /assets/* 빌드 산출물 서빙 (Vite 번들)
-    assets_dir = frontend_dir / "assets"
+    assets_dir = static_dir / "assets"
     if assets_dir.is_dir():
         app.mount(
             "/assets",
@@ -150,7 +151,7 @@ def _mount_frontend(app: FastAPI) -> None:
             if response.status_code == 404:
                 from fastapi.responses import FileResponse
 
-                file_path = frontend_dir / path.lstrip("/")
+                file_path = static_dir / path.lstrip("/")
                 if file_path.is_file():
                     return FileResponse(str(file_path))
                 return FileResponse(str(index_html))

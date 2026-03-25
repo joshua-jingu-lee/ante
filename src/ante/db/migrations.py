@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
     async def main() -> None:
         db = Database("db/ante.db")
-        await db.initialize()
+        await db.connect()
         applied = await run_migrations(db, data_path=Path("data/"))
         if applied:
             print(f"마이그레이션 적용: {', '.join(applied)}")

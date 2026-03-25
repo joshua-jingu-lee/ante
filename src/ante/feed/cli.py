@@ -224,7 +224,9 @@ def run_backfill(
 
     # CLI 옵션으로 schedule 오버라이드
     if since is not None:
-        config.setdefault("schedule", {})["backfill_since"] = since  # type: ignore[union-attr]
+        schedule = config.setdefault("schedule", {})
+        if isinstance(schedule, dict):
+            schedule["backfill_since"] = since
 
     orchestrator = _build_orchestrator(cfg)
 
