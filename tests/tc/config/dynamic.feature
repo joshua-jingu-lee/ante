@@ -39,6 +39,12 @@ Feature: 동적 설정 관리
     Then 종료 코드는 0
     And stdout에 "history" 가 포함되어 있다
 
+  # --- 개별 설정 조회 (CLI) ---
+
+  Scenario: 개별 설정 키 조회 (CLI)
+    When 컨테이너에서 실행: ante config get approval.auto_approve.enabled --format json
+    Then 종료 코드는 0
+
   # --- 에러 케이스 ---
 
   Scenario: 존재하지 않는 설정 키 변경 (API)
@@ -46,3 +52,8 @@ Feature: 동적 설정 관리
       | field | value |
       | value | 1     |
     Then 응답 상태는 404
+
+  Scenario: 존재하지 않는 키 조회 (CLI)
+    When 컨테이너에서 실행: ante config get nonexistent_key_99999 --format json
+    Then 종료 코드는 0
+    And stdout에 "not_found" 가 포함되어 있다
