@@ -67,9 +67,15 @@ class StrategyStatus(StrEnum):
     """전략 상태."""
 
     REGISTERED = "registered"
-    ACTIVE = "active"
-    INACTIVE = "inactive"
+    ADOPTED = "adopted"
     ARCHIVED = "archived"
+
+
+_ALLOWED_TRANSITIONS: dict[StrategyStatus, set[StrategyStatus]] = {
+    StrategyStatus.REGISTERED: {StrategyStatus.ADOPTED, StrategyStatus.ARCHIVED},
+    StrategyStatus.ADOPTED: {StrategyStatus.ARCHIVED},
+    StrategyStatus.ARCHIVED: set(),
+}
 
 
 @dataclass
@@ -207,7 +213,18 @@ class StrategyRegistry:
         strategy_id: str,
         status: StrategyStatus,
     ) -> None:
-        """전략 상태 변경."""
+        """전략 상태 변경. 허용된 전환만 수행한다."""
+        record = await self.get(strategy_id)
+        if record is None:
+            raise StrategyError(f"Strategy not found: {strategy_id}")
+
+        allowed = _ALLOWED_TRANSITIONS.get(record.status, set())
+        if status not in allowed:
+            raise ValueError(
+                f"전환 불가: {record.status.value} → {status.value} "
+                f"(허용: {', '.join(s.value for s in sorted(allowed))})"
+            )
+
         await self._db.execute(
             "UPDATE strategies SET status = ? WHERE strategy_id = ?",
             (status.value, strategy_id),
