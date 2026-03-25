@@ -101,7 +101,7 @@ def approval_list(
         service = ApprovalService(db=db, eventbus=eventbus)
         await service.initialize()
 
-        requests = await service.list(status=status, type=approval_type)
+        requests = await service.list_approvals(status=status, type=approval_type)
         await db.close()
         return [
             {
@@ -367,7 +367,7 @@ async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
         return req
 
     # prefix 검색
-    all_requests = await service.list(limit=100)
+    all_requests = await service.list_approvals(limit=100)
     matches = [r for r in all_requests if r.id.startswith(id)]
     if len(matches) == 1:
         return matches[0]

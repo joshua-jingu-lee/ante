@@ -41,7 +41,7 @@ class FakeMemberService:
         self._members: dict[str, FakeMember] = {}
         self._token_counter = 0
 
-    async def list(
+    async def list_members(
         self,
         member_type: str | None = None,
         org: str | None = None,

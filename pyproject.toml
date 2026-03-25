@@ -62,23 +62,13 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "ante.cli.*",
-    "ante.main",
-    "ante.feed.transform.validate",
-    "ante.feed.cli",
-    "ante.notification.service",
-    "ante.member.*",
-    "ante.approval.service",
-    "ante.backtest.*",
-    "ante.bot.*",
-    "ante.gateway.stream_integration",
-    "ante.data.*",
-    "ante.db.migrations",
+    "ante.cli.commands.backtest",
+    "ante.cli.commands.bot",
+    "ante.cli.commands.init",
+    "ante.cli.commands.report",
+
     "ante.report.store",
-    "ante.rule.engine",
     "ante.strategy.registry",
-    "ante.web.app",
-    "ante.web.routes.strategies",
 ]
 ignore_errors = true
 

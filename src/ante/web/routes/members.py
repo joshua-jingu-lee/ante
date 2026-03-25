@@ -65,7 +65,7 @@ async def list_members(
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     """멤버 목록 조회."""
-    members = await svc.list(
+    members = await svc.list_members(
         member_type=type, org=org, status=status, limit=limit, offset=offset
     )
     total = await svc.count(member_type=type, org=org, status=status)

@@ -31,6 +31,16 @@ class StrategyMeta:
         "accepts_external_signals",
     )
 
+    name: str
+    version: str
+    description: str
+    author_name: str
+    author_id: str
+    symbols: list[str] | None
+    timeframe: str
+    exchange: str
+    accepts_external_signals: bool
+
     def __init__(
         self,
         name: str,

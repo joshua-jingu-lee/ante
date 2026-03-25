@@ -6,10 +6,14 @@ import logging
 import re
 import shutil
 from pathlib import Path
+from typing import Literal
 
 import polars as pl
 
 logger = logging.getLogger(__name__)
+
+# write_parquet compression 타입
+CompressionType = Literal["lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"]
 
 # data_type별 시간 컬럼명
 _TIME_COLUMN: dict[str, str] = {
@@ -104,7 +108,9 @@ class ParquetStore:
     """Parquet 파일 관리. 다양한 데이터 타입의 읽기/쓰기/파티셔닝 담당."""
 
     def __init__(
-        self, base_path: str | Path = "data/", compression: str = "snappy"
+        self,
+        base_path: str | Path = "data/",
+        compression: CompressionType = "snappy",
     ) -> None:
         self._base = Path(base_path)
         self._compression = compression

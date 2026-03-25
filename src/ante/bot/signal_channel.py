@@ -126,6 +126,7 @@ class SignalChannel:
         params = msg.get("params", {})
 
         try:
+            data: Any = None
             if method == "positions":
                 data = self._ctx.get_positions()
             elif method == "balance":

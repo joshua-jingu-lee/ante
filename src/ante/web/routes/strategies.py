@@ -117,7 +117,7 @@ async def list_strategies(
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for r, result in zip(records, results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 _logger.debug(
                     "전략 %s cumulative_return 계산 실패",
                     r.strategy_id,
@@ -263,6 +263,7 @@ async def get_strategy_performance(
         if bot_info:
             from ante.report.feedback import PerformanceFeedback
 
+            assert bot_manager is not None  # guarded by bot_info check
             feedback = PerformanceFeedback(
                 trade_service=trade_service,
                 bot_manager=bot_manager,

@@ -98,7 +98,9 @@ class LiveTradeHistoryView(TradeHistoryView):
                 "order_type": r.order_type,
                 "reason": r.reason,
                 "commission": r.commission,
-                "timestamp": r.timestamp.isoformat(),
+                "timestamp": r.timestamp.isoformat()
+                if r.timestamp is not None
+                else None,
             }
             for r in records
         ]
