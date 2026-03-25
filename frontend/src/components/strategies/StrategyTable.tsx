@@ -37,8 +37,8 @@ export default function StrategyTable({ items }: { items: Strategy[] }) {
                 </td>
                 <td className="px-3 py-3 border-b border-border text-[13px] text-text-muted">v{s.version}</td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">
-                  {s.author ? (
-                    <span>{s.author} {s.author_id && <span className="text-text-muted font-normal">{s.author_id}</span>}</span>
+                  {s.author_name ? (
+                    <span>{s.author_name} {s.author_id && s.author_id !== s.author_name && <span className="text-text-muted font-normal">{s.author_id}</span>}</span>
                   ) : (
                     <span className="text-text-muted">-</span>
                   )}

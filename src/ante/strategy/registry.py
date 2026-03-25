@@ -27,11 +27,39 @@ CREATE TABLE IF NOT EXISTS strategies (
     status               TEXT NOT NULL DEFAULT 'registered',
     registered_at        TEXT NOT NULL,
     description          TEXT DEFAULT '',
-    author               TEXT DEFAULT 'agent',
+    author_name          TEXT DEFAULT 'agent',
+    author_id            TEXT DEFAULT 'agent',
     validation_warnings  TEXT DEFAULT '[]',
     rationale            TEXT DEFAULT '',
     risks                TEXT DEFAULT '[]'
 );
+"""
+
+STRATEGY_REGISTRY_MIGRATION_AUTHOR_SPLIT = """
+-- author → author_name + author_id 분리 마이그레이션
+CREATE TABLE IF NOT EXISTS strategies_new (
+    strategy_id          TEXT PRIMARY KEY,
+    name                 TEXT NOT NULL,
+    version              TEXT NOT NULL,
+    filepath             TEXT NOT NULL,
+    status               TEXT NOT NULL DEFAULT 'registered',
+    registered_at        TEXT NOT NULL,
+    description          TEXT DEFAULT '',
+    author_name          TEXT DEFAULT 'agent',
+    author_id            TEXT DEFAULT 'agent',
+    validation_warnings  TEXT DEFAULT '[]',
+    rationale            TEXT DEFAULT '',
+    risks                TEXT DEFAULT '[]'
+);
+INSERT OR IGNORE INTO strategies_new
+    (strategy_id, name, version, filepath, status, registered_at,
+     description, author_name, author_id, validation_warnings, rationale, risks)
+SELECT
+    strategy_id, name, version, filepath, status, registered_at,
+    description, author, author, validation_warnings, rationale, risks
+FROM strategies;
+DROP TABLE strategies;
+ALTER TABLE strategies_new RENAME TO strategies;
 """
 
 
@@ -55,7 +83,8 @@ class StrategyRecord:
     status: StrategyStatus
     registered_at: datetime
     description: str = ""
-    author: str = "agent"
+    author_name: str = "agent"
+    author_id: str = "agent"
     validation_warnings: list[str] = field(default_factory=list)
     rationale: str = ""
     risks: list[str] = field(default_factory=list)
@@ -68,8 +97,29 @@ class StrategyRegistry:
         self._db = db
 
     async def initialize(self) -> None:
-        """스키마 생성."""
-        await self._db.execute_script(STRATEGY_REGISTRY_SCHEMA)
+        """스키마 생성 및 마이그레이션."""
+        # 기존 테이블이 있으면 author 컬럼 존재 여부를 확인하여 마이그레이션
+        if await self._needs_author_migration():
+            logger.info(
+                "strategies 테이블 author → author_name/author_id 마이그레이션 실행"
+            )
+            await self._db.execute_script(STRATEGY_REGISTRY_MIGRATION_AUTHOR_SPLIT)
+        else:
+            await self._db.execute_script(STRATEGY_REGISTRY_SCHEMA)
+
+    async def _needs_author_migration(self) -> bool:
+        """기존 strategies 테이블에 author 컬럼이 있는지 확인."""
+        try:
+            row = await self._db.fetch_one(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='strategies'"
+            )
+        except Exception:
+            return False
+        if row is None:
+            return False
+        ddl = row.get("sql", "") or ""
+        # author 컬럼이 있고 author_name 컬럼이 없으면 마이그레이션 필요
+        return "author" in ddl and "author_name" not in ddl
 
     async def register(
         self,
@@ -95,7 +145,8 @@ class StrategyRegistry:
             status=StrategyStatus.REGISTERED,
             registered_at=now,
             description=meta.description,
-            author=meta.author,
+            author_name=meta.author_name,
+            author_id=meta.author_id,
             validation_warnings=warnings or [],
             rationale=rationale,
             risks=risks or [],
@@ -104,9 +155,9 @@ class StrategyRegistry:
         await self._db.execute(
             """INSERT INTO strategies
                (strategy_id, name, version, filepath, status,
-                registered_at, description, author,
+                registered_at, description, author_name, author_id,
                 validation_warnings, rationale, risks)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.strategy_id,
                 record.name,
@@ -115,7 +166,8 @@ class StrategyRegistry:
                 record.status.value,
                 record.registered_at.isoformat(),
                 record.description,
-                record.author,
+                record.author_name,
+                record.author_id,
                 json.dumps(record.validation_warnings),
                 record.rationale,
                 json.dumps(record.risks),
@@ -187,7 +239,8 @@ class StrategyRegistry:
             status=StrategyStatus(row["status"]),
             registered_at=datetime.fromisoformat(row["registered_at"]),
             description=row["description"],
-            author=row["author"],
+            author_name=row.get("author_name", row.get("author", "agent")),
+            author_id=row.get("author_id", row.get("author", "agent")),
             validation_warnings=json.loads(row["validation_warnings"]),
             rationale=row.get("rationale", ""),
             risks=json.loads(row["risks"]) if row.get("risks") else [],

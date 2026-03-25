@@ -24,7 +24,8 @@ class FakeStrategyRecord:
     status: StrategyStatus = StrategyStatus.ACTIVE
     registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     description: str = ""
-    author: str = "agent"
+    author_name: str = "agent"
+    author_id: str = "agent"
     validation_warnings: list[str] = field(default_factory=list)
     rationale: str = ""
     risks: list[str] = field(default_factory=list)

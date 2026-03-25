@@ -135,7 +135,8 @@ def submit(ctx: click.Context, path: str) -> None:
                 "name": record.name,
                 "version": record.version,
                 "description": record.description,
-                "author": record.author,
+                "author_name": record.author_name,
+                "author_id": record.author_id,
                 "filepath": str(record.filepath),
                 "registered_at": record.registered_at.isoformat(),
                 "validation_warnings": record.validation_warnings,
@@ -193,7 +194,8 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
                     "version": r.version,
                     "status": r.status.value,
                     "description": r.description,
-                    "author": r.author,
+                    "author_name": r.author_name,
+                    "author_id": r.author_id,
                     "registered_at": r.registered_at.isoformat(),
                 }
                 for r in records
@@ -212,7 +214,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
     else:
         fmt.table(
             rows,
-            ["strategy_id", "name", "version", "status", "author"],
+            ["strategy_id", "name", "version", "status", "author_name", "author_id"],
         )
 
 
@@ -242,7 +244,8 @@ def strategy_info(ctx: click.Context, name: str) -> None:
                 "version": record.version,
                 "status": record.status.value,
                 "description": record.description,
-                "author": record.author,
+                "author_name": record.author_name,
+                "author_id": record.author_id,
                 "filepath": record.filepath,
                 "registered_at": record.registered_at.isoformat(),
                 "validation_warnings": record.validation_warnings,
@@ -287,7 +290,8 @@ def _print_info_text(result: dict) -> None:
     click.echo(f"  {'버전':15s}: {result['version']}")
     click.echo(f"  {'상태':15s}: {result['status']}")
     click.echo(f"  {'설명':15s}: {result['description']}")
-    click.echo(f"  {'작성자':15s}: {result['author']}")
+    click.echo(f"  {'작성자':15s}: {result['author_name']}")
+    click.echo(f"  {'작성자 ID':15s}: {result['author_id']}")
     click.echo(f"  {'파일 경로':15s}: {result['filepath']}")
     click.echo(f"  {'등록일':15s}: {result['registered_at']}")
     _print_info_warnings(result.get("validation_warnings"))

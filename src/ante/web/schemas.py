@@ -174,6 +174,7 @@ class BotInfo(BaseModel):
     strategy_id: str = ""
     strategy_name: str | None = None
     strategy_author_name: str | None = None
+    strategy_author_id: str | None = None
     interval_seconds: int = 60
     started_at: str | None = None
     stopped_at: str | None = None
@@ -228,7 +229,8 @@ class StrategyListItem(BaseModel):
     name: str
     version: str
     status: str
-    author: str
+    author_name: str = "agent"
+    author_id: str = "agent"
     bot_id: str | None = None
     bot_status: str | None = None
     cumulative_return: float | None = None
@@ -250,7 +252,8 @@ class StrategyInfo(BaseModel):
     status: str = ""
     registered_at: str = ""
     description: str = ""
-    author: str = "agent"
+    author_name: str = "agent"
+    author_id: str = "agent"
     validation_warnings: list[str] = []
     rationale: str = ""
     risks: list[str] = []
