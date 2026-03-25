@@ -45,3 +45,41 @@ enabled = true
 bot_stop = true
 bot_create_paper = true
 budget_change_max = 10000000
+
+# ── 리스크 룰 ──
+
+[[rules.global]]
+type = "daily_loss_limit"
+enabled = true
+priority = 10
+params = { max_loss_pct = 5.0 }
+
+[[rules.global]]
+type = "total_exposure_limit"
+enabled = true
+priority = 20
+params = { max_exposure_percent = 0.8 }
+
+[[rules.global]]
+type = "trading_hours"
+enabled = true
+priority = 30
+params = { allowed_hours = "09:00-15:30" }
+
+[[rules.strategy.qa_default]]
+type = "position_size"
+enabled = true
+priority = 10
+params = { max_position_percent = 0.1 }
+
+[[rules.strategy.qa_default]]
+type = "unrealized_loss_limit"
+enabled = true
+priority = 20
+params = { max_unrealized_loss_percent = 0.1 }
+
+[[rules.strategy.qa_default]]
+type = "trade_frequency"
+enabled = true
+priority = 30
+params = { max_trades_per_hour = 10 }
