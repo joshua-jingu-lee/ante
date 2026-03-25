@@ -474,7 +474,7 @@ class TestRuleCommands:
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(cli, ["rule", "info", "nonexistent"])
-                assert result.exit_code == 0
+                assert result.exit_code == 1
                 assert "찾을 수 없습니다" in result.output
 
 
