@@ -35,8 +35,8 @@ Feature: 봇 생명주기
       | balance | 10000000 |
     Then 응답 상태는 200
 
-  Scenario: QA 전략 확보
-    When GET /api/strategies
+  Scenario: QA 샘플 전략 확보
+    When GET /api/strategies?name=qa_sample
     Then 응답 상태는 200
     And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
 
