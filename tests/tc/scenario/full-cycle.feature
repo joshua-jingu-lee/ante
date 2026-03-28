@@ -4,6 +4,9 @@ Feature: 전략 라이프사이클 전체 흐름 (E2E)
   Background:
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
+    # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
+    And DELETE /api/bots/qa-e2e-bot 요청 (실패 무시)
+    And DELETE /api/accounts/qa-e2e-cycle 요청 (실패 무시)
 
   # 1. 계좌 생성
   Scenario: E2E 테스트 계좌 생성
