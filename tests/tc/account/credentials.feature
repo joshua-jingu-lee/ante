@@ -54,7 +54,7 @@ Feature: 계좌 인증정보 관리
     And stdout JSON의 .credentials.app_key 는 null이 아니다
 
   Scenario: 인증정보 설정 후 봇 생성 및 시작 가능
-    When GET /api/strategies
+    When GET /api/strategies?name=qa_sample
     Then 응답 상태는 200
     And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
     When POST /api/bots 요청:

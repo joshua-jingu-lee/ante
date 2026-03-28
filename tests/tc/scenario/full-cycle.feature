@@ -32,8 +32,8 @@ Feature: 전략 라이프사이클 전체 흐름 (E2E)
     Then 응답 상태는 200
 
   # 3. 전략 확보
-  Scenario: 전략 ID 확보
-    When GET /api/strategies
+  Scenario: QA 매수 전략 확보
+    When GET /api/strategies?name=qa_buy_signal
     Then 응답 상태는 200
     And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
 

@@ -41,8 +41,8 @@ Feature: Treasury 예산 할당·회수
     Then 응답 상태는 200
     And 응답 body.total_balance 는 10000000
 
-  Scenario: QA 전략 확보
-    When GET /api/strategies
+  Scenario: QA 샘플 전략 확보
+    When GET /api/strategies?name=qa_sample
     Then 응답 상태는 200
     And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
 
