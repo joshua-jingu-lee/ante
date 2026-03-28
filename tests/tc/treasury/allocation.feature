@@ -6,7 +6,6 @@ Feature: Treasury 예산 할당·회수
     And QA Admin 인증 토큰이 확보되어 있다
     # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
     And DELETE /api/bots/qa-alloc-bot-01 요청 (실패 무시)
-    And DELETE /api/accounts/qa-treasury-alloc-01 요청 (실패 무시)
 
   # ── 환경 정리: 이전 실행 잔여 할당 회수 ──
 
@@ -42,9 +41,9 @@ Feature: Treasury 예산 할당·회수
     And 응답 body.total_balance 는 10000000
 
   Scenario: QA 샘플 전략 확보
-    When GET /api/strategies?name=qa_sample
+    When GET /api/strategies
     Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
+    And name이 "qa_sample"인 항목의 id 를 {strategy_id}로 저장한다
 
   Scenario: 할당 테스트용 봇 생성 (API)
     When POST /api/bots 요청:

@@ -5,8 +5,6 @@ Feature: 계좌 리스크 룰 관리
   Background:
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
-    # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
-    And DELETE /api/accounts/qa-rules-acct-01 요청 (실패 무시)
 
   # ── 사전 준비: 테스트용 계좌 생성 ──
 

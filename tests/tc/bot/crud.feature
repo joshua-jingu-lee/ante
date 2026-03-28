@@ -7,7 +7,6 @@ Feature: 봇 CRUD
     And QA Admin 인증 토큰이 확보되어 있다
     # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
     And DELETE /api/bots/qa-bot-crud-bot-01 요청 (실패 무시)
-    And DELETE /api/accounts/qa-bot-crud-01 요청 (실패 무시)
 
   # ── 사전 준비: 계좌 + 전략 + 잔고 확보 ──
 
@@ -34,10 +33,10 @@ Feature: 봇 CRUD
     Then 응답 상태는 200
 
   Scenario: QA 샘플 전략 확보
-    When GET /api/strategies?name=qa_sample
+    When GET /api/strategies
     Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
-    And 첫 번째 항목의 name 을 {strategy_name}으로 저장한다
+    And name이 "qa_sample"인 항목의 id 를 {strategy_id}로 저장한다
+    And name이 "qa_sample"인 항목의 name 을 {strategy_name}으로 저장한다
 
   # ── 봇 생성 ──
 

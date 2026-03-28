@@ -74,9 +74,9 @@ Feature: 계좌 생명주기
     And 응답 body.account.account_id 를 {suspended_account_id}로 저장한다
     When POST /api/accounts/{suspended_account_id}/suspend
     Then 응답 상태는 200
-    When GET /api/strategies?name=qa_sample
+    When GET /api/strategies
     Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
+    And name이 "qa_sample"인 항목의 id 를 {strategy_id}로 저장한다
     When POST /api/bots 요청:
       | field      | value                  |
       | bot_id     | qa-lifecycle-bot-01    |
