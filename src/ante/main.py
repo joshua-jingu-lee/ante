@@ -835,6 +835,19 @@ async def _init_approval(s: Services) -> None:
     # 사전 검증 validator 정의
     from ante.bot.config import BotStatus
 
+    async def _validate_strategy_adopt(params: dict) -> list[ValidationResult]:
+        """전략 채택 사전 검증: report_id·strategy_id 존재 확인."""
+        strategy_id = params.get("strategy_id", "")
+        if not strategy_id:
+            return [ValidationResult("fail", "strategy_id가 누락되었습니다", "system")]
+        report_id = params.get("report_id", "")
+        if not report_id:
+            return [ValidationResult("fail", "report_id가 누락되었습니다", "system")]
+        record = await s.strategy_registry.get(strategy_id)
+        if record is None:
+            return [ValidationResult("fail", "전략을 찾을 수 없습니다", "system")]
+        return [ValidationResult("pass", "", "system")]
+
     async def _validate_strategy_retire(params: dict) -> list[ValidationResult]:
         """전략 폐기 사전 검증: 전략 상태 확인."""
         strategy_id = params.get("strategy_id", "")
@@ -963,6 +976,7 @@ async def _init_approval(s: Services) -> None:
         return [ValidationResult("pass", "", "system:treasury")]
 
     approval_validators: dict = {
+        "strategy_adopt": _validate_strategy_adopt,
         "strategy_retire": _validate_strategy_retire,
         "bot_create": _validate_bot_create,
         "bot_delete": _validate_bot_delete,

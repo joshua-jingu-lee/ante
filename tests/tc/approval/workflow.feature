@@ -9,12 +9,12 @@ Feature: 결재 워크플로우 승인/거부
   # ── 사전 준비: pending 결재 시딩 ──
 
   Scenario: 승인 테스트용 결재 생성
-    When 컨테이너에서 실행: ante approval request --type strategy_adopt --title "QA 승인 테스트" --body "" --params '{}' --format json
+    When 컨테이너에서 실행: ante approval request --type general --title "QA 승인 테스트" --body "" --params '{}' --format json
     Then 종료 코드는 0
     And stdout JSON의 .id 를 {approval_id}로 저장한다
 
   Scenario: 거부 테스트용 결재 생성
-    When 컨테이너에서 실행: ante approval request --type strategy_adopt --title "QA 거부 테스트" --body "" --params '{}' --format json
+    When 컨테이너에서 실행: ante approval request --type general --title "QA 거부 테스트" --body "" --params '{}' --format json
     Then 종료 코드는 0
     And stdout JSON의 .id 를 {reject_approval_id}로 저장한다
 
