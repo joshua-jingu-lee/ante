@@ -7,6 +7,7 @@ import json
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -23,6 +24,7 @@ def approval() -> None:
 @click.option("--params", "params_json", default="{}", help="실행 파라미터 (JSON)")
 @click.option("--reference-id", default="", help="참조 ID (report_id 등)")
 @click.option("--expires-in", default="", help="만료 기한 (예: 72h, 7d)")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
@@ -78,6 +80,7 @@ def request(
 @click.option("--status", default=None, help="상태 필터")
 @click.option("--type", "approval_type", default=None, help="유형 필터")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:read")
@@ -126,6 +129,7 @@ def approval_list(
 @approval.command()
 @click.argument("id")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:read")
@@ -183,6 +187,7 @@ def info(ctx: click.Context, id: str, db_path: str) -> None:
 )
 @click.option("--detail", default="", help="검토 상세")
 @click.option("--db-path", default="db/ante.db", help="DB 경로")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:read")
@@ -239,6 +244,7 @@ def review(
     default=None,
     help="수정할 파라미터 (JSON, 미지정 시 기존 값 유지)",
 )
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
@@ -282,6 +288,7 @@ def reopen(
 
 @approval.command("cancel")
 @click.argument("id")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
@@ -307,6 +314,7 @@ def cancel(ctx: click.Context, id: str) -> None:
 
 @approval.command("approve")
 @click.argument("id")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
@@ -333,6 +341,7 @@ def approve(ctx: click.Context, id: str) -> None:
 @approval.command("reject")
 @click.argument("id")
 @click.option("--reason", default="", help="거절 사유")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
