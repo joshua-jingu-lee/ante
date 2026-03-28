@@ -9,7 +9,6 @@ Feature: 봇 생명주기
     And DELETE /api/bots/qa-bot-life-bot-01 요청 (실패 무시)
     And DELETE /api/bots/qa-bot-life-bot-02 요청 (실패 무시)
     And DELETE /api/bots/qa-bot-life-bot-03 요청 (실패 무시)
-    And DELETE /api/accounts/qa-bot-life-01 요청 (실패 무시)
 
   # ── 사전 준비: 계좌 + 잔고 + 전략 + 크레덴셜 + 봇 생성 ──
 
@@ -36,9 +35,9 @@ Feature: 봇 생명주기
     Then 응답 상태는 200
 
   Scenario: QA 샘플 전략 확보
-    When GET /api/strategies?name=qa_sample
+    When GET /api/strategies
     Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
+    And name이 "qa_sample"인 항목의 id 를 {strategy_id}로 저장한다
 
   Scenario: 생명주기 테스트 봇 생성 (API)
     When POST /api/bots 요청:

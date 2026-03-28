@@ -6,7 +6,6 @@ Feature: 거래 실행 및 포지션 반영
     And QA Admin 인증 토큰이 확보되어 있다
     # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
     And DELETE /api/bots/qa-trade-bot-01 요청 (실패 무시)
-    And DELETE /api/accounts/qa-trade-exec-01 요청 (실패 무시)
 
   # --- 사전 준비 ---
 
@@ -32,9 +31,9 @@ Feature: 거래 실행 및 포지션 반영
     Then 응답 상태는 200
 
   Scenario: QA 매수 전략 확보
-    When GET /api/strategies?name=qa_buy_signal
+    When GET /api/strategies
     Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
+    And name이 "qa_buy_signal"인 항목의 id 를 {strategy_id}로 저장한다
 
   Scenario: 매수 시그널 봇 생성
     When POST /api/bots 요청:

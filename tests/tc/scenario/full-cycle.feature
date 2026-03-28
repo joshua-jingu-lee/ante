@@ -6,7 +6,6 @@ Feature: 전략 라이프사이클 전체 흐름 (E2E)
     And QA Admin 인증 토큰이 확보되어 있다
     # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
     And DELETE /api/bots/qa-e2e-bot 요청 (실패 무시)
-    And DELETE /api/accounts/qa-e2e-cycle 요청 (실패 무시)
 
   # 1. 계좌 생성
   Scenario: E2E 테스트 계좌 생성
@@ -33,9 +32,9 @@ Feature: 전략 라이프사이클 전체 흐름 (E2E)
 
   # 3. 전략 확보
   Scenario: QA 매수 전략 확보
-    When GET /api/strategies?name=qa_buy_signal
+    When GET /api/strategies
     Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {strategy_id}로 저장한다
+    And name이 "qa_buy_signal"인 항목의 id 를 {strategy_id}로 저장한다
 
   # 4. 봇 생성 및 실행
   Scenario: 봇 생성
