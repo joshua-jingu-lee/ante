@@ -4,6 +4,9 @@ Feature: Treasury 예산 할당·회수
   Background:
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
+    # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
+    And DELETE /api/bots/qa-alloc-bot-01 요청 (실패 무시)
+    And DELETE /api/accounts/qa-treasury-alloc-01 요청 (실패 무시)
 
   # ── 환경 정리: 이전 실행 잔여 할당 회수 ──
 

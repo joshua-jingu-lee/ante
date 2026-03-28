@@ -4,6 +4,9 @@ Feature: 멤버 관리
   Background:
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
+    # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
+    And DELETE /api/members/qa-test-agent-01 요청 (실패 무시)
+    And DELETE /api/members/qa-test-human-01 요청 (실패 무시)
 
   # ── 멤버 등록 ──
 

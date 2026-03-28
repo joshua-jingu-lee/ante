@@ -4,6 +4,9 @@ Feature: 거래 실행 및 포지션 반영
   Background:
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
+    # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
+    And DELETE /api/bots/qa-trade-bot-01 요청 (실패 무시)
+    And DELETE /api/accounts/qa-trade-exec-01 요청 (실패 무시)
 
   # --- 사전 준비 ---
 

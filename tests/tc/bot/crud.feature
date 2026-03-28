@@ -5,6 +5,9 @@ Feature: 봇 CRUD
   Background:
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
+    # setup — 이전 실행 잔존 데이터 정리 (실패 무시)
+    And DELETE /api/bots/qa-bot-crud-bot-01 요청 (실패 무시)
+    And DELETE /api/accounts/qa-bot-crud-01 요청 (실패 무시)
 
   # ── 사전 준비: 계좌 + 전략 + 잔고 확보 ──
 
