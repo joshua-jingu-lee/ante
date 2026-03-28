@@ -6,7 +6,19 @@ Feature: 결재 워크플로우 승인/거부
     Given ante-qa 컨테이너가 실행 중이다
     And QA Admin 인증 토큰이 확보되어 있다
 
-  # ── 사전 준비: pending 결재 확보 ──
+  # ── 사전 준비: pending 결재 시딩 ──
+
+  Scenario: 승인 테스트용 결재 생성
+    When 컨테이너에서 실행: ante approval request --type strategy_adopt --title "QA 승인 테스트" --body "" --params '{}' --format json
+    Then 종료 코드는 0
+    And stdout JSON의 .id 를 {approval_id}로 저장한다
+
+  Scenario: 거부 테스트용 결재 생성
+    When 컨테이너에서 실행: ante approval request --type strategy_adopt --title "QA 거부 테스트" --body "" --params '{}' --format json
+    Then 종료 코드는 0
+    And stdout JSON의 .id 를 {reject_approval_id}로 저장한다
+
+  # ── pending 결재 확인 ──
 
   Scenario: pending 결재 목록 조회 (API)
     When GET /api/approvals?status=pending
@@ -14,10 +26,6 @@ Feature: 결재 워크플로우 승인/거부
     And 응답 body.approvals 는 null이 아니다
 
   Scenario: 결재 상세 조회 (API)
-    # pending 결재가 하나 이상 존재해야 한다 (봇 생성 등에서 자동 생성)
-    When GET /api/approvals?status=pending
-    Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {approval_id}로 저장한다
     When GET /api/approvals/{approval_id}
     Then 응답 상태는 200
     And 응답 body.approval.id 는 null이 아니다
@@ -41,12 +49,7 @@ Feature: 결재 워크플로우 승인/거부
       | memo   |          |
     Then 응답 상태는 404
 
-  # ── 거부 플로우: 새 pending 결재 확보 ──
-
-  Scenario: 거부 테스트용 pending 결재 확보 (API)
-    When GET /api/approvals?status=pending
-    Then 응답 상태는 200
-    And 첫 번째 항목의 id 를 {reject_approval_id}로 저장한다
+  # ── 거부 플로우 ──
 
   Scenario: 결재 거부 (API)
     When PATCH /api/approvals/{reject_approval_id}/status 요청:
