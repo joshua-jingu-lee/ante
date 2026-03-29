@@ -12,6 +12,10 @@ docs/
 config/secrets.env
 config/system.toml
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 
 # Python
 __pycache__/
@@ -22,6 +26,10 @@ __pycache__/
 dist/
 build/
 .coverage
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # IDE
 .vscode/
@@ -34,10 +42,17 @@ frontend/dist/
 frontend/node_modules/
 src/ante/web/static/
 
+# Docker
+docker-compose.override.yml
+
 # E2E test artifacts
 tests/e2e/screenshots/
 test-results/
 
+# Logs
+*.log
+
 # OS
 .DS_Store
 Thumbs.db
+._*
