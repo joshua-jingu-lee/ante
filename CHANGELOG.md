@@ -2,6 +2,111 @@
 
 <!-- version list -->
 
+## v0.8.1 (2026-03-29)
+
+### Bug Fixes
+
+- POST /api/reports 500 에러 수정 (#1065) ([#1069](https://github.com/joshua-jingu-lee/ante/pull/1069),
+  [`d60e826`](https://github.com/joshua-jingu-lee/ante/commit/d60e82663d6a3fcb5f7ffffed79caedbb5f37c47))
+
+- Rule info 미존재 시 종료 코드 1 반환에 맞춰 유닛 테스트 수정
+  ([#1056](https://github.com/joshua-jingu-lee/ante/pull/1056),
+  [`f5decef`](https://github.com/joshua-jingu-lee/ante/commit/f5decef32aae42168e4332b847557815ff0b65ed))
+
+- **api**: GET /api/members 에러 핸들링 및 로깅 추가 (#1084)
+  ([#1087](https://github.com/joshua-jingu-lee/ante/pull/1087),
+  [`b6c979d`](https://github.com/joshua-jingu-lee/ante/commit/b6c979d6b709446fbe78b8e9bfee3c34ce873409))
+
+- **approval**: Strategy_adopt 결재 생성 시 params 검증 추가
+  ([#1083](https://github.com/joshua-jingu-lee/ante/pull/1083),
+  [`1a259ab`](https://github.com/joshua-jingu-lee/ante/commit/1a259ab90e00936ddc5ef0928cb2d5f2d05a2a68))
+
+- **cli**: Approval 서브커맨드에 @format_option 데코레이터 추가
+  ([#1080](https://github.com/joshua-jingu-lee/ante/pull/1080),
+  [`d5364f7`](https://github.com/joshua-jingu-lee/ante/commit/d5364f73f29f6c07a7bc16ec9e56df6ef19d14d9))
+
+- **cli**: Backtest run 시작일 > 종료일 입력 검증 추가 (#1066)
+  ([#1068](https://github.com/joshua-jingu-lee/ante/pull/1068),
+  [`ef5f17b`](https://github.com/joshua-jingu-lee/ante/commit/ef5f17ba72d4d69f21d8ddc8211b4a99ec433bee))
+
+- **tc**: Approval/workflow.feature pending 결재 자체 시딩으로 SKIP 해소
+  ([#1077](https://github.com/joshua-jingu-lee/ante/pull/1077),
+  [`652ee9a`](https://github.com/joshua-jingu-lee/ante/commit/652ee9a761885e3e8fc5829dbc2b1100d48d6516))
+
+- **tc**: Background 계좌 DELETE 제거 및 전략 필터 Step 변경
+  ([#1081](https://github.com/joshua-jingu-lee/ante/pull/1081),
+  [`7c8a282`](https://github.com/joshua-jingu-lee/ante/commit/7c8a2820ec8d98eea1e9f399c9f4fda5f68eb33b))
+
+- **tc**: Background에 잔존 데이터 정리 Step 추가하여 반복 실행 안정성 확보
+  ([#1075](https://github.com/joshua-jingu-lee/ante/pull/1075),
+  [`49bc94c`](https://github.com/joshua-jingu-lee/ante/commit/49bc94c36f26fed091effbfc5e92d5ad702816cd))
+
+- **tc**: Bot/crud.feature 미구현 엔드포인트 참조 수정
+  ([#1088](https://github.com/joshua-jingu-lee/ante/pull/1088),
+  [`554f038`](https://github.com/joshua-jingu-lee/ante/commit/554f0387d9e7b9946a6313ddd5009c3264d57ed1))
+
+- **tc**: CLI --format json 옵션 위치 수정 및 기대값 불일치 해소 (#1064)
+  ([#1067](https://github.com/joshua-jingu-lee/ante/pull/1067),
+  [`5c83775`](https://github.com/joshua-jingu-lee/ante/commit/5c837753a253737a58d680f106f1d2ac15eb0208))
+
+- **tc**: QA 기대값 불일치 4건 수정 (#1070) ([#1071](https://github.com/joshua-jingu-lee/ante/pull/1071),
+  [`f622546`](https://github.com/joshua-jingu-lee/ante/commit/f622546388e6e50fed309f3c293589f156234cf2))
+
+- **tc**: Rule/query.feature QA 환경 기본 룰 미시딩으로 3건 FAIL (#1086)
+  ([#1089](https://github.com/joshua-jingu-lee/ante/pull/1089),
+  [`ada94fd`](https://github.com/joshua-jingu-lee/ante/commit/ada94fd4e187c55bccd8c4f1d6793de6095a9075))
+
+- **tc**: TC 스펙/구현체 불일치 4건 수정 + 개선 2건 ([#1053](https://github.com/joshua-jingu-lee/ante/pull/1053),
+  [`2dab1da`](https://github.com/joshua-jingu-lee/ante/commit/2dab1da00a6471d569208520872ff091c33ab856))
+
+- **tc**: 전략 조회 TC에 전략 이름을 명시적으로 지정 ([#1076](https://github.com/joshua-jingu-lee/ante/pull/1076),
+  [`72397bb`](https://github.com/joshua-jingu-lee/ante/commit/72397bbb4386aebb6c1ed4d214a0b8a4b04c7b5f))
+
+### Testing
+
+- 리스크 룰 조회 TC 추가 (#1043) ([#1056](https://github.com/joshua-jingu-lee/ante/pull/1056),
+  [`f5decef`](https://github.com/joshua-jingu-lee/ante/commit/f5decef32aae42168e4332b847557815ff0b65ed))
+
+- 리스크 룰 조회 TC 추가 (rule/query.feature) #1043
+  ([#1056](https://github.com/joshua-jingu-lee/ante/pull/1056),
+  [`f5decef`](https://github.com/joshua-jingu-lee/ante/commit/f5decef32aae42168e4332b847557815ff0b65ed))
+
+- **approval**: 결재 워크플로우 승인/거부 TC 추가 (#1042)
+  ([#1055](https://github.com/joshua-jingu-lee/ante/pull/1055),
+  [`91921b4`](https://github.com/joshua-jingu-lee/ante/commit/91921b46c0eac5089fa82d4c17f95e4e0be4b72d))
+
+- **audit**: 감사 로그 조회 및 필터링 TC 추가 (#1046)
+  ([#1057](https://github.com/joshua-jingu-lee/ante/pull/1057),
+  [`fc9ca46`](https://github.com/joshua-jingu-lee/ante/commit/fc9ca462e5f29c2c549bab0a0d44dafe298df795))
+
+- **backtest**: 백테스트 실행 및 성과 검증 TC 추가 (#1044)
+  ([#1058](https://github.com/joshua-jingu-lee/ante/pull/1058),
+  [`8074e2d`](https://github.com/joshua-jingu-lee/ante/commit/8074e2d7d3aa82c4622c67a38a6baf65b3ac7dd8))
+
+- **data**: 데이터 피드 및 저장 관리 TC 추가 (feed.feature)
+  ([#1061](https://github.com/joshua-jingu-lee/ante/pull/1061),
+  [`0a9f183`](https://github.com/joshua-jingu-lee/ante/commit/0a9f183650d3394d23392d71752b138420d69fb5))
+
+- **report**: 리포트 제출 및 조회 TC 추가 (#1045)
+  ([#1059](https://github.com/joshua-jingu-lee/ante/pull/1059),
+  [`d34adc1`](https://github.com/joshua-jingu-lee/ante/commit/d34adc199aeae7e21e43877f7cbe8bd70d371c07))
+
+- **report**: 성과 집계 조회 TC 추가 (#1048) ([#1060](https://github.com/joshua-jingu-lee/ante/pull/1060),
+  [`703d1fd`](https://github.com/joshua-jingu-lee/ante/commit/703d1fd56f405324135bb03b6ded38937b51865d))
+
+- **scenario**: E2E 전체 사이클 TC 추가 (#1050)
+  ([#1063](https://github.com/joshua-jingu-lee/ante/pull/1063),
+  [`c0f2e4b`](https://github.com/joshua-jingu-lee/ante/commit/c0f2e4b0adcbeb5f13645d21ae37e05f2365868a))
+
+- **trade**: 거래 실행 및 포지션 반영 TC 추가 (#1041)
+  ([#1054](https://github.com/joshua-jingu-lee/ante/pull/1054),
+  [`b362897`](https://github.com/joshua-jingu-lee/ante/commit/b362897bec06fb5276730fb858f9714d963ce977))
+
+- **trade,config**: Trade/query, config/dynamic TC 시나리오 확장
+  ([#1062](https://github.com/joshua-jingu-lee/ante/pull/1062),
+  [`5c82e6a`](https://github.com/joshua-jingu-lee/ante/commit/5c82e6a5192dd61d154735208018f967a6527445))
+
+
 ## v0.8.0 (2026-03-25)
 
 ### Bug Fixes
