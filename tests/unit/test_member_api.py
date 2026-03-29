@@ -467,3 +467,81 @@ class TestPermissionDeniedErrorHandling:
             json={"scopes": ["trade:read"]},
         )
         assert resp.status_code == 403
+
+
+class TestErrorHandlingLogging:
+    """서비스 예외 발생 시 503 응답과 로깅을 검증."""
+
+    def test_list_members_service_error_returns_503(self, client, member_service):
+        """list_members에서 예외 발생 시 503 반환."""
+
+        async def raise_error(**kwargs):
+            raise RuntimeError("DB connection lost")
+
+        member_service.list_members = raise_error
+        resp = client.get("/api/members")
+        assert resp.status_code == 503
+        assert "조회할 수 없습니다" in resp.json()["detail"]
+
+    def test_list_members_count_error_returns_503(self, client, member_service):
+        """count에서 예외 발생 시 503 반환."""
+
+        async def raise_error(**kwargs):
+            raise RuntimeError("DB connection lost")
+
+        member_service.count = raise_error
+        resp = client.get("/api/members")
+        assert resp.status_code == 503
+
+    def test_list_members_service_error_logs_params(
+        self, client, member_service, caplog
+    ):
+        """예외 발생 시 쿼리 파라미터가 로그에 포함."""
+        import logging
+
+        async def raise_error(**kwargs):
+            raise RuntimeError("DB connection lost")
+
+        member_service.list_members = raise_error
+        with caplog.at_level(logging.ERROR, logger="ante.web.routes.members"):
+            client.get("/api/members?type=agent&org=default&status=active")
+        assert "type=agent" in caplog.text
+        assert "org=default" in caplog.text
+        assert "status=active" in caplog.text
+
+    def test_get_member_service_error_returns_503(self, client, member_service):
+        """get_member에서 예외 발생 시 503 반환."""
+
+        async def raise_error(member_id):
+            raise RuntimeError("DB connection lost")
+
+        member_service.get = raise_error
+        resp = client.get("/api/members/agent-01")
+        assert resp.status_code == 503
+        assert "조회할 수 없습니다" in resp.json()["detail"]
+
+    def test_get_member_service_error_logs_member_id(
+        self, client, member_service, caplog
+    ):
+        """get_member 예외 시 member_id가 로그에 포함."""
+        import logging
+
+        async def raise_error(member_id):
+            raise RuntimeError("DB connection lost")
+
+        member_service.get = raise_error
+        with caplog.at_level(logging.ERROR, logger="ante.web.routes.members"):
+            client.get("/api/members/agent-01")
+        assert "agent-01" in caplog.text
+
+    def test_list_members_normal_response_unchanged(self, client, member_service):
+        """정상 케이스의 응답은 기존과 동일."""
+        member_service._members["agent-01"] = FakeMember(
+            member_id="agent-01", type="agent", name="테스트"
+        )
+        resp = client.get("/api/members")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["members"]) == 1
+        assert data["total"] == 1
+        assert data["members"][0]["member_id"] == "agent-01"
