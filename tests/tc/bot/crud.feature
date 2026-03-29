@@ -93,7 +93,7 @@ Feature: 봇 CRUD
     And 응답 body.bot.interval_seconds 는 120
 
   Scenario: 봇 예산 수정 전 잔고 확보 (API)
-    When PUT /api/treasury/{account_id}/balance 요청:
+    When POST /api/treasury/balance 요청:
       | field   | value    |
       | balance | 10000000 |
     Then 응답 상태는 200
