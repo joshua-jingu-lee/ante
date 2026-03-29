@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from typing import Annotated, Any
 
@@ -18,6 +19,8 @@ from ante.web.schemas import (
     MemberTokenResponse,
     OkResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -65,10 +68,23 @@ async def list_members(
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     """멤버 목록 조회."""
-    members = await svc.list_members(
-        member_type=type, org=org, status=status, limit=limit, offset=offset
-    )
-    total = await svc.count(member_type=type, org=org, status=status)
+    try:
+        members = await svc.list_members(
+            member_type=type, org=org, status=status, limit=limit, offset=offset
+        )
+        total = await svc.count(member_type=type, org=org, status=status)
+    except Exception:
+        logger.exception(
+            "멤버 목록 조회 실패 (type=%s, org=%s, status=%s, limit=%d, offset=%d)",
+            type,
+            org,
+            status,
+            limit,
+            offset,
+        )
+        raise HTTPException(
+            status_code=503, detail="멤버 목록을 조회할 수 없습니다"
+        ) from None
     return {"members": [asdict(m) for m in members], "total": total}
 
 
@@ -130,7 +146,13 @@ async def get_member(
     svc: Annotated[Any, Depends(get_member_service)],
 ) -> dict:
     """멤버 상세 조회."""
-    member = await svc.get(member_id)
+    try:
+        member = await svc.get(member_id)
+    except Exception:
+        logger.exception("멤버 상세 조회 실패 (member_id=%s)", member_id)
+        raise HTTPException(
+            status_code=503, detail="멤버 정보를 조회할 수 없습니다"
+        ) from None
     if member is None:
         raise HTTPException(status_code=404, detail="멤버를 찾을 수 없습니다")
     return {"member": asdict(member)}
