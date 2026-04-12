@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -121,8 +120,8 @@ class PaperOrderView(OrderView):
 class PaperExecutor:
     """Paper 봇의 주문을 가상 체결하는 실행기.
 
-    EventBus에서 OrderRequestEvent를 구독하여 paper 봇의 주문만 처리한다.
-    즉시 가상 체결 후 OrderFilledEvent를 발행한다.
+    EventBus에서 OrderApprovedEvent를 구독하여 paper 봇의 주문만 처리한다.
+    RuleEngine → Treasury 파이프라인을 거친 승인된 주문만 체결한다.
     """
 
     def __init__(
@@ -154,28 +153,30 @@ class PaperExecutor:
         logger.info("PaperExecutor: 봇 해제 %s", bot_id)
 
     def subscribe(self) -> None:
-        """EventBus에 OrderRequestEvent 구독."""
-        from ante.eventbus.events import OrderRequestEvent
+        """EventBus에 OrderApprovedEvent 구독."""
+        from ante.eventbus.events import OrderApprovedEvent
 
-        self._eventbus.subscribe(OrderRequestEvent, self._on_order_request, priority=50)
+        self._eventbus.subscribe(
+            OrderApprovedEvent, self._on_order_approved, priority=50
+        )
         logger.info("PaperExecutor 구독 완료")
 
-    async def _on_order_request(self, event: object) -> None:
-        """OrderRequestEvent 처리. paper 봇의 주문만 처리."""
+    async def _on_order_approved(self, event: object) -> None:
+        """OrderApprovedEvent 처리. paper 봇의 주문만 처리."""
         from ante.eventbus.events import (
+            OrderApprovedEvent,
             OrderFilledEvent,
-            OrderRejectedEvent,
-            OrderRequestEvent,
         )
 
-        if not isinstance(event, OrderRequestEvent):
+        if not isinstance(event, OrderApprovedEvent):
             return
 
         portfolio = self._portfolios.get(event.bot_id)
         if portfolio is None:
             return  # live 봇의 주문 → 무시 (APIGateway가 처리)
 
-        order_id = str(uuid.uuid4())
+        order_id = event.order_id
+        account_id = event.account_id
         symbol = event.symbol
         side = event.side
         quantity = event.quantity
@@ -207,31 +208,6 @@ class PaperExecutor:
         trade_amount = fill_price * quantity
         commission = self._commission_info.calculate(side, trade_amount)
 
-        # 잔고 확인 (매수 시)
-        if side == "buy":
-            total_cost = trade_amount + commission
-            if not portfolio.check_balance(total_cost):
-                await self._eventbus.publish(
-                    OrderRejectedEvent(
-                        order_id=order_id,
-                        bot_id=event.bot_id,
-                        strategy_id=event.strategy_id,
-                        symbol=symbol,
-                        side=side,
-                        quantity=quantity,
-                        order_type=order_type,
-                        reason="잔고 부족 (paper)",
-                    )
-                )
-                logger.info(
-                    "Paper 주문 거부 (잔고 부족): %s %s %s qty=%s",
-                    event.bot_id,
-                    side,
-                    symbol,
-                    quantity,
-                )
-                return
-
         # 가상 체결: 포지션/잔고 업데이트
         portfolio.apply_fill(symbol, side, quantity, fill_price, commission)
 
@@ -242,6 +218,7 @@ class PaperExecutor:
                 broker_order_id=f"paper-{order_id[:8]}",
                 bot_id=event.bot_id,
                 strategy_id=event.strategy_id,
+                account_id=account_id,
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
