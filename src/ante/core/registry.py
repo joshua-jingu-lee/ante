@@ -6,7 +6,7 @@ IPC 핸들러가 필요한 서비스에 접근할 때 사용한다.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from ante.bot.manager import BotManager
     from ante.config.dynamic import DynamicConfigService
     from ante.eventbus import EventBus
+    from ante.strategy.registry import StrategyRegistry
     from ante.trade.reconciler import PositionReconciler
     from ante.treasury.manager import TreasuryManager
 
@@ -30,3 +31,4 @@ class ServiceRegistry:
     approval: ApprovalService | Any
     reconciler: PositionReconciler | Any
     eventbus: EventBus | Any
+    strategy_registry: StrategyRegistry | Any = field(default=None)

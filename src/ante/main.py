@@ -1151,6 +1151,7 @@ async def _init_ipc(s: Services) -> None:
         approval=s.approval_service,
         reconciler=reconciler,
         eventbus=s.eventbus,
+        strategy_registry=s.strategy_registry,
     )
 
     command_registry = CommandRegistry()
