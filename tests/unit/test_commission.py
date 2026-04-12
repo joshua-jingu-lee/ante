@@ -102,6 +102,7 @@ class TestPaperExecutorCommission:
     async def test_buy_commission(self):
         """PaperExecutor 매수 수수료 = buy_commission_rate만 적용."""
         from ante.bot.providers.paper import PaperExecutor, PaperPortfolioView
+        from ante.eventbus.events import OrderApprovedEvent
 
         eventbus = EventBus()
         executor = PaperExecutor(
@@ -117,10 +118,10 @@ class TestPaperExecutorCommission:
         received: list[OrderFilledEvent] = []
         eventbus.subscribe(OrderFilledEvent, lambda e: received.append(e))
 
-        from ante.eventbus.events import OrderRequestEvent
-
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="bot1",
                 strategy_id="s1",
                 symbol="005930",
@@ -139,6 +140,7 @@ class TestPaperExecutorCommission:
     async def test_sell_commission_includes_tax(self):
         """PaperExecutor 매도 수수료 = commission_rate + sell_tax_rate."""
         from ante.bot.providers.paper import PaperExecutor, PaperPortfolioView
+        from ante.eventbus.events import OrderApprovedEvent
 
         eventbus = EventBus()
         executor = PaperExecutor(
@@ -160,10 +162,10 @@ class TestPaperExecutorCommission:
         received: list[OrderFilledEvent] = []
         eventbus.subscribe(OrderFilledEvent, lambda e: received.append(e))
 
-        from ante.eventbus.events import OrderRequestEvent
-
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-002",
+                account_id="acct1",
                 bot_id="bot1",
                 strategy_id="s1",
                 symbol="005930",
