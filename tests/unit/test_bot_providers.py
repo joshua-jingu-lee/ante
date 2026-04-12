@@ -11,9 +11,8 @@ from ante.bot.providers.paper import PaperExecutor, PaperOrderView, PaperPortfol
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
+    OrderApprovedEvent,
     OrderFilledEvent,
-    OrderRejectedEvent,
-    OrderRequestEvent,
 )
 from ante.strategy.base import DataProvider
 from ante.strategy.context import StrategyContext
@@ -227,7 +226,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -244,6 +245,8 @@ class TestPaperExecutor:
         assert filled[0].quantity == 10.0
         assert filled[0].price == 50000.0
         assert filled[0].commission == 50000.0 * 10.0 * 0.00015
+        assert filled[0].order_id == "ord-001"
+        assert filled[0].account_id == "acct1"
 
         # 포지션 반영 확인
         positions = portfolio.get_positions("paper1")
@@ -258,7 +261,9 @@ class TestPaperExecutor:
 
         # 먼저 매수
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -274,7 +279,9 @@ class TestPaperExecutor:
 
         # 매도
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-002",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -290,31 +297,6 @@ class TestPaperExecutor:
         assert sell_fill.side == "sell"
         assert sell_fill.price == 55000.0
 
-    async def test_paper_buy_insufficient_balance(self, eventbus):
-        """잔고 부족 시 OrderRejectedEvent 발행."""
-        executor = PaperExecutor(eventbus=eventbus)
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=100.0)
-        executor.register_bot("paper1", portfolio)
-        executor.subscribe()
-
-        rejected = []
-        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
-
-        await eventbus.publish(
-            OrderRequestEvent(
-                bot_id="paper1",
-                strategy_id="s1",
-                symbol="005930",
-                side="buy",
-                quantity=10.0,
-                order_type="limit",
-                price=50000.0,
-            )
-        )
-
-        assert len(rejected) == 1
-        assert "잔고 부족" in rejected[0].reason
-
     async def test_ignores_live_bot(self, eventbus):
         """live 봇의 주문은 무시."""
         executor = PaperExecutor(eventbus=eventbus)
@@ -324,7 +306,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="live_bot",
                 strategy_id="s1",
                 symbol="005930",
@@ -351,7 +335,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -375,7 +361,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -402,7 +390,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -430,7 +420,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
@@ -456,7 +448,9 @@ class TestPaperExecutor:
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
 
         await eventbus.publish(
-            OrderRequestEvent(
+            OrderApprovedEvent(
+                order_id="ord-001",
+                account_id="acct1",
                 bot_id="paper1",
                 strategy_id="s1",
                 symbol="005930",
