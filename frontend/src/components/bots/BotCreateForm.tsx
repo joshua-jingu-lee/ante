@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCreateBot } from '../../hooks/useBots'
 import { useStrategies } from '../../hooks/useStrategies'
+import { useActiveAccounts } from '../../hooks/useAccounts'
 import { useTreasurySummary } from '../../hooks/useTreasury'
 import { formatNumber } from '../../utils/formatters'
 
@@ -14,15 +15,26 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
   const [botId, setBotId] = useState('')
   const [name, setName] = useState('')
   const [strategyId, setStrategyId] = useState('')
+  const [accountId, setAccountId] = useState('')
   const [interval, setInterval] = useState('60')
   const [budget, setBudget] = useState('')
   const [botIdError, setBotIdError] = useState('')
   const createBot = useCreateBot()
   const { data: strategies } = useStrategies()
+  const { data: accounts, isLoading: accountsLoading } = useActiveAccounts()
   const { data: treasury } = useTreasurySummary()
 
   const adoptedStrategies = strategies?.filter((s) => s.status === 'adopted') ?? []
   const remainingBudget = treasury?.unallocated ?? 0
+
+  const activeAccounts = accounts ?? []
+
+  // 활성 계좌가 1개면 자동 선택
+  useEffect(() => {
+    if (activeAccounts.length === 1 && !accountId) {
+      setAccountId(activeAccounts[0].account_id)
+    }
+  }, [activeAccounts, accountId])
 
   const validateBotId = (value: string) => {
     if (value && !BOT_ID_PATTERN.test(value)) {
@@ -45,6 +57,7 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
         bot_id: botId,
         name,
         strategy_id: strategyId,
+        account_id: accountId || undefined,
         interval_seconds: Number(interval),
         budget: Number(budget.replace(/,/g, '')),
       },
@@ -81,6 +94,41 @@ export default function BotCreateForm({ onClose }: BotCreateFormProps) {
             </select>
             {adoptedStrategies.length === 0 && (
               <div className="text-[11px] text-warning mt-1">봇을 생성하려면 먼저 전략을 채택해 주세요</div>
+            )}
+          </div>
+          <div className="mb-4">
+            <label className="block text-[12px] font-semibold text-text-muted mb-1.5">계좌 선택</label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              required
+              disabled={accountsLoading || activeAccounts.length === 0}
+            >
+              {accountsLoading ? (
+                <option value="">계좌 목록 로딩 중...</option>
+              ) : activeAccounts.length === 0 ? (
+                <option value="">활성 계좌가 없습니다</option>
+              ) : activeAccounts.length === 1 ? (
+                <option value={activeAccounts[0].account_id}>
+                  {activeAccounts[0].name} ({activeAccounts[0].exchange} / {activeAccounts[0].trading_mode})
+                </option>
+              ) : (
+                <>
+                  <option value="">계좌를 선택하세요</option>
+                  {activeAccounts.map((acc) => (
+                    <option key={acc.account_id} value={acc.account_id}>
+                      {acc.name} ({acc.exchange} / {acc.trading_mode})
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+            {!accountsLoading && activeAccounts.length === 0 && (
+              <div className="text-[11px] text-warning mt-1">봇을 생성하려면 먼저 계좌를 등록해 주세요</div>
+            )}
+            {!accountsLoading && activeAccounts.length === 1 && (
+              <div className="text-[11px] text-text-muted mt-1">활성 계좌가 1개뿐이므로 자동 선택되었습니다</div>
             )}
           </div>
           <div className="mb-4">
