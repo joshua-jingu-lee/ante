@@ -83,7 +83,32 @@ async def _handle_account_delete(
 async def _handle_bot_create(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    bot = await svc.bot_manager.create_bot(**args)
+    from pathlib import Path
+
+    from ante.bot.config import BotConfig
+    from ante.strategy.loader import StrategyLoader
+
+    strategy_id = args["strategy_id"]
+    record = await svc.strategy_registry.get(strategy_id)
+    if record is None:
+        msg = f"전략을 찾을 수 없습니다: {strategy_id}"
+        raise ValueError(msg)
+
+    strategy_cls = StrategyLoader.load(Path(record.filepath))
+
+    config = BotConfig(
+        bot_id=args.get("bot_id", ""),
+        strategy_id=strategy_id,
+        name=args.get("name", ""),
+        account_id=args.get("account_id", ""),
+        interval_seconds=args.get("interval_seconds", 60),
+    )
+
+    bot = await svc.bot_manager.create_bot(
+        config=config,
+        strategy_cls=strategy_cls,
+        source_path=Path(record.filepath),
+    )
     return {"bot_id": bot.bot_id}
 
 

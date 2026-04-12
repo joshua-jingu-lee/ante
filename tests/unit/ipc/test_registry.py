@@ -64,3 +64,81 @@ def test_register_all_handlers() -> None:
         "broker.reconcile",
     }
     assert set(registry.commands) == expected
+
+
+# ── _handle_bot_create 변환 로직 테스트 ──────────────
+
+
+class TestHandleBotCreate:
+    async def test_creates_bot_with_config_and_strategy(self):
+        """strategy_id → StrategyLoader → BotConfig → create_bot 변환."""
+        from dataclasses import dataclass
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_bot_create
+
+        @dataclass
+        class FakeRecord:
+            filepath: str = "/tmp/strategy.py"
+
+        fake_registry = AsyncMock()
+        fake_registry.get.return_value = FakeRecord()
+
+        fake_bot = MagicMock()
+        fake_bot.bot_id = "new-bot"
+
+        fake_bot_manager = AsyncMock()
+        fake_bot_manager.create_bot.return_value = fake_bot
+
+        svc = MagicMock()
+        svc.strategy_registry = fake_registry
+        svc.bot_manager = fake_bot_manager
+
+        # StrategyLoader.load를 모킹
+        import ante.strategy.loader
+
+        original_load = ante.strategy.loader.StrategyLoader.load
+        ante.strategy.loader.StrategyLoader.load = MagicMock(
+            return_value=type("FakeStrategy", (), {})
+        )
+        try:
+            result = await _handle_bot_create(
+                svc,
+                {
+                    "strategy_id": "strat-1",
+                    "name": "테스트봇",
+                    "account_id": "acct-1",
+                    "interval_seconds": 30,
+                },
+                "cli-user",
+            )
+        finally:
+            ante.strategy.loader.StrategyLoader.load = original_load
+
+        assert result == {"bot_id": "new-bot"}
+        fake_registry.get.assert_awaited_once_with("strat-1")
+        fake_bot_manager.create_bot.assert_awaited_once()
+        call_kwargs = fake_bot_manager.create_bot.call_args.kwargs
+        assert call_kwargs["config"].strategy_id == "strat-1"
+        assert call_kwargs["config"].name == "테스트봇"
+        assert call_kwargs["config"].account_id == "acct-1"
+        assert call_kwargs["config"].interval_seconds == 30
+
+    async def test_raises_when_strategy_not_found(self):
+        """미등록 strategy_id → ValueError."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_bot_create
+
+        fake_registry = AsyncMock()
+        fake_registry.get.return_value = None
+
+        svc = MagicMock()
+        svc.strategy_registry = fake_registry
+
+        with pytest.raises(ValueError, match="전략을 찾을 수 없습니다"):
+            await _handle_bot_create(
+                svc,
+                {"strategy_id": "nonexistent"},
+                "cli-user",
+            )
