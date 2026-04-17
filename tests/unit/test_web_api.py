@@ -35,13 +35,15 @@ class TestSystemRoutes:
     def test_health(self, client):
         # 기본 앱에는 db/account_service가 주입되어 있지 않다.
         # - db 미주입 → checks.db = False
-        # - account_service 미주입 → checks.broker = True
+        # - account_service 미주입 → checks.broker = False (unhealthy)
         resp = client.get("/api/system/health")
         assert resp.status_code == 200
         data = resp.json()
         assert "ok" in data
         assert "checks" in data
-        assert data["checks"]["broker"] is True
+        assert data["checks"]["db"] is False
+        assert data["checks"]["broker"] is False
+        assert data["ok"] is False
 
     def test_health_db_ok_no_accounts(self, app, client):
         # DB 성공 + 계좌 0개
@@ -128,7 +130,9 @@ class TestSystemRoutes:
             app.state.account_service = None
 
     def test_health_account_service_missing(self, app, client):
-        # account_service 미주입 → checks.broker = True
+        # account_service 미주입 → checks.broker = False (unhealthy)
+        # 스펙: broker=True는 "계좌 0개"에만 허용되며, account_service 자체가
+        # 없어 계좌를 확인할 수 없는 상태는 healthy로 판정하지 않는다.
         class _DB:
             async def fetch_one(self, sql, params=()):
                 return {"1": 1}
@@ -139,8 +143,8 @@ class TestSystemRoutes:
             resp = client.get("/api/system/health")
             assert resp.status_code == 200
             data = resp.json()
-            assert data["ok"] is True
-            assert data["checks"] == {"db": True, "broker": True}
+            assert data["ok"] is False
+            assert data["checks"] == {"db": True, "broker": False}
         finally:
             app.state.db = None
 
@@ -647,16 +651,31 @@ class TestResponseModelCoverage:
 
         기본 앱에는 db가 주입되어 있지 않아 ok=False가 정상이다. 여기서는
         응답 구조(필수 필드 존재, checks 타입)만 검증한다.
+        `ok`와 `checks`는 모두 필수 필드여야 한다 (스펙 SSOT).
         """
+        import pytest
+        from pydantic import ValidationError
+
         from ante.web.schemas import HealthResponse
 
         resp = client.get("/api/system/health")
         assert resp.status_code == 200
         data = resp.json()
+
+        # 응답에 필수 키가 모두 존재해야 한다.
+        assert "ok" in data
+        assert "checks" in data
+        assert isinstance(data["checks"], dict)
+
         model = HealthResponse(**data)
         assert isinstance(model.ok, bool)
         assert isinstance(model.checks, dict)
         assert "db" in model.checks
+        assert "broker" in model.checks
+
+        # checks가 누락되면 ValidationError가 발생해야 한다 (required 필드).
+        with pytest.raises(ValidationError):
+            HealthResponse(ok=True)  # type: ignore[call-arg]
         assert "broker" in model.checks
 
     def test_response_model_validates_strategy_validate(self, client, tmp_path):

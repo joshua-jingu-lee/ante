@@ -65,7 +65,7 @@ async def health_check(
 
     - `db`: `SELECT 1` 성공 여부.
     - `broker`: 모든 계좌의 `broker.is_connected == True` AND 축약.
-      계좌 0개 또는 account_service 미주입 시 True.
+      계좌 0개이면 True. account_service 미주입 시 False (unhealthy).
     각 체크는 독립적이며, 예외는 내부에서 포착하고 해당 항목만 False로 기록한다.
     HTTP 상태 코드는 체크 결과와 무관하게 항상 200이다.
     """
@@ -93,9 +93,14 @@ async def _check_db(db: Any | None) -> bool:
 
 
 async def _check_broker(account_service: Any | None) -> bool:
-    """브로커 연결 체크. 모든 계좌의 is_connected AND. 계좌 0개이면 True."""
+    """브로커 연결 체크. 모든 계좌의 is_connected AND.
+
+    - 계좌 0개이면 True (스펙: 초기 설정 단계 허용).
+    - account_service 미주입은 False (unhealthy): 계좌 정보를 확인할 수 없는
+      상태는 "브로커 정상"으로 판정할 수 없다.
+    """
     if account_service is None:
-        return True
+        return False
     try:
         accounts = await account_service.list()
     except Exception:  # noqa: BLE001

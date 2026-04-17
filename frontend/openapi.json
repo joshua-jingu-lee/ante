@@ -12,7 +12,7 @@
           "accounts"
         ],
         "summary": "List Accounts",
-        "description": "\uacc4\uc88c \ubaa9\ub85d \uc870\ud68c.",
+        "description": "계좌 목록 조회.",
         "operationId": "list_accounts_api_accounts_get",
         "parameters": [
           {
@@ -60,7 +60,7 @@
           "accounts"
         ],
         "summary": "Create Account",
-        "description": "\uacc4\uc88c \uc0dd\uc131.",
+        "description": "계좌 생성.",
         "operationId": "create_account_api_accounts_post",
         "requestBody": {
           "required": true,
@@ -102,7 +102,7 @@
           "accounts"
         ],
         "summary": "Get Account",
-        "description": "\uacc4\uc88c \uc0c1\uc138 \uc870\ud68c.",
+        "description": "계좌 상세 조회.",
         "operationId": "get_account_api_accounts__account_id__get",
         "parameters": [
           {
@@ -143,7 +143,7 @@
           "accounts"
         ],
         "summary": "Update Account",
-        "description": "\uacc4\uc88c \uc218\uc815.",
+        "description": "계좌 수정.",
         "operationId": "update_account_api_accounts__account_id__put",
         "parameters": [
           {
@@ -194,7 +194,7 @@
           "accounts"
         ],
         "summary": "Delete Account",
-        "description": "\uacc4\uc88c \uc18c\ud504\ud2b8 \ub51c\ub9ac\ud2b8.",
+        "description": "계좌 소프트 딜리트.",
         "operationId": "delete_account_api_accounts__account_id__delete",
         "parameters": [
           {
@@ -230,7 +230,7 @@
           "accounts"
         ],
         "summary": "Suspend Account",
-        "description": "\uacc4\uc88c \uc815\uc9c0.",
+        "description": "계좌 정지.",
         "operationId": "suspend_account_api_accounts__account_id__suspend_post",
         "parameters": [
           {
@@ -290,7 +290,7 @@
           "accounts"
         ],
         "summary": "Activate Account",
-        "description": "\uacc4\uc88c \uc7ac\ud65c\uc131\ud654.",
+        "description": "계좌 재활성화.",
         "operationId": "activate_account_api_accounts__account_id__activate_post",
         "parameters": [
           {
@@ -333,7 +333,7 @@
           "accounts"
         ],
         "summary": "Get Account Rules",
-        "description": "\uacc4\uc88c \ub9ac\uc2a4\ud06c \ub8f0 \ubaa9\ub85d \uc870\ud68c.\n\nDynamicConfig\ub97c \uc6b0\uc120 \uc870\ud68c\ud558\uace0, \uc5c6\uc73c\uba74 \uc815\uc801 Config\uc5d0\uc11c \uc77d\ub294\ub2e4.\nRULE_REGISTRY\uc5d0 \ub4f1\ub85d\ub41c \ub8f0 \ud0c0\uc785\ub9cc \uad6c\uc870\ud654\ud558\uc5ec \ubc18\ud658\ud55c\ub2e4.",
+        "description": "계좌 리스크 룰 목록 조회.\n\nDynamicConfig를 우선 조회하고, 없으면 정적 Config에서 읽는다.\nRULE_REGISTRY에 등록된 룰 타입만 구조화하여 반환한다.",
         "operationId": "get_account_rules_api_accounts__account_id__rules_get",
         "parameters": [
           {
@@ -376,7 +376,7 @@
           "accounts"
         ],
         "summary": "Update Account Rule",
-        "description": "\uacc4\uc88c \ub9ac\uc2a4\ud06c \ub8f0 \uac1c\ubcc4 \uc218\uc815.\n\nRULE_REGISTRY\uc5d0 \ub4f1\ub85d\ub41c \ud0c0\uc785\ub9cc \ud5c8\uc6a9\ud558\uba70,\nDynamicConfigService\uc5d0 \uc704\uc784\ud558\uc5ec ConfigChangedEvent\ub97c \ubc1c\ud589\ud55c\ub2e4.",
+        "description": "계좌 리스크 룰 개별 수정.\n\nRULE_REGISTRY에 등록된 타입만 허용하며,\nDynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.",
         "operationId": "update_account_rule_api_accounts__account_id__rules__rule_type__put",
         "parameters": [
           {
@@ -438,7 +438,7 @@
           "auth"
         ],
         "summary": "Login",
-        "description": "\ud328\uc2a4\uc6cc\ub4dc \ub85c\uadf8\uc778 -> \uc138\uc158 \ucfe0\ud0a4 \ubc1c\uae09.",
+        "description": "패스워드 로그인 -> 세션 쿠키 발급.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -486,7 +486,7 @@
           "auth"
         ],
         "summary": "Logout",
-        "description": "\ub85c\uadf8\uc544\uc6c3 \u2014 \uc138\uc158 \uc0ad\uc81c + \ucfe0\ud0a4 \uc81c\uac70.",
+        "description": "로그아웃 — 세션 삭제 + 쿠키 제거.",
         "operationId": "logout_api_auth_logout_post",
         "parameters": [
           {
@@ -539,7 +539,7 @@
           "auth"
         ],
         "summary": "Me",
-        "description": "\ud604\uc7ac \ub85c\uadf8\uc778 \uc0ac\uc6a9\uc790 \uc815\ubcf4.\n\nBearer \ud1a0\ud070 \ub610\ub294 \uc138\uc158 \ucfe0\ud0a4\ub85c \uc778\uc99d\ud55c\ub2e4.\n- Bearer \ud1a0\ud070: TokenAuthMiddleware\uac00 request.state.member\uc5d0 \uc124\uc815\n- \uc138\uc158 \ucfe0\ud0a4: ante_session \ucfe0\ud0a4\ub85c \uc138\uc158 \uc870\ud68c",
+        "description": "현재 로그인 사용자 정보.\n\nBearer 토큰 또는 세션 쿠키로 인증한다.\n- Bearer 토큰: TokenAuthMiddleware가 request.state.member에 설정\n- 세션 쿠키: ante_session 쿠키로 세션 조회",
         "operationId": "me_api_auth_me_get",
         "parameters": [
           {
@@ -595,7 +595,7 @@
           "approvals"
         ],
         "summary": "List Approvals",
-        "description": "\uacb0\uc7ac \ubaa9\ub85d \uc870\ud68c.",
+        "description": "결재 목록 조회.",
         "operationId": "list_approvals_api_approvals_get",
         "parameters": [
           {
@@ -703,7 +703,7 @@
           "approvals"
         ],
         "summary": "Get Approval",
-        "description": "\uacb0\uc7ac \uc0c1\uc138 \uc870\ud68c.",
+        "description": "결재 상세 조회.",
         "operationId": "get_approval_api_approvals__approval_id__get",
         "parameters": [
           {
@@ -752,7 +752,7 @@
           "approvals"
         ],
         "summary": "Update Approval Status",
-        "description": "\uacb0\uc7ac \uc2b9\uc778/\uac70\ubd80 \ucc98\ub9ac.",
+        "description": "결재 승인/거부 처리.",
         "operationId": "update_approval_status_api_approvals__approval_id__status_patch",
         "parameters": [
           {
@@ -814,7 +814,7 @@
           "audit"
         ],
         "summary": "List Audit Logs",
-        "description": "\uac10\uc0ac \ub85c\uadf8 \uc870\ud68c.",
+        "description": "감사 로그 조회.",
         "operationId": "list_audit_logs_api_audit_get",
         "parameters": [
           {
@@ -935,7 +935,7 @@
           "portfolio"
         ],
         "summary": "Portfolio Value",
-        "description": "\ucd1d \uc790\uc0b0 \uac00\uce58 + \ub2f9\uc77c \uc190\uc775 + \uc218\uc775\ub960 + \ubbf8\uc2e4\ud604 \uc190\uc775 (\ucd5c\uc2e0 \uc2a4\ub0c5\uc0f7 \uae30\ubc18).",
+        "description": "총 자산 가치 + 당일 손익 + 수익률 + 미실현 손익 (최신 스냅샷 기반).",
         "operationId": "portfolio_value_api_portfolio_value_get",
         "parameters": [
           {
@@ -988,7 +988,7 @@
           "portfolio"
         ],
         "summary": "Portfolio History",
-        "description": "\uae30\uac04\ubcc4 \uc790\uc0b0 \ucd94\uc774 (daily_snapshots \uc2dc\uacc4\uc5f4 \ubc18\ud658).",
+        "description": "기간별 자산 추이 (daily_snapshots 시계열 반환).",
         "operationId": "portfolio_history_api_portfolio_history_get",
         "parameters": [
           {
@@ -1073,7 +1073,7 @@
           "members"
         ],
         "summary": "List Members",
-        "description": "\uba64\ubc84 \ubaa9\ub85d \uc870\ud68c.",
+        "description": "멤버 목록 조회.",
         "operationId": "list_members_api_members_get",
         "parameters": [
           {
@@ -1179,7 +1179,7 @@
           "members"
         ],
         "summary": "Create Member",
-        "description": "\uba64\ubc84 \ub4f1\ub85d. \ud1a0\ud070 1\ud68c \ubc18\ud658.",
+        "description": "멤버 등록. 토큰 1회 반환.",
         "operationId": "create_member_api_members_post",
         "requestBody": {
           "required": true,
@@ -1230,7 +1230,7 @@
           "members"
         ],
         "summary": "Get Member",
-        "description": "\uba64\ubc84 \uc0c1\uc138 \uc870\ud68c.",
+        "description": "멤버 상세 조회.",
         "operationId": "get_member_api_members__member_id__get",
         "parameters": [
           {
@@ -1279,7 +1279,7 @@
           "members"
         ],
         "summary": "Suspend Member",
-        "description": "\uba64\ubc84 \uc77c\uc2dc \uc815\uc9c0.",
+        "description": "멤버 일시 정지.",
         "operationId": "suspend_member_api_members__member_id__suspend_post",
         "parameters": [
           {
@@ -1331,7 +1331,7 @@
           "members"
         ],
         "summary": "Reactivate Member",
-        "description": "\uba64\ubc84 \uc7ac\ud65c\uc131\ud654.",
+        "description": "멤버 재활성화.",
         "operationId": "reactivate_member_api_members__member_id__reactivate_post",
         "parameters": [
           {
@@ -1383,7 +1383,7 @@
           "members"
         ],
         "summary": "Revoke Member",
-        "description": "\uba64\ubc84 \uc601\uad6c \ud3d0\uae30.",
+        "description": "멤버 영구 폐기.",
         "operationId": "revoke_member_api_members__member_id__revoke_post",
         "parameters": [
           {
@@ -1435,7 +1435,7 @@
           "members"
         ],
         "summary": "Rotate Token",
-        "description": "\ud1a0\ud070 \uc7ac\ubc1c\uae09.",
+        "description": "토큰 재발급.",
         "operationId": "rotate_token_api_members__member_id__rotate_token_post",
         "parameters": [
           {
@@ -1487,7 +1487,7 @@
           "members"
         ],
         "summary": "Change Password",
-        "description": "\ube44\ubc00\ubc88\ud638 \ubcc0\uacbd (human \uba64\ubc84 \uc804\uc6a9).",
+        "description": "비밀번호 변경 (human 멤버 전용).",
         "operationId": "change_password_api_members__member_id__password_patch",
         "parameters": [
           {
@@ -1549,7 +1549,7 @@
           "members"
         ],
         "summary": "Update Scopes",
-        "description": "\uad8c\ud55c \ubc94\uc704 \ubcc0\uacbd.",
+        "description": "권한 범위 변경.",
         "operationId": "update_scopes_api_members__member_id__scopes_put",
         "parameters": [
           {
@@ -1611,7 +1611,7 @@
           "config"
         ],
         "summary": "List Configs",
-        "description": "\ub3d9\uc801 \uc124\uc815 \uc804\uccb4 \uc870\ud68c.",
+        "description": "동적 설정 전체 조회.",
         "operationId": "list_configs_api_config_get",
         "responses": {
           "200": {
@@ -1636,7 +1636,7 @@
           "config"
         ],
         "summary": "Update Config",
-        "description": "\ub3d9\uc801 \uc124\uc815 \uac12 \ubcc0\uacbd.",
+        "description": "동적 설정 값 변경.",
         "operationId": "update_config_api_config__key__put",
         "parameters": [
           {
@@ -1695,7 +1695,7 @@
           "system"
         ],
         "summary": "Get System Status",
-        "description": "\uc2dc\uc2a4\ud15c \uc0c1\ud0dc \uc870\ud68c.",
+        "description": "시스템 상태 조회.",
         "operationId": "get_system_status_api_system_status_get",
         "responses": {
           "200": {
@@ -1717,7 +1717,7 @@
           "system"
         ],
         "summary": "Health Check",
-        "description": "\ud5ec\uc2a4\uccb4\ud06c.\n\n- `db`: `SELECT 1` \uc131\uacf5 \uc5ec\ubd80.\n- `broker`: \ubaa8\ub4e0 \uacc4\uc88c\uc758 `broker.is_connected == True` AND \ucd95\uc57d.\n  \uacc4\uc88c 0\uac1c \ub610\ub294 account_service \ubbf8\uc8fc\uc785 \uc2dc True.\n\uac01 \uccb4\ud06c\ub294 \ub3c5\ub9bd\uc801\uc774\uba70, \uc608\uc678\ub294 \ub0b4\ubd80\uc5d0\uc11c \ud3ec\ucc29\ud558\uace0 \ud574\ub2f9 \ud56d\ubaa9\ub9cc False\ub85c \uae30\ub85d\ud55c\ub2e4.\nHTTP \uc0c1\ud0dc \ucf54\ub4dc\ub294 \uccb4\ud06c \uacb0\uacfc\uc640 \ubb34\uad00\ud558\uac8c \ud56d\uc0c1 200\uc774\ub2e4.",
+        "description": "헬스체크.\n\n- `db`: `SELECT 1` 성공 여부.\n- `broker`: 모든 계좌의 `broker.is_connected == True` AND 축약.\n  계좌 0개이면 True. account_service 미주입 시 False (unhealthy).\n각 체크는 독립적이며, 예외는 내부에서 포착하고 해당 항목만 False로 기록한다.\nHTTP 상태 코드는 체크 결과와 무관하게 항상 200이다.",
         "operationId": "health_check_api_system_health_get",
         "responses": {
           "200": {
@@ -1739,7 +1739,7 @@
           "system"
         ],
         "summary": "Halt",
-        "description": "\uc804\uccb4 \uac70\ub798 \uc911\uc9c0 (\ubaa8\ub4e0 \uacc4\uc88c SUSPENDED).",
+        "description": "전체 거래 중지 (모든 계좌 SUSPENDED).",
         "operationId": "halt_api_system_halt_post",
         "requestBody": {
           "content": {
@@ -1784,7 +1784,7 @@
           "system"
         ],
         "summary": "Activate",
-        "description": "\uc804\uccb4 \uac70\ub798 \uc7ac\uac1c (\ubaa8\ub4e0 \uacc4\uc88c ACTIVE).",
+        "description": "전체 거래 재개 (모든 계좌 ACTIVE).",
         "operationId": "activate_api_system_activate_post",
         "requestBody": {
           "content": {
@@ -1829,7 +1829,7 @@
           "strategies"
         ],
         "summary": "Validate Strategy",
-        "description": "\uc804\ub7b5 \ud30c\uc77c \uc815\uc801 \uac80\uc99d.\n\nBody: {\"path\": \"/path/to/strategy.py\"}",
+        "description": "전략 파일 정적 검증.\n\nBody: {\"path\": \"/path/to/strategy.py\"}",
         "operationId": "validate_strategy_api_strategies_validate_post",
         "requestBody": {
           "content": {
@@ -1879,7 +1879,7 @@
           "strategies"
         ],
         "summary": "List Strategies",
-        "description": "\uc804\ub7b5 \ubaa9\ub85d \uc870\ud68c.",
+        "description": "전략 목록 조회.",
         "operationId": "list_strategies_api_strategies_get",
         "parameters": [
           {
@@ -1932,7 +1932,7 @@
           "strategies"
         ],
         "summary": "Update Strategy Status",
-        "description": "\uc804\ub7b5 \uc0c1\ud0dc \ubcc0\uacbd. \ubcf4\uad00 \uc804\ud658\uc6a9.",
+        "description": "전략 상태 변경. 보관 전환용.",
         "operationId": "update_strategy_status_api_strategies__strategy_id__status_patch",
         "parameters": [
           {
@@ -1960,7 +1960,7 @@
             "description": "Successful Response"
           },
           "400": {
-            "description": "\ud5c8\uc6a9\ub418\uc9c0 \uc54a\uc740 \uc0c1\ud0dc \uc804\ud658"
+            "description": "허용되지 않은 상태 전환"
           },
           "404": {
             "description": "Strategy not found"
@@ -1984,7 +1984,7 @@
           "strategies"
         ],
         "summary": "Get Strategy",
-        "description": "\uc804\ub7b5 \uc0c1\uc138 \uc870\ud68c.",
+        "description": "전략 상세 조회.",
         "operationId": "get_strategy_api_strategies__strategy_id__get",
         "parameters": [
           {
@@ -2033,7 +2033,7 @@
           "strategies"
         ],
         "summary": "Get Strategy Performance",
-        "description": "\uc804\ub7b5 \uc131\uacfc \uc9c0\ud45c \uc870\ud68c.",
+        "description": "전략 성과 지표 조회.",
         "operationId": "get_strategy_performance_api_strategies__strategy_id__performance_get",
         "parameters": [
           {
@@ -2098,7 +2098,7 @@
           "strategies"
         ],
         "summary": "Get Strategy Daily Summary",
-        "description": "\uc804\ub7b5 \uc77c\ubcc4 \uc131\uacfc \uc9d1\uacc4.",
+        "description": "전략 일별 성과 집계.",
         "operationId": "get_strategy_daily_summary_api_strategies__strategy_id__daily_summary_get",
         "parameters": [
           {
@@ -2147,7 +2147,7 @@
           "strategies"
         ],
         "summary": "Get Strategy Weekly Summary",
-        "description": "\uc804\ub7b5 \uc8fc\ubcc4 \uc131\uacfc \uc9d1\uacc4.",
+        "description": "전략 주별 성과 집계.",
         "operationId": "get_strategy_weekly_summary_api_strategies__strategy_id__weekly_summary_get",
         "parameters": [
           {
@@ -2196,7 +2196,7 @@
           "strategies"
         ],
         "summary": "Get Strategy Monthly Summary",
-        "description": "\uc804\ub7b5 \uc6d4\ubcc4 \uc131\uacfc \uc9d1\uacc4.",
+        "description": "전략 월별 성과 집계.",
         "operationId": "get_strategy_monthly_summary_api_strategies__strategy_id__monthly_summary_get",
         "parameters": [
           {
@@ -2245,7 +2245,7 @@
           "strategies"
         ],
         "summary": "Get Strategy Trades",
-        "description": "\uc804\ub7b5 \uac70\ub798 \ub0b4\uc5ed \uc870\ud68c (cursor \uae30\ubc18 \ud398\uc774\uc9c0\ub124\uc774\uc158).",
+        "description": "전략 거래 내역 조회 (cursor 기반 페이지네이션).",
         "operationId": "get_strategy_trades_api_strategies__strategy_id__trades_get",
         "parameters": [
           {
@@ -2322,7 +2322,7 @@
           "reports"
         ],
         "summary": "Get Report Schema",
-        "description": "\ub9ac\ud3ec\ud2b8 \uc81c\ucd9c \uc2a4\ud0a4\ub9c8 \uc870\ud68c.",
+        "description": "리포트 제출 스키마 조회.",
         "operationId": "get_report_schema_api_reports_schema_get",
         "responses": {
           "200": {
@@ -2344,7 +2344,7 @@
           "reports"
         ],
         "summary": "Submit Report",
-        "description": "\ub9ac\ud3ec\ud2b8 \uc81c\ucd9c.",
+        "description": "리포트 제출.",
         "operationId": "submit_report_api_reports_post",
         "requestBody": {
           "required": true,
@@ -2387,7 +2387,7 @@
           "reports"
         ],
         "summary": "List Reports",
-        "description": "\ub9ac\ud3ec\ud2b8 \ubaa9\ub85d \uc870\ud68c (cursor \uae30\ubc18 \ud398\uc774\uc9c0\ub124\uc774\uc158).",
+        "description": "리포트 목록 조회 (cursor 기반 페이지네이션).",
         "operationId": "list_reports_api_reports_get",
         "parameters": [
           {
@@ -2466,7 +2466,7 @@
           "reports"
         ],
         "summary": "Report View",
-        "description": "\ub9ac\ud3ec\ud2b8 \ub2e8\uac74 \uc870\ud68c.",
+        "description": "리포트 단건 조회.",
         "operationId": "report_view_api_reports__report_id__get",
         "parameters": [
           {
@@ -2515,7 +2515,7 @@
           "data"
         ],
         "summary": "List Datasets",
-        "description": "\ubcf4\uc720 \ub370\uc774\ud130\uc14b \ubaa9\ub85d (\ud398\uc774\uc9c0\ub124\uc774\uc158 \uc9c0\uc6d0).\n\ndata_type \ubbf8\uc9c0\uc815 \uc2dc \ubaa8\ub4e0 \uc720\ud615\uc744 \ubc18\ud658\ud558\uace0, \uc9c0\uc815 \uc2dc \ud574\ub2f9 \uc720\ud615\ub9cc \ubc18\ud658\ud55c\ub2e4.\n\n\uc885\ubaa9 \ubaa9\ub85d\ub9cc \uba3c\uc800 \uc218\uc9d1\ud558\uc5ec \ud398\uc774\uc9c0\ub124\uc774\uc158\uc744 \uc801\uc6a9\ud55c \ub4a4,\n\ud574\ub2f9 \ud398\uc774\uc9c0\uc758 \uc885\ubaa9\uc5d0 \ub300\ud574\uc11c\ub9cc date_range\ub97c \uacc4\uc0b0\ud55c\ub2e4.\nrow_count\uc640 file_size\ub294 \uc0c1\uc138 \uc870\ud68c \uc804\uc6a9\uc774\ubbc0\ub85c \uae30\ubcf8\uac12(0)\uc744 \ubc18\ud658\ud55c\ub2e4.\n\nReturns:\n    {items: [...], total: int}",
+        "description": "보유 데이터셋 목록 (페이지네이션 지원).\n\ndata_type 미지정 시 모든 유형을 반환하고, 지정 시 해당 유형만 반환한다.\n\n종목 목록만 먼저 수집하여 페이지네이션을 적용한 뒤,\n해당 페이지의 종목에 대해서만 date_range를 계산한다.\nrow_count와 file_size는 상세 조회 전용이므로 기본값(0)을 반환한다.\n\nReturns:\n    {items: [...], total: int}",
         "operationId": "list_datasets_api_data_datasets_get",
         "parameters": [
           {
@@ -2563,10 +2563,10 @@
                   "type": "null"
                 }
               ],
-              "description": "\ub370\uc774\ud130 \uc720\ud615 (ohlcv, fundamental, \ubbf8\uc9c0\uc815 \uc2dc \uc804\uccb4)",
+              "description": "데이터 유형 (ohlcv, fundamental, 미지정 시 전체)",
               "title": "Data Type"
             },
-            "description": "\ub370\uc774\ud130 \uc720\ud615 (ohlcv, fundamental, \ubbf8\uc9c0\uc815 \uc2dc \uc804\uccb4)"
+            "description": "데이터 유형 (ohlcv, fundamental, 미지정 시 전체)"
           },
           {
             "name": "offset",
@@ -2619,7 +2619,7 @@
           "data"
         ],
         "summary": "Get Dataset Detail",
-        "description": "\ub370\uc774\ud130\uc14b \uc0c1\uc138 \uc870\ud68c (\uba54\ud0c0\ub370\uc774\ud130 + \ucd5c\uadfc 5\ud589 \ubbf8\ub9ac\ubcf4\uae30).\n\ndataset_id \ud615\uc2dd: \"{symbol}__{timeframe}\" (\uc608: \"005930__1d\")",
+        "description": "데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기).\n\ndataset_id 형식: \"{symbol}__{timeframe}\" (예: \"005930__1d\")",
         "operationId": "get_dataset_detail_api_data_datasets__dataset_id__get",
         "parameters": [
           {
@@ -2660,7 +2660,7 @@
           "data"
         ],
         "summary": "Delete Dataset",
-        "description": "\ub370\uc774\ud130\uc14b \uc0ad\uc81c.\n\ndataset_id \ud615\uc2dd: \"{symbol}__{timeframe}\" (\uc608: \"005930__1d\")\nfundamental\uc758 \uacbd\uc6b0: \"{symbol}__fundamental\" (\uc608: \"005930__fundamental\")",
+        "description": "데이터셋 삭제.\n\ndataset_id 형식: \"{symbol}__{timeframe}\" (예: \"005930__1d\")\nfundamental의 경우: \"{symbol}__fundamental\" (예: \"005930__fundamental\")",
         "operationId": "delete_dataset_api_data_datasets__dataset_id__delete",
         "parameters": [
           {
@@ -2678,11 +2678,11 @@
             "required": false,
             "schema": {
               "type": "string",
-              "description": "\ub370\uc774\ud130 \uc720\ud615 (ohlcv, fundamental)",
+              "description": "데이터 유형 (ohlcv, fundamental)",
               "default": "ohlcv",
               "title": "Data Type"
             },
-            "description": "\ub370\uc774\ud130 \uc720\ud615 (ohlcv, fundamental)"
+            "description": "데이터 유형 (ohlcv, fundamental)"
           }
         ],
         "responses": {
@@ -2717,7 +2717,7 @@
           "data"
         ],
         "summary": "Get Data Schema",
-        "description": "\ub370\uc774\ud130 \uc2a4\ud0a4\ub9c8 \uc870\ud68c. data_type\uc5d0 \ub530\ub77c \ud574\ub2f9 \uc2a4\ud0a4\ub9c8\ub97c \ubc18\ud658.",
+        "description": "데이터 스키마 조회. data_type에 따라 해당 스키마를 반환.",
         "operationId": "get_data_schema_api_data_schema_get",
         "parameters": [
           {
@@ -2726,11 +2726,11 @@
             "required": false,
             "schema": {
               "type": "string",
-              "description": "\ub370\uc774\ud130 \uc720\ud615 (ohlcv, fundamental)",
+              "description": "데이터 유형 (ohlcv, fundamental)",
               "default": "ohlcv",
               "title": "Data Type"
             },
-            "description": "\ub370\uc774\ud130 \uc720\ud615 (ohlcv, fundamental)"
+            "description": "데이터 유형 (ohlcv, fundamental)"
           }
         ],
         "responses": {
@@ -2763,7 +2763,7 @@
           "data"
         ],
         "summary": "Get Storage Summary",
-        "description": "\uc800\uc7a5 \uc6a9\ub7c9 \ud604\ud669.",
+        "description": "저장 용량 현황.",
         "operationId": "get_storage_summary_api_data_storage_get",
         "responses": {
           "200": {
@@ -2785,7 +2785,7 @@
           "data"
         ],
         "summary": "Get Feed Status",
-        "description": "Feed \ud30c\uc774\ud504\ub77c\uc778 \uc0c1\ud0dc \uc870\ud68c.\n\nFeed \ucd08\uae30\ud654 \uc5ec\ubd80, \uc18c\uc2a4\ubcc4 \uccb4\ud06c\ud3ec\uc778\ud2b8 \ud604\ud669, \ucd5c\uadfc \ub9ac\ud3ec\ud2b8 \uc694\uc57d,\nAPI \ud0a4 \uc124\uc815 \uc0c1\ud0dc\ub97c \ubc18\ud658\ud55c\ub2e4.",
+        "description": "Feed 파이프라인 상태 조회.\n\nFeed 초기화 여부, 소스별 체크포인트 현황, 최근 리포트 요약,\nAPI 키 설정 상태를 반환한다.",
         "operationId": "get_feed_status_api_data_feed_status_get",
         "responses": {
           "200": {
@@ -2807,7 +2807,7 @@
           "trades"
         ],
         "summary": "List Trades",
-        "description": "\uac70\ub798 \uae30\ub85d \ubaa9\ub85d \uc870\ud68c (cursor \uae30\ubc18 \ud398\uc774\uc9c0\ub124\uc774\uc158).",
+        "description": "거래 기록 목록 조회 (cursor 기반 페이지네이션).",
         "operationId": "list_trades_api_trades_get",
         "parameters": [
           {
@@ -2918,7 +2918,7 @@
           "bots"
         ],
         "summary": "List Bots",
-        "description": "\ubd07 \ubaa9\ub85d \uc870\ud68c (cursor \uae30\ubc18 \ud398\uc774\uc9c0\ub124\uc774\uc158).",
+        "description": "봇 목록 조회 (cursor 기반 페이지네이션).",
         "operationId": "list_bots_api_bots_get",
         "parameters": [
           {
@@ -2995,7 +2995,7 @@
           "bots"
         ],
         "summary": "Create Bot",
-        "description": "\ubd07 \uc0dd\uc131.",
+        "description": "봇 생성.",
         "operationId": "create_bot_api_bots_post",
         "requestBody": {
           "required": true,
@@ -3042,7 +3042,7 @@
           "bots"
         ],
         "summary": "Get Bot",
-        "description": "\ubd07 \uc0c1\uc138 \uc870\ud68c.",
+        "description": "봇 상세 조회.",
         "operationId": "get_bot_api_bots__bot_id__get",
         "parameters": [
           {
@@ -3089,7 +3089,7 @@
           "bots"
         ],
         "summary": "Delete Bot",
-        "description": "\ubd07 \uc0ad\uc81c.\n\nhandle_positions:\n    - keep (\uae30\ubcf8): \ud3ec\uc9c0\uc158\uc744 \uc720\uc9c0\ud55c \ucc44 \ubd07\ub9cc \uc0ad\uc81c.\n    - liquidate: \ubcf4\uc720 \uc885\ubaa9 \uc2dc\uc7a5\uac00 \ub9e4\ub3c4 \uc8fc\ubb38 \ubc1c\ud589 \ud6c4 \uc0ad\uc81c.",
+        "description": "봇 삭제.\n\nhandle_positions:\n    - keep (기본): 포지션을 유지한 채 봇만 삭제.\n    - liquidate: 보유 종목 시장가 매도 주문 발행 후 삭제.",
         "operationId": "delete_bot_api_bots__bot_id__delete",
         "parameters": [
           {
@@ -3135,7 +3135,7 @@
           "bots"
         ],
         "summary": "Update Bot",
-        "description": "\ubd07 \uc124\uc815 \uc218\uc815. \uc911\uc9c0 \uc0c1\ud0dc\uc5d0\uc11c\ub9cc \ud5c8\uc6a9.",
+        "description": "봇 설정 수정. 중지 상태에서만 허용.",
         "operationId": "update_bot_api_bots__bot_id__put",
         "parameters": [
           {
@@ -3190,7 +3190,7 @@
           "bots"
         ],
         "summary": "Start Bot",
-        "description": "\ubd07 \uc2dc\uc791.",
+        "description": "봇 시작.",
         "operationId": "start_bot_api_bots__bot_id__start_post",
         "parameters": [
           {
@@ -3235,7 +3235,7 @@
           "bots"
         ],
         "summary": "Stop Bot",
-        "description": "\ubd07 \uc911\uc9c0.",
+        "description": "봇 중지.",
         "operationId": "stop_bot_api_bots__bot_id__stop_post",
         "parameters": [
           {
@@ -3287,7 +3287,7 @@
           "bots"
         ],
         "summary": "Get Bot Logs",
-        "description": "\ubd07 \uc2e4\ud589 \ub85c\uadf8 \uc870\ud68c.\n\nBotStepCompletedEvent \uc774\ub825\uc744 \ubc18\ud658\ud55c\ub2e4.\nevent_history_store(SQLite)\uac00 \uc788\uc73c\uba74 \uc601\uc18d \ub85c\uadf8\ub97c \uc870\ud68c\ud558\uace0,\n\uc5c6\uc73c\uba74 EventBus \uc778\uba54\ubaa8\ub9ac \ud788\uc2a4\ud1a0\ub9ac\uc5d0\uc11c \uc870\ud68c\ud55c\ub2e4.",
+        "description": "봇 실행 로그 조회.\n\nBotStepCompletedEvent 이력을 반환한다.\nevent_history_store(SQLite)가 있으면 영속 로그를 조회하고,\n없으면 EventBus 인메모리 히스토리에서 조회한다.",
         "operationId": "get_bot_logs_api_bots__bot_id__logs_get",
         "parameters": [
           {
@@ -3348,7 +3348,7 @@
           "treasury"
         ],
         "summary": "Get Summary",
-        "description": "\uc790\uae08 \ud604\ud669 \uc694\uc57d.\n\naccount_id \uc9c0\uc815 \uc2dc \ud574\ub2f9 \uacc4\uc88c\uc758 Treasury \uc694\uc57d\uc744 \ubc18\ud658\ud55c\ub2e4.\n\ubbf8\uc9c0\uc815 \uc2dc \uae30\ubcf8 Treasury \uc694\uc57d\uc744 \ubc18\ud658\ud55c\ub2e4 (\ud558\uc704 \ud638\ud658).",
+        "description": "자금 현황 요약.\n\naccount_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.\n미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).",
         "operationId": "get_summary_api_treasury_get",
         "parameters": [
           {
@@ -3404,7 +3404,7 @@
           "treasury"
         ],
         "summary": "List Transactions",
-        "description": "\uc790\uae08 \ubcc0\ub3d9 \uc774\ub825 \uc870\ud68c.",
+        "description": "자금 변동 이력 조회.",
         "operationId": "list_transactions_api_treasury_transactions_get",
         "parameters": [
           {
@@ -3541,7 +3541,7 @@
           "treasury"
         ],
         "summary": "Allocate",
-        "description": "\ubd07\uc5d0 \uc608\uc0b0 \ud560\ub2f9.",
+        "description": "봇에 예산 할당.",
         "operationId": "allocate_api_treasury_bots__bot_id__allocate_post",
         "parameters": [
           {
@@ -3606,7 +3606,7 @@
           "treasury"
         ],
         "summary": "Deallocate",
-        "description": "\ubd07 \uc608\uc0b0 \ud68c\uc218.",
+        "description": "봇 예산 회수.",
         "operationId": "deallocate_api_treasury_bots__bot_id__deallocate_post",
         "parameters": [
           {
@@ -3671,7 +3671,7 @@
           "treasury"
         ],
         "summary": "List Budgets",
-        "description": "\ubd07\ubcc4 \uc608\uc0b0 \ubaa9\ub85d \uc870\ud68c.",
+        "description": "봇별 예산 목록 조회.",
         "operationId": "list_budgets_api_treasury_budgets_get",
         "responses": {
           "200": {
@@ -3696,7 +3696,7 @@
           "treasury"
         ],
         "summary": "Set Balance",
-        "description": "\uacc4\uc88c \ucd1d \uc794\uace0 \uc218\ub3d9 \uc124\uc815.",
+        "description": "계좌 총 잔고 수동 설정.",
         "operationId": "set_balance_api_treasury_balance_post",
         "requestBody": {
           "content": {
@@ -3741,7 +3741,7 @@
           "treasury"
         ],
         "summary": "Get Latest Snapshot",
-        "description": "\uac00\uc7a5 \ucd5c\uadfc \uc77c\ubcc4 \uc2a4\ub0c5\uc0f7 \uc870\ud68c.",
+        "description": "가장 최근 일별 스냅샷 조회.",
         "operationId": "get_latest_snapshot_api_treasury_snapshots_latest_get",
         "parameters": [
           {
@@ -3794,7 +3794,7 @@
           "treasury"
         ],
         "summary": "List Snapshots",
-        "description": "\uae30\uac04\ubcc4 \uc77c\ubcc4 \uc2a4\ub0c5\uc0f7 \ubaa9\ub85d.",
+        "description": "기간별 일별 스냅샷 목록.",
         "operationId": "list_snapshots_api_treasury_snapshots_get",
         "parameters": [
           {
@@ -3879,7 +3879,7 @@
           "treasury"
         ],
         "summary": "Get Snapshot By Date",
-        "description": "\ud2b9\uc815\uc77c \uc2a4\ub0c5\uc0f7 \uc870\ud68c.",
+        "description": "특정일 스냅샷 조회.",
         "operationId": "get_snapshot_by_date_api_treasury_snapshots__date__get",
         "parameters": [
           {
@@ -3957,7 +3957,7 @@
           "message"
         ],
         "title": "AccountActionResponse",
-        "description": "\uacc4\uc88c \uc0c1\ud0dc \ubcc0\uacbd \uc751\ub2f5."
+        "description": "계좌 상태 변경 응답."
       },
       "AccountCreateRequest": {
         "properties": {
@@ -4035,7 +4035,7 @@
           "name"
         ],
         "title": "AccountCreateRequest",
-        "description": "\uacc4\uc88c \uc0dd\uc131 \uc694\uccad."
+        "description": "계좌 생성 요청."
       },
       "AccountDetailResponse": {
         "properties": {
@@ -4048,7 +4048,7 @@
           "account"
         ],
         "title": "AccountDetailResponse",
-        "description": "\uacc4\uc88c \uc0c1\uc138 \uc751\ub2f5."
+        "description": "계좌 상세 응답."
       },
       "AccountListResponse": {
         "properties": {
@@ -4065,7 +4065,7 @@
           "accounts"
         ],
         "title": "AccountListResponse",
-        "description": "\uacc4\uc88c \ubaa9\ub85d \uc751\ub2f5."
+        "description": "계좌 목록 응답."
       },
       "AccountResponse": {
         "properties": {
@@ -4150,7 +4150,7 @@
           "updated_at"
         ],
         "title": "AccountResponse",
-        "description": "\uacc4\uc88c \uc751\ub2f5. credentials\ub294 \ubcf4\uc548\uc0c1 \ud3ec\ud568\ud558\uc9c0 \uc54a\ub294\ub2e4."
+        "description": "계좌 응답. credentials는 보안상 포함하지 않는다."
       },
       "AccountSuspendRequest": {
         "properties": {
@@ -4162,7 +4162,7 @@
         },
         "type": "object",
         "title": "AccountSuspendRequest",
-        "description": "\uacc4\uc88c \uc815\uc9c0 \uc694\uccad."
+        "description": "계좌 정지 요청."
       },
       "AccountUpdateRequest": {
         "properties": {
@@ -4305,7 +4305,7 @@
         },
         "type": "object",
         "title": "AccountUpdateRequest",
-        "description": "\uacc4\uc88c \uc218\uc815 \uc694\uccad."
+        "description": "계좌 수정 요청."
       },
       "ActivateRequest": {
         "properties": {
@@ -4317,7 +4317,7 @@
         },
         "type": "object",
         "title": "ActivateRequest",
-        "description": "\uac70\ub798 \uc7ac\uac1c \uc694\uccad."
+        "description": "거래 재개 요청."
       },
       "ApprovalDetailResponse": {
         "properties": {
@@ -4342,7 +4342,7 @@
           "approval"
         ],
         "title": "ApprovalDetailResponse",
-        "description": "\uacb0\uc7ac \uc0c1\uc138 \uc751\ub2f5."
+        "description": "결재 상세 응답."
       },
       "ApprovalItem": {
         "properties": {
@@ -4436,7 +4436,7 @@
           "title"
         ],
         "title": "ApprovalItem",
-        "description": "\uacb0\uc7ac \uc694\uccad \uc544\uc774\ud15c."
+        "description": "결재 요청 아이템."
       },
       "ApprovalListResponse": {
         "properties": {
@@ -4458,7 +4458,7 @@
           "total"
         ],
         "title": "ApprovalListResponse",
-        "description": "\uacb0\uc7ac \ubaa9\ub85d \uc751\ub2f5."
+        "description": "결재 목록 응답."
       },
       "ApprovalStatusUpdate": {
         "properties": {
@@ -4477,7 +4477,7 @@
           "status"
         ],
         "title": "ApprovalStatusUpdate",
-        "description": "\uc2b9\uc778/\uac70\ubd80 \uc694\uccad."
+        "description": "승인/거부 요청."
       },
       "ApprovalUpdateResponse": {
         "properties": {
@@ -4490,7 +4490,7 @@
           "approval"
         ],
         "title": "ApprovalUpdateResponse",
-        "description": "\uacb0\uc7ac \uc0c1\ud0dc \ubcc0\uacbd \uc751\ub2f5."
+        "description": "결재 상태 변경 응답."
       },
       "AuditLogItem": {
         "properties": {
@@ -4535,7 +4535,7 @@
           "id"
         ],
         "title": "AuditLogItem",
-        "description": "\uac10\uc0ac \ub85c\uadf8 \uc544\uc774\ud15c."
+        "description": "감사 로그 아이템."
       },
       "AuditLogListResponse": {
         "properties": {
@@ -4557,7 +4557,7 @@
           "total"
         ],
         "title": "AuditLogListResponse",
-        "description": "\uac10\uc0ac \ub85c\uadf8 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "감사 로그 목록 응답."
       },
       "BalanceSetRequest": {
         "properties": {
@@ -4571,7 +4571,7 @@
           "balance"
         ],
         "title": "BalanceSetRequest",
-        "description": "\uc794\uace0 \uc218\ub3d9 \uc124\uc815 \uc694\uccad."
+        "description": "잔고 수동 설정 요청."
       },
       "BalanceSetResponse": {
         "properties": {
@@ -4590,7 +4590,7 @@
           "updated_at"
         ],
         "title": "BalanceSetResponse",
-        "description": "\uc794\uace0 \uc124\uc815 \uc751\ub2f5."
+        "description": "잔고 설정 응답."
       },
       "BotCreateRequest": {
         "properties": {
@@ -4661,7 +4661,7 @@
           "bot_id"
         ],
         "title": "BotCreateRequest",
-        "description": "\ubd07 \uc0dd\uc131 \uc694\uccad.\n\nstrategy_id \ub610\ub294 strategy_name \uc911 \ud558\ub098\ub97c \ud544\uc218\ub85c \uc804\ub2ec\ud574\uc57c \ud55c\ub2e4.\nstrategy_name\ub9cc \uc804\ub2ec\ud558\uba74 \ucd5c\uc2e0 \ubc84\uc804\uc758 strategy_id\ub85c \uc790\ub3d9 \ubcc0\ud658\ub41c\ub2e4."
+        "description": "봇 생성 요청.\n\nstrategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.\nstrategy_name만 전달하면 최신 버전의 strategy_id로 자동 변환된다."
       },
       "BotDetailResponse": {
         "properties": {
@@ -4674,7 +4674,7 @@
           "bot"
         ],
         "title": "BotDetailResponse",
-        "description": "\ubd07 \uc0c1\uc138/\uc0dd\uc131/\uc2dc\uc791/\uc911\uc9c0 \uc751\ub2f5."
+        "description": "봇 상세/생성/시작/중지 응답."
       },
       "BotInfo": {
         "properties": {
@@ -4780,7 +4780,7 @@
           "bot_id"
         ],
         "title": "BotInfo",
-        "description": "\ubd07 \uc815\ubcf4."
+        "description": "봇 정보."
       },
       "BotListResponse": {
         "properties": {
@@ -4808,7 +4808,7 @@
           "bots"
         ],
         "title": "BotListResponse",
-        "description": "\ubd07 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "봇 목록 응답."
       },
       "BotUpdateRequest": {
         "properties": {
@@ -4917,7 +4917,7 @@
         },
         "type": "object",
         "title": "BotUpdateRequest",
-        "description": "\ubd07 \uc124\uc815 \uc218\uc815 \uc694\uccad. None\uc778 \ud544\ub4dc\ub294 \ubcc0\uacbd\ud558\uc9c0 \uc54a\ub294\ub2e4."
+        "description": "봇 설정 수정 요청. None인 필드는 변경하지 않는다."
       },
       "BudgetChangeRequest": {
         "properties": {
@@ -4931,7 +4931,7 @@
           "amount"
         ],
         "title": "BudgetChangeRequest",
-        "description": "\uc608\uc0b0 \ud560\ub2f9/\ud68c\uc218 \uc694\uccad."
+        "description": "예산 할당/회수 요청."
       },
       "BudgetItem": {
         "properties": {
@@ -4976,7 +4976,7 @@
           "bot_id"
         ],
         "title": "BudgetItem",
-        "description": "\ubd07\ubcc4 \uc608\uc0b0 \uc544\uc774\ud15c."
+        "description": "봇별 예산 아이템."
       },
       "BudgetListResponse": {
         "properties": {
@@ -4993,7 +4993,7 @@
           "budgets"
         ],
         "title": "BudgetListResponse",
-        "description": "\uc608\uc0b0 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "예산 목록 응답."
       },
       "BudgetOperationResponse": {
         "properties": {
@@ -5017,7 +5017,7 @@
           "available"
         ],
         "title": "BudgetOperationResponse",
-        "description": "\uc608\uc0b0 \ud560\ub2f9/\ud68c\uc218 \uc751\ub2f5."
+        "description": "예산 할당/회수 응답."
       },
       "ConfigItem": {
         "properties": {
@@ -5045,7 +5045,7 @@
           "key"
         ],
         "title": "ConfigItem",
-        "description": "\ub3d9\uc801 \uc124\uc815 \uc544\uc774\ud15c."
+        "description": "동적 설정 아이템."
       },
       "ConfigListResponse": {
         "properties": {
@@ -5062,7 +5062,7 @@
           "configs"
         ],
         "title": "ConfigListResponse",
-        "description": "\ub3d9\uc801 \uc124\uc815 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "동적 설정 목록 응답."
       },
       "ConfigUpdateRequest": {
         "properties": {
@@ -5080,7 +5080,7 @@
           "value"
         ],
         "title": "ConfigUpdateRequest",
-        "description": "\uc124\uc815 \uac12 \ubcc0\uacbd \uc694\uccad."
+        "description": "설정 값 변경 요청."
       },
       "ConfigUpdateResponse": {
         "properties": {
@@ -5100,7 +5100,7 @@
           "key"
         ],
         "title": "ConfigUpdateResponse",
-        "description": "\uc124\uc815 \ubcc0\uacbd \uc751\ub2f5."
+        "description": "설정 변경 응답."
       },
       "DailySummaryItem": {
         "properties": {
@@ -5129,7 +5129,7 @@
           "win_rate"
         ],
         "title": "DailySummaryItem",
-        "description": "\uc77c\ubcc4 \uc131\uacfc \uc9d1\uacc4 \uc544\uc774\ud15c."
+        "description": "일별 성과 집계 아이템."
       },
       "DailySummaryResponse": {
         "properties": {
@@ -5146,14 +5146,14 @@
           "items"
         ],
         "title": "DailySummaryResponse",
-        "description": "\uc77c\ubcc4 \uc131\uacfc \uc9d1\uacc4 \uc751\ub2f5."
+        "description": "일별 성과 집계 응답."
       },
       "DataSchemaResponse": {
         "properties": {},
         "additionalProperties": true,
         "type": "object",
         "title": "DataSchemaResponse",
-        "description": "\ub370\uc774\ud130 \uc2a4\ud0a4\ub9c8 \uc751\ub2f5 (\ub3d9\uc801 \ud0a4-\uac12)."
+        "description": "데이터 스키마 응답 (동적 키-값)."
       },
       "DatasetDetailResponse": {
         "properties": {
@@ -5175,7 +5175,7 @@
           "dataset"
         ],
         "title": "DatasetDetailResponse",
-        "description": "\ub370\uc774\ud130\uc14b \uc0c1\uc138 \uc751\ub2f5 (\uba54\ud0c0\ub370\uc774\ud130 + \ubbf8\ub9ac\ubcf4\uae30)."
+        "description": "데이터셋 상세 응답 (메타데이터 + 미리보기)."
       },
       "DatasetItem": {
         "properties": {
@@ -5236,7 +5236,7 @@
           "data_type"
         ],
         "title": "DatasetItem",
-        "description": "\ub370\uc774\ud130\uc14b \uc544\uc774\ud15c."
+        "description": "데이터셋 아이템."
       },
       "DatasetListResponse": {
         "properties": {
@@ -5258,7 +5258,7 @@
           "total"
         ],
         "title": "DatasetListResponse",
-        "description": "\ub370\uc774\ud130\uc14b \ubaa9\ub85d \uc751\ub2f5."
+        "description": "데이터셋 목록 응답."
       },
       "FeedStatusResponse": {
         "properties": {
@@ -5297,7 +5297,7 @@
         },
         "type": "object",
         "title": "FeedStatusResponse",
-        "description": "Feed \ud30c\uc774\ud504\ub77c\uc778 \uc0c1\ud0dc \uc751\ub2f5."
+        "description": "Feed 파이프라인 상태 응답."
       },
       "HTTPValidationError": {
         "properties": {
@@ -5322,7 +5322,7 @@
         },
         "type": "object",
         "title": "HaltRequest",
-        "description": "\uac70\ub798 \uc911\uc9c0 \uc694\uccad."
+        "description": "거래 중지 요청."
       },
       "HealthResponse": {
         "properties": {
@@ -5335,16 +5335,16 @@
               "type": "boolean"
             },
             "type": "object",
-            "title": "Checks",
-            "default": {}
+            "title": "Checks"
           }
         },
         "type": "object",
         "required": [
-          "ok"
+          "ok",
+          "checks"
         ],
         "title": "HealthResponse",
-        "description": "\ud5ec\uc2a4\uccb4\ud06c \uc751\ub2f5.\n\n- `ok`: \ubaa8\ub4e0 \uc758\uc874\uc131 \uccb4\ud06c \ud1b5\uacfc \uc5ec\ubd80 (`all(checks.values())`).\n- `checks`: \uac1c\ubcc4 \uc758\uc874\uc131 \uccb4\ud06c \uacb0\uacfc. 1.0 \uae30\uc900 \ud0a4\ub294 `db`, `broker`.\n  \ud0a4 \ud655\uc7a5\uc740 \ud558\uc704 \ud638\ud658\uc774\ubbc0\ub85c \uc18c\ube44\uc790\ub294 \uc874\uc7ac\ud558\ub294 \ud0a4\ub9cc \ud655\uc778\ud55c\ub2e4."
+        "description": "헬스체크 응답.\n\n- `ok`: 모든 의존성 체크 통과 여부 (`all(checks.values())`).\n- `checks`: 개별 의존성 체크 결과. 1.0 기준 키는 `db`, `broker`.\n  키 확장은 하위 호환이므로 소비자는 존재하는 키만 확인한다.\n\n`ok`와 `checks` 모두 필수 필드 (OpenAPI `required`)."
       },
       "KillSwitchResponse": {
         "properties": {
@@ -5363,7 +5363,7 @@
           "changed_at"
         ],
         "title": "KillSwitchResponse",
-        "description": "\ud0ac \uc2a4\uc704\uce58 \uc81c\uc5b4 \uc751\ub2f5."
+        "description": "킬 스위치 제어 응답."
       },
       "LoginRequest": {
         "properties": {
@@ -5382,7 +5382,7 @@
           "password"
         ],
         "title": "LoginRequest",
-        "description": "\ub85c\uadf8\uc778 \uc694\uccad."
+        "description": "로그인 요청."
       },
       "LoginResponse": {
         "properties": {
@@ -5406,7 +5406,7 @@
           "type"
         ],
         "title": "LoginResponse",
-        "description": "\ub85c\uadf8\uc778 \uc131\uacf5 \uc751\ub2f5."
+        "description": "로그인 성공 응답."
       },
       "LogoutResponse": {
         "properties": {
@@ -5420,7 +5420,7 @@
           "ok"
         ],
         "title": "LogoutResponse",
-        "description": "\ub85c\uadf8\uc544\uc6c3 \uc751\ub2f5."
+        "description": "로그아웃 응답."
       },
       "MeResponse": {
         "properties": {
@@ -5459,7 +5459,7 @@
           "type"
         ],
         "title": "MeResponse",
-        "description": "\ud604\uc7ac \uc0ac\uc6a9\uc790 \uc815\ubcf4 \uc751\ub2f5."
+        "description": "현재 사용자 정보 응답."
       },
       "MemberCreateRequest": {
         "properties": {
@@ -5501,7 +5501,7 @@
           "member_type"
         ],
         "title": "MemberCreateRequest",
-        "description": "\uba64\ubc84 \ub4f1\ub85d \uc694\uccad."
+        "description": "멤버 등록 요청."
       },
       "MemberCreateResponse": {
         "properties": {
@@ -5519,7 +5519,7 @@
           "token"
         ],
         "title": "MemberCreateResponse",
-        "description": "\uba64\ubc84 \uc0dd\uc131 \uc751\ub2f5 (\ud1a0\ud070 \ud3ec\ud568)."
+        "description": "멤버 생성 응답 (토큰 포함)."
       },
       "MemberDetailResponse": {
         "properties": {
@@ -5532,7 +5532,7 @@
           "member"
         ],
         "title": "MemberDetailResponse",
-        "description": "\uba64\ubc84 \uc0c1\uc138 \uc751\ub2f5."
+        "description": "멤버 상세 응답."
       },
       "MemberInfo": {
         "properties": {
@@ -5630,7 +5630,7 @@
           "role"
         ],
         "title": "MemberInfo",
-        "description": "\uba64\ubc84 \uc815\ubcf4."
+        "description": "멤버 정보."
       },
       "MemberListResponse": {
         "properties": {
@@ -5652,7 +5652,7 @@
           "total"
         ],
         "title": "MemberListResponse",
-        "description": "\uba64\ubc84 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "멤버 목록 응답."
       },
       "MemberScopesResponse": {
         "properties": {
@@ -5665,7 +5665,7 @@
           "member"
         ],
         "title": "MemberScopesResponse",
-        "description": "\uad8c\ud55c \ubc94\uc704 \ubcc0\uacbd \uc751\ub2f5."
+        "description": "권한 범위 변경 응답."
       },
       "MemberTokenResponse": {
         "properties": {
@@ -5683,7 +5683,7 @@
           "token"
         ],
         "title": "MemberTokenResponse",
-        "description": "\ud1a0\ud070 \uc7ac\ubc1c\uae09 \uc751\ub2f5."
+        "description": "토큰 재발급 응답."
       },
       "MonthlySummaryItem": {
         "properties": {
@@ -5717,7 +5717,7 @@
           "win_rate"
         ],
         "title": "MonthlySummaryItem",
-        "description": "\uc6d4\ubcc4 \uc131\uacfc \uc9d1\uacc4 \uc544\uc774\ud15c."
+        "description": "월별 성과 집계 아이템."
       },
       "MonthlySummaryResponse": {
         "properties": {
@@ -5734,7 +5734,7 @@
           "items"
         ],
         "title": "MonthlySummaryResponse",
-        "description": "\uc6d4\ubcc4 \uc131\uacfc \uc9d1\uacc4 \uc751\ub2f5."
+        "description": "월별 성과 집계 응답."
       },
       "OkResponse": {
         "properties": {
@@ -5748,7 +5748,7 @@
           "ok"
         ],
         "title": "OkResponse",
-        "description": "\ub2e8\uc21c \uc131\uacf5 \uc751\ub2f5."
+        "description": "단순 성공 응답."
       },
       "PasswordChangeRequest": {
         "properties": {
@@ -5767,7 +5767,7 @@
           "new_password"
         ],
         "title": "PasswordChangeRequest",
-        "description": "\ube44\ubc00\ubc88\ud638 \ubcc0\uacbd \uc694\uccad."
+        "description": "비밀번호 변경 요청."
       },
       "PortfolioHistoryPoint": {
         "properties": {
@@ -5801,7 +5801,7 @@
           "unrealized_pnl"
         ],
         "title": "PortfolioHistoryPoint",
-        "description": "\uc790\uc0b0 \ucd94\uc774 \ub370\uc774\ud130 \ud3ec\uc778\ud2b8 (\uc2a4\ub0c5\uc0f7 \uae30\ubc18)."
+        "description": "자산 추이 데이터 포인트 (스냅샷 기반)."
       },
       "PortfolioHistoryResponse": {
         "properties": {
@@ -5828,7 +5828,7 @@
           "end_date"
         ],
         "title": "PortfolioHistoryResponse",
-        "description": "\uae30\uac04\ubcc4 \uc790\uc0b0 \ucd94\uc774 \uc751\ub2f5."
+        "description": "기간별 자산 추이 응답."
       },
       "PortfolioValueResponse": {
         "properties": {
@@ -5873,7 +5873,7 @@
           "updated_at"
         ],
         "title": "PortfolioValueResponse",
-        "description": "\ucd1d \uc790\uc0b0 \uac00\uce58 \uc751\ub2f5 (\uc2a4\ub0c5\uc0f7 \uae30\ubc18)."
+        "description": "총 자산 가치 응답 (스냅샷 기반)."
       },
       "ReportDetailResponse": {
         "properties": {
@@ -6093,7 +6093,7 @@
           "submitted_at"
         ],
         "title": "ReportDetailResponse",
-        "description": "\ub9ac\ud3ec\ud2b8 \uc0c1\uc138 \uc751\ub2f5."
+        "description": "리포트 상세 응답."
       },
       "ReportListItem": {
         "properties": {
@@ -6122,7 +6122,7 @@
           "submitted_at"
         ],
         "title": "ReportListItem",
-        "description": "\ub9ac\ud3ec\ud2b8 \ubaa9\ub85d \uc544\uc774\ud15c."
+        "description": "리포트 목록 아이템."
       },
       "ReportListResponse": {
         "properties": {
@@ -6150,14 +6150,14 @@
           "reports"
         ],
         "title": "ReportListResponse",
-        "description": "\ub9ac\ud3ec\ud2b8 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "리포트 목록 응답."
       },
       "ReportSchemaResponse": {
         "properties": {},
         "additionalProperties": true,
         "type": "object",
         "title": "ReportSchemaResponse",
-        "description": "\ub9ac\ud3ec\ud2b8 \uc2a4\ud0a4\ub9c8 \uc751\ub2f5."
+        "description": "리포트 스키마 응답."
       },
       "ReportSubmitRequest": {
         "properties": {
@@ -6266,7 +6266,7 @@
           "strategy_path"
         ],
         "title": "ReportSubmitRequest",
-        "description": "\ub9ac\ud3ec\ud2b8 \uc81c\ucd9c \uc694\uccad."
+        "description": "리포트 제출 요청."
       },
       "ReportSubmitResponse": {
         "properties": {
@@ -6290,7 +6290,7 @@
           "status"
         ],
         "title": "ReportSubmitResponse",
-        "description": "\ub9ac\ud3ec\ud2b8 \uc81c\ucd9c \uc751\ub2f5."
+        "description": "리포트 제출 응답."
       },
       "RuleItem": {
         "properties": {
@@ -6315,7 +6315,7 @@
           "type"
         ],
         "title": "RuleItem",
-        "description": "\ub8f0 \uc124\uc815 \uc544\uc774\ud15c."
+        "description": "룰 설정 아이템."
       },
       "RuleListResponse": {
         "properties": {
@@ -6337,7 +6337,7 @@
           "rules"
         ],
         "title": "RuleListResponse",
-        "description": "\uacc4\uc88c \ub8f0 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "계좌 룰 목록 응답."
       },
       "RuleUpdateRequest": {
         "properties": {
@@ -6355,7 +6355,7 @@
         },
         "type": "object",
         "title": "RuleUpdateRequest",
-        "description": "\ub8f0 \uc124\uc815 \ubcc0\uacbd \uc694\uccad."
+        "description": "룰 설정 변경 요청."
       },
       "RuleUpdateResponse": {
         "properties": {
@@ -6378,7 +6378,7 @@
           "rule"
         ],
         "title": "RuleUpdateResponse",
-        "description": "\ub8f0 \uc124\uc815 \ubcc0\uacbd \uc751\ub2f5."
+        "description": "룰 설정 변경 응답."
       },
       "ScopesUpdateRequest": {
         "properties": {
@@ -6395,7 +6395,7 @@
           "scopes"
         ],
         "title": "ScopesUpdateRequest",
-        "description": "\uad8c\ud55c \ubc94\uc704 \ubcc0\uacbd \uc694\uccad."
+        "description": "권한 범위 변경 요청."
       },
       "SnapshotItem": {
         "properties": {
@@ -6475,7 +6475,7 @@
           "created_at"
         ],
         "title": "SnapshotItem",
-        "description": "\uc77c\ubcc4 \uc790\uc0b0 \uc2a4\ub0c5\uc0f7 \uc544\uc774\ud15c."
+        "description": "일별 자산 스냅샷 아이템."
       },
       "SnapshotListResponse": {
         "properties": {
@@ -6492,7 +6492,7 @@
           "snapshots"
         ],
         "title": "SnapshotListResponse",
-        "description": "\uc2a4\ub0c5\uc0f7 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "스냅샷 목록 응답."
       },
       "SnapshotResponse": {
         "properties": {
@@ -6505,7 +6505,7 @@
           "snapshot"
         ],
         "title": "SnapshotResponse",
-        "description": "\ub2e8\uc77c \uc2a4\ub0c5\uc0f7 \uc751\ub2f5."
+        "description": "단일 스냅샷 응답."
       },
       "StatusResponse": {
         "properties": {
@@ -6557,7 +6557,7 @@
           "status"
         ],
         "title": "StatusResponse",
-        "description": "\uc2dc\uc2a4\ud15c \uc0c1\ud0dc \uc751\ub2f5."
+        "description": "시스템 상태 응답."
       },
       "StatusUpdateRequest": {
         "properties": {
@@ -6571,7 +6571,7 @@
           "status"
         ],
         "title": "StatusUpdateRequest",
-        "description": "\uc804\ub7b5 \uc0c1\ud0dc \ubcc0\uacbd \uc694\uccad."
+        "description": "전략 상태 변경 요청."
       },
       "StorageSummaryResponse": {
         "properties": {
@@ -6612,7 +6612,7 @@
           "by_timeframe"
         ],
         "title": "StorageSummaryResponse",
-        "description": "\uc800\uc7a5 \uc6a9\ub7c9 \ud604\ud669 \uc751\ub2f5."
+        "description": "저장 용량 현황 응답."
       },
       "StrategyDetailResponse": {
         "properties": {
@@ -6673,7 +6673,7 @@
           "strategy"
         ],
         "title": "StrategyDetailResponse",
-        "description": "\uc804\ub7b5 \uc0c1\uc138 \uc751\ub2f5."
+        "description": "전략 상세 응답."
       },
       "StrategyInfo": {
         "properties": {
@@ -6749,7 +6749,7 @@
           "version"
         ],
         "title": "StrategyInfo",
-        "description": "\uc804\ub7b5 \uc0c1\uc138 \uc815\ubcf4."
+        "description": "전략 상세 정보."
       },
       "StrategyListItem": {
         "properties": {
@@ -6821,7 +6821,7 @@
           "status"
         ],
         "title": "StrategyListItem",
-        "description": "\uc804\ub7b5 \ubaa9\ub85d \uc544\uc774\ud15c."
+        "description": "전략 목록 아이템."
       },
       "StrategyListResponse": {
         "properties": {
@@ -6838,7 +6838,7 @@
           "strategies"
         ],
         "title": "StrategyListResponse",
-        "description": "\uc804\ub7b5 \ubaa9\ub85d \uc751\ub2f5."
+        "description": "전략 목록 응답."
       },
       "StrategyPerformanceResponse": {
         "properties": {
@@ -6900,7 +6900,7 @@
         "additionalProperties": true,
         "type": "object",
         "title": "StrategyPerformanceResponse",
-        "description": "\uc804\ub7b5 \uc131\uacfc \uc9c0\ud45c \uc751\ub2f5."
+        "description": "전략 성과 지표 응답."
       },
       "StrategyTradeItem": {
         "properties": {
@@ -6949,7 +6949,7 @@
           "timestamp"
         ],
         "title": "StrategyTradeItem",
-        "description": "\uc804\ub7b5 \uac70\ub798 \uc544\uc774\ud15c."
+        "description": "전략 거래 아이템."
       },
       "StrategyTradesResponse": {
         "properties": {
@@ -6977,7 +6977,7 @@
           "trades"
         ],
         "title": "StrategyTradesResponse",
-        "description": "\uc804\ub7b5 \uac70\ub798 \ub0b4\uc5ed \uc751\ub2f5."
+        "description": "전략 거래 내역 응답."
       },
       "StrategyValidateResponse": {
         "properties": {
@@ -7007,7 +7007,7 @@
           "valid"
         ],
         "title": "StrategyValidateResponse",
-        "description": "\uc804\ub7b5 \uac80\uc99d \uc751\ub2f5."
+        "description": "전략 검증 응답."
       },
       "TradeItem": {
         "properties": {
@@ -7067,7 +7067,7 @@
           "status"
         ],
         "title": "TradeItem",
-        "description": "\uac70\ub798 \uae30\ub85d \uc544\uc774\ud15c."
+        "description": "거래 기록 아이템."
       },
       "TradeListResponse": {
         "properties": {
@@ -7095,7 +7095,7 @@
           "trades"
         ],
         "title": "TradeListResponse",
-        "description": "\uac70\ub798 \uae30\ub85d \ubaa9\ub85d \uc751\ub2f5."
+        "description": "거래 기록 목록 응답."
       },
       "TransactionItem": {
         "properties": {
@@ -7140,7 +7140,7 @@
           "created_at"
         ],
         "title": "TransactionItem",
-        "description": "\uc790\uae08 \ubcc0\ub3d9 \uc774\ub825 \uc544\uc774\ud15c."
+        "description": "자금 변동 이력 아이템."
       },
       "TransactionListResponse": {
         "properties": {
@@ -7162,7 +7162,7 @@
           "total"
         ],
         "title": "TransactionListResponse",
-        "description": "\uc790\uae08 \ubcc0\ub3d9 \uc774\ub825 \uc751\ub2f5."
+        "description": "자금 변동 이력 응답."
       },
       "TreasurySummaryResponse": {
         "properties": {
@@ -7282,7 +7282,7 @@
         "additionalProperties": true,
         "type": "object",
         "title": "TreasurySummaryResponse",
-        "description": "\uc790\uae08 \ud604\ud669 \uc694\uc57d \uc751\ub2f5."
+        "description": "자금 현황 요약 응답."
       },
       "ValidationError": {
         "properties": {
@@ -7361,7 +7361,7 @@
           "win_rate"
         ],
         "title": "WeeklySummaryItem",
-        "description": "\uc8fc\ubcc4 \uc131\uacfc \uc9d1\uacc4 \uc544\uc774\ud15c."
+        "description": "주별 성과 집계 아이템."
       },
       "WeeklySummaryResponse": {
         "properties": {
@@ -7378,7 +7378,7 @@
           "items"
         ],
         "title": "WeeklySummaryResponse",
-        "description": "\uc8fc\ubcc4 \uc131\uacfc \uc9d1\uacc4 \uc751\ub2f5."
+        "description": "주별 성과 집계 응답."
       }
     }
   }
