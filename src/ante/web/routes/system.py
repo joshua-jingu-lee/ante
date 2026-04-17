@@ -53,9 +53,39 @@ async def get_system_status(
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check() -> dict:
-    """헬스체크."""
-    return {"ok": True}
+async def health_check(
+    request: Request,
+    account_service: Annotated[Any | None, Depends(get_account_service_optional)],
+) -> dict:
+    """헬스체크 — 핵심 의존성(DB, Broker)의 실제 상태를 반영한다."""
+    checks: dict[str, bool] = {"db": False, "broker": False}
+
+    # DB 접근 확인
+    db = getattr(request.app.state, "db", None)
+    if db is not None:
+        try:
+            await db.fetch_one("SELECT 1")
+            checks["db"] = True
+        except Exception:
+            pass
+
+    # Broker 연결 확인: 연결된 Broker 1개라도 있으면 True
+    if account_service is not None:
+        try:
+            accounts = await account_service.list()
+            for a in accounts:
+                try:
+                    broker = await account_service.get_broker(a.account_id)
+                    if getattr(broker, "connected", False):
+                        checks["broker"] = True
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    ok = all(checks.values())
+    return {"ok": ok, "checks": checks}
 
 
 @router.post(

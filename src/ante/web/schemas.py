@@ -117,6 +117,7 @@ class HealthResponse(BaseModel):
     """헬스체크 응답."""
 
     ok: bool
+    checks: dict[str, bool] = {}
 
 
 class KillSwitchResponse(BaseModel):

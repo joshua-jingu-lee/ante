@@ -35,7 +35,11 @@ class TestSystemRoutes:
     def test_health(self, client):
         resp = client.get("/api/system/health")
         assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        data = resp.json()
+        # 기본 앱(DB/broker 미주입)에서는 ok=False + checks 내 의존성 상태 False
+        assert "ok" in data
+        assert data["checks"] == {"db": False, "broker": False}
+        assert data["ok"] is False
 
 
 # ── Strategy 라우트 테스트 ────────────────────────
@@ -512,7 +516,9 @@ class TestResponseModelCoverage:
         assert resp.status_code == 200
         data = resp.json()
         model = HealthResponse(**data)
-        assert model.ok is True
+        # 기본 앱에서는 DB/broker 미주입 → ok=False
+        assert model.ok is False
+        assert model.checks == {"db": False, "broker": False}
 
     def test_response_model_validates_strategy_validate(self, client, tmp_path):
         """StrategyValidateResponse 모델이 실제 응답과 일치하는지 검증."""
