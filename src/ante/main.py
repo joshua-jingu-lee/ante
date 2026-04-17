@@ -398,6 +398,20 @@ async def _init_gateway(s: Services) -> None:
                 account.account_id,
                 exc_info=True,
             )
+            from ante.eventbus.events import NotificationEvent
+
+            if s.eventbus is not None:
+                await s.eventbus.publish(
+                    NotificationEvent(
+                        level="error",
+                        title="Broker 연결 실패",
+                        message=(
+                            f"계좌 {account.account_id} 브로커 연결에 실패했습니다."
+                            " 주문 실행이 불가능할 수 있습니다."
+                        ),
+                        category="system",
+                    )
+                )
     if connected_count:
         logger.info("Broker 연결 완료: %d/%d개 계좌", connected_count, len(accounts))
 
@@ -414,6 +428,20 @@ async def _init_gateway(s: Services) -> None:
                     account.account_id,
                     exc_info=True,
                 )
+                from ante.eventbus.events import NotificationEvent
+
+                if s.eventbus is not None:
+                    await s.eventbus.publish(
+                        NotificationEvent(
+                            level="error",
+                            title="실시간 시세 연결 실패",
+                            message=(
+                                f"계좌 {account.account_id} StreamIntegration 초기화에"
+                                " 실패했습니다. 실시간 시세가 수신되지 않습니다."
+                            ),
+                            category="system",
+                        )
+                    )
 
     # 종목 마스터 동기화 (연결된 첫 번째 Broker 사용)
     if connected_count:
@@ -702,6 +730,21 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
                 account.account_id,
                 exc_info=True,
             )
+            from ante.eventbus.events import NotificationEvent
+
+            if s.eventbus is not None:
+                await s.eventbus.publish(
+                    NotificationEvent(
+                        level="error",
+                        title="Treasury 잔고 동기화 실패",
+                        message=(
+                            f"계좌 {account.account_id} Treasury 잔고 동기화에"
+                            " 실패했습니다. 봇 운영 시 잔고 불일치가"
+                            " 발생할 수 있습니다."
+                        ),
+                        category="system",
+                    )
+                )
 
 
 async def _init_feed(s: Services) -> None:

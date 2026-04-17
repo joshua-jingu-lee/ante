@@ -557,3 +557,54 @@ async def test_rule_engine_manager_multi_account(tmp_path: Path) -> None:
     assert len(rule_engine_manager.engines) == 2
 
     await db.close()
+
+
+async def test_init_treasury_sync_publishes_notification_on_failure(
+    tmp_path: Path,
+) -> None:
+    """Treasury 동기화 실패 시 NotificationEvent(level=error)를 발행한다."""
+    from ante.eventbus.events import NotificationEvent
+    from ante.main import Services, _init_treasury_sync
+
+    db = Database(str(tmp_path / "test.db"))
+    await db.connect()
+    eventbus = EventBus(history_size=100)
+
+    from ante.account import AccountService
+
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
+    await account_service.create_default_test_account()
+    accounts = await account_service.list()
+
+    # treasury_manager.get()가 실패하도록 빈 manager 준비
+    class _FailingTreasuryManager:
+        def get(self, account_id: str):
+            raise RuntimeError("treasury not initialized")
+
+    config = Config(static={}, secrets={})
+    s = Services(
+        db=db,
+        eventbus=eventbus,
+        config=config,
+        account_service=account_service,
+        treasury_manager=_FailingTreasuryManager(),
+    )
+
+    # 알림 수집
+    captured: list[NotificationEvent] = []
+
+    async def _collect(event: NotificationEvent) -> None:
+        captured.append(event)
+
+    eventbus.subscribe(NotificationEvent, _collect)
+
+    await _init_treasury_sync(s, accounts)
+
+    assert len(captured) == 1
+    assert captured[0].level == "error"
+    assert captured[0].category == "system"
+    assert "Treasury" in captured[0].title
+    assert accounts[0].account_id in captured[0].message
+
+    await db.close()
