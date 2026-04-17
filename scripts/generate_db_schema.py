@@ -2,14 +2,16 @@
 """*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성.
 
 src/ante/ 하위 모든 .py 파일에서 *_SCHEMA 상수(및 특수 명명 패턴)를 찾아
-DDL을 파싱하고 docs/generated/db-schema.md를 생성한다.
+DDL을 파싱하고 docs/architecture/generated/db-schema.md를 생성한다.
 
-SSOT: 모듈 소스 코드 내 DDL 상수 -> docs/generated/db-schema.md (자동 생성)
+SSOT: 모듈 소스 코드 내 DDL 상수 -> docs/architecture/generated/db-schema.md (자동 생성)
 
 사용법:
     python scripts/generate_db_schema.py
-    python scripts/generate_db_schema.py --output docs/generated/db-schema.md
+    python scripts/generate_db_schema.py --output <path>
     python scripts/generate_db_schema.py --stdout
+
+    <path> 기본값: docs/architecture/generated/db-schema.md
 """
 
 from __future__ import annotations
@@ -483,8 +485,8 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        default="docs/generated/db-schema.md",
-        help="출력 파일 경로 (기본: docs/generated/db-schema.md)",
+        default="docs/architecture/generated/db-schema.md",
+        help="출력 파일 경로 (기본: docs/architecture/generated/db-schema.md)",
     )
     parser.add_argument(
         "--stdout",

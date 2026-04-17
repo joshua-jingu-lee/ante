@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 기간별 성과</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item active">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="strategy-detail.html" class="btn btn-ghost btn-sm">&larr; 전략 상세</a>
+        <span class="page-title">기간별 성과</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 필터 바 -->
+      <div class="card mb-24">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">전략</label>
+            <input type="text" class="search-input" list="strategy-list" placeholder="전략명 검색..." value="모멘텀 돌파 전략" style="width: 220px;">
+            <datalist id="strategy-list">
+              <option value="모멘텀 돌파 전략">
+              <option value="MACD 크로스 전략">
+              <option value="RSI 과매도 반등">
+              <option value="볼린저밴드 스퀴즈">
+              <option value="듀얼 모멘텀">
+            </datalist>
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">기간</label>
+            <select class="filter-select" id="periodSelect" onchange="switchPeriod(this.value)">
+              <option value="daily">일별</option>
+              <option value="weekly">주별</option>
+              <option value="monthly" selected>월별</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">시작일</label>
+            <input type="date" class="search-input" value="2025-01-01" style="width: 160px;">
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">종료일</label>
+            <input type="date" class="search-input" value="2026-03-15" style="width: 160px;">
+          </div>
+          <div style="align-self: flex-end;">
+            <button class="btn btn-primary btn-sm">조회</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 요약 카드 -->
+      <div class="stats-row mb-24" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat-card">
+          <div class="stat-label">조회 기간 실현 손익</div>
+          <div class="stat-value text-positive">2,780,000 원</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">총 거래 수</div>
+          <div class="stat-value">84</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">승률</div>
+          <div class="stat-value">61.9%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">수익 팩터</div>
+          <div class="stat-value">1.72</div>
+        </div>
+      </div>
+
+      <!-- 일별 성과 테이블 -->
+      <div class="card" id="table-daily" style="display: none;">
+        <div class="card-title mb-16">일별 성과</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>일자</th>
+                <th class="text-right">거래 수</th>
+                <th class="text-right">승률</th>
+                <th class="text-right">실현 손익</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>2026-03-13</td><td class="text-right">2</td><td class="text-right">100%</td><td class="text-right text-positive">85,000 원</td></tr>
+              <tr><td>2026-03-12</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">130,000 원</td></tr>
+              <tr><td>2026-03-11</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-positive">85,000 원</td></tr>
+              <tr><td>2026-03-10</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">42,000 원</td></tr>
+              <tr><td>2026-03-07</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-negative">-18,000 원</td></tr>
+              <tr><td>2026-03-06</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">95,000 원</td></tr>
+              <tr><td>2026-03-05</td><td class="text-right">1</td><td class="text-right">0%</td><td class="text-right text-negative">-32,000 원</td></tr>
+              <tr><td>2026-03-04</td><td class="text-right">2</td><td class="text-right">100%</td><td class="text-right text-positive">78,000 원</td></tr>
+              <tr><td>2026-03-03</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">55,000 원</td></tr>
+              <tr><td>2026-02-28</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">110,000 원</td></tr>
+              <tr><td>2026-02-27</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-negative">-25,000 원</td></tr>
+              <tr><td>2026-02-26</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">63,000 원</td></tr>
+              <tr><td>2026-02-25</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-positive">38,000 원</td></tr>
+              <tr><td>2026-02-24</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">92,000 원</td></tr>
+              <tr><td>2026-02-21</td><td class="text-right">1</td><td class="text-right">0%</td><td class="text-right text-negative">-45,000 원</td></tr>
+              <tr><td>2026-02-20</td><td class="text-right">2</td><td class="text-right">100%</td><td class="text-right text-positive">125,000 원</td></tr>
+              <tr><td>2026-02-19</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">67,000 원</td></tr>
+              <tr><td>2026-02-18</td><td class="text-right">3</td><td class="text-right">33.3%</td><td class="text-right text-negative">-58,000 원</td></tr>
+              <tr><td>2026-02-17</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-positive">35,000 원</td></tr>
+              <tr><td>2026-02-14</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">88,000 원</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 페이지네이션 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 0 0; border-top: 1px solid var(--color-border); margin-top: 16px;">
+          <span style="font-size: 13px; color: var(--color-text-muted);">총 42건 중 1-20</span>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-outline btn-sm" disabled>&laquo;</button>
+            <button class="btn btn-primary btn-sm">1</button>
+            <button class="btn btn-outline btn-sm">2</button>
+            <button class="btn btn-outline btn-sm">3</button>
+            <button class="btn btn-outline btn-sm">&raquo;</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 주별 성과 테이블 -->
+      <div class="card" id="table-weekly" style="display: none;">
+        <div class="card-title mb-16">주별 성과</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>주간</th>
+                <th class="text-right">거래 수</th>
+                <th class="text-right">승률</th>
+                <th class="text-right">실현 손익</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>2026-03-10 ~ 03-14</td><td class="text-right">8</td><td class="text-right">75.0%</td><td class="text-right text-positive">324,000 원</td></tr>
+              <tr><td>2026-03-03 ~ 03-07</td><td class="text-right">7</td><td class="text-right">57.1%</td><td class="text-right text-positive">100,000 원</td></tr>
+              <tr><td>2026-02-24 ~ 02-28</td><td class="text-right">9</td><td class="text-right">66.7%</td><td class="text-right text-positive">196,000 원</td></tr>
+              <tr><td>2026-02-17 ~ 02-21</td><td class="text-right">6</td><td class="text-right">50.0%</td><td class="text-right text-negative">-45,000 원</td></tr>
+              <tr><td>2026-02-10 ~ 02-14</td><td class="text-right">8</td><td class="text-right">62.5%</td><td class="text-right text-positive">210,000 원</td></tr>
+              <tr><td>2026-02-03 ~ 02-07</td><td class="text-right">5</td><td class="text-right">80.0%</td><td class="text-right text-positive">285,000 원</td></tr>
+              <tr><td>2026-01-27 ~ 01-31</td><td class="text-right">7</td><td class="text-right">57.1%</td><td class="text-right text-positive">120,000 원</td></tr>
+              <tr><td>2026-01-20 ~ 01-24</td><td class="text-right">8</td><td class="text-right">62.5%</td><td class="text-right text-positive">195,000 원</td></tr>
+              <tr><td>2026-01-13 ~ 01-17</td><td class="text-right">6</td><td class="text-right">50.0%</td><td class="text-right text-negative">-30,000 원</td></tr>
+              <tr><td>2026-01-06 ~ 01-10</td><td class="text-right">9</td><td class="text-right">66.7%</td><td class="text-right text-positive">350,000 원</td></tr>
+              <tr><td>2025-12-30 ~ 01-03</td><td class="text-right">4</td><td class="text-right">50.0%</td><td class="text-right text-positive">75,000 원</td></tr>
+              <tr><td>2025-12-23 ~ 12-27</td><td class="text-right">5</td><td class="text-right">60.0%</td><td class="text-right text-positive">130,000 원</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 월별 성과 테이블 (기본 표시) -->
+      <div class="card" id="table-monthly">
+        <div class="card-title mb-16">월별 성과</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>월</th>
+                <th class="text-right">거래 수</th>
+                <th class="text-right">승률</th>
+                <th class="text-right">실현 손익</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>2026-03</td><td class="text-right">18</td><td class="text-right">66.7%</td><td class="text-right text-positive">620,000 원</td></tr>
+              <tr><td>2026-02</td><td class="text-right">32</td><td class="text-right">62.5%</td><td class="text-right text-positive">1,150,000 원</td></tr>
+              <tr><td>2026-01</td><td class="text-right">34</td><td class="text-right">58.8%</td><td class="text-right text-positive">1,010,000 원</td></tr>
+              <tr><td>2025-12</td><td class="text-right">28</td><td class="text-right">60.7%</td><td class="text-right text-positive">480,000 원</td></tr>
+              <tr><td>2025-11</td><td class="text-right">30</td><td class="text-right">56.7%</td><td class="text-right text-negative">-120,000 원</td></tr>
+              <tr><td>2025-10</td><td class="text-right">25</td><td class="text-right">64.0%</td><td class="text-right text-positive">390,000 원</td></tr>
+              <tr><td>2025-09</td><td class="text-right">22</td><td class="text-right">54.5%</td><td class="text-right text-positive">180,000 원</td></tr>
+              <tr><td>2025-08</td><td class="text-right">18</td><td class="text-right">50.0%</td><td class="text-right text-negative">-85,000 원</td></tr>
+              <tr><td>2025-07</td><td class="text-right">20</td><td class="text-right">65.0%</td><td class="text-right text-positive">310,000 원</td></tr>
+              <tr><td>2025-06</td><td class="text-right">15</td><td class="text-right">53.3%</td><td class="text-right text-positive">95,000 원</td></tr>
+              <tr><td>2025-05</td><td class="text-right">12</td><td class="text-right">58.3%</td><td class="text-right text-negative">-250,000 원</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    function switchPeriod(period) {
+      document.querySelectorAll('[id^="table-"]').forEach(t => t.style.display = 'none');
+      document.getElementById('table-' + period).style.display = '';
+    }
+  </script>
+</body>
+</html>

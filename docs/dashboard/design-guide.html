@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ante Dashboard — Design Guide</title>
+<link rel="stylesheet" href="design-guide.css">
+</head>
+<body>
+
+<!-- ===== Sidebar ===== -->
+<aside class="shell-sidebar">
+  <div class="shell-sidebar-logo">
+    <img src="../../frontend/public/logo-a.svg" alt="A" onerror="this.outerHTML='<span style=font-size:24px;font-weight:700>A</span>'">
+    <img src="../../frontend/public/logo-n.svg" alt="N" onerror="this.outerHTML='<span style=font-size:24px;font-weight:700>N</span>'">
+    <img src="../../frontend/public/logo-t.svg" alt="T" onerror="this.outerHTML='<span style=font-size:24px;font-weight:700>T</span>'">
+    <img src="../../frontend/public/logo-e.svg" alt="E" onerror="this.outerHTML='<span style=font-size:24px;font-weight:700>E</span>'">
+  </div>
+  <nav class="shell-sidebar-nav">
+    <a href="#colors" class="active">
+      <span class="nav-icon">&#127912;</span>
+      <span>색상 팔레트</span>
+    </a>
+    <a href="#typography">
+      <span class="nav-icon">&#128221;</span>
+      <span>타이포그래피</span>
+    </a>
+    <a href="#layout">
+      <span class="nav-icon">&#128200;</span>
+      <span>레이아웃</span>
+    </a>
+    <a href="#components">
+      <span class="nav-icon">&#128230;</span>
+      <span>공용 컴포넌트</span>
+    </a>
+    <a href="#spacing">
+      <span class="nav-icon">&#128207;</span>
+      <span>간격 규칙</span>
+    </a>
+    <a href="#borders">
+      <span class="nav-icon">&#9634;</span>
+      <span>테두리 · 라운딩</span>
+    </a>
+    <a href="#navigation">
+      <span class="nav-icon">&#128209;</span>
+      <span>네비게이션</span>
+    </a>
+    <a href="#tokens">
+      <span class="nav-icon">&#128736;</span>
+      <span>@theme 토큰</span>
+    </a>
+  </nav>
+  <div class="shell-sidebar-footer">
+    <div style="font-size: 11px;">Ante 1.0.0 · <a href="https://opensource.org/licenses/MIT" style="color: var(--color-text-muted);">MIT</a></div>
+  </div>
+</aside>
+
+<!-- ===== Header ===== -->
+<header class="shell-header">
+  <span class="shell-header-title">Design Guide</span>
+  <div style="position: relative;">
+    <div class="shell-header-user" id="user-profile-toggle">
+      <span class="dot" style="background: var(--color-positive);"></span>
+      <span>한투 국내주식</span>
+      <span style="color: var(--color-text-muted);">·</span>
+      <span class="user-emoji">&#129409;</span>
+      <span>admin</span>
+    </div>
+    <div class="user-dropdown" id="user-dropdown">
+      <a href="#" class="user-dropdown-item">&#9881; 설정</a>
+      <div class="user-dropdown-divider"></div>
+      <a href="#" class="user-dropdown-item user-dropdown-account active">
+        <span class="dot" style="background: var(--color-positive);"></span>
+        한투 국내주식
+        <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+      </a>
+      <a href="#" class="user-dropdown-item user-dropdown-account">
+        <span class="dot" style="background: var(--color-warning);"></span>
+        한투 해외주식
+        <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+      </a>
+      <div class="user-dropdown-divider"></div>
+      <a href="#" class="user-dropdown-item user-dropdown-logout">&#9211; 로그아웃</a>
+    </div>
+  </div>
+</header>
+
+<!-- ===== Main Content ===== -->
+<main class="shell-main">
+
+<h1>Ante Dashboard Design Guide</h1>
+<p class="guide-intro">
+  구현체(<code>frontend/src/index.css</code>)의 Tailwind v4 <code>@theme</code> 변수를 기준으로 정리한 디자인 참조 문서.<br>
+  CSS 작성 시 반드시 아래 토큰을 사용하고, 하드코딩된 색상값을 직접 쓰지 않는다.
+</p>
+
+<!-- ===== 1. Color Palette ===== -->
+<h2 id="colors">1. 색상 팔레트</h2>
+
+<h3>배경 · 표면 · 테두리</h3>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #0b0b10;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">bg</div>
+      <div class="swatch-value">#0b0b10</div>
+      <div class="swatch-token">bg-bg</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #141419;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">surface</div>
+      <div class="swatch-value">#141419</div>
+      <div class="swatch-token">bg-surface</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #1e1e25;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">surface-hover</div>
+      <div class="swatch-value">#1e1e25</div>
+      <div class="swatch-token">bg-surface-hover / hover:bg-surface-hover</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #2a2a35;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">border</div>
+      <div class="swatch-value">#2a2a35</div>
+      <div class="swatch-token">border-border</div>
+    </div>
+  </div>
+</div>
+
+<h3>텍스트</h3>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #e1e4ea;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">text</div>
+      <div class="swatch-value">#e1e4ea</div>
+      <div class="swatch-token">text-text</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #8b8fa3;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">text-muted</div>
+      <div class="swatch-value">#8b8fa3</div>
+      <div class="swatch-token">text-text-muted</div>
+    </div>
+  </div>
+</div>
+
+<h3>시맨틱 색상</h3>
+<p>Bloomberg Terminal 접근성 원칙 기반. Positive=Blue, Negative=Orange-Red로 모든 색각 이상에서 구별 가능.</p>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #1E8EFF;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">positive / primary</div>
+      <div class="swatch-value">#1E8EFF</div>
+      <div class="swatch-token">text-positive · bg-primary · bg-positive-bg</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #E85830;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">negative</div>
+      <div class="swatch-value">#E85830</div>
+      <div class="swatch-token">text-negative · bg-negative · bg-negative-bg</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #F0A030;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">warning</div>
+      <div class="swatch-value">#F0A030</div>
+      <div class="swatch-token">text-warning · bg-warning-bg</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #F5C518;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">accent</div>
+      <div class="swatch-value">#F5C518</div>
+      <div class="swatch-token">text-accent · bg-accent-bg</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #a78bfa;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">info</div>
+      <div class="swatch-value">#a78bfa</div>
+      <div class="swatch-token">text-info · bg-info-bg</div>
+    </div>
+  </div>
+</div>
+
+<h3>시맨틱 용도 매핑</h3>
+<table class="spec-table">
+  <tr><td>positive (Blue)</td><td>이익, 성공, 활성, 매수, 승인</td></tr>
+  <tr><td>negative (Orange-Red)</td><td>손실, 오류, 매도, 거부, 위험</td></tr>
+  <tr><td>warning (Amber)</td><td>경고, 주의, 대기</td></tr>
+  <tr><td>accent (Gold)</td><td>강조, 하이라이트</td></tr>
+  <tr><td>info (Violet)</td><td>정보, 중립 보조</td></tr>
+  <tr><td>primary</td><td>= positive. CTA 버튼, 링크, 활성 탭</td></tr>
+</table>
+
+<!-- ===== 2. Typography ===== -->
+<h2 id="typography">2. 타이포그래피</h2>
+
+<div class="demo-card" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
+  <span style="font-size: 24px; font-weight: 700;">₩12,345,678 <span style="font-size: 11px; color: var(--color-text-muted); font-weight: 400;">큰 숫자 (stat) — 24px bold</span></span>
+  <span style="font-size: 16px; font-weight: 600;">페이지 제목 — 16px semibold</span>
+  <span style="font-size: 15px; font-weight: 600;">카드 제목 — 15px semibold</span>
+  <span style="font-size: 13px;">본문 텍스트 — 13px regular</span>
+  <span style="font-size: 12px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">라벨 텍스트 — 12px semibold uppercase</span>
+  <span style="font-size: 11px; font-weight: 600;"><span class="badge badge-positive">뱃지 — 11px semibold</span></span>
+  <span style="font-size: 11px; color: var(--color-text-muted);">보조 텍스트 — 11px muted</span>
+</div>
+
+<table class="spec-table">
+  <tr><td>Font Family</td><td><code>-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif</code></td></tr>
+  <tr><td>Base Size</td><td>14px / line-height 1.5</td></tr>
+  <tr><td>페이지 제목</td><td>16px / font-semibold (600) — Header 컴포넌트</td></tr>
+  <tr><td>카드 제목</td><td>15px / font-semibold (600)</td></tr>
+  <tr><td>본문</td><td>13px — 테이블 셀, 상세 텍스트</td></tr>
+  <tr><td>라벨</td><td>12px / font-semibold / text-text-muted / uppercase tracking-wider</td></tr>
+  <tr><td>뱃지</td><td>11px / font-semibold</td></tr>
+  <tr><td>보조 텍스트</td><td>11px / text-text-muted</td></tr>
+  <tr><td>큰 숫자 (stat)</td><td>24px / font-bold (700) — 통계 카드 값</td></tr>
+</table>
+
+<!-- ===== 3. Layout ===== -->
+<h2 id="layout">3. 레이아웃</h2>
+
+<p>이 문서 자체가 실제 레이아웃 구조(사이드바 220px + 헤더 56px + 메인 콘텐츠)로 구성되어 있다. 좌측 사이드바와 상단 헤더를 직접 확인.</p>
+
+<div class="layout-diagram">┌──────────────┬──────────────────────────────────────────┐
+│  Sidebar     │  Header (h: 56px, fixed)                 │
+│  (w: 220px)  │  [제목]        [● 한투 국내주식 · 🦁 admin] │
+│  fixed       ├──────────────────────────────────────────┤
+│              │                                          │
+│  bg-surface  │  Main Content                            │
+│  border-r    │  (ml-sidebar, mt-header, p-4 md:p-6)    │
+│  border-border│                                          │
+│              │  bg-bg                                   │
+│              │                                          │
+└──────────────┴──────────────────────────────────────────┘</div>
+
+<table class="spec-table" style="margin-top: 16px;">
+  <tr><td>Sidebar 너비</td><td><code>--spacing-sidebar: 220px</code> → Tailwind: <code>w-sidebar</code>, <code>ml-sidebar</code></td></tr>
+  <tr><td>Header 높이</td><td><code>--spacing-header: 56px</code> → Tailwind: <code>h-header</code>, <code>mt-header</code></td></tr>
+  <tr><td>Content padding</td><td><code>p-4 md:p-6</code> (16px / 24px)</td></tr>
+  <tr><td>모바일</td><td>Sidebar: <code>-translate-x-full md:translate-x-0</code>, 햄버거 토글</td></tr>
+  <tr><td>z-index</td><td>Header: 100, Sidebar: 101, 모바일 햄버거: 102, 모달: 50, 드롭다운: 200, 토스트: 9999</td></tr>
+</table>
+
+<!-- ===== 4. Components ===== -->
+<h2 id="components">4. 공용 컴포넌트</h2>
+
+<h3>StatusBadge</h3>
+<p>variant prop으로 색상 결정. <code>components/common/StatusBadge.tsx</code></p>
+<div class="demo-row">
+  <span class="badge badge-positive">승인</span>
+  <span class="badge badge-negative">거부</span>
+  <span class="badge badge-warning">대기</span>
+  <span class="badge badge-info">정보</span>
+  <span class="badge badge-muted">보관됨</span>
+  <span class="badge badge-primary">활성</span>
+</div>
+<p>공통 Tailwind: <code>inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold</code></p>
+<table class="spec-table">
+  <tr><td>positive</td><td><code>bg-positive-bg text-positive</code></td></tr>
+  <tr><td>negative</td><td><code>bg-negative-bg text-negative</code></td></tr>
+  <tr><td>warning</td><td><code>bg-warning-bg text-warning</code></td></tr>
+  <tr><td>info</td><td><code>bg-info-bg text-info</code></td></tr>
+  <tr><td>muted</td><td><code>bg-[rgba(139,143,163,0.15)] text-text-muted</code></td></tr>
+  <tr><td>primary</td><td><code>bg-positive-bg text-primary</code></td></tr>
+</table>
+
+<h3>Buttons</h3>
+<p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px;">Default</p>
+<div class="demo-row">
+  <button class="btn btn-primary">Primary</button>
+  <button class="btn btn-negative">Negative</button>
+  <button class="btn btn-outline">Outline</button>
+  <button class="btn btn-ghost">Ghost</button>
+  <button class="btn btn-outline btn-sm">Small</button>
+</div>
+<p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px;">Hover</p>
+<div class="demo-row" style="margin-bottom: 12px;">
+  <button class="btn" style="background: var(--color-primary-hover); color: #fff;">Primary</button>
+  <button class="btn" style="background: var(--color-negative-hover); color: #fff;">Negative</button>
+  <button class="btn btn-outline" style="background: var(--color-surface-hover); color: var(--color-text);">Outline</button>
+  <button class="btn btn-ghost" style="background: var(--color-surface-hover); color: var(--color-text);">Ghost</button>
+</div>
+<p>공통 Tailwind: <code>inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium border-none cursor-pointer</code></p>
+
+<h3>DataTable</h3>
+<p>제네릭 테이블 컴포넌트. <code>components/common/DataTable.tsx</code></p>
+<div class="demo-card">
+  <table class="demo-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>이름</th>
+        <th>상태</th>
+        <th style="text-align: right;">수익률</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>stg-001</td>
+        <td>모멘텀 전략</td>
+        <td><span class="badge badge-positive">운용중</span></td>
+        <td style="text-align: right;" class="text-positive">+12.5%</td>
+      </tr>
+      <tr>
+        <td>stg-002</td>
+        <td>밸류 전략</td>
+        <td><span class="badge badge-muted">대기</span></td>
+        <td style="text-align: right;" class="text-muted">-</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p>
+  <code>th</code>: <code>text-left px-3 py-2.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider border-b border-border</code><br>
+  <code>td</code>: <code>px-3 py-3 border-b border-border text-[13px]</code><br>
+  행 hover: <code>hover:bg-surface-hover</code>
+</p>
+
+<h3>Form Elements</h3>
+<p>모든 폼 요소는 동일한 기반 스타일을 공유하며, 기본(default)과 소형(sm) 두 가지 사이즈를 지원한다.</p>
+
+<h3 style="margin-top: 16px; font-size: 13px;">공통 기반</h3>
+<table class="spec-table">
+  <tr><td>배경 · 테두리</td><td><code>bg-bg border border-border focus:outline-none focus:border-primary</code></td></tr>
+  <tr><td>색상</td><td><code>text-text placeholder:text-text-muted</code></td></tr>
+  <tr><td>disabled</td><td><code>opacity-50 cursor-not-allowed</code></td></tr>
+</table>
+
+<h3 style="margin-top: 16px; font-size: 13px;">사이즈 변형</h3>
+<table class="spec-table">
+  <tr><td>default</td><td><code>rounded-lg px-3 py-2.5 text-[14px]</code> — 폼 모달, 상세 페이지 편집</td></tr>
+  <tr><td>sm</td><td><code>rounded px-2 py-1 text-[13px]</code> — 필터바, 인라인 설정</td></tr>
+</table>
+
+<h3 style="margin-top: 16px; font-size: 13px;">Text Input</h3>
+<div class="demo-row" style="flex-direction: column; align-items: flex-start; gap: 12px;">
+  <div>
+    <label class="form-label">Default</label>
+    <input class="form-input" type="text" placeholder="영문+숫자 조합">
+  </div>
+  <div>
+    <label class="form-label">Small</label>
+    <input class="form-input" type="text" placeholder="검색어 입력" style="padding: 4px 8px; font-size: 13px; border-radius: 4px; width: 200px;">
+  </div>
+</div>
+<table class="spec-table" style="margin-top: 8px;">
+  <tr><td>default</td><td><code>w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary placeholder:text-text-muted</code></td></tr>
+  <tr><td>sm</td><td><code>bg-bg border border-border rounded px-2 py-1 text-text text-[13px] focus:outline-none focus:border-primary placeholder:text-text-muted</code></td></tr>
+</table>
+
+<h3 style="margin-top: 16px; font-size: 13px;">Select</h3>
+<div class="demo-row" style="flex-direction: column; align-items: flex-start; gap: 12px;">
+  <div>
+    <label class="form-label">Default</label>
+    <select class="form-input" style="cursor: pointer;">
+      <option>전략을 선택하세요</option>
+      <option>모멘텀 전략</option>
+      <option>밸류 전략</option>
+    </select>
+  </div>
+  <div>
+    <label class="form-label">Small</label>
+    <select class="form-input" style="padding: 4px 8px; font-size: 13px; border-radius: 4px; width: 200px; cursor: pointer;">
+      <option>전체</option>
+      <option>대기</option>
+      <option>승인</option>
+    </select>
+  </div>
+</div>
+<table class="spec-table" style="margin-top: 8px;">
+  <tr><td>default</td><td><code>w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary appearance-none cursor-pointer</code></td></tr>
+  <tr><td>sm</td><td><code>bg-bg border border-border rounded px-2 py-1 text-text text-[13px] focus:outline-none focus:border-primary cursor-pointer</code></td></tr>
+</table>
+
+<h3 style="margin-top: 16px; font-size: 13px;">Textarea</h3>
+<div class="demo-row" style="flex-direction: column; align-items: flex-start; gap: 12px;">
+  <div style="width: 100%; max-width: 320px;">
+    <label class="form-label">Default</label>
+    <textarea class="form-input" rows="3" placeholder="메모를 입력하세요" style="resize: vertical; min-height: 80px;"></textarea>
+  </div>
+  <div style="width: 100%; max-width: 320px;">
+    <label class="form-label">Small</label>
+    <textarea class="form-input" rows="2" placeholder="사유 입력" style="resize: vertical; min-height: 56px; padding: 4px 8px; font-size: 13px; border-radius: 4px;"></textarea>
+  </div>
+</div>
+<table class="spec-table" style="margin-top: 8px;">
+  <tr><td>default</td><td><code>w-full bg-bg border border-border rounded-lg px-3 py-2.5 text-text text-[14px] focus:outline-none focus:border-primary placeholder:text-text-muted resize-y min-h-[80px]</code></td></tr>
+  <tr><td>sm</td><td><code>w-full bg-bg border border-border rounded px-2 py-1 text-text text-[13px] focus:outline-none focus:border-primary placeholder:text-text-muted resize-y min-h-[56px]</code></td></tr>
+</table>
+
+<h3 style="margin-top: 16px; font-size: 13px;">Label</h3>
+<div class="demo-row" style="gap: 24px; margin-bottom: 8px;">
+  <label class="form-label" style="margin-bottom: 0;">전략 이름</label>
+  <label class="form-label" style="margin-bottom: 0;">거래 유형</label>
+  <label class="form-label" style="margin-bottom: 0;">비고</label>
+</div>
+<table class="spec-table">
+  <tr><td>기본</td><td><code>block text-[12px] font-semibold text-text-muted mb-1.5</code></td></tr>
+</table>
+
+<h3>Modal</h3>
+<p><code>components/common/Modal.tsx</code>. ESC 키 / 오버레이 클릭으로 닫기.</p>
+<div style="position: relative; background: rgba(0,0,0,0.5); border-radius: 8px; padding: 40px 20px; display: flex; justify-content: center; align-items: center; margin-bottom: 12px;">
+  <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 24px; width: 100%; max-width: 440px; box-shadow: 0 8px 24px rgba(0,0,0,0.3);">
+    <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">전략 등록</h4>
+    <p style="font-size: 13px; color: var(--color-text-muted); margin-bottom: 20px;">새로운 전략을 등록합니다. 등록 후 검증 단계를 거칩니다.</p>
+    <div style="margin-bottom: 16px;">
+      <label class="form-label">전략 이름</label>
+      <input class="form-input" type="text" placeholder="영문+숫자 조합" style="max-width: 100%;">
+    </div>
+    <div style="margin-bottom: 20px;">
+      <label class="form-label">설명</label>
+      <textarea class="form-input" rows="2" placeholder="전략 설명을 입력하세요" style="resize: vertical; min-height: 56px; max-width: 100%;"></textarea>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn btn-outline">취소</button>
+      <button class="btn btn-primary">등록</button>
+    </div>
+  </div>
+</div>
+<table class="spec-table">
+  <tr><td>오버레이</td><td><code>fixed inset-0 z-50 flex items-center justify-center bg-black/50</code></td></tr>
+  <tr><td>모달 본체</td><td><code>bg-surface border border-border rounded-lg p-6 w-full max-w-[440px] shadow-lg</code></td></tr>
+  <tr><td>제목</td><td><code>text-[16px] font-semibold mb-2</code></td></tr>
+  <tr><td>푸터</td><td><code>flex justify-end gap-2</code></td></tr>
+</table>
+
+<h3>Toast</h3>
+<p><code>showToast(message, type)</code> 함수로 호출. 5초 후 자동 소멸.</p>
+<div class="demo-row" style="flex-direction: column; align-items: flex-end; gap: 8px;">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 8px; font-size: 13px; border: 1px solid var(--color-positive); background: var(--color-positive-bg); min-width: 280px;">
+    <span style="font-size: 16px;">&#10003;</span>
+    <span>전략이 성공적으로 등록되었습니다.</span>
+  </div>
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 8px; font-size: 13px; border: 1px solid var(--color-negative); background: var(--color-negative-bg); min-width: 280px;">
+    <span style="font-size: 16px;">&#10007;</span>
+    <span>요청 처리 중 오류가 발생했습니다.</span>
+  </div>
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 8px; font-size: 13px; border: 1px solid var(--color-warning); background: var(--color-warning-bg); min-width: 280px;">
+    <span style="font-size: 16px;">&#9888;</span>
+    <span>잔고가 최소 기준 이하입니다.</span>
+  </div>
+</div>
+<table class="spec-table" style="margin-top: 8px;">
+  <tr><td>위치</td><td><code>fixed top-4 right-4 z-[9999]</code></td></tr>
+  <tr><td>공통</td><td><code>flex items-center gap-2.5 px-4 py-3 rounded-lg text-[13px] border</code></td></tr>
+  <tr><td>error</td><td><code>bg-negative-bg border-negative</code></td></tr>
+  <tr><td>success</td><td><code>bg-positive-bg border-positive</code></td></tr>
+  <tr><td>warning</td><td><code>bg-warning-bg border-warning</code></td></tr>
+</table>
+
+<h3>Skeleton (로딩 플레이스홀더)</h3>
+<p><code>components/common/Skeleton.tsx</code>. Table, Chart, Card, Page 변형 제공.</p>
+<div class="demo-card" style="margin-bottom: 12px;">
+  <p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 12px;">TableSkeleton (3 rows × 4 cols)</p>
+  <div style="display: flex; gap: 12px; margin-bottom: 10px;">
+    <div class="skel" style="width: 60px; height: 12px;"></div>
+    <div class="skel" style="width: 100px; height: 12px;"></div>
+    <div class="skel" style="width: 60px; height: 12px;"></div>
+    <div class="skel" style="flex: 1; height: 12px;"></div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; gap: 12px;"><div class="skel" style="width: 60px; height: 16px;"></div><div class="skel" style="width: 100px; height: 16px;"></div><div class="skel" style="width: 60px; height: 16px;"></div><div class="skel" style="flex: 1; height: 16px;"></div></div>
+    <div style="display: flex; gap: 12px;"><div class="skel" style="width: 60px; height: 16px;"></div><div class="skel" style="width: 100px; height: 16px;"></div><div class="skel" style="width: 60px; height: 16px;"></div><div class="skel" style="flex: 1; height: 16px;"></div></div>
+    <div style="display: flex; gap: 12px;"><div class="skel" style="width: 60px; height: 16px;"></div><div class="skel" style="width: 100px; height: 16px;"></div><div class="skel" style="width: 60px; height: 16px;"></div><div class="skel" style="flex: 1; height: 16px;"></div></div>
+  </div>
+</div>
+<div class="demo-card" style="margin-bottom: 12px;">
+  <p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 12px;">CardSkeleton (4 stat cards)</p>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+    <div style="padding: 12px;"><div class="skel" style="width: 60%; height: 12px; margin-bottom: 8px;"></div><div class="skel" style="width: 40%; height: 24px;"></div></div>
+    <div style="padding: 12px;"><div class="skel" style="width: 50%; height: 12px; margin-bottom: 8px;"></div><div class="skel" style="width: 55%; height: 24px;"></div></div>
+    <div style="padding: 12px;"><div class="skel" style="width: 70%; height: 12px; margin-bottom: 8px;"></div><div class="skel" style="width: 35%; height: 24px;"></div></div>
+    <div style="padding: 12px;"><div class="skel" style="width: 45%; height: 12px; margin-bottom: 8px;"></div><div class="skel" style="width: 50%; height: 24px;"></div></div>
+  </div>
+</div>
+<table class="spec-table">
+  <tr><td>기본</td><td><code>bg-surface-hover rounded animate-pulse</code></td></tr>
+  <tr><td>TableSkeleton</td><td>rows × cols 그리드</td></tr>
+  <tr><td>ChartSkeleton</td><td>제목 + 차트 영역</td></tr>
+  <tr><td>PageSkeleton</td><td>4개 카드 + 차트 + 테이블 조합</td></tr>
+</table>
+
+<h3>Pagination</h3>
+<p>오프셋 기반. <code>components/common/Pagination.tsx</code></p>
+<div class="demo-row" style="justify-content: space-between; padding: 12px 0;">
+  <span style="font-size: 13px; color: var(--color-text-muted);">총 47건 중 1-10</span>
+  <div style="display: flex; gap: 4px; align-items: center;">
+    <button style="width: 32px; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid var(--color-primary); background: var(--color-primary); color: #fff; cursor: pointer;">1</button>
+    <button style="width: 32px; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid var(--color-border); background: var(--color-surface-hover); color: var(--color-text-muted); cursor: pointer;">2</button>
+    <span style="font-size: 10px; color: var(--color-text-muted); margin: 0 2px;">← hover</span>
+    <button style="width: 32px; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid var(--color-border); background: transparent; color: var(--color-text-muted); cursor: pointer;">3</button>
+    <button style="width: 32px; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid var(--color-border); background: transparent; color: var(--color-text-muted); cursor: pointer;">4</button>
+    <button style="width: 32px; height: 32px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid var(--color-border); background: transparent; color: var(--color-text-muted); cursor: pointer;">5</button>
+  </div>
+</div>
+<table class="spec-table" style="margin-top: 8px;">
+  <tr><td>카운트</td><td><code>text-text-muted text-[13px]</code> — "총 N건 중 M-K"</td></tr>
+  <tr><td>페이지 버튼</td><td><code>w-8 h-8 rounded-lg text-[13px] font-medium border</code></td></tr>
+  <tr><td>활성 페이지</td><td><code>border-primary bg-primary text-white</code></td></tr>
+  <tr><td>비활성</td><td><code>border-border bg-transparent text-text-muted hover:bg-surface-hover</code></td></tr>
+</table>
+
+<h3>HintTooltip</h3>
+<p><code>?</code> 아이콘 호버 시 설명 표시. 성과 지표 등에 사용.</p>
+<div class="demo-row" style="gap: 24px; align-items: flex-start; padding: 16px 0;">
+  <div style="display: flex; align-items: center; gap: 6px; position: relative;">
+    <span style="font-size: 13px;">샤프 비율</span>
+    <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(139,143,163,0.15); color: var(--color-text-muted); font-size: 10px; font-weight: 700; cursor: help;">?</span>
+    <div style="position: absolute; left: calc(100% + 8px); top: -8px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--color-text-muted); box-shadow: 0 4px 12px rgba(0,0,0,0.3); white-space: nowrap;">위험 대비 초과수익 비율. 1 이상이면 양호.</div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 6px;">
+    <span style="font-size: 13px;">최대 낙폭</span>
+    <span style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(139,143,163,0.15); color: var(--color-text-muted); font-size: 10px; font-weight: 700; cursor: help;">?</span>
+  </div>
+</div>
+<table class="spec-table" style="margin-top: 8px;">
+  <tr><td>아이콘</td><td><code>w-4 h-4 rounded-full bg-[rgba(139,143,163,0.15)] text-text-muted text-[10px] font-bold</code></td></tr>
+  <tr><td>툴팁</td><td><code>bg-surface border border-border rounded-lg text-[12px] text-text-muted shadow-lg</code></td></tr>
+</table>
+
+<!-- ===== 5. Spacing ===== -->
+<h2 id="spacing">5. 간격 규칙</h2>
+
+<table class="spec-table">
+  <tr><td>카드 내부 패딩</td><td><code>p-4</code> ~ <code>p-5</code> (16px ~ 20px)</td></tr>
+  <tr><td>카드 간 간격</td><td><code>gap-4</code> (16px)</td></tr>
+  <tr><td>섹션 간 간격</td><td><code>mb-6</code> (24px) 또는 <code>space-y-6</code></td></tr>
+  <tr><td>테이블 셀</td><td><code>px-3 py-2.5</code> (th) / <code>px-3 py-3</code> (td)</td></tr>
+  <tr><td>버튼 내부</td><td><code>px-4 py-2</code> (기본) / <code>px-2.5 py-1</code> (소형)</td></tr>
+  <tr><td>뱃지 내부</td><td><code>px-2 py-0.5</code></td></tr>
+  <tr><td>그리드 카드</td><td><code>grid grid-cols-2 md:grid-cols-4 gap-4</code></td></tr>
+</table>
+
+<!-- ===== 6. Border & Radius ===== -->
+<h2 id="borders">6. 테두리 · 라운딩</h2>
+
+<table class="spec-table">
+  <tr><td>기본 radius</td><td><code>rounded-lg</code> (8px) — 카드, 버튼, 인풋, 모달</td></tr>
+  <tr><td>뱃지 radius</td><td><code>rounded-[10px]</code> — pill 형태</td></tr>
+  <tr><td>소형 radius</td><td><code>rounded</code> (4px) — 아이콘 버튼, 필터 탭</td></tr>
+  <tr><td>원형</td><td><code>rounded-full</code> — 상태 dot, 스피너, 툴팁 아이콘</td></tr>
+  <tr><td>테두리 색상</td><td><code>border-border</code> — 모든 구분선, 카드 외곽</td></tr>
+</table>
+
+<!-- ===== 7. Navigation ===== -->
+<h2 id="navigation">7. 네비게이션</h2>
+
+<h3>사이드바 메뉴 아이템</h3>
+<p>좌측 사이드바를 직접 확인. 아래는 상태별 Tailwind 클래스.</p>
+<table class="spec-table">
+  <tr><td>기본 상태</td><td><code>text-text-muted hover:bg-surface-hover hover:text-text</code></td></tr>
+  <tr><td>활성 상태</td><td><code>bg-primary !text-white</code></td></tr>
+  <tr><td>크기</td><td><code>px-3 py-[10px] text-[15px] font-medium rounded-lg gap-[10px]</code></td></tr>
+  <tr><td>아이콘</td><td>이모지, <code>text-[16px] w-5 text-center</code></td></tr>
+  <tr><td>뱃지 (결재함)</td><td><code>bg-negative text-white text-[11px] px-1.5 rounded-[10px] font-semibold</code></td></tr>
+</table>
+
+<h3>Header · 사용자 메뉴</h3>
+<p>상단 헤더를 직접 확인. 헤더 좌측에 페이지 제목, 우측에 사용자 프로필(클릭 시 드롭다운). 드롭다운에서 설정, 계좌 전환, 로그아웃을 수행한다. 대시보드 전체 데이터는 선택된 계좌 기준으로 렌더링된다.</p>
+
+<p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px;">사용자 드롭다운 열림 상태</p>
+<div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; margin-bottom: 0;">
+  <span style="font-size: 16px; font-weight: 600;">대시보드</span>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 8px; background: var(--color-surface-hover); cursor: pointer;">
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-positive); display: inline-block;"></span>
+    <span style="font-size: 13px; color: var(--color-text);">한투 국내주식</span>
+    <span style="font-size: 13px; color: var(--color-text-muted);">·</span>
+    <span style="font-size: 22px; line-height: 1;">&#129409;</span>
+    <span style="font-size: 13px; color: var(--color-text);">admin</span>
+  </div>
+</div>
+<div style="width: 220px; margin-left: auto; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); padding: 4px 0; margin-bottom: 12px;">
+  <div style="display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 13px; color: var(--color-text-muted); cursor: pointer;">&#9881; 설정</div>
+  <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 13px; font-weight: 500; background: var(--color-surface-hover); border-radius: 4px; margin: 0 4px; cursor: pointer;">
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-positive); display: inline-block;"></span>
+    한투 국내주식
+    <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 13px; color: var(--color-text-muted); margin: 0 4px; cursor: pointer;">
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); display: inline-block;"></span>
+    한투 해외주식
+    <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+  </div>
+  <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 13px; color: var(--color-negative); cursor: pointer;">&#9211; 로그아웃</div>
+</div>
+
+<table class="spec-table">
+  <tr><td>고정</td><td><code>fixed top-0 left-0 md:left-sidebar right-0 h-header</code></td></tr>
+  <tr><td>배경</td><td><code>bg-surface border-b border-border</code></td></tr>
+  <tr><td>좌측</td><td>페이지 제목 (+ 상세 페이지일 때 뒤로가기 버튼)</td></tr>
+  <tr><td>우측: 사용자 메뉴</td><td><code>flex items-center gap-2 px-2.5 py-1 rounded-lg text-[13px] text-text-muted hover:bg-surface-hover cursor-pointer</code></td></tr>
+  <tr><td>사용자 드롭다운</td><td><code>absolute top-full right-0 w-[220px] bg-surface border border-border rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.3)] z-[200]</code></td></tr>
+  <tr><td>드롭다운 구분선</td><td><code>h-px bg-border my-1</code></td></tr>
+  <tr><td>드롭다운 아이템</td><td><code>flex items-center gap-2 px-3.5 py-2.5 text-[13px] text-text-muted hover:bg-surface-hover</code></td></tr>
+  <tr><td>계좌 아이템</td><td><code>flex items-center gap-2 px-3.5 py-2.5 text-[13px] mx-1 rounded</code> — 상태 dot + 계좌명 + 상태 라벨</td></tr>
+  <tr><td>선택된 계좌</td><td><code>bg-surface-hover font-medium</code></td></tr>
+  <tr><td>계좌 상태 dot</td><td><code>w-2 h-2 rounded-full</code> — ACTIVE: <code>bg-positive</code>, PAUSED: <code>bg-warning</code>, HALTED: <code>bg-negative</code></td></tr>
+  <tr><td>로그아웃</td><td><code>text-negative</code></td></tr>
+</table>
+
+<h3>계좌 컨텍스트 규칙</h3>
+<table class="spec-table">
+  <tr><td>전역 상태</td><td>선택된 계좌 ID가 전역 상태로 관리되며, 대시보드 전체 데이터(자금, 전략, 봇, 거래내역 등)가 해당 계좌 기준으로 필터링된다.</td></tr>
+  <tr><td>상태 dot 귀속</td><td>시스템 상태 dot은 <strong>계좌별 거래 상태</strong>를 표시한다. 전역 시스템 상태가 아닌, 선택된 계좌의 trading_status를 반영.</td></tr>
+  <tr><td>계좌 전환</td><td>드롭다운에서 다른 계좌 선택 시 페이지 이동 없이 데이터만 리렌더링. URL 파라미터 또는 전역 스토어로 관리.</td></tr>
+  <tr><td>계좌 이름 표시</td><td>증권사 약칭 + 계좌 유형으로 구성. 예: "한투 국내주식", "한투 해외주식"</td></tr>
+  <tr><td>상태 종류</td><td>ACTIVE(<code>bg-positive</code>), PAUSED(<code>bg-warning</code>), HALTED(<code>bg-negative</code>)</td></tr>
+</table>
+
+<!-- ===== 8. Tailwind @theme 전체 토큰 ===== -->
+<h2 id="tokens">8. Tailwind @theme 토큰 레퍼런스</h2>
+
+<p><code>frontend/src/index.css</code>에서 정의. Tailwind v4의 <code>@theme</code> 블록으로 커스텀 유틸리티 자동 생성.</p>
+
+<div class="demo-card" style="font-family: monospace; font-size: 12px; line-height: 2; white-space: pre;">@theme {
+  --color-bg: #0b0b10;
+  --color-surface: #141419;
+  --color-surface-hover: #1e1e25;
+  --color-border: #2a2a35;
+  --color-text: #e1e4ea;
+  --color-text-muted: #8b8fa3;
+
+  --color-positive: #1E8EFF;
+  --color-positive-hover: #0A7AEE;
+  --color-positive-bg: rgba(30, 142, 255, 0.12);
+  --color-negative: #E85830;
+  --color-negative-hover: #D04820;
+  --color-negative-bg: rgba(232, 88, 48, 0.12);
+  --color-warning: #F0A030;
+  --color-warning-bg: rgba(240, 160, 48, 0.12);
+  --color-accent: #F5C518;
+  --color-accent-bg: rgba(245, 197, 24, 0.10);
+  --color-info: #a78bfa;
+  --color-info-bg: rgba(167, 139, 250, 0.10);
+  --color-primary: #1E8EFF;
+  --color-primary-hover: #0A7AEE;
+
+  --spacing-sidebar: 220px;
+  --spacing-header: 56px;
+}</div>
+
+<p style="margin-top: 16px;">
+  이 토큰들은 Tailwind 유틸리티로 자동 매핑된다:<br>
+  <code>--color-*</code> → <code>bg-*</code>, <code>text-*</code>, <code>border-*</code><br>
+  <code>--spacing-*</code> → <code>w-*</code>, <code>h-*</code>, <code>ml-*</code>, <code>mt-*</code>, <code>p-*</code>
+</p>
+
+</main>
+
+<!-- ===== Sidebar active state tracking ===== -->
+<script>
+(function() {
+  const links = document.querySelectorAll('.shell-sidebar-nav a');
+  const sections = [];
+  links.forEach(a => {
+    const id = a.getAttribute('href')?.replace('#', '');
+    if (id) sections.push({ id, el: document.getElementById(id), link: a });
+  });
+
+  function update() {
+    const scrollY = window.scrollY + 80;
+    let active = sections[0];
+    for (const s of sections) {
+      if (s.el && s.el.offsetTop <= scrollY) active = s;
+    }
+    links.forEach(a => a.classList.remove('active'));
+    if (active) active.link.classList.add('active');
+  }
+
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+
+// User profile dropdown toggle
+(function() {
+  const toggle = document.getElementById('user-profile-toggle');
+  const dropdown = document.getElementById('user-dropdown');
+  if (!toggle || !dropdown) return;
+
+  toggle.addEventListener('click', function(e) {
+    e.stopPropagation();
+    dropdown.classList.toggle('open');
+  });
+
+  document.addEventListener('click', function() {
+    dropdown.classList.remove('open');
+  });
+
+  dropdown.addEventListener('click', function(e) {
+    e.stopPropagation();
+  });
+})();
+</script>
+
+</body>
+</html>

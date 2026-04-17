@@ -1,8 +1,10 @@
-# Agent 참고 자료 (설계 문서, 스펙, 런북 — 로컬 관리)
-CLAUDE.md
-AGENT.md
-.claude/
-docs/
+# Shared collaboration context
+
+# Local agent overrides
+.claude/settings.local.json
+
+# Agent 참고 자료 (임시 작업 디렉토리만 제외)
+docs/temp/
 
 # Runtime data (루트 디렉토리만 — src/ante/data/ 는 소스코드)
 /data/

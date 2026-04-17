@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 결재 상세 (규칙 변경 · 거부)</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item active">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="approvals.html" style="font-size: 13px; color: var(--color-text-muted); text-decoration: none;">&larr; 결재함</a>
+        <span class="page-title">결재 상세</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 상세 헤더: 거부 완료 → 액션 버튼 없음 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">bot-rsi-01 종목당 최대 비중 20%→35% 변경 요청</div>
+        </div>
+      </div>
+
+      <!-- 거부 사유 배너 -->
+      <div style="background: var(--color-negative-bg); color: var(--color-negative); padding: 14px 18px; border-radius: var(--radius); font-size: 13px; margin-bottom: 24px; display: flex; align-items: flex-start; gap: 10px;">
+        <span style="font-size: 16px;">&#10005;</span>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 4px;">거부 사유</div>
+          <div style="font-size: 12px;">현재 시장 변동성이 높은 구간에서 단일 종목 비중 35%는 리스크가 과도합니다. 25% 이하로 재조정 후 다시 요청해주세요.</div>
+        </div>
+      </div>
+
+      <!-- 1행: 결재 정보 + 검토 의견 (2열) -->
+      <div class="detail-grid mb-24">
+        <!-- 좌: 결재 정보 -->
+        <div class="card">
+          <div class="card-title mb-16">결재 정보</div>
+          <div class="info-row">
+            <span class="info-label">요청자</span>
+            <span>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">유형</span>
+            <span><span class="badge badge-muted">규칙 변경</span></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">상태</span>
+            <span class="badge badge-negative">거부</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">요청일</span>
+            <span>2026-03-09 10:00</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">처리일</span>
+            <span>2026-03-09 11:45</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">처리자</span>
+            <span>owner</span>
+          </div>
+        </div>
+
+        <!-- 우: 검토 의견 -->
+        <div class="card">
+          <div class="card-title mb-16">검토 의견</div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>검증 주체</th>
+                  <th>결과</th>
+                  <th>상세</th>
+                  <th>검증 시각</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="text-mono">rule_engine</span></td>
+                  <td><span class="badge badge-negative">fail</span></td>
+                  <td style="font-size: 12px; color: var(--color-text-muted);">요청 비중 35%는 전역 설정 '종목당 최대 비중'(30%)을 초과합니다. 전역 설정 변경이 선행되어야 합니다.</td>
+                  <td class="text-muted">2026-03-09 10:00</td>
+                </tr>
+                <tr>
+                  <td><span class="text-mono">agent:risk-analyst</span></td>
+                  <td><span class="badge badge-negative">fail</span></td>
+                  <td style="font-size: 12px; color: var(--color-text-muted);">현재 시장 변동성 VIX 28.5. 단일 종목 35% 집중은 급락 시 손실 폭이 과도함. 25% 이하 권고.</td>
+                  <td class="text-muted">2026-03-09 10:30</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2행: 본문 -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">요청 본문</div>
+        <div style="font-size: 13px; line-height: 1.8; color: var(--color-text-muted);">
+          <p style="margin-bottom: 12px;">bot-rsi-01의 종목당 최대 비중을 20%에서 35%로 상향 조정을 요청합니다.</p>
+          <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">변경 근거:</strong></p>
+          <ul style="padding-left: 20px;">
+            <li>현재 전략이 소수 종목에 집중하는 특성상, 20% 제한으로 인해 포지션 진입이 제한되는 경우가 빈번합니다.</li>
+            <li>백테스트 결과 35% 비중에서도 MDD가 허용 범위 내(12.3%)입니다.</li>
+            <li>집중 투자 시 수익률이 현재 대비 약 40% 개선될 것으로 예상됩니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 실행 내용 -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">실행 내용</div>
+        <div style="background: var(--color-info-bg); color: var(--color-info); padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; margin-bottom: 16px;">
+          &#x1f4a1; 승인 시 RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.
+        </div>
+        <div class="info-row">
+          <span class="info-label">대상 봇</span>
+          <span class="text-mono">bot-rsi-01</span>
+        </div>
+        <div style="margin-top: 12px;">
+          <div style="font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: 8px;">변경 규칙</div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>규칙</th>
+                  <th>현재 값</th>
+                  <th></th>
+                  <th>요청 값</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>max_position_pct</td>
+                  <td>0.20 (20%)</td>
+                  <td style="text-align: center;">→</td>
+                  <td style="color: var(--color-warning); font-weight: 600;">0.35 (35%)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 감사 이력 -->
+      <div class="card">
+        <div class="card-title mb-16">감사 이력</div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-09 11:45</span>
+          <span><span class="text-mono" style="color: var(--color-negative);">owner</span> — <strong>거부</strong> · "현재 시장 변동성이 높은 구간에서 단일 종목 비중 35%는 리스크가 과도합니다."</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-09 10:30</span>
+          <span><span class="text-mono" style="color: var(--color-info);">agent:risk-analyst</span> — 검토 의견 첨부 (fail)</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-09 10:00</span>
+          <span><span class="text-mono" style="color: var(--color-text-muted);">rule_engine</span> — 검토 의견 완료 (fail)</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-09 10:00</span>
+          <span><span class="text-mono" style="color: var(--color-primary);">agent:strategy-dev-01</span> — 결재 요청 생성</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

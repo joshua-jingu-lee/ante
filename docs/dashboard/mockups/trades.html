@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 거래 내역</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item active">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="strategy-detail.html" class="btn btn-ghost btn-sm">&larr; 전략 상세</a>
+        <span class="page-title">거래 내역</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 필터 바 -->
+      <div class="card mb-24">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">전략</label>
+            <input type="text" class="search-input" list="strategy-list" placeholder="전략명 검색..." value="모멘텀 돌파 전략" style="width: 220px;">
+            <datalist id="strategy-list">
+              <option value="모멘텀 돌파 전략">
+              <option value="MACD 크로스 전략">
+              <option value="RSI 과매도 반등">
+              <option value="볼린저밴드 스퀴즈">
+              <option value="듀얼 모멘텀">
+            </datalist>
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">매매</label>
+            <select class="filter-select">
+              <option>전체</option>
+              <option>매수</option>
+              <option>매도</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">시작일</label>
+            <input type="date" class="search-input" value="2026-01-01" style="width: 160px;">
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">종료일</label>
+            <input type="date" class="search-input" value="2026-03-15" style="width: 160px;">
+          </div>
+          <div style="align-self: flex-end;">
+            <button class="btn btn-primary btn-sm">조회</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 거래 테이블 -->
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>시각</th>
+                <th>종목</th>
+                <th>매매</th>
+                <th class="text-right">수량</th>
+                <th class="text-right">단가</th>
+                <th class="text-right">금액</th>
+                <th class="text-right">수수료</th>
+                <th class="text-right">손익</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-mono">2026-03-13 09:15</td>
+                <td>NAVER (035420)</td>
+                <td><span class="badge badge-negative">매수</span></td>
+                <td class="text-right">15</td>
+                <td class="text-right">210,000 원</td>
+                <td class="text-right">3,150,000 원</td>
+                <td class="text-right text-muted">1,575 원</td>
+                <td class="text-right text-muted">—</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 14:30</td>
+                <td>카카오 (035720)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">30</td>
+                <td class="text-right">48,500 원</td>
+                <td class="text-right">1,455,000 원</td>
+                <td class="text-right text-muted">728 원</td>
+                <td class="text-right text-positive">45,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 09:05</td>
+                <td>삼성전자 (005930)</td>
+                <td><span class="badge badge-negative">매수</span></td>
+                <td class="text-right">50</td>
+                <td class="text-right">72,300 원</td>
+                <td class="text-right">3,615,000 원</td>
+                <td class="text-right text-muted">1,808 원</td>
+                <td class="text-right text-muted">—</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-11 15:20</td>
+                <td>LG에너지솔루션 (373220)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">5</td>
+                <td class="text-right">420,000 원</td>
+                <td class="text-right">2,100,000 원</td>
+                <td class="text-right text-muted">1,050 원</td>
+                <td class="text-right text-positive">120,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-11 09:10</td>
+                <td>현대차 (005380)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">10</td>
+                <td class="text-right">245,000 원</td>
+                <td class="text-right">2,450,000 원</td>
+                <td class="text-right text-muted">1,225 원</td>
+                <td class="text-right text-negative">-35,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-10 14:20</td>
+                <td>셀트리온 (068270)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">8</td>
+                <td class="text-right">195,000 원</td>
+                <td class="text-right">1,560,000 원</td>
+                <td class="text-right text-muted">780 원</td>
+                <td class="text-right text-positive">42,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-07 10:30</td>
+                <td>포스코홀딩스 (005490)</td>
+                <td><span class="badge badge-negative">매수</span></td>
+                <td class="text-right">12</td>
+                <td class="text-right">310,000 원</td>
+                <td class="text-right">3,720,000 원</td>
+                <td class="text-right text-muted">1,860 원</td>
+                <td class="text-right text-muted">—</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-07 09:05</td>
+                <td>KB금융 (105560)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">25</td>
+                <td class="text-right">68,200 원</td>
+                <td class="text-right">1,705,000 원</td>
+                <td class="text-right text-muted">853 원</td>
+                <td class="text-right text-negative">-18,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-06 14:50</td>
+                <td>현대모비스 (012330)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">7</td>
+                <td class="text-right">252,000 원</td>
+                <td class="text-right">1,764,000 원</td>
+                <td class="text-right text-muted">882 원</td>
+                <td class="text-right text-positive">63,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-06 09:10</td>
+                <td>삼성SDI (006400)</td>
+                <td><span class="badge badge-negative">매수</span></td>
+                <td class="text-right">5</td>
+                <td class="text-right">385,000 원</td>
+                <td class="text-right">1,925,000 원</td>
+                <td class="text-right text-muted">963 원</td>
+                <td class="text-right text-muted">—</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-05 13:45</td>
+                <td>기아 (000270)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">15</td>
+                <td class="text-right">92,500 원</td>
+                <td class="text-right">1,387,500 원</td>
+                <td class="text-right text-muted">694 원</td>
+                <td class="text-right text-negative">-32,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-04 09:20</td>
+                <td>LG전자 (066570)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">20</td>
+                <td class="text-right">108,500 원</td>
+                <td class="text-right">2,170,000 원</td>
+                <td class="text-right text-muted">1,085 원</td>
+                <td class="text-right text-positive">78,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-03 10:15</td>
+                <td>SK이노베이션 (096770)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">10</td>
+                <td class="text-right">128,000 원</td>
+                <td class="text-right">1,280,000 원</td>
+                <td class="text-right text-muted">640 원</td>
+                <td class="text-right text-positive">55,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-02-28 14:40</td>
+                <td>삼성전자 (005930)</td>
+                <td><span class="badge badge-positive">매도</span></td>
+                <td class="text-right">30</td>
+                <td class="text-right">74,800 원</td>
+                <td class="text-right">2,244,000 원</td>
+                <td class="text-right text-muted">1,122 원</td>
+                <td class="text-right text-positive">75,000 원</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-02-28 09:30</td>
+                <td>한화에어로스페이스 (012450)</td>
+                <td><span class="badge badge-negative">매수</span></td>
+                <td class="text-right">4</td>
+                <td class="text-right">520,000 원</td>
+                <td class="text-right">2,080,000 원</td>
+                <td class="text-right text-muted">1,040 원</td>
+                <td class="text-right text-muted">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 페이지네이션 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 0 0; border-top: 1px solid var(--color-border); margin-top: 16px;">
+          <span style="font-size: 13px; color: var(--color-text-muted);">총 84건 중 1-15</span>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-outline btn-sm" disabled>&laquo;</button>
+            <button class="btn btn-primary btn-sm">1</button>
+            <button class="btn btn-outline btn-sm">2</button>
+            <button class="btn btn-outline btn-sm">3</button>
+            <button class="btn btn-outline btn-sm">4</button>
+            <button class="btn btn-outline btn-sm">5</button>
+            <button class="btn btn-outline btn-sm">6</button>
+            <button class="btn btn-outline btn-sm">&raquo;</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

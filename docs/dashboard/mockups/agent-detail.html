@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 에이전트 상세</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item active">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="agents.html" class="btn btn-ghost btn-sm">&larr; 에이전트 관리</a>
+        <span class="page-title">strategy-dev-01</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- M-5: 상세 헤더 — Agent ID, 상태, 소속, 이름 + 상태 전환 버튼 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">strategy-dev-01</div>
+          <div class="detail-meta">
+            <span class="badge badge-positive">활성</span>
+            <span class="badge badge-muted">strategy-lab</span>
+            <span class="text-muted">전략 리서치 1호</span>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-outline" onclick="document.getElementById('editModal').style.display='flex'">정보 수정</button>
+          <button class="btn btn-outline">일시 정지</button>
+          <button class="btn btn-outline text-negative" onclick="document.getElementById('revokeModal').style.display='flex'">삭제</button>
+        </div>
+      </div>
+
+      <!-- M-5: 기본 정보 + 활동 정보 (2열 그리드) -->
+      <div class="detail-grid">
+        <div class="card">
+          <div class="card-title mb-16">기본 정보</div>
+          <div class="info-row"><span class="info-label">Agent ID</span><span class="text-mono">strategy-dev-01</span></div>
+          <div class="info-row"><span class="info-label">이름</span><span>전략 리서치 1호</span></div>
+          <div class="info-row"><span class="info-label">소속</span><span>strategy-lab</span></div>
+          <div class="info-row"><span class="info-label">상태</span><span class="badge badge-positive">활성</span></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title mb-16">활동 정보</div>
+          <div class="info-row"><span class="info-label">생성일</span><span>2026-02-15 10:00</span></div>
+          <div class="info-row"><span class="info-label">생성자</span><span>owner</span></div>
+          <div class="info-row"><span class="info-label">마지막 활동</span><span>2026-03-13 09:30</span></div>
+          <div class="info-row"><span class="info-label">일시 정지 시각</span><span class="text-muted">-</span></div>
+        </div>
+      </div>
+
+      <!-- M-6: 토큰 관리 -->
+      <div class="card mb-24">
+        <div class="card-header">
+          <span class="card-title">토큰 관리</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <div style="flex: 1;">
+            <div class="info-row">
+              <span class="info-label">토큰 접두어</span>
+              <span class="text-mono">ante_ak_****</span>
+            </div>
+          </div>
+          <button class="btn btn-outline" onclick="document.getElementById('tokenReissueModal').style.display='flex'">토큰 재발급</button>
+        </div>
+        <div class="form-hint" style="margin-top: 8px; color: var(--color-warning);">
+          &#9888; 토큰 재발급 시 기존 토큰이 즉시 무효화됩니다.
+        </div>
+      </div>
+
+      <!-- M-7: 권한 범위 (읽기 전용 — 수정은 정보 수정 모달에서) -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">권한 범위 (Scopes)</span>
+        </div>
+        <div class="scope-tags">
+          <span class="scope-tag">strategy:read</span>
+          <span class="scope-tag">strategy:write</span>
+          <span class="scope-tag">report:write</span>
+          <span class="scope-tag">data:read</span>
+          <span class="scope-tag">backtest:run</span>
+        </div>
+      </div>
+
+      <!-- M-6: 토큰 재발급 확인 모달 -->
+      <div class="modal-overlay" id="tokenReissueModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title" style="color: var(--color-warning);">&#9888; 토큰 재발급</div>
+          <p style="font-size: 13px; color: var(--color-text-muted); margin-bottom: 20px;">기존 토큰이 즉시 무효화됩니다. 해당 에이전트의 모든 API 요청이 새 토큰으로 인증해야 합니다.</p>
+          <p style="font-size: 14px; font-weight: 600; margin-bottom: 20px;">재발급을 진행하시겠습니까?</p>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('tokenReissueModal').style.display='none'">취소</button>
+            <button class="btn btn-primary" onclick="document.getElementById('tokenReissueModal').style.display='none'; document.getElementById('newTokenModal').style.display='flex'">재발급</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- M-6: 새 토큰 표시 모달 -->
+      <div class="modal-overlay" id="newTokenModal" style="display: none;">
+        <div class="modal" style="text-align: center;">
+          <div class="modal-title" style="color: var(--color-positive);">&#10003; 토큰 재발급 완료</div>
+
+          <div style="margin-bottom: 8px;">
+            <div class="form-label">Agent ID</div>
+            <div style="font-size: 16px; font-weight: 600;">strategy-dev-01</div>
+          </div>
+
+          <div style="margin: 20px 0;">
+            <div class="form-label">새 토큰</div>
+            <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; font-family: monospace; font-size: 13px; word-break: break-all; text-align: left; margin-top: 8px;">
+              ante_ak_j7n4r2x8vk5m1qf9wp3hs6tl0yc4bg7ead
+            </div>
+          </div>
+
+          <div style="background: var(--color-warning-bg); color: var(--color-warning); padding: 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 20px; text-align: left;">
+            &#9888; 이 토큰은 다시 표시되지 않습니다. 안전한 곳에 복사해 두세요.
+          </div>
+
+          <div class="btn-group" style="justify-content: center;">
+            <button class="btn btn-primary" onclick="navigator.clipboard.writeText('ante_ak_j7n4r2x8vk5m1qf9wp3hs6tl0yc4bg7ead')">토큰 복사</button>
+            <button class="btn btn-outline" onclick="document.getElementById('newTokenModal').style.display='none'">닫기</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- M-4: 삭제 확인 모달 -->
+      <div class="modal-overlay" id="revokeModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title" style="color: var(--color-negative);">&#9888; 에이전트 삭제</div>
+          <p style="font-size: 13px; color: var(--color-text-muted); margin-bottom: 20px;">이 작업은 되돌릴 수 없습니다. 해당 에이전트의 토큰이 영구 무효화됩니다.</p>
+          <p style="font-size: 14px; font-weight: 600; margin-bottom: 20px;">정말 삭제하시겠습니까?</p>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('revokeModal').style.display='none'">취소</button>
+            <button class="btn btn-negative" onclick="document.getElementById('revokeModal').style.display='none'">삭제</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- M-7: 에이전트 정보 수정 모달 -->
+      <div class="modal-overlay" id="editModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title">에이전트 정보 수정</div>
+
+          <div class="form-group">
+            <label class="form-label">Agent ID</label>
+            <input type="text" class="form-input" value="strategy-dev-01" disabled style="opacity: 0.5; cursor: not-allowed;">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">이름</label>
+            <input type="text" class="form-input" value="전략 리서치 1호">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">소속 (org)</label>
+            <input type="text" class="form-input" value="strategy-lab">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">권한 범위 (Scopes)</label>
+            <div class="checkbox-group">
+              <label class="checkbox-item"><input type="checkbox" checked> strategy:read</label>
+              <label class="checkbox-item"><input type="checkbox" checked> strategy:write</label>
+              <label class="checkbox-item"><input type="checkbox" checked> report:write</label>
+              <label class="checkbox-item"><input type="checkbox"> approval:create</label>
+              <label class="checkbox-item"><input type="checkbox"> approval:review</label>
+              <label class="checkbox-item"><input type="checkbox"> bot:read</label>
+              <label class="checkbox-item"><input type="checkbox" checked> data:read</label>
+              <label class="checkbox-item"><input type="checkbox"> data:write</label>
+              <label class="checkbox-item"><input type="checkbox" checked> backtest:run</label>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('editModal').style.display='none'">취소</button>
+            <button class="btn btn-primary" onclick="document.getElementById('editModal').style.display='none'">저장</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

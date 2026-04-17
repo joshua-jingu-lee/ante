@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 로그인</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    .login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--color-bg);
+    }
+
+    .login-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 400px;
+      text-align: center;
+    }
+
+    .login-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 4px;
+    }
+
+    .login-logo img {
+      width: 56px;
+      height: 56px;
+    }
+
+    .login-subtitle {
+      font-size: 13px;
+      color: var(--color-text-muted);
+      margin-bottom: 32px;
+    }
+
+    .login-form {
+      text-align: left;
+    }
+
+    .login-form .form-input {
+      padding: 12px 14px;
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+
+    .password-wrapper {
+      position: relative;
+    }
+
+    .password-toggle {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .login-error {
+      background: var(--color-negative-bg);
+      color: var(--color-negative);
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <div class="login-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <div class="login-subtitle">Ante Up. Agents Do the Rest.</div>
+
+      <div class="login-form">
+        <!-- 에러 메시지 (로그인 실패 시 표시) -->
+        <div class="login-error hidden" id="loginError">
+          ID 또는 패스워드가 올바르지 않습니다.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Member ID</label>
+          <input type="text" class="form-input" placeholder="owner" value="owner">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">패스워드</label>
+          <div class="password-wrapper">
+            <input type="password" class="form-input" placeholder="패스워드를 입력하세요" value="••••••••">
+            <button class="password-toggle" title="패스워드 표시">&#128065;</button>
+          </div>
+        </div>
+
+        <button class="btn btn-primary login-btn" onclick="location.href='treasury.html'">
+          로그인
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 에러 표시 토글 데모
+    document.querySelector('.password-toggle').addEventListener('click', function() {
+      const input = this.previousElementSibling;
+      input.type = input.type === 'password' ? 'text' : 'password';
+    });
+  </script>
+</body>
+</html>

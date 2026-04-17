@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 리포트 상세</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item active">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="strategies.html" style="font-size: 13px; color: var(--color-text-muted); text-decoration: none;">&larr; 전략과 성과</a>
+        <span class="page-title">리포트 상세</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 상세 헤더 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">모멘텀 돌파 전략 v2 검증 리포트</div>
+        </div>
+      </div>
+
+      <!-- 1행: 리포트 정보 + 백테스트 설정 + 백테스트 성과 (3열) -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+        <!-- 좌: 리포트 정보 -->
+        <div class="card">
+          <div class="card-title mb-16">리포트 정보</div>
+          <div class="info-row">
+            <span class="info-label">리포트 ID</span>
+            <span class="text-mono">report-20260313-001</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">전략명</span>
+            <span class="text-mono">momentum_breakout_v2</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">버전</span>
+            <span>v2.0</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">상태</span>
+            <span class="badge badge-warning">제출됨</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">수행자</span>
+            <a href="agent-detail.html">전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></a>
+          </div>
+          <div class="info-row">
+            <span class="info-label">수행일</span>
+            <span>2026-03-13 09:20</span>
+          </div>
+        </div>
+
+        <!-- 중: 백테스트 설정 -->
+        <div class="card">
+          <div class="card-title mb-16">백테스트 설정</div>
+          <div class="info-row">
+            <span class="info-label">백테스트 기간</span>
+            <span>2024-01 ~ 2026-03 (2년)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">초기 자금</span>
+            <span>₩10,000,000</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">타임프레임</span>
+            <span>1d</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">매수 수수료율</span>
+            <span>0.015%</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">매도 수수료율</span>
+            <span>0.195%</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">슬리피지율</span>
+            <span>0.1%</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">대상 종목</span>
+            <span><span class="text-mono">005930</span>, <span class="text-mono">000660</span> <span class="text-muted">외 8</span></span>
+          </div>
+        </div>
+
+        <!-- 우: 백테스트 성과 -->
+        <div class="card">
+          <div class="card-title mb-16">백테스트 성과</div>
+          <div class="info-row">
+            <span class="info-label">누적 수익률</span>
+            <span class="text-positive" style="font-weight: 600;">+42.3% (+4,230,000원)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">총 거래 수</span>
+            <span>127회</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">승률</span>
+            <span>62.2%</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">수익 팩터</span>
+            <span>1.85</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">샤프 비율</span>
+            <span>1.72</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">최대 낙폭</span>
+            <span class="text-negative" style="font-weight: 600;">-6.8% (-680,000원)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">평균 수익</span>
+            <span class="text-positive" style="font-weight: 600;">+1.12% (+78,500원)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">평균 손실</span>
+            <span class="text-negative" style="font-weight: 600;">-0.60% (-42,300원)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">수수료 합계</span>
+            <span style="color: var(--color-text-muted);">58,200원</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">활성 거래일</span>
+            <span>89일</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2행: 자산 곡선 차트 (플레이스홀더) -->
+      <div class="card mb-24">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+          <div>
+            <div class="card-title" style="margin-bottom: 4px;">자산 곡선</div>
+            <div style="font-size: 13px; color: var(--color-text-muted);">기간 손익 <span class="text-positive" style="font-weight: 600;">+4,230,000원</span> · 기간 수익률 <span class="text-positive" style="font-weight: 600;">+42.3%</span></div>
+          </div>
+        </div>
+        <div style="height: 240px; background: var(--color-bg-elevated); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px;">
+          &#128200; 듀얼 축 차트 — 좌축: 총 자산 추이 (Area) · 우축: 일별 수익률 (Bar)
+        </div>
+      </div>
+
+      <!-- 3행: 전략 요약 + 리스크 분석 (2열) -->
+      <div class="detail-grid mb-24">
+        <!-- 좌: 전략 요약 -->
+        <div class="card">
+          <div class="card-title mb-16">전략 요약</div>
+          <div style="font-size: 13px; line-height: 1.8; color: var(--color-text-muted);">
+            <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">요약</strong></p>
+            <p style="margin-bottom: 16px;">20일 이동평균 돌파 + 거래량 급증 조건이 동시에 충족될 때 진입하는 모멘텀 추세 추종 전략. 기존 v1 대비 거래량 필터를 추가하여 허위 돌파를 크게 줄임.</p>
+            <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">근거</strong></p>
+            <p>코스피200 대형주 중 변동성 상위 30종목을 대상으로, 모멘텀 효과가 통계적으로 유의미한 구간에서 진입하여 추세를 추종합니다. 거래량 필터 추가로 false breakout 비율이 v1 대비 38% 감소.</p>
+          </div>
+        </div>
+
+        <!-- 우: 리스크 분석 -->
+        <div class="card">
+          <div class="card-title mb-16">리스크 분석</div>
+          <div style="font-size: 13px; line-height: 1.8; color: var(--color-text-muted);">
+            <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">위험 요소</strong></p>
+            <p style="margin-bottom: 16px;">변동성 확대 구간(2024-08, 2025-03)에서 MDD가 일시적으로 증가했으나 허용 범위 내에서 관리되었습니다. 실전에서는 슬리피지 영향이 백테스트 대비 클 수 있어 모니터링이 필요합니다.</p>
+            <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">권장 사항</strong></p>
+            <p>모의투자 1개월 검증 후 실전 전환을 권장합니다. 초기 배정 예산은 전체 운용자금의 10% 이내가 적정합니다.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 결재 상세 (전략 채택)</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item active">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="approvals.html" style="font-size: 13px; color: var(--color-text-muted); text-decoration: none;">&larr; 결재함</a>
+        <span class="page-title">결재 상세</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 상세 헤더: 대기 상태 → 승인/거부 액션 노출 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">모멘텀 돌파 전략 v2 채택 요청</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-outline" onclick="document.getElementById('rejectModal').style.display='flex'">거부</button>
+          <button class="btn btn-positive" onclick="document.getElementById('approveModal').style.display='flex'">승인</button>
+        </div>
+      </div>
+
+      <!-- 1행: 결재 정보 + 검토 의견 (2열) -->
+      <div class="detail-grid mb-24">
+        <!-- 좌: 결재 정보 -->
+        <div class="card">
+          <div class="card-title mb-16">결재 정보</div>
+          <div class="info-row">
+            <span class="info-label">요청자</span>
+            <span>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">유형</span>
+            <span><span class="badge badge-muted">전략 채택</span></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">상태</span>
+            <span class="badge badge-warning">대기</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">요청일</span>
+            <span>2026-03-13 09:30</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">만료일</span>
+            <span>2026-03-16 09:30</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">참조 리포트</span>
+            <a href="report-detail.html">report-20260313-001</a>
+          </div>
+        </div>
+
+        <!-- 우: 검토 의견 -->
+        <div class="card">
+          <div class="card-title mb-16">검토 의견</div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>검증 주체</th>
+                  <th>결과</th>
+                  <th>상세</th>
+                  <th>검증 시각</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="text-mono">rule_engine</span></td>
+                  <td><span class="badge badge-positive">pass</span></td>
+                  <td style="font-size: 12px; color: var(--color-text-muted);">전략 파라미터 유효성 검증 통과. MDD 제한(15%) 이내, 거래 허용 시간대 준수.</td>
+                  <td class="text-muted">2026-03-13 09:30</td>
+                </tr>
+                <tr>
+                  <td><span class="text-mono">agent:risk-analyst</span></td>
+                  <td><span class="badge badge-warning">warn</span></td>
+                  <td style="font-size: 12px; color: var(--color-text-muted);">최근 3개월 시장 변동성 증가 구간. 백테스트 기간에 유사 구간이 포함되어 있으나, 실전에서는 슬리피지 영향이 클 수 있음.</td>
+                  <td class="text-muted">2026-03-13 09:45</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2행: 본문 (Agent가 작성한 마크다운) -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">요청 본문</div>
+        <div style="font-size: 13px; line-height: 1.8; color: var(--color-text-muted);">
+          <p style="margin-bottom: 12px;">모멘텀 돌파 전략 v2의 백테스트 결과를 바탕으로 채택을 요청합니다.</p>
+          <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">전략 개요:</strong></p>
+          <p style="margin-bottom: 12px;">20일 이동평균 돌파 + 거래량 급증 조건이 동시에 충족될 때 진입합니다. 기존 v1 대비 거래량 필터를 추가하여 허위 돌파(false breakout)를 크게 줄였습니다. 종목 풀은 코스피200 대형주 중 변동성 상위 30종목입니다.</p>
+          <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">리스크 분석:</strong></p>
+          <p>변동성 확대 구간(2024-08, 2025-03)에서 MDD가 일시적으로 증가했으나 허용 범위 내에서 관리되었습니다. 슬리피지 영향은 모니터링이 필요합니다.</p>
+
+          <!-- 마크다운 렌더링 레퍼런스 (개발 참고용) -->
+          <hr style="border: none; border-top: 1px dashed var(--color-border); margin: 24px 0;">
+          <p style="font-size: 11px; color: var(--color-text-muted); opacity: 0.6; margin-bottom: 16px;">▼ 마크다운 렌더링 레퍼런스 (개발 참고용)</p>
+
+          <h1 style="font-size: 15px; font-weight: 700; color: var(--color-text); margin-bottom: 8px;">제목 1 (# heading)</h1>
+          <h2 style="font-size: 14px; font-weight: 600; color: var(--color-text); margin-bottom: 8px;">제목 2 (## heading)</h2>
+          <h3 style="font-size: 13px; font-weight: 600; color: var(--color-text); margin-bottom: 12px;">제목 3 (### heading)</h3>
+
+          <p style="margin-bottom: 12px;">일반 텍스트에 <strong style="color: var(--color-text);">볼드(**bold**)</strong>, <em>이탤릭(*italic*)</em>, <strong style="color: var(--color-text);"><em>볼드 이탤릭(***both***)</em></strong>, <del>취소선(~~strike~~)</del>을 적용할 수 있습니다.</p>
+
+          <p style="margin-bottom: 12px;">인라인 코드: <code style="background: var(--color-bg-elevated); padding: 2px 6px; border-radius: 3px; font-size: 12px;">max_position_pct = 0.35</code></p>
+
+          <p style="margin-bottom: 8px;">링크: <a href="#">참고 문서 바로가기</a></p>
+
+          <p style="margin-bottom: 8px;"><strong style="color: var(--color-text);">순서 없는 목록 (- item):</strong></p>
+          <ul style="padding-left: 20px; margin-bottom: 12px;">
+            <li>첫 번째 항목</li>
+            <li>두 번째 항목
+              <ul style="padding-left: 20px;">
+                <li>중첩 항목</li>
+              </ul>
+            </li>
+            <li>세 번째 항목</li>
+          </ul>
+
+          <p style="margin-bottom: 8px;"><strong style="color: var(--color-text);">순서 있는 목록 (1. item):</strong></p>
+          <ol style="padding-left: 20px; margin-bottom: 12px;">
+            <li>첫 번째 단계</li>
+            <li>두 번째 단계</li>
+            <li>세 번째 단계</li>
+          </ol>
+
+          <blockquote style="border-left: 3px solid var(--color-border); padding: 8px 14px; margin: 0 0 12px 0; color: var(--color-text-muted); font-style: italic;">
+            인용문 (&gt; blockquote): Agent가 참조한 외부 분석 내용이나 주요 수치를 인용할 때 사용합니다.
+          </blockquote>
+
+          <p style="margin-bottom: 8px;"><strong style="color: var(--color-text);">코드 블록 (```code```):</strong></p>
+          <pre style="background: var(--color-bg-elevated); padding: 12px 16px; border-radius: var(--radius-sm); font-size: 12px; overflow-x: auto; margin-bottom: 12px;"><code>strategy:
+  name: momentum_breakout_v2
+  entry: MA20 돌파 + 거래량 급증
+  exit: 목표수익 5% 또는 손절 -2%</code></pre>
+
+          <p style="margin-bottom: 8px;"><strong style="color: var(--color-text);">표 (| table |):</strong></p>
+          <div class="table-wrapper" style="margin-bottom: 12px;">
+            <table>
+              <thead>
+                <tr><th>지표</th><th>v1</th><th>v2</th><th>변화</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>승률</td><td>55.1%</td><td>62.2%</td><td style="color: var(--color-positive);">+7.1%p</td></tr>
+                <tr><td>MDD</td><td>-9.2%</td><td>-6.8%</td><td style="color: var(--color-positive);">개선</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <hr style="border: none; border-top: 1px solid var(--color-border); margin: 12px 0;">
+          <p style="font-size: 11px; color: var(--color-text-muted); opacity: 0.6;">수평선 (---) ↑</p>
+        </div>
+      </div>
+
+      <!-- 감사 이력 -->
+      <div class="card">
+        <div class="card-title mb-16">감사 이력</div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:45</span>
+          <span><span class="text-mono" style="color: var(--color-info);">agent:risk-analyst</span> — 검토 의견 첨부 (warn)</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:30</span>
+          <span><span class="text-mono" style="color: var(--color-text-muted);">rule_engine</span> — 검토 의견 완료 (pass)</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:30</span>
+          <span><span class="text-mono" style="color: var(--color-primary);">agent:strategy-dev-01</span> — 결재 요청 생성</span>
+        </div>
+      </div>
+
+      <!-- 승인 확인 모달 -->
+      <div class="modal-overlay" id="approveModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title" style="color: var(--color-positive);">결재 승인</div>
+          <div style="margin-bottom: 16px; font-size: 13px; color: var(--color-text-muted);">
+            <strong style="color: var(--color-text);">모멘텀 돌파 전략 v2 채택 요청</strong>을 승인하시겠습니까?
+          </div>
+          <div style="background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; margin-bottom: 16px;">
+            &#9888; 검토 의견에 <strong>warn</strong> 결과가 포함되어 있습니다. 검증 내용을 확인하세요.
+          </div>
+          <div class="form-group">
+            <label class="form-label">메모 (선택)</label>
+            <input type="text" class="form-input" placeholder="예: 모의투자 1개월 검증 후 실전 전환 조건부 승인">
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('approveModal').style.display='none'">취소</button>
+            <button class="btn btn-positive" onclick="document.getElementById('approveModal').style.display='none'">승인</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 거부 확인 모달 -->
+      <div class="modal-overlay" id="rejectModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title" style="color: var(--color-negative);">결재 거부</div>
+          <div style="margin-bottom: 16px; font-size: 13px; color: var(--color-text-muted);">
+            <strong style="color: var(--color-text);">모멘텀 돌파 전략 v2 채택 요청</strong>을 거부하시겠습니까?
+          </div>
+          <div class="form-group">
+            <label class="form-label">거부 사유</label>
+            <input type="text" class="form-input" placeholder="예: 변동성 구간 추가 검증 필요">
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('rejectModal').style.display='none'">취소</button>
+            <button class="btn btn-negative" onclick="document.getElementById('rejectModal').style.display='none'">거부</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 결재함</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item active">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">결재함</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- A-2: 상태 필터 + A-3: 유형 필터 + 제목 검색 -->
+      <div class="filters">
+        <div class="filter-tabs">
+          <button class="filter-tab active">전체</button>
+          <button class="filter-tab">대기 (3)</button>
+          <button class="filter-tab">승인</button>
+          <button class="filter-tab">거부</button>
+        </div>
+        <select class="search-input" style="width: auto; min-width: 140px;">
+          <option value="">전체 유형</option>
+          <option value="strategy_adopt">전략 채택</option>
+          <option value="strategy_retire">전략 제거</option>
+          <option value="bot_create">봇 생성</option>
+          <option value="bot_assign_strategy">전략 배정</option>
+          <option value="bot_change_strategy">전략 변경</option>
+          <option value="bot_stop">봇 중지</option>
+          <option value="bot_resume">봇 재개</option>
+          <option value="bot_delete">봇 삭제</option>
+          <option value="budget_change">예산 변경</option>
+          <option value="rule_change">규칙 변경</option>
+        </select>
+        <input type="text" class="search-input" placeholder="제목 검색...">
+      </div>
+
+      <!-- A-1: 결재 테이블 -->
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>유형</th>
+                <th>제목</th>
+                <th>요청자</th>
+                <th>요청일</th>
+                <th>상태</th>
+                <th>처리일</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- 대기: 전략 채택 -->
+              <tr style="cursor: pointer;" onclick="location.href='approval-detail-strategy-adopt.html'">
+                <td><span class="badge badge-muted">전략 채택</span></td>
+                <td>모멘텀 돌파 전략 v2 채택 요청</td>
+                <td>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></td>
+                <td class="text-muted">2026-03-13 09:30</td>
+                <td><span class="badge badge-warning">대기</span></td>
+                <td class="text-muted">-</td>
+              </tr>
+              <!-- 대기: 예산 변경 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">예산 변경</span></td>
+                <td>bot-momentum-01 예산 1,000만원→2,500만원 증액 요청</td>
+                <td>자금 관리 <span class="text-muted">treasury-agent</span></td>
+                <td class="text-muted">2026-03-13 08:15</td>
+                <td><span class="badge badge-warning">대기</span></td>
+                <td class="text-muted">-</td>
+              </tr>
+              <!-- 대기: 봇 생성 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">봇 생성</span></td>
+                <td>RSI 역추세 전략 봇 신규 생성 요청</td>
+                <td>전략 리서치 2호 <span class="text-muted">strategy-dev-02</span></td>
+                <td class="text-muted">2026-03-12 17:45</td>
+                <td><span class="badge badge-warning">대기</span></td>
+                <td class="text-muted">-</td>
+              </tr>
+              <!-- 승인: 전략 채택 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">전략 채택</span></td>
+                <td>MACD 크로스 전략 v1 채택 요청</td>
+                <td>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></td>
+                <td class="text-muted">2026-03-11 14:20</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-11 15:30</td>
+              </tr>
+              <!-- 승인: 봇 중지 -->
+              <tr style="cursor: pointer;" onclick="location.href='approval-detail-bot-stop.html'">
+                <td><span class="badge badge-muted">봇 중지</span></td>
+                <td>bot-rsi-01 손실 누적 중지 요청</td>
+                <td>리스크 감시 <span class="text-muted">risk-monitor</span></td>
+                <td class="text-muted">2026-03-10 11:00</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-10 11:15</td>
+              </tr>
+              <!-- 거부: 규칙 변경 -->
+              <tr style="cursor: pointer;" onclick="location.href='approval-detail-rule-change.html'">
+                <td><span class="badge badge-muted">규칙 변경</span></td>
+                <td>bot-rsi-01 종목당 최대 비중 20%→35% 변경 요청</td>
+                <td>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></td>
+                <td class="text-muted">2026-03-09 10:00</td>
+                <td><span class="badge badge-negative">거부</span></td>
+                <td class="text-muted">2026-03-09 11:45</td>
+              </tr>
+              <!-- 승인: 예산 변경 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">예산 변경</span></td>
+                <td>bot-macd-01 예산 500만원→800만원 증액 요청</td>
+                <td>자금 관리 <span class="text-muted">treasury-agent</span></td>
+                <td class="text-muted">2026-03-08 16:30</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-08 17:00</td>
+              </tr>
+              <!-- 승인: 전략 배정 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">전략 배정</span></td>
+                <td>bot-macd-01에 MACD 크로스 전략 v1 배정 요청</td>
+                <td>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></td>
+                <td class="text-muted">2026-03-08 10:15</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-08 10:45</td>
+              </tr>
+              <!-- 승인: 전략 채택 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">전략 채택</span></td>
+                <td>볼린저 밴드 평균회귀 전략 채택 요청</td>
+                <td>전략 리서치 2호 <span class="text-muted">strategy-dev-02</span></td>
+                <td class="text-muted">2026-03-07 14:00</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-07 15:20</td>
+              </tr>
+              <!-- 승인: 봇 재개 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">봇 재개</span></td>
+                <td>bot-rsi-01 전략 수정 완료 후 재개 요청</td>
+                <td>봇 운영 1호 <span class="text-muted">ops-agent-01</span></td>
+                <td class="text-muted">2026-03-06 11:30</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-06 14:00</td>
+              </tr>
+              <!-- 승인: 규칙 변경 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">규칙 변경</span></td>
+                <td>전역 일일 손실 한도 3%→5% 변경 요청</td>
+                <td>리스크 감시 <span class="text-muted">risk-monitor</span></td>
+                <td class="text-muted">2026-03-05 09:00</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-05 10:30</td>
+              </tr>
+              <!-- 승인: 봇 중지 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">봇 중지</span></td>
+                <td>bot-bb-01 전략 리밸런싱 위한 일시 중지 요청</td>
+                <td>봇 운영 1호 <span class="text-muted">ops-agent-01</span></td>
+                <td class="text-muted">2026-03-04 15:45</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-04 16:00</td>
+              </tr>
+              <!-- 승인: 전략 제거 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">전략 제거</span></td>
+                <td>단순 이평선 전략 v1 제거 요청</td>
+                <td>전략 리서치 1호 <span class="text-muted">strategy-dev-01</span></td>
+                <td class="text-muted">2026-03-03 13:20</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-03 14:10</td>
+              </tr>
+              <!-- 거부: 봇 삭제 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">봇 삭제</span></td>
+                <td>bot-scalp-01 삭제 요청</td>
+                <td>봇 운영 1호 <span class="text-muted">ops-agent-01</span></td>
+                <td class="text-muted">2026-03-02 10:00</td>
+                <td><span class="badge badge-negative">거부</span></td>
+                <td class="text-muted">2026-03-02 11:30</td>
+              </tr>
+              <!-- 승인: 전략 변경 -->
+              <tr style="cursor: pointer;">
+                <td><span class="badge badge-muted">전략 변경</span></td>
+                <td>bot-momentum-01 전략 v1→v2 변경 요청</td>
+                <td>전략 리서치 2호 <span class="text-muted">strategy-dev-02</span></td>
+                <td class="text-muted">2026-03-01 09:30</td>
+                <td><span class="badge badge-positive">승인</span></td>
+                <td class="text-muted">2026-03-01 10:00</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- A-4: 페이지네이션 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 0 0; border-top: 1px solid var(--color-border); margin-top: 16px;">
+          <span style="font-size: 13px; color: var(--color-text-muted);">24건 중 1-15</span>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-outline btn-sm" disabled>&laquo; 이전</button>
+            <button class="btn btn-outline btn-sm">다음 &raquo;</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

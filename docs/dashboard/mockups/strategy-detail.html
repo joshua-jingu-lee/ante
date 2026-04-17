@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 전략 상세</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item active">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="strategies.html" class="btn btn-ghost btn-sm">&larr; 전략</a>
+        <span class="page-title">모멘텀 돌파 전략</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 전략 정보 헤더 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">모멘텀 돌파 전략</div>
+          <div class="detail-meta">
+            <span class="badge badge-positive">운용중</span>
+            <span class="text-muted">v2</span>
+            <span class="text-muted">|</span>
+            <span>실행 봇: <a href="bot-detail.html">bot-momentum-01</a></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 전략 개요 -->
+      <div class="detail-grid mb-24">
+        <div class="card">
+          <div class="card-title mb-16">전략 정보</div>
+          <div class="info-row"><span class="info-label">제출자</span><span><a href="agent-detail.html">전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></a></span></div>
+          <div class="info-row"><span class="info-label">버전</span><span>2.1.0</span></div>
+          <div class="info-row">
+            <span class="info-label">설명</span>
+            <span style="font-size: 12px; color: var(--color-text-muted);">20일 고점 돌파 시 매수, ATR 기반 트레일링 스탑으로 매도</span>
+          </div>
+          <div style="margin-top: 12px;">
+            <div style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px; font-weight: 600;">투자 근거</div>
+            <div style="font-size: 12px; color: var(--color-text-muted); line-height: 1.6; white-space: pre-line;">모멘텀 효과는 한국 시장에서 중소형주 중심으로 유의미한 초과수익을 보임.
+거래량 필터로 유동성 리스크 제어.
+최근 3년 백테스트 기준 연평균 수익률 22.4%, MDD -12.1%.</div>
+          </div>
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border);">
+            <div style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px; font-weight: 600;">리스크</div>
+            <div style="font-size: 12px; color: var(--color-text-muted); line-height: 1.6; white-space: pre-line;">급락장에서 모멘텀 반전 시 연속 손절 가능.
+MDD 제한으로 방어.
+거래량 급감 종목 진입 시 슬리피지 확대 위험.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title mb-16">전략 파라미터</div>
+          <div class="info-row"><span class="info-label">lookback_period</span><span><span class="text-mono">20</span> <span class="text-muted" style="font-size: 11px;">고점 탐색 기간 (일)</span></span></div>
+          <div class="info-row"><span class="info-label">atr_multiplier</span><span><span class="text-mono">2.5</span> <span class="text-muted" style="font-size: 11px;">트레일링 스탑 ATR 배수</span></span></div>
+          <div class="info-row"><span class="info-label">volume_threshold</span><span><span class="text-mono">1.5</span> <span class="text-muted" style="font-size: 11px;">평균 거래량 대비 배수</span></span></div>
+          <div class="info-row"><span class="info-label">max_positions</span><span><span class="text-mono">3</span> <span class="text-muted" style="font-size: 11px;">최대 동시 보유 종목 수</span></span></div>
+          <div class="info-row"><span class="info-label">position_size_pct</span><span><span class="text-mono">0.3</span> <span class="text-muted" style="font-size: 11px;">종목당 예산 비중 (30%)</span></span></div>
+        </div>
+      </div>
+
+      <div class="section-title" style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">전략 성과</div>
+
+      <!-- 자산 추이 차트 -->
+      <div class="card mb-24">
+        <div class="card-header">
+          <span class="card-title">자산 추이 (Equity Curve)</span>
+          <div class="period-selector">
+            <button class="period-btn">1주</button>
+            <button class="period-btn active">1개월</button>
+            <button class="period-btn">3개월</button>
+            <button class="period-btn">전체</button>
+          </div>
+        </div>
+        <div class="chart-placeholder" style="height: 240px;">&#128200; Equity Curve — 전략 자산 가치 변화</div>
+      </div>
+
+      <style>
+        .hint-icon {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 14px; height: 14px; border-radius: 50%;
+          border: 1px solid var(--color-text-muted); color: var(--color-text-muted);
+          font-size: 10px; font-weight: 600; cursor: help;
+          margin-left: 4px; vertical-align: middle; position: relative;
+        }
+        .hint-icon:hover::after {
+          content: attr(data-hint);
+          position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+          background: var(--color-surface); border: 1px solid var(--color-border);
+          color: var(--color-text); font-size: 11px; font-weight: 400;
+          padding: 6px 10px; border-radius: var(--radius-sm);
+          white-space: nowrap; z-index: 10;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+      </style>
+
+      <!-- 성과 지표 -->
+      <div class="stats-row" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat-card">
+          <div class="stat-label">순손익 <span class="hint-icon" data-hint="실현 손익 + 미실현 손익의 합계">?</span></div>
+          <div class="stat-value text-positive">2,710,500 원</div>
+          <div class="text-positive" style="font-size: 13px; margin-top: -4px;">(+18.07%)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">총 거래 수</div>
+          <div class="stat-value">84</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">승률 <span class="hint-icon" data-hint="수익을 낸 거래 수 / 전체 거래 수">?</span></div>
+          <div class="stat-value">61.9%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">활성 거래일 <span class="hint-icon" data-hint="실제 매매가 발생한 날의 수">?</span></div>
+          <div class="stat-value">42일</div>
+        </div>
+      </div>
+      <div class="stats-row" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat-card">
+          <div class="stat-label">수익 팩터 <span class="hint-icon" data-hint="총 수익 / 총 손실. 1 이상이면 수익 우위">?</span></div>
+          <div class="stat-value">1.72</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sharpe Ratio <span class="hint-icon" data-hint="위험 대비 수익 효율. 높을수록 안정적인 수익">?</span></div>
+          <div class="stat-value">1.35</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">MDD <span class="hint-icon" data-hint="최대 낙폭. 고점 대비 가장 크게 떨어진 비율">?</span></div>
+          <div class="stat-value text-negative">-8.4%</div>
+          <div class="text-negative" style="font-size: 13px; margin-top: -4px;">(-1,260,000 원)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">수수료 합계</div>
+          <div class="stat-value" style="color: var(--color-text-muted);">69,500 원</div>
+        </div>
+      </div>
+      <div class="stats-row mb-24" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat-card">
+          <div class="stat-label">평균 수익 <span class="hint-icon" data-hint="수익 거래의 평균 이익 금액">?</span></div>
+          <div class="stat-value text-positive">82,300 원</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">평균 손실 <span class="hint-icon" data-hint="손실 거래의 평균 손실 금액">?</span></div>
+          <div class="stat-value text-negative">-47,800 원</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">실현 손익 <span class="hint-icon" data-hint="매도 완료된 거래의 확정 손익">?</span></div>
+          <div class="stat-value text-positive">2,780,000 원</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">미실현 손익 <span class="hint-icon" data-hint="보유 중인 종목의 평가 손익 (미확정)">?</span></div>
+          <div class="stat-value text-positive">270,000 원</div>
+        </div>
+      </div>
+
+      <!-- 성과 & 최근 거래 2열 -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <!-- 좌: 기간별 성과 -->
+        <div class="card">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <div class="card-title">기간별 성과</div>
+            <a href="performance.html?strategy=momentum-breakout" style="font-size: 13px;">더 보기 &rarr;</a>
+          </div>
+          <div class="filter-tabs" style="margin-bottom: 16px;">
+            <button class="filter-tab" onclick="showPerfTab('daily')">일별</button>
+            <button class="filter-tab" onclick="showPerfTab('weekly')">주별</button>
+            <button class="filter-tab active" onclick="showPerfTab('monthly')">월별</button>
+          </div>
+
+          <!-- 일별 탭 -->
+          <div class="perf-tab" id="perf-daily" style="display: none;">
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>일자</th>
+                    <th class="text-right">거래 수</th>
+                    <th class="text-right">승률</th>
+                    <th class="text-right">실현 손익</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>2026-03-13</td><td class="text-right">2</td><td class="text-right">100%</td><td class="text-right text-positive">85,000 원</td></tr>
+                  <tr><td>2026-03-12</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">130,000 원</td></tr>
+                  <tr><td>2026-03-11</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-positive">85,000 원</td></tr>
+                  <tr><td>2026-03-10</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">42,000 원</td></tr>
+                  <tr><td>2026-03-07</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-negative">-18,000 원</td></tr>
+                  <tr><td>2026-03-06</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">95,000 원</td></tr>
+                  <tr><td>2026-03-05</td><td class="text-right">1</td><td class="text-right">0%</td><td class="text-right text-negative">-32,000 원</td></tr>
+                  <tr><td>2026-03-04</td><td class="text-right">2</td><td class="text-right">100%</td><td class="text-right text-positive">78,000 원</td></tr>
+                  <tr><td>2026-03-03</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">55,000 원</td></tr>
+                  <tr><td>2026-02-28</td><td class="text-right">3</td><td class="text-right">66.7%</td><td class="text-right text-positive">110,000 원</td></tr>
+                  <tr><td>2026-02-27</td><td class="text-right">2</td><td class="text-right">50.0%</td><td class="text-right text-negative">-25,000 원</td></tr>
+                  <tr><td>2026-02-26</td><td class="text-right">1</td><td class="text-right">100%</td><td class="text-right text-positive">63,000 원</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 주별 탭 -->
+          <div class="perf-tab" id="perf-weekly" style="display: none;">
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>주간</th>
+                    <th class="text-right">거래 수</th>
+                    <th class="text-right">승률</th>
+                    <th class="text-right">실현 손익</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>03/10 ~ 03/14</td><td class="text-right">8</td><td class="text-right">75.0%</td><td class="text-right text-positive">324,000 원</td></tr>
+                  <tr><td>03/03 ~ 03/07</td><td class="text-right">7</td><td class="text-right">57.1%</td><td class="text-right text-positive">100,000 원</td></tr>
+                  <tr><td>02/24 ~ 02/28</td><td class="text-right">9</td><td class="text-right">66.7%</td><td class="text-right text-positive">196,000 원</td></tr>
+                  <tr><td>02/17 ~ 02/21</td><td class="text-right">6</td><td class="text-right">50.0%</td><td class="text-right text-negative">-45,000 원</td></tr>
+                  <tr><td>02/10 ~ 02/14</td><td class="text-right">8</td><td class="text-right">62.5%</td><td class="text-right text-positive">210,000 원</td></tr>
+                  <tr><td>02/03 ~ 02/07</td><td class="text-right">5</td><td class="text-right">80.0%</td><td class="text-right text-positive">285,000 원</td></tr>
+                  <tr><td>01/27 ~ 01/31</td><td class="text-right">7</td><td class="text-right">57.1%</td><td class="text-right text-positive">120,000 원</td></tr>
+                  <tr><td>01/20 ~ 01/24</td><td class="text-right">8</td><td class="text-right">62.5%</td><td class="text-right text-positive">195,000 원</td></tr>
+                  <tr><td>01/13 ~ 01/17</td><td class="text-right">6</td><td class="text-right">50.0%</td><td class="text-right text-negative">-30,000 원</td></tr>
+                  <tr><td>01/06 ~ 01/10</td><td class="text-right">9</td><td class="text-right">66.7%</td><td class="text-right text-positive">350,000 원</td></tr>
+                  <tr><td>12/30 ~ 01/03</td><td class="text-right">4</td><td class="text-right">50.0%</td><td class="text-right text-positive">75,000 원</td></tr>
+                  <tr><td>12/23 ~ 12/27</td><td class="text-right">5</td><td class="text-right">60.0%</td><td class="text-right text-positive">130,000 원</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 월별 탭 (기본 활성) -->
+          <div class="perf-tab" id="perf-monthly">
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>월</th>
+                    <th class="text-right">거래 수</th>
+                    <th class="text-right">승률</th>
+                    <th class="text-right">실현 손익</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>2026-03</td><td class="text-right">18</td><td class="text-right">66.7%</td><td class="text-right text-positive">620,000 원</td></tr>
+                  <tr><td>2026-02</td><td class="text-right">32</td><td class="text-right">62.5%</td><td class="text-right text-positive">1,150,000 원</td></tr>
+                  <tr><td>2026-01</td><td class="text-right">34</td><td class="text-right">58.8%</td><td class="text-right text-positive">1,010,000 원</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 우: 최근 거래 -->
+        <div class="card">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <div class="card-title">최근 거래</div>
+            <a href="trades.html?strategy=momentum-breakout" style="font-size: 13px;">전체 보기 &rarr;</a>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>시각</th>
+                  <th>종목</th>
+                  <th>매매</th>
+                  <th class="text-right">수량</th>
+                  <th class="text-right">단가</th>
+                  <th class="text-right">손익</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="text-mono">03-13 09:15</td>
+                  <td>NAVER</td>
+                  <td><span class="badge badge-negative">매수</span></td>
+                  <td class="text-right">15</td>
+                  <td class="text-right">210,000</td>
+                  <td class="text-right text-muted">—</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-12 14:30</td>
+                  <td>카카오</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">30</td>
+                  <td class="text-right">48,500</td>
+                  <td class="text-right text-positive">45,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-12 09:05</td>
+                  <td>삼성전자</td>
+                  <td><span class="badge badge-negative">매수</span></td>
+                  <td class="text-right">50</td>
+                  <td class="text-right">72,300</td>
+                  <td class="text-right text-muted">—</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-11 15:20</td>
+                  <td>LG에너지솔루션</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">5</td>
+                  <td class="text-right">420,000</td>
+                  <td class="text-right text-positive">120,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-11 09:10</td>
+                  <td>현대차</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">10</td>
+                  <td class="text-right">245,000</td>
+                  <td class="text-right text-negative">-35,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-10 14:20</td>
+                  <td>셀트리온</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">8</td>
+                  <td class="text-right">195,000</td>
+                  <td class="text-right text-positive">42,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-07 10:30</td>
+                  <td>포스코홀딩스</td>
+                  <td><span class="badge badge-negative">매수</span></td>
+                  <td class="text-right">12</td>
+                  <td class="text-right">310,000</td>
+                  <td class="text-right text-muted">—</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-07 09:05</td>
+                  <td>KB금융</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">25</td>
+                  <td class="text-right">68,200</td>
+                  <td class="text-right text-negative">-18,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-06 14:50</td>
+                  <td>현대모비스</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">7</td>
+                  <td class="text-right">252,000</td>
+                  <td class="text-right text-positive">63,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-06 09:10</td>
+                  <td>삼성SDI</td>
+                  <td><span class="badge badge-negative">매수</span></td>
+                  <td class="text-right">5</td>
+                  <td class="text-right">385,000</td>
+                  <td class="text-right text-muted">—</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-05 13:45</td>
+                  <td>기아</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">15</td>
+                  <td class="text-right">92,500</td>
+                  <td class="text-right text-negative">-32,000</td>
+                </tr>
+                <tr>
+                  <td class="text-mono">03-04 09:20</td>
+                  <td>LG전자</td>
+                  <td><span class="badge badge-positive">매도</span></td>
+                  <td class="text-right">20</td>
+                  <td class="text-right">108,500</td>
+                  <td class="text-right text-positive">78,000</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        function showPerfTab(period) {
+          document.querySelectorAll('.perf-tab').forEach(t => t.style.display = 'none');
+          document.getElementById('perf-' + period).style.display = '';
+          document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+          event.target.classList.add('active');
+        }
+      </script>
+    </main>
+  </div>
+</body>
+</html>

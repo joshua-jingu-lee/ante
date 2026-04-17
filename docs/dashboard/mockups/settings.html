@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 설정</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .settings-left { display: flex; flex-direction: column; gap: 16px; }
+    .settings-right { display: flex; flex-direction: column; gap: 16px; }
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid var(--color-border);
+    }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-label { font-size: 13px; font-weight: 500; }
+    .setting-desc { font-size: 12px; color: var(--color-text-muted); }
+    .rule-table td:first-child { width: 60%; }
+    .rule-table td:nth-child(2) { width: 25%; }
+    .rule-table td:nth-child(3) { width: 15%; text-align: right; }
+    .section-subtitle {
+      font-size: 11px; font-weight: 600; color: var(--color-text-muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 8px 0 4px; border-bottom: 1px solid var(--color-border);
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">설정</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="settings-layout">
+
+        <!-- ═══════════════════ 좌측 열: 계좌 · 알림 · 시스템 ═══════════════════ -->
+        <div class="settings-left">
+
+          <!-- ST-1: 계좌 — 시스템 상태 (ACTIVE) -->
+          <div class="card" id="state-active">
+            <div class="card-title mb-16">시스템 상태</div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0;">
+              <div>
+                <div class="text-muted" style="font-size: 13px;">현재 모든 봇의 거래가 정상 운용 중입니다.</div>
+              </div>
+              <button class="btn" style="background: var(--color-negative); border-color: var(--color-negative); color: #fff;" onclick="document.getElementById('haltModal').style.display='flex'">비상 거래 정지</button>
+            </div>
+          </div>
+
+          <!-- ST-1: 계좌 — 시스템 상태 (HALTED, 기본 숨김) -->
+          <div class="card" id="state-halted" style="display: none;">
+            <div class="card-title mb-16">시스템 상태</div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0;">
+              <div>
+                <div style="font-size: 13px; color: var(--color-negative); font-weight: 600;">거래가 정지되었습니다</div>
+                <div class="text-muted" style="font-size: 12px; margin-top: 4px;">정지 시각: 2026-03-15 09:45 · 사유: 긴급 시장 변동</div>
+              </div>
+              <button class="btn btn-positive" onclick="document.getElementById('state-halted').style.display='none'; document.getElementById('state-active').style.display=''">거래 재개</button>
+            </div>
+          </div>
+
+          <!-- ST-2: 계좌 — 거래소 연결 -->
+          <div class="card">
+            <div class="card-title mb-16">거래소 연결</div>
+            <div class="info-row">
+              <span class="info-label">브로커</span>
+              <span>한국투자증권</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">거래 모드</span>
+              <span class="badge badge-primary">실전</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">계좌번호</span>
+              <span class="text-mono">5001****-01</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">거래소</span>
+              <span>KRX</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">통화</span>
+              <span>KRW</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">매수 수수료율</span>
+              <span>0.015%</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">매도 수수료율</span>
+              <span>0.195%</span>
+            </div>
+          </div>
+
+          <!-- ST-3: 알림 -->
+          <div class="card">
+            <div class="card-title mb-16">알림</div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">텔레그램 알림 수준</div>
+                <div class="setting-desc">notification.telegram_level · 알림 발송 기준</div>
+              </div>
+              <select class="filter-select" style="padding: 4px 8px; font-size: 13px;">
+                <option>all</option>
+                <option selected>important</option>
+                <option>critical</option>
+                <option>off</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">체결 알림</div>
+                <div class="setting-desc">매수/매도 체결 시 즉시 알림</div>
+              </div>
+              <button class="toggle active"></button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">일일 리포트</div>
+                <div class="setting-desc">매일 장 마감 후 수익 요약 리포트</div>
+              </div>
+              <button class="toggle"></button>
+            </div>
+          </div>
+
+          <!-- ST-4: 시스템 -->
+          <div class="card">
+            <div class="card-title mb-16">시스템</div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">금액 단위 위치</div>
+                <div class="setting-desc">금액 표시 시 통화 단위(원)의 위치</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-outline btn-sm">&#8361; 1,000,000</button>
+                <button class="btn btn-primary btn-sm">1,000,000 원</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">시스템 로그 수준</div>
+                <div class="setting-desc">system.log_level · 로그 출력 상세도</div>
+              </div>
+              <select class="filter-select" style="padding: 4px 8px; font-size: 13px;">
+                <option>DEBUG</option>
+                <option selected>INFO</option>
+                <option>WARNING</option>
+                <option>ERROR</option>
+              </select>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ═══════════════════ 우측 열: 리스크 규칙 ═══════════════════ -->
+        <div class="settings-right">
+
+          <!-- ST-5: 리스크 규칙 -->
+          <div class="card">
+            <div class="card-title mb-16">리스크 규칙</div>
+            <div class="table-wrapper">
+              <table class="rule-table">
+                <thead>
+                  <tr>
+                    <th>규칙</th>
+                    <th>값</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- 계좌 룰 -->
+                  <tr>
+                    <td colspan="3" class="section-subtitle">계좌 룰</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="font-weight: 500;">일일 손실 한도 (%)</div>
+                      <div class="text-muted" style="font-size: 11px;">일일 손실이 이 비율 초과 시 추가 매수 차단 · 예: 5 → 당일 손실 5% 초과 시 매수 불가</div>
+                    </td>
+                    <td>
+                      <input type="text" class="form-input" value="5.0" style="width: 100px; padding: 4px 8px; font-size: 13px;">
+                    </td>
+                    <td><button class="btn btn-outline btn-sm">저장</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="font-weight: 500;">총 노출 한도 (%)</div>
+                      <div class="text-muted" style="font-size: 11px;">총 자산 대비 최대 포지션 노출 비율 · 예: 80 → 총 자산의 80%까지만 투자</div>
+                    </td>
+                    <td>
+                      <input type="text" class="form-input" value="80.0" style="width: 100px; padding: 4px 8px; font-size: 13px;">
+                    </td>
+                    <td><button class="btn btn-outline btn-sm">저장</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="font-weight: 500;">거래 허용 시간</div>
+                      <div class="text-muted" style="font-size: 11px;">Account 설정에서 자동 주입 · 변경: ante account update</div>
+                    </td>
+                    <td>
+                      <span class="text-mono" style="font-size: 13px;">09:00–15:30</span>
+                    </td>
+                    <td><span class="text-muted" style="font-size: 11px;">읽기전용</span></td>
+                  </tr>
+                  <!-- 전략별 룰 기본값 -->
+                  <tr>
+                    <td colspan="3" class="section-subtitle">전략별 룰 기본값</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="font-weight: 500;">종목당 최대 비중 (%)</div>
+                      <div class="text-muted" style="font-size: 11px;">봇 배정 예산 대비 단일 종목 최대 비중 · 예: 30 → 예산의 30%까지 한 종목에 투자</div>
+                    </td>
+                    <td>
+                      <input type="text" class="form-input" value="30.0" style="width: 100px; padding: 4px 8px; font-size: 13px;">
+                    </td>
+                    <td><button class="btn btn-outline btn-sm">저장</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="font-weight: 500;">미실현 손실 한도 (%)</div>
+                      <div class="text-muted" style="font-size: 11px;">배정 예산 대비 미실현 손실 초과 시 추가 매수 차단 · 예: 10 → 평가손실 10% 초과 시 매수 불가</div>
+                    </td>
+                    <td>
+                      <input type="text" class="form-input" value="10.0" style="width: 100px; padding: 4px 8px; font-size: 13px;">
+                    </td>
+                    <td><button class="btn btn-outline btn-sm">저장</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div style="font-weight: 500;">시간당 최대 거래 수</div>
+                      <div class="text-muted" style="font-size: 11px;">봇당 시간당 거래 횟수 제한 · 예: 10 → 봇 1개가 1시간에 최대 10회 거래</div>
+                    </td>
+                    <td>
+                      <input type="text" class="form-input" value="10" style="width: 100px; padding: 4px 8px; font-size: 13px;">
+                    </td>
+                    <td><button class="btn btn-outline btn-sm">저장</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- 비상 거래 정지 확인 모달 -->
+      <div class="modal-overlay" id="haltModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title" style="color: var(--color-negative);">비상 거래 정지</div>
+          <div style="margin-bottom: 16px; font-size: 13px; color: var(--color-text-muted);">
+            모든 봇의 거래가 즉시 중단됩니다.<br>
+            실행 중인 사이클이 완료된 후 정지되며, 보유 포지션은 유지됩니다.
+          </div>
+          <div class="form-group">
+            <label class="form-label">정지 사유</label>
+            <input type="text" class="form-input" placeholder="예: 긴급 시장 변동">
+          </div>
+          <div style="background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; margin-bottom: 16px;">
+            &#9888; 이 작업은 실행 중인 모든 봇에 영향을 줍니다.
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('haltModal').style.display='none'">취소</button>
+            <button class="btn" style="background: var(--color-negative); border-color: var(--color-negative); color: #fff;" onclick="document.getElementById('haltModal').style.display='none'; document.getElementById('state-active').style.display='none'; document.getElementById('state-halted').style.display=''">거래 정지 확인</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

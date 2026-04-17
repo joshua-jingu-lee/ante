@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 봇 관리</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    .bot-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+    }
+    .bot-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .bot-card-profile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .bot-card-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      background: var(--color-positive-bg);
+      color: var(--color-positive);
+    }
+    .bot-card-icon svg {
+      width: 48px;
+      height: 48px;
+      fill: currentColor;
+    }
+    .bot-card-icon.stopped {
+      background: var(--color-bg);
+      color: var(--color-text-muted);
+    }
+    .bot-card-icon.running {
+      animation: border-glow 1.5s ease-in-out infinite;
+      box-shadow: 0 0 0px rgba(255,255,255,0);
+    }
+    @keyframes border-glow {
+      0%, 100% { box-shadow: inset 0 0 2px rgba(255,255,255,0.1); }
+      50% { box-shadow: inset 0 0 12px rgba(255,255,255,0.3); }
+    }
+    .bot-card-icon.running .bot-antenna {
+      animation: antenna-pulse 1.2s ease-in-out infinite;
+      fill: #fff;
+    }
+    .bot-card-icon.running .bot-eyes circle {
+      animation: eye-glow 1.5s ease-in-out infinite;
+    }
+    @keyframes antenna-pulse {
+      0%, 100% { opacity: 0.3; filter: drop-shadow(0 0 0px #fff); }
+      50% { opacity: 1; filter: drop-shadow(0 0 8px #fff); }
+    }
+    @keyframes eye-glow {
+      0%, 100% { fill: var(--color-surface); filter: drop-shadow(0 0 0px #fff); }
+      50% { fill: #fff; filter: drop-shadow(0 0 6px #fff); }
+    }
+    .bot-card-icon.error {
+      background: var(--color-negative-bg);
+      color: var(--color-negative);
+    }
+    .bot-card-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .bot-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .bot-card-name {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .bot-card-id {
+      font-size: 13px;
+      color: var(--color-text-muted);
+      margin-bottom: 12px;
+    }
+    .bot-card-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--color-text-muted);
+      margin-bottom: 16px;
+    }
+    .bot-card-meta-row {
+      display: flex;
+      justify-content: space-between;
+    }
+    .bot-card-meta:last-child {
+      margin-bottom: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item active">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">봇 관리</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 모의투자 모드 배너 — account.trading_mode === 'virtual' 일 때만 표시 -->
+      <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius); background: var(--color-info-bg); border: 1px solid rgba(167, 139, 250, 0.25); color: var(--color-info); font-size: 13px; margin-bottom: 16px;">
+        <span style="font-size: 15px;">&#9432;</span>
+        <span>모의 거래 중입니다. 실제 주문이 체결되지 않습니다.</span>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <button class="btn btn-primary" onclick="document.getElementById('createModal').style.display='flex'">+ 봇 생성</button>
+      </div>
+
+      <div class="bot-cards">
+
+          <div class="bot-card">
+            <div class="bot-card-profile">
+              <div class="bot-card-icon running"><svg viewBox="0 0 24 24"><circle class="bot-antenna" cx="12" cy="2" r="1.5"/><line x1="12" y1="3.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="6" width="16" height="12" rx="3" ry="3"/><g class="bot-eyes"><circle cx="9" cy="12" r="2" fill="var(--color-surface)"/><circle cx="15" cy="12" r="2" fill="var(--color-surface)"/></g><rect x="8" y="20" width="3" height="3" rx="1"/><rect x="13" y="20" width="3" height="3" rx="1"/></svg></div>
+              <span class="badge badge-positive">실행중</span>
+            </div>
+            <div class="bot-card-body">
+              <div class="bot-card-header">
+                <div class="bot-card-name">모멘텀 돌파 봇</div>
+              </div>
+              <div class="bot-card-id"><a href="bot-detail.html">bot-momentum-01</a></div>
+              <div class="bot-card-meta">
+                <div class="bot-card-meta-row">
+                  <span>전략</span>
+                  <span><a href="strategy-detail.html">모멘텀 돌파 전략 v2</a></span>
+                </div>
+                <div class="bot-card-meta-row">
+                  <span>실행 간격</span>
+                  <span>60초</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bot-card">
+            <div class="bot-card-profile">
+              <div class="bot-card-icon running"><svg viewBox="0 0 24 24"><circle class="bot-antenna" cx="12" cy="2" r="1.5"/><line x1="12" y1="3.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="6" width="16" height="12" rx="3" ry="3"/><g class="bot-eyes"><circle cx="9" cy="12" r="2" fill="var(--color-surface)"/><circle cx="15" cy="12" r="2" fill="var(--color-surface)"/></g><rect x="8" y="20" width="3" height="3" rx="1"/><rect x="13" y="20" width="3" height="3" rx="1"/></svg></div>
+              <span class="badge badge-positive">실행중</span>
+            </div>
+            <div class="bot-card-body">
+              <div class="bot-card-header">
+                <div class="bot-card-name">MACD 크로스 봇</div>
+              </div>
+              <div class="bot-card-id"><a href="#">bot-macd-cross</a></div>
+              <div class="bot-card-meta">
+                <div class="bot-card-meta-row">
+                  <span>전략</span>
+                  <span><a href="#">MACD 크로스 전략 v1</a></span>
+                </div>
+                <div class="bot-card-meta-row">
+                  <span>실행 간격</span>
+                  <span>60초</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bot-card">
+            <div class="bot-card-profile">
+              <div class="bot-card-icon running"><svg viewBox="0 0 24 24"><circle class="bot-antenna" cx="12" cy="2" r="1.5"/><line x1="12" y1="3.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="6" width="16" height="12" rx="3" ry="3"/><g class="bot-eyes"><circle cx="9" cy="12" r="2" fill="var(--color-surface)"/><circle cx="15" cy="12" r="2" fill="var(--color-surface)"/></g><rect x="8" y="20" width="3" height="3" rx="1"/><rect x="13" y="20" width="3" height="3" rx="1"/></svg></div>
+              <span class="badge badge-positive">실행중</span>
+            </div>
+            <div class="bot-card-body">
+              <div class="bot-card-header">
+                <div class="bot-card-name">RSI 반등 봇</div>
+              </div>
+              <div class="bot-card-id"><a href="#">bot-rsi-01</a></div>
+              <div class="bot-card-meta">
+                <div class="bot-card-meta-row">
+                  <span>전략</span>
+                  <span><a href="#">RSI 과매도 반등 v3</a></span>
+                </div>
+                <div class="bot-card-meta-row">
+                  <span>실행 간격</span>
+                  <span>60초</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bot-card">
+            <div class="bot-card-profile">
+              <div class="bot-card-icon stopped"><svg viewBox="0 0 24 24"><circle cx="12" cy="2" r="1.5"/><line x1="12" y1="3.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="6" width="16" height="12" rx="3" ry="3"/><g><circle cx="9" cy="12" r="2" fill="var(--color-surface)"/><circle cx="15" cy="12" r="2" fill="var(--color-surface)"/></g><rect x="8" y="20" width="3" height="3" rx="1"/><rect x="13" y="20" width="3" height="3" rx="1"/></svg></div>
+              <span class="badge badge-muted">중지됨</span>
+            </div>
+            <div class="bot-card-body">
+              <div class="bot-card-header">
+                <div class="bot-card-name">BB 스퀴즈 봇</div>
+              </div>
+              <div class="bot-card-id"><a href="bot-detail-stopped.html">bot-bb-squeeze</a></div>
+              <div class="bot-card-meta">
+                <div class="bot-card-meta-row">
+                  <span>전략</span>
+                  <span><a href="#">볼린저밴드 스퀴즈 v1</a></span>
+                </div>
+                <div class="bot-card-meta-row">
+                  <span>실행 간격</span>
+                  <span>60초</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bot-card">
+            <div class="bot-card-profile">
+              <div class="bot-card-icon error"><svg viewBox="0 0 24 24"><circle cx="12" cy="2" r="1.5"/><line x1="12" y1="3.5" x2="12" y2="6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="6" width="16" height="12" rx="3" ry="3"/><g><circle cx="9" cy="12" r="2" fill="var(--color-surface)"/><circle cx="15" cy="12" r="2" fill="var(--color-surface)"/></g><rect x="8" y="20" width="3" height="3" rx="1"/><rect x="13" y="20" width="3" height="3" rx="1"/></svg></div>
+              <span class="badge badge-negative">오류</span>
+            </div>
+            <div class="bot-card-body">
+              <div class="bot-card-header">
+                <div class="bot-card-name">듀얼 모멘텀 봇</div>
+              </div>
+              <div class="bot-card-id"><a href="#">bot-dual-mom</a></div>
+              <div class="bot-card-meta">
+                <div class="bot-card-meta-row">
+                  <span>전략</span>
+                  <span><a href="#">듀얼 모멘텀 v1</a></span>
+                </div>
+                <div class="bot-card-meta-row">
+                  <span>실행 간격</span>
+                  <span>60초</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+      </div>
+
+      <!-- 봇 생성 모달 -->
+      <div class="modal-overlay" id="createModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title">봇 생성</div>
+
+          <div class="form-group">
+            <label class="form-label">Bot ID</label>
+            <input type="text" class="form-input" value="my-bot-01">
+            <div class="form-hint">영문, 숫자, 하이픈만 사용 가능 (고유값)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">이름</label>
+            <input type="text" class="form-input" placeholder="모멘텀 돌파 봇">
+            <div class="form-hint">대시보드에 표시되는 이름</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">전략 선택</label>
+            <select class="filter-select" style="width: 100%;">
+              <option>모멘텀 돌파 전략 v2</option>
+              <option>MACD 크로스 전략 v1</option>
+              <option>RSI 과매도 반등 v3</option>
+              <option>볼린저밴드 스퀴즈 v1</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">실행 간격 (초)</label>
+            <input type="number" class="form-input" value="60" min="10" max="3600">
+            <div class="form-hint">최소 10초 ~ 최대 3,600초 (1시간)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">배정예산 (원)</label>
+            <input type="text" class="form-input" placeholder="5,000,000">
+            <div class="form-hint">잔여예산: 12,000,000 원</div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('createModal').style.display='none'">취소</button>
+            <button class="btn btn-primary">생성</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</body>
+</html>

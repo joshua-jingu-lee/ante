@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 백테스트 데이터 (Fundamental)</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    .explorer { display: flex; flex-direction: column; height: calc(100vh - 120px); min-height: 480px; background: #0a0a0f; border-radius: var(--radius); overflow: hidden; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
+
+    /* ── 검색 바 + 용량 (상단 전체 너비) ── */
+    .explorer-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #1a1a2e; }
+    .explorer-stats { font-size: 11px; color: #555; white-space: nowrap; margin-left: auto; }
+    .explorer-header input { width: 260px; padding: 6px 10px; font-size: 13px; background: transparent; border: 1px solid #1a1a2e; border-radius: var(--radius-sm); color: var(--color-text); font-family: monospace; }
+    .explorer-header input::placeholder { color: #555; }
+    .explorer-header input:focus { outline: none; border-color: var(--color-primary); }
+
+    /* ── 하단 2열 ── */
+    .explorer-body { display: flex; flex: 1; min-height: 0; }
+
+    /* ── 파일 브라우저 (왼쪽) ── */
+    .file-browser { width: 320px; min-width: 320px; border-right: 1px solid #1a1a2e; display: flex; flex-direction: column; }
+    .browser-path { padding: 8px 14px; border-bottom: 1px solid #1a1a2e; font-size: 12px; font-family: monospace; color: var(--color-text-muted); }
+    .browser-path span { color: var(--color-primary); }
+    /* 파일 리스트 */
+    .file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+    .file-item { display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 13px; font-family: monospace; color: var(--color-text-muted); cursor: pointer; border-left: 2px solid transparent; }
+    .file-item:hover { background: rgba(255,255,255,0.03); }
+    .file-item.active { color: var(--color-positive); border-left-color: var(--color-positive); }
+    .file-item .name { flex: 1; }
+    .file-item .meta { font-size: 11px; color: #555; }
+    .file-item.dir .name { color: var(--color-primary); }
+    .file-item.parent .name { color: #555; }
+
+    /* ── 상세 패널 (오른쪽, 터미널 스타일) ── */
+    .detail-panel { flex: 1; overflow-y: auto; padding: 16px 20px; font-size: 12px; line-height: 1.6; color: var(--color-text-muted); }
+    .detail-panel .prompt { color: var(--color-positive); }
+    .detail-panel .cmd { color: var(--color-text); }
+    .detail-panel .heading { color: var(--color-text); font-weight: 600; }
+    .detail-panel .val { color: var(--color-text); }
+    .detail-panel .val-pos { color: var(--color-positive); }
+    .detail-panel .val-neg { color: var(--color-negative); }
+    .detail-panel .dim { color: #555; }
+    .detail-panel .separator { color: #333; }
+    .detail-panel pre { margin: 0; white-space: pre; overflow-x: auto; }
+    .detail-panel .block { margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item active">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">백테스트 데이터</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main" style="padding: 16px;">
+      <!-- 터미널 파일 탐색기 -->
+      <div class="explorer">
+        <!-- 상단: 용량 + 검색 바 -->
+        <div class="explorer-header">
+          <input type="text" placeholder="검색 (종목명 또는 코드)">
+          <span class="explorer-stats">전체 1.2 GB — OHLCV 920 MB · Fundamental 280 MB</span>
+        </div>
+
+        <!-- 하단: 2열 (파일 브라우저 + 상세 패널) -->
+        <div class="explorer-body">
+          <!-- 왼쪽: 파일 브라우저 -->
+          <div class="file-browser">
+            <div class="browser-path"><span>~/data</span>/fundamental/005930</div>
+
+            <div class="file-list" id="fileList">
+              <div class="file-item parent">
+                <span class="name">../</span>
+              </div>
+              <div class="file-item active">
+                <span class="name">quarterly.parquet</span>
+                <span class="meta">12 MB · 96행</span>
+              </div>
+              <div class="file-item">
+                <span class="name">annual.parquet</span>
+                <span class="meta">4 MB · 24행</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 오른쪽: 터미널 스타일 상세 패널 -->
+          <div class="detail-panel">
+<pre class="block"><span class="prompt">$</span> <span class="cmd">ante data show fundamental/005930/quarterly.parquet</span></pre>
+<pre class="block"><span class="heading">File</span>       fundamental/005930/quarterly.parquet
+<span class="heading">Symbol</span>     005930 (삼성전자)
+<span class="heading">Type</span>       Fundamental
+<span class="heading">Timeframe</span>  quarterly
+<span class="heading">Period</span>     2002-Q1 ~ 2025-Q4
+<span class="heading">Rows</span>       <span class="val">96</span>
+<span class="heading">Size</span>       <span class="val">12 MB</span></pre>
+<pre class="block"><span class="separator">──────────────────────────────────────────────────────────────────────────────────────</span>
+<span class="heading">quarter    revenue          op_profit        net_profit       eps      roe</span>
+<span class="separator">──────────────────────────────────────────────────────────────────────────────────────</span>
+2025-Q4    67,780,000       9,820,000        7,150,000        1068     8.42%
+2025-Q3    79,100,000       12,400,000       9,380,000        1401     10.15%
+2025-Q2    74,070,000       10,440,000       8,010,000        1196     9.23%
+2025-Q1    71,920,000       6,600,000        4,820,000        720      6.78%
+2024-Q4    75,800,000       6,450,000        7,750,000        1158     8.91%
+<span class="dim">  ... 91 more rows</span>
+<span class="separator">──────────────────────────────────────────────────────────────────────────────────────</span></pre>
+<pre class="block" style="margin-bottom: 0;"><span class="prompt">$</span> <span class="cmd" style="opacity: 0.4;">_</span></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 삭제 확인 모달 -->
+      <div class="modal-overlay" id="deleteModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title" style="color: var(--color-negative);">데이터셋 삭제</div>
+          <div style="margin-bottom: 16px; font-size: 13px; color: var(--color-text-muted);">
+            <strong style="color: var(--color-text);">삼성전자 (005930) — 분기 재무제표</strong><br>
+            기간: 2002-Q1 ~ 2025-Q4 · 96건<br><br>
+            삭제된 데이터는 복구할 수 없습니다.
+          </div>
+          <div style="background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; margin-bottom: 16px;">
+            &#9888; 이 데이터를 사용 중인 백테스트가 있을 수 있습니다.
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('deleteModal').style.display='none'">취소</button>
+            <button class="btn btn-negative" onclick="document.getElementById('deleteModal').style.display='none'">삭제</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

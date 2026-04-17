@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 봇 상세 (중지)</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    .hint-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 1px solid var(--color-text-muted); color: var(--color-text-muted);
+      font-size: 10px; font-weight: 600; cursor: help;
+      margin-left: 4px; vertical-align: middle; position: relative;
+    }
+    .hint-icon:hover::after {
+      content: attr(data-hint);
+      position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      color: var(--color-text); font-size: 11px; font-weight: 400;
+      padding: 6px 10px; border-radius: var(--radius-sm);
+      white-space: nowrap; z-index: 10;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item active">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="bots.html" class="btn btn-ghost btn-sm">&larr; 봇 관리</a>
+        <span class="page-title">모멘텀 돌파 봇</span>
+        <span class="text-muted" style="font-size: 13px; margin-left: 8px;">bot-momentum-01</span>
+        <span class="badge badge-warning" style="margin-left: 8px;">중지</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 봇 정보 헤더 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">모멘텀 돌파 봇 <span class="text-muted" style="font-size: 16px; font-weight: 400;">bot-momentum-01</span></div>
+          <div class="detail-meta">
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-outline" onclick="document.getElementById('editModal').style.display='flex'">설정 수정</button>
+          <button class="btn btn-primary" onclick="location.href='bot-detail.html'">시작</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;" class="mb-24">
+        <!-- 운용 전략 -->
+        <div class="card">
+          <div class="card-title mb-16">운용 전략</div>
+          <div class="info-row"><span class="info-label">전략명</span><span><a href="strategy-detail.html">모멘텀 돌파 전략 v2</a></span></div>
+          <div class="info-row"><span class="info-label">버전</span><span>2.1.0</span></div>
+          <div class="info-row"><span class="info-label">작성자</span><span>strategy-dev-01</span></div>
+          <div class="info-row">
+            <span class="info-label">설명</span>
+            <span style="font-size: 12px; color: var(--color-text-muted);">20일 고점 돌파 시 매수, ATR 기반 트레일링 스탑으로 매도</span>
+          </div>
+        </div>
+
+        <!-- 실행 설정 -->
+        <div class="card">
+          <div class="card-title mb-16">실행 설정</div>
+          <div class="info-row"><span class="info-label">상태</span><span class="badge badge-warning">중지</span></div>
+          <div class="info-row"><span class="info-label">실행 간격</span><span>60초</span></div>
+          <div class="info-row"><span class="info-label">자동 재시작</span><span class="badge badge-positive">ON</span></div>
+          <div class="info-row"><span class="info-label">최대 재시작</span><span>3회</span></div>
+          <div class="info-row"><span class="info-label">재시작 쿨다운 <span class="hint-icon" data-hint="재시작 시도 사이의 대기 시간">?</span></span><span>60초</span></div>
+          <div class="info-row"><span class="info-label">스텝 타임아웃 <span class="hint-icon" data-hint="전략의 1회 실행(on_step)이 이 시간을 초과하면 경고">?</span></span><span>30초</span></div>
+          <div class="info-row"><span class="info-label">스텝당 최대 시그널 <span class="hint-icon" data-hint="전략의 1회 실행에서 발생할 수 있는 매매 신호 수 상한">?</span></span><span>50</span></div>
+        </div>
+
+        <!-- 배정예산 -->
+        <div class="card">
+          <div class="card-title mb-16">예산</div>
+          <div class="info-row"><span class="info-label">배정금액</span><span>15,000,000 원</span></div>
+          <div class="info-row"><span class="info-label">매수금액</span><span>5,000,000 원</span></div>
+          <div class="info-row"><span class="info-label">체결대기</span><span>0 원</span></div>
+          <div class="info-row"><span class="info-label">잔여예산</span><span>8,500,000 원</span></div>
+        </div>
+      </div>
+
+      <!-- 보유 종목 -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">보유 종목</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>종목</th>
+                <th class="text-right">수량</th>
+                <th class="text-right">평균단가</th>
+                <th class="text-right">현재가</th>
+                <th class="text-right">매수금액</th>
+                <th class="text-right">평가금액</th>
+                <th class="text-right">미실현 손익</th>
+                <th class="text-right">수익률</th>
+                <th class="text-right">실현 손익</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>삼성전자 (005930)</td>
+                <td class="text-right">50</td>
+                <td class="text-right">72,300 원</td>
+                <td class="text-right">74,500 원</td>
+                <td class="text-right">3,615,000 원</td>
+                <td class="text-right">3,725,000 원</td>
+                <td class="text-right text-positive">110,000 원</td>
+                <td class="text-right text-positive">+3.04%</td>
+                <td class="text-right text-muted">0 원</td>
+              </tr>
+              <tr>
+                <td>NAVER (035420)</td>
+                <td class="text-right">15</td>
+                <td class="text-right">210,000 원</td>
+                <td class="text-right">205,500 원</td>
+                <td class="text-right">3,150,000 원</td>
+                <td class="text-right">3,082,500 원</td>
+                <td class="text-right text-negative">-67,500 원</td>
+                <td class="text-right text-negative">-2.14%</td>
+                <td class="text-right text-muted">0 원</td>
+              </tr>
+              <tr>
+                <td>카카오 (035720)</td>
+                <td class="text-right">0</td>
+                <td class="text-right">—</td>
+                <td class="text-right">—</td>
+                <td class="text-right">—</td>
+                <td class="text-right">—</td>
+                <td class="text-right text-muted">—</td>
+                <td class="text-right text-muted">—</td>
+                <td class="text-right text-positive">45,000 원</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 실행 로그 -->
+      <div class="card">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <div class="card-title">실행 로그</div>
+          <a href="bot-logs.html?bot=bot-momentum-01" style="font-size: 13px;">전체 보기 &rarr;</a>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:20:00</span>
+          <span class="badge badge-warning btn-sm">중지</span>
+          <span>Bot 중지됨 — 사용자 요청</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:15:02</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>NAVER(035420) 매수 15주 @ &#8361;210,000 체결</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:14:01</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>시그널 분석 완료 — 매수 시그널 1건 감지</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:13:00</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>실행 사이클 시작 — 종목 스캔 중...</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-13 09:12:00</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>실행 사이클 완료 — 시그널 없음</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-12 15:30:05</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>카카오(035720) 매도 30주 @ &#8361;48,500 체결 (트레일링 스탑)</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-12 14:45:01</span>
+          <span class="badge badge-negative btn-sm">실패</span>
+          <span style="color: var(--color-negative);">API 타임아웃 — KIS 시세 조회 실패 (30s). 다음 사이클에 재시도</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-12 09:05:03</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>삼성전자(005930) 매수 50주 @ &#8361;72,300 체결</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-12 09:04:01</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>시그널 분석 완료 — 매수 시그널 1건 감지</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-12 09:03:00</span>
+          <span class="badge badge-positive btn-sm">성공</span>
+          <span>실행 사이클 시작 — 종목 스캔 중...</span>
+        </div>
+      </div>
+      <!-- 설정 수정 모달 -->
+      <div class="modal-overlay" id="editModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title">Bot 설정 수정</div>
+
+          <div class="form-group">
+            <label class="form-label">Bot ID</label>
+            <input type="text" class="form-input" value="bot-momentum-01" disabled style="opacity: 0.5;">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">이름</label>
+            <input type="text" class="form-input" value="모멘텀 돌파 봇">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">전략 선택</label>
+            <select class="filter-select" style="width: 100%;">
+              <option selected>모멘텀 돌파 전략 v2</option>
+              <option>MACD 크로스 전략 v1</option>
+              <option>RSI 과매도 반등 v3</option>
+              <option>볼린저밴드 스퀴즈 v1</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">실행 간격 (초)</label>
+            <input type="number" class="form-input" value="60" min="10" max="3600">
+            <div class="form-hint">최소 10초 ~ 최대 3,600초 (1시간)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">배정예산 (원)</label>
+            <input type="text" class="form-input" value="15,000,000">
+            <div class="form-hint">현재 배정예산: 15,000,000 원 · 최대 가능: 23,500,000 원 (매수가능금액 + 현재 배정예산)</div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('editModal').style.display='none'">취소</button>
+            <button class="btn btn-primary">저장</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

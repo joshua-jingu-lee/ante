@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 전략</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item active">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">전략</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="filters">
+        <div class="filter-tabs">
+          <button class="filter-tab active">전체</button>
+          <button class="filter-tab">운용중</button>
+          <button class="filter-tab">대기</button>
+          <button class="filter-tab">비활성</button>
+        </div>
+        <input type="text" class="search-input" placeholder="제목 검색...">
+      </div>
+
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>제목</th>
+                <th>제출자</th>
+                <th>상태</th>
+                <th>실행 봇</th>
+                <th class="text-right">누적 수익률</th>
+                <th class="text-right">백테스트 수익률</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>모멘텀 돌파 전략 <span class="text-muted" style="font-weight: 400;">v2</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-momentum-01</td>
+                <td class="text-right text-positive font-bold">+18.5%</td>
+                <td class="text-right text-positive">+22.4%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>MACD 크로스 전략 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-macd-cross</td>
+                <td class="text-right text-positive font-bold">+12.3%</td>
+                <td class="text-right text-positive">+15.8%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>RSI 과매도 반등 <span class="text-muted" style="font-weight: 400;">v3</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-rsi-01</td>
+                <td class="text-right text-negative font-bold">-3.2%</td>
+                <td class="text-right text-positive">+9.1%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>볼린저밴드 스퀴즈 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-warning">대기</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-right text-muted">-</td>
+                <td class="text-right text-positive">+14.2%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>듀얼 모멘텀 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-muted">비활성</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-right text-negative font-bold">-7.8%</td>
+                <td class="text-right text-positive">+5.3%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>VWAP 회귀 전략 <span class="text-muted" style="font-weight: 400;">v2</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-vwap-01</td>
+                <td class="text-right text-positive font-bold">+8.7%</td>
+                <td class="text-right text-positive">+11.3%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>이동평균 골든크로스 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-ma-cross</td>
+                <td class="text-right text-positive font-bold">+5.1%</td>
+                <td class="text-right text-positive">+7.9%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>스토캐스틱 반전 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-warning">대기</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-right text-muted">-</td>
+                <td class="text-right text-positive">+6.4%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>페어 트레이딩 <span class="text-muted" style="font-weight: 400;">v3</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-pair-01</td>
+                <td class="text-right text-negative font-bold">-1.4%</td>
+                <td class="text-right text-negative">-2.1%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>변동성 돌파 <span class="text-muted" style="font-weight: 400;">v2</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-vol-break</td>
+                <td class="text-right text-positive font-bold">+22.1%</td>
+                <td class="text-right text-positive">+19.5%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>ATR 추세추종 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-warning">대기</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-right text-muted">-</td>
+                <td class="text-right text-positive">+13.7%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>갭 트레이딩 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-muted">비활성</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-right text-negative font-bold">-5.3%</td>
+                <td class="text-right text-negative">-3.4%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>OBV 다이버전스 <span class="text-muted" style="font-weight: 400;">v2</span></td>
+                <td>전략 리서치 1호 <span class="text-muted" style="font-weight: 400;">strategy-dev-01</span></td>
+                <td><span class="badge badge-positive">운용중</span></td>
+                <td>bot-obv-01</td>
+                <td class="text-right text-positive font-bold">+9.8%</td>
+                <td class="text-right text-positive">+12.6%</td>
+              </tr>
+              <tr style="cursor: pointer;" onclick="location.href='strategy-detail.html'">
+                <td>채널 브레이크아웃 <span class="text-muted" style="font-weight: 400;">v1</span></td>
+                <td>전략 리서치 2호 <span class="text-muted" style="font-weight: 400;">strategy-dev-02</span></td>
+                <td><span class="badge badge-muted" style="border: 1px solid var(--color-border);">보관</span></td>
+                <td class="text-muted">-</td>
+                <td class="text-right text-negative font-bold">-11.2%</td>
+                <td class="text-right text-positive">+3.5%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 페이지네이션 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 0 0; border-top: 1px solid var(--color-border); margin-top: 16px;">
+          <span style="font-size: 13px; color: var(--color-text-muted);">28건 중 1-15</span>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-outline btn-sm" disabled>&laquo; 이전</button>
+            <button class="btn btn-outline btn-sm">다음 &raquo;</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

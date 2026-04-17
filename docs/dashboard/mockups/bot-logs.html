@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 봇 실행 로그</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item active">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="bot-detail.html" class="btn btn-ghost btn-sm">&larr; 봇 상세</a>
+        <span class="page-title">봇 실행 로그</span>
+        <span class="text-muted" style="font-size: 13px; margin-left: 8px;">bot-momentum-01</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="card mb-24">
+        <div style="display: flex; align-items: end; gap: 16px; flex-wrap: wrap;">
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">결과</label>
+            <select class="filter-select">
+              <option>전체</option>
+              <option>성공</option>
+              <option>실패</option>
+              <option>경고</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">시작일</label>
+            <input type="date" class="search-input" value="2026-03-10" style="width: 160px;">
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">종료일</label>
+            <input type="date" class="search-input" value="2026-03-13" style="width: 160px;">
+          </div>
+          <div>
+            <label style="font-size: 12px; color: var(--color-text-muted); display: block; margin-bottom: 4px;">검색</label>
+            <input type="text" class="search-input" placeholder="메시지 검색..." style="width: 260px;">
+          </div>
+          <div>
+            <button class="btn btn-primary btn-sm">조회</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-16">최근 실행 로그</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>시각</th>
+                <th>결과</th>
+                <th>메시지</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-mono">2026-03-13 09:15:02</td>
+                <td><span class="badge badge-positive">성공</span></td>
+                <td>NAVER(035420) 매수 15주 @ 210,000원 체결</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-13 09:14:01</td>
+                <td><span class="badge badge-positive">성공</span></td>
+                <td>시그널 분석 완료 — 매수 시그널 1건 감지</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-13 09:13:00</td>
+                <td><span class="badge badge-positive">성공</span></td>
+                <td>실행 사이클 시작 — 종목 스캔 중...</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 14:45:01</td>
+                <td><span class="badge badge-negative">실패</span></td>
+                <td style="color: var(--color-negative);">API 타임아웃 — KIS 시세 조회 실패 (30s). 다음 사이클에 재시도</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 10:00:00</td>
+                <td><span class="badge badge-warning">경고</span></td>
+                <td>삼성전자(005930) 호가 스프레드 확대 감지 — 주문 제출 보류</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 09:05:03</td>
+                <td><span class="badge badge-positive">성공</span></td>
+                <td>삼성전자(005930) 매수 50주 @ 72,300원 체결</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-11 15:30:00</td>
+                <td><span class="badge badge-positive">성공</span></td>
+                <td>장 마감 처리 완료 — 일일 요약 이벤트 발행</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-11 09:00:02</td>
+                <td><span class="badge badge-positive">성공</span></td>
+                <td>봇 시작 완료 — 전략 컨텍스트 초기화 성공</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--color-border);">
+          <span style="font-size: 13px; color: var(--color-text-muted);">총 128건 중 1-8</span>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-outline btn-sm" disabled>&laquo;</button>
+            <button class="btn btn-primary btn-sm">1</button>
+            <button class="btn btn-outline btn-sm">2</button>
+            <button class="btn btn-outline btn-sm">3</button>
+            <button class="btn btn-outline btn-sm">&raquo;</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

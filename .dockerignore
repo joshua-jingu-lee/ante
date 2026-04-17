@@ -27,9 +27,10 @@ config/secrets.env
 .vscode/
 .idea/
 docs/
+.agent/
 .claude/
+AGENTS.md
 CLAUDE.md
-AGENT.md
 
 # Tests (unit tests 제외, e2e/fixtures는 테스트 빌드에 필요)
 tests/unit/

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 에이전트 관리</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .page-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .page-header-left .page-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .page-header-left .count {
+      background: var(--color-border);
+      color: var(--color-text);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+    .agent-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+    }
+    .agent-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 20px;
+      transition: border-color 0.15s;
+      display: flex;
+      gap: 20px;
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+    }
+    .agent-card:hover {
+      border-color: var(--color-primary);
+      text-decoration: none;
+    }
+    .agent-card.suspended .agent-card-avatar {
+      opacity: 0.4;
+    }
+    .agent-card-avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 45px;
+      flex-shrink: 0;
+      background: var(--color-positive-bg);
+      color: var(--color-positive);
+      transition: transform 0.2s ease;
+      cursor: default;
+    }
+    .agent-card-avatar:hover {
+      transform: scale(1.15) rotate(-8deg);
+    }
+    .agent-card-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .agent-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .agent-card-id {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .agent-card-name {
+      font-size: 13px;
+      color: var(--color-text-muted);
+    }
+    .agent-card-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--color-text-muted);
+      margin-bottom: 12px;
+    }
+    .agent-card-meta-row {
+      display: flex;
+      justify-content: space-between;
+    }
+    .scopes-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .scope-tag {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      color: var(--color-text-muted);
+    }
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item active">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">에이전트 관리</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 등록 버튼 -->
+      <div style="margin-bottom: 20px;">
+        <button class="btn btn-primary" onclick="document.getElementById('registerModal').style.display='flex'">+ 에이전트 등록</button>
+      </div>
+
+      <!-- M-1: 에이전트 카드 그리드 -->
+      <div class="agent-cards">
+
+        <!-- active -->
+        <a href="agent-detail.html" class="agent-card">
+          <div class="agent-card-avatar">🦊</div>
+          <div class="agent-card-body">
+            <div class="agent-card-header">
+              <div>
+                <div class="agent-card-id">strategy-dev-01</div>
+                <div class="agent-card-name">전략 리서치 1호</div>
+              </div>
+              <span class="badge badge-positive">활성</span>
+            </div>
+            <div class="agent-card-meta">
+              <div class="agent-card-meta-row">
+                <span>소속</span>
+                <span class="badge badge-muted">strategy-lab</span>
+              </div>
+              <div class="agent-card-meta-row">
+                <span>마지막 활동</span>
+                <span>2026-03-13 09:30</span>
+              </div>
+            </div>
+            <div class="scopes-list">
+              <span class="scope-tag">strategy:write</span>
+              <span class="scope-tag">data:read</span>
+              <span class="scope-tag">backtest:run</span>
+              <span class="scope-tag">report:write</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- active -->
+        <a href="#" class="agent-card">
+          <div class="agent-card-avatar">🐼</div>
+          <div class="agent-card-body">
+            <div class="agent-card-header">
+              <div>
+                <div class="agent-card-id">strategy-dev-02</div>
+                <div class="agent-card-name">전략 리서치 2호</div>
+              </div>
+              <span class="badge badge-positive">활성</span>
+            </div>
+            <div class="agent-card-meta">
+              <div class="agent-card-meta-row">
+                <span>소속</span>
+                <span class="badge badge-muted">strategy-lab</span>
+              </div>
+              <div class="agent-card-meta-row">
+                <span>마지막 활동</span>
+                <span>2026-03-13 08:45</span>
+              </div>
+            </div>
+            <div class="scopes-list">
+              <span class="scope-tag">strategy:write</span>
+              <span class="scope-tag">data:read</span>
+              <span class="scope-tag">backtest:run</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- active -->
+        <a href="#" class="agent-card">
+          <div class="agent-card-avatar">🦉</div>
+          <div class="agent-card-body">
+            <div class="agent-card-header">
+              <div>
+                <div class="agent-card-id">risk-monitor</div>
+                <div class="agent-card-name">리스크 감시</div>
+              </div>
+              <span class="badge badge-positive">활성</span>
+            </div>
+            <div class="agent-card-meta">
+              <div class="agent-card-meta-row">
+                <span>소속</span>
+                <span class="badge badge-muted">risk</span>
+              </div>
+              <div class="agent-card-meta-row">
+                <span>마지막 활동</span>
+                <span>2026-03-13 09:15</span>
+              </div>
+            </div>
+            <div class="scopes-list">
+              <span class="scope-tag">bot:read</span>
+              <span class="scope-tag">data:read</span>
+              <span class="scope-tag">approval:review</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- active -->
+        <a href="#" class="agent-card">
+          <div class="agent-card-avatar">🐳</div>
+          <div class="agent-card-body">
+            <div class="agent-card-header">
+              <div>
+                <div class="agent-card-id">treasury-agent</div>
+                <div class="agent-card-name">자금 관리</div>
+              </div>
+              <span class="badge badge-positive">활성</span>
+            </div>
+            <div class="agent-card-meta">
+              <div class="agent-card-meta-row">
+                <span>소속</span>
+                <span class="badge badge-muted">treasury</span>
+              </div>
+              <div class="agent-card-meta-row">
+                <span>마지막 활동</span>
+                <span>2026-03-13 08:15</span>
+              </div>
+            </div>
+            <div class="scopes-list">
+              <span class="scope-tag">approval:create</span>
+              <span class="scope-tag">data:read</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- suspended (M-3) -->
+        <a href="#" class="agent-card suspended">
+          <div class="agent-card-avatar">🐧</div>
+          <div class="agent-card-body">
+            <div class="agent-card-header">
+              <div>
+                <div class="agent-card-id">ops-agent-01</div>
+                <div class="agent-card-name">봇 운영 1호</div>
+              </div>
+              <span class="badge badge-warning">일시 정지</span>
+            </div>
+            <div class="agent-card-meta">
+              <div class="agent-card-meta-row">
+                <span>소속</span>
+                <span class="badge badge-muted">operations</span>
+              </div>
+              <div class="agent-card-meta-row">
+                <span>마지막 활동</span>
+                <span>2026-03-10 16:00</span>
+              </div>
+            </div>
+            <div class="scopes-list">
+              <span class="scope-tag">bot:read</span>
+              <span class="scope-tag">data:read</span>
+            </div>
+          </div>
+        </a>
+
+      </div>
+
+      <!-- 빈 상태 -->
+      <div class="empty-state">등록된 에이전트가 없습니다.</div>
+
+      <!-- M-3: 에이전트 등록 모달 -->
+      <div class="modal-overlay" id="registerModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title">에이전트 등록</div>
+
+          <div class="form-group">
+            <label class="form-label">Agent ID</label>
+            <input type="text" class="form-input" placeholder="strategy-dev-03">
+            <div class="form-hint">영문, 숫자, 하이픈만 사용 가능</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">이름</label>
+            <input type="text" class="form-input" placeholder="전략 리서치 3호">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">소속 (org)</label>
+            <input type="text" class="form-input" placeholder="default" value="default">
+            <div class="form-hint">자유 텍스트. 기본값: default</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">권한 범위 (Scopes)</label>
+            <div class="checkbox-group">
+              <label class="checkbox-item"><input type="checkbox"> strategy:read</label>
+              <label class="checkbox-item"><input type="checkbox" checked> strategy:write</label>
+              <label class="checkbox-item"><input type="checkbox" checked> report:write</label>
+              <label class="checkbox-item"><input type="checkbox"> approval:create</label>
+              <label class="checkbox-item"><input type="checkbox"> approval:review</label>
+              <label class="checkbox-item"><input type="checkbox"> bot:read</label>
+              <label class="checkbox-item"><input type="checkbox" checked> data:read</label>
+              <label class="checkbox-item"><input type="checkbox"> data:write</label>
+              <label class="checkbox-item"><input type="checkbox" checked> backtest:run</label>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('registerModal').style.display='none'">취소</button>
+            <button class="btn btn-primary" onclick="document.getElementById('registerModal').style.display='none'; document.getElementById('tokenModal').style.display='flex'">등록</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- M-3: 토큰 표시 모달 -->
+      <div class="modal-overlay" id="tokenModal" style="display: none;">
+        <div class="modal" style="text-align: center;">
+          <div class="modal-title" style="color: var(--color-positive);">&#10003; 에이전트 등록 완료</div>
+
+          <div style="margin-bottom: 8px;">
+            <div class="form-label">Agent ID</div>
+            <div style="font-size: 16px; font-weight: 600;">strategy-dev-03</div>
+          </div>
+
+          <div style="margin: 20px 0;">
+            <div class="form-label">발급된 토큰</div>
+            <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; font-family: monospace; font-size: 13px; word-break: break-all; text-align: left; margin-top: 8px;">
+              ante_ak_8k2m9p4qw7xr3fj6tv1hn5yl0cg8be2ds
+            </div>
+          </div>
+
+          <div style="background: var(--color-warning-bg); color: var(--color-warning); padding: 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 20px; text-align: left;">
+            &#9888; 이 토큰은 다시 표시되지 않습니다. 안전한 곳에 복사해 두세요.
+          </div>
+
+          <div class="btn-group" style="justify-content: center;">
+            <button class="btn btn-primary" onclick="navigator.clipboard.writeText('ante_ak_8k2m9p4qw7xr3fj6tv1hn5yl0cg8be2ds')">토큰 복사</button>
+            <button class="btn btn-outline" onclick="document.getElementById('tokenModal').style.display='none'">닫기</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</body>
+</html>

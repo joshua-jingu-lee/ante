@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 자금관리</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item active">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left"><span class="page-title">자금관리</span></div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 모의투자 모드 배너 — account.trading_mode === 'virtual' 일 때만 표시 -->
+      <div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius); background: var(--color-info-bg); border: 1px solid rgba(167, 139, 250, 0.25); color: var(--color-info); font-size: 13px; margin-bottom: 16px;">
+        <span style="font-size: 15px;">&#9432;</span>
+        <span>가상 거래 계좌입니다. 표시된 손익은 시뮬레이션 결과입니다.</span>
+      </div>
+
+      <!-- KIS 계좌 잔고 -->
+      <div class="card mb-24" style="padding: 0; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--color-border);">
+          <div class="card-title">한투 국내주식</div>
+          <span class="text-mono" style="font-size: 13px;">12345678-01</span>
+          <div style="margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--color-text-muted);">
+            <span>수수료 0.015%</span>
+            <span>매도세 0.23%</span>
+            <span style="display: flex; align-items: center; gap: 6px;"><span class="status-dot"></span>동기화 09:30:15</span>
+          </div>
+        </div>
+        <div class="stats-row" style="margin-bottom: 0;">
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">총 자산 평가</div>
+            <div class="stat-value">52,350,000 원</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">총 손익</div>
+            <div class="stat-value text-negative">-2,350,000 원</div>
+            <div class="text-negative" style="font-size: 13px; margin-top: -4px;">(-4.70%)</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">예수금</div>
+            <div class="stat-value" style="color: var(--color-text-muted);">42,000,000 원</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">매수가능금액</div>
+            <div class="stat-value" style="color: var(--color-text-muted);">12,000,000 원</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ante 예산 관리 요약 -->
+      <div class="card mb-24" style="padding: 0; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--color-border);">
+          <div class="card-title">Ante 관리 자금</div>
+          <span style="font-size: 13px; color: var(--color-text-muted);">Bot 3개 운용 중</span>
+          <div style="margin-left: auto; display: flex; align-items: center; gap: 6px; background: var(--color-warning-bg); color: var(--color-warning); padding: 4px 12px; border-radius: var(--radius-sm); font-size: 12px;">
+            &#9888; 잔여예산이 매수가능금액을 초과합니다
+          </div>
+        </div>
+        <div class="stats-row" style="margin-bottom: 0; border-bottom: 1px solid var(--color-border); grid-template-columns: repeat(4, 1fr);">
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">Ante 관리자산 평가</div>
+            <div class="stat-value">37,350,000 원</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">Ante 관리자산 손익</div>
+            <div class="stat-value text-positive">2,350,000 원</div>
+            <div class="text-positive" style="font-size: 13px; margin-top: -4px;">(+6.71%)</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">Bot 배정예산</div>
+            <div class="stat-value" style="color: var(--color-text-muted);">35,000,000 원</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">잔여예산</div>
+            <div class="stat-value" style="color: var(--color-text-muted);">24,000,000 원</div>
+          </div>
+        </div>
+        <div class="stats-row" style="margin-bottom: 0; grid-template-columns: repeat(4, 1fr);">
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">보유종목 평가금액</div>
+            <div class="stat-value">10,350,000 원</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">보유종목 손익</div>
+            <div class="stat-value text-positive">2,350,000 원</div>
+            <div class="text-positive" style="font-size: 13px; margin-top: -4px;">(+29.38%)</div>
+          </div>
+          <div class="stat-card" style="border: none; border-radius: 0;">
+            <div class="stat-label">체결대기 자금</div>
+            <div class="stat-value" style="color: var(--color-text-muted);">3,000,000 원</div>
+          </div>
+        </div>
+        <!-- T-2: 자산 추이 차트 -->
+        <div style="border-top: 1px solid var(--color-border); padding: 16px 20px 0;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <div>
+              <div style="font-weight: 600; margin-bottom: 4px;">자산 추이</div>
+              <div style="font-size: 13px; color: var(--color-text-muted);">기간 손익 <span class="text-positive" style="font-weight: 600;">+1,130,000 원</span> · 기간 수익률 <span class="text-positive" style="font-weight: 600;">+3.12%</span></div>
+            </div>
+            <div class="period-selector">
+              <button class="period-btn active">1주</button>
+              <button class="period-btn">1개월</button>
+              <button class="period-btn">3개월</button>
+              <button class="period-btn">1년</button>
+              <button class="period-btn">전체</button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-placeholder" style="height: 240px; margin: 0 20px 8px;">
+          &#128200; 듀얼 축 차트 — 좌축: 총 자산 추이 (Area) · 우축: 일별 수익률 (Bar)
+        </div>
+        <div style="text-align: right; font-size: 11px; color: var(--color-text-muted); padding: 0 20px 16px;">산정 기준일 2026-03-20</div>
+      </div>
+
+      <div class="detail-grid mb-24">
+        <!-- Bot별 할당 차트 -->
+        <div class="card">
+          <div class="card-title mb-16">Bot 예산 비중</div>
+          <div class="chart-placeholder" style="height: 240px;">&#128200; 파이 차트 — Bot별 예산 비중</div>
+        </div>
+
+        <!-- 할당 관리 -->
+        <div class="card">
+          <div class="card-title mb-16">Bot 예산 관리</div>
+          <div style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 14px;">예산 변경은 Bot이 중지된 상태에서만 가능합니다.</div>
+          <div class="form-group">
+            <label class="form-label">Bot 선택</label>
+            <select class="filter-select" style="width: 100%; padding: 8px 12px; font-size: 14px; height: 38px;">
+              <option>bot-momentum-01 (중지)</option>
+              <option>bot-macd-cross (운용중)</option>
+              <option>bot-rsi-01 (중지)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">현재 배정예산</label>
+            <div style="font-size: 15px; font-weight: 600; margin-bottom: 8px;">15,000,000 원</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">변경할 예산 (원)</label>
+            <input type="text" class="form-input" placeholder="15,000,000" value="10,000,000">
+          </div>
+          <button class="btn btn-primary" onclick="document.getElementById('budgetConfirmModal').style.display='flex'">예산 변경</button>
+        </div>
+      </div>
+
+      <!-- Bot별 예산 테이블 -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">Bot당 예산</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Bot ID</th>
+                <th class="text-right">배정예산</th>
+                <th class="text-right">사용예산</th>
+                <th class="text-right">잔여예산</th>
+                <th class="text-right">체결대기</th>
+                <th class="text-right">보유종목 평가금액</th>
+                <th class="text-right">보유종목 손익</th>
+                <th class="text-right">종목 수익률</th>
+                <th class="text-right">예산 수익률</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><a href="bot-detail.html">bot-momentum-01</a></td>
+                <td class="text-right">15,000,000 원</td>
+                <td class="text-right">5,000,000 원</td>
+                <td class="text-right">8,500,000 원</td>
+                <td class="text-right">1,500,000 원</td>
+                <td class="text-right">5,500,000 원</td>
+                <td class="text-right text-positive">500,000 원</td>
+                <td class="text-right text-positive">+10.0%</td>
+                <td class="text-right text-positive">+3.3%</td>
+              </tr>
+              <tr>
+                <td><a href="#">bot-macd-cross</a></td>
+                <td class="text-right">10,000,000 원</td>
+                <td class="text-right">3,000,000 원</td>
+                <td class="text-right">6,200,000 원</td>
+                <td class="text-right">800,000 원</td>
+                <td class="text-right">2,700,000 원</td>
+                <td class="text-right text-negative">-300,000 원</td>
+                <td class="text-right text-negative">-10.0%</td>
+                <td class="text-right text-negative">-3.0%</td>
+              </tr>
+              <tr>
+                <td><a href="#">bot-rsi-01</a></td>
+                <td class="text-right">10,000,000 원</td>
+                <td class="text-right">2,000,000 원</td>
+                <td class="text-right">7,300,000 원</td>
+                <td class="text-right">700,000 원</td>
+                <td class="text-right">2,350,000 원</td>
+                <td class="text-right text-positive">350,000 원</td>
+                <td class="text-right text-positive">+17.5%</td>
+                <td class="text-right text-positive">+3.5%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 최근 자금 변동 -->
+      <div class="card">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <div class="card-title">최근 자금 변동</div>
+          <a href="treasury-history.html" style="font-size: 13px;">전체 보기 &rarr;</a>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>시각</th>
+                <th>유형</th>
+                <th>Bot</th>
+                <th class="text-right">금액</th>
+                <th>비고</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-mono">2026-03-13 09:00</td>
+                <td><span class="badge badge-positive">할당</span></td>
+                <td>bot-momentum-01</td>
+                <td class="text-right text-positive">+5,000,000 원</td>
+                <td class="text-muted">초기 할당</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 15:30</td>
+                <td><span class="badge badge-primary">체결</span></td>
+                <td>bot-macd-cross</td>
+                <td class="text-right text-negative">-1,200,000 원</td>
+                <td class="text-muted">삼성전자 매수</td>
+              </tr>
+              <tr>
+                <td class="text-mono">2026-03-12 10:00</td>
+                <td><span class="badge badge-positive">할당</span></td>
+                <td>bot-macd-cross</td>
+                <td class="text-right text-positive">+10,000,000 원</td>
+                <td class="text-muted">초기 할당</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 예산 변경 확인 모달 -->
+      <div class="modal-overlay" id="budgetConfirmModal" style="display: none;">
+        <div class="modal">
+          <div class="modal-title">예산 변경 확인</div>
+          <div style="margin-bottom: 16px; font-size: 13px; color: var(--color-text-muted);">
+            아래 내용으로 예산을 변경합니다.
+          </div>
+          <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="color: var(--color-text-muted); font-size: 13px;">Bot</span>
+              <span style="font-weight: 600;">bot-momentum-01</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="color: var(--color-text-muted); font-size: 13px;">현재 예산</span>
+              <span>15,000,000 원</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="color: var(--color-text-muted); font-size: 13px;">변경 예산</span>
+              <span style="font-weight: 600;">10,000,000 원</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--color-border); padding-top: 8px;">
+              <span style="color: var(--color-text-muted); font-size: 13px;">차액</span>
+              <span class="text-negative" style="font-weight: 600;">-5,000,000 원</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('budgetConfirmModal').style.display='none'">취소</button>
+            <button class="btn btn-primary" onclick="document.getElementById('budgetConfirmModal').style.display='none'">변경 확인</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

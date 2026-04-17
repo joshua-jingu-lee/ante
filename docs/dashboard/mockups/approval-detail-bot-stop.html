@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ante - 결재 상세 (봇 중지 · 승인)</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo"><img src="assets/logo-a.svg" alt="A"><img src="assets/logo-n.svg" alt="N"><img src="assets/logo-t.svg" alt="T"><img src="assets/logo-e.svg" alt="E"></div>
+      <nav class="sidebar-nav">
+        <a href="treasury.html" class="nav-item">💰 자금관리</a>
+        <a href="approvals.html" class="nav-item active">📋 결재함 <span class="nav-badge">3</span></a>
+        <a href="bots.html" class="nav-item">🤖 봇 관리</a>
+        <a href="strategies.html" class="nav-item">📈 전략과 성과</a>
+        <a href="agents.html" class="nav-item">🧑‍💼 에이전트 관리</a>
+        <a href="backtest-data.html" class="nav-item">📁 백테스트 데이터</a>
+      </nav>
+      <div class="sidebar-version">Ante v0.1.0 · <a href="https://opensource.org/licenses/MIT">MIT</a></div>
+    </aside>
+
+    <header class="header">
+      <div class="header-left">
+        <a href="approvals.html" style="font-size: 13px; color: var(--color-text-muted); text-decoration: none;">&larr; 결재함</a>
+        <span class="page-title">결재 상세</span>
+      </div>
+      <div class="header-right">
+        <div class="user-menu" onclick="this.classList.toggle('open')">
+          <span class="status-dot"></span>
+          <span>한투 국내주식</span>
+          <span class="text-muted">·</span>
+          <span class="user-menu-avatar">🦁</span>
+          <span>admin</span>
+          <div class="user-dropdown">
+            <a href="settings.html" class="user-dropdown-item">⚙️ 설정</a>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <div class="user-dropdown-item" style="font-weight: 500; background: var(--color-surface-hover); border-radius: var(--radius-sm); margin: 0 4px;">
+              <span class="status-dot"></span> 한투 국내주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
+            </div>
+            <div class="user-dropdown-item" style="margin: 0 4px;">
+              <span class="status-dot warning"></span> 한투 해외주식
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+            </div>
+            <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
+            <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 상세 헤더: 승인 완료 → 액션 버튼 없음 -->
+      <div class="detail-header">
+        <div>
+          <div class="detail-title">bot-rsi-01 손실 누적 중지 요청</div>
+        </div>
+      </div>
+
+      <!-- 승인 배너 -->
+      <div style="background: var(--color-positive-bg); color: var(--color-positive); padding: 14px 18px; border-radius: var(--radius); font-size: 13px; margin-bottom: 24px; display: flex; align-items: flex-start; gap: 10px;">
+        <span style="font-size: 16px;">&#10003;</span>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 4px;">승인 완료</div>
+          <div style="font-size: 12px;">봇 중지가 실행되었습니다.</div>
+        </div>
+      </div>
+
+      <!-- 1행: 결재 정보 + 검토 의견 (2열) -->
+      <div class="detail-grid mb-24">
+        <!-- 좌: 결재 정보 -->
+        <div class="card">
+          <div class="card-title mb-16">결재 정보</div>
+          <div class="info-row">
+            <span class="info-label">요청자</span>
+            <span>리스크 감시 <span class="text-muted">risk-monitor</span></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">유형</span>
+            <span><span class="badge badge-muted">봇 중지</span></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">상태</span>
+            <span class="badge badge-positive">승인</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">요청일</span>
+            <span>2026-03-10 11:00</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">처리일</span>
+            <span>2026-03-10 11:15</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">처리자</span>
+            <span>owner</span>
+          </div>
+        </div>
+
+        <!-- 우: 검토 의견 -->
+        <div class="card">
+          <div class="card-title mb-16">검토 의견</div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>검증 주체</th>
+                  <th>결과</th>
+                  <th>상세</th>
+                  <th>검증 시각</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="text-mono">rule_engine</span></td>
+                  <td><span class="badge badge-warning">warn</span></td>
+                  <td style="font-size: 12px; color: var(--color-text-muted);">MDD -8.5%는 제한(15%) 이내이나 일일 손실 한도(5%)의 46%에 해당. 추세 지속 시 24시간 내 한도 도달 가능성 있음.</td>
+                  <td class="text-muted">2026-03-10 11:00</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2행: 본문 -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">요청 본문</div>
+        <div style="font-size: 13px; line-height: 1.8; color: var(--color-text-muted);">
+          <p style="margin-bottom: 12px;">bot-rsi-01의 MDD가 -8.5%에 도달하여 중지를 요청합니다.</p>
+          <p style="margin-bottom: 12px;"><strong style="color: var(--color-text);">위험 지표:</strong></p>
+          <ul style="padding-left: 20px; margin-bottom: 12px;">
+            <li>현재 MDD: <span style="color: var(--color-negative); font-weight: 600;">-8.5%</span> (제한: 15%)</li>
+            <li>일일 손실: <span style="color: var(--color-negative);">-2.3%</span></li>
+            <li>연속 손실 거래: 5회</li>
+            <li>미실현 손실: -420,000원</li>
+          </ul>
+          <p>MDD가 제한의 절반을 넘어섰으며, 연속 손실 추세가 지속되고 있어 추가 손실 방지를 위해 일시 중지를 권고합니다.</p>
+        </div>
+      </div>
+
+      <!-- 실행 내용 -->
+      <div class="card mb-24">
+        <div class="card-title mb-16">실행 내용</div>
+        <div style="background: var(--color-negative-bg); color: var(--color-negative); padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12px; margin-bottom: 16px;">
+          &#9888; 승인 시 해당 봇의 거래가 즉시 중지됩니다.
+        </div>
+        <div class="info-row">
+          <span class="info-label">대상 봇</span>
+          <span class="text-mono">bot-rsi-01</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">중지 사유</span>
+          <span>손실 누적</span>
+        </div>
+      </div>
+
+      <!-- 감사 이력 -->
+      <div class="card">
+        <div class="card-title mb-16">감사 이력</div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-10 11:15</span>
+          <span><span class="text-mono" style="color: var(--color-positive);">owner</span> — <strong>승인</strong> · 봇 중지 실행 완료</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-10 11:00</span>
+          <span><span class="text-mono" style="color: var(--color-text-muted);">rule_engine</span> — 검토 의견 완료 (warn)</span>
+        </div>
+        <div class="log-entry">
+          <span class="log-time">2026-03-10 11:00</span>
+          <span><span class="text-mono" style="color: var(--color-primary);">agent:risk-monitor</span> — 결재 요청 생성</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
