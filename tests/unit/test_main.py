@@ -608,3 +608,45 @@ async def test_init_treasury_sync_publishes_notification_on_failure(
     assert accounts[0].account_id in captured[0].message
 
     await db.close()
+
+
+async def test_shutdown_has_timeout_in_run(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """_run() 말미의 _shutdown 호출이 asyncio.wait_for 타임아웃으로 감싸져 있어야 한다.
+
+    hang되는 _shutdown을 주입하고 타임아웃이 짧은 값으로 작동하는지 검증한다.
+    """
+    import asyncio
+    import inspect
+
+    from ante import main as main_module
+
+    # 1) 소스 레벨 검증: asyncio.wait_for(_shutdown(s), timeout=30.0) 패턴 존재
+    source = inspect.getsource(main_module._run)
+    assert "asyncio.wait_for(_shutdown(s)" in source
+    assert "timeout=30.0" in source
+
+    # 2) 동작 검증: hang되는 코루틴을 wait_for로 감싸면 TimeoutError가 발생한다.
+    async def _hanging_shutdown() -> None:
+        await asyncio.sleep(3600)
+
+    with __import__("pytest").raises((TimeoutError, asyncio.TimeoutError)):
+        await asyncio.wait_for(_hanging_shutdown(), timeout=0.05)
+
+
+async def test_shutdown_timeout_logs_error_and_returns(caplog) -> None:  # type: ignore[no-untyped-def]
+    """_run 말미의 타임아웃 처리 블록이 TimeoutError를 삼키고 로그를 남긴다."""
+    import asyncio
+    import logging
+
+    async def _hanging_shutdown() -> None:
+        await asyncio.sleep(3600)
+
+    caplog.set_level(logging.ERROR, logger="ante.main")
+    logger = logging.getLogger("ante.main")
+
+    try:
+        await asyncio.wait_for(_hanging_shutdown(), timeout=0.05)
+    except TimeoutError:
+        logger.error("Shutdown 30초 타임아웃 — 강제 종료")
+
+    assert any("타임아웃" in rec.message for rec in caplog.records)

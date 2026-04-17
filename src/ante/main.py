@@ -1286,7 +1286,10 @@ async def _run(s: Services) -> None:
 
     await shutdown_event.wait()
 
-    await _shutdown(s)
+    try:
+        await asyncio.wait_for(_shutdown(s), timeout=30.0)
+    except TimeoutError:
+        logger.error("Shutdown 30초 타임아웃 — 강제 종료")
 
 
 async def _shutdown(s: Services) -> None:
