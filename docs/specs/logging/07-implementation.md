@@ -14,10 +14,10 @@
 
 ## 네임스페이스 선택
 
-`src/ante/log/`가 아닌 `src/ante/core/log/`에 두는 이유:
+`src/ante/logging/`이 아닌 `src/ante/core/log/`에 두는 이유:
 
-1. **표준 라이브러리 `logging`과 이름 충돌 회피**: `ante.log.*` 네임스페이스는 패키지 내에서 `import logging`이 의도와 다르게 해석될 여지를 남긴다. `ante.core.log.*`는 안전하다.
-2. **Core 모듈 자산임을 경로로 명시**: 로깅은 Database와 마찬가지로 "모든 모듈이 공유하는 기반 인프라"이며, Core의 구현 자산 디렉토리에 두는 것이 아키텍처 의도와 일치한다.
+1. **표준 라이브러리 `logging`과 이름 충돌 회피**: `ante.logging.*` 네임스페이스는 패키지 내에서 `import logging`이 의도와 다르게 해석될 여지를 남긴다. `ante.core.log.*`는 안전하다.
+2. **공통 인프라 자산의 물리적 위치**: 스펙은 독립 모듈이지만 구현 코드는 Database·시스템 초기화와 같이 전역에서 호출되는 기반 자산이므로 기존 `core/` 하위에 둔다. 스펙(독립 `docs/specs/logging/`)과 구현 경로(`src/ante/core/log/`)는 일대일 매칭될 필요가 없으며, 독자는 본 문서의 매핑 표로 경로를 확인한다.
 
 # 설계 근거
 

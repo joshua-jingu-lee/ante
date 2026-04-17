@@ -9,7 +9,7 @@
 | 항목 | 값 | 근거 |
 |---|---|---|
 | stdout 핸들러 | `logging.StreamHandler(sys.stdout)` | 콘솔 출력, Docker `docker logs`로 수집 |
-| stdout 레벨 | `system.log_level` (기본 INFO) | [config/03-design-decisions.md](../../config/03-design-decisions.md) §1 |
+| stdout 레벨 | `system.log_level` (기본 INFO) | [config/03-design-decisions.md](../config/03-design-decisions.md) §1 |
 | stdout 포맷 | `%(asctime)s [%(levelname)s] %(name)s: %(message)s` | 기존 포맷 유지 — 사람 관찰용 |
 | 파일 핸들러 | `logging.handlers.TimedRotatingFileHandler` | 일일 회전 |
 | 파일 레벨 | `system.log_level` (동일) | 두 핸들러가 같은 레코드를 본다 |

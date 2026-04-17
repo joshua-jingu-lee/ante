@@ -2,14 +2,14 @@
 
 > ⚠️ 이 문서는 설계 의도와 인터페이스 계약을 기술합니다. 구현 코드는 `src/ante/core/log/` 를 참조하세요.
 
-> 참조: [core.md](../core.md) Core 모듈 개요, [eventbus.md](../../eventbus/eventbus.md) 이벤트 로그, [audit.md](../../audit/audit.md) 감사 로그, [config/03-design-decisions.md](../../config/03-design-decisions.md) 환경변수
+> 참조: [eventbus.md](../eventbus/eventbus.md) 이벤트 로그, [audit.md](../audit/audit.md) 감사 로그, [config/03-design-decisions.md](../config/03-design-decisions.md) 환경변수, [core.md](../core/core.md) 시스템 초기화 순서
 
-이 디렉토리는 Logging 스펙을 주제별 문서로 분할해 관리한다.
-기존 참조 호환을 위해 [logging.md](logging.md)를 개요 문서로 유지한다.
+이 문서는 분할된 `logging` 스펙의 호환용 개요 문서다.
+전체 인덱스는 [README.md](README.md)를, 세부 내용은 아래 하위 문서를 참조한다.
 
 | 문서 | 내용 |
 |---|---|
-| [logging.md](logging.md) | 호환용 개요 문서 및 기존 섹션 앵커 |
+| [README.md](README.md) | 분할 인덱스 |
 | [01-overview.md](01-overview.md) | 개요 및 로그 3종 구분 |
 | [02-design-decisions.md](02-design-decisions.md) | 설계 결정 |
 | [03-json-schema.md](03-json-schema.md) | JSON 로그 스키마 |

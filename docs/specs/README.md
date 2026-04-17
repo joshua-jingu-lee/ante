@@ -21,6 +21,7 @@
 | `eventbus` | [eventbus/eventbus.md](eventbus/eventbus.md) | 타입 기반 이벤트 발행/구독 인프라 |
 | `instrument` | [instrument/instrument.md](instrument/instrument.md) | 종목 메타데이터, 별칭, 표시 규칙 |
 | `ipc` | [ipc/ipc.md](ipc/ipc.md) | CLI와 서버 프로세스 간 IPC 프로토콜 |
+| `logging` | [README.md](logging/README.md) | 시스템 로그 인프라, JSONL 포맷, Fingerprint |
 | `member` | [README.md](member/README.md) | 멤버 인증, 권한, 알림 연계 |
 | `notification` | [notification/notification.md](notification/notification.md) | 알림 이벤트, 채널, 전송 정책 |
 | `report-store` | [report-store/report-store.md](report-store/report-store.md) | 백테스트/운영 리포트 저장과 조회 |
