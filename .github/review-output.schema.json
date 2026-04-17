@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approved",
+    "summary",
+    "blocking_findings",
+    "followups"
+  ],
+  "properties": {
+    "approved": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blocking_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "details",
+          "files"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "details": {
+            "type": "string",
+            "minLength": 1
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "followups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

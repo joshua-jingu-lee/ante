@@ -1,6 +1,6 @@
-ㅏ---
+---
 name: code-reviewer
-description: 코드 리뷰 전문가. PR의 코드 품질, 보안, 설계 준수 여부를 검증한다. PR 생성 후 자동 리뷰 또는 사용자 요청 시 위임.
+description: deprecated — 레거시 Claude PR 리뷰어. 현재 기본 운영 모델에서는 사용하지 않는다.
 model: opus
 tools: Read, Glob, Grep, Bash
 skills:
@@ -9,6 +9,8 @@ skills:
 ---
 
 # 코드 리뷰어 에이전트
+
+> deprecated: 현재 기본 워크플로우의 리뷰 역할은 Codex 브랜치 리뷰 + Claude/Codex PR 승인 워커로 분리되었다.
 
 PR의 코드 품질과 설계 준수 여부를 검증하는 서브에이전트다.
 

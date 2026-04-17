@@ -10,18 +10,20 @@
 | Runbook | 설명 |
 |---------|------|
 | [00-issue-management.md](00-issue-management.md) | GitHub Issues 등록, 분류, 추적 규칙 (이슈 템플릿, 라벨, 우선순위) |
-| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — 상호작용 흐름, 브랜치 전략, 복구 루프, autopilot, 코드 리뷰 |
-| [02-agent-structure.md](02-agent-structure.md) | 에이전트 역할(7종), `.agent/` 구조와 `.claude/` 호환 레이어 |
+| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Claude 구현, Codex 사전 브랜치 리뷰, PR 승인/merge gate |
+| [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, Codex 외부 리뷰 워커, `.agent/`와 `.claude/` 레이어 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션 (+ 버전 범프), PR 규칙 |
-| [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인 (Gate 모델, semantic-release, 릴리스 빌드) |
+| [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인 (Codex 브랜치 리뷰, 이중 승인, auto-merge) |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합/QA TC 테스트, 커버리지) |
+| [07-review-gate.md](07-review-gate.md) | 리뷰 단계와 merge gate의 책임 분리, status check 기준 |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)
 
 | 커맨드 | 설명 |
 |--------|------|
-| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 구현 → 리뷰 → 머지) |
-| `/autopilot` | 완전 자동 모드 (구현 → QA → 수정 루프, 무확인) |
+| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 구현 → Codex 브랜치 리뷰 → PR 생성) |
 | `/qa-test` | 지정 TC 실행 (`@qa-engineer` 위임) |
 | `/qa-sweep` | 전체 TC 순차 실행 (전수 검사) |
 | `/api-docs` | OpenAPI 스키마 조회 |
+
+`/autopilot`은 레거시 커맨드이며 삭제 예정이다.

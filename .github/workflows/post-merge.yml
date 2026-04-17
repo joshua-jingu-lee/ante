@@ -1,0 +1,89 @@
+name: Post Merge
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  post-merge:
+    name: post-merge
+    if: ${{ github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Update linked issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const body = pr.body || "";
+
+            const refs = [...body.matchAll(/\bRefs\s+#(\d+)/gi)].map((match) => Number(match[1]));
+            const uniqueRefs = [...new Set(refs)];
+
+            core.info(`Linked issues: ${uniqueRefs.join(", ") || "(none)"}`);
+
+            async function markIssueDone(issueNumber) {
+              const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+              const originalBody = issue.data.body || "";
+              const updatedBody = originalBody.replace(/^- \[ \]/gm, "- [x]");
+
+              if (updatedBody !== originalBody) {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body: updatedBody,
+                });
+              }
+
+              if (issue.data.state !== "closed") {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  state: "closed",
+                });
+              }
+
+              const epicMatch = originalBody.match(/(?:에픽|Epic)\s*:\s*#(\d+)/i);
+              if (!epicMatch) {
+                return;
+              }
+
+              const epicNumber = Number(epicMatch[1]);
+              const epic = await github.rest.issues.get({ owner, repo, issue_number: epicNumber });
+              const epicBody = epic.data.body || "";
+              const updatedEpicBody = epicBody.replace(
+                new RegExp(`- \\[ \\](.*#${issueNumber}\\b)`, "g"),
+                "- [x]$1",
+              );
+
+              if (updatedEpicBody !== epicBody) {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: epicNumber,
+                  body: updatedEpicBody,
+                });
+              }
+
+              if (!updatedEpicBody.match(/^- \[ \]/m) && epic.data.state !== "closed") {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: epicNumber,
+                  state: "closed",
+                });
+              }
+            }
+
+            for (const issueNumber of uniqueRefs) {
+              await markIssueDone(issueNumber);
+            }

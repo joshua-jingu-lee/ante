@@ -2,7 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - 'epic/**'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -47,3 +49,13 @@ jobs:
         env:
           ANTE_DB_ENCRYPTION_KEY: "sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk="
         run: pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
+
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - test
+    steps:
+      - name: CI gate passed
+        run: echo "ci passed"

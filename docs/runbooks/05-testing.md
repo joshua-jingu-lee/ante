@@ -223,7 +223,7 @@ Background:
 ### 8.1 단위/통합 테스트 (`@backend-dev`, `@frontend-dev`)
 
 - 모듈 구현 PR에 해당 모듈의 단위 테스트를 반드시 포함
-- 테스트 없는 코드는 `@code-reviewer`가 E1(테스트 존재) FAIL로 판정
+- 테스트 없는 코드는 `codex-branch-review` 또는 PR 승인 게이트에서 blocking failure로 판정한다
 - 테스트 실패 시 구현 코드를 수정하여 통과시킨 후 PR 업데이트
 
 ### 8.2 QA TC (`@qa-engineer`)

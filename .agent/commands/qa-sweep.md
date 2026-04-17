@@ -124,13 +124,6 @@ $ARGUMENTS — 옵션 (생략 가능)
 - 그 외에는 재시작하지 않고 누적 실행
 ```
 
-## /autopilot 통합
+## 레거시 메모
 
-autopilot에서 구현 이슈 완료 후 자동으로 `/qa-sweep --fix`를 실행한다:
-
-```
-autopilot 루프:
-  Phase 1. 오픈 이슈 순회 → /implement-issue → 자동 머지
-  Phase 2. /qa-sweep --fix → FAIL 시 버그 이슈 등록 → Phase 1 재진입
-  반복: 새 버그 이슈가 0건이 될 때까지 (최대 5라운드)
-```
+`/autopilot` 통합 설명은 레거시다. 현재 기본 운영 모델에서는 `/qa-sweep`이 독립 QA 전수 검사 커맨드로 사용된다.
