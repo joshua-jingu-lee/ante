@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
@@ -11,8 +12,11 @@ from ante.web.deps import (
     get_account_service,
     get_account_service_optional,
     get_audit_logger_optional,
+    get_db_optional,
 )
 from ante.web.schemas import HealthResponse, KillSwitchResponse, StatusResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -53,9 +57,65 @@ async def get_system_status(
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check() -> dict:
-    """헬스체크."""
-    return {"ok": True}
+async def health_check(
+    db: Annotated[Any | None, Depends(get_db_optional)],
+    account_service: Annotated[Any | None, Depends(get_account_service_optional)],
+) -> dict:
+    """헬스체크.
+
+    - `db`: `SELECT 1` 성공 여부.
+    - `broker`: 모든 계좌의 `broker.is_connected == True` AND 축약.
+      계좌 0개 또는 account_service 미주입 시 True.
+    각 체크는 독립적이며, 예외는 내부에서 포착하고 해당 항목만 False로 기록한다.
+    HTTP 상태 코드는 체크 결과와 무관하게 항상 200이다.
+    """
+    checks: dict[str, bool] = {}
+
+    # db 체크
+    checks["db"] = await _check_db(db)
+
+    # broker 체크
+    checks["broker"] = await _check_broker(account_service)
+
+    return {"ok": all(checks.values()), "checks": checks}
+
+
+async def _check_db(db: Any | None) -> bool:
+    """DB 연결 체크. SELECT 1 성공 시 True."""
+    if db is None:
+        return False
+    try:
+        await db.fetch_one("SELECT 1")
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception("health check: db failed")
+        return False
+
+
+async def _check_broker(account_service: Any | None) -> bool:
+    """브로커 연결 체크. 모든 계좌의 is_connected AND. 계좌 0개이면 True."""
+    if account_service is None:
+        return True
+    try:
+        accounts = await account_service.list()
+    except Exception:  # noqa: BLE001
+        logger.exception("health check: account_service.list failed")
+        return False
+
+    if not accounts:
+        return True
+
+    for account in accounts:
+        try:
+            broker = await account_service.get_broker(account.account_id)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "health check: get_broker failed for %s", account.account_id
+            )
+            return False
+        if not getattr(broker, "is_connected", False):
+            return False
+    return True
 
 
 @router.post(

@@ -33,9 +33,147 @@ class TestSystemRoutes:
         assert data["version"] == "0.1.0"
 
     def test_health(self, client):
+        # 기본 앱에는 db/account_service가 주입되어 있지 않다.
+        # - db 미주입 → checks.db = False
+        # - account_service 미주입 → checks.broker = True
         resp = client.get("/api/system/health")
         assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        data = resp.json()
+        assert "ok" in data
+        assert "checks" in data
+        assert data["checks"]["broker"] is True
+
+    def test_health_db_ok_no_accounts(self, app, client):
+        # DB 성공 + 계좌 0개
+        class _DB:
+            async def fetch_one(self, sql, params=()):
+                return {"1": 1}
+
+        class _AccountService:
+            async def list(self):
+                return []
+
+        app.state.db = _DB()
+        app.state.account_service = _AccountService()
+        try:
+            resp = client.get("/api/system/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data == {"ok": True, "checks": {"db": True, "broker": True}}
+        finally:
+            app.state.db = None
+            app.state.account_service = None
+
+    def test_health_db_failure(self, app, client):
+        # DB 실패 → checks.db = False, ok = False
+        class _DB:
+            async def fetch_one(self, sql, params=()):
+                raise RuntimeError("db down")
+
+        class _AccountService:
+            async def list(self):
+                return []
+
+        app.state.db = _DB()
+        app.state.account_service = _AccountService()
+        try:
+            resp = client.get("/api/system/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is False
+            assert data["checks"]["db"] is False
+            assert data["checks"]["broker"] is True
+        finally:
+            app.state.db = None
+            app.state.account_service = None
+
+    def test_health_broker_disconnected(self, app, client):
+        # 일부 계좌 broker 끊김 → checks.broker = False
+        class _DB:
+            async def fetch_one(self, sql, params=()):
+                return {"1": 1}
+
+        class _Account:
+            def __init__(self, account_id):
+                self.account_id = account_id
+
+        class _Broker:
+            def __init__(self, connected):
+                self.is_connected = connected
+
+        class _AccountService:
+            def __init__(self):
+                self._brokers = {
+                    "a1": _Broker(True),
+                    "a2": _Broker(False),
+                }
+
+            async def list(self):
+                return [_Account("a1"), _Account("a2")]
+
+            async def get_broker(self, account_id):
+                return self._brokers[account_id]
+
+        app.state.db = _DB()
+        app.state.account_service = _AccountService()
+        try:
+            resp = client.get("/api/system/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is False
+            assert data["checks"]["db"] is True
+            assert data["checks"]["broker"] is False
+        finally:
+            app.state.db = None
+            app.state.account_service = None
+
+    def test_health_account_service_missing(self, app, client):
+        # account_service 미주입 → checks.broker = True
+        class _DB:
+            async def fetch_one(self, sql, params=()):
+                return {"1": 1}
+
+        app.state.db = _DB()
+        app.state.account_service = None
+        try:
+            resp = client.get("/api/system/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is True
+            assert data["checks"] == {"db": True, "broker": True}
+        finally:
+            app.state.db = None
+
+    def test_health_all_brokers_connected(self, app, client):
+        # 모든 계좌 broker 연결됨 → checks.broker = True
+        class _DB:
+            async def fetch_one(self, sql, params=()):
+                return {"1": 1}
+
+        class _Account:
+            def __init__(self, account_id):
+                self.account_id = account_id
+
+        class _Broker:
+            is_connected = True
+
+        class _AccountService:
+            async def list(self):
+                return [_Account("a1"), _Account("a2")]
+
+            async def get_broker(self, account_id):
+                return _Broker()
+
+        app.state.db = _DB()
+        app.state.account_service = _AccountService()
+        try:
+            resp = client.get("/api/system/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data == {"ok": True, "checks": {"db": True, "broker": True}}
+        finally:
+            app.state.db = None
+            app.state.account_service = None
 
 
 # ── Strategy 라우트 테스트 ────────────────────────
@@ -505,14 +643,21 @@ class TestResponseModelCoverage:
         assert model.status == "running"
 
     def test_response_model_validates_health_response(self, client):
-        """HealthResponse 모델이 실제 응답과 일치하는지 검증."""
+        """HealthResponse 모델이 실제 응답과 일치하는지 검증.
+
+        기본 앱에는 db가 주입되어 있지 않아 ok=False가 정상이다. 여기서는
+        응답 구조(필수 필드 존재, checks 타입)만 검증한다.
+        """
         from ante.web.schemas import HealthResponse
 
         resp = client.get("/api/system/health")
         assert resp.status_code == 200
         data = resp.json()
         model = HealthResponse(**data)
-        assert model.ok is True
+        assert isinstance(model.ok, bool)
+        assert isinstance(model.checks, dict)
+        assert "db" in model.checks
+        assert "broker" in model.checks
 
     def test_response_model_validates_strategy_validate(self, client, tmp_path):
         """StrategyValidateResponse 모델이 실제 응답과 일치하는지 검증."""

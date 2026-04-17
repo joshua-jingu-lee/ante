@@ -4,6 +4,144 @@
  */
 
 export type paths = {
+    "/api/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Accounts
+         * @description 계좌 목록 조회.
+         */
+        get: operations["list_accounts_api_accounts_get"];
+        put?: never;
+        /**
+         * Create Account
+         * @description 계좌 생성.
+         */
+        post: operations["create_account_api_accounts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Account
+         * @description 계좌 상세 조회.
+         */
+        get: operations["get_account_api_accounts__account_id__get"];
+        /**
+         * Update Account
+         * @description 계좌 수정.
+         */
+        put: operations["update_account_api_accounts__account_id__put"];
+        post?: never;
+        /**
+         * Delete Account
+         * @description 계좌 소프트 딜리트.
+         */
+        delete: operations["delete_account_api_accounts__account_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{account_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Account
+         * @description 계좌 재활성화.
+         */
+        post: operations["activate_account_api_accounts__account_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{account_id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Account Rules
+         * @description 계좌 리스크 룰 목록 조회.
+         *
+         *     DynamicConfig를 우선 조회하고, 없으면 정적 Config에서 읽는다.
+         *     RULE_REGISTRY에 등록된 룰 타입만 구조화하여 반환한다.
+         */
+        get: operations["get_account_rules_api_accounts__account_id__rules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{account_id}/rules/{rule_type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Account Rule
+         * @description 계좌 리스크 룰 개별 수정.
+         *
+         *     RULE_REGISTRY에 등록된 타입만 허용하며,
+         *     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
+         */
+        put: operations["update_account_rule_api_accounts__account_id__rules__rule_type__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{account_id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend Account
+         * @description 계좌 정지.
+         */
+        post: operations["suspend_account_api_accounts__account_id__suspend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/approvals": {
         parameters: {
             query?: never;
@@ -11,8 +149,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 결재 목록 */
-        get: operations["list_approvals"];
+        /**
+         * List Approvals
+         * @description 결재 목록 조회.
+         */
+        get: operations["list_approvals_api_approvals_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -28,8 +169,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 결재 상세 */
-        get: operations["get_approval"];
+        /**
+         * Get Approval
+         * @description 결재 상세 조회.
+         */
+        get: operations["get_approval_api_approvals__approval_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -51,8 +195,11 @@ export type paths = {
         delete?: never;
         options?: never;
         head?: never;
-        /** 승인/거부 처리 */
-        patch: operations["update_approval_status"];
+        /**
+         * Update Approval Status
+         * @description 결재 승인/거부 처리.
+         */
+        patch: operations["update_approval_status_api_approvals__approval_id__status_patch"];
         trace?: never;
     };
     "/api/audit": {
@@ -62,8 +209,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 감사 로그 */
-        get: operations["list_audit_logs"];
+        /**
+         * List Audit Logs
+         * @description 감사 로그 조회.
+         */
+        get: operations["list_audit_logs_api_audit_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -81,8 +231,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 패스워드 로그인 */
-        post: operations["login"];
+        /**
+         * Login
+         * @description 패스워드 로그인 -> 세션 쿠키 발급.
+         */
+        post: operations["login_api_auth_login_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -98,8 +251,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 로그아웃 */
-        post: operations["logout"];
+        /**
+         * Logout
+         * @description 로그아웃 — 세션 삭제 + 쿠키 제거.
+         */
+        post: operations["logout_api_auth_logout_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -113,8 +269,15 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 현재 사용자 정보 */
-        get: operations["me"];
+        /**
+         * Me
+         * @description 현재 로그인 사용자 정보.
+         *
+         *     Bearer 토큰 또는 세션 쿠키로 인증한다.
+         *     - Bearer 토큰: TokenAuthMiddleware가 request.state.member에 설정
+         *     - 세션 쿠키: ante_session 쿠키로 세션 조회
+         */
+        get: operations["me_api_auth_me_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -130,11 +293,17 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 봇 목록 조회 */
-        get: operations["list_bots"];
+        /**
+         * List Bots
+         * @description 봇 목록 조회 (cursor 기반 페이지네이션).
+         */
+        get: operations["list_bots_api_bots_get"];
         put?: never;
-        /** 봇 생성 */
-        post: operations["create_bot"];
+        /**
+         * Create Bot
+         * @description 봇 생성.
+         */
+        post: operations["create_bot_api_bots_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -148,8 +317,47 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 봇 상세 조회 */
-        get: operations["get_bot"];
+        /**
+         * Get Bot
+         * @description 봇 상세 조회.
+         */
+        get: operations["get_bot_api_bots__bot_id__get"];
+        /**
+         * Update Bot
+         * @description 봇 설정 수정. 중지 상태에서만 허용.
+         */
+        put: operations["update_bot_api_bots__bot_id__put"];
+        post?: never;
+        /**
+         * Delete Bot
+         * @description 봇 삭제.
+         *
+         *     handle_positions:
+         *         - keep (기본): 포지션을 유지한 채 봇만 삭제.
+         *         - liquidate: 보유 종목 시장가 매도 주문 발행 후 삭제.
+         */
+        delete: operations["delete_bot_api_bots__bot_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bots/{bot_id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bot Logs
+         * @description 봇 실행 로그 조회.
+         *
+         *     BotStepCompletedEvent 이력을 반환한다.
+         *     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
+         *     없으면 EventBus 인메모리 히스토리에서 조회한다.
+         */
+        get: operations["get_bot_logs_api_bots__bot_id__logs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -167,8 +375,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 봇 시작 */
-        post: operations["start_bot"];
+        /**
+         * Start Bot
+         * @description 봇 시작.
+         */
+        post: operations["start_bot_api_bots__bot_id__start_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -184,8 +395,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 봇 중지 */
-        post: operations["stop_bot"];
+        /**
+         * Stop Bot
+         * @description 봇 중지.
+         */
+        post: operations["stop_bot_api_bots__bot_id__stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -199,8 +413,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 동적 설정 조회 */
-        get: operations["list_configs"];
+        /**
+         * List Configs
+         * @description 동적 설정 전체 조회.
+         */
+        get: operations["list_configs_api_config_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -217,8 +434,11 @@ export type paths = {
             cookie?: never;
         };
         get?: never;
-        /** 동적 설정 변경 */
-        put: operations["update_config"];
+        /**
+         * Update Config
+         * @description 동적 설정 값 변경.
+         */
+        put: operations["update_config_api_config__key__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -233,11 +453,52 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 데이터셋 목록 */
-        get: operations["list_datasets"];
+        /**
+         * List Datasets
+         * @description 보유 데이터셋 목록 (페이지네이션 지원).
+         *
+         *     data_type 미지정 시 모든 유형을 반환하고, 지정 시 해당 유형만 반환한다.
+         *
+         *     종목 목록만 먼저 수집하여 페이지네이션을 적용한 뒤,
+         *     해당 페이지의 종목에 대해서만 date_range를 계산한다.
+         *     row_count와 file_size는 상세 조회 전용이므로 기본값(0)을 반환한다.
+         *
+         *     Returns:
+         *         {items: [...], total: int}
+         */
+        get: operations["list_datasets_api_data_datasets_get"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/datasets/{dataset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dataset Detail
+         * @description 데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기).
+         *
+         *     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
+         */
+        get: operations["get_dataset_detail_api_data_datasets__dataset_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Dataset
+         * @description 데이터셋 삭제.
+         *
+         *     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
+         *     fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
+         */
+        delete: operations["delete_dataset_api_data_datasets__dataset_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -250,8 +511,34 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Feed 파이프라인 상태 */
-        get: operations["get_feed_status"];
+        /**
+         * Get Feed Status
+         * @description Feed 파이프라인 상태 조회.
+         *
+         *     Feed 초기화 여부, 소스별 체크포인트 현황, 최근 리포트 요약,
+         *     API 키 설정 상태를 반환한다.
+         */
+        get: operations["get_feed_status_api_data_feed_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/data/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Data Schema
+         * @description 데이터 스키마 조회. data_type에 따라 해당 스키마를 반환.
+         */
+        get: operations["get_data_schema_api_data_schema_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -267,8 +554,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 저장 용량 현황 */
-        get: operations["get_storage_summary"];
+        /**
+         * Get Storage Summary
+         * @description 저장 용량 현황.
+         */
+        get: operations["get_storage_summary_api_data_storage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -284,11 +574,17 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 멤버 목록 */
-        get: operations["list_members"];
+        /**
+         * List Members
+         * @description 멤버 목록 조회.
+         */
+        get: operations["list_members_api_members_get"];
         put?: never;
-        /** 멤버 등록 */
-        post: operations["create_member"];
+        /**
+         * Create Member
+         * @description 멤버 등록. 토큰 1회 반환.
+         */
+        post: operations["create_member_api_members_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -302,8 +598,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 멤버 상세 */
-        get: operations["get_member"];
+        /**
+         * Get Member
+         * @description 멤버 상세 조회.
+         */
+        get: operations["get_member_api_members__member_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -325,8 +624,11 @@ export type paths = {
         delete?: never;
         options?: never;
         head?: never;
-        /** 패스워드 변경 */
-        patch: operations["change_password"];
+        /**
+         * Change Password
+         * @description 비밀번호 변경 (human 멤버 전용).
+         */
+        patch: operations["change_password_api_members__member_id__password_patch"];
         trace?: never;
     };
     "/api/members/{member_id}/reactivate": {
@@ -338,8 +640,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 멤버 재활성화 */
-        post: operations["reactivate_member"];
+        /**
+         * Reactivate Member
+         * @description 멤버 재활성화.
+         */
+        post: operations["reactivate_member_api_members__member_id__reactivate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -355,8 +660,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 멤버 폐기 */
-        post: operations["revoke_member"];
+        /**
+         * Revoke Member
+         * @description 멤버 영구 폐기.
+         */
+        post: operations["revoke_member_api_members__member_id__revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -372,8 +680,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 토큰 재발급 */
-        post: operations["rotate_token"];
+        /**
+         * Rotate Token
+         * @description 토큰 재발급.
+         */
+        post: operations["rotate_token_api_members__member_id__rotate_token_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -388,8 +699,11 @@ export type paths = {
             cookie?: never;
         };
         get?: never;
-        /** 권한 범위 변경 */
-        put: operations["update_scopes"];
+        /**
+         * Update Scopes
+         * @description 권한 범위 변경.
+         */
+        put: operations["update_scopes_api_members__member_id__scopes_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -406,25 +720,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 멤버 정지 */
-        post: operations["suspend_member"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 알림 목록 */
-        get: operations["list_notifications"];
-        put?: never;
-        post?: never;
+        /**
+         * Suspend Member
+         * @description 멤버 일시 정지.
+         */
+        post: operations["suspend_member_api_members__member_id__suspend_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -438,8 +738,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 자산 추이 */
-        get: operations["get_portfolio_history"];
+        /**
+         * Portfolio History
+         * @description 기간별 자산 추이 (daily_snapshots 시계열 반환).
+         */
+        get: operations["portfolio_history_api_portfolio_history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -455,8 +758,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 총 자산 가치 */
-        get: operations["get_portfolio_value"];
+        /**
+         * Portfolio Value
+         * @description 총 자산 가치 + 당일 손익 + 수익률 + 미실현 손익 (최신 스냅샷 기반).
+         */
+        get: operations["portfolio_value_api_portfolio_value_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -472,11 +778,17 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 리포트 목록 */
-        get: operations["list_reports"];
+        /**
+         * List Reports
+         * @description 리포트 목록 조회 (cursor 기반 페이지네이션).
+         */
+        get: operations["list_reports_api_reports_get"];
         put?: never;
-        /** 리포트 제출 */
-        post: operations["submit_report"];
+        /**
+         * Submit Report
+         * @description 리포트 제출.
+         */
+        post: operations["submit_report_api_reports_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -490,8 +802,31 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 리포트 상세 */
-        get: operations["get_report"];
+        /**
+         * Report View
+         * @description 리포트 단건 조회.
+         */
+        get: operations["report_view_api_reports__report_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Report Schema
+         * @description 리포트 제출 스키마 조회.
+         */
+        get: operations["get_report_schema_api_reports_schema_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -507,8 +842,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 전략 목록 조회 */
-        get: operations["list_strategies"];
+        /**
+         * List Strategies
+         * @description 전략 목록 조회.
+         */
+        get: operations["list_strategies_api_strategies_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -524,25 +862,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 전략 상세 조회 */
-        get: operations["get_strategy"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/strategies/{strategy_id}/performance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 전략 성과 지표 */
-        get: operations["get_strategy_performance"];
+        /**
+         * Get Strategy
+         * @description 전략 상세 조회.
+         */
+        get: operations["get_strategy_api_strategies__strategy_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -558,8 +882,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 일별 성과 집계 */
-        get: operations["get_daily_summary"];
+        /**
+         * Get Strategy Daily Summary
+         * @description 전략 일별 성과 집계.
+         */
+        get: operations["get_strategy_daily_summary_api_strategies__strategy_id__daily_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -575,8 +902,71 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 월별 성과 집계 */
-        get: operations["get_monthly_summary"];
+        /**
+         * Get Strategy Monthly Summary
+         * @description 전략 월별 성과 집계.
+         */
+        get: operations["get_strategy_monthly_summary_api_strategies__strategy_id__monthly_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategies/{strategy_id}/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Strategy Performance
+         * @description 전략 성과 지표 조회.
+         */
+        get: operations["get_strategy_performance_api_strategies__strategy_id__performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/strategies/{strategy_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Strategy Status
+         * @description 전략 상태 변경. 보관 전환용.
+         */
+        patch: operations["update_strategy_status_api_strategies__strategy_id__status_patch"];
+        trace?: never;
+    };
+    "/api/strategies/{strategy_id}/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Strategy Trades
+         * @description 전략 거래 내역 조회 (cursor 기반 페이지네이션).
+         */
+        get: operations["get_strategy_trades_api_strategies__strategy_id__trades_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -592,25 +982,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 주별 성과 집계 */
-        get: operations["get_weekly_summary"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/strategies/{strategy_id}/trades": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 전략 거래 내역 */
-        get: operations["get_strategy_trades"];
+        /**
+         * Get Strategy Weekly Summary
+         * @description 전략 주별 성과 집계.
+         */
+        get: operations["get_strategy_weekly_summary_api_strategies__strategy_id__weekly_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -628,8 +1004,53 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 전략 파일 검증 */
-        post: operations["validate_strategy"];
+        /**
+         * Validate Strategy
+         * @description 전략 파일 정적 검증.
+         *
+         *     Body: {"path": "/path/to/strategy.py"}
+         */
+        post: operations["validate_strategy_api_strategies_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate
+         * @description 전체 거래 재개 (모든 계좌 ACTIVE).
+         */
+        post: operations["activate_api_system_activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/halt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Halt
+         * @description 전체 거래 중지 (모든 계좌 SUSPENDED).
+         */
+        post: operations["halt_api_system_halt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -643,27 +1064,19 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 헬스체크 */
-        get: operations["get_health"];
+        /**
+         * Health Check
+         * @description 헬스체크.
+         *
+         *     - `db`: `SELECT 1` 성공 여부.
+         *     - `broker`: 모든 계좌의 `broker.is_connected == True` AND 축약.
+         *       계좌 0개 또는 account_service 미주입 시 True.
+         *     각 체크는 독립적이며, 예외는 내부에서 포착하고 해당 항목만 False로 기록한다.
+         *     HTTP 상태 코드는 체크 결과와 무관하게 항상 200이다.
+         */
+        get: operations["health_check_api_system_health_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/system/kill-switch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 킬 스위치 제어 */
-        post: operations["toggle_kill_switch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -677,8 +1090,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 시스템 상태 조회 */
-        get: operations["get_system_status"];
+        /**
+         * Get System Status
+         * @description 시스템 상태 조회.
+         */
+        get: operations["get_system_status_api_system_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -694,8 +1110,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 거래 기록 목록 */
-        get: operations["list_trades"];
+        /**
+         * List Trades
+         * @description 거래 기록 목록 조회 (cursor 기반 페이지네이션).
+         */
+        get: operations["list_trades_api_trades_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -711,8 +1130,14 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 자금 현황 요약 */
-        get: operations["get_treasury_summary"];
+        /**
+         * Get Summary
+         * @description 자금 현황 요약.
+         *
+         *     account_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.
+         *     미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).
+         */
+        get: operations["get_summary_api_treasury_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -730,8 +1155,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 잔고 설정 */
-        post: operations["set_balance"];
+        /**
+         * Set Balance
+         * @description 계좌 총 잔고 수동 설정.
+         */
+        post: operations["set_balance_api_treasury_balance_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -747,8 +1175,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 예산 할당 */
-        post: operations["allocate_budget"];
+        /**
+         * Allocate
+         * @description 봇에 예산 할당.
+         */
+        post: operations["allocate_api_treasury_bots__bot_id__allocate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -764,8 +1195,11 @@ export type paths = {
         };
         get?: never;
         put?: never;
-        /** 예산 회수 */
-        post: operations["deallocate_budget"];
+        /**
+         * Deallocate
+         * @description 봇 예산 회수.
+         */
+        post: operations["deallocate_api_treasury_bots__bot_id__deallocate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -779,8 +1213,71 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 봇별 예산 목록 */
-        get: operations["get_budget_list"];
+        /**
+         * List Budgets
+         * @description 봇별 예산 목록 조회.
+         */
+        get: operations["list_budgets_api_treasury_budgets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/treasury/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Snapshots
+         * @description 기간별 일별 스냅샷 목록.
+         */
+        get: operations["list_snapshots_api_treasury_snapshots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/treasury/snapshots/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Snapshot By Date
+         * @description 특정일 스냅샷 조회.
+         */
+        get: operations["get_snapshot_by_date_api_treasury_snapshots__date__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/treasury/snapshots/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Snapshot
+         * @description 가장 최근 일별 스냅샷 조회.
+         */
+        get: operations["get_latest_snapshot_api_treasury_snapshots_latest_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -796,8 +1293,11 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** 자금 변동 이력 */
-        get: operations["get_transactions"];
+        /**
+         * List Transactions
+         * @description 자금 변동 이력 조회.
+         */
+        get: operations["list_transactions_api_treasury_transactions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -810,420 +1310,1853 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
-        ApprovalDetailResponse: {
-            approval: {
+        /**
+         * AccountActionResponse
+         * @description 계좌 상태 변경 응답.
+         */
+        AccountActionResponse: {
+            account: components["schemas"]["AccountResponse"];
+            /** Message */
+            message: string;
+        };
+        /**
+         * AccountCreateRequest
+         * @description 계좌 생성 요청.
+         */
+        AccountCreateRequest: {
+            /** Account Id */
+            account_id: string;
+            /**
+             * Broker Config
+             * @default {}
+             */
+            broker_config: {
                 [key: string]: unknown;
             };
+            /**
+             * Broker Type
+             * @default test
+             */
+            broker_type: string;
+            /**
+             * Buy Commission Rate
+             * @default 0
+             */
+            buy_commission_rate: number;
+            /**
+             * Credentials
+             * @default {}
+             */
+            credentials: {
+                [key: string]: string;
+            };
+            /**
+             * Currency
+             * @default
+             */
+            currency: string;
+            /**
+             * Exchange
+             * @default
+             */
+            exchange: string;
+            /** Name */
+            name: string;
+            /**
+             * Sell Commission Rate
+             * @default 0
+             */
+            sell_commission_rate: number;
+            /**
+             * Timezone
+             * @default
+             */
+            timezone: string;
+            /**
+             * Trading Hours End
+             * @default
+             */
+            trading_hours_end: string;
+            /**
+             * Trading Hours Start
+             * @default
+             */
+            trading_hours_start: string;
+            /**
+             * Trading Mode
+             * @default virtual
+             */
+            trading_mode: string;
+        };
+        /**
+         * AccountDetailResponse
+         * @description 계좌 상세 응답.
+         */
+        AccountDetailResponse: {
+            account: components["schemas"]["AccountResponse"];
+        };
+        /**
+         * AccountListResponse
+         * @description 계좌 목록 응답.
+         */
+        AccountListResponse: {
+            /** Accounts */
+            accounts: components["schemas"]["AccountResponse"][];
+        };
+        /**
+         * AccountResponse
+         * @description 계좌 응답. credentials는 보안상 포함하지 않는다.
+         */
+        AccountResponse: {
+            /** Account Id */
+            account_id: string;
+            /**
+             * Broker Config
+             * @default {}
+             */
+            broker_config: {
+                [key: string]: unknown;
+            };
+            /** Broker Type */
+            broker_type: string;
+            /** Buy Commission Rate */
+            buy_commission_rate: number;
+            /** Created At */
+            created_at: string;
+            /** Currency */
+            currency: string;
+            /** Exchange */
+            exchange: string;
+            /** Name */
+            name: string;
+            /** Sell Commission Rate */
+            sell_commission_rate: number;
+            /** Status */
+            status: string;
+            /** Timezone */
+            timezone: string;
+            /** Trading Hours End */
+            trading_hours_end: string;
+            /** Trading Hours Start */
+            trading_hours_start: string;
+            /** Trading Mode */
+            trading_mode: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * AccountSuspendRequest
+         * @description 계좌 정지 요청.
+         */
+        AccountSuspendRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * AccountUpdateRequest
+         * @description 계좌 수정 요청.
+         */
+        AccountUpdateRequest: {
+            /** Broker Config */
+            broker_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Broker Type */
+            broker_type?: string | null;
+            /** Buy Commission Rate */
+            buy_commission_rate?: number | null;
+            /** Credentials */
+            credentials?: {
+                [key: string]: string;
+            } | null;
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Sell Commission Rate */
+            sell_commission_rate?: number | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Trading Hours End */
+            trading_hours_end?: string | null;
+            /** Trading Hours Start */
+            trading_hours_start?: string | null;
+            /** Trading Mode */
+            trading_mode?: string | null;
+        };
+        /**
+         * ActivateRequest
+         * @description 거래 재개 요청.
+         */
+        ActivateRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * ApprovalDetailResponse
+         * @description 결재 상세 응답.
+         */
+        ApprovalDetailResponse: {
+            approval: components["schemas"]["ApprovalItem"];
+            /** Report Detail */
             report_detail?: {
                 [key: string]: unknown;
             } | null;
         };
-        ApprovalListResponse: {
-            approvals: {
+        /**
+         * ApprovalItem
+         * @description 결재 요청 아이템.
+         */
+        ApprovalItem: {
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * @default
+             */
+            expires_at: string;
+            /**
+             * History
+             * @default []
+             */
+            history: {
                 [key: string]: unknown;
             }[];
-            total: number;
-        };
-        ApprovalUpdateResponse: {
-            approval: {
+            /** Id */
+            id: string;
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
                 [key: string]: unknown;
             };
-        };
-        AuditLogListResponse: {
-            logs: {
+            /**
+             * Reference Id
+             * @default
+             */
+            reference_id: string;
+            /**
+             * Reject Reason
+             * @default
+             */
+            reject_reason: string;
+            /** Requester */
+            requester: string;
+            /**
+             * Resolved At
+             * @default
+             */
+            resolved_at: string;
+            /**
+             * Resolved By
+             * @default
+             */
+            resolved_by: string;
+            /**
+             * Reviews
+             * @default []
+             */
+            reviews: {
                 [key: string]: unknown;
             }[];
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ApprovalListResponse
+         * @description 결재 목록 응답.
+         */
+        ApprovalListResponse: {
+            /** Approvals */
+            approvals: components["schemas"]["ApprovalItem"][];
+            /** Total */
             total: number;
         };
+        /**
+         * ApprovalStatusUpdate
+         * @description 승인/거부 요청.
+         */
+        ApprovalStatusUpdate: {
+            /**
+             * Memo
+             * @default
+             */
+            memo: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * ApprovalUpdateResponse
+         * @description 결재 상태 변경 응답.
+         */
+        ApprovalUpdateResponse: {
+            approval: components["schemas"]["ApprovalItem"];
+        };
+        /**
+         * AuditLogItem
+         * @description 감사 로그 아이템.
+         */
+        AuditLogItem: {
+            /**
+             * Action
+             * @default
+             */
+            action: string;
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Id */
+            id: number;
+            /**
+             * Ip
+             * @default
+             */
+            ip: string;
+            /**
+             * Member Id
+             * @default
+             */
+            member_id: string;
+            /**
+             * Resource
+             * @default
+             */
+            resource: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AuditLogListResponse
+         * @description 감사 로그 목록 응답.
+         */
+        AuditLogListResponse: {
+            /** Logs */
+            logs: components["schemas"]["AuditLogItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * BalanceSetRequest
+         * @description 잔고 수동 설정 요청.
+         */
+        BalanceSetRequest: {
+            /** Balance */
+            balance: number;
+        };
+        /**
+         * BalanceSetResponse
+         * @description 잔고 설정 응답.
+         */
         BalanceSetResponse: {
+            /** Total Balance */
             total_balance: number;
+            /** Updated At */
             updated_at: string;
         };
-        BotDetailResponse: {
-            bot: {
-                [key: string]: unknown;
-            };
+        /**
+         * BotCreateRequest
+         * @description 봇 생성 요청.
+         *
+         *     strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
+         *     strategy_name만 전달하면 최신 버전의 strategy_id로 자동 변환된다.
+         */
+        BotCreateRequest: {
+            /** Account Id */
+            account_id?: string | null;
+            /** Bot Id */
+            bot_id: string;
+            /** Budget */
+            budget?: number | null;
+            /**
+             * Interval Seconds
+             * @default 60
+             */
+            interval_seconds: number;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /** Strategy Id */
+            strategy_id?: string | null;
+            /** Strategy Name */
+            strategy_name?: string | null;
         };
+        /**
+         * BotDetailResponse
+         * @description 봇 상세/생성/시작/중지 응답.
+         */
+        BotDetailResponse: {
+            bot: components["schemas"]["BotInfo"];
+        };
+        /**
+         * BotInfo
+         * @description 봇 정보.
+         */
+        BotInfo: {
+            /**
+             * Account Id
+             * @default
+             */
+            account_id: string;
+            /** Bot Id */
+            bot_id: string;
+            /** Error Message */
+            error_message?: string | null;
+            /**
+             * Interval Seconds
+             * @default 60
+             */
+            interval_seconds: number;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /** Stopped At */
+            stopped_at?: string | null;
+            /** Strategy Author Id */
+            strategy_author_id?: string | null;
+            /** Strategy Author Name */
+            strategy_author_name?: string | null;
+            /**
+             * Strategy Id
+             * @default
+             */
+            strategy_id: string;
+            /** Strategy Name */
+            strategy_name?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * BotListResponse
+         * @description 봇 목록 응답.
+         */
         BotListResponse: {
-            bots: {
-                [key: string]: unknown;
-            }[];
+            /** Bots */
+            bots: components["schemas"]["BotInfo"][];
+            /** Next Cursor */
             next_cursor?: string | null;
         };
-        BudgetListResponse: {
-            budgets: {
-                [key: string]: unknown;
-            }[];
+        /**
+         * BotUpdateRequest
+         * @description 봇 설정 수정 요청. None인 필드는 변경하지 않는다.
+         */
+        BotUpdateRequest: {
+            /** Auto Restart */
+            auto_restart?: boolean | null;
+            /** Budget */
+            budget?: number | null;
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /** Max Restart Attempts */
+            max_restart_attempts?: number | null;
+            /** Max Signals Per Step */
+            max_signals_per_step?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Restart Cooldown Seconds */
+            restart_cooldown_seconds?: number | null;
+            /** Step Timeout Seconds */
+            step_timeout_seconds?: number | null;
+            /** Strategy Name */
+            strategy_name?: string | null;
         };
-        BudgetOperationResponse: {
+        /**
+         * BudgetChangeRequest
+         * @description 예산 할당/회수 요청.
+         */
+        BudgetChangeRequest: {
+            /** Amount */
+            amount: number;
+        };
+        /**
+         * BudgetItem
+         * @description 봇별 예산 아이템.
+         */
+        BudgetItem: {
+            /**
+             * Allocated
+             * @default 0
+             */
             allocated: number;
+            /**
+             * Available
+             * @default 0
+             */
             available: number;
+            /** Bot Id */
+            bot_id: string;
+            /**
+             * Last Updated
+             * @default
+             */
+            last_updated: string;
+            /**
+             * Reserved
+             * @default 0
+             */
+            reserved: number;
+            /**
+             * Returned
+             * @default 0
+             */
+            returned: number;
+            /**
+             * Spent
+             * @default 0
+             */
+            spent: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * BudgetListResponse
+         * @description 예산 목록 응답.
+         */
+        BudgetListResponse: {
+            /** Budgets */
+            budgets: components["schemas"]["BudgetItem"][];
+        };
+        /**
+         * BudgetOperationResponse
+         * @description 예산 할당/회수 응답.
+         */
+        BudgetOperationResponse: {
+            /** Allocated */
+            allocated: number;
+            /** Available */
+            available: number;
+            /** Bot Id */
             bot_id: string;
         };
+        /**
+         * ConfigItem
+         * @description 동적 설정 아이템.
+         */
+        ConfigItem: {
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /** Key */
+            key: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /** Value */
+            value?: unknown;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ConfigListResponse
+         * @description 동적 설정 목록 응답.
+         */
         ConfigListResponse: {
-            configs: {
+            /** Configs */
+            configs: components["schemas"]["ConfigItem"][];
+        };
+        /**
+         * ConfigUpdateRequest
+         * @description 설정 값 변경 요청.
+         */
+        ConfigUpdateRequest: {
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /** Value */
+            value: unknown;
+        };
+        /**
+         * ConfigUpdateResponse
+         * @description 설정 변경 응답.
+         */
+        ConfigUpdateResponse: {
+            /** Key */
+            key: string;
+            /** New Value */
+            new_value?: unknown;
+            /** Old Value */
+            old_value?: unknown;
+        };
+        /**
+         * DailySummaryItem
+         * @description 일별 성과 집계 아이템.
+         */
+        DailySummaryItem: {
+            /** Date */
+            date: string;
+            /** Realized Pnl */
+            realized_pnl: number;
+            /** Trade Count */
+            trade_count: number;
+            /** Win Rate */
+            win_rate: number;
+        };
+        /**
+         * DailySummaryResponse
+         * @description 일별 성과 집계 응답.
+         */
+        DailySummaryResponse: {
+            /** Items */
+            items: components["schemas"]["DailySummaryItem"][];
+        };
+        /**
+         * DataSchemaResponse
+         * @description 데이터 스키마 응답 (동적 키-값).
+         */
+        DataSchemaResponse: {
+            [key: string]: unknown;
+        };
+        /**
+         * DatasetDetailResponse
+         * @description 데이터셋 상세 응답 (메타데이터 + 미리보기).
+         */
+        DatasetDetailResponse: {
+            dataset: components["schemas"]["DatasetItem"];
+            /**
+             * Preview
+             * @default []
+             */
+            preview: {
                 [key: string]: unknown;
             }[];
         };
-        ConfigUpdateResponse: {
-            key: string;
-            new_value?: unknown;
-            old_value?: unknown;
-        };
-        DailySummaryItem: {
-            date: string;
-            realized_pnl: number;
-            trade_count: number;
-            win_rate: number;
-        };
-        DailySummaryResponse: {
-            items: components["schemas"]["DailySummaryItem"][];
-        };
+        /**
+         * DatasetItem
+         * @description 데이터셋 아이템.
+         */
         DatasetItem: {
+            /** Data Type */
             data_type: string;
+            /** End Date */
             end_date?: string | null;
+            /**
+             * File Size
+             * @default 0
+             */
+            file_size: number;
+            /** Id */
             id: string;
-            /** @default 0 */
+            /**
+             * Row Count
+             * @default 0
+             */
             row_count: number;
+            /** Start Date */
             start_date?: string | null;
+            /** Symbol */
             symbol: string;
+            /** Timeframe */
             timeframe: string;
         };
+        /**
+         * DatasetListResponse
+         * @description 데이터셋 목록 응답.
+         */
         DatasetListResponse: {
+            /** Items */
             items: components["schemas"]["DatasetItem"][];
+            /** Total */
             total: number;
         };
-        EquityCurvePoint: {
-            date: string;
-            value: number;
-        };
-        ErrorResponse: {
-            /** @default  */
-            detail: string;
-            /** @default  */
-            instance: string;
-            /** @default 500 */
-            status: number;
-            /** @default Internal Server Error */
-            title: string;
-            /** @default /errors/internal */
-            type: string;
-        };
+        /**
+         * FeedStatusResponse
+         * @description Feed 파이프라인 상태 응답.
+         */
         FeedStatusResponse: {
-            /** @default [] */
+            /**
+             * Api Keys
+             * @default []
+             */
             api_keys: {
                 [key: string]: unknown;
             }[];
-            /** @default [] */
+            /**
+             * Checkpoints
+             * @default []
+             */
             checkpoints: {
                 [key: string]: unknown;
             }[];
-            /** @default false */
+            /**
+             * Initialized
+             * @default false
+             */
             initialized: boolean;
-            /** @default [] */
+            /**
+             * Recent Reports
+             * @default []
+             */
             recent_reports: {
                 [key: string]: unknown;
             }[];
         };
+        /**
+         * HaltRequest
+         * @description 거래 중지 요청.
+         */
+        HaltRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * HealthResponse
+         * @description 헬스체크 응답.
+         *
+         *     - `ok`: 모든 의존성 체크 통과 여부 (`all(checks.values())`).
+         *     - `checks`: 개별 의존성 체크 결과. 1.0 기준 키는 `db`, `broker`.
+         *       키 확장은 하위 호환이므로 소비자는 존재하는 키만 확인한다.
+         */
         HealthResponse: {
+            /**
+             * Checks
+             * @default {}
+             */
+            checks: {
+                [key: string]: boolean;
+            };
+            /** Ok */
             ok: boolean;
         };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * KillSwitchResponse
+         * @description 킬 스위치 제어 응답.
+         */
         KillSwitchResponse: {
+            /** Changed At */
             changed_at: string;
+            /** Status */
             status: string;
         };
+        /**
+         * LoginRequest
+         * @description 로그인 요청.
+         */
         LoginRequest: {
+            /** Member Id */
             member_id: string;
+            /** Password */
             password: string;
         };
+        /**
+         * LoginResponse
+         * @description 로그인 성공 응답.
+         */
         LoginResponse: {
+            /** Member Id */
             member_id: string;
+            /** Name */
             name: string;
+            /** Type */
             type: string;
         };
+        /**
+         * LogoutResponse
+         * @description 로그아웃 응답.
+         */
         LogoutResponse: {
+            /** Ok */
             ok: boolean;
         };
+        /**
+         * MemberCreateRequest
+         * @description 멤버 등록 요청.
+         */
+        MemberCreateRequest: {
+            /** Member Id */
+            member_id: string;
+            /** Member Type */
+            member_type: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Org
+             * @default default
+             */
+            org: string;
+            /**
+             * Role
+             * @default default
+             */
+            role: string;
+            /**
+             * Scopes
+             * @default []
+             */
+            scopes: string[];
+        };
+        /**
+         * MemberCreateResponse
+         * @description 멤버 생성 응답 (토큰 포함).
+         */
         MemberCreateResponse: {
-            member: {
-                [key: string]: unknown;
-            };
+            member: components["schemas"]["MemberInfo"];
+            /** Token */
             token: string;
         };
+        /**
+         * MemberDetailResponse
+         * @description 멤버 상세 응답.
+         */
         MemberDetailResponse: {
-            member: {
-                [key: string]: unknown;
-            };
+            member: components["schemas"]["MemberInfo"];
         };
+        /**
+         * MemberInfo
+         * @description 멤버 정보.
+         */
+        MemberInfo: {
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /**
+             * Emoji
+             * @default
+             */
+            emoji: string;
+            /**
+             * Last Active At
+             * @default
+             */
+            last_active_at: string;
+            /** Member Id */
+            member_id: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Org
+             * @default default
+             */
+            org: string;
+            /**
+             * Password Hash
+             * @default
+             */
+            password_hash: string;
+            /**
+             * Recovery Key Hash
+             * @default
+             */
+            recovery_key_hash: string;
+            /**
+             * Revoked At
+             * @default
+             */
+            revoked_at: string;
+            /** Role */
+            role: string;
+            /**
+             * Scopes
+             * @default []
+             */
+            scopes: string[];
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /**
+             * Suspended At
+             * @default
+             */
+            suspended_at: string;
+            /**
+             * Token Expires At
+             * @default
+             */
+            token_expires_at: string;
+            /**
+             * Token Hash
+             * @default
+             */
+            token_hash: string;
+            /** Type */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * MemberListResponse
+         * @description 멤버 목록 응답.
+         */
         MemberListResponse: {
-            members: {
-                [key: string]: unknown;
-            }[];
+            /** Members */
+            members: components["schemas"]["MemberInfo"][];
+            /** Total */
             total: number;
         };
+        /**
+         * MemberScopesResponse
+         * @description 권한 범위 변경 응답.
+         */
         MemberScopesResponse: {
-            member: {
-                [key: string]: unknown;
-            };
+            member: components["schemas"]["MemberInfo"];
         };
+        /**
+         * MemberTokenResponse
+         * @description 토큰 재발급 응답.
+         */
         MemberTokenResponse: {
-            member: {
-                [key: string]: unknown;
-            };
+            member: components["schemas"]["MemberInfo"];
+            /** Token */
             token: string;
         };
+        /**
+         * MeResponse
+         * @description 현재 사용자 정보 응답.
+         */
         MeResponse: {
-            /** @default  */
+            /**
+             * Emoji
+             * @default
+             */
             emoji: string;
-            /** @default  */
+            /**
+             * Login At
+             * @default
+             */
             login_at: string;
+            /** Member Id */
             member_id: string;
+            /** Name */
             name: string;
-            /** @default  */
+            /**
+             * Role
+             * @default
+             */
             role: string;
+            /** Type */
             type: string;
         };
+        /**
+         * MonthlySummaryItem
+         * @description 월별 성과 집계 아이템.
+         */
         MonthlySummaryItem: {
+            /** Month */
             month: number;
+            /** Realized Pnl */
             realized_pnl: number;
+            /** Trade Count */
             trade_count: number;
+            /** Win Rate */
             win_rate: number;
+            /** Year */
             year: number;
         };
+        /**
+         * MonthlySummaryResponse
+         * @description 월별 성과 집계 응답.
+         */
         MonthlySummaryResponse: {
+            /** Items */
             items: components["schemas"]["MonthlySummaryItem"][];
         };
-        NotificationItem: {
-            created_at: string;
-            id: string;
-            level: string;
-            message: string;
-            success: boolean;
-            title: string;
-        };
-        NotificationListResponse: {
-            next_cursor?: string | null;
-            notifications: components["schemas"]["NotificationItem"][];
-        };
+        /**
+         * OkResponse
+         * @description 단순 성공 응답.
+         */
         OkResponse: {
+            /** Ok */
             ok: boolean;
         };
+        /**
+         * PasswordChangeRequest
+         * @description 비밀번호 변경 요청.
+         */
+        PasswordChangeRequest: {
+            /** New Password */
+            new_password: string;
+            /** Old Password */
+            old_password: string;
+        };
+        /**
+         * PortfolioHistoryPoint
+         * @description 자산 추이 데이터 포인트 (스냅샷 기반).
+         */
         PortfolioHistoryPoint: {
-            date: string;
-            value: number;
-        };
-        PortfolioHistoryResponse: {
-            data: components["schemas"]["PortfolioHistoryPoint"][];
-            period: string;
-        };
-        PortfolioValueResponse: {
+            /** Daily Pnl */
             daily_pnl: number;
-            daily_pnl_pct: number;
+            /** Daily Return */
+            daily_return: number;
+            /** Date */
+            date: string;
+            /** Total Asset */
+            total_asset: number;
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
+        };
+        /**
+         * PortfolioHistoryResponse
+         * @description 기간별 자산 추이 응답.
+         */
+        PortfolioHistoryResponse: {
+            /** Data */
+            data: components["schemas"]["PortfolioHistoryPoint"][];
+            /** End Date */
+            end_date: string;
+            /** Start Date */
+            start_date: string;
+        };
+        /**
+         * PortfolioValueResponse
+         * @description 총 자산 가치 응답 (스냅샷 기반).
+         */
+        PortfolioValueResponse: {
+            /** Daily Pnl */
+            daily_pnl: number;
+            /** Daily Return */
+            daily_return: number;
+            /** Snapshot Date */
+            snapshot_date?: string | null;
+            /** Total Value */
             total_value: number;
+            /**
+             * Unrealized Pnl
+             * @default 0
+             */
+            unrealized_pnl: number;
+            /** Updated At */
             updated_at: string;
         };
+        /**
+         * ReportDetailResponse
+         * @description 리포트 상세 응답.
+         */
         ReportDetailResponse: {
+            /** Backtest Period */
             backtest_period?: string | null;
-            /** @default [] */
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Datasets
+             * @default []
+             */
+            datasets: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Equity Curve
+             * @default []
+             */
             equity_curve: {
                 [key: string]: unknown;
             }[];
+            /** Final Balance */
             final_balance?: number | null;
+            /** Initial Balance */
             initial_balance?: number | null;
+            /** Max Drawdown Pct */
             max_drawdown_pct?: number | null;
-            /** @default {} */
+            /**
+             * Metrics
+             * @default {}
+             */
             metrics: {
                 [key: string]: unknown;
             };
-            /** @default  */
+            /**
+             * Rationale
+             * @default
+             */
             rationale: string;
-            /** @default  */
+            /**
+             * Recommendations
+             * @default
+             */
             recommendations: string;
+            /** Report Id */
             report_id: string;
+            /** Reviewed At */
             reviewed_at?: string | null;
-            /** @default  */
+            /**
+             * Risks
+             * @default
+             */
             risks: string;
+            /** Sharpe Ratio */
             sharpe_ratio?: number | null;
+            /** Status */
             status: string;
+            /** Strategy Name */
             strategy_name: string;
-            /** @default  */
+            /**
+             * Strategy Path
+             * @default
+             */
             strategy_path: string;
+            /** Strategy Version */
             strategy_version: string;
+            /** Submitted At */
             submitted_at: string;
-            /** @default  */
+            /**
+             * Submitted By
+             * @default
+             */
             submitted_by: string;
-            /** @default  */
+            /**
+             * Summary
+             * @default
+             */
             summary: string;
-            /** @default [] */
-            symbols: unknown[];
+            /**
+             * Symbols
+             * @default []
+             */
+            symbols: (string | {
+                [key: string]: unknown;
+            })[];
+            /** Total Return Pct */
             total_return_pct?: number | null;
+            /** Total Trades */
             total_trades?: number | null;
-            /** @default  */
+            /**
+             * User Notes
+             * @default
+             */
             user_notes: string;
+            /** Win Rate */
             win_rate?: number | null;
         };
+        /**
+         * ReportListItem
+         * @description 리포트 목록 아이템.
+         */
         ReportListItem: {
+            /** Report Id */
             report_id: string;
+            /** Status */
             status: string;
+            /** Strategy */
             strategy: string;
+            /** Submitted At */
             submitted_at: string;
         };
+        /**
+         * ReportListResponse
+         * @description 리포트 목록 응답.
+         */
         ReportListResponse: {
+            /** Next Cursor */
             next_cursor?: string | null;
+            /** Reports */
             reports: components["schemas"]["ReportListItem"][];
         };
+        /**
+         * ReportSchemaResponse
+         * @description 리포트 스키마 응답.
+         */
+        ReportSchemaResponse: {
+            [key: string]: unknown;
+        };
+        /**
+         * ReportSubmitRequest
+         * @description 리포트 제출 요청.
+         */
+        ReportSubmitRequest: {
+            /**
+             * Backtest Period
+             * @default
+             */
+            backtest_period: string;
+            /**
+             * Detail Json
+             * @default {}
+             */
+            detail_json: string;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /**
+             * Rationale
+             * @default
+             */
+            rationale: string;
+            /**
+             * Recommendations
+             * @default
+             */
+            recommendations: string;
+            /**
+             * Risks
+             * @default
+             */
+            risks: string;
+            /** Sections */
+            sections?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sharpe Ratio */
+            sharpe_ratio?: number | null;
+            /** Strategy Name */
+            strategy_name: string;
+            /** Strategy Path */
+            strategy_path: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Total Return Pct
+             * @default 0
+             */
+            total_return_pct: number;
+            /**
+             * Total Trades
+             * @default 0
+             */
+            total_trades: number;
+            /** Win Rate */
+            win_rate?: number | null;
+        };
+        /**
+         * ReportSubmitResponse
+         * @description 리포트 제출 응답.
+         */
         ReportSubmitResponse: {
+            /** Report Id */
             report_id: string;
+            /** Status */
             status: string;
+            /** Strategy */
             strategy: string;
         };
-        SeedResetResponse: {
-            ok: boolean;
-            scenario: string;
+        /**
+         * RuleItem
+         * @description 룰 설정 아이템.
+         */
+        RuleItem: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Type */
+            type: string;
         };
+        /**
+         * RuleListResponse
+         * @description 계좌 룰 목록 응답.
+         */
+        RuleListResponse: {
+            /** Account Id */
+            account_id: string;
+            /** Rules */
+            rules: components["schemas"]["RuleItem"][];
+        };
+        /**
+         * RuleUpdateRequest
+         * @description 룰 설정 변경 요청.
+         */
+        RuleUpdateRequest: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RuleUpdateResponse
+         * @description 룰 설정 변경 응답.
+         */
+        RuleUpdateResponse: {
+            /** Account Id */
+            account_id: string;
+            rule: components["schemas"]["RuleItem"];
+            /** Rule Type */
+            rule_type: string;
+        };
+        /**
+         * ScopesUpdateRequest
+         * @description 권한 범위 변경 요청.
+         */
+        ScopesUpdateRequest: {
+            /** Scopes */
+            scopes: string[];
+        };
+        /**
+         * SnapshotItem
+         * @description 일별 자산 스냅샷 아이템.
+         */
+        SnapshotItem: {
+            /** Account Balance */
+            account_balance: number;
+            /** Account Id */
+            account_id: string;
+            /** Ante Eval Amount */
+            ante_eval_amount: number;
+            /** Ante Purchase Amount */
+            ante_purchase_amount: number;
+            /** Bot Count */
+            bot_count: number;
+            /** Created At */
+            created_at: string;
+            /** Daily Pnl */
+            daily_pnl: number;
+            /** Daily Return */
+            daily_return: number;
+            /** Net Trade Amount */
+            net_trade_amount: number;
+            /** Snapshot Date */
+            snapshot_date: string;
+            /** Total Allocated */
+            total_allocated: number;
+            /** Total Asset */
+            total_asset: number;
+            /** Unallocated */
+            unallocated: number;
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SnapshotListResponse
+         * @description 스냅샷 목록 응답.
+         */
+        SnapshotListResponse: {
+            /** Snapshots */
+            snapshots: components["schemas"]["SnapshotItem"][];
+        };
+        /**
+         * SnapshotResponse
+         * @description 단일 스냅샷 응답.
+         */
+        SnapshotResponse: {
+            snapshot: components["schemas"]["SnapshotItem"];
+        };
+        /**
+         * StatusResponse
+         * @description 시스템 상태 응답.
+         */
         StatusResponse: {
+            /** Halt Reason */
             halt_reason?: string | null;
+            /** Halt Time */
             halt_time?: string | null;
+            /** Status */
             status: string;
+            /** Trading Status */
             trading_status?: string | null;
-            /** @default 0.1.0 */
+            /**
+             * Version
+             * @default 0.1.0
+             */
             version: string;
         };
+        /**
+         * StatusUpdateRequest
+         * @description 전략 상태 변경 요청.
+         */
+        StatusUpdateRequest: {
+            /** Status */
+            status: string;
+        };
+        /**
+         * StorageSummaryResponse
+         * @description 저장 용량 현황 응답.
+         */
         StorageSummaryResponse: {
+            /** By Data Type */
+            by_data_type?: {
+                [key: string]: number;
+            } | null;
+            /** By Timeframe */
             by_timeframe: {
                 [key: string]: number;
             };
+            /** Total Bytes */
             total_bytes: number;
+            /** Total Mb */
             total_mb: number;
         };
+        /**
+         * StrategyDetailResponse
+         * @description 전략 상세 응답.
+         */
         StrategyDetailResponse: {
-            bot?: {
-                [key: string]: unknown;
-            } | null;
-            strategy: {
+            bot?: components["schemas"]["BotInfo"] | null;
+            /**
+             * Param Schema
+             * @default {}
+             */
+            param_schema: {
+                [key: string]: string;
+            };
+            /**
+             * Params
+             * @default {}
+             */
+            params: {
                 [key: string]: unknown;
             };
+            /**
+             * Rationale
+             * @default
+             */
+            rationale: string;
+            /**
+             * Risks
+             * @default []
+             */
+            risks: string[];
+            /** Status */
+            status?: string | null;
+            strategy: components["schemas"]["StrategyInfo"];
         };
-        StrategyListItem: {
-            author: string;
-            bot_id?: string | null;
-            bot_status?: string | null;
-            id: string;
+        /**
+         * StrategyInfo
+         * @description 전략 상세 정보.
+         */
+        StrategyInfo: {
+            /**
+             * Author Id
+             * @default agent
+             */
+            author_id: string;
+            /**
+             * Author Name
+             * @default agent
+             */
+            author_name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Filepath
+             * @default
+             */
+            filepath: string;
+            /** Name */
             name: string;
+            /**
+             * Rationale
+             * @default
+             */
+            rationale: string;
+            /**
+             * Registered At
+             * @default
+             */
+            registered_at: string;
+            /**
+             * Risks
+             * @default []
+             */
+            risks: string[];
+            /**
+             * Status
+             * @default
+             */
             status: string;
+            /** Strategy Id */
+            strategy_id: string;
+            /**
+             * Validation Warnings
+             * @default []
+             */
+            validation_warnings: string[];
+            /** Version */
+            version: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * StrategyListItem
+         * @description 전략 목록 아이템.
+         */
+        StrategyListItem: {
+            /**
+             * Author Id
+             * @default agent
+             */
+            author_id: string;
+            /**
+             * Author Name
+             * @default agent
+             */
+            author_name: string;
+            /** Bot Id */
+            bot_id?: string | null;
+            /** Bot Status */
+            bot_status?: string | null;
+            /** Cumulative Return */
+            cumulative_return?: number | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Version */
             version: string;
         };
+        /**
+         * StrategyListResponse
+         * @description 전략 목록 응답.
+         */
         StrategyListResponse: {
+            /** Strategies */
             strategies: components["schemas"]["StrategyListItem"][];
         };
+        /**
+         * StrategyPerformanceResponse
+         * @description 전략 성과 지표 응답.
+         */
         StrategyPerformanceResponse: {
-            /** @default 0 */
+            /**
+             * Avg Pnl
+             * @default 0
+             */
             avg_pnl: number;
-            /** @default [] */
+            /**
+             * Equity Curve
+             * @default []
+             */
             equity_curve: {
                 [key: string]: unknown;
             }[];
-            /** @default 0 */
+            /**
+             * Losing Trades
+             * @default 0
+             */
             losing_trades: number;
-            /** @default 0 */
+            /**
+             * Max Drawdown
+             * @default 0
+             */
             max_drawdown: number;
-            /** @default 0 */
+            /**
+             * Profit Factor
+             * @default 0
+             */
             profit_factor: number;
-            /** @default 0 */
+            /**
+             * Sharpe Ratio
+             * @default 0
+             */
             sharpe_ratio: number;
-            /** @default 0 */
+            /**
+             * Total Pnl
+             * @default 0
+             */
             total_pnl: number;
-            /** @default 0 */
+            /**
+             * Total Trades
+             * @default 0
+             */
             total_trades: number;
-            /** @default 0 */
+            /**
+             * Win Rate
+             * @default 0
+             */
             win_rate: number;
-            /** @default 0 */
+            /**
+             * Winning Trades
+             * @default 0
+             */
             winning_trades: number;
         } & {
             [key: string]: unknown;
         };
+        /**
+         * StrategyTradeItem
+         * @description 전략 거래 아이템.
+         */
         StrategyTradeItem: {
+            /** Bot Id */
             bot_id: string;
+            /** Price */
             price: number;
+            /** Quantity */
             quantity: number;
+            /** Side */
             side: string;
+            /** Status */
             status: string;
+            /** Symbol */
             symbol: string;
+            /** Timestamp */
             timestamp: string;
+            /** Trade Id */
             trade_id: string;
         };
+        /**
+         * StrategyTradesResponse
+         * @description 전략 거래 내역 응답.
+         */
         StrategyTradesResponse: {
+            /** Next Cursor */
             next_cursor?: string | null;
+            /** Trades */
             trades: components["schemas"]["StrategyTradeItem"][];
         };
+        /**
+         * StrategyValidateResponse
+         * @description 전략 검증 응답.
+         */
         StrategyValidateResponse: {
-            /** @default [] */
+            /**
+             * Errors
+             * @default []
+             */
             errors: string[];
+            /** Valid */
             valid: boolean;
-            /** @default [] */
+            /**
+             * Warnings
+             * @default []
+             */
             warnings: string[];
         };
+        /**
+         * TradeItem
+         * @description 거래 기록 아이템.
+         */
         TradeItem: {
+            /**
+             * Account Id
+             * @default
+             */
+            account_id: string;
+            /** Bot Id */
             bot_id: string;
-            created_at: string;
+            /** Price */
             price: number;
+            /** Quantity */
             quantity: number;
+            /** Side */
             side: string;
+            /** Status */
             status: string;
+            /** Symbol */
             symbol: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Trade Id */
             trade_id: string;
         };
+        /**
+         * TradeListResponse
+         * @description 거래 기록 목록 응답.
+         */
         TradeListResponse: {
+            /** Next Cursor */
             next_cursor?: string | null;
+            /** Trades */
             trades: components["schemas"]["TradeItem"][];
         };
+        /**
+         * TransactionItem
+         * @description 자금 변동 이력 아이템.
+         */
         TransactionItem: {
+            /** Amount */
             amount: number;
+            /** Bot Id */
             bot_id?: string | null;
+            /** Created At */
             created_at: string;
-            /** @default  */
+            /**
+             * Description
+             * @default
+             */
             description: string;
+            /** Id */
             id: number;
+            /** Type */
             type: string;
         };
+        /**
+         * TransactionListResponse
+         * @description 자금 변동 이력 응답.
+         */
         TransactionListResponse: {
+            /** Items */
             items: components["schemas"]["TransactionItem"][];
+            /** Total */
             total: number;
         };
+        /**
+         * TreasurySummaryResponse
+         * @description 자금 현황 요약 응답.
+         */
         TreasurySummaryResponse: {
+            /** Account No */
             account_no?: string | null;
+            /** Broker Id */
             broker_id?: string | null;
+            /** Broker Name */
             broker_name?: string | null;
+            /** Broker Short Name */
             broker_short_name?: string | null;
-            /** @default 0.00015 */
+            /**
+             * Commission Rate
+             * @default 0.00015
+             */
             commission_rate: number;
+            /** Exchange */
             exchange?: string | null;
+            /** Is Virtual */
             is_virtual?: boolean | null;
-            /** @default 0.0023 */
+            /**
+             * Sell Tax Rate
+             * @default 0.0023
+             */
             sell_tax_rate: number;
+            /** Synced At */
             synced_at?: string | null;
-            /** @default 0 */
+            /**
+             * Total Allocated
+             * @default 0
+             */
             total_allocated: number;
-            /** @default 0 */
+            /**
+             * Total Balance
+             * @default 0
+             */
             total_balance: number;
-            /** @default 0 */
+            /**
+             * Total Evaluation
+             * @default 0
+             */
             total_evaluation: number;
-            /** @default 0 */
+            /**
+             * Total Profit Loss
+             * @default 0
+             */
             total_profit_loss: number;
-            /** @default 0 */
+            /**
+             * Unallocated
+             * @default 0
+             */
             unallocated: number;
         } & {
             [key: string]: unknown;
         };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+        };
+        /**
+         * WeeklySummaryItem
+         * @description 주별 성과 집계 아이템.
+         */
         WeeklySummaryItem: {
+            /** Realized Pnl */
             realized_pnl: number;
+            /** Trade Count */
             trade_count: number;
+            /** Week End */
             week_end: string;
+            /** Week Label */
             week_label: string;
+            /** Week Start */
             week_start: string;
+            /** Win Rate */
             win_rate: number;
         };
+        /**
+         * WeeklySummaryResponse
+         * @description 주별 성과 집계 응답.
+         */
         WeeklySummaryResponse: {
+            /** Items */
             items: components["schemas"]["WeeklySummaryItem"][];
         };
     };
@@ -1233,51 +3166,84 @@ export type components = {
     headers: never;
     pathItems: never;
 };
+export type AccountActionResponse = components['schemas']['AccountActionResponse'];
+export type AccountCreateRequest = components['schemas']['AccountCreateRequest'];
+export type AccountDetailResponse = components['schemas']['AccountDetailResponse'];
+export type AccountListResponse = components['schemas']['AccountListResponse'];
+export type AccountResponse = components['schemas']['AccountResponse'];
+export type AccountSuspendRequest = components['schemas']['AccountSuspendRequest'];
+export type AccountUpdateRequest = components['schemas']['AccountUpdateRequest'];
+export type ActivateRequest = components['schemas']['ActivateRequest'];
 export type ApprovalDetailResponse = components['schemas']['ApprovalDetailResponse'];
+export type ApprovalItem = components['schemas']['ApprovalItem'];
 export type ApprovalListResponse = components['schemas']['ApprovalListResponse'];
+export type ApprovalStatusUpdate = components['schemas']['ApprovalStatusUpdate'];
 export type ApprovalUpdateResponse = components['schemas']['ApprovalUpdateResponse'];
+export type AuditLogItem = components['schemas']['AuditLogItem'];
 export type AuditLogListResponse = components['schemas']['AuditLogListResponse'];
+export type BalanceSetRequest = components['schemas']['BalanceSetRequest'];
 export type BalanceSetResponse = components['schemas']['BalanceSetResponse'];
+export type BotCreateRequest = components['schemas']['BotCreateRequest'];
 export type BotDetailResponse = components['schemas']['BotDetailResponse'];
+export type BotInfo = components['schemas']['BotInfo'];
 export type BotListResponse = components['schemas']['BotListResponse'];
+export type BotUpdateRequest = components['schemas']['BotUpdateRequest'];
+export type BudgetChangeRequest = components['schemas']['BudgetChangeRequest'];
+export type BudgetItem = components['schemas']['BudgetItem'];
 export type BudgetListResponse = components['schemas']['BudgetListResponse'];
 export type BudgetOperationResponse = components['schemas']['BudgetOperationResponse'];
+export type ConfigItem = components['schemas']['ConfigItem'];
 export type ConfigListResponse = components['schemas']['ConfigListResponse'];
+export type ConfigUpdateRequest = components['schemas']['ConfigUpdateRequest'];
 export type ConfigUpdateResponse = components['schemas']['ConfigUpdateResponse'];
 export type DailySummaryItem = components['schemas']['DailySummaryItem'];
 export type DailySummaryResponse = components['schemas']['DailySummaryResponse'];
+export type DataSchemaResponse = components['schemas']['DataSchemaResponse'];
+export type DatasetDetailResponse = components['schemas']['DatasetDetailResponse'];
 export type DatasetItem = components['schemas']['DatasetItem'];
 export type DatasetListResponse = components['schemas']['DatasetListResponse'];
-export type EquityCurvePoint = components['schemas']['EquityCurvePoint'];
-export type ErrorResponse = components['schemas']['ErrorResponse'];
 export type FeedStatusResponse = components['schemas']['FeedStatusResponse'];
+export type HaltRequest = components['schemas']['HaltRequest'];
 export type HealthResponse = components['schemas']['HealthResponse'];
+export type HttpValidationError = components['schemas']['HTTPValidationError'];
 export type KillSwitchResponse = components['schemas']['KillSwitchResponse'];
 export type LoginRequest = components['schemas']['LoginRequest'];
 export type LoginResponse = components['schemas']['LoginResponse'];
 export type LogoutResponse = components['schemas']['LogoutResponse'];
+export type MemberCreateRequest = components['schemas']['MemberCreateRequest'];
 export type MemberCreateResponse = components['schemas']['MemberCreateResponse'];
 export type MemberDetailResponse = components['schemas']['MemberDetailResponse'];
+export type MemberInfo = components['schemas']['MemberInfo'];
 export type MemberListResponse = components['schemas']['MemberListResponse'];
 export type MemberScopesResponse = components['schemas']['MemberScopesResponse'];
 export type MemberTokenResponse = components['schemas']['MemberTokenResponse'];
 export type MeResponse = components['schemas']['MeResponse'];
 export type MonthlySummaryItem = components['schemas']['MonthlySummaryItem'];
 export type MonthlySummaryResponse = components['schemas']['MonthlySummaryResponse'];
-export type NotificationItem = components['schemas']['NotificationItem'];
-export type NotificationListResponse = components['schemas']['NotificationListResponse'];
 export type OkResponse = components['schemas']['OkResponse'];
+export type PasswordChangeRequest = components['schemas']['PasswordChangeRequest'];
 export type PortfolioHistoryPoint = components['schemas']['PortfolioHistoryPoint'];
 export type PortfolioHistoryResponse = components['schemas']['PortfolioHistoryResponse'];
 export type PortfolioValueResponse = components['schemas']['PortfolioValueResponse'];
 export type ReportDetailResponse = components['schemas']['ReportDetailResponse'];
 export type ReportListItem = components['schemas']['ReportListItem'];
 export type ReportListResponse = components['schemas']['ReportListResponse'];
+export type ReportSchemaResponse = components['schemas']['ReportSchemaResponse'];
+export type ReportSubmitRequest = components['schemas']['ReportSubmitRequest'];
 export type ReportSubmitResponse = components['schemas']['ReportSubmitResponse'];
-export type SeedResetResponse = components['schemas']['SeedResetResponse'];
+export type RuleItem = components['schemas']['RuleItem'];
+export type RuleListResponse = components['schemas']['RuleListResponse'];
+export type RuleUpdateRequest = components['schemas']['RuleUpdateRequest'];
+export type RuleUpdateResponse = components['schemas']['RuleUpdateResponse'];
+export type ScopesUpdateRequest = components['schemas']['ScopesUpdateRequest'];
+export type SnapshotItem = components['schemas']['SnapshotItem'];
+export type SnapshotListResponse = components['schemas']['SnapshotListResponse'];
+export type SnapshotResponse = components['schemas']['SnapshotResponse'];
 export type StatusResponse = components['schemas']['StatusResponse'];
+export type StatusUpdateRequest = components['schemas']['StatusUpdateRequest'];
 export type StorageSummaryResponse = components['schemas']['StorageSummaryResponse'];
 export type StrategyDetailResponse = components['schemas']['StrategyDetailResponse'];
+export type StrategyInfo = components['schemas']['StrategyInfo'];
 export type StrategyListItem = components['schemas']['StrategyListItem'];
 export type StrategyListResponse = components['schemas']['StrategyListResponse'];
 export type StrategyPerformanceResponse = components['schemas']['StrategyPerformanceResponse'];
@@ -1289,15 +3255,309 @@ export type TradeListResponse = components['schemas']['TradeListResponse'];
 export type TransactionItem = components['schemas']['TransactionItem'];
 export type TransactionListResponse = components['schemas']['TransactionListResponse'];
 export type TreasurySummaryResponse = components['schemas']['TreasurySummaryResponse'];
+export type ValidationError = components['schemas']['ValidationError'];
 export type WeeklySummaryItem = components['schemas']['WeeklySummaryItem'];
 export type WeeklySummaryResponse = components['schemas']['WeeklySummaryResponse'];
 export type $defs = Record<string, never>;
 export interface operations {
-    list_approvals: {
+    list_accounts_api_accounts_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_account_api_accounts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_account_api_accounts__account_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_account_api_accounts__account_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_account_api_accounts__account_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_account_api_accounts__account_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_account_rules_api_accounts__account_id__rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_account_rule_api_accounts__account_id__rules__rule_type__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                rule_type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suspend_account_api_accounts__account_id__suspend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AccountSuspendRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_approvals_api_approvals_get: {
         parameters: {
             query?: {
                 limit?: number;
                 offset?: number;
+                search?: string | null;
                 status?: string | null;
                 type?: string | null;
             };
@@ -1316,9 +3576,25 @@ export interface operations {
                     "application/json": components["schemas"]["ApprovalListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Approval service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_approval: {
+    get_approval_api_approvals__approval_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1338,9 +3614,32 @@ export interface operations {
                     "application/json": components["schemas"]["ApprovalDetailResponse"];
                 };
             };
+            /** @description Approval not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Approval service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    update_approval_status: {
+    update_approval_status_api_approvals__approval_id__status_patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -1349,7 +3648,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalStatusUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1360,11 +3663,48 @@ export interface operations {
                     "application/json": components["schemas"]["ApprovalUpdateResponse"];
                 };
             };
+            /** @description Invalid status value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Approval service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    list_audit_logs: {
+    list_audit_logs_api_audit_get: {
         parameters: {
-            query?: never;
+            query?: {
+                action?: string | null;
+                from_date?: string | null;
+                limit?: number;
+                member_id?: string | null;
+                offset?: number;
+                to_date?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1380,9 +3720,25 @@ export interface operations {
                     "application/json": components["schemas"]["AuditLogListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Audit logger not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    login: {
+    login_api_auth_login_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1404,14 +3760,39 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
+            /** @description Invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member or session service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    logout: {
+    logout_api_auth_logout_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ante_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1424,14 +3805,32 @@ export interface operations {
                     "application/json": components["schemas"]["LogoutResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Session service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    me: {
+    me_api_auth_me_get: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                ante_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -1444,11 +3843,35 @@ export interface operations {
                     "application/json": components["schemas"]["MeResponse"];
                 };
             };
+            /** @description Not authenticated or session expired */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member or session service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    list_bots: {
+    list_bots_api_bots_get: {
         parameters: {
             query?: {
+                account_id?: string | null;
                 cursor?: string | null;
                 limit?: number;
             };
@@ -1467,16 +3890,36 @@ export interface operations {
                     "application/json": components["schemas"]["BotListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bot manager not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    create_bot: {
+    create_bot_api_bots_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotCreateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -1487,9 +3930,44 @@ export interface operations {
                     "application/json": components["schemas"]["BotDetailResponse"];
                 };
             };
+            /** @description Strategy loading failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot already exists or conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description strategy_id/strategy_name both missing or budget error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot manager or strategy registry not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_bot: {
+    get_bot_api_bots__bot_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1509,9 +3987,185 @@ export interface operations {
                     "application/json": components["schemas"]["BotDetailResponse"];
                 };
             };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bot manager not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    start_bot: {
+    update_bot_api_bots__bot_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotDetailResponse"];
+                };
+            };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot state conflict (not stopped) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Budget update failed (e.g. insufficient funds) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot manager not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_bot_api_bots__bot_id__delete: {
+        parameters: {
+            query?: {
+                handle_positions?: string;
+            };
+            header?: never;
+            path: {
+                bot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid handle_positions value */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot manager not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_bot_logs_api_bots__bot_id__logs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                bot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Event history store not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_bot_api_bots__bot_id__start_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1531,9 +4185,37 @@ export interface operations {
                     "application/json": components["schemas"]["BotDetailResponse"];
                 };
             };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Account credentials not configured */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot manager not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    stop_bot: {
+    stop_bot_api_bots__bot_id__stop_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1553,9 +4235,39 @@ export interface operations {
                     "application/json": components["schemas"]["BotDetailResponse"];
                 };
             };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bot manager not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    list_configs: {
+    list_configs_api_config_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1573,9 +4285,16 @@ export interface operations {
                     "application/json": components["schemas"]["ConfigListResponse"];
                 };
             };
+            /** @description Config service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    update_config: {
+    update_config_api_config__key__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -1584,7 +4303,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1595,11 +4318,41 @@ export interface operations {
                     "application/json": components["schemas"]["ConfigUpdateResponse"];
                 };
             };
+            /** @description Config key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Config service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    list_datasets: {
+    list_datasets_api_data_datasets_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 데이터 유형 (ohlcv, fundamental, 미지정 시 전체) */
+                data_type?: string | null;
+                limit?: number;
+                offset?: number;
+                symbol?: string | null;
+                timeframe?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1615,9 +4368,102 @@ export interface operations {
                     "application/json": components["schemas"]["DatasetListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    get_feed_status: {
+    get_dataset_detail_api_data_datasets__dataset_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_dataset_api_data_datasets__dataset_id__delete: {
+        parameters: {
+            query?: {
+                /** @description 데이터 유형 (ohlcv, fundamental) */
+                data_type?: string;
+            };
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid dataset_id format */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Dataset not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Data store not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_feed_status_api_data_feed_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1637,7 +4483,39 @@ export interface operations {
             };
         };
     };
-    get_storage_summary: {
+    get_data_schema_api_data_schema_get: {
+        parameters: {
+            query?: {
+                /** @description 데이터 유형 (ohlcv, fundamental) */
+                data_type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSchemaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_storage_summary_api_data_storage_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1657,9 +4535,15 @@ export interface operations {
             };
         };
     };
-    list_members: {
+    list_members_api_members_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+                org?: string | null;
+                status?: string | null;
+                type?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1675,16 +4559,36 @@ export interface operations {
                     "application/json": components["schemas"]["MemberListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    create_member: {
+    create_member_api_members_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberCreateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -1695,9 +4599,39 @@ export interface operations {
                     "application/json": components["schemas"]["MemberCreateResponse"];
                 };
             };
+            /** @description Invalid member data */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_member: {
+    get_member_api_members__member_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1717,9 +4651,32 @@ export interface operations {
                     "application/json": components["schemas"]["MemberDetailResponse"];
                 };
             };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    change_password: {
+    change_password_api_members__member_id__password_patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -1728,7 +4685,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1739,9 +4700,39 @@ export interface operations {
                     "application/json": components["schemas"]["OkResponse"];
                 };
             };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    reactivate_member: {
+    reactivate_member_api_members__member_id__reactivate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1761,9 +4752,39 @@ export interface operations {
                     "application/json": components["schemas"]["MemberDetailResponse"];
                 };
             };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    revoke_member: {
+    revoke_member_api_members__member_id__revoke_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1783,9 +4804,39 @@ export interface operations {
                     "application/json": components["schemas"]["MemberDetailResponse"];
                 };
             };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    rotate_token: {
+    rotate_token_api_members__member_id__rotate_token_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1805,9 +4856,39 @@ export interface operations {
                     "application/json": components["schemas"]["MemberTokenResponse"];
                 };
             };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    update_scopes: {
+    update_scopes_api_members__member_id__scopes_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -1816,7 +4897,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopesUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1827,9 +4912,39 @@ export interface operations {
                     "application/json": components["schemas"]["MemberScopesResponse"];
                 };
             };
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    suspend_member: {
+    suspend_member_api_members__member_id__suspend_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1849,32 +4964,44 @@ export interface operations {
                     "application/json": components["schemas"]["MemberDetailResponse"];
                 };
             };
-        };
-    };
-    list_notifications: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Permission denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Member not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotificationListResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description Member service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
-    get_portfolio_history: {
+    portfolio_history_api_portfolio_history_get: {
         parameters: {
             query?: {
-                period?: string;
+                account_id?: string | null;
+                end_date?: string | null;
+                start_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -1891,11 +5018,29 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioHistoryResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_portfolio_value: {
+    portfolio_value_api_portfolio_value_get: {
         parameters: {
-            query?: never;
+            query?: {
+                account_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1911,11 +5056,31 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioValueResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    list_reports: {
+    list_reports_api_reports_get: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                status?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1931,16 +5096,36 @@ export interface operations {
                     "application/json": components["schemas"]["ReportListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Report store not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    submit_report: {
+    submit_report_api_reports_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportSubmitRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -1951,9 +5136,25 @@ export interface operations {
                     "application/json": components["schemas"]["ReportSubmitResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Report store not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_report: {
+    report_view_api_reports__report_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1973,11 +5174,56 @@ export interface operations {
                     "application/json": components["schemas"]["ReportDetailResponse"];
                 };
             };
+            /** @description Report not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Report store not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    list_strategies: {
+    get_report_schema_api_reports_schema_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportSchemaResponse"];
+                };
+            };
+        };
+    };
+    list_strategies_api_strategies_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1993,9 +5239,25 @@ export interface operations {
                     "application/json": components["schemas"]["StrategyListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Strategy registry not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_strategy: {
+    get_strategy_api_strategies__strategy_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2015,31 +5277,32 @@ export interface operations {
                     "application/json": components["schemas"]["StrategyDetailResponse"];
                 };
             };
-        };
-    };
-    get_strategy_performance: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string;
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StrategyPerformanceResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description Strategy registry not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
-    get_daily_summary: {
+    get_strategy_daily_summary_api_strategies__strategy_id__daily_summary_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2059,9 +5322,32 @@ export interface operations {
                     "application/json": components["schemas"]["DailySummaryResponse"];
                 };
             };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Strategy registry or database not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_monthly_summary: {
+    get_strategy_monthly_summary_api_strategies__strategy_id__monthly_summary_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2081,11 +5367,36 @@ export interface operations {
                     "application/json": components["schemas"]["MonthlySummaryResponse"];
                 };
             };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Strategy registry or database not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_weekly_summary: {
+    get_strategy_performance_api_strategies__strategy_id__performance_get: {
         parameters: {
-            query?: never;
+            query?: {
+                account_id?: string | null;
+            };
             header?: never;
             path: {
                 strategy_id: string;
@@ -2100,12 +5411,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeeklySummaryResponse"];
+                    "application/json": components["schemas"]["StrategyPerformanceResponse"];
+                };
+            };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Strategy registry or database not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_strategy_status_api_strategies__strategy_id__status_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 허용되지 않은 상태 전환 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    get_strategy_trades: {
+    get_strategy_trades_api_strategies__strategy_id__trades_get: {
         parameters: {
             query?: {
                 cursor?: string | null;
@@ -2128,13 +5509,38 @@ export interface operations {
                     "application/json": components["schemas"]["StrategyTradesResponse"];
                 };
             };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Strategy registry or trade service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    validate_strategy: {
+    get_strategy_weekly_summary_api_strategies__strategy_id__weekly_summary_get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                strategy_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -2145,12 +5551,164 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["WeeklySummaryResponse"];
+                };
+            };
+            /** @description Strategy not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Strategy registry or database not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    validate_strategy_api_strategies_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["StrategyValidateResponse"];
+                };
+            };
+            /** @description Path is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Strategy file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    get_health: {
+    activate_api_system_activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Account service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    halt_api_system_halt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HaltRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Account service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    health_check_api_system_health_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2170,27 +5728,7 @@ export interface operations {
             };
         };
     };
-    toggle_kill_switch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KillSwitchResponse"];
-                };
-            };
-        };
-    };
-    get_system_status: {
+    get_system_status_api_system_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2210,9 +5748,15 @@ export interface operations {
             };
         };
     };
-    list_trades: {
+    list_trades_api_trades_get: {
         parameters: {
-            query?: never;
+            query?: {
+                account_id?: string | null;
+                bot_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+                symbol?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2228,11 +5772,29 @@ export interface operations {
                     "application/json": components["schemas"]["TradeListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Trade service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_treasury_summary: {
+    get_summary_api_treasury_get: {
         parameters: {
-            query?: never;
+            query?: {
+                account_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2248,16 +5810,43 @@ export interface operations {
                     "application/json": components["schemas"]["TreasurySummaryResponse"];
                 };
             };
+            /** @description Account not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    set_balance: {
+    set_balance_api_treasury_balance_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BalanceSetRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2268,9 +5857,25 @@ export interface operations {
                     "application/json": components["schemas"]["BalanceSetResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    allocate_budget: {
+    allocate_api_treasury_bots__bot_id__allocate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2279,7 +5884,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetChangeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2290,9 +5899,46 @@ export interface operations {
                     "application/json": components["schemas"]["BudgetOperationResponse"];
                 };
             };
+            /** @description Insufficient funds or invalid amount */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot not stopped */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    deallocate_budget: {
+    deallocate_api_treasury_bots__bot_id__deallocate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2301,7 +5947,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetChangeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2312,9 +5962,46 @@ export interface operations {
                     "application/json": components["schemas"]["BudgetOperationResponse"];
                 };
             };
+            /** @description Insufficient available budget */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bot not stopped */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_budget_list: {
+    list_budgets_api_treasury_budgets_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2332,11 +6019,151 @@ export interface operations {
                     "application/json": components["schemas"]["BudgetListResponse"];
                 };
             };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
-    get_transactions: {
+    list_snapshots_api_treasury_snapshots_get: {
         parameters: {
-            query?: never;
+            query?: {
+                account_id?: string | null;
+                end_date?: string | null;
+                start_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_snapshot_by_date_api_treasury_snapshots__date__get: {
+        parameters: {
+            query?: {
+                account_id?: string | null;
+            };
+            header?: never;
+            path: {
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotResponse"];
+                };
+            };
+            /** @description Snapshot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_latest_snapshot_api_treasury_snapshots_latest_get: {
+        parameters: {
+            query?: {
+                account_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_transactions_api_treasury_transactions_get: {
+        parameters: {
+            query?: {
+                account_id?: string | null;
+                bot_id?: string | null;
+                end_date?: string | null;
+                limit?: number;
+                offset?: number;
+                start_date?: string | null;
+                type?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2351,6 +6178,22 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TransactionListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Treasury not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
