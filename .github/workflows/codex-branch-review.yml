@@ -23,14 +23,162 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      issues: write
       pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Resolve review context
+        id: context
+        env:
+          HEAD_REF: ${{ github.ref_name }}
+        run: |
+          ISSUE_NUMBER="$(python3 scripts/ai_review.py extract-issue --head-ref "$HEAD_REF")"
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "run_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Stop blocked review loop
+        id: loop_guard
+        if: ${{ steps.context.outputs.issue_number != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.context.outputs.issue_number }}
+        run: |
+          if gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' | grep -Fxq 'blocked:review-loop'; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "Review loop is blocked by the 'blocked:review-loop' label." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment review started
+        if: ${{ steps.context.outputs.issue_number != '' && steps.loop_guard.outputs.blocked != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.ref_name }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          ISSUE_NUMBER: ${{ steps.context.outputs.issue_number }}
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+        run: |
+          python3 scripts/ai_review.py render-issue-comment \
+            --stage started \
+            --engine codex \
+            --phase branch \
+            --head-ref "$HEAD_REF" \
+            --head-sha "$HEAD_SHA" \
+            --run-url "$RUN_URL" > "$RUNNER_TEMP/codex-branch-review-started.md"
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/codex-branch-review-started.md"
+
       - name: Run Codex branch review
+        id: review
+        continue-on-error: true
+        if: ${{ steps.loop_guard.outputs.blocked != 'true' }}
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           HEAD_REF: ${{ github.ref_name }}
+          REVIEW_RESULT_PATH: ${{ runner.temp }}/codex-branch-review-result.json
+          REVIEW_SUMMARY_PATH: ${{ runner.temp }}/codex-branch-review-summary.md
         run: scripts/run_ai_review.sh codex branch
+
+      - name: Analyze review loop
+        id: loop
+        if: ${{ always() && steps.context.outputs.issue_number != '' && steps.loop_guard.outputs.blocked != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.context.outputs.issue_number }}
+          RESULT_PATH: ${{ runner.temp }}/codex-branch-review-result.json
+          COMMENTS_PATH: ${{ runner.temp }}/codex-branch-review-comments.json
+          ANALYSIS_PATH: ${{ runner.temp }}/codex-branch-review-analysis.json
+        run: |
+          if [[ ! -f "$RESULT_PATH" ]]; then
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+            echo "failure_count=0" >> "$GITHUB_OUTPUT"
+            echo "same_title_streak=0" >> "$GITHUB_OUTPUT"
+            echo "escalate=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments?per_page=100" > "$COMMENTS_PATH"
+          python3 scripts/ai_review.py analyze-review-loop \
+            --comments "$COMMENTS_PATH" \
+            --input "$RESULT_PATH" \
+            --engine codex \
+            --phase branch \
+            --threshold 5 > "$ANALYSIS_PATH"
+
+          echo "blocked=$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field blocked)" >> "$GITHUB_OUTPUT"
+          echo "failure_count=$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field failure_count)" >> "$GITHUB_OUTPUT"
+          echo "same_title_streak=$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field same_title_streak)" >> "$GITHUB_OUTPUT"
+          echo "escalate=$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field escalate)" >> "$GITHUB_OUTPUT"
+
+      - name: Mark blocked review loop
+        if: ${{ always() && steps.loop.outputs.blocked == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.context.outputs.issue_number }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/labels" \
+            -f name='blocked:review-loop' \
+            -f color='B60205' \
+            -f description='Codex branch review failed 5 times or more' >/dev/null 2>&1 || true
+
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/labels" \
+            -f labels[]='blocked:review-loop' >/dev/null
+
+      - name: Comment review completed
+        if: ${{ always() && steps.context.outputs.issue_number != '' && steps.loop_guard.outputs.blocked != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.ref_name }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          ISSUE_NUMBER: ${{ steps.context.outputs.issue_number }}
+          RESULT_PATH: ${{ runner.temp }}/codex-branch-review-result.json
+          ANALYSIS_PATH: ${{ runner.temp }}/codex-branch-review-analysis.json
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+        run: |
+          if [[ -f "$RESULT_PATH" ]]; then
+            RENDER_ARGS=(
+              --stage completed
+              --engine codex
+              --phase branch
+              --head-ref "$HEAD_REF"
+              --head-sha "$HEAD_SHA"
+              --run-url "$RUN_URL"
+              --input "$RESULT_PATH"
+            )
+            if [[ -f "$ANALYSIS_PATH" ]]; then
+              RENDER_ARGS+=(--analysis "$ANALYSIS_PATH")
+            fi
+            python3 scripts/ai_review.py render-issue-comment "${RENDER_ARGS[@]}" > "$RUNNER_TEMP/codex-branch-review-completed.md"
+          else
+            cat > "$RUNNER_TEMP/codex-branch-review-completed.md" <<EOF
+❌ **Codex 브랜치 리뷰 완료**
+- Verdict: \`FAIL\`
+- 브랜치: \`$HEAD_REF\`
+- HEAD: \`${HEAD_SHA:0:7}\`
+- Summary: 리뷰 결과 파일을 생성하지 못했습니다. Actions 로그를 확인해 주세요.
+- run: $RUN_URL
+EOF
+          fi
+
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/codex-branch-review-completed.md"
+
+      - name: Enforce review verdict
+        if: ${{ always() }}
+        env:
+          APPROVED: ${{ steps.review.outputs.approved }}
+          LOOP_BLOCKED: ${{ steps.loop_guard.outputs.blocked }}
+        run: |
+          if [[ "$LOOP_BLOCKED" == "true" ]]; then
+            exit 1
+          fi
+          if [[ "$APPROVED" != "true" ]]; then
+            exit 1
+          fi

@@ -22,9 +22,11 @@
 ### 2.2 결과
 
 - 상태 체크: `codex-branch-review`
-- 선택 출력:
-  - 이슈 코멘트
-  - 커밋/체크 요약
+- 이슈 코멘트:
+  - Claude Code 리뷰 요청
+  - Codex 브랜치 리뷰 시작 (workflow 자동)
+  - Codex 브랜치 리뷰 완료 + blocking finding / follow-up
+- 커밋/체크 요약
 
 ### 2.3 처리 규칙
 
@@ -33,6 +35,9 @@
 - `failure`:
   - Claude가 같은 브랜치에서 수정 후 재push
 - 같은 SHA에 `failure`가 남아 있는 상태에서 PR을 먼저 열지 않는다
+- 실패 횟수는 이슈 코멘트 기준으로 누적한다.
+- 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호를 이슈 코멘트에 남긴다.
+- 실패가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 추가 Codex 브랜치 리뷰를 중단한다.
 
 ### 2.4 역할
 

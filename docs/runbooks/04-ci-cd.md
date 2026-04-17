@@ -143,6 +143,8 @@ pytest tests/unit/ -v
 | `claude-pr-approve` | 스펙/계약/테스트 누락 | Claude 개발 에이전트 |
 | `codex-pr-approve` | 버그/회귀/설계 위반 | Claude 개발 에이전트 |
 
+`codex-branch-review`는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
+
 ## 6. 설계 적합성 검증 (선택 Gate)
 
 모듈 간 import 방향과 순환 의존을 기계적으로 검사하는 Gate는 계속 도입 후보로 둔다.

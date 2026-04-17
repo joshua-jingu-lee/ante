@@ -28,7 +28,7 @@ mkdir -p "$WORKTREE_ROOT"
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
 | 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
 | 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
-| 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` |
+| 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` + 이슈 코멘트 |
 | 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Refs #이슈`) |
 | 13 (최종 승인/머지) | GitHub automation | Claude/Codex PR 승인 워커 + auto-merge | PR checks |
 
@@ -90,7 +90,15 @@ Agent(
 
 ### Codex 브랜치 리뷰 루프
 
-10. **Codex 사전 리뷰 대기**: 브랜치 push 후 `codex-branch-review` 상태를 확인한다.
+10. **Codex 사전 리뷰 요청 및 대기**: 브랜치 push 직후 Claude가 이슈에 리뷰 요청 코멘트를 남기고, 이후 `codex-branch-review` 상태를 확인한다.
+
+```bash
+gh issue comment #{이슈번호} --body "🤖 **Claude Code 리뷰 요청**
+- 단계: Codex 브랜치 리뷰
+- 브랜치: {브랜치명}
+- HEAD: {SHA}
+- 다음 단계: GitHub Actions가 리뷰를 시작하고, 시작/완료 결과를 이슈 코멘트로 남깁니다."
+```
 
 - `success`:
   - PR 생성 단계로 진행
@@ -106,7 +114,10 @@ while codex-branch-review != success:
   최신 HEAD SHA의 codex-branch-review 재확인
 ```
 
-반복 실패가 3회 이상이면 `blocked`로 전환하고 이슈에 실패 사유를 코멘트로 남긴다.
+- 실패 횟수는 이슈 코멘트 기준으로 누적한다.
+- 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 보고 원인 파악을 우선한다.
+- 반복 실패가 5회 이상이면 `blocked:review-loop` 라벨이 붙고 Codex 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
+- 이 상태에서는 사용자가 개입해 원인을 정리하거나 라벨을 해제하기 전까지 같은 이슈를 계속 밀어붙이지 않는다.
 
 ### PR 생성
 

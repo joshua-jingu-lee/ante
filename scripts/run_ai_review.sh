@@ -80,12 +80,14 @@ from pathlib import Path
 print(json.dumps(json.loads(Path(sys.argv[1]).read_text()), separators=(",", ":")))
 PY
 )"
-  "$CLAUDE_BIN" -p \
+  # Feed the review prompt via stdin. `--add-dir` is variadic, so passing the
+  # prompt positionally after it can be parsed as another directory instead of
+  # the actual print-mode input.
+  printf '%s' "$PROMPT" | "$CLAUDE_BIN" -p \
     --output-format json \
     --json-schema "$CLAUDE_SCHEMA" \
     --allowedTools "Bash(git *) Bash(rg *) Bash(cat *) Bash(sed *) Read Glob Grep" \
-    --add-dir "$WORKSPACE" \
-    "$PROMPT" > "$RAW_PATH"
+    --add-dir "$WORKSPACE" > "$RAW_PATH"
   python3 "$WORKSPACE/scripts/ai_review.py" extract-claude --input "$RAW_PATH" --output "$RESULT_PATH"
 else
   echo "Unknown engine: $ENGINE" >&2
@@ -96,6 +98,14 @@ python3 "$WORKSPACE/scripts/ai_review.py" render \
   --engine "$ENGINE" \
   --phase "$PHASE" \
   --input "$RESULT_PATH" > "$SUMMARY_PATH"
+
+if [[ -n "${REVIEW_RESULT_PATH:-}" ]]; then
+  cp "$RESULT_PATH" "$REVIEW_RESULT_PATH"
+fi
+
+if [[ -n "${REVIEW_SUMMARY_PATH:-}" ]]; then
+  cp "$SUMMARY_PATH" "$REVIEW_SUMMARY_PATH"
+fi
 
 cat "$SUMMARY_PATH"
 
