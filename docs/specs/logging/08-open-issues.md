@@ -2,13 +2,65 @@
 
 > 인덱스: [README.md](README.md) | 호환 문서: [logging.md](logging.md)
 
-# 미결 사항
+본 절은 YAGNI 기준으로 현재 스코프에서 해결할 미결 사항을 추린 결과다. 제외된 항목은 제외 사유와 함께 기록하여, 필요가 실제로 발생하는 시점에 재고할 수 있도록 한다.
+
+# 확정 미결사항
+
+스테이징 환경 1차 도입 범위. 각 항목은 별도 이슈로 발행되어 구현된다.
 
 - [ ] `JsonFormatter` 초기 구현 (`src/ante/core/log/formatter.py`) 및 단위 테스트
 - [ ] `compute_fingerprint()` 구현 및 단위 테스트 (스택에서 `ante.*` 최근 프레임 선택, 폴백 동작)
 - [ ] `setup_logging()` 구현 및 `main.py` 통합, 회귀 테스트 (`ANTE_LOG_JSONL` 미설정 시 기존 동작 유지)
 - [ ] [config/03-design-decisions.md](../config/03-design-decisions.md)에 `ANTE_ENV`, `ANTE_LOG_JSONL` 환경변수 문서화
-- [ ] 주요 에러 경로(`ante.broker.*`, `ante.bot.*`, `ante.web.*`)에 `extra={}` 컨텍스트 필드 점진 보강 — 후속 이슈로 분리
-- [ ] 3일 이후 자동 gzip 압축 정책 구현 방식 결정 (`logging.handlers` 후킹 vs 별도 cron/launchd)
-- [ ] 멀티 프로세스 환경 지원이 필요해지는 시점의 대안(`ConcurrentRotatingFileHandler` 도입 여부) 검토
-- [ ] Fingerprint 규칙 변경 시 기존 GitHub 이슈와의 매칭을 유지하는 마이그레이션 절차
+
+# 스코프 제외 (YAGNI)
+
+요구사항이 실제로 발생하면 해당 시점에 이슈를 발행한다. 지금 스펙에 담지 않는다.
+
+| 항목 | 제외 사유 |
+|---|---|
+| 에러 경로 `extra={}` 컨텍스트 필드 점진 보강 | [06-context-fields.md](06-context-fields.md) §주입 실패에 대한 내성에 원칙이 이미 기술되어 있다. 전체 경로를 미리 목록화하지 않고, 운용 중 필요성이 드러난 경로만 개별 이슈로 처리한다. |
+| 멀티 프로세스 환경 지원 (`ConcurrentRotatingFileHandler`) | [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §동시성에서 단일 프로세스 전제를 명시했다. 멀티 워커 구성은 현재·단기 로드맵에 없다. 필요해지는 시점에 대안을 결정한다. |
+| Fingerprint 규칙 변경 마이그레이션 | 아직 배포 전이며 실제 문제가 관찰되지 않았다. 규칙을 바꿀 사유가 생겼을 때, 그 시점의 기존 이슈 볼륨에 맞춰 절차를 정한다. |
+
+# 경계 판단 필요 — Q1. 자동 gzip 압축 도입 여부
+
+YAGNI 기준으로는 제외지만, 디스크 관리의 사후 대응 비용 때문에 "관례적으로는 포함"하는 영역이다. 의사결정이 필요한 경계선이라 판단되어 아래에 남긴다.
+
+## 문제 정의
+
+30일치 JSONL 파일이 축적될 때 맥미니·홈서버의 디스크 사용량이 의미 있는 수준으로 불어나는가? 된다면 언제 어떤 방식으로 압축할 것인가?
+
+**관찰 데이터 부재**: 현재 로그 볼륨에 대한 실측이 없다. 추정치는 INFO 레벨 기준 하루 10~50MB(월 약 300MB~1.5GB), 디버깅 중이거나 스트림이 활발한 구간은 하루 100MB 이상으로 더 커질 수 있다.
+
+## 해결 방안
+
+| 대안 | 설명 |
+|---|---|
+| **A. 압축 생략 (YAGNI)** | 30일 후 자동 삭제에 맡긴다. 디스크 압박이 실제로 관찰되면 그때 도입한다. |
+| **B. `TimedRotatingFileHandler.rotator` 후킹** | `handler.rotator = _gzip_rotator` 5라인으로 rollover 시점에 자동 `.gz` 변환. 외부 의존성 없음. |
+| **C. 외부 cron/launchd** | `find logs -mtime +3 -name "*.jsonl" -exec gzip {} \;`을 매일 실행. 환경별 스케줄러 필요. |
+
+## 장단점
+
+| | A. 생략 | B. rotator 후킹 | C. 외부 cron |
+|---|---|---|---|
+| 초기 구현 비용 | 0 | 낮음 (5라인) | 중간 (환경별 plist/crontab) |
+| 디스크 절약 효과 | 없음 | 즉각 (회전 시점) | 1일 이상 지연 |
+| Python 프로세스 내 완결성 | — | 있음 | 없음 (스케줄러 분리) |
+| 환경 의존성 | 없음 | 없음 | 있음 (macOS launchd / Linux systemd) |
+| 실패 시 영향 | 없음 | 비압축 파일이 남음 | 로깅과 분리되어 안전 |
+| 나중 도입 용이성 | — | 매우 쉬움 | 보통 |
+
+## 추천
+
+**A (현재 스펙) 유지.** 근거:
+
+1. 실측 데이터 없이 "관례적으로 필요하지 않을까"로 선도입하는 것은 YAGNI 위반이다.
+2. 30일 자동 삭제라는 보호막이 이미 있어 무제한 축적되지 않는다.
+3. 나중에 필요해지면 B를 별도 이슈로 도입하는 비용이 매우 낮다 (5라인).
+4. 맥미니의 디스크 여유가 통상 수백 GB 이상이므로 월 1~3GB 수준은 즉각적 문제가 아니다.
+
+## 확정 시 후속 조치
+
+A로 확정하는 경우 [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §파일 경로와 회전 표의 "3일 이후 | gzip 압축" 행을 제거하고, [01-overview.md](01-overview.md)의 "회전 정책" 주요 기능 설명에서도 "3일 이후 gzip 압축"을 삭제해야 한다.
