@@ -7,6 +7,7 @@ import pytest
 
 from ante.core.database import Database
 from ante.db.migrations import (
+    MIGRATIONS,
     _accepts_data_path,
     ensure_schema_version_table,
     get_applied_seqs,
@@ -154,7 +155,6 @@ class TestParquetMigrationIntegration:
 
     async def test_v002_registered_in_migrations(self):
         """v002_parquet_migration이 MIGRATIONS 리스트에 등록되어 있다."""
-        from ante.db.migrations import MIGRATIONS
 
         seqs = [seq for seq, _, _ in MIGRATIONS]
         fns = [fn for _, _, fn in MIGRATIONS]
@@ -189,3 +189,84 @@ class TestAcceptsDataPath:
     def test_v002_accepts_data_path(self):
         """v002_parquet_migration은 data_path 파라미터를 받는다."""
         assert _accepts_data_path(v002_parquet_migration.migrate)
+
+
+class TestMigrationAutoBackup:
+    """마이그레이션 실행 전 자동 DB 백업 테스트 (Refs #1097)."""
+
+    async def test_backup_called_when_pending_exists(
+        self, db: Database, monkeypatch: pytest.MonkeyPatch
+    ):
+        """미적용 마이그레이션이 있을 때 backup_db가 한 번 호출된다."""
+        calls: list[tuple[Path, str]] = []
+
+        def fake_backup(src_path: Path, version: str) -> Path:
+            calls.append((src_path, version))
+            return src_path.parent / f"{src_path.name}.bak.v{version}"
+
+        monkeypatch.setattr("ante.db.migrations.backup_db", fake_backup)
+
+        await run_migrations(db)
+
+        assert len(calls) == 1
+        src, version = calls[0]
+        # 첫 번째 미적용 마이그레이션의 version이 사용된다.
+        first_pending_version = sorted(MIGRATIONS, key=lambda x: x[0])[0][1]
+        assert version == first_pending_version
+        assert src.name == "test.db"
+
+    async def test_backup_not_called_when_no_pending(
+        self, db: Database, monkeypatch: pytest.MonkeyPatch
+    ):
+        """모든 마이그레이션이 이미 적용됐으면 backup_db가 호출되지 않는다."""
+        # 먼저 한 번 전부 적용
+        await run_migrations(db)
+
+        calls: list[tuple[Path, str]] = []
+
+        def fake_backup(src_path: Path, version: str) -> Path:
+            calls.append((src_path, version))
+            return src_path
+
+        monkeypatch.setattr("ante.db.migrations.backup_db", fake_backup)
+
+        result = await run_migrations(db)
+
+        assert result == []
+        assert calls == []
+
+    async def test_backup_called_only_once_even_with_multiple_pending(
+        self, db: Database, monkeypatch: pytest.MonkeyPatch
+    ):
+        """미적용 마이그레이션이 여러 건이어도 backup_db는 1회만 호출된다."""
+        calls: list[tuple[Path, str]] = []
+
+        def fake_backup(src_path: Path, version: str) -> Path:
+            calls.append((src_path, version))
+            return src_path.parent / f"{src_path.name}.bak.v{version}"
+
+        monkeypatch.setattr("ante.db.migrations.backup_db", fake_backup)
+
+        result = await run_migrations(db)
+
+        # 여러 마이그레이션이 적용됐어도
+        assert len(result) >= 2
+        # 백업은 1회만
+        assert len(calls) == 1
+
+    async def test_backup_failure_propagates(
+        self, db: Database, monkeypatch: pytest.MonkeyPatch
+    ):
+        """backup_db에서 예외가 발생하면 마이그레이션이 중단된다."""
+
+        def failing_backup(src_path: Path, version: str) -> Path:
+            raise FileNotFoundError("원본 DB 없음")
+
+        monkeypatch.setattr("ante.db.migrations.backup_db", failing_backup)
+
+        with pytest.raises(FileNotFoundError):
+            await run_migrations(db)
+
+        # 예외 발생 시 마이그레이션이 적용되지 않아야 한다.
+        applied = await get_applied_seqs(db)
+        assert applied == set()
