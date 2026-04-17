@@ -24,15 +24,14 @@
 | 회전 시점 | `when="midnight", utc=False` (Asia/Seoul 자정 기준) |
 | 회전 방식 | 현재 파일을 날짜 suffix 붙여 rename, 새 파일 생성 |
 | 보관 | 30일 (`backupCount=30`) |
-| 3일 이후 | gzip 압축 (`*.jsonl.gz`) — 후처리 cron 또는 rotator hook |
 | 디렉토리 | 컨테이너 `/app/logs` (named volume 또는 bind mount) |
 | 퍼미션 | 0644 (기본) |
 
 ## 회전 동작 세부
 
 1. 자정에 `ante-2026-04-17.jsonl`이 rename되어 새 `ante-2026-04-18.jsonl`이 열린다.
-2. 30일 지난 파일(`ante-2026-03-18.jsonl*`)은 자동 삭제된다.
-3. 3일 경과된 파일은 별도 후처리로 `.gz`로 압축된다. 압축 후에도 `backupCount` 기준에는 포함된다.
+2. 30일 지난 파일(`ante-2026-03-18.jsonl`)은 자동 삭제된다.
+3. 압축은 수행하지 않는다. 디스크 압박이 실측되면 후속 반복에서 `TimedRotatingFileHandler.rotator` 후킹으로 도입한다. 자세한 판단 이력은 [08-open-issues.md](08-open-issues.md) §스코프 제외 참조.
 
 ## 실패 처리
 
