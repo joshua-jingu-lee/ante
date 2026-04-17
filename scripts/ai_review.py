@@ -79,14 +79,24 @@ def extract_issue(args: argparse.Namespace) -> int:
 
 def extract_claude(args: argparse.Namespace) -> int:
     payload = json.loads(Path(args.input).read_text())
-    result_text = payload.get("result")
-    if not isinstance(result_text, str):
-        raise SystemExit("Claude output did not include a string 'result' field.")
 
-    try:
-        parsed = json.loads(result_text)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"Claude result was not valid JSON: {exc}") from exc
+    # Claude CLI 2.x returns schema-validated JSON under 'structured_output'
+    # when --json-schema is used. Older CLI versions embedded the JSON string
+    # in 'result'. Support both.
+    structured = payload.get("structured_output")
+    if isinstance(structured, dict):
+        parsed = structured
+    else:
+        result_text = payload.get("result")
+        if not isinstance(result_text, str) or not result_text.strip():
+            raise SystemExit(
+                "Claude output did not include structured_output "
+                "or a non-empty 'result' string."
+            )
+        try:
+            parsed = json.loads(result_text)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Claude result was not valid JSON: {exc}") from exc
 
     Path(args.output).write_text(json.dumps(parsed, indent=2) + "\n")
     return 0
