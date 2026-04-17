@@ -4,12 +4,12 @@
 
 > 참조: [architecture.md](../../architecture/README.md) 웹 대시보드, D-008, [cli.md](../cli/cli.md) CLI 인터페이스
 
-이 문서는 분할된 `web-api` 스펙의 호환용 개요 문서다.
-전체 인덱스는 [README.md](README.md)를, 세부 내용은 아래 하위 문서를 참조한다.
+이 디렉토리는 300줄을 넘던 모듈 스펙을 주제별 문서로 분할해 관리한다.
+기존 참조 호환을 위해 [web-api.md](web-api.md)를 개요 문서로 유지한다.
 
 | 문서 | 내용 |
 |---|---|
-| [README.md](README.md) | 분할 인덱스 |
+| [web-api.md](web-api.md) | 호환용 개요 문서 및 기존 섹션 앵커 |
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-design-decisions.md](02-design-decisions.md) | FastAPI 구성·라우터·인증·CORS·OpenAPI 문서화 |
 | [03-session-service.md](03-session-service.md) | SessionService — 서버사이드 세션 관리 |

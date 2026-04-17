@@ -29,4 +29,4 @@
 | `strategy` | [README.md](strategy/README.md) | 전략 인터페이스, 레지스트리, 외부 신호 |
 | `trade` | [README.md](trade/README.md) | 주문, 체결, 포지션, reconciliation |
 | `treasury` | [README.md](treasury/README.md) | 예산, 가상 현금, 자금 스냅샷 |
-| `web-api` | [web-api/web-api.md](web-api/web-api.md) | 대시보드 API, 인증, 라우트 계약 |
+| `web-api` | [README.md](web-api/README.md) | 대시보드 API, 인증, 라우트 계약 |
