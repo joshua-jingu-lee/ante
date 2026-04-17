@@ -130,7 +130,9 @@ main
 ### 5.1 재시도 규칙
 
 - 동일 head SHA에 대해 같은 실패를 반복 판정하지 않는다. 새 커밋이 push되어야 새 시도로 본다.
-- 동일 유형의 blocking failure가 3회 이상 반복되면 `blocked` 상태로 전환하고 사용자에게 에스컬레이션한다.
+- 이슈 코멘트에 Codex 브랜치 리뷰 실패 횟수를 누적한다.
+- 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
+- 동일 유형의 blocking failure가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 - Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.
 
 ## 6. 리뷰와 머지 게이트

@@ -179,7 +179,7 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
   │
   ├── post-merge automation → 체크박스 갱신 + issue close
   │
-  └── 3회 실패 시 → 'blocked' 라벨 + 에스컬레이션
+  └── 5회 실패 시 → `blocked:review-loop` 라벨 + 에스컬레이션
 ```
 
 ### 이슈 close 규칙
