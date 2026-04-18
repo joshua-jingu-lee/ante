@@ -273,3 +273,12 @@ WebAPI -> DynamicConfigService.update(key, value)
 - `system.toml`이 아예 없어도 기본값으로 시스템 시작 가능 (비밀값 제외)
 
 구현: `src/ante/config/defaults.py` 참조
+
+## §3 환경변수 (logging 관련)
+
+| 환경변수 | 값 | 용도 | 기본값 |
+|---|---|---|---|
+| `ANTE_ENV` | `production` / `staging` / `qa` | JSONL 로그 레코드의 `env` 필드로 주입되어 환경 식별 | `production` |
+| `ANTE_LOG_JSONL` | `1` / 미설정 | JSONL 파일 핸들러 활성화 게이트. 미설정 시 stdout 평문 핸들러만 동작 | 미설정 |
+
+**세부 스펙**: [docs/specs/logging/](docs/specs/logging/) (JSON 스키마, 핸들러 구성, 회전 정책, Fingerprint 규칙 등)
