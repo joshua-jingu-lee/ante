@@ -406,6 +406,50 @@ async def test_get_broker_broker_config_default(service):
 
 
 @pytest.mark.asyncio
+async def test_update_credentials_invalidates_broker_cache(service):
+    """credentials 수정 시 캐시된 브로커를 무효화하여 새 값을 즉시 반영한다.
+
+    회귀 방지: health check가 미리 get_broker를 호출해 캐시를 만든 뒤에도
+    이후 update()가 적용되어야 한다.
+    """
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    assert broker_before.config.get("app_key") == "test"
+
+    await service.update("test", credentials={"app_key": "new", "app_secret": "new"})
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is not broker_before
+    assert broker_after.config.get("app_key") == "new"
+
+
+@pytest.mark.asyncio
+async def test_update_broker_config_invalidates_broker_cache(service):
+    """broker_config 수정 시 캐시된 브로커를 무효화한다."""
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    assert "is_paper" not in broker_before.config
+
+    await service.update("test", broker_config={"is_paper": True})
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is not broker_before
+    assert broker_after.config.get("is_paper") is True
+
+
+@pytest.mark.asyncio
+async def test_update_non_broker_fields_preserves_broker_cache(service):
+    """브로커와 무관한 필드(name 등) 수정 시 캐시는 유지된다."""
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+
+    await service.update("test", name="renamed")
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is broker_before
+
+
+@pytest.mark.asyncio
 async def test_create_account_with_broker_config(service):
     """생성 시 broker_config가 DB에 저장/로드."""
     account = _make_account(broker_config={"is_paper": True, "hts_id": "myid"})

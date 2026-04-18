@@ -272,6 +272,8 @@ class AccountService:
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
+        broker_invalidating = {"credentials", "broker_config"}
+        invalidate_broker = bool(set(fields.keys()) & broker_invalidating)
         for key, value in fields.items():
             if key not in updatable:
                 continue
@@ -307,6 +309,8 @@ class AccountService:
         )
 
         self._accounts[account_id] = account
+        if invalidate_broker:
+            self._brokers.pop(account_id, None)
         logger.info("계좌 수정: %s", account_id)
         return account
 
