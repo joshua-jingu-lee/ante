@@ -148,10 +148,27 @@ async def create_account(
     # 브로커 어댑터 인스턴스 생성 가능 여부 검증
     # BROKER_REGISTRY에 미등록된 타입은 생성 직후 롤백
     try:
-        await account_service.get_broker(created.account_id)
+        broker = await account_service.get_broker(created.account_id)
     except InvalidBrokerTypeError as e:
         await account_service.delete(created.account_id, deleted_by="system")
         raise HTTPException(status_code=400, detail=str(e))
+
+    # 런타임 계좌 추가 직후 /api/system/health와 APIGateway 호출이 즉시
+    # 동작하도록 새 브로커를 connect한다. 부팅 시 _init_gateway와 동일한
+    # best-effort 정책 — connect 실패는 계좌 자체를 롤백하지 않고 경고만
+    # 로그에 남긴다. 실패 시 /health가 broker=false로 떨어져 운영자가
+    # 자격증명/설정을 교정한 뒤 재시도할 수 있게 한다. 이 connect 호출이
+    # 없으면 신규 계좌가 추가된 인스턴스의 /health가 재시작 전까지 영구적
+    # 으로 unhealthy가 되는 회귀가 발생한다.
+    try:
+        await broker.connect()
+    except Exception:
+        logger.warning(
+            "신규 계좌 브로커 connect 실패: account=%s — /health가 "
+            "broker=false를 보고할 수 있습니다.",
+            created.account_id,
+            exc_info=True,
+        )
 
     if audit_logger:
         await audit_logger.log(
