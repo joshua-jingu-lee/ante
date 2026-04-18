@@ -94,10 +94,23 @@ class TestSystemResponseModels:
         assert model.halt_reason == "긴급 중단"
 
     def test_health_response(self):
-        """GET /api/system/health."""
-        data = {"ok": True}
+        """GET /api/system/health.
+
+        `ok`와 `checks`는 모두 필수 필드 (스펙 SSOT).
+        """
+        from pydantic import ValidationError
+
+        data = {"ok": True, "checks": {"db": True, "broker": True}}
         model = HealthResponse.model_validate(data)
         assert model.ok is True
+        assert model.checks == {"db": True, "broker": True}
+
+        # 필수 필드(checks) 누락 시 ValidationError.
+        with pytest.raises(ValidationError):
+            HealthResponse.model_validate({"ok": True})
+        # 필수 필드(ok) 누락 시 ValidationError.
+        with pytest.raises(ValidationError):
+            HealthResponse.model_validate({"checks": {"db": True, "broker": True}})
 
     def test_kill_switch_response(self):
         """POST /api/system/kill-switch."""
@@ -1100,7 +1113,7 @@ class TestExtraAllowModels:
         "model_cls,base_data",
         [
             (StatusResponse, {"status": "running"}),
-            (HealthResponse, {"ok": True}),
+            (HealthResponse, {"ok": True, "checks": {"db": True, "broker": True}}),
             (BotListResponse, {"bots": []}),
         ],
         ids=["StatusResponse", "HealthResponse", "BotListResponse"],

@@ -50,3 +50,4 @@
 - 1.0 범위의 `checks`는 `db`, `broker`로 제한한다. `stream`, `treasury` 등은 운용 중 필요성이 실증되면 후속 이슈에서 확장한다 (YAGNI).
 - 계좌 0개 상태에서 `broker=true`인 이유: 초기 설정 단계나 계좌가 일시적으로 비어있는 상태를 "브로커 불가"로 판정하지 않기 위함이다.
 - `checks` 키 집합 확장은 기존 응답과 하위 호환이다 (소비자는 존재하는 키만 확인).
+- 런타임 계좌 생성 경로(`POST /api/accounts`)는 새 브로커 어댑터 생성 후 `connect()`까지 호출한다. 그렇지 않으면 부팅 시 `_init_gateway`의 connect 루프를 타지 않은 신규 계좌 때문에 `/health`가 재시작 전까지 `broker=false`로 고정되는 회귀가 발생한다. `connect()` 실패는 best-effort로 처리해 계좌 레코드 자체는 유지하고 경고만 로그에 남긴다.

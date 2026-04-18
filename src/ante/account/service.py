@@ -15,6 +15,7 @@ from ante.account.errors import (
     AccountDeletedException,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
     MissingCredentialsError,
@@ -272,6 +273,13 @@ class AccountService:
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
+        broker_invalidating = {
+            "credentials",
+            "broker_config",
+            "buy_commission_rate",
+            "sell_commission_rate",
+        }
+        invalidate_broker = bool(set(fields.keys()) & broker_invalidating)
         for key, value in fields.items():
             if key not in updatable:
                 continue
@@ -307,8 +315,72 @@ class AccountService:
         )
 
         self._accounts[account_id] = account
+        if invalidate_broker:
+            await self._reconnect_broker(account_id)
         logger.info("계좌 수정: %s", account_id)
         return account
+
+    async def _reconnect_broker(self, account_id: str) -> None:
+        """새 브로커 어댑터를 생성·연결한 뒤에만 캐시를 교체한다.
+
+        update()에서 credentials/broker_config/수수료율 등 브로커 재생성이
+        필요한 필드가 바뀐 직후 호출된다.
+
+        캐시가 비어 있으면 아무 것도 하지 않는다. 재연결은 이미 런타임에
+        생성돼 있는 어댑터를 새 설정으로 교체하는 작업이므로, 캐시 부재
+        시점(예: 부팅 중 레거시 is_paper 마이그레이션처럼 아직 `get_broker()`가
+        불린 적 없는 구간)에는 의미가 없고, 다음 `get_broker()` 호출이 새
+        설정으로 lazy init한다.
+
+        실패 의미론:
+        - 새 어댑터 생성(`_build_broker_adapter`) 실패 → 캐시는 기존 브로커를
+          그대로 유지하고, `BrokerReconnectFailedError`를 올려 update() 호출자가
+          DB는 갱신됐으나 런타임 브로커는 구 설정임을 인지하게 한다.
+        - 새 어댑터 connect() 실패 → 동일하게 기존 캐시를 보존하고
+          `BrokerReconnectFailedError`를 올린다. 캐시에 `is_connected=False`인
+          stale 어댑터가 남아 후속 gateway 호출을 계속 깨뜨리는 회귀를 막는다.
+        - 새 어댑터가 성공적으로 connect된 뒤에야 캐시를 원자적으로 교체한다.
+
+        **이전 어댑터는 의도적으로 disconnect하지 않는다.** `ReconcileScheduler`나
+        `Treasury.start_sync()` 같은 장기 실행 consumer가 시작 시점에 주입받은
+        BrokerAdapter 참조를 내부에 고정해서 사용하기 때문이다. 새 어댑터로
+        캐시를 교체하면 `AccountService.get_broker()` / `APIGateway` 경로는
+        즉시 새 설정을 사용하지만, 이미 시작된 consumer는 참조를 통해 구
+        어댑터를 계속 사용한다. 구 어댑터를 세션 레벨까지 끊어버리면 주기
+        대사/잔고 동기화가 바로 깨지므로, 구 어댑터는 자연스러운 GC와 서비스
+        재시작 시점까지 살려둔다. consumer에 새 어댑터를 주입하는 이벤트
+        기반 경로는 후속 작업으로 분리한다 (#1100의 범위를 넘어선다).
+        """
+        if account_id not in self._brokers:
+            return
+
+        try:
+            new_broker = await self._build_broker_adapter(account_id)
+        except Exception as exc:
+            logger.error(
+                "브로커 어댑터 생성 실패: account=%s — 기존 캐시를 유지합니다.",
+                account_id,
+                exc_info=True,
+            )
+            raise BrokerReconnectFailedError(
+                f"계좌 '{account_id}'의 새 브로커 어댑터 생성에 실패했습니다."
+            ) from exc
+
+        try:
+            await new_broker.connect()
+        except Exception as exc:
+            logger.error(
+                "브로커 재연결 실패: account=%s — 기존 캐시를 유지합니다.",
+                account_id,
+                exc_info=True,
+            )
+            raise BrokerReconnectFailedError(
+                f"계좌 '{account_id}'의 새 브로커 connect()에 실패했습니다."
+            ) from exc
+
+        # connect 성공 후에만 캐시를 원자적으로 교체한다.
+        # 이전 어댑터는 의도적으로 disconnect하지 않는다 (docstring 참고).
+        self._brokers[account_id] = new_broker
 
     # ── 상태 전이 ──────────────────────────────────────
 
@@ -478,6 +550,17 @@ class AccountService:
         if account_id in self._brokers:
             return self._brokers[account_id]
 
+        broker = await self._build_broker_adapter(account_id)
+        self._brokers[account_id] = broker
+        return broker
+
+    async def _build_broker_adapter(self, account_id: str) -> BrokerAdapter:
+        """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음).
+
+        `get_broker()`의 최초 생성 경로와 `_reconnect_broker()`의 재생성
+        경로가 공유한다. 캐시 쓰기는 호출자가 책임진다 — 특히 재연결은
+        connect() 성공을 확인한 뒤에 캐시를 교체한다.
+        """
         _register_brokers()
 
         account = await self.get(account_id)
@@ -498,7 +581,6 @@ class AccountService:
         }
 
         broker = broker_cls(config)
-        self._brokers[account_id] = broker
         logger.info(
             "브로커 인스턴스 생성: %s (type=%s)",
             account_id,

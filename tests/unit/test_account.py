@@ -9,6 +9,7 @@ from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
     AccountNotFoundError,
+    BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
     MissingCredentialsError,
@@ -403,6 +404,231 @@ async def test_get_broker_broker_config_default(service):
     await service.create(_make_account())
     broker = await service.get_broker("test")
     assert "is_paper" not in broker.config
+
+
+@pytest.mark.asyncio
+async def test_update_credentials_invalidates_broker_cache(service):
+    """credentials 수정 시 캐시된 브로커를 무효화하여 새 값을 즉시 반영한다.
+
+    회귀 방지: health check가 미리 get_broker를 호출해 캐시를 만든 뒤에도
+    이후 update()가 적용되어야 한다. 새로 생성된 어댑터는 connect()까지
+    수행되어야 이후 호출에서 즉시 사용 가능하다.
+    """
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    await broker_before.connect()
+    assert broker_before.config.get("app_key") == "test"
+    assert broker_before.is_connected is True
+
+    await service.update("test", credentials={"app_key": "new", "app_secret": "new"})
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is not broker_before
+    assert broker_after.config.get("app_key") == "new"
+    # 새 어댑터는 재연결되어 즉시 사용 가능해야 한다.
+    assert broker_after.is_connected is True
+    # 이전 어댑터는 장기 실행 consumer가 참조하고 있을 수 있으므로
+    # 의도적으로 disconnect하지 않는다 (spec: 04-account-service.md 참고).
+    assert broker_before.is_connected is True
+
+
+@pytest.mark.asyncio
+async def test_update_broker_config_invalidates_broker_cache(service):
+    """broker_config 수정 시 캐시된 브로커를 무효화하고 재연결한다."""
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    await broker_before.connect()
+    assert "is_paper" not in broker_before.config
+
+    await service.update("test", broker_config={"is_paper": True})
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is not broker_before
+    assert broker_after.config.get("is_paper") is True
+    assert broker_after.is_connected is True
+    # 이전 어댑터는 의도적으로 disconnect하지 않는다 — 장기 실행 consumer
+    # 회귀 방지.
+    assert broker_before.is_connected is True
+
+
+@pytest.mark.asyncio
+async def test_update_commission_rate_invalidates_broker_cache(service):
+    """수수료율 수정 시 캐시된 브로커를 무효화해 새 수수료가 즉시 반영된다.
+
+    회귀 방지: 브로커 어댑터는 생성 시점에 수수료율을 고정하므로,
+    update() 후에도 캐시를 유지하면 이후 체결/수수료 계산이 계속 이전
+    값으로 수행된다.
+    """
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    await broker_before.connect()
+    assert float(broker_before.config.get("buy_commission_rate", 0.0)) == 0.0
+
+    await service.update(
+        "test",
+        buy_commission_rate=Decimal("0.0015"),
+        sell_commission_rate=Decimal("0.0025"),
+    )
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is not broker_before
+    assert float(broker_after.config.get("buy_commission_rate")) == pytest.approx(
+        0.0015
+    )
+    assert float(broker_after.config.get("sell_commission_rate")) == pytest.approx(
+        0.0025
+    )
+    assert broker_after.is_connected is True
+
+
+@pytest.mark.asyncio
+async def test_update_non_broker_fields_preserves_broker_cache(service):
+    """브로커와 무관한 필드(name 등) 수정 시 캐시는 유지된다."""
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+
+    await service.update("test", name="renamed")
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is broker_before
+
+
+@pytest.mark.asyncio
+async def test_update_does_not_disconnect_broker_held_by_long_running_consumer(service):
+    """재연결 시 장기 실행 consumer가 붙잡은 기존 어댑터를 끊지 않는다.
+
+    회귀 방지: ReconcileScheduler / Treasury.start_sync() 같은 장기 실행
+    consumer는 시작 시점에 주입받은 BrokerAdapter 객체를 내부에 고정해
+    계속 사용한다. credentials/broker_config 업데이트가 성공한 직후 기존
+    어댑터를 disconnect하면 consumer가 붙잡은 세션이 바로 닫혀 주기 대사와
+    잔고 동기화가 깨진다. 본 테스트는 consumer가 보유한 레퍼런스가 update
+    이후에도 여전히 연결 상태를 유지하고, 실제 broker operation을 계속
+    수행할 수 있음을 검증한다.
+    """
+    await service.create(_make_account())
+    held_by_consumer = await service.get_broker("test")
+    await held_by_consumer.connect()
+    assert held_by_consumer.is_connected is True
+
+    # consumer는 참조를 붙잡고 있으면서 주기적으로 broker operation을 호출한다.
+    baseline_balance = await held_by_consumer.get_account_balance()
+    assert isinstance(baseline_balance, dict)
+
+    # credentials 업데이트 — 캐시는 새 어댑터로 교체되지만 consumer의 참조는
+    # 끊기면 안 된다.
+    await service.update(
+        "test", credentials={"app_key": "rotated", "app_secret": "rotated"}
+    )
+
+    # consumer가 붙잡은 어댑터는 여전히 연결된 상태로 동작해야 한다.
+    assert held_by_consumer.is_connected is True
+    post_update_balance = await held_by_consumer.get_account_balance()
+    assert isinstance(post_update_balance, dict)
+
+    # 새로 get_broker를 호출한 경로(APIGateway 등)는 교체된 어댑터를 받는다.
+    cached_now = await service.get_broker("test")
+    assert cached_now is not held_by_consumer
+    assert cached_now.is_connected is True
+    assert cached_now.config.get("app_key") == "rotated"
+
+
+@pytest.mark.asyncio
+async def test_update_without_cached_broker_is_noop(service):
+    """캐시에 어댑터가 없으면 broker_invalidating 필드 수정도 오류 없이 통과한다.
+
+    회귀 방지: 부팅 중 레거시 is_paper 마이그레이션처럼, 아직 get_broker()가
+    한 번도 불리지 않은 시점에 update(broker_config=...)가 호출되는 경우가
+    있다. 재연결은 이미 생성돼 있는 어댑터를 교체하는 작업이므로 캐시
+    부재 시점에는 의미가 없어야 하며, update는 DB 반영만 하고 조용히
+    통과해야 한다. 이후 get_broker()가 새 설정으로 lazy init한다.
+    """
+    await service.create(_make_account())
+    assert "test" not in service._brokers  # 아직 get_broker 호출 전
+
+    # broker_config 변경 — 캐시가 비어 있어 재연결은 noop이어야 한다
+    await service.update("test", broker_config={"is_paper": True})
+
+    account = await service.get("test")
+    assert account.broker_config == {"is_paper": True}
+    # 캐시는 여전히 비어 있어야 한다 (lazy init은 이후 get_broker가 담당)
+    assert "test" not in service._brokers
+
+    # lazy init 후 새 설정이 반영되어야 한다
+    broker = await service.get_broker("test")
+    assert broker.config.get("is_paper") is True
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_cache_when_new_broker_connect_fails(
+    service, monkeypatch
+):
+    """새 브로커 connect 실패 시 기존 캐시를 보존하고 예외를 전파한다.
+
+    회귀 방지: 일시적 인증/네트워크 오류로 새 어댑터 connect가 실패해도,
+    캐시에 `is_connected=False`인 stale 어댑터가 남아 후속 gateway 호출이
+    연쇄적으로 깨지는 상황을 차단한다. 기존 캐시(이전 설정으로 연결된
+    브로커)는 그대로 유지되며, update 호출자는 BrokerReconnectFailedError를
+    받는다. DB에는 새 설정이 이미 반영된 상태다.
+    """
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    await broker_before.connect()
+    assert broker_before.is_connected is True
+
+    # 새 어댑터의 connect만 실패하도록 강제
+    from ante.broker.test import TestBrokerAdapter
+
+    async def fail_connect(self):  # noqa: ANN001
+        raise RuntimeError("connect 실패 — 시뮬레이션")
+
+    monkeypatch.setattr(TestBrokerAdapter, "connect", fail_connect)
+
+    with pytest.raises(BrokerReconnectFailedError):
+        await service.update(
+            "test", credentials={"app_key": "new", "app_secret": "new"}
+        )
+
+    # 캐시는 기존 브로커를 그대로 유지해야 한다
+    cached = await service.get_broker("test")
+    assert cached is broker_before
+    assert cached.is_connected is True
+
+    # DB에는 새 설정이 반영되어 있음 (재시도 시 새 credentials로 생성됨)
+    account = await service.get("test")
+    assert account.credentials == {"app_key": "new", "app_secret": "new"}
+
+
+@pytest.mark.asyncio
+async def test_broker_operations_work_after_credentials_update(service):
+    """health check가 브로커를 캐시한 뒤 credentials 업데이트가 즉시 반영된다.
+
+    회귀 시나리오: 헬스체크가 주기적으로 get_broker를 호출해 어댑터를 미리
+    캐시한 상태에서 사용자가 credentials를 변경해도, 이후 gateway 호출
+    경로(get_broker → broker 메서드)가 새 설정의 연결된 어댑터로 동작해야 한다.
+    AccountService.update가 단순히 캐시를 pop만 하고 재연결하지 않으면
+    APIGateway는 is_connected=False 상태의 새 어댑터를 받아 실제 호출이
+    깨진다 — 본 테스트는 그 회귀를 방지한다.
+    """
+    await service.create(_make_account())
+
+    # 1) health check 경로: 미리 get_broker를 호출해 캐시 생성
+    pre_broker = await service.get_broker("test")
+    await pre_broker.connect()
+    assert pre_broker.is_connected is True
+
+    # 2) 운영 중 credentials 변경
+    await service.update(
+        "test",
+        credentials={"app_key": "rotated", "app_secret": "rotated"},
+    )
+
+    # 3) gateway 호출 경로: get_broker가 반환한 어댑터로 즉시 operation 실행
+    post_broker = await service.get_broker("test")
+    assert post_broker is not pre_broker
+    assert post_broker.is_connected is True
+    # 실제 브로커 오퍼레이션이 바로 동작해야 한다 (별도 connect 없이 호출 가능)
+    balance = await post_broker.get_account_balance()
+    assert isinstance(balance, dict)
 
 
 @pytest.mark.asyncio

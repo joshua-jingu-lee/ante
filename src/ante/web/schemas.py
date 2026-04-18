@@ -114,9 +114,17 @@ class StatusResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """헬스체크 응답."""
+    """헬스체크 응답.
+
+    - `ok`: 모든 의존성 체크 통과 여부 (`all(checks.values())`).
+    - `checks`: 개별 의존성 체크 결과. 1.0 기준 키는 `db`, `broker`.
+      키 확장은 하위 호환이므로 소비자는 존재하는 키만 확인한다.
+
+    `ok`와 `checks` 모두 필수 필드 (OpenAPI `required`).
+    """
 
     ok: bool
+    checks: dict[str, bool]
 
 
 class KillSwitchResponse(BaseModel):

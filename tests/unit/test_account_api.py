@@ -21,6 +21,28 @@ from ante.account.models import Account, AccountStatus, TradingMode  # noqa: E40
 from ante.web.app import create_app  # noqa: E402
 
 
+class FakeBrokerAdapter:
+    """테스트용 BrokerAdapter 모의.
+
+    `connect()`가 호출되면 `is_connected`가 True가 된다. `fail_connect`가
+    True면 RuntimeError를 던져 실패 경로를 재현한다.
+    """
+
+    def __init__(self, fail_connect: bool = False) -> None:
+        self.is_connected = False
+        self.fail_connect = fail_connect
+        self.connect_calls = 0
+
+    async def connect(self) -> None:
+        self.connect_calls += 1
+        if self.fail_connect:
+            raise RuntimeError("connect 실패 — 시뮬레이션")
+        self.is_connected = True
+
+    async def disconnect(self) -> None:
+        self.is_connected = False
+
+
 class FakeAccountService:
     """테스트용 AccountService 모의 객체."""
 
@@ -28,6 +50,10 @@ class FakeAccountService:
         self._accounts: dict[str, Account] = {}
         self._audit_logs: list[dict[str, Any]] = []
         self._deleted: set[str] = set()
+        self._brokers: dict[str, FakeBrokerAdapter] = {}
+        # 테스트가 다음 get_broker 호출에서 실패하는 어댑터를 받도록 하고
+        # 싶을 때 계좌 ID를 넣는다.
+        self._fail_connect_for: set[str] = set()
 
     async def create(self, account: Account) -> Account:
         if account.account_id in self._accounts:
@@ -114,7 +140,7 @@ class FakeAccountService:
         del self._accounts[account_id]
 
     async def get_broker(self, account_id: str) -> Any:
-        """브로커 인스턴스 반환 모의."""
+        """브로커 인스턴스 반환 모의. connect() 가능한 어댑터를 캐싱해서 돌려준다."""
         account = await self.get(account_id)
         # test, kis-domestic만 등록됨
         if account.broker_type not in ("test", "kis-domestic"):
@@ -122,7 +148,11 @@ class FakeAccountService:
                 f"broker_type '{account.broker_type}'은 BROKER_REGISTRY에 "
                 f"등록되지 않았습니다."
             )
-        return object()  # 더미 브로커
+        if account_id not in self._brokers:
+            self._brokers[account_id] = FakeBrokerAdapter(
+                fail_connect=(account_id in self._fail_connect_for)
+            )
+        return self._brokers[account_id]
 
 
 class FakeAuditLogger:
@@ -271,6 +301,60 @@ class TestCreateAccount:
         )
         assert resp.status_code == 409
 
+    def test_create_connects_broker_so_health_stays_up(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """신규 계좌 생성 시 브로커 connect()가 호출되어 /health가 계속 healthy.
+
+        회귀 방지: 부팅 시 _init_gateway의 connect 루프를 타지 않은 런타임
+        신규 계좌는 connect가 별도로 호출되지 않으면 /health가 broker=false
+        로 고정된다. 본 테스트는 POST /api/accounts 이후 반환된 어댑터의
+        is_connected가 True임을 검증한다.
+        """
+        resp = client.post(
+            "/api/accounts",
+            json={
+                "account_id": "new-live",
+                "name": "런타임 추가 계좌",
+                "broker_type": "test",
+                "credentials": {"app_key": "k", "app_secret": "s"},
+            },
+        )
+        assert resp.status_code == 201
+        broker = account_service._brokers["new-live"]
+        assert broker.connect_calls == 1
+        assert broker.is_connected is True
+
+    def test_create_survives_broker_connect_failure(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """브로커 connect 실패해도 계좌 생성 자체는 성공(201)한다.
+
+        운영자는 이후 /health에서 broker=false를 확인하고 설정을 교정 후
+        재시도한다. main._init_gateway의 best-effort 패턴과 동일.
+        """
+        account_service._fail_connect_for.add("flaky")
+
+        resp = client.post(
+            "/api/accounts",
+            json={
+                "account_id": "flaky",
+                "name": "플레이키 계좌",
+                "broker_type": "test",
+                "credentials": {"app_key": "k", "app_secret": "s"},
+            },
+        )
+        assert resp.status_code == 201
+        broker = account_service._brokers["flaky"]
+        assert broker.connect_calls == 1
+        assert broker.is_connected is False
+        # 계좌 레코드는 유지된다 (롤백되지 않음)
+        assert "flaky" in account_service._accounts
+
     def test_create_missing_credentials_returns_422(
         self,
         client: TestClient,
@@ -367,6 +451,39 @@ class TestUpdateAccount:
 
         resp = client.put("/api/accounts/test-account", json={})
         assert resp.status_code == 400
+
+    def test_update_broker_reconnect_failed_returns_503(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """브로커 재연결 실패는 503과 부분 성공 메시지로 노출된다.
+
+        회귀 방지: service.update가 BrokerReconnectFailedError를 올리면
+        (DB는 반영됐지만 새 설정으로 connect 실패한 부분 성공 상태)
+        전역 500이 아닌 503으로 매핑되어, 응답 본문이 '계좌 정보는
+        저장되었으나 브로커 재연결에 실패했습니다'를 포함해야 한다.
+        """
+        from ante.account.errors import BrokerReconnectFailedError
+
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        async def raise_reconnect_failed(account_id: str, **fields: Any) -> Account:
+            raise BrokerReconnectFailedError(
+                f"계좌 '{account_id}' 브로커 connect() 실패"
+            )
+
+        account_service.update = raise_reconnect_failed  # type: ignore[method-assign]
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"credentials": {"app_key": "new", "app_secret": "new"}},
+        )
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert "브로커 재연결에 실패" in detail
+        assert "저장" in detail
 
 
 class TestSuspendAccount:
