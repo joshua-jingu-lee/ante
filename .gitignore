@@ -5,6 +5,7 @@
 
 # Agent 참고 자료 (임시 작업 디렉토리만 제외)
 docs/temp/
+docs/superpowers/
 
 # Runtime data (루트 디렉토리만 — src/ante/data/ 는 소스코드)
 /data/
