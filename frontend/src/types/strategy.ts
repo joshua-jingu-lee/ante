@@ -8,14 +8,18 @@ import type {
   DailySummaryItem,
   WeeklySummaryItem,
   MonthlySummaryItem,
-  EquityCurvePoint,
 } from './api.generated'
 
 // ── API 응답 타입 re-export (generated 완전 대응) ────────
 export type DailySummary = DailySummaryItem
 export type WeeklySummary = WeeklySummaryItem
 export type MonthlySummary = MonthlySummaryItem
-export type { EquityCurvePoint }
+
+/** 에쿼티 커브 포인트 — StrategyPerformance.equity_curve 원소 타입. */
+export interface EquityCurvePoint {
+  date: string
+  value: number
+}
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
 export type StrategyStatus = 'registered' | 'adopted' | 'active' | 'inactive' | 'archived'
