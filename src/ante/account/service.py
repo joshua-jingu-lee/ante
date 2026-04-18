@@ -272,7 +272,12 @@ class AccountService:
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
-        broker_invalidating = {"credentials", "broker_config"}
+        broker_invalidating = {
+            "credentials",
+            "broker_config",
+            "buy_commission_rate",
+            "sell_commission_rate",
+        }
         invalidate_broker = bool(set(fields.keys()) & broker_invalidating)
         for key, value in fields.items():
             if key not in updatable:
@@ -310,9 +315,38 @@ class AccountService:
 
         self._accounts[account_id] = account
         if invalidate_broker:
-            self._brokers.pop(account_id, None)
+            await self._reconnect_broker(account_id)
         logger.info("계좌 수정: %s", account_id)
         return account
+
+    async def _reconnect_broker(self, account_id: str) -> None:
+        """캐시된 브로커를 안전하게 해제하고 새 어댑터를 연결한다.
+
+        update()에서 credentials/broker_config/수수료율 등 브로커 재생성이
+        필요한 필드가 바뀐 직후 호출된다. disconnect/connect 실패는 로그만
+        남기고 예외를 삼켜, update() 자체가 중단되지 않도록 한다. 실제
+        실패는 다음 health check로 드러난다.
+        """
+        old_broker = self._brokers.pop(account_id, None)
+        if old_broker is not None and old_broker.is_connected:
+            try:
+                await old_broker.disconnect()
+            except Exception:
+                logger.warning(
+                    "브로커 disconnect 실패: account=%s",
+                    account_id,
+                    exc_info=True,
+                )
+
+        try:
+            new_broker = await self.get_broker(account_id)
+            await new_broker.connect()
+        except Exception:
+            logger.warning(
+                "브로커 재연결 실패: account=%s",
+                account_id,
+                exc_info=True,
+            )
 
     # ── 상태 전이 ──────────────────────────────────────
 

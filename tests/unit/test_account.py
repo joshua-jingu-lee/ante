@@ -410,24 +410,32 @@ async def test_update_credentials_invalidates_broker_cache(service):
     """credentials 수정 시 캐시된 브로커를 무효화하여 새 값을 즉시 반영한다.
 
     회귀 방지: health check가 미리 get_broker를 호출해 캐시를 만든 뒤에도
-    이후 update()가 적용되어야 한다.
+    이후 update()가 적용되어야 한다. 새로 생성된 어댑터는 connect()까지
+    수행되어야 이후 호출에서 즉시 사용 가능하다.
     """
     await service.create(_make_account())
     broker_before = await service.get_broker("test")
+    await broker_before.connect()
     assert broker_before.config.get("app_key") == "test"
+    assert broker_before.is_connected is True
 
     await service.update("test", credentials={"app_key": "new", "app_secret": "new"})
     broker_after = await service.get_broker("test")
 
     assert broker_after is not broker_before
     assert broker_after.config.get("app_key") == "new"
+    # 새 어댑터는 재연결되어 즉시 사용 가능해야 한다.
+    assert broker_after.is_connected is True
+    # 이전 어댑터는 disconnect 되어야 한다.
+    assert broker_before.is_connected is False
 
 
 @pytest.mark.asyncio
 async def test_update_broker_config_invalidates_broker_cache(service):
-    """broker_config 수정 시 캐시된 브로커를 무효화한다."""
+    """broker_config 수정 시 캐시된 브로커를 무효화하고 재연결한다."""
     await service.create(_make_account())
     broker_before = await service.get_broker("test")
+    await broker_before.connect()
     assert "is_paper" not in broker_before.config
 
     await service.update("test", broker_config={"is_paper": True})
@@ -435,6 +443,38 @@ async def test_update_broker_config_invalidates_broker_cache(service):
 
     assert broker_after is not broker_before
     assert broker_after.config.get("is_paper") is True
+    assert broker_after.is_connected is True
+    assert broker_before.is_connected is False
+
+
+@pytest.mark.asyncio
+async def test_update_commission_rate_invalidates_broker_cache(service):
+    """수수료율 수정 시 캐시된 브로커를 무효화해 새 수수료가 즉시 반영된다.
+
+    회귀 방지: 브로커 어댑터는 생성 시점에 수수료율을 고정하므로,
+    update() 후에도 캐시를 유지하면 이후 체결/수수료 계산이 계속 이전
+    값으로 수행된다.
+    """
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    await broker_before.connect()
+    assert float(broker_before.config.get("buy_commission_rate", 0.0)) == 0.0
+
+    await service.update(
+        "test",
+        buy_commission_rate=Decimal("0.0015"),
+        sell_commission_rate=Decimal("0.0025"),
+    )
+    broker_after = await service.get_broker("test")
+
+    assert broker_after is not broker_before
+    assert float(broker_after.config.get("buy_commission_rate")) == pytest.approx(
+        0.0015
+    )
+    assert float(broker_after.config.get("sell_commission_rate")) == pytest.approx(
+        0.0025
+    )
+    assert broker_after.is_connected is True
 
 
 @pytest.mark.asyncio
