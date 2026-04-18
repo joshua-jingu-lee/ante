@@ -36,6 +36,16 @@ AccountService(db: Database, eventbus: EventBus)
 
 > **`trading_mode`와 `broker_config`의 분리**: `trading_mode`는 시스템이 브로커 API를 실제로 호출할지 결정한다 (VIRTUAL=가상거래, LIVE=실거래). `broker_config`는 브로커 내부 동작 설정을 담는다. 예를 들어 KIS 브로커의 `is_paper`는 모의투자/실전투자 엔드포인트를 결정하는 브로커 내부 관심사이므로 `broker_config`에 속한다. `get_broker()`는 `trading_mode`로부터 `is_paper`를 파생하지 않는다.
 
+### 브로커 캐시 무효화 규칙
+
+브로커 어댑터는 생성 시점의 `credentials`, `broker_config`, `buy_commission_rate`, `sell_commission_rate`를 내부에 고정한다. 따라서 `update()`에서 이 필드 중 하나라도 변경되면 `AccountService`는 다음을 보장한다.
+
+1. 캐시된 기존 어댑터를 `disconnect()`한다 (실패해도 업데이트 자체는 중단되지 않음 — 경고 로그만 기록).
+2. 캐시에서 제거한 뒤 새 설정으로 어댑터를 재생성한다.
+3. 새 어댑터의 `connect()`까지 수행하여, 이후 `get_broker()` 호출자가 별도 `connect()` 없이 바로 사용할 수 있도록 한다.
+
+`name`, `timezone`, `trading_hours_start`, `trading_hours_end` 등 브로커 설정과 무관한 필드 수정은 기존 어댑터 캐시를 그대로 유지한다.
+
 ### 에러 클래스
 
 ```python

@@ -490,6 +490,39 @@ async def test_update_non_broker_fields_preserves_broker_cache(service):
 
 
 @pytest.mark.asyncio
+async def test_broker_operations_work_after_credentials_update(service):
+    """health check가 브로커를 캐시한 뒤 credentials 업데이트가 즉시 반영된다.
+
+    회귀 시나리오: 헬스체크가 주기적으로 get_broker를 호출해 어댑터를 미리
+    캐시한 상태에서 사용자가 credentials를 변경해도, 이후 gateway 호출
+    경로(get_broker → broker 메서드)가 새 설정의 연결된 어댑터로 동작해야 한다.
+    AccountService.update가 단순히 캐시를 pop만 하고 재연결하지 않으면
+    APIGateway는 is_connected=False 상태의 새 어댑터를 받아 실제 호출이
+    깨진다 — 본 테스트는 그 회귀를 방지한다.
+    """
+    await service.create(_make_account())
+
+    # 1) health check 경로: 미리 get_broker를 호출해 캐시 생성
+    pre_broker = await service.get_broker("test")
+    await pre_broker.connect()
+    assert pre_broker.is_connected is True
+
+    # 2) 운영 중 credentials 변경
+    await service.update(
+        "test",
+        credentials={"app_key": "rotated", "app_secret": "rotated"},
+    )
+
+    # 3) gateway 호출 경로: get_broker가 반환한 어댑터로 즉시 operation 실행
+    post_broker = await service.get_broker("test")
+    assert post_broker is not pre_broker
+    assert post_broker.is_connected is True
+    # 실제 브로커 오퍼레이션이 바로 동작해야 한다 (별도 connect 없이 호출 가능)
+    balance = await post_broker.get_account_balance()
+    assert isinstance(balance, dict)
+
+
+@pytest.mark.asyncio
 async def test_create_account_with_broker_config(service):
     """생성 시 broker_config가 DB에 저장/로드."""
     account = _make_account(broker_config={"is_paper": True, "hts_id": "myid"})
