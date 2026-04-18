@@ -3378,6 +3378,27 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDetailResponse"];
                 };
             };
+            /** @description 수정할 필드가 없거나 불변 필드 수정 시도 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 계좌를 찾을 수 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 삭제된 계좌 수정 시도 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3386,6 +3407,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description DB에는 계좌 정보가 저장되었으나 새 설정으로 브로커 재연결에 실패한 부분 성공 상태. 자격증명/브로커 설정을 확인한 뒤 재시도. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
