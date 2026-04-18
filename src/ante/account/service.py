@@ -15,6 +15,7 @@ from ante.account.errors import (
     AccountDeletedException,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
     MissingCredentialsError,
@@ -320,33 +321,59 @@ class AccountService:
         return account
 
     async def _reconnect_broker(self, account_id: str) -> None:
-        """캐시된 브로커를 안전하게 해제하고 새 어댑터를 연결한다.
+        """새 브로커 어댑터를 생성·연결한 뒤에만 캐시를 교체한다.
 
         update()에서 credentials/broker_config/수수료율 등 브로커 재생성이
-        필요한 필드가 바뀐 직후 호출된다. disconnect/connect 실패는 로그만
-        남기고 예외를 삼켜, update() 자체가 중단되지 않도록 한다. 실제
-        실패는 다음 health check로 드러난다.
+        필요한 필드가 바뀐 직후 호출된다.
+
+        실패 의미론:
+        - 새 어댑터 생성(`_build_broker_adapter`) 실패 → 캐시는 기존 브로커를
+          그대로 유지하고, `BrokerReconnectFailedError`를 올려 update() 호출자가
+          DB는 갱신됐으나 런타임 브로커는 구 설정임을 인지하게 한다.
+        - 새 어댑터 connect() 실패 → 동일하게 기존 캐시를 보존하고
+          `BrokerReconnectFailedError`를 올린다. 캐시에 `is_connected=False`인
+          stale 어댑터가 남아 후속 gateway 호출을 계속 깨뜨리는 회귀를 막는다.
+        - 새 어댑터가 성공적으로 connect된 뒤에야 캐시를 원자적으로 교체하고,
+          교체된 기존 어댑터는 마지막에 best-effort로 disconnect한다
+          (disconnect 실패는 경고 로그만).
         """
-        old_broker = self._brokers.pop(account_id, None)
+        try:
+            new_broker = await self._build_broker_adapter(account_id)
+        except Exception as exc:
+            logger.error(
+                "브로커 어댑터 생성 실패: account=%s — 기존 캐시를 유지합니다.",
+                account_id,
+                exc_info=True,
+            )
+            raise BrokerReconnectFailedError(
+                f"계좌 '{account_id}'의 새 브로커 어댑터 생성에 실패했습니다."
+            ) from exc
+
+        try:
+            await new_broker.connect()
+        except Exception as exc:
+            logger.error(
+                "브로커 재연결 실패: account=%s — 기존 캐시를 유지합니다.",
+                account_id,
+                exc_info=True,
+            )
+            raise BrokerReconnectFailedError(
+                f"계좌 '{account_id}'의 새 브로커 connect()에 실패했습니다."
+            ) from exc
+
+        # connect 성공 후에만 캐시를 교체한다.
+        old_broker = self._brokers.get(account_id)
+        self._brokers[account_id] = new_broker
+
         if old_broker is not None and old_broker.is_connected:
             try:
                 await old_broker.disconnect()
             except Exception:
                 logger.warning(
-                    "브로커 disconnect 실패: account=%s",
+                    "이전 브로커 disconnect 실패: account=%s",
                     account_id,
                     exc_info=True,
                 )
-
-        try:
-            new_broker = await self.get_broker(account_id)
-            await new_broker.connect()
-        except Exception:
-            logger.warning(
-                "브로커 재연결 실패: account=%s",
-                account_id,
-                exc_info=True,
-            )
 
     # ── 상태 전이 ──────────────────────────────────────
 
@@ -516,6 +543,17 @@ class AccountService:
         if account_id in self._brokers:
             return self._brokers[account_id]
 
+        broker = await self._build_broker_adapter(account_id)
+        self._brokers[account_id] = broker
+        return broker
+
+    async def _build_broker_adapter(self, account_id: str) -> BrokerAdapter:
+        """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음).
+
+        `get_broker()`의 최초 생성 경로와 `_reconnect_broker()`의 재생성
+        경로가 공유한다. 캐시 쓰기는 호출자가 책임진다 — 특히 재연결은
+        connect() 성공을 확인한 뒤에 캐시를 교체한다.
+        """
         _register_brokers()
 
         account = await self.get(account_id)
@@ -536,7 +574,6 @@ class AccountService:
         }
 
         broker = broker_cls(config)
-        self._brokers[account_id] = broker
         logger.info(
             "브로커 인스턴스 생성: %s (type=%s)",
             account_id,

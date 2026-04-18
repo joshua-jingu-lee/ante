@@ -9,6 +9,7 @@ from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
     AccountNotFoundError,
+    BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
     MissingCredentialsError,
@@ -487,6 +488,46 @@ async def test_update_non_broker_fields_preserves_broker_cache(service):
     broker_after = await service.get_broker("test")
 
     assert broker_after is broker_before
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_cache_when_new_broker_connect_fails(
+    service, monkeypatch
+):
+    """새 브로커 connect 실패 시 기존 캐시를 보존하고 예외를 전파한다.
+
+    회귀 방지: 일시적 인증/네트워크 오류로 새 어댑터 connect가 실패해도,
+    캐시에 `is_connected=False`인 stale 어댑터가 남아 후속 gateway 호출이
+    연쇄적으로 깨지는 상황을 차단한다. 기존 캐시(이전 설정으로 연결된
+    브로커)는 그대로 유지되며, update 호출자는 BrokerReconnectFailedError를
+    받는다. DB에는 새 설정이 이미 반영된 상태다.
+    """
+    await service.create(_make_account())
+    broker_before = await service.get_broker("test")
+    await broker_before.connect()
+    assert broker_before.is_connected is True
+
+    # 새 어댑터의 connect만 실패하도록 강제
+    from ante.broker.test import TestBrokerAdapter
+
+    async def fail_connect(self):  # noqa: ANN001
+        raise RuntimeError("connect 실패 — 시뮬레이션")
+
+    monkeypatch.setattr(TestBrokerAdapter, "connect", fail_connect)
+
+    with pytest.raises(BrokerReconnectFailedError):
+        await service.update(
+            "test", credentials={"app_key": "new", "app_secret": "new"}
+        )
+
+    # 캐시는 기존 브로커를 그대로 유지해야 한다
+    cached = await service.get_broker("test")
+    assert cached is broker_before
+    assert cached.is_connected is True
+
+    # DB에는 새 설정이 반영되어 있음 (재시도 시 새 credentials로 생성됨)
+    account = await service.get("test")
+    assert account.credentials == {"app_key": "new", "app_secret": "new"}
 
 
 @pytest.mark.asyncio

@@ -61,5 +61,15 @@ class AccountImmutableFieldError(AccountError):
     pass
 
 
+class BrokerReconnectFailedError(AccountError):
+    """계좌 설정 변경 후 브로커 재연결에 실패했음.
+
+    update() 자체는 DB에 반영되지만, 새 자격증명/설정으로 broker connect()가
+    실패했을 때 발생한다. 운영자는 설정을 교정한 뒤 재시도해야 한다.
+    """
+
+    pass
+
+
 # 하위 호환용 별칭
 AccountDeletedException = AccountDeletedError
