@@ -153,6 +153,8 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - `ci`
 - `claude-pr-approve`
 - `codex-pr-approve`
+- PR 승인 `content` FAIL 시 Claude 자동 재수정 최대 3회
+- `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 없이 중단 사유만 남김
 - 모든 체크가 green이면 auto-merge
 - 머지 후 post-merge automation이 이슈 체크박스를 갱신하고 close
 

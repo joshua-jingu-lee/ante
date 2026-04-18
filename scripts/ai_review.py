@@ -114,6 +114,106 @@ def normalize_titles(titles: list[str]) -> list[str]:
     return sorted(dict.fromkeys(normalized))
 
 
+def summarize_text(text: str, limit: int = 400) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "..."
+
+
+def classify_failure_text(text: str) -> tuple[str, str]:
+    lowered = text.lower()
+
+    if any(
+        pattern in lowered
+        for pattern in (
+            "usage limit",
+            "rate limit",
+            "quota",
+            "try again at",
+            "credits remaining",
+        )
+    ):
+        return (
+            "quota",
+            "AI 사용량 제한 또는 요금제 한도로 인해 리뷰 워커가 완료되지 못했습니다.",
+        )
+
+    if any(
+        pattern in lowered
+        for pattern in (
+            "not logged in",
+            "authentication",
+            "please run /login",
+            "login required",
+            "auth token",
+        )
+    ):
+        return (
+            "auth_error",
+            "AI CLI 인증이 만료되었거나 누락되어 리뷰 워커가 실행되지 못했습니다.",
+        )
+
+    if any(
+        pattern in text
+        for pattern in (
+            (
+                "Input must be provided either through stdin or as a prompt "
+                "argument when using --print"
+            ),
+        )
+    ) or any(
+        pattern in lowered
+        for pattern in (
+            "unknown option",
+            "invalid option",
+            "missing required argument",
+            "json schema",
+            "schema validation",
+        )
+    ):
+        return (
+            "script_error",
+            (
+                "리뷰 워커 스크립트 또는 CLI 호출 방식에 오류가 있어 "
+                "자동 리뷰를 시작하지 못했습니다."
+            ),
+        )
+
+    return (
+        "infra_error",
+        (
+            "리뷰 워커가 구조화된 결과를 남기기 전에 실패했습니다. "
+            "Actions 로그를 확인해 주세요."
+        ),
+    )
+
+
+def build_status_payload(
+    *,
+    engine: str,
+    phase: str,
+    state: str,
+    approved: bool,
+    failure_kind: str,
+    message: str,
+    review_output_available: bool,
+    auto_fix_eligible: bool,
+    raw_excerpt: str = "",
+) -> dict:
+    return {
+        "engine": engine,
+        "phase": phase,
+        "state": state,
+        "approved": approved,
+        "failure_kind": failure_kind,
+        "message": message.strip(),
+        "review_output_available": review_output_available,
+        "auto_fix_eligible": auto_fix_eligible,
+        "raw_excerpt": raw_excerpt.strip(),
+    }
+
+
 def build_review_metadata(
     *,
     engine: str,
@@ -124,6 +224,10 @@ def build_review_metadata(
     head_ref: str,
     head_sha: str,
     analysis: dict | None,
+    failure_kind: str = "",
+    attempt: int | None = None,
+    state: str = "",
+    source_engines: list[str] | None = None,
 ) -> dict:
     metadata = {
         "engine": engine,
@@ -134,6 +238,14 @@ def build_review_metadata(
         "head_ref": head_ref,
         "head_sha": head_sha,
     }
+    if failure_kind:
+        metadata["failure_kind"] = failure_kind
+    if attempt is not None:
+        metadata["attempt"] = attempt
+    if state:
+        metadata["state"] = state
+    if source_engines:
+        metadata["source_engines"] = source_engines
     if analysis:
         metadata["failure_count"] = analysis.get("failure_count")
         metadata["threshold"] = analysis.get("threshold")
@@ -222,6 +334,78 @@ def analysis_field(args: argparse.Namespace) -> int:
         print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
     else:
         print(value)
+    return 0
+
+
+def build_review_status(args: argparse.Namespace) -> int:
+    data = load_review(args.input)
+    approved = bool(data.get("approved"))
+    status = build_status_payload(
+        engine=args.engine,
+        phase=args.phase,
+        state="approved" if approved else "rejected",
+        approved=approved,
+        failure_kind="" if approved else "content",
+        message=data.get("summary", ""),
+        review_output_available=True,
+        auto_fix_eligible=(args.phase == "pr" and not approved),
+    )
+    Path(args.output).write_text(
+        json.dumps(status, indent=2, ensure_ascii=False) + "\n"
+    )
+    return 0
+
+
+def classify_failure(args: argparse.Namespace) -> int:
+    text = ""
+    path = Path(args.input)
+    if path.exists():
+        text = path.read_text(errors="replace")
+
+    failure_kind, message = classify_failure_text(text)
+    status = build_status_payload(
+        engine=args.engine,
+        phase=args.phase,
+        state="error",
+        approved=False,
+        failure_kind=failure_kind,
+        message=message,
+        review_output_available=False,
+        auto_fix_eligible=False,
+        raw_excerpt=summarize_text(text),
+    )
+    Path(args.output).write_text(
+        json.dumps(status, indent=2, ensure_ascii=False) + "\n"
+    )
+    return 0
+
+
+def analyze_fix_loop(args: argparse.Namespace) -> int:
+    comments = json.loads(Path(args.comments).read_text())
+    if not isinstance(comments, list):
+        raise SystemExit("PR comments payload must be a JSON array.")
+
+    attempts = 0
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        metadata = extract_comment_metadata(comment.get("body", ""))
+        if not metadata:
+            continue
+        if metadata.get("engine") != "claude":
+            continue
+        if metadata.get("phase") != "pr":
+            continue
+        if metadata.get("stage") != "fix-completed":
+            continue
+        attempts += 1
+
+    result = {
+        "attempt_count": attempts,
+        "threshold": args.threshold,
+        "blocked": attempts >= args.threshold,
+    }
+    print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -326,6 +510,140 @@ def render_issue_comment(args: argparse.Namespace) -> int:
             head_ref=args.head_ref,
             head_sha=args.head_sha,
             analysis=analysis,
+            failure_kind="" if approved else "content",
+        )
+        lines.extend(
+            [
+                "",
+                f"<!-- ai-review-meta: {json.dumps(metadata, ensure_ascii=False, separators=(',', ':'))} -->",  # noqa: E501
+            ]
+        )
+    elif args.stage == "error":
+        status = json.loads(Path(args.status).read_text())
+        failure_kind = status.get("failure_kind", "infra_error")
+        emoji = "⚠️"
+        lines.extend(
+            [
+                f"{emoji} **{phase_label} 실행 실패**",
+                "- Verdict: `ERROR`",
+                f"- 브랜치: `{args.head_ref}`",
+            ]
+        )
+        if short_sha:
+            lines.append(f"- HEAD: `{short_sha}`")
+        lines.append(f"- Failure Kind: `{failure_kind}`")
+        lines.append(f"- Summary: {status.get('message', '').strip()}")
+        if status.get("raw_excerpt"):
+            lines.append(f"- Raw: `{status.get('raw_excerpt')}`")
+        if args.run_url:
+            lines.append(f"- run: {args.run_url}")
+
+        metadata = build_review_metadata(
+            engine=args.engine,
+            phase=args.phase,
+            stage=args.stage,
+            approved=False,
+            titles=[],
+            head_ref=args.head_ref,
+            head_sha=args.head_sha,
+            analysis=None,
+            failure_kind=failure_kind,
+        )
+        lines.extend(
+            [
+                "",
+                f"<!-- ai-review-meta: {json.dumps(metadata, ensure_ascii=False, separators=(',', ':'))} -->",  # noqa: E501
+            ]
+        )
+    elif args.stage == "fix-started":
+        source_engines = [
+            item.strip()
+            for item in (args.source_engines or "").split(",")
+            if item.strip()
+        ]
+        lines.extend(
+            [
+                "🔁 **Claude 재수정 시작**",
+                f"- Attempt: `{args.attempt}/{args.threshold}`",
+                f"- 브랜치: `{args.head_ref}`",
+            ]
+        )
+        if short_sha:
+            lines.append(f"- HEAD: `{short_sha}`")
+        if source_engines:
+            formatted = ", ".join(f"`{item}`" for item in source_engines)
+            lines.append(f"- Trigger: {formatted}")
+        if args.run_url:
+            lines.append(f"- run: {args.run_url}")
+    elif args.stage == "fix-completed":
+        status = json.loads(Path(args.status).read_text())
+        state = status.get("state", "unknown")
+        emoji = "✅" if state == "pushed" else "⚠️"
+        headline = "Claude 재수정 완료" if state == "pushed" else "Claude 재수정 종료"
+        new_head_sha = status.get("new_head_sha") or args.head_sha
+        new_short_sha = new_head_sha[:7] if new_head_sha else ""
+        lines.extend(
+            [
+                f"{emoji} **{headline}**",
+                f"- Attempt: `{args.attempt}/{args.threshold}`",
+                f"- Result: `{state.upper()}`",
+                f"- 브랜치: `{args.head_ref}`",
+            ]
+        )
+        if new_short_sha:
+            lines.append(f"- HEAD: `{new_short_sha}`")
+        lines.append(f"- Summary: {status.get('message', '').strip()}")
+        if args.run_url:
+            lines.append(f"- run: {args.run_url}")
+
+        metadata = build_review_metadata(
+            engine="claude",
+            phase="pr",
+            stage="fix-completed",
+            approved=False,
+            titles=[],
+            head_ref=args.head_ref,
+            head_sha=new_head_sha,
+            analysis=None,
+            attempt=args.attempt,
+            state=state,
+        )
+        lines.extend(
+            [
+                "",
+                f"<!-- ai-review-meta: {json.dumps(metadata, ensure_ascii=False, separators=(',', ':'))} -->",  # noqa: E501
+            ]
+        )
+    elif args.stage == "fix-skipped":
+        reason = args.reason or "infra_error"
+        message = args.message.strip() if args.message else ""
+        lines.extend(
+            [
+                "⏸️ **Claude 재수정 중단**",
+                f"- 브랜치: `{args.head_ref}`",
+            ]
+        )
+        if short_sha:
+            lines.append(f"- HEAD: `{short_sha}`")
+        if args.attempt and args.threshold:
+            lines.append(f"- Attempt Budget: `{args.attempt}/{args.threshold}`")
+        lines.append(f"- Reason: `{reason}`")
+        if message:
+            lines.append(f"- Summary: {message}")
+        if args.run_url:
+            lines.append(f"- run: {args.run_url}")
+
+        metadata = build_review_metadata(
+            engine="claude",
+            phase="pr",
+            stage="fix-skipped",
+            approved=False,
+            titles=[],
+            head_ref=args.head_ref,
+            head_sha=args.head_sha,
+            analysis=None,
+            failure_kind=reason,
+            attempt=args.attempt if args.attempt else None,
         )
         lines.extend(
             [
@@ -410,7 +728,17 @@ def main() -> int:
 
     p_issue_comment = sub.add_parser("render-issue-comment")
     p_issue_comment.add_argument(
-        "--stage", required=True, choices=["requested", "started", "completed"]
+        "--stage",
+        required=True,
+        choices=[
+            "requested",
+            "started",
+            "completed",
+            "error",
+            "fix-started",
+            "fix-completed",
+            "fix-skipped",
+        ],
     )
     p_issue_comment.add_argument("--engine", required=True, choices=["claude", "codex"])
     p_issue_comment.add_argument("--phase", required=True, choices=["branch", "pr"])
@@ -419,6 +747,12 @@ def main() -> int:
     p_issue_comment.add_argument("--run-url", default="")
     p_issue_comment.add_argument("--input", default="")
     p_issue_comment.add_argument("--analysis", default="")
+    p_issue_comment.add_argument("--status", default="")
+    p_issue_comment.add_argument("--attempt", type=int, default=0)
+    p_issue_comment.add_argument("--threshold", type=int, default=0)
+    p_issue_comment.add_argument("--reason", default="")
+    p_issue_comment.add_argument("--message", default="")
+    p_issue_comment.add_argument("--source-engines", default="")
     p_issue_comment.set_defaults(func=render_issue_comment)
 
     p_analyze = sub.add_parser("analyze-review-loop")
@@ -433,6 +767,25 @@ def main() -> int:
     p_field.add_argument("--input", required=True)
     p_field.add_argument("--field", required=True)
     p_field.set_defaults(func=analysis_field)
+
+    p_status = sub.add_parser("build-review-status")
+    p_status.add_argument("--engine", required=True, choices=["claude", "codex"])
+    p_status.add_argument("--phase", required=True, choices=["branch", "pr"])
+    p_status.add_argument("--input", required=True)
+    p_status.add_argument("--output", required=True)
+    p_status.set_defaults(func=build_review_status)
+
+    p_classify = sub.add_parser("classify-failure")
+    p_classify.add_argument("--engine", required=True, choices=["claude", "codex"])
+    p_classify.add_argument("--phase", required=True, choices=["branch", "pr"])
+    p_classify.add_argument("--input", required=True)
+    p_classify.add_argument("--output", required=True)
+    p_classify.set_defaults(func=classify_failure)
+
+    p_fix = sub.add_parser("analyze-fix-loop")
+    p_fix.add_argument("--comments", required=True)
+    p_fix.add_argument("--threshold", required=True, type=int)
+    p_fix.set_defaults(func=analyze_fix_loop)
 
     p_render = sub.add_parser("render")
     p_render.add_argument("--engine", required=True, choices=["claude", "codex"])

@@ -10,7 +10,7 @@
 | Runbook | 설명 |
 |---------|------|
 | [00-issue-management.md](00-issue-management.md) | GitHub Issues 등록, 분류, 추적 규칙 (이슈 템플릿, 라벨, 우선순위) |
-| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Claude 구현, Codex 사전 브랜치 리뷰, PR 승인/merge gate |
+| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Claude 구현, Codex 사전 브랜치 리뷰, PR 승인/자동 재수정/merge gate |
 | [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, Codex 외부 리뷰 워커, `.agent/`와 `.claude/` 레이어 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션 (+ 버전 범프), PR 규칙 |
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인 (Codex 브랜치 리뷰, 이중 승인, auto-merge) |

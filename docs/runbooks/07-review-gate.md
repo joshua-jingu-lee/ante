@@ -74,6 +74,29 @@
 - 구현 스펙 기준: `docs/specs/`
 - 아키텍처 기준: `docs/architecture/`
 
+### 3.5 승인 실패 후 Claude 재수정 루프
+
+- `claude-pr-approve` 또는 `codex-pr-approve`가 **content FAIL**을 반환하면, GitHub automation이 같은 PR 브랜치에서 Claude 재수정을 시도한다.
+- 자동 재수정은 최대 **3회**까지 시도한다.
+- 각 시도는 **새 커밋을 push한 경우에만** 다음 승인 사이클로 이어진다.
+- 재수정 결과는 PR 코멘트에 남기고, 새 커밋이 push되면 `pull_request synchronize`로 승인 워크플로우를 다시 시작한다.
+- 3회 소진 후에도 승인 실패가 반복되면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
+
+### 3.6 실패 분류
+
+PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
+
+| 분류 | 의미 | Claude 자동 재수정 |
+|------|------|-------------------|
+| `content` | 실제 blocking finding | 실행 |
+| `quota` | AI 사용량/요금제 제한 | 실행 안 함 |
+| `script_error` | 리뷰 스크립트 또는 CLI 호출 오류 | 실행 안 함 |
+| `auth_error` | AI CLI 인증 만료/누락 | 실행 안 함 |
+| `infra_error` | 기타 runner/환경 실패 | 실행 안 함 |
+
+- `quota`, `script_error`, `auth_error`, `infra_error`는 **재수정 예산 3회에 포함하지 않는다**.
+- 이 경우 PR 코멘트에 중단 사유를 남기고, 워커 복구 또는 수동 재실행을 기다린다.
+
 ## 4. Merge Gate
 
 ### 4.1 입력
@@ -126,3 +149,4 @@
 - PR 본문은 `Refs #이슈번호`만 사용한다
 - 이슈 close는 post-merge automation이 수행한다
 - PR 승인 실패로 다시 수정이 발생해도 같은 이슈/같은 PR을 계속 사용한다
+- PR 승인 실패가 `content`인 경우에만 Claude 자동 재수정이 같은 PR 브랜치에서 최대 3회 동작한다

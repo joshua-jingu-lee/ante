@@ -52,6 +52,8 @@ Claude 오케스트레이터
   │    ├── Claude PR 승인 (`claude-pr-approve`)
   │    └── Codex PR 승인 (`codex-pr-approve`)
   │
+  ├── PR 승인 content FAIL → Claude 자동 재수정 (최대 3회)
+  │
   ├── 모든 게이트 green → GitHub auto-merge
   │
   ├── post-merge automation → 이슈 체크박스 갱신 + close
@@ -123,8 +125,10 @@ main
 | `codex-branch-review` FAIL | 코드/설계 문제 | Claude 개발 에이전트 | 같은 브랜치에서 수정 후 재push |
 | CI 실패 — 코드 문제 | 테스트/lint/type 오류 | Claude 개발 에이전트 | 새 커밋 push 후 체크 재실행 |
 | CI 실패 — 인프라 문제 | Docker/CI 설정/스크립트 | `@devops` | 수정 후 동일 PR에서 재실행 |
-| `claude-pr-approve` FAIL | 스펙·계약·테스트 누락 | Claude 개발 에이전트 | 동일 PR 브랜치 수정 후 재검증 |
-| `codex-pr-approve` FAIL | 버그/회귀/설계 위반 | Claude 개발 에이전트 | 동일 PR 브랜치 수정 후 재검증 |
+| `claude-pr-approve` FAIL — `content` | 스펙·계약·테스트 누락 | Claude 자동 재수정 워커 | 동일 PR 브랜치 수정 후 재검증 |
+| `codex-pr-approve` FAIL — `content` | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 | 동일 PR 브랜치 수정 후 재검증 |
+| `claude-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
+| `codex-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
 | QA FAIL | 기능 버그 | 오케스트레이터가 버그 이슈 등록 → Claude 개발 에이전트 | 재검증 속행 |
 
 ### 5.1 재시도 규칙
@@ -134,6 +138,9 @@ main
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
 - 동일 유형의 blocking failure가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 - Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.
+- PR 승인 단계에서는 `content` 실패에 한해 Claude 자동 재수정을 최대 3회 시도한다.
+- `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 예산에 포함하지 않는다.
+- PR 승인 content 실패가 3회 재수정 후에도 해소되지 않으면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
 
 ## 6. 리뷰와 머지 게이트
 
