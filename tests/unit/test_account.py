@@ -427,8 +427,9 @@ async def test_update_credentials_invalidates_broker_cache(service):
     assert broker_after.config.get("app_key") == "new"
     # 새 어댑터는 재연결되어 즉시 사용 가능해야 한다.
     assert broker_after.is_connected is True
-    # 이전 어댑터는 disconnect 되어야 한다.
-    assert broker_before.is_connected is False
+    # 이전 어댑터는 장기 실행 consumer가 참조하고 있을 수 있으므로
+    # 의도적으로 disconnect하지 않는다 (spec: 04-account-service.md 참고).
+    assert broker_before.is_connected is True
 
 
 @pytest.mark.asyncio
@@ -445,7 +446,9 @@ async def test_update_broker_config_invalidates_broker_cache(service):
     assert broker_after is not broker_before
     assert broker_after.config.get("is_paper") is True
     assert broker_after.is_connected is True
-    assert broker_before.is_connected is False
+    # 이전 어댑터는 의도적으로 disconnect하지 않는다 — 장기 실행 consumer
+    # 회귀 방지.
+    assert broker_before.is_connected is True
 
 
 @pytest.mark.asyncio
@@ -488,6 +491,45 @@ async def test_update_non_broker_fields_preserves_broker_cache(service):
     broker_after = await service.get_broker("test")
 
     assert broker_after is broker_before
+
+
+@pytest.mark.asyncio
+async def test_update_does_not_disconnect_broker_held_by_long_running_consumer(service):
+    """재연결 시 장기 실행 consumer가 붙잡은 기존 어댑터를 끊지 않는다.
+
+    회귀 방지: ReconcileScheduler / Treasury.start_sync() 같은 장기 실행
+    consumer는 시작 시점에 주입받은 BrokerAdapter 객체를 내부에 고정해
+    계속 사용한다. credentials/broker_config 업데이트가 성공한 직후 기존
+    어댑터를 disconnect하면 consumer가 붙잡은 세션이 바로 닫혀 주기 대사와
+    잔고 동기화가 깨진다. 본 테스트는 consumer가 보유한 레퍼런스가 update
+    이후에도 여전히 연결 상태를 유지하고, 실제 broker operation을 계속
+    수행할 수 있음을 검증한다.
+    """
+    await service.create(_make_account())
+    held_by_consumer = await service.get_broker("test")
+    await held_by_consumer.connect()
+    assert held_by_consumer.is_connected is True
+
+    # consumer는 참조를 붙잡고 있으면서 주기적으로 broker operation을 호출한다.
+    baseline_balance = await held_by_consumer.get_account_balance()
+    assert isinstance(baseline_balance, dict)
+
+    # credentials 업데이트 — 캐시는 새 어댑터로 교체되지만 consumer의 참조는
+    # 끊기면 안 된다.
+    await service.update(
+        "test", credentials={"app_key": "rotated", "app_secret": "rotated"}
+    )
+
+    # consumer가 붙잡은 어댑터는 여전히 연결된 상태로 동작해야 한다.
+    assert held_by_consumer.is_connected is True
+    post_update_balance = await held_by_consumer.get_account_balance()
+    assert isinstance(post_update_balance, dict)
+
+    # 새로 get_broker를 호출한 경로(APIGateway 등)는 교체된 어댑터를 받는다.
+    cached_now = await service.get_broker("test")
+    assert cached_now is not held_by_consumer
+    assert cached_now.is_connected is True
+    assert cached_now.config.get("app_key") == "rotated"
 
 
 @pytest.mark.asyncio

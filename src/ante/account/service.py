@@ -339,9 +339,17 @@ class AccountService:
         - 새 어댑터 connect() 실패 → 동일하게 기존 캐시를 보존하고
           `BrokerReconnectFailedError`를 올린다. 캐시에 `is_connected=False`인
           stale 어댑터가 남아 후속 gateway 호출을 계속 깨뜨리는 회귀를 막는다.
-        - 새 어댑터가 성공적으로 connect된 뒤에야 캐시를 원자적으로 교체하고,
-          교체된 기존 어댑터는 마지막에 best-effort로 disconnect한다
-          (disconnect 실패는 경고 로그만).
+        - 새 어댑터가 성공적으로 connect된 뒤에야 캐시를 원자적으로 교체한다.
+
+        **이전 어댑터는 의도적으로 disconnect하지 않는다.** `ReconcileScheduler`나
+        `Treasury.start_sync()` 같은 장기 실행 consumer가 시작 시점에 주입받은
+        BrokerAdapter 참조를 내부에 고정해서 사용하기 때문이다. 새 어댑터로
+        캐시를 교체하면 `AccountService.get_broker()` / `APIGateway` 경로는
+        즉시 새 설정을 사용하지만, 이미 시작된 consumer는 참조를 통해 구
+        어댑터를 계속 사용한다. 구 어댑터를 세션 레벨까지 끊어버리면 주기
+        대사/잔고 동기화가 바로 깨지므로, 구 어댑터는 자연스러운 GC와 서비스
+        재시작 시점까지 살려둔다. consumer에 새 어댑터를 주입하는 이벤트
+        기반 경로는 후속 작업으로 분리한다 (#1100의 범위를 넘어선다).
         """
         if account_id not in self._brokers:
             return
@@ -370,19 +378,9 @@ class AccountService:
                 f"계좌 '{account_id}'의 새 브로커 connect()에 실패했습니다."
             ) from exc
 
-        # connect 성공 후에만 캐시를 교체한다.
-        old_broker = self._brokers.get(account_id)
+        # connect 성공 후에만 캐시를 원자적으로 교체한다.
+        # 이전 어댑터는 의도적으로 disconnect하지 않는다 (docstring 참고).
         self._brokers[account_id] = new_broker
-
-        if old_broker is not None and old_broker.is_connected:
-            try:
-                await old_broker.disconnect()
-            except Exception:
-                logger.warning(
-                    "이전 브로커 disconnect 실패: account=%s",
-                    account_id,
-                    exc_info=True,
-                )
 
     # ── 상태 전이 ──────────────────────────────────────
 

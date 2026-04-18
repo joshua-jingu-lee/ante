@@ -44,9 +44,11 @@ AccountService(db: Database, eventbus: EventBus)
 2. **캐시가 있는 경우** —
    1. 새 설정으로 어댑터를 생성한다 (이 시점에는 캐시를 건드리지 않는다).
    2. 새 어댑터의 `connect()`를 호출한다.
-   3. `connect()` 성공 시에만 캐시를 새 어댑터로 교체하고, 교체된 기존 어댑터는 best-effort로 `disconnect()`한다 (disconnect 실패는 경고 로그로만 기록하고 update는 정상 완료).
+   3. `connect()` 성공 시에만 캐시를 새 어댑터로 교체한다.
 
 캐시가 있었을 때의 이 순서 덕분에, `update()` 반환 이후 `get_broker()` 호출자는 별도 `connect()` 없이 반환된 어댑터를 바로 사용할 수 있다.
+
+**이전 어댑터는 의도적으로 `disconnect()`하지 않는다.** `ReconcileScheduler`, `Treasury.start_sync()` 등 장기 실행 consumer는 시작 시점에 주입받은 `BrokerAdapter` 참조를 내부에 고정해서 사용하므로, 세션 레벨에서 끊어버리면 주기 대사와 잔고 동기화가 즉시 깨진다. 새 어댑터로 캐시만 교체하면 `get_broker()` / `APIGateway` 경로는 즉시 새 설정을 사용하고, 기존 consumer는 다음 서비스 재시작 시 새 어댑터를 주입받는다. 장기 실행 consumer에 새 어댑터를 런타임으로 전파하는 이벤트 기반 경로는 후속 개선 과제로 남겨둔다.
 
 **실패 시 의미론**:
 
