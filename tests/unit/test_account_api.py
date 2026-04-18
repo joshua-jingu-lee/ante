@@ -368,6 +368,39 @@ class TestUpdateAccount:
         resp = client.put("/api/accounts/test-account", json={})
         assert resp.status_code == 400
 
+    def test_update_broker_reconnect_failed_returns_503(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """브로커 재연결 실패는 503과 부분 성공 메시지로 노출된다.
+
+        회귀 방지: service.update가 BrokerReconnectFailedError를 올리면
+        (DB는 반영됐지만 새 설정으로 connect 실패한 부분 성공 상태)
+        전역 500이 아닌 503으로 매핑되어, 응답 본문이 '계좌 정보는
+        저장되었으나 브로커 재연결에 실패했습니다'를 포함해야 한다.
+        """
+        from ante.account.errors import BrokerReconnectFailedError
+
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        async def raise_reconnect_failed(account_id: str, **fields: Any) -> Account:
+            raise BrokerReconnectFailedError(
+                f"계좌 '{account_id}' 브로커 connect() 실패"
+            )
+
+        account_service.update = raise_reconnect_failed  # type: ignore[method-assign]
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"credentials": {"app_key": "new", "app_secret": "new"}},
+        )
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert "브로커 재연결에 실패" in detail
+        assert "저장" in detail
+
 
 class TestSuspendAccount:
     """POST /api/accounts/:id/suspend."""

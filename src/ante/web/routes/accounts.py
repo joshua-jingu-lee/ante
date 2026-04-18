@@ -194,6 +194,7 @@ async def update_account(
         AccountDeletedError,
         AccountImmutableFieldError,
         AccountNotFoundError,
+        BrokerReconnectFailedError,
     )
 
     # None이 아닌 필드만 업데이트 대상
@@ -233,6 +234,18 @@ async def update_account(
         raise HTTPException(status_code=409, detail=str(e))
     except AccountImmutableFieldError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except BrokerReconnectFailedError as e:
+        # 계좌 정보는 DB에 반영됐지만 새 설정으로 브로커를 재연결하지
+        # 못한 부분 실패 상태. 503으로 명시해 운영자가 자격증명/설정을
+        # 교정 후 재시도하도록 유도한다. 캐시에는 기존 브로커가 그대로
+        # 남아 있어 기존 연결 기반 호출은 계속 동작한다.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{e} 계좌 정보는 저장되었으나 브로커 재연결에 실패했습니다. "
+                "자격증명/브로커 설정을 확인한 뒤 다시 시도하세요."
+            ),
+        )
 
     if audit_logger:
         await audit_logger.log(

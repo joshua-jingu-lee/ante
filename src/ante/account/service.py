@@ -326,6 +326,12 @@ class AccountService:
         update()에서 credentials/broker_config/수수료율 등 브로커 재생성이
         필요한 필드가 바뀐 직후 호출된다.
 
+        캐시가 비어 있으면 아무 것도 하지 않는다. 재연결은 이미 런타임에
+        생성돼 있는 어댑터를 새 설정으로 교체하는 작업이므로, 캐시 부재
+        시점(예: 부팅 중 레거시 is_paper 마이그레이션처럼 아직 `get_broker()`가
+        불린 적 없는 구간)에는 의미가 없고, 다음 `get_broker()` 호출이 새
+        설정으로 lazy init한다.
+
         실패 의미론:
         - 새 어댑터 생성(`_build_broker_adapter`) 실패 → 캐시는 기존 브로커를
           그대로 유지하고, `BrokerReconnectFailedError`를 올려 update() 호출자가
@@ -337,6 +343,9 @@ class AccountService:
           교체된 기존 어댑터는 마지막에 best-effort로 disconnect한다
           (disconnect 실패는 경고 로그만).
         """
+        if account_id not in self._brokers:
+            return
+
         try:
             new_broker = await self._build_broker_adapter(account_id)
         except Exception as exc:

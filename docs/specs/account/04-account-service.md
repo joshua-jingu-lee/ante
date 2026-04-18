@@ -40,16 +40,19 @@ AccountService(db: Database, eventbus: EventBus)
 
 브로커 어댑터는 생성 시점의 `credentials`, `broker_config`, `buy_commission_rate`, `sell_commission_rate`를 내부에 고정한다. 따라서 `update()`에서 이 필드 중 하나라도 변경되면 `AccountService`는 다음을 보장한다.
 
-1. 새 설정으로 어댑터를 생성한다 (이 시점에는 캐시를 건드리지 않는다).
-2. 새 어댑터의 `connect()`를 호출한다.
-3. `connect()` 성공 시에만 캐시를 새 어댑터로 교체하고, 교체된 기존 어댑터는 best-effort로 `disconnect()`한다 (disconnect 실패는 경고 로그로만 기록하고 update는 정상 완료).
+1. **캐시가 비어 있는 경우 noop** — 아직 어댑터가 생성된 적이 없으면 재연결할 대상이 없으므로 아무 것도 하지 않는다. 다음 `get_broker()` 호출이 새 설정으로 lazy init한다. (부팅 중 레거시 마이그레이션처럼 아직 `get_broker()`가 불리지 않은 구간에서 `update()`가 호출되는 케이스가 이에 해당.)
+2. **캐시가 있는 경우** —
+   1. 새 설정으로 어댑터를 생성한다 (이 시점에는 캐시를 건드리지 않는다).
+   2. 새 어댑터의 `connect()`를 호출한다.
+   3. `connect()` 성공 시에만 캐시를 새 어댑터로 교체하고, 교체된 기존 어댑터는 best-effort로 `disconnect()`한다 (disconnect 실패는 경고 로그로만 기록하고 update는 정상 완료).
 
-이 순서로 처리하기 때문에 `get_broker()` 호출자는 별도 `connect()` 없이 반환된 어댑터를 바로 사용할 수 있다.
+캐시가 있었을 때의 이 순서 덕분에, `update()` 반환 이후 `get_broker()` 호출자는 별도 `connect()` 없이 반환된 어댑터를 바로 사용할 수 있다.
 
 **실패 시 의미론**:
 
 - 새 어댑터 생성 또는 `connect()`가 실패하면 `AccountService`는 기존 캐시를 그대로 유지하고 `BrokerReconnectFailedError`를 올린다. DB에는 새 설정이 반영되어 있으나 런타임은 구 브로커를 계속 사용한다. 운영자는 설정을 교정한 뒤 다시 `update()`를 호출해 재연결을 유도해야 한다.
 - 캐시에 `is_connected=False`인 stale 어댑터가 남지 않도록 보장해 후속 gateway 호출이 "죽은 어댑터"로 연쇄 실패하는 회귀를 차단한다.
+- HTTP 계약: `PUT /api/accounts/{account_id}`는 이 예외를 `503 Service Unavailable`로 매핑한다. 응답 메시지는 "계좌 정보는 저장되었으나 브로커 재연결에 실패했습니다"를 포함한다.
 
 `name`, `timezone`, `trading_hours_start`, `trading_hours_end` 등 브로커 설정과 무관한 필드 수정은 기존 어댑터 캐시를 그대로 유지한다.
 

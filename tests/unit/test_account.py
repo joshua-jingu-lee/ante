@@ -491,6 +491,32 @@ async def test_update_non_broker_fields_preserves_broker_cache(service):
 
 
 @pytest.mark.asyncio
+async def test_update_without_cached_broker_is_noop(service):
+    """캐시에 어댑터가 없으면 broker_invalidating 필드 수정도 오류 없이 통과한다.
+
+    회귀 방지: 부팅 중 레거시 is_paper 마이그레이션처럼, 아직 get_broker()가
+    한 번도 불리지 않은 시점에 update(broker_config=...)가 호출되는 경우가
+    있다. 재연결은 이미 생성돼 있는 어댑터를 교체하는 작업이므로 캐시
+    부재 시점에는 의미가 없어야 하며, update는 DB 반영만 하고 조용히
+    통과해야 한다. 이후 get_broker()가 새 설정으로 lazy init한다.
+    """
+    await service.create(_make_account())
+    assert "test" not in service._brokers  # 아직 get_broker 호출 전
+
+    # broker_config 변경 — 캐시가 비어 있어 재연결은 noop이어야 한다
+    await service.update("test", broker_config={"is_paper": True})
+
+    account = await service.get("test")
+    assert account.broker_config == {"is_paper": True}
+    # 캐시는 여전히 비어 있어야 한다 (lazy init은 이후 get_broker가 담당)
+    assert "test" not in service._brokers
+
+    # lazy init 후 새 설정이 반영되어야 한다
+    broker = await service.get_broker("test")
+    assert broker.config.get("is_paper") is True
+
+
+@pytest.mark.asyncio
 async def test_update_preserves_cache_when_new_broker_connect_fails(
     service, monkeypatch
 ):
