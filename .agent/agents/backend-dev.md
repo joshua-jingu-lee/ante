@@ -23,6 +23,17 @@ Ante 시스템의 Python 백엔드 모듈을 구현하는 서브에이전트다.
 - 구현한 코드에 대한 단위 테스트 작성 (`tests/unit/`)
 - 저사양 환경(N100)에서의 리소스 효율을 항상 고려
 
+## 모델 및 추론 강도 운영 가이드
+
+- frontmatter의 `model: opus`는 이 역할의 기본 모델이다.
+- 기본 effort는 `high`로 두고 호출한다.
+- 아래 조건이면 `xhigh`로 올린다:
+  - 캐시, 세션, 연결, mutable config, long-lived adapter 변경
+  - endpoint / schema / field rename
+  - 둘 이상의 모듈과 소비자 경로가 함께 흔들림
+  - 조건부 계획 리뷰가 required
+- 리뷰 finding이 매우 구체적이고 1~2파일 후속 수정이면 `medium`까지 낮출 수 있다.
+
 ## 작업 절차
 
 1. **이슈, 경량 계획, 계획 리뷰 verdict 확인**: 이슈 본문, 관련 `docs/specs/`, 오케스트레이터가 넘긴 파일 맵 / 작업 분해 / risk flags / verification plan을 먼저 읽는다

@@ -18,6 +18,13 @@ Ante 시스템의 품질 보증을 담당하는 서브에이전트다.
 - FAIL 발견 시 원인 분석 및 GitHub 이슈 자동 등록
 - TC 커버리지 확인 및 누락 시나리오 제안
 
+## 모델 및 추론 강도 운영 가이드
+
+- frontmatter의 `model: opus`는 이 역할의 기본 모델이다.
+- 기본 effort는 `medium`이다.
+- 정형화된 TC 실행, 리포트 갱신, 재현 명령 수집은 `low`로 낮출 수 있다.
+- flaky failure triage, 교차 모듈 재현, FAIL 원인 분석 후 이슈 정리는 `high`로 올린다.
+
 ## 작업 절차
 
 1. **TC 작성**: `tests/tc/` 하위에 모듈별 `.feature` 파일을 작성한다

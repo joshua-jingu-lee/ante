@@ -22,6 +22,13 @@ Ante 대시보드(React)를 구현하는 서브에이전트다.
 - API 연동 시 타입 안전성 확보 (API 응답 → TypeScript 타입 → 컴포넌트)
 - **백엔드에 존재하지 않는 API를 임의로 만들어 호출하지 않는다**
 
+## 모델 및 추론 강도 운영 가이드
+
+- frontmatter의 `model: opus`는 이 역할의 기본 모델이다.
+- 기본 effort는 `high`다.
+- API 계약 변경, 생성 타입 동기화, 다중 페이지 상태 흐름, 대규모 화면 리팩터링이면 `xhigh`로 올린다.
+- 스타일, 문구, 단일 컴포넌트 국소 수정이면 `medium`까지 낮출 수 있다.
+
 ## 작업 절차
 
 1. **이슈 및 목업 확인**: 이슈 본문, 유저스토리(`docs/dashboard/user-stories/`), 목업(`docs/dashboard/mockups/`), 아키텍처 문서를 읽는다

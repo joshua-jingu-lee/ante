@@ -141,6 +141,26 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 `.agent/agents/*.md`는 Claude 서브에이전트 정의의 SSOT이다. Codex 워커는 GitHub Actions/Webhook 구성의 일부이므로 이 디렉토리에 포함하지 않는다.
 
+### 2.2.1 모델 및 추론 강도 정책
+
+- frontmatter의 `model:`은 **단일 기본 모델**만 기록한다. 현재 운영 기준으로 복수 모델 배열은 지원하지 않는다.
+- `reasoning effort`는 frontmatter에 고정하지 않고, **오케스트레이터가 호출 시점에 작업 위험도에 따라 선택**한다.
+- 즉, 에이전트 문서는 "역할"을 정의하고, 모델/effort는 "운영 정책"으로 관리한다.
+- 문서에서 쓰는 `xhigh`는 **최고 추론 단계**를 뜻한다. 실행 환경이나 모델별 UI에서는 `max`로 보일 수 있다.
+- 특정 모델이 `xhigh`라는 정확한 라벨을 지원하지 않으면, **그 모델이 지원하는 최고 단계**로 해석한다.
+
+| 에이전트 | 기본 effort | 높여야 하는 경우 | 낮춰도 되는 경우 |
+|------|------|------|------|
+| `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, 조건부 계획 리뷰 required | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
+| `@frontend-dev` | `high` | API 계약 변경, 생성 타입 동기화, 다중 페이지 상태 흐름, 대규모 화면 리팩터링 | 스타일·문구·단일 컴포넌트 수정 |
+| `@qa-engineer` | `medium` | flaky failure triage, 교차 모듈 재현, FAIL 원인 분석 후 이슈 정리 | 정형화된 TC 실행, 리포트 갱신 |
+| `@devops` | `high` | CI/CD, 인증, secret, release, merge automation, 운영 스크립트 변경 | 문서성 변경, 작은 경로 수정 |
+| `@strategy-dev` | `xhigh` (`max`) | 새 전략 설계, 파라미터 탐색, 지표 해석, 백테스트 결과 비교 | 단순 validation rerun, 리포트 포맷 정리 |
+| `@code-reviewer` | `xhigh` (`max`) | 반복 risk class failure, lifecycle/contract drift, 범위 축소/이슈 분할/사람 에스컬레이션 판단 | 조건부 계획 리뷰가 명확하고 범위가 매우 국소적인 경우 |
+
+- `@code-reviewer`만 항상 더 무겁게 두는 것이 아니라, **고위험 백엔드/DevOps 작업도 `xhigh`까지 올릴 수 있다.**
+- 반대로 `low`는 품질 게이트 판단보다는 **정형 실행·수집 작업**에 한정한다.
+
 ### 2.3 커스텀 명령어 (commands/)
 
 반복적인 개발 작업을 슬래시 명령으로 정의한다:

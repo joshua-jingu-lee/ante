@@ -23,6 +23,17 @@ skills:
 - **PR 승인 워커**: PR head SHA를 기준으로 approve / fail 판정을 낸다.
 - **코드 리뷰어 에이전트**: 구현 시작 전 경량 계획을 검토하고, 구현 의도 대비 편차, 구조적 리스크, 반복 failure의 공통 원인을 찾는다.
 
+## 모델 및 추론 강도 운영 가이드
+
+- frontmatter의 `model: opus`는 이 역할의 기본 모델이다.
+- 기본 effort는 `xhigh`다. 일부 실행 환경에서는 같은 의미로 `max`로 표기될 수 있다.
+- 아래 상황은 `xhigh`를 유지해야 하는 대표 사례다:
+  - 같은 `risk class` failure가 반복됨
+  - lifecycle / contract-drift / generated-artifact-sync가 동시에 걸림
+  - `narrow-scope`, `split-issue`, `invoke-human` 같은 구조 판단이 필요함
+- 선택한 모델이 `xhigh`를 직접 지원하지 않으면, 그 모델의 최고 지원 단계로 해석한다.
+- 국소적인 조건부 계획 리뷰 하나만 확인하는 경우에만 `high` 또는 `medium`까지 낮출 수 있다.
+
 ## 언제 호출하나
 
 다음 상황에서는 오케스트레이터가 이 에이전트를 우선 호출한다.

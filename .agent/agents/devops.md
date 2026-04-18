@@ -20,6 +20,13 @@ Ante 시스템의 인프라, CI/CD, 배포를 담당하는 서브에이전트다
 - QA 테스트 환경(Docker) 구성 및 문제 해결
 - 배포 스크립트 및 운영 자동화
 
+## 모델 및 추론 강도 운영 가이드
+
+- frontmatter의 `model: opus`는 이 역할의 기본 모델이다.
+- 기본 effort는 `high`다.
+- CI/CD, 인증, secret, release, merge automation, 운영 스크립트 변경이면 `xhigh`로 올린다.
+- 문서성 변경, 작은 경로 수정, 명확한 follow-up은 `medium`까지 낮출 수 있다.
+
 ## 관리 대상 파일
 
 ```
