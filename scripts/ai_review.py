@@ -413,7 +413,7 @@ def render_issue_comment(args: argparse.Namespace) -> int:
     phase_label = (
         "Codex 브랜치 리뷰"
         if args.phase == "branch"
-        else f"{args.engine.capitalize()} PR 승인"
+        else f"{args.engine.capitalize()} PR 검토"
     )
     short_sha = args.head_sha[:7] if args.head_sha else ""
     lines: list[str] = []
