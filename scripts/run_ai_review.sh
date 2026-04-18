@@ -10,6 +10,7 @@ TMP_DIR="$(mktemp -d)"
 RAW_PATH="$TMP_DIR/raw.json"
 RESULT_PATH="$TMP_DIR/result.json"
 SUMMARY_PATH="$TMP_DIR/summary.md"
+STATUS_PATH="${REVIEW_STATUS_PATH:-$TMP_DIR/status.json}"
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/actions-runners/bin/claude}"
 CODEX_BIN="${CODEX_BIN:-$HOME/actions-runners/bin/codex}"
 
@@ -21,6 +22,38 @@ cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+copy_review_artifacts() {
+  if [[ -n "${REVIEW_RESULT_PATH:-}" && -f "$RESULT_PATH" && "$RESULT_PATH" != "$REVIEW_RESULT_PATH" ]]; then
+    cp "$RESULT_PATH" "$REVIEW_RESULT_PATH"
+  fi
+
+  if [[ -n "${REVIEW_SUMMARY_PATH:-}" && -f "$SUMMARY_PATH" && "$SUMMARY_PATH" != "$REVIEW_SUMMARY_PATH" ]]; then
+    cp "$SUMMARY_PATH" "$REVIEW_SUMMARY_PATH"
+  fi
+
+  if [[ -n "${REVIEW_RAW_PATH:-}" && -f "$RAW_PATH" && "$RAW_PATH" != "${REVIEW_RAW_PATH}" ]]; then
+    cp "$RAW_PATH" "$REVIEW_RAW_PATH"
+  fi
+}
+
+write_failure_status() {
+  python3 "$WORKSPACE/scripts/ai_review.py" classify-failure \
+    --engine "$ENGINE" \
+    --phase "$PHASE" \
+    --input "$RAW_PATH" \
+    --output "$STATUS_PATH"
+  copy_review_artifacts
+}
+
+write_completed_status() {
+  python3 "$WORKSPACE/scripts/ai_review.py" build-review-status \
+    --engine "$ENGINE" \
+    --phase "$PHASE" \
+    --input "$RESULT_PATH" \
+    --output "$STATUS_PATH"
+  copy_review_artifacts
+}
 
 BASE_REF="$(
   python3 "$WORKSPACE/scripts/ai_review.py" detect-base \
@@ -67,12 +100,38 @@ EOF
 )
 
 if [[ "$ENGINE" == "codex" ]]; then
+  # `set -e` already aborts the script when the codex CLI exits non-zero,
+  # so we rely on that for exec-level failure visibility. The structured
+  # output lives in `$RESULT_PATH` and is validated downstream.
+  set +e
   "$CODEX_BIN" exec \
     --cd "$WORKSPACE" \
     --sandbox read-only \
     --output-schema "$SCHEMA_PATH" \
     --output-last-message "$RESULT_PATH" \
-    "$PROMPT"
+    "$PROMPT" > "$RAW_PATH" 2>&1
+  CODEX_EXIT=$?
+  set -e
+
+  if [[ "$CODEX_EXIT" -ne 0 ]]; then
+    echo "::error title=Codex CLI failed::Codex CLI exited with status $CODEX_EXIT" >&2
+    echo "----- Codex CLI raw output (exit $CODEX_EXIT) -----" >&2
+    if [[ -s "$RAW_PATH" ]]; then
+      cat "$RAW_PATH" >&2
+    else
+      echo "(raw output is empty)" >&2
+    fi
+    echo "----- end raw output -----" >&2
+    write_failure_status
+    exit 1
+  fi
+
+  if [[ ! -s "$RESULT_PATH" ]]; then
+    printf '%s\n' "Codex CLI finished without writing a structured review result." >> "$RAW_PATH"
+    echo "::error title=Codex result missing::Codex CLI did not create $RESULT_PATH" >&2
+    write_failure_status
+    exit 1
+  fi
 elif [[ "$ENGINE" == "claude" ]]; then
   CLAUDE_SCHEMA="$(python3 - <<'PY' "$SCHEMA_PATH"
 import json, sys
@@ -82,13 +141,88 @@ PY
 )"
   # Feed the review prompt via stdin. `--add-dir` is variadic, so passing the
   # prompt positionally after it can be parsed as another directory instead of
-  # the actual print-mode input.
-  printf '%s' "$PROMPT" | "$CLAUDE_BIN" -p \
+  # the actual print-mode input. We stage the prompt in a temp file and
+  # redirect it as stdin so we can capture the CLI's exit code directly
+  # (pipelines under `pipefail` make exit-code capture fragile).
+  PROMPT_FILE="$TMP_DIR/prompt.txt"
+  printf '%s' "$PROMPT" > "$PROMPT_FILE"
+
+  set +e
+  "$CLAUDE_BIN" -p \
     --output-format json \
     --json-schema "$CLAUDE_SCHEMA" \
     --allowedTools "Bash(git *) Bash(rg *) Bash(cat *) Bash(sed *) Read Glob Grep" \
-    --add-dir "$WORKSPACE" > "$RAW_PATH"
+    --add-dir "$WORKSPACE" \
+    < "$PROMPT_FILE" > "$RAW_PATH"
+  CLAUDE_EXIT=$?
+  set -e
+
+  if [[ "$CLAUDE_EXIT" -ne 0 ]]; then
+    echo "::error title=Claude CLI failed::Claude CLI exited with status $CLAUDE_EXIT" >&2
+    echo "----- Claude CLI raw output (exit $CLAUDE_EXIT) -----" >&2
+    if [[ -s "$RAW_PATH" ]]; then
+      cat "$RAW_PATH" >&2
+    else
+      echo "(raw.json is empty)" >&2
+    fi
+    echo "----- end raw output -----" >&2
+    write_failure_status
+    exit 1
+  fi
+
+  # Claude CLI sometimes exits 0 even when the session itself failed
+  # (auth, tool error, etc). In that case the JSON payload carries
+  # `is_error: true` and a human-readable `result`. Surface it so the
+  # failure is visible in the CI log instead of silently falling through.
+  set +e
+  python3 - "$RAW_PATH" <<'PY'
+import json, sys
+from pathlib import Path
+try:
+    data = json.loads(Path(sys.argv[1]).read_text())
+except Exception:
+    sys.exit(0)
+if isinstance(data, dict) and data.get("is_error") is True:
+    sys.exit(1)
+sys.exit(0)
+PY
+  IS_ERROR_EXIT=$?
+  set -e
+
+  if [[ "$IS_ERROR_EXIT" -ne 0 ]]; then
+    RESULT_MSG="$(python3 - "$RAW_PATH" <<'PY'
+import json, sys
+from pathlib import Path
+try:
+    data = json.loads(Path(sys.argv[1]).read_text())
+except Exception as exc:
+    print(f"(failed to parse raw.json: {exc})")
+    sys.exit(0)
+if isinstance(data, dict):
+    print(data.get("result") or data.get("error") or "(no result field)")
+else:
+    print("(raw.json is not an object)")
+PY
+)"
+    echo "::error title=Claude CLI session error::${RESULT_MSG}" >&2
+    echo "----- Claude CLI raw output (is_error=true) -----" >&2
+    cat "$RAW_PATH" >&2
+    echo "----- end raw output -----" >&2
+    write_failure_status
+    exit 1
+  fi
+
+  set +e
   python3 "$WORKSPACE/scripts/ai_review.py" extract-claude --input "$RAW_PATH" --output "$RESULT_PATH"
+  EXTRACT_EXIT=$?
+  set -e
+
+  if [[ "$EXTRACT_EXIT" -ne 0 ]]; then
+    printf '\nClaude structured output extraction failed (exit %s).\n' "$EXTRACT_EXIT" >> "$RAW_PATH"
+    echo "::error title=Claude output parse failed::Failed to extract structured review output" >&2
+    write_failure_status
+    exit 1
+  fi
 else
   echo "Unknown engine: $ENGINE" >&2
   exit 2
@@ -99,13 +233,7 @@ python3 "$WORKSPACE/scripts/ai_review.py" render \
   --phase "$PHASE" \
   --input "$RESULT_PATH" > "$SUMMARY_PATH"
 
-if [[ -n "${REVIEW_RESULT_PATH:-}" ]]; then
-  cp "$RESULT_PATH" "$REVIEW_RESULT_PATH"
-fi
-
-if [[ -n "${REVIEW_SUMMARY_PATH:-}" ]]; then
-  cp "$SUMMARY_PATH" "$REVIEW_SUMMARY_PATH"
-fi
+write_completed_status
 
 cat "$SUMMARY_PATH"
 

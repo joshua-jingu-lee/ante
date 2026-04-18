@@ -25,19 +25,109 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Resolve context
+        id: context
+        run: |
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "run_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Run Claude PR approval
+        id: review
+        continue-on-error: true
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: scripts/run_ai_review.sh claude pr
+          REVIEW_RESULT_PATH: ${{ runner.temp }}/claude-pr-approve/result.json
+          REVIEW_SUMMARY_PATH: ${{ runner.temp }}/claude-pr-approve/summary.md
+          REVIEW_STATUS_PATH: ${{ runner.temp }}/claude-pr-approve/status.json
+          REVIEW_RAW_PATH: ${{ runner.temp }}/claude-pr-approve/raw.txt
+        run: |
+          mkdir -p "$RUNNER_TEMP/claude-pr-approve"
+          scripts/run_ai_review.sh claude pr
+
+      - name: Load review status
+        id: status
+        if: ${{ always() }}
+        env:
+          STATUS_PATH: ${{ runner.temp }}/claude-pr-approve/status.json
+          RAW_PATH: ${{ runner.temp }}/claude-pr-approve/raw.txt
+        run: |
+          if [[ ! -f "$STATUS_PATH" ]]; then
+            python3 scripts/ai_review.py classify-failure \
+              --engine claude \
+              --phase pr \
+              --input "$RAW_PATH" \
+              --output "$STATUS_PATH"
+          fi
+
+          {
+            echo "approved=$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field approved)"
+            echo "failure_kind=$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field failure_kind)"
+            echo "review_output_available=$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field review_output_available)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload review artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-pr-approve
+          path: ${{ runner.temp }}/claude-pr-approve
+          if-no-files-found: ignore
+
+      - name: Comment approval result
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          RESULT_PATH: ${{ runner.temp }}/claude-pr-approve/result.json
+          STATUS_PATH: ${{ runner.temp }}/claude-pr-approve/status.json
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+          APPROVED: ${{ steps.status.outputs.approved }}
+          FAILURE_KIND: ${{ steps.status.outputs.failure_kind }}
+          REVIEW_OUTPUT_AVAILABLE: ${{ steps.status.outputs.review_output_available }}
+        run: |
+          if [[ "$APPROVED" == "true" || ( "$FAILURE_KIND" == "content" && "$REVIEW_OUTPUT_AVAILABLE" == "true" && -f "$RESULT_PATH" ) ]]; then
+            python3 scripts/ai_review.py render-issue-comment \
+              --stage completed \
+              --engine claude \
+              --phase pr \
+              --head-ref "$HEAD_REF" \
+              --head-sha "$HEAD_SHA" \
+              --run-url "$RUN_URL" \
+              --input "$RESULT_PATH" > "$RUNNER_TEMP/claude-pr-approve-comment.md"
+          else
+            python3 scripts/ai_review.py render-issue-comment \
+              --stage error \
+              --engine claude \
+              --phase pr \
+              --head-ref "$HEAD_REF" \
+              --head-sha "$HEAD_SHA" \
+              --run-url "$RUN_URL" \
+              --status "$STATUS_PATH" > "$RUNNER_TEMP/claude-pr-approve-comment.md"
+          fi
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/claude-pr-approve-comment.md"
+
+      - name: Enforce approval verdict
+        if: ${{ always() }}
+        env:
+          APPROVED: ${{ steps.status.outputs.approved }}
+        run: |
+          if [[ "$APPROVED" != "true" ]]; then
+            exit 1
+          fi
 
   codex-pr-approve:
     name: codex-pr-approve
@@ -48,19 +138,404 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Resolve context
+        id: context
+        run: |
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "run_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Run Codex PR approval
+        id: review
+        continue-on-error: true
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: scripts/run_ai_review.sh codex pr
+          REVIEW_RESULT_PATH: ${{ runner.temp }}/codex-pr-approve/result.json
+          REVIEW_SUMMARY_PATH: ${{ runner.temp }}/codex-pr-approve/summary.md
+          REVIEW_STATUS_PATH: ${{ runner.temp }}/codex-pr-approve/status.json
+          REVIEW_RAW_PATH: ${{ runner.temp }}/codex-pr-approve/raw.txt
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-pr-approve"
+          scripts/run_ai_review.sh codex pr
+
+      - name: Load review status
+        id: status
+        if: ${{ always() }}
+        env:
+          STATUS_PATH: ${{ runner.temp }}/codex-pr-approve/status.json
+          RAW_PATH: ${{ runner.temp }}/codex-pr-approve/raw.txt
+        run: |
+          if [[ ! -f "$STATUS_PATH" ]]; then
+            python3 scripts/ai_review.py classify-failure \
+              --engine codex \
+              --phase pr \
+              --input "$RAW_PATH" \
+              --output "$STATUS_PATH"
+          fi
+
+          {
+            echo "approved=$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field approved)"
+            echo "failure_kind=$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field failure_kind)"
+            echo "review_output_available=$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field review_output_available)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload review artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-pr-approve
+          path: ${{ runner.temp }}/codex-pr-approve
+          if-no-files-found: ignore
+
+      - name: Comment approval result
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          RESULT_PATH: ${{ runner.temp }}/codex-pr-approve/result.json
+          STATUS_PATH: ${{ runner.temp }}/codex-pr-approve/status.json
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+          APPROVED: ${{ steps.status.outputs.approved }}
+          FAILURE_KIND: ${{ steps.status.outputs.failure_kind }}
+          REVIEW_OUTPUT_AVAILABLE: ${{ steps.status.outputs.review_output_available }}
+        run: |
+          if [[ "$APPROVED" == "true" || ( "$FAILURE_KIND" == "content" && "$REVIEW_OUTPUT_AVAILABLE" == "true" && -f "$RESULT_PATH" ) ]]; then
+            python3 scripts/ai_review.py render-issue-comment \
+              --stage completed \
+              --engine codex \
+              --phase pr \
+              --head-ref "$HEAD_REF" \
+              --head-sha "$HEAD_SHA" \
+              --run-url "$RUN_URL" \
+              --input "$RESULT_PATH" > "$RUNNER_TEMP/codex-pr-approve-comment.md"
+          else
+            python3 scripts/ai_review.py render-issue-comment \
+              --stage error \
+              --engine codex \
+              --phase pr \
+              --head-ref "$HEAD_REF" \
+              --head-sha "$HEAD_SHA" \
+              --run-url "$RUN_URL" \
+              --status "$STATUS_PATH" > "$RUNNER_TEMP/codex-pr-approve-comment.md"
+          fi
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/codex-pr-approve-comment.md"
+
+      - name: Enforce approval verdict
+        if: ${{ always() }}
+        env:
+          APPROVED: ${{ steps.status.outputs.approved }}
+        run: |
+          if [[ "$APPROVED" != "true" ]]; then
+            exit 1
+          fi
+
+  claude-pr-fix:
+    name: claude-pr-fix
+    if: ${{ always() && vars.AI_REVIEW_ENABLED == 'true' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false }}
+    needs:
+      - claude-pr-approve
+      - codex-pr-approve
+    runs-on:
+      - self-hosted
+      - claude-review
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Resolve context
+        id: context
+        run: |
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "run_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Claude approval artifact
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-pr-approve
+          path: ${{ runner.temp }}/approvals/claude
+
+      - name: Download Codex approval artifact
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-pr-approve
+          path: ${{ runner.temp }}/approvals/codex
+
+      - name: Analyze repair policy
+        id: policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CLAUDE_STATUS: ${{ runner.temp }}/approvals/claude/status.json
+          CODEX_STATUS: ${{ runner.temp }}/approvals/codex/status.json
+          COMMENTS_PATH: ${{ runner.temp }}/pr-comments.json
+          ANALYSIS_PATH: ${{ runner.temp }}/pr-fix-analysis.json
+        run: |
+          python3 scripts/ai_review.py classify-failure \
+            --engine claude \
+            --phase pr \
+            --input /dev/null \
+            --output "$RUNNER_TEMP/default-status.json" >/dev/null 2>&1 || true
+
+          for path in "$CLAUDE_STATUS" "$CODEX_STATUS"; do
+            if [[ ! -f "$path" ]]; then
+              mkdir -p "$(dirname "$path")"
+              cp "$RUNNER_TEMP/default-status.json" "$path"
+            fi
+          done
+
+          CLAUDE_APPROVED="$(python3 scripts/ai_review.py analysis-field --input "$CLAUDE_STATUS" --field approved)"
+          CLAUDE_KIND="$(python3 scripts/ai_review.py analysis-field --input "$CLAUDE_STATUS" --field failure_kind)"
+          CLAUDE_MESSAGE="$(python3 scripts/ai_review.py analysis-field --input "$CLAUDE_STATUS" --field message)"
+          CODEX_APPROVED="$(python3 scripts/ai_review.py analysis-field --input "$CODEX_STATUS" --field approved)"
+          CODEX_KIND="$(python3 scripts/ai_review.py analysis-field --input "$CODEX_STATUS" --field failure_kind)"
+          CODEX_MESSAGE="$(python3 scripts/ai_review.py analysis-field --input "$CODEX_STATUS" --field message)"
+
+          SOURCE_ENGINES=()
+          if [[ "$CLAUDE_APPROVED" != "true" && "$CLAUDE_KIND" == "content" ]]; then
+            SOURCE_ENGINES+=("claude-pr-approve")
+          fi
+          if [[ "$CODEX_APPROVED" != "true" && "$CODEX_KIND" == "content" ]]; then
+            SOURCE_ENGINES+=("codex-pr-approve")
+          fi
+
+          if [[ "$CLAUDE_APPROVED" == "true" && "$CODEX_APPROVED" == "true" ]]; then
+            {
+              echo "should_fix=false"
+              echo "reason=noop"
+              echo "attempt=0"
+              echo "source_engines="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$CLAUDE_APPROVED" != "true" && "$CLAUDE_KIND" != "" && "$CLAUDE_KIND" != "content" ]]; then
+            {
+              echo "should_fix=false"
+              echo "reason=$CLAUDE_KIND"
+              echo "attempt=0"
+              echo "source_engines="
+              echo "message<<EOF"
+              echo "$CLAUDE_MESSAGE"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$CODEX_APPROVED" != "true" && "$CODEX_KIND" != "" && "$CODEX_KIND" != "content" ]]; then
+            {
+              echo "should_fix=false"
+              echo "reason=$CODEX_KIND"
+              echo "attempt=0"
+              echo "source_engines="
+              echo "message<<EOF"
+              echo "$CODEX_MESSAGE"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${#SOURCE_ENGINES[@]}" -eq 0 ]]; then
+            {
+              echo "should_fix=false"
+              echo "reason=noop"
+              echo "attempt=0"
+              echo "source_engines="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" > "$COMMENTS_PATH"
+          python3 scripts/ai_review.py analyze-fix-loop \
+            --comments "$COMMENTS_PATH" \
+            --threshold 3 > "$ANALYSIS_PATH"
+
+          ATTEMPT_COUNT="$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field attempt_count)"
+          BLOCKED="$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field blocked)"
+          NEXT_ATTEMPT="$((ATTEMPT_COUNT + 1))"
+          ENGINE_LIST="$(printf '%s\n' "${SOURCE_ENGINES[@]}" | paste -sd, -)"
+
+          if [[ "$BLOCKED" == "true" || "$NEXT_ATTEMPT" -gt 3 ]]; then
+            {
+              echo "should_fix=false"
+              echo "reason=attempt_limit"
+              echo "attempt=$ATTEMPT_COUNT"
+              echo "source_engines=$ENGINE_LIST"
+              echo "message<<EOF"
+              echo "PR 승인 실패에 대한 Claude 재수정 시도가 3회를 모두 사용해 자동 재수정을 중단합니다."
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "should_fix=true"
+            echo "reason=content"
+            echo "attempt=$NEXT_ATTEMPT"
+            echo "source_engines=$ENGINE_LIST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mark blocked PR review loop
+        if: ${{ steps.policy.outputs.reason == 'attempt_limit' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/labels" \
+            -f name='blocked:pr-review-loop' \
+            -f color='B60205' \
+            -f description='Claude PR auto-fix exhausted 3 attempts' >/dev/null 2>&1 || true
+
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+            -f labels[]='blocked:pr-review-loop' >/dev/null
+
+      - name: Comment skipped repair
+        if: ${{ steps.policy.outputs.should_fix != 'true' && steps.policy.outputs.reason != 'noop' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+          REASON: ${{ steps.policy.outputs.reason }}
+          MESSAGE: ${{ steps.policy.outputs.message }}
+          ATTEMPT: ${{ steps.policy.outputs.attempt }}
+        run: |
+          python3 scripts/ai_review.py render-issue-comment \
+            --stage fix-skipped \
+            --engine claude \
+            --phase pr \
+            --head-ref "$HEAD_REF" \
+            --head-sha "$HEAD_SHA" \
+            --run-url "$RUN_URL" \
+            --reason "$REASON" \
+            --message "$MESSAGE" \
+            --attempt "${ATTEMPT:-0}" \
+            --threshold 3 > "$RUNNER_TEMP/claude-pr-fix-skipped.md"
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/claude-pr-fix-skipped.md"
+
+      - name: Comment repair started
+        if: ${{ steps.policy.outputs.should_fix == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+          ATTEMPT: ${{ steps.policy.outputs.attempt }}
+          SOURCE_ENGINES: ${{ steps.policy.outputs.source_engines }}
+        run: |
+          python3 scripts/ai_review.py render-issue-comment \
+            --stage fix-started \
+            --engine claude \
+            --phase pr \
+            --head-ref "$HEAD_REF" \
+            --head-sha "$HEAD_SHA" \
+            --run-url "$RUN_URL" \
+            --attempt "$ATTEMPT" \
+            --threshold 3 \
+            --source-engines "$SOURCE_ENGINES" > "$RUNNER_TEMP/claude-pr-fix-started.md"
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/claude-pr-fix-started.md"
+
+      - name: Run Claude PR repair
+        id: repair
+        if: ${{ steps.policy.outputs.should_fix == 'true' }}
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+          ATTEMPT: ${{ steps.policy.outputs.attempt }}
+          FIX_THRESHOLD: 3
+          CLAUDE_REVIEW_DIR: ${{ runner.temp }}/approvals/claude
+          CODEX_REVIEW_DIR: ${{ runner.temp }}/approvals/codex
+          FIX_STATUS_PATH: ${{ runner.temp }}/claude-pr-fix/status.json
+          FIX_RAW_PATH: ${{ runner.temp }}/claude-pr-fix/raw.txt
+        run: |
+          mkdir -p "$RUNNER_TEMP/claude-pr-fix"
+          chmod +x scripts/run_pr_fix.sh
+          scripts/run_pr_fix.sh
+
+      - name: Comment repair result
+        if: ${{ always() && steps.policy.outputs.should_fix == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          RUN_URL: ${{ steps.context.outputs.run_url }}
+          ATTEMPT: ${{ steps.policy.outputs.attempt }}
+          STATUS_PATH: ${{ runner.temp }}/claude-pr-fix/status.json
+        run: |
+          if [[ ! -f "$STATUS_PATH" ]]; then
+            python3 scripts/ai_review.py classify-failure \
+              --engine claude \
+              --phase pr \
+              --input /dev/null \
+              --output "$STATUS_PATH"
+          fi
+
+          STATE="$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field state)"
+          FAILURE_KIND="$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field failure_kind)"
+
+          if [[ "$STATE" == "pushed" || "$STATE" == "no_changes" ]]; then
+            python3 scripts/ai_review.py render-issue-comment \
+              --stage fix-completed \
+              --engine claude \
+              --phase pr \
+              --head-ref "$HEAD_REF" \
+              --head-sha "$HEAD_SHA" \
+              --run-url "$RUN_URL" \
+              --status "$STATUS_PATH" \
+              --attempt "$ATTEMPT" \
+              --threshold 3 > "$RUNNER_TEMP/claude-pr-fix-result.md"
+          else
+            python3 scripts/ai_review.py render-issue-comment \
+              --stage fix-skipped \
+              --engine claude \
+              --phase pr \
+              --head-ref "$HEAD_REF" \
+              --head-sha "$HEAD_SHA" \
+              --run-url "$RUN_URL" \
+              --reason "$FAILURE_KIND" \
+              --message "$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field message)" \
+              --attempt "$ATTEMPT" \
+              --threshold 3 > "$RUNNER_TEMP/claude-pr-fix-result.md"
+          fi
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/claude-pr-fix-result.md"
 
   merge-gate:
     name: merge-gate
