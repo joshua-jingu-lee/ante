@@ -4,11 +4,21 @@ on:
   pull_request:
     types:
       - closed
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged PR number to reconcile linked issues
+        required: false
+        type: string
+      issue_numbers:
+        description: Comma-separated issue numbers to reconcile directly
+        required: false
+        type: string
 
 jobs:
   post-merge:
     name: post-merge
-    if: ${{ github.event.pull_request.merged == true }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,13 +31,66 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const pr = context.payload.pull_request;
-            const body = pr.body || "";
+            const eventName = context.eventName;
+            const closingPattern =
+              /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#(\d+)/gi;
 
-            const refs = [...body.matchAll(/\bRefs\s+#(\d+)/gi)].map((match) => Number(match[1]));
-            const uniqueRefs = [...new Set(refs)];
+            function parseIssueNumbers(text) {
+              return [...(text || "").matchAll(closingPattern)].map((match) => Number(match[1]));
+            }
 
-            core.info(`Linked issues: ${uniqueRefs.join(", ") || "(none)"}`);
+            let pr = null;
+            let issueNumbers = [];
+
+            if (eventName === "workflow_dispatch") {
+              const prNumberInput = core.getInput("pr_number");
+              const issueNumbersInput = core.getInput("issue_numbers");
+
+              if (prNumberInput) {
+                pr = (
+                  await github.rest.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: Number(prNumberInput),
+                  })
+                ).data;
+
+                issueNumbers.push(...parseIssueNumbers(pr.body || ""));
+
+                if (!pr.merged_at) {
+                  core.warning(`PR #${pr.number} is not merged. Proceeding with manual reconciliation.`);
+                }
+              }
+
+              if (issueNumbersInput) {
+                issueNumbers.push(
+                  ...issueNumbersInput
+                    .split(",")
+                    .map((value) => Number(value.trim()))
+                    .filter((value) => Number.isInteger(value) && value > 0),
+                );
+              }
+
+              if (!pr && issueNumbers.length === 0) {
+                core.setFailed("workflow_dispatch requires pr_number or issue_numbers.");
+                return;
+              }
+            } else {
+              pr = context.payload.pull_request;
+              issueNumbers.push(...parseIssueNumbers(pr.body || ""));
+            }
+
+            const uniqueRefs = [...new Set(issueNumbers)];
+
+            core.info(
+              `Linked issues from ${eventName === "workflow_dispatch" ? "manual dispatch" : "merged PR"}: ` +
+              `${uniqueRefs.join(", ") || "(none)"}`
+            );
+
+            if (uniqueRefs.length === 0) {
+              core.warning("No linked issues found; nothing to reconcile.");
+              return;
+            }
 
             async function markIssueDone(issueNumber) {
               const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });

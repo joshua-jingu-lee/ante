@@ -6,6 +6,8 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 isolation: worktree
 skills:
   - frontend-conventions
+  - lightweight-planning
+  - receive-review
 ---
 
 # 프론트엔드 개발자 에이전트

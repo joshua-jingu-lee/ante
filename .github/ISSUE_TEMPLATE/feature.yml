@@ -21,6 +21,44 @@ body:
       required: true
 
   - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 다루지 않을 것.
+    validations:
+      required: true
+
+  - type: textarea
+    id: contracts
+    attributes:
+      label: 영향 받는 계약
+      description: API / CLI / DB schema / generated type / runtime config 중 해당 항목을 적어주세요.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: risk-flags
+    attributes:
+      label: 위험 신호
+      options:
+        - label: cache / invalidate
+        - label: reconnect / reinitialize
+        - label: mutable config
+        - label: generated artifact sync
+        - label: background task / health path
+
+  - type: textarea
+    id: verification-scenarios
+    attributes:
+      label: 검증 시나리오
+      description: 기능이 제대로 동작함을 보여줄 2~4개 시나리오를 적어주세요.
+      value: |
+        - 시나리오 1:
+        - 시나리오 2:
+    validations:
+      required: true
+
+  - type: textarea
     id: technical-notes
     attributes:
       label: 기술 노트

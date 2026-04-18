@@ -27,7 +27,7 @@ gh issue view #{번호} --json number,title,labels,body
 이미 아키텍트 리뷰가 달린 이슈는 건너뛴다:
 ```bash
 # 코멘트에 "🏗️ **아키텍트 리뷰**" 가 있으면 스킵
-gh issue view #{번호} --json comments --jq '.comments[].body' | grep -q "🏗️ \*\*아키텍트 리뷰\*\*"
+gh issue view #{번호} --json comments --jq '.comments[].body' | rg -q "🏗️ \\*\\*아키텍트 리뷰\\*\\*"
 ```
 
 ### 2단계: 이슈별 분석

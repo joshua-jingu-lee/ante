@@ -3,6 +3,9 @@ name: strategy-dev
 description: 매매 전략 개발 에이전트. 시장 데이터 탐색, 전략 작성, 정적 검증, 백테스트, 리포트 제출까지 전략 개발 전 과정을 수행한다.
 model: opus
 tools: Read, Write, Edit, Glob, Grep, Bash
+skills:
+  - lightweight-planning
+  - receive-review
 ---
 
 # 전략 개발자 에이전트

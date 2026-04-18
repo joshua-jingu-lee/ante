@@ -11,10 +11,34 @@ body:
       required: true
 
   - type: textarea
+    id: invariants
+    attributes:
+      label: 보존해야 할 동작 invariant
+      description: 리팩터링 후에도 절대 바뀌면 안 되는 동작.
+    validations:
+      required: true
+
+  - type: textarea
     id: scope
     attributes:
       label: 변경 범위
       description: 영향받는 모듈, 파일 목록.
+    validations:
+      required: true
+
+  - type: textarea
+    id: consumers
+    attributes:
+      label: 영향 소비자
+      description: 이 변경을 읽거나 호출하는 소비자, 생성 산출물, 운영 경로를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: prohibited-expansion
+    attributes:
+      label: 금지할 확장
+      description: 이번 이슈에서 같이 하지 않을 구조 변경을 적어주세요.
     validations:
       required: true
 

@@ -9,6 +9,8 @@
 ```
 Claude 구현 (worktree 격리)
   │
+  ├── 조건부 계획 리뷰 (`@code-reviewer`, 필요 시)
+  │
   ├── 로컬 lint / test
   │
   ├── 브랜치 push
@@ -22,6 +24,8 @@ Claude 구현 (worktree 격리)
   ├──▶ [Gate C] claude-pr-approve ─────── content 실패 → Claude 자동 재수정
   │
   ├──▶ [Gate D] codex-pr-approve ──────── content 실패 → Claude 자동 재수정
+  │
+  ├──▶ [Meta] code-reviewer ───────────── 고위험 변경 / 반복 risk class 시 원인 분석
   │
   ├──▶ [Loop] Claude PR repair ────────── 최대 3회, quota/script/auth/infra는 제외
   │
@@ -83,6 +87,25 @@ post-merge automation
   - `content` FAIL → Claude 자동 재수정 루프
   - `quota/script_error/auth_error/infra_error` → 재수정 없이 PR 코멘트로 중단 사유 기록
 
+### Meta Review — Claude code-reviewer
+
+**목적**: approve / fail 판정보다 앞서 계획 적합성과 구조 리스크를 좁힌다.
+
+- **트리거**:
+  - 구현 시작 전 경량 계획에서 고위험 조건 감지
+  - 고위험 변경
+  - 같은 `risk class` failure 2회 반복
+- **실행 주체**: Claude 오케스트레이터 또는 수동 호출
+- **기준**:
+  - `.agent/agents/code-reviewer.md`
+  - `.agent/skills/lifecycle-review.md`
+  - `.agent/skills/contract-drift-review.md`
+  - `.agent/skills/generated-artifact-sync.md`
+- **원칙**:
+  - status check를 하나 더 늘리는 단계가 아니다.
+  - 구현 시작 전에는 "지금 이 범위로 코딩해도 되는가"를 판단한다.
+  - auto-fix를 계속 돌리기 전에는 "무엇을 먼저 검증해야 하는가"를 정리하는 단계다.
+
 ### Claude PR 재수정 루프
 
 **목적**: PR 승인에서 발견된 실제 blocking finding을 같은 PR 브랜치에서 빠르게 해소
@@ -129,8 +152,11 @@ post-merge automation
 
 ### 3.1 현재 저장소와 목표 상태
 
-- **현재 존재**: `ci.yml`, `semantic-release.yml`, `publish.yml`
-- **추가 필요**: `codex-branch-review.yml`, `pr-approvals.yml`, `post-merge.yml`
+- **현재 존재**: `ci.yml`, `codex-branch-review.yml`, `pr-approvals.yml`, `post-merge.yml`, `semantic-release.yml`, `publish.yml`
+- **운영 과제**:
+  - review artifact / 코멘트 형식 개선
+  - 반복 `risk class` 에스컬레이션 자동화 고도화
+  - 필요 시 architecture gate 도입
 
 GitHub branch protection에서 required status checks를 사용할 경우, 각 job 이름은 서로 달라야 한다.
 
@@ -165,6 +191,7 @@ pytest tests/unit/ -v
 
 `codex-branch-review`는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
 `claude-pr-approve` / `codex-pr-approve`는 `content` FAIL일 때만 Claude 자동 재수정을 최대 3회 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다.
+`lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
 
 ## 6. 설계 적합성 검증 (선택 Gate)
 

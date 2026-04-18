@@ -58,6 +58,23 @@
 - [ ] {actor}는 {action}을 할 수 있다. 그래서 {benefit}.
 - [ ] ...
 
+## 비목표
+이번 이슈에서 다루지 않을 것.
+
+## 영향 받는 계약
+API / CLI / DB schema / generated type / runtime config 중 해당 항목.
+
+## 위험 신호
+- [ ] cache / invalidate
+- [ ] reconnect / reinitialize
+- [ ] mutable config
+- [ ] generated artifact sync
+- [ ] background task / health path
+
+## 검증 시나리오
+- 시나리오 1:
+- 시나리오 2:
+
 ## 기술 노트 (선택)
 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등.
 
@@ -81,6 +98,15 @@
 ## 기대 동작
 정상적으로 어떻게 동작해야 하는지.
 
+## 첫 failing check
+처음 실패를 확인한 로그, 체크, 테스트 또는 workflow.
+
+## 회귀를 막을 테스트 위치
+추가하거나 보강해야 할 테스트 파일/카테고리.
+
+## 영향 범위 경계
+예: `web만`, `web + QA consumer`, `account + gateway + broker`
+
 ## 원인 분석 (선택)
 추정 원인, 관련 코드 위치.
 
@@ -95,8 +121,17 @@
 ## 배경
 현재 코드의 문제점과 개선 동기.
 
+## 보존해야 할 동작 invariant
+리팩터링 후에도 절대 바뀌면 안 되는 동작.
+
 ## 변경 범위
 영향받는 모듈, 파일 목록.
+
+## 영향 소비자
+이 변경을 읽거나 호출하는 소비자, 생성 산출물, 운영 경로.
+
+## 금지할 확장
+이번 이슈에서 같이 하지 않을 구조 변경.
 
 ## 접근 방법
 어떻게 개선할 것인지 (구체적 전략).
@@ -173,7 +208,7 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
   │
   ├── 브랜치 push → codex-branch-review 통과
   │
-  ├── PR 생성 (본문에 "Refs #{번호}" — 자동 close 방지)
+  ├── PR 생성 (본문에 "Closes #{번호}")
   │
   ├── PR 승인 + auto-merge
   │
@@ -184,10 +219,10 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
 
 ### 이슈 close 규칙
 
-- **PR 본문에 `Closes #N`, `Fixes #N` 등 자동 close 키워드를 사용하지 않는다.** 대신 `Refs #N`으로 참조만 남긴다.
-- 이슈는 **PR이 최종 머지되고 변경이 base 브랜치에 반영된 것을 확인한 후** post-merge automation이 close한다.
+- **PR 본문에는 `Closes #N`를 기본으로 사용한다.** `Fixes #N`, `Resolves #N`도 허용하지만, runbook과 예시는 `Closes #N`으로 통일한다.
+- 이슈 close는 GitHub 기본 auto-close를 우선 사용하고, `post-merge` automation은 체크박스와 에픽 상태를 동기화한다.
 - 에픽 이슈는 모든 하위 이슈가 close된 후에 close한다.
-- 이유: PR 자동 close는 에픽 하위 이슈 등에서 실제 구현 없이 이슈가 닫히는 문제를 유발한다.
+- `post-merge`가 누락되면 workflow 수동 실행으로 PR 번호 또는 이슈 번호를 넣어 복구한다.
 
 ## 7. 에이전트의 이슈 등록
 

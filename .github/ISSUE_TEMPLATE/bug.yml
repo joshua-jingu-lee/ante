@@ -30,6 +30,30 @@ body:
       required: true
 
   - type: textarea
+    id: first-failing-check
+    attributes:
+      label: 첫 failing check
+      description: 처음 실패를 확인한 로그, 테스트, workflow, 커맨드 등을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: regression-test-location
+    attributes:
+      label: 회귀를 막을 테스트 위치
+      description: 추가/보강해야 할 테스트 파일이나 TC 카테고리를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact-boundary
+    attributes:
+      label: 영향 범위 경계
+      description: 예) `web만`, `web + QA consumer`, `account + gateway + broker`
+    validations:
+      required: true
+
+  - type: textarea
     id: analysis
     attributes:
       label: 원인 분석

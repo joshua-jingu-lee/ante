@@ -30,7 +30,7 @@ gh issue view #{번호} --json number,title,labels,body
 
 이미 QA 리뷰가 달린 이슈는 건너뛴다:
 ```bash
-gh issue view #{번호} --json comments --jq '.comments[].body' | grep -q "🧪 \*\*QA 리뷰\*\*"
+gh issue view #{번호} --json comments --jq '.comments[].body' | rg -q "🧪 \\*\\*QA 리뷰\\*\\*"
 ```
 
 ### 2단계: 이슈별 분석

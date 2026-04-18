@@ -21,15 +21,18 @@ mkdir -p "$WORKTREE_ROOT"
 
 ## 에이전트 역할 분담
 
-이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. PR 전 사전 리뷰는 Codex가 수행한다.
+이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. PR 전 기본 사전 리뷰는 Codex가 수행하고, 구현 시작 전 고위험 이슈는 Claude `@code-reviewer`의 조건부 계획 리뷰를 먼저 통과해야 한다. 구조 리스크가 높거나 반복 failure가 나오면 같은 리뷰어가 메타 리뷰도 수행한다.
 
 | 단계 | 담당 | 실행 주체 | GitHub 기록 |
 |------|------|-----------|-------------|
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
+| 4a (경량 계획) | 오케스트레이터 | Claude 메인 세션 | 필요 시 이슈 코멘트 |
+| 4b (조건부 계획 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈 코멘트 |
 | 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
 | 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` + 이슈 코멘트 |
-| 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Refs #이슈`) |
+| 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
+| 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Closes #이슈`) |
 | 13 (최종 승인/머지) | GitHub automation | Claude/Codex PR 승인 워커 + auto-merge | PR checks |
 
 ## 작업 흐름
@@ -49,6 +52,25 @@ mkdir -p "$WORKTREE_ROOT"
    - 양쪽 모두 변경 → 백엔드 먼저, 프론트엔드 후속
 4. **기존 코드 파악**: 이슈가 기존 모듈 수정을 포함하면 관련 소스를 먼저 읽고 영향 범위를 파악한다.
 
+4a. **경량 계획 체크리스트 작성**: 구현 전에 `.agent/skills/lightweight-planning.md` 규칙으로 아래 다섯 가지를 짧게 정리한다.
+
+- `파일 맵`: 수정 파일, 반드시 읽을 호출자/소비자, 생성 산출물
+- `작업 분해`: 3~7개의 작은 작업 단위
+- `risk flags`: lifecycle / contract-drift / generated-artifact-sync / mutable-config / health-path 등
+- `verification plan`: 로컬에서 반드시 돌릴 검증
+- `stop conditions`: 같은 risk class 반복, 범위 확장, failing test 정의 불가 등
+
+4b. **조건부 계획 리뷰 판단**: 아래 조건이 하나라도 맞으면 구현을 시작하기 전에 Claude `@code-reviewer`를 호출한다.
+
+- 캐시, 세션, 연결, long-lived adapter, mutable config 변경
+- endpoint / schema / field / CLI rename
+- OpenAPI, 생성 타입, 생성 문서, schema drift 가능성
+- 둘 이상의 모듈과 소비자 경로가 함께 흔들림
+- 운영 health / readiness / background task와 연결된 동작 변경
+- 같은 `risk class` failure가 과거 리뷰에서 2회 반복됨
+
+`@code-reviewer` verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다.
+
 ### 구현 시작 기록 (오케스트레이터)
 
 5. **이슈에 착수 코멘트**:
@@ -57,7 +79,9 @@ mkdir -p "$WORKTREE_ROOT"
 gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 담당 에이전트: @{에이전트명}
 - 변경 대상: {src/ante/xxx, frontend/ 등}
-- base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}"
+- base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
+- 계획 리뷰: {not-required | approve-implement | narrow-scope}
+- risk flags: {없음 또는 쉼표 구분 목록}"
 ```
 
 ### 구현 단계 (개발 에이전트)
@@ -82,6 +106,12 @@ Agent(
 8. 로컬 검증 (ruff check, ruff format, pytest)
 9. 브랜치 push
 
+## 경량 계획
+{파일 맵, 작업 분해, risk flags, verification plan, stop conditions}
+
+## 계획 리뷰 verdict
+{not-required | approve-implement | narrow-scope}
+
 브랜치명과 push한 HEAD SHA를 반환하라.
 """,
   isolation="worktree"
@@ -103,7 +133,7 @@ gh issue comment #{이슈번호} --body "🤖 **Claude Code 리뷰 요청**
 - `success`:
   - PR 생성 단계로 진행
 - `failure`:
-  - Codex가 남긴 blocking finding을 읽고 Claude 개발 에이전트에 수정 위임
+  - Codex가 남긴 blocking finding을 `.agent/skills/receive-review.md` 규칙으로 정리한 뒤 Claude 개발 에이전트에 수정 위임
 
 11. **수정 루프**: `codex-branch-review`가 최신 HEAD SHA에서 `success`가 될 때까지 반복한다.
 
@@ -116,8 +146,17 @@ while codex-branch-review != success:
 
 - 실패 횟수는 이슈 코멘트 기준으로 누적한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 보고 원인 파악을 우선한다.
+- 자동 수정 전에 finding을 곧바로 patch로 번역하지 말고 `.agent/skills/receive-review.md` 규칙으로 사실/추론/영향 범위를 먼저 다시 정리한다.
+- 같은 `risk class`가 2회 반복되면 `@code-reviewer`를 호출해 구조 리스크와 계획 편차를 먼저 정리한다.
 - 반복 실패가 5회 이상이면 `blocked:review-loop` 라벨이 붙고 Codex 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
 - 이 상태에서는 사용자가 개입해 원인을 정리하거나 라벨을 해제하기 전까지 같은 이슈를 계속 밀어붙이지 않는다.
+
+11a. **메타 리뷰 호출 조건**: 아래에 해당하면 PR을 만들기 전에 Claude `@code-reviewer`를 다시 호출한다.
+
+- 캐시, 세션, 연결, long-lived adapter, mutable config 변경
+- endpoint / schema / generated artifact drift 가능성
+- 같은 `risk class` failure 2회 반복
+- "무슨 파일을 고쳐야 하는가"보다 "원래 계획에서 왜 어긋났는가"가 더 중요해진 경우
 
 ### PR 생성
 
@@ -127,7 +166,7 @@ while codex-branch-review != success:
 gh pr create \
   --base {main 또는 epic/...} \
   --title "{conventional commit 형식 제목}" \
-  --body "Refs #{이슈번호}
+  --body "Closes #{이슈번호}
 
 ## Summary
 - {변경 요약}
@@ -153,7 +192,8 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - `ci`
 - `claude-pr-approve`
 - `codex-pr-approve`
-- PR 승인 `content` FAIL 시 Claude 자동 재수정 최대 3회
+- PR 승인 `content` FAIL 시 Claude는 `.agent/skills/receive-review.md` 규칙으로 finding을 정리한 뒤 자동 재수정을 최대 3회 수행
+- 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선
 - `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 없이 중단 사유만 남김
 - 모든 체크가 green이면 auto-merge
 - 머지 후 post-merge automation이 이슈 체크박스를 갱신하고 close

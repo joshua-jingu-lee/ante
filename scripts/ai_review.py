@@ -121,6 +121,14 @@ def summarize_text(text: str, limit: int = 400) -> str:
     return normalized[: limit - 1].rstrip() + "..."
 
 
+def review_list(data: dict, *keys: str) -> list:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
 def classify_failure_text(text: str) -> tuple[str, str]:
     lowered = text.lower()
 
@@ -449,7 +457,10 @@ def render_issue_comment(args: argparse.Namespace) -> int:
         verdict = "PASS" if approved else "FAIL"
         emoji = "✅" if approved else "❌"
         blocking = data.get("blocking_findings") or []
-        followups = data.get("followups") or []
+        followups = review_list(data, "followups", "follow_ups")
+        executed_checks = review_list(data, "executed_checks")
+        inferred_checks = review_list(data, "inferred_checks", "inferred_only")
+        risk_flags = review_list(data, "risk_flags")
         titles = [finding.get("title", "").strip() for finding in blocking]
 
         lines.extend(
@@ -488,7 +499,10 @@ def render_issue_comment(args: argparse.Namespace) -> int:
             lines.extend(["", "**Blocking Findings**"])
             for idx, finding in enumerate(blocking, start=1):
                 title = finding.get("title", "").strip()
-                details = finding.get("details", "").strip()
+                details = (
+                    finding.get("details", "").strip()
+                    or finding.get("explanation", "").strip()
+                )
                 files = ", ".join(finding.get("files") or [])
                 lines.append(f"{idx}. **{title}**")
                 if details:
@@ -500,6 +514,21 @@ def render_issue_comment(args: argparse.Namespace) -> int:
             lines.extend(["", "**Follow-ups**"])
             for idx, item in enumerate(followups, start=1):
                 lines.append(f"{idx}. {item}")
+
+        if executed_checks:
+            lines.extend(["", "**Executed Checks**"])
+            for idx, item in enumerate(executed_checks, start=1):
+                lines.append(f"{idx}. {item}")
+
+        if inferred_checks:
+            lines.extend(["", "**Inferred Checks**"])
+            for idx, item in enumerate(inferred_checks, start=1):
+                lines.append(f"{idx}. {item}")
+
+        if risk_flags:
+            lines.extend(["", "**Risk Flags**"])
+            for idx, item in enumerate(risk_flags, start=1):
+                lines.append(f"{idx}. `{item}`")
 
         metadata = build_review_metadata(
             engine=args.engine,
@@ -669,14 +698,20 @@ def render(args: argparse.Namespace) -> int:
     print(f"- Summary: {data.get('summary', '').strip()}")
 
     blocking = data.get("blocking_findings") or []
-    followups = data.get("followups") or []
+    followups = review_list(data, "followups", "follow_ups")
+    executed_checks = review_list(data, "executed_checks")
+    inferred_checks = review_list(data, "inferred_checks", "inferred_only")
+    risk_flags = review_list(data, "risk_flags")
 
     if blocking:
         print("")
         print("### Blocking Findings")
         for idx, finding in enumerate(blocking, start=1):
             title = finding.get("title", "").strip()
-            details = finding.get("details", "").strip()
+            details = (
+                finding.get("details", "").strip()
+                or finding.get("explanation", "").strip()
+            )
             files = ", ".join(finding.get("files") or [])
             print(f"{idx}. **{title}**")
             print(f"   - {details}")
@@ -688,6 +723,24 @@ def render(args: argparse.Namespace) -> int:
         print("### Follow-ups")
         for idx, item in enumerate(followups, start=1):
             print(f"{idx}. {item}")
+
+    if executed_checks:
+        print("")
+        print("### Executed Checks")
+        for idx, item in enumerate(executed_checks, start=1):
+            print(f"{idx}. {item}")
+
+    if inferred_checks:
+        print("")
+        print("### Inferred Checks")
+        for idx, item in enumerate(inferred_checks, start=1):
+            print(f"{idx}. {item}")
+
+    if risk_flags:
+        print("")
+        print("### Risk Flags")
+        for idx, item in enumerate(risk_flags, start=1):
+            print(f"{idx}. `{item}`")
 
     return 0
 
