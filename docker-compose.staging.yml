@@ -17,8 +17,9 @@
 services:
   ante:
     environment:
-      - ANTE_ENV=staging
-      - ANTE_LOG_JSONL=1
+      ANTE_ENV: staging
+      ANTE_LOG_JSONL: "1"
+      # TZ 는 base docker-compose.yml 에서 Asia/Seoul 로 설정됨 — 여기서는 유지.
     volumes:
       # named volume(ante-logs) 대신 호스트 bind mount 로 덮어쓴다.
       - ${ANTE_STAGING_LOG_DIR:-${HOME}/Projects/ante/logs}:/app/logs

@@ -17,41 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-# LogRecord.__init__ 가 설정하는 모든 속성. 이들이 extra 에 포함되면
-# stdlib makeRecord 가 KeyError 를 던진다.
-_LOGRECORD_RESERVED: frozenset[str] = frozenset(
-    {
-        "name",
-        "msg",
-        "args",
-        "levelname",
-        "levelno",
-        "pathname",
-        "filename",
-        "module",
-        "exc_info",
-        "exc_text",
-        "stack_info",
-        "lineno",
-        "funcName",
-        "created",
-        "msecs",
-        "relativeCreated",
-        "thread",
-        "threadName",
-        "processName",
-        "process",
-        "message",
-        "asctime",
-    }
-)
-
-# Ante JSONL 스펙의 표준 필드 (03-json-schema.md §예약어 처리).
-# LogRecord 속성과 직접 충돌하지는 않지만, formatter 가 표준 값을 보장하므로
-# extra 로 들어와도 무시한다.
-_ANTE_RESERVED: frozenset[str] = frozenset(
-    {"ts", "level", "logger", "msg", "env", "exc"}
-)
+from ._record_keys import ANTE_RESERVED as _ANTE_RESERVED
+from ._record_keys import LOGRECORD_ATTRS as _LOGRECORD_RESERVED
 
 
 def _sanitize_extra(extra: dict[str, Any] | None) -> dict[str, Any] | None:

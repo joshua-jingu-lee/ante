@@ -12,9 +12,15 @@ FROM python:3.12-slim AS runtime
 WORKDIR /app
 
 # 시스템 의존성
+# tzdata: JSONL 파일명 회전이 Asia/Seoul 자정 기준임을 보장하기 위해 필수
+# (docs/specs/logging/05-handlers-and-rotation.md §회전 규칙)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# 타임존: 로그 회전 자정 경계의 단일 기준
+ENV TZ=Asia/Seoul
 
 # Python 패키지 설치
 COPY pyproject.toml ./

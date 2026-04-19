@@ -12,6 +12,10 @@ services:
       # ANTE_LOG_JSONL=1 게이트가 켜진 경우 컨테이너가 /app/logs 에
       # ante-YYYY-MM-DD.jsonl 파일을 일일 회전 기록하며, 재시작 시 보존된다.
       - ante-logs:/app/logs
+    environment:
+      # 로그 회전 자정 경계의 단일 기준 (05-handlers-and-rotation.md §회전 규칙).
+      # Dockerfile 의 ENV TZ 와 일치해야 한다.
+      TZ: Asia/Seoul
     env_file:
       - config/secrets.env
 
