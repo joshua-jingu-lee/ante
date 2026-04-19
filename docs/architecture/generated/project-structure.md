@@ -35,9 +35,8 @@ src/ante/
 │
 ├── core/
 │   ├── database.py              # Database — SQLite WAL 연결 관리
-│   └── log/                     # 시스템 로그 인프라 (JSONL 포맷, fingerprint)
+│   └── log/                     # 시스템 로그 인프라
 │       ├── __init__.py
-│       ├── formatter.py         # JsonFormatter — JSONL 직렬화
 │       └── fingerprint.py       # compute_fingerprint() — 예외 dedup 키
 │
 ├── config/
