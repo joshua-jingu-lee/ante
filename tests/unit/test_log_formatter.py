@@ -215,7 +215,64 @@ def test_korean_message_not_escaped(formatter):
     assert "\\u" not in line
 
 
-# ── 9. 단일 라인 보장 (개행 없음) ──────────────────────────────
+# ── 9. non-finite float는 strict JSON을 위해 null로 정규화 ─────
+
+
+def _parse_strict(line: str) -> dict:
+    """strict JSON 기준 파서. NaN/Infinity 토큰이 있으면 예외를 발생시킨다."""
+
+    def _raise(token: str) -> None:
+        raise ValueError(f"non-strict JSON token: {token}")
+
+    return json.loads(line, parse_constant=_raise)
+
+
+def test_nan_in_extra_serialized_as_null(formatter):
+    record = _make_record(extra={"ratio": float("nan")})
+
+    line = formatter.format(record)
+
+    assert "NaN" not in line
+    payload = _parse_strict(line)
+    assert payload["extra"] == {"ratio": None}
+
+
+def test_positive_infinity_in_extra_serialized_as_null(formatter):
+    record = _make_record(extra={"upper": float("inf")})
+
+    line = formatter.format(record)
+
+    assert "Infinity" not in line
+    payload = _parse_strict(line)
+    assert payload["extra"] == {"upper": None}
+
+
+def test_negative_infinity_in_extra_serialized_as_null(formatter):
+    record = _make_record(extra={"lower": float("-inf")})
+
+    line = formatter.format(record)
+
+    assert "Infinity" not in line
+    payload = _parse_strict(line)
+    assert payload["extra"] == {"lower": None}
+
+
+def test_nan_nested_in_explicit_extra_dict_sanitized(formatter):
+    """record.extra 내부 dict/list에 포함된 non-finite 값도 정규화된다."""
+    record = _make_record(
+        extra={
+            "extra": {"stats": {"mean": float("nan"), "samples": [1.0, float("inf")]}},
+        }
+    )
+
+    line = formatter.format(record)
+
+    assert "NaN" not in line and "Infinity" not in line
+    payload = _parse_strict(line)
+    assert payload["extra"] == {"stats": {"mean": None, "samples": [1.0, None]}}
+
+
+# ── 10. 단일 라인 보장 (개행 없음) ─────────────────────────────
 
 
 def test_single_line_output(formatter):

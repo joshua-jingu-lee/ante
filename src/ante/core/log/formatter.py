@@ -6,6 +6,7 @@ JSON 엔트리를 생성한다.
 
 import json
 import logging
+import math
 import os
 import traceback
 from datetime import UTC, datetime
@@ -47,6 +48,21 @@ _LOGRECORD_BUILTIN = {
     "thread",
     "threadName",
 }
+
+
+def _sanitize_for_json(value: object) -> object:
+    """non-finite float(NaN/Infinity)를 None으로 치환해 strict JSON을 보장한다.
+
+    Why: `json.dumps` 기본 동작은 NaN/Infinity를 `NaN`/`Infinity` 토큰으로 출력하는데,
+    이는 strict JSON 파서에서 파싱되지 않아 JSONL 로그 계약을 깨뜨린다.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(v) for v in value]
+    return value
 
 
 class JsonFormatter(logging.Formatter):
@@ -98,4 +114,4 @@ class JsonFormatter(logging.Formatter):
                 ),
             }
 
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps(_sanitize_for_json(payload), ensure_ascii=False, allow_nan=False)
