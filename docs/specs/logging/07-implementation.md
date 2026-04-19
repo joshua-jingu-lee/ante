@@ -9,8 +9,26 @@
 | `JsonFormatter` | `src/ante/core/log/formatter.py` (신설) | `logging.Formatter` 상속, `format()`이 [03-json-schema.md](03-json-schema.md)의 스키마에 따라 JSON 직렬화 |
 | `compute_fingerprint` | `src/ante/core/log/fingerprint.py` (신설) | Exception과 traceback 객체에서 [04-fingerprint.md](04-fingerprint.md) 규칙에 따라 키 생성 |
 | `setup_logging` | `src/ante/core/log/setup.py` (신설) | 핸들러 구성 함수. `config`, 환경변수, 로그 디렉토리를 입력으로 받아 `logging` 루트 로거에 핸들러 부착 |
+| `AnteLogger` / `install_safe_logger` | `src/ante/core/log/safe_logger.py` (신설) | 예약 키가 `extra=` 로 주입되어도 `makeRecord` KeyError 없이 무시되도록 Logger 서브클래스 등록 |
+| `DateNamedTimedRotatingFileHandler` | `src/ante/core/log/handlers.py` (신설) | 활성 파일명에 `YYYY-MM-DD` 를 포함시켜 자정 경계에서 **파일명 교체**로 회전 (이름 바꾸기 없음) |
+| 예약 키 단일 소스 | `src/ante/core/log/_record_keys.py` (신설) | `LOGRECORD_ATTRS` 는 런타임 프로브로 추출, `ANTE_RESERVED` 는 JSONL 스펙 필드. formatter/safe_logger 가 공유 |
 | 통합 지점 | `src/ante/main.py` `_init_core` | 기존 `logging.basicConfig(...)`을 `setup_logging(config)`으로 교체 |
-| 테스트 | `tests/unit/test_log_formatter.py`, `tests/unit/test_log_setup.py` | 스키마·fingerprint·이중 핸들러 동작 회귀 검증 |
+| 테스트 | `tests/unit/test_log_formatter.py`, `tests/unit/test_log_setup.py`, `tests/unit/test_log_safe_logger.py` | 스키마·fingerprint·이중 핸들러·예약 키 방어 회귀 검증 |
+
+## 스펙 § → 코드 → 회귀 테스트 매트릭스
+
+같은 리스크 클래스의 반복 회귀를 막기 위한 고정 매핑이다. 스펙 문단을 바꿀 때
+는 대응 코드·테스트를 함께 갱신한다. PR 설명에는 해당 행을 인용한다.
+
+| 스펙 | 코드 | 회귀 테스트 | 차단 대상 |
+|---|---|---|---|
+| [03-json-schema.md](03-json-schema.md) §예약어 처리 | `src/ante/core/log/safe_logger.py::AnteLogger.makeRecord`, `_record_keys.LOGRECORD_ATTRS`, `formatter._LOGRECORD_BUILTIN` (같은 소스) | `tests/unit/test_log_safe_logger.py`, `tests/unit/test_log_formatter.py::test_reserved_keys_ignored_from_extra` | `extra={"msg": ...}` 류 KeyError, Python 버전별 `taskName` 누락 |
+| [03-json-schema.md](03-json-schema.md) §직렬화 규칙 (non-finite float) | `src/ante/core/log/formatter.py::_sanitize_for_json`, `json.dumps(..., allow_nan=False)` | `tests/unit/test_log_formatter.py` NaN/Infinity 케이스 | `NaN`/`Infinity` 토큰이 JSONL 로 누출되어 strict 파서가 깨짐 |
+| [04-fingerprint.md](04-fingerprint.md) | `src/ante/core/log/fingerprint.py::compute_fingerprint` | `tests/unit/test_log_fingerprint.py` | 라인번호 의존·설치 경로 의존으로 같은 근본 원인이 다른 키로 기록됨 |
+| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (no-rename) | `src/ante/core/log/handlers.py::DateNamedTimedRotatingFileHandler.doRollover` | `tests/unit/test_log_setup.py` 회전 동작 | 자정에 파일이 rename 되어 외부 파일 감시기(감시 에이전트)가 inode 를 잃음 |
+| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (Asia/Seoul 자정) | `src/ante/core/log/handlers.py` `_KST = ZoneInfo("Asia/Seoul")`, `computeRollover`, `_make_filename` | `tests/unit/test_log_handlers.py` KST 경계 회귀 | 호스트/컨테이너 TZ (Docker, systemd, launchd) 불일치로 자정 경계가 밀림 |
+| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §볼륨 마운트 | `docker-compose.yml` `ante-logs`, `docker-compose.staging.yml` bind mount | 수동 검증 (`docker compose config`) | 컨테이너 종료 시 로그 유실, staging 감시 에이전트가 파일을 못 읽음 |
+| [06-failure-handling.md](06-failure-handling.md) §파일 핸들러 실패 격리 | `src/ante/core/log/setup.py` try/except + stdout 선등록 | `tests/unit/test_log_setup.py` 디스크/권한 실패 케이스 | 파일 핸들러 초기화 실패가 부팅을 차단 |
 
 ## 네임스페이스 선택
 

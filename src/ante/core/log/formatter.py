@@ -11,9 +11,10 @@ import os
 import traceback
 from datetime import UTC, datetime
 
+from ._record_keys import ANTE_RESERVED as _RESERVED
+from ._record_keys import LOGRECORD_ATTRS as _LOGRECORD_BUILTIN
 from .fingerprint import compute_fingerprint
 
-_RESERVED = {"ts", "level", "logger", "env", "exc"}
 _STANDARD_EXTRA = (
     "account_id",
     "bot_id",
@@ -23,31 +24,6 @@ _STANDARD_EXTRA = (
     "request_id",
     "extra",
 )
-_LOGRECORD_BUILTIN = {
-    "args",
-    "asctime",
-    "created",
-    "exc_info",
-    "exc_text",
-    "filename",
-    "funcName",
-    "levelname",
-    "levelno",
-    "lineno",
-    "message",
-    "module",
-    "msecs",
-    "msg",
-    "name",
-    "pathname",
-    "process",
-    "processName",
-    "relativeCreated",
-    "stack_info",
-    "taskName",
-    "thread",
-    "threadName",
-}
 
 
 def _sanitize_for_json(value: object) -> object:

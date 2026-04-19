@@ -113,11 +113,10 @@ async def _init_core(s: Services) -> None:
     s.config = Config.load()
     s.config.validate()
 
+    from ante.core.log import setup_logging
+
+    setup_logging(s.config)
     log_level = s.config.get("system.log_level", "INFO")
-    logging.basicConfig(
-        level=getattr(logging, log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
     logger.info("Ante 시작")
 
     # Database

@@ -161,8 +161,17 @@ def test_non_dict_extra_with_nonstandard_keys_merges_only_dict(formatter):
 
 
 def test_reserved_keys_ignored_from_extra(monkeypatch):
-    """예약 키가 실제 logger.error() 경로로 전달되어도 표준 값이 유지된다."""
+    """예약 키가 실제 logger.error() 경로로 전달되어도 표준 값이 유지된다.
+
+    ``msg`` 는 LogRecord 생성자가 직접 설정하는 속성이라 stdlib makeRecord 가
+    KeyError 를 던진다. ``install_safe_logger()`` 가 이를 제거하여 formatter
+    단계에서 표준 값이 그대로 유지되는지 검증한다.
+    """
     import io
+
+    from ante.core.log import install_safe_logger
+
+    install_safe_logger()
 
     monkeypatch.setenv("ANTE_ENV", "staging")
 
@@ -175,23 +184,32 @@ def test_reserved_keys_ignored_from_extra(monkeypatch):
     logger.propagate = False
 
     try:
-        # Ante 예약 키(ts, env, exc)를 extra로 전달: makeRecord()를 통과하지만
-        # formatter가 payload 최상위 표준 값으로 덮어쓰지 않고 extra 하위로도
-        # 새어나가지 않아야 한다.
+        # Ante 예약 키(ts, level, logger, msg, env, exc) 를 모두 extra 로 전달:
+        # - msg 는 LogRecord 속성과 충돌 → AnteLogger 가 makeRecord 단계에서 제거
+        # - ts/env/exc 등은 formatter 가 표준 값으로 덮어씀
+        # 어느 쪽이든 호출이 예외 없이 성공하고 표준 값이 유지되어야 한다.
         logger.error(
             "hello",
-            extra={"ts": "FAKE_TS", "env": "fake-env", "exc": "fake-exc"},
+            extra={
+                "ts": "FAKE_TS",
+                "level": "FAKE_LEVEL",
+                "logger": "fake.logger",
+                "msg": "FAKE_MSG",
+                "env": "fake-env",
+                "exc": "fake-exc",
+            },
         )
     finally:
         logger.removeHandler(handler)
 
     payload = json.loads(stream.getvalue().strip())
 
-    assert payload["level"] == "ERROR"
-    assert payload["logger"] == "ante.test.reserved"
-    assert payload["msg"] == "hello"
+    assert payload["level"] == "ERROR"  # extra["level"] 이 아님
+    assert payload["logger"] == "ante.test.reserved"  # extra["logger"] 이 아님
+    assert payload["msg"] == "hello"  # extra["msg"] 가 아님
     assert payload["env"] == "staging"  # ANTE_ENV 환경변수 값, extra["env"] 아님
     assert payload["ts"].endswith("Z")  # 실제 타임스탬프, "FAKE_TS" 아님
+    assert "exc" not in payload  # extra["exc"] 가 새어나오지 않음
     assert "extra" not in payload
 
 

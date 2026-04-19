@@ -20,8 +20,9 @@ ante/
 ├── .claude/             # Claude Code 설정 + .agent 호환 링크
 ├── Dockerfile           # 프로덕션 Docker 이미지
 ├── Dockerfile.qa        # QA 테스트 Docker 이미지
-├── docker-compose.yml   # 프로덕션 Docker Compose
-├── docker-compose.qa.yml # QA 테스트용 Docker Compose
+├── docker-compose.yml        # 프로덕션 Docker Compose (ante-logs named volume 포함)
+├── docker-compose.qa.yml     # QA 테스트용 Docker Compose
+├── docker-compose.staging.yml # Staging override (JSONL 로그 bind mount, ANTE_ENV/ANTE_LOG_JSONL)
 ├── AGENTS.md            # 개발 Agent 마스터 가이드
 └── CHANGELOG.md         # 변경 이력
 ```
@@ -37,8 +38,12 @@ src/ante/
 │   ├── database.py              # Database — SQLite WAL 연결 관리
 │   └── log/                     # 시스템 로그 인프라 (JSONL 포맷, fingerprint)
 │       ├── __init__.py
+│       ├── _record_keys.py      # LogRecord 속성 / Ante 예약 키 단일 소스 (runtime probe)
 │       ├── formatter.py         # JsonFormatter — JSONL 직렬화
-│       └── fingerprint.py       # compute_fingerprint() — 예외 dedup 키
+│       ├── fingerprint.py       # compute_fingerprint() — 예외 dedup 키
+│       ├── handlers.py          # DateNamedTimedRotatingFileHandler (KST 자정 no-rename 회전)
+│       ├── safe_logger.py       # AnteLogger, install_safe_logger() (makeRecord 예약 키 정규화)
+│       └── setup.py             # setup_logging() stdout + JSONL 파일 핸들러 구성
 │
 ├── config/
 │   ├── config.py                # ConfigService — 설정 로딩 (system.toml + secrets.env)
