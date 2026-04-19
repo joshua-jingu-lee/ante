@@ -1,0 +1,124 @@
+"""JSONL 시스템 로그 Formatter.
+
+`docs/specs/logging/03-json-schema.md` 에 정의된 스키마에 따라 한 라인
+JSON 엔트리를 생성한다.
+"""
+
+import json
+import logging
+import math
+import os
+import traceback
+from datetime import UTC, datetime
+
+from .fingerprint import compute_fingerprint
+
+_RESERVED = {"ts", "level", "logger", "env", "exc"}
+_STANDARD_EXTRA = (
+    "account_id",
+    "bot_id",
+    "strategy_id",
+    "order_id",
+    "symbol",
+    "request_id",
+    "extra",
+)
+_LOGRECORD_BUILTIN = {
+    "args",
+    "asctime",
+    "created",
+    "exc_info",
+    "exc_text",
+    "filename",
+    "funcName",
+    "levelname",
+    "levelno",
+    "lineno",
+    "message",
+    "module",
+    "msecs",
+    "msg",
+    "name",
+    "pathname",
+    "process",
+    "processName",
+    "relativeCreated",
+    "stack_info",
+    "taskName",
+    "thread",
+    "threadName",
+}
+
+
+def _sanitize_for_json(value: object) -> object:
+    """non-finite float(NaN/Infinity)를 None으로 치환해 strict JSON을 보장한다.
+
+    Why: `json.dumps` 기본 동작은 NaN/Infinity를 `NaN`/`Infinity` 토큰으로 출력하는데,
+    이는 strict JSON 파서에서 파싱되지 않아 JSONL 로그 계약을 깨뜨린다.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(v) for v in value]
+    return value
+
+
+class JsonFormatter(logging.Formatter):
+    """LogRecord를 JSONL 한 줄로 직렬화한다."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "ts": datetime.fromtimestamp(record.created, tz=UTC)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+            "env": os.environ.get("ANTE_ENV", "production"),
+        }
+
+        for key in _STANDARD_EXTRA:
+            if hasattr(record, key):
+                value = getattr(record, key)
+                if key == "extra" and not isinstance(value, dict):
+                    continue
+                payload[key] = value
+
+        extras: dict[str, object] = {}
+        for k, v in record.__dict__.items():
+            if (
+                k in _LOGRECORD_BUILTIN
+                or k in _RESERVED
+                or k in _STANDARD_EXTRA
+                or k.startswith("_")
+            ):
+                continue
+            extras[k] = v
+        if extras:
+            existing = payload.get("extra")
+            payload["extra"] = (
+                {**existing, **extras} if isinstance(existing, dict) else extras
+            )
+
+        if record.exc_info:
+            exc_type, exc_val, exc_tb = record.exc_info
+            payload["exc"] = {
+                "type": exc_type.__name__ if exc_type else "UnknownException",
+                "message": str(exc_val) if exc_val is not None else "",
+                "traceback": "".join(
+                    traceback.format_exception(exc_type, exc_val, exc_tb)
+                ),
+                "fingerprint": compute_fingerprint(
+                    exc_type if exc_type else type(exc_val) if exc_val else Exception,
+                    exc_tb,
+                    record.name,
+                ),
+            }
+
+        return json.dumps(
+            _sanitize_for_json(payload),
+            ensure_ascii=False,
+            allow_nan=False,
+        )

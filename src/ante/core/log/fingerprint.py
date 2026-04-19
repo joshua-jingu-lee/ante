@@ -40,7 +40,7 @@ def compute_fingerprint(
 
     # 오래된 → 최근 순 순회, ante.* 프레임 수집
     ante_frames: list[tuple[str, str]] = []
-    tb = exc_tb
+    tb: TracebackType | None = exc_tb
     while tb is not None:
         frame = tb.tb_frame
         module = frame.f_globals.get("__name__", "")
