@@ -156,14 +156,14 @@ jobs:
             fi
             python3 scripts/ai_review.py render-issue-comment "${RENDER_ARGS[@]}" > "$RUNNER_TEMP/codex-branch-review-completed.md"
           else
-            cat > "$RUNNER_TEMP/codex-branch-review-completed.md" <<EOF
-❌ **Codex 브랜치 리뷰 완료**
-- Verdict: \`FAIL\`
-- 브랜치: \`$HEAD_REF\`
-- HEAD: \`${HEAD_SHA:0:7}\`
-- Summary: 리뷰 결과 파일을 생성하지 못했습니다. Actions 로그를 확인해 주세요.
-- run: $RUN_URL
-EOF
+            {
+              echo '❌ **Codex 브랜치 리뷰 완료**'
+              echo "- Verdict: \`FAIL\`"
+              echo "- 브랜치: \`$HEAD_REF\`"
+              echo "- HEAD: \`${HEAD_SHA:0:7}\`"
+              echo '- Summary: 리뷰 결과 파일을 생성하지 못했습니다. Actions 로그를 확인해 주세요.'
+              echo "- run: $RUN_URL"
+            } > "$RUNNER_TEMP/codex-branch-review-completed.md"
           fi
 
           gh issue comment "$ISSUE_NUMBER" \
