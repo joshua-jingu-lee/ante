@@ -242,18 +242,23 @@ def test_file_handler_mkdir_failure_does_not_break_stdout(
     assert not isinstance(root.handlers[0], TimedRotatingFileHandler)
 
 
-# ── 7. 회전 시 새 baseFilename 이 새 날짜로 갱신됨 ────────────
+# ── 7. no-rename 회전 계약 검증 ─────────────────────────────
+
+# 회전 계약 (`docs/specs/logging/05-handlers-and-rotation.md`):
+#   1) 활성 파일명에 날짜가 포함되므로 기존 파일은 rename 되지 않는다
+#   2) 자정에 baseFilename 이 새 날짜 파일로 교체되고 새 파일이 열린다
+#   3) 회전 전에 기록된 엔트리는 이전 날 파일에 그대로 남아 있다
+#   4) 회전 후 emit() 호출은 새 파일에 기록된다
 
 
-def test_rollover_updates_base_filename_to_next_date(
+def test_rollover_preserves_previous_file_and_opens_new_date(
     monkeypatch: pytest.MonkeyPatch,
     _cwd_tmp: Path,
 ):
-    """``doRollover()`` 호출 후 baseFilename 이 새 날짜 파일을 가리킨다."""
+    """no-rename 회전 계약: 기존 파일은 내용 보존 + 새 날짜 파일이 열린다."""
     log_dir = _cwd_tmp / "logs"
     log_dir.mkdir()
 
-    # 초기 생성 시점의 파일명은 "오늘"
     handler = DateNamedTimedRotatingFileHandler(
         log_dir,
         prefix="ante",
@@ -262,27 +267,89 @@ def test_rollover_updates_base_filename_to_next_date(
         utc=False,
     )
     try:
-        initial_name = Path(handler.baseFilename).name
+        handler.setFormatter(logging.Formatter("%(message)s"))
+
+        # 1) 오늘 파일에 엔트리 기록
+        initial_path = Path(handler.baseFilename)
+        initial_name = initial_path.name
         assert re.match(r"^ante-\d{4}-\d{2}-\d{2}\.jsonl$", initial_name)
 
-        # _make_filename() 을 "다음 날" 로 고정
+        pre_rollover_record = logging.LogRecord(
+            name="ante.test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=0,
+            msg="PRE_ROLLOVER_ENTRY",
+            args=None,
+            exc_info=None,
+        )
+        handler.emit(pre_rollover_record)
+        handler.flush()
+
+        # 기록이 실제로 디스크에 반영됐는지 확인
+        pre_content = initial_path.read_text(encoding="utf-8")
+        assert "PRE_ROLLOVER_ENTRY" in pre_content
+
+        # 2) _make_filename() 을 "다음 날" 로 monkeypatch
         next_day = "ante-2099-01-01.jsonl"
+        next_path = log_dir / next_day
         monkeypatch.setattr(
             handler,
             "_make_filename",
-            lambda: str(log_dir / next_day),
+            lambda: str(next_path),
         )
 
+        # 3) 회전 실행
         handler.doRollover()
 
-        # 새 baseFilename 이 새 날짜를 가리킨다
+        # 4) 어서션: no-rename 계약
+        #    (a) baseFilename 이 새 날짜 파일로 교체됨
         assert Path(handler.baseFilename).name == next_day
-        # 기존 파일은 rename 되지 않고 그대로 존재
-        assert (log_dir / initial_name).exists() or not Path(
-            log_dir / initial_name
-        ).exists()
-        # 새 파일은 생성되어 있어야 한다
-        assert (log_dir / next_day).exists()
+
+        #    (b) 기존 파일이 여전히 존재하고 기록된 엔트리를 보존
+        assert initial_path.exists(), (
+            f"기존 파일이 사라졌다 (rename 의심): {initial_name}"
+        )
+        assert "PRE_ROLLOVER_ENTRY" in initial_path.read_text(encoding="utf-8"), (
+            "기존 파일 내용이 손실됨 — no-rename 계약 위반"
+        )
+
+        #    (c) 새 날짜 파일이 생성됨
+        assert next_path.exists(), "새 baseFilename 파일이 열리지 않음"
+
+        #    (d) 기존 파일이 ".bak" / 무날짜 ante.jsonl 등으로 rename 되지 않음
+        suspicious = [
+            p.name for p in log_dir.iterdir() if p.name not in {initial_name, next_day}
+        ]
+        assert suspicious == [], (
+            f"회전 과정에서 예상 외 파일이 생성됨 (rename 의심): {suspicious}"
+        )
+        assert not (log_dir / "ante.jsonl").exists(), (
+            "무날짜 활성 파일이 생성됨 — 표준 TimedRotatingFileHandler 로 회귀"
+        )
+        for bak_pattern in (".bak", ".1", ".old"):
+            assert not (log_dir / f"{initial_name}{bak_pattern}").exists(), (
+                f"기존 파일이 {bak_pattern} suffix 로 rename 됨"
+            )
+
+        # 5) 회전 후 emit() 이 새 파일에 기록되는지 검증
+        post_rollover_record = logging.LogRecord(
+            name="ante.test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=0,
+            msg="POST_ROLLOVER_ENTRY",
+            args=None,
+            exc_info=None,
+        )
+        handler.emit(post_rollover_record)
+        handler.flush()
+
+        # 새 파일에만 POST 엔트리가 있어야 한다
+        assert next_path.stat().st_size > 0
+        assert "POST_ROLLOVER_ENTRY" in next_path.read_text(encoding="utf-8")
+        # 기존 파일에는 POST 엔트리가 없어야 한다 (스트림이 전환됐음을 확인)
+        assert "POST_ROLLOVER_ENTRY" not in initial_path.read_text(encoding="utf-8")
     finally:
         handler.close()
 

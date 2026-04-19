@@ -38,7 +38,10 @@ src/ante/
 │   └── log/                     # 시스템 로그 인프라 (JSONL 포맷, fingerprint)
 │       ├── __init__.py
 │       ├── formatter.py         # JsonFormatter — JSONL 직렬화
-│       └── fingerprint.py       # compute_fingerprint() — 예외 dedup 키
+│       ├── fingerprint.py       # compute_fingerprint() — 예외 dedup 키
+│       ├── handlers.py          # DateNamedTimedRotatingFileHandler (no-rename 일일 회전)
+│       ├── safe_logger.py       # AnteLogger, install_safe_logger() (makeRecord 예약 키 정규화)
+│       └── setup.py             # setup_logging() stdout + JSONL 파일 핸들러 구성
 │
 ├── config/
 │   ├── config.py                # ConfigService — 설정 로딩 (system.toml + secrets.env)

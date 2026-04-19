@@ -20,17 +20,17 @@
 
 | 항목 | 값 |
 |---|---|
-| 파일명 | `logs/ante-YYYY-MM-DD.jsonl` |
+| 파일명 | `logs/ante-YYYY-MM-DD.jsonl` (활성 파일명 자체가 날짜를 포함) |
 | 회전 시점 | `when="midnight", utc=False` (Asia/Seoul 자정 기준) |
-| 회전 방식 | 현재 파일을 날짜 suffix 붙여 rename, 새 파일 생성 |
-| 보관 | 30일 (`backupCount=30`) |
+| 회전 방식 | 활성 파일은 날짜를 포함하므로 rename 불필요. 자정에 새 날짜로 `baseFilename` 을 교체하고 새 파일을 연다 |
+| 보관 | 30일 (`backupCount=30`). 초과분은 가장 오래된 파일부터 삭제 |
 | 디렉토리 | 컨테이너 `/app/logs` (named volume 또는 bind mount) |
 | 퍼미션 | 0644 (기본) |
 
 ## 회전 동작 세부
 
-1. 자정에 `ante-2026-04-17.jsonl`이 rename되어 새 `ante-2026-04-18.jsonl`이 열린다.
-2. 30일 지난 파일(`ante-2026-03-18.jsonl`)은 자동 삭제된다.
+1. 자정이 지나면 기존 `ante-2026-04-17.jsonl` 은 그대로 두고 (활성 파일명에 이미 날짜가 포함됨), 새 `ante-2026-04-18.jsonl` 을 연다. 이전 날 파일은 마지막 엔트리가 기록된 상태로 남아 감시 에이전트가 안전하게 수집할 수 있다.
+2. `backupCount=30` 을 초과한 가장 오래된 파일부터 삭제된다 (예: 31일째 자정 회전 시 `ante-2026-03-18.jsonl` 이 제거됨).
 3. 압축은 수행하지 않는다. 디스크 압박이 실측되면 후속 반복에서 `TimedRotatingFileHandler.rotator` 후킹으로 도입한다. 자세한 판단 이력은 [08-open-issues.md](08-open-issues.md) §스코프 제외 참조.
 
 ## 실패 처리
