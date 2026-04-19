@@ -34,7 +34,10 @@ src/ante/
 ├── main.py                      # asyncio 엔트리포인트 (Composition Root)
 │
 ├── core/
-│   └── database.py              # Database — SQLite WAL 연결 관리
+│   ├── database.py              # Database — SQLite WAL 연결 관리
+│   └── log/                     # 시스템 로그 인프라
+│       ├── __init__.py
+│       └── fingerprint.py       # compute_fingerprint() — 예외 dedup 키
 │
 ├── config/
 │   ├── config.py                # ConfigService — 설정 로딩 (system.toml + secrets.env)
