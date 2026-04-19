@@ -9,11 +9,7 @@
 
 from __future__ import annotations
 
-import re
-import traceback
 from types import TracebackType
-
-_ANTE_MODULE_RE = re.compile(r"(ante/[^.]+)\.py$")
 
 
 def compute_fingerprint(
@@ -24,9 +20,12 @@ def compute_fingerprint(
     """Exception fingerprint 문자열을 생성한다.
 
     형식은 ``{exception class}@{최근 ante.* 프레임 module:function}``이다.
-    스택을 최근 호출 → 먼 호출 순으로 순회하면서 모듈 경로가 ``ante/`` 접두어
-    아래에 있는 첫 프레임을 선택한다. 해당 프레임이 없으면
-    ``{exception class}@{logger_name}`` 으로 폴백한다.
+    traceback 체인을 오래된 호출 → 최근 호출 순으로 순회하면서 ``f_globals['__name__']``
+    이 ``ante.`` 으로 시작하는 프레임을 수집한다. 가장 최근(= 가장 깊은) 프레임을
+    선택한다. 해당 프레임이 없으면 ``{exception class}@{logger_name}`` 으로 폴백한다.
+
+    파일 경로 대신 Python이 설정한 ``__name__`` 을 사용하므로 설치 경로나
+    체크아웃 경로에 독립적이다.
 
     Args:
         exc_type: 발생한 예외의 클래스.
@@ -38,21 +37,20 @@ def compute_fingerprint(
     """
     if exc_tb is None:
         return f"{exc_type.__name__}@{logger_name}"
-    frames = traceback.extract_tb(exc_tb)
-    for frame in reversed(frames):
-        module = _module_path(frame.filename)
-        if module:
-            return f"{exc_type.__name__}@{module}:{frame.name}"
+
+    # 오래된 → 최근 순 순회, ante.* 프레임 수집
+    ante_frames: list[tuple[str, str]] = []
+    tb = exc_tb
+    while tb is not None:
+        frame = tb.tb_frame
+        module = frame.f_globals.get("__name__", "")
+        if module == "ante" or module.startswith("ante."):
+            ante_frames.append((module, frame.f_code.co_name))
+        tb = tb.tb_next
+
+    if ante_frames:
+        # 가장 최근 = 리스트의 마지막 원소
+        module, func = ante_frames[-1]
+        return f"{exc_type.__name__}@{module}:{func}"
+
     return f"{exc_type.__name__}@{logger_name}"
-
-
-def _module_path(filename: str) -> str | None:
-    """파일 경로에서 ante 패키지 상대 경로를 추출하여 module 표기로 변환한다.
-
-    예: ``/app/src/ante/broker/kis_stream.py`` → ``ante.broker.kis_stream``.
-    ante 패키지 경로가 아니면 ``None``을 반환한다.
-    """
-    m = _ANTE_MODULE_RE.search(filename)
-    if not m:
-        return None
-    return m.group(1).replace("/", ".")
