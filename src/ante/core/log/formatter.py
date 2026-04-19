@@ -20,6 +20,7 @@ _STANDARD_EXTRA = (
     "order_id",
     "symbol",
     "request_id",
+    "extra",
 )
 _LOGRECORD_BUILTIN = {
     "args",
@@ -77,7 +78,10 @@ class JsonFormatter(logging.Formatter):
                 continue
             extras[k] = v
         if extras:
-            payload["extra"] = extras
+            existing = payload.get("extra")
+            payload["extra"] = (
+                {**existing, **extras} if isinstance(existing, dict) else extras
+            )
 
         if record.exc_info:
             exc_type, exc_val, exc_tb = record.exc_info

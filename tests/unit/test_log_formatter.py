@@ -116,6 +116,24 @@ def test_nonstandard_extra_nested_in_extra(formatter):
     assert payload["extra"] == {"custom_field": "x", "code": 403}
 
 
+def test_explicit_extra_dict_not_double_nested(formatter):
+    """extra={"extra": {...}} 패턴이 이중 중첩 없이 최상위로 승격된다."""
+    record = _make_record(extra={"extra": {"code": 403}})
+
+    payload = _format(formatter, record)
+
+    assert payload["extra"] == {"code": 403}
+
+
+def test_explicit_extra_merged_with_nonstandard_keys(formatter):
+    """record.extra와 비표준 자유 키가 공존할 때 merge된다."""
+    record = _make_record(extra={"extra": {"code": 403}, "mode": "restored"})
+
+    payload = _format(formatter, record)
+
+    assert payload["extra"] == {"code": 403, "mode": "restored"}
+
+
 # ── 6. 예약 키 (level, logger 등) 은 무시되어 표준 값 유지 ─────
 
 
