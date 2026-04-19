@@ -44,7 +44,7 @@ def compute_fingerprint(
     while tb is not None:
         frame = tb.tb_frame
         module = frame.f_globals.get("__name__", "")
-        if module == "ante" or module.startswith("ante."):
+        if module.startswith("ante."):
             ante_frames.append((module, frame.f_code.co_name))
         tb = tb.tb_next
 

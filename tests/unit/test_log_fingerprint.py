@@ -144,11 +144,11 @@ class TestComputeFingerprint:
         fp2 = compute_fingerprint(ValueError, tb2, "ante.bot.manager")
         assert fp1 == fp2 == "ValueError@ante.bot.manager:start"
 
-    def test_ante_root_module_is_matched(self) -> None:
-        """모듈명이 'ante' 그 자체여도 매칭된다."""
+    def test_bare_ante_module_falls_back(self) -> None:
+        """모듈명이 'ante' 그 자체이면 ante.* 조건에 해당하지 않아 폴백한다."""
         tb = _make_tb_with_modules([("ante", "some_func")])
-        result = compute_fingerprint(ValueError, tb, "ante")
-        assert result == "ValueError@ante:some_func"
+        result = compute_fingerprint(ValueError, tb, "ante.core")
+        assert result == "ValueError@ante.core"
 
 
 # ---------------------------------------------------------------------------
