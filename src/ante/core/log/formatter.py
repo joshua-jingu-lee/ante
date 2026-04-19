@@ -114,4 +114,8 @@ class JsonFormatter(logging.Formatter):
                 ),
             }
 
-        return json.dumps(_sanitize_for_json(payload), ensure_ascii=False, allow_nan=False)
+        return json.dumps(
+            _sanitize_for_json(payload),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
