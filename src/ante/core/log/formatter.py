@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from .fingerprint import compute_fingerprint
 
-_RESERVED = {"ts", "level", "logger", "msg", "env", "exc"}
+_RESERVED = {"ts", "level", "logger", "env", "exc"}
 _STANDARD_EXTRA = (
     "account_id",
     "bot_id",

@@ -119,28 +119,38 @@ def test_nonstandard_extra_nested_in_extra(formatter):
 # ── 6. 예약 키 (level, logger 등) 은 무시되어 표준 값 유지 ─────
 
 
-def test_reserved_keys_ignored_from_extra(formatter, monkeypatch):
-    """예약 키가 extra 경로로 새어들어와도 표준 값이 유지된다."""
+def test_reserved_keys_ignored_from_extra(monkeypatch):
+    """예약 키가 실제 logger.error() 경로로 전달되어도 표준 값이 유지된다."""
+    import io
+
     monkeypatch.setenv("ANTE_ENV", "staging")
 
-    # 실제 호출부는 `logger.error(msg, extra={...})` 경로이므로 setattr로 시뮬레이션.
-    # LogRecord 생성 후 예약 키가 속성으로 존재하더라도 payload 최상위는 표준 값을
-    # 유지해야 하고, extra 하위로도 새어나가면 안 된다.
-    record = _make_record(level=logging.ERROR, msg="hello")
-    # msg 제외 예약 키들을 LogRecord 속성으로 주입 시도 (비정상 경로 시뮬레이션)
-    record.ts = "0"
-    record.env = "fake"
-    record.exc = "fake"
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    logger = logging.getLogger("ante.test.reserved")
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
 
-    payload = _format(formatter, record)
+    try:
+        # Ante 예약 키(ts, env, exc)를 extra로 전달: makeRecord()를 통과하지만
+        # formatter가 payload 최상위 표준 값으로 덮어쓰지 않고 extra 하위로도
+        # 새어나가지 않아야 한다.
+        logger.error(
+            "hello",
+            extra={"ts": "FAKE_TS", "env": "fake-env", "exc": "fake-exc"},
+        )
+    finally:
+        logger.removeHandler(handler)
 
-    # 표준 필드가 유지된다
+    payload = json.loads(stream.getvalue().strip())
+
     assert payload["level"] == "ERROR"
-    assert payload["logger"] == "ante.test"
+    assert payload["logger"] == "ante.test.reserved"
     assert payload["msg"] == "hello"
-    assert payload["env"] == "staging"
-    assert payload["ts"].endswith("Z")
-    # 예약 키는 extra 하위로 새어나가지 않는다
+    assert payload["env"] == "staging"  # ANTE_ENV 환경변수 값, extra["env"] 아님
+    assert payload["ts"].endswith("Z")  # 실제 타임스탬프, "FAKE_TS" 아님
     assert "extra" not in payload
 
 
