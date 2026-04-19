@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 from .formatter import JsonFormatter
+from .handlers import DateNamedTimedRotatingFileHandler
 
 
 def setup_logging(config: Any) -> None:
@@ -22,7 +22,9 @@ def setup_logging(config: Any) -> None:
 
     - stdout: 사람 관찰용 기존 포맷 유지.
     - 파일 JSONL: ``ANTE_LOG_JSONL=1`` 이 설정된 경우에만 활성화,
-      ``logs/ante.jsonl`` 에 ``TimedRotatingFileHandler`` 로 일일 회전.
+      ``logs/ante-YYYY-MM-DD.jsonl`` 에 일일 자정 회전.
+    - 파일 핸들러 초기화 실패(디스크 가득, 권한 문제 등) 시 예외를 삼키고
+      stdout 핸들러만 유지한다 (스펙 §실패 처리).
     """
     root = logging.getLogger()
     log_level = config.get("system.log_level", "INFO")
@@ -32,7 +34,8 @@ def setup_logging(config: Any) -> None:
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    # stdout 핸들러 (기존 포맷 유지 — 사람 관찰용)
+    # stdout 핸들러 (기존 포맷 유지 — 사람 관찰용).
+    # 파일 핸들러 초기화 이전에 등록해 이후 실패 시에도 stdout 로깅이 살아있다.
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -41,14 +44,20 @@ def setup_logging(config: Any) -> None:
 
     # JSONL 파일 핸들러 (환경변수 게이트)
     if os.environ.get("ANTE_LOG_JSONL") == "1":
-        log_dir = Path("logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = TimedRotatingFileHandler(
-            log_dir / "ante.jsonl",
-            when="midnight",
-            utc=False,
-            backupCount=30,
-        )
-        file_handler.suffix = "%Y-%m-%d"
-        file_handler.setFormatter(JsonFormatter())
-        root.addHandler(file_handler)
+        try:
+            log_dir = Path("logs")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            file_handler = DateNamedTimedRotatingFileHandler(
+                log_dir,
+                prefix="ante",
+                file_suffix=".jsonl",
+                backup_count=30,
+                utc=False,
+            )
+            file_handler.setFormatter(JsonFormatter())
+            root.addHandler(file_handler)
+        except Exception as err:  # noqa: BLE001 — 로깅 실패는 전체 흡수
+            # 부팅 차단을 막기 위해 예외를 흡수하고 stdout 핸들러만 유지한다.
+            logging.getLogger(__name__).warning(
+                "JSONL 파일 핸들러 초기화 실패 — stdout 전용으로 계속 진행: %s", err
+            )
