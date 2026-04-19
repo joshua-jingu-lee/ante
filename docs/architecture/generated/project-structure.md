@@ -20,8 +20,9 @@ ante/
 ├── .claude/             # Claude Code 설정 + .agent 호환 링크
 ├── Dockerfile           # 프로덕션 Docker 이미지
 ├── Dockerfile.qa        # QA 테스트 Docker 이미지
-├── docker-compose.yml   # 프로덕션 Docker Compose
-├── docker-compose.qa.yml # QA 테스트용 Docker Compose
+├── docker-compose.yml        # 프로덕션 Docker Compose (ante-logs named volume 포함)
+├── docker-compose.qa.yml     # QA 테스트용 Docker Compose
+├── docker-compose.staging.yml # Staging override (JSONL 로그 bind mount, ANTE_ENV/ANTE_LOG_JSONL)
 ├── AGENTS.md            # 개발 Agent 마스터 가이드
 └── CHANGELOG.md         # 변경 이력
 ```

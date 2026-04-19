@@ -1,0 +1,24 @@
+# Staging 환경 override.
+#
+# 사용법:
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# 스펙: docs/specs/logging/05-handlers-and-rotation.md §볼륨 마운트
+#   - Staging: bind mount `~/Projects/ante/logs` → `/app/logs`
+#     감시 에이전트가 Docker 컨테이너 외부(맥미니 호스트)에서 직접
+#     JSONL 파일을 읽어야 하므로 named volume 대신 bind mount 를 사용한다.
+#
+# 선행 조건:
+#   mkdir -p ~/Projects/ante/logs
+#
+# 참고: ANTE_LOG_JSONL 게이트가 꺼져 있으면 파일 핸들러가 활성화되지 않아
+#       마운트된 경로에 JSONL 이 생성되지 않는다. Staging 은 점진 도입의
+#       1차 대상이므로 본 override 는 ANTE_LOG_JSONL=1 을 기본 주입한다.
+services:
+  ante:
+    environment:
+      - ANTE_ENV=staging
+      - ANTE_LOG_JSONL=1
+    volumes:
+      # named volume(ante-logs) 대신 호스트 bind mount 로 덮어쓴다.
+      - ${ANTE_STAGING_LOG_DIR:-${HOME}/Projects/ante/logs}:/app/logs

@@ -47,9 +47,11 @@
 
 | 환경 | 마운트 방식 | 경로 |
 |---|---|---|
-| Production | Docker named volume `ante_logs` → `/app/logs` | 재시작 시 보존 |
-| Staging | bind mount `~/Projects/ante/logs` → `/app/logs` | 맥미니 파일시스템 직접 노출, 감시 에이전트 접근 용이 |
+| Production | Docker named volume `ante-logs` → `/app/logs` (`docker-compose.yml`) | 재시작 시 보존 |
+| Staging | bind mount `~/Projects/ante/logs` → `/app/logs` (`docker-compose.staging.yml`, `ANTE_STAGING_LOG_DIR` 로 override 가능) | 맥미니 파일시스템 직접 노출, 감시 에이전트 접근 용이 |
 | QA | 마운트 불필요 | TC 실행 중 휘발, 자동 삭제 |
 | 로컬 개발 | bind mount 또는 마운트 생략 | 개발자 선택 |
 
-Staging이 bind mount인 이유: 감시 에이전트가 Docker 컨테이너 외부(맥미니 호스트)에서 직접 JSONL 파일을 읽어야 하기 때문이다.
+Staging이 bind mount인 이유: 감시 에이전트가 Docker 컨테이너 외부(맥미니 호스트)에서 직접 JSONL 파일을 읽어야 하기 때문이다. Staging override 는 `docker compose -f docker-compose.yml -f docker-compose.staging.yml up` 형식으로 결합하며, `ANTE_ENV=staging` 과 `ANTE_LOG_JSONL=1` 을 기본 주입한다.
+
+Production 볼륨 이름은 기존 저장소 관습(`ante-data`, `ante-db` 하이픈)을 따라 `ante-logs` 로 선언한다(compose 프로젝트 prefix 가 붙어 실제 생성되는 볼륨은 `ante_ante-logs`). `ANTE_LOG_JSONL=1` 게이트는 Production 에서도 점진 도입 원칙에 따라 운영 시점에 `config/secrets.env` 또는 compose `environment:` 로 주입한다. 게이트가 꺼진 상태에서는 파일 핸들러가 생성되지 않아 `ante-logs` 볼륨은 비어 있게 된다.
