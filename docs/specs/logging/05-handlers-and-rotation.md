@@ -21,7 +21,7 @@
 | 항목 | 값 |
 |---|---|
 | 파일명 | `logs/ante-YYYY-MM-DD.jsonl` (활성 파일명 자체가 날짜를 포함) |
-| 회전 시점 | `when="midnight", utc=False` (Asia/Seoul 자정 기준) |
+| 회전 시점 | **Asia/Seoul 자정**. 핸들러가 `zoneinfo.ZoneInfo("Asia/Seoul")` 을 사용해 코드 레벨에서 TZ 를 고정한다 (호스트/컨테이너 TZ 와 무관) |
 | 회전 방식 | 활성 파일은 날짜를 포함하므로 rename 불필요. 자정에 새 날짜로 `baseFilename` 을 교체하고 새 파일을 연다 |
 | 보관 | 30일 (`backupCount=30`). 초과분은 가장 오래된 파일부터 삭제 |
 | 디렉토리 | 컨테이너 `/app/logs` (named volume 또는 bind mount) |
@@ -48,7 +48,7 @@
 | 환경 | 마운트 방식 | 경로 |
 |---|---|---|
 | Production | Docker named volume `ante-logs` → `/app/logs` (`docker-compose.yml`) | 재시작 시 보존 |
-| Staging | bind mount `~/Projects/ante/logs` → `/app/logs` (`docker-compose.staging.yml`, `ANTE_STAGING_LOG_DIR` 로 override 가능) | 맥미니 파일시스템 직접 노출, 감시 에이전트 접근 용이 |
+| Staging | bind mount `~/ante-staging/logs` → `/app/logs` (`docker-compose.staging.yml`, `ANTE_STAGING_LOG_DIR` 로 override 가능) | 감시 에이전트 설계 (§7.2) 의 글롭 전제와 일치 |
 | QA | 마운트 불필요 | TC 실행 중 휘발, 자동 삭제 |
 | 로컬 개발 | bind mount 또는 마운트 생략 | 개발자 선택 |
 

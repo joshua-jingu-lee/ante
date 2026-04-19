@@ -26,7 +26,7 @@
 | [03-json-schema.md](03-json-schema.md) §직렬화 규칙 (non-finite float) | `src/ante/core/log/formatter.py::_sanitize_for_json`, `json.dumps(..., allow_nan=False)` | `tests/unit/test_log_formatter.py` NaN/Infinity 케이스 | `NaN`/`Infinity` 토큰이 JSONL 로 누출되어 strict 파서가 깨짐 |
 | [04-fingerprint.md](04-fingerprint.md) | `src/ante/core/log/fingerprint.py::compute_fingerprint` | `tests/unit/test_log_fingerprint.py` | 라인번호 의존·설치 경로 의존으로 같은 근본 원인이 다른 키로 기록됨 |
 | [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (no-rename) | `src/ante/core/log/handlers.py::DateNamedTimedRotatingFileHandler.doRollover` | `tests/unit/test_log_setup.py` 회전 동작 | 자정에 파일이 rename 되어 외부 파일 감시기(감시 에이전트)가 inode 를 잃음 |
-| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (Asia/Seoul 자정) | `Dockerfile` `ENV TZ=Asia/Seoul`, `docker-compose.yml` `TZ`, `setup_logging` `utc=False` | 수동 검증 (컨테이너 `date` + 파일명) | 호스트/컨테이너 TZ 불일치로 자정 경계 밀림 |
+| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (Asia/Seoul 자정) | `src/ante/core/log/handlers.py` `_KST = ZoneInfo("Asia/Seoul")`, `computeRollover`, `_make_filename` | `tests/unit/test_log_handlers.py` KST 경계 회귀 | 호스트/컨테이너 TZ (Docker, systemd, launchd) 불일치로 자정 경계가 밀림 |
 | [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §볼륨 마운트 | `docker-compose.yml` `ante-logs`, `docker-compose.staging.yml` bind mount | 수동 검증 (`docker compose config`) | 컨테이너 종료 시 로그 유실, staging 감시 에이전트가 파일을 못 읽음 |
 | [06-failure-handling.md](06-failure-handling.md) §파일 핸들러 실패 격리 | `src/ante/core/log/setup.py` try/except + stdout 선등록 | `tests/unit/test_log_setup.py` 디스크/권한 실패 케이스 | 파일 핸들러 초기화 실패가 부팅을 차단 |
 

@@ -264,7 +264,6 @@ def test_rollover_preserves_previous_file_and_opens_new_date(
         prefix="ante",
         file_suffix=".jsonl",
         backup_count=30,
-        utc=False,
     )
     try:
         handler.setFormatter(logging.Formatter("%(message)s"))
@@ -377,7 +376,6 @@ def test_rollover_deletes_oldest_files_beyond_backup_count(
         prefix="ante",
         file_suffix=".jsonl",
         backup_count=2,
-        utc=False,
     )
     try:
         # 회전 후 새 파일명

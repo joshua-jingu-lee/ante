@@ -60,7 +60,6 @@ def setup_logging(config: Any) -> None:
                 prefix="ante",
                 file_suffix=".jsonl",
                 backup_count=30,
-                utc=False,
             )
             file_handler.setFormatter(JsonFormatter())
             root.addHandler(file_handler)

@@ -13,8 +13,8 @@ services:
       # ante-YYYY-MM-DD.jsonl 파일을 일일 회전 기록하며, 재시작 시 보존된다.
       - ante-logs:/app/logs
     environment:
-      # 로그 회전 자정 경계의 단일 기준 (05-handlers-and-rotation.md §회전 규칙).
-      # Dockerfile 의 ENV TZ 와 일치해야 한다.
+      # 관측성 TZ 일관성 (Dockerfile ENV 와 동일).
+      # 로그 회전 자정 경계는 핸들러가 Asia/Seoul 로 고정하므로 이 값과 무관.
       TZ: Asia/Seoul
     env_file:
       - config/secrets.env
