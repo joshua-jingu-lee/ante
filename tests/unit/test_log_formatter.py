@@ -134,6 +134,29 @@ def test_explicit_extra_merged_with_nonstandard_keys(formatter):
     assert payload["extra"] == {"code": 403, "mode": "restored"}
 
 
+def test_non_dict_extra_value_ignored(formatter):
+    """record.extra가 string/list 등 non-dict이면 무시되어 object 계약을 보호한다.
+
+    spec(03-json-schema.md)은 top-level `extra`를 object로 고정한다.
+    호출자가 실수로 `extra={"extra": "raw"}`를 넘겨도 raw scalar/array가
+    그대로 노출되어선 안 된다.
+    """
+    record = _make_record(extra={"extra": "raw"})
+
+    payload = _format(formatter, record)
+
+    assert "extra" not in payload
+
+
+def test_non_dict_extra_with_nonstandard_keys_merges_only_dict(formatter):
+    """non-dict record.extra는 무시되고, 비표준 자유 키만 extra object로 묶인다."""
+    record = _make_record(extra={"extra": [1, 2, 3], "code": 403})
+
+    payload = _format(formatter, record)
+
+    assert payload["extra"] == {"code": 403}
+
+
 # ── 6. 예약 키 (level, logger 등) 은 무시되어 표준 값 유지 ─────
 
 

@@ -81,7 +81,10 @@ class JsonFormatter(logging.Formatter):
 
         for key in _STANDARD_EXTRA:
             if hasattr(record, key):
-                payload[key] = getattr(record, key)
+                value = getattr(record, key)
+                if key == "extra" and not isinstance(value, dict):
+                    continue
+                payload[key] = value
 
         extras: dict[str, object] = {}
         for k, v in record.__dict__.items():
