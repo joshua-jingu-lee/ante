@@ -22,6 +22,7 @@ import os
 import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -100,7 +101,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         """
         if self.stream is not None:
             self.stream.close()
-            self.stream = None
+            self.stream = cast(Any, None)
 
         self.baseFilename = self._make_filename()
         if not self.delay:
