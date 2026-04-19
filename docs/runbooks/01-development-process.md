@@ -141,6 +141,18 @@ main
      epic 브랜치 자체도 최종 PR 전에 Codex 브랜치 리뷰를 거친다.
 ```
 
+### 4.2.1 에픽 하위 브랜치 정렬 규칙
+
+- 에픽 구현은 통합용 `epic/*` 브랜치 1개와 하위 이슈별 작업 브랜치를 분리한다.
+- 에픽과 하위 이슈를 하나의 공용 작업 브랜치에 순차 누적하지 않는다.
+- sibling PR이 `epic/*`에 머지되면, 아직 열려 있는 다른 하위 이슈 브랜치는 다음 push 전에 최신 에픽 기준으로 재정렬한다.
+- 최소 확인 절차:
+  - `git fetch origin`
+  - `git rebase origin/epic/#{에픽번호}-{짧은설명}` 또는 필요 시 새 브랜치 재생성
+  - `git cherry -v origin/epic/#{에픽번호}-{짧은설명} HEAD`
+  - rebase/히스토리 정리 전후 차이를 확인해야 하면 `git range-diff <정리 전 브랜치> <정리 후 브랜치>`
+- 중복 커밋, stale base, base regression이 보이면 PR 생성이나 리뷰 재시도보다 히스토리 정리를 먼저 수행한다.
+
 ### 4.3 Worktree 격리
 
 모든 구현 작업은 **git worktree**로 격리하여 로컬 main을 보호한다.
@@ -151,6 +163,12 @@ main
 | 에픽 하위 이슈 병렬 구현 | O |
 | 의존성 있는 순차 구현 | O |
 | PR 승인 실패 후 재수정 | O (같은 이슈 브랜치 재사용) |
+
+### 4.3.1 공유 `.venv` 사용 시 재현성 주의
+
+- 여러 worktree가 하나의 editable install을 공유하면, 현재 작업 중인 worktree가 아닌 다른 worktree의 `src/ante`를 잘못 import할 수 있다.
+- 로컬 검증 전 `pip show ante`로 editable project location을 확인한다.
+- 대상 worktree에서만 검증해야 할 때는 `PYTHONPATH=$PWD/src`를 명시하거나 editable install을 현재 worktree 기준으로 다시 맞춘다.
 
 ## 5. 실패 복구 루프
 
@@ -175,12 +193,23 @@ main
 - 같은 `risk class` failure가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출하고, 그 전까지는 얕은 auto-fix만 반복하지 않는다.
 - 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 조건부 계획 리뷰 단계로 되돌린다.
 - 동일 유형의 blocking failure가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
+- `blocked:review-loop`가 최초 부착되거나, PR 자동 재수정 결과가 `NO_CHANGES`로 끝나면 얕은 자동 수정 루프를 중단하고 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.
 - PR 승인 단계에서는 `content` 실패에 한해 Claude 자동 재수정을 최대 3회 시도한다.
 - 자동 재수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
 - `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 예산에 포함하지 않는다.
 - PR 승인 content 실패가 3회 재수정 후에도 해소되지 않으면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
 - PR 승인에서 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 자동 재수정보다 `@code-reviewer` 또는 사람 개입을 우선한다.
+
+### 5.2 승인 루프 수동 복구
+
+- 같은 head SHA에서 워크플로우/러너 문제로 보이는 실패는 코드 수정 없이 `gh run rerun`을 우선한다.
+- `NO_CHANGES`는 성공이 아니라 “자동 수정이 안전한 패치를 만들지 못했다”는 신호로 해석한다.
+- `pull_request` 이벤트 자체가 누락되었거나 재트리거가 꼭 필요할 때만 PR `close → reopen`을 예외적으로 허용한다.
+- 수동 복구를 수행한 경우 PR 또는 이슈 코멘트에 다음을 남긴다.
+  - 왜 자동 루프로 복구되지 않았는지
+  - 어떤 방식으로 재트리거했는지
+  - 새 run 링크 또는 확인 근거
 
 ## 6. 리뷰와 머지 게이트
 

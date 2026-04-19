@@ -75,6 +75,7 @@
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호를 이슈 코멘트에 남긴다.
 - 같은 `risk class`가 2회 반복되면 Claude 오케스트레이터가 `@code-reviewer` 메타 리뷰를 호출한다.
 - 실패가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 추가 Codex 브랜치 리뷰를 중단한다.
+- sibling PR 머지 후 stale base나 duplicate commit이 의심되면, 브랜치 리뷰 재시도 전에 최신 base로 rebase하고 히스토리를 정리한다.
 
 ### 3.4 역할
 
@@ -134,7 +135,9 @@
 - 자동 재수정은 최대 **3회**까지 시도한다.
 - 각 시도는 **새 커밋을 push한 경우에만** 다음 승인 사이클로 이어진다.
 - 재수정 결과는 PR 코멘트에 남기고, 새 커밋이 push되면 `pull_request synchronize`로 승인 워크플로우를 다시 시작한다.
+- 자동 재수정 결과가 `NO_CHANGES`면, 승인 루프를 성공으로 보지 않고 메타 리뷰 또는 수동 수정 단계로 승격한다.
 - 3회 소진 후에도 승인 실패가 반복되면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
+- 같은 head SHA에서 재실행만 필요할 때는 `gh run rerun`을 우선하고, `pull_request` 이벤트가 필요할 때만 PR `close → reopen`을 예외적으로 사용한다.
 
 ### 4.7 실패 분류
 
@@ -151,6 +154,7 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
 - `quota`, `script_error`, `auth_error`, `infra_error`는 **재수정 예산 3회에 포함하지 않는다**.
 - 이 경우 PR 코멘트에 중단 사유를 남기고, 워커 복구 또는 수동 재실행을 기다린다.
 - `content` FAIL이라도 같은 `risk class`가 2회 반복되면, 다음 자동 재수정 전에 `@code-reviewer` 메타 리뷰를 우선한다.
+- review 결과가 생성되었고 마지막 verdict step만 실패했다면, 이를 워커 장애보다 **실제 content finding**으로 우선 해석한다.
 
 ## 5. Merge Gate
 
@@ -184,6 +188,15 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
 
 다른 컴퓨터의 Codex가 원격 브랜치를 머지해도, Claude가 만든 로컬 worktree는 Codex가 직접 지울 수 없다. 이 둘은 반드시 분리해서 취급한다.
 
+### 6.1 Post-merge 수동 복구
+
+- `post-merge`가 자동으로 실행되지 않거나, 실행되었어도 체크박스/에픽 동기화가 누락될 수 있다.
+- 복구 순서:
+  1. PR 번호 기준 `workflow_dispatch`
+  2. 필요 시 이슈 번호 기준 reconciliation / close
+  3. 복구 run 링크와 최종 상태를 PR 또는 이슈 코멘트에 기록
+- merge actor가 GitHub App인 경우에도 후처리 누락 가능성을 점검한다.
+
 ## 7. 저장소 설정 권장값
 
 - `Allow auto-merge`: 활성화
@@ -212,3 +225,4 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
   - `inferred checks`
   - `risk flags`
 - `post-merge`가 누락되면 `workflow_dispatch`로 PR 번호 또는 이슈 번호를 넣어 수동 복구할 수 있다
+- 수동 복구는 “조용히” 끝내지 않고, 왜 자동 경로가 실패했는지와 어떤 경로로 복구했는지를 코멘트로 남긴다

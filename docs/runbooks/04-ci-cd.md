@@ -46,6 +46,7 @@ post-merge automation
 - **트리거**: feature/fix/refactor/docs/epic 브랜치 push
 - **결과**: `codex-branch-review`
 - **실패 시**: Claude가 같은 브랜치에서 수정 후 재push
+- **해석 주의**: 리뷰 단계가 finding을 생성했고 마지막 `Enforce review verdict`만 실패한 경우, 이는 워크플로우 장애가 아니라 **의도된 content fail**이다.
 
 이 게이트는 보호 브랜치의 required status check는 아니지만, **PR 생성 전 필수 조건**이다.
 
@@ -75,6 +76,7 @@ post-merge automation
 - **후속 처리**:
   - `content` FAIL → Claude 자동 재수정 루프
   - `quota/script_error/auth_error/infra_error` → 재수정 없이 PR 코멘트로 중단 사유 기록
+- **해석 주의**: review 결과 파일이 있고 마지막 verdict step만 실패하면, 빨간 체크는 실제 finding을 의미한다.
 
 ### Gate D — Codex PR 승인
 
@@ -86,6 +88,7 @@ post-merge automation
 - **후속 처리**:
   - `content` FAIL → Claude 자동 재수정 루프
   - `quota/script_error/auth_error/infra_error` → 재수정 없이 PR 코멘트로 중단 사유 기록
+- **해석 주의**: review 결과 생성 후 verdict gate만 실패한 경우, CI 인프라 문제보다 코드/계약 finding을 먼저 본다.
 
 ### Meta Review — Claude code-reviewer
 
@@ -117,6 +120,7 @@ post-merge automation
 - **결과**:
   - 새 커밋 push → `pull_request synchronize`로 Gate B/C/D 재실행
   - 3회 초과 → `blocked:pr-review-loop`
+  - `NO_CHANGES` → 자동 루프 중단 후 메타 리뷰 또는 수동 수정으로 승격
 
 ### Gate E — Merge Gate
 
@@ -167,6 +171,19 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - 저장소 변수 `AI_REVIEW_ENABLED=true`일 때만 AI 리뷰 workflow를 활성화한다.
 - runner가 준비되기 전에는 `AI_REVIEW_ENABLED`를 비워 두거나 `false`로 유지한다.
 
+### 3.3 AI 리뷰 러너 / 검증 환경 체크리스트
+
+- 목표 Python 버전이 저장소 기준과 일치해야 한다.
+- `pytest`, `ruff`, 필요 테스트 의존성이 러너에 설치되어 있어야 한다.
+- writable temp dir가 있어야 artifact/summary/result 파일을 안정적으로 생성할 수 있다.
+- compose 또는 런타임 설정 검증이 필요한 저장소라면 `config/secrets.env` 같은 필수 입력 파일 가용성을 확인한다.
+- 여러 worktree가 하나의 editable install을 공유한다면 `pip show ante`로 editable project location을 확인하고, 필요 시 `PYTHONPATH=$PWD/src` 또는 worktree 기준 재설치를 사용한다.
+
+### 3.4 워크플로우 의존성 유지보수
+
+- `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact` 등 GitHub-hosted action의 런타임 deprecation 공지는 정기적으로 점검한다.
+- Node 런타임 deprecation warning은 저장소 Python 코드 실패와 분리해서 추적한다.
+
 ## 4. 로컬 개발 시 사전 검증
 
 ```bash
@@ -192,6 +209,24 @@ pytest tests/unit/ -v
 `codex-branch-review`는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
 `claude-pr-approve` / `codex-pr-approve`는 `content` FAIL일 때만 Claude 자동 재수정을 최대 3회 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다.
 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
+
+### 5.1 승인 루프 수동 복구 순서
+
+1. 같은 head SHA에서 러너/스크립트/일시적 환경 문제로 보이면 `gh run rerun`을 우선한다.
+2. 자동 재수정이 `NO_CHANGES`를 반환하면, 재시도보다 메타 리뷰 또는 수동 패치 설계를 먼저 수행한다.
+3. `pull_request` 이벤트 누락으로 승인이 다시 시작되지 않을 때만 PR `close → reopen`을 예외적으로 사용한다.
+4. 수동 복구를 실행한 경우 PR 코멘트에 복구 이유, 사용한 방식, 새 run 링크를 남긴다.
+
+### 5.2 Post-merge 실패 모드와 복구
+
+- 알려진 실패 모드:
+  - merge actor나 이벤트 경로 차이로 `pull_request.closed` 후처리가 기대대로 실행되지 않음
+  - `workflow_dispatch` 입력 파싱 실패
+  - GitHub 기본 auto-close는 되었지만 체크박스/에픽 동기화가 누락됨
+- 복구 순서:
+  1. `post-merge`를 PR 번호 기준으로 수동 실행
+  2. 필요 시 이슈 번호 기준 reconciliation/close 수행
+  3. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남김
 
 ## 6. 설계 적합성 검증 (선택 Gate)
 
