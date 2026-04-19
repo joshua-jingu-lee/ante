@@ -15,6 +15,7 @@ from typing import Any
 
 from .formatter import JsonFormatter
 from .handlers import DateNamedTimedRotatingFileHandler
+from .safe_logger import install_safe_logger
 
 
 def setup_logging(config: Any) -> None:
@@ -25,7 +26,14 @@ def setup_logging(config: Any) -> None:
       ``logs/ante-YYYY-MM-DD.jsonl`` 에 일일 자정 회전.
     - 파일 핸들러 초기화 실패(디스크 가득, 권한 문제 등) 시 예외를 삼키고
       stdout 핸들러만 유지한다 (스펙 §실패 처리).
+    - 예약 키(``ts``, ``level``, ``logger``, ``msg``, ``env``, ``exc`` 및
+      기타 LogRecord 속성)가 ``extra=`` 로 주입되어도 KeyError 없이 무시되도록
+      ``AnteLogger`` 를 전역 Logger 클래스로 설치한다
+      (스펙 ``03-json-schema.md`` §예약어 처리).
     """
+    # 예약 키 KeyError 방지 — 반드시 핸들러 구성 이전에 수행.
+    install_safe_logger()
+
     root = logging.getLogger()
     log_level = config.get("system.log_level", "INFO")
     root.setLevel(getattr(logging, log_level))
