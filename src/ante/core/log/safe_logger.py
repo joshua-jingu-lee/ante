@@ -15,13 +15,16 @@ stdlib ``Logger.makeRecord()`` 는 ``extra`` 의 키가 ``LogRecord`` 속성과
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from ._record_keys import ANTE_RESERVED as _ANTE_RESERVED
 from ._record_keys import LOGRECORD_ATTRS as _LOGRECORD_RESERVED
 
 
-def _sanitize_extra(extra: dict[str, Any] | None) -> dict[str, Any] | None:
+def _sanitize_extra(
+    extra: Mapping[str, object] | None,
+) -> dict[str, object] | None:
     """예약 키 충돌을 제거한 extra dict 반환.
 
     - LogRecord 속성과 겹치는 키(``msg``, ``args``, ``name`` 등): 제거
@@ -32,9 +35,9 @@ def _sanitize_extra(extra: dict[str, Any] | None) -> dict[str, Any] | None:
     제거 대신 ``extra`` 하위로 옮기지 않는다 — 호출자의 실수를 무시하는 것이
     스펙 동작이다.
     """
-    if not extra:
-        return extra
-    cleaned: dict[str, Any] = {}
+    if extra is None:
+        return None
+    cleaned: dict[str, object] = {}
     for key, val in extra.items():
         if key in _LOGRECORD_RESERVED or key in _ANTE_RESERVED:
             # 무시 (스펙: 호출자 실수로부터 로그 구조 보호)
@@ -53,7 +56,7 @@ def _safe_make_record(
     args: Any,
     exc_info: Any,
     func: str | None = None,
-    extra: dict[str, Any] | None = None,
+    extra: Mapping[str, object] | None = None,
     sinfo: str | None = None,
 ) -> logging.LogRecord:
     """``Logger.makeRecord`` 대체 구현.
@@ -92,7 +95,7 @@ class AnteLogger(logging.Logger):
         args: Any,
         exc_info: Any,
         func: str | None = None,
-        extra: dict[str, Any] | None = None,
+        extra: Mapping[str, object] | None = None,
         sinfo: str | None = None,
     ) -> logging.LogRecord:
         return _safe_make_record(
