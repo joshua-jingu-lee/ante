@@ -652,10 +652,13 @@ def _init_context_factory(s: Services) -> None:
     if s.data_provider:
         context_factory = StrategyContextFactory(
             data_provider=s.data_provider,
+            account_service=s.account_service,
             live_portfolio=s.live_portfolio,
             live_order_view=s.live_order_view,
             paper_executor=s.paper_executor,
             live_trade_history=live_trade_history,
+            treasury_manager=s.treasury_manager,
+            position_history=s.position_history,
         )
         s.bot_manager._context_factory = context_factory
         logger.info("StrategyContextFactory 설정 완료")
