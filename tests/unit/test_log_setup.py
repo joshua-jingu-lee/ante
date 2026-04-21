@@ -388,6 +388,61 @@ def test_gate_off_does_not_trigger_zoneinfo(monkeypatch: pytest.MonkeyPatch):
     )
 
 
+def test_cold_import_gate_off_does_not_call_zoneinfo(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Cold import 회귀 고정: QA 부팅 경로(fresh Python process)를 재현한다.
+
+    실제 부팅 경로는 ``src/ante/main.py`` 의 ``from ante.core.log import
+    setup_logging`` 으로 시작하고, 이 import 가 ``ante.core.log.__init__`` →
+    ``ante.core.log.handlers`` 까지 함께 로드한다. tzdata 가 없는
+    ``python:3.12-slim`` 기반 QA 이미지(``Dockerfile.qa``)에서 과거처럼
+    ``_KST = ZoneInfo("Asia/Seoul")`` 을 handlers 모듈 레벨에 두면 이 import
+    만으로도 ``ZoneInfoNotFoundError`` 가 발생해 QA 컨테이너 부팅이 중단된다.
+
+    본 테스트는 ``sys.modules`` 에서 ``ante.core.log.*`` 를 제거해 다음 import
+    를 "콜드" 로 만들고, 그 직전에 ``zoneinfo.ZoneInfo`` 를 추적 래퍼로 교체한다.
+    이어서 콜드 import + 게이트-off ``setup_logging()`` 까지 수행한 뒤
+    ``ZoneInfo("Asia/Seoul")`` 호출이 0 회임을 검증한다. 모듈-레벨 ``ZoneInfo``
+    회귀가 들어오면 handlers import 시점에 카운터가 증가해 이 테스트가 실패한다.
+    """
+    import importlib
+    import sys
+    import zoneinfo
+
+    # 1) zoneinfo.ZoneInfo 추적기 설치.
+    #    handlers 모듈이 콜드 재import 될 때 ``from zoneinfo import ZoneInfo``
+    #    가 이 패치된 속성을 집도록, 재import 보다 먼저 설치해야 한다.
+    call_tracker: list[str] = []
+    original_zoneinfo = zoneinfo.ZoneInfo
+
+    def _tracked(key: str, *args: Any, **kwargs: Any) -> Any:
+        call_tracker.append(key)
+        return original_zoneinfo(key, *args, **kwargs)
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", _tracked)
+
+    # 2) ante.core.log.* 를 sys.modules 에서 제거해 다음 import 를 콜드로 강제.
+    for name in list(sys.modules):
+        if name == "ante.core.log" or name.startswith("ante.core.log."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    # 3) main.py 부팅 경로 재현: 게이트 off.
+    monkeypatch.delenv("ANTE_LOG_JSONL", raising=False)
+
+    # 4) 콜드 import (handlers 모듈-레벨 코드가 재실행된다) + setup_logging().
+    log_pkg = importlib.import_module("ante.core.log")
+    log_pkg.setup_logging(_StubConfig())
+
+    # 5) ZoneInfo("Asia/Seoul") 는 한 번도 호출되면 안 된다.
+    seoul_calls = [k for k in call_tracker if k == "Asia/Seoul"]
+    assert seoul_calls == [], (
+        f"Cold import + 게이트-off 경로에서 ZoneInfo('Asia/Seoul') 가 "
+        f"{len(seoul_calls)} 회 호출됨 — tzdata 부재 QA 이미지 부팅 차단 회귀. "
+        f"전체 호출 기록: {call_tracker}"
+    )
+
+
 # ── 8. backup_count 초과 시 가장 오래된 파일 삭제 ─────────────
 
 
