@@ -25,12 +25,17 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-_KST = ZoneInfo("Asia/Seoul")
-"""회전 자정 경계의 단일 기준 (스펙 §회전 규칙).
+# 회전 자정 경계의 단일 기준 (스펙 §회전 규칙). Asia/Seoul 고정.
+# ``ANTE_LOG_JSONL`` 미설정 게이트-off 경로에서 이 모듈이 단순 import 되더라도
+# tzdata 부재 환경이 부팅을 깨뜨리지 않도록 첫 핸들러 생성 시까지 지연 로드한다.
+_KST: ZoneInfo | None = None
 
-호스트 TZ/컨테이너 ENV 와 독립. 지원 배포 경로(Docker, PyPI+systemd,
-launchd) 어느 쪽이든 동일한 시각에 회전한다.
-"""
+
+def _get_kst() -> ZoneInfo:
+    global _KST
+    if _KST is None:
+        _KST = ZoneInfo("Asia/Seoul")
+    return _KST
 
 
 class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
@@ -72,7 +77,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
     @staticmethod
     def _now_kst() -> _dt.datetime:
         """현재 시각을 Asia/Seoul tzinfo 로 반환한다."""
-        return _dt.datetime.now(_KST)
+        return _dt.datetime.now(_get_kst())
 
     def _make_filename(self) -> str:
         """현재 날짜(Asia/Seoul) 기준 활성 파일 경로를 반환한다."""
@@ -86,7 +91,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         배포 경로마다 TZ 가 달라질 수 있으므로 여기서 KST 를 명시적으로 고정해
         스펙 계약을 코드 레벨에서 보장한다.
         """
-        now = _dt.datetime.fromtimestamp(currentTime, tz=_KST)
+        now = _dt.datetime.fromtimestamp(currentTime, tz=_get_kst())
         next_midnight = (now + _dt.timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )

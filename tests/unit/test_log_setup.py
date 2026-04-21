@@ -202,10 +202,12 @@ def test_file_handler_failure_does_not_break_stdout(
     def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
         raise OSError("disk full (simulated)")
 
-    # DateNamedTimedRotatingFileHandler 생성자에서 OSError 발생시키기
-    import ante.core.log.setup as setup_mod
+    # DateNamedTimedRotatingFileHandler 생성자에서 OSError 발생시키기.
+    # setup.py 는 게이트 내부에서 handlers 모듈을 지연 import 하므로
+    # 패치 타깃은 handlers 모듈이어야 한다.
+    import ante.core.log.handlers as handlers_mod
 
-    monkeypatch.setattr(setup_mod, "DateNamedTimedRotatingFileHandler", _raise)
+    monkeypatch.setattr(handlers_mod, "DateNamedTimedRotatingFileHandler", _raise)
 
     # 예외가 전파되지 않아야 한다
     setup_logging(_StubConfig())
@@ -351,6 +353,39 @@ def test_rollover_preserves_previous_file_and_opens_new_date(
         assert "POST_ROLLOVER_ENTRY" not in initial_path.read_text(encoding="utf-8")
     finally:
         handler.close()
+
+
+# ── 7b. 게이트-off 경로 tzdata 독립성 (QA 이미지 회귀 방지) ────
+
+
+def test_gate_off_does_not_trigger_zoneinfo(monkeypatch: pytest.MonkeyPatch):
+    """``ANTE_LOG_JSONL`` 미설정 시 ``ZoneInfo("Asia/Seoul")`` 가 호출되지 않는다.
+
+    스펙 ``docs/specs/logging/02-design-decisions.md`` 의 "미설정 시 기존 동작
+    유지" 계약. tzdata 가 없는 컨테이너(예: QA 이미지)에서 부팅 경로가
+    ``ZoneInfoNotFoundError`` 로 깨지지 않도록 보호한다.
+    """
+    monkeypatch.delenv("ANTE_LOG_JSONL", raising=False)
+
+    import ante.core.log.handlers as handlers_mod
+
+    # _KST 캐시가 이전 테스트로 이미 채워졌을 수 있으므로 초기화
+    monkeypatch.setattr(handlers_mod, "_KST", None)
+
+    call_count = {"n": 0}
+    original = handlers_mod.ZoneInfo
+
+    def _tracked_zoneinfo(key: str):  # noqa: ANN202
+        call_count["n"] += 1
+        return original(key)
+
+    monkeypatch.setattr(handlers_mod, "ZoneInfo", _tracked_zoneinfo)
+
+    setup_logging(_StubConfig())
+
+    assert call_count["n"] == 0, (
+        "게이트-off 경로에서 ZoneInfo 가 호출됨 — tzdata 의존 회귀"
+    )
 
 
 # ── 8. backup_count 초과 시 가장 오래된 파일 삭제 ─────────────

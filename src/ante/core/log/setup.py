@@ -13,8 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .formatter import JsonFormatter
-from .handlers import DateNamedTimedRotatingFileHandler
 from .safe_logger import install_safe_logger
 
 
@@ -51,8 +49,13 @@ def setup_logging(config: Any) -> None:
     root.addHandler(stdout_handler)
 
     # JSONL 파일 핸들러 (환경변수 게이트)
+    # 게이트-off 경로에서 불필요한 import 비용 및 ZoneInfo(tzdata) 의존을 피하기 위해
+    # formatter/handlers 모듈 import 는 게이트 블록 내부로 지연한다.
     if os.environ.get("ANTE_LOG_JSONL") == "1":
         try:
+            from .formatter import JsonFormatter
+            from .handlers import DateNamedTimedRotatingFileHandler
+
             log_dir = Path("logs")
             log_dir.mkdir(parents=True, exist_ok=True)
             file_handler = DateNamedTimedRotatingFileHandler(
