@@ -182,7 +182,7 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
 | 작업 | 담당 |
 |------|------|
 | PR 머지 | GitHub auto-merge |
-| head branch 삭제 | GitHub repository setting |
+| head branch 삭제 | GitHub repository setting + head branch 삭제를 막지 않는 ruleset |
 | 이슈 체크박스 갱신 + close | `post-merge.yml` |
 | 로컬 worktree 정리 | Claude 구현 머신 |
 
@@ -190,6 +190,9 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
 
 ### 6.1 Post-merge 수동 복구
 
+- auto-merged PR은 `merge-gate`가 auto-merge 활성화 전에 PR head ref 기준 `workflow_dispatch`로 `post-merge`를 호출한다.
+- `post-merge`는 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 이슈 reconciliation을 수행하고, 장기 대기 시 handoff 직전에 PR 상태를 다시 확인한 뒤 자기 자신을 다시 dispatch해 대기를 넘겨받는다.
+- 장기 대기 handoff에는 고정 횟수 제한을 두지 않고 merged 상태까지 자동 경로를 유지한다.
 - `post-merge`가 자동으로 실행되지 않거나, 실행되었어도 체크박스/에픽 동기화가 누락될 수 있다.
 - 복구 순서:
   1. PR 번호 기준 `workflow_dispatch`
@@ -215,7 +218,8 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
 ## 8. 이슈와의 연결
 
 - PR 본문은 기본적으로 `Closes #이슈번호`를 사용한다
-- 이슈 close는 GitHub 기본 auto-close를 우선 사용하고, `post-merge`는 체크박스 / 에픽 상태 동기화와 수동 복구 경로를 담당한다
+- `Refs #이슈번호`는 GitHub 기본 auto-close를 만들지 않으므로, 이슈를 닫을 변경은 `Closes #이슈번호`를 사용한다
+- 이슈 close는 GitHub 기본 auto-close를 우선 사용하고, `post-merge`는 체크박스 / 에픽 상태 동기화와 auto-merge 후속 복구를 담당한다
 - PR 승인 실패로 다시 수정이 발생해도 같은 이슈/같은 PR을 계속 사용한다
 - PR 승인 실패가 `content`인 경우에만 Claude 자동 재수정이 같은 PR 브랜치에서 최대 3회 동작한다
 - 승인 워커는 verdict만 남기지 않고 아래 정보를 함께 남긴다.
