@@ -11,6 +11,8 @@ feat/#42-symbol-validation
 fix/#57-treasury-rounding
 refactor/#63-broker-interface
 docs/#70-api-reference
+test/#81-regression-coverage
+chore/#88-runner-cleanup
 epic/#300-datafeed
 ```
 
@@ -20,7 +22,21 @@ epic/#300-datafeed
 - 에픽은 통합용 `epic/*` 브랜치를 별도로 두고, 하위 이슈는 각자 작업 브랜치를 사용한다.
 - 에픽과 하위 이슈를 하나의 공용 작업 브랜치에 순차 누적하지 않는다.
 
-### 1.2 에픽 하위 브랜치 최신화
+### 1.2 이슈 라벨과 브랜치 prefix 매핑
+
+| 이슈 라벨 | 브랜치 prefix |
+|-----------|---------------|
+| `feature` | `feat/` |
+| `bug` | `fix/` |
+| `refactor` | `refactor/` |
+| `docs` | `docs/` |
+| `test` | `test/` |
+| `chore` | `chore/` |
+| `epic` | `epic/` |
+
+`/implement-issue`, `/autopilot`, `codex-branch-review`는 이 매핑을 기준으로 정렬한다.
+
+### 1.3 에픽 하위 브랜치 최신화
 
 - 에픽 하위 이슈 브랜치는 PR 생성 전 최신 `origin/epic/*`를 기준으로 해야 한다.
 - sibling PR이 `epic/*`에 머지되면 다음 확인을 수행한다.
@@ -74,7 +90,7 @@ PR을 열기 전, 최신 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통�
 
 ### 3.1 브랜치 리뷰 트리거
 
-- 대상 브랜치: `feat/*`, `fix/*`, `refactor/*`, `docs/*`, `epic/*`
+- 대상 브랜치: `feat/*`, `fix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 - 트리거: 원격 브랜치 push
 - 상태 체크: `codex-branch-review`
 

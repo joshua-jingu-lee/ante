@@ -127,11 +127,13 @@ Claude 오케스트레이터
 
 ```
 main
-  └─ {type}/#{issue번호}-{짧은설명}
+  └─ {branch-prefix}/#{issue번호}-{짧은설명}
        ├─ 구현 + push
        ├─ codex-branch-review PASS
        └─ PR → main → auto-merge
 ```
+
+`branch-prefix`는 [00-issue-management.md 섹션 2.1](00-issue-management.md#21-이슈-타입과-브랜치-prefix-매핑)의 canonical 매핑을 따른다.
 
 **에픽 이슈**:
 

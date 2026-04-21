@@ -7,6 +7,8 @@ on:
       - 'fix/**'
       - 'refactor/**'
       - 'docs/**'
+      - 'test/**'
+      - 'chore/**'
       - 'epic/**'
 
 concurrency:

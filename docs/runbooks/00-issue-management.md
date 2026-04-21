@@ -35,6 +35,21 @@
 | `test` | 테스트 추가/수정 | `test` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` |
 
+### 2.1 이슈 타입과 브랜치 prefix 매핑
+
+이슈 제목/라벨과 실제 작업 브랜치 prefix는 아래를 기준으로 맞춘다.
+
+| 이슈 타입 | 라벨 | 브랜치 prefix |
+|-----------|------|---------------|
+| `feat` | `feature` | `feat/` |
+| `fix` | `bug` | `fix/` |
+| `refactor` | `refactor` | `refactor/` |
+| `docs` | `docs` | `docs/` |
+| `test` | `test` | `test/` |
+| `chore` | `chore` | `chore/` |
+
+`/implement-issue`, `/autopilot`, `codex-branch-review`는 이 매핑을 공통 기준으로 사용한다.
+
 ### 예시
 
 ```
@@ -218,6 +233,13 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
 - 추가 제외:
   - 이미 open PR이 연결된 이슈
   - 선행 의존 이슈가 아직 close되지 않은 이슈
+- 브랜치 prefix 매핑:
+  - `feature -> feat/*`
+  - `bug -> fix/*`
+  - `refactor -> refactor/*`
+  - `docs -> docs/*`
+  - `test -> test/*`
+  - `chore -> chore/*`
 - 정렬:
   - `P0 → P1 → P2 → P3`
   - 같은 우선순위에서는 오래 열린 이슈 우선
@@ -233,7 +255,8 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
   │     → 사람/오케스트레이터가 분류 후 라벨 제거 전까지 autopilot 제외
   │
   ├── 에이전트 또는 사용자가 작업 시작
-  │     → 브랜치 생성: {type}/#{번호}-{짧은설명}
+  │     → 브랜치 생성: {branch-prefix}/#{번호}-{짧은설명}
+  │       예: `feat/#42-symbol-validation`, `fix/#57-treasury-rounding`, `chore/#88-runner-cleanup`
   │
   ├── 브랜치 push → codex-branch-review 통과
   │
