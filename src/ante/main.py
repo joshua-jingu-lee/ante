@@ -1091,21 +1091,45 @@ async def _approval_expire_loop(
 
 
 async def _init_notification(s: Services) -> None:
-    """NotificationService, TelegramCommandReceiver 초기화."""
+    """NotificationService, TelegramCommandReceiver 초기화.
+
+    부팅 계약 (#1118):
+
+    - ``TELEGRAM_BOT_TOKEN`` / ``TELEGRAM_CHAT_ID`` 시크릿이 누락(``ConfigError``)
+      되거나 공란이면 NotificationService 를 생성하지 않고 부팅을 계속한다.
+      과거에는 시크릿이 아예 없을 때 ``Config.secret()`` 이 raise 하여 부팅이
+      막혔다 — ``notification.telegram_enabled=false`` 로 Telegram 을 끈 stage
+      환경에서도 우회가 필요했던 원인이다.
+    - 시크릿이 존재하면 ``notification.telegram_enabled`` 플래그와 무관하게
+      ``NotificationService`` 를 항상 생성한다. 플래그는 서비스 내부의 필터링
+      (CRITICAL 이외 차단) 과 ``ConfigChangedEvent`` 기반 런타임 재활성화
+      계약에만 사용된다 — `docs/specs/notification/notification.md` §_should_send
+      참조. 서비스 자체를 지워 버리면 disabled 상태에서도 보장되어야 할
+      CRITICAL 알림 경로와 동적 토글이 함께 무력화된다.
+    - 공란 시크릿(``TELEGRAM_BOT_TOKEN=`` 등) 역시 비활성화 신호로 취급한다
+      (`docs/superpowers/specs/2026-04-17-staging-environment-design.md` 참고).
+      ``Config.secret()`` 은 이 경우 raise 하지 않고 빈 문자열을 반환하므로
+      별도 가드가 필요하다.
+    """
     assert s.eventbus is not None
     assert s.dynamic_config is not None
 
+    from ante.config import ConfigError
     from ante.notification import (
         NotificationLevel,
         NotificationService,
         TelegramAdapter,
     )
 
-    telegram_token = s.config.secret("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = s.config.secret("TELEGRAM_CHAT_ID")
+    try:
+        telegram_token = s.config.secret("TELEGRAM_BOT_TOKEN")
+        telegram_chat_id = s.config.secret("TELEGRAM_CHAT_ID")
+    except ConfigError as err:
+        logger.info("NotificationService 건너뜀 — Telegram 시크릿 없음: %s", err)
+        return
 
     if not (telegram_token and telegram_chat_id):
-        logger.info("NotificationService 건너뜀 — Telegram 설정 없음")
+        logger.info("NotificationService 건너뜀 — Telegram 시크릿이 공란")
         return
 
     adapter = TelegramAdapter(bot_token=telegram_token, chat_id=telegram_chat_id)
@@ -1137,7 +1161,9 @@ async def _init_notification(s: Services) -> None:
         telegram_enabled=telegram_enabled_bool,
     )
     s.notification_service.subscribe()
-    logger.info("NotificationService 초기화 완료 (Telegram)")
+    logger.info(
+        "NotificationService 초기화 완료 (Telegram, enabled=%s)", telegram_enabled_bool
+    )
 
     # TelegramCommandReceiver
     from ante.notification import TelegramCommandReceiver
