@@ -85,8 +85,9 @@ mkdir -p "$WORKTREE_ROOT"
 - latest verdict (`ready | caution | blocked`)
 - 구현 전에 반드시 반영할 주의사항
 - TC 추가/보완이 필요한 항목
+- 최신 리뷰에 `verdict:`가 없거나, 리뷰 이후 이슈 본문/스펙/선행 조건이 바뀌었는지 여부
 
-가장 최신 사전 리뷰 verdict가 `blocked`면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
+최신 사전 리뷰에 `verdict:`가 없거나 stale하다고 판단되면 `/arch-review` 또는 `/qa-review` refresh를 먼저 요청한다. 가장 최신 사전 리뷰 verdict가 여전히 `blocked`일 때만 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
 
 ### 구현 시작 기록 (오케스트레이터)
 

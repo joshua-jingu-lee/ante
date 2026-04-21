@@ -73,6 +73,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 이슈에 최신 `🏗️ **아키텍트 리뷰**` 코멘트가 있으면 그대로 재사용한다.
 - 이슈에 최신 `🧪 **QA 리뷰**` 코멘트가 있으면 그대로 재사용한다.
 - 이미 남아 있는 사전 리뷰 증적을 덮어쓰지 않는다. 새 정보가 없으면 중복 리뷰를 남기지 않는다.
+- 다만 최신 리뷰에 `verdict:`가 없거나, 최신 verdict가 `blocked`/`caution`인데 이슈 본문·스펙·선행 조건이 이후 바뀌었다면 `/arch-review` 또는 `/qa-review`를 다시 호출해 refresh verdict를 남긴다.
 
 ### 판정 해석
 
@@ -109,6 +110,8 @@ gh issue list --state open --limit 100 --json number,title,labels,body,createdAt
 4. `arch-review` 필요 여부 판단
 5. `qa-review` 필요 여부 판단
 6. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
+
+최신 사전 리뷰에 `verdict:`가 없거나, 오래된 `blocked` verdict가 최신 이슈 상태를 반영하지 못하면 refresh 리뷰를 먼저 남긴 뒤 그 결과를 사용한다.
 
 사전 리뷰 결과가 `blocked`면 이슈 코멘트에 다음을 남기고 스킵한다.
 

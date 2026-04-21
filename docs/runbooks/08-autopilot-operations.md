@@ -98,6 +98,8 @@ autopilot은 필요 시 구현 전에 두 종류의 리뷰 증적을 남긴다.
 
 최신 리뷰 verdict는 `ready | caution | blocked` 중 하나로 남긴다.
 
+최신 리뷰에 verdict가 없거나, `blocked`/`caution` verdict 이후 이슈 본문·스펙·선행 조건이 바뀌었다면 `/arch-review` 또는 `/qa-review`를 다시 실행해 refresh verdict를 남길 수 있어야 한다.
+
 ### 4.4 verdict 해석
 
 - `ready`: 구현 진행 가능
@@ -111,6 +113,7 @@ autopilot은 필요 시 구현 전에 두 종류의 리뷰 증적을 남긴다.
 - `/implement-issue`는 이슈 코멘트에 남아 있는 `arch-review` / `qa-review` 증적을 읽고:
   - 구현 착수 코멘트에 요약을 남기고
   - 개발 에이전트 프롬프트에도 같은 요약을 포함한다
+- verdict가 없거나 stale한 리뷰는 구현 게이트로 쓰지 않고, refresh 리뷰를 먼저 남긴 뒤 최신 verdict를 사용한다.
 
 이렇게 해야 사전 리뷰 증적과 실제 구현이 끊기지 않는다.
 
