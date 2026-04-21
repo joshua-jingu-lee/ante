@@ -120,10 +120,15 @@ class Config:
     def secret(self, key: str) -> str:
         """비밀값 조회. 환경변수 우선, 없으면 .env에서.
 
+        환경변수가 존재하면(빈 문자열 포함) 그대로 반환하며, 빈 값 허용
+        여부는 호출자가 판단한다.
+
         예: config.secret("KIS_APP_KEY")
         Raises: ConfigError if not found
         """
-        value = os.environ.get(key) or self._secrets.get(key)
+        if key in os.environ:
+            return os.environ[key]
+        value = self._secrets.get(key)
         if value is None:
             raise ConfigError(f"Secret not found: {key}")
         return value
