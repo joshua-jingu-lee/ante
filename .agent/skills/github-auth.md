@@ -25,7 +25,7 @@
   - `Contents`: `Read and write`
   - `Pull requests`: `Read and write`
   - `Issues`: `Read and write`
-  - `Actions`: `Read` 또는 `Write`
+  - `Actions`: `Read and write` (수동 복구에 `gh run rerun` / `gh workflow run` 필요)
 
 ## 초기 설정
 
