@@ -93,10 +93,28 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ### 2단계: 큐 snapshot 수집
 
 ```bash
-gh issue list --state open --limit 100 --json number,title,labels,body,createdAt
+REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+QUERY="repo:${REPO} is:issue is:open sort:created-asc \
+  -label:needs-triage \
+  -label:question \
+  -label:blocked \
+  -label:blocked:review-loop \
+  -label:blocked:pr-review-loop \
+  -label:epic"
+
+page=1
+while :; do
+  batch="$(gh api search/issues -f q="$QUERY" -f per_page=100 -f page="$page" --jq '.items')"
+  [[ "$batch" == "[]" ]] && break
+  printf '%s\n' "$batch"
+  page=$((page + 1))
+done
 ```
 
-- 위 결과에서 포함/제외 규칙을 적용해 이번 배치 큐를 고정한다.
+- 큐 snapshot은 "앞 100건만 가져온 뒤 로컬에서 후행 필터링"하지 않는다.
+- `needs-triage`와 기본 제외 라벨은 **수집 단계에서 server-side search filter로 먼저 제외**한다.
+- snapshot은 100건 단일 조회가 아니라 **pagination으로 끝까지 수집한 전체 open issue 후보 집합**으로 고정한다.
+- 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
 - `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다.
 
@@ -112,6 +130,8 @@ gh issue list --state open --limit 100 --json number,title,labels,body,createdAt
 6. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
 
 최신 사전 리뷰에 `verdict:`가 없거나, 오래된 `blocked` verdict가 최신 이슈 상태를 반영하지 못하면 refresh 리뷰를 먼저 남긴 뒤 그 결과를 사용한다.
+
+`needs-triage`는 이미 2단계 server-side snapshot에서 제외되어 있어야 하며, 여기서는 stale snapshot이나 수동 개입 여부를 다시 확인하는 안전 검사를 수행한다.
 
 사전 리뷰 결과가 `blocked`면 이슈 코멘트에 다음을 남기고 스킵한다.
 

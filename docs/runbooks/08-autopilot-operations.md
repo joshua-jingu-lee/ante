@@ -24,6 +24,8 @@
 ### 2.1 Snapshot 원칙
 
 - 배치 시작 시점의 open issue 목록을 snapshot으로 고정한다.
+- snapshot 수집은 `needs-triage`와 기본 제외 라벨을 **server-side filter로 먼저 제외한 뒤**, pagination으로 전체 후보 집합을 끝까지 모으는 방식이어야 한다.
+- "앞 100건만 가져온 뒤 로컬에서 제외 라벨을 거르는 방식"은 backlog가 커질 때 실제 처리 가능 이슈를 누락시킬 수 있으므로 사용하지 않는다.
 - 배치 도중 새로 생긴 이슈나 follow-up 이슈는 다음 실행으로 넘긴다.
 - 같은 배치에서 같은 이슈를 두 번 재선택하지 않는다.
 
@@ -49,6 +51,8 @@
 - 이미 open PR이 연결된 이슈
 - 선행 의존 이슈가 close되지 않은 이슈
 
+라벨 기반 제외는 snapshot 수집 시점에 server-side로 먼저 적용하고, open PR 존재 여부나 선행 의존성처럼 추가 조회가 필요한 조건만 후행 검사로 남긴다.
+
 ### 2.3 정렬 규칙
 
 1. `P0 - Critical`
@@ -63,6 +67,7 @@
 - `needs-triage`는 "이 이슈를 autopilot이 바로 집으면 안 된다"는 의미다.
 - watcher나 QA 자동화가 만든 이슈, 중복/오탐 가능성이 있는 이슈, 스펙 준비 여부를 사람이 먼저 판단해야 하는 이슈에 붙인다.
 - autopilot은 `needs-triage`가 남아 있는 이슈를 건너뛴다.
+- 이 건너뛰기는 후보를 다 가져온 뒤 후행 필터링하는 방식이 아니라, queue snapshot 수집 단계에서 `-label:needs-triage`를 먼저 적용해 보장한다.
 - 수동 `/implement-issue`도 `needs-triage`가 붙어 있으면 구현을 시작하지 않는다.
 - 사람이 이슈를 검토한 뒤 실제 처리 가치와 범위를 확인하면 라벨을 제거한다.
 
