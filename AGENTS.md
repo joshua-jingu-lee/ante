@@ -54,4 +54,4 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 - 사용자의 질문에 임의로 대답하지 않는다. 항상 스펙 문서를 확인 후 답변한다.
 - 사용자에 스펙을 제안할 때는 YAGNI가 아닌지 확인한다. 
 - .gitignore 에 등록된 파일은 커밋 여부를 묻지 않는다.
-- 설계·계획 단계 에이전트(Claude 오케스트레이터, `superpowers:writing-plans` 등)는 **GitHub 이슈 등록까지만** 수행한다. 실제 구현·PR 생성·리뷰 대응은 `/implement-issue` 에이전트에 위임한다.
+- 설계·계획 단계 에이전트(`superpowers:writing-plans` 등 스펙/플래닝 스킬)는 **GitHub 이슈 등록까지만** 수행한다. 직접 코드 구현은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@frontend-dev`, `@devops`, `@strategy-dev`)에게 위임한다. Claude 오케스트레이터는 `/implement-issue`·`/autopilot` 커맨드 계약에 따라 사전 리뷰 조율, 이슈/브랜치/PR 코멘트, PR 생성까지 수행할 수 있다. 자세한 분담은 [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)를 따른다.
