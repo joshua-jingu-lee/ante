@@ -82,11 +82,72 @@ async def test_disabled_skips_without_secrets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_disabled_skips_even_with_secrets() -> None:
-    """telegram_enabled=false 면 시크릿이 있어도 NotificationService 미생성."""
+async def test_disabled_with_secrets_still_creates_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """telegram_enabled=false + 시크릿 존재 → 서비스는 생성한다.
+
+    CRITICAL 알림 예외 경로와 ``ConfigChangedEvent`` 기반 동적 재활성화
+    (notification 스펙 §_should_send) 를 보존하려면, disabled 상태에서도
+    NotificationService 자체는 살아 있어야 한다. ``telegram_enabled=False``
+    플래그만 필터로 전달한다. Receiver 는 토글 OFF 상태이므로 시작하지 않는다.
+    """
     s = _make_services(
         telegram_enabled="false",
         secrets={"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"},
+    )
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+
+    created_kwargs: list[dict[str, Any]] = []
+
+    import ante.notification as notification_mod
+
+    class _StubNotificationService:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            created_kwargs.append(kwargs)
+
+        def subscribe(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        notification_mod, "NotificationService", _StubNotificationService
+    )
+
+    await _init_notification(s)
+
+    assert len(created_kwargs) == 1, "disabled 상태에서도 서비스는 생성되어야 한다"
+    assert created_kwargs[0]["telegram_enabled"] is False
+    assert s.notification_service is not None
+    assert s.telegram_receiver is None, (
+        "Receiver 는 telegram_enabled=false 일 때 시작되면 안 된다"
+    )
+
+
+@pytest.mark.asyncio
+async def test_disabled_with_empty_secrets_skips() -> None:
+    """telegram_enabled=false + 공란 시크릿 → skip (adapter 생성 불가)."""
+    s = _make_services(
+        telegram_enabled="false",
+        secrets={"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""},
+    )
+
+    await _init_notification(s)
+
+    assert s.notification_service is None
+    assert s.telegram_receiver is None
+
+
+@pytest.mark.asyncio
+async def test_enabled_with_empty_secrets_skips() -> None:
+    """telegram_enabled=true + 공란 시크릿 → broken adapter 방지 skip.
+
+    ``Config.secret()`` 은 env 가 ``""`` 로 설정된 경우 빈 문자열을 반환하므로
+    (raise 가 아님), 명시적 공란 가드가 필요하다. 스테이징 환경에서 시크릿을
+    의도적으로 비워 두는 방식을 안전하게 지원한다.
+    """
+    s = _make_services(
+        telegram_enabled="true",
+        secrets={"TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": ""},
     )
 
     await _init_notification(s)
