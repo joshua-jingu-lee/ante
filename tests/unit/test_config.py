@@ -118,6 +118,23 @@ class TestConfigSecret:
         with pytest.raises(ConfigError, match="Secret not found"):
             config.secret("NONEXISTENT")
 
+    def test_empty_env_returns_empty_string(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """환경변수가 빈 문자열이면 그대로 빈 문자열을 반환한다."""
+        monkeypatch.setenv("API_KEY", "")
+        config = Config(static={}, secrets={"API_KEY": "from_file"})
+        # 환경변수가 명시적으로 빈 문자열이면 dotenv로 fallback하지 않는다.
+        assert config.secret("API_KEY") == ""
+
+    def test_empty_env_does_not_fallback_to_dotenv(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """명시적 빈 환경변수는 .env fallback을 발생시키지 않는다."""
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+        config = Config(static={}, secrets={"TELEGRAM_BOT_TOKEN": "file_value"})
+        assert config.secret("TELEGRAM_BOT_TOKEN") == ""
+
 
 # ── 유효성 검증 ──────────────────────────────────
 
