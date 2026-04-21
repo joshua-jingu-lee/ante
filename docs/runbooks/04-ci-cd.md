@@ -136,7 +136,7 @@ post-merge automation
 출력:
 - auto-merge 활성화 또는 유지
 - auto-merge 활성화 전에 PR head ref 기준 `workflow_dispatch`로 `post-merge.yml` 호출
-- `post-merge.yml`은 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 후처리를 수행
+- `post-merge.yml`은 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 후처리를 수행하고, 장기 대기 시 timeout 전에 자기 자신을 다시 dispatch해 대기를 넘겨받는다
 - 머지 불가 시 대기
 
 **원칙**: merge gate는 세 번째 코드 리뷰어가 아니라 **정책 집행자**다.
@@ -226,7 +226,7 @@ pytest tests/unit/ -v
   - `workflow_dispatch`를 default branch 기준으로 실행하면, 머지 전에는 최신 PR 브랜치의 `post-merge.yml` 변경이 반영되지 않음
   - `workflow_dispatch`를 auto-merge 뒤에 호출하면, head branch 자동 삭제와 경쟁해 PR head ref를 찾지 못할 수 있음
   - merge actor나 이벤트 경로 차이로 `pull_request.closed` 후처리가 기대대로 실행되지 않음
-  - auto-merge 전에 별도 `post-merge` run을 시작해도, 실제 merged 상태가 늦게 반영될 수 있어 workflow 내부 대기가 필요함
+  - auto-merge 전에 별도 `post-merge` run을 시작해도, 실제 merged 상태가 늦게 반영될 수 있어 workflow 내부 대기와 handoff 재-dispatch가 필요함
   - `workflow_dispatch` 입력 파싱 실패
   - GitHub 기본 auto-close는 되었지만 체크박스/에픽 동기화가 누락됨
 - 복구 순서:
