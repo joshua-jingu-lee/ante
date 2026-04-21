@@ -20,6 +20,7 @@ jobs:
     name: post-merge
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       contents: read
       issues: write
@@ -40,10 +41,11 @@ jobs:
             }
 
             async function waitForMergedPullRequest(pullNumber) {
-              const maxAttempts = 80;
-              const delayMs = 15_000;
+              const delayMs = 30_000;
+              let attempt = 0;
 
-              for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              while (true) {
+                attempt += 1;
                 const current = (
                   await github.rest.pulls.get({
                     owner,
@@ -65,15 +67,12 @@ jobs:
                 if (attempt === 1 || attempt % 5 === 0) {
                   core.info(
                     `PR #${pullNumber} is not merged yet ` +
-                    `(attempt ${attempt}/${maxAttempts}, state=${current.state}). Waiting ${delayMs / 1000}s...`,
+                    `(attempt ${attempt}, state=${current.state}). Waiting ${delayMs / 1000}s...`,
                   );
                 }
 
                 await new Promise((resolve) => setTimeout(resolve, delayMs));
               }
-
-              core.setFailed(`PR #${pullNumber} did not reach merged state within 20 minutes.`);
-              return null;
             }
 
             let pr = null;

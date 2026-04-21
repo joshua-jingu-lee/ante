@@ -558,5 +558,6 @@ jobs:
       - name: Dispatch post-merge reconciliation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh workflow run post-merge.yml --repo "$GITHUB_REPOSITORY" -f pr_number="$PR_NUMBER"
+        run: gh workflow run post-merge.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF" -f pr_number="$PR_NUMBER"
