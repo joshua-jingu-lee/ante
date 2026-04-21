@@ -135,6 +135,7 @@ post-merge automation
 
 출력:
 - auto-merge 활성화 또는 유지
+- auto-merge 직후 PR이 실제로 merged 상태가 되면 `workflow_dispatch`로 `post-merge.yml` 호출
 - 머지 불가 시 대기
 
 **원칙**: merge gate는 세 번째 코드 리뷰어가 아니라 **정책 집행자**다.
@@ -149,7 +150,7 @@ post-merge automation
     ├── ci.yml                    # Gate B: lint + test
     ├── codex-branch-review.yml   # Gate A: PR 전 Codex 브랜치 리뷰
     ├── pr-approvals.yml          # Gate C/D: Claude + Codex PR 승인
-    ├── post-merge.yml            # 머지 후 이슈 정리, 후처리
+    ├── post-merge.yml            # 머지 후 이슈 정리, 후처리 (closed event + workflow_dispatch)
     ├── semantic-release.yml      # 수동 릴리스
     └── publish.yml               # Release 기반 배포
 ```
@@ -220,6 +221,7 @@ pytest tests/unit/ -v
 ### 5.2 Post-merge 실패 모드와 복구
 
 - 알려진 실패 모드:
+  - GitHub Actions의 `GITHUB_TOKEN`으로 수행한 auto-merge는 후속 workflow run을 자동으로 만들지 않아 `pull_request.closed` 후처리가 누락될 수 있음
   - merge actor나 이벤트 경로 차이로 `pull_request.closed` 후처리가 기대대로 실행되지 않음
   - `workflow_dispatch` 입력 파싱 실패
   - GitHub 기본 auto-close는 되었지만 체크박스/에픽 동기화가 누락됨

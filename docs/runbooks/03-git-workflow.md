@@ -139,6 +139,8 @@ PR을 열기 전, 최신 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통�
 - 기본 머지 방식은 **squash merge**
 - merge 실행 주체는 GitHub auto-merge
 - head branch 삭제는 GitHub의 **Automatically delete head branches** 설정 사용
+- head branch 자동 삭제가 필요하면 repository ruleset / branch protection이 모든 브랜치 삭제를 막지 않도록 확인한다
+- `main` 보호는 `main` branch protection의 `allow_deletions=false`를 기준으로 두고, 전 브랜치 공통 ruleset에 `deletion`을 넣지 않는다
 
 ### 4.5 PR 크기 가이드
 
