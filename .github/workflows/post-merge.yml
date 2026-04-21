@@ -79,8 +79,9 @@ jobs:
             let issueNumbers = [];
 
             if (eventName === "workflow_dispatch") {
-              const prNumberInput = core.getInput("pr_number");
-              const issueNumbersInput = core.getInput("issue_numbers");
+              const workflowInputs = context.payload.inputs || {};
+              const prNumberInput = String(workflowInputs.pr_number || "").trim();
+              const issueNumbersInput = String(workflowInputs.issue_numbers || "").trim();
 
               if (prNumberInput) {
                 pr = (
