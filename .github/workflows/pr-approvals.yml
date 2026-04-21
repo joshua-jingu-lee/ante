@@ -555,26 +555,6 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
 
-      - name: Wait for merged pull request
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          for attempt in {1..20}; do
-            MERGED_AT="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json mergedAt --jq '.mergedAt // ""')"
-            if [[ -n "$MERGED_AT" ]]; then
-              echo "PR #$PR_NUMBER merged at $MERGED_AT"
-              exit 0
-            fi
-
-            STATE="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')"
-            echo "Waiting for PR #$PR_NUMBER to merge (attempt $attempt/20, state=$STATE)..."
-            sleep 3
-          done
-
-          echo "Timed out waiting for PR #$PR_NUMBER to merge after enabling auto-merge." >&2
-          exit 1
-
       - name: Dispatch post-merge reconciliation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

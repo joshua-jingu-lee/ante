@@ -33,10 +33,47 @@ jobs:
             const repo = context.repo.repo;
             const eventName = context.eventName;
             const closingPattern =
-              /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#(\d+)/gi;
+              /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
 
             function parseIssueNumbers(text) {
               return [...(text || "").matchAll(closingPattern)].map((match) => Number(match[1]));
+            }
+
+            async function waitForMergedPullRequest(pullNumber) {
+              const maxAttempts = 80;
+              const delayMs = 15_000;
+
+              for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                const current = (
+                  await github.rest.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: pullNumber,
+                  })
+                ).data;
+
+                if (current.merged_at) {
+                  core.info(`PR #${pullNumber} merged at ${current.merged_at}.`);
+                  return current;
+                }
+
+                if (current.state === "closed") {
+                  core.setFailed(`PR #${pullNumber} was closed without merge.`);
+                  return null;
+                }
+
+                if (attempt === 1 || attempt % 5 === 0) {
+                  core.info(
+                    `PR #${pullNumber} is not merged yet ` +
+                    `(attempt ${attempt}/${maxAttempts}, state=${current.state}). Waiting ${delayMs / 1000}s...`,
+                  );
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+              }
+
+              core.setFailed(`PR #${pullNumber} did not reach merged state within 20 minutes.`);
+              return null;
             }
 
             let pr = null;
@@ -55,11 +92,14 @@ jobs:
                   })
                 ).data;
 
-                issueNumbers.push(...parseIssueNumbers(pr.body || ""));
-
                 if (!pr.merged_at) {
-                  core.warning(`PR #${pr.number} is not merged. Proceeding with manual reconciliation.`);
+                  pr = await waitForMergedPullRequest(pr.number);
+                  if (!pr) {
+                    return;
+                  }
                 }
+
+                issueNumbers.push(...parseIssueNumbers(pr.body || ""));
               }
 
               if (issueNumbersInput) {
