@@ -48,6 +48,16 @@ jobs:
               return [...(text || "").matchAll(closingPattern)].map((match) => Number(match[1]));
             }
 
+            async function fetchPullRequest(pullNumber) {
+              return (
+                await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: pullNumber,
+                })
+              ).data;
+            }
+
             async function dispatchPostMergeHandoff(pullNumber, nextDepth) {
               if (!workflowRef) {
                 core.setFailed("Missing workflow ref for post-merge handoff dispatch.");
@@ -75,18 +85,11 @@ jobs:
             async function waitForMergedPullRequest(pullNumber, handoffDepth) {
               const delayMs = 30_000;
               const maxAttempts = 660;
-              const maxHandoffDepth = 6;
               let attempt = 0;
 
               while (attempt < maxAttempts) {
                 attempt += 1;
-                const current = (
-                  await github.rest.pulls.get({
-                    owner,
-                    repo,
-                    pull_number: pullNumber,
-                  })
-                ).data;
+                const current = await fetchPullRequest(pullNumber);
 
                 if (current.merged_at) {
                   core.info(`PR #${pullNumber} merged at ${current.merged_at}.`);
@@ -108,16 +111,39 @@ jobs:
                 await new Promise((resolve) => setTimeout(resolve, delayMs));
               }
 
-              if (handoffDepth < maxHandoffDepth) {
-                const dispatched = await dispatchPostMergeHandoff(pullNumber, handoffDepth + 1);
-                return dispatched ? { type: "handoff" } : { type: "dispatch_failed" };
+              const latest = await fetchPullRequest(pullNumber);
+
+              if (latest.merged_at) {
+                core.info(`PR #${pullNumber} merged at ${latest.merged_at} during handoff boundary.`);
+                return { type: "merged", pr: latest };
               }
 
-              core.setFailed(
-                `PR #${pullNumber} did not merge after ${maxAttempts} attempts ` +
-                `and reached the maximum handoff depth (${maxHandoffDepth}).`,
-              );
-              return { type: "timeout" };
+              if (latest.state === "closed") {
+                core.setFailed(`PR #${pullNumber} was closed without merge.`);
+                return { type: "closed" };
+              }
+
+              try {
+                const dispatched = await dispatchPostMergeHandoff(pullNumber, handoffDepth + 1);
+                return dispatched ? { type: "handoff" } : { type: "dispatch_failed" };
+              } catch (error) {
+                const afterDispatchFailure = await fetchPullRequest(pullNumber);
+
+                if (afterDispatchFailure.merged_at) {
+                  core.info(
+                    `PR #${pullNumber} merged at ${afterDispatchFailure.merged_at} ` +
+                    `while dispatching handoff; continuing in the current run.`,
+                  );
+                  return { type: "merged", pr: afterDispatchFailure };
+                }
+
+                if (afterDispatchFailure.state === "closed") {
+                  core.setFailed(`PR #${pullNumber} was closed without merge.`);
+                  return { type: "closed" };
+                }
+
+                throw error;
+              }
             }
 
             let pr = null;
@@ -132,13 +158,7 @@ jobs:
                 Number.isInteger(handoffDepth) && handoffDepth >= 0 ? handoffDepth : 0;
 
               if (prNumberInput) {
-                pr = (
-                  await github.rest.pulls.get({
-                    owner,
-                    repo,
-                    pull_number: Number(prNumberInput),
-                  })
-                ).data;
+                pr = await fetchPullRequest(Number(prNumberInput));
 
                 if (!pr.merged_at) {
                   const waitResult = await waitForMergedPullRequest(pr.number, normalizedHandoffDepth);

@@ -191,7 +191,8 @@ PR 승인 워커 실패는 아래처럼 분리해서 처리한다.
 ### 6.1 Post-merge 수동 복구
 
 - auto-merged PR은 `merge-gate`가 auto-merge 활성화 전에 PR head ref 기준 `workflow_dispatch`로 `post-merge`를 호출한다.
-- `post-merge`는 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 이슈 reconciliation을 수행하고, 장기 대기 시 timeout 전에 자기 자신을 다시 dispatch해 대기를 넘겨받는다.
+- `post-merge`는 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 이슈 reconciliation을 수행하고, 장기 대기 시 handoff 직전에 PR 상태를 다시 확인한 뒤 자기 자신을 다시 dispatch해 대기를 넘겨받는다.
+- 장기 대기 handoff에는 고정 횟수 제한을 두지 않고 merged 상태까지 자동 경로를 유지한다.
 - `post-merge`가 자동으로 실행되지 않거나, 실행되었어도 체크박스/에픽 동기화가 누락될 수 있다.
 - 복구 순서:
   1. PR 번호 기준 `workflow_dispatch`

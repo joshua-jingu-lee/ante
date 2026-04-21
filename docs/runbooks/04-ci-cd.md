@@ -136,7 +136,8 @@ post-merge automation
 출력:
 - auto-merge 활성화 또는 유지
 - auto-merge 활성화 전에 PR head ref 기준 `workflow_dispatch`로 `post-merge.yml` 호출
-- `post-merge.yml`은 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 후처리를 수행하고, 장기 대기 시 timeout 전에 자기 자신을 다시 dispatch해 대기를 넘겨받는다
+- `post-merge.yml`은 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 후처리를 수행하고, 장기 대기 시 handoff 직전에 PR 상태를 다시 확인한 뒤 자기 자신을 다시 dispatch해 대기를 넘겨받는다
+- 장기 대기 handoff에는 고정 횟수 제한을 두지 않고 merged 상태까지 자동 경로를 유지한다
 - 머지 불가 시 대기
 
 **원칙**: merge gate는 세 번째 코드 리뷰어가 아니라 **정책 집행자**다.
