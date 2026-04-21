@@ -84,7 +84,7 @@ Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트에 반응�
 
 | 역할 | 트리거 | 책임 |
 |------|--------|------|
-| **Codex 브랜치 리뷰어** | `feat/*`, `fix/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push | PR 전 blocking issue 식별, `codex-branch-review` 상태 기록 |
+| **Codex 브랜치 리뷰어** | `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push | PR 전 blocking issue 식별, `codex-branch-review` 상태 기록 |
 | **Codex PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | 최종 승인 체크, `codex-pr-approve` 상태 기록 |
 
 ### 1.9 Claude PR 승인 워커

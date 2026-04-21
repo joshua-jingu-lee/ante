@@ -43,11 +43,13 @@
 |-----------|------|---------------|
 | `feat` | `feature` | `feat/` |
 | `fix` | `bug` | `fix/` |
+| `perf` | `feature` | `perf/` |
 | `refactor` | `refactor` | `refactor/` |
 | `docs` | `docs` | `docs/` |
 | `test` | `test` | `test/` |
 | `chore` | `chore` | `chore/` |
 
+`feature` 라벨은 이슈 타입에 따라 `feat/` 또는 `perf/` 브랜치로 연결될 수 있다.
 `/implement-issue`, `/autopilot`, `codex-branch-review`는 이 매핑을 공통 기준으로 사용한다.
 
 ### 예시
@@ -235,6 +237,7 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
   - 선행 의존 이슈가 아직 close되지 않은 이슈
 - 브랜치 prefix 매핑:
   - `feature -> feat/*`
+  - `feature(perf) -> perf/*`
   - `bug -> fix/*`
   - `refactor -> refactor/*`
   - `docs -> docs/*`
