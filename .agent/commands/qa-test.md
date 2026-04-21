@@ -1,5 +1,7 @@
 지정된 Gherkin TC(.feature)를 Docker 서버에서 실행하고 결과를 리포트한다.
 
+버그 이슈 생성 같은 GitHub 쓰기 작업은 `.agent/skills/github-ops.md`를 따르고, 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
+
 ## 인자
 
 $ARGUMENTS — 테스트 대상 (예: account, bot/lifecycle, scenario/full-pipeline)

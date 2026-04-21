@@ -34,20 +34,22 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 > 설계 결정 이력: [docs/decisions/README.md](docs/decisions/README.md)
 
 ## 개발 프로세스
+> 런북 인덱스: [docs/runbooks/README.md](docs/runbooks/README.md)
 > 이슈 관리: [docs/runbooks/00-issue-management.md](docs/runbooks/00-issue-management.md)
 > 개발 프로세스: [docs/runbooks/01-development-process.md](docs/runbooks/01-development-process.md)
 > 에이전트 구조: [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)
 > Git 워크플로우: [docs/runbooks/03-git-workflow.md](docs/runbooks/03-git-workflow.md)
 > CI/CD: [docs/runbooks/04-ci-cd.md](docs/runbooks/04-ci-cd.md)
 > 테스트 전략: [docs/runbooks/05-testing.md](docs/runbooks/05-testing.md)
+> 릴리스 운영: [docs/runbooks/06-release.md](docs/runbooks/06-release.md)
+> 리뷰 게이트: [docs/runbooks/07-review-gate.md](docs/runbooks/07-review-gate.md)
+> Autopilot 운영: [docs/runbooks/08-autopilot-operations.md](docs/runbooks/08-autopilot-operations.md)
+
 
 ## 프로젝트 디렉토리 구조
 
 > 파일 단위 상세 구조: [docs/architecture/generated/project-structure.md](docs/architecture/generated/project-structure.md)
 
-
-## 향후 계획
-- 개인 운용으로 충분히 검증 후 오픈소스 공개 고려
 
 ## 규칙
 - 모든 대화는 **한국어**로 진행한다.
@@ -56,3 +58,6 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 - 사용자의 질문에 임의로 대답하지 않는다. 항상 스펙 문서를 확인 후 답변한다.
 - 사용자에 스펙을 제안할 때는 YAGNI가 아닌지 확인한다. 
 - .gitignore 에 등록된 파일은 커밋 여부를 묻지 않는다.
+- 설계·계획 단계 에이전트(`superpowers:writing-plans` 등 스펙/플래닝 스킬)는 **GitHub 이슈 등록까지만** 수행한다.
+- Claude 오케스트레이터와 `/autopilot`은 `/implement-issue`·`/autopilot` 커맨드 계약에 따라 사전 리뷰 조율, 이슈/브랜치/PR 코멘트, PR 생성, 상태 보고 같은 오케스트레이션을 수행할 수 있다. 자세한 분담은 [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)를 따른다.
+- 직접 코드 구현과 작업 브랜치 수정은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@frontend-dev`, `@devops`, `@strategy-dev`)에게 위임한다.

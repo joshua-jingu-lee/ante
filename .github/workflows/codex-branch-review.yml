@@ -5,8 +5,11 @@ on:
     branches:
       - 'feat/**'
       - 'fix/**'
+      - 'perf/**'
       - 'refactor/**'
       - 'docs/**'
+      - 'test/**'
+      - 'chore/**'
       - 'epic/**'
 
 concurrency:

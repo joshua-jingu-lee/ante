@@ -451,6 +451,8 @@ docs/
 │   ├── 04-ci-cd.md
 │   ├── 05-testing.md
 │   ├── 06-release.md           # 릴리스 절차
+│   ├── 07-review-gate.md       # 리뷰 게이트와 merge gate
+│   ├── 08-autopilot-operations.md # 야간 autopilot 큐 운영
 │   └── README.md
 ├── specs/                      # 모듈별 세부 설계
 │   ├── README.md
@@ -671,11 +673,14 @@ frontend/src/
 │   ├── autopilot.md             # /autopilot
 │   ├── qa-test.md               # /qa-test
 │   ├── qa-sweep.md              # /qa-sweep
-│   └── api-docs.md              # /api-docs
+│   ├── api-docs.md              # /api-docs
+│   ├── arch-review.md           # /arch-review
+│   └── qa-review.md             # /qa-review
 └── skills/                      # 프로젝트 스킬 (컨벤션·패턴 참조)
     ├── asyncio-patterns.md
     ├── frontend-conventions.md
     ├── github-auth.md           # GitHub CLI 로컬 PAT 인증 절차
+    ├── github-ops.md            # GitHub 조회/코멘트/PR/재실행 공통 절차
     ├── module-conventions.md
     ├── qa-tester/               # QA 테스터 스킬 (Gherkin 해석)
     ├── release.md               # /release 릴리스 절차

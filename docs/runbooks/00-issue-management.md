@@ -35,6 +35,23 @@
 | `test` | 테스트 추가/수정 | `test` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` |
 
+### 2.1 이슈 타입과 브랜치 prefix 매핑
+
+이슈 제목/라벨과 실제 작업 브랜치 prefix는 아래를 기준으로 맞춘다.
+
+| 이슈 타입 | 라벨 | 브랜치 prefix |
+|-----------|------|---------------|
+| `feat` | `feature` | `feat/` |
+| `fix` | `bug` | `fix/` |
+| `perf` | `feature` | `perf/` |
+| `refactor` | `refactor` | `refactor/` |
+| `docs` | `docs` | `docs/` |
+| `test` | `test` | `test/` |
+| `chore` | `chore` | `chore/` |
+
+`feature` 라벨은 이슈 타입에 따라 `feat/` 또는 `perf/` 브랜치로 연결될 수 있다.
+`/implement-issue`, `/autopilot`, `codex-branch-review`는 이 매핑을 공통 기준으로 사용한다.
+
 ### 예시
 
 ```
@@ -185,7 +202,18 @@ A → D     (A 완료 후 B, D 병렬 가능)
 | `question` | 논의/질문 | 주황색 |
 | `epic` | 에픽 (하위 이슈 묶음) | 검정색 |
 | `blocked` | 다른 작업에 의존하여 대기 | 빨간색 |
+| `needs-triage` | 자동 처리 전 사람 분류 필요 | 회색 |
+| `blocked:review-loop` | 브랜치 리뷰 반복 실패로 자동 진행 중단 | 진한 빨간색 |
+| `blocked:pr-review-loop` | PR 승인 반복 실패로 자동 진행 중단 | 진한 빨간색 |
 | `good first issue` | 에이전트가 자율 처리 가능 | 연두색 |
+
+### 4.1 `needs-triage` 라벨
+
+- `needs-triage`는 "이 이슈를 autopilot이나 `/implement-issue`가 바로 집으면 안 된다"는 뜻이다.
+- watcher, QA, 리뷰 후속 자동화처럼 에이전트가 새 이슈를 만들었지만 중복/우선순위/스펙 준비 상태를 아직 사람이 확인하지 않았을 때 사용한다.
+- 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
+- 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
+- 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
 
 ## 5. 우선순위
 
@@ -198,13 +226,40 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
 | `P2 - Medium` | 일반 기능/개선 — 스프린트 내 처리 |
 | `P3 - Low` | 편의 기능, 기술 부채 — 여유 시 처리 |
 
+### 5.1 Autopilot 큐 선별
+
+야간/정기 배치의 `/autopilot`은 아래 규칙으로 대상을 고른다.
+
+- 포함: `feature`, `bug`, `refactor`, `docs`, `test`, `chore`
+- 제외: `needs-triage`, `question`, `blocked`, `blocked:review-loop`, `blocked:pr-review-loop`, `epic`
+- 추가 제외:
+  - 이미 open PR이 연결된 이슈
+  - 선행 의존 이슈가 아직 close되지 않은 이슈
+- 브랜치 prefix 매핑:
+  - `feature -> feat/*`
+  - `feature(perf) -> perf/*`
+  - `bug -> fix/*`
+  - `refactor -> refactor/*`
+  - `docs -> docs/*`
+  - `test -> test/*`
+  - `chore -> chore/*`
+- 정렬:
+  - `P0 → P1 → P2 → P3`
+  - 같은 우선순위에서는 오래 열린 이슈 우선
+- 실행 방식:
+  - 배치 시작 시점의 snapshot 기준으로 한 번에 하나의 이슈만 활성 처리
+
 ## 6. 이슈 생명주기
 
 ```
 등록 (Open)
   │
+  ├── `needs-triage`가 붙은 경우
+  │     → 사람/오케스트레이터가 분류 후 라벨 제거 전까지 autopilot 제외
+  │
   ├── 에이전트 또는 사용자가 작업 시작
-  │     → 브랜치 생성: {type}/#{번호}-{짧은설명}
+  │     → 브랜치 생성: {branch-prefix}/#{번호}-{짧은설명}
+  │       예: `feat/#42-symbol-validation`, `fix/#57-treasury-rounding`, `chore/#88-runner-cleanup`
   │
   ├── 브랜치 push → codex-branch-review 통과
   │
@@ -243,6 +298,8 @@ BotManager가 중복 주문을 발행하면 Treasury 잔고가 음수가 되는 
 - [ ] 동시 주문 시나리오 테스트 추가" \
   --label "bug"
 ```
+
+watcher나 QA 자동화가 만든 새 이슈가 아직 분류 전이면 `needs-triage`를 함께 붙여 autopilot 대상에서 잠시 제외한다.
 
 ## 8. 이슈와 버전 관리의 연결
 

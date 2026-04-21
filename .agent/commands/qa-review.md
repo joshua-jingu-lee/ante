@@ -1,5 +1,7 @@
 오픈 이슈를 QA 엔지니어 관점에서 순회하며, TC 추가 작성 및 보완 필요 여부를 파악하고 GitHub 코멘트로 남긴다.
 
+GitHub 조회/코멘트 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
+
 ## 인자
 
 $ARGUMENTS — 옵션 (생략 가능)
@@ -28,10 +30,16 @@ gh issue list --state open --label "feature,bug,epic" --limit 50 --json number,t
 gh issue view #{번호} --json number,title,labels,body
 ```
 
-이미 QA 리뷰가 달린 이슈는 건너뛴다:
+기존 QA 리뷰는 먼저 확인하되, 아래 경우에는 **refresh 리뷰**를 새 코멘트로 다시 남긴다:
 ```bash
-gh issue view #{번호} --json comments --jq '.comments[].body' | rg -q "🧪 \\*\\*QA 리뷰\\*\\*"
+gh issue view #{번호} --json comments --jq '.comments[].body' | rg "🧪 \\*\\*QA 리뷰\\*\\*"
 ```
+
+- 최신 리뷰에 `verdict:` 필드가 없다
+- 최신 verdict가 `blocked` 또는 `caution`인데, 수용 조건/TC 경로/선행 이슈가 이후 정리되었다
+- 사용자가 `/qa-review`를 다시 호출해 최신 판단을 요청했다
+
+같은 헤더가 있다는 이유만으로 무조건 스킵하지 않는다. verdict를 구현 게이트로 사용하는 이상, 최신 TC 판단으로 갱신할 수 있어야 한다.
 
 ### 2단계: 이슈별 분석
 
@@ -113,6 +121,11 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 ```markdown
 🧪 **QA 리뷰**
 
+### 판정
+- verdict: `ready | caution | blocked`
+- next-step: `implement-issue | add-tc-followup | invoke-human`
+- review-mode: `fresh | refresh`
+
 ### TC 커버리지 현황
 
 | 수용 조건 | 기존 TC | 상태 |
@@ -150,6 +163,8 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 2. **기존 TC 참조**: 새 시나리오 작성 시, 같은 카테고리의 기존 `.feature` 파일 스타일(Background, 변수명, 스텝 패턴)을 따르도록 안내한다.
 3. **과도한 TC 방지**: 수용 조건에 직접 대응하는 TC만 제안한다. 이슈 범위를 넘는 "있으면 좋을" TC는 제안하지 않는다.
 4. **QA 환경 고려**: TC 초안은 Docker QA 환경(`ante-qa` 컨테이너)에서 실행 가능한 형태로 작성한다. `gherkin-guide.md`의 스텝 패턴을 준수한다.
+5. **판정 명시**: 구현을 바로 시작할 수 있는지(`ready`), 구현은 가능하지만 TC follow-up이 필요한지(`caution`), 수용 조건/검증 경로가 불명확해 사람 판단이 먼저인지(`blocked`)를 명확히 남긴다.
+6. **refresh 허용**: 이전 QA 리뷰가 있어도 verdict가 오래되었거나 수용 조건/TC 정보가 바뀌면 같은 헤더로 새 코멘트를 남겨 최신 verdict를 갱신한다.
 
 ### 4단계: 결과 요약
 
@@ -163,7 +178,8 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 | #103 | 리스크 엔진 | ❌ TC 없음 — 신규 3건 제안 |
 
 리뷰 완료: {N}건
-스킵 (이미 리뷰 완료): {M}건
+기존 리뷰 재사용: {M}건
+refresh 리뷰: {K}건
 TC 추가 제안: {총 건수}건
 TC 보완 제안: {총 건수}건
 ```

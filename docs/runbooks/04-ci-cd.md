@@ -43,7 +43,7 @@ post-merge automation
 
 **목적**: PR 전 브랜치 품질 게이트
 
-- **트리거**: feature/fix/refactor/docs/epic 브랜치 push
+- **트리거**: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push
 - **결과**: `codex-branch-review`
 - **실패 시**: Claude가 같은 브랜치에서 수정 후 재push
 - **해석 주의**: 리뷰 단계가 finding을 생성했고 마지막 `Enforce review verdict`만 실패한 경우, 이는 워크플로우 장애가 아니라 **의도된 content fail**이다.

@@ -53,7 +53,7 @@
 ### 3.1 트리거
 
 - 브랜치 push
-- 대상: `feat/*`, `fix/*`, `refactor/*`, `docs/*`, `epic/*`
+- 대상: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 
 ### 3.2 결과
 

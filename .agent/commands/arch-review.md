@@ -1,5 +1,7 @@
 오픈 이슈를 아키텍트 관점에서 순회하며, 구현 시 주의사항과 보완 의견을 GitHub 코멘트로 남긴다.
 
+GitHub 조회/코멘트 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
+
 ## 인자
 
 $ARGUMENTS — 옵션 (생략 가능)
@@ -24,11 +26,17 @@ gh issue list --state open --label "feature,bug,refactor,epic" --limit 50 --json
 gh issue view #{번호} --json number,title,labels,body
 ```
 
-이미 아키텍트 리뷰가 달린 이슈는 건너뛴다:
+기존 아키텍트 리뷰는 먼저 확인하되, 아래 경우에는 **refresh 리뷰**를 새 코멘트로 다시 남긴다:
 ```bash
-# 코멘트에 "🏗️ **아키텍트 리뷰**" 가 있으면 스킵
-gh issue view #{번호} --json comments --jq '.comments[].body' | rg -q "🏗️ \\*\\*아키텍트 리뷰\\*\\*"
+# 기존 리뷰 확인
+gh issue view #{번호} --json comments --jq '.comments[].body' | rg "🏗️ \\*\\*아키텍트 리뷰\\*\\*"
 ```
+
+- 최신 리뷰에 `verdict:` 필드가 없다
+- 최신 verdict가 `blocked` 또는 `caution`인데, 이슈 본문/스펙/선행 조건이 이후 정리되었다
+- 사용자가 `/arch-review`를 다시 호출해 최신 판단을 요청했다
+
+즉, 같은 헤더가 있다는 이유만으로 무조건 스킵하지 않는다. verdict를 구현 게이트로 재사용하는 이상, 최신 상태로 갱신할 경로가 있어야 한다.
 
 ### 2단계: 이슈별 분석
 
@@ -104,6 +112,11 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 ```markdown
 🏗️ **아키텍트 리뷰**
 
+### 판정
+- verdict: `ready | caution | blocked`
+- next-step: `implement-issue | narrow-scope | split-issue | invoke-human`
+- review-mode: `fresh | refresh`
+
 ### 관련 스펙
 - `docs/specs/{모듈}/{모듈}.md` — {관련 섹션 요약}
 
@@ -131,6 +144,8 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 2. **간결함 우선**: 이슈당 코멘트는 주의사항 5개 이내로 압축한다. 모든 체크리스트 항목을 나열하지 않고, 실제 발견된 사항만 기술한다.
 3. **판단 보류**: 스펙 불일치를 발견해도 스펙을 수정하지 않는다. 불일치 사실만 기록하고 사용자 판단을 요청한다.
 4. **기존 코드 참조**: "이렇게 구현하라"보다 "기존 {모듈}의 {패턴}을 참고하라"로 안내한다.
+5. **판정 명시**: 구현을 바로 시작해도 되는지(`ready`), 주의사항이 많은지(`caution`), 사람 판단/선행 작업이 먼저인지(`blocked`)를 한 줄로 명확히 남긴다.
+6. **refresh 허용**: 이전 리뷰가 있어도 verdict가 오래되었거나 조건이 바뀌면 같은 헤더로 새 코멘트를 남겨 최신 verdict를 갱신한다.
 
 ### 4단계: 결과 요약
 
@@ -146,5 +161,6 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 | #103 | 리스크 엔진 | 🚫 스펙 미정의 — 구현 보류 권고 |
 
 리뷰가 달린 이슈: {N}건
-스킵 (이미 리뷰 완료): {M}건
+기존 리뷰 재사용: {M}건
+refresh 리뷰: {K}건
 ```
