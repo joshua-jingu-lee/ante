@@ -2,6 +2,12 @@
 
 # Local agent overrides
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Repo-local GitHub CLI auth (tokens)
+.github/local/*
+!.github/local/*.example
 
 # Agent 참고 자료 (임시 작업 디렉토리만 제외)
 docs/temp/

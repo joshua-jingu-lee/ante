@@ -3,7 +3,7 @@
 > 이 문서는 실제 소스 트리에서 생성된 문서입니다.
 > 새 모듈/파일 추가 시 이 문서도 함께 최신화해 주세요.
 >
-> 마지막 갱신: 2026-03-25
+> 마지막 갱신: 2026-04-21
 
 ## 최상위 구조
 
@@ -18,6 +18,7 @@ ante/
 ├── scripts/             # 설치·운영·문서 생성 스크립트
 ├── .agent/              # 에이전트 정의/명령/스킬
 ├── .claude/             # Claude Code 설정 + .agent 호환 링크
+├── .github/             # GitHub 워크플로/이슈 템플릿/로컬 인증 파일
 ├── Dockerfile           # 프로덕션 Docker 이미지
 ├── Dockerfile.qa        # QA 테스트 Docker 이미지
 ├── docker-compose.yml        # 프로덕션 Docker Compose (ante-logs named volume 포함)
@@ -674,11 +675,23 @@ frontend/src/
 └── skills/                      # 프로젝트 스킬 (컨벤션·패턴 참조)
     ├── asyncio-patterns.md
     ├── frontend-conventions.md
+    ├── github-auth.md           # GitHub CLI 로컬 PAT 인증 절차
     ├── module-conventions.md
     ├── qa-tester/               # QA 테스터 스킬 (Gherkin 해석)
     ├── release.md               # /release 릴리스 절차
     ├── review-pr.md
     └── sqlite-patterns.md
+```
+
+## .github/ — GitHub 워크플로/이슈 템플릿/로컬 인증
+
+```
+.github/
+├── ISSUE_TEMPLATE/              # 이슈 템플릿
+├── workflows/                   # GitHub Actions 워크플로
+├── local/                       # 저장소-로컬 개발용 파일 (.gitignore 제외 대상)
+│   └── github.env.example       # gh CLI 인증 환경변수 예시 (실제 github.env는 커밋 금지)
+└── review-output.schema.json    # 리뷰 게이트 출력 스키마
 ```
 
 ## .claude/ — Claude Code 설정 및 호환 레이어
