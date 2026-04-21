@@ -86,11 +86,14 @@ Claude 오케스트레이터
 | 커맨드 | 역할 | 파일 |
 |--------|------|------|
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
+| `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → 필요 시 `arch-review`/`qa-review` → `/implement-issue` 인계) | `.agent/commands/autopilot.md` |
 | `/qa-test` | 지정 TC 실행 (`@qa-engineer` 위임) | `.agent/commands/qa-test.md` |
 | `/qa-sweep` | 전체 TC 순차 실행 (전수 검사) | `.agent/commands/qa-sweep.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 | `/arch-review` | 이슈 사전 아키텍처 검토 | `.agent/commands/arch-review.md` |
 | `/qa-review` | 이슈 사전 QA 커버리지 검토 | `.agent/commands/qa-review.md` |
+
+야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 `/arch-review`와 `/qa-review` 증적을 이슈 코멘트로 남긴 뒤 `/implement-issue`에 개별 구현을 위임한다. `/autopilot`의 기본 성공 기준은 merge 자체가 아니라 **PR 생성 후 기존 리뷰 게이트에 인계**하는 것이다.
 
 ### 4.1 조건부 계획 리뷰
 

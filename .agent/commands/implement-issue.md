@@ -1,5 +1,7 @@
 GitHub 이슈의 유저스토리를 기반으로 구현하고, Codex 브랜치 리뷰를 통과한 뒤 PR을 생성한다.
 
+GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
+
 ## 인자
 
 $ARGUMENTS — GitHub 이슈 번호 (예: 43, 39 등)
@@ -28,6 +30,7 @@ mkdir -p "$WORKTREE_ROOT"
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
 | 4a (경량 계획) | 오케스트레이터 | Claude 메인 세션 | 필요 시 이슈 코멘트 |
 | 4b (조건부 계획 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈 코멘트 |
+| 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
 | 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
 | 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` + 이슈 코멘트 |
@@ -42,6 +45,7 @@ mkdir -p "$WORKTREE_ROOT"
 1. **이슈 읽기**: `gh issue view #{번호}`로 이슈 본문을 읽고 유저스토리와 수용 조건을 파악한다.
    - **에픽 이슈인 경우**: 아래 "에픽 이슈 처리 절차"를 따른다.
    - **하위 이슈인 경우**: 선행 이슈가 모두 close 상태인지 확인한다. 미완성이면 이 이슈를 스킵하고 사용자에게 보고한다.
+   - **`needs-triage` 라벨이 붙어 있으면**: 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
 2. **설계 문서 확인**: 관련 설계 문서(`docs/specs/{모듈}/{모듈}.md`)를 읽고 인터페이스와 요구사항을 파악한다.
    - 스펙에 정의되지 않은 인터페이스·동작을 요구하면 구현하지 않고 이슈에 스킵 사유를 남긴다.
 3. **대상 에이전트 결정**:
@@ -71,6 +75,19 @@ mkdir -p "$WORKTREE_ROOT"
 
 `@code-reviewer` verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다.
 
+4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
+
+- `🏗️ **아키텍트 리뷰**` (`/arch-review`)
+- `🧪 **QA 리뷰**` (`/qa-review`)
+
+정리할 내용:
+
+- latest verdict (`ready | caution | blocked`)
+- 구현 전에 반드시 반영할 주의사항
+- TC 추가/보완이 필요한 항목
+
+가장 최신 사전 리뷰 verdict가 `blocked`면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
+
 ### 구현 시작 기록 (오케스트레이터)
 
 5. **이슈에 착수 코멘트**:
@@ -81,7 +98,9 @@ gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 변경 대상: {src/ante/xxx, frontend/ 등}
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
 - 계획 리뷰: {not-required | approve-implement | narrow-scope}
-- risk flags: {없음 또는 쉼표 구분 목록}"
+- risk flags: {없음 또는 쉼표 구분 목록}
+- 사전 리뷰: {arch=ready/caution/n-a, qa=ready/caution/n-a}
+- 사전 리뷰 요약: {핵심 주의사항 1~2줄 또는 없음}"
 ```
 
 ### 구현 단계 (개발 에이전트)
@@ -111,6 +130,9 @@ Agent(
 
 ## 계획 리뷰 verdict
 {not-required | approve-implement | narrow-scope}
+
+## 사전 리뷰 증적
+{arch-review / qa-review의 최신 verdict와 핵심 주의사항, TC follow-up}
 
 브랜치명과 push한 HEAD SHA를 반환하라.
 """,

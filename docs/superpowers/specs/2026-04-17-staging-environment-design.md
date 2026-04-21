@@ -224,7 +224,7 @@ QA 컴포즈의 `ante_ante-data:ro` 같은 프로덕션 볼륨 참조 마운트�
 ### 7.4 자동 처리 게이트
 
 - 감시 에이전트는 **`needs-triage` 라벨을 반드시 붙인다**.
-- [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 및 `implement-issue`는 이슈 선별 시 `-label:needs-triage` 필터를 적용한다 (관련 커맨드 보강 필요 — §11 참조).
+- [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)는 이슈 큐 선별 시 `-label:needs-triage`를 적용하고, [.agent/commands/implement-issue.md](../../.agent/commands/implement-issue.md)는 `needs-triage`가 붙은 단건 이슈를 거부한다.
 - 사용자/오케스트레이터가 판단 후 `needs-triage`를 제거하면 autopilot이 처리한다.
 
 ### 7.5 스케줄
@@ -277,7 +277,6 @@ macOS `launchd` plist를 `deploy/staging/com.ante.staging-watcher.plist`로 제�
 
 ## 11. 오픈 이슈 (1차 구현 시 확인)
 
-- [ ] autopilot/implement-issue가 `-label:needs-triage` 필터를 지원하는지 확인. 미지원 시 커맨드 md 보강.
 - [ ] Notification 모듈이 `TELEGRAM_BOT_TOKEN` 공란 시 silent 동작을 실제로 지원하는지 확인. 미지원 시 가드 추가.
 - [ ] macOS `launchd`에서 `claude` CLI 호출 시 PATH/인증 전달 방식 검증 (기존 shell 세션 환경과 차이 확인 필요).
 - [ ] GitHub 이슈 검색 API의 타이틀 내 fingerprint 매칭 정확도 확인. 불충분 시 이슈 body HTML 코멘트 마커(`<!-- fingerprint: ... -->`) 스캔으로 폴백.

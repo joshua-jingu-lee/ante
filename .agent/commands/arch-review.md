@@ -1,5 +1,7 @@
 오픈 이슈를 아키텍트 관점에서 순회하며, 구현 시 주의사항과 보완 의견을 GitHub 코멘트로 남긴다.
 
+GitHub 조회/코멘트 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
+
 ## 인자
 
 $ARGUMENTS — 옵션 (생략 가능)
@@ -104,6 +106,10 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 ```markdown
 🏗️ **아키텍트 리뷰**
 
+### 판정
+- verdict: `ready | caution | blocked`
+- next-step: `implement-issue | narrow-scope | split-issue | invoke-human`
+
 ### 관련 스펙
 - `docs/specs/{모듈}/{모듈}.md` — {관련 섹션 요약}
 
@@ -131,6 +137,7 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 2. **간결함 우선**: 이슈당 코멘트는 주의사항 5개 이내로 압축한다. 모든 체크리스트 항목을 나열하지 않고, 실제 발견된 사항만 기술한다.
 3. **판단 보류**: 스펙 불일치를 발견해도 스펙을 수정하지 않는다. 불일치 사실만 기록하고 사용자 판단을 요청한다.
 4. **기존 코드 참조**: "이렇게 구현하라"보다 "기존 {모듈}의 {패턴}을 참고하라"로 안내한다.
+5. **판정 명시**: 구현을 바로 시작해도 되는지(`ready`), 주의사항이 많은지(`caution`), 사람 판단/선행 작업이 먼저인지(`blocked`)를 한 줄로 명확히 남긴다.
 
 ### 4단계: 결과 요약
 

@@ -1,5 +1,7 @@
 오픈 이슈를 QA 엔지니어 관점에서 순회하며, TC 추가 작성 및 보완 필요 여부를 파악하고 GitHub 코멘트로 남긴다.
 
+GitHub 조회/코멘트 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
+
 ## 인자
 
 $ARGUMENTS — 옵션 (생략 가능)
@@ -113,6 +115,10 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 ```markdown
 🧪 **QA 리뷰**
 
+### 판정
+- verdict: `ready | caution | blocked`
+- next-step: `implement-issue | add-tc-followup | invoke-human`
+
 ### TC 커버리지 현황
 
 | 수용 조건 | 기존 TC | 상태 |
@@ -150,6 +156,7 @@ gh issue comment #{이슈번호} --body "{코멘트}"
 2. **기존 TC 참조**: 새 시나리오 작성 시, 같은 카테고리의 기존 `.feature` 파일 스타일(Background, 변수명, 스텝 패턴)을 따르도록 안내한다.
 3. **과도한 TC 방지**: 수용 조건에 직접 대응하는 TC만 제안한다. 이슈 범위를 넘는 "있으면 좋을" TC는 제안하지 않는다.
 4. **QA 환경 고려**: TC 초안은 Docker QA 환경(`ante-qa` 컨테이너)에서 실행 가능한 형태로 작성한다. `gherkin-guide.md`의 스텝 패턴을 준수한다.
+5. **판정 명시**: 구현을 바로 시작할 수 있는지(`ready`), 구현은 가능하지만 TC follow-up이 필요한지(`caution`), 수용 조건/검증 경로가 불명확해 사람 판단이 먼저인지(`blocked`)를 명확히 남긴다.
 
 ### 4단계: 결과 요약
 
