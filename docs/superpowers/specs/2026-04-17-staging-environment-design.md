@@ -224,7 +224,7 @@ QA 컴포즈의 `ante_ante-data:ro` 같은 프로덕션 볼륨 참조 마운트�
 ### 7.4 자동 처리 게이트
 
 - 감시 에이전트는 **`needs-triage` 라벨을 반드시 붙인다**.
-- [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)는 이슈 큐 선별 시 `-label:needs-triage`를 포함한 server-side exclusion filter를 먼저 적용하고, pagination 기반 전체 snapshot을 만든다. [.agent/commands/implement-issue.md](../../.agent/commands/implement-issue.md)는 `needs-triage`가 붙은 단건 이슈를 거부한다.
+- [.agent/commands/autopilot.md](../../../.agent/commands/autopilot.md)는 이슈 큐 선별 시 `-label:needs-triage`를 포함한 server-side exclusion filter를 먼저 적용하고, pagination 기반 전체 snapshot을 만든다. [.agent/commands/implement-issue.md](../../../.agent/commands/implement-issue.md)는 `needs-triage`가 붙은 단건 이슈를 거부한다.
 - 사용자/오케스트레이터가 판단 후 `needs-triage`를 제거하면 autopilot이 처리한다.
 
 ### 7.5 스케줄
