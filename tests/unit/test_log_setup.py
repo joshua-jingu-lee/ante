@@ -202,10 +202,12 @@ def test_file_handler_failure_does_not_break_stdout(
     def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
         raise OSError("disk full (simulated)")
 
-    # DateNamedTimedRotatingFileHandler 생성자에서 OSError 발생시키기
-    import ante.core.log.setup as setup_mod
+    # DateNamedTimedRotatingFileHandler 생성자에서 OSError 발생시키기.
+    # setup.py 는 게이트 내부에서 handlers 모듈을 지연 import 하므로
+    # 패치 타깃은 handlers 모듈이어야 한다.
+    import ante.core.log.handlers as handlers_mod
 
-    monkeypatch.setattr(setup_mod, "DateNamedTimedRotatingFileHandler", _raise)
+    monkeypatch.setattr(handlers_mod, "DateNamedTimedRotatingFileHandler", _raise)
 
     # 예외가 전파되지 않아야 한다
     setup_logging(_StubConfig())
@@ -351,6 +353,94 @@ def test_rollover_preserves_previous_file_and_opens_new_date(
         assert "POST_ROLLOVER_ENTRY" not in initial_path.read_text(encoding="utf-8")
     finally:
         handler.close()
+
+
+# ── 7b. 게이트-off 경로 tzdata 독립성 (QA 이미지 회귀 방지) ────
+
+
+def test_gate_off_does_not_trigger_zoneinfo(monkeypatch: pytest.MonkeyPatch):
+    """``ANTE_LOG_JSONL`` 미설정 시 ``ZoneInfo("Asia/Seoul")`` 가 호출되지 않는다.
+
+    스펙 ``docs/specs/logging/02-design-decisions.md`` 의 "미설정 시 기존 동작
+    유지" 계약. tzdata 가 없는 컨테이너(예: QA 이미지)에서 부팅 경로가
+    ``ZoneInfoNotFoundError`` 로 깨지지 않도록 보호한다.
+    """
+    monkeypatch.delenv("ANTE_LOG_JSONL", raising=False)
+
+    import ante.core.log.handlers as handlers_mod
+
+    # _KST 캐시가 이전 테스트로 이미 채워졌을 수 있으므로 초기화
+    monkeypatch.setattr(handlers_mod, "_KST", None)
+
+    call_count = {"n": 0}
+    original = handlers_mod.ZoneInfo
+
+    def _tracked_zoneinfo(key: str):  # noqa: ANN202
+        call_count["n"] += 1
+        return original(key)
+
+    monkeypatch.setattr(handlers_mod, "ZoneInfo", _tracked_zoneinfo)
+
+    setup_logging(_StubConfig())
+
+    assert call_count["n"] == 0, (
+        "게이트-off 경로에서 ZoneInfo 가 호출됨 — tzdata 의존 회귀"
+    )
+
+
+def test_cold_import_gate_off_does_not_call_zoneinfo(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Cold import 회귀 고정: QA 부팅 경로(fresh Python process)를 재현한다.
+
+    실제 부팅 경로는 ``src/ante/main.py`` 의 ``from ante.core.log import
+    setup_logging`` 으로 시작하고, 이 import 가 ``ante.core.log.__init__`` →
+    ``ante.core.log.handlers`` 까지 함께 로드한다. tzdata 가 없는
+    ``python:3.12-slim`` 기반 QA 이미지(``Dockerfile.qa``)에서 과거처럼
+    ``_KST = ZoneInfo("Asia/Seoul")`` 을 handlers 모듈 레벨에 두면 이 import
+    만으로도 ``ZoneInfoNotFoundError`` 가 발생해 QA 컨테이너 부팅이 중단된다.
+
+    본 테스트는 ``sys.modules`` 에서 ``ante.core.log.*`` 를 제거해 다음 import
+    를 "콜드" 로 만들고, 그 직전에 ``zoneinfo.ZoneInfo`` 를 추적 래퍼로 교체한다.
+    이어서 콜드 import + 게이트-off ``setup_logging()`` 까지 수행한 뒤
+    ``ZoneInfo("Asia/Seoul")`` 호출이 0 회임을 검증한다. 모듈-레벨 ``ZoneInfo``
+    회귀가 들어오면 handlers import 시점에 카운터가 증가해 이 테스트가 실패한다.
+    """
+    import importlib
+    import sys
+    import zoneinfo
+
+    # 1) zoneinfo.ZoneInfo 추적기 설치.
+    #    handlers 모듈이 콜드 재import 될 때 ``from zoneinfo import ZoneInfo``
+    #    가 이 패치된 속성을 집도록, 재import 보다 먼저 설치해야 한다.
+    call_tracker: list[str] = []
+    original_zoneinfo = zoneinfo.ZoneInfo
+
+    def _tracked(key: str, *args: Any, **kwargs: Any) -> Any:
+        call_tracker.append(key)
+        return original_zoneinfo(key, *args, **kwargs)
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", _tracked)
+
+    # 2) ante.core.log.* 를 sys.modules 에서 제거해 다음 import 를 콜드로 강제.
+    for name in list(sys.modules):
+        if name == "ante.core.log" or name.startswith("ante.core.log."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    # 3) main.py 부팅 경로 재현: 게이트 off.
+    monkeypatch.delenv("ANTE_LOG_JSONL", raising=False)
+
+    # 4) 콜드 import (handlers 모듈-레벨 코드가 재실행된다) + setup_logging().
+    log_pkg = importlib.import_module("ante.core.log")
+    log_pkg.setup_logging(_StubConfig())
+
+    # 5) ZoneInfo("Asia/Seoul") 는 한 번도 호출되면 안 된다.
+    seoul_calls = [k for k in call_tracker if k == "Asia/Seoul"]
+    assert seoul_calls == [], (
+        f"Cold import + 게이트-off 경로에서 ZoneInfo('Asia/Seoul') 가 "
+        f"{len(seoul_calls)} 회 호출됨 — tzdata 부재 QA 이미지 부팅 차단 회귀. "
+        f"전체 호출 기록: {call_tracker}"
+    )
 
 
 # ── 8. backup_count 초과 시 가장 오래된 파일 삭제 ─────────────
