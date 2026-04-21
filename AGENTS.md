@@ -41,13 +41,11 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 > CI/CD: [docs/runbooks/04-ci-cd.md](docs/runbooks/04-ci-cd.md)
 > 테스트 전략: [docs/runbooks/05-testing.md](docs/runbooks/05-testing.md)
 
+
 ## 프로젝트 디렉토리 구조
 
 > 파일 단위 상세 구조: [docs/architecture/generated/project-structure.md](docs/architecture/generated/project-structure.md)
 
-
-## 향후 계획
-- 개인 운용으로 충분히 검증 후 오픈소스 공개 고려
 
 ## 규칙
 - 모든 대화는 **한국어**로 진행한다.
@@ -56,3 +54,4 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 - 사용자의 질문에 임의로 대답하지 않는다. 항상 스펙 문서를 확인 후 답변한다.
 - 사용자에 스펙을 제안할 때는 YAGNI가 아닌지 확인한다. 
 - .gitignore 에 등록된 파일은 커밋 여부를 묻지 않는다.
+- 설계·계획 단계 에이전트(Claude 오케스트레이터, `superpowers:writing-plans` 등)는 **GitHub 이슈 등록까지만** 수행한다. 실제 구현·PR 생성·리뷰 대응은 `/implement-issue` 에이전트에 위임한다.
