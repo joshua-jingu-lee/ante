@@ -4,7 +4,7 @@ set -euo pipefail
 PR_NUMBER="${PR_NUMBER:?PR_NUMBER is required}"
 HEAD_REF="${HEAD_REF:?HEAD_REF is required}"
 ATTEMPT="${ATTEMPT:?ATTEMPT is required}"
-FIX_THRESHOLD="${FIX_THRESHOLD:-3}"
+FIX_THRESHOLD="${FIX_THRESHOLD:-10}"
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 TMP_DIR="$(mktemp -d)"
