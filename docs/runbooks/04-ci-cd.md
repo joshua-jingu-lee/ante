@@ -27,7 +27,7 @@ Claude 구현 (worktree 격리)
   │
   ├──▶ [Meta] code-reviewer ───────────── 고위험 변경 / 반복 risk class 시 원인 분석
   │
-  ├──▶ [Loop] Claude PR repair ────────── 최대 3회, quota/script/auth/infra는 제외
+  ├──▶ [Loop] Claude PR repair ────────── 최대 10회, quota/script/auth/infra는 제외
   │
   ├──▶ [Gate E] merge-gate ────────────── 모든 게이트 성공 시 auto-merge
   │
@@ -115,11 +115,11 @@ post-merge automation
 
 - **트리거**: `claude-pr-approve` 또는 `codex-pr-approve`의 `content` FAIL
 - **실행 주체**: Claude self-hosted runner
-- **예산**: 최대 3회
+- **예산**: 최대 10회
 - **비포함 실패**: `quota`, `script_error`, `auth_error`, `infra_error`
 - **결과**:
   - 새 커밋 push → `pull_request synchronize`로 Gate B/C/D 재실행
-  - 3회 초과 → `blocked:pr-review-loop`
+  - 10회 초과 → `blocked:pr-review-loop`
   - `NO_CHANGES` → 자동 루프 중단 후 메타 리뷰 또는 수동 수정으로 승격
 
 ### Gate E — Merge Gate
@@ -209,8 +209,8 @@ pytest tests/unit/ -v
 | `claude-pr-approve` | 스펙/계약/테스트 누락 | Claude 자동 재수정 워커 또는 `@devops` |
 | `codex-pr-approve` | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 또는 `@devops` |
 
-`codex-branch-review`는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
-`claude-pr-approve` / `codex-pr-approve`는 `content` FAIL일 때만 Claude 자동 재수정을 최대 3회 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다.
+`codex-branch-review`는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
+`claude-pr-approve` / `codex-pr-approve`는 `content` FAIL일 때만 Claude 자동 재수정을 최대 10회 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다.
 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
 
 ### 5.1 승인 루프 수동 복구 순서

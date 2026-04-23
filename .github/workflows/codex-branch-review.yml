@@ -16,6 +16,9 @@ concurrency:
   group: codex-branch-review-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  REVIEW_LOOP_THRESHOLD: "10"
+
 jobs:
   codex-branch-review:
     name: codex-branch-review
@@ -112,7 +115,7 @@ jobs:
             --input "$RESULT_PATH" \
             --engine codex \
             --phase branch \
-            --threshold 5 > "$ANALYSIS_PATH"
+            --threshold "$REVIEW_LOOP_THRESHOLD" > "$ANALYSIS_PATH"
 
           echo "blocked=$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field blocked)" >> "$GITHUB_OUTPUT"
           echo "failure_count=$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field failure_count)" >> "$GITHUB_OUTPUT"
@@ -128,7 +131,7 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/labels" \
             -f name='blocked:review-loop' \
             -f color='B60205' \
-            -f description='Codex branch review failed 5 times or more' >/dev/null 2>&1 || true
+            -f description="Codex branch review failed ${REVIEW_LOOP_THRESHOLD} times or more" >/dev/null 2>&1 || true
 
           gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/labels" \
             -f labels[]='blocked:review-loop' >/dev/null

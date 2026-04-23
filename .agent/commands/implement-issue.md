@@ -86,9 +86,12 @@ mkdir -p "$WORKTREE_ROOT"
 - latest `qa-review` verdict (`ready | caution | blocked | n-a`)
 - 구현 전에 반드시 반영할 주의사항
 - TC 추가/보완이 필요한 항목
+- 구현 완료 전 반드시 체크해야 할 리뷰 체크리스트
 - 최신 리뷰에 `verdict:`가 없거나, 리뷰 이후 이슈 본문/스펙/선행 조건이 바뀌었는지 여부
 
 최신 `arch-review` 또는 `qa-review`에 `verdict:`가 없거나 stale하다고 판단되면 해당 리뷰 타입의 refresh를 먼저 요청한다. 두 리뷰 타입의 최신 verdict를 각각 평가하고, 둘 중 하나라도 `blocked`이면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
+
+`ready` / `caution` verdict에서 나온 주의사항은 구현 프롬프트의 **필수 반영 항목**이다. 특히 `caution`은 "좋으면 반영" 메모가 아니라, 코드/테스트/문서 Done criteria로 승격한다.
 
 ### 구현 시작 기록 (오케스트레이터)
 
@@ -136,6 +139,9 @@ Agent(
 ## 사전 리뷰 증적
 {arch-review / qa-review의 최신 verdict와 핵심 주의사항, TC follow-up}
 
+## 구현 필수 체크리스트
+{사전 리뷰에서 승격된 must-fix / must-test / must-sync 항목}
+
 브랜치명과 push한 HEAD SHA를 반환하라.
 """,
   isolation="worktree"
@@ -172,7 +178,7 @@ while codex-branch-review != success:
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 보고 원인 파악을 우선한다.
 - 자동 수정 전에 finding을 곧바로 patch로 번역하지 말고 `.agent/skills/receive-review.md` 규칙으로 사실/추론/영향 범위를 먼저 다시 정리한다.
 - 같은 `risk class`가 2회 반복되면 `@code-reviewer`를 호출해 구조 리스크와 계획 편차를 먼저 정리한다.
-- 반복 실패가 5회 이상이면 `blocked:review-loop` 라벨이 붙고 Codex 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
+- 반복 실패가 10회 이상이면 `blocked:review-loop` 라벨이 붙고 Codex 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
 - 이 상태에서는 사용자가 개입해 원인을 정리하거나 라벨을 해제하기 전까지 같은 이슈를 계속 밀어붙이지 않는다.
 
 11a. **메타 리뷰 호출 조건**: 아래에 해당하면 PR을 만들기 전에 Claude `@code-reviewer`를 다시 호출한다.
@@ -216,7 +222,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - `ci`
 - `claude-pr-approve`
 - `codex-pr-approve`
-- PR 승인 `content` FAIL 시 Claude는 `.agent/skills/receive-review.md` 규칙으로 finding을 정리한 뒤 자동 재수정을 최대 3회 수행
+- PR 승인 `content` FAIL 시 Claude는 `.agent/skills/receive-review.md` 규칙으로 finding을 정리한 뒤 자동 재수정을 최대 10회 수행
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선
 - `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 없이 중단 사유만 남김
 - 모든 체크가 green이면 auto-merge
