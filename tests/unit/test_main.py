@@ -650,3 +650,133 @@ async def test_shutdown_timeout_logs_error_and_returns(caplog) -> None:  # type:
         logger.error("Shutdown 30초 타임아웃 — 강제 종료")
 
     assert any("타임아웃" in rec.message for rec in caplog.records)
+
+
+async def test_init_context_factory_wires_account_and_treasury(
+    tmp_path: Path,
+) -> None:
+    """_init_context_factory가 account_service/treasury_manager/position_history를
+    StrategyContextFactory에 모두 주입한다 (#1124 회귀 방지).
+
+    이 wiring이 누락되면 _resolve_trading_mode가 VIRTUAL로 단락되어
+    trading_mode=live 계좌의 봇이 Paper context로 생성되는 버그가 재발한다.
+    """
+    from ante.account import AccountService
+    from ante.bot import BotManager
+    from ante.bot.providers.paper import PaperExecutor
+    from ante.main import Services, _init_context_factory
+    from ante.strategy.base import DataProvider
+    from ante.trade.position import PositionHistory
+    from ante.treasury import TreasuryManager
+
+    db = Database(str(tmp_path / "test.db"))
+    await db.connect()
+    eventbus = EventBus(history_size=100)
+
+    # 최소 의존성 준비
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
+    await account_service.create_default_test_account()
+
+    treasury_manager = TreasuryManager(db=db, eventbus=eventbus)
+    accounts = await account_service.list()
+    await treasury_manager.initialize_all(accounts)
+
+    position_history = PositionHistory(db=db)
+    await position_history.initialize()
+
+    bot_manager = BotManager(eventbus=eventbus, db=db, account_service=account_service)
+    await bot_manager.initialize()
+
+    class _FakeDataProvider(DataProvider):
+        async def get_ohlcv(self, symbol, timeframe="1d", limit=100):  # type: ignore[no-untyped-def]
+            return None
+
+        async def get_current_price(self, symbol):  # type: ignore[no-untyped-def]
+            return 0.0
+
+        async def get_indicator(self, symbol, indicator, params=None):  # type: ignore[no-untyped-def]
+            return {}
+
+    config = Config(static={}, secrets={})
+    s = Services(
+        db=db,
+        eventbus=eventbus,
+        config=config,
+        account_service=account_service,
+        treasury_manager=treasury_manager,
+        position_history=position_history,
+        bot_manager=bot_manager,
+        data_provider=_FakeDataProvider(),
+        paper_executor=PaperExecutor(eventbus=eventbus),
+    )
+
+    # trade_recorder는 LiveTradeHistoryView 생성에 필요
+    from ante.trade import TradeRecorder
+
+    s.trade_recorder = TradeRecorder(db=db, position_history=position_history)
+    await s.trade_recorder.initialize()
+
+    _init_context_factory(s)
+
+    factory = bot_manager._context_factory
+    assert factory is not None, "StrategyContextFactory가 BotManager에 주입되지 않았다"
+
+    # 핵심: account_service / treasury_manager / position_history 모두 전달되어야 함
+    assert factory._account_service is account_service
+    assert factory._treasury_manager is treasury_manager
+    assert factory._position_history is position_history
+
+    await db.close()
+
+
+async def test_init_context_factory_resolves_live_mode_for_live_account(
+    tmp_path: Path,
+) -> None:
+    """AccountService가 주입된 factory는 LIVE 계좌에 대해 LIVE mode를 반환 (#1124)."""
+    from ante.account import Account, AccountService, TradingMode
+    from ante.bot.config import BotConfig
+
+    db = Database(str(tmp_path / "test.db"))
+    await db.connect()
+    eventbus = EventBus(history_size=100)
+
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
+
+    live_account = Account(
+        account_id="live-acct",
+        name="실계좌",
+        broker_type="kis-domestic",
+        exchange="KRX",
+        trading_mode=TradingMode.LIVE,
+        currency="KRW",
+        credentials={"app_key": "k", "app_secret": "s", "account_no": "n"},
+    )
+    await account_service.create(live_account)
+
+    # main.py의 wiring을 모사: account_service를 factory에 전달
+    from ante.bot.context_factory import StrategyContextFactory
+    from ante.strategy.base import DataProvider
+
+    class _FakeDataProvider(DataProvider):
+        async def get_ohlcv(self, symbol, timeframe="1d", limit=100):  # type: ignore[no-untyped-def]
+            return None
+
+        async def get_current_price(self, symbol):  # type: ignore[no-untyped-def]
+            return 0.0
+
+        async def get_indicator(self, symbol, indicator, params=None):  # type: ignore[no-untyped-def]
+            return {}
+
+    factory = StrategyContextFactory(
+        data_provider=_FakeDataProvider(),
+        account_service=account_service,
+    )
+
+    config = BotConfig(bot_id="bot-live", strategy_id="s1", account_id="live-acct")
+    # _resolve_trading_mode가 LIVE를 반환해야 한다
+    resolved = factory._resolve_trading_mode(config)
+    assert resolved == TradingMode.LIVE
+
+    await db.close()
