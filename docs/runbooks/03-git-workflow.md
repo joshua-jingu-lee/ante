@@ -105,7 +105,7 @@ PR을 열기 전, 최신 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통�
 - 동일 SHA에 실패한 상태에서 PR을 먼저 열지 않는다
 - 실패 횟수는 이슈 코멘트로 누적 관리한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 대상으로 본다.
-- 실패가 5회 누적되면 이슈에 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
+- 실패가 10회 누적되면 이슈에 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 
 ### 3.3 Stale Base / Duplicate Commit / Merge Conflict 대응
 
@@ -145,12 +145,12 @@ PR을 열기 전, 최신 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통�
 ### 4.3 PR 승인 실패 처리
 
 - `claude-pr-approve` 또는 `codex-pr-approve`가 `content` FAIL이면 Claude가 같은 PR 브랜치에서 자동 재수정을 시도한다.
-- 자동 재수정은 최대 3회까지 허용한다.
+- 자동 재수정은 최대 10회까지 허용한다.
 - `quota`, `script_error`, `auth_error`, `infra_error`는 코드 내용 실패로 보지 않으며, 자동 재수정 횟수에 포함하지 않는다.
 - 자동 재수정 결과가 `NO_CHANGES`이면, 이를 성공으로 취급하지 않고 메타 리뷰 또는 수동 수정 단계로 승격한다.
 - 같은 head SHA에서 재실행만 필요할 때는 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
-- 3회 소진 시 `blocked:pr-review-loop` 라벨을 붙이고 PR을 사람 확인 대상으로 넘긴다.
+- 10회 소진 시 `blocked:pr-review-loop` 라벨을 붙이고 PR을 사람 확인 대상으로 넘긴다.
 
 ### 4.4 머지 방식
 

@@ -15,6 +15,9 @@ concurrency:
   group: pr-approvals-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  PR_FIX_THRESHOLD: "10"
+
 jobs:
   claude-pr-approve:
     name: claude-pr-approve
@@ -371,21 +374,21 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" > "$COMMENTS_PATH"
           python3 scripts/ai_review.py analyze-fix-loop \
             --comments "$COMMENTS_PATH" \
-            --threshold 3 > "$ANALYSIS_PATH"
+            --threshold "$PR_FIX_THRESHOLD" > "$ANALYSIS_PATH"
 
           ATTEMPT_COUNT="$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field attempt_count)"
           BLOCKED="$(python3 scripts/ai_review.py analysis-field --input "$ANALYSIS_PATH" --field blocked)"
           NEXT_ATTEMPT="$((ATTEMPT_COUNT + 1))"
           ENGINE_LIST="$(printf '%s\n' "${SOURCE_ENGINES[@]}" | paste -sd, -)"
 
-          if [[ "$BLOCKED" == "true" || "$NEXT_ATTEMPT" -gt 3 ]]; then
+          if [[ "$BLOCKED" == "true" || "$NEXT_ATTEMPT" -gt "$PR_FIX_THRESHOLD" ]]; then
             {
               echo "should_fix=false"
               echo "reason=attempt_limit"
               echo "attempt=$ATTEMPT_COUNT"
               echo "source_engines=$ENGINE_LIST"
               echo "message<<EOF"
-              echo "PR 승인 실패에 대한 Claude 재수정 시도가 3회를 모두 사용해 자동 재수정을 중단합니다."
+              echo "PR 승인 실패에 대한 Claude 재수정 시도가 ${PR_FIX_THRESHOLD}회를 모두 사용해 자동 재수정을 중단합니다."
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -407,7 +410,7 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/labels" \
             -f name='blocked:pr-review-loop' \
             -f color='B60205' \
-            -f description='Claude PR auto-fix exhausted 3 attempts' >/dev/null 2>&1 || true
+            -f description="Claude PR auto-fix exhausted ${PR_FIX_THRESHOLD} attempts" >/dev/null 2>&1 || true
 
           gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
             -f labels[]='blocked:pr-review-loop' >/dev/null
@@ -434,7 +437,7 @@ jobs:
             --reason "$REASON" \
             --message "$MESSAGE" \
             --attempt "${ATTEMPT:-0}" \
-            --threshold 3 > "$RUNNER_TEMP/claude-pr-fix-skipped.md"
+            --threshold "$PR_FIX_THRESHOLD" > "$RUNNER_TEMP/claude-pr-fix-skipped.md"
 
           gh pr comment "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
@@ -459,7 +462,7 @@ jobs:
             --head-sha "$HEAD_SHA" \
             --run-url "$RUN_URL" \
             --attempt "$ATTEMPT" \
-            --threshold 3 \
+            --threshold "$PR_FIX_THRESHOLD" \
             --source-engines "$SOURCE_ENGINES" > "$RUNNER_TEMP/claude-pr-fix-started.md"
 
           gh pr comment "$PR_NUMBER" \
@@ -476,7 +479,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
           ATTEMPT: ${{ steps.policy.outputs.attempt }}
-          FIX_THRESHOLD: 3
+          FIX_THRESHOLD: ${{ env.PR_FIX_THRESHOLD }}
           CLAUDE_REVIEW_DIR: ${{ runner.temp }}/approvals/claude
           CODEX_REVIEW_DIR: ${{ runner.temp }}/approvals/codex
           FIX_STATUS_PATH: ${{ runner.temp }}/claude-pr-fix/status.json
@@ -518,7 +521,7 @@ jobs:
               --run-url "$RUN_URL" \
               --status "$STATUS_PATH" \
               --attempt "$ATTEMPT" \
-              --threshold 3 > "$RUNNER_TEMP/claude-pr-fix-result.md"
+              --threshold "$PR_FIX_THRESHOLD" > "$RUNNER_TEMP/claude-pr-fix-result.md"
           else
             python3 scripts/ai_review.py render-issue-comment \
               --stage fix-skipped \
@@ -530,7 +533,7 @@ jobs:
               --reason "$FAILURE_KIND" \
               --message "$(python3 scripts/ai_review.py analysis-field --input "$STATUS_PATH" --field message)" \
               --attempt "$ATTEMPT" \
-              --threshold 3 > "$RUNNER_TEMP/claude-pr-fix-result.md"
+              --threshold "$PR_FIX_THRESHOLD" > "$RUNNER_TEMP/claude-pr-fix-result.md"
           fi
 
           gh pr comment "$PR_NUMBER" \

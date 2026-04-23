@@ -19,7 +19,7 @@
 **역할**:
 - 작업 분석과 분해
 - 경량 계획 체크리스트 작성과 조건부 계획 리뷰 여부 판단
-- 야간 `/autopilot` 배치에서 이슈 큐 snapshot, 선행 리뷰 증적, handoff 조율
+- 야간 `/autopilot` 배치에서 이슈 큐 snapshot, 선행 리뷰 증적, 구현 위임, merge 모니터링 조율
 - 적절한 Claude 서브에이전트 위임
 - 이슈/브랜치/PR GitHub 기록 관리
 - Codex 브랜치 리뷰 결과를 받아 수정 루프 조율
@@ -168,7 +168,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 반복적인 개발 작업을 슬래시 명령으로 정의한다:
 
 - `/implement-issue #{번호}` — 분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성
-- `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` / `qa-review` → `/implement-issue` 순차 위임
+- `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` / `qa-review` → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/qa-test {카테고리}` — 지정 TC 실행
 - `/qa-sweep` — 전체 TC 전수 검사
 - `/api-docs` — OpenAPI 스키마 조회

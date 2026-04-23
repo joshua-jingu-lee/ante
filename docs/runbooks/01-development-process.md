@@ -64,7 +64,7 @@ Claude 오케스트레이터
   │    ├── Claude PR 승인 (`claude-pr-approve`)
   │    └── Codex PR 승인 (`codex-pr-approve`)
   │
-  ├── PR 승인 content FAIL → Claude 자동 재수정 (최대 3회)
+  ├── PR 승인 content FAIL → Claude 자동 재수정 (최대 10회)
   │
   ├── 모든 게이트 green → GitHub auto-merge
   │
@@ -86,14 +86,16 @@ Claude 오케스트레이터
 | 커맨드 | 역할 | 파일 |
 |--------|------|------|
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
-| `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → 필요 시 `arch-review`/`qa-review` → `/implement-issue` 인계) | `.agent/commands/autopilot.md` |
+| `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → 의견 검토 → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`) | `.agent/commands/autopilot.md` |
 | `/qa-test` | 지정 TC 실행 (`@qa-engineer` 위임) | `.agent/commands/qa-test.md` |
 | `/qa-sweep` | 전체 TC 순차 실행 (전수 검사) | `.agent/commands/qa-sweep.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 | `/arch-review` | 이슈 사전 아키텍처 검토 | `.agent/commands/arch-review.md` |
 | `/qa-review` | 이슈 사전 QA 커버리지 검토 | `.agent/commands/qa-review.md` |
 
-야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 `/arch-review`와 `/qa-review` 증적을 이슈 코멘트로 남긴 뒤 `/implement-issue`에 개별 구현을 위임한다. `/autopilot`의 기본 성공 기준은 merge 자체가 아니라 **PR 생성 후 기존 리뷰 게이트에 인계**하는 것이다.
+야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 `/arch-review`와 `/qa-review` 증적을 이슈 코멘트로 남긴 뒤 `/implement-issue`에 개별 구현을 위임한다. 사전 리뷰의 `ready`/`caution`은 구현 체크리스트로 승격되며, `/autopilot`은 기본적으로 **한 번에 최대 10개 이슈를 review → implement → merge/post-merge까지 순차 모니터링**한다.
+
+운영 중인 이슈의 현재 단계는 최신 `🤖 **Autopilot 사이클 상태**` 코멘트로 노출하며, 여기서 `review-state`, `implement-state`, `merge-monitor-state`를 각각 `pending | running | blocked | done`으로 추적한다.
 
 ### 4.1 조건부 계획 리뷰
 
@@ -197,13 +199,13 @@ main
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
 - 같은 `risk class` failure가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출하고, 그 전까지는 얕은 auto-fix만 반복하지 않는다.
 - 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 조건부 계획 리뷰 단계로 되돌린다.
-- 동일 유형의 blocking failure가 5회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
+- 동일 유형의 blocking failure가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 - `blocked:review-loop`가 최초 부착되거나, PR 자동 재수정 결과가 `NO_CHANGES`로 끝나면 얕은 자동 수정 루프를 중단하고 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.
-- PR 승인 단계에서는 `content` 실패에 한해 Claude 자동 재수정을 최대 3회 시도한다.
+- PR 승인 단계에서는 `content` 실패에 한해 Claude 자동 재수정을 최대 10회 시도한다.
 - 자동 재수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
 - `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 예산에 포함하지 않는다.
-- PR 승인 content 실패가 3회 재수정 후에도 해소되지 않으면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
+- PR 승인 content 실패가 10회 재수정 후에도 해소되지 않으면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
 - PR 승인에서 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 자동 재수정보다 `@code-reviewer` 또는 사람 개입을 우선한다.
 
 ### 5.2 승인 루프 수동 복구
