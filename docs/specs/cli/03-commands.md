@@ -180,10 +180,13 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 패스워드·토큰·recovery key를 **자동 생성**하여 1회만 출력한다. 사용자는 입력하지 않는다.
 
-**멱등성 (I4):**
+**멱등성 (I4 — 파일 + master 레코드 기반 재진입):**
 
-- 위 3개 파일이 **모두 존재**하면 거부 (`"init이 이미 완료된 상태입니다"`, exit code 1)
-- **하나라도 누락**이면 누락분만 생성. DB 누락 시 master·테스트 계좌도 함께 재발급.
+- 3개 파일 + master row + test account row가 **모두 존재**하면 거부 (`"init이 이미 완료된 상태입니다"`, exit code 1)
+- 그 외 경로에서는 **누락된 것만** 생성. 즉:
+  - 파일 누락 → 누락 파일 재생성
+  - master row 없음 → master bootstrap 실행 (비밀값 즉시 출력하여 후속 단계 실패 시에도 복구 가능)
+  - test account row 없음 → test account 생성
 
 **옵셔널 도메인 입력 (Telegram / KIS 실계좌 / DataFeed):**
 

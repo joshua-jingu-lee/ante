@@ -1,11 +1,15 @@
-"""ante init CLI 테스트 — 비대화형 재설계 (issue #1125)."""
+"""ante init CLI 테스트 — 비대화형 재설계 (issue #1125).
+
+5-state 가드: 파일(3) + master row + test account row 조합 전수 검증.
+"""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 import stat
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -38,8 +42,12 @@ def _mock_create_test_account(*args, **kwargs):
     return _MOCK_TEST_ACCOUNT
 
 
-def _patch_init():
-    """표준 패치 3종: _bootstrap_master + _create_test_account + authenticate_member."""
+def _patch_init(*, master_exists: bool = False, test_account_exists: bool = False):
+    """표준 패치 세트.
+
+    기본값은 빈 DB로 간주 (master/test account 둘 다 없음)하여
+    state 5 경로와 호환된다. DB 레코드 존재를 제어하려면 명시적으로 전달.
+    """
     return [
         patch(
             "ante.cli.commands.init._bootstrap_master",
@@ -49,8 +57,66 @@ def _patch_init():
             "ante.cli.commands.init._create_test_account",
             new=AsyncMock(side_effect=_mock_create_test_account),
         ),
+        patch(
+            "ante.cli.commands.init._master_exists_in_db",
+            new=AsyncMock(return_value=master_exists),
+        ),
+        patch(
+            "ante.cli.commands.init._test_account_exists_in_db",
+            new=AsyncMock(return_value=test_account_exists),
+        ),
         patch("ante.cli.main.authenticate_member"),
     ]
+
+
+def _create_db_with_master_row(db_path: Path) -> None:
+    """테스트 헬퍼: DB 파일에 members 테이블과 master row를 만든다."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS members (
+                member_id TEXT PRIMARY KEY,
+                role TEXT NOT NULL DEFAULT 'default'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO members (member_id, role) VALUES (?, ?)",
+            ("owner", "master"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _create_db_with_test_account_row(db_path: Path) -> None:
+    """테스트 헬퍼: DB 파일에 accounts 테이블과 test account row를 만든다."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS accounts (
+                account_id TEXT PRIMARY KEY,
+                broker_type TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO accounts (account_id, broker_type) VALUES (?, ?)",
+            ("test", "test"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _create_full_db(db_path: Path) -> None:
+    """테스트 헬퍼: master row + test account row를 모두 채운 DB 생성."""
+    _create_db_with_master_row(db_path)
+    _create_db_with_test_account_row(db_path)
 
 
 @pytest.fixture
@@ -59,7 +125,7 @@ def runner():
 
 
 class TestInitFreshEnvironment:
-    """시나리오 1: 신규 환경 초기화."""
+    """시나리오 1: 신규 환경 초기화 (state 5)."""
 
     def test_init_creates_all_artifacts(self, runner, tmp_path):
         """ante init (플래그 없음) → 3개 파일 생성, 토큰·recovery key·패스워드 출력."""
@@ -113,6 +179,14 @@ class TestInitFlagsSetIdentity:
         with (
             patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
             patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
             patch("ante.cli.main.authenticate_member"),
         ):
             result = runner.invoke(
@@ -140,34 +214,228 @@ class TestInitFlagsSetIdentity:
         assert "Alice" in result.output
 
 
-class TestInitIdempotency:
-    """시나리오 3 & 4: 멱등성 — 전체 존재 시 거부, 부분 누락 시 보완."""
+class TestInitFiveStateGuard:
+    """스펙 I4 — 파일 + master 레코드 기반 멱등성. 5-state 가드 전수 검증."""
 
-    def test_init_refuses_when_all_artifacts_exist(self, runner, tmp_path):
-        """system.toml + secrets.env + db/ante.db 모두 존재 시 거부."""
+    def test_state1_all_exist_rejects(self, runner, tmp_path):
+        """state 1: 모든 상태 완료 → 거부 (exit 1, 'init이 이미 완료된 상태입니다')."""
         target = tmp_path / "config"
         target.mkdir()
-        (target / "system.toml").write_text("existing")
-        (target / "secrets.env").write_text("existing")
-        db_dir = target / "db"
-        db_dir.mkdir()
-        (db_dir / "ante.db").write_text("")
+        (target / "system.toml").write_text("x")
+        (target / "secrets.env").write_text("x")
+        db_path = target / "db" / "ante.db"
+        _create_full_db(db_path)
 
-        with patch("ante.cli.main.authenticate_member"):
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
 
-        assert result.exit_code != 0
+        assert result.exit_code == 1, result.output
         assert "init이 이미 완료된 상태입니다" in result.output
+        bootstrap_mock.assert_not_called()
+        create_acc_mock.assert_not_called()
+
+    def test_state2_files_missing_db_complete_regenerates_files_only(
+        self, runner, tmp_path
+    ):
+        """state 2: 파일만 누락, DB 완전 → 파일만 재생성.
+
+        bootstrap/account는 호출되지 않아야 한다.
+        """
+        target = tmp_path / "config"
+        target.mkdir()
+        # 파일은 없음
+        db_path = target / "db" / "ante.db"
+        _create_full_db(db_path)
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 0, result.output
+        # 파일 재생성됨
+        assert (target / "system.toml").exists()
+        assert (target / "secrets.env").exists()
+        # master/test account는 손대지 않음
+        bootstrap_mock.assert_not_called()
+        create_acc_mock.assert_not_called()
+
+    def test_state3_master_exists_but_test_account_missing(self, runner, tmp_path):
+        """state 3: master 있으나 test account 없음 → test account만 생성."""
+        target = tmp_path / "config"
+        target.mkdir()
+        db_path = target / "db" / "ante.db"
+        # master row만 있는 DB
+        _create_db_with_master_row(db_path)
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 0, result.output
+        # master bootstrap은 호출 안 됨
+        bootstrap_mock.assert_not_called()
+        # test account만 생성
+        create_acc_mock.assert_called_once()
+        # text 모드에서 master는 이미 존재 알림
+        assert "Master" in result.output or "master" in result.output.lower()
+
+    def test_state4_orphan_db_no_master(self, runner, tmp_path):
+        """state 4: DB 파일 있지만 master 없음 → master bootstrap + test account."""
+        target = tmp_path / "config"
+        target.mkdir()
+        # 빈 DB 파일 (orphan)
+        db_path = target / "db" / "ante.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        db_path.write_bytes(b"")
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 0, result.output
+        # orphan 수복: 둘 다 호출
+        bootstrap_mock.assert_called_once()
+        create_acc_mock.assert_called_once()
+        # 비밀값 출력 확인
+        assert _MOCK_TOKEN in result.output
+        assert _MOCK_RECOVERY_KEY in result.output
+
+    def test_state5_fresh_install(self, runner, tmp_path):
+        """state 5: DB 파일 없음 → 전체 신규 생성 (기존 동작)."""
+        target = tmp_path / "config"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert (target / "system.toml").exists()
+        assert (target / "secrets.env").exists()
+        assert _MOCK_TOKEN in result.output
+        assert _MOCK_RECOVERY_KEY in result.output
+
+    def test_master_credentials_emitted_before_test_account_attempt(
+        self, runner, tmp_path
+    ):
+        """옵션 P: master 비밀값은 test account 단계 전에 출력돼야 한다.
+
+        _create_test_account가 Exception을 던져도 stdout/stderr에 token/
+        recovery_key/password가 남아야 한다.
+        """
+        target = tmp_path / "config"
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock 실패"))
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 1, result.output
+        # test account 실패했지만 master 비밀값은 이미 노출
+        combined = result.output
+        assert _MOCK_TOKEN in combined
+        assert _MOCK_RECOVERY_KEY in combined
+        assert "패스워드" in combined
+        # 에러 메시지에서 test_account_failed 코드 확인
+        assert "테스트 계좌 생성 실패" in combined
+
+    def test_master_credentials_json_mode_stderr_event_on_test_account_failure(
+        self, runner, tmp_path
+    ):
+        """옵션 P (JSON 모드): master bootstrap 직후 stderr 1줄 JSON 이벤트.
+
+        test account 실패 시에도 Agent는 stderr에서 비밀값을 파싱할 수 있어야 한다.
+        """
+        target = tmp_path / "config"
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock"))
+
+        # mix_stderr=False로 stdout/stderr 분리
+        runner_split = CliRunner(mix_stderr=False)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner_split.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 1
+        # stderr에 master_bootstrap_complete 이벤트
+        stderr = result.stderr
+        assert "master_bootstrap_complete" in stderr
+        # stderr에서 JSON 라인 추출
+        master_event = None
+        for line in stderr.splitlines():
+            line_s = line.strip()
+            if line_s.startswith("{") and "master_bootstrap_complete" in line_s:
+                master_event = json.loads(line_s)
+                break
+        assert master_event is not None, f"stderr에 JSON 이벤트 없음: {stderr!r}"
+        assert master_event["stage"] == "master_bootstrap_complete"
+        assert master_event["token"] == _MOCK_TOKEN
+        assert master_event["recovery_key"] == _MOCK_RECOVERY_KEY
+        assert "password" in master_event
+
+
+class TestInitIdempotency:
+    """시나리오 3 & 4: 멱등성 — 부분 누락 시 보완 (state 2/3/4/5)."""
 
     def test_init_skips_db_when_only_config_files_exist(self, runner, tmp_path):
-        """멱등성 경계 — secrets.env만 존재할 때 나머지 산출물이 채워진다.
-
-        arch-review 권고: system.toml과 db/ante.db 둘 다 누락이면
-        `_all_artifacts_exist` 는 False 이므로 init은 진행해야 한다.
-        단 db/ante.db가 실제로 없을 때만 master bootstrap이 실행되어야 한다.
-
-        이 테스트는 보완 케이스: secrets.env만 존재 → 나머지 생성.
-        """
+        """보완 케이스: secrets.env만 존재 → 나머지 생성 (state 5 경로)."""
         target = tmp_path / "config"
         target.mkdir()
         (target / "secrets.env").write_text("existing")
@@ -187,7 +455,7 @@ class TestInitIdempotency:
         assert (target / "secrets.env").read_text() == "existing"
 
     def test_init_preserves_existing_config_files(self, runner, tmp_path):
-        """시나리오 4: system.toml + secrets.env 있고 db 누락 → DB만 재생성."""
+        """system.toml + secrets.env 있고 DB 없음 → DB 재생성, 설정 파일 보존."""
         target = tmp_path / "config"
         target.mkdir()
         (target / "system.toml").write_text("# custom config\n")
@@ -249,13 +517,13 @@ class TestInitJsonOutput:
 
         assert result.exit_code == 0, result.output
 
-        # JSON 파싱
+        # JSON 파싱 — 최종 payload는 stdout의 마지막 멀티라인 JSON 오브젝트
         lines = result.output.strip().splitlines()
+        # 최종 JSON은 indent=2로 출력되므로 마지막 "}" 역순으로 매칭된 "{" 지점을 찾는다
         json_start = None
         for i, line in enumerate(lines):
-            if line.strip().startswith("{"):
+            if line.strip() == "{":
                 json_start = i
-                break
         assert json_start is not None, f"JSON 출력 없음: {result.output}"
         data = json.loads("\n".join(lines[json_start:]))
 
@@ -313,6 +581,14 @@ class TestInitCreatesTestAccount:
                 "ante.cli.commands.init._create_test_account",
                 new=create_acc_mock,
             ),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
             patch("ante.cli.main.authenticate_member"),
         ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
@@ -352,6 +628,14 @@ class TestInitDefaultFlagValues:
         with (
             patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
             patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
             patch("ante.cli.main.authenticate_member"),
         ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
@@ -391,64 +675,20 @@ class TestInitAuthExempt:
                 "ante.cli.commands.init._create_test_account",
                 new=AsyncMock(side_effect=_mock_create_test_account),
             ),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
 
         assert result.exit_code == 0, result.output
         assert "인증 실패" not in result.output
         assert "init이 이미 완료된 상태입니다" not in result.output
-
-
-class TestInitReentryWithOrphanDb:
-    """DB 파일만 존재하고 config 파일은 없을 때의 재진입 경로.
-
-    issue #1125 Codex finding A의 회귀 테스트:
-    서버가 먼저 기동되어 DB 파일을 생성해 둔 뒤 ante init이 호출되면
-    db_existed_before=True로 master bootstrap이 skip되어야 한다.
-    """
-
-    def test_init_skips_master_when_db_exists_but_config_missing(
-        self, runner, tmp_path: Path
-    ) -> None:
-        """DB만 있고 config 없으면 파일만 재생성하고 bootstrap은 skip."""
-        cfg = tmp_path / "cfg"
-        (cfg / "db").mkdir(parents=True)
-        (cfg / "db" / "ante.db").write_bytes(b"")  # 빈 DB 파일 흉내
-
-        bootstrap_mock = Mock()
-        create_account_mock = Mock()
-
-        with (
-            patch(
-                "ante.cli.commands.init._bootstrap_master",
-                new=bootstrap_mock,
-            ),
-            patch(
-                "ante.cli.commands.init._create_test_account",
-                new=create_account_mock,
-            ),
-            patch("ante.cli.main.authenticate_member"),
-        ):
-            result = runner.invoke(cli, ["--format", "json", "init", "--dir", str(cfg)])
-
-        assert result.exit_code == 0, result.output
-        bootstrap_mock.assert_not_called()
-        create_account_mock.assert_not_called()
-        # system.toml / secrets.env는 재생성
-        assert (cfg / "system.toml").exists()
-        assert (cfg / "secrets.env").exists()
-        # JSON 출력에는 token/recovery_key 없음 (master bootstrap이 skip됐으므로)
-        lines = result.output.strip().splitlines()
-        json_start = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith("{"):
-                json_start = i
-                break
-        assert json_start is not None, f"JSON 출력 없음: {result.output}"
-        data = json.loads("\n".join(lines[json_start:]))
-        assert "token" not in data or data.get("token") in (None, "")
-        assert "recovery_key" not in data or data.get("recovery_key") in (None, "")
-        assert "test_account" not in data
 
 
 class TestInitJsonErrorContract:
@@ -481,9 +721,8 @@ class TestInitJsonErrorContract:
         target.mkdir()
         (target / "system.toml").write_text("x")
         (target / "secrets.env").write_text("x")
-        db_dir = target / "db"
-        db_dir.mkdir()
-        (db_dir / "ante.db").write_text("")
+        db_path = target / "db" / "ante.db"
+        _create_full_db(db_path)
 
         with patch("ante.cli.main.authenticate_member"):
             result = runner.invoke(
@@ -509,6 +748,14 @@ class TestInitJsonErrorContract:
             patch(
                 "ante.cli.commands.init._create_test_account",
                 new=AsyncMock(side_effect=_mock_create_test_account),
+            ),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -536,6 +783,14 @@ class TestInitJsonErrorContract:
                 new=AsyncMock(side_effect=_mock_bootstrap),
             ),
             patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
             patch("ante.cli.main.authenticate_member"),
         ):
             result = runner.invoke(
@@ -559,9 +814,8 @@ class TestInitJsonErrorContract:
         target.mkdir()
         (target / "system.toml").write_text("x")
         (target / "secrets.env").write_text("x")
-        db_dir = target / "db"
-        db_dir.mkdir()
-        (db_dir / "ante.db").write_text("")
+        db_path = target / "db" / "ante.db"
+        _create_full_db(db_path)
 
         with patch("ante.cli.main.authenticate_member"):
             result = runner.invoke(cli, ["init", "--dir", str(target)])

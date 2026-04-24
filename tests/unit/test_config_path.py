@@ -155,7 +155,7 @@ class TestInitCommand:
         assert (target / "secrets.env").exists()
 
     def test_init_blocks_existing(self, runner, tmp_path: Path) -> None:
-        """이미 3개 산출물이 모두 있으면 에러."""
+        """이미 3개 산출물이 모두 있고 DB 레코드가 완전하면 에러 (I4 state 1)."""
         target = tmp_path / "existing"
         target.mkdir()
         (target / "system.toml").write_text("existing")
@@ -163,7 +163,18 @@ class TestInitCommand:
         (target / "db").mkdir()
         (target / "db" / "ante.db").write_text("")
 
-        with patch("ante.cli.main.authenticate_member"):
+        # state 1: master + test account 모두 존재하는 상태를 시뮬레이션
+        with (
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=True),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
         assert "init이 이미 완료된 상태입니다" in result.output
 

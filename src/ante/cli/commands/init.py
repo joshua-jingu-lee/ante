@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -83,6 +84,60 @@ def _ensure_file(path: Path, template: str) -> bool:
     return True
 
 
+async def _master_exists_in_db(db_path: str) -> bool:
+    """DB에 role='master' member row가 있는지 확인.
+
+    DB 파일은 있으나 스키마/데이터가 없는 "orphan" 상태에서도
+    False를 반환하도록 예외를 흡수한다.
+    """
+    from ante.core.database import Database
+
+    db = Database(db_path)
+    try:
+        await db.connect()
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        try:
+            row = await db.fetch_one(
+                "SELECT member_id FROM members WHERE role = ? LIMIT 1",
+                ("master",),
+            )
+        except Exception:  # noqa: BLE001
+            # members 테이블이 아직 없을 수 있음 (orphan DB)
+            return False
+        return row is not None
+    finally:
+        await db.close()
+
+
+async def _test_account_exists_in_db(db_path: str) -> bool:
+    """DB에 account_id='test' (broker_type='test') account row가 있는지 확인.
+
+    `AccountService.create_default_test_account()`가 만드는 행을 기준으로 판정.
+    """
+    from ante.core.database import Database
+
+    db = Database(db_path)
+    try:
+        await db.connect()
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        try:
+            row = await db.fetch_one(
+                "SELECT account_id FROM accounts "
+                "WHERE account_id = ? OR broker_type = ? LIMIT 1",
+                ("test", "test"),
+            )
+        except Exception:  # noqa: BLE001
+            # accounts 테이블이 아직 없을 수 있음 (orphan DB)
+            return False
+        return row is not None
+    finally:
+        await db.close()
+
+
 async def _bootstrap_master(
     db_path: str, member_id: str, name: str, password: str
 ) -> tuple[dict, str, str]:
@@ -138,6 +193,50 @@ async def _create_test_account(db_path: str) -> dict[str, str]:
         await db.close()
 
 
+def _emit_master_credentials(
+    fmt: OutputFormatter,
+    master_info: dict,
+    password: str,
+    token: str,
+    recovery_key: str,
+    config_path: Path,
+) -> None:
+    """master bootstrap 직후 비밀값을 즉시 화면에 내보낸다.
+
+    test account 생성이 실패해도 이 정보로 복구할 수 있도록 순서를 고정.
+    JSON 모드에서는 stderr에 한 줄 JSON 이벤트를, text 모드에서는 stdout에
+    사람이 읽기 쉬운 블록을 출력한다.
+    """
+    if fmt.is_json:
+        click.echo(
+            json.dumps(
+                {
+                    "stage": "master_bootstrap_complete",
+                    **master_info,
+                    "password": password,
+                    "token": token,
+                    "recovery_key": recovery_key,
+                    "config_dir": str(config_path),
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+            err=True,
+        )
+    else:
+        click.echo("\n── Master 계정 생성 완료 ──────────────────────")
+        click.echo(f"  Member ID   : {master_info['member_id']}")
+        click.echo(f"  이름        : {master_info['name']}")
+        click.echo(f"  이모지      : {master_info['emoji']}")
+        click.echo(f"\n  패스워드     : {password}")
+        click.echo(f"  토큰         : {token}")
+        click.echo(f"  Recovery Key : {recovery_key}")
+        click.echo(
+            "\n  ⚠ 위 비밀값은 아래 단계(test account)가 실패하더라도 "
+            "지금 기록해두세요."
+        )
+
+
 @click.command("init")
 @click.option("--member-id", default="owner", show_default=True, help="master 멤버 ID")
 @click.option("--name", default="Owner", show_default=True, help="master 표시 이름")
@@ -157,13 +256,27 @@ def init(
 ) -> None:
     """비대화형 최소 초기 설정.
 
-    실행 순서: 1. 디렉토리 생성 → 2. master bootstrap → 3. test account 생성
+    멱등성 (I4 — 파일 + master 레코드 기반 재진입):
+    파일(3) + master row + test account row 5-state 가드로 재구성된다.
+    모든 상태 완료 시 거부, 그 외 경로에서는 누락된 것만 생성한다.
     """
     fmt = get_formatter(ctx)
     config_path = _resolve_config_path(target_dir)
 
-    # 멱등성: 3개 파일 모두 존재 시 거부
-    if _all_artifacts_exist(config_path):
+    artifacts = _expected_artifacts(config_path)
+    all_files_exist = _all_artifacts_exist(config_path)
+    db_path = artifacts["db/ante.db"]
+    db_file_exists = db_path.exists()
+
+    # DB 레코드 상태 조회 (DB 파일이 있을 때만)
+    master_exists = False
+    test_account_exists = False
+    if db_file_exists:
+        master_exists = _run(_master_exists_in_db(str(db_path)))
+        test_account_exists = _run(_test_account_exists_in_db(str(db_path)))
+
+    # state 1: 모든 상태 완료 → 거부
+    if all_files_exist and master_exists and test_account_exists:
         _fail(
             fmt,
             f"init이 이미 완료된 상태입니다: {config_path}\n"
@@ -171,16 +284,11 @@ def init(
             code="already_initialized",
         )
 
-    # 1. 디렉토리 생성
+    # 1. 디렉토리 생성 및 누락 파일 보충 (state 2/3/4/5 공통)
     config_path.mkdir(parents=True, exist_ok=True)
-
-    artifacts = _expected_artifacts(config_path)
     _ensure_file(artifacts["system.toml"], SYSTEM_TOML_TEMPLATE)
     _ensure_file(artifacts["secrets.env"], SECRETS_ENV_TEMPLATE)
     artifacts["secrets.env"].chmod(0o600)
-
-    db_path = artifacts["db/ante.db"]
-    db_existed_before = db_path.exists()
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     token = ""
@@ -188,22 +296,38 @@ def init(
     password = ""
     master_info: dict = {}
     test_account: dict = {}
+    master_already_existed = master_exists
 
-    if not db_existed_before:
+    # 2. master bootstrap — master row 없을 때만 (state 4/5)
+    if not master_exists:
         password = generate_password()
-        # 2. master bootstrap
         try:
             master_info, token, recovery_key = _run(
                 _bootstrap_master(str(db_path), member_id, name, password)
             )
         except ValueError as e:
             _fail(fmt, str(e), code="bootstrap_failed")
+        # ⚠️ 즉시 출력 — test account 실패해도 복구 가능하도록
+        _emit_master_credentials(
+            fmt, master_info, password, token, recovery_key, config_path
+        )
 
-        # 3. test account 생성
+    # 3. test account 생성 — test account row 없을 때만 (state 3/4/5)
+    if not test_account_exists:
         try:
             test_account = _run(_create_test_account(str(db_path)))
         except Exception as e:  # noqa: BLE001
-            _fail(fmt, f"테스트 계좌 생성 실패: {e}", code="test_account_failed")
+            if master_info:
+                # master는 이미 출력됐으므로 복구 가능
+                _fail(
+                    fmt,
+                    f"테스트 계좌 생성 실패: {e}. "
+                    "master는 위에 출력된 비밀값으로 접근 가능. "
+                    "원인 해결 후 재실행 시 test account만 생성됨.",
+                    code="test_account_failed",
+                )
+            else:
+                _fail(fmt, f"테스트 계좌 생성 실패: {e}", code="test_account_failed")
 
     if fmt.is_json:
         payload: dict = {"config_dir": str(config_path)}
@@ -223,6 +347,8 @@ def init(
         click.echo(f"  Member ID   : {master_info['member_id']}")
         click.echo(f"  이름        : {master_info['name']}")
         click.echo(f"  이모지      : {master_info['emoji']}")
+    elif master_already_existed:
+        click.echo("  Master 계정 : 이미 존재 (재발급 안 함)")
     if test_account:
         click.echo(
             f"  테스트 계좌 : {test_account['account_id']} ({test_account['exchange']})"
