@@ -108,6 +108,20 @@ fi
 rm -f "$INIT_STDOUT" "$INIT_STDERR"
 trap - EXIT
 
+# ante init 은 ANTE_CONFIG_DIR=/app 에 minimal system.toml 을 만든다 (web.enabled
+# 등 QA 필수 설정이 빠져 있다). 서버(`python -m ante.main`)도 같은
+# ANTE_CONFIG_DIR 로 인해 /app/system.toml 을 읽으므로, Dockerfile.qa 가
+# /app/config/system.toml 위치에 배치해 둔 QA 전용 설정(config/system.qa.toml
+# 사본)으로 덮어써야 web.enabled=true / mock broker 같은 QA 설정이 적용된다.
+# 이 단계가 빠지면 _init_web() 이 enabled 키 부재로 리턴해 HTTP 서버가 뜨지
+# 않고 헬스체크가 깨진다.
+if [ -f /app/config/system.toml ]; then
+    cp /app/config/system.toml /app/system.toml
+    echo "[qa] /app/system.toml 을 QA 전용 설정으로 갱신 (config/system.qa.toml 기반)"
+else
+    echo "[qa] WARNING: /app/config/system.toml 가 없어 QA overlay 를 건너뜁니다" >&2
+fi
+
 # init이 새 master를 발급한 경우(=신규 DB 또는 partial-failure 복구)에만 QA
 # 고정 패스워드로 동기화한다. 재기동(기존 DB) 시에는 INIT_RECOVERY_KEY가 비어
 # 있으므로 이 블록이 자동으로 skip 된다.

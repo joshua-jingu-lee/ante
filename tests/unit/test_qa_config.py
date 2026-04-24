@@ -314,6 +314,60 @@ class TestQaEntrypoint:
             "export ANTE_CONFIG_DIR 는 ante init 호출 전에 와야 합니다."
         )
 
+    def test_qa_entrypoint_overlays_system_qa_toml(self) -> None:
+        """Codex 13차 review — ante init 직후 /app/system.toml 을 QA 설정으로 덮어쓴다.
+
+        ante init 은 ANTE_CONFIG_DIR=/app 에 minimal system.toml 을 작성하는데
+        이 파일에는 [web].enabled 가 없어 _init_web() 이 즉시 리턴, HTTP 서버가
+        뜨지 않는다. Dockerfile.qa 가 /app/config/system.toml 위치에 배치해 둔
+        QA 전용 설정(config/system.qa.toml 사본)을 init 직후 /app/system.toml
+        로 복사해야 서버가 QA 설정으로 부팅된다.
+        """
+        script = self.path.read_text()
+
+        # 1) overlay 명령이 존재해야 한다 — /app/config/system.toml 을
+        #    /app/system.toml 로 복사.
+        assert "/app/config/system.toml" in script and "/app/system.toml" in script, (
+            "init 이 만든 minimal system.toml 을 QA 전용 설정으로 덮어써야 함"
+        )
+
+        # 2) overlay 는 ante init 호출 이후에 와야 한다. init 이 만든 파일을
+        #    덮어쓰는 의도이므로 순서가 반드시 init -> cp 여야 한다.
+        init_pos = script.find("ante --format json init")
+        cp_pos = script.find("/app/config/system.toml /app/system.toml")
+        assert init_pos != -1, "ante init 호출이 없습니다"
+        assert cp_pos != -1, "system.toml overlay (cp) 명령이 없습니다"
+        assert cp_pos > init_pos, (
+            "system.toml overlay 는 ante init 호출 이후에 위치해야 합니다"
+        )
+
+        # 3) overlay 는 서버 백그라운드 기동 전에 실행돼야 한다.
+        server_pos = script.find("python -m ante.main &")
+        assert server_pos != -1, "서버 백그라운드 기동 라인이 없습니다"
+        assert cp_pos < server_pos, (
+            "system.toml overlay 는 서버 기동 전에 실행돼야 QA 설정으로 부팅됨"
+        )
+
+    def test_qa_system_toml_has_web_enabled_for_overlay(self) -> None:
+        """Codex 13차 review — overlay 대상인 config/system.qa.toml 에는
+        web.enabled=true 등 QA 필수 설정이 있어야 한다.
+
+        overlay 가 일어나도 원본에 [web].enabled 가 없으면 회귀가 재발한다.
+        """
+        import tomllib
+
+        qa_path = PROJECT_ROOT / "config" / "system.qa.toml"
+        with open(qa_path, "rb") as f:
+            config = tomllib.load(f)
+
+        assert "web" in config, "config/system.qa.toml 에 [web] 섹션이 필요함"
+        assert config["web"].get("enabled") is True, (
+            "config/system.qa.toml 의 web.enabled 가 true 여야 HTTP 서버가 뜸"
+        )
+        assert config["web"].get("port") == 8000, (
+            "config/system.qa.toml 의 web.port 가 8000 이어야 헬스체크가 통과"
+        )
+
     def test_qa_entrypoint_only_already_initialized_allows_restart(self) -> None:
         """Codex 7차 review — already_initialized 외의 code는 재기동 금지.
 
