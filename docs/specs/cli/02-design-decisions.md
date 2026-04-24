@@ -61,6 +61,30 @@ CLI 커맨드에 멤버 인증과 스코프 기반 접근 제어를 적용하는
 - `--db-path` 옵션을 가진 커맨드(`ante approval`, `ante backtest`, `ante instrument`, `ante report`, `ante data`)는 사용자 override를 위해 기본값을 `None`으로 두고, 값이 없을 때 `get_db_path(ctx)`로 폴백한다. 이로써 기존 사용자의 `--db-path` 지정은 그대로 동작한다.
 - 서버(`ante system start`)는 이미 `system.toml`의 `db.path` 설정을 읽고 `ANTE_CONFIG_DIR`을 하위 프로세스로 전달하므로, CLI 쪽 경로 해석이 서버 동작에 영향을 주지 않는다.
 
+### `--db-path` 옵션의 인증 DB / 작업 DB 분리
+
+일부 CLI 커맨드(`ante approval`, `ante backtest`, `ante data`, `ante instrument`, `ante report`)는 대용량 조회·백테스트·스냅샷 조회 등을 위해 보조 DB를 지정할 수 있는 `--db-path <경로>` 옵션을 제공한다. 이 옵션은 **작업 대상 DB만 바꾸며 인증 DB를 바꾸지 않는다**. 아래 분리는 의도된 설계다.
+
+- **인증 단계(루트 그룹)**: `authenticate_member(ctx)`는 항상 `get_db_path(ctx)` — 즉 `resolve_config_dir()`이 해석한 **기본 설정 DB** — 에서 `ANTE_MEMBER_TOKEN`을 검증한다. 서브커맨드의 `--db-path` 값은 루트 콜백 실행 시점에 파싱되기 전이므로 인증 대상 DB에 영향을 줄 수 없다.
+- **작업 단계(서브커맨드)**: 인증이 성공하면 서브커맨드가 `--db-path`로 지정된 DB(또는 미지정 시 `get_db_path(ctx)` 폴백)를 열어 실제 조회/기록을 수행한다.
+
+예: `ante approval list --db-path /tmp/backup.db`는
+
+1. 기본 설정 DB(`<config_dir>/db/ante.db`)에서 `ANTE_MEMBER_TOKEN`을 검증한 뒤 (루트 콜백),
+2. `/tmp/backup.db`에서 approval 목록을 조회한다 (서브커맨드 콜백).
+
+**이 분리를 유지하는 이유**:
+
+- **보안**: 토큰 검증은 신뢰할 수 있는 기본 DB에서만 수행한다. 호출자가 임의의 경로를 넘겨 인증을 우회하거나, 준비된 가짜 DB로 멤버 레코드를 위조하는 공격 벡터를 차단한다.
+- **운영 시나리오**: 사용자·Agent가 백테스트 DB, 스냅샷, 아카이브를 조회할 때마다 해당 DB에 별도 멤버·토큰을 심어둘 필요가 없다. 한 번 발급받은 토큰으로 여러 데이터셋을 오가며 조회할 수 있다.
+
+**부수 효과**:
+
+- `--db-path`로 지정한 DB 자체의 유효성(존재 여부, 스키마 호환 등)은 서브커맨드 실행 시점에 검증되며, 인증이 실패하면 그 지점에 도달하지 않으므로 경로 유효성 오류는 노출되지 않을 수 있다. 이는 의도된 순서(인증 먼저)다.
+- 반대로 `--config-dir`(또는 `ANTE_CONFIG_DIR`)은 루트 콜백 시점에 해석되므로 **인증 DB와 작업 DB를 함께** 바꾼다. 두 DB를 한 번에 스위치하려면 `--db-path`가 아니라 `--config-dir`을 사용한다.
+
+`--db-path`가 인증 DB까지 바꾸도록 재구성하는 것은 구조적 리팩터링(루트 콜백에서 서브커맨드 파라미터 선해석)이 필요하며, 현재 범위에 포함하지 않는다. 필요 시 별도 설계 결정으로 다룬다.
+
 ### 시스템 통신
 
 CLI 커맨드는 **오프라인**과 **런타임** 두 가지 방식으로 시스템과 통신한다.

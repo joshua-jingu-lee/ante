@@ -8,6 +8,7 @@ import click
 
 from ante.cli.formatter import OutputFormatter
 from ante.cli.middleware import authenticate_member
+from ante.config.config import resolve_config_dir
 
 try:
     from importlib.metadata import version as pkg_version
@@ -112,10 +113,12 @@ def get_formatter(ctx: click.Context) -> OutputFormatter:
 def get_db_path(ctx: click.Context | None = None) -> str:
     """`--config-dir`/`ANTE_CONFIG_DIR` 기반으로 DB 경로를 반환한다.
 
-    우선순위:
+    우선순위는 `resolve_config_dir()`를 그대로 따른다:
       1. `ctx.obj["config_dir"]` (루트 그룹이 `--config-dir` 또는
-         `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path)
-      2. 기본값 `~/.config/ante/` (init과 동일한 기본 경로)
+         `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path) — override로 전달
+      2. `ANTE_CONFIG_DIR` 환경변수
+      3. `~/.config/ante/` (디렉토리가 실제로 존재할 때)
+      4. `./config/` (repo-local 폴백)
 
     이 함수가 필요한 이유: `ante init`은 `<config_dir>/db/ante.db`를 생성하지만
     후속 CLI들은 과거 `Database("db/ante.db")`를 CWD 기준으로 하드코딩해 다른
@@ -132,12 +135,13 @@ def get_db_path(ctx: click.Context | None = None) -> str:
     if ctx is None:
         ctx = click.get_current_context(silent=True)
     obj = getattr(ctx, "obj", None) if ctx is not None else None
-    config_dir = None
+    override: Path | None = None
     if isinstance(obj, dict):
-        config_dir = obj.get("config_dir")
-    if config_dir is None:
-        config_dir = Path.home() / ".config" / "ante"
-    return str(Path(config_dir) / "db" / "ante.db")
+        raw = obj.get("config_dir")
+        if raw is not None:
+            override = raw if isinstance(raw, Path) else Path(raw)
+    config_dir = resolve_config_dir(override=override)
+    return str(config_dir / "db" / "ante.db")
 
 
 # 서브커맨드 등록
