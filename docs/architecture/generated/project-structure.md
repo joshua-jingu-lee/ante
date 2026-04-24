@@ -3,7 +3,7 @@
 > 이 문서는 실제 소스 트리에서 생성된 문서입니다.
 > 새 모듈/파일 추가 시 이 문서도 함께 최신화해 주세요.
 >
-> 마지막 갱신: 2026-04-21
+> 마지막 갱신: 2026-04-24
 
 ## 최상위 구조
 
@@ -212,6 +212,7 @@ src/ante/
     ├── middleware.py             # 인증 미들웨어 (require_auth, require_scope)
     ├── formatter.py             # OutputFormatter — table/json 출력
     └── commands/
+        ├── _password.py         # generate_password() — CLI용 랜덤 패스워드 유틸
         ├── approval.py          # ante approval request/list/info/review/cancel/approve/reject
         ├── audit.py             # ante audit — 감사 로그 조회
         ├── backtest.py          # ante backtest run (진행률 바, 성과 지표 테이블 포함)
@@ -219,9 +220,9 @@ src/ante/
         ├── broker.py            # ante broker 명령
         ├── config.py            # ante config 명령
         ├── data.py              # ante data list/schema/inject/validate
-        ├── init.py              # ante init — 설정 디렉토리 초기화
+        ├── init.py              # ante init — 비대화형 최소 초기 설정 (master + 테스트 계좌)
         ├── instrument.py        # ante instrument list/search/sync/import (--listed-only)
-        ├── member.py            # ante member bootstrap/register/list/info/suspend/revoke/set-emoji/...
+        ├── member.py            # ante member register/list/info/suspend/revoke/set-emoji/... (bootstrap은 init으로 통합)
         ├── notification.py      # ante notification history
         ├── report.py            # ante report list/show/schema/performance/view
         ├── rule.py              # ante rule 명령
@@ -309,7 +310,9 @@ tests/
 │   ├── test_broker.py
 │   ├── test_cli_auth.py
 │   ├── test_cli_config.py
+│   ├── test_cli_init.py         # ante init (비대화형) CLI 테스트
 │   ├── test_cli_live.py
+│   ├── test_cli_password.py     # generate_password() 유틸 테스트
 │   ├── test_cli.py
 │   ├── test_commission.py
 │   ├── test_config.py
