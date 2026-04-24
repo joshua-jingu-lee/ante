@@ -143,3 +143,57 @@ class TestQaEntrypoint:
             f"qa-entrypoint.sh: ante init(pos={init_pos})이 "
             f"서버 기동(pos={server_pos}) 앞에 와야 합니다"
         )
+
+    def test_qa_entrypoint_uses_login_rotate_after_reset_password(self) -> None:
+        """reset-password 이후엔 login+rotate-token으로 새 토큰을 발급해야 한다.
+
+        init이 발급한 초기 토큰은 reset-password 내부의
+        `RecoveryKeyManager._invalidate_token`이 `token_hash=NULL`로 업데이트하여
+        무효화한다. 따라서 init의 JSON 출력에서 token 필드를 QA_TOKEN에 직접
+        저장하면 /run/ante-token에 무효 토큰이 쓰여 CLI 인증이 깨진다.
+        유효 토큰은 서버 기동 후 login + rotate-token 경로로만 발급해야 한다.
+
+        관련 이슈: #1125 (Codex branch review 3차 finding)
+        """
+        import re
+
+        script = self.path.read_text()
+
+        # 1) reset-password가 호출되는지 (QA 패스워드 동기화)
+        assert "reset-password" in script, "reset-password 호출이 없습니다"
+
+        # 2) init이 낸 token을 QA_TOKEN에 직접 대입하지 않는지
+        #    금지 패턴: QA_TOKEN=$(echo "$INIT_JSON" ... .token ...)
+        forbidden = re.search(
+            r"QA_TOKEN=\$\(echo\s+\"\$INIT_JSON\".*?token",
+            script,
+            re.DOTALL,
+        )
+        assert forbidden is None, (
+            "init 토큰을 QA_TOKEN에 직접 대입하고 있습니다 (reset-password로 무효화됨)"
+        )
+
+        # 3) login + rotate-token 흐름이 존재하는지
+        assert "/api/auth/login" in script, "login 엔드포인트 호출이 없습니다"
+        assert "/api/members" in script and "rotate-token" in script, (
+            "rotate-token 엔드포인트 호출이 없습니다"
+        )
+
+        # 4) login이 조건부(예: `if [ -z "$QA_TOKEN" ]`)가 아니라 서버 기동 후
+        #    항상 실행되어야 한다. login 위치가 reset-password 이후이고,
+        #    이전의 조건부 `if [ -z "$QA_TOKEN" ]` 블록 안이 아닌지 확인한다.
+        #    (실제 HTTP 호출 URL 기준으로 위치를 찾는다 — 주석/설명문 포함 금지)
+        reset_pos = script.find("reset-password")
+        login_pos = script.find("/api/auth/login")
+        rotate_http_pos = script.find("/api/members/qa-admin/rotate-token")
+        assert reset_pos < login_pos, "login은 reset-password 이후에 위치해야 합니다"
+        assert login_pos < rotate_http_pos, (
+            "rotate-token HTTP 호출은 login 이후에 위치해야 합니다"
+        )
+
+        # 5) 기존의 조건부 재발급 블록(`if [ -z "$QA_TOKEN" ]`)이 제거됐는지
+        #    검증 — 이 가드가 남아 있으면 첫 기동에서 rotate가 skip된다.
+        assert 'if [ -z "$QA_TOKEN" ]' not in script, (
+            "조건부 rotate-token 분기가 남아 있습니다. "
+            "reset-password 후에는 항상 login+rotate로 토큰을 재발급해야 합니다."
+        )

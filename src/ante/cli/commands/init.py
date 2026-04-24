@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import click
 
 from ante.cli.commands._password import generate_password
+from ante.cli.formatter import OutputFormatter
 from ante.cli.main import get_formatter
+
+
+def _fail(fmt: OutputFormatter, message: str, code: str = "") -> None:
+    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1.
+
+    `click.ClickException`은 text 모드에서 "Error: ..." 를 stderr에 쓰지만
+    JSON 모드에서도 동일한 텍스트를 내보내 `--format json` 계약을 깨뜨린다.
+    이 헬퍼는 `OutputFormatter.error()`를 거쳐 JSON 모드에서는 구조화 에러를,
+    text 모드에서는 "Error: ..." 를 stderr에 낸 뒤 exit code 1로 종료한다.
+    """
+    fmt.error(message, code=code)
+    sys.exit(1)
+
 
 _SYSTEM_TOML_FILENAME = "system.toml"
 _SECRETS_ENV_FILENAME = "secrets.env"
@@ -149,9 +164,11 @@ def init(
 
     # 멱등성: 3개 파일 모두 존재 시 거부
     if _all_artifacts_exist(config_path):
-        raise click.ClickException(
+        _fail(
+            fmt,
             f"init이 이미 완료된 상태입니다: {config_path}\n"
-            "  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요."
+            "  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요.",
+            code="already_initialized",
         )
 
     # 1. 디렉토리 생성
@@ -180,13 +197,13 @@ def init(
                 _bootstrap_master(str(db_path), member_id, name, password)
             )
         except ValueError as e:
-            raise click.ClickException(str(e)) from e
+            _fail(fmt, str(e), code="bootstrap_failed")
 
         # 3. test account 생성
         try:
             test_account = _run(_create_test_account(str(db_path)))
         except Exception as e:  # noqa: BLE001
-            raise click.ClickException(f"테스트 계좌 생성 실패: {e}") from e
+            _fail(fmt, f"테스트 계좌 생성 실패: {e}", code="test_account_failed")
 
     if fmt.is_json:
         payload: dict = {"config_dir": str(config_path)}

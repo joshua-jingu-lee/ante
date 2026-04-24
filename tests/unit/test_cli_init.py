@@ -449,3 +449,124 @@ class TestInitReentryWithOrphanDb:
         assert "token" not in data or data.get("token") in (None, "")
         assert "recovery_key" not in data or data.get("recovery_key") in (None, "")
         assert "test_account" not in data
+
+
+class TestInitJsonErrorContract:
+    """`ante --format json init` 실패 경로가 JSON 계약을 유지해야 한다.
+
+    `click.ClickException`은 JSON 모드에서도 stderr에 "Error: ..." 텍스트를 내
+    Agent의 JSON 파서를 깨뜨린다. init은 세 가지 실패 경로(이미 초기화 / bootstrap
+    ValueError / test account Exception) 모두 stdout에 구조화된 JSON을 내고
+    exit code 1로 종료해야 한다.
+
+    스펙: docs/specs/cli/02-design-decisions.md (--format json은 모든 커맨드
+    출력을 파싱 가능해야 함). 관련 이슈: #1125 (Codex branch review, 3차 FAIL).
+    """
+
+    @staticmethod
+    def _parse_error_json(output: str) -> dict:
+        """stdout의 마지막 JSON 오브젝트를 파싱해 반환."""
+        stripped = output.strip()
+        assert stripped, "stdout이 비어 있음 (JSON 실패 계약 위반)"
+        # fmt.error는 indent 없이 한 줄 JSON을 낸다
+        for line in reversed(stripped.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                return json.loads(line)
+        raise AssertionError(f"JSON 오브젝트를 찾을 수 없음: {output!r}")
+
+    def test_init_already_initialized_json_output(self, runner, tmp_path):
+        """이미 초기화된 상태에서 --format json으로 재실행하면 JSON 에러 + exit 1."""
+        target = tmp_path / "config"
+        target.mkdir()
+        (target / "system.toml").write_text("x")
+        (target / "secrets.env").write_text("x")
+        db_dir = target / "db"
+        db_dir.mkdir()
+        (db_dir / "ante.db").write_text("")
+
+        with patch("ante.cli.main.authenticate_member"):
+            result = runner.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 1, (
+            f"exit=1 기대 (got {result.exit_code}): {result.output}"
+        )
+        data = self._parse_error_json(result.output)
+        assert "error" in data
+        assert "init이 이미 완료된 상태입니다" in data["error"]
+        assert data.get("code") == "already_initialized"
+
+    def test_init_bootstrap_failure_json_output(self, runner, tmp_path):
+        """_bootstrap_master가 ValueError를 던지면 JSON 에러 + exit 1."""
+        target = tmp_path / "config"
+
+        bootstrap_mock = AsyncMock(side_effect=ValueError("패스워드 정책 위반"))
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch(
+                "ante.cli.commands.init._create_test_account",
+                new=AsyncMock(side_effect=_mock_create_test_account),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 1, (
+            f"exit=1 기대 (got {result.exit_code}): {result.output}"
+        )
+        data = self._parse_error_json(result.output)
+        assert "error" in data
+        assert "패스워드 정책 위반" in data["error"]
+        assert data.get("code") == "bootstrap_failed"
+
+    def test_init_test_account_failure_json_output(self, runner, tmp_path):
+        """_create_test_account가 Exception을 던지면 JSON 에러 + exit 1."""
+        target = tmp_path / "config"
+
+        create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock"))
+
+        with (
+            patch(
+                "ante.cli.commands.init._bootstrap_master",
+                new=AsyncMock(side_effect=_mock_bootstrap),
+            ),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 1, (
+            f"exit=1 기대 (got {result.exit_code}): {result.output}"
+        )
+        data = self._parse_error_json(result.output)
+        assert "error" in data
+        assert "테스트 계좌 생성 실패" in data["error"]
+        assert "DB lock" in data["error"]
+        assert data.get("code") == "test_account_failed"
+
+    def test_init_already_initialized_text_mode_preserves_message(
+        self, runner, tmp_path
+    ):
+        """text 모드에서도 멱등성 거부 메시지가 유지되어야 한다 (기존 테스트 호환)."""
+        target = tmp_path / "config"
+        target.mkdir()
+        (target / "system.toml").write_text("x")
+        (target / "secrets.env").write_text("x")
+        db_dir = target / "db"
+        db_dir.mkdir()
+        (db_dir / "ante.db").write_text("")
+
+        with patch("ante.cli.main.authenticate_member"):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 1
+        # text 모드에서는 OutputFormatter.error가 "Error: ..." 를 stderr로 보낸다
+        # CliRunner 기본 mix_stderr=True이면 result.output에 섞여 보인다
+        assert "init이 이미 완료된 상태입니다" in result.output

@@ -1,25 +1,28 @@
 #!/bin/bash
 # QA 테스트 환경 엔트리포인트
 # 1. ante init으로 QA Admin 마스터 부트스트랩 (서버 기동 전; DB 파일을 서버가 만들기 전에 실행)
-# 2. Ante 서버 백그라운드 기동
-# 3. 헬스체크 대기 (최대 30초)
-# 4. 토큰 export / 재발급 처리
-# 5. 서버 포그라운드 전환
+# 2. reset-password로 QA 고정 패스워드 동기화 (신규 DB만) — init 토큰은 여기서 무효화됨
+# 3. Ante 서버 백그라운드 기동
+# 4. 헬스체크 대기 (최대 30초)
+# 5. login + rotate-token으로 유효 토큰을 항상 재발급
+# 6. 서버 포그라운드 전환
 set -e
 
 echo "[qa] QA Admin 멤버 부트스트랩 (ante init 통합, issue #1125)..."
-# ante init은 비대화형. 패스워드는 자동 생성되며 JSON 출력에서 토큰을 추출한다.
+# ante init은 비대화형. 신규 DB일 때만 master를 생성하고 JSON에 recovery_key를 반환한다.
 # QA TC(tests/tc/)와 docker-compose.qa.yml의 QA_ADMIN_PASSWORD 계약을 지키기 위해
 # init 직후 reset-password로 DB의 master 비밀번호를 $QA_PASSWORD 로 동기화한다.
 # --dir /app: 서버(config/system.qa.toml) [db].path=/app/db/ante.db 와 init DB 경로 일치
 #
-# 주의: ante init과 ante member reset-password는 반드시 서버 기동 전에 실행해야 한다.
+# 주의 1: ante init과 ante member reset-password는 반드시 서버 기동 전에 실행해야 한다.
 # 서버(src/ante/main.py _init_account)가 먼저 기동되면 DB 파일을 자동 생성해 버려
 # ante init의 master bootstrap이 db_existed_before=True 분기로 항상 skip된다.
+#
+# 주의 2: init이 반환한 토큰은 사용하지 않는다. 아래 reset-password 호출이
+# recovery_key_manager._invalidate_token으로 기존 토큰을 무효화하기 때문이다.
+# 유효한 토큰은 서버 기동 후 login + rotate-token 경로로만 발급한다.
 QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
 INIT_JSON=$(ante --format json init --dir /app --member-id qa-admin --name "QA Admin" 2>/dev/null || true)
-QA_TOKEN=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
-INIT_PASSWORD=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('password',''))" 2>/dev/null || true)
 INIT_RECOVERY_KEY=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('recovery_key',''))" 2>/dev/null || true)
 
 # init이 새 master를 발급한 경우(=신규 DB)에만 QA 고정 패스워드로 동기화한다.
@@ -28,9 +31,10 @@ if [ -n "$INIT_RECOVERY_KEY" ]; then
     echo "[qa] QA 고정 패스워드로 master 비밀번호 동기화..."
     if printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
         ante member reset-password --recovery-key "$INIT_RECOVERY_KEY" > /dev/null 2>&1; then
-        INIT_PASSWORD="$QA_PASSWORD"
+        echo "[qa] master 패스워드 동기화 완료"
     else
-        echo "[qa] WARNING: QA 패스워드 동기화 실패 — init 랜덤 패스워드를 사용합니다" >&2
+        echo "[qa] ERROR: QA 패스워드 동기화 실패 — 이후 login이 실패할 수 있습니다" >&2
+        exit 1
     fi
 fi
 
@@ -51,35 +55,51 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-if [ -z "$QA_TOKEN" ]; then
-    # 이미 init 완료된 경우 (재기동) — 로그인 후 rotate-token으로 재발급
-    echo "[qa] 기존 master 계정 감지 — 토큰 재발급 중..."
-    LOGIN_PASSWORD="${INIT_PASSWORD:-$QA_PASSWORD}"
-    LOGIN_RESP=$(curl -sf -X POST http://localhost:8000/api/auth/login \
-        -H "Content-Type: application/json" \
-        -d "{\"member_id\":\"qa-admin\",\"password\":\"$LOGIN_PASSWORD\"}" \
-        -c - 2>/dev/null || true)
-    SESSION_COOKIE=$(echo "$LOGIN_RESP" | grep 'ante_session' | awk '{print $NF}')
-    if [ -n "$SESSION_COOKIE" ]; then
-        ROTATE_RESP=$(curl -sf -X POST http://localhost:8000/api/members/qa-admin/rotate-token \
-            -b "ante_session=$SESSION_COOKIE" 2>/dev/null || true)
-        QA_TOKEN=$(echo "$ROTATE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
-    fi
+# 유효한 토큰은 언제나 서버 기동 후 login + rotate-token 경로로 발급한다.
+# - 신규 DB: init 토큰은 직전 reset-password 호출로 무효화됨 → 재발급 필수
+# - 재기동: init이 master를 skip했으므로 init 토큰 자체가 없음 → 재발급 필수
+# 조건 분기가 필요 없으므로 항상 실행한다.
+echo "[qa] QA Admin 토큰 발급 (login + rotate-token)..."
+COOKIE_JAR=$(mktemp)
+trap 'rm -f "$COOKIE_JAR"' EXIT
+
+LOGIN_HTTP=$(curl -s -o /tmp/qa_login_resp -w "%{http_code}" \
+    -X POST http://localhost:8000/api/auth/login \
+    -H "Content-Type: application/json" \
+    -c "$COOKIE_JAR" \
+    -d "{\"member_id\":\"qa-admin\",\"password\":\"$QA_PASSWORD\"}" || echo "000")
+if [ "$LOGIN_HTTP" != "200" ]; then
+    echo "[qa] ERROR: login 실패 (HTTP=$LOGIN_HTTP)" >&2
+    echo "[qa] login response: $(cat /tmp/qa_login_resp 2>/dev/null || echo '(empty)')" >&2
+    exit 1
 fi
 
-if [ -n "$QA_TOKEN" ]; then
-    export ANTE_MEMBER_TOKEN="$QA_TOKEN"
-    echo "export ANTE_MEMBER_TOKEN=\"$QA_TOKEN\"" >> /root/.bashrc
-    # docker exec는 컨테이너의 환경변수를 상속하지 않으므로
-    # 토큰을 파일로도 저장하여 CLI가 자동으로 읽을 수 있게 한다
-    echo -n "$QA_TOKEN" > /run/ante-token
-    chmod 644 /run/ante-token
-    # docker exec에서 CLI가 토큰 파일을 찾을 수 있도록 환경변수 파일에도 기록
-    echo "ANTE_TOKEN_FILE=/run/ante-token" >> /etc/environment
-    echo "[qa] ANTE_MEMBER_TOKEN 설정 완료 (환경변수 + /run/ante-token)"
-else
-    echo "[qa] WARNING: ANTE_MEMBER_TOKEN 설정 실패" >&2
+ROTATE_HTTP=$(curl -s -o /tmp/qa_rotate_resp -w "%{http_code}" \
+    -X POST http://localhost:8000/api/members/qa-admin/rotate-token \
+    -b "$COOKIE_JAR" || echo "000")
+if [ "$ROTATE_HTTP" != "200" ]; then
+    echo "[qa] ERROR: rotate-token 실패 (HTTP=$ROTATE_HTTP)" >&2
+    echo "[qa] rotate response: $(cat /tmp/qa_rotate_resp 2>/dev/null || echo '(empty)')" >&2
+    exit 1
 fi
+QA_TOKEN=$(python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" < /tmp/qa_rotate_resp 2>/dev/null || true)
+
+case "$QA_TOKEN" in
+    "")
+        echo "[qa] ERROR: rotate-token 응답에서 토큰을 추출할 수 없습니다" >&2
+        exit 1
+        ;;
+esac
+
+export ANTE_MEMBER_TOKEN="$QA_TOKEN"
+echo "export ANTE_MEMBER_TOKEN=\"$QA_TOKEN\"" >> /root/.bashrc
+# docker exec는 컨테이너의 환경변수를 상속하지 않으므로
+# 토큰을 파일로도 저장하여 CLI가 자동으로 읽을 수 있게 한다
+echo -n "$QA_TOKEN" > /run/ante-token
+chmod 644 /run/ante-token
+# docker exec에서 CLI가 토큰 파일을 찾을 수 있도록 환경변수 파일에도 기록
+echo "ANTE_TOKEN_FILE=/run/ante-token" >> /etc/environment
+echo "[qa] ANTE_MEMBER_TOKEN 설정 완료 (환경변수 + /run/ante-token)"
 
 echo "[qa] QA 시드 계좌 확인 (Treasury 초기화 보장)..."
 # 계좌가 없으면 API로 테스트 계좌 생성 → 서버 재기동하여 Treasury 초기화
