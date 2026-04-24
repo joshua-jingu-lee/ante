@@ -276,7 +276,6 @@ class TestGenerateCliReference:
         expected_commands = [
             "ante bot create",
             "ante bot list",
-            "ante member bootstrap",
             "ante strategy validate",
             "ante system halt",
             "ante trade list",
@@ -284,6 +283,11 @@ class TestGenerateCliReference:
         ]
         for cmd in expected_commands:
             assert cmd in content, f"'{cmd}'가 문서에 없음"
+
+        # 제거된 커맨드는 문서에 존재하지 않아야 한다 (issue #1125)
+        assert "ante member bootstrap" not in content, (
+            "제거된 ante member bootstrap이 CLI reference에 남아있습니다"
+        )
 
     def test_intro_notice(self) -> None:
         """사용자 친화적 소개 문구가 포함된다."""

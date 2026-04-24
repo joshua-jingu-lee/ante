@@ -99,9 +99,15 @@ class TestQaEntrypoint:
         assert "health" in content, "헬스체크 로직이 포함되어야 합니다"
         assert "seq 1 30" in content, "30초 헬스체크 대기 루프가 포함되어야 합니다"
 
-    def test_contains_member_bootstrap(self) -> None:
+    def test_contains_ante_init(self) -> None:
+        """issue #1125: member bootstrap은 제거되고 ante init이 master 생성을 담당."""
         content = self.path.read_text()
-        assert "member bootstrap" in content, "멤버 부트스트랩 명령이 포함되어야 합니다"
+        assert "ante --format json init" in content or "ante init" in content, (
+            "ante init (비대화형) 명령이 포함되어야 합니다"
+        )
+        assert "member bootstrap" not in content, (
+            "제거된 ante member bootstrap 명령이 남아있습니다"
+        )
 
     def test_contains_server_background_start(self) -> None:
         content = self.path.read_text()

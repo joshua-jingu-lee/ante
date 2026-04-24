@@ -23,20 +23,22 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-echo "[qa] QA Admin 멤버 부트스트랩..."
-# bootstrap은 대화형 패스워드 프롬프트를 사용하므로
-# confirmation_prompt=True → 패스워드를 2번 입력해야 한다
+echo "[qa] QA Admin 멤버 부트스트랩 (ante init 통합, issue #1125)..."
+# ante init은 비대화형. 패스워드는 자동 생성되며 JSON 출력에서 토큰을 추출한다.
+# QA_PASSWORD 환경변수는 기존 QA 도구와의 호환을 위해 유지하되, init 경로에선 무시된다.
+# (대시보드 API 로그인 시에는 init이 발급한 password가 필요 — 아래 JSON에서 추출.)
 QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
-BOOTSTRAP_OUTPUT=$(printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
-    ante member bootstrap --id qa-admin --name "QA Admin" 2>/dev/null || true)
-QA_TOKEN=$(echo "$BOOTSTRAP_OUTPUT" | grep -oE 'ante_[a-z]+_[A-Za-z0-9_-]+' | head -1)
+INIT_JSON=$(ante --format json init --member-id qa-admin --name "QA Admin" 2>/dev/null || true)
+QA_TOKEN=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+INIT_PASSWORD=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('password',''))" 2>/dev/null || true)
 
 if [ -z "$QA_TOKEN" ]; then
-    # 이미 bootstrap 완료된 경우 (재기동) — 로그인 후 rotate-token으로 재발급
+    # 이미 init 완료된 경우 (재기동) — 로그인 후 rotate-token으로 재발급
     echo "[qa] 기존 master 계정 감지 — 토큰 재발급 중..."
+    LOGIN_PASSWORD="${INIT_PASSWORD:-$QA_PASSWORD}"
     LOGIN_RESP=$(curl -sf -X POST http://localhost:8000/api/auth/login \
         -H "Content-Type: application/json" \
-        -d "{\"member_id\":\"qa-admin\",\"password\":\"$QA_PASSWORD\"}" \
+        -d "{\"member_id\":\"qa-admin\",\"password\":\"$LOGIN_PASSWORD\"}" \
         -c - 2>/dev/null || true)
     SESSION_COOKIE=$(echo "$LOGIN_RESP" | grep 'ante_session' | awk '{print $NF}')
     if [ -n "$SESSION_COOKIE" ]; then

@@ -35,51 +35,6 @@ async def _create_service():  # noqa: ANN202
     return service, db
 
 
-@member.command()
-@click.option("--id", "member_id", required=True, help="master 멤버 ID")
-@click.option("--name", default="", help="표시 이름")
-@click.pass_context
-def bootstrap(ctx: click.Context, member_id: str, name: str) -> None:
-    """최초 master 계정 생성 (인증 불필요)."""
-    fmt = get_formatter(ctx)
-    password = click.prompt("패스워드", hide_input=True, confirmation_prompt=True)
-
-    async def _run_bootstrap() -> tuple[dict, str, str]:
-        service, db = await _create_service()
-        try:
-            m, token, recovery_key = await service.bootstrap_master(
-                member_id=member_id,
-                password=password,
-                name=name,
-            )
-            return (
-                {
-                    "member_id": m.member_id,
-                    "role": m.role,
-                    "emoji": m.emoji,
-                },
-                token,
-                recovery_key,
-            )
-        finally:
-            await db.close()
-
-    try:
-        result, token, recovery_key = _run(_run_bootstrap())
-    except ValueError as e:
-        fmt.error(str(e))
-        return
-
-    if fmt.is_json:
-        fmt.output({**result, "token": token, "recovery_key": recovery_key})
-    else:
-        fmt.success("master 계정 생성 완료", result)
-        click.echo(f"\n🔑 토큰: {token}")
-        click.echo(f"   export ANTE_MEMBER_TOKEN={token}")
-        click.echo(f"\n⚠️  Recovery Key: {recovery_key}")
-        click.echo("   이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.")
-
-
 @member.command("list")
 @click.option(
     "--type",
