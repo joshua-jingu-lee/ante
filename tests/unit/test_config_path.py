@@ -105,7 +105,12 @@ _MOCK_RECOVERY_KEY = "ANTE-RK-TEST-PATH-XXXX-YYYY"
 
 def _mock_bootstrap(*args, **kwargs):
     return (
-        {"member_id": "test-master", "role": MemberRole.MASTER, "emoji": "🦊"},
+        {
+            "member_id": "test-master",
+            "name": "Test Master",
+            "role": MemberRole.MASTER,
+            "emoji": "🦊",
+        },
         _MOCK_TOKEN,
         _MOCK_RECOVERY_KEY,
     )

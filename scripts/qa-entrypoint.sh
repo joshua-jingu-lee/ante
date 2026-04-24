@@ -25,12 +25,26 @@ done
 
 echo "[qa] QA Admin 멤버 부트스트랩 (ante init 통합, issue #1125)..."
 # ante init은 비대화형. 패스워드는 자동 생성되며 JSON 출력에서 토큰을 추출한다.
-# QA_PASSWORD 환경변수는 기존 QA 도구와의 호환을 위해 유지하되, init 경로에선 무시된다.
-# (대시보드 API 로그인 시에는 init이 발급한 password가 필요 — 아래 JSON에서 추출.)
+# QA TC(tests/tc/)와 docker-compose.qa.yml의 QA_ADMIN_PASSWORD 계약을 지키기 위해
+# init 직후 reset-password로 DB의 master 비밀번호를 $QA_PASSWORD 로 동기화한다.
+# --dir /app: 서버(config/system.qa.toml) [db].path=/app/db/ante.db 와 init DB 경로 일치
 QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
-INIT_JSON=$(ante --format json init --member-id qa-admin --name "QA Admin" 2>/dev/null || true)
+INIT_JSON=$(ante --format json init --dir /app --member-id qa-admin --name "QA Admin" 2>/dev/null || true)
 QA_TOKEN=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
 INIT_PASSWORD=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('password',''))" 2>/dev/null || true)
+INIT_RECOVERY_KEY=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('recovery_key',''))" 2>/dev/null || true)
+
+# init이 새 master를 발급한 경우(=신규 DB)에만 QA 고정 패스워드로 동기화한다.
+# 재기동(기존 DB) 시에는 INIT_JSON 이 비어 있으므로 이 블록이 자동으로 skip 된다.
+if [ -n "$INIT_RECOVERY_KEY" ]; then
+    echo "[qa] QA 고정 패스워드로 master 비밀번호 동기화..."
+    if printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
+        ante member reset-password --recovery-key "$INIT_RECOVERY_KEY" > /dev/null 2>&1; then
+        INIT_PASSWORD="$QA_PASSWORD"
+    else
+        echo "[qa] WARNING: QA 패스워드 동기화 실패 — init 랜덤 패스워드를 사용합니다" >&2
+    fi
+fi
 
 if [ -z "$QA_TOKEN" ]; then
     # 이미 init 완료된 경우 (재기동) — 로그인 후 rotate-token으로 재발급

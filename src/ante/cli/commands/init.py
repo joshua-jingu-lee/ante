@@ -90,6 +90,7 @@ async def _bootstrap_master(
         return (
             {
                 "member_id": m.member_id,
+                "name": m.name,
                 "role": m.role,
                 "emoji": m.emoji,
             },
@@ -203,6 +204,7 @@ def init(
     click.echo(f"  설정 디렉토리: {config_path}")
     if master_info:
         click.echo(f"  Member ID   : {master_info['member_id']}")
+        click.echo(f"  이름        : {master_info['name']}")
         click.echo(f"  이모지      : {master_info['emoji']}")
     if test_account:
         click.echo(

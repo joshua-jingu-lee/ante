@@ -13,6 +13,7 @@ from ante.cli.main import cli
 
 _MOCK_MASTER_INFO = {
     "member_id": "owner",
+    "name": "Owner",
     "role": "master",
     "emoji": "🦊",
 }
@@ -81,6 +82,9 @@ class TestInitFreshEnvironment:
         assert _MOCK_TOKEN in result.output
         assert _MOCK_RECOVERY_KEY in result.output
         assert "패스워드" in result.output
+        # master member_id와 name이 text 출력에 표시된다 (Codex finding 3)
+        assert _MOCK_MASTER_INFO["member_id"] in result.output
+        assert _MOCK_MASTER_INFO["name"] in result.output
         # 테스트 계좌 표시
         assert "test" in result.output
 
@@ -92,7 +96,17 @@ class TestInitFlagsSetIdentity:
         """--member-id alice --name Alice 시 해당 값이 _bootstrap_master에 전달된다."""
         target = tmp_path / "config"
 
-        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        custom_info = {
+            "member_id": "alice",
+            "name": "Alice",
+            "role": "master",
+            "emoji": "🦊",
+        }
+
+        def _mock_bootstrap_alice(*args, **kwargs):
+            return custom_info, _MOCK_TOKEN, _MOCK_RECOVERY_KEY
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap_alice)
         create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
 
         with (
@@ -120,6 +134,9 @@ class TestInitFlagsSetIdentity:
         args = call_args.args
         assert args[1] == "alice"
         assert args[2] == "Alice"
+        # install.feature Scenario 6: stdout에 member_id와 name이 모두 노출
+        assert "alice" in result.output
+        assert "Alice" in result.output
 
 
 class TestInitIdempotency:
@@ -242,6 +259,7 @@ class TestInitJsonOutput:
         data = json.loads("\n".join(lines[json_start:]))
 
         assert data["member_id"] == "owner"
+        assert data["name"] == "Owner"
         assert data["token"] == _MOCK_TOKEN
         assert data["recovery_key"] == _MOCK_RECOVERY_KEY
         assert "password" in data

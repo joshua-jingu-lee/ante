@@ -157,6 +157,7 @@ pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
 - **Docker 컨테이너**: `docker-compose.qa.yml`로 QA 서버 기동
 - **test 브로커**: GBM 시뮬레이션 기반 가상 시세 (credentials: `app_key=test`, `app_secret=test`)
 - **QA Admin**: `member_id=qa-admin`, `password=qa-password`
+  - 첫 기동 시 `ante init`이 랜덤 패스워드로 master를 생성한 직후, `qa-entrypoint.sh`가 `ante member reset-password --recovery-key <init 반환값>`을 통해 `QA_ADMIN_PASSWORD`(기본 `qa-password`)로 동기화한다. 재기동 시에는 DB가 이미 존재하므로 init이 master 재발급 없이 종료되고, 기존 DB의 고정 패스워드가 그대로 유지된다.
 
 ### 7.3 담당 에이전트
 
