@@ -1,33 +1,21 @@
 #!/bin/bash
 # QA 테스트 환경 엔트리포인트
-# 1. Ante 서버 백그라운드 기동
-# 2. 헬스체크 대기 (최대 30초)
-# 3. QA Admin 멤버 부트스트랩
-# 4. 서버 포그라운드 전환
+# 1. ante init으로 QA Admin 마스터 부트스트랩 (서버 기동 전; DB 파일을 서버가 만들기 전에 실행)
+# 2. Ante 서버 백그라운드 기동
+# 3. 헬스체크 대기 (최대 30초)
+# 4. 토큰 export / 재발급 처리
+# 5. 서버 포그라운드 전환
 set -e
-
-echo "[qa] Ante 서버 시작 (백그라운드)..."
-python -m ante.main &
-SERVER_PID=$!
-
-echo "[qa] 헬스체크 대기 (최대 30초)..."
-for i in $(seq 1 30); do
-    if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')" 2>/dev/null; then
-        echo "[qa] 서버 준비 완료 (${i}초)"
-        break
-    fi
-    if [ "$i" -eq 30 ]; then
-        echo "[qa] 서버 헬스체크 타임아웃 (30초)" >&2
-        exit 1
-    fi
-    sleep 1
-done
 
 echo "[qa] QA Admin 멤버 부트스트랩 (ante init 통합, issue #1125)..."
 # ante init은 비대화형. 패스워드는 자동 생성되며 JSON 출력에서 토큰을 추출한다.
 # QA TC(tests/tc/)와 docker-compose.qa.yml의 QA_ADMIN_PASSWORD 계약을 지키기 위해
 # init 직후 reset-password로 DB의 master 비밀번호를 $QA_PASSWORD 로 동기화한다.
 # --dir /app: 서버(config/system.qa.toml) [db].path=/app/db/ante.db 와 init DB 경로 일치
+#
+# 주의: ante init과 ante member reset-password는 반드시 서버 기동 전에 실행해야 한다.
+# 서버(src/ante/main.py _init_account)가 먼저 기동되면 DB 파일을 자동 생성해 버려
+# ante init의 master bootstrap이 db_existed_before=True 분기로 항상 skip된다.
 QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
 INIT_JSON=$(ante --format json init --dir /app --member-id qa-admin --name "QA Admin" 2>/dev/null || true)
 QA_TOKEN=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
@@ -45,6 +33,23 @@ if [ -n "$INIT_RECOVERY_KEY" ]; then
         echo "[qa] WARNING: QA 패스워드 동기화 실패 — init 랜덤 패스워드를 사용합니다" >&2
     fi
 fi
+
+echo "[qa] Ante 서버 시작 (백그라운드)..."
+python -m ante.main &
+SERVER_PID=$!
+
+echo "[qa] 헬스체크 대기 (최대 30초)..."
+for i in $(seq 1 30); do
+    if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/health')" 2>/dev/null; then
+        echo "[qa] 서버 준비 완료 (${i}초)"
+        break
+    fi
+    if [ "$i" -eq 30 ]; then
+        echo "[qa] 서버 헬스체크 타임아웃 (30초)" >&2
+        exit 1
+    fi
+    sleep 1
+done
 
 if [ -z "$QA_TOKEN" ]; then
     # 이미 init 완료된 경우 (재기동) — 로그인 후 rotate-token으로 재발급

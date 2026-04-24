@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import stat
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -361,3 +362,90 @@ class TestInitDefaultFlagValues:
         assert args[2] == "Owner"
         # 패스워드는 랜덤 생성 (길이 최소 20자 이상)
         assert len(args[3]) >= 20
+
+
+class TestInitAuthExempt:
+    """ante init은 인증 면제 커맨드여야 한다 — issue #1125 Codex finding B.
+
+    middleware._AUTH_EXEMPT_COMMANDS에 'init'이 포함되어 있으므로
+    stale/invalid한 ANTE_MEMBER_TOKEN이 있어도 init은 막히면 안 된다.
+    """
+
+    def test_init_runs_when_stale_ante_member_token_set(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stale한 ANTE_MEMBER_TOKEN이 설정돼도 init은 면제로 실행돼야 한다."""
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid_token")
+        # 토큰 파일 fallback도 끄기 위해 존재하지 않는 경로로 우회
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+
+        target = tmp_path / "cfg"
+
+        # authenticate_member는 patch하지 않는다 — 실제 middleware가 init을 면제해야 함
+        with (
+            patch(
+                "ante.cli.commands.init._bootstrap_master",
+                new=AsyncMock(side_effect=_mock_bootstrap),
+            ),
+            patch(
+                "ante.cli.commands.init._create_test_account",
+                new=AsyncMock(side_effect=_mock_create_test_account),
+            ),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 0, result.output
+        assert "인증 실패" not in result.output
+        assert "init이 이미 완료된 상태입니다" not in result.output
+
+
+class TestInitReentryWithOrphanDb:
+    """DB 파일만 존재하고 config 파일은 없을 때의 재진입 경로.
+
+    issue #1125 Codex finding A의 회귀 테스트:
+    서버가 먼저 기동되어 DB 파일을 생성해 둔 뒤 ante init이 호출되면
+    db_existed_before=True로 master bootstrap이 skip되어야 한다.
+    """
+
+    def test_init_skips_master_when_db_exists_but_config_missing(
+        self, runner, tmp_path: Path
+    ) -> None:
+        """DB만 있고 config 없으면 파일만 재생성하고 bootstrap은 skip."""
+        cfg = tmp_path / "cfg"
+        (cfg / "db").mkdir(parents=True)
+        (cfg / "db" / "ante.db").write_bytes(b"")  # 빈 DB 파일 흉내
+
+        bootstrap_mock = Mock()
+        create_account_mock = Mock()
+
+        with (
+            patch(
+                "ante.cli.commands.init._bootstrap_master",
+                new=bootstrap_mock,
+            ),
+            patch(
+                "ante.cli.commands.init._create_test_account",
+                new=create_account_mock,
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["--format", "json", "init", "--dir", str(cfg)])
+
+        assert result.exit_code == 0, result.output
+        bootstrap_mock.assert_not_called()
+        create_account_mock.assert_not_called()
+        # system.toml / secrets.env는 재생성
+        assert (cfg / "system.toml").exists()
+        assert (cfg / "secrets.env").exists()
+        # JSON 출력에는 token/recovery_key 없음 (master bootstrap이 skip됐으므로)
+        lines = result.output.strip().splitlines()
+        json_start = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith("{"):
+                json_start = i
+                break
+        assert json_start is not None, f"JSON 출력 없음: {result.output}"
+        data = json.loads("\n".join(lines[json_start:]))
+        assert "token" not in data or data.get("token") in (None, "")
+        assert "recovery_key" not in data or data.get("recovery_key") in (None, "")
+        assert "test_account" not in data

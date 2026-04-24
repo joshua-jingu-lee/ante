@@ -18,8 +18,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # 인증 면제 커맨드 목록 (커맨드 이름 기준)
+# init: 최초 1회 실행이므로 토큰이 아직 없음
+# reset-password / regenerate-recovery-key: 인증 수단 분실 시 복구 경로
 _AUTH_EXEMPT_COMMANDS: set[str] = {
-    "bootstrap",
+    "init",
     "reset-password",
     "regenerate-recovery-key",
 }

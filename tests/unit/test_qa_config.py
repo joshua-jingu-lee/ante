@@ -124,3 +124,22 @@ class TestQaEntrypoint:
     def test_set_e_for_error_handling(self) -> None:
         content = self.path.read_text()
         assert "set -e" in content, "set -e로 에러 시 즉시 종료해야 합니다"
+
+    def test_qa_entrypoint_runs_init_before_server_start(self) -> None:
+        """qa-entrypoint.sh는 서버 백그라운드 기동 전에 ante init을 호출해야 한다.
+
+        서버가 먼저 기동되면 DB 파일이 생성되어 init이
+        master bootstrap을 skip하는 회귀를 막는다.
+        관련 이슈: #1125 (Codex branch review finding)
+        """
+        script = self.path.read_text()
+        # ante init은 python -m ante.main (서버 기동) 앞에 와야 한다
+        init_pos = script.find("ante --format json init")
+        # 백그라운드 기동 패턴: "python -m ante.main &" (ampersand 포함)
+        server_pos = script.find("python -m ante.main &")
+        assert init_pos != -1, "ante init 호출이 없습니다"
+        assert server_pos != -1, "서버 백그라운드 기동 라인이 없습니다"
+        assert init_pos < server_pos, (
+            f"qa-entrypoint.sh: ante init(pos={init_pos})이 "
+            f"서버 기동(pos={server_pos}) 앞에 와야 합니다"
+        )
