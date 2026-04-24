@@ -668,7 +668,7 @@ class TestInitDefaultFlagValues:
 class TestInitAuthExempt:
     """ante init은 인증 면제 커맨드여야 한다 — issue #1125 Codex finding B.
 
-    middleware._AUTH_EXEMPT_COMMANDS에 'init'이 포함되어 있으므로
+    middleware._AUTH_EXEMPT_COMMAND_PATHS에 ('init',)이 포함되어 있으므로
     stale/invalid한 ANTE_MEMBER_TOKEN이 있어도 init은 막히면 안 된다.
     """
 

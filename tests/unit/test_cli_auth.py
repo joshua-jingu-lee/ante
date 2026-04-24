@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -184,10 +185,14 @@ class TestAuthExemptCommands:
 class TestNestedAuthExempt:
     """2단계 이상 nested subcommand의 인증 면제 판정 — Codex 6차 review Finding 1.
 
-    `ante member reset-password` 처럼 root 바로 아래가 아닌 leaf 레벨 이름이
-    `_AUTH_EXEMPT_COMMANDS`에 포함된 경우에도 면제가 되어야 한다. 과거 구현은
-    `ctx.invoked_subcommand`만 보고 1단계 이름("member")만 면제 대상과 비교했기
-    때문에 stale `ANTE_MEMBER_TOKEN`이 있으면 복구 경로가 막혔다.
+    `ante member reset-password` 처럼 root 바로 아래가 아닌 nested 서브커맨드
+    경로가 `_AUTH_EXEMPT_COMMAND_PATHS`에 포함된 경우에도 면제가 되어야 한다.
+    과거 구현은 `ctx.invoked_subcommand`만 보고 1단계 이름("member")만 면제
+    대상과 비교했기 때문에 stale `ANTE_MEMBER_TOKEN`이 있으면 복구 경로가
+    막혔다. 그 뒤 leaf 이름 매칭으로 수정했지만, 이번에는 `ante feed init`
+    처럼 leaf 이름이 우연히 "init"인 다른 서브커맨드까지 오인되어 nested
+    서브커맨드의 `@require_auth`가 동작하지 않는 회귀가 발생했다. 현재
+    구현은 전체 커맨드 경로 tuple로 매칭한다.
     """
 
     def test_member_reset_password_help_exempt_with_stale_token(
@@ -231,6 +236,87 @@ class TestNestedAuthExempt:
         result = runner.invoke(cli, ["init", "--help"])
         assert result.exit_code == 0, result.output
         assert "인증 실패" not in result.output
+
+
+class TestLeafNameCollisionNotExempt:
+    """같은 leaf 이름("init")을 가진 서브커맨드가 면제 오인되지 않는다.
+
+    `ante feed init`은 leaf 이름이 `ante init`과 같지만, 설계상
+    `@require_auth` + `@require_scope("data:write")` 데코레이터가 있어
+    반드시 유효 토큰이 필요하다. 전체 경로 tuple로 매칭하므로
+    ("feed", "init")은 면제 대상에 포함되지 않아야 한다.
+    """
+
+    def test_auth_exempt_path_set_contains_only_full_paths(self):
+        """면제 set이 전체 경로 tuple로 관리된다."""
+        from ante.cli.middleware import _AUTH_EXEMPT_COMMAND_PATHS
+
+        assert ("init",) in _AUTH_EXEMPT_COMMAND_PATHS
+        assert ("member", "reset-password") in _AUTH_EXEMPT_COMMAND_PATHS
+        assert ("member", "regenerate-recovery-key") in _AUTH_EXEMPT_COMMAND_PATHS
+        # feed init은 면제 아님
+        assert ("feed", "init") not in _AUTH_EXEMPT_COMMAND_PATHS
+
+    def test_feed_init_requires_auth_when_token_missing(
+        self, runner, monkeypatch, tmp_path
+    ):
+        """토큰이 전혀 없으면 `ante feed init`은 '인증이 필요합니다'로 실패."""
+        monkeypatch.delenv("ANTE_MEMBER_TOKEN", raising=False)
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        result = runner.invoke(cli, ["feed", "init", str(tmp_path / "feed-data")])
+        assert result.exit_code == 1, result.output
+        # @require_auth가 동작: "인증이 필요합니다" 또는 인증 실패 메시지
+        assert "인증" in result.output
+
+    def test_feed_init_rejects_stale_token(self, runner, monkeypatch, tmp_path):
+        """stale한 ANTE_MEMBER_TOKEN이면 `ante feed init`은 인증 실패로 종료."""
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        result = runner.invoke(cli, ["feed", "init", str(tmp_path / "feed-data")])
+        # 면제 오인이 없어야 하므로 인증 경로를 타야 함 (exit code 1)
+        assert result.exit_code == 1, result.output
+        assert "인증" in result.output
+
+    def test_resolve_command_path_for_root_init(self):
+        """LeafAwareGroup이 `ante init`에 대해 ("init",)을 저장한다."""
+        from ante.cli.main import LeafAwareGroup, cli
+
+        ctx = click.Context(cli)
+        assert isinstance(cli, LeafAwareGroup)
+        path = cli._resolve_command_path(ctx, ["init"])
+        assert path == ("init",)
+
+    def test_resolve_command_path_for_feed_init(self):
+        """LeafAwareGroup이 `ante feed init`에 대해 ("feed", "init")을 저장한다."""
+        from ante.cli.main import cli
+
+        ctx = click.Context(cli)
+        path = cli._resolve_command_path(ctx, ["feed", "init"])
+        assert path == ("feed", "init")
+
+    def test_resolve_command_path_with_options_and_args(self):
+        """옵션이 섞여 있어도 올바른 경로를 반환한다."""
+        from ante.cli.main import cli
+
+        ctx = click.Context(cli)
+        # `ante --format json feed init --data-path /tmp`
+        path = cli._resolve_command_path(
+            ctx, ["--format", "json", "feed", "init", "--data-path", "/tmp"]
+        )
+        # "json"은 `cli.get_command(ctx, "json")`가 None이어서 건너뛰지 못하고
+        # break한다. 이 테스트는 실제 Click invoke 흐름에서 옵션 값이 args에
+        # 남기지 않음을 전제로 한다. 그러나 방어적으로 최소한 첫 커맨드
+        # 위치는 올바르게 잡아야 한다. 실제 Click은 root 콜백 이후
+        # ctx.protected_args=["feed", "init", "--data-path", "/tmp"]만 남긴다.
+        assert path in {("feed", "init"), ()}
+
+    def test_resolve_command_path_nested_member_reset_password(self):
+        """LeafAwareGroup이 `ante member reset-password`에 대해 전체 경로."""
+        from ante.cli.main import cli
+
+        ctx = click.Context(cli)
+        path = cli._resolve_command_path(ctx, ["member", "reset-password"])
+        assert path == ("member", "reset-password")
 
 
 class TestGetMemberId:

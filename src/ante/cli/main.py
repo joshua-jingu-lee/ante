@@ -16,51 +16,60 @@ except Exception:
 
 
 class LeafAwareGroup(click.Group):
-    """root group invoke 직전에 leaf 서브커맨드 이름을 ctx.obj에 저장.
+    """root group invoke 직전에 전체 서브커맨드 경로를 ctx.obj에 저장.
 
     Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전
     `ctx.protected_args` / `ctx.args`를 비운다(core.py:1680-1682). 따라서
     root 콜백이 단독으로는 `ante member reset-password` 같은 2단계 이상
-    서브커맨드의 leaf를 알 수 없다. 이 서브클래스는 `super().invoke(ctx)`
-    호출 전에 subcommand 트리를 따라가며 leaf 이름을 추출해
-    `ctx.obj["_leaf_command"]`에 저장한다. middleware._get_invoked_subcommand
-    가 이 값을 우선적으로 사용하여 `_AUTH_EXEMPT_COMMANDS` (reset-password,
-    regenerate-recovery-key)를 leaf 기준으로 매칭하도록 한다.
+    서브커맨드의 경로를 알 수 없다. 이 서브클래스는 `super().invoke(ctx)`
+    호출 전에 subcommand 트리를 따라가며 전체 경로 tuple을 추출해
+    `ctx.obj["_leaf_command_path"]`에 저장한다. middleware._get_invoked_command_path
+    가 이 값을 이용해 `_AUTH_EXEMPT_COMMAND_PATHS`를 전체 경로 기준으로
+    매칭한다.
+
+    예:
+    - `ante init` → ("init",)
+    - `ante member list` → ("member", "list")
+    - `ante member reset-password` → ("member", "reset-password")
+    - `ante feed init` → ("feed", "init")  (leaf 이름이 "init"이지만 면제 아님)
     """
 
     def invoke(self, ctx: click.Context) -> object:
         ctx.ensure_object(dict)
         all_args = [*ctx.protected_args, *ctx.args]
-        leaf = self._resolve_leaf_command(ctx, all_args)
-        if leaf is not None:
-            ctx.obj["_leaf_command"] = leaf
+        path = self._resolve_command_path(ctx, all_args)
+        if path:
+            ctx.obj["_leaf_command_path"] = path
+            # 하위 호환: 기존 코드가 leaf 이름만 필요로 할 수 있음
+            ctx.obj["_leaf_command"] = path[-1]
         return super().invoke(ctx)
 
-    def _resolve_leaf_command(self, ctx: click.Context, args: list[str]) -> str | None:
-        """subcommand 트리를 따라가 leaf 커맨드명을 반환.
+    def _resolve_command_path(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str, ...]:
+        """subcommand 트리를 따라가 루트부터 leaf까지의 경로 tuple을 반환.
 
-        Options(`-x`, `--flag`)는 skip하고 non-option 토큰만 커맨드 후보로
-        본다. resolve_command가 알지 못하는 토큰을 만나면 현재까지의
-        last known 이름을 leaf로 간주한다.
+        Options(`-x`, `--flag`, `--key=value`)는 skip하고 non-option 토큰만
+        커맨드 후보로 본다. `current.get_command(ctx, token)`이 None을
+        반환하면 경로 탐색을 종료한다. 이는 옵션 값으로 쓰인 non-option
+        토큰(예: `--format json`의 "json")이 섞여 들어와도 안전하게 동작
+        하도록 한다.
         """
         cmd: click.Command = self
-        remaining = list(args)
-        last: str | None = None
-        while remaining and isinstance(cmd, click.MultiCommand):
-            name: str | None = None
-            for tok in remaining:
-                if not tok.startswith("-"):
-                    name = tok
-                    break
-            if name is None:
-                return last
-            sub = cmd.get_command(ctx, name)
+        path: list[str] = []
+        i = 0
+        while i < len(args) and isinstance(cmd, click.MultiCommand):
+            token = args[i]
+            if token.startswith("-"):
+                i += 1
+                continue
+            sub = cmd.get_command(ctx, token)
             if sub is None:
-                return last
-            last = name
-            remaining = remaining[remaining.index(name) + 1 :]
+                break
+            path.append(token)
             cmd = sub
-        return last
+            i += 1
+        return tuple(path)
 
 
 @click.group(cls=LeafAwareGroup)

@@ -17,13 +17,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 인증 면제 커맨드 목록 (커맨드 이름 기준)
-# init: 최초 1회 실행이므로 토큰이 아직 없음
-# reset-password / regenerate-recovery-key: 인증 수단 분실 시 복구 경로
-_AUTH_EXEMPT_COMMANDS: set[str] = {
-    "init",
-    "reset-password",
-    "regenerate-recovery-key",
+# 인증 면제 커맨드 경로 목록 (루트부터 leaf까지의 전체 경로)
+# - ("init",): 최초 1회 실행이므로 토큰이 아직 없음
+# - ("member", "reset-password") / ("member", "regenerate-recovery-key"):
+#   인증 수단 분실 시 복구 경로
+#
+# NOTE: 전체 경로 tuple로 매칭한다. leaf 이름만 비교하면 `ante feed init`처럼
+# leaf 이름이 우연히 "init"인 다른 서브커맨드까지 면제 대상으로 오인된다.
+# (`ante feed init`은 `@require_auth` + `@require_scope("data:write")`로 반드시
+# 인증이 필요하다.)
+_AUTH_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
+    ("init",),
+    ("member", "reset-password"),
+    ("member", "regenerate-recovery-key"),
 }
 
 
@@ -58,10 +64,11 @@ def authenticate_member(ctx: click.Context) -> None:
     if ctx.resilient_parsing:
         return
 
-    # 면제 커맨드 판별 — leaf 서브커맨드 이름까지 내려가서 매치한다.
-    # (`ante member reset-password`는 leaf가 "reset-password"이므로 면제)
-    invoked = _get_invoked_subcommand(ctx)
-    if invoked in _AUTH_EXEMPT_COMMANDS:
+    # 면제 커맨드 판별 — 루트부터 leaf까지의 전체 커맨드 경로로 매칭한다.
+    # (`ante member reset-password` → ("member", "reset-password"))
+    # LeafAwareGroup(main.py)이 ctx.obj["_leaf_command_path"]에 tuple을 저장.
+    path = _get_invoked_command_path(ctx)
+    if path is not None and path in _AUTH_EXEMPT_COMMAND_PATHS:
         ctx.obj["member"] = None
         return
 
@@ -99,12 +106,13 @@ def _run_authenticate(token: str) -> Member:
     return asyncio.run(_auth())
 
 
-def _get_invoked_subcommand(ctx: click.Context) -> str | None:
-    """호출된 leaf 서브커맨드명을 반환.
+def _get_invoked_command_path(ctx: click.Context) -> tuple[str, ...] | None:
+    """호출된 서브커맨드의 전체 경로 tuple을 반환.
 
-    `ante init` → "init"
-    `ante member list` → "list"
-    `ante member reset-password` → "reset-password"
+    `ante init` → ("init",)
+    `ante member list` → ("member", "list")
+    `ante member reset-password` → ("member", "reset-password")
+    `ante feed init` → ("feed", "init")
 
     Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전에
     `ctx.protected_args`/`ctx.args`를 비운다 (core.py:1680-1682). 따라서
@@ -113,17 +121,17 @@ def _get_invoked_subcommand(ctx: click.Context) -> str | None:
     subcommand path를 직접 추출할 수 없다.
 
     대신 루트 그룹을 `LeafAwareGroup`(main.py)로 설정해, `invoke()`의
-    `super().invoke(ctx)` 호출 **전에** leaf command 이름을
-    `ctx.obj["_leaf_command"]`에 저장한다. 이 값이 있으면 우선 사용하고,
-    없으면 `ctx.invoked_subcommand`로 fallback한다.
+    `super().invoke(ctx)` 호출 **전에** 전체 커맨드 경로를 tuple로
+    `ctx.obj["_leaf_command_path"]`에 저장한다. 이 값이 있으면 우선 사용하고,
+    없으면 `ctx.invoked_subcommand`로 부분 fallback한다.
     """
     obj = getattr(ctx, "obj", None)
     if isinstance(obj, dict):
-        leaf = obj.get("_leaf_command")
-        if leaf:
-            return leaf
-    if hasattr(ctx, "invoked_subcommand"):
-        return ctx.invoked_subcommand
+        path = obj.get("_leaf_command_path")
+        if path:
+            return tuple(path)
+    if hasattr(ctx, "invoked_subcommand") and ctx.invoked_subcommand:
+        return (ctx.invoked_subcommand,)
     return None
 
 
