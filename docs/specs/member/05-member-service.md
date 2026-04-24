@@ -19,7 +19,7 @@ MemberService는 내부적으로 책임을 분리하여 `AuthService`(인증), `
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `initialize` | — | None | 스키마 생성 |
-| `bootstrap_master` | member_id, password, name, emoji | tuple[Member, str, str] | master 생성 + (token, recovery_key) 반환. 최초 1회만. 이미 존재 시 에러 |
+| `bootstrap_master` | member_id, password, name, emoji | tuple[Member, str, str] | master 생성 + (token, recovery_key) 반환. 최초 1회만. 이미 존재 시 에러. CLI에서는 `ante init`이 내부 호출 |
 | `register` | member_id, type, role, org, name, scopes, registered_by, emoji | tuple[Member, str] | 멤버 등록 + 토큰 반환. master만 호출 가능 |
 | `authenticate` | token | Member | 토큰으로 멤버 식별. 타입 접두어 검증 포함 |
 | `authenticate_password` | member_id, password | Member | 패스워드 인증 (human 대시보드 로그인) |

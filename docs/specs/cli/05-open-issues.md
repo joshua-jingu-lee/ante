@@ -22,5 +22,9 @@
 - [x] `MemberService.bootstrap_master()` 토큰 동시 발급
 - [x] KIS 연동 정보 미입력 시 `broker_type = "test"`인 "default" Account 자동 생성 (Test 계좌 폴백)
 - [x] Telegram 설정 선택 입력 (스킵 시 알림 비활성)
+- [x] **[재설계 2026-04]** `ante init` 대화형 흐름 제거 → 플래그 기반 비대화형 재설계
+- [x] **[재설계 2026-04]** `ante member bootstrap` 제거 (master 생성은 `ante init`에 통합)
+- [x] **[재설계 2026-04]** `--seed` 플래그 제거 (PR #609에서 관련 인프라 삭제된 후 죽은 코드)
+- [x] **[재설계 2026-04]** 패스워드 자동 생성 + 1회 출력 방식으로 변경
 
 ### 구현되었으나 스펙 미반영

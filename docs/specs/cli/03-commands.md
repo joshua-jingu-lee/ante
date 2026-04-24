@@ -152,110 +152,57 @@ ante approval reopen <approval_id> [--data <json>]  # 거절된 요청 재상신
 
 ### `ante init` — 시스템 초기 설정
 
-설치 후 최초 1회 실행하는 대화형 설정 커맨드. 인증 면제.
-설정 파일 생성, master 계정 생성, 증권사·알림 연동까지 한 번에 수행한다.
+설치 후 최초 1회 실행하는 **비대화형** 설정 커맨드. 인증 면제.
+파일시스템 골격(`system.toml`·`secrets.env`·빈 DB) 생성 + master 계정 + 가상 탐색용 테스트 계좌를 1회 생성한다.
 
 ```bash
-ante init [--dir <경로>] [--seed]
+ante init [--member-id owner] [--name Owner] [--dir <경로>]
 ```
 
-**대화형 흐름:**
+**플래그:**
 
-```
-$ ante init
-
-Ante 초기 설정을 시작합니다.
-
-── 1. Master 계정 ──────────────────────────────
-Member ID: owner
-이름: 홈트레이더
-패스워드: ••••••••
-패스워드 확인: ••••••••
-
-── 2. 계좌 등록 ────────────────────────────────
-  증권사 계좌를 등록합니다. 건너뛰면 Test 계좌로 설정됩니다.
-  나중에 `ante account add` 명령어로 추가할 수 있습니다.
-KIS 연동 정보를 입력하시겠습니까? [y/N]: y
-계좌 ID (기본: default): default
-APP KEY: PSxxxxxxxxxxx
-APP SECRET: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-계좌번호 (예: 50123456-01): 50123456-01
-모의투자 여부 [y/N]: n
-
-── 3. 텔레그램 알림 (선택) ─────────────────────
-  나중에 ~/.config/ante/secrets.env에서 설정할 수 있습니다.
-텔레그램 알림을 설정하시겠습니까? [y/N]: n
-
-── 4. 데이터 수집 API (선택) ───────────────────
-  설정하면 백테스팅용 KRX 시세·재무 데이터를 자동 수집할 수 있습니다.
-  data.go.kr과 DART의 Open API Key가 필요합니다.
-  나중에 `ante feed config set` 명령어로도 설정할 수 있습니다.
-data.go.kr API 키를 입력하시겠습니까? [y/N]: n
-DART API 키를 입력하시겠습니까? [y/N]: n
-
-── 완료 ────────────────────────────────────────
-
-✅ 초기 설정 완료
-  설정 디렉토리: ~/.config/ante/
-  Member ID   : owner
-  이모지      : 🦊
-  계좌        : default (KIS, 실투자)
-
-🔑 토큰: ante_hk_8k2m9p4q...
-
-   셸 프로필에 추가하면 매번 입력하지 않아도 됩니다:
-   echo 'export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...' >> ~/.zshrc
-
-   또는 현재 세션에서만 사용:
-   export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...
-
-   이제 시스템을 시작할 수 있습니다:
-   ante system start
-
-⚠️ Recovery Key: ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
-   이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.
-```
-
-**입력 항목:**
-
-| 단계 | 항목 | 필수 | 입력 방식 | 미입력 시 |
-|------|------|------|----------|----------|
-| 1 | Member ID | O | 평문 | — |
-| 1 | 이름 | O | 평문 | — |
-| 1 | 패스워드 | O | 마스킹 (hide_input) | — |
-| 2 | 계좌 ID | — | 평문 | "default" |
-| 2 | KIS APP KEY | — | 평문 | Test 계좌로 설정 |
-| 2 | KIS APP SECRET | — | 평문 | Test 계좌로 설정 |
-| 2 | 계좌번호 | — | 평문 | Test 계좌로 설정 |
-| 2 | 모의투자 여부 | — | y/N | N (실투자) |
-| 3 | Telegram 봇 토큰 | — | 평문 | 알림 비활성 |
-| 3 | Telegram 채팅 ID | — | 평문 | 알림 비활성 |
-| 4 | data.go.kr API 키 | — | 평문 | DataFeed 미사용 |
-| 4 | DART API 키 | — | 평문 | DataFeed 미사용 |
-
-**내부 실행 순서:**
-
-1. 설정 디렉토리 생성 + `system.toml` 생성
-2. KIS·Telegram 연동 정보를 `secrets.env`에 기록 (`KIS_{ACCOUNT_ID}_*` 접두사)
-3. Account 생성 — KIS 입력 시 해당 계좌 등록, 미입력 시 Test 계좌(`broker_type="test"`)로 "default" Account 생성
-4. DataFeed API 키를 `.feed/.env`에 기록 (`ante feed config set` 내부 호출)
-5. `MemberService.bootstrap_master()` 호출 → master 생성 + 토큰 + recovery key 발급
-
-**옵션:**
-
-| 옵션 | 기본값 | 설명 |
-|------|--------|------|
+| 플래그 | 기본값 | 설명 |
+|--------|--------|------|
+| `--member-id` | `owner` | master 멤버 ID |
+| `--name` | `Owner` | master 표시 이름 |
 | `--dir` | `~/.config/ante/` | 설정 디렉토리 경로 |
-| `--seed` | false | E2E 테스트용 시드 데이터 주입 |
 
-**멱등성**: 이미 master가 존재하면 거부한다. 설정 파일은 덮어쓰지 않고 기존 파일 유지.
+**생성 산출물:**
 
-> `ante member bootstrap`은 독립 실행도 유지한다. `ante init` 없이 bootstrap만 따로 실행할 수 있으며, `ante init`은 내부적으로 bootstrap을 호출한다.
+파일 3개와 DB 레코드 2개를 생성한다.
+
+- 파일: `<dir>/system.toml`, `<dir>/secrets.env` (placeholder 주석), `<dir>/db/ante.db` (스키마 적용)
+- DB 레코드: master member 1개, default test account (`broker_type="test"`) 1개
+
+**내부 실행 순서**: 1. 디렉토리 생성 → 2. master bootstrap → 3. test account 생성
+
+**출력:**
+
+패스워드·토큰·recovery key를 **자동 생성**하여 1회만 출력한다. 사용자는 입력하지 않는다.
+
+**멱등성 (I4):**
+
+- 위 3개 파일이 **모두 존재**하면 거부 (`"init이 이미 완료된 상태입니다"`, exit code 1)
+- **하나라도 누락**이면 누락분만 생성. DB 누락 시 master·테스트 계좌도 함께 재발급.
+
+**옵셔널 도메인 입력 (Telegram / KIS 실계좌 / DataFeed):**
+
+`ante init`은 이들을 다루지 않는다. 필요 시 다음 명령을 사용한다:
+
+- KIS 실계좌: `ante account add <account_id> ...`
+- Telegram: `<dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
+- DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
+
+**비범위:**
+
+- 대화형 프롬프트: 없음
+- 시드 데이터 주입: 지원하지 않음 (PR #609 이후 관련 인프라 제거됨)
 
 ### `ante member` — 멤버(에이전트) 관리
 
+> master 계정 생성은 `ante init`에 통합되었다. 별도 `ante member bootstrap` 명령은 제거됨(재설계 2026-04).
+
 ```bash
-ante member bootstrap --id <member_id> [--name <이름>]  # master 계정 생성 + 토큰 발급 (인증 면제, ante init에서 내부 호출)
 ante member register <name> --role <역할>               # 멤버 등록
 ante member list [--status <상태>]                      # 멤버 목록
 ante member info <member_id>                            # 멤버 상세
