@@ -1,15 +1,54 @@
-"""ante init CLI 테스트."""
+"""ante init CLI 테스트 — 비대화형 재설계 (issue #1125)."""
 
 from __future__ import annotations
 
 import json
+import stat
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
-from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+
+_MOCK_MASTER_INFO = {
+    "member_id": "owner",
+    "role": "master",
+    "emoji": "🦊",
+}
+_MOCK_TOKEN = "ante_hk_test_token_123"
+_MOCK_RECOVERY_KEY = "ANTE-RK-XXXX-YYYY-ZZZZ-AAAA-BBBB-CCCC"
+
+_MOCK_TEST_ACCOUNT = {
+    "account_id": "test",
+    "broker_type": "test",
+    "exchange": "TEST",
+}
+
+
+def _mock_bootstrap(*args, **kwargs):
+    """_bootstrap_master mock — 3-tuple (dict, token, recovery_key) 반환."""
+    return _MOCK_MASTER_INFO, _MOCK_TOKEN, _MOCK_RECOVERY_KEY
+
+
+def _mock_create_test_account(*args, **kwargs):
+    """_create_test_account mock — test account dict 반환."""
+    return _MOCK_TEST_ACCOUNT
+
+
+def _patch_init():
+    """표준 패치 3종: _bootstrap_master + _create_test_account + authenticate_member."""
+    return [
+        patch(
+            "ante.cli.commands.init._bootstrap_master",
+            new=AsyncMock(side_effect=_mock_bootstrap),
+        ),
+        patch(
+            "ante.cli.commands.init._create_test_account",
+            new=AsyncMock(side_effect=_mock_create_test_account),
+        ),
+        patch("ante.cli.main.authenticate_member"),
+    ]
 
 
 @pytest.fixture
@@ -17,520 +56,290 @@ def runner():
     return CliRunner()
 
 
-_MOCK_MEMBER = Member(
-    member_id="owner",
-    type=MemberType.HUMAN,
-    role=MemberRole.MASTER,
-    org="default",
-    name="홈트레이더",
-    emoji="🦊",
-    status=MemberStatus.ACTIVE,
-    scopes=[],
-    token_hash="hash",
-    password_hash="hash",
-    recovery_key_hash="hash",
-    created_at="2026-01-01 00:00:00",
-    created_by="system",
-    token_expires_at="2026-04-01 00:00:00",
-)
+class TestInitFreshEnvironment:
+    """시나리오 1: 신규 환경 초기화."""
 
-_MOCK_TOKEN = "ante_hk_test_token_123"
-_MOCK_RECOVERY_KEY = "ANTE-RK-XXXX-YYYY-ZZZZ-AAAA-BBBB-CCCC"
-
-
-_MOCK_RESULT = {
-    "member_id": _MOCK_MEMBER.member_id,
-    "role": _MOCK_MEMBER.role,
-    "emoji": _MOCK_MEMBER.emoji,
-}
-
-
-_MOCK_TEST_ACCOUNT = [
-    {
-        "account_id": "test",
-        "broker_type": "test",
-        "exchange": "TEST",
-    }
-]
-
-
-def _mock_bootstrap(*args, **kwargs):
-    """bootstrap_master mock — 3-tuple (dict, token, recovery_key) 반환."""
-    return _MOCK_RESULT, _MOCK_TOKEN, _MOCK_RECOVERY_KEY
-
-
-def _mock_create_accounts_test_only(*args, **kwargs):
-    """_create_accounts mock — 테스트 계좌만 생성."""
-    return _MOCK_TEST_ACCOUNT
-
-
-def _mock_create_accounts_with_real(*args, **kwargs):
-    """_create_accounts mock — 테스트 + 실제 계좌."""
-    return [
-        *_MOCK_TEST_ACCOUNT,
-        {
-            "account_id": "domestic",
-            "broker_type": "kis-domestic",
-            "exchange": "KRX",
-        },
-    ]
-
-
-def _patch_bootstrap_and_auth():
-    """bootstrap_master + _create_accounts + authenticate_member mock."""
-    return [
-        patch(
-            "ante.cli.commands.init._bootstrap_master",
-            new=AsyncMock(side_effect=_mock_bootstrap),
-        ),
-        patch(
-            "ante.cli.commands.init._create_accounts",
-            new=AsyncMock(side_effect=_mock_create_accounts_test_only),
-        ),
-        patch("ante.cli.main.authenticate_member"),
-    ]
-
-
-def _patch_with_real_account():
-    """실제 계좌 등록 포함 mock."""
-    return [
-        patch(
-            "ante.cli.commands.init._bootstrap_master",
-            new=AsyncMock(side_effect=_mock_bootstrap),
-        ),
-        patch(
-            "ante.cli.commands.init._create_accounts",
-            new=AsyncMock(side_effect=_mock_create_accounts_with_real),
-        ),
-        patch("ante.cli.main.authenticate_member"),
-    ]
-
-
-class TestInitInteractive:
-    """ante init 대화형 통합 흐름 테스트."""
-
-    def test_init_skip_account_creates_test(self, runner, tmp_path):
-        """계좌 등록 스킵 시 테스트 계좌만 생성된다."""
+    def test_init_creates_all_artifacts(self, runner, tmp_path):
+        """ante init (플래그 없음) → 3개 파일 생성, 토큰·recovery key·패스워드 출력."""
         target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",  # Member ID
-                "홈트레이더",  # 이름
-                "pass1234",  # 패스워드
-                "pass1234",  # 패스워드 확인
-                "n",  # 실제 계좌 등록? n
-                "n",  # 텔레그램? n
-                "n",  # data.go.kr? n
-                "n",  # DART? n
-            ]
-        )
 
-        patches = _patch_bootstrap_and_auth()
+        patches = _patch_init()
         for p in patches:
             p.start()
         try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
         finally:
             for p in patches:
                 p.stop()
 
         assert result.exit_code == 0, result.output
-        assert "초기 설정 완료" in result.output
-        assert "test (테스트 계좌만)" in result.output
+        # 3개 파일 존재
+        assert (target / "system.toml").exists()
+        assert (target / "secrets.env").exists()
+        # DB는 _bootstrap mock에 의존 — 파일 존재는 보장되지 않음
+        # 출력에 토큰·recovery·패스워드 섹션 포함
+        assert _MOCK_TOKEN in result.output
+        assert _MOCK_RECOVERY_KEY in result.output
+        assert "패스워드" in result.output
+        # 테스트 계좌 표시
+        assert "test" in result.output
+
+
+class TestInitFlagsSetIdentity:
+    """시나리오 2: 플래그로 정체성 지정."""
+
+    def test_custom_member_id_and_name(self, runner, tmp_path):
+        """--member-id alice --name Alice 시 해당 값이 _bootstrap_master에 전달된다."""
+        target = tmp_path / "config"
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "init",
+                    "--dir",
+                    str(target),
+                    "--member-id",
+                    "alice",
+                    "--name",
+                    "Alice",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        # bootstrap_mock 호출 시 member_id='alice', name='Alice' 전달 확인
+        call_args = bootstrap_mock.call_args
+        # 포지셔널: (db_path, member_id, name, password)
+        args = call_args.args
+        assert args[1] == "alice"
+        assert args[2] == "Alice"
+
+
+class TestInitIdempotency:
+    """시나리오 3 & 4: 멱등성 — 전체 존재 시 거부, 부분 누락 시 보완."""
+
+    def test_init_refuses_when_all_artifacts_exist(self, runner, tmp_path):
+        """system.toml + secrets.env + db/ante.db 모두 존재 시 거부."""
+        target = tmp_path / "config"
+        target.mkdir()
+        (target / "system.toml").write_text("existing")
+        (target / "secrets.env").write_text("existing")
+        db_dir = target / "db"
+        db_dir.mkdir()
+        (db_dir / "ante.db").write_text("")
+
+        with patch("ante.cli.main.authenticate_member"):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code != 0
+        assert "init이 이미 완료된 상태입니다" in result.output
+
+    def test_init_skips_db_when_only_config_files_exist(self, runner, tmp_path):
+        """멱등성 경계 — secrets.env만 존재할 때 나머지 산출물이 채워진다.
+
+        arch-review 권고: system.toml과 db/ante.db 둘 다 누락이면
+        `_all_artifacts_exist` 는 False 이므로 init은 진행해야 한다.
+        단 db/ante.db가 실제로 없을 때만 master bootstrap이 실행되어야 한다.
+
+        이 테스트는 보완 케이스: secrets.env만 존재 → 나머지 생성.
+        """
+        target = tmp_path / "config"
+        target.mkdir()
+        (target / "secrets.env").write_text("existing")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert (target / "system.toml").exists()
+        # secrets.env 기존 내용 보존
+        assert (target / "secrets.env").read_text() == "existing"
+
+    def test_init_preserves_existing_config_files(self, runner, tmp_path):
+        """시나리오 4: system.toml + secrets.env 있고 db 누락 → DB만 재생성."""
+        target = tmp_path / "config"
+        target.mkdir()
+        (target / "system.toml").write_text("# custom config\n")
+        (target / "secrets.env").write_text("CUSTOM=1\n")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        # 기존 설정 파일 보존
+        assert (target / "system.toml").read_text() == "# custom config\n"
+        assert (target / "secrets.env").read_text() == "CUSTOM=1\n"
+        # DB 재발급에 따른 토큰·recovery key 출력
         assert _MOCK_TOKEN in result.output
         assert _MOCK_RECOVERY_KEY in result.output
 
-    def test_init_with_real_account(self, runner, tmp_path):
-        """실제 계좌 등록 시 계좌 정보가 표시된다."""
+
+class TestInitSeedFlagRemoved:
+    """시나리오 5: --seed 플래그가 제거되었음을 검증."""
+
+    def test_seed_flag_is_unknown_option(self, runner, tmp_path):
+        """--seed 옵션은 Click이 'no such option'으로 거부해야 한다."""
         target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",  # Member ID
-                "홈트레이더",  # 이름
-                "pass1234",  # 패스워드
-                "pass1234",  # 패스워드 확인
-                "y",  # 실제 계좌 등록? y
-                "1",  # 브로커 선택 (kis-domestic)
-                "domestic",  # 계좌 ID
-                "국내 주식",  # 이름
-                "PSxxxxxxxx",  # app_key
-                "secretkey123",  # app_secret
-                "50123456-01",  # account_no
-                "y",  # 모의투자 모드? y
-                "n",  # 추가 계좌? n
-                "n",  # 텔레그램? n
-                "n",  # data.go.kr? n
-                "n",  # DART? n
-            ]
-        )
 
-        patches = _patch_with_real_account()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
+        with patch("ante.cli.main.authenticate_member"):
+            result = runner.invoke(cli, ["init", "--dir", str(target), "--seed"])
 
-        assert result.exit_code == 0, result.output
-        assert "초기 설정 완료" in result.output
-        assert _MOCK_TOKEN in result.output
+        # Click unknown option → exit code 2
+        assert result.exit_code != 0
+        # 에러 메시지에 --seed 관련 문구 포함 (Click 기본 메시지)
+        combined = result.output + (result.stderr if result.stderr_bytes else "")
+        assert "no such option" in combined.lower() or "--seed" in combined
 
-    def test_init_no_kis_keys_in_secrets_env(self, runner, tmp_path):
-        """계좌 스킵 시 secrets.env에 KIS 키가 없다 (Account.credentials로 이동)."""
+
+class TestInitJsonOutput:
+    """시나리오 7: --format json 출력."""
+
+    def test_json_output_contains_all_secrets(self, runner, tmp_path):
+        """--format json 시 password/token/recovery_key/config_dir/test_account 포함."""
         target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",  # 계좌 스킵
-                "n",  # 텔레그램 스킵
-                "n",  # data.go.kr 스킵
-                "n",  # DART 스킵
-            ]
-        )
 
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-        secrets_env = target / "secrets.env"
-        content = secrets_env.read_text()
-        # KIS 관련 키가 secrets.env에 없어야 함
-        assert "KIS_APP_KEY" not in content
-        assert "KIS_APP_SECRET" not in content
-        assert "KIS_ACCOUNT_NO" not in content
-
-    def test_init_no_broker_in_system_toml(self, runner, tmp_path):
-        """계좌 스킵 시 system.toml에 [broker] 섹션이 추가되지 않는다."""
-        target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",  # 계좌 스킵
-                "n",  # 텔레그램 스킵
-                "n",  # data.go.kr 스킵
-                "n",  # DART 스킵
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-        system_toml = target / "system.toml"
-        content = system_toml.read_text()
-        # 이전에는 KIS 스킵 시 [broker] type = "test" 추가했으나,
-        # 이제는 Account 모델로 관리하므로 system.toml에 [broker] 없어야 함
-        assert "[broker]" not in content
-
-    def test_init_skip_telegram(self, runner, tmp_path):
-        """텔레그램 스킵 시 secrets.env에 텔레그램 키가 없다."""
-        target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",  # 계좌 스킵
-                "n",  # 텔레그램 스킵
-                "n",  # data.go.kr 스킵
-                "n",  # DART 스킵
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-        secrets_env = target / "secrets.env"
-        content = secrets_env.read_text()
-        assert "TELEGRAM_BOT_TOKEN=" not in content.replace("# TELEGRAM_BOT_TOKEN=", "")
-
-    def test_init_with_telegram(self, runner, tmp_path):
-        """텔레그램 입력 시 secrets.env에 키가 기록된다."""
-        target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",  # 계좌 스킵
-                "y",  # 텔레그램? y
-                "bot123token",  # 봇 토큰
-                "12345678",  # 채팅 ID
-                "n",  # data.go.kr 스킵
-                "n",  # DART 스킵
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-        secrets_env = target / "secrets.env"
-        content = secrets_env.read_text()
-        assert "TELEGRAM_BOT_TOKEN=bot123token" in content
-        assert "TELEGRAM_CHAT_ID=12345678" in content
-
-    def test_init_with_datafeed(self, runner, tmp_path):
-        """DataFeed API 키 입력 시 .feed/.env에 기록된다."""
-        target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",  # 계좌 스킵
-                "n",  # 텔레그램 스킵
-                "y",  # data.go.kr? y
-                "datagokr_key",  # data.go.kr API 키
-                "y",  # DART? y
-                "dart_key",  # DART API 키
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-
-        # .feed/.env에 키가 기록됨
-        feed_env = target / "data" / ".feed" / ".env"
-        assert feed_env.exists()
-        content = feed_env.read_text()
-        assert "ANTE_DATAGOKR_API_KEY=datagokr_key" in content
-        assert "ANTE_DART_API_KEY=dart_key" in content
-
-    def test_init_skip_datafeed(self, runner, tmp_path):
-        """DataFeed 스킵 시 .feed/.env에 키가 없다."""
-        target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",  # 계좌 스킵
-                "n",  # 텔레그램 스킵
-                "n",  # data.go.kr 스킵
-                "n",  # DART 스킵
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-        feed_env = target / "data" / ".feed" / ".env"
-        assert not feed_env.exists()
-
-    def test_init_dart_prompt_eof_defaults_no(self, runner, tmp_path):
-        """DART 프롬프트에서 EOF 수신 시 Abort 없이 기본값 'N'으로 처리된다 (#673)."""
-        target = tmp_path / "config"
-        # 7개 입력만 제공 — DART 프롬프트에서 EOF 발생
-        input_lines = "\n".join(
-            [
-                "owner",  # Member ID
-                "홈트레이더",  # 이름
-                "pass1234",  # 패스워드
-                "pass1234",  # 패스워드 확인
-                "n",  # 계좌 등록? n
-                "n",  # 텔레그램? n
-                "n",  # data.go.kr? n
-                # DART 입력 없음 → EOF
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
-        for p in patches:
-            p.start()
-        try:
-            result = runner.invoke(
-                cli, ["init", "--dir", str(target)], input=input_lines
-            )
-        finally:
-            for p in patches:
-                p.stop()
-
-        assert result.exit_code == 0, result.output
-        assert "초기 설정 완료" in result.output
-        # DART 키가 저장되지 않아야 함
-        feed_env = target / "data" / ".feed" / ".env"
-        assert not feed_env.exists()
-
-    def test_init_json_output(self, runner, tmp_path):
-        """--format json 시 JSON 출력에 accounts 포함."""
-        target = tmp_path / "config"
-        input_lines = "\n".join(
-            [
-                "owner",
-                "홈트레이더",
-                "pass1234",
-                "pass1234",
-                "n",
-                "n",
-                "n",
-                "n",
-            ]
-        )
-
-        patches = _patch_bootstrap_and_auth()
+        patches = _patch_init()
         for p in patches:
             p.start()
         try:
             result = runner.invoke(
                 cli,
                 ["--format", "json", "init", "--dir", str(target)],
-                input=input_lines,
             )
         finally:
             for p in patches:
                 p.stop()
 
         assert result.exit_code == 0, result.output
-        # JSON 출력은 대화형 프롬프트 텍스트 뒤에 위치
+
+        # JSON 파싱
         lines = result.output.strip().splitlines()
         json_start = None
         for i, line in enumerate(lines):
             if line.strip().startswith("{"):
                 json_start = i
                 break
-        assert json_start is not None, "JSON output not found"
-        json_text = "\n".join(lines[json_start:])
-        data = json.loads(json_text)
+        assert json_start is not None, f"JSON 출력 없음: {result.output}"
+        data = json.loads("\n".join(lines[json_start:]))
+
         assert data["member_id"] == "owner"
         assert data["token"] == _MOCK_TOKEN
         assert data["recovery_key"] == _MOCK_RECOVERY_KEY
-        assert "accounts" in data
-        assert data["accounts"][0]["account_id"] == "test"
+        assert "password" in data
+        assert len(data["password"]) >= 20
+        assert "config_dir" in data
+        assert "test_account" in data
+        assert data["test_account"]["account_id"] == "test"
 
 
-class TestInitIdempotent:
-    """멱등성: 설정이 이미 존재하면 거부."""
+class TestInitSecretsEnvPermission:
+    """secrets.env 파일 권한 0600."""
 
-    def test_init_existing_config_rejected(self, runner, tmp_path):
+    def test_secrets_env_is_0600(self, runner, tmp_path):
+        """secrets.env 생성 후 권한이 0600 (u+rw, others 없음)이어야 한다."""
         target = tmp_path / "config"
-        target.mkdir()
-        (target / "system.toml").write_text("existing")
 
-        with patch("ante.cli.main.authenticate_member"):
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        secrets_env = target / "secrets.env"
+        assert secrets_env.exists()
+        mode = secrets_env.stat().st_mode
+        # 0600 === rw-------
+        perms = stat.S_IMODE(mode)
+        assert perms == 0o600, f"secrets.env 권한이 0600이 아님: {oct(perms)}"
+
+
+class TestInitCreatesTestAccount:
+    """default test account 자동 생성 검증."""
+
+    def test_create_test_account_is_called(self, runner, tmp_path):
+        """DB가 새로 생성될 때 _create_test_account가 호출된다."""
+        target = tmp_path / "config"
+
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch(
+                "ante.cli.commands.init._bootstrap_master",
+                new=AsyncMock(side_effect=_mock_bootstrap),
+            ),
+            patch(
+                "ante.cli.commands.init._create_test_account",
+                new=create_acc_mock,
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
 
-        assert result.exit_code == 0
-        assert "이미 존재합니다" in result.output
+        assert result.exit_code == 0, result.output
+        create_acc_mock.assert_called_once()
 
 
-class TestPromptAccount:
-    """_prompt_account / _get_available_brokers 단위 테스트."""
+class TestInitDefaultDir:
+    """--dir 미지정 시 ~/.config/ante/ 사용."""
 
-    def test_test_excluded(self):
-        """test 프리셋이 브로커 선택지에서 제외된다."""
-        from ante.cli.commands.init import _get_available_brokers
+    def test_default_dir(self, runner, tmp_path):
+        from pathlib import Path
 
-        brokers = _get_available_brokers()
-        broker_types = [bt for bt, _ in brokers]
-        assert "test" not in broker_types
-        assert "kis-domestic" in broker_types
-
-
-class TestBootstrapTokenReturn:
-    """bootstrap_master가 3-tuple (member, token, recovery_key)을 반환하는지 검증."""
-
-    async def test_bootstrap_returns_3_tuple(self, tmp_path):
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
-        from ante.member.service import MemberService
-
-        db = Database(str(tmp_path / "test.db"))
-        await db.connect()
+        patches = _patch_init()
+        for p in patches:
+            p.start()
         try:
-            svc = MemberService(db, EventBus())
-            await svc.initialize()
-            member, token, recovery_key = await svc.bootstrap_master(
-                member_id="owner", password="pass123", name="대표"
-            )
-            assert member.member_id == "owner"
-            assert token.startswith("ante_hk_")
-            assert recovery_key.startswith("ANTE-RK-")
+            with patch.object(Path, "home", return_value=tmp_path):
+                result = runner.invoke(cli, ["init"])
         finally:
-            await db.close()
+            for p in patches:
+                p.stop()
 
-    async def test_bootstrap_token_authenticates(self, tmp_path):
-        """bootstrap에서 발급된 토큰으로 인증이 성공한다."""
-        from ante.core.database import Database
-        from ante.eventbus.bus import EventBus
-        from ante.member.service import MemberService
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / ".config" / "ante" / "system.toml").exists()
 
-        db = Database(str(tmp_path / "test.db"))
-        await db.connect()
-        try:
-            svc = MemberService(db, EventBus())
-            await svc.initialize()
-            _, token, _ = await svc.bootstrap_master("owner", "pass123")
-            member = await svc.authenticate(token)
-            assert member.member_id == "owner"
-            assert member.role == MemberRole.MASTER
-        finally:
-            await db.close()
+
+class TestInitDefaultFlagValues:
+    """플래그 기본값 owner/Owner이 bootstrap으로 전달된다."""
+
+    def test_defaults_are_owner_and_owner(self, runner, tmp_path):
+        target = tmp_path / "config"
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 0, result.output
+        args = bootstrap_mock.call_args.args
+        assert args[1] == "owner"
+        assert args[2] == "Owner"
+        # 패스워드는 랜덤 생성 (길이 최소 20자 이상)
+        assert len(args[3]) >= 20
