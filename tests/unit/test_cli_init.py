@@ -11,6 +11,7 @@ import stat
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -1059,3 +1060,150 @@ class TestInitTestAccountDetectionNarrowed:
         assert "비활성 상태" in result.output
         create_acc_mock.assert_not_called()
         bootstrap_mock.assert_not_called()
+
+
+class TestInitConfigDirContract:
+    """ante init이 전역 --config-dir / ANTE_CONFIG_DIR 계약을 따라야 한다.
+
+    Codex 12차 리뷰 Finding 1 회귀 — `_resolve_config_path`가 `--dir` 인자만
+    보고 `~/.config/ante`로 폴백하면 후속 CLI들이 `get_db_path()`로 보는
+    `<config_dir>/db/ante.db`와 init이 만든 DB 경로가 어긋난다.
+    """
+
+    def test_resolve_uses_ctx_config_dir_when_dir_not_given(self, tmp_path):
+        """--dir 없으면 ctx.obj['config_dir']를 우선 사용 (root --config-dir)."""
+        from ante.cli.commands.init import _resolve_config_path
+
+        custom = tmp_path / "ctx-cfg"
+        ctx = click.Context(cli, obj={"config_dir": custom})
+        result = _resolve_config_path(ctx, target_dir=None)
+        assert result == custom
+
+    def test_resolve_uses_ctx_config_dir_string_value(self, tmp_path):
+        """ctx.obj['config_dir']가 str여도 Path로 변환하여 사용."""
+        from ante.cli.commands.init import _resolve_config_path
+
+        custom = tmp_path / "ctx-cfg-str"
+        ctx = click.Context(cli, obj={"config_dir": str(custom)})
+        result = _resolve_config_path(ctx, target_dir=None)
+        assert result == custom
+
+    def test_resolve_uses_ante_config_dir_env(self, tmp_path, monkeypatch):
+        """--dir, ctx config_dir 모두 없으면 ANTE_CONFIG_DIR 사용."""
+        from ante.cli.commands.init import _resolve_config_path
+
+        custom = tmp_path / "env-cfg"
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(custom))
+        ctx = click.Context(cli, obj={})
+        result = _resolve_config_path(ctx, target_dir=None)
+        assert result == custom
+
+    def test_resolve_dir_arg_takes_precedence_over_ctx_config_dir(self, tmp_path):
+        """--dir 인자가 지정되면 ctx config_dir/ANTE_CONFIG_DIR 모두 무시."""
+        from ante.cli.commands.init import _resolve_config_path
+
+        explicit = tmp_path / "explicit"
+        ctx_cfg = tmp_path / "ctx-cfg"
+        ctx = click.Context(cli, obj={"config_dir": ctx_cfg})
+        result = _resolve_config_path(ctx, target_dir=str(explicit))
+        assert result == explicit
+
+    def test_resolve_dir_arg_takes_precedence_over_env(self, tmp_path, monkeypatch):
+        """--dir 인자가 ANTE_CONFIG_DIR 환경변수보다 우선."""
+        from ante.cli.commands.init import _resolve_config_path
+
+        explicit = tmp_path / "explicit-env"
+        env_cfg = tmp_path / "env-cfg"
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(env_cfg))
+        ctx = click.Context(cli, obj={})
+        result = _resolve_config_path(ctx, target_dir=str(explicit))
+        assert result == explicit
+
+    def test_init_writes_to_config_dir_from_root_option(self, runner, tmp_path):
+        """`ante --config-dir <path> init`이 그 디렉토리에 산출물을 쓴다.
+
+        통합 검증 — root group이 ctx.obj['config_dir']를 세팅하고 init이
+        그 값을 사용해야 한다.
+        """
+        target = tmp_path / "root-cfg"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["--config-dir", str(target), "init"])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert (target / "system.toml").exists()
+        assert (target / "secrets.env").exists()
+
+    def test_init_writes_to_ante_config_dir_env(self, runner, tmp_path, monkeypatch):
+        """`ANTE_CONFIG_DIR=<path> ante init`이 그 디렉토리에 산출물을 쓴다."""
+        target = tmp_path / "env-cfg-init"
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(target))
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init"])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert (target / "system.toml").exists()
+        assert (target / "secrets.env").exists()
+
+
+class TestInitSystemTomlAbsoluteDbPath:
+    """init이 생성하는 system.toml의 db.path가 절대 경로여야 한다.
+
+    Codex 12차 리뷰 Finding 2 회귀 — 상대 경로 `db/ante.db`를 그대로 쓰면
+    서버(`ante system start`)와 IPC가 cwd 기준 `./db/ante.db`를 보고,
+    CLI는 `<config_dir>/db/ante.db`를 보아 두 DB가 어긋난다.
+    """
+
+    def test_system_toml_db_path_is_absolute(self, runner, tmp_path):
+        """fresh init 후 system.toml의 db.path가 `<config>/db/ante.db` 절대 경로."""
+        target = tmp_path / "abs-cfg"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+
+        toml_text = (target / "system.toml").read_text()
+        expected = (target / "db" / "ante.db").resolve()
+        assert f'path = "{expected}"' in toml_text, (
+            f"db.path 절대 경로가 system.toml에 없음:\n{toml_text}"
+        )
+        # 더 이상 상대 경로 'db/ante.db' (큰따옴표 포함)가 system.toml에 없어야
+        assert 'path = "db/ante.db"' not in toml_text
+
+    def test_system_toml_db_path_with_root_config_dir(self, runner, tmp_path):
+        """`--config-dir <path> init` 경로에서도 db.path가 절대 경로."""
+        target = tmp_path / "abs-root"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["--config-dir", str(target), "init"])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        toml_text = (target / "system.toml").read_text()
+        expected = (target / "db" / "ante.db").resolve()
+        assert f'path = "{expected}"' in toml_text

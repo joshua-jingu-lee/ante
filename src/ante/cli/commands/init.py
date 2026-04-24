@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Literal
@@ -39,7 +40,7 @@ log_level = "INFO"
 timezone = "Asia/Seoul"
 
 [db]
-path = "db/ante.db"
+path = "{db_path}"
 
 [web]
 host = "0.0.0.0"
@@ -61,8 +62,37 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-def _resolve_config_path(target_dir: str | None) -> Path:
-    return Path(target_dir) if target_dir else Path.home() / ".config" / "ante"
+def _resolve_config_path(ctx: click.Context, target_dir: str | None) -> Path:
+    """init 대상 디렉토리 결정.
+
+    우선순위:
+      1. `--dir` 인자 (이 명령 전용 명시적 override) — 다른 모든 입력을 무시한다.
+      2. 루트 그룹이 `--config-dir`/`ANTE_CONFIG_DIR`로부터 확정한
+         `ctx.obj['config_dir']`.
+      3. `ANTE_CONFIG_DIR` 환경변수 (root callback이 이미 처리하지만 ctx가
+         비어 있는 직접 호출 경로를 위해 폴백으로도 검사한다).
+      4. 최종 폴백: `~/.config/ante/`. `resolve_config_dir()`은
+         "디렉토리가 실제로 존재할 때만 ~/.config/ante 사용"으로 동작하지만,
+         init은 이 디렉토리를 **만드는** 명령이므로 존재 여부와 무관하게
+         스펙(기본: ~/.config/ante)을 따른다.
+
+    `init`이 root 그룹의 `--config-dir`/`ANTE_CONFIG_DIR`을 무시하면 이후
+    CLI들이 `get_db_path()`로 보는 `<config_dir>/db/ante.db`와 init이 만든
+    DB 경로가 어긋난다(Codex 12차 리뷰 Finding 1).
+    """
+    if target_dir:
+        return Path(target_dir)
+
+    obj = ctx.obj or {}
+    raw_override = obj.get("config_dir")
+    if raw_override is not None:
+        return raw_override if isinstance(raw_override, Path) else Path(raw_override)
+
+    env_dir = os.environ.get("ANTE_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir)
+
+    return Path.home() / ".config" / "ante"
 
 
 def _expected_artifacts(config_path: Path) -> dict[str, Path]:
@@ -283,7 +313,7 @@ def init(
     모든 상태 완료 시 거부, 그 외 경로에서는 누락된 것만 생성한다.
     """
     fmt = get_formatter(ctx)
-    config_path = _resolve_config_path(target_dir)
+    config_path = _resolve_config_path(ctx, target_dir)
 
     artifacts = _expected_artifacts(config_path)
     all_files_exist = _all_artifacts_exist(config_path)
@@ -321,7 +351,11 @@ def init(
 
     # 1. 디렉토리 생성 및 누락 파일 보충 (state 2/3/4/5 공통)
     config_path.mkdir(parents=True, exist_ok=True)
-    _ensure_file(artifacts["system.toml"], SYSTEM_TOML_TEMPLATE)
+    # db.path는 절대 경로로 기록한다. 서버(`ante system start`)와 IPC가
+    # cwd와 무관하게 동일한 DB 파일을 보도록 보장하기 위함이다.
+    db_absolute = (config_path / _DB_FILENAME).resolve()
+    system_toml_content = SYSTEM_TOML_TEMPLATE.format(db_path=str(db_absolute))
+    _ensure_file(artifacts["system.toml"], system_toml_content)
     _ensure_file(artifacts["secrets.env"], SECRETS_ENV_TEMPLATE)
     artifacts["secrets.env"].chmod(0o600)
     db_path.parent.mkdir(parents=True, exist_ok=True)
