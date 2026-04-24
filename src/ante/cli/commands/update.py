@@ -170,10 +170,12 @@ def update(
             click.echo("DB 백업 중...")
         backup_db(db_path, current)
 
-    # 의존성 스냅샷 저장
+    # 의존성 스냅샷 저장 — 스냅샷은 DB 디렉터리 옆에 저장해 백업과 위치를
+    # 통일한다. `get_db_path(ctx)` 결과의 부모 디렉터리를 그대로 전달해
+    # 과거 `./db` CWD 폴백이 남기던 유령 파일을 없앤다 (Refs #1125).
     if not fmt.is_json:
         click.echo("의존성 스냅샷 저장 중...")
-    snapshot_path = snapshot_dependencies(current)
+    snapshot_path = snapshot_dependencies(current, db_dir=db_path.parent)
     if snapshot_path:
         if not fmt.is_json:
             click.echo(f"스냅샷 저장 완료: {snapshot_path}")
@@ -187,14 +189,16 @@ def update(
         fmt.error("업데이트 실패")
         raise SystemExit(1)
 
-    # Phase B: 마이그레이션
+    # Phase B: 마이그레이션 — executor 가 서브프로세스로 `python -m
+    # ante.db.migrations` 를 호출한다. config_dir 로 계산한 DB 경로를
+    # 환경변수로 전달해 서브프로세스가 같은 DB 에 마이그레이션을 적용한다.
     if not fmt.is_json:
         click.echo("DB 마이그레이션 실행 중...")
-    if not run_post_update_migrations():
+    if not run_post_update_migrations(str(db_path)):
         if not fmt.is_json:
             click.echo("마이그레이션 실패. 자동 롤백 시도 중...", err=True)
         backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"
-        if rollback_update(current, backup_path):
+        if rollback_update(current, backup_path, str(db_path)):
             if fmt.is_json:
                 fmt.error("마이그레이션 실패. 롤백 완료.", code="migration_failed")
             else:

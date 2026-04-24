@@ -8,6 +8,17 @@
 # 6. 서버 포그라운드 전환
 set -e
 
+# config/system.qa.toml 의 [db].path=/app/db/ante.db 와 CLI 의 get_db_path 가
+# 같은 DB 를 바라보도록 ANTE_CONFIG_DIR 을 /app 으로 고정한다. 이 값이 없으면
+# get_db_path 가 ~/.config/ante/db/ante.db 폴백을 사용해 QA 서버 DB 와
+# 다른 DB 를 보게 된다 (Codex 10차 review Finding 1).
+#
+# 이 export 는 현재 스크립트에서 실행되는 모든 ante CLI 호출(`ante init`,
+# `ante member reset-password`, `ante --format json ...` 등)에 적용된다.
+# ante init 의 `--dir /app` 옵션과 독립적으로 작동하지만, member reset-password
+# 처럼 `--config-dir` 옵션을 받지 않는 서브커맨드는 env var 에만 의존한다.
+export ANTE_CONFIG_DIR=/app
+
 echo "[qa] QA Admin 멤버 부트스트랩 (ante init 통합, issue #1125)..."
 # ante init은 비대화형. 신규 DB일 때만 master를 생성하고 JSON에 recovery_key를 반환한다.
 # QA TC(tests/tc/)와 docker-compose.qa.yml의 QA_ADMIN_PASSWORD 계약을 지키기 위해
@@ -172,6 +183,11 @@ echo -n "$QA_TOKEN" > /run/ante-token
 chmod 644 /run/ante-token
 # docker exec에서 CLI가 토큰 파일을 찾을 수 있도록 환경변수 파일에도 기록
 echo "ANTE_TOKEN_FILE=/run/ante-token" >> /etc/environment
+# docker exec 세션이 컨테이너의 export 된 환경변수를 상속하지 않으므로
+# ANTE_CONFIG_DIR 도 /etc/environment 에 기록해 tests/tc/ 의 plain `ante ...`
+# CLI 호출이 서버와 같은 /app/db/ante.db 를 바라보게 한다
+# (Codex 10차 review Finding 1).
+echo "ANTE_CONFIG_DIR=/app" >> /etc/environment
 echo "[qa] ANTE_MEMBER_TOKEN 설정 완료 (환경변수 + /run/ante-token)"
 
 echo "[qa] QA 시드 계좌 확인 (Treasury 초기화 보장)..."

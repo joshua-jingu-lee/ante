@@ -1,5 +1,7 @@
 """schema_version 테이블 + 중앙 마이그레이션 러너 테스트."""
 
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -270,3 +272,56 @@ class TestMigrationAutoBackup:
         # 예외 발생 시 마이그레이션이 적용되지 않아야 한다.
         applied = await get_applied_seqs(db)
         assert applied == set()
+
+
+class TestMigrationsCliDbPath:
+    """Codex 10차 review Finding 2 — `python -m ante.db.migrations` 의
+    --db-path / ANTE_DB_PATH 지원 테스트.
+
+    `ante update` 가 서브프로세스로 migrations 러너를 호출할 때 실제 DB
+    경로를 전달하려면 `__main__` 블록이 CLI 인자 또는 환경변수를 받아야
+    한다. 과거 `Database("db/ante.db")` 하드코딩 회귀를 방지한다.
+    """
+
+    def test_cli_accepts_db_path_argument(self, tmp_path: Path) -> None:
+        """--db-path 인자로 전달된 DB 파일에 마이그레이션이 적용된다."""
+        db_file = tmp_path / "custom.db"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "ante.db.migrations",
+                "--db-path",
+                str(db_file),
+                "--data-path",
+                str(tmp_path / "data"),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"migrations 러너 실패: stdout={result.stdout} stderr={result.stderr}"
+        )
+        # 지정된 경로에만 DB 파일이 생성돼야 한다.
+        assert db_file.exists(), "--db-path 로 전달한 파일이 생성돼야 합니다"
+
+    def test_cli_accepts_ante_db_path_env(self, tmp_path: Path) -> None:
+        """ANTE_DB_PATH 환경변수로도 DB 경로를 전달할 수 있다."""
+        import os as _os
+
+        db_file = tmp_path / "env.db"
+        env = _os.environ.copy()
+        env["ANTE_DB_PATH"] = str(db_file)
+        env["ANTE_DATA_PATH"] = str(tmp_path / "data")
+        result = subprocess.run(
+            [sys.executable, "-m", "ante.db.migrations"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert result.returncode == 0, (
+            f"migrations 러너 실패: stdout={result.stdout} stderr={result.stderr}"
+        )
+        assert db_file.exists(), "ANTE_DB_PATH 로 전달한 파일이 생성돼야 합니다"

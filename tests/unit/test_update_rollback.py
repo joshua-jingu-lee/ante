@@ -102,6 +102,29 @@ class TestRollbackUpdate:
         assert result is True
         mock_copy.assert_not_called()
 
+    def test_db_path_argument_controls_restore_target(self, tmp_path: Path) -> None:
+        """Codex 10차 review Finding 2 — db_path 인자가 복원 대상 경로를 결정한다.
+
+        과거 `rollback_update` 는 `Path("db/ante.db")` 를 CWD 기준으로
+        하드코딩해 config_dir 기반 DB 경로와 다른 파일을 복원했다.
+        호출자가 `get_db_path(ctx)` 결과를 `db_path` 인자로 넘기면
+        그 경로를 정확히 덮어써야 한다.
+        """
+        backup = tmp_path / "ante.db.bak.v1.0.0"
+        backup.write_text("backup-data")
+        custom_db = tmp_path / "custom" / "ante.db"
+        custom_db.parent.mkdir(parents=True)
+        custom_db.write_text("old")
+
+        with patch("ante.update.executor.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = rollback_update("1.0.0", backup, db_path=str(custom_db))
+
+        assert result is True
+        assert custom_db.read_text() == "backup-data", (
+            "db_path 로 전달한 경로가 복원 대상이어야 합니다"
+        )
+
 
 # ---------------------------------------------------------------------------
 # CLI 통합: 마이그레이션 실패 시 롤백 호출

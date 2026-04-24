@@ -275,6 +275,45 @@ class TestQaEntrypoint:
         assert "FATAL" in script, "복구 불가능한 init 실패에 FATAL 로그가 필요합니다"
         assert "exit 1" in script, "복구 불가능한 init 실패에서 즉시 exit 1 해야 합니다"
 
+    def test_qa_entrypoint_exports_config_dir(self) -> None:
+        """Codex 10차 review Finding 1 — ANTE_CONFIG_DIR 전파.
+
+        config/system.qa.toml의 [db].path=/app/db/ante.db 와 CLI 의
+        get_db_path() 계산이 같은 DB 를 가리키려면 ANTE_CONFIG_DIR=/app 이
+        export 돼야 한다. 이 값이 없으면 get_db_path() 가
+        ~/.config/ante/db/ante.db 폴백을 타서 서버 DB 와 다른 DB 를 본다.
+        또한 docker exec 세션은 컨테이너의 export 환경변수를 상속하지 않으므로
+        /etc/environment 에도 기록해야 tests/tc/ 의 plain `ante ...` CLI
+        호출이 같은 DB 를 바라본다.
+        """
+        import re
+
+        script = self.path.read_text()
+
+        # 1) 스크립트 본문 export 로 현재 프로세스의 모든 ante CLI 가 /app 을 본다
+        assert "export ANTE_CONFIG_DIR=/app" in script, (
+            "qa-entrypoint.sh 가 ANTE_CONFIG_DIR=/app 을 export 해야 "
+            "ante init/reset-password 가 서버와 같은 DB 를 봅니다."
+        )
+
+        # 2) /etc/environment 에도 기록해 docker exec 세션에서 상속되도록 한다
+        assert re.search(
+            r"echo\s+\"ANTE_CONFIG_DIR=/app\"\s*>>\s*/etc/environment",
+            script,
+        ), (
+            "ANTE_CONFIG_DIR=/app 을 /etc/environment 에 기록해야 "
+            "docker exec 세션의 CLI 가 같은 DB 를 봅니다."
+        )
+
+        # 3) export 가 첫 ante CLI 호출(ante init) 전에 위치해야 한다
+        export_pos = script.find("export ANTE_CONFIG_DIR=/app")
+        init_pos = script.find("ante --format json init")
+        assert export_pos != -1
+        assert init_pos != -1
+        assert export_pos < init_pos, (
+            "export ANTE_CONFIG_DIR 는 ante init 호출 전에 와야 합니다."
+        )
+
     def test_qa_entrypoint_only_already_initialized_allows_restart(self) -> None:
         """Codex 7차 review — already_initialized 외의 code는 재기동 금지.
 
