@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from typing import Literal
 
 import click
 
@@ -111,15 +112,21 @@ async def _master_exists_in_db(db_path: str) -> bool:
         await db.close()
 
 
-async def _test_account_exists_in_db(db_path: str) -> bool:
-    """default test account(account_id='test', status='active') 존재 여부.
+async def _test_account_state(
+    db_path: str,
+) -> Literal["active", "inactive", "missing"]:
+    """default test account(account_id='test')의 3-state 판정.
 
-    `AccountService.create_default_test_account()`가 만드는 정확한 계좌만
-    `True`로 판정한다. 임의의 custom `broker_type='test'` 계좌 또는
-    `suspended/deleted` 상태의 과거 test 계좌가 있어도 default 조건을 만족하지
-    않으므로 `False`를 반환한다. 판정이 너무 넓으면 default test account 생성
-    스텝이 부당하게 skip될 수 있어, AccountService가 만드는 행(`account_id='test'`
-    + `status='active'`)과 정확히 매칭되도록 좁힌다.
+    - "active":  status='active' 인 'test' 계좌 존재 → 재생성 불필요 (skip)
+    - "inactive": 'test' 계좌가 있으나 suspended/deleted 등 비활성 상태
+                  → init이 `AccountService.create_default_test_account()`를
+                  호출하면 account_id 중복으로 예외가 터지므로, 사용자에게
+                  명시적 에러로 안내해야 한다 (묵시적 skip 금지).
+    - "missing": 'test' 계좌 자체가 없음 → 재생성 대상
+
+    AccountService가 만드는 행(`account_id='test'`)을 기준으로 판정 범위를
+    좁히므로 임의의 custom `broker_type='test'` 계좌(account_id!='test')는
+    "missing"으로 취급된다.
     """
     from ante.core.database import Database
 
@@ -127,17 +134,20 @@ async def _test_account_exists_in_db(db_path: str) -> bool:
     try:
         await db.connect()
     except Exception:  # noqa: BLE001
-        return False
+        return "missing"
     try:
         try:
             row = await db.fetch_one(
-                "SELECT 1 FROM accounts WHERE account_id = ? AND status = ? LIMIT 1",
-                ("test", "active"),
+                "SELECT status FROM accounts WHERE account_id = ? LIMIT 1",
+                ("test",),
             )
         except Exception:  # noqa: BLE001
             # accounts 테이블이 아직 없을 수 있음 (orphan DB)
-            return False
-        return row is not None
+            return "missing"
+        if row is None:
+            return "missing"
+        status = row.get("status")
+        return "active" if status == "active" else "inactive"
     finally:
         await db.close()
 
@@ -282,10 +292,23 @@ def init(
 
     # DB 레코드 상태 조회 (DB 파일이 있을 때만)
     master_exists = False
-    test_account_exists = False
+    test_account_status: Literal["active", "inactive", "missing"] = "missing"
     if db_file_exists:
         master_exists = _run(_master_exists_in_db(str(db_path)))
-        test_account_exists = _run(_test_account_exists_in_db(str(db_path)))
+        test_account_status = _run(_test_account_state(str(db_path)))
+    test_account_exists = test_account_status == "active"
+
+    # test account가 suspended/deleted 등 비활성 상태면 명시적 에러로 안내한다.
+    # AccountService.create_default_test_account()가 account_id='test' 중복으로
+    # 예외를 던지므로 묵시적 skip/재생성을 시도하면 init 자체가 실패한다.
+    if test_account_status == "inactive":
+        _fail(
+            fmt,
+            "default test account(account_id='test')가 비활성 상태입니다. "
+            "`ante account activate test`로 활성화하거나 해당 row를 정리한 "
+            "뒤 재시도하세요.",
+            code="test_account_inactive",
+        )
 
     # state 1: 모든 상태 완료 → 거부
     if all_files_exist and master_exists and test_account_exists:

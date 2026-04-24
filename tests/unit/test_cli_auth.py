@@ -181,6 +181,58 @@ class TestAuthExemptCommands:
         assert result.exit_code == 0
 
 
+class TestNestedAuthExempt:
+    """2단계 이상 nested subcommand의 인증 면제 판정 — Codex 6차 review Finding 1.
+
+    `ante member reset-password` 처럼 root 바로 아래가 아닌 leaf 레벨 이름이
+    `_AUTH_EXEMPT_COMMANDS`에 포함된 경우에도 면제가 되어야 한다. 과거 구현은
+    `ctx.invoked_subcommand`만 보고 1단계 이름("member")만 면제 대상과 비교했기
+    때문에 stale `ANTE_MEMBER_TOKEN`이 있으면 복구 경로가 막혔다.
+    """
+
+    def test_member_reset_password_help_exempt_with_stale_token(
+        self, runner, monkeypatch, tmp_path
+    ):
+        """stale ANTE_MEMBER_TOKEN 환경에서도 `member reset-password --help` 통과."""
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        result = runner.invoke(cli, ["member", "reset-password", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "인증 실패" not in result.output
+
+    def test_member_regenerate_recovery_key_help_exempt_with_stale_token(
+        self, runner, monkeypatch, tmp_path
+    ):
+        """stale ANTE_MEMBER_TOKEN 환경에서 `regenerate-recovery-key --help` 통과."""
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        result = runner.invoke(cli, ["member", "regenerate-recovery-key", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "인증 실패" not in result.output
+
+    def test_member_list_still_requires_auth_with_stale_token(
+        self, runner, monkeypatch, tmp_path
+    ):
+        """면제 목록에 없는 nested command는 여전히 인증 요구 (regression 방지).
+
+        stale ANTE_MEMBER_TOKEN이면 MemberService.authenticate가 PermissionError를
+        내고 SystemExit(1)로 종료해야 한다.
+        """
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        result = runner.invoke(cli, ["member", "list"])
+        assert result.exit_code == 1, result.output
+        assert "인증 실패" in result.output
+
+    def test_init_exempt_regression(self, runner, monkeypatch, tmp_path):
+        """단일 레벨 면제 커맨드(`ante init`) 회귀 방지."""
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        result = runner.invoke(cli, ["init", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "인증 실패" not in result.output
+
+
 class TestGetMemberId:
     """get_member_id 유틸리티 테스트."""
 

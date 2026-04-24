@@ -197,3 +197,47 @@ class TestQaEntrypoint:
             "조건부 rotate-token 분기가 남아 있습니다. "
             "reset-password 후에는 항상 login+rotate로 토큰을 재발급해야 합니다."
         )
+
+    def test_qa_entrypoint_preserves_init_stderr_for_recovery(self) -> None:
+        """Finding 2 (Codex 6차 review) — init stderr를 버리면 partial-failure
+        recovery_key 이벤트가 영구 소실된다.
+
+        `ante init`이 master bootstrap은 성공했지만 test account 생성에서 실패하면
+        stdout은 에러 payload로 대체되고 stderr 1줄 JSON 이벤트
+        (`master_bootstrap_complete`)에 recovery_key가 실린다. 과거 구현은
+        `ante ... init ... 2>/dev/null || true`로 stderr를 버려 재기동 시 복구
+        불가능한 상태를 만들었다. 이제는 stdout/stderr를 각각 mktemp 파일로
+        캡처하고 exit code 분기로 partial-failure를 복구해야 한다.
+        """
+        import re
+
+        script = self.path.read_text()
+
+        # 1) init 호출 부근에서 `2>/dev/null` 으로 stderr를 버리면 안 된다.
+        #    허용되는 패턴: stderr를 파일(또는 FD)에 리다이렉트.
+        init_block_match = re.search(r"ante\s+--format\s+json\s+init[^\n]*", script)
+        assert init_block_match is not None, "ante init 호출 라인이 없습니다"
+        init_line = init_block_match.group(0)
+        assert "2>/dev/null" not in init_line, (
+            "ante init 호출에서 stderr를 버리고 있습니다 "
+            f"(partial-failure 복구 이벤트 소실): {init_line!r}"
+        )
+
+        # 2) stderr를 파일/stream에 캡처하는 리다이렉션이 있어야 한다.
+        assert re.search(r"2>\s*\"?\$?INIT_STDERR", script) or "2> " in script, (
+            "init stderr를 파일에 캡처하는 리다이렉션이 보이지 않습니다"
+        )
+
+        # 3) partial-failure 이벤트(master_bootstrap_complete)를 처리하는
+        #    분기가 있어야 한다.
+        assert "master_bootstrap_complete" in script, (
+            "init의 partial-failure stderr 이벤트(master_bootstrap_complete)를 "
+            "처리하는 분기가 없습니다"
+        )
+
+        # 4) exit code를 || true 로 삼켜버리면 partial-failure와
+        #    already_initialized 구분이 불가능하다. init 호출 직후 exit code를
+        #    변수에 보관해 분기로 처리해야 한다.
+        assert "INIT_EXIT" in script, (
+            "init exit code를 변수에 보관해 분기 처리해야 합니다"
+        )

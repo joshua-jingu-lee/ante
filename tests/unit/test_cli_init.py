@@ -47,6 +47,10 @@ def _patch_init(*, master_exists: bool = False, test_account_exists: bool = Fals
 
     기본값은 빈 DB로 간주 (master/test account 둘 다 없음)하여
     state 5 경로와 호환된다. DB 레코드 존재를 제어하려면 명시적으로 전달.
+
+    `_test_account_state`는 3-state ("active"/"inactive"/"missing")를 반환하므로,
+    `test_account_exists=True`는 "active"로, False는 "missing"으로 매핑한다.
+    "inactive" 시나리오는 개별 테스트에서 직접 mock 한다.
     """
     return [
         patch(
@@ -62,8 +66,8 @@ def _patch_init(*, master_exists: bool = False, test_account_exists: bool = Fals
             new=AsyncMock(return_value=master_exists),
         ),
         patch(
-            "ante.cli.commands.init._test_account_exists_in_db",
-            new=AsyncMock(return_value=test_account_exists),
+            "ante.cli.commands.init._test_account_state",
+            new=AsyncMock(return_value="active" if test_account_exists else "missing"),
         ),
         patch("ante.cli.main.authenticate_member"),
     ]
@@ -100,7 +104,7 @@ def _create_db_with_test_account_row(
 ) -> None:
     """테스트 헬퍼: DB 파일에 accounts 테이블과 test account row를 만든다.
 
-    `_test_account_exists_in_db`는 실제 AccountService 스키마(account_id + status)를
+    `_test_account_state`는 실제 AccountService 스키마(account_id + status)를
     기준으로 판정하므로 `status` 컬럼을 포함해야 한다. 기본값은 default test
     account(account_id='test', status='active')과 동일하다.
     """
@@ -197,8 +201,8 @@ class TestInitFlagsSetIdentity:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -378,8 +382,8 @@ class TestInitFiveStateGuard:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -417,8 +421,8 @@ class TestInitFiveStateGuard:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -599,8 +603,8 @@ class TestInitCreatesTestAccount:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -646,8 +650,8 @@ class TestInitDefaultFlagValues:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -693,8 +697,8 @@ class TestInitAuthExempt:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
         ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
@@ -767,8 +771,8 @@ class TestInitJsonErrorContract:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -801,8 +805,8 @@ class TestInitJsonErrorContract:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -896,8 +900,8 @@ class TestInitCredentialsSingleEmission:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -940,8 +944,8 @@ class TestInitCredentialsSingleEmission:
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=False),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):
@@ -994,8 +998,16 @@ class TestInitTestAccountDetectionNarrowed:
         # master는 이미 있으므로 bootstrap은 호출 안 됨
         bootstrap_mock.assert_not_called()
 
-    def test_test_account_suspended_triggers_recreation(self, runner, tmp_path):
-        """status='suspended'인 'test' account → default 조건 불만족, 재생성 시도."""
+    def test_test_account_suspended_raises_clear_error(self, runner, tmp_path):
+        """Finding 3 (Codex 6차 review) — status='suspended'인 'test' account는
+        명시적 에러로 안내해야 한다.
+
+        과거 구현은 suspended/deleted 상태를 `False` (없음)로 판정해 재생성 시도를
+        했지만 `AccountService.create_default_test_account()`는 `account_id='test'`
+        중복 검사에 걸려 예외를 던진다 → init 자체가 실패하면서 사용자에게는
+        원인이 불명확하다. 이제는 3-state (active/inactive/missing) 판정으로
+        inactive를 만나면 `test_account_inactive` 에러 코드로 안내한다.
+        """
         target = tmp_path / "config"
         target.mkdir()
         db_path = target / "db" / "ante.db"
@@ -1015,7 +1027,35 @@ class TestInitTestAccountDetectionNarrowed:
         ):
             result = runner.invoke(cli, ["init", "--dir", str(target)])
 
-        # suspended 조건 불만족 → default 재생성 시도
-        assert result.exit_code == 0, result.output
-        create_acc_mock.assert_called_once()
+        assert result.exit_code == 1, result.output
+        # 명시적 에러 안내 — suspended/deleted 상태임을 사용자가 바로 인지 가능
+        assert "비활성 상태" in result.output
+        assert "account activate" in result.output
+        # 묵시적 재생성/bootstrap 시도 금지
+        create_acc_mock.assert_not_called()
+        bootstrap_mock.assert_not_called()
+
+    def test_test_account_deleted_raises_clear_error(self, runner, tmp_path):
+        """Finding 3 — status='deleted'인 'test' account도 동일하게 명시적 에러."""
+        target = tmp_path / "config"
+        target.mkdir()
+        db_path = target / "db" / "ante.db"
+        _create_db_with_master_row(db_path)
+        _create_db_with_test_account_row(
+            db_path, account_id="test", broker_type="test", status="deleted"
+        )
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 1, result.output
+        assert "비활성 상태" in result.output
+        create_acc_mock.assert_not_called()
         bootstrap_mock.assert_not_called()

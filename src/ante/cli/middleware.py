@@ -58,7 +58,8 @@ def authenticate_member(ctx: click.Context) -> None:
     if ctx.resilient_parsing:
         return
 
-    # 면제 커맨드 판별
+    # 면제 커맨드 판별 — leaf 서브커맨드 이름까지 내려가서 매치한다.
+    # (`ante member reset-password`는 leaf가 "reset-password"이므로 면제)
     invoked = _get_invoked_subcommand(ctx)
     if invoked in _AUTH_EXEMPT_COMMANDS:
         ctx.obj["member"] = None
@@ -99,7 +100,28 @@ def _run_authenticate(token: str) -> Member:
 
 
 def _get_invoked_subcommand(ctx: click.Context) -> str | None:
-    """현재 컨텍스트에서 호출된 하위 커맨드 이름을 반환."""
+    """호출된 leaf 서브커맨드명을 반환.
+
+    `ante init` → "init"
+    `ante member list` → "list"
+    `ante member reset-password` → "reset-password"
+
+    Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전에
+    `ctx.protected_args`/`ctx.args`를 비운다 (core.py:1680-1682). 따라서
+    root 콜백 시점에 `ctx.invoked_subcommand`는 1단계 서브커맨드 이름만
+    담고 있고, `ctx.args`/`ctx.protected_args`도 비어 있어 nested
+    subcommand path를 직접 추출할 수 없다.
+
+    대신 루트 그룹을 `LeafAwareGroup`(main.py)로 설정해, `invoke()`의
+    `super().invoke(ctx)` 호출 **전에** leaf command 이름을
+    `ctx.obj["_leaf_command"]`에 저장한다. 이 값이 있으면 우선 사용하고,
+    없으면 `ctx.invoked_subcommand`로 fallback한다.
+    """
+    obj = getattr(ctx, "obj", None)
+    if isinstance(obj, dict):
+        leaf = obj.get("_leaf_command")
+        if leaf:
+            return leaf
     if hasattr(ctx, "invoked_subcommand"):
         return ctx.invoked_subcommand
     return None

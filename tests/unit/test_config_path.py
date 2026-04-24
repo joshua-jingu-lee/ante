@@ -170,8 +170,8 @@ class TestInitCommand:
                 new=AsyncMock(return_value=True),
             ),
             patch(
-                "ante.cli.commands.init._test_account_exists_in_db",
-                new=AsyncMock(return_value=True),
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="active"),
             ),
             patch("ante.cli.main.authenticate_member"),
         ):

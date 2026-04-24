@@ -15,7 +15,55 @@ except Exception:
     __version__ = "dev"
 
 
-@click.group()
+class LeafAwareGroup(click.Group):
+    """root group invoke 직전에 leaf 서브커맨드 이름을 ctx.obj에 저장.
+
+    Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전
+    `ctx.protected_args` / `ctx.args`를 비운다(core.py:1680-1682). 따라서
+    root 콜백이 단독으로는 `ante member reset-password` 같은 2단계 이상
+    서브커맨드의 leaf를 알 수 없다. 이 서브클래스는 `super().invoke(ctx)`
+    호출 전에 subcommand 트리를 따라가며 leaf 이름을 추출해
+    `ctx.obj["_leaf_command"]`에 저장한다. middleware._get_invoked_subcommand
+    가 이 값을 우선적으로 사용하여 `_AUTH_EXEMPT_COMMANDS` (reset-password,
+    regenerate-recovery-key)를 leaf 기준으로 매칭하도록 한다.
+    """
+
+    def invoke(self, ctx: click.Context) -> object:
+        ctx.ensure_object(dict)
+        all_args = [*ctx.protected_args, *ctx.args]
+        leaf = self._resolve_leaf_command(ctx, all_args)
+        if leaf is not None:
+            ctx.obj["_leaf_command"] = leaf
+        return super().invoke(ctx)
+
+    def _resolve_leaf_command(self, ctx: click.Context, args: list[str]) -> str | None:
+        """subcommand 트리를 따라가 leaf 커맨드명을 반환.
+
+        Options(`-x`, `--flag`)는 skip하고 non-option 토큰만 커맨드 후보로
+        본다. resolve_command가 알지 못하는 토큰을 만나면 현재까지의
+        last known 이름을 leaf로 간주한다.
+        """
+        cmd: click.Command = self
+        remaining = list(args)
+        last: str | None = None
+        while remaining and isinstance(cmd, click.MultiCommand):
+            name: str | None = None
+            for tok in remaining:
+                if not tok.startswith("-"):
+                    name = tok
+                    break
+            if name is None:
+                return last
+            sub = cmd.get_command(ctx, name)
+            if sub is None:
+                return last
+            last = name
+            remaining = remaining[remaining.index(name) + 1 :]
+            cmd = sub
+        return last
+
+
+@click.group(cls=LeafAwareGroup)
 @click.option(
     "--format",
     "output_format",

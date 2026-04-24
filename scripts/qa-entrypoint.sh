@@ -22,11 +22,59 @@ echo "[qa] QA Admin 멤버 부트스트랩 (ante init 통합, issue #1125)..."
 # recovery_key_manager._invalidate_token으로 기존 토큰을 무효화하기 때문이다.
 # 유효한 토큰은 서버 기동 후 login + rotate-token 경로로만 발급한다.
 QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
-INIT_JSON=$(ante --format json init --dir /app --member-id qa-admin --name "QA Admin" 2>/dev/null || true)
-INIT_RECOVERY_KEY=$(echo "$INIT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('recovery_key',''))" 2>/dev/null || true)
+#
+# init 호출 — stdout/stderr를 분리 캡처해 partial-failure 복구 이벤트를 보존한다.
+# * 성공 (exit=0): stdout JSON payload에 recovery_key 포함.
+# * test account 단계만 실패: stdout은 에러 payload, stderr에 master_bootstrap_complete
+#   JSON 이벤트가 1줄 나오므로 이 stderr에서 recovery_key 복구.
+# * 이미 초기화(already_initialized) 또는 기타 실패: recovery_key 없음 → login+rotate
+#   경로로 이어간다(재기동 시나리오).
+#
+# 과거 구현은 `2>/dev/null || true`로 stderr과 exit code를 모두 버려 partial-failure
+# 시 recovery_key가 영구 소실되는 회귀가 있었다 (Codex 6차 review Finding 2).
+INIT_STDOUT=$(mktemp)
+INIT_STDERR=$(mktemp)
+trap 'rm -f "$INIT_STDOUT" "$INIT_STDERR"' EXIT
 
-# init이 새 master를 발급한 경우(=신규 DB)에만 QA 고정 패스워드로 동기화한다.
-# 재기동(기존 DB) 시에는 INIT_JSON 이 비어 있으므로 이 블록이 자동으로 skip 된다.
+INIT_EXIT=0
+ante --format json init --dir /app --member-id qa-admin --name "QA Admin" \
+    > "$INIT_STDOUT" 2> "$INIT_STDERR" || INIT_EXIT=$?
+
+INIT_JSON=""
+INIT_RECOVERY_KEY=""
+if [ "$INIT_EXIT" -eq 0 ]; then
+    # 정상 성공 경로: stdout payload에서 recovery_key 추출
+    INIT_JSON=$(cat "$INIT_STDOUT")
+    INIT_RECOVERY_KEY=$(printf '%s' "$INIT_JSON" | \
+        python3 -c "import sys,json; print(json.load(sys.stdin).get('recovery_key',''))" \
+        2>/dev/null || true)
+elif grep -q 'master_bootstrap_complete' "$INIT_STDERR"; then
+    # Partial-failure 경로: master는 생성됐지만 test account 생성이 실패.
+    # stderr 1줄 JSON 이벤트에서 recovery_key/password 복구.
+    EVENT_LINE=$(grep 'master_bootstrap_complete' "$INIT_STDERR" | head -1)
+    INIT_RECOVERY_KEY=$(printf '%s' "$EVENT_LINE" | \
+        python3 -c "import sys,json; print(json.load(sys.stdin).get('recovery_key',''))" \
+        2>/dev/null || true)
+    echo "[qa] ante init test account 단계 실패 — master는 생성됨. stderr에서 recovery key 복구." >&2
+    echo "[qa] init stderr:" >&2
+    cat "$INIT_STDERR" >&2
+else
+    # 이미 초기화된 상태(already_initialized) 또는 기타 실패 — 재기동 시나리오로 간주.
+    # recovery_key 없이 login+rotate 경로로 계속 진행한다.
+    echo "[qa] ante init (exit=$INIT_EXIT) — 기존 상태로 간주하고 진행합니다." >&2
+    if [ -s "$INIT_STDERR" ]; then
+        echo "[qa] init stderr:" >&2
+        cat "$INIT_STDERR" >&2
+    fi
+fi
+
+# init 임시 파일 정리 후 trap 해제 (이후 COOKIE_JAR trap이 덮어쓴다).
+rm -f "$INIT_STDOUT" "$INIT_STDERR"
+trap - EXIT
+
+# init이 새 master를 발급한 경우(=신규 DB 또는 partial-failure 복구)에만 QA
+# 고정 패스워드로 동기화한다. 재기동(기존 DB) 시에는 INIT_RECOVERY_KEY가 비어
+# 있으므로 이 블록이 자동으로 skip 된다.
 if [ -n "$INIT_RECOVERY_KEY" ]; then
     echo "[qa] QA 고정 패스워드로 master 비밀번호 동기화..."
     if printf '%s\n%s\n' "$QA_PASSWORD" "$QA_PASSWORD" | \
