@@ -23,10 +23,11 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_registry():  # noqa: ANN202
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.strategy.registry import StrategyRegistry
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     registry = StrategyRegistry(db)
     return registry, db
@@ -394,11 +395,12 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     fmt = get_formatter(ctx)
 
     async def _perf() -> dict | None:
+        from ante.cli.main import get_db_path
         from ante.core.database import Database
         from ante.strategy.registry import StrategyRegistry
         from ante.trade.performance import PerformanceTracker
 
-        db = Database("db/ante.db")
+        db = Database(get_db_path())
         await db.connect()
         try:
             registry = StrategyRegistry(db)

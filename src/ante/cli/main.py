@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 
 from ante.cli.formatter import OutputFormatter
@@ -105,6 +107,37 @@ def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
 def get_formatter(ctx: click.Context) -> OutputFormatter:
     """컨텍스트에서 OutputFormatter를 가져온다."""
     return ctx.obj["formatter"]
+
+
+def get_db_path(ctx: click.Context | None = None) -> str:
+    """`--config-dir`/`ANTE_CONFIG_DIR` 기반으로 DB 경로를 반환한다.
+
+    우선순위:
+      1. `ctx.obj["config_dir"]` (루트 그룹이 `--config-dir` 또는
+         `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path)
+      2. 기본값 `~/.config/ante/` (init과 동일한 기본 경로)
+
+    이 함수가 필요한 이유: `ante init`은 `<config_dir>/db/ante.db`를 생성하지만
+    후속 CLI들은 과거 `Database("db/ante.db")`를 CWD 기준으로 하드코딩해 다른
+    DB를 바라보는 문제가 있었다. 모든 CLI는 이 헬퍼를 통해 동일한 DB 경로를
+    사용해야 한다.
+
+    Args:
+        ctx: 선택적 Click 컨텍스트. 전달되지 않으면
+            `click.get_current_context(silent=True)`로 현재 컨텍스트를 조회한다.
+
+    Returns:
+        `<config_dir>/db/ante.db` 형태의 경로 문자열.
+    """
+    if ctx is None:
+        ctx = click.get_current_context(silent=True)
+    obj = getattr(ctx, "obj", None) if ctx is not None else None
+    config_dir = None
+    if isinstance(obj, dict):
+        config_dir = obj.get("config_dir")
+    if config_dir is None:
+        config_dir = Path.home() / ".config" / "ante"
+    return str(Path(config_dir) / "db" / "ante.db")
 
 
 # 서브커맨드 등록

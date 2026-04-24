@@ -201,7 +201,24 @@ $ ante init --member-id owner --name "홈트레이더"
   7. default test account 생성
 ```
 
-`ante init`은 최초 1회만 실행 가능하다. `system.toml` / `secrets.env` / `db/ante.db` 3개가 모두 존재하면 거부한다.
+**멱등성 (I4 — 파일 + master 레코드 + test account 기반 재진입)**:
+
+`ante init`은 다음 **5가지 상태가 모두 존재할 때**에만 거부한다:
+
+1. `system.toml`
+2. `secrets.env`
+3. `db/ante.db`
+4. master row (`members` 테이블에 `role="master"` 행이 존재)
+5. test account row (`accounts` 테이블에 기본 test 계좌가 `active` 상태로 존재)
+
+위 5가지 중 일부만 존재하는 경우에는 **누락된 것만** 생성하는 재진입 모드로 동작한다:
+
+- 파일(1~3)이 누락 → 누락된 파일만 재생성
+- master row가 없으면 → master bootstrap 실행 (패스워드 / 토큰 / Recovery Key를 화면에 1회 출력)
+- test account row가 없으면 → test account 생성
+- test account가 `suspended` 또는 `deleted` 상태로 존재 → 명확한 에러 메시지로 중단 (사용자가 수동으로 정리)
+
+이 5-state 재진입 규칙은 부분 초기화가 실패한 뒤 재실행해도 안전하게 완료되도록 보장한다.
 
 ### bootstrap 시 토큰 동시 발급
 

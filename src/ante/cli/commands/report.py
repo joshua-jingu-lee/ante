@@ -31,7 +31,7 @@ def schema(ctx: click.Context) -> None:
 
 @report.command()
 @click.argument("json_path", type=click.Path(exists=True))
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.option("--run", "run_id", default=None, help="참조할 백테스트 run_id")
 @click.pass_context
 @require_auth
@@ -39,13 +39,15 @@ def schema(ctx: click.Context) -> None:
 def submit(
     ctx: click.Context,
     json_path: str,
-    db_path: str,
+    db_path: str | None,
     run_id: str | None,
 ) -> None:
     """리포트 제출."""
+    from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     with open(json_path) as f:
         report_data = json.load(f)
@@ -57,7 +59,7 @@ def submit(
     async def _submit() -> dict:
         from ante.core.database import Database
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             # run_id가 제공되면 backtest_runs에서 참조 검증
@@ -121,21 +123,23 @@ def submit(
 
 @report.command("list")
 @click.option("--status", help="상태 필터 (pending/adopted/rejected)")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("report:read")
-def report_list(ctx: click.Context, status: str | None, db_path: str) -> None:
+def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> None:
     """리포트 목록 조회."""
+    from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _list() -> list[dict]:
         from ante.core.database import Database
         from ante.report.models import ReportStatus
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         store = ReportStore(db=db)
         await store.initialize()
@@ -187,10 +191,11 @@ def report_performance(
     fmt = get_formatter(ctx)
 
     async def _run_performance() -> list[dict]:
+        from ante.cli.main import get_db_path
         from ante.core.database import Database
         from ante.trade.performance import PerformanceTracker
 
-        db = Database("db/ante.db")
+        db = Database(get_db_path())
         await db.connect()
         try:
             tracker = PerformanceTracker(db)
@@ -229,20 +234,22 @@ def report_performance(
 
 @report.command("view")
 @click.argument("report_id")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("report:read")
-def report_view(ctx: click.Context, report_id: str, db_path: str) -> None:
+def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None:
     """리포트 상세 조회."""
+    from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _view() -> dict | None:
         from ante.core.database import Database
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             store = ReportStore(db)

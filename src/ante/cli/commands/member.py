@@ -23,11 +23,12 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 async def _create_service():  # noqa: ANN202
     """CLI용 MemberService 인스턴스 생성."""
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.member.service import MemberService
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
     service = MemberService(db, eventbus)

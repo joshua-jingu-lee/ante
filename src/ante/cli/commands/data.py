@@ -15,19 +15,21 @@ def data() -> None:
 
 @data.command("list")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def data_list(ctx: click.Context, data_path: str, db_path: str) -> None:
+def data_list(ctx: click.Context, data_path: str, db_path: str | None) -> None:
     """보유 데이터셋 목록."""
     import asyncio
 
+    from ante.cli.main import get_db_path
     from ante.data.schemas import TIMEFRAMES
     from ante.data.store import ParquetStore
 
     fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     datasets = []
     for tf in TIMEFRAMES:
@@ -51,7 +53,7 @@ def data_list(ctx: click.Context, data_path: str, db_path: str) -> None:
         from ante.core.database import Database
         from ante.instrument.service import InstrumentService
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             svc = InstrumentService(db)

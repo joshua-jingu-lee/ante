@@ -142,7 +142,9 @@ def update(
         return
 
     # 디스크 공간 사전 검사
-    db_path = Path("db/ante.db")
+    from ante.cli.main import get_db_path
+
+    db_path = Path(get_db_path(ctx))
     ok, msg = check_disk_space(db_path)
     if not ok:
         click.echo(msg, err=True)
@@ -209,7 +211,7 @@ def update(
                 click.echo(
                     f"자동 롤백 실패. 수동 복구 필요:\n"
                     f"{restore_hint}\n"
-                    f"  cp {backup_path} db/ante.db",
+                    f"  cp {backup_path} {db_path}",
                     err=True,
                 )
         raise SystemExit(1)

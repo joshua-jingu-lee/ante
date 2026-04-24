@@ -21,7 +21,7 @@ def instrument() -> None:
     "--type", "inst_type", default=None, help="종목 유형 필터 (stock, etf, etn 등)"
 )
 @click.option("--listed-only", is_flag=True, help="상장 종목만 표시")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("data:read")
@@ -30,16 +30,18 @@ def instrument_list(
     exchange: str,
     inst_type: str | None,
     listed_only: bool,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """등록된 종목 목록 조회."""
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.instrument.service import InstrumentService
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _run() -> list[dict]:
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             svc = InstrumentService(db)
@@ -81,23 +83,25 @@ def instrument_list(
 
 @instrument.command()
 @click.option("--exchange", default="KRX", help="거래소 (기본: KRX)")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("data:write")
 def sync(
     ctx: click.Context,
     exchange: str,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """KIS API에서 종목 마스터 데이터를 동기화."""
     from ante.broker.kis import KISAdapter
+    from ante.cli.main import get_db_path
     from ante.config import Config
     from ante.core.database import Database
     from ante.instrument.models import Instrument
     from ante.instrument.service import InstrumentService
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _run() -> dict:
         config = Config.load()
@@ -105,7 +109,7 @@ def sync(
         if not broker_config.get("app_key"):
             return {"error": "브로커 설정이 없습니다."}
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             svc = InstrumentService(db)
@@ -189,7 +193,7 @@ def sync(
 @click.argument("keyword")
 @click.option("--limit", default=20, help="최대 결과 수")
 @click.option("--listed-only", is_flag=True, help="상장 종목만 검색")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("data:read")
@@ -198,16 +202,18 @@ def search(
     keyword: str,
     limit: int,
     listed_only: bool,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """키워드로 종목 검색 (종목코드, 한글명, 영문명)."""
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.instrument.service import InstrumentService
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _run() -> list[dict]:
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             svc = InstrumentService(db)
@@ -242,7 +248,7 @@ def search(
 @instrument.command("import")
 @click.argument("file_path", type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True, help="실제 저장 없이 미리보기")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("data:write")
@@ -250,17 +256,19 @@ def instrument_import(
     ctx: click.Context,
     file_path: str,
     dry_run: bool,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """CSV/JSON 파일에서 종목 데이터 import."""
     import json
     from pathlib import Path
 
+    from ante.cli.main import get_db_path
     from ante.instrument.models import Instrument
 
     fmt = get_formatter(ctx)
     path = Path(file_path)
     ext = path.suffix.lower()
+    resolved_db_path = db_path or get_db_path(ctx)
 
     # 파일 읽기
     try:
@@ -335,7 +343,7 @@ def instrument_import(
         from ante.core.database import Database
         from ante.instrument.service import InstrumentService
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             svc = InstrumentService(db)

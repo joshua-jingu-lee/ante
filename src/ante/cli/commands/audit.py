@@ -43,9 +43,10 @@ def audit_list(
 
     async def _run_list() -> list[dict]:
         from ante.audit import AuditLogger
+        from ante.cli.main import get_db_path
         from ante.core.database import Database
 
-        db = Database("db/ante.db")
+        db = Database(get_db_path())
         await db.connect()
         try:
             audit_logger = AuditLogger(db)

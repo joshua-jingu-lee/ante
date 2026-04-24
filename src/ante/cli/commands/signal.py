@@ -30,10 +30,11 @@ async def _run_connect(key: str) -> None:
     from ante.bot.manager import BotManager
     from ante.bot.signal_channel import SignalChannel
     from ante.bot.signal_key import SignalKeyManager
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
 
     try:

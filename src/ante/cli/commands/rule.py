@@ -23,11 +23,12 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_rule_engine():  # noqa: ANN202
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.rule.engine import RuleEngine
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
     engine = RuleEngine(eventbus=eventbus)

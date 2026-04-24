@@ -79,7 +79,7 @@ def request(
 @approval.command("list")
 @click.option("--status", default=None, help="상태 필터")
 @click.option("--type", "approval_type", default=None, help="유형 필터")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @format_option
 @click.pass_context
 @require_auth
@@ -88,17 +88,20 @@ def approval_list(
     ctx: click.Context,
     status: str | None,
     approval_type: str | None,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """결재 목록 조회."""
+    from ante.cli.main import get_db_path
+
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _list() -> list[dict]:
         from ante.approval import ApprovalService
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         eventbus = EventBus()
         service = ApprovalService(db=db, eventbus=eventbus)
@@ -128,21 +131,24 @@ def approval_list(
 
 @approval.command()
 @click.argument("id")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @format_option
 @click.pass_context
 @require_auth
 @require_scope("approval:read")
-def info(ctx: click.Context, id: str, db_path: str) -> None:
+def info(ctx: click.Context, id: str, db_path: str | None) -> None:
     """결재 상세 조회."""
+    from ante.cli.main import get_db_path
+
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _info() -> dict:
         from ante.approval import ApprovalService
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         eventbus = EventBus()
         service = ApprovalService(db=db, eventbus=eventbus)
@@ -186,7 +192,7 @@ def info(ctx: click.Context, id: str, db_path: str) -> None:
     help="검토 결과",
 )
 @click.option("--detail", default="", help="검토 상세")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @format_option
 @click.pass_context
 @require_auth
@@ -196,18 +202,21 @@ def review(
     id: str,
     review_result: str,
     detail: str,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """검토 의견 추가."""
+    from ante.cli.main import get_db_path
+
     fmt = get_formatter(ctx)
     reviewer = get_member_id(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _review() -> dict:
         from ante.approval import ApprovalService
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         eventbus = EventBus()
         service = ApprovalService(db=db, eventbus=eventbus)

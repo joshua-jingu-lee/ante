@@ -45,7 +45,21 @@ CLI 커맨드에 멤버 인증과 스코프 기반 접근 제어를 적용하는
 | `@require_scope(*scopes)` | 커맨드 데코레이터. Human 멤버(`MemberType.HUMAN`)는 스코프 무제한 통과. Agent 멤버는 등록된 scope에 필요 scope가 모두 포함되어야 함 |
 | `get_member_id(ctx)` | 인증된 멤버 ID 반환. 미인증 시 `"unknown"` |
 
-**인증 면제 커맨드**: `bootstrap`, `reset-password`, `regenerate-recovery-key` (토큰 없이 실행 가능)
+**인증 면제 커맨드 경로**: `ante init`, `ante member reset-password`, `ante member regenerate-recovery-key` (토큰 없이 실행 가능)
+
+매칭은 leaf 이름이 아니라 **전체 커맨드 경로** 기준이다. `ante feed init`처럼 leaf 이름이 우연히 `init`인 다른 서브커맨드는 면제 대상이 아니다 (`@require_auth` + `@require_scope`로 인증 필요). 구현은 `LeafAwareGroup`(src/ante/cli/main.py)이 루트 그룹 진입 직후 전체 경로 tuple을 `ctx.obj["_leaf_command_path"]`에 저장하고, `authenticate_member`가 이 tuple과 `_AUTH_EXEMPT_COMMAND_PATHS`(src/ante/cli/middleware.py)를 비교한다.
+
+### DB 경로 일관성 (config_dir 기반)
+
+**배경**: `ante init`은 `<config_dir>/db/ante.db`를 생성하지만, 후속 CLI들이 과거 `Database("db/ante.db")`를 CWD 기준으로 하드코딩하면 서로 다른 DB 파일을 참조하게 되어 방금 만든 master 토큰으로도 인증이 실패한다.
+
+**규칙**:
+- 모든 CLI는 `ante.cli.main.get_db_path(ctx)` 헬퍼로 DB 경로를 해석한다.
+- 우선순위:
+  1. `ctx.obj["config_dir"]` (루트 그룹이 `--config-dir` 또는 `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path)
+  2. 기본값 `~/.config/ante/` (init과 동일)
+- `--db-path` 옵션을 가진 커맨드(`ante approval`, `ante backtest`, `ante instrument`, `ante report`, `ante data`)는 사용자 override를 위해 기본값을 `None`으로 두고, 값이 없을 때 `get_db_path(ctx)`로 폴백한다. 이로써 기존 사용자의 `--db-path` 지정은 그대로 동작한다.
+- 서버(`ante system start`)는 이미 `system.toml`의 `db.path` 설정을 읽고 `ANTE_CONFIG_DIR`을 하위 프로세스로 전달하므로, CLI 쪽 경로 해석이 서버 동작에 영향을 주지 않는다.
 
 ### 시스템 통신
 

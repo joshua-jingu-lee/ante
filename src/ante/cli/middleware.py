@@ -78,7 +78,9 @@ def authenticate_member(ctx: click.Context) -> None:
         return
 
     try:
-        member = _run_authenticate(token)
+        from ante.cli.main import get_db_path
+
+        member = _run_authenticate(token, get_db_path(ctx))
         ctx.obj["member"] = member
         logger.debug("CLI 인증 성공: %s", member.member_id)
     except PermissionError as e:
@@ -86,15 +88,34 @@ def authenticate_member(ctx: click.Context) -> None:
         raise SystemExit(1) from e
 
 
-def _run_authenticate(token: str) -> Member:
-    """동기 컨텍스트에서 MemberService.authenticate 호출."""
+def _run_authenticate(token: str, db_path: str) -> Member:
+    """동기 컨텍스트에서 MemberService.authenticate 호출.
+
+    Args:
+        token: 인증할 멤버 토큰.
+        db_path: 사용할 SQLite DB 파일 경로. `ante init`이 생성한 위치와
+            동일해야 하므로 `get_db_path(ctx)`로부터 전달한다.
+
+    Raises:
+        PermissionError: 토큰이 유효하지 않거나, DB를 열 수 없는 경우
+            (예: `ante init`이 아직 실행되지 않아 `<config_dir>/db/ante.db`가
+            없음). DB I/O 오류도 PermissionError로 통일하여 동일한
+            "인증 실패" 경로로 에러를 노출한다.
+    """
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.member.service import MemberService
 
     async def _auth() -> Member:
-        db = Database("db/ante.db")
-        await db.connect()
+        db = Database(db_path)
+        try:
+            await db.connect()
+        except Exception as e:  # noqa: BLE001 — sqlite/OS 오류 통일 처리
+            msg = (
+                f"DB 접근 불가 ({db_path}): {e}. "
+                "`ante init --dir <config_dir>` 이후 동일 `--config-dir`로 실행하세요."
+            )
+            raise PermissionError(msg) from e
         try:
             eventbus = EventBus()
             service = MemberService(db, eventbus)
