@@ -112,9 +112,14 @@ async def _master_exists_in_db(db_path: str) -> bool:
 
 
 async def _test_account_exists_in_db(db_path: str) -> bool:
-    """DB에 account_id='test' (broker_type='test') account row가 있는지 확인.
+    """default test account(account_id='test', status='active') 존재 여부.
 
-    `AccountService.create_default_test_account()`가 만드는 행을 기준으로 판정.
+    `AccountService.create_default_test_account()`가 만드는 정확한 계좌만
+    `True`로 판정한다. 임의의 custom `broker_type='test'` 계좌 또는
+    `suspended/deleted` 상태의 과거 test 계좌가 있어도 default 조건을 만족하지
+    않으므로 `False`를 반환한다. 판정이 너무 넓으면 default test account 생성
+    스텝이 부당하게 skip될 수 있어, AccountService가 만드는 행(`account_id='test'`
+    + `status='active'`)과 정확히 매칭되도록 좁힌다.
     """
     from ante.core.database import Database
 
@@ -126,9 +131,8 @@ async def _test_account_exists_in_db(db_path: str) -> bool:
     try:
         try:
             row = await db.fetch_one(
-                "SELECT account_id FROM accounts "
-                "WHERE account_id = ? OR broker_type = ? LIMIT 1",
-                ("test", "test"),
+                "SELECT 1 FROM accounts WHERE account_id = ? AND status = ? LIMIT 1",
+                ("test", "active"),
             )
         except Exception:  # noqa: BLE001
             # accounts 테이블이 아직 없을 수 있음 (orphan DB)
@@ -193,48 +197,56 @@ async def _create_test_account(db_path: str) -> dict[str, str]:
         await db.close()
 
 
-def _emit_master_credentials(
-    fmt: OutputFormatter,
+def _emit_master_credentials_text(
+    master_info: dict,
+    password: str,
+    token: str,
+    recovery_key: str,
+) -> None:
+    """text 모드에서 master bootstrap 직후 비밀값을 stdout에 출력한다.
+
+    성공/실패와 무관하게 이 블록 **한 번**만 비밀값을 노출한다. completion 블록은
+    요약/다음 단계 안내만 출력하며 비밀값을 재출력하지 않는다 (1회 노출 불변식).
+    """
+    click.echo("\n── Master 계정 생성 완료 ──────────────────────")
+    click.echo(f"  Member ID   : {master_info['member_id']}")
+    click.echo(f"  이름        : {master_info['name']}")
+    click.echo(f"  이모지      : {master_info['emoji']}")
+    click.echo(f"\n  패스워드     : {password}")
+    click.echo(f"  토큰         : {token}")
+    click.echo(f"  Recovery Key : {recovery_key}")
+    click.echo("\n  ⚠ 위 3개 값은 이 화면에만 표시됩니다. 안전한 곳에 보관하세요.")
+
+
+def _emit_master_credentials_json_stderr(
     master_info: dict,
     password: str,
     token: str,
     recovery_key: str,
     config_path: Path,
 ) -> None:
-    """master bootstrap 직후 비밀값을 즉시 화면에 내보낸다.
+    """JSON 모드 실패 경로 전용 복구 이벤트 (stderr 한 줄 JSON).
 
-    test account 생성이 실패해도 이 정보로 복구할 수 있도록 순서를 고정.
-    JSON 모드에서는 stderr에 한 줄 JSON 이벤트를, text 모드에서는 stdout에
-    사람이 읽기 쉬운 블록을 출력한다.
+    test account 생성 실패 시에만 호출되며, stdout payload가 비밀값 없는 에러
+    응답으로 대체되므로 stderr에 비밀값 1회 노출을 보장해 Agent가 lockout에서
+    복구할 수 있게 한다. 성공 경로에서는 호출되지 않는다 (stdout payload로 1회
+    노출).
     """
-    if fmt.is_json:
-        click.echo(
-            json.dumps(
-                {
-                    "stage": "master_bootstrap_complete",
-                    **master_info,
-                    "password": password,
-                    "token": token,
-                    "recovery_key": recovery_key,
-                    "config_dir": str(config_path),
-                },
-                ensure_ascii=False,
-                default=str,
-            ),
-            err=True,
-        )
-    else:
-        click.echo("\n── Master 계정 생성 완료 ──────────────────────")
-        click.echo(f"  Member ID   : {master_info['member_id']}")
-        click.echo(f"  이름        : {master_info['name']}")
-        click.echo(f"  이모지      : {master_info['emoji']}")
-        click.echo(f"\n  패스워드     : {password}")
-        click.echo(f"  토큰         : {token}")
-        click.echo(f"  Recovery Key : {recovery_key}")
-        click.echo(
-            "\n  ⚠ 위 비밀값은 아래 단계(test account)가 실패하더라도 "
-            "지금 기록해두세요."
-        )
+    click.echo(
+        json.dumps(
+            {
+                "stage": "master_bootstrap_complete",
+                **master_info,
+                "password": password,
+                "token": token,
+                "recovery_key": recovery_key,
+                "config_dir": str(config_path),
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        err=True,
+    )
 
 
 @click.command("init")
@@ -307,10 +319,12 @@ def init(
             )
         except ValueError as e:
             _fail(fmt, str(e), code="bootstrap_failed")
-        # ⚠️ 즉시 출력 — test account 실패해도 복구 가능하도록
-        _emit_master_credentials(
-            fmt, master_info, password, token, recovery_key, config_path
-        )
+        # text 모드는 여기서 비밀값을 1회 노출 (completion 블록은 재출력 금지).
+        # JSON 성공 경로는 stdout payload로 1회 노출되므로 여기서 stderr 이벤트를
+        # 내보내지 않는다 (중복 노출 방지). JSON 실패 경로만 아래 except에서
+        # stderr 이벤트로 복구 수단을 유지한다.
+        if not fmt.is_json:
+            _emit_master_credentials_text(master_info, password, token, recovery_key)
 
     # 3. test account 생성 — test account row 없을 때만 (state 3/4/5)
     if not test_account_exists:
@@ -318,7 +332,13 @@ def init(
             test_account = _run(_create_test_account(str(db_path)))
         except Exception as e:  # noqa: BLE001
             if master_info:
-                # master는 이미 출력됐으므로 복구 가능
+                # master는 이미 생성됐다. JSON 모드라면 stdout은 에러 payload가
+                # 쓰이므로 stderr에 복구용 이벤트를 1회 내보낸다. text 모드는
+                # 위에서 이미 블록을 출력했다.
+                if fmt.is_json:
+                    _emit_master_credentials_json_stderr(
+                        master_info, password, token, recovery_key, config_path
+                    )
                 _fail(
                     fmt,
                     f"테스트 계좌 생성 실패: {e}. "
@@ -341,12 +361,12 @@ def init(
         fmt.output(payload)
         return
 
+    # text completion — 비밀값은 위 _emit_master_credentials_text 블록에서 1회
+    # 노출되었으므로 여기서는 요약 + 다음 단계 안내만 출력한다 (1회 노출 불변식).
     click.echo("\n── 완료 ────────────────────────────────────────")
     click.echo(f"  설정 디렉토리: {config_path}")
     if master_info:
         click.echo(f"  Member ID   : {master_info['member_id']}")
-        click.echo(f"  이름        : {master_info['name']}")
-        click.echo(f"  이모지      : {master_info['emoji']}")
     elif master_already_existed:
         click.echo("  Master 계정 : 이미 존재 (재발급 안 함)")
     if test_account:
@@ -354,11 +374,7 @@ def init(
             f"  테스트 계좌 : {test_account['account_id']} ({test_account['exchange']})"
         )
     if master_info:
-        click.echo(f"\n  패스워드     : {password}")
-        click.echo(f"  토큰         : {token}")
-        click.echo(f"  Recovery Key : {recovery_key}")
-        click.echo("\n  위 3개 값은 이 화면에만 표시됩니다. 안전한 곳에 보관하세요.")
-        click.echo("\n  셸에 토큰 등록:")
-        click.echo(f"   export ANTE_MEMBER_TOKEN={token}")
-        click.echo("\n  이제 시스템을 시작할 수 있습니다:")
-        click.echo("   ante system start")
+        click.echo("\n  위에 출력된 토큰을 환경변수로 등록하세요:")
+        click.echo("    export ANTE_MEMBER_TOKEN=<위 토큰>")
+    click.echo("\n  이제 시스템을 시작할 수 있습니다:")
+    click.echo("    ante system start")

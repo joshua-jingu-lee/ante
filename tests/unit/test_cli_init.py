@@ -91,8 +91,19 @@ def _create_db_with_master_row(db_path: Path) -> None:
         conn.close()
 
 
-def _create_db_with_test_account_row(db_path: Path) -> None:
-    """테스트 헬퍼: DB 파일에 accounts 테이블과 test account row를 만든다."""
+def _create_db_with_test_account_row(
+    db_path: Path,
+    *,
+    account_id: str = "test",
+    broker_type: str = "test",
+    status: str = "active",
+) -> None:
+    """테스트 헬퍼: DB 파일에 accounts 테이블과 test account row를 만든다.
+
+    `_test_account_exists_in_db`는 실제 AccountService 스키마(account_id + status)를
+    기준으로 판정하므로 `status` 컬럼을 포함해야 한다. 기본값은 default test
+    account(account_id='test', status='active')과 동일하다.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
@@ -100,13 +111,15 @@ def _create_db_with_test_account_row(db_path: Path) -> None:
             """
             CREATE TABLE IF NOT EXISTS accounts (
                 account_id TEXT PRIMARY KEY,
-                broker_type TEXT NOT NULL
+                broker_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active'
             )
             """
         )
         conn.execute(
-            "INSERT OR IGNORE INTO accounts (account_id, broker_type) VALUES (?, ?)",
-            ("test", "test"),
+            "INSERT OR IGNORE INTO accounts "
+            "(account_id, broker_type, status) VALUES (?, ?, ?)",
+            (account_id, broker_type, status),
         )
         conn.commit()
     finally:
@@ -824,3 +837,185 @@ class TestInitJsonErrorContract:
         # text 모드에서는 OutputFormatter.error가 "Error: ..." 를 stderr로 보낸다
         # CliRunner 기본 mix_stderr=True이면 result.output에 섞여 보인다
         assert "init이 이미 완료된 상태입니다" in result.output
+
+
+class TestInitCredentialsSingleEmission:
+    """Codex 5차 리뷰 Finding 1 회귀 — 비밀값은 각 스트림에서 정확히 1회 노출."""
+
+    def test_master_credentials_emitted_once_in_text_mode(self, runner, tmp_path):
+        """성공 경로에서 password/token/recovery_key는 stdout에 정확히 1회만."""
+        target = tmp_path / "config"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        # 각 비밀값은 stdout에 정확히 1회만 (성공 경로 중복 노출 방지)
+        assert result.output.count(_MOCK_TOKEN) == 1, (
+            f"token 중복 노출: {result.output}"
+        )
+        assert result.output.count(_MOCK_RECOVERY_KEY) == 1, (
+            f"recovery_key 중복 노출: {result.output}"
+        )
+        # password — bootstrap 호출 args[3]에서 추출
+        bootstrap_args = None
+        for p in patches:
+            target_obj = getattr(p, "new", None)
+            if target_obj and hasattr(target_obj, "call_args") and target_obj.call_args:
+                args = target_obj.call_args.args
+                if len(args) >= 4 and args[0].endswith("ante.db"):
+                    bootstrap_args = args
+                    break
+        assert bootstrap_args is not None, "bootstrap mock 호출 미확인"
+        password = bootstrap_args[3]
+        assert result.output.count(password) == 1, (
+            f"password 중복 노출: {result.output}"
+        )
+
+    def test_master_credentials_emitted_only_in_stdout_on_json_success(
+        self, runner, tmp_path
+    ):
+        """JSON 성공 경로 — stderr에 master_bootstrap_complete 이벤트 없음."""
+        target = tmp_path / "config"
+        runner_split = CliRunner(mix_stderr=False)
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner_split.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 0, f"stdout={result.output} stderr={result.stderr}"
+        # stderr에는 master_bootstrap_complete 이벤트가 없어야 한다 (중복 노출 방지)
+        assert "master_bootstrap_complete" not in result.stderr, (
+            f"성공 경로에서 stderr 이벤트 중복: {result.stderr!r}"
+        )
+        # stdout JSON payload는 token/recovery_key/password 포함
+        lines = result.output.strip().splitlines()
+        json_start = None
+        for i, line in enumerate(lines):
+            if line.strip() == "{":
+                json_start = i
+        assert json_start is not None, f"stdout에 JSON 없음: {result.output!r}"
+        data = json.loads("\n".join(lines[json_start:]))
+        assert data["token"] == _MOCK_TOKEN
+        assert data["recovery_key"] == _MOCK_RECOVERY_KEY
+        assert "password" in data
+        # stdout에서 token도 정확히 1회
+        assert result.output.count(_MOCK_TOKEN) == 1
+
+    def test_json_failure_preserves_credentials_in_stderr(self, runner, tmp_path):
+        """JSON 실패 경로 — stderr에 master_bootstrap_complete 이벤트(비밀값 포함)."""
+        target = tmp_path / "config"
+        runner_split = CliRunner(mix_stderr=False)
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock"))
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner_split.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 1
+        # stderr에 master_bootstrap_complete 이벤트 (복구 수단)
+        assert "master_bootstrap_complete" in result.stderr
+        # stdout에는 에러 payload, 비밀값 미포함
+        assert _MOCK_TOKEN not in result.output, (
+            f"JSON 실패 payload(stdout)에 토큰 포함: {result.output!r}"
+        )
+        assert _MOCK_RECOVERY_KEY not in result.output
+        # stderr에는 비밀값 정확히 1회
+        assert result.stderr.count(_MOCK_TOKEN) == 1
+        assert result.stderr.count(_MOCK_RECOVERY_KEY) == 1
+
+
+class TestInitTestAccountDetectionNarrowed:
+    """Codex 5차 리뷰 Finding 2 회귀 — test account 판정은 default 조건만 매치."""
+
+    def test_state4_with_custom_test_broker_still_creates_default(
+        self, runner, tmp_path
+    ):
+        """custom broker_type='test' 계좌(account_id!='test')여도 default 생성."""
+        target = tmp_path / "config"
+        target.mkdir()
+        db_path = target / "db" / "ante.db"
+        # master row + custom test broker 계좌 (account_id='custom-test')
+        _create_db_with_master_row(db_path)
+        _create_db_with_test_account_row(
+            db_path, account_id="custom-test", broker_type="test", status="active"
+        )
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        assert result.exit_code == 0, result.output
+        # default test account(account_id='test')는 따로 생성돼야 한다
+        create_acc_mock.assert_called_once()
+        # master는 이미 있으므로 bootstrap은 호출 안 됨
+        bootstrap_mock.assert_not_called()
+
+    def test_test_account_suspended_triggers_recreation(self, runner, tmp_path):
+        """status='suspended'인 'test' account → default 조건 불만족, 재생성 시도."""
+        target = tmp_path / "config"
+        target.mkdir()
+        db_path = target / "db" / "ante.db"
+        # master row + suspended test account (account_id='test', status='suspended')
+        _create_db_with_master_row(db_path)
+        _create_db_with_test_account_row(
+            db_path, account_id="test", broker_type="test", status="suspended"
+        )
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+
+        # suspended 조건 불만족 → default 재생성 시도
+        assert result.exit_code == 0, result.output
+        create_acc_mock.assert_called_once()
+        bootstrap_mock.assert_not_called()
