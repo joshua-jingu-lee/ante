@@ -241,3 +241,63 @@ class TestQaEntrypoint:
         assert "INIT_EXIT" in script, (
             "init exit code를 변수에 보관해 분기 처리해야 합니다"
         )
+
+    def test_qa_entrypoint_fails_fast_on_non_recoverable_init_error(self) -> None:
+        """Finding (Codex 7차 review) — 복구 불가능한 init 실패에서 즉시 종료.
+
+        `ante init`은 여러 exit 1 경로를 가진다:
+        - test_account_inactive: default test account가 suspended/deleted 상태
+        - bootstrap_failed: master bootstrap 중 예외
+        - test_account_failed: partial-failure (stderr 이벤트로 처리됨)
+        - already_initialized: 모든 상태 완료 (재기동)
+
+        과거 구현(Codex 6차 fix)은 `master_bootstrap_complete` stderr 이벤트가
+        없는 모든 non-zero exit을 "기존 상태 = 재기동"으로 오인해 suspended
+        test account 같은 치명적 실패 시에도 서버를 그대로 기동했다.
+
+        이제는 stdout JSON의 `code` 필드로 실패 유형을 구분해
+        `already_initialized`만 재기동 경로로 허용하고 그 외는 exit 1 한다.
+        """
+        script = self.path.read_text()
+
+        # 1) stdout JSON의 code 필드를 파싱하는 분기가 있어야 한다.
+        assert "INIT_CODE" in script, (
+            "init stdout JSON의 code 필드를 파싱해 분기 처리해야 합니다"
+        )
+
+        # 2) already_initialized가 재기동 허용 토큰으로 쓰여야 한다.
+        assert "already_initialized" in script, (
+            "already_initialized code를 재기동 경로로 허용해야 합니다"
+        )
+
+        # 3) 복구 불가능 분기가 exit 1로 종료해야 한다. 분기 블록 안에 FATAL
+        #    메시지가 있고 exit 1이 존재해야 한다.
+        assert "FATAL" in script, "복구 불가능한 init 실패에 FATAL 로그가 필요합니다"
+        assert "exit 1" in script, "복구 불가능한 init 실패에서 즉시 exit 1 해야 합니다"
+
+    def test_qa_entrypoint_only_already_initialized_allows_restart(self) -> None:
+        """Codex 7차 review — already_initialized 외의 code는 재기동 금지.
+
+        이 테스트는 분기 순서/구조를 문자열 기반으로 확인한다:
+        - INIT_CODE 추출 블록이 있어야 하고
+        - `already_initialized`와 같은 비교 조건이 분기 트루 쪽에 있어야 하며
+        - 그 반대 (else) 분기에서 exit 1 해야 한다.
+        """
+        script = self.path.read_text()
+
+        # INIT_CODE 분기 블록 — `if [ "$INIT_CODE" = "already_initialized" ]`
+        # 형태가 존재해야 한다.
+        assert '"$INIT_CODE" = "already_initialized"' in script, (
+            "already_initialized code를 명시적으로 비교하는 분기가 필요합니다"
+        )
+
+        # else 분기(복구 불가능)에 exit 1이 있어야 한다. 간단 검증: 분기 블록 안에
+        # `else` 및 `exit 1`이 함께 있는지 전체 스크립트에서 확인.
+        # 블록 대략적 위치: INIT_CODE 변수 선언 이후 처음 나오는 `exit 1`
+        idx_init_code = script.find("INIT_CODE")
+        assert idx_init_code != -1
+        tail = script[idx_init_code:]
+        # else ... exit 1 패턴
+        assert "else" in tail and "exit 1" in tail, (
+            "INIT_CODE 분기의 else 경로에서 exit 1 해야 합니다"
+        )

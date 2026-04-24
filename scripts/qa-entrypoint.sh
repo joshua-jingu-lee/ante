@@ -27,11 +27,15 @@ QA_PASSWORD="${QA_ADMIN_PASSWORD:-qaadmin123!}"
 # * 성공 (exit=0): stdout JSON payload에 recovery_key 포함.
 # * test account 단계만 실패: stdout은 에러 payload, stderr에 master_bootstrap_complete
 #   JSON 이벤트가 1줄 나오므로 이 stderr에서 recovery_key 복구.
-# * 이미 초기화(already_initialized) 또는 기타 실패: recovery_key 없음 → login+rotate
-#   경로로 이어간다(재기동 시나리오).
+# * 이미 초기화(code=already_initialized): 재기동 시나리오로 간주하고 login+rotate
+#   경로로 계속 진행한다.
+# * 그 외 복구 불가능한 실패(code=test_account_inactive / bootstrap_failed / ...):
+#   stdout/stderr를 남기고 즉시 exit 1 해 깨진 상태로 서버가 기동되는 것을 막는다.
 #
 # 과거 구현은 `2>/dev/null || true`로 stderr과 exit code를 모두 버려 partial-failure
 # 시 recovery_key가 영구 소실되는 회귀가 있었다 (Codex 6차 review Finding 2).
+# 또한 non-zero exit을 모두 "기존 상태 = 재기동"으로 오인하던 회귀는
+# Codex 7차 review에서 잡혔다 — 현재는 stdout JSON의 code 필드를 분기 기준으로 쓴다.
 INIT_STDOUT=$(mktemp)
 INIT_STDERR=$(mktemp)
 trap 'rm -f "$INIT_STDOUT" "$INIT_STDERR"' EXIT
@@ -59,12 +63,33 @@ elif grep -q 'master_bootstrap_complete' "$INIT_STDERR"; then
     echo "[qa] init stderr:" >&2
     cat "$INIT_STDERR" >&2
 else
-    # 이미 초기화된 상태(already_initialized) 또는 기타 실패 — 재기동 시나리오로 간주.
-    # recovery_key 없이 login+rotate 경로로 계속 진행한다.
-    echo "[qa] ante init (exit=$INIT_EXIT) — 기존 상태로 간주하고 진행합니다." >&2
-    if [ -s "$INIT_STDERR" ]; then
-        echo "[qa] init stderr:" >&2
-        cat "$INIT_STDERR" >&2
+    # master_bootstrap_complete 이벤트도 없는 실패 — stdout JSON의 code 필드로
+    # 실패 유형을 구분한다. OutputFormatter.error가 JSON 모드에서
+    # `{"error":..., "code":...}`를 stdout으로 내보내고 exit 1 한다.
+    # * already_initialized: 기존 DB로 이어가는 재기동 시나리오 → 계속 진행
+    # * test_account_inactive / bootstrap_failed / test_account_failed / 기타:
+    #   복구 불가능한 치명적 실패 → 즉시 exit 1 하여 깨진 상태로 서버가 기동되는
+    #   것을 막는다.
+    INIT_CODE=$(python3 -c "
+import json, sys
+try:
+    with open('$INIT_STDOUT') as f:
+        print(json.load(f).get('code', ''))
+except Exception:
+    print('')
+" 2>/dev/null || true)
+
+    if [ "$INIT_CODE" = "already_initialized" ]; then
+        echo "[qa] ante init 이미 완료된 상태 — 기존 DB로 재기동 진행" >&2
+    else
+        echo "[qa] FATAL: ante init 실패 (code='$INIT_CODE', exit=$INIT_EXIT)" >&2
+        echo "[qa] init stdout:" >&2
+        cat "$INIT_STDOUT" >&2
+        if [ -s "$INIT_STDERR" ]; then
+            echo "[qa] init stderr:" >&2
+            cat "$INIT_STDERR" >&2
+        fi
+        exit 1
     fi
 fi
 
