@@ -61,85 +61,121 @@ pip install ante
 
 ## ⚙️ 초기 설정
 
-설치 후 `ante init`을 실행하면 대화형으로 초기 설정을 진행합니다.
+설치 후 `ante init`을 실행하면 **비대화형**으로 파일 골격과 master 계정을 한 번에 생성합니다.
+프롬프트 입력 없이, 플래그로 필요한 값을 지정합니다. AI 에이전트가 동일 커맨드를 호출할 수 있도록 설계되었습니다.
 
 ```bash
 ante init
+# 또는 master 정체성을 지정
+ante init --member-id owner --name "홈트레이더"
 ```
 
-### 1단계: Master 계정
+### 플래그
 
-시스템 관리자 계정을 생성합니다.
+| 플래그 | 기본값 | 설명 |
+|--------|--------|------|
+| `--member-id` | `owner` | master 멤버 ID |
+| `--name` | `Owner` | master 표시 이름 |
+| `--dir` | `~/.config/ante/` | 설정 디렉토리 경로 |
+
+### 생성되는 것
+
+`ante init` 한 번으로 다음 **6가지 산출물**이 생성됩니다.
+
+- **파일 3개**: `~/.config/ante/system.toml`, `~/.config/ante/secrets.env` (권한 0600), `~/.config/ante/db/ante.db`
+- **DB 레코드 2개**: master 계정 1개, default 테스트 계좌(`broker_type="test"`) 1개
+- **민감값 3개(1회만 표시)**: 자동 생성된 패스워드, master 토큰(`ante_hk_*`), Recovery Key(`ANTE-RK-*`)
+
+테스트 계좌만으로 시스템 전체를 가상으로 체험할 수 있습니다. 실거래는 아래 "선택 설정"에서 별도로 추가합니다.
+
+### 완료 화면
 
 ```
-── 1. Master 계정 ──────────────────────────────
-Member ID: owner
-이름: 홈트레이더
-패스워드: ••••••••
-패스워드 확인: ••••••••
+── 완료 ────────────────────────────────────────
+  설정 디렉토리: ~/.config/ante/
+  Member ID   : owner
+  이모지      : 🦊
+  테스트 계좌 : test (TEST)
+
+  패스워드     : gX7mKq2nPvR8sT4uWxYzA3bF
+  토큰         : ante_hk_8k2m9p4q...
+  Recovery Key : ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
+
+  위 3개 값은 이 화면에만 표시됩니다. 안전한 곳에 보관하세요.
+
+  셸에 토큰 등록:
+   export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...
+
+  이제 시스템을 시작할 수 있습니다:
+   ante system start
 ```
 
-### 2단계: 계좌 등록
+**패스워드 / 토큰 / Recovery Key** 3개는 DB에 해시로만 저장되며 **1회만** 화면에 표시됩니다. 반드시 안전한 곳에 복사해 두세요.
 
-실제 거래에 사용할 증권사 계좌를 등록합니다.
-건너뛰면 테스트 계좌가 자동 생성되며, 실제 매매 없이 시스템을 체험할 수 있습니다.
+- **토큰**은 이후 모든 CLI 명령에 필요합니다.
+- **패스워드**는 웹 대시보드 로그인에 사용됩니다.
+- **Recovery Key**는 패스워드 분실 시 유일한 복구 수단입니다.
+
+### 재실행 (멱등성)
+
+`ante init`은 **위 3개 파일이 모두 존재하면** 실행을 거부합니다:
 
 ```
-── [2/4] 계좌 설정 ─────────────────────────────
-  등록하지 않으면 테스트 계좌가 자동으로 생성됩니다.
-  나중에 `ante account create` 명령어로도 추가할 수 있습니다.
-실제 거래 계좌를 등록하시겠습니까? [y/N]: y
-
-  브로커를 선택하세요:
-    1) kis-domestic (KRX / KRW)
-  선택 [1]: 1
-  계좌 ID [domestic]: domestic
-  이름 [국내 주식]: 국내 주식
-  app_key: PSxxxxxxxxxxx
-  app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  account_no: 50123456-01
-  -> 계좌 "domestic" 등록 예정 (KRX / KRW / kis-domestic)
+Error: init이 이미 완료된 상태입니다: /Users/foo/.config/ante/
+  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요.
 ```
 
-각 계좌에는 **거래 모드(TradingMode)** 와 **모의투자 여부(is_paper)** 가 설정됩니다:
+모두 밀고 다시 시작하려면 설정 디렉토리를 삭제한 뒤 재실행합니다:
 
-**TradingMode** — Ante 시스템 레벨의 거래 모드입니다:
+```bash
+rm -rf ~/.config/ante/
+ante init
+```
 
-| 모드 | 설명 |
-|------|------|
-| `VIRTUAL` | 가상거래 — 실제 주문이 나가지 않으며, 시스템 내부에서 체결을 시뮬레이션합니다. |
-| `LIVE` | 실제거래 — 증권사 API를 통해 실제 주문이 발생합니다. |
+> `ante init`은 `--force` 같은 재초기화 플래그를 제공하지 않습니다. 실수로 master 계정과 DB가 덮어써지는 것을 막기 위한 의도적인 제약입니다.
 
-**is_paper** — KIS 증권사 API 레벨의 모의투자 모드입니다:
+### JSON 출력 (AI 에이전트용)
 
-| 값 | 설명 |
-|----|------|
-| `true` | KIS 모의투자 서버에 접속합니다. 실제 체결은 발생하지 않지만 증권사 API를 통해 주문이 처리됩니다. |
-| `false` | KIS 실전투자 서버에 접속합니다. 실제 자금으로 매매가 이루어집니다. |
+스크립트/에이전트가 호출할 때는 JSON 포맷으로 값을 바로 파싱할 수 있습니다.
 
-> `is_paper`는 KIS 브로커(`kis-domestic`)에서만 사용되며, `broker_config`에 설정합니다.
-> Test 브로커에서는 이 설정이 무시됩니다.
+```bash
+ante --format json init --member-id qa-admin --name "QA Admin"
+```
 
-**가능한 조합:**
+출력 JSON에는 `member_id`, `role`, `emoji`, `token`, `recovery_key`, `password`, `config_dir`, `test_account` 필드가 포함됩니다.
+
+---
+
+## 🧩 선택 설정 (필요 시)
+
+`ante init`은 파일 골격 + master + 테스트 계좌 딱 여기까지만 만듭니다.
+아래 기능은 **별도 명령**으로 추가합니다. 한 번에 다 하지 않아도, 필요한 시점에 하나씩 추가할 수 있습니다.
+
+### 실거래 증권사 계좌 (KIS) 추가
+
+```bash
+ante account add domestic \
+  --exchange KRX --currency KRW \
+  --broker-type kis-domestic
+```
+
+계좌 인증정보(`app_key`, `app_secret`, `account_no`)와 `is_paper`(KIS 모의투자 여부)는 이후 `ante account` 관련 명령으로 설정합니다. 자세한 플래그는 `ante account add --help`를 참고하세요.
+
+**TradingMode**(Ante 시스템 레벨의 거래 모드)와 **is_paper**(KIS API 레벨의 모의투자 여부) 조합:
 
 | 브로커 | TradingMode | is_paper | 동작 | 용도 |
 |--------|-------------|----------|------|------|
-| `test` | `VIRTUAL` | — | Ante 내부 시뮬레이션 (증권사 API 미사용) | 시스템 체험, 개발/테스트 |
-| `kis-domestic` | `VIRTUAL` | — | Ante 내부 시뮬레이션 (KIS API로 시세만 조회) | KIS 계좌 연동 확인 |
-| `kis-domestic` | `LIVE` | `true` | KIS 모의투자 서버로 주문 전송 | 실전 전 검증 (추천) |
-| `kis-domestic` | `LIVE` | `false` | KIS 실전투자 서버로 주문 전송 | **실제 매매** |
+| `test` | `VIRTUAL` | — | Ante 내부 시뮬레이션 | 시스템 체험 |
+| `kis-domestic` | `VIRTUAL` | — | Ante 내부 시뮬레이션 (KIS 시세만) | 연동 확인 |
+| `kis-domestic` | `LIVE` | `true` | KIS 모의투자 서버 | 실전 전 검증 |
+| `kis-domestic` | `LIVE` | `false` | KIS 실전투자 서버 | **실제 매매** |
 
 > [!WARNING]
-> `LIVE` + `is_paper=false` 조합은 실제 자금으로 매매가 이루어집니다. 충분한 테스트 후 사용하세요.
+> `LIVE` + `is_paper=false` 조합은 실제 자금으로 매매됩니다. 충분한 테스트 후 사용하세요.
 
-나중에 `ante account create` 명령어로 계좌를 추가할 수 있습니다.
+### 텔레그램 알림
 
-### 3단계: 텔레그램 알림 (선택)
-
-거래 알림, 시스템 경고 등을 텔레그램으로 받을 수 있습니다.
-건너뛰어도 시스템 운영에 지장은 없습니다.
-
-나중에 `~/.config/ante/secrets.env`에서 설정할 수 있습니다:
+`~/.config/ante/secrets.env`를 직접 편집합니다:
 
 ```bash
 # ~/.config/ante/secrets.env
@@ -150,25 +186,18 @@ TELEGRAM_CHAT_ID=987654321
 - **BOT_TOKEN**: [BotFather](https://core.telegram.org/bots/tutorial)에서 봇 생성 시 발급받은 토큰
 - **CHAT_ID**: 알림을 받을 채팅방 ID (개인 DM 또는 그룹)
 
-> Docker 등에서 `secrets.env` 대신 셸 환경변수로 전달할 수도 있습니다. 양쪽에 같은 키가 있으면 환경변수가 우선합니다.
+> Docker 환경에서는 `secrets.env` 대신 셸 환경변수로 전달할 수도 있습니다. 양쪽에 같은 키가 있으면 환경변수가 우선합니다.
 
-### 4단계: 데이터 수집 API (선택)
+### DataFeed API 키 (백테스팅 데이터 수집)
 
-백테스팅용 KRX 시세·재무 데이터를 자동 수집할 수 있습니다.
-data.go.kr과 DART의 Open API Key가 필요합니다.
-건너뛰어도 시스템 운영에 지장은 없습니다.
+백테스팅용 KRX 시세·재무 데이터를 자동 수집하려면 `data.go.kr`과 `DART`의 Open API 키가 필요합니다.
 
 ```bash
-# 나중에 설정하는 경우
 ante feed config set ANTE_DATAGOKR_API_KEY your_key_here
 ante feed config set ANTE_DART_API_KEY your_key_here
 ```
 
-#### 데이터 수집 상세 설정
-
-데이터 수집의 스케줄, 수집 범위, 시간대 가드 등은 `~/.config/ante/data/.feed/config.toml`에서 변경할 수 있습니다.
-
-> 현재 이 설정은 CLI로 변경할 수 없으며, TOML 파일을 직접 편집해야 합니다.
+수집 스케줄·시간대 가드·수집 범위 등 상세 설정은 `~/.config/ante/data/.feed/config.toml`에서 변경합니다. (해당 파일 편집은 CLI 지원 예정.)
 
 **수집 스케줄:**
 
@@ -176,67 +205,30 @@ ante feed config set ANTE_DART_API_KEY your_key_here
 [schedule]
 daily_at = "16:00"              # 매일 자동 수집 시각 (KST, 장 종료 후)
 backfill_at = "01:00"           # 과거 데이터 백필 시각 (KST, 새벽)
-backfill_since = "2015-01-01"   # 백필 시작일 (이 날짜부터 과거 데이터 수집)
-                                # KRX 전 종목 일봉 기준 약 10MB/년 (Parquet+Snappy 압축)
+backfill_since = "2015-01-01"   # 백필 시작일
+                                # KRX 전 종목 일봉 기준 약 10MB/년 (Parquet+Snappy)
                                 # 재무 데이터 포함 시 약 40~50MB/년
-                                # 2015년부터 수집 시 약 400~500MB
 ```
 
-**시간대 가드:**
-
-데이터 수집은 기본적으로 **장 시간(09:00~15:30) 동안 일시 정지**됩니다.
+**시간대 가드** (기본: 장 시간 09:00~15:30 동안 수집 일시 정지):
 
 ```toml
 [guard]
-blocked_days = []                # 수집 차단 요일 (예: ["sat", "sun"])
-blocked_hours = ["09:00-15:30"]  # 수집 차단 시간대 (KST)
-pause_during_trading = true      # true: blocked_hours 적용
+blocked_days = []
+blocked_hours = ["09:00-15:30"]
+pause_during_trading = true
 ```
 
-**수집 범위:**
-
-기본적으로 KRX 전 종목의 일봉과 재무 데이터를 수집합니다.
-특정 종목만 수집하려면 `symbols`를 리스트로 변경합니다.
+**수집 범위** (기본: KRX 전 종목):
 
 ```toml
 [ohlcv.krx]
-timeframes = ["1d"]              # 수집할 타임프레임
-symbols = "all"                  # 전 종목 수집 (또는 ["005930", "000660"])
+timeframes = ["1d"]
+symbols = "all"                 # 또는 ["005930", "000660"]
 
 [fundamental.krx]
-symbols = "all"                  # 전 종목 재무 데이터 수집
+symbols = "all"
 ```
-
-### 설정 완료
-
-초기 설정이 끝나면 토큰과 Recovery Key가 출력됩니다.
-
-```
-── 완료 ────────────────────────────────────────
-
-초기 설정 완료
-  설정 디렉토리: ~/.config/ante/
-  Member ID   : owner
-  이모지      : 🦊
-  계좌        : domestic (kis-domestic)
-
-  토큰: ante_hk_8k2m9p4q...
-
-   셸 프로필에 추가하면 매번 입력하지 않아도 됩니다:
-   echo 'export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...' >> ~/.zshrc
-
-   Recovery Key: ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
-   이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.
-```
-
-**토큰**은 이후 모든 CLI 명령에 필요합니다. 셸 프로필에 등록하면 편리합니다:
-
-```bash
-echo 'export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...' >> ~/.zshrc
-source ~/.zshrc
-```
-
-**Recovery Key**는 패스워드 분실 시 유일한 복구 수단입니다. 안전한 곳에 보관하세요.
 
 ---
 
