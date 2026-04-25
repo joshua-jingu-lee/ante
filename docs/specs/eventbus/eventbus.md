@@ -73,8 +73,10 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 | `BotStoppedEvent` | BotManager | — | `account_id`, `bot_id` |
 | `BotErrorEvent` | BotManager | Notification | `account_id`, `bot_id`, `error_message` |
 | `BotRestartExhaustedEvent` | BotManager | Notification | `account_id`, `bot_id`, `restart_attempts`, `last_error` |
-| `TradingStateChangedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `old_state`, `new_state` (`"active"` / `"halted"`), `reason`, `changed_by` |
 | `SystemShutdownEvent` | Main | 전체 | `reason` |
+
+`TradingStateChangedEvent`는 legacy 이벤트이며 1.0 런타임 계약에서는 사용하지 않는다.
+계좌별/전체 킬 스위치는 `AccountSuspendedEvent`와 `AccountActivatedEvent`로 표현한다.
 
 #### 알림 (Notification)
 
@@ -118,9 +120,11 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `AccountCreatedEvent` | AccountService | Notification | `account_id`, `exchange`, `currency`, `broker_type` |
 | `AccountSuspendedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `reason` |
 | `AccountActivatedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id` |
+
+`AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.
+계좌 생성/삭제는 cold-path structural operation이며, 서버 실행 중 consumer topology를 hot wiring하지 않는다.
 
 #### 멤버 (Member)
 

@@ -71,7 +71,9 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 |-----------|-----------|-------------|-------------|
 | `ante account suspend` | `account.suspend` | `AccountService.suspend()` | `AccountSuspendedEvent` → BotManager 봇 중지 |
 | `ante account activate` | `account.activate` | `AccountService.activate()` | `AccountActivatedEvent` → BotManager 봇 재시작 |
-| `ante account delete` | `account.delete` | `AccountService.delete()` | `AccountSuspendedEvent` → BotManager 봇 중지 + `AccountDeletedEvent` 발행 |
+
+`ante account create`, `ante account delete`, `ante account set-credentials`는 IPC 대상이 아니다.
+이 명령들은 cold-path structural 커맨드이며, 서버 실행 중이면 CLI guard에서 차단된다.
 
 #### Bot
 
@@ -112,6 +114,17 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 ### 오프라인 커맨드 (기존 유지)
 
 `system start`, `system stop`, `system status`, 모든 조회(`list`, `show`, `status`) 커맨드, `backtest`, `data`, `strategy validate/submit`, `report`, `instrument`, `member` 조회, `audit`, `signal` 등.
+
+### Cold-path structural 커맨드
+
+서버 topology를 바꾸는 명령은 IPC로 서버에 위임하지 않는다. 같은 `config_dir`의 서버가
+실행 중이면 실패하고, 서버 정지 상태에서만 직접 DB를 수정한다.
+
+| CLI 커맨드 | 서버 실행 중 동작 | 이유 |
+|-----------|------------------|------|
+| `ante account create` | 차단 | Treasury/RuleEngine/Gateway/Bot hot wiring 비지원 |
+| `ante account delete` | 차단 | 실행 중 consumer 제거와 partial failure 보상 비지원 |
+| `ante account set-credentials` | 차단 | BrokerAdapter 재초기화와 장기 실행 consumer 전파 비지원 |
 
 > **참고**: `member register/suspend/revoke`는 이벤트를 발행하지만 현재 서버에 구독자가 없으므로 오프라인으로 분류한다. 향후 구독자가 추가되면 런타임으로 재분류한다.
 

@@ -74,13 +74,16 @@ class Account:
 | `trading_mode` | - | `VIRTUAL` | 불가 | 거래 모드 (VIRTUAL / LIVE) |
 | **브로커** | | | | |
 | `broker_type` | O | — | 불가 | 브로커 어댑터 유형 |
-| `credentials` | - | `{}` | 가능 | 브로커 인증 정보 (암호화 저장) |
-| `broker_config` | - | `{}` | 가능 | 브로커 동작 설정 (예: KIS `is_paper`) |
+| `credentials` | - | `{}` | cold-path | 브로커 인증 정보 (암호화 저장) |
+| `broker_config` | - | `{}` | cold-path | 브로커 동작 설정 (예: KIS `is_paper`) |
 | **비용** | | | | |
-| `buy_commission_rate` | - | `0` | 가능 | 매수 수수료율 |
-| `sell_commission_rate` | - | `0` | 가능 | 매도 수수료율 (세금 포함) |
+| `buy_commission_rate` | - | `0` | cold-path | 매수 수수료율 |
+| `sell_commission_rate` | - | `0` | cold-path | 매도 수수료율 (세금 포함) |
 | **상태** | | | | |
 | `status` | - | `ACTIVE` | 상태 전이 | 계좌 상태 (ACTIVE / SUSPENDED / DELETED) |
+
+`cold-path` 필드는 수정 가능하지만 서버 정지 상태에서만 변경한다. 서버 실행 중에는
+`AccountStructuralChangeRequiresStoppedServerError`로 차단한다.
 
 ### 불변 필드 정책 (D-ACC-06)
 

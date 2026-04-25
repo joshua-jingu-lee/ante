@@ -61,6 +61,10 @@
 
 상세 내용: [02-design-decisions.md](02-design-decisions.md)
 
+### D-ACC-07: Account lifecycle cold-path contract
+
+상세 내용: [02-design-decisions.md](02-design-decisions.md)
+
 ## 데이터 모델
 
 상세 내용: [03-data-model.md](03-data-model.md)

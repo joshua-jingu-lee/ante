@@ -5,7 +5,7 @@
 # CLI 인터페이스
 
 ```bash
-# 계좌 생성 (대화형)
+# 계좌 생성 (대화형, cold-path 전용)
 ante account create
 
 # 계좌 목록
@@ -19,19 +19,35 @@ ante account info <account_id>
 ante account suspend <account_id>
 ante account activate <account_id>
 
-# 계좌 삭제 (소프트 딜리트)
+# 계좌 삭제 (소프트 딜리트, cold-path 전용)
 ante account delete <account_id>
 
 # 인증 정보 조회 (마스킹)
 ante account credentials <account_id>
 
-# 인증 정보 재설정 (대화형, 기존 값을 덮어씀)
+# 인증 정보 재설정 (대화형, 기존 값을 덮어씀, cold-path 전용)
 ante account set-credentials <account_id>
 
 # 시스템 전체 Kill Switch
 ante system halt                    # 전체 거래 정지
 ante system activate                # 전체 거래 재개
 ```
+
+### 런타임/Cold-path 분류
+
+| 커맨드 | 분류 | 서버 실행 중 동작 |
+|---|---|---|
+| `ante account list` | 런타임 허용/오프라인 조회 | 실행 가능 |
+| `ante account info <account_id>` | 런타임 허용/오프라인 조회 | 실행 가능 |
+| `ante account credentials <account_id>` | 런타임 허용/오프라인 조회 | 마스킹 조회만 가능 |
+| `ante account suspend <account_id>` | 런타임 허용 | IPC로 서버 `AccountService.suspend()` 호출 |
+| `ante account activate <account_id>` | 런타임 허용 | IPC로 서버 `AccountService.activate()` 호출 |
+| `ante account create` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+| `ante account delete <account_id>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+| `ante account set-credentials <account_id>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+
+cold-path 전용 명령은 같은 `config_dir`의 PID/socket guard로 서버 실행 여부를 먼저 확인한다.
+서버가 실행 중이면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 에러로 종료한다.
 
 ### CLI 출력 예시
 

@@ -8,15 +8,29 @@
 
 ```
 GET    /api/accounts                      — 계좌 목록
-POST   /api/accounts                      — 계좌 생성
+POST   /api/accounts                      — 계좌 생성 (cold-path 전용, 런타임 서버에서는 409)
 GET    /api/accounts/:id                  — 계좌 상세
-PUT    /api/accounts/:id                  — 계좌 수정
+PUT    /api/accounts/:id                  — 계좌 수정 (런타임에는 비구조 필드만 허용)
 POST   /api/accounts/:id/suspend          — 계좌 정지
 POST   /api/accounts/:id/activate         — 계좌 재활성화
-DELETE /api/accounts/:id                  — 계좌 삭제
-POST   /api/system/halt                    — 전체 Kill Switch (모든 ACTIVE → SUSPENDED)
-POST   /api/system/activate               — 전체 복구 (모든 SUSPENDED → ACTIVE)
+GET    /api/accounts/:id/credentials      — 인증 정보 마스킹 조회
+DELETE /api/accounts/:id                  — 계좌 삭제 (cold-path 전용, 런타임 서버에서는 409)
+POST   /api/system/kill-switch            — 전체/계좌별 Kill Switch (action=halt|activate, account_id? 생략 시 전체)
 ```
+
+### 런타임 차단 규칙
+
+Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경 요청은 기본적으로 런타임 요청이다.
+따라서 다음 요청은 1.0에서 409 Conflict를 반환한다.
+
+- `POST /api/accounts`
+- `DELETE /api/accounts/:id`
+- `PUT /api/accounts/:id` 중 `credentials`, `broker_config`, `buy_commission_rate`,
+  `sell_commission_rate`, `broker_type`, `exchange`, `currency`, `trading_mode`를 포함한 요청
+
+에러 코드는 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`이다. 계좌 생성/삭제와
+브로커 재초기화성 변경은 서버를 정지한 뒤 cold-path CLI로 수행하고, 서버 재시작 시 새
+계좌 topology가 반영된다.
 
 ### 기존 엔드포인트 계좌 필터
 

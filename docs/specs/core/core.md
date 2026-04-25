@@ -90,6 +90,10 @@ canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기
 15. BotManager.restore_bots()              # DB에서 봇 설정 복원 + 시작
 ```
 
+계좌 topology는 6~12단계에서 서버 시작 시점의 DB 상태를 기준으로 고정된다.
+계좌 생성/삭제/credentials·broker_config·commission 변경은 cold-path 전용이며, 서버 실행 중
+hot-add/hot-remove를 수행하지 않는다.
+
 ## 이벤트 버스 연동 (EventBus Integration)
 
 | 이벤트 | 발행 시점 | 구독자 |

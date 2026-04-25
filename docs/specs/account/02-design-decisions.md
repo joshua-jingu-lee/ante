@@ -74,10 +74,48 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 `ante init`은 더 이상 KIS 실계좌 / Telegram / DataFeed / 기존 broker→account 마이그레이션을 다루지 않는다. 사용자/Agent가 후속 명령으로 명시적으로 추가한다:
 
-- 실거래 계좌(KIS 등): `ante account create` (대화형) 또는 추가 옵션이 필요한 경우 동일 명령의 향후 비대화형 플래그
+- 실거래 계좌(KIS 등): 서버 정지 상태에서 `ante account create` (대화형) 또는 추가 옵션이 필요한 경우 동일 명령의 향후 비대화형 플래그
 - Telegram: `<config_dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
 - DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
 
 테스트 계좌(`account_id: "test"`)는 `ante init`이 항상 자동 생성하므로, 사용자는 실계좌 등록 없이도 가상 자금으로 시스템 전체 흐름을 체험할 수 있다.
 
 > 상세 init 계약 (생성 산출물·멱등성·플래그)은 [cli/03-commands.md](../cli/03-commands.md#ante-init--시스템-초기-설정) 참조.
+
+### D-ACC-07: Account lifecycle cold-path contract
+
+**결정**: 계좌 구조 변경은 서버 정지 상태에서만 허용한다. 서버 실행 중에는
+계좌별 런타임 상태 전이와 조회만 허용하고, Treasury/RuleEngine/Gateway/Bot에 새 계좌나
+새 브로커 설정을 hot wiring하는 것을 1.0 범위에서 지원하지 않는다.
+
+**런타임 중 허용**:
+
+| 작업 | CLI | Web API | 실행 경로 |
+|---|---|---|---|
+| 계좌 목록/상세 조회 | `account list`, `account info` | `GET /api/accounts`, `GET /api/accounts/{id}` | 읽기 |
+| 인증 정보 마스킹 조회 | `account credentials` | `GET /api/accounts/{id}/credentials` | 읽기 |
+| 계좌 거래 정지 | `account suspend` | `POST /api/accounts/{id}/suspend` | IPC/Web API → `AccountService.suspend()` |
+| 계좌 거래 재개 | `account activate` | `POST /api/accounts/{id}/activate` | IPC/Web API → `AccountService.activate()` |
+| 전체 거래 정지/재개 | `system halt/activate` | `POST /api/system/kill-switch` | IPC/Web API → `suspend_all()` / `activate_all()` |
+| 비구조 필드 수정 | `account update` 계열 향후 명령 | `PUT /api/accounts/{id}` | `name`, `timezone`, `trading_hours` 등 브로커 재초기화가 필요 없는 필드만 |
+| 계좌별 rule 변경 | `rule`/`config` 계열 명령 | `PUT /api/accounts/{id}/rules/{rule_type}` | DynamicConfig + `ConfigChangedEvent` |
+
+**cold-path 전용**:
+
+| 작업 | CLI/Web API | 서버 실행 중 동작 |
+|---|---|---|
+| 계좌 생성 | `account create`, `POST /api/accounts` | `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로 거부 |
+| 계좌 삭제 | `account delete`, `DELETE /api/accounts/{id}` | 동일 |
+| credentials 변경 | `account set-credentials`, credentials 변경 payload | 동일 |
+| `broker_config` 변경 | `PUT /api/accounts/{id}` payload | 동일 |
+| `buy_commission_rate` / `sell_commission_rate` 변경 | `PUT /api/accounts/{id}` payload | 동일 |
+| `broker_type`, `exchange`, `currency`, `trading_mode` 변경 | 생성 후 불변. 변경하려면 서버 정지 상태에서 새 계좌 생성 + 기존 계좌 삭제 |
+
+**차단 규칙**:
+
+1. cold-path 전용 CLI는 먼저 같은 `config_dir`의 PID/socket으로 서버 실행 여부를 확인한다.
+2. 서버가 실행 중이면 DB를 열기 전에 실패한다.
+3. 런타임 Web API가 cold-path 전용 요청을 받으면 409 Conflict와
+   `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`를 반환한다.
+4. cold-path structural mutation은 runtime IPC 대상이 아니다.
+5. 서버는 시작 시 DB의 계좌 목록을 로드하고, 그 구조를 해당 프로세스의 계좌 topology로 고정한다. 구조 변경 후에는 서버 재시작이 필요하다.

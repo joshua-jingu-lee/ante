@@ -18,7 +18,7 @@
 | Prefix | 태그 | 설명 |
 |--------|------|------|
 | `/api/system` | system | 시스템 상태·헬스체크·킬스위치 (계좌별/전체) |
-| `/api/accounts` | accounts | 계좌 CRUD + 정지·활성화 |
+| `/api/accounts` | accounts | 계좌 조회 + 정지·활성화 + 비구조 필드 수정. 구조 변경 요청은 cold-path 계약에 따라 409로 차단 |
 | `/api/auth` | auth | 세션 인증 (login/logout/me) |
 | `/api/bots` | bots | 봇 CRUD + 제어 |
 | `/api/trades` | trades | 거래 이력 조회 |

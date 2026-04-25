@@ -5,6 +5,7 @@
 # 타 모듈 설계 시 참고
 
 - **CLI 스펙** ([cli.md](../cli/cli.md)): CLI와 Web API는 동일한 서비스 계층을 공유, 기능 대칭 유지
+- **Account 스펙** ([account/README.md](../account/README.md)): 계좌 구조 변경은 cold-path 전용. 런타임 Web API는 계좌 생성/삭제/브로커 재초기화성 수정을 409로 차단한다.
 - **EventBus 스펙** ([eventbus.md](../eventbus/eventbus.md)): `ExternalSignalEvent` 정의
 - **Bot 스펙** ([bot/README.md](../bot/README.md)): `BotManager`가 REST API에서 호출됨 (생성/시작/중지)
 - **Report Store 스펙** ([report-store.md](../report-store/report-store.md)): 리포트 CRUD + 상태 변경 API

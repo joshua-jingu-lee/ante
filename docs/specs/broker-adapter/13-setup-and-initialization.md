@@ -10,7 +10,7 @@ Account 모델의 `broker_type`으로 어댑터를 결정한다. `AccountService
 
 ### 설정 예시
 
-계좌 기반 설정 체계를 사용한다. 아래는 `ante account create` 또는 설정 파일로 등록하는 계좌 예시이다.
+계좌 기반 설정 체계를 사용한다. 아래는 서버 정지 상태에서 `ante account create`로 등록하는 계좌 예시이다. 계좌 생성과 `credentials`/`broker_config` 변경은 cold-path 전용이며, 서버 실행 중 브로커 어댑터를 hot-reinitialize하지 않는다.
 
 ```toml
 # 국내주식 계좌

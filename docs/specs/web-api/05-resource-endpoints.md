@@ -11,11 +11,13 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/accounts` | 계좌 목록 |
-| POST | `/api/accounts` | 계좌 등록. Body: account_id, exchange, currency, broker_type, credentials_ref, commission_rate, sell_tax_rate |
+| POST | `/api/accounts` | 계좌 등록. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환. Body: account_id, exchange, currency, broker_type, trading_mode, credentials, broker_config, buy_commission_rate, sell_commission_rate |
 | GET | `/api/accounts/{account_id}` | 계좌 상세 조회 |
+| PUT | `/api/accounts/{account_id}` | 계좌 수정. 런타임에는 `name`, `timezone`, `trading_hours` 같은 비구조 필드만 허용. credentials/broker_config/commission 등 structural field 포함 시 409 |
+| GET | `/api/accounts/{account_id}/credentials` | 인증 정보 마스킹 조회 |
 | POST | `/api/accounts/{account_id}/suspend` | 계좌 거래 정지. Body: reason. 이미 정지 상태이면 409 Conflict |
 | POST | `/api/accounts/{account_id}/activate` | 계좌 거래 재개. 이미 활성 상태이면 409 Conflict |
-| DELETE | `/api/accounts/{account_id}` | 계좌 삭제 (연결된 봇이 없을 때만) |
+| DELETE | `/api/accounts/{account_id}` | 계좌 삭제. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환 |
 | GET | `/api/accounts/{account_id}/rules` | 계좌 리스크 룰 목록 조회. Config에서 `accounts.{id}.rules` 키를 읽어 RULE_REGISTRY 기반으로 구조화 반환. 응답: `{rules: [{type, name, enabled, priority, config, param_schema}]}` |
 | PUT | `/api/accounts/{account_id}/rules/{rule_type}` | 계좌 리스크 룰 수정. Body: `{enabled?, config?}`. RULE_REGISTRY에서 rule_type 유효성 + config 파라미터 스키마 검증 후 Config API(`PUT /api/config/{key}`)에 위임. ConfigChangedEvent → RuleEngine 자동 리로드 |
 

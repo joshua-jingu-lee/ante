@@ -19,13 +19,17 @@ ante system activate [--account <account_id>]  # halt 해제, 거래 재개 (계
 ```bash
 ante account list                             # 계좌 목록
 ante account info <account_id>                # 계좌 상세 정보
-ante account create                           # 대화형 계좌 등록 (브로커/모드/인증정보 prompt)
+ante account create                           # 대화형 계좌 등록 (cold-path 전용, 서버 정지 필요)
 ante account credentials <account_id>         # 인증 정보 조회 (마스킹)
-ante account set-credentials <account_id> [--app-key K --app-secret S]  # 인증 정보 재설정 (대화형 또는 비대화형)
+ante account set-credentials <account_id> [--app-key K --app-secret S]  # 인증 정보 재설정 (cold-path 전용)
 ante account suspend <account_id> --reason <사유>  # 계좌 거래 정지
 ante account activate <account_id>            # 계좌 거래 재개
-ante account delete <account_id>              # 계좌 삭제 (연결된 봇이 없을 때만)
+ante account delete <account_id>              # 계좌 삭제 (cold-path 전용, 연결된 봇이 없을 때만)
 ```
+
+`account create/delete/set-credentials`는 계좌 topology 또는 브로커 초기화 입력을 바꾸므로
+서버 실행 중에는 차단된다. 실행 전 같은 `config_dir`의 PID/socket guard를 확인하고,
+서버가 실행 중이면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로 종료한다.
 
 ### `ante bot` — 봇 관리
 
@@ -204,7 +208,7 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 `ante init`은 이들을 다루지 않는다. 필요 시 다음 명령을 사용한다:
 
-- KIS 실계좌: `ante account create` (대화형)
+- KIS 실계좌: 서버 정지 상태에서 `ante account create` (대화형)
 - Telegram: `<dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
 - DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
 

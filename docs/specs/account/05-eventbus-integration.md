@@ -8,9 +8,13 @@
 
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
-| `AccountSuspendedEvent` | `suspend()` 또는 `delete()` 호출 시 | BotManager (소속 봇 전체 중지) |
-| `AccountActivatedEvent` | `activate()` 호출 시 | — |
-| `AccountDeletedEvent` | `delete()` 호출 시 | — |
+| `AccountSuspendedEvent` | `suspend()` 호출 시 | BotManager (소속 봇 전체 중지), RuleEngine, Notification |
+| `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (해당 계좌 봇 재개), RuleEngine, Notification |
+
+`AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 wiring 이벤트가 아니다. 계좌 생성/삭제는
+cold-path 전용이므로 서버 실행 중 EventBus 구독자에게 새 topology를 전파하지 않는다.
+구조 변경 이력은 필요 시 감사 로그나 cold-path maintenance 결과로 남기며, 라이브 서비스의
+consumer 생성/제거를 트리거하지 않는다.
 
 ### 구독 이벤트
 

@@ -56,6 +56,6 @@ class BotStepCompletedEvent(Event):
 | `OrderCancelFailedEvent` | 주문 취소 실패 통보 | `on_order_update()` (status="cancel_failed") |
 | `ExternalSignalEvent` | 외부 AI Agent 시그널 | `on_data()` → Signal 발행 |
 | `BotStopEvent` | RuleEngine 등에서 발행한 봇 중지 요청 | — (BotManager가 `stop_bot()` 호출) |
-| `TradingStateChangedEvent` | 킬 스위치 HALTED 시 전체 봇 중지 | — (BotManager가 `stop_all()` 호출) |
 | `AccountSuspendedEvent` | 계좌 정지 시 해당 계좌의 봇만 중지 | — (BotManager가 계좌별 `stop_bot()` 호출) |
+| `AccountActivatedEvent` | 계좌 재활성화 시 해당 계좌의 봇 재개 가능 상태 반영 | — (BotManager가 계좌별 재개 정책 적용) |
 | `BotErrorEvent` | 봇 에러 시 자동 재시작 정책 수행 | — (BotManager가 `_on_bot_error()` 처리) |
