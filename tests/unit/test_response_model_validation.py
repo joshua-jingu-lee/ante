@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
-from ante import __version__
 from ante.web.schemas import (
     ApprovalDetailResponse,
     ApprovalListResponse,
@@ -57,6 +59,17 @@ from ante.web.schemas import (
     WeeklySummaryResponse,
 )
 
+
+def _expected_release_version() -> str:
+    """pyproject.toml의 SSOT 버전을 직접 파싱한다."""
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    with pyproject.open("rb") as fp:
+        return tomllib.load(fp)["project"]["version"]
+
+
+EXPECTED_VERSION = _expected_release_version()
+
+
 # ── 시스템 라우트 응답 모델 ──────────────────────────
 
 
@@ -65,17 +78,17 @@ class TestSystemResponseModels:
 
     def test_status_response_basic(self):
         """GET /api/system/status — 기본 응답 (account_service 없음)."""
-        data = {"status": "running", "version": __version__}
+        data = {"status": "running", "version": EXPECTED_VERSION}
         model = StatusResponse.model_validate(data)
         assert model.status == "running"
-        assert model.version == __version__
+        assert model.version == EXPECTED_VERSION
         assert model.trading_status is None
 
     def test_status_response_with_trading_status(self):
         """GET /api/system/status — account_service가 있을 때."""
         data = {
             "status": "running",
-            "version": __version__,
+            "version": EXPECTED_VERSION,
             "trading_status": "ACTIVE",
         }
         model = StatusResponse.model_validate(data)
@@ -85,7 +98,7 @@ class TestSystemResponseModels:
         """GET /api/system/status — HALTED 상태일 때 halt 정보 포함."""
         data = {
             "status": "running",
-            "version": __version__,
+            "version": EXPECTED_VERSION,
             "trading_status": "HALTED",
             "halt_time": "2026-03-19T10:00:00Z",
             "halt_reason": "긴급 중단",
@@ -93,6 +106,16 @@ class TestSystemResponseModels:
         model = StatusResponse.model_validate(data)
         assert model.halt_time == "2026-03-19T10:00:00Z"
         assert model.halt_reason == "긴급 중단"
+
+    def test_module_version_matches_pyproject(self):
+        """`ante.__version__`이 pyproject.toml의 SSOT 버전과 일치해야 한다.
+
+        설치(`pip install -e .`) 여부와 무관하게, 현재 checkout의 SSOT
+        버전이 노출되어야 한다 (PYTHONPATH=$PWD/src 직접 실행 포함).
+        """
+        from ante import __version__
+
+        assert __version__ == EXPECTED_VERSION
 
     def test_health_response(self):
         """GET /api/system/health.
