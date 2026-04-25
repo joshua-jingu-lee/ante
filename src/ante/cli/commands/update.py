@@ -142,9 +142,13 @@ def update(
         return
 
     # 디스크 공간 사전 검사
-    from ante.cli.main import get_db_path
+    from ante.cli.main import get_data_path, get_db_path
 
     db_path = Path(get_db_path(ctx))
+    # 마이그레이션 서브프로세스에 넘길 데이터 루트.
+    # 런타임이 `data.path` 로 보는 경로와 동일해야 v002 Parquet 마이그레이션이
+    # 실제 데이터 트리에 적용된다 (Refs #1125 Codex 13차 review Finding 1).
+    data_path = get_data_path(ctx)
     ok, msg = check_disk_space(db_path)
     if not ok:
         click.echo(msg, err=True)
@@ -190,11 +194,12 @@ def update(
         raise SystemExit(1)
 
     # Phase B: 마이그레이션 — executor 가 서브프로세스로 `python -m
-    # ante.db.migrations` 를 호출한다. config_dir 로 계산한 DB 경로를
-    # 환경변수로 전달해 서브프로세스가 같은 DB 에 마이그레이션을 적용한다.
+    # ante.db.migrations` 를 호출한다. config_dir 로 계산한 DB 경로와
+    # `data.path` 로 계산한 데이터 루트를 환경변수로 함께 전달해, 서브프로세스가
+    # 런타임과 동일한 DB·데이터 트리에 마이그레이션을 적용한다.
     if not fmt.is_json:
         click.echo("DB 마이그레이션 실행 중...")
-    if not run_post_update_migrations(str(db_path)):
+    if not run_post_update_migrations(str(db_path), data_path=data_path):
         if not fmt.is_json:
             click.echo("마이그레이션 실패. 자동 롤백 시도 중...", err=True)
         backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"

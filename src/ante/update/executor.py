@@ -65,7 +65,11 @@ def pip_upgrade(version: str | None = None) -> bool:
     return True
 
 
-def run_post_update_migrations(db_path: str | None = None) -> bool:
+def run_post_update_migrations(
+    db_path: str | None = None,
+    *,
+    data_path: str | None = None,
+) -> bool:
     """신 코드로 DB 마이그레이션을 실행한다. 성공 시 True.
 
     Args:
@@ -73,10 +77,19 @@ def run_post_update_migrations(db_path: str | None = None) -> bool:
             결과를 넘기면 서브프로세스가 ANTE_DB_PATH 환경변수로 이를 읽고
             해당 DB 를 연다. None 이면 서브프로세스 쪽 fallback
             (`db/ante.db`)을 그대로 사용한다 (하위 호환).
+        data_path: Parquet 데이터 트리 루트 경로. ``get_data_path(ctx)``
+            결과를 넘기면 서브프로세스가 ANTE_DATA_PATH 환경변수로 이를
+            읽고 v002 Parquet 마이그레이션을 해당 트리에 적용한다. None
+            이면 서브프로세스 쪽 fallback(`data/`)을 그대로 사용한다 —
+            custom config_dir / 사용자 지정 데이터 루트에서는 반드시
+            전달해야 마이그레이션이 런타임과 동일한 트리를 본다
+            (Refs #1125 Codex 13차 review Finding 1).
     """
     env = os.environ.copy()
     if db_path:
         env["ANTE_DB_PATH"] = db_path
+    if data_path:
+        env["ANTE_DATA_PATH"] = data_path
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "ante.db.migrations"],
         capture_output=True,

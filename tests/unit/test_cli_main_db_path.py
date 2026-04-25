@@ -15,7 +15,7 @@ from pathlib import Path
 import click
 import pytest
 
-from ante.cli.main import cli, get_db_path
+from ante.cli.main import cli, get_data_path, get_db_path
 
 
 def test_get_db_path_uses_config_dir(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,3 +158,80 @@ def test_get_db_path_env_used_when_ctx_has_no_override(
 
     ctx = click.Context(cli, obj={})
     assert get_db_path(ctx) == str(env_dir / "db" / "ante.db")
+
+
+# ---------------------------------------------------------------------------
+# get_data_path — Codex 13차 review Finding 1
+#
+# `ante update` 서브프로세스가 v002 Parquet 마이그레이션을 적용할 때
+# 런타임이 보는 동일한 데이터 트리를 사용해야 한다. 헬퍼는 system.toml
+# 의 ``data.path`` 키(런타임 `s.config.get("data.path", "data/")` 와 동일)
+# 를 그대로 노출한다.
+# ---------------------------------------------------------------------------
+
+
+def test_get_data_path_default_when_no_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """system.toml 이 없거나 [data].path 설정이 없으면 `data/` 기본값."""
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    custom_dir = tmp_path / "no-data-path"
+    custom_dir.mkdir()
+    ctx = click.Context(cli, obj={"config_dir": custom_dir})
+    assert get_data_path(ctx) == "data/"
+
+
+def test_get_data_path_reads_system_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """system.toml 에 [data].path 가 절대 경로로 설정되면 그 값을 반환."""
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    custom_dir = tmp_path / "with-data-path"
+    custom_dir.mkdir()
+    custom_data = tmp_path / "shared" / "ante-data"
+    (custom_dir / "system.toml").write_text(
+        "[db]\npath = \"/tmp/ante.db\"\n\n"
+        f'[data]\npath = "{custom_data}"\n'
+    )
+
+    ctx = click.Context(cli, obj={"config_dir": custom_dir})
+    assert get_data_path(ctx) == str(custom_data)
+
+
+def test_get_data_path_env_var(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ANTE_CONFIG_DIR 환경변수도 system.toml 위치 결정에 반영된다."""
+    env_dir = tmp_path / "env-data-cfg"
+    env_dir.mkdir()
+    custom_data = tmp_path / "env-data"
+    (env_dir / "system.toml").write_text(
+        "[db]\npath = \"/tmp/ante.db\"\n\n"
+        f'[data]\npath = "{custom_data}"\n'
+    )
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(env_dir))
+
+    ctx = click.Context(cli, obj={})
+    assert get_data_path(ctx) == str(custom_data)
+
+
+def test_get_data_path_override_beats_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--config-dir` (ctx.obj['config_dir']) 가 ANTE_CONFIG_DIR 보다 우선."""
+    env_dir = tmp_path / "env-cfg"
+    env_dir.mkdir()
+    (env_dir / "system.toml").write_text(
+        "[db]\npath = \"/tmp/env-ante.db\"\n\n"
+        '[data]\npath = "/should-not-be-used"\n'
+    )
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(env_dir))
+
+    override_dir = tmp_path / "override-cfg"
+    override_dir.mkdir()
+    custom_data = tmp_path / "override-data"
+    (override_dir / "system.toml").write_text(
+        "[db]\npath = \"/tmp/override-ante.db\"\n\n"
+        f'[data]\npath = "{custom_data}"\n'
+    )
+
+    ctx = click.Context(cli, obj={"config_dir": override_dir})
+    assert get_data_path(ctx) == str(custom_data)

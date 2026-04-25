@@ -8,7 +8,7 @@ import click
 
 from ante.cli.formatter import OutputFormatter
 from ante.cli.middleware import authenticate_member
-from ante.config.config import resolve_config_dir
+from ante.config.config import Config, resolve_config_dir
 
 try:
     from importlib.metadata import version as pkg_version
@@ -164,6 +164,26 @@ def get_db_path(ctx: click.Context | None = None) -> str:
         `<config_dir>/db/ante.db` 형태의 경로 문자열.
     """
     return str(get_config_dir(ctx) / "db" / "ante.db")
+
+
+def get_data_path(ctx: click.Context | None = None) -> str:
+    """`--config-dir` 기반 system.toml 에서 ``data.path`` 를 읽어 반환한다.
+
+    런타임(`ante.main._init_feed`/`_init_core`의 마이그레이션 호출)이 사용하는
+    `s.config.get("data.path", "data/")` 와 동일한 키·기본값을 사용한다.
+    `ante update` 가 마이그레이션 서브프로세스에 같은 데이터 루트를 넘겨야
+    v002 Parquet 마이그레이션이 런타임이 보는 동일한 트리에 적용된다
+    (Refs #1125 Codex 13차 review Finding 1).
+
+    Args:
+        ctx: 선택적 Click 컨텍스트. 전달되지 않으면
+            `click.get_current_context(silent=True)`로 현재 컨텍스트를 조회한다.
+
+    Returns:
+        `data.path` 설정값(절대/상대) 문자열. 미설정이면 `"data/"`.
+    """
+    cfg = Config.load(config_dir=get_config_dir(ctx))
+    return str(cfg.get("data.path", "data/"))
 
 
 # 서브커맨드 등록

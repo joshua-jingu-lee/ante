@@ -137,6 +137,13 @@ class TestSnapshotInRollbackMessage:
                 return_value=snapshot_path,
             ),
             patch("ante.cli.commands.update.check_disk_space", return_value=(True, "")),
+            # `pathlib.Path.exists`가 항상 True 를 돌려주는 테스트 시나리오에서는
+            # `Config.load()` 가 존재하지도 않는 system.toml 을 열려다 IOError 가
+            # 난다. update 흐름에서 호출되는 get_data_path 를 직접 mocking 한다.
+            patch(
+                "ante.cli.main.get_data_path",
+                return_value="data/",
+            ),
         ]
 
     def test_rollback_message_includes_snapshot_path(self, runner: CliRunner) -> None:
@@ -153,6 +160,7 @@ class TestSnapshotInRollbackMessage:
             patches[7],
             patches[8],
             patches[9],
+            patches[10],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -174,6 +182,7 @@ class TestSnapshotInRollbackMessage:
             patches[7],
             patches[8],
             patches[9],
+            patches[10],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -218,3 +227,127 @@ class TestRunPostUpdateMigrationsDbPath:
 
         if "ANTE_DB_PATH" not in _os.environ:
             assert "ANTE_DB_PATH" not in env
+
+
+class TestRunPostUpdateMigrationsDataPath:
+    """Codex 13차 review Finding 1 — run_post_update_migrations 가 전달된
+    data_path 를 서브프로세스 환경변수로 내려보내야 한다.
+
+    과거 구현은 db_path 만 ANTE_DB_PATH 로 전달해, 서브프로세스가
+    `data/` CWD 폴백으로 v002 Parquet 마이그레이션을 적용했다. custom
+    config_dir / 사용자 지정 data root 환경에서는 런타임이 보는 데이터
+    트리와 어긋나 마이그레이션이 빈 디렉토리를 보고 성공 처리되는
+    문제가 있었다. 이제는 상위 CLI 가 계산한 실제 데이터 루트를
+    ANTE_DATA_PATH 로 내려줘야 한다.
+    """
+
+    def test_data_path_passed_as_env_var(self) -> None:
+        """data_path 인자가 ANTE_DATA_PATH 환경변수로 서브프로세스에 전달된다."""
+        with patch("ante.update.executor.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            ok = run_post_update_migrations(
+                "/custom/path/ante.db",
+                data_path="/custom/path/data",
+            )
+
+        assert ok is True
+        call_kwargs = mock_run.call_args.kwargs
+        assert "env" in call_kwargs, "서브프로세스 env 키워드가 전달돼야 함"
+        assert call_kwargs["env"]["ANTE_DB_PATH"] == "/custom/path/ante.db"
+        assert call_kwargs["env"]["ANTE_DATA_PATH"] == "/custom/path/data"
+
+    def test_data_path_keyword_only(self) -> None:
+        """data_path 는 키워드 전용 인자 — 위치 인자로는 전달할 수 없다.
+
+        호출자가 db_path 자리에 data_path 를 잘못 끼워 넣는 사고를 막기 위함.
+        """
+        with patch("ante.update.executor.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            with pytest.raises(TypeError):
+                run_post_update_migrations(  # type: ignore[misc]
+                    "/custom/path/ante.db", "/custom/path/data"
+                )
+
+    def test_no_data_path_does_not_set_env(self) -> None:
+        """data_path 가 None 이면 ANTE_DATA_PATH 는 설정하지 않는다 (하위 호환)."""
+        with patch("ante.update.executor.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            ok = run_post_update_migrations("/custom/path/ante.db")
+
+        assert ok is True
+        call_kwargs = mock_run.call_args.kwargs
+        env = call_kwargs.get("env", {})
+        import os as _os
+
+        if "ANTE_DATA_PATH" not in _os.environ:
+            assert "ANTE_DATA_PATH" not in env
+
+
+class TestUpdateCliPropagatesDataPath:
+    """`ante update` CLI 통합: --config-dir 의 data.path 가 마이그레이션 호출에
+    그대로 전달되는지 확인 (Codex 13차 review Finding 1)."""
+
+    def test_cli_passes_data_path_from_system_toml(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """system.toml 의 [data].path 가 run_post_update_migrations 의
+        data_path 키워드 인자로 전달된다."""
+        monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+
+        config_dir = tmp_path / "cfg"
+        config_dir.mkdir()
+        custom_data = tmp_path / "shared" / "ante-data"
+        (config_dir / "system.toml").write_text(
+            f'[db]\npath = "{config_dir / "db" / "ante.db"}"\n\n'
+            f'[data]\npath = "{custom_data}"\n'
+        )
+
+        captured: dict[str, object] = {}
+
+        def _capture(*args: object, **kwargs: object) -> bool:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return True
+
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch(
+                "ante.update.checker.get_current_version",
+                return_value="1.0.0",
+            ),
+            patch(
+                "ante.update.checker.get_latest_version",
+                return_value="2.0.0",
+            ),
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.db.backup.backup_db"),
+            patch("ante.update.executor.pip_upgrade", return_value=True),
+            patch(
+                "ante.update.executor.snapshot_dependencies",
+                return_value=None,
+            ),
+            patch(
+                "ante.update.executor.run_post_update_migrations",
+                side_effect=_capture,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--config-dir", str(config_dir), "update", "-y"],
+            )
+
+        assert result.exit_code == 0, result.output
+        kwargs = captured.get("kwargs") or {}
+        assert isinstance(kwargs, dict)
+        assert kwargs.get("data_path") == str(custom_data), (
+            "update CLI 는 system.toml 의 data.path 를 그대로 전달해야 합니다."
+        )
