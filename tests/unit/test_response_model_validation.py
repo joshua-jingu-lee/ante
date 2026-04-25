@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from ante import __version__
 from ante.web.schemas import (
     ApprovalDetailResponse,
     ApprovalListResponse,
@@ -64,17 +65,17 @@ class TestSystemResponseModels:
 
     def test_status_response_basic(self):
         """GET /api/system/status — 기본 응답 (account_service 없음)."""
-        data = {"status": "running", "version": "0.1.0"}
+        data = {"status": "running", "version": __version__}
         model = StatusResponse.model_validate(data)
         assert model.status == "running"
-        assert model.version == "0.1.0"
+        assert model.version == __version__
         assert model.trading_status is None
 
     def test_status_response_with_trading_status(self):
         """GET /api/system/status — account_service가 있을 때."""
         data = {
             "status": "running",
-            "version": "0.1.0",
+            "version": __version__,
             "trading_status": "ACTIVE",
         }
         model = StatusResponse.model_validate(data)
@@ -84,7 +85,7 @@ class TestSystemResponseModels:
         """GET /api/system/status — HALTED 상태일 때 halt 정보 포함."""
         data = {
             "status": "running",
-            "version": "0.1.0",
+            "version": __version__,
             "trading_status": "HALTED",
             "halt_time": "2026-03-19T10:00:00Z",
             "halt_reason": "긴급 중단",

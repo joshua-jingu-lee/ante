@@ -8,6 +8,7 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from ante import __version__  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
 
 
@@ -30,7 +31,7 @@ class TestSystemRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "running"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == __version__
 
     def test_health(self, client):
         # 기본 앱에는 db/account_service가 주입되어 있지 않다.

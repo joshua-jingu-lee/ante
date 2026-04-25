@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ante import __version__
+
 
 class ErrorResponse(BaseModel):
     """RFC 7807 Problem Details 에러 응답."""
@@ -107,7 +109,7 @@ class StatusResponse(BaseModel):
     """시스템 상태 응답."""
 
     status: str
-    version: str = "0.1.0"
+    version: str = __version__
     trading_status: str | None = None
     halt_time: str | None = None
     halt_reason: str | None = None
