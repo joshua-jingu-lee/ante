@@ -87,13 +87,10 @@ Claude 오케스트레이터
 |--------|------|------|
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
 | `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → 의견 검토 → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`) | `.agent/commands/autopilot.md` |
-| `/qa-test` | 지정 TC 실행 (`@qa-engineer` 위임) | `.agent/commands/qa-test.md` |
-| `/qa-sweep` | 전체 TC 순차 실행 (전수 검사) | `.agent/commands/qa-sweep.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 | `/arch-review` | 이슈 사전 아키텍처 검토 | `.agent/commands/arch-review.md` |
-| `/qa-review` | 이슈 사전 QA 커버리지 검토 | `.agent/commands/qa-review.md` |
 
-야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 `/arch-review`와 `/qa-review` 증적을 이슈 코멘트로 남긴 뒤 `/implement-issue`에 개별 구현을 위임한다. 사전 리뷰의 `ready`/`caution`은 구현 체크리스트로 승격되며, `/autopilot`은 기본적으로 **한 번에 최대 10개 이슈를 review → implement → merge/post-merge까지 순차 모니터링**한다.
+야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 `/arch-review` 증적을 이슈 코멘트로 남긴 뒤 `/implement-issue`에 개별 구현을 위임한다. 사전 리뷰의 `ready`/`caution`은 구현 체크리스트로 승격되며, `/autopilot`은 기본적으로 **한 번에 최대 10개 이슈를 review → implement → merge/post-merge까지 순차 모니터링**한다.
 
 운영 중인 이슈의 현재 단계는 최신 `🤖 **Autopilot 사이클 상태**` 코멘트로 노출하며, 여기서 `review-state`, `implement-state`, `merge-monitor-state`를 각각 `pending | running | blocked | done`으로 추적한다.
 
@@ -190,7 +187,7 @@ main
 | `codex-pr-approve` FAIL — `content` | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 | 동일 PR 브랜치 수정 후 재검증 |
 | `claude-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
 | `codex-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
-| QA FAIL | 기능 버그 | 오케스트레이터가 버그 이슈 등록 → Claude 개발 에이전트 | 재검증 속행 |
+| 수용 검증 FAIL | 기능 버그 | 오케스트레이터가 버그 이슈 등록 → Claude 개발 에이전트 | 재검증 속행 |
 
 ### 5.1 재시도 규칙
 

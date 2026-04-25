@@ -21,10 +21,9 @@
 
 2. **같은 의미의 코멘트를 중복으로 남기지 않는다**
    - 새 코멘트를 남기기 전에 기존 코멘트 헤더를 먼저 확인한다.
-   - 단, `arch-review` / `qa-review`처럼 verdict를 갱신해야 하는 리뷰는 예외다. 최신 verdict가 없거나 stale하면 같은 헤더로 refresh 코멘트를 새로 남긴다.
+   - 단, `arch-review`처럼 verdict를 갱신해야 하는 리뷰는 예외다. 최신 verdict가 없거나 stale하면 같은 헤더로 refresh 코멘트를 새로 남긴다.
    - 예:
      - `🏗️ **아키텍트 리뷰**`
-     - `🧪 **QA 리뷰**`
      - `🤖 **구현 착수**`
      - `🤖 **PR 생성 완료**`
      - `🤖 **Autopilot 보류**`
@@ -124,10 +123,8 @@ gh pr create --base {base} --title "{title}" --body "{body}"
   - 큐 snapshot, open PR 여부 확인, 보류 코멘트, 사전 리뷰 증적 재사용
 - `/implement-issue`
   - 이슈 조회, 구현 착수 코멘트, 리뷰 요청 코멘트, PR 생성, PR 생성 완료 코멘트
-- `/arch-review`, `/qa-review`
+- `/arch-review`
   - 기존 코멘트를 확인하되, stale verdict 또는 verdict 누락 시 refresh 코멘트로 증적 갱신
-- `/qa-test`
-  - FAIL 발견 시 버그 이슈 생성
 
 ## 금지 사항
 

@@ -14,7 +14,7 @@
 | [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, 조건부 계획 리뷰어 `@code-reviewer`, Codex 외부 리뷰 워커, `.agent/`와 `.claude/` 레이어 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션 (+ 버전 범프), `Closes #N` 기반 PR 규칙 |
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인 (Codex 브랜치 리뷰, 이중 승인, auto-merge) |
-| [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합/QA TC 테스트, 커버리지) |
+| [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (버전 관리, 태그, 배포 체크리스트) |
 | [07-review-gate.md](07-review-gate.md) | 조건부 계획 리뷰, 리뷰 단계와 merge gate의 책임 분리, 확장 리뷰 규칙, status check 기준 |
 | [08-autopilot-operations.md](08-autopilot-operations.md) | 야간 autopilot 배치 운영 규칙 (`needs-triage`, 큐 선별, 사전 리뷰 증적, `/implement-issue`, merge/post-merge 모니터링) |
@@ -24,9 +24,6 @@
 | 커맨드 | 설명 |
 |--------|------|
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성) |
-| `/autopilot` | 오픈 이슈 큐 순차 처리 (필요 시 `arch-review` / `qa-review` 후 `/implement-issue`와 merge/post-merge까지 순차 모니터링, 기본 `limit=10`) |
-| `/qa-test` | 지정 TC 실행 (`@qa-engineer` 위임) |
-| `/qa-sweep` | 전체 TC 순차 실행 (전수 검사) |
+| `/autopilot` | 오픈 이슈 큐 순차 처리 (필요 시 `arch-review` 후 `/implement-issue`와 merge/post-merge까지 순차 모니터링, 기본 `limit=10`) |
 | `/api-docs` | OpenAPI 스키마 조회 |
 | `/arch-review` | 구현 전 아키텍처/의존성/계약 관점 사전 검토 |
-| `/qa-review` | 구현 전 TC 커버리지/시나리오 관점 사전 검토 |

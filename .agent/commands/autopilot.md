@@ -30,8 +30,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 `/autopilot`은 아래 3개 사이클을 **같은 이슈에 대해 순차적으로** 끝낸 뒤에만 다음 이슈로 이동한다.
 
 1. **의견 검토 사이클**
-   - `arch-review` / `qa-review`를 재사용 또는 refresh한다.
-   - `ready` / `caution` verdict에서 나온 주의사항, TC follow-up, 범위 경계는 구현 체크리스트로 승격한다.
+   - `arch-review`를 재사용 또는 refresh한다.
+   - `ready` / `caution` verdict에서 나온 주의사항, 테스트 follow-up, 범위 경계는 구현 체크리스트로 승격한다.
 2. **개별 이슈 실행 사이클**
    - `/implement-issue #{번호}`를 호출해 실제 수정, 검증, PR 생성까지 진행한다.
    - 사전 리뷰의 `caution`은 종료 사유가 아니라, 구현 프롬프트에 강제 반영할 항목이다.
@@ -55,7 +55,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - `review-state`: `pending | running | blocked | done`
 - `implement-state`: `pending | running | blocked | done`
 - `merge-monitor-state`: `pending | running | blocked | done`
-- `review-verdicts`: `arch=ready/caution/blocked/n-a, qa=ready/caution/blocked/n-a`
+- `review-verdicts`: `arch=ready/caution/blocked/n-a`
 - `pr`: `#번호 | n-a`
 - `head`: `{SHA7} | n-a`
 - `result`: `in-progress | merged | handed-off | deferred-* | retry-later-infra | skipped-in-progress`
@@ -72,7 +72,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - review-state: done
 - implement-state: running
 - merge-monitor-state: pending
-- review-verdicts: arch=caution, qa=ready
+- review-verdicts: arch=caution
 - pr: n-a
 - head: a1b2c3d
 - result: in-progress
@@ -134,24 +134,16 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 둘 이상의 모듈과 소비자 경로가 함께 흔들릴 가능성
 - 에픽 하위 이슈의 선행/후속 관계가 불명확
 
-### `qa-review`를 먼저 거는 경우
-
-- 수용 조건이 2개 이상인데 기존 TC 매핑이 불명확
-- happy path 외 에러/경계값 검증이 핵심
-- frontend / API 변경으로 수용 조건과 TC 동기화가 중요
-- 에픽 하위 이슈 또는 통합 시나리오가 필요한 경우
-
 ### 재사용 규칙
 
 - 이슈에 최신 `🏗️ **아키텍트 리뷰**` 코멘트가 있으면 그대로 재사용한다.
-- 이슈에 최신 `🧪 **QA 리뷰**` 코멘트가 있으면 그대로 재사용한다.
 - 이미 남아 있는 사전 리뷰 증적을 덮어쓰지 않는다. 새 정보가 없으면 중복 리뷰를 남기지 않는다.
-- 다만 최신 리뷰에 `verdict:`가 없거나, 최신 verdict가 `blocked`/`caution`인데 이슈 본문·스펙·선행 조건이 이후 바뀌었다면 `/arch-review` 또는 `/qa-review`를 다시 호출해 refresh verdict를 남긴다.
+- 다만 최신 리뷰에 `verdict:`가 없거나, 최신 verdict가 `blocked`/`caution`인데 이슈 본문·스펙·선행 조건이 이후 바뀌었다면 `/arch-review`를 다시 호출해 refresh verdict를 남긴다.
 
 ### 판정 해석
 
 - `ready`: 구현 진행 가능
-- `caution`: 구현 진행 가능하나 주의사항 또는 TC follow-up을 반드시 반영
+- `caution`: 구현 진행 가능하나 주의사항 또는 테스트 follow-up을 반드시 반영
 - `blocked`: autopilot이 구현을 시작하지 않고 다음 이슈로 이동
 
 `ready` / `caution`은 모두 다음 사이클(`/implement-issue`)로 이어져야 한다. `caution` 항목은 착수 코멘트와 구현 프롬프트의 **필수 반영 체크리스트**로 넘기고, `blocked`만 보류 사유가 된다.
@@ -202,8 +194,7 @@ done
 2. 선행 의존 이슈 close 여부 확인
 3. open PR 존재 여부 확인
 4. `arch-review` 필요 여부 판단
-5. `qa-review` 필요 여부 판단
-6. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
+5. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
 
 최신 사전 리뷰에 `verdict:`가 없거나, 오래된 `blocked` verdict가 최신 이슈 상태를 반영하지 못하면 refresh 리뷰를 먼저 남긴 뒤 그 결과를 사용한다.
 
@@ -212,7 +203,7 @@ done
 `ready` 또는 `caution` verdict가 나오면, autopilot은 다음 정보를 **구현 필수 체크리스트**로 묶어 다음 단계에 넘긴다.
 
 - 아키텍처 주의사항
-- QA TC follow-up
+- 테스트 follow-up
 - 범위에 포함해야 할 스펙/문서/생성 산출물 동기화
 - 이번 PR에서 하지 말아야 할 확장
 
@@ -225,17 +216,17 @@ done
 ```markdown
 🤖 **Autopilot 보류**
 - 이슈: #{번호}
-- 사유: {needs-triage | 선행 이슈 미완료 | arch-review blocked | qa-review blocked}
-- 다음 단계: {triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | TC 설계 보강}
+- 사유: {needs-triage | 선행 이슈 미완료 | arch-review blocked}
+- 다음 단계: {triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | 테스트 설계 보강}
 ```
 
 ### 4단계: 개별 이슈 실행 사이클
 
 사전 리뷰를 통과한 이슈만 `/implement-issue #{번호}`로 넘긴다.
 
-- `arch-review` / `qa-review` 증적은 이슈 코멘트에 남아 있어야 한다.
+- `arch-review` 증적은 이슈 코멘트에 남아 있어야 한다.
 - `/implement-issue`는 그 증적을 읽고 구현 착수 코멘트와 개발 에이전트 프롬프트에 요약을 포함한다.
-- `caution` verdict의 주의사항과 TC follow-up은 **선택 메모가 아니라 Done criteria**다.
+- `caution` verdict의 주의사항과 테스트 follow-up은 **선택 메모가 아니라 Done criteria**다.
 - 리뷰 의견을 반영한 실제 수정, 테스트, PR 생성이 확인될 때까지 같은 이슈를 유지한다.
 - 이 단계에 진입하면 상태 코멘트를 `review-state=done`, `implement-state=running`, `current-cycle=implement`로 갱신한다.
 
@@ -268,7 +259,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - `handed-off`: `--handoff-only`에서만 사용
 - `deferred-triage`: `needs-triage`가 남아 있어 보류
 - `deferred-dependency`: 선행 이슈 미완
-- `deferred-review`: `arch-review` 또는 `qa-review`가 `blocked`
+- `deferred-review`: `arch-review`가 `blocked`
 - `deferred-scope`: 리뷰 결과를 구현으로 이어가려면 남은 배치 예산을 초과
 - `deferred-merge-monitoring`: PR은 생성됐지만 merge/post-merge 확인 전 시간 예산 또는 대기 임계값 소진
 - `retry-later-infra`: 인증/러너/네트워크 등 공통 인프라 문제

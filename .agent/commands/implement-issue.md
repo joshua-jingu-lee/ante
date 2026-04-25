@@ -78,18 +78,16 @@ mkdir -p "$WORKTREE_ROOT"
 4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
 
 - `🏗️ **아키텍트 리뷰**` (`/arch-review`)
-- `🧪 **QA 리뷰**` (`/qa-review`)
 
 정리할 내용:
 
 - latest `arch-review` verdict (`ready | caution | blocked | n-a`)
-- latest `qa-review` verdict (`ready | caution | blocked | n-a`)
 - 구현 전에 반드시 반영할 주의사항
-- TC 추가/보완이 필요한 항목
+- 테스트 추가/보완이 필요한 항목
 - 구현 완료 전 반드시 체크해야 할 리뷰 체크리스트
 - 최신 리뷰에 `verdict:`가 없거나, 리뷰 이후 이슈 본문/스펙/선행 조건이 바뀌었는지 여부
 
-최신 `arch-review` 또는 `qa-review`에 `verdict:`가 없거나 stale하다고 판단되면 해당 리뷰 타입의 refresh를 먼저 요청한다. 두 리뷰 타입의 최신 verdict를 각각 평가하고, 둘 중 하나라도 `blocked`이면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
+최신 `arch-review`에 `verdict:`가 없거나 stale하다고 판단되면 refresh를 먼저 요청한다. 최신 verdict가 `blocked`이면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
 
 `ready` / `caution` verdict에서 나온 주의사항은 구현 프롬프트의 **필수 반영 항목**이다. 특히 `caution`은 "좋으면 반영" 메모가 아니라, 코드/테스트/문서 Done criteria로 승격한다.
 
@@ -104,7 +102,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
 - 계획 리뷰: {not-required | approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}
-- 사전 리뷰: {arch=ready/caution/n-a, qa=ready/caution/n-a}
+- 사전 리뷰: {arch=ready/caution/n-a}
 - 사전 리뷰 요약: {핵심 주의사항 1~2줄 또는 없음}"
 ```
 
@@ -137,7 +135,7 @@ Agent(
 {not-required | approve-implement | narrow-scope}
 
 ## 사전 리뷰 증적
-{arch-review / qa-review의 최신 verdict와 핵심 주의사항, TC follow-up}
+{arch-review의 최신 verdict와 핵심 주의사항, 테스트 follow-up}
 
 ## 구현 필수 체크리스트
 {사전 리뷰에서 승격된 must-fix / must-test / must-sync 항목}

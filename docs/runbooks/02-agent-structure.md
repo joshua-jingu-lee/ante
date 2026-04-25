@@ -45,22 +45,18 @@
 - `docs/dashboard/architecture.md` 기준으로 구현
 - API 계약은 백엔드 OpenAPI와 자동 생성 타입을 기준으로 사용
 
-### 1.4 QA 엔지니어 (`@qa-engineer`)
+### 1.4 DevOps 엔지니어 (`@devops`)
 
-**담당**: Gherkin TC 실행, Docker QA 환경 테스트, 버그 리포트
-
-### 1.5 DevOps 엔지니어 (`@devops`)
-
-**담당**: Docker, GitHub Actions, CI/CD, QA 환경 관리
+**담당**: Docker, GitHub Actions, CI/CD, 배포 환경 관리
 
 - 리뷰 게이트와 merge automation을 포함한 GitHub Actions 구성 관리
 - `pyproject.toml` dependencies 변경 시 사용자 확인 필수
 
-### 1.6 전략 개발자 (`@strategy-dev`)
+### 1.5 전략 개발자 (`@strategy-dev`)
 
 **담당**: 매매 전략 개발, 데이터 탐색, 백테스트
 
-### 1.7 코드 리뷰어 (`@code-reviewer`)
+### 1.6 코드 리뷰어 (`@code-reviewer`)
 
 **담당**: 조건부 계획 리뷰, 계획 정합성 검토, 구조 리스크 메타 리뷰, 반복 review failure 원인 분석
 
@@ -78,7 +74,7 @@
   - `split-issue`
   - `invoke-human`
 
-### 1.8 Codex 외부 워커
+### 1.7 Codex 외부 워커
 
 Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트에 반응하는 외부 자동화 워커다.
 
@@ -87,7 +83,7 @@ Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트에 반응�
 | **Codex 브랜치 리뷰어** | `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push | PR 전 blocking issue 식별, `codex-branch-review` 상태 기록 |
 | **Codex PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | 최종 승인 체크, `codex-pr-approve` 상태 기록 |
 
-### 1.9 Claude PR 승인 워커
+### 1.8 Claude PR 승인 워커
 
 Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
@@ -104,18 +100,14 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 ├── agents/                # Claude 측 역할 정의 (정식 위치)
 │   ├── backend-dev.md         # @backend-dev
 │   ├── frontend-dev.md        # @frontend-dev
-│   ├── qa-engineer.md         # @qa-engineer
 │   ├── devops.md              # @devops
 │   ├── strategy-dev.md        # @strategy-dev
 │   └── code-reviewer.md       # @code-reviewer — 조건부 계획 리뷰 / 구조 리스크 메타 리뷰
 ├── commands/              # 커스텀 슬래시 명령어 (작업 절차 SSOT)
 │   ├── implement-issue.md     # /implement-issue
 │   ├── autopilot.md           # /autopilot
-│   ├── qa-test.md             # /qa-test
-│   ├── qa-sweep.md            # /qa-sweep
 │   ├── api-docs.md            # /api-docs
-│   ├── arch-review.md         # /arch-review
-│   └── qa-review.md           # /qa-review
+│   └── arch-review.md         # /arch-review
 └── skills/                # 도메인 지식 스킬
     ├── module-conventions.md
     ├── asyncio-patterns.md
@@ -126,8 +118,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
     ├── receive-review.md
     ├── lifecycle-review.md    # 캐시/세션/연결/설정 변경 리뷰
     ├── contract-drift-review.md
-    ├── generated-artifact-sync.md
-    └── qa-tester/
+    └── generated-artifact-sync.md
 
 .claude/
 ├── settings.json
@@ -155,7 +146,6 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 |------|------|------|------|
 | `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, 조건부 계획 리뷰 required | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
 | `@frontend-dev` | `high` | API 계약 변경, 생성 타입 동기화, 다중 페이지 상태 흐름, 대규모 화면 리팩터링 | 스타일·문구·단일 컴포넌트 수정 |
-| `@qa-engineer` | `medium` | flaky failure triage, 교차 모듈 재현, FAIL 원인 분석 후 이슈 정리 | 정형화된 TC 실행, 리포트 갱신 |
 | `@devops` | `high` | CI/CD, 인증, secret, release, merge automation, 운영 스크립트 변경 | 문서성 변경, 작은 경로 수정 |
 | `@strategy-dev` | `xhigh` (`max`) | 새 전략 설계, 파라미터 탐색, 지표 해석, 백테스트 결과 비교 | 단순 validation rerun, 리포트 포맷 정리 |
 | `@code-reviewer` | `xhigh` (`max`) | 반복 risk class failure, lifecycle/contract drift, 범위 축소/이슈 분할/사람 에스컬레이션 판단 | 조건부 계획 리뷰가 명확하고 범위가 매우 국소적인 경우 |
@@ -168,11 +158,9 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 반복적인 개발 작업을 슬래시 명령으로 정의한다:
 
 - `/implement-issue #{번호}` — 분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성
-- `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` / `qa-review` → `/implement-issue` → merge/post-merge 순차 모니터링
-- `/qa-test {카테고리}` — 지정 TC 실행
-- `/qa-sweep` — 전체 TC 전수 검사
+- `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/api-docs` — OpenAPI 스키마 조회
-- `/arch-review`, `/qa-review` — 이슈 사전 점검용 보조 커맨드
+- `/arch-review` — 이슈 사전 점검용 보조 커맨드
 
 ### 2.4 도메인 스킬 (skills/)
 
@@ -189,7 +177,6 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
   - `lifecycle-review`
   - `contract-drift-review`
   - `generated-artifact-sync`
-- **QA**: `qa-tester/`
 
 `review-pr.md`는 Claude/Codex PR 승인 워커가 공유하는 최종 승인 계약 문서다.
 `code-reviewer.md`는 그보다 앞단의 조건부 계획 리뷰 / 구조 리스크 메타 리뷰 정의다.

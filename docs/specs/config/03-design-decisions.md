@@ -179,7 +179,7 @@ WebAPI -> DynamicConfigService.update(key, value)
 ### Ante instance/path contract
 
 Ante 인스턴스의 루트는 `config_dir`이다. `system.toml`이 있는 디렉토리와
-`config_dir`은 같은 경계이며, 서버 프로세스·CLI·IPC·migration·QA entrypoint는
+`config_dir`은 같은 경계이며, 서버 프로세스·CLI·IPC·migration은
 같은 `config_dir`을 공유할 때 같은 Ante 인스턴스를 바라본다.
 
 **경로 해석 규칙**:

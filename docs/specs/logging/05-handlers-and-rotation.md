@@ -49,7 +49,7 @@
 |---|---|---|
 | Production | Docker named volume `ante-logs` → `logging.directory` (`docker-compose.yml`) | 재시작 시 보존 |
 | Staging | bind mount `~/ante-staging/logs` → `logging.directory` (`docker-compose.staging.yml`, `ANTE_STAGING_LOG_DIR` 로 override 가능) | 감시 에이전트 설계 (§7.2) 의 글롭 전제와 일치 |
-| QA | 마운트 불필요 | TC 실행 중 휘발, 자동 삭제 |
+| 배포 이미지 시뮬레이션 테스트 | 테스트 러너가 결정 | 테스트 실행 단위로 격리 |
 | 로컬 개발 | bind mount 또는 마운트 생략 | 개발자 선택 |
 
 Staging이 bind mount인 이유: 감시 에이전트가 Docker 컨테이너 외부(맥미니 호스트)에서 직접 JSONL 파일을 읽어야 하기 때문이다. Staging override 는 `docker compose -f docker-compose.yml -f docker-compose.staging.yml up` 형식으로 결합하며, `ANTE_ENV=staging` 과 `ANTE_LOG_JSONL=1` 을 기본 주입한다.

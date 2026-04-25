@@ -26,7 +26,7 @@
 | [03-json-schema.md](03-json-schema.md) §직렬화 규칙 (non-finite float) | `src/ante/core/log/formatter.py::_sanitize_for_json`, `json.dumps(..., allow_nan=False)` | `tests/unit/test_log_formatter.py` NaN/Infinity 케이스 | `NaN`/`Infinity` 토큰이 JSONL 로 누출되어 strict 파서가 깨짐 |
 | [04-fingerprint.md](04-fingerprint.md) | `src/ante/core/log/fingerprint.py::compute_fingerprint` | `tests/unit/test_log_fingerprint.py` | 라인번호 의존·설치 경로 의존으로 같은 근본 원인이 다른 키로 기록됨 |
 | [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (no-rename) | `src/ante/core/log/handlers.py::DateNamedTimedRotatingFileHandler.doRollover` | `tests/unit/test_log_setup.py` 회전 동작 | 자정에 파일이 rename 되어 외부 파일 감시기(감시 에이전트)가 inode 를 잃음 |
-| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (Asia/Seoul 자정) | `src/ante/core/log/handlers.py` `_get_kst()` (지연 로드, tzdata 의존을 게이트-off 경로에서 격리), `computeRollover`, `_make_filename` | `tests/unit/test_log_handlers.py` KST 경계 회귀, `tests/unit/test_log_setup.py::test_cold_import_gate_off_does_not_call_zoneinfo` | 호스트/컨테이너 TZ (Docker, systemd, launchd) 불일치로 자정 경계가 밀림; tzdata 부재 QA 이미지에서 게이트-off 부팅이 차단되는 회귀 |
+| [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §회전 규칙 (Asia/Seoul 자정) | `src/ante/core/log/handlers.py` `_get_kst()` (지연 로드, tzdata 의존을 게이트-off 경로에서 격리), `computeRollover`, `_make_filename` | `tests/unit/test_log_handlers.py` KST 경계 회귀, `tests/unit/test_log_setup.py::test_cold_import_gate_off_does_not_call_zoneinfo` | 호스트/컨테이너 TZ (Docker, systemd, launchd) 불일치로 자정 경계가 밀림; tzdata 부재 경량 이미지에서 게이트-off 부팅이 차단되는 회귀 |
 | [05-handlers-and-rotation.md](05-handlers-and-rotation.md) §볼륨 마운트 | `docker-compose.yml` `ante-logs`, `docker-compose.staging.yml` bind mount | 수동 검증 (`docker compose config`) | 컨테이너 종료 시 로그 유실, staging 감시 에이전트가 파일을 못 읽음 |
 | [06-failure-handling.md](06-failure-handling.md) §파일 핸들러 실패 격리 | `src/ante/core/log/setup.py` try/except + stdout 선등록 | `tests/unit/test_log_setup.py` 디스크/권한 실패 케이스 | 파일 핸들러 초기화 실패가 부팅을 차단 |
 
@@ -52,7 +52,7 @@
 `ANTE_LOG_JSONL` 게이트로 전역 영향 없이 개별 환경에서 검증 후 확산한다.
 
 - 기존 프로덕션은 미설정 상태로 회귀 위험이 0이다.
-- 스테이징에서 먼저 켜서 며칠~몇 주 운용한 뒤 QA·프로덕션으로 확장한다.
+- 스테이징에서 먼저 켜서 며칠~몇 주 운용한 뒤 배포 이미지 시뮬레이션 테스트·프로덕션으로 확장한다.
 - 파일 핸들러의 실패가 stdout 핸들러에 영향을 주지 않는다.
 
 ## 3. 관심사 분리

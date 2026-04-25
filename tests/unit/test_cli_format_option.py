@@ -1,6 +1,6 @@
 """CLI --format json 서브커맨드 뒤 배치 테스트.
 
-이슈 #632: QA TC에서 `ante account list --format json` 형태로 호출할 때
+이슈 #632: `ante account list --format json` 형태로 호출할 때
 서브커맨드 뒤의 --format 옵션이 올바르게 동작하는지 검증한다.
 """
 

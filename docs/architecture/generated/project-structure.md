@@ -20,9 +20,7 @@ ante/
 ├── .claude/             # Claude Code 설정 + .agent 호환 링크
 ├── .github/             # GitHub 워크플로/이슈 템플릿/로컬 인증 파일
 ├── Dockerfile           # 프로덕션 Docker 이미지
-├── Dockerfile.qa        # QA 테스트 Docker 이미지
 ├── docker-compose.yml        # 프로덕션 Docker Compose (ante-logs named volume 포함)
-├── docker-compose.qa.yml     # QA 테스트용 Docker Compose
 ├── docker-compose.staging.yml # Staging override (JSONL 로그 bind mount, ANTE_ENV/ANTE_LOG_JSONL)
 ├── AGENTS.md            # 개발 Agent 마스터 가이드
 └── CHANGELOG.md         # 변경 이력
@@ -390,17 +388,6 @@ tests/
 │       └── test_validate.py     # 4계층 데이터 검증
 ├── integration/                 # 통합 테스트
 │   └── test_e2e_flow.py
-└── tc/                          # Gherkin 테스트 케이스 (.feature)
-    ├── account/
-    ├── approval/
-    ├── bot/
-    ├── config/
-    ├── data/
-    ├── member/
-    ├── scenario/
-    ├── strategy/
-    ├── trade/
-    └── treasury/
 ```
 
 ## deploy/ — 서비스 배포
@@ -418,10 +405,7 @@ scripts/
 ├── generate_cli_reference.py  # CLI 레퍼런스 문서 자동 생성 (Click introspection)
 ├── install-service.sh         # OS 감지 후 systemd/launchd 서비스 설치
 ├── uninstall-service.sh       # 서비스 제거
-├── verify-install.py          # 설치 검증 스크립트
-├── qa-entrypoint.sh           # QA Docker 엔트리포인트
-├── qa_seed_datasets.py        # QA 테스트용 데이터셋 시드
-└── qa_seed_strategies.py      # QA 테스트용 전략 시드
+└── verify-install.py          # 설치 검증 스크립트
 ```
 
 ## docs/ — 설계 문서
@@ -674,18 +658,14 @@ frontend/src/
 ├── commands/                    # 프로젝트 슬래시 커맨드
 │   ├── implement-issue.md       # /implement-issue
 │   ├── autopilot.md             # /autopilot
-│   ├── qa-test.md               # /qa-test
-│   ├── qa-sweep.md              # /qa-sweep
 │   ├── api-docs.md              # /api-docs
-│   ├── arch-review.md           # /arch-review
-│   └── qa-review.md             # /qa-review
+│   └── arch-review.md           # /arch-review
 └── skills/                      # 프로젝트 스킬 (컨벤션·패턴 참조)
     ├── asyncio-patterns.md
     ├── frontend-conventions.md
     ├── github-auth.md           # GitHub CLI 로컬 PAT 인증 절차
     ├── github-ops.md            # GitHub 조회/코멘트/PR/재실행 공통 절차
     ├── module-conventions.md
-    ├── qa-tester/               # QA 테스터 스킬 (Gherkin 해석)
     ├── release.md               # /release 릴리스 절차
     ├── review-pr.md
     └── sqlite-patterns.md

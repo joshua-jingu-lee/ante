@@ -355,14 +355,14 @@ def test_rollover_preserves_previous_file_and_opens_new_date(
         handler.close()
 
 
-# ── 7b. 게이트-off 경로 tzdata 독립성 (QA 이미지 회귀 방지) ────
+# ── 7b. 게이트-off 경로 tzdata 독립성 ────
 
 
 def test_gate_off_does_not_trigger_zoneinfo(monkeypatch: pytest.MonkeyPatch):
     """``ANTE_LOG_JSONL`` 미설정 시 ``ZoneInfo("Asia/Seoul")`` 가 호출되지 않는다.
 
     스펙 ``docs/specs/logging/02-design-decisions.md`` 의 "미설정 시 기존 동작
-    유지" 계약. tzdata 가 없는 컨테이너(예: QA 이미지)에서 부팅 경로가
+    유지" 계약. tzdata 가 없는 경량 컨테이너에서 부팅 경로가
     ``ZoneInfoNotFoundError`` 로 깨지지 않도록 보호한다.
     """
     monkeypatch.delenv("ANTE_LOG_JSONL", raising=False)
@@ -391,14 +391,14 @@ def test_gate_off_does_not_trigger_zoneinfo(monkeypatch: pytest.MonkeyPatch):
 def test_cold_import_gate_off_does_not_call_zoneinfo(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Cold import 회귀 고정: QA 부팅 경로(fresh Python process)를 재현한다.
+    """Cold import 회귀 고정: fresh Python process 부팅 경로를 재현한다.
 
     실제 부팅 경로는 ``src/ante/main.py`` 의 ``from ante.core.log import
     setup_logging`` 으로 시작하고, 이 import 가 ``ante.core.log.__init__`` →
     ``ante.core.log.handlers`` 까지 함께 로드한다. tzdata 가 없는
-    ``python:3.12-slim`` 기반 QA 이미지(``Dockerfile.qa``)에서 과거처럼
+    ``python:3.12-slim`` 기반 경량 이미지에서 과거처럼
     ``_KST = ZoneInfo("Asia/Seoul")`` 을 handlers 모듈 레벨에 두면 이 import
-    만으로도 ``ZoneInfoNotFoundError`` 가 발생해 QA 컨테이너 부팅이 중단된다.
+    만으로도 ``ZoneInfoNotFoundError`` 가 발생해 경량 컨테이너 부팅이 중단된다.
 
     본 테스트는 ``sys.modules`` 에서 ``ante.core.log.*`` 를 제거해 다음 import
     를 "콜드" 로 만들고, 그 직전에 ``zoneinfo.ZoneInfo`` 를 추적 래퍼로 교체한다.
@@ -438,7 +438,7 @@ def test_cold_import_gate_off_does_not_call_zoneinfo(
     seoul_calls = [k for k in call_tracker if k == "Asia/Seoul"]
     assert seoul_calls == [], (
         f"Cold import + 게이트-off 경로에서 ZoneInfo('Asia/Seoul') 가 "
-        f"{len(seoul_calls)} 회 호출됨 — tzdata 부재 QA 이미지 부팅 차단 회귀. "
+        f"{len(seoul_calls)} 회 호출됨 — tzdata 부재 경량 이미지 부팅 차단 회귀. "
         f"전체 호출 기록: {call_tracker}"
     )
 

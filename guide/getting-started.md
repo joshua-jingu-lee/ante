@@ -139,7 +139,7 @@ ante init
 스크립트/에이전트가 호출할 때는 JSON 포맷으로 값을 바로 파싱할 수 있습니다.
 
 ```bash
-ante --format json init --member-id qa-admin --name "QA Admin"
+ante --format json init --member-id operator --name "Operator"
 ```
 
 출력 JSON에는 `member_id`, `role`, `emoji`, `token`, `recovery_key`, `password`, `config_dir`, `test_account` 필드가 포함됩니다.

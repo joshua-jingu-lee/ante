@@ -7,17 +7,19 @@
 
 ## 1. 배경과 문제
 
-현재 환경은 두 가지다.
+현재 운영 환경은 Production 하나이며, 테스트 계층은 pytest 기반 단위/통합 테스트와
+별도 배포 이미지 시뮬레이션 테스트로 분리하는 방향이다.
 
 - **Production**: 홈서버에서 24h 구동, 실계좌 매매
-- **QA**: `docker-compose.qa.yml` + `Dockerfile.qa`, TestBrokerAdapter 기반, Gherkin TC 자동 실행용 (CI 포함)
+- **배포 이미지 시뮬레이션 테스트**: 외부에서 제공된 Ante Docker image를 대상으로 별도 테스트 전용 프로그램이 검증
 
 그 사이에 **실제 외부 API와 붙은 채 장시간 운용 시 어떻게 행동하는지** 관찰할 수 있는 공간이 비어 있다. 특히 다음 두 시나리오를 다룰 수 없다.
 
 - KIS WebSocket 스트림을 하루/며칠 켜놓았을 때의 재접속·누수·끊김 거동
 - KIS 모의투자 계좌에 실제 주문을 넣었을 때의 응답·수수료·체결 흐름
 
-QA는 결정론적 무상태 테스트용이라 이 관찰을 담을 수 없고, Production에서 검증하는 것은 위험하다. 이 공백을 메우는 **제3의 상시 환경**이 필요하다.
+배포 이미지 시뮬레이션 테스트는 on-demand 검증용이라 이 관찰을 담을 수 없고,
+Production에서 검증하는 것은 위험하다. 이 공백을 메우는 **제3의 상시 환경**이 필요하다.
 
 ## 2. 목적과 비목적
 
@@ -39,16 +41,14 @@ QA는 결정론적 무상태 테스트용이라 이 관찰을 담을 수 없고,
 |---|---|---|---|---|
 | Production | 홈서버 | 24/7 | 실계좌 | 상시 |
 | **Staging** | **맥미니** | **24/7** | **KIS 모의투자** | **상시** |
-| QA | CI 러너 / 임시 | on-demand | TestBrokerAdapter | TC 실행 시 |
+| 배포 이미지 시뮬레이션 테스트 | 테스트 러너 | on-demand | TestBrokerAdapter 또는 시뮬레이터 | 테스트 실행 시 |
 
 ### 3.2 Docker 자산 재사용
 
-| 파일 | Production | Staging | QA |
+| 파일 | Production | Staging | 배포 이미지 시뮬레이션 테스트 |
 |---|:---:|:---:|:---:|
-| `Dockerfile` | ✅ | ✅ (재사용) | — |
-| `Dockerfile.qa` | — | — | ✅ |
+| `Dockerfile` | ✅ | ✅ (재사용) | 입력 image의 빌드 원천 |
 | `docker-compose.yml` | ✅ | — | — |
-| `docker-compose.qa.yml` | — | — | ✅ |
 | `docker-compose.staging.yml` | — | ✅ (신규) | — |
 
 Staging은 Production과 동일한 풀 이미지(프론트엔드 포함)를 사용한다. 이미지 빌드·배포 파이프라인은 기존 [.github/workflows/publish.yml](../../.github/workflows/publish.yml)을 재사용한다 (main 푸시 시 GHCR에 push).
@@ -114,7 +114,7 @@ main 머지 → GHCR publish (자동)
 | `ante_staging_data` | `/app/data` | 영속 |
 | `ante_staging_logs` | `/app/logs` | 30일 순환 (§6.4) |
 
-QA 컴포즈의 `ante_ante-data:ro` 같은 프로덕션 볼륨 참조 마운트는 사용하지 않는다 (물리적 격리).
+테스트 러너의 프로덕션 볼륨 참조 마운트 같은 교차 환경 의존은 사용하지 않는다 (물리적 격리).
 
 ## 6. 구조화 JSONL 로그
 
@@ -122,7 +122,7 @@ QA 컴포즈의 `ante_ante-data:ro` 같은 프로덕션 볼륨 참조 마운트�
 
 ### 6.1 도입 범위
 
-**전역 도입**을 권장한다 (Production/QA/Staging 모두). 이중 핸들러 구조:
+**전역 도입**을 권장한다 (Production/Staging/배포 이미지 시뮬레이션 테스트 모두). 이중 핸들러 구조:
 
 - **콘솔 stdout**: 컬러 평문 (기존 포맷 유지, 개발자 경험 보존)
 - **파일 `logs/ante-YYYY-MM-DD.jsonl`**: JSONL
