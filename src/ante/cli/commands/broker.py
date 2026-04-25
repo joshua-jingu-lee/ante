@@ -45,9 +45,10 @@ async def _get_broker(account_id: str | None = None):  # noqa: ANN202
         return adapter, db
 
     # 폴백: 기존 Config 기반 브로커 생성
+    from ante.cli.main import get_config_dir
     from ante.config.config import Config
 
-    config = Config.load()
+    config = Config.load(config_dir=get_config_dir())
     broker_config = config.get("broker") or {}
     if not isinstance(broker_config, dict):
         broker_config = {}

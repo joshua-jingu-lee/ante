@@ -94,7 +94,7 @@ def sync(
 ) -> None:
     """KIS API에서 종목 마스터 데이터를 동기화."""
     from ante.broker.kis import KISAdapter
-    from ante.cli.main import get_db_path
+    from ante.cli.main import get_config_dir, get_db_path
     from ante.config import Config
     from ante.core.database import Database
     from ante.instrument.models import Instrument
@@ -102,9 +102,10 @@ def sync(
 
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
+    resolved_config_dir = get_config_dir(ctx)
 
     async def _run() -> dict:
-        config = Config.load()
+        config = Config.load(config_dir=resolved_config_dir)
         broker_config = config.get("broker", {})
         if not broker_config.get("app_key"):
             return {"error": "브로커 설정이 없습니다."}

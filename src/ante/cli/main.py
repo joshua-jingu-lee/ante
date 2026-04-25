@@ -110,6 +110,37 @@ def get_formatter(ctx: click.Context) -> OutputFormatter:
     return ctx.obj["formatter"]
 
 
+def get_config_dir(ctx: click.Context | None = None) -> Path:
+    """`--config-dir`/`ANTE_CONFIG_DIR` 기반으로 설정 디렉토리 Path를 반환한다.
+
+    우선순위는 `resolve_config_dir()`를 그대로 따른다:
+      1. `ctx.obj["config_dir"]` (루트 그룹이 `--config-dir` 또는
+         `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path) — override로 전달
+      2. `ANTE_CONFIG_DIR` 환경변수
+      3. `~/.config/ante/` (디렉토리가 실제로 존재할 때)
+      4. `./config/` (repo-local 폴백)
+
+    `--config-dir`이 DB 경로뿐 아니라 정적 Config(`system.toml`)와 IPC
+    소켓 경로 계산까지 일관되게 적용되도록 하는 단일 진입점이다.
+
+    Args:
+        ctx: 선택적 Click 컨텍스트. 전달되지 않으면
+            `click.get_current_context(silent=True)`로 현재 컨텍스트를 조회한다.
+
+    Returns:
+        설정 디렉토리 Path (절대 또는 상대).
+    """
+    if ctx is None:
+        ctx = click.get_current_context(silent=True)
+    obj = getattr(ctx, "obj", None) if ctx is not None else None
+    override: Path | None = None
+    if isinstance(obj, dict):
+        raw = obj.get("config_dir")
+        if raw is not None:
+            override = raw if isinstance(raw, Path) else Path(raw)
+    return resolve_config_dir(override=override)
+
+
 def get_db_path(ctx: click.Context | None = None) -> str:
     """`--config-dir`/`ANTE_CONFIG_DIR` 기반으로 DB 경로를 반환한다.
 
@@ -132,16 +163,7 @@ def get_db_path(ctx: click.Context | None = None) -> str:
     Returns:
         `<config_dir>/db/ante.db` 형태의 경로 문자열.
     """
-    if ctx is None:
-        ctx = click.get_current_context(silent=True)
-    obj = getattr(ctx, "obj", None) if ctx is not None else None
-    override: Path | None = None
-    if isinstance(obj, dict):
-        raw = obj.get("config_dir")
-        if raw is not None:
-            override = raw if isinstance(raw, Path) else Path(raw)
-    config_dir = resolve_config_dir(override=override)
-    return str(config_dir / "db" / "ante.db")
+    return str(get_config_dir(ctx) / "db" / "ante.db")
 
 
 # 서브커맨드 등록
