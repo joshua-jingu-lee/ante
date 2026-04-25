@@ -3,7 +3,7 @@
   "info": {
     "title": "Ante",
     "description": "AI-Native Trading Engine API",
-    "version": "0.1.0"
+    "version": "0.9.0"
   },
   "paths": {
     "/api/accounts": {
@@ -6528,7 +6528,7 @@
           "version": {
             "type": "string",
             "title": "Version",
-            "default": "0.1.0"
+            "default": "0.9.0"
           },
           "trading_status": {
             "anyOf": [
