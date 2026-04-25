@@ -6,11 +6,13 @@
 > 참조: [architecture.md](../../architecture/README.md) 주문 처리 흐름, [AGENTS.md](../../../AGENTS.md) 거래 룰 (2중 구조), [notification.md](../notification/notification.md) 알림 발송
 
 이 디렉토리는 300줄을 넘던 모듈 스펙을 주제별 문서로 분할해 관리한다.
-기존 링크와 앵커 호환을 위해 [rule-engine.md](rule-engine.md)를 개요 문서로 유지한다.
+계약 SSOT는 이 README의 문서 목록과 주제별 하위 문서다.
+[rule-engine.md](rule-engine.md)는 기존 링크와 섹션 앵커 호환을 위한 인덱스이며 계약 본문이 아니다.
+새 계약, 결정, 미결 사항은 [rule-engine.md](rule-engine.md)에 추가하지 않고 해당 하위 문서에 반영한다.
 
 | 문서 | 내용 |
 |---|---|
-| [rule-engine.md](rule-engine.md) | 호환용 개요 문서 및 기존 섹션 앵커 |
+| [rule-engine.md](rule-engine.md) | 호환용 인덱스 및 기존 섹션 앵커 (계약 본문 아님) |
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-reference-implementations.md](02-reference-implementations.md) | 참고 구현체 분석 |
 | [03-two-layer-evaluation.md](03-two-layer-evaluation.md) | 2계층 평가 흐름 |

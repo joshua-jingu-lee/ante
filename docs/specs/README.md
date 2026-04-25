@@ -2,7 +2,12 @@
 
 > 마스터 문서: [AGENTS.md](../../AGENTS.md) | 아키텍처: [architecture.md](../architecture/README.md)
 
-`docs/specs/`는 모듈별 상세 설계 문서의 인덱스다. 큰 모듈은 `docs/specs/<module>/README.md`를 인덱스로 두고 주제별 하위 문서로 분할 관리한다. 기존 참조 호환을 위해 `docs/specs/<module>/<module>.md`는 개요와 앵커를 유지하는 호환 문서로 남겨둔다.
+`docs/specs/`는 모듈별 상세 설계 문서의 인덱스다. 큰 모듈은 `docs/specs/<module>/README.md`를 인덱스로 두고 주제별 하위 문서로 분할 관리한다.
+
+분할 모듈의 계약 SSOT는 해당 모듈의 `README.md` 문서 목록과 주제별 하위 문서다.
+`docs/specs/<module>/<module>.md`는 기존 링크와 섹션 앵커 호환을 위한 인덱스이며
+계약 본문이 아니다. 새 계약, 설계 결정, 미결 사항은 compatibility 문서에 추가하지
+않고 해당 하위 문서에 반영한다.
 
 | 모듈 | 스펙 문서 | 설명 |
 |---|---|---|

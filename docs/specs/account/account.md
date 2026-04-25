@@ -5,8 +5,9 @@
 
 > 참조: [architecture.md](../../architecture/README.md) 계좌 관리, [bot.md](../bot/bot.md) 봇 모듈, [treasury.md](../treasury/treasury.md) 자금 관리, [broker-adapter.md](../broker-adapter/broker-adapter.md) 브로커 어댑터
 
-이 문서는 분할된 `account` 스펙의 호환용 개요 문서다.
-전체 인덱스는 [README.md](README.md)를, 세부 내용은 아래 하위 문서를 참조한다.
+이 문서는 분할된 `account` 스펙의 기존 링크와 섹션 앵커 호환을 위한 인덱스이며 계약 본문이 아니다.
+최신 계약 SSOT는 [README.md](README.md)의 문서 목록과 주제별 하위 문서다.
+새 계약, 결정, 미결 사항은 이 파일에 추가하지 않고 해당 하위 문서에 반영한다.
 
 | 문서 | 내용 |
 |---|---|

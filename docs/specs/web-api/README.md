@@ -5,11 +5,13 @@
 > 참조: [architecture.md](../../architecture/README.md) 웹 대시보드, D-008, [cli.md](../cli/cli.md) CLI 인터페이스
 
 이 디렉토리는 300줄을 넘던 모듈 스펙을 주제별 문서로 분할해 관리한다.
-기존 참조 호환을 위해 [web-api.md](web-api.md)를 개요 문서로 유지한다.
+계약 SSOT는 이 README의 문서 목록과 주제별 하위 문서다.
+[web-api.md](web-api.md)는 기존 링크와 섹션 앵커 호환을 위한 인덱스이며 계약 본문이 아니다.
+새 계약, 결정, 미결 사항은 [web-api.md](web-api.md)에 추가하지 않고 해당 하위 문서에 반영한다.
 
 | 문서 | 내용 |
 |---|---|
-| [web-api.md](web-api.md) | 호환용 개요 문서 및 기존 섹션 앵커 |
+| [web-api.md](web-api.md) | 호환용 인덱스 및 기존 섹션 앵커 (계약 본문 아님) |
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-design-decisions.md](02-design-decisions.md) | FastAPI 구성·라우터·인증·CORS·OpenAPI 문서화 |
 | [03-session-service.md](03-session-service.md) | SessionService — 서버사이드 세션 관리 |

@@ -6,11 +6,13 @@
 > 참조: [architecture.md](../../architecture/README.md) 백테스트, D-004, [strategy.md](../strategy/strategy.md) 전략 인터페이스
 
 이 디렉토리는 300줄을 넘던 모듈 스펙을 주제별 문서로 분할해 관리한다.
-기존 링크와 앵커 호환을 위해 [backtest.md](backtest.md)를 개요 문서로 유지한다.
+계약 SSOT는 이 README의 문서 목록과 주제별 하위 문서다.
+[backtest.md](backtest.md)는 기존 링크와 섹션 앵커 호환을 위한 인덱스이며 계약 본문이 아니다.
+새 계약, 결정, 미결 사항은 [backtest.md](backtest.md)에 추가하지 않고 해당 하위 문서에 반영한다.
 
 | 문서 | 내용 |
 |---|---|
-| [backtest.md](backtest.md) | 호환용 개요 문서 및 기존 섹션 앵커 |
+| [backtest.md](backtest.md) | 호환용 인덱스 및 기존 섹션 앵커 (계약 본문 아님) |
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-design-decisions.md](02-design-decisions.md) | 설계 결정 |
 | [03-cli-usage.md](03-cli-usage.md) | CLI 사용법 |
