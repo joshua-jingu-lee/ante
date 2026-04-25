@@ -398,6 +398,17 @@ deploy/
 └── com.ante.plist       # macOS launchd plist 파일
 ```
 
+## strategies/ — 전략 템플릿과 예제
+
+```
+strategies/
+├── _template.py                 # 새 전략 작성용 최소 템플릿
+└── _examples/                   # Agent 참고용 예제 전략
+    ├── ma_crossover.py          # 이동평균 크로스오버 예제
+    ├── rsi_mean_reversion.py    # RSI 평균회귀 예제
+    └── volume_breakout.py       # 거래량 돌파 예제
+```
+
 ## scripts/ — 설치·운영 스크립트
 
 ```
