@@ -9,8 +9,10 @@
 DataFeed는 `ante.data.store.ParquetStore.write()`를 호출하여 저장한다.
 자체 Parquet 읽기/쓰기 구현(`store/parquet.py`)을 두지 않는다.
 
-**쓰기 모드는 overwrite(파티션 덮어쓰기)**다. 동일 파티션에 대해 `write()`를 재호출하면 기존 데이터를 완전 교체한다.
-이로써 **멱등성이 보장**되므로 장애 후 재시도 시 중복이나 데이터 손상 없이 안전하게 복구할 수 있다.
+**쓰기 모드는 merge/dedup**이다. `write()`는 기존 월별 파티션과 새 데이터를 병합한 뒤
+natural key(`timestamp` 또는 `date`) 기준으로 중복을 제거하고 정렬한다.
+이로써 **멱등성이 보장**되므로 장애 후 같은 범위를 다시 수집해도 중복 행이 누적되지 않는다.
+값 정정이나 전체 재생성을 위한 true partition replace는 1.0 계약에 포함하지 않는다.
 
 ### 쓰기 소유권
 
@@ -18,10 +20,10 @@ DataFeed가 소유하는 데이터 영역:
 
 | 데이터 | 쓰기 방식 | 근거 |
 |--------|----------|------|
-| OHLCV 일봉 (`1d`) | 파티션 덮어쓰기 | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |
-| `fundamental` | 파티션 덮어쓰기 | DART에서 재무제표 수집 |
-| `flow` (Phase 2) | 파티션 덮어쓰기 | pykrx에서 수급 데이터 수집 |
-| `event` (Phase 2) | 파티션 덮어쓰기 | DART에서 기업 이벤트 수집 |
+| OHLCV 일봉 (`1d`) | merge/dedup | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |
+| `fundamental` | merge/dedup | DART에서 재무제표 수집 |
+| `flow` (Phase 2) | Phase 2에서 확정 | pykrx에서 수급 데이터 수집 |
+| `event` (Phase 2) | Phase 2에서 확정 | DART에서 기업 이벤트 수집 |
 
 분봉(`1m`, `5m` 등 1d 미만)과 틱 데이터는 Collector 소유이므로 DataFeed가 쓰지 않는다.
 Collector는 반대로 1d 미만 타임프레임만 수집하며, 일봉 이상 데이터는 수신하더라도 폐기한다.

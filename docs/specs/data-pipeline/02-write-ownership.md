@@ -9,9 +9,9 @@
 
 | 데이터 | 쓰기 소유자 | 쓰기 모드 | 근거 |
 |--------|-----------|----------|------|
-| OHLCV 일봉 (`1d`) | DataFeed | overwrite (파티션 덮어쓰기) | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |
+| OHLCV 일봉 (`1d`) | DataFeed | merge/dedup | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |
 | OHLCV 분봉 (`1m`, `5m` 등, 1d 미만) | Collector | append | 실시간으로만 수집 가능, KIS API 경유 |
-| `fundamental` | DataFeed | overwrite (파티션 덮어쓰기) | 외부 API 배치 수집 전용 |
+| `fundamental` | DataFeed | merge/dedup | 외부 API 배치 수집 전용 |
 | `tick` | Collector | append | 실시간 전용 |
 
 `flow`와 `event`는 1.0 쓰기 소유권 계약에 포함하지 않는다. `flow`는 pykrx Phase 2에서
@@ -19,7 +19,10 @@
 별도 계약으로 정의한다.
 
 > **쓰기 모드 정의**:
-> - **overwrite**: 파티션 단위로 기존 데이터를 완전 교체. DataFeed가 사용. 멱등성을 보장하므로 재시도 시 안전하다.
+> - **merge/dedup**: 기존 월별 파티션과 새 데이터를 병합한 뒤 natural key
+>   (`timestamp` 또는 `date`) 기준으로 중복을 제거하고 정렬한다. DataFeed가 사용한다.
+>   같은 데이터를 재수집해도 중복 행이 누적되지 않으므로 재시도 시 안전하다.
+>   값 정정을 위한 true partition replace는 1.0 계약에 포함하지 않는다.
 > - **append**: 기존 데이터에 새 행을 추가. Collector가 사용. 중복 제거는 flush 시점에 수행.
 
 **읽기는 제한 없음** — 모든 소비자(Backtest, DataProvider, Strategy, CLI)가 `ParquetStore.read()`로 통합 조회한다.

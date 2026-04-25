@@ -22,7 +22,7 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 | `market` | Utf8 | 시장구분 (KOSPI/KOSDAQ/KONEX) |
 
 > data.go.kr 수집 시 `srtnCd`(symbol), `itmsNm`(name), `mrktCtg`(market)를 함께 받아오므로 추가 호출 없이 갱신.
-> 수집할 때마다 덮어쓰기하여 최신 상태 유지.
+> 수집 결과를 정규화하여 최신 종목 메타데이터 상태를 유지한다.
 
 ### 파일 규격
 
@@ -31,7 +31,7 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 | 형식 | Parquet (snappy 압축) |
 | 디렉토리 | OHLCV: `{data.path}/ohlcv/{timeframe}/{exchange}/{symbol}/{YYYY-MM}.parquet`; 기타: `{data.path}/{data_type}/{exchange}/{symbol}/{YYYY-MM}.parquet` |
 | 파티셔닝 | 1m 이상: 월별, 10s/30s: 일별 (YYYY-MM-DD) |
-| 쓰기 방식 | `ParquetStore.write()` 호출 (파티션 단위 overwrite — 멱등성 보장) |
+| 쓰기 방식 | `ParquetStore.write()` 호출 (natural-key merge/dedup — 멱등성 보장) |
 | 정렬 | timestamp/date 오름차순 |
 | 중복 | 동일 timestamp 행 없을 것 |
 | 타임존 | UTC |
