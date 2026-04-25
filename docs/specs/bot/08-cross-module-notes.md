@@ -9,4 +9,5 @@
 - **Data Pipeline 스펙 작성 시**: ContextFactory가 DataProvider를 StrategyContext에 주입
 - **Rule Engine 스펙 작성 시**: OrderRequestEvent에 bot_id, account_id 포함 — 봇별·계좌별 룰 조회에 활용
 - **Web API 스펙 작성 시**: BotManager의 create/start/stop/list를 REST API로 노출
+- **CLI/IPC 스펙 작성 시**: `bot create/start/stop/remove`와 `signal-key --rotate`는 런타임 IPC로 서버 BotManager에 위임한다. 실행 중 조회는 서버 live 상태가 필요하면 IPC를 우선 사용하고, 서버 정지 중에는 persisted snapshot만 조회한다.
 - **Notification 스펙 작성 시**: BotErrorEvent 구독 → 텔레그램 알림 발송

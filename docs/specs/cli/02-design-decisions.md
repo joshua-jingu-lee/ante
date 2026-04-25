@@ -94,12 +94,13 @@ CLI 커맨드에 멤버 인증과 스코프 기반 접근 제어를 적용하는
 
 CLI 커맨드는 **오프라인**, **런타임**, **cold-path structural** 세 가지 방식으로 시스템과 통신한다.
 
-구분 기준: **서버의 EventBus 구독자가 반응해야 하는 부수효과(이벤트 발행 또는 인메모리 상태 변경)가 있는가?**
+구분 기준: **서버 프로세스가 보유한 EventBus 구독자, 인메모리 작업, 외부 연결,
+인증·세션 상태가 관여하는가?**
 
 | 분류 | 실행 방식 | 설명 |
 |------|----------|------|
-| **오프라인** | 직접 모듈 임포트 | 조회, 백테스트, 데이터 관리 등 서버 런타임에 영향이 없는 커맨드. 서비스를 직접 생성하여 호출한다. |
-| **런타임** | IPC (Unix domain socket) | 봇 중지, 예산 할당, 설정 변경 등 서버의 EventBus 구독자가 반응해야 하는 커맨드. 서버 프로세스의 서비스 계층에 위임한다. |
+| **오프라인** | 직접 모듈 임포트 | 백테스트, 데이터 파일 조회, 정적 검증처럼 서버 런타임에 영향이 없고 서버의 live 상태를 읽을 필요도 없는 커맨드. 서비스를 직접 생성하여 호출한다. |
+| **런타임** | IPC (Unix domain socket) | 봇 실행 제어, 예산 할당, 설정 변경, live broker 조회, 멤버 인증 상태 변경처럼 서버의 EventBus·인메모리 상태·외부 연결·세션 상태가 관여하는 커맨드. 서버 프로세스의 서비스 계층에 위임한다. |
 | **cold-path structural** | 서버 정지 guard + 직접 DB | 계좌 생성/삭제/credentials 변경처럼 서버 topology를 바꾸는 커맨드. 같은 `config_dir`의 서버가 실행 중이면 DB 수정 전 거부한다. |
 
 런타임 커맨드의 상세 목록과 IPC 프로토콜은 [ipc.md](../ipc/ipc.md)를 참조한다.
@@ -109,3 +110,7 @@ CLI 커맨드는 **오프라인**, **런타임**, **cold-path structural** 세 �
 2. Config resolver가 정규화한 `runtime.socket_path`로 `IPCClient` 연결
 3. 서버의 `IPCServer`가 수신 → `ServiceRegistry`의 서비스 실행 → EventBus 이벤트 전파
 4. 결과를 CLI에 반환하여 출력
+
+`ante member reset-password`와 `ante member regenerate-recovery-key`처럼 인증 면제
+recovery 커맨드가 서버 실행 중 런타임 경로를 사용할 때는 토큰 대신 recovery key 또는
+현재 패스워드를 서버 서비스가 검증한다.

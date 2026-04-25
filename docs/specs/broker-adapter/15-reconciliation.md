@@ -68,6 +68,10 @@ ReconcileScheduler는 `PositionReconciler`(Trade 모듈), `BotManager`, `EventBu
 |------|--------|------|
 | 봇 시작 시 | `BotManager.start_bot()` | 시스템 재시작 후 누락 체결 복구 |
 | 주기적 (30분) | `ReconcileScheduler` | 운영 중 데이터 드리프트 감지 |
-| 수동 요청 | CLI `ante broker reconcile --bot <id>` | 사용자가 의심 시 즉시 확인 |
+| 수동 요청 | CLI `ante broker reconcile --account <id> [--fix]` | 사용자가 의심 시 즉시 확인 |
+
+수동 대사는 런타임 IPC로 서버 프로세스의 `PositionReconciler`와 BrokerAdapter를
+사용한다. 서버 밖에서 별도 BrokerAdapter를 직접 생성해 대사하면 서버가 보유한
+연결 상태, circuit breaker, TradeService 인메모리 상태와 어긋날 수 있다.
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조

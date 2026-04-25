@@ -146,7 +146,18 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web
 | `ante system halt` | `system.halt` | `system:kill_switch` |
 | `ante system activate` | `system.activate` | `system:kill_switch` |
 | `ante bot create` | `bot.create` | `bot:{bot_id}` |
+| `ante bot start <id>` | `bot.start` | `bot:{bot_id}` |
+| `ante bot stop <id>` | `bot.stop` | `bot:{bot_id}` |
 | `ante bot remove <id>` | `bot.delete` | `bot:{bot_id}` |
+| `ante bot signal-key <id> --rotate` | `bot.signal_key.rotate` | `bot:{bot_id}` |
+| `ante broker reconcile --fix` | `broker.reconcile` | `account:{account_id}` |
+| `ante member register` | `member.create` | `member:{member_id}` |
+| `ante member suspend <id>` | `member.suspend` | `member:{member_id}` |
+| `ante member reactivate <id>` | `member.reactivate` | `member:{member_id}` |
+| `ante member revoke <id>` | `member.revoke` | `member:{member_id}` |
+| `ante member rotate-token <id>` | `member.rotate_token` | `member:{member_id}` |
+| `ante member reset-password` | `member.reset_password` | `member:{member_id}` |
+| `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{member_id}` |
 
 ### 구현 방식 — 이중 구조
 

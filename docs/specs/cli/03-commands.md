@@ -36,11 +36,20 @@ ante account delete <account_id>              # 계좌 삭제 (cold-path 전용,
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create <name> --strategy <path> --account <account_id> [--balance <금액>] [--param key=value ...]
+ante bot start <bot_id>            # 봇 시작
+ante bot stop <bot_id>             # 봇 중지
 ante bot remove <bot_id>           # 봇 삭제
 ante bot info <bot_id>             # 봇 상세 정보
+ante bot status <bot_id>           # 봇 실행 상태
 ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
+
+`bot create/start/stop/remove`와 `bot signal-key --rotate`는 서버 BotManager의
+인메모리 `_bots`, 실행 task, EventBus 구독, signal key 연결 상태를 바꾸므로 런타임
+IPC 커맨드다. 서버 실행 중 `bot list/info/status/positions/signal-key` 조회는 IPC로
+서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB의 persisted snapshot만
+읽을 수 있으며, 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
 
 ### `ante trade` — 거래 이력
 
@@ -83,11 +92,20 @@ ante rule info <rule_id>           # 룰 상세
 ### `ante broker` — 증권사 연동
 
 ```bash
+ante broker status [--account <account_id>]      # 증권사 연결 상태
+ante broker health [--account <account_id>]      # status alias
 ante broker balance [--account <account_id>]     # 실제 증권사 잔고 조회
 ante broker positions [--account <account_id>]   # 실제 증권사 포지션 조회
-ante broker reconcile [--account <account_id>]   # 시스템↔증권사 포지션 대사
-ante broker status [--account <account_id>]      # 증권사 연결 상태
+ante broker price <symbol> [--account <account_id>]  # live 현재가 조회
+ante broker reconcile [--account <account_id>] [--fix]  # 시스템↔증권사 포지션 대사
 ```
+
+모든 `broker` live 커맨드는 서버가 시작 시 생성한 BrokerAdapter를 통해 실행하는
+런타임 IPC 커맨드다. CLI가 별도 adapter를 직접 생성하면 credentials 복호화, 연결
+상태, rate limit, circuit breaker, audit 경로가 서버와 분리되므로 허용하지 않는다.
+`broker price`는 live broker quote만 의미한다. 과거·공개 market data 조회는
+`data`/`feed` 계열 커맨드로 다룬다. `broker order`와 `broker stream prices`는
+일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙 없이는 제공하지 않는다.
 
 ### `ante data` — 데이터 관리
 
@@ -230,9 +248,15 @@ ante member reactivate <member_id>                      # 멤버 재활성화
 ante member revoke <member_id>                          # 멤버 권한 영구 해제
 ante member rotate-token <member_id>                    # 인증 토큰 갱신
 ante member set-emoji <member_id> <emoji>               # 멤버 이모지 설정
-ante member reset-password <member_id>                  # 비밀번호 초기화
-ante member regenerate-recovery-key <member_id>         # 복구 키 재발급
+ante member reset-password --recovery-key <key>          # 비밀번호 초기화
+ante member regenerate-recovery-key                     # 복구 키 재발급
 ```
+
+`member list/info`는 오프라인 조회가 가능하다. 그 외 member 상태·토큰·패스워드·복구키
+변경 커맨드는 서버 실행 중 IPC로 서버에 위임한다. 서버는 MemberService 실행 후
+필요한 세션 무효화, 토큰 무효화, 감사 로그, member/security 알림을 같은 런타임
+경로에서 처리한다. 같은 `config_dir`의 서버가 정지된 상태에서는 bootstrap/recovery
+및 비상 revoke를 위해 직접 MemberService를 생성하는 maintenance fallback을 허용한다.
 
 ### `ante instrument` — 종목 관리
 

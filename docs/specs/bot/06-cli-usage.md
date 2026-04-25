@@ -4,6 +4,11 @@
 
 # CLI 사용법
 
+봇의 생성·시작·중지·삭제와 signal key 갱신은 서버 BotManager의 인메모리 상태,
+실행 task, EventBus 구독, 외부 signal channel에 영향을 주므로 런타임 IPC로 처리한다.
+서버 실행 중 조회는 IPC로 live 상태를 우선 조회하고, 서버 정지 중에는 DB에 저장된
+persisted snapshot만 조회한다.
+
 ```bash
 # 봇 생성 — --account로 소속 계좌 지정 (active 계좌가 하나뿐이면 생략 가능)
 ante bot create --strategy momentum_breakout_v1.0.0 --account domestic --interval 60

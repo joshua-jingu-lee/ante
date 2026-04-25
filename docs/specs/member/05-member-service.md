@@ -36,6 +36,26 @@ MemberService는 내부적으로 책임을 분리하여 `AuthService`(인증), `
 | `update_scopes` | member_id, scopes, updated_by | Member | 권한 범위 변경. master만 호출 가능 |
 | `update_last_active` | member_id | None | 마지막 활동 시각 갱신 |
 
+### 런타임 경계
+
+서버 실행 중 member 상태·토큰·패스워드·복구키 변경은 IPC 또는 Web API를 통해 서버
+프로세스의 MemberService에서 실행한다. CLI가 서버와 같은 `config_dir`을 쓰고 서버가
+실행 중이면 직접 DB 수정 대신 IPC를 사용해야 한다.
+
+서버 런타임 경로는 MemberService 호출 후 다음 후처리를 같은 프로세스에서 수행한다:
+
+| 작업 | 필수 후처리 |
+|------|-------------|
+| `suspend`, `revoke` | `SessionService.delete_by_member(member_id)`로 기존 웹 세션 무효화 |
+| `rotate_token` | 기존 토큰 해시 폐기. 새 토큰은 1회만 반환 |
+| `reset_password`, `change_password` | 기존 웹 세션 무효화 + 보안 알림 |
+| `regenerate_recovery_key` | 기존 recovery key 폐기 + 보안 알림 |
+| `register`, `update_emoji`, `update_scopes`, `reactivate` | 감사 로그와 member 이벤트 발행 |
+
+서버 정지 상태에서는 recovery/maintenance 목적으로 CLI가 MemberService를 직접 생성할
+수 있다. 이 경우에도 동일한 DB 불변식과 감사 기록을 남겨야 하며, 서버 재시작 후 새
+인증 상태가 canonical DB에서 로드된다.
+
 ### 불변식 검증
 
 모든 상태 변경 메서드는 다음 불변식을 사전 검증한다:

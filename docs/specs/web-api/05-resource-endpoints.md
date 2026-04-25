@@ -119,6 +119,10 @@
 
 ## 멤버 관리 (`/api/members`)
 
+Web API는 서버 프로세스 내부에서 실행되므로 member 변경은 항상 런타임 경로다.
+상태·토큰·패스워드·복구키 변경은 MemberService 호출 후 세션 무효화, 감사 로그,
+member/security 알림을 같은 프로세스에서 처리한다.
+
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/members` | 멤버 목록 (필터: type, org, status, limit, offset) |

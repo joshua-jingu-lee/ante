@@ -164,6 +164,22 @@ master(human)는 scope 제한 없이 모든 작업을 수행할 수 있다. scop
 
 > `signal` 도메인은 봇별 signal key(`sk_`) 인증으로 동작하며, member scope 체계 밖이다.
 
+### Member command runtime boundary
+
+`member list/info`는 오프라인 조회가 가능하다. 등록, 정지, 재활성화, 폐기,
+토큰 재발급, 패스워드 변경/리셋, recovery key 재발급, scope 변경은 인증 상태를 바꾸는
+mutation이므로 서버 실행 중 IPC 또는 Web API를 통해 서버 프로세스에서 처리한다.
+
+근거:
+
+- 서버는 Web API 세션을 보유하므로 member mutation 직후 세션 무효화가 필요하다.
+- 토큰/패스워드/recovery key 변경은 감사 로그와 security notification을 동반한다.
+- 향후 member cache나 권한 cache가 생겨도 CLI 직접 DB 수정이 런타임 상태와 어긋나지
+  않도록 단일 실행 경로를 유지한다.
+
+서버 정지 상태에서는 bootstrap, recovery, 비상 revoke 같은 운영 복구를 위해 CLI가
+MemberService를 직접 생성하는 maintenance fallback을 허용한다.
+
 **scope 검증은 CLI 미들웨어에서 데코레이터로 수행:**
 
 ```python

@@ -131,9 +131,17 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
 | `MemberRegisteredEvent` | MemberService | Notification | `member_id`, `member_type`, `role`, `registered_by` |
-| `MemberSuspendedEvent` | MemberService | Notification | `member_id`, `suspended_by` |
-| `MemberRevokedEvent` | MemberService | Notification | `member_id`, `revoked_by` |
+| `MemberSuspendedEvent` | MemberService | SessionService, Notification | `member_id`, `suspended_by` |
+| `MemberReactivatedEvent` | MemberService | Notification | `member_id`, `reactivated_by` |
+| `MemberRevokedEvent` | MemberService | SessionService, Notification | `member_id`, `revoked_by` |
+| `MemberTokenRotatedEvent` | MemberService | Audit | `member_id`, `rotated_by` |
+| `MemberPasswordChangedEvent` | MemberService | SessionService, Notification | `member_id`, `changed_by`, `reason` |
+| `MemberRecoveryKeyRegeneratedEvent` | MemberService | Notification | `member_id`, `regenerated_by` |
 | `MemberAuthFailedEvent` | MemberService | Notification | `member_id`, `reason` |
+
+Member 변경 이벤트는 서버 실행 중 CLI IPC 또는 Web API 런타임 경로에서 발행한다.
+서버 정지 상태의 maintenance fallback은 EventBus consumer를 호출하지 않으며, 감사 기록과
+canonical DB 상태를 남긴 뒤 서버 재시작 시 반영된다.
 
 ### 디스패치 방식: 타입 기반 동기 콜백
 

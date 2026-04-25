@@ -4,6 +4,18 @@
 
 # CLI 커맨드
 
+## 실행 경계
+
+`member list/info`는 오프라인 조회가 가능하다. 그 외 member 상태·토큰·패스워드·복구키
+변경 커맨드는 같은 `config_dir`의 서버가 실행 중이면 런타임 IPC로 서버에 위임한다.
+서버는 MemberService 실행 후 필요한 세션 무효화, 토큰 무효화, 감사 로그,
+member/security 알림을 같은 런타임 경로에서 처리한다.
+
+서버가 정지된 상태에서는 bootstrap, recovery, 비상 revoke 같은 운영 복구를 위해
+CLI가 MemberService를 직접 생성하는 maintenance fallback을 허용한다. 이 fallback은
+account cold-path처럼 서버 topology를 바꾸지는 않지만 인증 상태를 바꾸므로, 서버
+실행 중 직접 DB 수정은 금지한다.
+
 ### `ante member list`
 
 ```

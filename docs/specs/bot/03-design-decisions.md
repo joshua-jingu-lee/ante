@@ -204,6 +204,11 @@ BotManager.start_bot(bot_id)
     → BotStoppedEvent 발행
 ```
 
+CLI의 `bot create/start/stop/remove`와 `bot signal-key --rotate`는 위 흐름을 서버
+프로세스 안에서 실행해야 하므로 런타임 IPC 전용이다. 직접 DB 수정으로 봇 status나
+signal key를 바꾸면 `_bots`, 실행 task, EventBus 구독, 외부 signal channel이
+어긋나므로 허용하지 않는다.
+
 ### 외부 시그널 채널
 
 > 참조: [strategy.md](../strategy/strategy.md) 전략 운용 방식, 외부 시그널 채널

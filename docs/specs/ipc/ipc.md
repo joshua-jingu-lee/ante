@@ -51,7 +51,8 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 
 ## CLI 커맨드 분류
 
-구분 기준: **서버의 EventBus 구독자가 반응해야 하는 부수효과(이벤트 발행 또는 인메모리 상태 변경)가 있는가?**
+구분 기준: **서버 프로세스가 보유한 EventBus 구독자, 인메모리 작업, 외부 연결,
+인증·세션 상태가 관여하는가?**
 
 - 있으면 → **런타임 커맨드** → IPC를 통해 서버에 위임
 - 없으면 → **오프라인 커맨드** → 직접 모듈 임포트 (기존 유지)
@@ -80,7 +81,14 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | BotManager 인메모리 `_bots` 반영 필요 |
-| `ante bot remove` | `bot.remove` | `BotManager.remove_bot()` | 실행 중 봇 중지 + 인메모리 제거 필요 |
+| `ante bot start` | `bot.start` | `BotManager.start_bot()` | asyncio task 생성 + `BotStartedEvent` 발행 |
+| `ante bot stop` | `bot.stop` | `BotManager.stop_bot()` | 실행 task 취소 + `BotStoppedEvent` 발행 |
+| `ante bot remove` | `bot.remove` | `BotManager.remove_bot()` | 실행 중 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요 |
+| `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
+
+서버 실행 중 `ante bot list/info/status/positions/signal-key`는 `bot.query` 계열 IPC로
+서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
+snapshot 조회만 허용하며, 직접 DB 수정으로 봇 상태를 변경하지 않는다.
 
 #### Treasury
 
@@ -109,11 +117,39 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
+| `ante broker status` / `ante broker health` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
+| `ante broker balance` | `broker.balance` | `BrokerAdapter.get_account_balance()` | 서버 시작 시 생성된 adapter/credentials/rate limit 상태 재사용 |
+| `ante broker positions` | `broker.positions` | `BrokerAdapter.get_positions()` | 서버 adapter 연결과 계좌 topology 기준으로 live 포지션 조회 |
+| `ante broker price` | `broker.price` | `BrokerAdapter.get_current_price()` | live broker quote 조회. historical/public data 조회와 분리 |
 | `ante broker reconcile --fix` | `broker.reconcile` | `PositionReconciler.reconcile()` | TradeService 인메모리 반영 + `NotificationEvent` 알림 |
+
+일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의
+credentials 복호화, 연결 세션, rate limit, circuit breaker, audit 경로를 우회할 수
+있다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
+maintenance/test 스펙 없이는 제공하지 않는다.
+
+#### Member
+
+| CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
+|-----------|-----------|-------------|-------------|
+| `ante member register` | `member.register` | `MemberService.register()` | 토큰 발급 + 감사 로그 + member 알림 |
+| `ante member set-emoji` | `member.set_emoji` | `MemberService.update_emoji()` | 런타임 member cache/API 응답 일관성 |
+| `ante member suspend` | `member.suspend` | `MemberService.suspend()` | 기존 세션 무효화 + 보안 알림 |
+| `ante member reactivate` | `member.reactivate` | `MemberService.reactivate()` | 인증 상태 변경을 런타임 API에 즉시 반영 |
+| `ante member revoke` | `member.revoke` | `MemberService.revoke()` | 토큰 해시 삭제 + 세션 무효화 + 되돌릴 수 없는 감사 이벤트 |
+| `ante member rotate-token` | `member.rotate_token` | `MemberService.rotate_token()` | 기존 토큰 즉시 무효화 + 새 토큰 1회 반환 |
+| `ante member reset-password` | `member.reset_password` | `MemberService.reset_password()` | recovery key 검증 + 세션 무효화 + 보안 알림 |
+| `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `MemberService.regenerate_recovery_key()` | 기존 recovery key 폐기 + 보안 알림 |
 
 ### 오프라인 커맨드 (기존 유지)
 
-`system start`, `system stop`, `system status`, 모든 조회(`list`, `show`, `status`) 커맨드, `backtest`, `data`, `strategy validate/submit`, `report`, `instrument`, `member` 조회, `audit`, `signal` 등.
+`system start`, `system stop`, `system status`, 서버 live 상태가 필요 없는 조회
+커맨드, `backtest`, `data`, `strategy validate/submit`, `report`, `instrument`,
+`member list/info`, `audit`, `signal` 등.
+
+조회 커맨드라도 서버가 가진 live 상태를 읽어야 하면 런타임 IPC 대상이다. 대표적으로
+`bot list/info/status/positions/signal-key`의 live 조회와
+`broker status/health/balance/positions/price`가 여기에 속한다.
 
 ### Cold-path structural 커맨드
 
@@ -126,7 +162,13 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 | `ante account delete` | 차단 | 실행 중 consumer 제거와 partial failure 보상 비지원 |
 | `ante account set-credentials` | 차단 | BrokerAdapter 재초기화와 장기 실행 consumer 전파 비지원 |
 
-> **참고**: `member register/suspend/revoke`는 이벤트를 발행하지만 현재 서버에 구독자가 없으므로 오프라인으로 분류한다. 향후 구독자가 추가되면 런타임으로 재분류한다.
+### 서버 정지 maintenance fallback
+
+`member register/set-emoji/suspend/reactivate/revoke/rotate-token/reset-password/regenerate-recovery-key`는
+서버 실행 중 런타임 IPC 대상이다. 같은 `config_dir`의 서버가 정지된 상태에서는
+bootstrap, recovery, 비상 revoke 같은 운영 복구를 위해 CLI가 MemberService를 직접
+생성할 수 있다. 이 fallback은 account cold-path처럼 서버 topology를 바꾸지는 않지만,
+인증·세션 상태를 바꾸므로 서버 실행 중 직접 DB 수정은 금지한다.
 
 ## 통신 프로토콜
 
@@ -162,7 +204,7 @@ JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 | `id` | `string` (UUID v4) | 요청 식별자. 응답의 `id`와 매칭 |
 | `command` | `string` | IPC 커맨드 (`CommandRegistry` 키) |
 | `args` | `dict` | 커맨드 파라미터 |
-| `actor` | `string` | CLI에서 인증된 멤버 ID (감사 추적용) |
+| `actor` | `string` | CLI에서 인증된 멤버 ID (감사 추적용). 인증 면제 recovery 커맨드는 `"unknown"` 또는 recovery 대상 member_id |
 
 **응답 (성공)**:
 ```json
@@ -273,7 +315,7 @@ class ServiceRegistry:
 
 | 상황 | 동작 |
 |------|------|
-| 서버 미기동 (소켓 없음) | `IPCClient`가 `ServerNotRunningError` 발생. CLI는 `"서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."` 출력 후 종료 |
+| 서버 미기동 (소켓 없음) | 런타임 전용 커맨드는 `IPCClient`가 `ServerNotRunningError` 발생. CLI는 `"서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."` 출력 후 종료. member maintenance fallback 대상은 IPC 실패 전/후 직접 MemberService 경로로 전환 가능 |
 | 타임아웃 (기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
@@ -281,7 +323,7 @@ class ServiceRegistry:
 ## 보안 고려
 
 - **소켓 파일 권한**: 생성 시 `0o600` (소유자만 읽기/쓰기) — 로컬 머신의 다른 사용자 접근 차단
-- **인증 이중화 불필요**: CLI에서 이미 `ANTE_MEMBER_TOKEN`으로 인증 + scope 확인을 수행하므로, IPC 계층에서 재인증하지 않는다. `actor` 필드로 감사 추적만 전달한다
+- **인증 이중화 불필요**: 일반 CLI는 이미 `ANTE_MEMBER_TOKEN`으로 인증 + scope 확인을 수행하므로, IPC 계층에서 재인증하지 않는다. `actor` 필드로 감사 추적만 전달한다. `member reset-password`처럼 인증 면제 recovery 커맨드는 토큰 대신 recovery key 또는 현재 패스워드를 서버 서비스가 검증한다
 - **요청 크기 제한**: 메시지 최대 크기 1MB — 과도한 페이로드 차단
 
 ## 파일 구조
