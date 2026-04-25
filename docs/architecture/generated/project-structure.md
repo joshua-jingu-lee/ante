@@ -21,7 +21,6 @@ ante/
 ├── .github/             # GitHub 워크플로/이슈 템플릿/로컬 인증 파일
 ├── Dockerfile           # 프로덕션 Docker 이미지
 ├── docker-compose.yml        # 프로덕션 Docker Compose (ante-logs named volume 포함)
-├── docker-compose.staging.yml # Staging override (JSONL 로그 bind mount, ANTE_ENV/ANTE_LOG_JSONL)
 ├── AGENTS.md            # 개발 Agent 마스터 가이드
 └── CHANGELOG.md         # 변경 이력
 ```

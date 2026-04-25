@@ -1,6 +1,6 @@
 # 스테이징 환경 구축 설계
 
-> 상태: **Draft (사용자 리뷰 대기)**
+> 상태: **Archived draft (현재 1.0 산출물에서 제외)**
 > 작성일: 2026-04-17
 > 범위: 스테이징 호스팅, 배포, 로그 포맷, 감시 에이전트
 > 관련 스펙: [docs/specs/config/03-design-decisions.md](../../specs/config/03-design-decisions.md), [docs/specs/broker-adapter/07-kis-base-adapter.md](../../specs/broker-adapter/07-kis-base-adapter.md), [docs/specs/account/04-account-service.md](../../specs/account/04-account-service.md)
@@ -48,8 +48,7 @@ Production에서 검증하는 것은 위험하다. 이 공백을 메우는 **제
 | 파일 | Production | Staging | 배포 이미지 시뮬레이션 테스트 |
 |---|:---:|:---:|:---:|
 | `Dockerfile` | ✅ | ✅ (재사용) | 입력 image의 빌드 원천 |
-| `docker-compose.yml` | ✅ | — | — |
-| `docker-compose.staging.yml` | — | ✅ (신규) | — |
+| `docker-compose.yml` | ✅ | 후속 설계에서 재사용 여부 결정 | — |
 
 Staging은 Production과 동일한 풀 이미지(프론트엔드 포함)를 사용한다. 이미지 빌드·배포 파이프라인은 기존 [.github/workflows/publish.yml](../../.github/workflows/publish.yml)을 재사용한다 (main 푸시 시 GHCR에 push).
 
@@ -59,8 +58,7 @@ Staging은 Production과 동일한 풀 이미지(프론트엔드 포함)를 사�
 main 머지 → GHCR publish (자동)
              ↓
 맥미니에서 사용자가 원할 때:
-  docker compose -f docker-compose.staging.yml pull
-  docker compose -f docker-compose.staging.yml up -d
+  후속 staging 운영 런북에서 확정한 compose/배포 명령 실행
 ```
 
 배포를 수동으로 유지하는 이유: 장시간 스트림 관찰 중 원치 않는 재시작이 관찰을 끊지 않도록 사용자가 업그레이드 시점을 통제한다.
