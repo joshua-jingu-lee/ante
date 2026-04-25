@@ -154,12 +154,10 @@ ante --format json init --member-id qa-admin --name "QA Admin"
 ### 실거래 증권사 계좌 (KIS) 추가
 
 ```bash
-ante account add domestic \
-  --exchange KRX --currency KRW \
-  --broker-type kis-domestic
+ante account create
 ```
 
-계좌 인증정보(`app_key`, `app_secret`, `account_no`)와 `is_paper`(KIS 모의투자 여부)는 이후 `ante account` 관련 명령으로 설정합니다. 자세한 플래그는 `ante account add --help`를 참고하세요.
+`ante account create`는 대화형으로 브로커 종류, 계좌 ID, 거래 모드(VIRTUAL/LIVE), 인증정보(`app_key`, `app_secret`, 계좌번호 등)와 KIS의 `is_paper`(모의투자 여부)를 입력받아 새 계좌를 생성합니다. 인증정보는 이후 `ante account set-credentials`로 갱신할 수 있습니다.
 
 **TradingMode**(Ante 시스템 레벨의 거래 모드)와 **is_paper**(KIS API 레벨의 모의투자 여부) 조합:
 

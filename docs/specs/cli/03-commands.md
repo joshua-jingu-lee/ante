@@ -19,7 +19,9 @@ ante system activate [--account <account_id>]  # halt 해제, 거래 재개 (계
 ```bash
 ante account list                             # 계좌 목록
 ante account info <account_id>                # 계좌 상세 정보
-ante account add <account_id> --exchange <거래소> --currency <통화> --broker-type <타입>  # 계좌 등록
+ante account create                           # 대화형 계좌 등록 (브로커/모드/인증정보 prompt)
+ante account credentials <account_id>         # 인증 정보 조회 (마스킹)
+ante account set-credentials <account_id> [--app-key K --app-secret S]  # 인증 정보 재설정 (대화형 또는 비대화형)
 ante account suspend <account_id> --reason <사유>  # 계좌 거래 정지
 ante account activate <account_id>            # 계좌 거래 재개
 ante account delete <account_id>              # 계좌 삭제 (연결된 봇이 없을 때만)
@@ -192,7 +194,7 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 `ante init`은 이들을 다루지 않는다. 필요 시 다음 명령을 사용한다:
 
-- KIS 실계좌: `ante account add <account_id> ...`
+- KIS 실계좌: `ante account create` (대화형)
 - Telegram: `<dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
 - DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
 
