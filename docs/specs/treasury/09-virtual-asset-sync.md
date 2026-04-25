@@ -1,8 +1,11 @@
-# Treasury 모듈 세부 설계 - Virtual 모드 자산 평가 동기화 (D-TRS-01)
+# Treasury 모듈 세부 설계 - Virtual 모드 자산 평가 동기화 배경 (D-TRS-01)
 
 > 인덱스: [README.md](README.md) | 호환 문서: [treasury.md](treasury.md)
 
-# Virtual 모드 자산 평가 동기화 (D-TRS-01)
+# Virtual 모드 자산 평가 동기화 배경 (D-TRS-01)
+
+> 기본 인터페이스 계약은 [04-treasury-interface.md](04-treasury-interface.md#자산-평가-동기화-계약)가 SSOT다.
+> 이 문서는 Virtual 모드 동기화 계약을 채택한 배경과 영향 범위를 설명한다.
 
 ### 배경
 
@@ -20,23 +23,25 @@ Virtual 모드에서는 브로커 동기화가 없으므로 이 필드들이 **�
 
 Virtual 모드에는 외부 매매와 비거래 변동이 존재하지 않으므로, Trade DB가 유일하고 정확한 포지션 소스다.
 
-### 해결 방향
+### 채택된 해결 방향
 
-`_do_sync()`에서 `trading_mode`에 따라 분기한다:
+Treasury 동기화는 `trading_mode`에 따라 분기한다:
 
 - **Live**: 기존대로 `broker.get_account_balance()` + `broker.get_positions()` 사용
-- **Virtual**: Trade DB(`PositionHistory`)에서 Paper 포지션을 조회하여 `_purchase_amount`, `_eval_amount` 계산
+- **Virtual**: Trade DB(`PositionHistory`)에서 해당 `account_id`의 미청산 Paper 포지션을 조회하여 `_purchase_amount`, `_eval_amount` 계산
 
 ```
 Virtual 모드 동기화 흐름:
 
-PositionHistory.get_positions(account_id)
+PositionHistory(account_id의 미청산 포지션)
   → SUM(avg_entry_price × quantity) → _purchase_amount
   → SUM(current_price × quantity)   → _eval_amount
   → _external_* = 0 (외부 종목 없음)
 ```
 
-현재가(`current_price`) 조회는 PaperExecutor의 시뮬레이션 시세(DataProvider)를 활용한다.
+현재가(`current_price`) 조회는 서버 초기화 시 주입된 Gateway/DataProvider 기반
+`price_resolver`를 활용한다. 조회 실패 또는 `price_resolver` 미주입 시
+`avg_entry_price` fallback을 허용한다.
 
 ### 영향 범위
 
@@ -45,13 +50,14 @@ PositionHistory.get_positions(account_id)
 - `take_snapshot()`: 수정 없음 — `get_summary()` 값에 의존
 - 대시보드 T-1/T-2: 수정 없음 — 스냅샷 데이터에 의존
 
-### 스펙 변경
+### 기본 계약 위치
 
-퍼블릭 메서드 테이블의 `start_sync` 설명을 아래와 같이 변경한다:
+`start_sync`의 퍼블릭 계약은 [04-treasury-interface.md](04-treasury-interface.md)에 둔다.
+이 문서는 더 이상 별도 변경안이 아니며, 기본 인터페이스에 반영된 설계 배경이다.
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `start_sync` | broker \| None, position_history, interval_seconds=300, trading_mode=VIRTUAL | `None` | 자산 평가 주기적 동기화 시작. Live: 브로커 API 기반. Virtual: Trade DB(PositionHistory) + DataProvider 기반 |
+| `start_sync` | broker \| None, position_history, interval_seconds=300, trading_mode, price_resolver=None | `None` | 자산 평가 주기적 동기화 시작. Live: 브로커 API 기반. Virtual: Trade DB(PositionHistory) + Gateway/DataProvider 기반 |
 
 ### 설계 원칙
 

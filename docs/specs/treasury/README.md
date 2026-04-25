@@ -19,5 +19,5 @@
 | [06-database-schema.md](06-database-schema.md) | 데이터베이스 스키마 |
 | [07-cli.md](07-cli.md) | CLI 인터페이스 |
 | [08-daily-asset-snapshots.md](08-daily-asset-snapshots.md) | 일별 자산 스냅샷 (Daily Asset Snapshot) |
-| [09-virtual-asset-sync.md](09-virtual-asset-sync.md) | Virtual 모드 자산 평가 동기화 (D-TRS-01) |
+| [09-virtual-asset-sync.md](09-virtual-asset-sync.md) | Virtual 모드 자산 평가 동기화 배경 (D-TRS-01) |
 | [11-cross-module-notes.md](11-cross-module-notes.md) | 타 모듈 설계 시 참고 |

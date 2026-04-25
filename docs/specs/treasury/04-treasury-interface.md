@@ -41,13 +41,46 @@ Treasury(
 | `list_budgets` | — | list[BotBudget] | 모든 봇의 예산 상태 목록 조회 |
 | `set_bot_status_checker` | checker: Callable[[str], str] | None | 봇 상태 조회 콜백 주입. deallocate 시 봇 정지 상태 검증에 사용 |
 | `get_summary` | — | dict | 자금 현황 요약 (아래 상세 참조) |
-| `sync_balance` | balance_data: dict[str, float] | `None` | KIS 잔고 데이터로 Treasury 상태 동기화 |
-| `start_sync` | broker, position_history, interval_seconds=300 | `None` | KIS 계좌 잔고 주기적 동기화 시작 |
+| `sync_balance` | balance_data: dict[str, float] | `None` | 브로커 잔고 데이터로 Treasury 상태 동기화 |
+| `start_sync` | broker: BrokerAdapter \| None, position_history: PositionHistory, interval_seconds=300, trading_mode="live", price_resolver=None | `None` | 자산 평가 주기적 동기화 시작. Live는 브로커 기반, Virtual은 Trade DB 기반 |
 | `stop_sync` | — | `None` | 잔고 동기화 중지 |
 | `update_commission_rates` | buy_commission_rate: float, sell_commission_rate: float | `None` | 수수료율 업데이트 (DynamicConfig 변경 시) |
 | `release_budget` | bot_id: str | float | 봇 예산 전액 환수. 반환값은 환수된 금액 |
 | `update_budget` | bot_id: str, target_amount: float | `None` | 봇 예산 변경. 증가분은 미할당에서 차감, 감소분은 미할당으로 환수 |
 | `set_account_info` | account_number: str, is_demo_trading: bool | `None` | KIS 계좌 메타 정보 설정 (계좌번호, 모의투자 여부) |
+
+### 자산 평가 동기화 계약
+
+`start_sync`는 `Account.trading_mode`에 따라 자산 평가 소스를 분기한다.
+`trading_mode`는 계좌 생성 후 불변인 Account 속성이며, Treasury는 이 값을 변경하지 않는다.
+
+| 모드 | `broker` | 평가 소스 | 외부 보유종목 | 설명 |
+|------|----------|-----------|--------------|------|
+| `live` | 필수 | `BrokerAdapter.get_account_balance()` + `BrokerAdapter.get_positions()` | 브로커 포지션과 Trade 포지션 대조로 산정 | 실계좌/모의투자 브로커 상태를 신뢰한다 |
+| `virtual` | `None` 허용 | `PositionHistory` + `price_resolver` | 항상 0 | Ante 주문만 존재하므로 Trade DB가 포지션 SSOT다 |
+
+Virtual 모드에서 Treasury는 포지션을 소유하지 않는다. `PositionHistory`에서
+`Treasury.account_id`에 속한 미청산 포지션을 조회하여 다음 값만 계산한다.
+
+```text
+purchase_amount = SUM(avg_entry_price * quantity)
+eval_amount     = SUM(current_price * quantity)
+external_*      = 0
+```
+
+`current_price`는 `price_resolver(symbol)`로 조회한다. 조회 실패 또는
+`price_resolver` 미주입 시 `avg_entry_price`를 fallback으로 사용할 수 있다.
+이 fallback은 평가액을 0으로 만들지 않기 위한 보수적 동작이며, 정확한 평가를 위해
+서버 초기화 시 Gateway/DataProvider 기반 `price_resolver`를 주입하는 것을 기본 경로로 둔다.
+
+초기화 순서는 다음을 따른다.
+
+1. AccountService가 계좌를 로드한다.
+2. TreasuryManager가 계좌별 Treasury를 생성하고 초기화한다.
+3. Broker/Gateway/Trade 서비스가 준비된다.
+4. 각 계좌의 `trading_mode`에 따라 `start_sync`를 호출한다.
+
+상세 배경은 [09-virtual-asset-sync.md](09-virtual-asset-sync.md)를 참조한다.
 
 ### 프로퍼티
 
