@@ -27,7 +27,7 @@ RuleEngine(
 
 - `OrderRequestEvent` (priority=100): 주문 평가 — `event.account_id` 필터링 → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행
 - `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행. 거부 시 `OrderModifyRejectedEvent` 발행
-- `ConfigChangedEvent`: 룰 설정 변경 감지 (category가 `"rule"`, `"global_rule"`, `"strategy_rule"` 중 하나일 때)
+- `ConfigChangedEvent`: 룰 설정 변경 감지. `category="rule"` + `key="accounts.{account_id}.rules"`이면 해당 계좌 엔진만 계좌 룰을 재로드하고, `category="strategy_rule"`이면 해당 전략 룰을 재로드한다.
 
 ### 룰 레지스트리
 

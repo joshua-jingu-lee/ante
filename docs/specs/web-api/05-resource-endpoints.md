@@ -18,8 +18,8 @@
 | POST | `/api/accounts/{account_id}/suspend` | 계좌 거래 정지. Body: reason. 이미 정지 상태이면 409 Conflict |
 | POST | `/api/accounts/{account_id}/activate` | 계좌 거래 재개. 이미 활성 상태이면 409 Conflict |
 | DELETE | `/api/accounts/{account_id}` | 계좌 삭제. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환 |
-| GET | `/api/accounts/{account_id}/rules` | 계좌 리스크 룰 목록 조회. Config에서 `accounts.{id}.rules` 키를 읽어 RULE_REGISTRY 기반으로 구조화 반환. 응답: `{rules: [{type, name, enabled, priority, config, param_schema}]}` |
-| PUT | `/api/accounts/{account_id}/rules/{rule_type}` | 계좌 리스크 룰 수정. Body: `{enabled?, config?}`. RULE_REGISTRY에서 rule_type 유효성 + config 파라미터 스키마 검증 후 Config API(`PUT /api/config/{key}`)에 위임. ConfigChangedEvent → RuleEngine 자동 리로드 |
+| GET | `/api/accounts/{account_id}/rules` | 계좌 리스크 룰 목록 조회. DynamicConfig의 `accounts.{account_id}.rules` 리스트를 RULE_REGISTRY 기반으로 구조화 반환. 응답: `{rules: [{type, enabled, params}]}` |
+| PUT | `/api/accounts/{account_id}/rules/{rule_type}` | 계좌 리스크 룰 수정. Body: `{enabled?, params?}`. RULE_REGISTRY에서 rule_type 유효성 + params 스키마 검증 후 DynamicConfig `accounts.{account_id}.rules` 리스트 전체를 갱신. ConfigChangedEvent → 대상 계좌 RuleEngine 자동 리로드 |
 
 ## 인증 (`/api/auth`)
 

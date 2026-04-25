@@ -4,44 +4,100 @@
 
 # 룰 정의 및 관리
 
-룰은 계좌별 설정 파일로 정의되며, 동적으로 추가/수정 가능.
+계좌별 룰의 런타임 SSOT는 SQLite `dynamic_config` 테이블이다.
+정적 TOML(`system.toml`)은 초기 bootstrap seed 또는 dynamic_config가 비어 있을 때의
+fallback으로만 사용한다. 웹/API에서 룰을 수정하면 `dynamic_config`에 저장하고,
+`ConfigChangedEvent`를 통해 해당 계좌의 RuleEngine이 재로드한다.
 
-```toml
-[accounts.domestic.rules]
-daily_loss_limit = { max_daily_loss_rate = 0.05, action = "halt" }
-total_exposure_limit = { max_exposure_rate = 0.8 }
-# trading_hours는 Account의 trading_hours_start/end, timezone에서 자동 주입
+### DynamicConfig key namespace
 
-[accounts.us-stock.rules]
-daily_loss_limit = { max_daily_loss_rate = 0.03, action = "halt" }
-total_exposure_limit = { max_exposure_rate = 0.7 }
-# trading_hours는 Account의 trading_hours_start/end, timezone에서 자동 주입
+| 범위 | key | category | value |
+|------|-----|----------|-------|
+| 계좌별 룰 | `accounts.{account_id}.rules` | `rule` | `list[RuleConfig]` |
+| 전략별 룰 | `rules.strategy.{strategy_id}` | `strategy_rule` | `list[RuleConfig]` |
+
+계좌별 룰 value는 rule config 객체의 리스트다. 개별 rule REST API는 특정 rule을 수정해도
+저장 시 같은 `accounts.{account_id}.rules` 리스트 전체를 갱신한다. 따라서
+`accounts.{account_id}.rules.{rule_type}` 같은 per-rule dynamic_config key는 사용하지 않는다.
+
+```json
+{
+  "key": "accounts.domestic.rules",
+  "category": "rule",
+  "value": [
+    {
+      "type": "daily_loss_limit",
+      "enabled": true,
+      "max_daily_loss_rate": 0.05,
+      "action": "halt"
+    },
+    {
+      "type": "total_exposure_limit",
+      "enabled": true,
+      "max_exposure_rate": 0.8
+    }
+  ]
+}
 ```
 
 > `trading_hours` 룰의 시간대와 거래 시간은 Account 모델에서 자동 주입되므로, 룰 설정에서 별도로 지정하지 않는다. Account의 `trading_hours_start`, `trading_hours_end`, `timezone` 필드가 곧 TradingHoursRule의 설정이 된다.
 
-전략별 룰은 계좌 설정 하위에 정의한다:
+### Static TOML seed
+
+정적 TOML은 운영 중 룰 수정의 저장소가 아니다. 초기 계좌 seed나 복구용 기본값이 필요할
+때만 같은 key shape를 만들 수 있는 TOML 구조를 둔다.
+
+```toml
+[accounts.domestic]
+rules = [
+  { type = "daily_loss_limit", enabled = true, max_daily_loss_rate = 0.05, action = "halt" },
+  { type = "total_exposure_limit", enabled = true, max_exposure_rate = 0.8 },
+]
+
+[accounts.us-stock]
+rules = [
+  { type = "daily_loss_limit", enabled = true, max_daily_loss_rate = 0.03, action = "halt" },
+  { type = "total_exposure_limit", enabled = true, max_exposure_rate = 0.7 },
+]
+```
+
+시스템 시작 시 dynamic_config에 `accounts.{account_id}.rules`가 있으면 그 값을 우선한다.
+없을 때만 정적 TOML seed를 읽어 RuleEngine 초기화에 사용한다. 런타임 수정은 항상
+dynamic_config에 기록한다.
+
+### 전략별 룰
+
+전략별 룰은 계좌 설정 하위가 아니라 전략 key 하위에 정의한다:
 
 ```json
 {
-  "accounts": {
-    "domestic": {
-      "strategy": {
-        "my_strategy": {
-          "position_size": {
-            "id": "position_size",
-            "name": "Position Size Limit",
-            "type": "position_size",
-            "enabled": true,
-            "priority": 10,
-            "config": {
-              "max_position_percent": 0.10,
-              "max_position_amount": 1000.0
-            }
-          }
-        }
+  "key": "rules.strategy.my_strategy",
+  "category": "strategy_rule",
+  "value": [
+    {
+      "type": "position_size",
+      "enabled": true,
+      "max_position_percent": 0.10,
+      "max_position_amount": 1000.0
+    }
+  ]
+}
+```
+
+API 응답에서는 rule type, enabled, params를 분리해 반환하지만 저장 value는
+RuleEngine이 로드하는 flat rule config list를 유지한다.
+
+```json
+{
+  "rules": [
+    {
+      "type": "position_size",
+      "enabled": true,
+      "params": {
+        "max_position_percent": 0.10,
+        "max_position_amount": 1000.0
       }
     }
-  }
+  ]
 }
 ```

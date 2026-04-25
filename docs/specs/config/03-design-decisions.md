@@ -107,8 +107,25 @@ CREATE TABLE dynamic_config (
 
 | 키 | 카테고리 | 설명 | 예시 값 |
 |----|---------|------|--------|
-| `rule.max_daily_loss_rate` | rule | 일일 누적 손실 한도 (총 자금 대비 %). 초과 시 시스템이 자동으로 HALTED 전환 | `0.03` |
-| `rule.max_total_exposure` | rule | 최대 총 노출 비율 (총 자금 대비 %). 보유 포지션 평가액 합계가 이 비율에 도달하면 신규 매수 거부 | `0.30` |
+| `rule.max_daily_loss_rate` | trading | 일일 누적 손실 한도 기본값. 계좌별 룰이 없을 때 seed로 사용 가능 | `0.03` |
+| `rule.max_total_exposure` | trading | 최대 총 노출 비율 기본값. 계좌별 룰이 없을 때 seed로 사용 가능 | `0.30` |
+
+*계좌별 룰 (RuleEngine이 런타임 재로드)*:
+
+| 키 | 카테고리 | 설명 | 예시 값 |
+|----|---------|------|--------|
+| `accounts.{account_id}.rules` | rule | 계좌별 리스크 룰 리스트. 런타임 룰 변경의 SSOT | `[{"type":"daily_loss_limit","enabled":true,"max_daily_loss_rate":0.03,"action":"halt"}]` |
+
+계좌별 룰은 per-rule key로 나누지 않는다. `PUT /api/accounts/{account_id}/rules/{rule_type}`는
+해당 rule만 수정하더라도 `accounts.{account_id}.rules` 리스트 전체를 갱신하고,
+`ConfigChangedEvent(category="rule", key="accounts.{account_id}.rules")`를 발행한다.
+정적 TOML의 `accounts.{account_id}.rules`는 초기 seed/fallback으로만 사용한다.
+
+*전략별 룰 (RuleEngine/BotManager가 참조)*:
+
+| 키 | 카테고리 | 설명 | 예시 값 |
+|----|---------|------|--------|
+| `rules.strategy.{strategy_id}` | strategy_rule | 전략별 룰 리스트. 봇 시작/전략 룰 갱신 시 로드 | `[{"type":"position_size","enabled":true,"max_position_percent":0.1}]` |
 
 *자금 관리 (Treasury가 참조)*:
 
