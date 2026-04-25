@@ -240,7 +240,7 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 
 오래된 데이터를 삭제하여 용량을 관리한다.
 
-**기본 보존 기간**:
+**1.0 기본 보존 기간**:
 
 | Timeframe | 보존 기간 |
 |-----------|----------|
@@ -250,10 +250,12 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 | 1h | 365일 (1년) |
 | 1d | 3,650일 (10년) |
 | fundamental | 무기한 (삭제 안 함) |
-| flow | TBD (Phase 2, pykrx 도입과 함께 결정) |
-| event | TBD (Phase 2) |
 
-> DataFeed 소유 데이터(1d, fundamental, flow, event)의 보존 정책도 이 테이블에서 통합 관리한다.
+`flow`와 `event` 보존 정책은 1.0 계약에 포함하지 않는다. `flow`는 pykrx Phase 2에서
+수급 데이터 수집을 도입할 때 수집 범위, 파티션 구조, 보존 기간을 함께 확정한다.
+`event`는 후속 데이터 확장 단계에서 별도 계약으로 정의한다.
+
+> DataFeed 소유 데이터(1d, fundamental)의 보존 정책도 이 테이블에서 통합 관리한다.
 > RetentionPolicy는 소유자와 무관하게 `data_type`과 `timeframe` 기준으로 적용된다.
 
 | 메서드 | 파라미터 | 반환값 | 설명 |

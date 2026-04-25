@@ -12,8 +12,11 @@
 | OHLCV 일봉 (`1d`) | DataFeed | overwrite (파티션 덮어쓰기) | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |
 | OHLCV 분봉 (`1m`, `5m` 등, 1d 미만) | Collector | append | 실시간으로만 수집 가능, KIS API 경유 |
 | `fundamental` | DataFeed | overwrite (파티션 덮어쓰기) | 외부 API 배치 수집 전용 |
-| `flow`, `event` | DataFeed | overwrite | Phase 2 (pykrx 도입과 함께 결정) |
 | `tick` | Collector | append | 실시간 전용 |
+
+`flow`와 `event`는 1.0 쓰기 소유권 계약에 포함하지 않는다. `flow`는 pykrx Phase 2에서
+수집 소스, 파티션 구조, 보존 정책을 함께 정의한다. `event`는 후속 데이터 확장 단계에서
+별도 계약으로 정의한다.
 
 > **쓰기 모드 정의**:
 > - **overwrite**: 파티션 단위로 기존 데이터를 완전 교체. DataFeed가 사용. 멱등성을 보장하므로 재시도 시 안전하다.

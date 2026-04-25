@@ -25,3 +25,12 @@ DataStore는 **시세·재무 데이터의 저장·정규화·조회·관리를 
 - **DataCollector**: 봇 운영 중 APIGateway 경유 실시간 시세 수집 → ParquetStore 적재 (1d 미만만)
 - **Canonical data root**: 기본 저장소는 Config의 `data.path`이며, 상대 경로는 `config_dir` 기준으로 정규화
 - **RetentionPolicy**: 보존 정책 기반 용량 관리
+
+**1.0 범위**:
+- OHLCV 일봉(`1d`)과 `fundamental` 배치 데이터
+- OHLCV 분봉(`1d` 미만)과 선택적 `tick` 실시간 데이터
+- 위 데이터 유형에 대한 ParquetStore, Normalizer, RetentionPolicy 계약
+
+**1.0 비범위**:
+- `flow` 데이터셋과 해당 보존 정책. 수급 데이터는 pykrx Phase 2 도입 시 DataFeed 스펙에서 수집·쓰기·보존 계약을 함께 확정한다.
+- `event` 데이터셋과 해당 보존 정책. 기업 이벤트 데이터는 1.0 DataStore 계약에 포함하지 않으며 후속 데이터 확장 단계에서 별도 정의한다.
