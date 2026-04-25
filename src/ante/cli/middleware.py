@@ -39,7 +39,7 @@ def _resolve_token() -> str:
     우선순위:
     1. ANTE_MEMBER_TOKEN 환경변수
     2. ANTE_TOKEN_FILE 환경변수가 가리키는 파일
-    3. /run/ante-token 파일 (QA 컨테이너 기본 경로)
+    3. /run/ante-token 파일 (컨테이너/서비스 환경의 기본 토큰 파일 경로)
     """
     token = os.environ.get("ANTE_MEMBER_TOKEN", "")
     if token:

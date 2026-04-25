@@ -178,7 +178,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 - review-state: done
 - implement-state: done
 - merge-monitor-state: running
-- review-verdicts: arch=caution, qa=ready
+- review-verdicts: arch=caution
 - pr: #1250
 - head: a1b2c3d
 - result: in-progress

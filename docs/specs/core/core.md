@@ -65,7 +65,7 @@ canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기
 **요약**:
 - 이중 핸들러 — stdout 평문(사람) + 파일 JSONL(자동 분석)
 - `ANTE_LOG_JSONL=1` 환경변수 게이트로 점진 도입
-- `ANTE_ENV`로 환경 식별 (`production` / `staging` / `qa`)
+- `ANTE_ENV`로 환경 식별 (`production` / `staging` / `test`)
 - 이벤트 로그([eventbus](../eventbus/eventbus.md))·감사 로그([audit](../audit/audit.md))와 완전 분리
 
 ## 시스템 초기화 순서
