@@ -18,6 +18,24 @@ DELETE /api/accounts/:id                  — 계좌 삭제 (cold-path 전용, �
 POST   /api/system/kill-switch            — 전체/계좌별 Kill Switch (action=halt|activate, account_id? 생략 시 전체)
 ```
 
+### Account payload 필드 계약
+
+Account Web API의 request/response schema는 Account 모델/DB 필드명을 그대로 사용한다.
+표준 structural field는 다음과 같다.
+
+- `account_id`
+- `exchange`
+- `currency`
+- `broker_type`
+- `trading_mode`
+- `credentials`
+- `broker_config`
+- `buy_commission_rate`
+- `sell_commission_rate`
+
+`credentials_ref`, `commission_rate`, `sell_tax_rate`는 Web API 필드가 아니다. 이 이름들은
+legacy config migration 입력을 설명할 때만 사용하며, API alias로 허용하지 않는다.
+
 ### 런타임 차단 규칙
 
 Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경 요청은 기본적으로 런타임 요청이다.

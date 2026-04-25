@@ -13,7 +13,7 @@
 | GET | `/api/accounts` | 계좌 목록 |
 | POST | `/api/accounts` | 계좌 등록. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환. Body: account_id, exchange, currency, broker_type, trading_mode, credentials, broker_config, buy_commission_rate, sell_commission_rate |
 | GET | `/api/accounts/{account_id}` | 계좌 상세 조회 |
-| PUT | `/api/accounts/{account_id}` | 계좌 수정. 런타임에는 `name`, `timezone`, `trading_hours` 같은 비구조 필드만 허용. credentials/broker_config/commission 등 structural field 포함 시 409 |
+| PUT | `/api/accounts/{account_id}` | 계좌 수정. 런타임에는 `name`, `timezone`, `trading_hours_start`, `trading_hours_end` 같은 비구조 필드만 허용. `credentials`, `broker_config`, `buy_commission_rate`, `sell_commission_rate`, `broker_type`, `exchange`, `currency`, `trading_mode` 포함 시 409 |
 | GET | `/api/accounts/{account_id}/credentials` | 인증 정보 마스킹 조회 |
 | POST | `/api/accounts/{account_id}/suspend` | 계좌 거래 정지. Body: reason. 이미 정지 상태이면 409 Conflict |
 | POST | `/api/accounts/{account_id}/activate` | 계좌 거래 재개. 이미 활성 상태이면 409 Conflict |

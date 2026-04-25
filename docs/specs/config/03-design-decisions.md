@@ -37,9 +37,12 @@ host = "0.0.0.0"
 port = 3982
 cors_origins = ["http://localhost:3000"]
 
-# [broker] 섹션은 Account 모델로 이관됨.
-# broker.type, broker.commission_rate, broker.sell_tax_rate → Account 모델의 필드로 관리.
-# broker.kis.* (APP_KEY, APP_SECRET 등) → Account.credentials_ref를 통해 secrets.env 참조.
+# [broker] 섹션의 계좌성 값은 Account 모델로 이관됨.
+# broker.type → Account.broker_type
+# broker.commission_rate → Account.buy_commission_rate
+# broker.commission_rate + broker.sell_tax_rate → Account.sell_commission_rate
+# broker.kis.* 또는 secrets.env의 KIS_* → Account.credentials JSON으로 암호화 저장.
+# 상세 mapping은 docs/specs/account/08-config-migration.md를 따른다.
 # 아래는 Account와 무관한 브로커 인프라 설정만 유지.
 [broker]
 base_url = "https://openapi.koreainvestment.com:9443"  # 실전
@@ -62,8 +65,8 @@ history_size = 1000  # 인메모리 링버퍼 크기
 API 키, 토큰 등 민감 정보. gitignore 대상.
 
 ```env
-# 한국투자증권 API — Account.credentials_ref로 참조
-# Account별 접두사: KIS_{ACCOUNT_ID}_ 형식
+# 한국투자증권 API — legacy migration input 예시
+# 이관 후에는 Account.credentials JSON으로 암호화 저장한다.
 KIS_DEFAULT_APP_KEY=xxxxxxxx
 KIS_DEFAULT_APP_SECRET=xxxxxxxx
 KIS_DEFAULT_ACCOUNT_NO=12345678-01
@@ -302,8 +305,8 @@ AuditLogger가 공유하는 canonical DB이다. 예외적으로 다른 DB를 볼
 | `member.token_ttl_days` | `90` |
 | `instrument.default_exchange` | `"KRX"` |
 | `instrument.cache_ttl_seconds` | `3600` |
-| `broker.commission_rate` | `0.00015` (Account 모델로 이관 예정) |
-| `broker.sell_tax_rate` | `0.0023` (Account 모델로 이관 예정) |
+| `broker.commission_rate` | legacy source. Account `buy_commission_rate` 및 `sell_commission_rate` 산정에 사용 |
+| `broker.sell_tax_rate` | legacy source. Account `sell_commission_rate` 산정에 합산 |
 | `broker.retry.max_retries_order` | `3` |
 | `broker.retry.max_retries_query` | `2` |
 | `broker.retry.max_retries_auth` | `2` |
