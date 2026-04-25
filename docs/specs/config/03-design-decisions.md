@@ -137,8 +137,17 @@ CREATE TABLE dynamic_config (
 
 | 키 | 카테고리 | 설명 | 예시 값 |
 |----|---------|------|--------|
-| `notification.enabled` | notification | 알림 발송 활성화 여부 | `true` |
-| `notification.quiet_hours` | notification | 알림 무음 시간대. 이 시간에는 긴급 알림 외 발송 안 함 | `"23:00-07:00"` |
+| `notification.telegram_enabled` | notification | 텔레그램 알림 발송 활성화 여부. `false`이면 CRITICAL 외 알림을 발송하지 않음 | `"true"` |
+| `notification.quiet_hours` | notification | `HH:MM-HH:MM` 형식의 알림 무음 시간대. 이 시간에는 CRITICAL 외 알림을 발송하지 않음 | `"23:00-07:00"` |
+
+`notification.enabled`는 사용하지 않는다. 1.0의 알림 채널은 Telegram 단일 채널이므로
+런타임 토글 키는 `notification.telegram_enabled`로 고정한다.
+`notification.quiet_hours`는 값이 없거나 빈 문자열이면 비활성화된다. 잘못된 형식도
+무음 시간대 비활성으로 처리하고, 알림 서비스는 경고 로그만 남긴다.
+NotificationService는 시작 시 두 키를 읽고, 이후
+`ConfigChangedEvent(key="notification.telegram_enabled")`와
+`ConfigChangedEvent(key="notification.quiet_hours")`를 구독하여 재시작 없이 반영한다.
+CRITICAL 알림은 `telegram_enabled=false`와 `quiet_hours`를 모두 우회한다.
 
 > **참고 — 킬 스위치(Trading State)**는 `dynamic_config`에 포함하지 않음.
 > 긴급 상황에서 DB 경로를 거치지 않고 즉시 작동해야 하므로
@@ -334,12 +343,15 @@ AuditLogger가 공유하는 canonical DB이다. 예외적으로 다른 DB를 볼
 | `broker.timeout.query` | `5` |
 | `broker.timeout.auth` | `10` |
 | `treasury.sync_interval_seconds` | `300` |
-| `telegram.command.polling_interval` | `3.0` |
-| `telegram.command.confirm_timeout` | `30.0` |
+| `notification.telegram_enabled` | `"true"` |
+| `notification.telegram_level` | `"important"` |
+| `notification.fill_alert` | `"true"` |
+| `notification.daily_report` | `"true"` |
 
 - TOML에 없는 항목은 기본값에서 가져옴
 - 우선순위: TOML > DEFAULTS
 - `system.toml`이 아예 없어도 기본값으로 시스템 시작 가능 (비밀값 제외)
+- `notification.quiet_hours`는 기본값을 시드하지 않는다. 키가 없거나 값이 비어 있으면 무음 시간대 비활성으로 해석한다.
 
 구현: `src/ante/config/defaults.py` 참조
 

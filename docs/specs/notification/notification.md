@@ -18,7 +18,7 @@ Notification Adapter는 **`NotificationEvent`를 외부 알림 채널로 전달�
 - **TelegramAdapter**: 텔레그램 봇 API 기반 알림 발송. 레벨별 이모지 자동 부여
 - **NotificationService**: `NotificationEvent` 구독 → 필터링 → 발송
 - **알림 레벨**: critical / error / warning / info — 레벨별 필터링
-- **무음 시간대**: quiet_hours 설정으로 비긴급 알림 억제
+- **무음 시간대**: `notification.quiet_hours` 설정으로 비긴급 알림 억제
 - **알림 중복 억제**: dedup_window 기반 동일 메시지 억제
 - **TelegramCommandReceiver**: 텔레그램 봇 명령 수신 (양방향 통신)
 
@@ -70,16 +70,34 @@ NotificationService는 `NotificationEvent`만 구독하여 발송한다. 개별 
 | `quiet_start` | time \| None | None | 무음 시작 시각 |
 | `quiet_end` | time \| None | None | 무음 종료 시각 |
 | `dedup_window` | float | 60.0 | 중복 알림 억제 윈도 (초) |
+| `telegram_enabled` | bool | True | 텔레그램 알림 활성화 여부. False여도 CRITICAL은 발송 |
 
 **메서드:**
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
-| `subscribe` | — | None | `NotificationEvent` 구독 등록 |
+| `subscribe` | — | None | `NotificationEvent`와 `ConfigChangedEvent` 구독 등록 |
 | `_on_notification` | event: NotificationEvent | None | 필터링 → 발송 |
-| `_should_send` | level: NotificationLevel | bool | 발송 여부 판단 (CRITICAL은 항상 발송) |
+| `_on_config_changed` | event: ConfigChangedEvent | None | `notification.telegram_enabled`, `notification.quiet_hours` 런타임 반영 |
+| `_should_send` | level: NotificationLevel | bool | 발송 여부 판단. CRITICAL은 always-send |
+| `parse_quiet_hours` | value: str | tuple[time, time] \| None | `HH:MM-HH:MM` 형식 파싱. invalid이면 None |
 
 구현: `src/ante/notification/service.py`
+
+### 런타임 알림 설정
+
+알림 설정의 SSOT는 Config의 `dynamic_config`다. NotificationService는 시작 시
+아래 키를 읽고, 이후 `ConfigChangedEvent`를 통해 재시작 없이 갱신한다.
+
+| 키 | 값 | 동작 |
+|----|----|------|
+| `notification.telegram_enabled` | `"true"` / `"false"` | `false`이면 CRITICAL 외 알림을 발송하지 않는다. Telegram 시크릿이 존재하면 서비스는 계속 살아 있어 런타임 재활성화와 CRITICAL 발송 경로를 유지한다 |
+| `notification.quiet_hours` | `"23:00-07:00"` 또는 빈 값 | 지정 시간대에는 CRITICAL 외 알림을 발송하지 않는다. 빈 값은 비활성화, invalid 형식은 경고 후 비활성화로 처리한다 |
+
+`TELEGRAM_BOT_TOKEN` 또는 `TELEGRAM_CHAT_ID`가 없거나 빈 문자열이면 Telegram 어댑터를
+생성할 수 없으므로 NotificationService를 생성하지 않고 서버 부팅은 계속한다.
+CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup을 모두
+우회하여 항상 발송한다.
 
 ### 알림 트리거 전체 목록
 
@@ -191,6 +209,6 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
 
 ## 타 모듈 설계 시 참고
 
-- **Config 스펙**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`는 secrets.env에서 관리
-- **Web API 스펙**: 알림 설정 변경 API (notification.enabled, notification.quiet_hours)
+- **Config 스펙**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`는 secrets.env에서 관리. `notification.telegram_enabled`, `notification.quiet_hours`는 dynamic_config에서 관리
+- **Web API 스펙**: `/api/config/{key:path}` 동적 설정 API로 `notification.telegram_enabled`, `notification.quiet_hours`를 변경
 - **EventBus 스펙**: `NotificationEvent`에 `category` 필드 추가, `SystemStartedEvent` 신규 생성
