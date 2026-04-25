@@ -120,12 +120,35 @@ async def run_migrations(
 
 
 if __name__ == "__main__":
+    import argparse
     import asyncio
+    import os
+
+    # `ante update` 서브프로세스 호출이 `--db-path` 또는 `ANTE_DB_PATH`
+    # 환경변수로 실제 DB 경로를 전달한다. 둘 다 없으면 과거 동작과 동일한
+    # `db/ante.db` CWD 폴백을 사용한다 (하위 호환; Refs #1125).
+    parser = argparse.ArgumentParser(
+        description="Ante 마이그레이션 러너 (ante.db.migrations)"
+    )
+    parser.add_argument(
+        "--db-path",
+        default=os.environ.get("ANTE_DB_PATH", "db/ante.db"),
+        help=(
+            "마이그레이션을 적용할 SQLite DB 파일 경로. "
+            "ANTE_DB_PATH 환경변수로도 전달 가능."
+        ),
+    )
+    parser.add_argument(
+        "--data-path",
+        default=os.environ.get("ANTE_DATA_PATH", "data/"),
+        help="Parquet 마이그레이션이 이동할 데이터 루트 경로.",
+    )
+    args = parser.parse_args()
 
     async def main() -> None:
-        db = Database("db/ante.db")
+        db = Database(args.db_path)
         await db.connect()
-        applied = await run_migrations(db, data_path=Path("data/"))
+        applied = await run_migrations(db, data_path=Path(args.data_path))
         if applied:
             print(f"마이그레이션 적용: {', '.join(applied)}")
         else:

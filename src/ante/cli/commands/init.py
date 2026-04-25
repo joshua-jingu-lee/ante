@@ -1,18 +1,36 @@
-"""ante init — 대화형 통합 초기 설정."""
+"""ante init — 비대화형 최소 초기 설정."""
 
 from __future__ import annotations
 
 import asyncio
-import stat
+import json
+import os
+import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Literal
 
 import click
 
+from ante.cli.commands._password import generate_password
+from ante.cli.formatter import OutputFormatter
 from ante.cli.main import get_formatter
+
+
+def _fail(fmt: OutputFormatter, message: str, code: str = "") -> None:
+    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1.
+
+    `click.ClickException`은 text 모드에서 "Error: ..." 를 stderr에 쓰지만
+    JSON 모드에서도 동일한 텍스트를 내보내 `--format json` 계약을 깨뜨린다.
+    이 헬퍼는 `OutputFormatter.error()`를 거쳐 JSON 모드에서는 구조화 에러를,
+    text 모드에서는 "Error: ..." 를 stderr에 낸 뒤 exit code 1로 종료한다.
+    """
+    fmt.error(message, code=code)
+    sys.exit(1)
+
 
 _SYSTEM_TOML_FILENAME = "system.toml"
 _SECRETS_ENV_FILENAME = "secrets.env"
+_DB_FILENAME = "db/ante.db"
 
 SYSTEM_TOML_TEMPLATE = """\
 # Ante 시스템 설정
@@ -22,7 +40,7 @@ log_level = "INFO"
 timezone = "Asia/Seoul"
 
 [db]
-path = "db/ante.db"
+path = "{db_path}"
 
 [web]
 host = "0.0.0.0"
@@ -33,7 +51,7 @@ SECRETS_ENV_TEMPLATE = """\
 # Ante 비밀값 설정
 # 환경변수가 이 파일보다 우선합니다.
 
-# 텔레그램 알림 (선택)
+# 텔레그램 알림 (선택) - 사용 시 주석 해제하고 값 채우기
 # TELEGRAM_BOT_TOKEN=
 # TELEGRAM_CHAT_ID=
 """
@@ -44,165 +62,124 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-def _resolve_config_path(target_dir: str | None) -> Path:
-    return Path(target_dir) if target_dir else Path.home() / ".config" / "ante"
+def _resolve_config_path(ctx: click.Context, target_dir: str | None) -> Path:
+    """init 대상 디렉토리 결정.
 
+    우선순위:
+      1. `--dir` 인자 (이 명령 전용 명시적 override) — 다른 모든 입력을 무시한다.
+      2. 루트 그룹이 `--config-dir`/`ANTE_CONFIG_DIR`로부터 확정한
+         `ctx.obj['config_dir']`.
+      3. `ANTE_CONFIG_DIR` 환경변수 (root callback이 이미 처리하지만 ctx가
+         비어 있는 직접 호출 경로를 위해 폴백으로도 검사한다).
+      4. 최종 폴백: `~/.config/ante/`. `resolve_config_dir()`은
+         "디렉토리가 실제로 존재할 때만 ~/.config/ante 사용"으로 동작하지만,
+         init은 이 디렉토리를 **만드는** 명령이므로 존재 여부와 무관하게
+         스펙(기본: ~/.config/ante)을 따른다.
 
-def _create_config_files(config_path: Path) -> None:
-    """설정 디렉토리와 기본 파일을 생성한다."""
-    config_path.mkdir(parents=True, exist_ok=True)
-
-    system_toml = config_path / _SYSTEM_TOML_FILENAME
-    if not system_toml.exists():
-        system_toml.write_text(SYSTEM_TOML_TEMPLATE)
-
-    secrets_env = config_path / _SECRETS_ENV_FILENAME
-    if not secrets_env.exists():
-        secrets_env.write_text(SECRETS_ENV_TEMPLATE)
-
-
-def _write_secrets_env(config_path: Path, entries: dict[str, str]) -> None:
-    """secrets.env에 키-값 쌍을 추가한다. 기존 내용 보존."""
-    secrets_env = config_path / _SECRETS_ENV_FILENAME
-    content = secrets_env.read_text() if secrets_env.exists() else ""
-
-    lines = []
-    for key, value in entries.items():
-        lines.append(f"{key}={value}\n")
-
-    if lines:
-        secrets_env.write_text(content + "\n" + "".join(lines))
-        secrets_env.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
-
-
-def _prompt_master_account() -> tuple[str, str, str]:
-    """Master 계정 정보를 대화형으로 입력받는다."""
-    click.echo("\n── [1/4] Master 계정 ───────────────────────────")
-    member_id = click.prompt("Member ID")
-    name = click.prompt("이름")
-    password = click.prompt("패스워드", hide_input=True, confirmation_prompt=True)
-    return member_id, name, password
-
-
-def _get_available_brokers() -> list[tuple[str, str]]:
-    """등록 가능한 브로커 목록을 반환한다.
-
-    Returns:
-        (broker_type, display_label) 튜플 리스트.
+    `init`이 root 그룹의 `--config-dir`/`ANTE_CONFIG_DIR`을 무시하면 이후
+    CLI들이 `get_db_path()`로 보는 `<config_dir>/db/ante.db`와 init이 만든
+    DB 경로가 어긋난다(Codex 12차 리뷰 Finding 1).
     """
-    from ante.account.presets import BROKER_PRESETS
+    if target_dir:
+        return Path(target_dir)
 
-    excluded = {"test"}
-    result = []
-    for broker_type, preset in BROKER_PRESETS.items():
-        if broker_type in excluded:
-            continue
-        label = f"{broker_type} ({preset.exchange} / {preset.currency})"
-        result.append((broker_type, label))
-    return result
+    obj = ctx.obj or {}
+    raw_override = obj.get("config_dir")
+    if raw_override is not None:
+        return raw_override if isinstance(raw_override, Path) else Path(raw_override)
 
+    env_dir = os.environ.get("ANTE_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir)
 
-def _prompt_account() -> list[dict[str, Any]]:
-    """계좌 등록 정보를 대화형으로 입력받는다.
-
-    Returns:
-        등록할 계좌 정보 딕셔너리 리스트. 빈 리스트면 테스트 계좌만 생성.
-    """
-    from ante.account.presets import BROKER_PRESETS
-
-    click.echo("\n── [2/4] 계좌 설정 ─────────────────────────────")
-    click.echo("  등록하지 않으면 테스트 계좌가 자동으로 생성됩니다.")
-    click.echo("  나중에 `ante account create` 명령어로도 추가할 수 있습니다.")
-
-    accounts: list[dict[str, Any]] = []
-    brokers = _get_available_brokers()
-
-    while True:
-        if not click.confirm("실제 거래 계좌를 등록하시겠습니까?", default=False):
-            break
-
-        # 브로커 선택
-        click.echo("\n  브로커를 선택하세요:")
-        for i, (_, label) in enumerate(brokers, 1):
-            click.echo(f"    {i}) {label}")
-
-        choice = click.prompt("  선택", type=click.IntRange(1, len(brokers)), default=1)
-        broker_type = brokers[choice - 1][0]
-        preset = BROKER_PRESETS[broker_type]
-
-        # 계좌 ID, 이름
-        account_id = click.prompt("  계좌 ID", default=preset.default_account_id)
-        account_name = click.prompt("  이름", default=preset.default_name)
-
-        # 인증 정보 입력
-        credentials: dict[str, str] = {}
-        for cred_key in preset.required_credentials:
-            value = click.prompt(f"  {cred_key}")
-            credentials[cred_key] = value
-
-        # 브로커 설정 (broker_config)
-        broker_config: dict[str, object] = {}
-        if broker_type == "kis-domestic":
-            is_paper = click.confirm(
-                "  모의투자 모드로 사용하시겠습니까?", default=True
-            )
-            broker_config["is_paper"] = is_paper
-
-        accounts.append(
-            {
-                "account_id": account_id,
-                "name": account_name,
-                "broker_type": broker_type,
-                "credentials": credentials,
-                "broker_config": broker_config,
-            }
-        )
-
-        click.echo(
-            f'  -> 계좌 "{account_id}" 등록 예정 '
-            f"({preset.exchange} / {preset.currency} / {broker_type})"
-        )
-
-    return accounts
+    return Path.home() / ".config" / "ante"
 
 
-def _prompt_telegram() -> dict[str, str] | None:
-    """Telegram 연동 정보를 입력받는다. 스킵 시 None 반환."""
-    click.echo("\n── [3/4] 텔레그램 알림 (선택) ──────────────────")
-    click.echo("  나중에 secrets.env에서 설정할 수 있습니다.")
-    if not click.confirm("텔레그램 알림을 설정하시겠습니까?", default=False):
-        return None
-
-    bot_token = click.prompt("봇 토큰")
-    chat_id = click.prompt("채팅 ID")
+def _expected_artifacts(config_path: Path) -> dict[str, Path]:
     return {
-        "TELEGRAM_BOT_TOKEN": bot_token,
-        "TELEGRAM_CHAT_ID": chat_id,
+        "system.toml": config_path / _SYSTEM_TOML_FILENAME,
+        "secrets.env": config_path / _SECRETS_ENV_FILENAME,
+        "db/ante.db": config_path / _DB_FILENAME,
     }
 
 
-def _prompt_datafeed(config_path: Path) -> None:
-    """DataFeed API 키를 입력받아 .feed/.env에 저장한다."""
-    click.echo("\n── [4/4] 데이터 수집 API (선택) ────────────────")
-    click.echo("  설정하면 백테스팅용 KRX 시세·재무 데이터를 자동 수집할 수 있습니다.")
-    click.echo("  data.go.kr과 DART의 Open API Key가 필요합니다.")
-    click.echo("  나중에 `ante feed config set` 명령어로도 설정할 수 있습니다.")
+def _all_artifacts_exist(config_path: Path) -> bool:
+    return all(p.exists() for p in _expected_artifacts(config_path).values())
 
-    from ante.feed.config import FeedConfig
 
-    feed_cfg = FeedConfig(str(config_path / "data"))
+def _ensure_file(path: Path, template: str) -> bool:
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(template)
+    return True
 
-    if click.confirm("data.go.kr API 키를 입력하시겠습니까?", default=False):
-        key = click.prompt("data.go.kr API 키")
-        feed_cfg.set_api_key("ANTE_DATAGOKR_API_KEY", key)
 
+async def _master_exists_in_db(db_path: str) -> bool:
+    """DB에 role='master' member row가 있는지 확인.
+
+    DB 파일은 있으나 스키마/데이터가 없는 "orphan" 상태에서도
+    False를 반환하도록 예외를 흡수한다.
+    """
+    from ante.core.database import Database
+
+    db = Database(db_path)
     try:
-        want_dart = click.confirm("DART API 키를 입력하시겠습니까?", default=False)
-    except (click.Abort, EOFError):
-        want_dart = False
-    if want_dart:
-        key = click.prompt("DART API 키")
-        feed_cfg.set_api_key("ANTE_DART_API_KEY", key)
+        await db.connect()
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        try:
+            row = await db.fetch_one(
+                "SELECT member_id FROM members WHERE role = ? LIMIT 1",
+                ("master",),
+            )
+        except Exception:  # noqa: BLE001
+            # members 테이블이 아직 없을 수 있음 (orphan DB)
+            return False
+        return row is not None
+    finally:
+        await db.close()
+
+
+async def _test_account_state(
+    db_path: str,
+) -> Literal["active", "inactive", "missing"]:
+    """default test account(account_id='test')의 3-state 판정.
+
+    - "active":  status='active' 인 'test' 계좌 존재 → 재생성 불필요 (skip)
+    - "inactive": 'test' 계좌가 있으나 suspended/deleted 등 비활성 상태
+                  → init이 `AccountService.create_default_test_account()`를
+                  호출하면 account_id 중복으로 예외가 터지므로, 사용자에게
+                  명시적 에러로 안내해야 한다 (묵시적 skip 금지).
+    - "missing": 'test' 계좌 자체가 없음 → 재생성 대상
+
+    AccountService가 만드는 행(`account_id='test'`)을 기준으로 판정 범위를
+    좁히므로 임의의 custom `broker_type='test'` 계좌(account_id!='test')는
+    "missing"으로 취급된다.
+    """
+    from ante.core.database import Database
+
+    db = Database(db_path)
+    try:
+        await db.connect()
+    except Exception:  # noqa: BLE001
+        return "missing"
+    try:
+        try:
+            row = await db.fetch_one(
+                "SELECT status FROM accounts WHERE account_id = ? LIMIT 1",
+                ("test",),
+            )
+        except Exception:  # noqa: BLE001
+            # accounts 테이블이 아직 없을 수 있음 (orphan DB)
+            return "missing"
+        if row is None:
+            return "missing"
+        status = row.get("status")
+        return "active" if status == "active" else "inactive"
+    finally:
+        await db.close()
 
 
 async def _bootstrap_master(
@@ -227,6 +204,7 @@ async def _bootstrap_master(
         return (
             {
                 "member_id": m.member_id,
+                "name": m.name,
                 "role": m.role,
                 "emoji": m.emoji,
             },
@@ -237,19 +215,8 @@ async def _bootstrap_master(
         await db.close()
 
 
-async def _create_accounts(
-    db_path: str,
-    account_inputs: list[dict[str, Any]],
-) -> list[dict[str, str]]:
-    """AccountService를 통해 계좌를 생성한다.
-
-    테스트 계좌는 항상 생성되고, account_inputs가 있으면 실제 계좌도 생성한다.
-
-    Returns:
-        생성된 계좌 정보 딕셔너리 리스트 (account_id, broker_type 포함).
-    """
-    from ante.account.models import Account, TradingMode
-    from ante.account.presets import BROKER_PRESETS
+async def _create_test_account(db_path: str) -> dict[str, str]:
+    """default test account 한 개를 생성한다."""
     from ante.account.service import AccountService
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
@@ -260,55 +227,71 @@ async def _create_accounts(
         eventbus = EventBus()
         service = AccountService(db, eventbus)
         await service.initialize()
-
-        created: list[dict[str, str]] = []
-
-        # 테스트 계좌 자동 생성
-        test_account = await service.create_default_test_account()
-        created.append(
-            {
-                "account_id": test_account.account_id,
-                "broker_type": test_account.broker_type,
-                "exchange": test_account.exchange,
-            }
-        )
-
-        # 실제 계좌 생성
-        for info in account_inputs:
-            broker_type = str(info["broker_type"])
-            preset = BROKER_PRESETS[broker_type]
-            credentials = cast(dict[str, str], info["credentials"])
-            broker_config = cast(dict[str, Any], info.get("broker_config", {}))
-            account = Account(
-                account_id=str(info["account_id"]),
-                name=str(info["name"]),
-                exchange=preset.exchange,
-                currency=preset.currency,
-                timezone=preset.timezone,
-                trading_hours_start=preset.trading_hours_start,
-                trading_hours_end=preset.trading_hours_end,
-                trading_mode=TradingMode.LIVE,
-                broker_type=broker_type,
-                credentials=credentials,
-                broker_config=broker_config,
-                buy_commission_rate=preset.buy_commission_rate,
-                sell_commission_rate=preset.sell_commission_rate,
-            )
-            await service.create(account)
-            created.append(
-                {
-                    "account_id": account.account_id,
-                    "broker_type": broker_type,
-                    "exchange": preset.exchange,
-                }
-            )
-
-        return created
+        account = await service.create_default_test_account()
+        return {
+            "account_id": account.account_id,
+            "broker_type": account.broker_type,
+            "exchange": account.exchange,
+        }
     finally:
         await db.close()
 
 
+def _emit_master_credentials_text(
+    master_info: dict,
+    password: str,
+    token: str,
+    recovery_key: str,
+) -> None:
+    """text 모드에서 master bootstrap 직후 비밀값을 stdout에 출력한다.
+
+    성공/실패와 무관하게 이 블록 **한 번**만 비밀값을 노출한다. completion 블록은
+    요약/다음 단계 안내만 출력하며 비밀값을 재출력하지 않는다 (1회 노출 불변식).
+    """
+    click.echo("\n── Master 계정 생성 완료 ──────────────────────")
+    click.echo(f"  Member ID   : {master_info['member_id']}")
+    click.echo(f"  이름        : {master_info['name']}")
+    click.echo(f"  이모지      : {master_info['emoji']}")
+    click.echo(f"\n  패스워드     : {password}")
+    click.echo(f"  토큰         : {token}")
+    click.echo(f"  Recovery Key : {recovery_key}")
+    click.echo("\n  ⚠ 위 3개 값은 이 화면에만 표시됩니다. 안전한 곳에 보관하세요.")
+
+
+def _emit_master_credentials_json_stderr(
+    master_info: dict,
+    password: str,
+    token: str,
+    recovery_key: str,
+    config_path: Path,
+) -> None:
+    """JSON 모드 실패 경로 전용 복구 이벤트 (stderr 한 줄 JSON).
+
+    test account 생성 실패 시에만 호출되며, stdout payload가 비밀값 없는 에러
+    응답으로 대체되므로 stderr에 비밀값 1회 노출을 보장해 Agent가 lockout에서
+    복구할 수 있게 한다. 성공 경로에서는 호출되지 않는다 (stdout payload로 1회
+    노출).
+    """
+    click.echo(
+        json.dumps(
+            {
+                "stage": "master_bootstrap_complete",
+                **master_info,
+                "password": password,
+                "token": token,
+                "recovery_key": recovery_key,
+                "config_dir": str(config_path),
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        err=True,
+    )
+
+
 @click.command("init")
+@click.option("--member-id", default="owner", show_default=True, help="master 멤버 ID")
+@click.option("--name", default="Owner", show_default=True, help="master 표시 이름")
 @click.option(
     "--dir",
     "target_dir",
@@ -316,142 +299,139 @@ async def _create_accounts(
     default=None,
     help="설정 디렉토리 경로 (기본: ~/.config/ante/)",
 )
-@click.option(
-    "--seed",
-    is_flag=True,
-    default=False,
-    help="E2E 테스트용 시드 데이터 주입",
-)
 @click.pass_context
-def init(ctx: click.Context, target_dir: str | None, seed: bool) -> None:
-    """설정 디렉토리 및 기본 설정 파일 생성."""
+def init(
+    ctx: click.Context,
+    member_id: str,
+    name: str,
+    target_dir: str | None,
+) -> None:
+    """비대화형 최소 초기 설정.
+
+    멱등성 (I4 — 파일 + master 레코드 기반 재진입):
+    파일(3) + master row + test account row 5-state 가드로 재구성된다.
+    모든 상태 완료 시 거부, 그 외 경로에서는 누락된 것만 생성한다.
+    """
     fmt = get_formatter(ctx)
-    config_path = _resolve_config_path(target_dir)
+    config_path = _resolve_config_path(ctx, target_dir)
 
-    # --seed: 기존 동작 유지 (시드 데이터 주입 전용)
-    if seed:
-        _run_seed_mode(fmt, config_path)
-        return
+    artifacts = _expected_artifacts(config_path)
+    all_files_exist = _all_artifacts_exist(config_path)
+    db_path = artifacts["db/ante.db"]
+    db_file_exists = db_path.exists()
 
-    # 멱등성: 이미 설정이 존재하면 거부
-    if config_path.exists():
-        existing = []
-        if (config_path / _SYSTEM_TOML_FILENAME).exists():
-            existing.append(_SYSTEM_TOML_FILENAME)
-        if (config_path / _SECRETS_ENV_FILENAME).exists():
-            existing.append(_SECRETS_ENV_FILENAME)
-        if existing:
-            fmt.error(
-                f"설정 디렉토리가 이미 존재합니다: {config_path}\n"
-                f"  기존 파일: {', '.join(existing)}"
-            )
-            return
+    # DB 레코드 상태 조회 (DB 파일이 있을 때만)
+    master_exists = False
+    test_account_status: Literal["active", "inactive", "missing"] = "missing"
+    if db_file_exists:
+        master_exists = _run(_master_exists_in_db(str(db_path)))
+        test_account_status = _run(_test_account_state(str(db_path)))
+    test_account_exists = test_account_status == "active"
 
-    click.echo("\nAnte 초기 설정을 시작합니다.")
-
-    # 1. 설정 파일 생성
-    _create_config_files(config_path)
-
-    # 2. Master 계정 입력
-    member_id, name, password = _prompt_master_account()
-
-    # 3. 계좌 설정
-    account_inputs = _prompt_account()
-
-    # 4. Telegram 연동
-    telegram_info = _prompt_telegram()
-    if telegram_info:
-        _write_secrets_env(config_path, telegram_info)
-
-    # 5. DataFeed API 키
-    _prompt_datafeed(config_path)
-
-    # 6. Bootstrap master 계정
-    db_path = str(config_path / "db" / "ante.db")
-    (config_path / "db").mkdir(parents=True, exist_ok=True)
-
-    try:
-        result, token, recovery_key = _run(
-            _bootstrap_master(db_path, member_id, name, password)
+    # test account가 suspended/deleted 등 비활성 상태면 명시적 에러로 안내한다.
+    # AccountService.create_default_test_account()가 account_id='test' 중복으로
+    # 예외를 던지므로 묵시적 skip/재생성을 시도하면 init 자체가 실패한다.
+    if test_account_status == "inactive":
+        _fail(
+            fmt,
+            "default test account(account_id='test')가 비활성 상태입니다. "
+            "`ante account activate test`로 활성화하거나 해당 row를 정리한 "
+            "뒤 재시도하세요.",
+            code="test_account_inactive",
         )
-    except ValueError as e:
-        fmt.error(str(e))
-        return
 
-    # 7. 계좌 생성 (테스트 계좌 자동 + 실제 계좌)
-    try:
-        created_accounts = _run(_create_accounts(db_path, account_inputs))
-    except Exception as e:
-        fmt.error(f"계좌 생성 실패: {e}")
-        return
+    # state 1: 모든 상태 완료 → 거부
+    if all_files_exist and master_exists and test_account_exists:
+        _fail(
+            fmt,
+            f"init이 이미 완료된 상태입니다: {config_path}\n"
+            "  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요.",
+            code="already_initialized",
+        )
 
-    # 계좌 라벨 생성
-    if account_inputs:
-        labels = [f"{a['account_id']} ({a['broker_type']})" for a in created_accounts]
-        account_label = ", ".join(labels)
-    else:
-        account_label = "test (테스트 계좌만)"
+    # 1. 디렉토리 생성 및 누락 파일 보충 (state 2/3/4/5 공통)
+    config_path.mkdir(parents=True, exist_ok=True)
+    # db.path는 절대 경로로 기록한다. 서버(`ante system start`)와 IPC가
+    # cwd와 무관하게 동일한 DB 파일을 보도록 보장하기 위함이다.
+    db_absolute = (config_path / _DB_FILENAME).resolve()
+    system_toml_content = SYSTEM_TOML_TEMPLATE.format(db_path=str(db_absolute))
+    _ensure_file(artifacts["system.toml"], system_toml_content)
+    _ensure_file(artifacts["secrets.env"], SECRETS_ENV_TEMPLATE)
+    artifacts["secrets.env"].chmod(0o600)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 8. 결과 출력
-    click.echo("\n── 완료 ────────────────────────────────────────")
+    token = ""
+    recovery_key = ""
+    password = ""
+    master_info: dict = {}
+    test_account: dict = {}
+    master_already_existed = master_exists
+
+    # 2. master bootstrap — master row 없을 때만 (state 4/5)
+    if not master_exists:
+        password = generate_password()
+        try:
+            master_info, token, recovery_key = _run(
+                _bootstrap_master(str(db_path), member_id, name, password)
+            )
+        except ValueError as e:
+            _fail(fmt, str(e), code="bootstrap_failed")
+        # text 모드는 여기서 비밀값을 1회 노출 (completion 블록은 재출력 금지).
+        # JSON 성공 경로는 stdout payload로 1회 노출되므로 여기서 stderr 이벤트를
+        # 내보내지 않는다 (중복 노출 방지). JSON 실패 경로만 아래 except에서
+        # stderr 이벤트로 복구 수단을 유지한다.
+        if not fmt.is_json:
+            _emit_master_credentials_text(master_info, password, token, recovery_key)
+
+    # 3. test account 생성 — test account row 없을 때만 (state 3/4/5)
+    if not test_account_exists:
+        try:
+            test_account = _run(_create_test_account(str(db_path)))
+        except Exception as e:  # noqa: BLE001
+            if master_info:
+                # master는 이미 생성됐다. JSON 모드라면 stdout은 에러 payload가
+                # 쓰이므로 stderr에 복구용 이벤트를 1회 내보낸다. text 모드는
+                # 위에서 이미 블록을 출력했다.
+                if fmt.is_json:
+                    _emit_master_credentials_json_stderr(
+                        master_info, password, token, recovery_key, config_path
+                    )
+                _fail(
+                    fmt,
+                    f"테스트 계좌 생성 실패: {e}. "
+                    "master는 위에 출력된 비밀값으로 접근 가능. "
+                    "원인 해결 후 재실행 시 test account만 생성됨.",
+                    code="test_account_failed",
+                )
+            else:
+                _fail(fmt, f"테스트 계좌 생성 실패: {e}", code="test_account_failed")
 
     if fmt.is_json:
-        fmt.output(
-            {
-                **result,
-                "config_dir": str(config_path),
-                "accounts": created_accounts,
-                "token": token,
-                "recovery_key": recovery_key,
-            }
-        )
+        payload: dict = {"config_dir": str(config_path)}
+        if master_info:
+            payload.update(master_info)
+            payload["token"] = token
+            payload["recovery_key"] = recovery_key
+            payload["password"] = password
+        if test_account:
+            payload["test_account"] = test_account
+        fmt.output(payload)
         return
 
-    click.echo("\n초기 설정 완료")
+    # text completion — 비밀값은 위 _emit_master_credentials_text 블록에서 1회
+    # 노출되었으므로 여기서는 요약 + 다음 단계 안내만 출력한다 (1회 노출 불변식).
+    click.echo("\n── 완료 ────────────────────────────────────────")
     click.echo(f"  설정 디렉토리: {config_path}")
-    click.echo(f"  Member ID   : {result['member_id']}")
-    click.echo(f"  이모지      : {result['emoji']}")
-    click.echo(f"  계좌        : {account_label}")
-    click.echo(f"\n  토큰: {token}")
-    click.echo("\n   셸 프로필에 추가하면 매번 입력하지 않아도 됩니다:")
-    click.echo(f"   echo 'export ANTE_MEMBER_TOKEN={token}' >> ~/.zshrc")
-    click.echo("\n   또는 현재 세션에서만 사용:")
-    click.echo(f"   export ANTE_MEMBER_TOKEN={token}")
-    click.echo("\n   이제 시스템을 시작할 수 있습니다:")
-    click.echo("   ante system start")
-    click.echo(f"\n   Recovery Key: {recovery_key}")
-    click.echo("   이 키는 다시 표시되지 않습니다. 안전한 곳에 보관하세요.")
-
-
-def _run_seed_mode(fmt, config_path: Path) -> None:  # noqa: ANN001
-    """--seed 모드: 설정 파일 + 시드 데이터 주입."""
-    config_path.mkdir(parents=True, exist_ok=True)
-
-    system_toml = config_path / _SYSTEM_TOML_FILENAME
-    if not system_toml.exists():
-        system_toml.write_text(SYSTEM_TOML_TEMPLATE)
-
-    secrets_env = config_path / _SECRETS_ENV_FILENAME
-    if not secrets_env.exists():
-        secrets_env.write_text(SECRETS_ENV_TEMPLATE)
-
-    created_files = [_SYSTEM_TOML_FILENAME, _SECRETS_ENV_FILENAME]
-
-    from tests.fixtures.seed.seeder import inject_seed_data
-
-    db_path = str(config_path / "db" / "ante.db")
-    (config_path / "db").mkdir(parents=True, exist_ok=True)
-    data_dir = str(config_path / "data")
-
-    result = asyncio.run(inject_seed_data(db_path, data_dir))
-    created_files.append("db/ante.db (시드 데이터)")
-    if result.get("parquet_path"):
-        created_files.append("data/ (샘플 OHLCV)")
-
-    fmt.success(
-        f"설정 초기화 완료: {config_path}",
-        {
-            "config_dir": str(config_path),
-            "files": created_files,
-        },
-    )
+    if master_info:
+        click.echo(f"  Member ID   : {master_info['member_id']}")
+    elif master_already_existed:
+        click.echo("  Master 계정 : 이미 존재 (재발급 안 함)")
+    if test_account:
+        click.echo(
+            f"  테스트 계좌 : {test_account['account_id']} ({test_account['exchange']})"
+        )
+    if master_info:
+        click.echo("\n  위에 출력된 토큰을 환경변수로 등록하세요:")
+        click.echo("    export ANTE_MEMBER_TOKEN=<위 토큰>")
+    click.echo("\n  이제 시스템을 시작할 수 있습니다:")
+    click.echo("    ante system start")

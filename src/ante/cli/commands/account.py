@@ -32,10 +32,11 @@ def _run(coro):  # noqa: ANN001, ANN202
 async def _create_account_service() -> tuple[AccountService, Database]:
     """CLI에서 AccountService를 생성하는 헬퍼."""
     from ante.account.service import AccountService
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
     account_service = AccountService(db=db, eventbus=eventbus)

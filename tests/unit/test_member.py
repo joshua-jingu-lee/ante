@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
+from click.testing import CliRunner
 
 from ante.core.database import Database
 from ante.eventbus import EventBus
@@ -128,6 +131,30 @@ class TestAuth:
 
 
 # ── MemberService ────────────────────────────────────
+
+
+class TestMemberBootstrapCommandRemoved:
+    """회귀 방지: ante member bootstrap 커맨드는 제거되었다 (issue #1125)."""
+
+    def test_bootstrap_subcommand_is_removed(self) -> None:
+        """`ante member bootstrap` → exit code != 0 + "No such command" 포함.
+
+        master 생성은 `ante init`으로 통합됨. `MemberService.bootstrap_master()`
+        서비스 API는 유지되며 `ante init`이 내부 호출한다.
+        """
+        from ante.cli.main import cli
+
+        runner = CliRunner()
+        with patch("ante.cli.main.authenticate_member"):
+            result = runner.invoke(cli, ["member", "bootstrap", "--help"])
+
+        assert result.exit_code != 0, (
+            f"bootstrap 커맨드가 여전히 존재합니다 (exit={result.exit_code})"
+        )
+        combined = result.output
+        if result.stderr_bytes:
+            combined += result.stderr
+        assert "No such command" in combined or "bootstrap" in combined.lower()
 
 
 class TestBootstrapMaster:

@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-03-25
+> 마지막 갱신: 2026-04-25
 
 ## 목차
 
@@ -72,7 +72,6 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante instrument search](#ante-instrument-search)
   - [ante instrument import](#ante-instrument-import)
 - [member — 멤버 등록·관리.](#member-멤버-등록관리)
-  - [ante member bootstrap](#ante-member-bootstrap)
   - [ante member list](#ante-member-list)
   - [ante member info](#ante-member-info)
   - [ante member register](#ante-member-register)
@@ -153,7 +152,7 @@ ante [OPTIONS] <command>
 | `ante approval cancel` | 결재 철회 (요청자만 가능). | `approval:write` | H·A |
 | `ante approval approve` | 결재 승인. | `approval:admin` | H·A |
 | `ante approval reject` | 결재 거절. | `approval:admin` | H·A |
-| `ante init` | 설정 디렉토리 및 기본 설정 파일 생성. | — | — |
+| `ante init` | 비대화형 최소 초기 설정. | — | — |
 | `ante bot list` | 봇 목록 조회. | `bot:read` | H·A |
 | `ante bot info` | 봇 상세 정보 조회. | `bot:read` | H·A |
 | `ante bot create` | 봇 생성. | `bot:admin` | H·A |
@@ -187,7 +186,6 @@ ante [OPTIONS] <command>
 | `ante instrument sync` | KIS API에서 종목 마스터 데이터를 동기화. | `data:write` | H·A |
 | `ante instrument search` | 키워드로 종목 검색 (종목코드, 한글명, 영문명). | `data:read` | H·A |
 | `ante instrument import` | CSV/JSON 파일에서 종목 데이터 import. | `data:write` | H·A |
-| `ante member bootstrap` | 최초 master 계정 생성 (인증 불필요). | — | — |
 | `ante member list` | 멤버 목록 조회. | `member:read` | H·A |
 | `ante member info` | 멤버 상세 정보 조회. | `member:read` | H·A |
 | `ante member register` | 멤버 등록 (토큰 발급). | `member:admin` | H·A |
@@ -453,6 +451,7 @@ ante approval request [OPTIONS]
 | `--params` | - | TEXT | {} | 실행 파라미터 (JSON) |
 | `--reference-id` | - | TEXT |  | 참조 ID (report_id 등) |
 | `--expires-in` | - | TEXT |  | 만료 기한 (예: 72h, 7d) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval list
@@ -472,7 +471,8 @@ ante approval list [OPTIONS]
 |------|------|------|--------|------|
 | `--status` | - | TEXT | — | 상태 필터 |
 | `--type` | - | TEXT | — | 유형 필터 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval info
@@ -496,7 +496,8 @@ ante approval info <ID> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval review
@@ -522,7 +523,8 @@ ante approval review <ID> [OPTIONS]
 |------|------|------|--------|------|
 | `--result` | O | pass / warn / fail | — | 검토 결과 |
 | `--detail` | - | TEXT |  | 검토 상세 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval reopen
@@ -548,6 +550,7 @@ ante approval reopen <ID> [OPTIONS]
 |------|------|------|--------|------|
 | `--body` | - | TEXT | — | 수정할 본문 (미지정 시 기존 값 유지) |
 | `--params` | - | TEXT | — | 수정할 파라미터 (JSON, 미지정 시 기존 값 유지) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval cancel
@@ -558,7 +561,7 @@ ante approval reopen <ID> [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante approval cancel <ID>
+ante approval cancel <ID> [OPTIONS]
 ```
 
 **Arguments:**
@@ -566,6 +569,12 @@ ante approval cancel <ID>
 | 인자 | 필수 | 설명 |
 |------|------|------|
 | `<ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval approve
@@ -576,7 +585,7 @@ ante approval cancel <ID>
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante approval approve <ID>
+ante approval approve <ID> [OPTIONS]
 ```
 
 **Arguments:**
@@ -584,6 +593,12 @@ ante approval approve <ID>
 | 인자 | 필수 | 설명 |
 |------|------|------|
 | `<ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante approval reject
@@ -608,6 +623,7 @@ ante approval reject <ID> [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--reason` | - | TEXT |  | 거절 사유 |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ---
@@ -616,7 +632,11 @@ ante approval reject <ID> [OPTIONS]
 
 ### ante init
 
-설정 디렉토리 및 기본 설정 파일 생성.
+비대화형 최소 초기 설정.
+
+멱등성 (I4 — 파일 + master 레코드 기반 재진입):
+파일(3) + master row + test account row 5-state 가드로 재구성된다.
+모든 상태 완료 시 거부, 그 외 경로에서는 누락된 것만 생성한다.
 
 - **필요 scope**: —
 - **토큰**: 인증 불필요
@@ -629,8 +649,9 @@ ante init [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
+| `--member-id` | - | TEXT | owner | master 멤버 ID |
+| `--name` | - | TEXT | Owner | master 표시 이름 |
 | `--dir` | - | PATH | — | 설정 디렉토리 경로 (기본: ~/.config/ante/) |
-| `--seed` | - | BOOLEAN | false | E2E 테스트용 시드 데이터 주입 |
 
 
 ---
@@ -972,7 +993,7 @@ ante strategy list [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--status` | - | TEXT | — | 상태 필터 (registered/active/inactive/archived) |
+| `--status` | - | TEXT | — | 상태 필터 (registered/adopted/archived) |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1044,7 +1065,7 @@ ante data list [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante data schema
@@ -1135,7 +1156,7 @@ ante backtest run <STRATEGY_PATH> [OPTIONS]
 | `--balance` | - | FLOAT | 10000000 | 초기 자금 |
 | `--timeframe` | - | TEXT | 1d | 타임프레임 |
 | `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante backtest history
@@ -1160,7 +1181,7 @@ ante backtest history <STRATEGY_NAME> [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--limit` | - | INTEGER | 20 | 조회 건수 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ---
@@ -1200,7 +1221,7 @@ ante report submit <JSON_PATH> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 | `--run` | - | TEXT | — | 참조할 백테스트 run_id |
 
 
@@ -1220,7 +1241,7 @@ ante report list [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--status` | - | TEXT | — | 상태 필터 (pending/adopted/rejected) |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante report performance
@@ -1266,7 +1287,7 @@ ante report view <REPORT_ID> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ---
@@ -1291,7 +1312,7 @@ ante instrument list [OPTIONS]
 | `--exchange` | - | TEXT | KRX | 거래소 (기본: KRX) |
 | `--type` | - | TEXT | — | 종목 유형 필터 (stock, etf, etn 등) |
 | `--listed-only` | - | BOOLEAN | false | 상장 종목만 표시 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante instrument sync
@@ -1310,7 +1331,7 @@ ante instrument sync [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--exchange` | - | TEXT | KRX | 거래소 (기본: KRX) |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante instrument search
@@ -1336,7 +1357,7 @@ ante instrument search <KEYWORD> [OPTIONS]
 |------|------|------|--------|------|
 | `--limit` | - | INTEGER | 20 | 최대 결과 수 |
 | `--listed-only` | - | BOOLEAN | false | 상장 종목만 검색 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante instrument import
@@ -1361,31 +1382,12 @@ ante instrument import <FILE_PATH> [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--dry-run` | - | BOOLEAN | false | 실제 저장 없이 미리보기 |
-| `--db-path` | - | TEXT | db/ante.db | DB 경로 |
+| `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
 ---
 
 ## member — 멤버 등록·관리.
-
-### ante member bootstrap
-
-최초 master 계정 생성 (인증 불필요).
-
-- **필요 scope**: —
-- **토큰**: 인증 불필요
-
-```bash
-ante member bootstrap [OPTIONS]
-```
-
-**Options:**
-
-| 옵션 | 필수 | 타입 | 기본값 | 설명 |
-|------|------|------|--------|------|
-| `--id` | O | TEXT | — | master 멤버 ID |
-| `--name` | - | TEXT |  | 표시 이름 |
-
 
 ### ante member list
 

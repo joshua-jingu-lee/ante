@@ -25,10 +25,11 @@ def _run(coro):  # noqa: ANN001, ANN202
 async def _create_services():  # noqa: ANN202
     from ante.account.service import AccountService
     from ante.bot.manager import BotManager
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
     account_service = AccountService(db=db, eventbus=eventbus)
@@ -337,13 +338,14 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_positions() -> list[dict]:
+        from ante.cli.main import get_db_path
         from ante.core.database import Database
         from ante.trade.performance import PerformanceTracker
         from ante.trade.position import PositionHistory
         from ante.trade.recorder import TradeRecorder
         from ante.trade.service import TradeService
 
-        db = Database("db/ante.db")
+        db = Database(get_db_path())
         await db.connect()
         try:
             position_history = PositionHistory(db)

@@ -173,7 +173,7 @@ Ante는 PyPI 패키지로 배포한다. (pip only — Docker/Windows 미지원)
 ### PyPI 패키지 (`pip install ante`)
 
 - 사용자가 Python 환경에서 패키지를 설치하고 `ante` CLI로 시스템을 실행한다.
-- 최초 실행 시 `ante init`으로 설정 디렉토리(`~/.config/ante/`)를 생성하고, 대화형으로 필수 설정(증권사 API 키, 계좌번호)과 선택 설정(텔레그램 토큰 등)을 입력받는다.
+- 최초 실행 시 `ante init`을 **비대화형**으로 실행하여 설정 디렉토리(`~/.config/ante/`)와 파일 골격(`system.toml`, `secrets.env`, 빈 DB)을 만들고 master 멤버 1개와 default test account 1개를 생성한다. 증권사 실계좌(KIS 등), Telegram, DataFeed API 키, 기존 broker→account 마이그레이션은 `ante init` 범위가 아니며 후속 명령(`ante account create`, `ante feed config set`, `secrets.env` 직접 편집)으로 추가한다. 상세 계약은 [specs/cli/03-commands.md](../specs/cli/03-commands.md#ante-init--시스템-초기-설정).
 - systemd 서비스로 등록하여 홈서버에서 상시 구동한다.
 - 설정 경로 탐색 우선순위: CLI 인자(`--config-dir`) > 환경변수(`ANTE_CONFIG_DIR`) > `~/.config/ante/` > `./config/`
 - 프론트엔드 빌드는 CI에서 수행하며, 패키지에 정적 파일로 포함된다.

@@ -21,10 +21,11 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 async def _create_account_service():  # noqa: ANN202
     from ante.account.service import AccountService
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
     account_service = AccountService(db=db, eventbus=eventbus)
@@ -44,9 +45,10 @@ async def _get_broker(account_id: str | None = None):  # noqa: ANN202
         return adapter, db
 
     # 폴백: 기존 Config 기반 브로커 생성
+    from ante.cli.main import get_config_dir
     from ante.config.config import Config
 
-    config = Config.load()
+    config = Config.load(config_dir=get_config_dir())
     broker_config = config.get("broker") or {}
     if not isinstance(broker_config, dict):
         broker_config = {}
@@ -272,11 +274,12 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
         except click.ClickException:
             # 서버 미실행 — 기존 오프라인 방식 폴백
             async def _run_reconcile() -> dict:
+                from ante.cli.main import get_db_path
                 from ante.core.database import Database
                 from ante.trade.position import PositionHistory
 
                 adapter, adapter_db = await _get_broker(account_id)
-                db = adapter_db or Database("db/ante.db")
+                db = adapter_db or Database(get_db_path())
                 if not adapter_db:
                     await db.connect()
                 try:

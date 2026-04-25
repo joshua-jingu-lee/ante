@@ -2,6 +2,18 @@
 
 <!-- version list -->
 
+## Unreleased
+
+### BREAKING CHANGES
+
+- **cli**: `ante member bootstrap` removed, `ante init` is now non-interactive
+  (issue #1125). master 생성과 default 테스트 계좌 생성이 `ante init` 내부 단일
+  흐름으로 통합되었으며, 플래그는 `--member-id` / `--name` / `--dir`만 받는다.
+  대화형 프롬프트와 죽은 `--seed` 플래그는 제거되었다. 패스워드는 자동 생성되며
+  토큰·Recovery Key와 함께 화면에 **1회만** 표시된다. 기존 설치는 디렉토리
+  삭제 후 재실행하는 방식으로 마이그레이션한다. `MemberService.bootstrap_master()`
+  서비스 API 자체는 변경 없음.
+
 ## v0.8.1 (2026-03-29)
 
 ### Bug Fixes

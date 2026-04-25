@@ -22,15 +22,16 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_services():  # noqa: ANN202
+    from ante.cli.main import get_config_dir, get_db_path
     from ante.config.config import Config
     from ante.config.dynamic import DynamicConfigService
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
-    static_config = Config.load()
+    static_config = Config.load(config_dir=get_config_dir())
     dynamic = DynamicConfigService(db, eventbus)
     await dynamic.initialize()
     return static_config, dynamic, db

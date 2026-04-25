@@ -27,7 +27,7 @@ def backtest() -> None:
 @click.option("--balance", default=10_000_000, type=float, help="초기 자금")
 @click.option("--timeframe", default="1d", help="타임프레임")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("backtest:run")
@@ -40,14 +40,16 @@ def run(
     balance: float,
     timeframe: str,
     data_path: str,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """백테스트 실행."""
     import datetime
 
     from ante.backtest.service import BacktestService
+    from ante.cli.main import get_db_path
 
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     # 시작일/종료일 검증
     try:
@@ -105,7 +107,9 @@ def run(
         metrics = result_dict.get("metrics", {})
 
         # backtest_runs 이력 저장
-        run_id = asyncio.run(_save_backtest_run(db_path, result, config, metrics))
+        run_id = asyncio.run(
+            _save_backtest_run(resolved_db_path, result, config, metrics)
+        )
         result_dict["run_id"] = run_id
 
         fmt.output(
@@ -160,7 +164,7 @@ async def _save_backtest_run(
 @backtest.command()
 @click.argument("strategy_name")
 @click.option("--limit", default=20, type=int, help="조회 건수")
-@click.option("--db-path", default="db/ante.db", help="DB 경로")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
 @require_scope("backtest:run")
@@ -168,16 +172,19 @@ def history(
     ctx: click.Context,
     strategy_name: str,
     limit: int,
-    db_path: str,
+    db_path: str | None,
 ) -> None:
     """전략별 백테스트 실행 이력 조회."""
+    from ante.cli.main import get_db_path
+
     fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _list() -> list[dict]:
         from ante.backtest.run_store import BacktestRunStore
         from ante.core.database import Database
 
-        db = Database(db_path)
+        db = Database(resolved_db_path)
         await db.connect()
         try:
             store = BacktestRunStore(db)

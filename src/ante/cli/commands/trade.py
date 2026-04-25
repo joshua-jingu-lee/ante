@@ -22,13 +22,14 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_trade_service():  # noqa: ANN202
+    from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.trade.performance import PerformanceTracker
     from ante.trade.position import PositionHistory
     from ante.trade.recorder import TradeRecorder
     from ante.trade.service import TradeService
 
-    db = Database("db/ante.db")
+    db = Database(get_db_path())
     await db.connect()
     position_history = PositionHistory(db=db)
     await position_history.initialize()
@@ -108,9 +109,10 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
+        from ante.cli.main import get_db_path
         from ante.core.database import Database
 
-        db = Database("db/ante.db")
+        db = Database(get_db_path())
         await db.connect()
         try:
             row = await db.fetch_one(

@@ -62,48 +62,22 @@ Data Store는 `exchange/symbol/timeframe`으로 파티셔닝하며, 봇이 데�
 
 ### D-ACC-05: ante init에서 계좌를 어떻게 다루는가
 
-**변경 전**: `ante init` → Master 계정 + KIS 연동 + 알림 + 데이터 API
+**최초 설계**: `ante init` → Master 계정 + KIS 연동 + 알림 + 데이터 API (대화형)
 
-**변경 후**: `ante init` → Master 계정 + **테스트 계좌 자동 생성** + **계좌 등록 (선택)** + 알림 + 데이터 API
+**과도기**: `ante init` → Master + 테스트 계좌 자동 + 실계좌 대화형 등록 옵션 + 알림 + 데이터 API
 
-`ante init` 대화형 흐름에서 테스트 계좌는 자동 생성되고, 이어서 실제 계좌(KIS 등) 등록 여부를 묻는다. 사용자가 원하면 계좌번호, APP KEY 등을 입력하여 바로 실전 계좌를 설정할 수 있다. 건너뛰면 이후 `ante account create`로 추가 가능.
+**현행 (재설계 2026-04, #1125)**: `ante init` → **비대화형** 최소 bootstrap. master 멤버 1개 + default test account(`broker_type="test"`, `trading_mode=VIRTUAL`) 1개만 생성한다.
 
-```
-$ ante init
-
-[1/4] Master 계정 설정
-  사용자명: ...
-  비밀번호: ...
-
-[2/4] 계좌 설정
-  실제 거래 계좌를 등록하시겠습니까?
-  등록하지 않으면 테스트 계좌가 자동으로 지정됩니다. (y/N): y
-
-  거래소를 선택하세요:
-    1) KRX (한국거래소)
-    2) NYSE (뉴욕증권거래소)        ← 향후 지원 (1.1)
-    3) NASDAQ (나스닥)              ← 향후 지원 (1.1)
-  > 1
-
-  브로커를 선택하세요:
-    1) kis-domestic (한국투자증권 국내)
-  > 1
-
-  계좌 ID [domestic]: domestic
-  이름 [국내 주식]: 국내 주식
-  APP KEY: PSxxxxxxxx
-  APP SECRET: ********
-  계좌번호: 50123456-01
-  ✓ 계좌 "domestic" 생성 완료 (KRX / KRW / kis-domestic)
-
-  추가 계좌를 등록하시겠습니까? (y/N): N
-
-[3/4] 알림 설정
-  ...
-
-[4/4] 데이터 API 설정
-  ...
+```bash
+ante init [--member-id owner] [--name Owner] [--dir <경로>]
 ```
 
-- **N 선택 시**: 테스트 계좌(`account_id: "test"`, `trading_mode: VIRTUAL`)만 자동 생성
-- **Y 선택 시**: 실제 계좌를 등록하고, 테스트 계좌도 함께 생성
+`ante init`은 더 이상 KIS 실계좌 / Telegram / DataFeed / 기존 broker→account 마이그레이션을 다루지 않는다. 사용자/Agent가 후속 명령으로 명시적으로 추가한다:
+
+- 실거래 계좌(KIS 등): `ante account create` (대화형) 또는 추가 옵션이 필요한 경우 동일 명령의 향후 비대화형 플래그
+- Telegram: `<config_dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
+- DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
+
+테스트 계좌(`account_id: "test"`)는 `ante init`이 항상 자동 생성하므로, 사용자는 실계좌 등록 없이도 가상 자금으로 시스템 전체 흐름을 체험할 수 있다.
+
+> 상세 init 계약 (생성 산출물·멱등성·플래그)은 [cli/03-commands.md](../cli/03-commands.md#ante-init--시스템-초기-설정) 참조.

@@ -75,23 +75,21 @@ agent가 서버 파일 시스템에 접근할 수 있더라도:
 
 human 멤버의 패스워드 분실 시 **외부 인프라(이메일, SMS) 없이** 자체 복구할 수 있는 메커니즘.
 
-**생성 시점**: `ante member bootstrap` 실행 시 master 계정과 함께 1회 생성
+**생성 시점**: `ante init` 실행 시 master 계정과 함께 1회 생성 (재설계 2026-04: 기존 `ante member bootstrap`은 `ante init`으로 통합됨)
 
 ```
-$ ante member bootstrap --id owner --name "홈트레이더"
-패스워드: ••••••••
-패스워드 확인: ••••••••
+$ ante init --member-id owner --name "홈트레이더"
 
-✅ master 계정 생성 완료
-  Member ID : owner
-  이모지    : 🦊
+── 완료 ────────────────────────────────────────
+  설정 디렉토리: ~/.config/ante/
+  Member ID   : owner
+  이모지      : 🦊
 
-🔑 토큰: ante_hk_8k2m9p4q...
-   export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...
+  패스워드     : gX7mKq2nPvR8sT4uWxYzA3bF
+  토큰         : ante_hk_8k2m9p4q...
+  Recovery Key : ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
 
-⚠️ Recovery Key: ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
-   이 키는 패스워드 분실 시 유일한 복구 수단입니다.
-   안전한 곳에 보관하세요. 이 키는 다시 표시되지 않습니다.
+  위 3개 값은 이 화면에만 표시됩니다. 안전한 곳에 보관하세요.
 ```
 
 **설계:**
@@ -193,37 +191,57 @@ scopes: bot:read, bot:admin, approval:read, approval:write, config:read
 ### 시스템 초기화 흐름
 
 ```
-$ ante member bootstrap --id owner --name "홈트레이더"
-  1. members 테이블 생성 (없으면)
-  2. master 멤버 생성 (type=human, role=master, org=default)
-  3. 패스워드 설정 (대화형 입력)
-  4. Recovery Key 생성 + 화면 출력 (원문은 저장하지 않음)
-  5. master 토큰(ante_hk_*) 발급 + 화면 출력
+$ ante init --member-id owner --name "홈트레이더"
+  1. 설정 디렉토리 생성 + system.toml / secrets.env 생성
+  2. members 테이블 생성 (없으면)
+  3. master 멤버 생성 (type=human, role=master, org=default)
+  4. 패스워드 자동 생성 + 화면 출력 (원문은 저장하지 않음)
+  5. Recovery Key 생성 + 화면 출력 (원문은 저장하지 않음)
+  6. master 토큰(ante_hk_*) 발급 + 화면 출력
+  7. default test account 생성
 ```
 
-`bootstrap`은 최초 1회만 실행 가능하다. master가 이미 존재하면 거부한다.
+**멱등성 (I4 — 파일 + master 레코드 + test account 기반 재진입)**:
+
+`ante init`은 다음 **5가지 상태가 모두 존재할 때**에만 거부한다:
+
+1. `system.toml`
+2. `secrets.env`
+3. `db/ante.db`
+4. master row (`members` 테이블에 `role="master"` 행이 존재)
+5. test account row (`accounts` 테이블에 기본 test 계좌가 `active` 상태로 존재)
+
+위 5가지 중 일부만 존재하는 경우에는 **누락된 것만** 생성하는 재진입 모드로 동작한다:
+
+- 파일(1~3)이 누락 → 누락된 파일만 재생성
+- master row가 없으면 → master bootstrap 실행 (패스워드 / 토큰 / Recovery Key를 화면에 1회 출력)
+- test account row가 없으면 → test account 생성
+- test account가 `suspended` 또는 `deleted` 상태로 존재 → 명확한 에러 메시지로 중단 (사용자가 수동으로 정리)
+
+이 5-state 재진입 규칙은 부분 초기화가 실패한 뒤 재실행해도 안전하게 완료되도록 보장한다.
 
 ### bootstrap 시 토큰 동시 발급
 
-bootstrap 완료 시 master 토큰(`ante_hk_*`)을 함께 생성하여 출력한다.
+`MemberService.bootstrap_master()` 완료 시 master 토큰(`ante_hk_*`)을 함께 생성하여 반환한다.
 이는 CLI 첫 사용 흐름에서 **순환 의존을 방지**하기 위한 설계다.
 
 **배경**: `ante system start` 등 대부분의 명령은 `ANTE_MEMBER_TOKEN` 환경변수가 필요하다.
 그러나 토큰을 발급받으려면 웹 대시보드 로그인이 필요하고, 웹 대시보드는 시스템 시작 이후에만 사용 가능하다.
-bootstrap에서 토큰을 함께 발급하면 별도의 웹 로그인 없이 CLI만으로 전체 초기 설정을 완료할 수 있다.
+`ante init`에서 토큰을 함께 발급하면 별도의 웹 로그인 없이 CLI만으로 전체 초기 설정을 완료할 수 있다.
 
 **출력 예시**:
 
 ```
-$ ante member bootstrap --id owner --name "홈트레이더"
-패스워드: ••••••••
-패스워드 확인: ••••••••
+$ ante init --member-id owner --name "홈트레이더"
 
-✅ master 계정 생성 완료
-  Member ID : owner
-  이모지    : 🦊
+── 완료 ────────────────────────────────────────
+  설정 디렉토리: ~/.config/ante/
+  Member ID   : owner
+  이모지      : 🦊
 
-🔑 토큰: ante_hk_8k2m9p4q...
+  패스워드     : gX7mKq2nPvR8sT4uWxYzA3bF
+  토큰         : ante_hk_8k2m9p4q...
+  Recovery Key : ANTE-RK-7F3X-9K2M-P4QW-8J5N-R6TV-2Y1H
    이후 명령 실행 시 환경변수로 설정하세요:
    export ANTE_MEMBER_TOKEN=ante_hk_8k2m9p4q...
 
