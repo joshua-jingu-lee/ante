@@ -145,7 +145,7 @@ main
        └─ PR → main → auto-merge
 ```
 
-`branch-prefix`는 [00-issue-management.md 섹션 2.1](00-issue-management.md#21-이슈-타입과-브랜치-prefix-매핑)의 canonical 매핑을 따른다.
+`branch-prefix`는 [03-git-workflow.md 섹션 1.2](03-git-workflow.md#12-이슈-타입과-브랜치-prefix-매핑)의 canonical 매핑을 따른다.
 
 **에픽 이슈**:
 

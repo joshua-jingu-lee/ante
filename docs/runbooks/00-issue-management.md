@@ -35,22 +35,8 @@
 | `test` | 테스트 추가/수정 | `test` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` |
 
-### 2.1 이슈 타입과 브랜치 prefix 매핑
-
-이슈 제목/라벨과 실제 작업 브랜치 prefix는 아래를 기준으로 맞춘다.
-
-| 이슈 타입 | 라벨 | 브랜치 prefix |
-|-----------|------|---------------|
-| `feat` | `feature` | `feat/` |
-| `fix` | `bug` | `fix/` |
-| `perf` | `feature` | `perf/` |
-| `refactor` | `refactor` | `refactor/` |
-| `docs` | `docs` | `docs/` |
-| `test` | `test` | `test/` |
-| `chore` | `chore` | `chore/` |
-
-`feature` 라벨은 이슈 타입에 따라 `feat/` 또는 `perf/` 브랜치로 연결될 수 있다.
-`/implement-issue`, `/autopilot`, `codex-branch-review`는 이 매핑을 공통 기준으로 사용한다.
+브랜치 prefix 매핑과 PR 규칙은 [03-git-workflow.md](03-git-workflow.md)가 SSOT다.
+이 문서는 이슈 제목 타입과 라벨만 정의한다.
 
 ### 예시
 
@@ -226,51 +212,27 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
 | `P2 - Medium` | 일반 기능/개선 — 스프린트 내 처리 |
 | `P3 - Low` | 편의 기능, 기술 부채 — 여유 시 처리 |
 
-### 5.1 Autopilot 큐 선별
+### 5.1 Autopilot과 우선순위
 
-야간/정기 배치의 `/autopilot`은 아래 규칙으로 대상을 고른다.
-
-- 포함: `feature`, `bug`, `refactor`, `docs`, `test`, `chore`
-- 제외: `needs-triage`, `question`, `blocked`, `blocked:review-loop`, `blocked:pr-review-loop`, `epic`
-- 추가 제외:
-  - 이미 open PR이 연결된 이슈
-  - 선행 의존 이슈가 아직 close되지 않은 이슈
-- 브랜치 prefix 매핑:
-  - `feature -> feat/*`
-  - `feature(perf) -> perf/*`
-  - `bug -> fix/*`
-  - `refactor -> refactor/*`
-  - `docs -> docs/*`
-  - `test -> test/*`
-  - `chore -> chore/*`
-- 정렬:
-  - `P0 → P1 → P2 → P3`
-  - 같은 우선순위에서는 오래 열린 이슈 우선
-- 실행 방식:
-  - 배치 시작 시점의 snapshot 기준으로 한 번에 하나의 이슈만 활성 처리
+Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge 모니터링은
+[08-autopilot-operations.md](08-autopilot-operations.md)가 SSOT다.
+이 문서에서는 이슈에 우선순위와 보류 라벨을 정확히 붙이는 것까지만 다룬다.
 
 ## 6. 이슈 생명주기
 
-```
-등록 (Open)
-  │
-  ├── `needs-triage`가 붙은 경우
-  │     → 사람/오케스트레이터가 분류 후 라벨 제거 전까지 autopilot 제외
-  │
-  ├── 에이전트 또는 사용자가 작업 시작
-  │     → 브랜치 생성: {branch-prefix}/#{번호}-{짧은설명}
-  │       예: `feat/#42-symbol-validation`, `fix/#57-treasury-rounding`, `chore/#88-runner-cleanup`
-  │
-  ├── 브랜치 push → codex-branch-review 통과
-  │
-  ├── PR 생성 (본문에 "Closes #{번호}")
-  │
-  ├── PR 승인 + auto-merge
-  │
-  ├── post-merge automation → 체크박스 갱신 + issue close
-  │
-  └── 10회 실패 시 → `blocked:review-loop` 라벨 + 에스컬레이션
-```
+이슈 관리 관점의 상태는 다음 네 가지로 본다.
+
+| 상태 | 의미 | 다음 처리 |
+|------|------|-----------|
+| Open | 등록됨 | 분류, 스펙 경로 확인, Plan Preflight |
+| Needs triage | `needs-triage` 라벨 존재 | 사람/오케스트레이터가 범위와 처리 가치를 확인한 뒤 라벨 제거 |
+| Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
+| Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |
+
+구현 실행 흐름은 [01-development-process.md](01-development-process.md),
+브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),
+리뷰/머지 게이트는 [07-review-gate.md](07-review-gate.md),
+autopilot 배치 상태는 [08-autopilot-operations.md](08-autopilot-operations.md)를 따른다.
 
 ### 이슈 close 규칙
 
@@ -281,46 +243,15 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
 
 ## 7. 에이전트의 이슈 등록
 
-에이전트(QA 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
+에이전트(외부 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
 
-```bash
-gh issue create \
-  --title "[fix] Treasury 잔고 음수 허용 버그" \
-  --body "## 현상
-BotManager가 중복 주문을 발행하면 Treasury 잔고가 음수가 되는 경우 발견.
-
-## 재현 절차
-1. 동일 봇에서 2건의 매수 주문을 동시 발행
-2. Treasury.allocate()가 잔고 검증 없이 차감
-
-## 완료 조건
-- [ ] 잔고 검증 로직 추가
-- [ ] 동시 주문 시나리오 테스트 추가" \
-  --label "bug"
-```
-
-watcher나 QA 자동화가 만든 새 이슈가 아직 분류 전이면 `needs-triage`를 함께 붙여 autopilot 대상에서 잠시 제외한다.
+- 이 문서의 제목/본문 템플릿을 사용한다.
+- 스펙 준비 상태나 중복 여부가 불명확하면 `needs-triage`를 함께 붙인다.
+- review-loop recovery 중에는 단발 follow-up을 즉시 양산하지 않고 recovery 런북의 issue graph rewrite를 따른다.
+- watcher, 외부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.
 
 ## 8. 이슈와 버전 관리의 연결
 
-이슈 → 커밋 → 버전 범프가 자연스럽게 연결된다:
-
-```
-[feat] 전략 비교 대시보드  ←── GitHub Issue #50
-  │
-  ▼
-feat(web): add strategy comparison dashboard (#50)  ←── 커밋 메시지
-  │
-  ▼
-semantic-release: feat 감지 → minor 범프 (v0.2.0 → v0.3.0)
-  │
-  ▼
-GitHub Release v0.3.0 자동 생성 (릴리스 노트에 #50 포함)
-```
-
-커밋 메시지에 이슈 번호를 포함하면:
-- GitHub Release 노트에 변경 사항이 이슈 단위로 정리됨
-- 어떤 버전에 어떤 기능이 포함되었는지 추적 가능
-
-상세 커밋 컨벤션: [03-git-workflow.md 섹션 2](03-git-workflow.md#2-커밋-컨벤션)
-상세 버전 관리: [04-ci-cd.md 섹션 3](04-ci-cd.md#3-워크플로우-구성)
+커밋 메시지와 PR 본문에는 관련 이슈 번호를 포함한다.
+상세 커밋 컨벤션은 [03-git-workflow.md](03-git-workflow.md),
+릴리스/버전 관리는 [04-ci-cd.md](04-ci-cd.md)가 SSOT다.
