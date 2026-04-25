@@ -64,7 +64,7 @@
             </div>
             <div class="user-dropdown-item" style="margin: 0 4px;">
               <span class="status-dot warning"></span> 한투 해외주식
-              <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+              <span style="margin-left: auto; font-size: 11px; color: var(--color-negative);">SUSPENDED</span>
             </div>
             <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
             <button class="user-dropdown-item text-negative" onclick="location.href='login.html'">⏻ 로그아웃</button>
@@ -90,15 +90,15 @@
             </div>
           </div>
 
-          <!-- ST-1: 계좌 — 시스템 상태 (HALTED, 기본 숨김) -->
-          <div class="card" id="state-halted" style="display: none;">
+          <!-- ST-1: 계좌 — 시스템 상태 (SUSPENDED, 기본 숨김) -->
+          <div class="card" id="state-suspended" style="display: none;">
             <div class="card-title mb-16">시스템 상태</div>
             <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0;">
               <div>
                 <div style="font-size: 13px; color: var(--color-negative); font-weight: 600;">거래가 정지되었습니다</div>
                 <div class="text-muted" style="font-size: 12px; margin-top: 4px;">정지 시각: 2026-03-15 09:45 · 사유: 긴급 시장 변동</div>
               </div>
-              <button class="btn btn-positive" onclick="document.getElementById('state-halted').style.display='none'; document.getElementById('state-active').style.display=''">거래 재개</button>
+              <button class="btn btn-positive" onclick="document.getElementById('state-suspended').style.display='none'; document.getElementById('state-active').style.display=''">거래 재개</button>
             </div>
           </div>
 
@@ -305,7 +305,7 @@
           </div>
           <div class="modal-footer">
             <button class="btn btn-outline" onclick="document.getElementById('haltModal').style.display='none'">취소</button>
-            <button class="btn" style="background: var(--color-negative); border-color: var(--color-negative); color: #fff;" onclick="document.getElementById('haltModal').style.display='none'; document.getElementById('state-active').style.display='none'; document.getElementById('state-halted').style.display=''">거래 정지 확인</button>
+            <button class="btn" style="background: var(--color-negative); border-color: var(--color-negative); color: #fff;" onclick="document.getElementById('haltModal').style.display='none'; document.getElementById('state-active').style.display='none'; document.getElementById('state-suspended').style.display=''">거래 정지 확인</button>
           </div>
         </div>
       </div>

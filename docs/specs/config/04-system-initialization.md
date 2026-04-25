@@ -9,10 +9,11 @@
 2. Instance path resolver 확정 (`config_dir` 기준 DB/data/PID/socket/logs 경로 정규화)
 3. Logging 초기화 (`logging.directory` 참조)
 4. Database 초기화 (`db.path` 참조)
-5. EventBus 초기화
-6. SystemState 초기화 (DB + EventBus 주입)
-7. DynamicConfigService 초기화 (DB + EventBus 주입)
-8. 나머지 모듈 초기화 — 전체 순서는 architecture.md 참조
+5. EventBus + EventHistoryStore 초기화
+6. DynamicConfigService 초기화 (DB + EventBus 주입)
+7. DB migration 적용
+8. AccountService 초기화 (DB + EventBus 주입, `Account.status` 복원)
+9. 나머지 모듈 초기화 — 전체 순서는 architecture.md 참조
 ```
 
 모든 상대 경로는 CWD가 아니라 `config_dir` 기준으로 해석한다. 서버와 CLI가 같은

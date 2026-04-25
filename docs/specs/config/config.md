@@ -47,11 +47,11 @@
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 
-### SystemState — 킬 스위치(Trading State) 관리
+### 킬 스위치 상태 — Account.status
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 
-#### TradingState Enum
+#### AccountStatus Enum
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 

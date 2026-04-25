@@ -105,7 +105,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 
 | 트리거 | 담당 모듈 | 레벨 | category |
 |--------|----------|------|----------|
-| 거래 상태 변경 (킬 스위치) | core (SystemState) | CRITICAL | system |
+| 거래 상태 변경 (킬 스위치) | account (AccountService) | CRITICAL | system |
 | 포지션 불일치 | broker (Reconciler) | CRITICAL | broker |
 | 봇 에러 | bot (BotManager) | ERROR | bot |
 | 봇 재시작 한도 소진 | bot (BotManager) | ERROR | bot |
@@ -143,7 +143,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `confirm_timeout` | float | 30.0 | 위험 명령 확인 대기 시간 (초) |
 | `bot_manager` | BotManager \| None | None | 봇 관리용 |
 | `treasury` | Treasury \| None | None | 자금 현황 조회용 |
-| `system_state` | SystemState \| None | None | 시스템 상태 제어용 |
+| `account_service` | AccountService \| None | None | 계좌 상태 제어용 |
 | `approval_service` | ApprovalService \| None | None | 결재 승인/거절 처리용 |
 
 **지원 명령:**

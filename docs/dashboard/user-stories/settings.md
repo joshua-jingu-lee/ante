@@ -25,7 +25,7 @@
 │ │ [ACTIVE] 정상 운용 안내   │ │ │                           │ │
 │ │ [비상 거래 정지] 버튼     │ │ │ ── 계좌 룰 ──             │ │
 │ │                           │ │ │ 일일 손실 한도     [5.0]  │ │
-│ │ — 또는 HALTED —           │ │ │ 총 노출 한도       [80.0] │ │
+│ │ — 또는 SUSPENDED —           │ │ │ 총 노출 한도       [80.0] │ │
 │ │ 거래 정지 안내 + [재개]   │ │ │ 거래 허용 시간   읽기전용  │ │
 │ └───────────────────────────┘ │ │                           │ │
 │                              │ │ ── 전략별 룰 기본값 ──     │ │
@@ -52,7 +52,7 @@
 
 | ID | 스토리 | 모듈 | 완료 조건 |
 |----|--------|------|----------|
-| ST-1 | 운영자가 시스템 거래 상태를 확인하고 비상 정지/재개한다 | Account | ACTIVE/HALTED 상태 표시, Kill Switch + 확인 모달 |
+| ST-1 | 운영자가 시스템 거래 상태를 확인하고 비상 정지/재개한다 | Account | ACTIVE/SUSPENDED 상태 표시, Kill Switch + 확인 모달 |
 | ST-2 | 운영자가 현재 계좌의 거래소 연결 정보를 확인한다 | Account | 브로커, 모드, 계좌번호, 거래소, 통화, 수수료율 표시 |
 | ST-3 | 운영자가 알림 채널과 수준을 설정한다 | Notification | 텔레그램 수준, 체결 알림, 일일 리포트 토글 |
 | ST-4 | 운영자가 시스템 전역 표시 설정을 변경한다 | System | 금액 단위 위치, 로그 수준 선택 |
@@ -73,7 +73,7 @@
 | 1 | 안내 메시지 | 정상 운용 상태 안내 (muted) | `현재 모든 봇의 거래가 정상 운용 중입니다.` |
 | 2 | 비상 거래 정지 버튼 | Negative 스타일 버튼 | `비상 거래 정지` |
 
-**HALTED 상태**
+**SUSPENDED 상태**
 
 | # | 필드 | 설명 | 목업 예시 |
 |---|------|------|-----------|
@@ -96,7 +96,7 @@
 - **비상 거래 정지**: `POST /api/system/halt` — 모든 ACTIVE 계좌를 SUSPENDED로 전환 (`AccountService.suspend_all`)
 - **거래 재개**: `POST /api/system/activate` — 모든 SUSPENDED 계좌를 ACTIVE로 복구 (`AccountService.activate_all`). DELETED 계좌는 대상 제외
 - 정지 시 정지 사유(`reason`)와 정지 요청자(`suspended_by`: 현재 로그인 멤버)를 함께 전송
-- 상태 전환 후 카드 표시가 ACTIVE ↔ HALTED로 즉시 전환
+- 상태 전환 후 카드 표시가 ACTIVE ↔ SUSPENDED로 즉시 전환
 
 > **참조**: Kill Switch는 Account.status 기반으로 동작한다. [account.md](../../specs/account/account.md) Kill Switch 통합 섹션 참조.
 

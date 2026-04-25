@@ -75,9 +75,9 @@
         <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
       </a>
       <a href="#" class="user-dropdown-item user-dropdown-account">
-        <span class="dot" style="background: var(--color-warning);"></span>
+        <span class="dot" style="background: var(--color-negative);"></span>
         한투 해외주식
-        <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+        <span style="margin-left: auto; font-size: 11px; color: var(--color-negative);">SUSPENDED</span>
       </a>
       <div class="user-dropdown-divider"></div>
       <a href="#" class="user-dropdown-item user-dropdown-logout">&#9211; 로그아웃</a>
@@ -596,9 +596,9 @@
     <span style="margin-left: auto; font-size: 11px; color: var(--color-positive);">ACTIVE</span>
   </div>
   <div style="display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 13px; color: var(--color-text-muted); margin: 0 4px; cursor: pointer;">
-    <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-warning); display: inline-block;"></span>
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-negative); display: inline-block;"></span>
     한투 해외주식
-    <span style="margin-left: auto; font-size: 11px; color: var(--color-warning);">PAUSED</span>
+    <span style="margin-left: auto; font-size: 11px; color: var(--color-negative);">SUSPENDED</span>
   </div>
   <div style="height: 1px; background: var(--color-border); margin: 4px 0;"></div>
   <div style="display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 13px; color: var(--color-negative); cursor: pointer;">&#9211; 로그아웃</div>
@@ -614,7 +614,7 @@
   <tr><td>드롭다운 아이템</td><td><code>flex items-center gap-2 px-3.5 py-2.5 text-[13px] text-text-muted hover:bg-surface-hover</code></td></tr>
   <tr><td>계좌 아이템</td><td><code>flex items-center gap-2 px-3.5 py-2.5 text-[13px] mx-1 rounded</code> — 상태 dot + 계좌명 + 상태 라벨</td></tr>
   <tr><td>선택된 계좌</td><td><code>bg-surface-hover font-medium</code></td></tr>
-  <tr><td>계좌 상태 dot</td><td><code>w-2 h-2 rounded-full</code> — ACTIVE: <code>bg-positive</code>, PAUSED: <code>bg-warning</code>, HALTED: <code>bg-negative</code></td></tr>
+  <tr><td>계좌 상태 dot</td><td><code>w-2 h-2 rounded-full</code> — ACTIVE: <code>bg-positive</code>, SUSPENDED: <code>bg-negative</code></td></tr>
   <tr><td>로그아웃</td><td><code>text-negative</code></td></tr>
 </table>
 
@@ -624,7 +624,7 @@
   <tr><td>상태 dot 귀속</td><td>시스템 상태 dot은 <strong>계좌별 거래 상태</strong>를 표시한다. 전역 시스템 상태가 아닌, 선택된 계좌의 trading_status를 반영.</td></tr>
   <tr><td>계좌 전환</td><td>드롭다운에서 다른 계좌 선택 시 페이지 이동 없이 데이터만 리렌더링. URL 파라미터 또는 전역 스토어로 관리.</td></tr>
   <tr><td>계좌 이름 표시</td><td>증권사 약칭 + 계좌 유형으로 구성. 예: "한투 국내주식", "한투 해외주식"</td></tr>
-  <tr><td>상태 종류</td><td>ACTIVE(<code>bg-positive</code>), PAUSED(<code>bg-warning</code>), HALTED(<code>bg-negative</code>)</td></tr>
+  <tr><td>상태 종류</td><td>ACTIVE(<code>bg-positive</code>), SUSPENDED(<code>bg-negative</code>)</td></tr>
 </table>
 
 <!-- ===== 8. Tailwind @theme 전체 토큰 ===== -->

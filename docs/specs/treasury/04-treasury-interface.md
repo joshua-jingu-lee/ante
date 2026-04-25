@@ -44,7 +44,7 @@ Treasury(
 | `sync_balance` | balance_data: dict[str, float] | `None` | 브로커 잔고 데이터로 Treasury 상태 동기화 |
 | `start_sync` | broker: BrokerAdapter \| None, position_history: PositionHistory, interval_seconds=300, trading_mode="live", price_resolver=None | `None` | 자산 평가 주기적 동기화 시작. Live는 브로커 기반, Virtual은 Trade DB 기반 |
 | `stop_sync` | — | `None` | 잔고 동기화 중지 |
-| `update_commission_rates` | buy_commission_rate: float, sell_commission_rate: float | `None` | 수수료율 업데이트 (DynamicConfig 변경 시) |
+| `update_commission_rates` | buy_commission_rate: float, sell_commission_rate: float | `None` | 수수료율 재주입. 1.0 런타임 DynamicConfig 경로가 아니며, Account cold-path 재초기화/테스트 보조 경로에서만 사용 |
 | `release_budget` | bot_id: str | float | 봇 예산 전액 환수. 반환값은 환수된 금액 |
 | `update_budget` | bot_id: str, target_amount: float | `None` | 봇 예산 변경. 증가분은 미할당에서 차감, 감소분은 미할당으로 환수 |
 | `set_account_info` | account_number: str, is_demo_trading: bool | `None` | KIS 계좌 메타 정보 설정 (계좌번호, 모의투자 여부) |

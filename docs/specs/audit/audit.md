@@ -252,4 +252,4 @@ async def _audit_cleanup_loop(audit_logger: AuditLogger, retention_days: int = 9
                 logger.info("감사 로그 정리: %d건 삭제 (보존 %d일)", deleted, retention_days)
 ```
 
-중요 이벤트(킬 스위치, 결재 등)는 별도 테이블(approval history, notification_history)에도 기록되므로, 감사 로그 삭제 후에도 추적 경로가 유지된다.
+중요 이벤트(킬 스위치, 결재 등)는 감사 로그와 별개로 각 도메인의 소유 저장소에도 남을 수 있다. 결재 상태 전이는 Approval history가 추적하고, 알림 발송 이력은 별도 `notification_history` 테이블을 두지 않고 텔레그램 채팅방 자체를 운영 이력으로 본다.

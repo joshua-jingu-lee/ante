@@ -51,7 +51,6 @@ legacy `[broker]` 설정의 출처만 설명하고, 이관 후 필드명은 본 
 | `treasury.sync_interval_seconds` | 브로커 어댑터 내부에서 관리 |
 | `instrument.cache_ttl_seconds` | 캐시 정책 |
 | `audit.retention_days` | 시스템 전역 규정 |
-| `telegram.command.*` | 알림은 글로벌 |
 
 ### 삭제 또는 Account 파생으로 전환하는 설정
 
@@ -60,3 +59,4 @@ legacy `[broker]` 설정의 출처만 설명하고, 이관 후 필드명은 본 
 | `broker.retry.*` | BrokerAdapter 내부 상수로 유지 (broker_type별 고정값) |
 | `broker.circuit_breaker.*` | 동일 |
 | `broker.timeout.*` | 동일 |
+| `telegram.command.*` | 1.0 설정 키가 아니므로 DEFAULTS에서 제거. TelegramCommandReceiver는 코드 기본값과 Telegram 시크릿으로 초기화 |

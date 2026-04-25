@@ -149,62 +149,13 @@ NotificationService는 시작 시 두 키를 읽고, 이후
 `ConfigChangedEvent(key="notification.quiet_hours")`를 구독하여 재시작 없이 반영한다.
 CRITICAL 알림은 `telegram_enabled=false`와 `quiet_hours`를 모두 우회한다.
 
-> **참고 — 킬 스위치(Trading State)**는 `dynamic_config`에 포함하지 않음.
-> 긴급 상황에서 DB 경로를 거치지 않고 즉시 작동해야 하므로
-> `AccountService`에서 계좌별 인메모리로 관리하며,
-> SQLite에는 재시작 복원용으로만 기록한다.
-> 상태: ACTIVE / HALTED (2단계). 계좌별 정지/활성화 또는 전체 제어 가능.
-> 제어 채널: 웹 대시보드, CLI (`ante system halt/activate [--account <id>]`), 텔레그램 명령.
-
-### SystemState — 킬 스위치(Trading State) 관리
-
-#### TradingState Enum
-
-| 값 | 설명 |
-|----|------|
-| ACTIVE | 정상 거래 |
-| HALTED | 모든 거래 차단 (긴급 중지) |
-
-SystemState는 시스템 거래 상태(킬 스위치)를 관리한다.
-인메모리에서 즉시 조회 가능하며, SQLite에 재시작 복원용으로 영속화한다.
-상태 변경 시 `TradingStateChangedEvent`를 발행하여 시스템 전체에 전파한다.
-
-> **Account 모델 도입 후**: 거래 상태는 `AccountService`가 계좌별로 관리한다.
-> `TradingStateChangedEvent`의 발행자가 `SystemState` → `AccountService`로 변경되며,
-> 이벤트에 `account_id`가 포함된다. 전체 시스템 halt는 모든 계좌를 일괄 HALTED로 전환하는 방식으로 동작한다.
-
-| 메서드 | 파라미터 | 반환값 | 설명 |
-|--------|----------|--------|------|
-| `initialize` | — | None | 스키마 생성 + DB에서 마지막 상태 복원 |
-| `trading_state` (property) | — | TradingState | 현재 거래 상태 조회 (인메모리 즉시 반환) |
-| `set_state` | state: TradingState, reason: str = "", changed_by: str = "" | None | 거래 상태 변경 (인메모리 + DB + 이벤트 발행). 동일 상태로의 변경은 무시 |
-
-**SQLite 스키마**:
-
-```sql
-CREATE TABLE system_state (
-    key        TEXT PRIMARY KEY,
-    value      TEXT NOT NULL,
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE system_state_history (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    old_state  TEXT NOT NULL,
-    new_state  TEXT NOT NULL,
-    reason     TEXT DEFAULT '',
-    changed_by TEXT DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now'))
-);
-```
-
-**설계 근거**:
-- **인메모리 우선**: `trading_state` 프로퍼티는 DB 조회 없이 즉시 반환 — 킬 스위치의 핵심 요건
-- **DB는 복원 전용**: 시스템 재시작 시 마지막 상태로 복원
-- **이력 기록**: 누가/언제/왜 상태를 변경했는지 감사 추적
-- **Config와 분리**: Config는 정적 설정(TOML) + 비밀값(.env), SystemState는 실시간 운영 상태
-
-구현: `src/ante/config/system_state.py` 참조
+> **참고 — 킬 스위치(Trading State)**는 `dynamic_config`와 별도 `system_state`
+> 테이블에 포함하지 않는다. 거래 가능 상태의 SSOT는 Account 모듈의
+> `Account.status`이며, 값은 `ACTIVE` / `SUSPENDED` / `DELETED`다.
+> `ante system halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환하는 편의 명령이고,
+> `ante system activate`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다.
+> 상태 변경 이벤트는 `TradingStateChangedEvent`가 아니라
+> `AccountSuspendedEvent` / `AccountActivatedEvent`를 사용한다.
 
 ### 동적 설정 변경 알림 흐름
 

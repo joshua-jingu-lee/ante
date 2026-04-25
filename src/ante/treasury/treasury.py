@@ -317,7 +317,11 @@ class Treasury:
     def update_commission_rates(
         self, buy_commission_rate: float, sell_commission_rate: float
     ) -> None:
-        """수수료율 업데이트 (DynamicConfig 변경 시 호출)."""
+        """수수료율 재주입.
+
+        1.0 런타임 DynamicConfig 경로가 아니라, Account cold-path 재초기화나
+        테스트 보조 경로에서만 사용한다.
+        """
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
         logger.info(
