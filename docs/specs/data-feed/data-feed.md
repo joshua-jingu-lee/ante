@@ -22,7 +22,6 @@
 | [09-failure-recovery.md](09-failure-recovery.md) | 장애 대응 |
 | [10-checkpoints-and-reports.md](10-checkpoints-and-reports.md) | 체크포인트 및 리포트 |
 | [11-module-structure.md](11-module-structure.md) | 모듈 구조 |
-| [12-open-issues.md](12-open-issues.md) | 미결 사항 |
 | [13-cross-module-notes.md](13-cross-module-notes.md) | 타 모듈 설계 시 참고 |
 
 ## 개요
@@ -233,9 +232,6 @@
 
 상세 내용: [11-module-structure.md](11-module-structure.md)
 
-## 미결 사항
-
-상세 내용: [12-open-issues.md](12-open-issues.md)
 
 ## 타 모듈 설계 시 참고
 

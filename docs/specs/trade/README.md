@@ -18,5 +18,4 @@
 | [05-cli-usage.md](05-cli-usage.md) | CLI 사용 |
 | [06-testing.md](06-testing.md) | 테스트 고려사항 |
 | [07-notification-events.md](07-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
-| [08-open-issues.md](08-open-issues.md) | 미결 사항 |
 | [09-cross-module-notes.md](09-cross-module-notes.md) | 타 모듈 설계 시 참고 |

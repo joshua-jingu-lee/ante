@@ -16,7 +16,6 @@
 | [03-design-decisions.md](03-design-decisions.md) | 설계 결정 |
 | [04-system-initialization.md](04-system-initialization.md) | 시스템 초기화 순서에서의 위치 |
 | [05-broker-to-account-migration.md](05-broker-to-account-migration.md) | Broker → Account 마이그레이션 |
-| [06-open-issues.md](06-open-issues.md) | 미결 사항 |
 | [07-cross-module-notes.md](07-cross-module-notes.md) | 타 모듈 설계 시 참고 |
 
 ## 개요
@@ -91,9 +90,6 @@
 
 상세 내용: [05-broker-to-account-migration.md](05-broker-to-account-migration.md)
 
-## 미결 사항
-
-상세 내용: [06-open-issues.md](06-open-issues.md)
 
 ## 타 모듈 설계 시 참고
 

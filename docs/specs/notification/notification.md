@@ -106,7 +106,7 @@ NotificationService는 `NotificationEvent`만 구독하여 발송한다. 개별 
 | 시스템 시작 | core (main) | INFO | system |
 | 시스템 종료 | core (main) | INFO | system |
 
-> 각 모듈의 예시 메시지는 해당 스펙 문서의 미결 사항에 기재되어 있다.
+> 각 모듈의 예시 메시지는 해당 모듈의 알림 이벤트 정의 또는 텔레그램 명령 응답 섹션에 기재한다.
 > [bot.md](../bot/bot.md), [trade.md](../trade/trade.md), [core.md](../core/core.md), [broker-adapter.md](../broker-adapter/broker-adapter.md), [approval.md](../approval/approval.md), [member.md](../member/member.md)
 
 ### TelegramCommandReceiver — 텔레그램 명령 수신
@@ -183,15 +183,11 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
 
 이를 통해 사용자는 어떤 채널에서 처리하든 정확히 1번만 메시지를 수신한다.
 
-> 각 모듈별 텔레그램 명령 응답 형식은 해당 스펙 문서의 알림 이벤트 정의 또는 미결 사항에 기재되어 있다.
+> 각 모듈별 텔레그램 명령 응답 형식은 해당 스펙 문서의 알림 이벤트 정의 또는 텔레그램 명령 응답 섹션에 기재한다.
 
 ### 알림 중복 억제 (Dedup)
 
 `dedup_window` 초 내에 동일 내용의 알림을 억제한다. MD5 해시 기반으로 `(level, message)` 조합을 추적하며, 억제된 알림 수를 다음 발송 시 `"(N건 억제됨)"` 형태로 메시지에 병기한다. **CRITICAL 레벨 알림은 중복 억제를 우회하여 항상 발송된다.**
-
-## 미결 사항
-
-- [ ] 텔레그램 명령 중복 알림 방지 구현 ([#515](https://github.com/joshua-jingu-lee/ante/issues/515)) — `TelegramCommandReceiver`가 서비스 메서드 호출 시 `suppress_notification=True`를 전달하여 NotificationEvent 발행을 생략. 대상: `ApprovalService.approve/reject()` ([#516](https://github.com/joshua-jingu-lee/ante/issues/516)), `SystemState.set_state()` ([#517](https://github.com/joshua-jingu-lee/ante/issues/517)), `BotManager.stop_bot()` ([#518](https://github.com/joshua-jingu-lee/ante/issues/518)), `TelegramCommandReceiver` 호출부 ([#519](https://github.com/joshua-jingu-lee/ante/issues/519))
 
 ## 타 모듈 설계 시 참고
 

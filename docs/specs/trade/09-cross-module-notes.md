@@ -12,5 +12,5 @@
 - **CLI 스펙 작성 시**: `ante trade list/performance/summary` 커맨드 구현
 - **Broker Adapter 스펙 작성 시**: OrderFilledEvent에 commission 필드 포함 필요
 - **EventBus 스펙 갱신 시**: OrderCancelledEvent (취소 완료) 이벤트 타입 추가 (OrderCancelEvent는 취소 요청, OrderCancelledEvent는 취소 완료)
-- **Bot 스펙 갱신 시**: 봇의 미결 사항 "봇 성능 지표" 항목 → Trade 모듈로 이관 완료
+- **Bot 스펙 갱신 시**: 봇 성능 지표는 Trade 모듈의 거래 기록과 성과 지표를 참조한다.
 - **Notification 스펙 작성 시**: 거래 체결 시 TradeRecord 정보를 포함한 알림 발송 (NotificationEvent에 거래 상세 포함)

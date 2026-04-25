@@ -23,4 +23,3 @@
 | [10-eventbus-integration.md](10-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [11-notification-events.md](11-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
 | [12-cross-module-notes.md](12-cross-module-notes.md) | 타 모듈 설계 시 참고 |
-| [13-open-issues.md](13-open-issues.md) | 미결 사항 |

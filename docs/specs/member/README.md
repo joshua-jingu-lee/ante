@@ -20,4 +20,3 @@
 | [07-eventbus-integration.md](07-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [08-module-impact.md](08-module-impact.md) | 기존 모듈 영향 |
 | [09-notification-events.md](09-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
-| [10-open-issues.md](10-open-issues.md) | 미결 사항 |

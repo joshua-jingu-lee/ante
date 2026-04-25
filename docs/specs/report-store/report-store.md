@@ -180,10 +180,6 @@ CREATE INDEX idx_reports_status ON reports(status);
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
 
-## 미결 사항
-
-없음.
-
 ## 타 모듈 설계 시 참고
 
 - **CLI 스펙**: 명령 시그니처와 실행 분류의 SSOT는 [cli/03-commands.md](../cli/03-commands.md)다. Report Store는 `ante report schema/submit/list/view/performance`의 저장소 동작만 설명한다.

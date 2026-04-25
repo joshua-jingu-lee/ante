@@ -23,5 +23,4 @@
 | [10-rule-engine-manager.md](10-rule-engine-manager.md) | RuleEngineManager |
 | [11-rest-api.md](11-rest-api.md) | REST API |
 | [12-cli.md](12-cli.md) | CLI 인터페이스 |
-| [13-open-issues.md](13-open-issues.md) | 미결 사항 |
 | [14-cross-module-notes.md](14-cross-module-notes.md) | 타 모듈 설계 시 참고 |

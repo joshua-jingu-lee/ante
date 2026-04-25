@@ -22,5 +22,4 @@
 | [09-cli.md](09-cli.md) | CLI 인터페이스 |
 | [10-web-api.md](10-web-api.md) | Web API 엔드포인트 |
 | [11-scope-out.md](11-scope-out.md) | Scope Out (1.0에서 제외) |
-| [12-open-issues.md](12-open-issues.md) | 미결 사항 |
 | [13-cross-module-notes.md](13-cross-module-notes.md) | 타 모듈 설계 시 참고 |

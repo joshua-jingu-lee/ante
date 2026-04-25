@@ -14,5 +14,4 @@
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-design-decisions.md](02-design-decisions.md) | 설계 결정 |
 | [03-cli-usage.md](03-cli-usage.md) | CLI 사용법 |
-| [04-open-issues.md](04-open-issues.md) | 미결 사항 |
 | [05-cross-module-notes.md](05-cross-module-notes.md) | 타 모듈 설계 시 참고 |

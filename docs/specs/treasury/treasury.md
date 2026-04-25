@@ -20,7 +20,6 @@
 | [07-cli.md](07-cli.md) | CLI 인터페이스 |
 | [08-daily-asset-snapshots.md](08-daily-asset-snapshots.md) | 일별 자산 스냅샷 (Daily Asset Snapshot) |
 | [09-virtual-asset-sync.md](09-virtual-asset-sync.md) | Virtual 모드 자산 평가 동기화 (D-TRS-01) |
-| [10-open-issues.md](10-open-issues.md) | 미결 사항 |
 | [11-cross-module-notes.md](11-cross-module-notes.md) | 타 모듈 설계 시 참고 |
 
 ## 개요
@@ -151,9 +150,6 @@
 
 상세 내용: [09-virtual-asset-sync.md](09-virtual-asset-sync.md)
 
-## 미결 사항
-
-상세 내용: [10-open-issues.md](10-open-issues.md)
 
 ## 타 모듈 설계 시 참고
 

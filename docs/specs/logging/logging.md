@@ -17,4 +17,3 @@
 | [05-handlers-and-rotation.md](05-handlers-and-rotation.md) | 핸들러 구성과 회전 정책 |
 | [06-context-fields.md](06-context-fields.md) | 컨텍스트 필드 주입 패턴 |
 | [07-implementation.md](07-implementation.md) | 구현 위치와 설계 근거 |
-| [08-open-issues.md](08-open-issues.md) | 미결 사항 |

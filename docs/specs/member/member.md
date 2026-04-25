@@ -20,7 +20,6 @@
 | [07-eventbus-integration.md](07-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [08-module-impact.md](08-module-impact.md) | 기존 모듈 영향 |
 | [09-notification-events.md](09-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
-| [10-open-issues.md](10-open-issues.md) | 미결 사항 |
 
 ## 개요
 
@@ -153,11 +152,3 @@
 ### 3. 패스워드 리셋 (Recovery Key)
 
 상세 내용: [09-notification-events.md](09-notification-events.md)
-
-## 미결 사항
-
-상세 내용: [10-open-issues.md](10-open-issues.md)
-
-### bootstrap 시 토큰 동시 발급
-
-상세 내용: [10-open-issues.md](10-open-issues.md)

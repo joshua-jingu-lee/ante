@@ -253,7 +253,3 @@ async def _audit_cleanup_loop(audit_logger: AuditLogger, retention_days: int = 9
 ```
 
 중요 이벤트(킬 스위치, 결재 등)는 별도 테이블(approval history, notification_history)에도 기록되므로, 감사 로그 삭제 후에도 추적 경로가 유지된다.
-
-## 미결 사항
-
-없음.

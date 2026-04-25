@@ -18,5 +18,4 @@
 | [06-pagination.md](06-pagination.md) | Cursor 기반 페이지네이션 |
 | [07-error-format.md](07-error-format.md) | RFC 7807 에러 응답 |
 | [08-pydantic-schemas.md](08-pydantic-schemas.md) | Pydantic 스키마 목록 |
-| [09-open-issues.md](09-open-issues.md) | 미결 사항 |
 | [10-cross-module-notes.md](10-cross-module-notes.md) | 타 모듈 설계 시 참고 |

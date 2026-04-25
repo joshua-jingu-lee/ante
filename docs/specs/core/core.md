@@ -163,31 +163,24 @@ category: system
 Ante 시스템이 종료됩니다.
 ```
 
-## 미결 사항
-
-- [x] 알림 메시지 발행 — `main.py`(시작/종료), AccountService(계좌 상태 변경)에서 NotificationEvent 직접 발행 구현 완료 (category: "system")
-- [ ] `SystemStartedEvent` 신규 생성 ([#539](https://github.com/joshua-jingu-lee/ante/issues/539)) — `eventbus/events.py`에 이벤트 정의 + `main.py`에서 시스템 시작 완료 시 발행. `restore_bots()` 구현 시 자동 재개 봇 수 페이로드 반영
-- [ ] 텔레그램 `/halt` 응답 메시지 스펙 적용 ([#540](https://github.com/joshua-jingu-lee/ante/issues/540)) — 계좌별 정지로 변경. 에픽: [#531](https://github.com/joshua-jingu-lee/ante/issues/531)
-- [ ] 텔레그램 `/activate` 응답 메시지 스펙 적용 ([#541](https://github.com/joshua-jingu-lee/ante/issues/541)) — 계좌별 활성화로 변경. 에픽: [#531](https://github.com/joshua-jingu-lee/ante/issues/531)
-- [ ] `AccountService.suspend()`에 `suppress_notification` 파라미터 추가 ([#517](https://github.com/joshua-jingu-lee/ante/issues/517)) — `True`이면 NotificationEvent 발행을 생략. 에픽: [#515](https://github.com/joshua-jingu-lee/ante/issues/515)
+## 텔레그램 시스템 명령 응답
 
 **`/halt` 응답 메시지 — 결과 분기:**
 
 | 조건 | 응답 |
 |------|------|
-| 성공 (ACTIVE → SUSPENDED) | 아래 메시지 |
-| 이미 중지됨 | `이미 거래가 중지된 상태입니다. (계좌: {account_id})` |
+| 성공 | 아래 메시지 |
+| 이미 전체 정지됨 | `이미 거래가 중지된 상태입니다.` |
 
 ```
-🚨 계좌 거래가 중지되었습니다.
-계좌: {account_id}
+🚨 전체 거래가 중지되었습니다.
 사유: {reason}
-해제하려면 /activate {account_id} 를 입력하세요.
+해제하려면 /activate 를 입력하세요.
 ```
 
 **`/activate` 응답 메시지 — 결과 분기:**
 
 | 조건 | 응답 |
 |------|------|
-| 성공 (SUSPENDED → ACTIVE) | `✅ 계좌 거래가 재개되었습니다. (계좌: {account_id})` |
-| 이미 활성 | `이미 거래가 활성 상태입니다. (계좌: {account_id})` |
+| 성공 | `✅ 거래가 재개되었습니다.` |
+| 이미 전체 활성 | `이미 거래가 활성 상태입니다.` |

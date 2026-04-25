@@ -15,7 +15,6 @@
 | [02-design-decisions.md](02-design-decisions.md) | 설계 결정 |
 | [03-commands.md](03-commands.md) | 커맨드 상세. CLI 명령 시그니처와 실행 분류의 SSOT |
 | [04-agent-workflows.md](04-agent-workflows.md) | Agent 워크플로우 예시 |
-| [05-open-issues.md](05-open-issues.md) | 미결 사항 |
 | [06-cross-module-notes.md](06-cross-module-notes.md) | 타 모듈 설계 시 참고 |
 
 ## 개요
@@ -133,26 +132,6 @@
 ## Agent 워크플로우 예시
 
 상세 내용: [04-agent-workflows.md](04-agent-workflows.md)
-
-## 미결 사항
-
-상세 내용: [05-open-issues.md](05-open-issues.md)
-
-### 스펙 미구현
-
-상세 내용: [05-open-issues.md](05-open-issues.md)
-
-### 백테스트·리포트 플로우 개선
-
-상세 내용: [05-open-issues.md](05-open-issues.md)
-
-### `ante init` 통합 초기 설정
-
-상세 내용: [05-open-issues.md](05-open-issues.md)
-
-### 구현되었으나 스펙 미반영
-
-상세 내용: [05-open-issues.md](05-open-issues.md)
 
 ## 타 모듈 설계 시 참고
 

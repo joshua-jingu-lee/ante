@@ -28,7 +28,6 @@
 | [15-reconciliation.md](15-reconciliation.md) | 대사 (Reconciliation) |
 | [16-eventbus-integration.md](16-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [17-notification-events.md](17-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
-| [18-open-issues.md](18-open-issues.md) | 미결 사항 |
 | [19-scope-out.md](19-scope-out.md) | 스펙 아웃 (Scope-out) |
 
 ## 개요
@@ -227,9 +226,6 @@
 
 상세 내용: [17-notification-events.md](17-notification-events.md)
 
-## 미결 사항
-
-상세 내용: [18-open-issues.md](18-open-issues.md)
 
 ## 스펙 아웃 (Scope-out)
 

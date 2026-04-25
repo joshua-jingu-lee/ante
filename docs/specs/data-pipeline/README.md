@@ -16,5 +16,4 @@
 | [03-design-decisions.md](03-design-decisions.md) | 설계 결정 |
 | [04-dependencies.md](04-dependencies.md) | 의존 관계 |
 | [05-datafeed-relationship.md](05-datafeed-relationship.md) | DataFeed와의 관계 |
-| [06-open-issues.md](06-open-issues.md) | 미결 사항 |
 | [07-cross-module-notes.md](07-cross-module-notes.md) | 타 모듈 설계 시 참고 |

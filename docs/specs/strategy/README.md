@@ -16,5 +16,4 @@
 | [03-design-decisions.md](03-design-decisions.md) | 설계 결정 |
 | [04-examples.md](04-examples.md) | 사용 예시 |
 | [05-testing.md](05-testing.md) | 테스트 고려사항 |
-| [06-open-issues.md](06-open-issues.md) | 미결 사항 |
 | [07-cross-module-notes.md](07-cross-module-notes.md) | 타 모듈 설계 시 참고 |

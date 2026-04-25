@@ -139,10 +139,6 @@ CSV/JSON 파일에서 종목 데이터를 일괄 등록/갱신한다. 파일 확
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
 
-## 미결 사항
-
-없음.
-
 ## 타 모듈 설계 시 참고
 
 - **Notification**: `NotificationService`에 `instrument_service` 주입 시 체결 알림에 종목명 병기

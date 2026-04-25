@@ -280,8 +280,3 @@ Bot.on_signal()
 | `StreamDisconnectedEvent` | KISStreamClient | — | `broker`, `reason` |
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
-
-## 미결 사항
-
-- [ ] `SystemStartedEvent` 신규 생성 ([#539](https://github.com/joshua-jingu-lee/ante/issues/539)) — 시스템 시작 완료 시 발행. 자동 재개 봇 수 등 포함 ([core.md](../core/core.md) 미결 사항 참조)
-- [x] `NotificationEvent` 필드 확장 — `category` 필드 추가 완료. bot/trade/broker/approval/member/system 카테고리 사용 중

@@ -19,4 +19,3 @@
 | [06-cli-usage.md](06-cli-usage.md) | CLI 사용법 |
 | [07-testing.md](07-testing.md) | 테스트 고려사항 |
 | [08-cross-module-notes.md](08-cross-module-notes.md) | 타 모듈 설계 시 참고 |
-| [09-open-issues.md](09-open-issues.md) | 미결 사항 |
