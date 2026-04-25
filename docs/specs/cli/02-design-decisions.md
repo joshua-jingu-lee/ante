@@ -37,6 +37,9 @@ text/json 모드를 지원하는 CLI 출력 포맷터.
 > 소스: `src/ante/cli/middleware.py`
 
 CLI 커맨드에 멤버 인증과 스코프 기반 접근 제어를 적용하는 미들웨어.
+principal, token prefix, scope vocabulary, human bypass, agent scope 제한 규칙의
+SSOT는 [member/02-design-decisions.md](../member/02-design-decisions.md#authorization-ssot)다.
+CLI는 해당 규칙을 command 실행 전에 적용하는 표면이다.
 
 | 함수/데코레이터 | 설명 |
 |----------------|------|
@@ -107,7 +110,7 @@ CLI 명령 시그니처와 실행 분류의 SSOT는 [03-commands.md](03-commands
 런타임 커맨드의 IPC 프로토콜과 서버 라우팅은 [ipc.md](../ipc/ipc.md)를 참조한다.
 
 **런타임 커맨드 실행 흐름**:
-1. CLI에서 `ANTE_MEMBER_TOKEN` 인증 + `@require_scope` 권한 확인 (기존과 동일)
+1. CLI에서 `ANTE_MEMBER_TOKEN` 인증 + Member SSOT 기반 `@require_scope` 권한 확인
 2. Config resolver가 정규화한 `runtime.socket_path`로 `IPCClient` 연결
 3. 서버의 `IPCServer`가 수신 → `ServiceRegistry`의 서비스 실행 → EventBus 이벤트 전파
 4. 결과를 CLI에 반환하여 출력

@@ -44,10 +44,10 @@ human과 agent의 인증 경로를 물리적으로 분리하여, 한쪽의 인�
 ```
 접근 경로              인증 방식                   토큰 접두어
 ────────────────────────────────────────────────────────────
-대시보드 (human)    → 패스워드 + 세션 쿠키          (세션 기반)
+Web API 대시보드    → 패스워드 + 세션 쿠키          (human session)
+Web API client     → Authorization: Bearer 헤더    ante_ak_
 CLI (human)        → ANTE_MEMBER_TOKEN 환경변수    ante_hk_
 CLI (agent)        → ANTE_MEMBER_TOKEN 환경변수    ante_ak_
-Web API (agent)    → Authorization: Bearer 헤더    ante_ak_
 ```
 
 **토큰 접두어에 의한 타입 강제:**
@@ -70,6 +70,24 @@ def authenticate(token: str) -> Member:
 agent가 서버 파일 시스템에 접근할 수 있더라도:
 - DB에는 토큰 해시만 저장되므로 human 토큰 원문을 복원할 수 없다.
 - 자신의 `ante_ak_` 토큰으로는 master 권한이 필요한 작업을 실행할 수 없다.
+
+### Authorization SSOT
+
+Member 모듈은 Ante의 principal, credential type, scope vocabulary, permission
+판정 규칙의 SSOT다. 다른 인터페이스 문서는 인증 전달 방식과 적용 지점만 설명하고,
+scope 문자열의 의미와 판정 규칙은 이 문서를 따른다.
+
+| 영역 | SSOT 책임 |
+|------|-----------|
+| Member | `human`/`agent`/`master` 모델, 토큰 접두어, scope vocabulary, human bypass, agent scope 제한 |
+| Web API | session cookie와 Bearer token을 HTTP 요청에서 추출하고, endpoint별 required scope를 Member 규칙으로 검사 |
+| CLI | `ANTE_MEMBER_TOKEN`을 canonical instance DB에서 검증하고, command별 required scope를 Member 규칙으로 검사 |
+| IPC | 별도 인증/권한 모델을 두지 않음. CLI에서 검증된 `actor`와 command payload를 서버 런타임 실행 경로로 전달 |
+
+필요 scope의 연결표는 각 표면의 계약 문서에 둘 수 있다. 예를 들어 CLI command별
+required scope는 `docs/specs/cli/03-commands.md`, HTTP endpoint별 required scope는
+Web API 라우터/스키마 문서에 둘 수 있다. 단, `bot:admin`이나 `backtest:run` 같은
+scope 문자열의 의미와 human/agent 판정 규칙은 Member 문서가 소유한다.
 
 ### 비밀번호 복구 — Recovery Key
 
@@ -134,18 +152,20 @@ $ ante member regenerate-recovery-key
 agent 멤버에게는 토큰 발급 시 scope를 지정하여 접근 범위를 제한한다.
 master(human)는 scope 제한 없이 모든 작업을 수행할 수 있다. scope는 오직 agent 멤버를 제한하기 위한 장치다.
 
-**권한 수준 (3단계):**
+**권한 수준:**
 
 | 수준 | 의미 | 예시 |
 |------|------|------|
 | `read` | 조회만 가능 | 목록 보기, 상세 보기, 상태 확인 |
 | `write` | 데이터 생성/수정 | 전략 등록, 설정 변경, 결재 요청 |
 | `admin` | 시스템 제어/위험 작업 | 봇 시그널키 발급, 룰 활성화/비활성화, 멤버 정지/폐기 |
+| `run` | 실행성 작업 | 백테스트 실행 |
 
 **도메인별 scope 목록:**
 
 | 도메인 | read | write | admin | run |
 |--------|------|-------|-------|-----|
+| `account` | 계좌 조회, credentials 마스킹 조회 | 계좌 생성/수정/삭제, 상태 전이, credentials 변경 | — | — |
 | `strategy` | 전략 조회 | 전략 등록/검증 | — | — |
 | `data` | 데이터/종목 조회 | 데이터 주입, 종목 동기화 | — | — |
 | `report` | 리포트 조회 | 리포트 제출 | — | — |
@@ -180,16 +200,18 @@ mutation이므로 서버 실행 중 IPC 또는 Web API를 통해 서버 프로�
 서버 정지 상태에서는 bootstrap, recovery, 비상 revoke 같은 운영 복구를 위해 CLI가
 MemberService를 직접 생성하는 maintenance fallback을 허용한다.
 
-**scope 검증은 CLI 미들웨어에서 데코레이터로 수행:**
+**scope 검증 predicate:**
 
 ```python
-@require_auth
-@require_scope("strategy:write")
-def strategy_submit(ctx, ...):
-    ...
+def require_scope(member: Member, required: str) -> bool:
+    if member.type == "human":
+        return True
+    return required in member.scopes
 ```
 
-human 멤버는 `require_scope` 검증을 무조건 통과한다. agent 멤버만 등록된 scope 목록에 대해 검증된다.
+human 멤버는 scope 검증을 무조건 통과한다. agent 멤버만 등록된 scope 목록에 대해
+검증된다. CLI는 `@require_scope(...)` 데코레이터로, Web API는 라우트 dependency 또는
+middleware로 같은 predicate를 적용한다.
 
 **agent 등록 시 scope 조합 예시:**
 

@@ -19,7 +19,7 @@
 |--------|------|------|
 | `/api/system` | system | 시스템 상태·헬스체크·킬스위치 (계좌별/전체) |
 | `/api/accounts` | accounts | 계좌 조회 + 정지·활성화 + 비구조 필드 수정. 구조 변경 요청은 cold-path 계약에 따라 409로 차단 |
-| `/api/auth` | auth | 세션 인증 (login/logout/me) |
+| `/api/auth` | auth | 세션 인증 (login/logout/me) + Bearer token 기반 me 조회 |
 | `/api/bots` | bots | 봇 CRUD + 제어 |
 | `/api/trades` | trades | 거래 이력 조회 |
 | `/api/strategies` | strategies | 전략 관리 |
@@ -35,9 +35,25 @@
 
 ## 인증
 
-세션 기반 인증 구현 완료. `POST /api/auth/login`으로 로그인 후 세션 쿠키를 발급하며, 401 응답 통일. `GET /api/auth/me`로 현재 사용자 정보 조회, `POST /api/auth/logout`으로 로그아웃.
+Web API는 HTTP 인증 transport를 담당한다. 권한 모델, scope vocabulary, human bypass,
+agent 제한 규칙의 SSOT는 [member/02-design-decisions.md](../member/02-design-decisions.md#authorization-ssot)다.
+
+| 호출자 | 인증 transport | principal |
+|--------|----------------|-----------|
+| human dashboard | `POST /api/auth/login` 후 `ante_session` 쿠키 | human member |
+| agent/API client | `Authorization: Bearer ante_ak_*` | agent member |
+
+`POST /api/auth/login`은 패스워드 인증 후 세션 쿠키를 발급한다. `POST /api/auth/logout`은
+세션을 삭제하고 쿠키를 제거한다. `GET /api/auth/me`는 Bearer token이 있으면 토큰 인증
+결과를 우선 사용하고, 없으면 `ante_session` 쿠키를 검증한다.
+
+인증 실패는 401, 인증은 되었지만 required scope가 부족한 경우는 403으로 응답한다.
+endpoint별 required scope는 Web API 라우터 계약에 둘 수 있지만, scope 문자열의 의미는
+Member 스펙을 따른다.
 
 세션 저장·검증의 세부 인터페이스는 [03-session-service.md](03-session-service.md) 참조.
+Bearer token 추출은 Web API token auth middleware가 수행하며, 실제 토큰 검증은
+MemberService.authenticate()에 위임한다.
 
 ## CORS 설정
 

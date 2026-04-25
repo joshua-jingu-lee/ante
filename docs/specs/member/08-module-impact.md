@@ -14,7 +14,7 @@ Member 모듈 도입 시 기존 모듈에서 `"agent"` 하드코딩을 member_id
 | Approval `resolved_by` | `"user"` 하드코딩 | 인증된 member_id 사용 |
 | Approval `history.actor` | 자유 문자열 | member_id 사용 |
 | CLI 전체 | 인증 없음 | 토큰 기반 인증 미들웨어 추가 |
-| Web API | 인증 없음 | 세션/토큰 기반 인증 미들웨어 추가 |
+| Web API | 인증 없음 | session cookie / Bearer token HTTP transport 추가. 권한 판정은 Member scope SSOT를 따름 |
 
 **하위 호환성**: 기존 DB 레코드의 `"agent"`, `"user"` 문자열은 그대로 보존한다. Member 모듈 도입 후 생성되는 레코드부터 member_id를 사용한다.
 
