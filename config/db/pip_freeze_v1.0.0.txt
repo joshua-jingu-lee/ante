@@ -4,7 +4,7 @@ aiosignal==1.4.0
 aiosqlite==0.22.1
 annotated-doc==0.0.4
 annotated-types==0.7.0
--e git+https://github.com/joshua-jingu-lee/ante@79eec3220411defcac4b95e1b07c463f9dc098a2#egg=ante
+-e git+https://github.com/joshua-jingu-lee/ante@5decffef8b1933bb34d6d578b7cc7551f9db4788#egg=ante
 anyio==4.12.1
 attrs==25.4.0
 build==1.4.0

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
@@ -9,6 +12,20 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+
+
+def _expected_release_version() -> str:
+    """pyproject.toml의 release 버전(SSOT)을 직접 읽어 반환.
+
+    `ante.__version__`을 통하지 않고 pyproject.toml을 직접 파싱하여,
+    공개 버전 표면이 SSOT 버전과 일치하는지 고정값으로 검증한다.
+    """
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    with pyproject.open("rb") as fp:
+        return tomllib.load(fp)["project"]["version"]
+
+
+EXPECTED_VERSION = _expected_release_version()
 
 
 @pytest.fixture
@@ -30,7 +47,7 @@ class TestSystemRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "running"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == EXPECTED_VERSION
 
     def test_health(self, client):
         # 기본 앱에는 db/account_service가 주입되어 있지 않다.
@@ -563,6 +580,8 @@ class TestAppFactory:
         assert resp.status_code == 200
         data = resp.json()
         assert data["info"]["title"] == "Ante"
+        # PYTHONPATH=$PWD/src 실행 경로에서도 SSOT 버전이 노출되어야 한다.
+        assert data["info"]["version"] == EXPECTED_VERSION
 
 
 # ── response_model 커버리지 테스트 ────────────────────────
