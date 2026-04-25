@@ -109,7 +109,7 @@
 
 상세 내용: [06-cli.md](06-cli.md)
 
-### `ante feed init <data_path>`
+### `ante feed init [data_path]`
 
 상세 내용: [06-cli.md](06-cli.md)
 

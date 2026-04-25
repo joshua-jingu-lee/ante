@@ -6,7 +6,7 @@
 
 ### 계층별 역할
 
-#### 1. 정적 설정 — TOML 파일 (`config/system.toml`)
+#### 1. 정적 설정 — TOML 파일 (`<config_dir>/system.toml`)
 
 시스템 인프라 수준의 설정으로, 변경 시 재시작 필요.
 
@@ -19,8 +19,17 @@ timezone = "Asia/Seoul"
 path = "db/ante.db"
 event_log_retention_days = 30
 
+[data]
+path = "data"
+
+[runtime]
+pid_path = "run/ante.pid"
+socket_path = "run/ante.sock"
+
+[logging]
+directory = "logs"
+
 [parquet]
-base_path = "data/"
 compression = "snappy"
 
 [web]
@@ -48,7 +57,7 @@ history_size = 1000  # 인메모리 링버퍼 크기
 - 사람이 읽기/편집 용이 (JSON보다 코멘트 지원, YAML보다 파싱 안정적)
 - FreqTrade의 JSON 방식은 코멘트 불가, NautilusTrader의 YAML은 보안 이슈(arbitrary code execution) 가능
 
-#### 2. 비밀값 — `.env` 파일 (`config/secrets.env`)
+#### 2. 비밀값 — `.env` 파일 (`<config_dir>/secrets.env`)
 
 API 키, 토큰 등 민감 정보. gitignore 대상.
 
@@ -182,12 +191,49 @@ WebAPI -> DynamicConfigService.update(key, value)
 - SQLite에 저장하므로 재시작 후에도 유지
 - EventBus 알림으로 모듈이 능동적으로 반영 (폴링 불필요)
 
+### Ante instance/path contract
+
+Ante 인스턴스의 루트는 `config_dir`이다. `system.toml`이 있는 디렉토리와
+`config_dir`은 같은 경계이며, 서버 프로세스·CLI·IPC·migration·QA entrypoint는
+같은 `config_dir`을 공유할 때 같은 Ante 인스턴스를 바라본다.
+
+**경로 해석 규칙**:
+
+1. `system.toml` 안의 상대 경로는 모두 `config_dir` 기준으로 해석한다.
+2. 호출 시점의 CWD는 인스턴스 경계나 정적 설정 경로의 기준이 아니다.
+3. `ante init`은 상대 경로 기본값을 기록하고, resolver가 절대 경로로 정규화한다.
+4. 명시적 CLI override(`--db-path`, `--data-path`)는 해당 커맨드의 작업 대상만 바꾸며, 인스턴스 인증 DB나 서버 프로세스 경계를 바꾸지 않는다. 인스턴스를 바꾸려면 `--config-dir` 또는 `ANTE_CONFIG_DIR`을 사용한다.
+
+**Canonical resource table**:
+
+| 리소스 | 설정 키/위치 | 기본값 | 정규화 결과 |
+|---|---|---|---|
+| Instance root | `config_dir` | `~/.config/ante/` | `config_dir` 자체 |
+| 정적 설정 | `<config_dir>/system.toml` | — | `<config_dir>/system.toml` |
+| 비밀값 | `<config_dir>/secrets.env` | — | `<config_dir>/secrets.env` |
+| Canonical DB | `db.path` | `db/ante.db` | `<config_dir>/db/ante.db` |
+| Data root | `data.path` | `data` | `<config_dir>/data` |
+| PID file | `runtime.pid_path` | `run/ante.pid` | `<config_dir>/run/ante.pid` |
+| IPC socket | `runtime.socket_path` | `run/ante.sock` | `<config_dir>/run/ante.sock` |
+| System logs | `logging.directory` | `logs` | `<config_dir>/logs` |
+| DataFeed workspace | derived from `data.path` | `.feed/` | `<config_dir>/data/.feed/` |
+
+`db.path`는 서버 DB, CLI 인증 DB, CLI 작업 DB의 기본값, migration DB, EventHistoryStore,
+AuditLogger가 공유하는 canonical DB이다. 예외적으로 다른 DB를 볼 수 있는 명령은
+`--db-path` 같은 명시적 작업 DB override 계약을 가져야 한다.
+
+`data.path`는 ParquetStore와 DataFeed가 공유하는 canonical data root이다.
+과거 `parquet.base_path`는 legacy alias로만 취급한다. `data.path`가 없고
+`parquet.base_path`만 있는 기존 설정은 `data.path`로 이관해 해석할 수 있지만, 둘이
+동시에 있으면 `data.path`가 우선하며 검증 경고를 낸다.
+
 ### Config 클래스
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `load` (classmethod) | config_dir: Path \| None | Config | 설정 파일 로드 및 인스턴스 생성. config_dir이 None이면 `resolve_config_dir()`로 자동 탐색 |
 | `get` | key: str, default: Any | Any | 정적 설정 조회. 점(.) 구분자로 중첩 접근 |
+| `resolve_path` | key: str, default: str \| None = None | Path | path-like 정적 설정을 `config_dir` 기준의 절대 경로로 정규화 |
 | `secret` | key: str | str | 비밀값 조회. 환경변수 우선, 없으면 .env. 미존재 시 ConfigError |
 | `validate` | — | None | 필수 설정 존재 여부 및 타입 검증 (Fail-fast) |
 
@@ -203,7 +249,7 @@ WebAPI -> DynamicConfigService.update(key, value)
 
 **설계 포인트**:
 
-1. **정적 설정은 점(.) 구분자로 중첩 접근** — `config.get("db.path")` → TOML의 `[db]` 섹션 내 `path` 키
+1. **정적 설정은 점(.) 구분자로 중첩 접근** — `config.get("db.path")` → TOML의 `[db]` 섹션 내 `path` 키. path-like 설정을 사용할 때는 raw 문자열을 직접 조합하지 않고 `resolve_path()` 계열 resolver를 거친다.
 2. **비밀값은 별도 메서드 (`secret()`)** — 호출부에서 비밀값임을 명시적으로 표현, 로깅 시 실수 방지, 미존재 시 즉시 예외
 3. **동적 설정은 Config 클래스에 포함하지 않음** — `DynamicConfigService`가 별도로 CRUD + EventBus 알림 담당
 
@@ -230,7 +276,7 @@ WebAPI -> DynamicConfigService.update(key, value)
 
 **접근 방식**: 로드 시점에 검증 (Fail-fast)
 
-`Config.validate()`는 시스템 시작 시 호출되며, 필수 정적 설정(`db.path`, `parquet.base_path`, `web.port`)의 존재 여부와 타입을 검증한다. 검증 실패 시 모든 에러를 수집하여 `ConfigError`로 일괄 보고한다.
+`Config.validate()`는 시스템 시작 시 호출되며, 필수 정적 설정(`db.path`, `data.path`, `web.port`)의 존재 여부와 타입을 검증한다. 검증 실패 시 모든 에러를 수집하여 `ConfigError`로 일괄 보고한다.
 
 **근거**:
 - 시작 시 전체 검증으로 런타임 에러 방지
@@ -245,7 +291,10 @@ WebAPI -> DynamicConfigService.update(key, value)
 | `system.timezone` | `"Asia/Seoul"` |
 | `db.path` | `"db/ante.db"` |
 | `db.event_log_retention_days` | `30` |
-| `parquet.base_path` | `"data/"` |
+| `data.path` | `"data"` |
+| `runtime.pid_path` | `"run/ante.pid"` |
+| `runtime.socket_path` | `"run/ante.sock"` |
+| `logging.directory` | `"logs"` |
 | `parquet.compression` | `"snappy"` |
 | `web.host` | `"0.0.0.0"` |
 | `web.port` | `3982` |

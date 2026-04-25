@@ -6,7 +6,7 @@
 
 ### 체크포인트
 
-수집 중단/재개를 위한 내부 상태. `{data}/.feed/checkpoints/`에 소스별로 저장.
+수집 중단/재개를 위한 내부 상태. `{data.path}/.feed/checkpoints/`에 소스별로 저장.
 **원자적 기록**: 임시 파일에 쓴 후 rename (write-then-rename).
 
 ```json
@@ -22,7 +22,7 @@
 ### 리포트
 
 backfill/daily 실행 완료 시 생성되는 **운영 기록**.
-`{data}/.feed/reports/{YYYY-MM-DD}-{mode}.json`에 저장.
+`{data.path}/.feed/reports/{YYYY-MM-DD}-{mode}.json`에 저장.
 
 ```json
 // reports/2026-03-17-daily.json

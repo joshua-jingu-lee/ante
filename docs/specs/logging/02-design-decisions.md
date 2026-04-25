@@ -25,7 +25,7 @@
 | 핸들러 | 대상 | 포맷 | 용도 |
 |---|---|---|---|
 | `StreamHandler(sys.stdout)` | 콘솔 | 평문 (`%(asctime)s [%(levelname)s] %(name)s: %(message)s`) | 사람이 직접 관찰 |
-| `TimedRotatingFileHandler` | `logs/ante-YYYY-MM-DD.jsonl` | JSONL | 에이전트·스크립트 분석 |
+| `TimedRotatingFileHandler` | `<logging.directory>/ante-YYYY-MM-DD.jsonl` | JSONL | 에이전트·스크립트 분석 |
 
 **근거**: 두 핸들러가 동일한 로그 레코드를 각자의 포맷으로 기록한다. 한쪽이 실패해도 다른 쪽은 유지된다. 개발자 경험과 자동 분석을 모두 만족한다.
 

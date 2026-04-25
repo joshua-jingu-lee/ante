@@ -123,10 +123,20 @@ DARTNormalizer는 BaseNormalizer(OHLCV)와 다른 스키마를 출력하므로 �
 
 **정규화 과정**: 컬럼 매핑 → timestamp UTC 정규화 → 숫자 컬럼 타입 변환 → source/symbol 컬럼 추가 → 스키마 컬럼만 선택 → timestamp 기준 정렬
 
+### Data root contract
+
+DataStore의 canonical root는 Config의 `data.path`이다. 기본값은
+`<config_dir>/data`이며, `system.toml`의 상대 경로는 `config_dir` 기준으로
+정규화한다. 모든 DataStore 소비자(DataFeed, Backtest, Strategy, CLI)는 명시적
+override가 없으면 이 root를 사용한다.
+
+과거 `parquet.base_path`는 legacy alias이며 신규 스펙과 예시는 `data.path`를
+SSOT로 삼는다.
+
 ### Parquet 파일 구조
 
 ```
-data/
+{data.path}/
 ├── ohlcv/
 │   ├── 1m/                    # 1분봉 (Collector 소유)
 │   │   ├── KRX/               # 거래소별 디렉토리
@@ -201,9 +211,9 @@ APIGateway를 통해 시세를 조회하고, 메모리 버퍼에 적재 후 일�
 
 Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet에 접근할 때 사용하는 유일한 인터페이스**다.
 
-**생성자 파라미터**: `base_path: str | Path = "data/"`, `compression: str = "snappy"`
+**생성자 파라미터**: `base_path: str | Path`, `compression: str = "snappy"`
 
-**프로퍼티**: `base_path: Path` — 데이터 저장소 루트 경로
+**프로퍼티**: `base_path: Path` — 데이터 저장소 루트 경로. Ante 인스턴스 안에서 생성할 때는 Config resolver가 정규화한 `data.path`를 주입한다. 테스트나 독립 도구에서 명시적으로 넘긴 상대 경로는 호출자의 작업 디렉토리 기준으로 해석할 수 있지만, 서버/CLI 기본 경로 계약에는 사용하지 않는다.
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|

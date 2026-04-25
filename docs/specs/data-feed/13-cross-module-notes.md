@@ -7,4 +7,4 @@
 - **DataStore 스펙**: ParquetStore, Normalizer, schemas를 import하여 사용. DataFeed가 쓴 파일을 모든 소비자가 읽을 수 있다.
 - **CLI 스펙**: `ante feed` 서브커맨드 등록
 - **Instrument 스펙**: `instruments.parquet`에서 종목 메타데이터를 InstrumentService가 읽을 수 있다
-- **Config 스펙**: API 키는 `{data}/.feed/.env`에 저장 (`ante feed config set`으로 관리, 환경변수 우선), 설정은 `{data}/.feed/config.toml`
+- **Config 스펙**: canonical data root는 `data.path`. API 키는 `{data.path}/.feed/.env`에 저장 (`ante feed config set`으로 관리, 환경변수 우선), 설정은 `{data.path}/.feed/config.toml`

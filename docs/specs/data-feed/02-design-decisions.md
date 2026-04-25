@@ -30,7 +30,7 @@ Collector는 반대로 1d 미만 타임프레임만 수집하며, 일봉 이상 
 
 코드는 `pip install ante`에 항상 포함되지만, `ante feed init`을 실행하기 전까지 비활성 상태이며 아무 동작도 하지 않는다.
 
-**활성화 조건**: `{data}/.feed/config.toml`이 존재하면 활성 상태.
+**활성화 조건**: `{data.path}/.feed/config.toml`이 존재하면 활성 상태.
 
 **API 키 없이도 init 가능**: init은 디렉토리와 config만 생성한다.
 API 키가 없으면 수집 시작 시 해당 소스를 스킵하고 리포트에 기록한다.
@@ -38,7 +38,7 @@ API 키가 없으면 수집 시작 시 해당 소스를 스킵하고 리포트�
 ### 저장소 구조
 
 ```
-{data}/                                  # Ante 데이터 저장소
+{data.path}/                             # Ante 데이터 저장소 (Config의 data.path)
 ├── .feed/                           # DataFeed 운영 데이터
 │   ├── config.toml                      # 설정 (수집 대상, 스케줄, 가드, 라우팅)
 │   ├── .env                             # API 키 저장 (ante feed config set으로 관리)
@@ -50,19 +50,20 @@ API 키가 없으면 수집 시작 시 해당 소스를 스킵하고 리포트�
 │       └── {YYYY-MM-DD}-{mode}.json
 │
 ├── ohlcv/                               # DataFeed → 1d만 소유
-│   └── 1d/{symbol}/{YYYY-MM}.parquet    # 거래소 계층 없음 (ParquetStore 구현)
+│   └── 1d/{exchange}/{symbol}/{YYYY-MM}.parquet
 │
 ├── fundamental/                         # DataFeed 소유
-│   └── krx/{symbol}/{YYYY-MM}.parquet
+│   └── {exchange}/{symbol}/{YYYY-MM}.parquet
 │
 ├── flow/                                # Phase 2, DataFeed 소유
-│   └── krx/{symbol}/{YYYY-MM}.parquet
+│   └── {exchange}/{symbol}/{YYYY-MM}.parquet
 │
 └── event/                               # Phase 2, DataFeed 소유
-    └── krx/{symbol}.parquet
+    └── {exchange}/{symbol}.parquet
 ```
 
-계층 원칙: **데이터 유형 > 거래소 > 해상도 > 심볼 > 시간 파티션**
+계층 원칙은 DataStore와 같다. OHLCV는 **데이터 유형 > 해상도 > 거래소 > 심볼 > 시간 파티션**,
+fundamental/flow/event는 **데이터 유형 > 거래소 > 심볼 > 시간 파티션** 순서다.
 
 ### 설정 관리 — FeedConfig
 
@@ -89,16 +90,16 @@ API 키가 없으면 수집 시작 시 해당 소스를 스킵하고 리포트�
 
 | 구분 | 위치 | 내용 |
 |------|------|------|
-| **설정 파일** | `{data}/.feed/config.toml` | 수집 대상, 스케줄, 방어 가드, 라우팅, 로그 레벨, 프로세스 우선순위 |
-| **API 키** | `{data}/.feed/.env` | `ante feed config set`으로 관리. 환경변수가 설정되어 있으면 환경변수가 우선 |
+| **설정 파일** | `{data.path}/.feed/config.toml` | 수집 대상, 스케줄, 방어 가드, 라우팅, 로그 레벨, 프로세스 우선순위 |
+| **API 키** | `{data.path}/.feed/.env` | `ante feed config set`으로 관리. 환경변수가 설정되어 있으면 환경변수가 우선 |
 | **소스 상수** | 각 소스 모듈에 하드코딩 | base_url, tps_limit, daily_limit 등 API 스펙 종속 값 |
 
-**API 키 우선순위**: 환경변수 > `{data}/.feed/.env` 파일.
+**API 키 우선순위**: 환경변수 > `{data.path}/.feed/.env` 파일.
 `ante feed config set`으로 `.env`에 저장하거나, 환경변수를 직접 설정한다.
 
 > 소스별 API 상수(base_url, tps_limit 등)는 API 스펙에 종속된 값이므로 소스 모듈에 하드코딩한다.
 
-**설정 파일** (`{data}/.feed/config.toml`):
+**설정 파일** (`{data.path}/.feed/config.toml`):
 
 ```toml
 [general]
@@ -127,7 +128,9 @@ dart = ["krx"]
 # yahoo = ["nasdaq", "nyse"]
 
 # 수집 대상 정의
-# 디렉토리 구조: data/{data_type}/{exchange}/{timeframe}/{symbol}/...
+# 디렉토리 구조:
+# - OHLCV: {data.path}/ohlcv/{timeframe}/{exchange}/{symbol}/...
+# - 기타: {data.path}/{data_type}/{exchange}/{symbol}/...
 
 [ohlcv.krx]
 timeframes = ["1d"]               # DataFeed가 수집하는 타임프레임 (일봉만)

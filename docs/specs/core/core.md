@@ -22,6 +22,10 @@ Core 모듈은 **모든 모듈이 공유하는 기반 인프라**를 제공한�
 Database(db_path: str)
 ```
 
+`db_path`는 Config 스펙의 Ante instance/path contract에 따라 정규화된
+canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기준
+`db/ante.db`를 Core에서 직접 조합하지 않는다.
+
 ### 퍼블릭 메서드
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
@@ -69,19 +73,21 @@ Database(db_path: str)
 모듈 간 의존 관계에 따라 다음 순서로 초기화한다:
 
 ```
-1. Config.load() + Config.validate()     # 정적 설정 로드 + 검증
-2. Database 초기화                        # SQLite 연결, WAL 모드 설정
-3. EventBus 초기화
-4. AccountService 초기화                  # DB + EventBus 주입, 기존 Account 로드
-5. DynamicConfigService 초기화            # DB + EventBus 주입
-6. TreasuryManager 초기화                 # 계좌별 Treasury 생성
-7. TradeService 초기화                    # DB + EventBus (PositionHistory, TradeRecorder, PerformanceTracker)
-8. RuleEngineManager 초기화               # 계좌별 RuleEngine 생성 (Config + DynamicConfig + EventBus + AccountService)
-9. APIGateway 초기화                      # AccountService 주입, 계좌별 BrokerAdapter 라우팅
-10. BotManager 초기화                      # EventBus + StrategyRegistry + APIGateway factories
-11. NotificationService 초기화             # EventBus + 알림 어댑터
-12. WebAPI 시작                           # FastAPI (모든 서비스 주입)
-13. BotManager.restore_bots()             # DB에서 봇 설정 복원 + 시작
+1. Config.load() + Config.validate()      # 정적 설정 로드 + 검증
+2. Instance path resolver 확정             # config_dir 기준 DB/data/PID/socket/logs 경로 정규화
+3. Logging 초기화                          # logging.directory 참조
+4. Database 초기화                         # db.path 참조, SQLite 연결, WAL 모드 설정
+5. EventBus 초기화
+6. AccountService 초기화                   # DB + EventBus 주입, 기존 Account 로드
+7. DynamicConfigService 초기화             # DB + EventBus 주입
+8. TreasuryManager 초기화                  # 계좌별 Treasury 생성
+9. TradeService 초기화                     # DB + EventBus (PositionHistory, TradeRecorder, PerformanceTracker)
+10. RuleEngineManager 초기화               # 계좌별 RuleEngine 생성 (Config + DynamicConfig + EventBus + AccountService)
+11. APIGateway 초기화                      # AccountService 주입, 계좌별 BrokerAdapter 라우팅
+12. BotManager 초기화                      # EventBus + StrategyRegistry + APIGateway factories
+13. NotificationService 초기화             # EventBus + 알림 어댑터
+14. WebAPI 시작                            # FastAPI (모든 서비스 주입)
+15. BotManager.restore_bots()              # DB에서 봇 설정 복원 + 시작
 ```
 
 ## 이벤트 버스 연동 (EventBus Integration)

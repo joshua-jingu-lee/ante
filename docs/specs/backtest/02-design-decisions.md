@@ -116,7 +116,7 @@ strategy.on_stop()
 | `buy_commission_rate` | `float` | `0.00015` | 매수 수수료율 (Account 모듈 기준, KRX: 0.00015) |
 | `sell_commission_rate` | `float` | `0.00195` | 매도 수수료율 (Account 모듈 기준, KRX: 0.00195) |
 | `slippage_rate` | `float` | `0.001` | 슬리피지율 |
-| `data_paths` | `list[str]` | `["data/"]` | Parquet 저장 경로 목록 (복수 데이터 소스 지원) |
+| `data_paths` | `list[str]` | `[resolved data.path]` | Parquet 저장 경로 목록. 기본값은 Config resolver가 정규화한 canonical data root |
 
 #### DatasetInfo — 로드된 데이터셋 정보
 
@@ -129,11 +129,11 @@ strategy.on_stop()
 | `row_count` | `int` | 로드된 행 수 |
 | `start_date` | `str` | 데이터 시작일 |
 | `end_date` | `str` | 데이터 종료일 |
-| `data_dir` | `str` | Parquet 디렉토리 경로 (예: `"data/ohlcv/1d/KRX/005930"`) |
+| `data_dir` | `str` | Parquet 디렉토리 경로 (예: `"{data.path}/ohlcv/1d/KRX/005930"`) |
 | `file_count` | `int` | 해당 디렉토리의 parquet 파일 수 |
 
 > **참고**: ParquetStore는 종목당 월별 파티션 파일(`YYYY-MM.parquet`)을 사용한다.
-> `load("005930", "1d")` 호출 시 `data/ohlcv/1d/KRX/005930/*.parquet` 전체를 concat하여 로드.
+> `load("005930", "1d")` 호출 시 `{data.path}/ohlcv/1d/KRX/005930/*.parquet` 전체를 concat하여 로드.
 > `data_dir`은 이 디렉토리 경로, `file_count`는 읽힌 파일 수를 기록한다.
 
 #### to_dict() 직렬화
@@ -223,7 +223,11 @@ def to_dict(self) -> dict:
 | `run_subprocess(config) → dict` | 백테스트를 subprocess로 격리 실행 (D-004), JSON 결과 반환 |
 
 **설정 필수 키**: `strategy_path`, `start_date`, `end_date`
-**선택 키**: `symbols` (list[str]), `timeframe` (기본 `"1d"`), `initial_balance` (기본 10,000,000), `buy_commission_rate` (기본 0.00015), `sell_commission_rate` (기본 0.00195), `slippage_rate` (기본 0.001), `data_paths` (기본 `["data/"]`), `data_path` (하위호환, 단수)
+**선택 키**: `symbols` (list[str]), `timeframe` (기본 `"1d"`), `initial_balance` (기본 10,000,000), `buy_commission_rate` (기본 0.00015), `sell_commission_rate` (기본 0.00195), `slippage_rate` (기본 0.001), `data_paths` (기본 Config resolver의 `data.path`), `data_path` (하위호환, 단수)
+
+`data_paths`/`data_path`는 백테스트 실행 단위의 데이터셋 override이다. 값이 없으면 Ante
+인스턴스의 `data.path`를 사용한다. 명시적 override는 백테스트 입력 데이터만 바꾸며
+인증 DB나 서버 IPC 경계를 바꾸지 않는다.
 
 **`_validate_config()` → BacktestConfig 통합**:
 
@@ -242,7 +246,7 @@ def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
             buy_commission_rate=config.get("buy_commission_rate", 0.00015),
             sell_commission_rate=config.get("sell_commission_rate", 0.00195),
             slippage_rate=config.get("slippage_rate", 0.001),
-            data_paths=config.get("data_paths", [config.get("data_path", self._data_path)]),
+            data_paths=config.get("data_paths", [config.get("data_path", self._data_path)]),  # self._data_path = resolved data.path
         )
     except KeyError as e:
         raise BacktestConfigError(f"Missing required config key: {e}")

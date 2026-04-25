@@ -74,7 +74,7 @@ HTTP 상태 코드만으로 성공 여부를 판단하면 안 된다.
 | 일일 호출 한도 | 20,000건 |
 | 응답 형식 | JSON / XML 선택 가능 |
 | 데이터 범위 | 2015년 이후 (XBRL 의무 공시 이후) |
-| 선행 작업 | 고유번호(corp_code) 매핑 파일 다운로드 필수 → `{data}/.feed/dart_corp_codes.json`에 캐싱 |
+| 선행 작업 | 고유번호(corp_code) 매핑 파일 다운로드 필수 → `{data.path}/.feed/dart_corp_codes.json`에 캐싱 |
 
 **사용 API:**
 

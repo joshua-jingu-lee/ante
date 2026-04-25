@@ -49,28 +49,33 @@ CLI 커맨드에 멤버 인증과 스코프 기반 접근 제어를 적용하는
 
 매칭은 leaf 이름이 아니라 **전체 커맨드 경로** 기준이다. `ante feed init`처럼 leaf 이름이 우연히 `init`인 다른 서브커맨드는 면제 대상이 아니다 (`@require_auth` + `@require_scope`로 인증 필요). 구현은 `LeafAwareGroup`(src/ante/cli/main.py)이 루트 그룹 진입 직후 전체 경로 tuple을 `ctx.obj["_leaf_command_path"]`에 저장하고, `authenticate_member`가 이 tuple과 `_AUTH_EXEMPT_COMMAND_PATHS`(src/ante/cli/middleware.py)를 비교한다.
 
-### DB 경로 일관성 (config_dir 기반)
+### 인스턴스 경로 일관성 (`config_dir` 기반)
 
-**배경**: `ante init`은 `<config_dir>/db/ante.db`를 생성하지만, 후속 CLI들이 과거 `Database("db/ante.db")`를 CWD 기준으로 하드코딩하면 서로 다른 DB 파일을 참조하게 되어 방금 만든 master 토큰으로도 인증이 실패한다.
+**배경**: `ante init`은 `<config_dir>/system.toml`과 `<config_dir>/db/ante.db`를 생성한다. 후속 CLI들이 과거처럼 `Database("db/ante.db")`나 `data/`를 CWD 기준으로 하드코딩하면 서버와 CLI가 서로 다른 인스턴스를 참조하게 된다.
 
 **규칙**:
-- 모든 CLI는 `ante.cli.main.get_db_path(ctx)` 헬퍼로 DB 경로를 해석한다.
+- 모든 CLI는 Config 스펙의 Ante instance/path contract를 따른다.
+- `--config-dir` 또는 `ANTE_CONFIG_DIR`이 확정한 `config_dir`이 인스턴스 루트이다.
+- 모든 정적 상대 경로(`db.path`, `data.path`, `runtime.socket_path` 등)는 `config_dir` 기준으로 해석한다.
+- 모든 CLI는 `ante.cli.main.get_db_path(ctx)` 헬퍼로 DB 경로를 해석한다. 이 헬퍼는 `system.toml`의 `db.path`를 우선 읽고, 미설정 시 `<config_dir>/db/ante.db` 기본값으로 폴백한다.
+- data 계열 CLI는 `get_data_path(ctx)` 계열 헬퍼로 `data.path`를 해석한다. 명시적 `--data-path`가 없으면 `<config_dir>/data`가 기본값이다.
 - 우선순위:
   1. `ctx.obj["config_dir"]` (루트 그룹이 `--config-dir` 또는 `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path)
-  2. 기본값 `~/.config/ante/` (init과 동일)
+  2. `system.toml` 안의 path-like 설정
+  3. Config 기본값 (`db/ante.db`, `data`, `run/ante.sock` 등)
 - `--db-path` 옵션을 가진 커맨드(`ante approval`, `ante backtest`, `ante instrument`, `ante report`, `ante data`)는 사용자 override를 위해 기본값을 `None`으로 두고, 값이 없을 때 `get_db_path(ctx)`로 폴백한다. 이로써 기존 사용자의 `--db-path` 지정은 그대로 동작한다.
-- 서버(`ante system start`)는 이미 `system.toml`의 `db.path` 설정을 읽고 `ANTE_CONFIG_DIR`을 하위 프로세스로 전달하므로, CLI 쪽 경로 해석이 서버 동작에 영향을 주지 않는다.
+- 서버(`ante system start`)와 런타임 CLI는 같은 resolver로 `db.path`와 `runtime.socket_path`를 해석한다. 따라서 같은 `config_dir`을 쓰면 같은 DB와 IPC socket을 본다.
 
 ### `--db-path` 옵션의 인증 DB / 작업 DB 분리
 
 일부 CLI 커맨드(`ante approval`, `ante backtest`, `ante data`, `ante instrument`, `ante report`)는 대용량 조회·백테스트·스냅샷 조회 등을 위해 보조 DB를 지정할 수 있는 `--db-path <경로>` 옵션을 제공한다. 이 옵션은 **작업 대상 DB만 바꾸며 인증 DB를 바꾸지 않는다**. 아래 분리는 의도된 설계다.
 
-- **인증 단계(루트 그룹)**: `authenticate_member(ctx)`는 항상 `get_db_path(ctx)` — 즉 `resolve_config_dir()`이 해석한 **기본 설정 DB** — 에서 `ANTE_MEMBER_TOKEN`을 검증한다. 서브커맨드의 `--db-path` 값은 루트 콜백 실행 시점에 파싱되기 전이므로 인증 대상 DB에 영향을 줄 수 없다.
+- **인증 단계(루트 그룹)**: `authenticate_member(ctx)`는 항상 `get_db_path(ctx)` — 즉 `config_dir`과 `system.toml`의 `db.path`에서 정규화한 **canonical instance DB** — 에서 `ANTE_MEMBER_TOKEN`을 검증한다. 서브커맨드의 `--db-path` 값은 루트 콜백 실행 시점에 파싱되기 전이므로 인증 대상 DB에 영향을 줄 수 없다.
 - **작업 단계(서브커맨드)**: 인증이 성공하면 서브커맨드가 `--db-path`로 지정된 DB(또는 미지정 시 `get_db_path(ctx)` 폴백)를 열어 실제 조회/기록을 수행한다.
 
 예: `ante approval list --db-path /tmp/backup.db`는
 
-1. 기본 설정 DB(`<config_dir>/db/ante.db`)에서 `ANTE_MEMBER_TOKEN`을 검증한 뒤 (루트 콜백),
+1. canonical instance DB(`<config_dir>/db/ante.db`, 또는 `system.toml`의 `db.path` 정규화 결과)에서 `ANTE_MEMBER_TOKEN`을 검증한 뒤 (루트 콜백),
 2. `/tmp/backup.db`에서 approval 목록을 조회한다 (서브커맨드 콜백).
 
 **이 분리를 유지하는 이유**:
@@ -81,7 +86,7 @@ CLI 커맨드에 멤버 인증과 스코프 기반 접근 제어를 적용하는
 **부수 효과**:
 
 - `--db-path`로 지정한 DB 자체의 유효성(존재 여부, 스키마 호환 등)은 서브커맨드 실행 시점에 검증되며, 인증이 실패하면 그 지점에 도달하지 않으므로 경로 유효성 오류는 노출되지 않을 수 있다. 이는 의도된 순서(인증 먼저)다.
-- 반대로 `--config-dir`(또는 `ANTE_CONFIG_DIR`)은 루트 콜백 시점에 해석되므로 **인증 DB와 작업 DB를 함께** 바꾼다. 두 DB를 한 번에 스위치하려면 `--db-path`가 아니라 `--config-dir`을 사용한다.
+- 반대로 `--config-dir`(또는 `ANTE_CONFIG_DIR`)은 루트 콜백 시점에 해석되므로 **인증 DB, 기본 작업 DB, data root, IPC socket을 함께** 바꾼다. 인스턴스를 스위치하려면 `--db-path`가 아니라 `--config-dir`을 사용한다.
 
 `--db-path`가 인증 DB까지 바꾸도록 재구성하는 것은 구조적 리팩터링(루트 콜백에서 서브커맨드 파라미터 선해석)이 필요하며, 현재 범위에 포함하지 않는다. 필요 시 별도 설계 결정으로 다룬다.
 
@@ -100,6 +105,6 @@ CLI 커맨드는 **오프라인**과 **런타임** 두 가지 방식으로 시�
 
 **런타임 커맨드 실행 흐름**:
 1. CLI에서 `ANTE_MEMBER_TOKEN` 인증 + `@require_scope` 권한 확인 (기존과 동일)
-2. `IPCClient`로 서버의 Unix socket에 커맨드 전달
+2. Config resolver가 정규화한 `runtime.socket_path`로 `IPCClient` 연결
 3. 서버의 `IPCServer`가 수신 → `ServiceRegistry`의 서비스 실행 → EventBus 이벤트 전파
 4. 결과를 CLI에 반환하여 출력

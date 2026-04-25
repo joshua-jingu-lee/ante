@@ -23,5 +23,5 @@ DataStore는 **시세·재무 데이터의 저장·정규화·조회·관리를 
 - **ParquetStore**: Parquet 파일 읽기/쓰기/검증 — 모든 데이터 접근의 단일 진입점. `data_type` 파라미터로 OHLCV/fundamental/tick 등 다중 스키마 지원
 - **Normalizer**: 모든 소스(KIS, Yahoo, DataGoKr, DART 등)의 데이터를 통일된 스키마로 정규화
 - **DataCollector**: 봇 운영 중 APIGateway 경유 실시간 시세 수집 → ParquetStore 적재 (1d 미만만)
-
+- **Canonical data root**: 기본 저장소는 Config의 `data.path`이며, 상대 경로는 `config_dir` 기준으로 정규화
 - **RetentionPolicy**: 보존 정책 기반 용량 관리

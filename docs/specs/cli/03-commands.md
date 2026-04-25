@@ -88,6 +88,8 @@ ante broker status [--account <account_id>]      # 증권사 연결 상태
 ### `ante data` — 데이터 관리
 
 모든 data 커맨드는 `@require_auth`와 `@require_scope("data:read")` 데코레이터 적용.
+`--data-path`를 생략하면 Config resolver가 정규화한 `data.path`를 사용한다.
+명시적 `--data-path`는 해당 커맨드의 작업 대상만 바꾸며 인스턴스 경계를 바꾸지 않는다.
 
 ```bash
 ante data list [--data-path <경로>] [--db-path <경로>]            # 보유 데이터셋 목록 (종목명 병기, InstrumentService 연동)
@@ -97,6 +99,8 @@ ante data validate [--symbol <종목>] [--timeframe <주기>] [--fix] [--data-pa
 ```
 
 ### `ante backtest` — 백테스트
+
+`--data-path`를 생략하면 canonical data root(`data.path`)에서 Parquet 데이터를 읽는다.
 
 ```bash
 ante backtest run <strategy_path> --start <날짜> --end <날짜> [--symbols <종목,...>] [--balance <초기자금>] [--timeframe <주기>] [--data-path <경로>]  # 진행률 바 표시 (text 모드)
@@ -118,7 +122,7 @@ CLI 정의는 `src/ante/feed/cli.py`에 있으며 `ante.cli.main`에서 서브�
 모든 feed 커맨드는 `@require_auth`와 `@require_scope` 데코레이터로 인증/권한 검증을 수행한다.
 
 ```bash
-ante feed init [data_path]               # 운영 디렉토리 초기화, 기본 config 생성 (scope: data:write)
+ante feed init [data_path]               # 운영 디렉토리 초기화, 기본 config 생성. 생략 시 data.path 사용 (scope: data:write)
 ante feed status [--data-path <경로>]     # 수집 상태 조회 (scope: data:read)
 ante feed config set <KEY> <VALUE> [--data-path <경로>]       # API 키를 .feed/.env에 저장 (scope: data:write)
 ante feed config list [--data-path <경로>]                    # 등록된 설정값 목록 (마스킹 표시) (scope: data:read)
@@ -155,7 +159,7 @@ ante approval reopen <approval_id> [--data <json>]  # 거절된 요청 재상신
 ### `ante init` — 시스템 초기 설정
 
 설치 후 최초 1회 실행하는 **비대화형** 설정 커맨드. 인증 면제.
-파일시스템 골격(`system.toml`·`secrets.env`·빈 DB) 생성 + master 계정 + 가상 탐색용 테스트 계좌를 1회 생성한다.
+파일시스템 골격(`system.toml`·`secrets.env`·빈 DB·data/run/logs 디렉토리) 생성 + master 계정 + 가상 탐색용 테스트 계좌를 1회 생성한다.
 
 ```bash
 ante init [--member-id owner] [--name Owner] [--dir <경로>]
@@ -171,10 +175,15 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 **생성 산출물:**
 
-파일 3개와 DB 레코드 2개를 생성한다.
+인스턴스 파일/디렉토리와 DB 레코드 2개를 생성한다.
 
 - 파일: `<dir>/system.toml`, `<dir>/secrets.env` (placeholder 주석), `<dir>/db/ante.db` (스키마 적용)
+- 디렉토리: `<dir>/data/`, `<dir>/run/`, `<dir>/logs/`
 - DB 레코드: master member 1개, default test account (`broker_type="test"`) 1개
+
+`system.toml`은 `db.path = "db/ante.db"`, `data.path = "data"`,
+`runtime.socket_path = "run/ante.sock"`, `runtime.pid_path = "run/ante.pid"`,
+`logging.directory = "logs"`처럼 `config_dir` 기준 상대 경로를 기록한다.
 
 **내부 실행 순서**: 1. 디렉토리 생성 → 2. master bootstrap → 3. test account 생성
 
@@ -187,6 +196,7 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 - 3개 파일 + master row + test account row가 **모두 존재**하면 거부 (`"init이 이미 완료된 상태입니다"`, exit code 1)
 - 그 외 경로에서는 **누락된 것만** 생성. 즉:
   - 파일 누락 → 누락 파일 재생성
+  - `data/`, `run/`, `logs/` 디렉토리 누락 → 누락 디렉토리 재생성
   - master row 없음 → master bootstrap 실행 (비밀값 즉시 출력하여 후속 단계 실패 시에도 복구 가능)
   - test account row 없음 → test account 생성
 

@@ -6,9 +6,12 @@
 
 Ante CLI의 `feed` 서브커맨드로 제공된다.
 
-### `ante feed init <data_path>`
+### `ante feed init [data_path]`
 
 Ante 데이터 저장소에 DataFeed 운영 디렉토리를 초기화한다.
+`data_path`를 생략하면 Config resolver가 정규화한 `data.path`를 사용한다.
+명시적 `data_path` 또는 `--data-path`는 해당 feed 작업 대상만 바꾸며 Ante 인스턴스의
+`config_dir` 자체를 바꾸지 않는다.
 
 **동작:**
 1. `{data_path}/.feed/` 디렉토리 생성
@@ -66,10 +69,10 @@ Daily 수집을 1회 실행 후 종료.
 
 ### `ante feed config set <KEY> <VALUE>`
 
-API 키 등 설정값을 `{data}/.feed/.env`에 저장한다.
+API 키 등 설정값을 `{data.path}/.feed/.env`에 저장한다.
 
 **동작:**
-1. `{data}/.feed/.env` 파일이 없으면 생성
+1. `{data.path}/.feed/.env` 파일이 없으면 생성
 2. 해당 KEY가 이미 존재하면 값을 덮어쓰기
 3. 파일 퍼미션 `0600` 설정 (소유자만 읽기/쓰기)
 
@@ -167,7 +170,7 @@ $ ante feed inject samsung_2024.csv --symbol 005930
 Loaded 245 rows from samsung_2024.csv
 Normalized: source=external, schema=OHLCV
 Validated: 245 rows passed
-Written to ohlcv/krx/1d/005930/
+Written to ohlcv/1d/krx/005930/
 
 Injected 245 rows for 005930 (1d)
 ```

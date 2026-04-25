@@ -12,7 +12,7 @@ systemd 서비스로 바로 사용할 수 있어 OS별 스케줄러 설정이 �
 ```
 ante feed start
   │
-  ├─ config 로드 ({data}/.feed/config.toml + .env + 환경변수)
+  ├─ config 로드 ({data.path}/.feed/config.toml + .env + 환경변수)
   │
   ├─ [스케줄 루프]
   │   ├─ backfill 미완료? → backfill_at 시각에 backfill 실행
@@ -33,8 +33,8 @@ ante feed start
 ```
 ante feed run backfill
   │
-  ├─ config 로드 ({data}/.feed/config.toml + .env + 환경변수)
-  ├─ 체크포인트 로드 ({data}/.feed/checkpoints/)
+  ├─ config 로드 ({data.path}/.feed/config.toml + .env + 환경변수)
+  ├─ 체크포인트 로드 ({data.path}/.feed/checkpoints/)
   ├─ 날짜 범위 결정 (체크포인트 이후 ~ 오늘)
   │
   ├─ [날짜별 루프]
@@ -47,7 +47,7 @@ ante feed run backfill
   │   ├─ Load: ante.data.store.ParquetStore.write()로 저장
   │   └─ 체크포인트 갱신
   │
-  └─ 리포트 생성 ({data}/.feed/reports/)
+  └─ 리포트 생성 ({data.path}/.feed/reports/)
 ```
 
 ### Daily Incremental — 일일 증분 수집
@@ -57,7 +57,7 @@ Backfill 완료 후, 매일 전일 데이터를 보강한다.
 ```
 ante feed run daily
   │
-  ├─ config 로드 ({data}/.feed/config.toml + .env + 환경변수)
+  ├─ config 로드 ({data.path}/.feed/config.toml + .env + 환경변수)
   ├─ 전일 날짜 결정
   ├─ 방어 가드 (blocked_days/blocked_hours)
   ├─ 동일 ETL 흐름 (날짜 1개)

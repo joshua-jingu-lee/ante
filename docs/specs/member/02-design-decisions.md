@@ -192,7 +192,7 @@ scopes: bot:read, bot:admin, approval:read, approval:write, config:read
 
 ```
 $ ante init --member-id owner --name "홈트레이더"
-  1. 설정 디렉토리 생성 + system.toml / secrets.env 생성
+  1. config_dir 생성 + system.toml / secrets.env / db / data / run / logs 골격 생성
   2. members 테이블 생성 (없으면)
   3. master 멤버 생성 (type=human, role=master, org=default)
   4. 패스워드 자동 생성 + 화면 출력 (원문은 저장하지 않음)
@@ -214,6 +214,7 @@ $ ante init --member-id owner --name "홈트레이더"
 위 5가지 중 일부만 존재하는 경우에는 **누락된 것만** 생성하는 재진입 모드로 동작한다:
 
 - 파일(1~3)이 누락 → 누락된 파일만 재생성
+- `data/`, `run/`, `logs/` 디렉토리가 누락 → 누락된 디렉토리만 재생성
 - master row가 없으면 → master bootstrap 실행 (패스워드 / 토큰 / Recovery Key를 화면에 1회 출력)
 - test account row가 없으면 → test account 생성
 - test account가 `suspended` 또는 `deleted` 상태로 존재 → 명확한 에러 메시지로 중단 (사용자가 수동으로 정리)

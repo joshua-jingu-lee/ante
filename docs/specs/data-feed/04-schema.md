@@ -10,7 +10,7 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 
 **FUNDAMENTAL**: [data-pipeline.md](../data-pipeline/data-pipeline.md) §FUNDAMENTAL_SCHEMA 참조.
 
-**INSTRUMENTS** (`{data}/.feed/instruments.parquet`):
+**INSTRUMENTS** (`{data.path}/.feed/instruments.parquet`):
 
 수집 과정에서 확보한 종목 메타데이터. Ante의 `InstrumentService`가 읽어서 `instruments` 테이블에 반영할 수 있다.
 
@@ -29,7 +29,7 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 | 항목 | 규칙 |
 |------|------|
 | 형식 | Parquet (snappy 압축) |
-| 디렉토리 | `data/{data_type}/{exchange}/{timeframe}/{symbol}/{YYYY-MM}.parquet` |
+| 디렉토리 | OHLCV: `{data.path}/ohlcv/{timeframe}/{exchange}/{symbol}/{YYYY-MM}.parquet`; 기타: `{data.path}/{data_type}/{exchange}/{symbol}/{YYYY-MM}.parquet` |
 | 파티셔닝 | 1m 이상: 월별, 10s/30s: 일별 (YYYY-MM-DD) |
 | 쓰기 방식 | `ParquetStore.write()` 호출 (파티션 단위 overwrite — 멱등성 보장) |
 | 정렬 | timestamp/date 오름차순 |

@@ -8,7 +8,7 @@
 |---|---|---|
 | `JsonFormatter` | `src/ante/core/log/formatter.py` (신설) | `logging.Formatter` 상속, `format()`이 [03-json-schema.md](03-json-schema.md)의 스키마에 따라 JSON 직렬화 |
 | `compute_fingerprint` | `src/ante/core/log/fingerprint.py` (신설) | Exception과 traceback 객체에서 [04-fingerprint.md](04-fingerprint.md) 규칙에 따라 키 생성 |
-| `setup_logging` | `src/ante/core/log/setup.py` (신설) | 핸들러 구성 함수. `config`, 환경변수, 로그 디렉토리를 입력으로 받아 `logging` 루트 로거에 핸들러 부착 |
+| `setup_logging` | `src/ante/core/log/setup.py` (신설) | 핸들러 구성 함수. `config`와 환경변수를 입력으로 받아 Config resolver가 정규화한 `logging.directory`에 파일 핸들러를 부착 |
 | `AnteLogger` / `install_safe_logger` | `src/ante/core/log/safe_logger.py` (신설) | 예약 키가 `extra=` 로 주입되어도 `makeRecord` KeyError 없이 무시되도록 Logger 서브클래스 등록 |
 | `DateNamedTimedRotatingFileHandler` | `src/ante/core/log/handlers.py` (신설) | 활성 파일명에 `YYYY-MM-DD` 를 포함시켜 자정 경계에서 **파일명 교체**로 회전 (이름 바꾸기 없음) |
 | 예약 키 단일 소스 | `src/ante/core/log/_record_keys.py` (신설) | `LOGRECORD_ATTRS` 는 런타임 프로브로 추출, `ANTE_RESERVED` 는 JSONL 스펙 필드. formatter/safe_logger 가 공유 |

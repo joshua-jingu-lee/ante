@@ -119,9 +119,14 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 
 ### 전송 계층
 
-- **Unix domain socket**: `{data_dir}/ante.sock` (예: `db/ante.sock`)
+- **Unix domain socket**: Config resolver가 정규화한 `runtime.socket_path`
+  - 기본값: `<config_dir>/run/ante.sock`
+  - `system.toml`에는 `runtime.socket_path = "run/ante.sock"`처럼 `config_dir` 기준 상대 경로를 기록한다.
 - 서버 기동 시 소켓 생성, 종료 시 삭제
 - 파일 시스템 권한으로 접근 제어 (소유자만 접근 가능, `0o600`)
+
+CLI와 서버는 같은 `--config-dir` 또는 `ANTE_CONFIG_DIR`을 사용할 때 같은 socket을 본다.
+CWD나 `db.path` parent에서 socket 위치를 파생하지 않는다.
 
 ### 메시지 형식
 

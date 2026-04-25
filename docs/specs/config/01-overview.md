@@ -11,5 +11,6 @@ Config 모듈은 Ante의 **모든 설정에 대한 통일된 접근 인터페이
 **주요 기능**:
 - **3계층 설정 분리**: 정적 설정(TOML), 비밀값(.env + 환경변수), 동적 설정(SQLite) — 각 성격에 맞는 저장소와 변경 주기
 - **통일된 접근 API**: `Config.get()` (정적), `Config.secret()` (비밀값), `DynamicConfigService` (동적) — 모듈별 설정 접근 패턴 일관화
+- **인스턴스 경계 정의**: `config_dir`을 Ante instance root로 삼고 DB·data·PID·IPC socket·logs·secrets 경로를 같은 resolver로 정규화
 - **동적 설정 즉시 반영**: SQLite CRUD + EventBus(`ConfigChangedEvent`) 알림으로 재시작 없이 런타임 변경 적용
 - **시작 시 유효성 검증**: 필수 설정 존재 여부 및 타입을 시작 시점에 전체 검증 (Fail-fast)

@@ -35,11 +35,11 @@
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 
-#### 1. 정적 설정 — TOML 파일 (`config/system.toml`)
+#### 1. 정적 설정 — TOML 파일 (`<config_dir>/system.toml`)
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 
-#### 2. 비밀값 — `.env` 파일 (`config/secrets.env`)
+#### 2. 비밀값 — `.env` 파일 (`<config_dir>/secrets.env`)
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 
@@ -56,6 +56,10 @@
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 
 ### 동적 설정 변경 알림 흐름
+
+상세 내용: [03-design-decisions.md](03-design-decisions.md)
+
+### Ante instance/path contract
 
 상세 내용: [03-design-decisions.md](03-design-decisions.md)
 

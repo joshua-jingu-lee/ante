@@ -20,11 +20,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 파일명 | `logs/ante-YYYY-MM-DD.jsonl` (활성 파일명 자체가 날짜를 포함) |
+| 파일명 | `<logging.directory>/ante-YYYY-MM-DD.jsonl` (활성 파일명 자체가 날짜를 포함) |
 | 회전 시점 | **Asia/Seoul 자정**. 핸들러가 `zoneinfo.ZoneInfo("Asia/Seoul")` 을 사용해 코드 레벨에서 TZ 를 고정한다 (호스트/컨테이너 TZ 와 무관) |
 | 회전 방식 | 활성 파일은 날짜를 포함하므로 rename 불필요. 자정에 새 날짜로 `baseFilename` 을 교체하고 새 파일을 연다 |
 | 보관 | 30일 (`backupCount=30`). 초과분은 가장 오래된 파일부터 삭제 |
-| 디렉토리 | 컨테이너 `/app/logs` (named volume 또는 bind mount) |
+| 디렉토리 | Config resolver가 정규화한 `logging.directory` (기본 `<config_dir>/logs`) |
 | 퍼미션 | 0644 (기본) |
 
 ## 회전 동작 세부
@@ -47,11 +47,11 @@
 
 | 환경 | 마운트 방식 | 경로 |
 |---|---|---|
-| Production | Docker named volume `ante-logs` → `/app/logs` (`docker-compose.yml`) | 재시작 시 보존 |
-| Staging | bind mount `~/ante-staging/logs` → `/app/logs` (`docker-compose.staging.yml`, `ANTE_STAGING_LOG_DIR` 로 override 가능) | 감시 에이전트 설계 (§7.2) 의 글롭 전제와 일치 |
+| Production | Docker named volume `ante-logs` → `logging.directory` (`docker-compose.yml`) | 재시작 시 보존 |
+| Staging | bind mount `~/ante-staging/logs` → `logging.directory` (`docker-compose.staging.yml`, `ANTE_STAGING_LOG_DIR` 로 override 가능) | 감시 에이전트 설계 (§7.2) 의 글롭 전제와 일치 |
 | QA | 마운트 불필요 | TC 실행 중 휘발, 자동 삭제 |
 | 로컬 개발 | bind mount 또는 마운트 생략 | 개발자 선택 |
 
 Staging이 bind mount인 이유: 감시 에이전트가 Docker 컨테이너 외부(맥미니 호스트)에서 직접 JSONL 파일을 읽어야 하기 때문이다. Staging override 는 `docker compose -f docker-compose.yml -f docker-compose.staging.yml up` 형식으로 결합하며, `ANTE_ENV=staging` 과 `ANTE_LOG_JSONL=1` 을 기본 주입한다.
 
-Production 볼륨 이름은 기존 저장소 관습(`ante-data`, `ante-db` 하이픈)을 따라 `ante-logs` 로 선언한다(compose 프로젝트 prefix 가 붙어 실제 생성되는 볼륨은 `ante_ante-logs`). `ANTE_LOG_JSONL=1` 게이트는 Production 에서도 점진 도입 원칙에 따라 운영 시점에 `config/secrets.env` 또는 compose `environment:` 로 주입한다. 게이트가 꺼진 상태에서는 파일 핸들러가 생성되지 않아 `ante-logs` 볼륨은 비어 있게 된다.
+Production 볼륨 이름은 기존 저장소 관습(`ante-data`, `ante-db` 하이픈)을 따라 `ante-logs` 로 선언한다(compose 프로젝트 prefix 가 붙어 실제 생성되는 볼륨은 `ante_ante-logs`). 컨테이너 배포에서 로그를 config 볼륨과 분리하고 싶으면 `system.toml`의 `logging.directory`를 `/app/logs` 같은 절대 경로로 override한다. `ANTE_LOG_JSONL=1` 게이트는 Production 에서도 점진 도입 원칙에 따라 운영 시점에 `<config_dir>/secrets.env` 또는 compose `environment:` 로 주입한다. 게이트가 꺼진 상태에서는 파일 핸들러가 생성되지 않아 `ante-logs` 볼륨은 비어 있게 된다.
