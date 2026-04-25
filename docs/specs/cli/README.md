@@ -13,7 +13,7 @@
 | [cli.md](cli.md) | 호환용 개요 문서 및 기존 섹션 앵커 |
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-design-decisions.md](02-design-decisions.md) | 설계 결정 |
-| [03-commands.md](03-commands.md) | 커맨드 상세 |
+| [03-commands.md](03-commands.md) | 커맨드 상세. CLI 명령 시그니처와 실행 분류의 SSOT |
 | [04-agent-workflows.md](04-agent-workflows.md) | Agent 워크플로우 예시 |
 | [05-open-issues.md](05-open-issues.md) | 미결 사항 |
 | [06-cross-module-notes.md](06-cross-module-notes.md) | 타 모듈 설계 시 참고 |

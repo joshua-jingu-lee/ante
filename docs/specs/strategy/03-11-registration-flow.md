@@ -4,6 +4,10 @@
 
 # 전략 등록 플로우
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-strategy--전략-관리)다. Strategy
+문서는 등록 플로우와 도메인 동작만 정의한다.
+
 ```
 Agent: 전략 파일 작성 (strategies/momentum_breakout.py)
   ↓
@@ -21,6 +25,9 @@ StrategyValidator.validate()
             ↓
           "전략 등록 완료: momentum_breakout_v1.0.0"
 ```
+
+`submit` 결과로 생성된 `strategy_id`가 봇 생성의 입력이다. `ante bot create`는
+전략 파일 경로를 직접 받지 않는다.
 
 **단계별 설명**:
 1. **정적 검증** (StrategyValidator): 코드 실행 없이 AST 분석

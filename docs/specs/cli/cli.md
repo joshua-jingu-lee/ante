@@ -13,7 +13,7 @@
 | [README.md](README.md) | 분할 인덱스 |
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-design-decisions.md](02-design-decisions.md) | 설계 결정 |
-| [03-commands.md](03-commands.md) | 커맨드 상세 |
+| [03-commands.md](03-commands.md) | 커맨드 상세. CLI 명령 시그니처와 실행 분류의 SSOT |
 | [04-agent-workflows.md](04-agent-workflows.md) | Agent 워크플로우 예시 |
 | [05-open-issues.md](05-open-issues.md) | 미결 사항 |
 | [06-cross-module-notes.md](06-cross-module-notes.md) | 타 모듈 설계 시 참고 |
@@ -118,7 +118,15 @@
 
 상세 내용: [03-commands.md](03-commands.md)
 
+### `ante audit` — 감사 로그 조회
+
+상세 내용: [03-commands.md](03-commands.md)
+
 ### `ante signal` — 외부 시그널 채널
+
+상세 내용: [03-commands.md](03-commands.md)
+
+### `ante update` — 업데이트
 
 상세 내용: [03-commands.md](03-commands.md)
 

@@ -4,6 +4,10 @@
 
 # CLI 인터페이스
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-broker--증권사-연동)다. 이 문서는
+Broker Adapter 관점의 런타임 경계만 설명한다.
+
 증권사 live 상태를 읽는 CLI 명령은 서버가 시작 시 생성한 BrokerAdapter를 통해
 실행하는 런타임 IPC 커맨드다. CLI가 별도 adapter를 직접 생성하면 credentials 복호화,
 연결 세션, rate limit, circuit breaker, audit 경로가 서버와 분리된다.

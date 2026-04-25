@@ -90,9 +90,12 @@ GET /api/audit?member_id=agent-01&action=bot.&from_date=2026-03-12&to_date=2026-
 
 ### CLI
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-audit--감사-로그-조회)다.
+
 ```
 ante audit list \
-  [--member-id agent-01] \
+  [--member agent-01] \
   [--action "bot."] \
   [--from-date 2026-03-12] \
   [--to-date 2026-03-19] \

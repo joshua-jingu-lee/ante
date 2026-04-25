@@ -51,6 +51,10 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 
 ## CLI 커맨드 분류
 
+CLI 명령 시그니처와 전체 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md)다. 이 절은 그중 IPC 서버가 라우팅해야 하는
+런타임 커맨드와 cold-path 예외만 설명한다.
+
 구분 기준: **서버 프로세스가 보유한 EventBus 구독자, 인메모리 작업, 외부 연결,
 인증·세션 상태가 관여하는가?**
 
@@ -80,7 +84,7 @@ IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비�
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante bot create` | `bot.create` | `BotManager.create_bot()` | BotManager 인메모리 `_bots` 반영 필요 |
+| `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
 | `ante bot start` | `bot.start` | `BotManager.start_bot()` | asyncio task 생성 + `BotStartedEvent` 발행 |
 | `ante bot stop` | `bot.stop` | `BotManager.stop_bot()` | 실행 task 취소 + `BotStoppedEvent` 발행 |
 | `ante bot remove` | `bot.remove` | `BotManager.remove_bot()` | 실행 중 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요 |

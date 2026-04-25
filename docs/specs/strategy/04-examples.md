@@ -10,6 +10,8 @@
 
 ### CLI 사용 (Agent 워크플로우)
 
+CLI 명령 시그니처의 SSOT는 [cli/03-commands.md](../cli/03-commands.md#ante-strategy--전략-관리)다.
+
 ```bash
 # 전략 정적 검증
 ante strategy validate strategies/momentum_breakout.py
@@ -20,6 +22,6 @@ ante strategy submit strategies/momentum_breakout.py
 # 등록된 전략 목록
 ante strategy list --format json
 
-# 전략 상세 조회
-ante strategy info momentum_breakout_v1.0.0 --format json
+# 전략 상세 조회 (CLI는 strategy name을 받으며 최신 버전을 보여준다)
+ante strategy info momentum_breakout --format json
 ```

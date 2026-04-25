@@ -5,6 +5,9 @@
 # CLI
 
 Ante CLI의 `feed` 서브커맨드로 제공된다.
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-feed--데이터-피드-datafeed)다. 이 문서는
+DataFeed 작업별 동작만 설명한다.
 
 ### `ante feed init [data_path]`
 

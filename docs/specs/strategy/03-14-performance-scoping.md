@@ -8,7 +8,7 @@
 
 ```bash
 # 계좌별 성과 조회
-ante strategy performance momentum_breakout --account domestic
+ante strategy performance momentum_breakout --account-id domestic
 # → domestic 계좌에서의 성과만
 
 ante strategy performance momentum_breakout

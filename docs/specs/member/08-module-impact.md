@@ -10,7 +10,7 @@ Member 모듈 도입 시 기존 모듈에서 `"agent"` 하드코딩을 member_id
 |------|------|---------|
 | Strategy `author` | `"agent"` 하드코딩 | 인증된 member_id 사용 |
 | Report `submitted_by` | `"agent"` 하드코딩 | 인증된 member_id 사용 |
-| Approval `requester` | CLI `--requester` 옵션 (기본 `"agent"`) | 토큰에서 member_id 자동 추출 |
+| Approval `requester` | 과거 CLI `--requester` 옵션 또는 `"agent"` 기본값 | 토큰에서 member_id 자동 추출 |
 | Approval `resolved_by` | `"user"` 하드코딩 | 인증된 member_id 사용 |
 | Approval `history.actor` | 자유 문자열 | member_id 사용 |
 | CLI 전체 | 인증 없음 | 토큰 기반 인증 미들웨어 추가 |

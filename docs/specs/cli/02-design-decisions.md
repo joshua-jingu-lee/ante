@@ -103,7 +103,8 @@ CLI 커맨드는 **오프라인**, **런타임**, **cold-path structural** 세 �
 | **런타임** | IPC (Unix domain socket) | 봇 실행 제어, 예산 할당, 설정 변경, live broker 조회, 멤버 인증 상태 변경처럼 서버의 EventBus·인메모리 상태·외부 연결·세션 상태가 관여하는 커맨드. 서버 프로세스의 서비스 계층에 위임한다. |
 | **cold-path structural** | 서버 정지 guard + 직접 DB | 계좌 생성/삭제/credentials 변경처럼 서버 topology를 바꾸는 커맨드. 같은 `config_dir`의 서버가 실행 중이면 DB 수정 전 거부한다. |
 
-런타임 커맨드의 상세 목록과 IPC 프로토콜은 [ipc.md](../ipc/ipc.md)를 참조한다.
+CLI 명령 시그니처와 실행 분류의 SSOT는 [03-commands.md](03-commands.md)다.
+런타임 커맨드의 IPC 프로토콜과 서버 라우팅은 [ipc.md](../ipc/ipc.md)를 참조한다.
 
 **런타임 커맨드 실행 흐름**:
 1. CLI에서 `ANTE_MEMBER_TOKEN` 인증 + `@require_scope` 권한 확인 (기존과 동일)

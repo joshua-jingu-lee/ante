@@ -21,7 +21,7 @@ ante report schema --format json
 ante report submit report_draft.json --format json
 
 # 5. (채택 후) 실전 성과 확인 — Agent 피드백 루프
-ante trade list --bot bot_001 --days 30 --format json
+ante trade list --bot bot_001 --from 2026-03-01 --to 2026-03-31 --format json
 ante bot positions bot_001 --format json
 ante strategy performance my_strategy --format json
 ```

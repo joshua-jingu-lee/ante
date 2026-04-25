@@ -232,7 +232,7 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 - fundamental: `{base_path}/fundamental/{exchange}/{symbol}/{YYYY-MM}.parquet`
 - tick: `{base_path}/tick/{exchange}/{symbol}/{YYYY-MM-DD}.parquet`
 
-**기존 데이터 마이그레이션**: exchange 미명시 기존 데이터(OHLCV 경로에 exchange 디렉토리가 없는 경우)는 `KRX/` 하위로 자동 이동한다. 마이그레이션은 시스템 시작 시 자동 감지·실행하거나, CLI 명령 `ante data migrate`로 수동 실행할 수 있다.
+**기존 데이터 마이그레이션**: exchange 미명시 기존 데이터(OHLCV 경로에 exchange 디렉토리가 없는 경우)는 `KRX/` 하위로 자동 이동한다. 마이그레이션은 시스템 시작 또는 `ante update`의 post-update migration에서 자동 감지·실행한다. 별도 public `ante data migrate` 명령은 CLI SSOT에 포함하지 않는다.
 
 소스: `src/ante/data/store.py`
 

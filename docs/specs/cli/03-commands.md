@@ -4,6 +4,92 @@
 
 # 커맨드 상세
 
+## SSOT 원칙
+
+이 문서는 Ante CLI의 **명령 시그니처, 실행 분류, 서버 실행 중 동작**에 대한 단일 출처(SSOT)다.
+모듈별 문서는 도메인 동작과 예시를 설명할 수 있지만, CLI 옵션·인자·runtime/offline
+분류가 이 문서와 충돌하면 이 문서를 우선한다.
+
+전략 파일 경로와 등록된 전략 ID는 분리한다. 전략 파일은 `ante strategy submit <path>`와
+`ante backtest run <strategy_path>`에서만 직접 받는다. 봇 생성은 등록된 전략 ID를
+사용한다.
+
+## 실행 분류 전수 표
+
+| 분류 | 의미 |
+|------|------|
+| `offline` | 서버 프로세스와 무관하게 CLI가 직접 서비스/저장소를 생성해 실행한다. 서버 실행 중에도 live 상태를 바꾸지 않는다. |
+| `runtime IPC` | 서버 프로세스의 서비스 인스턴스, EventBus, 인메모리 상태, 외부 연결, 세션 상태가 필요하므로 IPC로 위임한다. |
+| `runtime IPC + snapshot fallback` | 서버 실행 중에는 IPC로 live 상태를 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다. |
+| `cold-path` | 서버 topology 또는 broker 초기화 입력을 바꾸므로 같은 `config_dir`의 서버가 정지된 상태에서만 직접 DB를 수정한다. |
+| `external process` | 별도 프로세스 실행, OS signal, 장기 실행 파이프/스케줄러처럼 CLI 프로세스 경계를 넘는 작업이다. |
+| `bootstrap/maintenance` | 초기화·복구 목적의 인증 면제 또는 서버 정지 fallback 경로다. |
+
+| 커맨드 | 분류 | 실행 경계 |
+|--------|------|-----------|
+| `ante system start [--config-dir <path>]` | `external process` | `python -m ante.main` 실행 |
+| `ante system stop` | `external process` | PID 기반 SIGTERM |
+| `ante system status` | `offline` | canonical DB/PID 상태 조회 |
+| `ante system halt [--account <account_id>]` | `runtime IPC` | 서버 AccountService kill switch |
+| `ante system activate [--account <account_id>]` | `runtime IPC` | 서버 AccountService kill switch 해제 |
+| `ante account list [--status <status>]` | `offline` | runtime-safe 조회 |
+| `ante account info <account_id>` | `offline` | runtime-safe 조회 |
+| `ante account credentials <account_id>` | `offline` | 마스킹 조회 |
+| `ante account create` | `cold-path` | 서버 실행 중 차단 |
+| `ante account set-credentials <account_id> ...` | `cold-path` | 서버 실행 중 차단 |
+| `ante account delete <account_id>` | `cold-path` | 서버 실행 중 차단 |
+| `ante account suspend <account_id> --reason <reason>` | `runtime IPC` | 서버 AccountService + EventBus |
+| `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
+| `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
+| `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
+| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
+| `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
+| `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
+| `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
+| `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성 |
+| `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지 |
+| `ante bot remove <bot_id>` | `runtime IPC` | 서버 BotManager 정리 |
+| `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
+| `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
+| `ante trade info <trade_id>` | `offline` | canonical DB 조회 |
+| `ante strategy validate <path>` | `offline` | AST 정적 검증 |
+| `ante strategy submit <path>` | `offline` | 검증 + 로드 테스트 + StrategyRegistry 등록 |
+| `ante strategy list` | `offline` | StrategyRegistry 조회 |
+| `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
+| `ante strategy performance <name> [--account-id <account_id>]` | `offline` | 성과 DB 집계 |
+| `ante treasury status [--account <account_id>]` | `offline` | persisted treasury 상태 조회 |
+| `ante treasury allocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
+| `ante treasury deallocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
+| `ante treasury snapshot ...` | `offline` | 일별 snapshot 조회 |
+| `ante rule list [--scope global|strategy]` | `offline` | rule 설정 조회 |
+| `ante rule info <rule_id>` | `offline` | rule 설정 조회 |
+| `ante broker status/health [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 상태 |
+| `ante broker balance [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
+| `ante broker positions [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
+| `ante broker price <symbol> [--account <account_id>]` | `runtime IPC` | live broker quote |
+| `ante broker reconcile [--account <account_id>] [--fix]` | `runtime IPC` | 서버 PositionReconciler |
+| `ante data list/schema/storage/validate ...` | `offline` | canonical data root 또는 명시 data path 대상 |
+| `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
+| `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
+| `ante report schema/submit/list/view/performance ...` | `offline` | ReportStore/PerformanceFeedback 직접 호출 |
+| `ante feed init/status/config/inject/run ...` | `offline` | canonical data root의 feed 작업 |
+| `ante feed start [--data-path <path>]` | `external process` | 장기 실행 feed scheduler |
+| `ante config get [key]` | `offline` | static/dynamic config 조회 |
+| `ante config set <key> <value>` | `runtime IPC` | 서버 DynamicConfigService + EventBus |
+| `ante config history <key>` | `offline` | dynamic config history 조회 |
+| `ante approval request/approve/reject/cancel/reopen ...` | `runtime IPC` | 서버 ApprovalService + Notification/EventBus |
+| `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
+| `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
+| `ante member list/info ...` | `offline` | member 조회 |
+| `ante member register --id <member_id> --type human|agent ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member set-emoji/suspend/reactivate/revoke/rotate-token/reset-password/regenerate-recovery-key ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| 동일 member mutation, 서버 정지 상태 | `bootstrap/maintenance` | recovery/비상 운영 fallback |
+| `ante instrument list/search/sync/import ...` | `offline` | InstrumentService 및 외부 master data 작업 |
+| `ante audit list ...` | `offline` | 감사 로그 조회 |
+| `ante signal connect --key <sk_...>` | `external process` | signal key 기반 장기 실행 JSON Lines 채널 |
+| `ante update [--check] [--version <version>] [--yes] [--force]` | `external process` | pip update + post-update migration |
+| `ante notification` | — | public leaf command 없음 |
+
 ### `ante system` — 시스템 제어
 
 ```bash
@@ -17,7 +103,7 @@ ante system activate [--account <account_id>]  # halt 해제, 거래 재개 (계
 ### `ante account` — 계좌 관리
 
 ```bash
-ante account list                             # 계좌 목록
+ante account list [--status active|suspended|deleted]  # 계좌 목록
 ante account info <account_id>                # 계좌 상세 정보
 ante account create                           # 대화형 계좌 등록 (cold-path 전용, 서버 정지 필요)
 ante account credentials <account_id>         # 인증 정보 조회 (마스킹)
@@ -35,7 +121,7 @@ ante account delete <account_id>              # 계좌 삭제 (cold-path 전용,
 
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
-ante bot create <name> --strategy <path> --account <account_id> [--balance <금액>] [--param key=value ...]
+ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
 ante bot start <bot_id>            # 봇 시작
 ante bot stop <bot_id>             # 봇 중지
 ante bot remove <bot_id>           # 봇 삭제
@@ -51,10 +137,13 @@ IPC 커맨드다. 서버 실행 중 `bot list/info/status/positions/signal-key` 
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB의 persisted snapshot만
 읽을 수 있으며, 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
 
+`--strategy`는 등록된 `strategy_id`다. 전략 파일 경로를 직접 넘기려면 먼저
+`ante strategy submit <path>`로 등록해야 한다.
+
 ### `ante trade` — 거래 이력
 
 ```bash
-ante trade list [--account <account_id>] [--bot <bot_id>] [--strategy <name>] [--days N] [--limit N]
+ante trade list [--bot <bot_id>] [--from <날짜>] [--to <날짜>] [--limit N]
 ante trade info <trade_id>         # 거래 상세
 ```
 
@@ -62,17 +151,21 @@ ante trade info <trade_id>         # 거래 상세
 
 ```bash
 ante strategy validate <path>      # 전략 파일 정적 검증 (AST)
+ante strategy submit <path>        # 검증 + 로드 테스트 + 전략 등록
 ante strategy list                 # 등록된 전략 목록
 ante strategy info <name>          # 전략 상세 (메타데이터, 파라미터)
-ante strategy performance <name>   # 전략 전체 성과 (모든 봇 집계, Agent 피드백용)
+ante strategy performance <name> [--account-id <account_id>]  # 전략 전체 성과 (모든 봇 집계, Agent 피드백용)
 ```
+
+`strategy submit`은 전략 파일을 `StrategyRegistry`에 등록하고 `strategy_id`를 생성한다.
+이후 봇 생성은 이 `strategy_id`를 참조한다.
 
 ### `ante treasury` — 자금 관리
 
 ```bash
 ante treasury status [--account <account_id>]    # 자금 현황 (계좌별 필터링)
-ante treasury allocate <bot_id> <금액>           # 봇에 자금 할당
-ante treasury deallocate <bot_id>                # 봇 자금 회수
+ante treasury allocate <bot_id> <금액> --account <account_id>    # 봇에 자금 할당
+ante treasury deallocate <bot_id> <금액> --account <account_id>  # 봇 자금 회수
 
 # 일별 자산 스냅샷 조회
 ante treasury snapshot [--account <account_id>]                        # 최근 스냅샷 (대시보드 D-1)
@@ -85,7 +178,7 @@ ante treasury snapshot --date <날짜> [--account <account_id>]          # 특�
 ### `ante rule` — 거래 룰 관리
 
 ```bash
-ante rule list                     # 전역 + 전략별 룰 목록
+ante rule list [--scope global|strategy]  # 전역 + 전략별 룰 목록
 ante rule info <rule_id>           # 룰 상세
 ```
 
@@ -126,13 +219,14 @@ ante data validate [--symbol <종목>] [--timeframe <주기>] [--fix] [--data-pa
 
 ```bash
 ante backtest run <strategy_path> --start <날짜> --end <날짜> [--symbols <종목,...>] [--balance <초기자금>] [--timeframe <주기>] [--data-path <경로>]  # 진행률 바 표시 (text 모드)
+ante backtest history <strategy_name> [--limit N] [--db-path <경로>]  # 전략별 백테스트 실행 이력
 ```
 
 ### `ante report` — 리포트
 
 ```bash
 ante report schema                 # 리포트 제출 스키마 조회 (Agent용)
-ante report submit <json_path> [--db-path <경로>]     # 리포트 제출
+ante report submit <json_path> [--run <run_id>] [--db-path <경로>]  # 리포트 제출
 ante report list [--status <상태>] [--db-path <경로>]  # 리포트 목록 조회
 ante report view <report_id> [--db-path <경로>]        # 리포트 상세 조회
 ante report performance [--period daily|monthly] [--bot-id <봇ID>] [--start <날짜>] [--end <날짜>] [--year <연도>]  # 기간별 성과 집계
@@ -168,10 +262,10 @@ ante config history <key>          # 설정 변경 이력 조회
 ### `ante approval` — 승인 요청 관리
 
 ```bash
-ante approval request <type> --data <json>  # 승인 요청 생성
+ante approval request --type <type> --title <title> [--body <text>] [--params <json>] [--reference-id <id>] [--expires-in 72h]  # 승인 요청 생성
 ante approval list [--status <상태>]        # 승인 요청 목록
 ante approval info <approval_id>            # 승인 요청 상세
-ante approval review <approval_id>          # 승인 요청 리뷰 (상세 + 승인/거부 안내)
+ante approval review <approval_id> --result pass|warn|fail [--detail <text>]  # 승인 요청 리뷰
 ante approval cancel <approval_id>          # 승인 요청 취소
 ante approval approve <approval_id>         # 승인 요청 승인
 ante approval reject <approval_id>          # 승인 요청 거부
@@ -240,8 +334,8 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 > master 계정 생성은 `ante init`에 통합되었다. 별도 `ante member bootstrap` 명령은 제거됨(재설계 2026-04).
 
 ```bash
-ante member register <name> --role <역할>               # 멤버 등록
-ante member list [--status <상태>]                      # 멤버 목록
+ante member register --id <member_id> --type human|agent [--org <org>] [--name <name>] [--scopes <csv>]  # 멤버 등록
+ante member list [--type human|agent] [--org <org>] [--status active|suspended|revoked]  # 멤버 목록
 ante member info <member_id>                            # 멤버 상세
 ante member suspend <member_id>                         # 멤버 일시 정지
 ante member reactivate <member_id>                      # 멤버 재활성화
@@ -261,20 +355,31 @@ ante member regenerate-recovery-key                     # 복구 키 재발급
 ### `ante instrument` — 종목 관리
 
 ```bash
-ante instrument list [--exchange <거래소>] [--listed-only]  # 종목 목록
+ante instrument list [--exchange <거래소>] [--type <유형>] [--listed-only] [--db-path <경로>]  # 종목 목록
 ante instrument sync [--exchange <거래소>]                  # KIS API에서 종목 마스터 동기화
-ante instrument search <query> [--listed-only]              # 종목 검색
-ante instrument import <filepath> [--dry-run]               # CSV/JSON 종목 데이터 주입
+ante instrument search <query> [--limit N] [--listed-only] [--db-path <경로>]  # 종목 검색
+ante instrument import <filepath> [--dry-run] [--db-path <경로>]  # CSV/JSON 종목 데이터 주입
 ```
 
 ### `ante notification` — 알림 관리
 
+`notification_history` 테이블 제거 후 public leaf command는 없다. 텔레그램 채팅방 자체가
+발송 이력을 담당한다.
+
+### `ante audit` — 감사 로그 조회
+
 ```bash
-ante notification list [--level <레벨>] [--limit N] [--failed]  # 알림 발송 이력 조회
+ante audit list [--member <member_id>] [--action <prefix>] [--from-date <날짜>] [--to-date <날짜>] [--limit N] [--offset N]
 ```
 
 ### `ante signal` — 외부 시그널 채널
 
 ```bash
 ante signal connect --key <sk_...>   # 양방향 JSON Lines 시그널 채널 수립
+```
+
+### `ante update` — 업데이트
+
+```bash
+ante update [--check] [--version <version>] [--yes] [--force]
 ```

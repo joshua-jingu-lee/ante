@@ -4,6 +4,10 @@
 
 # CLI 사용법
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-backtest--백테스트)다. 이 문서는
+Backtest 관점의 실행 예시만 제공한다.
+
 ```bash
 # 백테스트 실행
 ante backtest run strategies/my_strategy.py \

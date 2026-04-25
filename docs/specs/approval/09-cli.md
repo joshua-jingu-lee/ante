@@ -4,6 +4,10 @@
 
 # CLI 커맨드
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-approval--승인-요청-관리)다. 이 문서는
+Approval 도메인의 사용 의도와 주요 예시만 설명한다.
+
 ### `ante approval request`
 
 ```
@@ -35,7 +39,6 @@ ante approval info <id> [--format json]
 
 ```
 ante approval review <id> \
-  --reviewer "agent:risk-analyst" \
   --result pass \
   --detail "리스크 허용 범위 내, 변동성 지표 안정적" \
   [--format json]
@@ -47,7 +50,6 @@ ante approval review <id> \
 
 ```
 ante approval cancel <id> \
-  --requester "agent:strategy-dev" \
   [--format json]
 ```
 
@@ -57,7 +59,6 @@ ante approval cancel <id> \
 
 ```
 ante approval reopen <id> \
-  --requester "agent:strategy-dev" \
   [--body "거절 사유를 반영하여 예산을 축소 조정함"] \
   [--params '{"bot_id": "bot-1", "amount": 15000000, "current": 10000000}'] \
   [--format json]

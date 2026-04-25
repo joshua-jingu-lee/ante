@@ -4,6 +4,10 @@
 
 # CLI 인터페이스
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-account--계좌-관리)다. 이 문서는
+Account 관점의 lifecycle 경계와 출력 예시만 설명한다.
+
 ```bash
 # 계좌 생성 (대화형, cold-path 전용)
 ante account create

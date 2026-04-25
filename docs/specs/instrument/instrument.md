@@ -88,6 +88,10 @@ CREATE INDEX IF NOT EXISTS idx_instruments_name ON instruments(name);
 
 ## CLI 커맨드
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-instrument--종목-관리)다. 이 절은
+Instrument 도메인의 조회·동기화 동작만 설명한다.
+
 ### `ante instrument list`
 
 ```

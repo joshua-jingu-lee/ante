@@ -4,15 +4,20 @@
 
 # CLI 사용법
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#커맨드-상세)다. 이 문서는 Bot 관점의
+운영 흐름만 설명한다.
+
 봇의 생성·시작·중지·삭제와 signal key 갱신은 서버 BotManager의 인메모리 상태,
 실행 task, EventBus 구독, 외부 signal channel에 영향을 주므로 런타임 IPC로 처리한다.
 서버 실행 중 조회는 IPC로 live 상태를 우선 조회하고, 서버 정지 중에는 DB에 저장된
 persisted snapshot만 조회한다.
 
 ```bash
-# 봇 생성 — --account로 소속 계좌 지정 (active 계좌가 하나뿐이면 생략 가능)
-ante bot create --strategy momentum_breakout_v1.0.0 --account domestic --interval 60
-ante bot create --strategy agent_relay_v1.0.0 --account us-stock
+# 전략 등록 후 봇 생성 — --account로 소속 계좌 지정 (active 계좌가 하나뿐이면 생략 가능)
+ante strategy submit strategies/momentum_breakout.py
+ante bot create --name "Momentum Bot" --strategy momentum_breakout_v1.0.0 --account domestic --interval 60
+ante bot create --name "Agent Relay" --strategy agent_relay_v1.0.0 --account us-stock
 # → bot_id: bot_002, signal_key: sk_a1b2c3d4 (외부 시그널 수신 가능)
 
 # 봇 시작

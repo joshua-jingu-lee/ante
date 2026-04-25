@@ -4,6 +4,10 @@
 
 # CLI 커맨드
 
+CLI 명령 시그니처와 실행 분류의 SSOT는
+[cli/03-commands.md](../cli/03-commands.md#ante-member--멤버에이전트-관리)다. 이 문서는
+Member 관점의 실행 경계와 보안 동작만 설명한다.
+
 ## 실행 경계
 
 `member list/info`는 오프라인 조회가 가능하다. 그 외 member 상태·토큰·패스워드·복구키
