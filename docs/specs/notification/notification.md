@@ -78,7 +78,7 @@ NotificationService는 `NotificationEvent`만 구독하여 발송한다. 개별 
 |--------|----------|--------|------|
 | `subscribe` | — | None | `NotificationEvent`와 `ConfigChangedEvent` 구독 등록 |
 | `_on_notification` | event: NotificationEvent | None | 필터링 → 발송 |
-| `_on_config_changed` | event: ConfigChangedEvent | None | `notification.telegram_enabled`, `notification.quiet_hours` 런타임 반영 |
+| `_on_config_changed` | event: ConfigChangedEvent | None | `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours` 런타임 반영 |
 | `_should_send` | level: NotificationLevel | bool | 발송 여부 판단. CRITICAL은 always-send |
 | `parse_quiet_hours` | value: str | tuple[time, time] \| None | `HH:MM-HH:MM` 형식 파싱. invalid이면 None |
 
@@ -92,7 +92,12 @@ NotificationService는 `NotificationEvent`만 구독하여 발송한다. 개별 
 | 키 | 값 | 동작 |
 |----|----|------|
 | `notification.telegram_enabled` | `"true"` / `"false"` | `false`이면 CRITICAL 외 알림을 발송하지 않는다. Telegram 시크릿이 존재하면 서비스는 계속 살아 있어 런타임 재활성화와 CRITICAL 발송 경로를 유지한다 |
+| `notification.min_level` | `"critical"` / `"error"` / `"warning"` / `"info"` | 최소 발송 레벨. 낮은 우선순위 알림은 발송하지 않는다 |
 | `notification.quiet_hours` | `"23:00-07:00"` 또는 빈 값 | 지정 시간대에는 CRITICAL 외 알림을 발송하지 않는다. 빈 값은 비활성화, invalid 형식은 경고 후 비활성화로 처리한다 |
+
+세부 알림 정책 키(`notification.telegram_level`, `notification.on_fill`,
+`notification.fill_alert`, `notification.daily_report`)는 1.0 계약에 포함하지 않는다.
+체결 알림만 끄기, 일일 리포트만 켜기 같은 정책은 후속 스펙에서 별도 정의한다.
 
 `TELEGRAM_BOT_TOKEN` 또는 `TELEGRAM_CHAT_ID`가 없거나 빈 문자열이면 Telegram 어댑터를
 생성할 수 없으므로 NotificationService를 생성하지 않고 서버 부팅은 계속한다.
@@ -209,6 +214,6 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
 
 ## 타 모듈 설계 시 참고
 
-- **Config 스펙**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`는 secrets.env에서 관리. `notification.telegram_enabled`, `notification.quiet_hours`는 dynamic_config에서 관리
-- **Web API 스펙**: `/api/config/{key:path}` 동적 설정 API로 `notification.telegram_enabled`, `notification.quiet_hours`를 변경
+- **Config 스펙**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`는 secrets.env에서 관리. `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours`는 dynamic_config에서 관리
+- **Web API 스펙**: `/api/config/{key:path}` 동적 설정 API로 `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours`를 변경
 - **EventBus 스펙**: `NotificationEvent`에 `category` 필드 추가, `SystemStartedEvent` 신규 생성

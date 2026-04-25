@@ -140,29 +140,29 @@
             <div class="card-title mb-16">알림</div>
             <div class="setting-row">
               <div>
-                <div class="setting-label">텔레그램 알림 수준</div>
-                <div class="setting-desc">notification.telegram_level · 알림 발송 기준</div>
-              </div>
-              <select class="filter-select" style="padding: 4px 8px; font-size: 13px;">
-                <option>all</option>
-                <option selected>important</option>
-                <option>critical</option>
-                <option>off</option>
-              </select>
-            </div>
-            <div class="setting-row">
-              <div>
-                <div class="setting-label">체결 알림</div>
-                <div class="setting-desc">매수/매도 체결 시 즉시 알림</div>
+                <div class="setting-label">텔레그램 알림</div>
+                <div class="setting-desc">notification.telegram_enabled · 텔레그램 발송 활성화</div>
               </div>
               <button class="toggle active"></button>
             </div>
             <div class="setting-row">
               <div>
-                <div class="setting-label">일일 리포트</div>
-                <div class="setting-desc">매일 장 마감 후 수익 요약 리포트</div>
+                <div class="setting-label">최소 발송 레벨</div>
+                <div class="setting-desc">notification.min_level · 이 레벨 이상만 발송</div>
               </div>
-              <button class="toggle"></button>
+              <select class="filter-select" style="padding: 4px 8px; font-size: 13px;">
+                <option>critical</option>
+                <option>error</option>
+                <option>warning</option>
+                <option selected>info</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">무음 시간대</div>
+                <div class="setting-desc">notification.quiet_hours · CRITICAL 외 알림 억제</div>
+              </div>
+              <input class="form-input" value="23:00-07:00" style="width: 120px; padding: 4px 8px; font-size: 13px;">
             </div>
           </div>
 

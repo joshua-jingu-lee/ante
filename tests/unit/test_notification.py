@@ -438,6 +438,56 @@ class TestNotificationService:
         )
         assert len(adapter.sent_rich) == 1
 
+    async def test_min_level_config_change(self, adapter, eventbus):
+        """ConfigChangedEvent로 notification.min_level을 동적 변경."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        svc = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            min_level=NotificationLevel.INFO,
+        )
+        svc.subscribe()
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.min_level",
+                old_value='"info"',
+                new_value='"error"',
+                changed_by="test",
+            )
+        )
+        assert svc._min_level == NotificationLevel.ERROR
+
+        await eventbus.publish(NotificationEvent(level="warning", title="차단"))
+        assert len(adapter.sent_rich) == 0
+
+        await eventbus.publish(NotificationEvent(level="error", title="발송"))
+        assert len(adapter.sent_rich) == 1
+
+    async def test_invalid_min_level_config_change_ignored(self, adapter, eventbus):
+        """유효하지 않은 notification.min_level 변경은 기존 값을 유지."""
+        from ante.eventbus.events import ConfigChangedEvent
+
+        svc = NotificationService(
+            adapter=adapter,
+            eventbus=eventbus,
+            min_level=NotificationLevel.INFO,
+        )
+        svc.subscribe()
+
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="notification",
+                key="notification.min_level",
+                old_value='"info"',
+                new_value='"important"',
+                changed_by="test",
+            )
+        )
+        assert svc._min_level == NotificationLevel.INFO
+
 
 # ── parse_quiet_hours ─────────────────────────────
 

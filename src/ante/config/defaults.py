@@ -29,7 +29,5 @@ DEFAULTS: dict[str, object] = {
     "broker.sell_tax_rate": 0.0018,
     # ── 알림 ──
     "notification.telegram_enabled": "true",
-    "notification.telegram_level": "important",
-    "notification.fill_alert": "true",
-    "notification.daily_report": "true",
+    "notification.min_level": "info",
 }

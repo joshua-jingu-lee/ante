@@ -79,6 +79,21 @@ class NotificationService:
             logger.info("telegram_enabled 갱신: %s", self._telegram_enabled)
             return
 
+        if event.key == "notification.min_level":
+            import json
+
+            try:
+                raw = json.loads(event.new_value)
+            except (json.JSONDecodeError, TypeError):
+                raw = event.new_value
+            try:
+                self._min_level = NotificationLevel(str(raw))
+            except ValueError:
+                logger.warning("notification.min_level 무시: 유효하지 않은 값 %r", raw)
+                return
+            logger.info("notification.min_level 갱신: %s", self._min_level)
+            return
+
         if event.key != "notification.quiet_hours":
             return
 

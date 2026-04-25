@@ -1136,7 +1136,16 @@ async def _init_notification(s: Services) -> None:
         return
 
     adapter = TelegramAdapter(bot_token=telegram_token, chat_id=telegram_chat_id)
-    min_level_str = s.config.get("notification.min_level", "info")
+    min_level_raw = await s.dynamic_config.get(
+        "notification.min_level",
+        default=s.config.get("notification.min_level", "info"),
+    )
+    min_level_str = str(min_level_raw)
+    try:
+        min_level = NotificationLevel(min_level_str)
+    except ValueError:
+        logger.warning("notification.min_level 무시: 유효하지 않은 값 %r", min_level_raw)
+        min_level = NotificationLevel.INFO
 
     # quiet_hours 파싱
     quiet_start = None
@@ -1158,7 +1167,7 @@ async def _init_notification(s: Services) -> None:
     s.notification_service = NotificationService(
         adapter=adapter,
         eventbus=s.eventbus,
-        min_level=NotificationLevel(min_level_str),
+        min_level=min_level,
         quiet_start=quiet_start,
         quiet_end=quiet_end,
         telegram_enabled=telegram_enabled_bool,
