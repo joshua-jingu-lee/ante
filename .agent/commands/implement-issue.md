@@ -33,7 +33,7 @@ mkdir -p "$WORKTREE_ROOT"
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
 | 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
 | 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
-| 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
+| 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
 | 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` + 이슈 코멘트 |
 | 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
@@ -105,10 +105,12 @@ Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니
 
 `ready` / `caution` verdict에서 나온 주의사항은 구현 프롬프트의 **필수 반영 항목**이다. 특히 `caution`은 "좋으면 반영" 메모가 아니라, 코드/테스트/문서 Done criteria로 승격한다.
 
-### 구현 시작 기록 (오케스트레이터)
+### 구현 시작 기록 (개발 에이전트)
 
 5. **이슈에 착수 코멘트**:
 
+착수 코멘트는 `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 남긴다.
+오케스트레이터는 이슈 본문 구현계획과 사전 리뷰 증적을 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
 착수 코멘트는 `plan-preflight:done` 라벨이 있고, 이슈 본문 구현계획이 최신 Codex Plan Review verdict를 반영한 뒤에만 남긴다.
 `arch-review`의 `ready`/`caution` 주의사항은 이슈 본문을 다시 확정하는 별도 단계가 아니라, 착수 코멘트와 개발 에이전트 프롬프트의 필수 반영 항목으로 넘긴다.
 

@@ -57,10 +57,9 @@ Claude 오케스트레이터
   │         ├── needs-spec-first → Spec-First 경로로 전환
   │         └── split-issue / invoke-human / blocked → 구현 중단
   │
-  ├── 착수 기록: 이슈 코멘트
-  │
   ├──▶ Claude 개발 에이전트 (worktree 격리)
   │         │
+  │         ├── 착수 기록: 이슈 코멘트
   │         ├── 구현 + 로컬 lint/test
   │         ├── 브랜치 push
   │         ▼
@@ -93,7 +92,7 @@ Claude 오케스트레이터
 - 구현 전 Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비하고, Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
 - Plan Preflight가 시작된 이슈는 `plan-preflight:started`, 구현계획이 확정된 이슈는 `plan-preflight:done` 라벨로 구분한다.
 - `plan-preflight:done`은 최신 이슈 본문 구현계획과 Codex Plan Review의 `approve-implement` 또는 `narrow-scope` verdict가 맞물려 구현 착수 가능한 상태라는 뜻이다.
-- 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤에만 작성한다.
+- 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤, `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 작성한다.
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
 - Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 브랜치 리뷰**다.
 - PR 단계의 Claude/Codex 승인 체크는 **같은 head SHA**를 기준으로 독립 실행된다.
