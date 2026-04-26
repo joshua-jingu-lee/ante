@@ -20,6 +20,10 @@ export type paths = {
         /**
          * Create Account
          * @description 계좌 생성.
+         *
+         *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
+         *     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
+         *     수행한다.
          */
         post: operations["create_account_api_accounts_post"];
         delete?: never;
@@ -43,12 +47,24 @@ export type paths = {
         /**
          * Update Account
          * @description 계좌 수정.
+         *
+         *     런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
+         *     ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
+         *     포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는
+         *     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
+         *     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
          */
         put: operations["update_account_api_accounts__account_id__put"];
         post?: never;
         /**
          * Delete Account
          * @description 계좌 소프트 딜리트.
+         *
+         *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
+         *     실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
+         *     수행한다. service-layer 회귀 보호는 ``tests/unit/test_account.py``의
+         *     ``test_delete_account``, ``test_delete_already_deleted_account_raises``가
+         *     담당한다.
          */
         delete: operations["delete_account_api_accounts__account_id__delete"];
         options?: never;
@@ -3312,6 +3328,13 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDetailResponse"];
                 };
             };
+            /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3378,7 +3401,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDetailResponse"];
                 };
             };
-            /** @description 수정할 필드가 없거나 불변 필드 수정 시도 */
+            /** @description 수정할 필드가 없음 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3392,7 +3415,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 삭제된 계좌 수정 시도 */
+            /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3407,13 +3430,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-            /** @description DB에는 계좌 정보가 저장되었으나 새 설정으로 브로커 재연결에 실패한 부분 성공 상태. 자격증명/브로커 설정을 확인한 뒤 재시도. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
@@ -3430,6 +3446,13 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

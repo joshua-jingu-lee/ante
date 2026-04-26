@@ -30,6 +30,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# Cold-path 전용 필드: 서버 실행 중에는 변경할 수 없다.
+# 출처: docs/specs/account/04-account-service.md 51-58줄.
+# - credentials, broker_config, buy_commission_rate, sell_commission_rate:
+#   broker adapter 재초기화가 필요한 필드
+# - exchange, currency, trading_mode, broker_type:
+#   계좌 생성 후 불변 필드 (구조 변경 시 모든 소비자 재구성 필요)
+STRUCTURAL_FIELDS: tuple[str, ...] = (
+    "credentials",
+    "broker_config",
+    "buy_commission_rate",
+    "sell_commission_rate",
+    "broker_type",
+    "exchange",
+    "currency",
+    "trading_mode",
+)
+
+# 응답 detail prefix로 노출되는 cold-path 식별자.
+# 클라이언트는 이 prefix로 cold-path 응답과 다른 409 경로(예: 삭제된 계좌
+# 수정 시도)를 구분한다.
+STRUCTURAL_CHANGE_ERROR_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
+
+
+def _cold_path_detail(message: str) -> str:
+    """Cold-path 차단 응답의 표준 detail 문자열을 만든다."""
+    return f"{STRUCTURAL_CHANGE_ERROR_CODE}: {message}"
+
+
 def _account_to_response(account: Any) -> dict[str, Any]:
     """Account 객체를 AccountResponse 호환 dict로 변환.
 
@@ -85,101 +113,42 @@ async def list_accounts(
     return {"accounts": [_account_to_response(a) for a in accounts]}
 
 
-@router.post("", response_model=AccountDetailResponse, status_code=201)
+@router.post(
+    "",
+    response_model=AccountDetailResponse,
+    status_code=201,
+    responses={
+        409: {
+            "description": (
+                "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
+                "— 런타임 계좌 생성 차단"
+            )
+        },
+    },
+)
 async def create_account(
     body: AccountCreateRequest,
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 생성."""
-    from ante.account.errors import (
-        AccountAlreadyExistsError,
-        InvalidBrokerTypeError,
-        MissingCredentialsError,
+    """계좌 생성.
+
+    런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
+    실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
+    수행한다.
+    """
+    # 다른 검증/서비스 호출 전, 진입 즉시 cold-path 409 응답.
+    # AccountService 생성 호출, broker connect, 감사 로그 모두 발생하지 않는다.
+    # 이 경로의 회귀 보호는 service-layer 테스트(`tests/unit/test_account.py`)가
+    # 담당한다.
+    raise HTTPException(
+        status_code=409,
+        detail=_cold_path_detail(
+            "계좌 생성은 cold-path 전용입니다. "
+            "서버를 정지한 뒤 ante account create로 수행하세요."
+        ),
     )
-    from ante.account.models import Account, TradingMode
-    from ante.account.presets import BROKER_PRESETS
-
-    # broker_type에서 프리셋 기본값 적용
-    preset = BROKER_PRESETS.get(body.broker_type)
-
-    try:
-        trading_mode = TradingMode(body.trading_mode)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"유효하지 않은 trading_mode: '{body.trading_mode}'",
-        )
-
-    from decimal import Decimal
-
-    account = Account(
-        account_id=body.account_id,
-        name=body.name,
-        exchange=body.exchange or (preset.exchange if preset else ""),
-        currency=body.currency or (preset.currency if preset else ""),
-        timezone=body.timezone or (preset.timezone if preset else "Asia/Seoul"),
-        trading_hours_start=body.trading_hours_start
-        or (preset.trading_hours_start if preset else "09:00"),
-        trading_hours_end=body.trading_hours_end
-        or (preset.trading_hours_end if preset else "15:30"),
-        trading_mode=trading_mode,
-        broker_type=body.broker_type,
-        credentials=body.credentials,
-        broker_config=body.broker_config,
-        buy_commission_rate=Decimal(str(body.buy_commission_rate))
-        if body.buy_commission_rate
-        else (preset.buy_commission_rate if preset else Decimal("0")),
-        sell_commission_rate=Decimal(str(body.sell_commission_rate))
-        if body.sell_commission_rate
-        else (preset.sell_commission_rate if preset else Decimal("0")),
-    )
-
-    try:
-        created = await account_service.create(account)
-    except InvalidBrokerTypeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except AccountAlreadyExistsError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except MissingCredentialsError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    # 브로커 어댑터 인스턴스 생성 가능 여부 검증
-    # BROKER_REGISTRY에 미등록된 타입은 생성 직후 롤백
-    try:
-        broker = await account_service.get_broker(created.account_id)
-    except InvalidBrokerTypeError as e:
-        await account_service.delete(created.account_id, deleted_by="system")
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # 런타임 계좌 추가 직후 /api/system/health와 APIGateway 호출이 즉시
-    # 동작하도록 새 브로커를 connect한다. 부팅 시 _init_gateway와 동일한
-    # best-effort 정책 — connect 실패는 계좌 자체를 롤백하지 않고 경고만
-    # 로그에 남긴다. 실패 시 /health가 broker=false로 떨어져 운영자가
-    # 자격증명/설정을 교정한 뒤 재시도할 수 있게 한다. 이 connect 호출이
-    # 없으면 신규 계좌가 추가된 인스턴스의 /health가 재시작 전까지 영구적
-    # 으로 unhealthy가 되는 회귀가 발생한다.
-    try:
-        await broker.connect()
-    except Exception:
-        logger.warning(
-            "신규 계좌 브로커 connect 실패: account=%s — /health가 "
-            "broker=false를 보고할 수 있습니다.",
-            created.account_id,
-            exc_info=True,
-        )
-
-    if audit_logger:
-        await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "dashboard"),
-            action="account.create",
-            resource=f"account:{created.account_id}",
-            detail=f"계좌 생성: {created.account_id} ({created.broker_type})",
-            ip=request.client.host if request.client else "",
-        )
-
-    return {"account": _account_to_response(created)}
 
 
 @router.get("/{account_id}", response_model=AccountDetailResponse)
@@ -202,13 +171,12 @@ async def get_account(
     "/{account_id}",
     response_model=AccountDetailResponse,
     responses={
-        400: {"description": "수정할 필드가 없거나 불변 필드 수정 시도"},
+        400: {"description": "수정할 필드가 없음"},
         404: {"description": "계좌를 찾을 수 없음"},
-        409: {"description": "삭제된 계좌 수정 시도"},
-        503: {
+        409: {
             "description": (
-                "DB에는 계좌 정보가 저장되었으나 새 설정으로 브로커 재연결에 "
-                "실패한 부분 성공 상태. 자격증명/브로커 설정을 확인한 뒤 재시도."
+                "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
+                "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
             )
         },
     },
@@ -220,36 +188,44 @@ async def update_account(
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 수정."""
+    """계좌 수정.
+
+    런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
+    ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
+    포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는
+    ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
+    응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
+    """
     from ante.account.errors import (
         AccountDeletedError,
-        AccountImmutableFieldError,
         AccountNotFoundError,
-        BrokerReconnectFailedError,
     )
 
-    # None이 아닌 필드만 업데이트 대상
+    # cold-path 가드: structural 필드가 하나라도 명시(`is not None`)되면
+    # DB/서비스 호출 전 409로 즉시 차단한다.
+    # 가드 이후의 service.update는 비구조 필드만 받으므로
+    # AccountImmutableFieldError/BrokerReconnectFailedError 경로에 도달하지
+    # 않는다. 해당 service-layer 동작 회귀는 `tests/unit/test_account.py`,
+    # `tests/unit/test_account_immutable_fields.py`가 보호한다.
+    triggered_structural = [
+        name for name in STRUCTURAL_FIELDS if getattr(body, name, None) is not None
+    ]
+    if triggered_structural:
+        raise HTTPException(
+            status_code=409,
+            detail=_cold_path_detail(
+                f"다음 필드는 cold-path 전용입니다: {', '.join(triggered_structural)}"
+            ),
+        )
+
+    # None이 아닌 비구조 필드만 업데이트 대상
     fields: dict[str, Any] = {}
     for field_name in (
         "name",
         "timezone",
         "trading_hours_start",
         "trading_hours_end",
-        "credentials",
-        "broker_config",
-        "buy_commission_rate",
-        "sell_commission_rate",
     ):
-        value = getattr(body, field_name, None)
-        if value is not None:
-            if field_name in ("buy_commission_rate", "sell_commission_rate"):
-                from decimal import Decimal
-
-                value = Decimal(str(value))
-            fields[field_name] = value
-
-    # 불변 필드가 요청에 포함된 경우 서비스 레이어에서 차단하도록 전달
-    for field_name in ("exchange", "currency", "trading_mode", "broker_type"):
         value = getattr(body, field_name, None)
         if value is not None:
             fields[field_name] = value
@@ -263,20 +239,6 @@ async def update_account(
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    except AccountImmutableFieldError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except BrokerReconnectFailedError as e:
-        # 계좌 정보는 DB에 반영됐지만 새 설정으로 브로커를 재연결하지
-        # 못한 부분 실패 상태. 503으로 명시해 운영자가 자격증명/설정을
-        # 교정 후 재시도하도록 유도한다. 캐시에는 기존 브로커가 그대로
-        # 남아 있어 기존 연결 기반 호출은 계속 동작한다.
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"{e} 계좌 정보는 저장되었으나 브로커 재연결에 실패했습니다. "
-                "자격증명/브로커 설정을 확인한 뒤 다시 시도하세요."
-            ),
-        )
 
     if audit_logger:
         await audit_logger.log(
@@ -366,31 +328,39 @@ async def activate_account(
     }
 
 
-@router.delete("/{account_id}", status_code=204)
+@router.delete(
+    "/{account_id}",
+    status_code=204,
+    responses={
+        409: {
+            "description": (
+                "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
+                "— 런타임 계좌 삭제 차단"
+            )
+        },
+    },
+)
 async def delete_account(
     account_id: str,
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> None:
-    """계좌 소프트 딜리트."""
-    from ante.account.errors import AccountNotFoundError
+    """계좌 소프트 딜리트.
 
-    deleted_by = getattr(request.state, "member_id", "dashboard")
-
-    try:
-        await account_service.delete(account_id, deleted_by=deleted_by)
-    except AccountNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    if audit_logger:
-        await audit_logger.log(
-            member_id=deleted_by,
-            action="account.delete",
-            resource=f"account:{account_id}",
-            detail="계좌 삭제",
-            ip=request.client.host if request.client else "",
-        )
+    런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
+    실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
+    수행한다. service-layer 회귀 보호는 ``tests/unit/test_account.py``의
+    ``test_delete_account``, ``test_delete_already_deleted_account_raises``가
+    담당한다.
+    """
+    raise HTTPException(
+        status_code=409,
+        detail=_cold_path_detail(
+            "계좌 삭제는 cold-path 전용입니다. "
+            "서버를 정지한 뒤 ante account delete로 수행하세요."
+        ),
+    )
 
 
 # ── 리스크 룰 ─────────────────────────────────────────

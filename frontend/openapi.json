@@ -60,7 +60,7 @@
           "accounts"
         ],
         "summary": "Create Account",
-        "description": "계좌 생성.",
+        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.",
         "operationId": "create_account_api_accounts_post",
         "requestBody": {
           "required": true,
@@ -82,6 +82,9 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단"
           },
           "422": {
             "description": "Validation Error",
@@ -143,7 +146,7 @@
           "accounts"
         ],
         "summary": "Update Account",
-        "description": "계좌 수정.",
+        "description": "계좌 수정.\n\n런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,\n``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도\n포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는\n``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path\n응답과 ``AccountDeletedError`` 경로의 409를 구분한다.",
         "operationId": "update_account_api_accounts__account_id__put",
         "parameters": [
           {
@@ -178,16 +181,13 @@
             }
           },
           "400": {
-            "description": "수정할 필드가 없거나 불변 필드 수정 시도"
+            "description": "수정할 필드가 없음"
           },
           "404": {
             "description": "계좌를 찾을 수 없음"
           },
           "409": {
-            "description": "삭제된 계좌 수정 시도"
-          },
-          "503": {
-            "description": "DB에는 계좌 정보가 저장되었으나 새 설정으로 브로커 재연결에 실패한 부분 성공 상태. 자격증명/브로커 설정을 확인한 뒤 재시도."
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
           },
           "422": {
             "description": "Validation Error",
@@ -206,7 +206,7 @@
           "accounts"
         ],
         "summary": "Delete Account",
-        "description": "계좌 소프트 딜리트.",
+        "description": "계좌 소프트 딜리트.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로\n수행한다. service-layer 회귀 보호는 ``tests/unit/test_account.py``의\n``test_delete_account``, ``test_delete_already_deleted_account_raises``가\n담당한다.",
         "operationId": "delete_account_api_accounts__account_id__delete",
         "parameters": [
           {
@@ -222,6 +222,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단"
           },
           "422": {
             "description": "Validation Error",

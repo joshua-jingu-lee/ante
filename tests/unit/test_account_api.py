@@ -257,121 +257,49 @@ class TestListAccounts:
 
 
 class TestCreateAccount:
-    """POST /api/accounts."""
+    """POST /api/accounts.
 
-    def test_create_success(
+    런타임 Web API에서 계좌 생성은 cold-path 전용이므로 항상 409로 차단된다.
+    서비스 단의 회귀 보호(중복/missing credentials/broker connect 등)는
+    `tests/unit/test_account.py`의 `test_create_account`,
+    `test_create_duplicate_raises`, `test_create_invalid_broker_type_raises`,
+    `test_create_missing_credentials_raises`,
+    `test_create_partial_credentials_raises` 등이 담당한다.
+    """
+
+    def test_create_blocked_runtime_409(
         self,
         client: TestClient,
+        account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
+        """런타임 POST /api/accounts는 cold-path 409로 즉시 차단된다.
+
+        - 응답 status 409
+        - detail에 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 포함
+        - AccountService는 호출되지 않아 계좌가 만들어지지 않음
+        - audit 로그도 남기지 않음
+        """
         resp = client.post(
             "/api/accounts",
             json={
                 "account_id": "new-test",
-                "name": "새 테스트 계좌",
+                "name": "런타임 생성 시도",
                 "broker_type": "test",
-                "credentials": {"app_key": "key", "app_secret": "secret"},
-            },
-        )
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["account"]["account_id"] == "new-test"
-        assert data["account"]["broker_type"] == "test"
-        # 감사 로그 확인
-        route_logs = [
-            log for log in audit_logger.logs if log["action"] == "account.create"
-        ]
-        assert len(route_logs) == 1
-
-    def test_create_duplicate(
-        self,
-        client: TestClient,
-        account_service: FakeAccountService,
-    ) -> None:
-        account = _make_account("existing")
-        account_service._accounts["existing"] = account
-
-        resp = client.post(
-            "/api/accounts",
-            json={
-                "account_id": "existing",
-                "name": "중복 계좌",
-                "broker_type": "test",
+                "credentials": {"app_key": "k", "app_secret": "s"},
             },
         )
         assert resp.status_code == 409
-
-    def test_create_connects_broker_so_health_stays_up(
-        self,
-        client: TestClient,
-        account_service: FakeAccountService,
-    ) -> None:
-        """신규 계좌 생성 시 브로커 connect()가 호출되어 /health가 계속 healthy.
-
-        회귀 방지: 부팅 시 _init_gateway의 connect 루프를 타지 않은 런타임
-        신규 계좌는 connect가 별도로 호출되지 않으면 /health가 broker=false
-        로 고정된다. 본 테스트는 POST /api/accounts 이후 반환된 어댑터의
-        is_connected가 True임을 검증한다.
-        """
-        resp = client.post(
-            "/api/accounts",
-            json={
-                "account_id": "new-live",
-                "name": "런타임 추가 계좌",
-                "broker_type": "test",
-                "credentials": {"app_key": "k", "app_secret": "s"},
-            },
-        )
-        assert resp.status_code == 201
-        broker = account_service._brokers["new-live"]
-        assert broker.connect_calls == 1
-        assert broker.is_connected is True
-
-    def test_create_survives_broker_connect_failure(
-        self,
-        client: TestClient,
-        account_service: FakeAccountService,
-    ) -> None:
-        """브로커 connect 실패해도 계좌 생성 자체는 성공(201)한다.
-
-        운영자는 이후 /health에서 broker=false를 확인하고 설정을 교정 후
-        재시도한다. main._init_gateway의 best-effort 패턴과 동일.
-        """
-        account_service._fail_connect_for.add("flaky")
-
-        resp = client.post(
-            "/api/accounts",
-            json={
-                "account_id": "flaky",
-                "name": "플레이키 계좌",
-                "broker_type": "test",
-                "credentials": {"app_key": "k", "app_secret": "s"},
-            },
-        )
-        assert resp.status_code == 201
-        broker = account_service._brokers["flaky"]
-        assert broker.connect_calls == 1
-        assert broker.is_connected is False
-        # 계좌 레코드는 유지된다 (롤백되지 않음)
-        assert "flaky" in account_service._accounts
-
-    def test_create_missing_credentials_returns_422(
-        self,
-        client: TestClient,
-    ) -> None:
-        """credentials 누락 시 422 Validation Error를 반환해야 한다 (GH-848)."""
-        resp = client.post(
-            "/api/accounts",
-            json={
-                "account_id": "no-creds",
-                "name": "크레덴셜 누락 계좌",
-                "broker_type": "test",
-                "credentials": {},
-            },
-        )
-        assert resp.status_code == 422
-        data = resp.json()
-        assert "credentials" in data["detail"].lower() or "누락" in data["detail"]
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        # 서비스 미호출 — 계좌가 생성되지 않았다.
+        assert account_service._accounts == {}
+        assert account_service._brokers == {}
+        # audit 로그도 남기지 않는다.
+        create_logs = [
+            log for log in audit_logger.logs if log["action"] == "account.create"
+        ]
+        assert create_logs == []
 
 
 class TestGetAccount:
@@ -411,7 +339,27 @@ class TestGetAccount:
 
 
 class TestUpdateAccount:
-    """PUT /api/accounts/:id."""
+    """PUT /api/accounts/:id.
+
+    비구조 필드(`name`, `timezone`, `trading_hours_start`, `trading_hours_end`)는
+    런타임 PUT 200 경로를 유지한다. structural 필드(`credentials`,
+    `broker_config`, `buy_commission_rate`, `sell_commission_rate`,
+    `broker_type`, `exchange`, `currency`, `trading_mode`)가 포함되면
+    cold-path 409로 즉시 차단된다.
+
+    Service-layer 회귀 보호처:
+    - `tests/unit/test_account_immutable_fields.py`의
+      `test_update_immutable_*`, `test_update_mutable_*`
+    - `tests/unit/test_account.py`의
+      `test_update_credentials_invalidates_broker_cache`,
+      `test_update_broker_config_invalidates_broker_cache`,
+      `test_update_commission_rate_invalidates_broker_cache`,
+      `test_update_preserves_cache_when_new_broker_connect_fails`
+    503 매핑(`BrokerReconnectFailedError`) 회귀는 라우트 가드가 credentials를
+    409로 차단해 도달할 수 없으므로 라우트 레벨 테스트는 제거. 매핑 자체는
+    코드 inspection(`update_account`의 `except BrokerReconnectFailedError`)으로
+    확인한다.
+    """
 
     def test_update_success(
         self,
@@ -434,6 +382,29 @@ class TestUpdateAccount:
         ]
         assert len(route_logs) == 1
 
+    def test_update_non_structural_fields_succeed(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """`timezone`, `trading_hours_start`, `trading_hours_end` 동시 변경 200."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={
+                "timezone": "America/New_York",
+                "trading_hours_start": "09:30",
+                "trading_hours_end": "16:00",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["account"]["timezone"] == "America/New_York"
+        assert data["account"]["trading_hours_start"] == "09:30"
+        assert data["account"]["trading_hours_end"] == "16:00"
+
     def test_update_not_found(self, client: TestClient) -> None:
         resp = client.put(
             "/api/accounts/nonexistent",
@@ -452,38 +423,150 @@ class TestUpdateAccount:
         resp = client.put("/api/accounts/test-account", json={})
         assert resp.status_code == 400
 
-    def test_update_broker_reconnect_failed_returns_503(
+    def test_update_credentials_blocked_409(
         self,
         client: TestClient,
         account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
     ) -> None:
-        """브로커 재연결 실패는 503과 부분 성공 메시지로 노출된다.
-
-        회귀 방지: service.update가 BrokerReconnectFailedError를 올리면
-        (DB는 반영됐지만 새 설정으로 connect 실패한 부분 성공 상태)
-        전역 500이 아닌 503으로 매핑되어, 응답 본문이 '계좌 정보는
-        저장되었으나 브로커 재연결에 실패했습니다'를 포함해야 한다.
-        """
-        from ante.account.errors import BrokerReconnectFailedError
-
+        """`credentials` 변경 요청은 cold-path 409로 즉시 차단된다."""
         account = _make_account()
         account_service._accounts[account.account_id] = account
-
-        async def raise_reconnect_failed(account_id: str, **fields: Any) -> Account:
-            raise BrokerReconnectFailedError(
-                f"계좌 '{account_id}' 브로커 connect() 실패"
-            )
-
-        account_service.update = raise_reconnect_failed  # type: ignore[method-assign]
 
         resp = client.put(
             "/api/accounts/test-account",
             json={"credentials": {"app_key": "new", "app_secret": "new"}},
         )
-        assert resp.status_code == 503
+        assert resp.status_code == 409
         detail = resp.json()["detail"]
-        assert "브로커 재연결에 실패" in detail
-        assert "저장" in detail
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+        # service 미호출 — 계좌 필드가 변경되지 않음
+        assert account_service._accounts["test-account"].credentials == {
+            "secret_key": "hidden"
+        }
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
+    def test_update_broker_config_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"broker_config": {"is_paper": True}},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "broker_config" in detail
+
+    def test_update_buy_commission_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"buy_commission_rate": 0.001},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "buy_commission_rate" in detail
+
+    def test_update_sell_commission_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"sell_commission_rate": 0.002},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "sell_commission_rate" in detail
+
+    def test_update_broker_type_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"broker_type": "kis-domestic"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "broker_type" in detail
+
+    def test_update_exchange_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"exchange": "KRX"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "exchange" in detail
+
+    def test_update_currency_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"currency": "USD"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "currency" in detail
+
+    def test_update_trading_mode_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"trading_mode": "live"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "trading_mode" in detail
 
 
 class TestSuspendAccount:
@@ -591,25 +674,36 @@ class TestActivateAccount:
 
 
 class TestDeleteAccount:
-    """DELETE /api/accounts/:id."""
+    """DELETE /api/accounts/:id.
 
-    def test_delete_success(
+    런타임 Web API에서 계좌 삭제는 cold-path 전용이므로 항상 409로 차단된다.
+    Service-layer 회귀 보호처: `tests/unit/test_account.py::test_delete_account`,
+    `tests/unit/test_account.py::test_delete_already_deleted_account_raises`.
+    """
+
+    def test_delete_blocked_runtime_409(
         self,
         client: TestClient,
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
+        """런타임 DELETE /api/accounts/:id는 cold-path 409로 즉시 차단된다.
+
+        - 응답 status 409
+        - detail에 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 포함
+        - AccountService는 호출되지 않음 (`_accounts`/`_deleted` 변경 없음)
+        - audit 로그 미발행
+        """
         account = _make_account()
         account_service._accounts[account.account_id] = account
 
         resp = client.delete("/api/accounts/test-account")
-        assert resp.status_code == 204
-        assert "test-account" not in account_service._accounts
-        route_logs = [
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        # 서비스 미호출 — 계좌 그대로 유지, soft-delete 트래킹도 변경 없음
+        assert "test-account" in account_service._accounts
+        assert account_service._deleted == set()
+        assert [
             log for log in audit_logger.logs if log["action"] == "account.delete"
-        ]
-        assert len(route_logs) == 1
-
-    def test_delete_not_found(self, client: TestClient) -> None:
-        resp = client.delete("/api/accounts/nonexistent")
-        assert resp.status_code == 404
+        ] == []
