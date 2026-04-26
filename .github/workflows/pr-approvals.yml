@@ -549,31 +549,6 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Wait for ci workflow success
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          deadline=$(( $(date +%s) + 5400 ))  # 90분 한도 (ci.yml test 잡 timeout 45분 + 큐/다른 step 여유)
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&event=pull_request" --jq '[.workflow_runs[] | select(.path == ".github/workflows/ci.yml")] | .[0] // {}')
-            status=$(echo "$run_json" | jq -r '.status // "missing"')
-            conclusion=$(echo "$run_json" | jq -r '.conclusion // ""')
-            if [ "$status" = "completed" ]; then
-              if [ "$conclusion" = "success" ]; then
-                echo "ci workflow succeeded for $HEAD_SHA"
-                exit 0
-              fi
-              echo "ci workflow concluded with: $conclusion"
-              exit 1
-            fi
-            echo "ci workflow status=$status conclusion=$conclusion (waiting 30s)"
-            sleep 30
-          done
-          echo "Timed out waiting for ci workflow on $HEAD_SHA"
-          exit 1
-
       - name: Dispatch post-merge reconciliation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
