@@ -60,41 +60,23 @@
           "accounts"
         ],
         "summary": "Create Account",
-        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.",
+        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.\n\nbody 파라미터를 받지 않는 이유: cold-path 차단은 입력 valid 여부와\n무관하게 항상 409여야 하므로, FastAPI가 핸들러 진입 전에 body\nvalidation을 수행하지 않도록 시그니처에서 의도적으로 제외한다.\n또한 OpenAPI에서도 requestBody가 노출되지 않아 클라이언트에\n\"런타임 POST는 어떤 body도 받지 않는다\"는 계약이 정확히 전달된다.",
         "operationId": "create_account_api_accounts_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountCreateRequest"
-              }
-            }
-          }
-        },
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountDetailResponse"
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Account Api Accounts Post"
                 }
               }
             }
           },
           "409": {
             "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
           }
         }
       }
@@ -220,8 +202,13 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "409": {
             "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단"
@@ -3973,84 +3960,6 @@
         ],
         "title": "AccountActionResponse",
         "description": "계좌 상태 변경 응답."
-      },
-      "AccountCreateRequest": {
-        "properties": {
-          "account_id": {
-            "type": "string",
-            "title": "Account Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "exchange": {
-            "type": "string",
-            "title": "Exchange",
-            "default": ""
-          },
-          "currency": {
-            "type": "string",
-            "title": "Currency",
-            "default": ""
-          },
-          "timezone": {
-            "type": "string",
-            "title": "Timezone",
-            "default": ""
-          },
-          "trading_hours_start": {
-            "type": "string",
-            "title": "Trading Hours Start",
-            "default": ""
-          },
-          "trading_hours_end": {
-            "type": "string",
-            "title": "Trading Hours End",
-            "default": ""
-          },
-          "trading_mode": {
-            "type": "string",
-            "title": "Trading Mode",
-            "default": "virtual"
-          },
-          "broker_type": {
-            "type": "string",
-            "title": "Broker Type",
-            "default": "test"
-          },
-          "credentials": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Credentials",
-            "default": {}
-          },
-          "broker_config": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Broker Config",
-            "default": {}
-          },
-          "buy_commission_rate": {
-            "type": "number",
-            "title": "Buy Commission Rate",
-            "default": 0.0
-          },
-          "sell_commission_rate": {
-            "type": "number",
-            "title": "Sell Commission Rate",
-            "default": 0.0
-          }
-        },
-        "type": "object",
-        "required": [
-          "account_id",
-          "name"
-        ],
-        "title": "AccountCreateRequest",
-        "description": "계좌 생성 요청."
       },
       "AccountDetailResponse": {
         "properties": {

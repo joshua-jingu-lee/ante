@@ -301,6 +301,50 @@ class TestCreateAccount:
         ]
         assert create_logs == []
 
+    def test_create_blocked_with_empty_body_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """빈 body여도 422가 아니라 409로 차단된다.
+
+        라우트는 body schema를 받지 않으므로 FastAPI의 body validation
+        단계가 사라져 입력 valid 여부와 무관하게 cold-path 409가 일관되게
+        반환된다.
+        """
+        resp = client.post("/api/accounts", json={})
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert account_service._accounts == {}
+        assert account_service._brokers == {}
+        create_logs = [
+            log for log in audit_logger.logs if log["action"] == "account.create"
+        ]
+        assert create_logs == []
+
+    def test_create_blocked_with_invalid_body_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """알 수 없는 키만 들어간 body여도 422가 아니라 409로 차단된다.
+
+        cold-path 가드는 모든 입력 형태에 대해 같은 409 응답을 보장한다.
+        """
+        resp = client.post("/api/accounts", json={"unknown": "x"})
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert account_service._accounts == {}
+        assert account_service._brokers == {}
+        create_logs = [
+            log for log in audit_logger.logs if log["action"] == "account.create"
+        ]
+        assert create_logs == []
+
 
 class TestGetAccount:
     """GET /api/accounts/:id."""

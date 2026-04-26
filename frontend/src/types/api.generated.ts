@@ -24,6 +24,12 @@ export type paths = {
          *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
          *     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
          *     수행한다.
+         *
+         *     body 파라미터를 받지 않는 이유: cold-path 차단은 입력 valid 여부와
+         *     무관하게 항상 409여야 하므로, FastAPI가 핸들러 진입 전에 body
+         *     validation을 수행하지 않도록 시그니처에서 의도적으로 제외한다.
+         *     또한 OpenAPI에서도 requestBody가 노출되지 않아 클라이언트에
+         *     "런타임 POST는 어떤 body도 받지 않는다"는 계약이 정확히 전달된다.
          */
         post: operations["create_account_api_accounts_post"];
         delete?: never;
@@ -1334,75 +1340,6 @@ export type components = {
             account: components["schemas"]["AccountResponse"];
             /** Message */
             message: string;
-        };
-        /**
-         * AccountCreateRequest
-         * @description 계좌 생성 요청.
-         */
-        AccountCreateRequest: {
-            /** Account Id */
-            account_id: string;
-            /**
-             * Broker Config
-             * @default {}
-             */
-            broker_config: {
-                [key: string]: unknown;
-            };
-            /**
-             * Broker Type
-             * @default test
-             */
-            broker_type: string;
-            /**
-             * Buy Commission Rate
-             * @default 0
-             */
-            buy_commission_rate: number;
-            /**
-             * Credentials
-             * @default {}
-             */
-            credentials: {
-                [key: string]: string;
-            };
-            /**
-             * Currency
-             * @default
-             */
-            currency: string;
-            /**
-             * Exchange
-             * @default
-             */
-            exchange: string;
-            /** Name */
-            name: string;
-            /**
-             * Sell Commission Rate
-             * @default 0
-             */
-            sell_commission_rate: number;
-            /**
-             * Timezone
-             * @default
-             */
-            timezone: string;
-            /**
-             * Trading Hours End
-             * @default
-             */
-            trading_hours_end: string;
-            /**
-             * Trading Hours Start
-             * @default
-             */
-            trading_hours_start: string;
-            /**
-             * Trading Mode
-             * @default virtual
-             */
-            trading_mode: string;
         };
         /**
          * AccountDetailResponse
@@ -3182,7 +3119,6 @@ export type components = {
     pathItems: never;
 };
 export type AccountActionResponse = components['schemas']['AccountActionResponse'];
-export type AccountCreateRequest = components['schemas']['AccountCreateRequest'];
 export type AccountDetailResponse = components['schemas']['AccountDetailResponse'];
 export type AccountListResponse = components['schemas']['AccountListResponse'];
 export type AccountResponse = components['schemas']['AccountResponse'];
@@ -3313,19 +3249,17 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountCreateRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountDetailResponse"];
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단 */
@@ -3334,15 +3268,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
             };
         };
     };
@@ -3445,11 +3370,13 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단 */
             409: {

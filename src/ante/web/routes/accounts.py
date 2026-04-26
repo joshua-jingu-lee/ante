@@ -15,7 +15,6 @@ from ante.web.deps import (
 )
 from ante.web.schemas import (
     AccountActionResponse,
-    AccountCreateRequest,
     AccountDetailResponse,
     AccountListResponse,
     AccountSuspendRequest,
@@ -115,8 +114,6 @@ async def list_accounts(
 
 @router.post(
     "",
-    response_model=AccountDetailResponse,
-    status_code=201,
     responses={
         409: {
             "description": (
@@ -127,7 +124,6 @@ async def list_accounts(
     },
 )
 async def create_account(
-    body: AccountCreateRequest,
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
@@ -137,6 +133,12 @@ async def create_account(
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
     수행한다.
+
+    body 파라미터를 받지 않는 이유: cold-path 차단은 입력 valid 여부와
+    무관하게 항상 409여야 하므로, FastAPI가 핸들러 진입 전에 body
+    validation을 수행하지 않도록 시그니처에서 의도적으로 제외한다.
+    또한 OpenAPI에서도 requestBody가 노출되지 않아 클라이언트에
+    "런타임 POST는 어떤 body도 받지 않는다"는 계약이 정확히 전달된다.
     """
     # 다른 검증/서비스 호출 전, 진입 즉시 cold-path 409 응답.
     # AccountService 생성 호출, broker connect, 감사 로그 모두 발생하지 않는다.
@@ -330,7 +332,6 @@ async def activate_account(
 
 @router.delete(
     "/{account_id}",
-    status_code=204,
     responses={
         409: {
             "description": (
