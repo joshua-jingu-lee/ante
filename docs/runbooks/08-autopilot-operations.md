@@ -12,8 +12,9 @@
 - autopilot은 새 구현 파이프라인을 만들지 않는다.
 - 실제 구현 절차 SSOT는 계속 `/implement-issue`다.
 - autopilot은 이슈 선별, 보류 판단, 사전 리뷰 증적, 구현 위임, merge/post-merge 모니터링 순서를 책임진다.
-- 병렬 선행 작업은 Plan Preflight까지만 허용하며, Codex Plan Review, 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
-- Plan Preflight가 끝난 이슈는 `plan-preflight:ready` 라벨로 표시해 다음 `/autopilot` 또는 `/implement-issue`가 재사용할 수 있게 한다.
+- 병렬 선행 작업은 Plan Preflight까지만 허용하며, 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
+- Plan Preflight는 이슈 본문 구현계획 작성/보강, Codex Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지 포함한다.
+- Plan Preflight가 진행 중인 이슈는 `plan-preflight:started`, 구현계획까지 확정된 이슈는 `plan-preflight:done` 라벨로 표시해 다음 `/autopilot` 또는 `/implement-issue`가 재사용할 수 있게 한다.
 
 기본 성공 기준:
 
@@ -90,11 +91,13 @@ autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
 
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 GitHub 이슈 본문을 실행 가능한 계획으로 보강하거나 전면 재작성한다.
-- Plan Preflight의 `ready`는 Codex Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
-- `ready`이면 `plan-preflight:ready` 라벨을 붙인다.
+- Plan Preflight를 시작하면 `plan-preflight:started` 라벨을 붙이고 `plan-preflight:done`은 제거한다.
+- Plan Preflight는 Codex Plan Review를 요청하고, `approve-implement` 또는 `narrow-scope` 피드백을 이슈 본문 구현계획에 반영한 뒤에만 완료된다.
+- 완료 시 이슈 본문 구현계획을 최신화하고 `plan-preflight:started`를 제거한 뒤 `plan-preflight:done` 라벨을 붙인다.
 - `needs-rewrite`, `needs-spec-first`, `blocked`가 나오면 같은 배치에서 구현 대상으로 넘기지 않는다.
-- `needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:ready` 라벨을 제거한다.
-- 이미 `plan-preflight:ready` 라벨이 있고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않고 Codex Plan Review 후보로 둔다.
+- `needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:done` 라벨을 제거한다.
+- 보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.
+- 이미 `plan-preflight:done` 라벨이 있고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않고 확정 계획으로 재사용한다.
 - 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
 
 ### 4.1 `arch-review`
@@ -130,7 +133,7 @@ autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
 ### 5.1 의견 검토 사이클
 
 - `arch-review` 최신 verdict를 재사용하거나 refresh한다.
-- `plan-preflight:ready` 라벨이 없거나 stale이면 Plan Preflight를 먼저 수행한다.
+- `plan-preflight:done` 라벨이 없거나 stale이면 Plan Preflight를 먼저 수행한다.
 - `ready` / `caution` verdict에서 나온 주의사항, 테스트 follow-up, 금지할 확장을 구현 체크리스트로 정리한다.
 - `blocked`만 같은 배치의 보류 사유가 된다.
 
@@ -182,7 +185,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 
 - `current-cycle`: `review | implement | merge-monitor | completed`
 - 각 `*-state`: `pending | running | blocked | done`
-- `preflight`: `pending | ready | stale | blocked | n-a`
+- `preflight`: `pending | started | done | stale | blocked | n-a`
 - `result`: `in-progress | merged | handed-off | deferred-* | retry-later-infra | skipped-in-progress`
 
 권장 예시:
@@ -195,7 +198,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 - review-state: done
 - implement-state: done
 - merge-monitor-state: running
-- preflight: ready
+- preflight: done
 - review-verdicts: arch=caution
 - pr: #1250
 - head: a1b2c3d
@@ -207,8 +210,9 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 전이 규칙:
 
 - 의견 검토 시작 시 `review-state=running`
-- Plan Preflight `ready` 시 `preflight=ready`, `plan-preflight:ready` 라벨 부착
-- Plan Preflight stale/blocked 시 `preflight=stale` 또는 `blocked`, `plan-preflight:ready` 라벨 제거
+- Plan Preflight 시작 시 `preflight=started`, `plan-preflight:started` 라벨 부착, `plan-preflight:done` 라벨 제거
+- Plan Preflight 완료 시 이슈 본문 구현계획 최신화 후 `preflight=done`, `plan-preflight:started` 제거, `plan-preflight:done` 라벨 부착
+- Plan Preflight stale/blocked 시 `preflight=stale` 또는 `blocked`, `plan-preflight:done` 라벨 제거
 - 구현 위임 시 `review-state=done`, `implement-state=running`
 - PR 생성 시 `implement-state=done`, `merge-monitor-state=running`
 - 보류 시 해당 사이클을 `blocked`로 두고 `result`를 `deferred-*`로 기록

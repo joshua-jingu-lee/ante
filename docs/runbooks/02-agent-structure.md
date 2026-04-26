@@ -18,7 +18,7 @@
 
 **역할**:
 - 작업 분석과 분해
-- Plan Preflight 산출물 확인, `plan-preflight:ready` 라벨 관리, Codex Plan Review 요청/결과 조율
+- Plan Preflight 산출물 확인, `plan-preflight:started`/`plan-preflight:done` 라벨 관리, Codex Plan Review 요청/결과 조율
 - 야간 `/autopilot` 배치에서 이슈 큐 snapshot, 선행 리뷰 증적, 구현 위임, merge 모니터링 조율
 - 적절한 Claude 서브에이전트 위임
 - 이슈/브랜치/PR GitHub 기록 관리
@@ -74,7 +74,7 @@ Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트에 반응�
 
 | 역할 | 트리거 | 책임 |
 |------|--------|------|
-| **Codex Plan Review 워커** | `plan-preflight:ready` 라벨 또는 구현 전 계획 검증 필요 | `/codex:adversarial-review`로 구현계획의 가정, 위험, 대안을 검토하고 이슈 코멘트에 verdict 기록 |
+| **Codex Plan Review 워커** | `plan-preflight:started` 라벨 또는 구현 전 계획 검증 필요 | `/codex:adversarial-review`로 구현계획의 가정, 위험, 대안을 검토하고 이슈 코멘트에 verdict 기록 |
 | **Codex 브랜치 리뷰어** | `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push | PR 전 blocking issue 식별, `codex-branch-review` 상태 기록 |
 | **Codex PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | 최종 승인 체크, `codex-pr-approve` 상태 기록 |
 

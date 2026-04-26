@@ -172,15 +172,17 @@ Plan Preflight가 이슈 본문에 보강해야 할 항목:
 - Codex Plan Review 피드백 반영 결과
 - 커밋 단위 제안
 
-Plan Preflight 판정:
+Plan Preflight 상태/판정:
 
-- `ready`: Codex Plan Review로 넘길 준비 완료. 이슈에 `plan-preflight:ready` 라벨 부착
+- `started`: 구현계획 작성, Codex Plan Review 요청, 리뷰 피드백 반영이 진행 중. 이슈에 `plan-preflight:started` 라벨 부착
+- `done`: Codex Plan Review의 `approve-implement` 또는 `narrow-scope` 피드백까지 반영해 이슈 본문 구현계획 확정. `plan-preflight:started` 제거 후 `plan-preflight:done` 라벨 부착
 - `needs-rewrite`: 이슈 본문을 전면 재작성한 뒤 다시 확인
 - `needs-spec-first`: `1B`로 진행할 수 없고 `1A`로 전환 필요
 - `blocked`: 선행 결정 또는 선행 이슈 없이는 계획 작성 불가
 
 `needs-spec-first` 또는 `blocked`이면 구현으로 넘기지 않는다.
-`needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:ready` 라벨을 제거한다.
+`needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:done` 라벨을 제거한다.
+보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.
 
 ## 4. 처리 방식 선택
 
@@ -237,7 +239,7 @@ Plan Preflight 판정:
 ### 6B. Plan-Preflight Lane
 
 - implementation lane이 한 이슈의 코드를 수정하거나 리뷰/CI를 기다리는 동안, `/autopilot`은 다른 후보 이슈에 대해 Plan Preflight를 수행할 수 있다.
-- 이 lane은 이슈 본문 보강, 실행계획 재작성, 사전 판단 코멘트 작성까지만 수행한다.
+- 이 lane은 이슈 본문 보강, 실행계획 재작성, Codex Plan Review 요청/결과 반영, 사전 판단 코멘트 작성까지만 수행한다.
 - 코드 수정, 브랜치 생성, PR 생성은 금지한다.
 - 현재 implementation issue와 같은 이슈 또는 같은 open PR에 대해서는 병렬 Plan Preflight를 수행하지 않는다.
 - 선행 의존성이 닫히지 않은 이슈, `needs-triage`, `blocked`, `blocked:review-loop`, `blocked:pr-review-loop` 이슈는 Plan Preflight도 하지 않는다.
@@ -246,14 +248,14 @@ Plan-Preflight Lane의 산출물:
 
 - 이슈 본문 구현계획 업데이트
 - 필요 시 `🧭 Plan Preflight` 코멘트로 변경 요약 기록
-- verdict: `ready`, `needs-rewrite`, `needs-spec-first`, `blocked`
-- label: `ready`일 때 `plan-preflight:ready`
+- verdict: `started`, `done`, `needs-rewrite`, `needs-spec-first`, `blocked`
+- label: 진행 중일 때 `plan-preflight:started`, 확정 시 `plan-preflight:done`
 - 다음 구현자가 따라야 할 task/checklist
 
 Lane 전환 규칙:
 
-- Plan Preflight가 `ready`인 이슈도 현재 implementation lane이 끝나기 전에는 Codex Plan Review 또는 구현으로 넘기지 않는다.
-- 현재 implementation lane이 종료되면, `plan-preflight:ready` 라벨이 있는 이슈를 다음 Codex Plan Review 후보로 삼을 수 있다.
+- Plan Preflight가 `done`인 이슈도 현재 implementation lane이 끝나기 전에는 구현으로 넘기지 않는다.
+- 현재 implementation lane이 종료되면, `plan-preflight:done` 라벨이 있는 이슈를 다음 구현 후보로 삼을 수 있다.
 - Plan Preflight 중 스펙 충돌이 드러나면 해당 이슈는 `1A` 전환 대상으로 기록하고 구현 큐에 올리지 않는다.
 
 ## 7. Codex Plan Review
@@ -289,6 +291,7 @@ Codex Plan Review를 수행해야 하는 조건:
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현으로 넘기지 않는다.
 `revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 정비한 뒤 다시 Codex Plan Review를 요청한다.
+`approve-implement` 또는 `narrow-scope`이면 Plan Preflight가 이슈 본문 구현계획을 최신화하고 `plan-preflight:started`를 제거한 뒤 `plan-preflight:done` 라벨을 붙인다.
 
 ## 8. `/implement-issue` 분석
 

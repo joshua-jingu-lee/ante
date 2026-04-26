@@ -48,10 +48,11 @@ post-merge automation
 
 **목적**: 구현 전 계획을 외부 Codex가 공격적으로 검토하는 게이트
 
-- **트리거**: Plan Preflight가 이슈 본문 구현계획을 `ready`로 정리하고 `plan-preflight:ready` 라벨을 붙인 시점
+- **트리거**: Plan Preflight가 `plan-preflight:started` 상태에서 이슈 본문 구현계획 초안을 정리한 시점
 - **실행**: `openai/codex-plugin-cc`의 `/codex:adversarial-review`
 - **결과**: 이슈 코멘트 `codex-plan-review`
-- **실패 시**: Plan Preflight가 이슈 본문 구현계획을 보강하고 `plan-preflight:ready` 라벨을 갱신한 뒤 재요청
+- **성공 시**: Plan Preflight가 이슈 본문 구현계획을 최신화하고 `plan-preflight:done` 라벨로 확정
+- **실패 시**: Plan Preflight가 `plan-preflight:started` 상태를 유지한 채 이슈 본문 구현계획을 보강하고 재요청
 - **해석 주의**: 이 단계는 Claude 내부 계획 검토가 아니라 외부 read-only Codex 리뷰다. 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
 
 이 게이트는 보호 브랜치의 required status check가 아니라, **구현 착수 전 필수 이슈 증적**이다.

@@ -64,11 +64,13 @@ mkdir -p "$WORKTREE_ROOT"
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
 - 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
 - 이슈 본문의 구현계획에는 파일 맵, 작업 순서, risk flags, 구현 체크리스트, 검증 체크리스트, stop conditions, 비목표를 포함한다.
-- 이슈에 `plan-preflight:ready` 라벨이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건 변경으로 stale하지 않은지 확인한다.
-- Plan Preflight verdict가 `ready`이면 이슈에 `plan-preflight:ready` 라벨을 붙인다.
+- 이슈에 `plan-preflight:done` 라벨이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건 변경으로 stale하지 않은지 확인한다.
+- Plan Preflight를 시작하거나 stale 계획을 재정비할 때는 `plan-preflight:started`를 붙이고 `plan-preflight:done`을 제거한다.
 - Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 구현을 시작하지 않는다.
-- `needs-rewrite`, `needs-spec-first`, `blocked`이거나 stale한 구현계획이면 `plan-preflight:ready` 라벨을 제거한다.
-- Plan Preflight의 `ready`는 Codex Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
+- `needs-rewrite`, `needs-spec-first`, `blocked`이거나 stale한 구현계획이면 `plan-preflight:done` 라벨을 제거한다.
+- 보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.
+- Codex Plan Review가 `approve-implement` 또는 `narrow-scope`를 반환하면 이슈 본문 구현계획을 최신화한 뒤 `plan-preflight:started`를 제거하고 `plan-preflight:done`을 붙인다.
+- `plan-preflight:done`은 구현계획까지 확정됐다는 뜻이며, 이슈 본문이 canonical plan이다.
 - Plan Preflight가 없더라도 작은 이슈라면 이슈 본문 자체가 실행계획 역할을 할 수 있다.
 
 4b. **Codex Plan Review 요청/대기**: Plan Preflight가 정비한 구현계획을 Codex plugin 외부 리뷰 게이트로 넘긴다.
@@ -86,7 +88,7 @@ mkdir -p "$WORKTREE_ROOT"
   issue #{번호} implementation plan: challenge assumptions, scope fit, missing consumers, generated artifacts, rollback/test gaps
 ```
 
-Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
+Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 `plan-preflight:started` 상태를 유지하고, Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
 
 4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
 
@@ -109,6 +111,7 @@ Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니
 - `approve-implement`이면 현재 구현계획을 확정한다.
 - `narrow-scope`이면 축소 범위, 제외 범위, 후속 이슈 후보를 이슈 본문에 반영한다.
 - `arch-review`의 `ready`/`caution` 주의사항을 구현 체크리스트와 검증 체크리스트에 반영한다.
+- 확정 시 이슈 본문을 최신 구현계획으로 갱신하고 `plan-preflight:started`를 제거한 뒤 `plan-preflight:done` 라벨을 붙인다.
 - 구현 착수 코멘트는 이 단계가 끝난 뒤에만 남긴다.
 
 ### 구현 시작 기록 (오케스트레이터)

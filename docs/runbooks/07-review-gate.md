@@ -23,13 +23,16 @@
 - Codex 브랜치 리뷰처럼 요청, 대기, 결과 수신, 수정 루프를 분리한다.
 - Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Codex Plan Review를 요청한다.
 - Codex Plan Review는 그 계획이 구현 가능한지, 더 안전하거나 단순한 대안이 있는지, 숨은 가정과 실패 모드가 있는지 검토한다.
-- Plan Preflight가 `ready`이면 이슈에 `plan-preflight:ready` 라벨을 붙인다. 이 라벨은 Codex Plan Review 후보 표시이며 구현 승인이 아니다.
+- Plan Preflight가 시작되면 이슈에 `plan-preflight:started` 라벨을 붙인다.
+- Codex Plan Review가 `approve-implement` 또는 `narrow-scope`를 반환하고 피드백이 이슈 본문 구현계획에 반영되면 `plan-preflight:started`를 제거하고 `plan-preflight:done`을 붙인다.
+- `plan-preflight:done`은 구현계획이 확정됐다는 뜻이며, 이슈 본문이 canonical plan이다.
 
 ### 2.2 트리거
 
 아래 조건이 하나라도 맞으면 Codex Plan Review를 실행한다.
 
-- `plan-preflight:ready` 라벨이 있는 이슈
+- `plan-preflight:started` 라벨이 있고 구현계획 초안이 준비된 이슈
+- `plan-preflight:done`이 없거나 stale하여 구현 전 계획 검증이 필요한 이슈
 - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
 - endpoint / schema / field / CLI rename
 - OpenAPI, 생성 타입, 생성 문서, schema drift 가능성
@@ -49,6 +52,7 @@ Codex Plan Review는 이슈 코멘트에 아래 중 하나의 verdict를 남긴�
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
 `revise-plan`은 Plan Preflight가 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 받아야 한다.
+`approve-implement` 또는 `narrow-scope` verdict가 나오면 Plan Preflight가 이슈 본문을 최신 구현계획으로 갱신하고 `plan-preflight:done`으로 상태를 닫는다.
 
 ### 2.4 책임
 
