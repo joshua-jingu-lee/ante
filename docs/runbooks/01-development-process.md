@@ -1,6 +1,6 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> Claude Code가 구현을 담당하고, Codex가 사전 브랜치 리뷰를 담당하며, PR 단계에서는 두 모델이 독립적으로 승인하는 개발 체계를 정의한다.
+> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 사전 브랜치 리뷰를 담당하며, PR 단계에서는 두 모델이 독립적으로 승인하는 개발 체계를 정의한다.
 
 ---
 
@@ -11,7 +11,7 @@
 - PR은 구현 완료 사실을 알리는 문서가 아니라, **이미 한 차례 Codex 사전 리뷰를 통과한 변경**을 통합 후보로 올리는 단계다.
 - 최종 머지 결정은 사람 감각이 아니라 **명시적인 게이트 상태**로 판단한다.
 - `docs/specs/`와 `docs/architecture/`는 코드보다 앞선 계약이며, 리뷰와 승인 단계 모두 이 문서를 기준으로 판정한다.
-- 구현 전 계획은 **Plan Preflight로 작성**하고, **Plan Review로 검증**한다.
+- 구현 전 계획은 **Plan Preflight로 작성**하고, **Codex Plan Review로 검증**한다.
 - 리뷰는 수정된 파일 목록만으로 끝내지 않는다.
   - 캐시, 연결, 생성 산출물, 소비자 경로가 보이면 호출자와 후속 경로까지 넓혀 본다.
 
@@ -22,7 +22,8 @@
 
 - **Claude 오케스트레이터**: 이슈 분석, 스펙 확인, 구현 에이전트 위임, GitHub 기록 관리
 - **Claude 개발 에이전트**: 구현, 로컬 검증, 브랜치 푸시, Codex 피드백 반영
-- **Claude 코드 리뷰어**: 고위험 Plan Review, 구조 리스크 메타 리뷰, 반복 failure 원인 분석
+- **Codex Plan Review 워커**: `/codex:adversarial-review`로 구현 전 계획의 가정, 위험, 대안을 외부 검증
+- **Claude 코드 리뷰어**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석
 - **Codex 브랜치 리뷰어**: PR 전 브랜치 단위 사전 리뷰, blocking issue 식별
 - **Claude PR 승인 워커**: PR head SHA 기준 최종 승인 체크
 - **Codex PR 승인 워커**: PR head SHA 기준 최종 승인 체크
@@ -41,8 +42,10 @@ Claude 오케스트레이터
   │
   ├── Plan Preflight (`superpowers:writing-plans` 원칙)
   │         ├── 이슈 본문에 구현계획 작성/정비
-  │         ├── Plan Review 호출 → 피드백/verdict 수신
-  │         ├── needs-rewrite → 이슈 본문 재작성 후 Plan Review 재호출
+  │         ├──▶ Codex Plan Review (`/codex:adversarial-review`)
+  │         │       ├── PASS: approve-implement / narrow-scope
+  │         │       └── FAIL: revise-plan / split-issue / invoke-human
+  │         ├── needs-rewrite → 이슈 본문 재작성 후 Codex Plan Review 재요청
   │         ├── revise-plan → 피드백 반영 후 이슈 본문 재정비
   │         ├── approve-implement → 구현계획 확정
   │         ├── narrow-scope → 축소 범위로 구현계획 확정
@@ -87,10 +90,10 @@ Claude 오케스트레이터
 ```
 
 **핵심 차이**:
-- 구현 전 Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비하고, Plan Review를 호출해 피드백을 받은 뒤 확정한다.
-- 착수 기록은 Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤에만 작성한다.
+- 구현 전 Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비하고, Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
+- 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤에만 작성한다.
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
-- Codex의 첫 리뷰는 **PR 전 브랜치 리뷰**다.
+- Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 브랜치 리뷰**다.
 - PR 단계의 Claude/Codex 승인 체크는 **같은 head SHA**를 기준으로 독립 실행된다.
 - 머지는 Claude 오케스트레이터가 직접 하지 않고, GitHub auto-merge가 수행한다.
 
@@ -100,7 +103,7 @@ Claude 오케스트레이터
 
 | 커맨드 | 역할 | 파일 |
 |--------|------|------|
-| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
+| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
 | `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → Plan Preflight/의견 검토 → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`) | `.agent/commands/autopilot.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 | `/arch-review` | 이슈 사전 아키텍처 검토 | `.agent/commands/arch-review.md` |
@@ -109,24 +112,20 @@ Claude 오케스트레이터
 
 운영 중인 이슈의 현재 단계는 최신 `🤖 **Autopilot 사이클 상태**` 코멘트로 노출하며, 여기서 `review-state`, `implement-state`, `merge-monitor-state`를 각각 `pending | running | blocked | done`으로 추적한다.
 
-### 4.1 Plan Review
+### 4.1 Codex Plan Review
 
-Plan Review는 GitHub status check가 아니라, **구현 시작 전에만 거는 계획 검증 단계**다.
-Plan Preflight가 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Plan Review를 호출하고,
-Plan Review는 그 계획을 검토해 Plan Preflight에 피드백과 verdict를 돌려준다.
+Codex Plan Review는 Claude 내부 사고 절차가 아니라, **Codex plugin의 `/codex:adversarial-review`로 수행하는 외부 read-only 리뷰 게이트**다.
+Codex 브랜치 리뷰처럼 요청, 대기, 결과 수신, 수정 루프를 분리해 취급한다.
+Plan Preflight가 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Codex Plan Review를 요청하고,
+Codex는 그 계획이 구현 가능한지, 더 안전하거나 단순한 대안이 있는지, 숨은 가정이 있는지 검토한다.
 
-- Plan Review는 `.agent/skills/plan-review.md`의 형식을 따른다.
-- 오케스트레이터는 Plan Preflight 산출물과 최신 코드/스펙 맥락을 대조한다.
-- 저위험 이슈는 오케스트레이터가 Plan Review를 수행할 수 있다.
-- 아래 조건이 하나라도 맞으면 `@code-reviewer`가 Plan Review를 수행한다.
-  - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
-  - endpoint / schema / field / CLI rename
-  - OpenAPI, 생성 타입, 생성 문서, schema drift 가능성
-  - 둘 이상의 모듈과 소비자 경로 동시 영향
-  - 운영 health / readiness / background task와 연결된 동작 변경
-  - 같은 `risk class` failure가 과거 리뷰에서 2회 반복
+- 실행 명령은 `/codex:adversarial-review`다.
+- 긴 리뷰는 `/codex:adversarial-review --background`로 시작하고 `/codex:status`, `/codex:result`로 결과를 회수한다.
+- focus text에는 이슈 번호, 스펙 경로, 구현계획 요약, 중점 검토 위험을 포함한다.
+- 이 단계는 코드를 수정하지 않고, 브랜치나 PR도 만들지 않는다.
+- 결과는 이슈 코멘트에 `Codex Plan Review`로 남기고, 필요하면 이슈 본문 구현계획을 갱신한다.
 
-Plan Review의 출력은 다음 중 하나다.
+Codex Plan Review의 출력은 다음 중 하나다.
 
 - `approve-implement`
 - `revise-plan`
@@ -135,7 +134,7 @@ Plan Review의 출력은 다음 중 하나다.
 - `invoke-human`
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
-`revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 리뷰한다.
+`revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
 
 ### 4.2 브랜치 전략
 
@@ -214,7 +213,7 @@ main
 - 이슈 코멘트에 Codex 브랜치 리뷰 실패 횟수를 누적한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
 - 같은 `risk class` failure가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출하고, 그 전까지는 얕은 auto-fix만 반복하지 않는다.
-- 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 Plan Review 단계로 되돌린다.
+- 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 Codex Plan Review 단계로 되돌린다.
 - 동일 유형의 blocking failure가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 - `blocked:review-loop`가 최초 부착되거나, PR 자동 재수정 결과가 `NO_CHANGES`로 끝나면 얕은 자동 수정 루프를 중단하고 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.

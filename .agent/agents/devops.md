@@ -5,7 +5,6 @@ model: opus
 tools: Read, Write, Edit, Glob, Grep, Bash
 isolation: worktree
 skills:
-  - plan-review
   - receive-review
 ---
 

@@ -51,7 +51,7 @@
 
 - `patch-now`: 현재 브랜치에서 최소 수정
 - `add-test-first`: failing test를 먼저 추가
-- `invoke-code-reviewer`: 계획/구조 재검토 필요
+- `invoke-code-reviewer`: 구조 리스크 재검토 필요
 - `split-issue`: 현재 PR 범위를 넘는다
 - `invoke-human`: 스펙/정책 충돌
 

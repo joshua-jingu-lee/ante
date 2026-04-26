@@ -1,7 +1,7 @@
 # PR 코드 리뷰 스킬
 
 > Claude PR 승인 워커와 Codex PR 승인 워커가 공유하는 **최종 승인 체크 계약**이다.
-> 일반적인 메타 리뷰나 계획 정합성 리뷰는 `.agent/agents/code-reviewer.md`가 담당한다.
+> 반복 failure 메타 리뷰와 구조 리스크 재검토는 `.agent/agents/code-reviewer.md`가 담당한다.
 
 ## 트리거
 
@@ -18,7 +18,7 @@ $ARGUMENTS — PR 번호 (예: 42)
 - **한다**: blocking finding, follow-up, executed / inferred 검증을 구조화해서 남긴다.
 - **하지 않는다**: 계획 자체를 새로 짜지 않는다.
 - **하지 않는다**: 반복 failure의 근본 원인 분석을 끝까지 맡지 않는다.
-  - 그 상황은 `.agent/agents/code-reviewer.md`의 메타 리뷰 범위다.
+  - 그 상황은 `.agent/agents/code-reviewer.md`의 반복 failure 메타 리뷰 범위다.
 
 ## 실행 절차
 

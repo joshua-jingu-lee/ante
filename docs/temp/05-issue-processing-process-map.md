@@ -137,7 +137,7 @@ PR 필수 조건:
 
 Plan Preflight는 구현 착수 전에 GitHub 이슈 본문을 실행 가능한 구현계획으로
 보강하거나 전면 재작성하는 사전점검 단계다.
-작성한 구현계획은 Plan Review를 호출해 피드백을 받은 뒤 확정한다.
+작성한 구현계획은 Codex Plan Review를 요청해 피드백을 받은 뒤 확정한다.
 
 사용 기준:
 
@@ -169,12 +169,12 @@ Plan Preflight가 이슈 본문에 보강해야 할 항목:
 - 테스트 계획: 각 task의 failing check, 통과 check, 실행 명령
 - 문서/생성 산출물 동기화 계획
 - 중단 조건: 스펙 충돌, 영향 범위 확장, failing check 불명확 등
-- Plan Review 피드백 반영 결과
+- Codex Plan Review 피드백 반영 결과
 - 커밋 단위 제안
 
 Plan Preflight 판정:
 
-- `ready`: Plan Review로 넘길 준비 완료
+- `ready`: Codex Plan Review로 넘길 준비 완료
 - `needs-rewrite`: 이슈 본문을 전면 재작성한 뒤 다시 확인
 - `needs-spec-first`: `1B`로 진행할 수 없고 `1A`로 전환 필요
 - `blocked`: 선행 결정 또는 선행 이슈 없이는 계획 작성 불가
@@ -250,14 +250,14 @@ Plan-Preflight Lane의 산출물:
 
 Lane 전환 규칙:
 
-- Plan Preflight가 `ready`인 이슈도 현재 implementation lane이 끝나기 전에는 Plan Review 또는 구현으로 넘기지 않는다.
-- 현재 implementation lane이 종료되면, 이미 `ready`인 이슈를 다음 Plan Review 후보로 삼을 수 있다.
+- Plan Preflight가 `ready`인 이슈도 현재 implementation lane이 끝나기 전에는 Codex Plan Review 또는 구현으로 넘기지 않는다.
+- 현재 implementation lane이 종료되면, 이미 `ready`인 이슈를 다음 Codex Plan Review 후보로 삼을 수 있다.
 - Plan Preflight 중 스펙 충돌이 드러나면 해당 이슈는 `1A` 전환 대상으로 기록하고 구현 큐에 올리지 않는다.
 
-## 7. Plan Review
+## 7. Codex Plan Review
 
-Plan Review는 Plan Preflight가 작성한 계획을 구현 전에 검증하고 피드백을 주는 단계다.
-Plan Preflight가 호출하며, 계획을 새로 작성하지 않고 이미 작성된 계획이 현재 스펙/코드/소비자 경로 기준으로
+Codex Plan Review는 Plan Preflight가 작성한 계획을 구현 전에 외부 Codex에 검증받는 단계다.
+`/codex:adversarial-review`로 실행하며, 계획을 새로 작성하지 않고 이미 작성된 계획이 현재 스펙/코드/소비자 경로 기준으로
 구현 가능한지 확인한 뒤 피드백과 verdict를 Plan Preflight에 돌려준다.
 
 검토 항목:
@@ -269,7 +269,7 @@ Plan Preflight가 호출하며, 계획을 새로 작성하지 않고 이미 작�
 - verification: 실행 가능한 검증 명령과 inferred check가 구분되어 있는가
 - stop conditions: 스펙 충돌, 영향 범위 확장, failing check 불명확 등이 명시되어 있는가
 
-`@code-reviewer`가 Plan Review를 수행해야 하는 조건:
+Codex Plan Review를 수행해야 하는 조건:
 
 - API, CLI, schema, field rename 가능성
 - cache, invalidate, reconnect, mutable config, health-path 신호
@@ -286,7 +286,7 @@ Plan Preflight가 호출하며, 계획을 새로 작성하지 않고 이미 작�
 - `invoke-human`: 스펙/정책/운영 판단 필요
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현으로 넘기지 않는다.
-`revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 정비한 뒤 다시 리뷰한다.
+`revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 정비한 뒤 다시 Codex Plan Review를 요청한다.
 
 ## 8. `/implement-issue` 분석
 
@@ -309,7 +309,7 @@ Plan Preflight가 호출하며, 계획을 새로 작성하지 않고 이미 작�
 
 포함 항목:
 
-- Plan Review verdict
+- Codex Plan Review verdict
 - 확정된 파일 맵
 - 구현 체크리스트
 - 검증 체크리스트
@@ -325,7 +325,7 @@ Plan Preflight가 호출하며, 계획을 새로 작성하지 않고 이미 작�
 - 담당 에이전트
 - 변경 대상
 - base 브랜치
-- Plan Review verdict
+- Codex Plan Review verdict
 - risk flags
 - 사전 리뷰 verdict와 핵심 주의사항
 
@@ -475,7 +475,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 - `1B`: 이슈 발행 -> 같은 작업에서 스펙 수정과 코드 수정
 - `1B` 중 충돌이 발견되면 즉시 `1A`로 승격한다.
 - `3`: Plan Preflight로 이슈 본문을 실행 가능한 계획으로 보강한다.
-- `7`: Plan Review로 계획을 검증하고 피드백/verdict를 남긴다.
+- `7`: Codex Plan Review로 계획을 검증하고 피드백/verdict를 남긴다.
 - `6B`: Autopilot은 implementation lane이 바쁜 동안 다른 이슈의 Plan Preflight를 병렬로 수행할 수 있다.
 
 이 합의는 review-loop recovery 논의의 전제다.

@@ -1,6 +1,6 @@
 # 07. 리뷰 및 머지 게이트
 
-> Claude 구현 + Plan Review + Codex 사전 리뷰 + Claude/Codex 이중 승인 + GitHub auto-merge 구조를 정의한다.
+> Claude 구현 + Codex Plan Review + Codex 사전 리뷰 + Claude/Codex 이중 승인 + GitHub auto-merge 구조를 정의한다.
 
 ---
 
@@ -8,25 +8,27 @@
 
 이 문서는 네 가지를 분리한다.
 
-1. **Plan Review**: Plan Preflight가 작성한 계획을 구현 시작 전에 검증하고 피드백 제공
+1. **Codex Plan Review**: Plan Preflight가 작성한 계획을 `/codex:adversarial-review`로 외부 검증
 2. **Codex 브랜치 리뷰**: PR 전 사전 품질 게이트
 3. **Claude/Codex PR 승인**: PR head SHA 기준 최종 승인
 4. **Merge Gate**: 승인과 CI 결과를 종합해 실제 머지 가능 여부만 판단
 
-## 2. Plan Review
+## 2. Codex Plan Review
 
 ### 2.1 성격
 
-- GitHub status check가 아니다.
-- 구현 전에만 거는 계획 검증 단계다.
-- Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Plan Review를 호출한다.
-- Plan Review는 그 계획이 구현 가능한지 검토하고, 피드백과 verdict를 Plan Preflight에 돌려준다.
-- 저위험 이슈는 오케스트레이터가 검토할 수 있고, 고위험 이슈는 `@code-reviewer`가 Plan Review를 수행한다.
+- Claude 내부 프로세스가 아니다.
+- Codex plugin `openai/codex-plugin-cc`의 `/codex:adversarial-review`로 수행하는 외부 read-only 리뷰 게이트다.
+- 구현 전에만 실행하며, 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
+- Codex 브랜치 리뷰처럼 요청, 대기, 결과 수신, 수정 루프를 분리한다.
+- Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Codex Plan Review를 요청한다.
+- Codex Plan Review는 그 계획이 구현 가능한지, 더 안전하거나 단순한 대안이 있는지, 숨은 가정과 실패 모드가 있는지 검토한다.
 
-### 2.2 `@code-reviewer` 트리거
+### 2.2 트리거
 
-아래 조건이 하나라도 맞으면 `@code-reviewer` Plan Review를 강제한다.
+아래 조건이 하나라도 맞으면 Codex Plan Review를 실행한다.
 
+- Plan Preflight가 `ready`인 이슈
 - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
 - endpoint / schema / field / CLI rename
 - OpenAPI, 생성 타입, 생성 문서, schema drift 가능성
@@ -36,7 +38,7 @@
 
 ### 2.3 결과
 
-Plan Review는 아래 중 하나를 반환한다.
+Codex Plan Review는 이슈 코멘트에 아래 중 하나의 verdict를 남긴다.
 
 - `approve-implement`
 - `revise-plan`
@@ -45,12 +47,22 @@ Plan Review는 아래 중 하나를 반환한다.
 - `invoke-human`
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
-`revise-plan`은 Plan Preflight가 이슈 본문 구현계획을 보강한 뒤 다시 Plan Review를 받아야 한다.
+`revise-plan`은 Plan Preflight가 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 받아야 한다.
 
 ### 2.4 책임
 
-이 단계는 approve / fail 상태 체크를 남기지 않는다.
-대신 계획이 구현 가능한지, 어떤 피드백을 반영해야 하는지, 범위를 줄이거나 이슈를 나눠야 하는지를 판단한다.
+이 단계의 Codex는 **계획 단계의 blocking finding 식별자**다.
+아직 구현 브랜치를 승인하거나 merge 후보를 승인하는 단계가 아니다.
+계획이 구현 가능한지, 어떤 피드백을 반영해야 하는지, 범위를 줄이거나 이슈를 나눠야 하는지를 판단한다.
+
+### 2.5 실행 예시
+
+```text
+/codex:adversarial-review --background \
+  issue #123 implementation plan: challenge assumptions, scope fit, missing consumers, generated artifacts, rollback/test gaps
+```
+
+결과 확인은 `/codex:status`, `/codex:result`로 수행한다.
 
 ## 3. Codex 브랜치 리뷰
 

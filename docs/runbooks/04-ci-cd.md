@@ -11,7 +11,7 @@ Claude 구현 준비
   │
   ├── Plan Preflight (이슈 계획 작성/보강)
   │
-  ├── Plan Review (`@code-reviewer`, 고위험 시)
+  ├──▶ [Gate 0] codex-plan-review ─────── 실패 → Plan Preflight가 이슈 본문 재정비
   │
   ▼
 Claude 구현 (worktree 격리)
@@ -43,6 +43,18 @@ post-merge automation
 ```
 
 ## 2. Gate 상세
+
+### Gate 0 — Codex Plan Review
+
+**목적**: 구현 전 계획을 외부 Codex가 공격적으로 검토하는 게이트
+
+- **트리거**: Plan Preflight가 이슈 본문 구현계획을 `ready`로 정리한 시점
+- **실행**: `openai/codex-plugin-cc`의 `/codex:adversarial-review`
+- **결과**: 이슈 코멘트 `codex-plan-review`
+- **실패 시**: Plan Preflight가 이슈 본문 구현계획을 보강한 뒤 재요청
+- **해석 주의**: 이 단계는 Claude 내부 계획 검토가 아니라 외부 read-only Codex 리뷰다. 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
+
+이 게이트는 보호 브랜치의 required status check가 아니라, **구현 착수 전 필수 이슈 증적**이다.
 
 ### Gate A — Codex 브랜치 리뷰
 
@@ -97,10 +109,9 @@ post-merge automation
 
 ### Meta Review — Claude code-reviewer
 
-**목적**: approve / fail 판정보다 앞서 계획 적합성과 구조 리스크를 좁힌다.
+**목적**: approve / fail 판정보다 앞서 반복 failure와 구조 리스크를 좁힌다.
 
 - **트리거**:
-  - Plan Review에서 고위험 조건 감지
   - 고위험 변경
   - 같은 `risk class` failure 2회 반복
 - **실행 주체**: Claude 오케스트레이터 또는 수동 호출
@@ -111,7 +122,6 @@ post-merge automation
   - `.agent/skills/generated-artifact-sync.md`
 - **원칙**:
   - status check를 하나 더 늘리는 단계가 아니다.
-  - 구현 시작 전에는 "지금 이 범위로 코딩해도 되는가"를 판단한다.
   - auto-fix를 계속 돌리기 전에는 "무엇을 먼저 검증해야 하는가"를 정리하는 단계다.
 
 ### Claude PR 재수정 루프

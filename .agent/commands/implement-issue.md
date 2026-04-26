@@ -23,13 +23,15 @@ mkdir -p "$WORKTREE_ROOT"
 
 ## 에이전트 역할 분담
 
-이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. PR 전 기본 사전 리뷰는 Codex가 수행한다. 구현 시작 전에는 Plan Preflight 산출물을 Plan Review로 검증하며, 고위험 이슈는 Claude `@code-reviewer`가 Plan Review를 수행한다. 구조 리스크가 높거나 반복 failure가 나오면 같은 리뷰어가 메타 리뷰도 수행한다.
+이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. 구현 전 Codex Plan Review와 PR 전 브랜치 리뷰는 Codex가 수행한다. Codex Plan Review는 Claude 내부 단계가 아니라 `openai/codex-plugin-cc`의 `/codex:adversarial-review`로 실행하는 외부 read-only 게이트다.
+
+구조 리스크가 높거나 반복 failure가 나오면 Claude `@code-reviewer`가 메타 리뷰를 수행한다.
 
 | 단계 | 담당 | 실행 주체 | GitHub 기록 |
 |------|------|-----------|-------------|
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
-| 4b (Plan Review 피드백 루프) | 오케스트레이터 또는 `@code-reviewer` | Claude 메인 세션 / `@code-reviewer` | 이슈 본문/코멘트 |
+| 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
 | 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
 | 4d (이슈 본문 구현계획 확정) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
 | 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
@@ -63,19 +65,25 @@ mkdir -p "$WORKTREE_ROOT"
 - 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
 - 이슈 본문의 구현계획에는 파일 맵, 작업 순서, risk flags, 구현 체크리스트, 검증 체크리스트, stop conditions, 비목표를 포함한다.
 - Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 구현을 시작하지 않는다.
-- Plan Preflight의 `ready`는 Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
+- Plan Preflight의 `ready`는 Codex Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
 - Plan Preflight가 없더라도 작은 이슈라면 이슈 본문 자체가 실행계획 역할을 할 수 있다.
 
-4b. **Plan Review 피드백 루프**: Plan Preflight가 `.agent/skills/plan-review.md` 규칙으로 Plan Review를 호출해 구현계획 피드백/verdict를 받는다. 아래 조건이 하나라도 맞으면 Claude `@code-reviewer`가 Plan Review를 수행한다.
+4b. **Codex Plan Review 요청/대기**: Plan Preflight가 정비한 구현계획을 Codex plugin 외부 리뷰 게이트로 넘긴다.
 
-- 캐시, 세션, 연결, long-lived adapter, mutable config 변경
-- endpoint / schema / field / CLI rename
-- OpenAPI, 생성 타입, 생성 문서, schema drift 가능성
-- 둘 이상의 모듈과 소비자 경로가 함께 흔들림
-- 운영 health / readiness / background task와 연결된 동작 변경
-- 같은 `risk class` failure가 과거 리뷰에서 2회 반복됨
+- 실행 명령은 `/codex:adversarial-review`다.
+- 긴 리뷰는 `/codex:adversarial-review --background`로 시작하고 `/codex:status`, `/codex:result`로 결과를 회수한다.
+- focus text에는 이슈 번호, 스펙 경로, 구현계획 요약, 중점 검토 위험을 포함한다.
+- 이 단계는 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
+- 결과는 이슈 코멘트에 `Codex Plan Review`로 남긴다.
 
-Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Plan Review를 수행한다.
+예시:
+
+```text
+/codex:adversarial-review --background \
+  issue #{번호} implementation plan: challenge assumptions, scope fit, missing consumers, generated artifacts, rollback/test gaps
+```
+
+Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
 
 4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
 
@@ -93,7 +101,7 @@ Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6�
 
 `ready` / `caution` verdict에서 나온 주의사항은 구현 프롬프트의 **필수 반영 항목**이다. 특히 `caution`은 "좋으면 반영" 메모가 아니라, 코드/테스트/문서 Done criteria로 승격한다.
 
-4d. **이슈 본문 구현계획 확정**: 착수 기록을 남기기 전에 이슈 본문 구현계획을 최신 Plan Review verdict와 사전 리뷰 증적으로 정비한다.
+4d. **이슈 본문 구현계획 확정**: 착수 기록을 남기기 전에 이슈 본문 구현계획을 최신 Codex Plan Review verdict와 사전 리뷰 증적으로 정비한다.
 
 - `approve-implement`이면 현재 구현계획을 확정한다.
 - `narrow-scope`이면 축소 범위, 제외 범위, 후속 이슈 후보를 이슈 본문에 반영한다.
@@ -109,7 +117,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 담당 에이전트: @{에이전트명}
 - 변경 대상: {src/ante/xxx, frontend/ 등}
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
-- Plan Review: {approve-implement | narrow-scope}
+- Codex Plan Review: {approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}
 - 사전 리뷰: {arch=ready/caution/n-a}
 - 사전 리뷰 요약: {핵심 주의사항 1~2줄 또는 없음}"
@@ -140,7 +148,7 @@ Agent(
 ## Plan Preflight
 {이슈 본문 또는 이슈 코멘트의 실행계획 요약}
 
-## Plan Review
+## Codex Plan Review
 {verdict, feedback, implementation checklist, verification checklist, stop conditions}
 
 ## 사전 리뷰 증적

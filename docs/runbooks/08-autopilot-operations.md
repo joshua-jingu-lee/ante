@@ -12,7 +12,7 @@
 - autopilot은 새 구현 파이프라인을 만들지 않는다.
 - 실제 구현 절차 SSOT는 계속 `/implement-issue`다.
 - autopilot은 이슈 선별, 보류 판단, 사전 리뷰 증적, 구현 위임, merge/post-merge 모니터링 순서를 책임진다.
-- 병렬 선행 작업은 Plan Preflight까지만 허용하며, Plan Review, 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
+- 병렬 선행 작업은 Plan Preflight까지만 허용하며, Codex Plan Review, 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
 
 기본 성공 기준:
 
@@ -89,7 +89,7 @@ autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
 
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 GitHub 이슈 본문을 실행 가능한 계획으로 보강하거나 전면 재작성한다.
-- Plan Preflight의 `ready`는 Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
+- Plan Preflight의 `ready`는 Codex Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
 - `needs-rewrite`, `needs-spec-first`, `blocked`가 나오면 같은 배치에서 구현 대상으로 넘기지 않는다.
 - 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
 
