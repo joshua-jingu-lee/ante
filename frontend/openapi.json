@@ -123,7 +123,7 @@
           "accounts"
         ],
         "summary": "Update Account",
-        "description": "계좌 수정.\n\n런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,\n``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도\n포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는\n``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path\n응답과 ``AccountDeletedError`` 경로의 409를 구분한다.\n\nbody는 자유 ``dict[str, Any] | None``로 받는다. FastAPI 선행 Pydantic\n검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가\nstructural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.\n핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,\n비구조 필드를 그대로 ``account_service.update``에 forward한다.\nservice-layer가 알 수 없는/불변 필드는 자체 검증으로 거부한다\n(`AccountImmutableFieldError → 400`, `ValueError(unknown field)` 등).\nPUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속\n이슈 #1143에서 다룬다.",
+        "description": "계좌 수정.\n\n런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,\n``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도\n포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는\n``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path\n응답과 ``AccountDeletedError`` 경로의 409를 구분한다.\n\nbody는 자유 ``dict[str, Any] | None``로 받는다. FastAPI 선행 Pydantic\n검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가\nstructural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.\n핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,\nstructural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로\n``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{\"name\":\nnull}`` / ``{\"timezone\": {}}`` 같은 잘못된 값이 service/DB까지 흘러가\n상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로\n422로 변환한다.\n\nPUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속\n이슈 #1143에서 다룬다.",
         "operationId": "update_account_api_accounts__account_id__put",
         "parameters": [
           {
@@ -195,8 +195,8 @@
               }
             }
           },
-          "503": {
-            "description": "Account service not available 또는 broker 재연결 실패",
+          "422": {
+            "description": "비구조(mutable) 필드 type 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다.",
             "content": {
               "application/json": {
                 "schema": {
@@ -205,12 +205,12 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "503": {
+            "description": "Account service not available 또는 broker 재연결 실패",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

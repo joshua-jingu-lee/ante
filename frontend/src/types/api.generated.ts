@@ -66,9 +66,12 @@ export type paths = {
          *     검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
          *     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
          *     핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
-         *     비구조 필드를 그대로 ``account_service.update``에 forward한다.
-         *     service-layer가 알 수 없는/불변 필드는 자체 검증으로 거부한다
-         *     (`AccountImmutableFieldError → 400`, `ValueError(unknown field)` 등).
+         *     structural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로
+         *     ``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{"name":
+         *     null}`` / ``{"timezone": {}}`` 같은 잘못된 값이 service/DB까지 흘러가
+         *     상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로
+         *     422로 변환한다.
+         *
          *     PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
          *     이슈 #1143에서 다룬다.
          */
@@ -3360,13 +3363,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description 비구조(mutable) 필드 type 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Account service not available 또는 broker 재연결 실패 */

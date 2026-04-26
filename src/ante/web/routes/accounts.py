@@ -6,6 +6,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import ValidationError
 
 from ante.web.deps import (
     get_account_service,
@@ -18,6 +19,7 @@ from ante.web.schemas import (
     AccountDetailResponse,
     AccountListResponse,
     AccountSuspendRequest,
+    AccountUpdateRequest,
     ErrorResponse,
     RuleListResponse,
     RuleUpdateRequest,
@@ -182,6 +184,13 @@ async def get_account(
                 "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
             ),
         },
+        422: {
+            "model": ErrorResponse,
+            "description": (
+                "비구조(mutable) 필드 type 검증 실패. "
+                "structural 필드 키는 422가 아닌 409로 차단된다."
+            ),
+        },
         503: {
             "model": ErrorResponse,
             "description": "Account service not available 또는 broker 재연결 실패",
@@ -206,9 +215,12 @@ async def update_account(
     검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
     핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
-    비구조 필드를 그대로 ``account_service.update``에 forward한다.
-    service-layer가 알 수 없는/불변 필드는 자체 검증으로 거부한다
-    (`AccountImmutableFieldError → 400`, `ValueError(unknown field)` 등).
+    structural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로
+    ``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{"name":
+    null}`` / ``{"timezone": {}}`` 같은 잘못된 값이 service/DB까지 흘러가
+    상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로
+    422로 변환한다.
+
     PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
     이슈 #1143에서 다룬다.
     """
@@ -226,7 +238,8 @@ async def update_account(
     # cold-path 가드: structural 필드 키가 payload에 하나라도 등장하면
     # DB/서비스 호출 전 409로 즉시 차단한다(invariant I1/I4). 값이 null이거나
     # 타입이 잘못돼도 동일하게 차단된다 — Pydantic 검증을 통과한 값이 아니라
-    # 키 존재 여부만 본다.
+    # 키 존재 여부만 본다. 따라서 structural mutable 검증보다 *먼저* 수행해야
+    # mutable 422가 cold-path 409를 가리지 않는다.
     structural_hits = sorted(set(payload) & set(STRUCTURAL_FIELDS))
     if structural_hits:
         raise HTTPException(
@@ -236,9 +249,25 @@ async def update_account(
             ),
         )
 
-    # structural 가드를 통과한 키만 service.update에 forward한다. service가
-    # unknown/invalid 필드를 거부하므로 라우트는 추가 schema 검증을 하지 않는다.
-    fields = {k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS}
+    # 비구조 필드만 모은다. structural 키는 위 가드에서 이미 차단되었으므로
+    # 여기에는 들어오지 않는다. mutable 필드만 들어온 raw dict를 기존
+    # ``AccountUpdateRequest``로 model_validate하여 type 검증한다(새 모델
+    # 추가 없음 — 메타 리뷰 #2 결정 보존). structural 필드는 input에 없으므로
+    # None default로 통과되고, mutable 필드의 잘못된 값(예: null, dict 등)은
+    # ValidationError로 거부된다.
+    mutable_payload_in = {
+        k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS
+    }
+
+    try:
+        validated = AccountUpdateRequest.model_validate(mutable_payload_in)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
+
+    # ``exclude_none=True``로 set된 mutable 필드만 추출한다. ``{"name": null}``
+    # 같이 명시적으로 null이 들어온 경우 model_dump에서 빠지므로 service까지
+    # null이 흘러가지 않는다(P1: DB 오염 차단).
+    fields = validated.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
 

@@ -751,24 +751,26 @@ class TestUpdateAccount:
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
         assert "exchange" in detail
 
-    def test_update_unknown_mutable_field_forwarded_to_service(
+    def test_update_unknown_mutable_field_rejected_at_route(
         self,
         client: TestClient,
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
-        """알 수 없는 비구조 필드는 service-layer가 거부한다 (글로벌 400 매핑).
+        """알 수 없는 비구조 필드는 라우트의 mutable 검증 단계에서 무시된다.
 
-        attempt 8에서 라우트 단 ``AccountMutableUpdateRequest`` 검증이 제거
-        되면서 비구조 필드 schema 검증은 service-layer로 위임된다. structural
-        가드를 통과한 unknown 키는 ``account_service.update``로 그대로 forward
-        되며, 실제 ``AccountService.update``는 unknown field에 ``ValueError``를
-        던진다. 글로벌 예외 핸들러(``app.py``의 ValueError handler)가 이를
-        RFC 7807 400 ``ErrorResponse``로 매핑한다.
+        attempt 9는 P1 회귀 보호로 비구조 페이로드를
+        ``AccountUpdateRequest.model_validate``에 통과시킨다. Pydantic의
+        기본 동작은 unknown field를 ignore하므로, ``some_unknown_field``는
+        ``model_dump(exclude_none=True)`` 결과에서 사라진다 → 라우트는
+        ``fields``가 비었다고 판단해 400 "수정할 필드가 없습니다."로 응답한다.
 
-        본 테스트는 service-위임 동작과 글로벌 400 매핑을 함께 확인한다.
-        라우트가 unknown field를 PUT 422로 명시 매핑하는 schema accuracy 회복은
-        #1143에서 다룬다. service-layer 회귀 보호처:
+        결과적으로 service.update는 호출되지 않으며, unknown field가 DB에
+        도달할 가능성이 차단된다. unknown field에 대한 schema-accurate 422
+        매핑(라우트가 명시적으로 reject)은 #1143에서 mutable 모델을 직접
+        노출할 때 함께 정리한다.
+
+        service-layer 회귀 보호처(별도 invariant):
         ``tests/unit/test_account_immutable_fields.py``의
         ``test_update_unknown_field_raises_value_error``.
         """
@@ -779,13 +781,90 @@ class TestUpdateAccount:
             "/api/accounts/test-account",
             json={"some_unknown_field": "x"},
         )
-        # 글로벌 ValueError 핸들러가 400으로 매핑.
+        # 라우트 단 400 — unknown field가 Pydantic에서 무시되어 fields가 비었다.
         assert resp.status_code == 400
         body = resp.json()
-        # ErrorResponse 형태로 매핑됨.
         assert body.get("status") == 400
-        assert "some_unknown_field" in body.get("detail", "")
-        # audit 미발행 (service.update가 raise하면 logger 호출 전에 끊긴다)
+        assert body.get("detail") == "수정할 필드가 없습니다."
+        # service.update 미호출 — DB 오염 차단.
+        assert account_service._accounts["test-account"].name == "테스트 계좌"
+        # audit 미발행
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
+    def test_update_invalid_mutable_field_type_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """비구조 필드의 type이 잘못되면 422 (P1 회귀 보호).
+
+        ``timezone``은 문자열이어야 한다. dict가 들어오면 라우트의
+        ``AccountUpdateRequest.model_validate``가 ``ValidationError``를
+        발생시키고, 라우트는 이를 명시적으로 422로 매핑한다. 잘못된 값이
+        service/DB까지 도달해 상태를 오염시키는 것을 차단한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"timezone": {}},
+        )
+        assert resp.status_code == 422
+        # service.update 미호출 — timezone 보존
+        assert account_service._accounts["test-account"].timezone == "Asia/Seoul"
+        # audit 미발행
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
+    def test_update_invalid_name_type_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """``name``에 dict가 들어오면 422 (P1 회귀 보호)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": {"nested": "x"}},
+        )
+        assert resp.status_code == 422
+        # service.update 미호출 — name 보존
+        assert account_service._accounts["test-account"].name == "테스트 계좌"
+
+    def test_update_null_mutable_field_treated_as_no_op(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """``{"name": null}``은 fields가 비어 400으로 차단된다 (P1 회귀 보호).
+
+        ``AccountUpdateRequest`` 모든 필드는 ``str | None = None``이라 null도
+        Pydantic 검증을 통과한다. 그러나 ``model_dump(exclude_none=True)``로
+        None 필드를 제외하면 fields가 비고, 라우트는 400 "수정할 필드가
+        없습니다."로 응답한다 — null이 service까지 forward되어 DB의 name을
+        지우거나 NOT NULL 제약 위반을 일으킬 가능성을 차단한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+        original_name = account_service._accounts[account.account_id].name
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": None},
+        )
+        assert resp.status_code == 400
+        assert resp.json().get("detail") == "수정할 필드가 없습니다."
+        # service.update 미호출 — name 보존 (DB 오염 차단)
+        assert account_service._accounts["test-account"].name == original_name
+        # audit 미발행
         assert [
             log for log in audit_logger.logs if log["action"] == "account.update"
         ] == []

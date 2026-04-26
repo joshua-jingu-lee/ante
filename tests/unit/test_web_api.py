@@ -749,10 +749,11 @@ class TestResponseModelCoverage:
         content가 있고 schema가 ``ErrorResponse``를 가리키는지 확인한다.
 
         FastAPI가 자동 생성하는 path/dependency 검증용 422 응답은
-        ``HTTPValidationError`` 표준 schema를 사용하므로 본 테스트의
-        검증 대상에서 제외한다. attempt 8에서 PUT 422 명시 등록은 제거되어
-        (mutable schema 검증을 service-layer로 위임) ``responses=``의 422
-        강제 단언도 제외했다 — schema accuracy 회복은 #1143에서 다룬다.
+        ``HTTPValidationError`` 표준 schema를 사용하지만, 본 PUT 라우트는
+        attempt 9에서 mutable 필드 type 검증 실패에 대한 422 응답을 명시
+        등록(``model: ErrorResponse``)했으므로 본 테스트의 검증 대상에 포함
+        한다. body requestBody의 schema accuracy(mutable 모델 직접 노출)는
+        후속 이슈 #1143에서 다룬다.
         """
         resp = client.get("/openapi.json")
         assert resp.status_code == 200
@@ -763,10 +764,16 @@ class TestResponseModelCoverage:
         # 다른 account 라우트(suspend/activate/rules)의 4xx 커버리지 확장은
         # 후속 이슈(#1143 schema accuracy)에서 다룬다.
         # 각 튜플의 세 번째 요소는 ``responses=`` 데코레이터에 명시 등록된
-        # 에러 status code 집합 — FastAPI 자동 422는 제외한다.
+        # 에러 status code 집합 — FastAPI 자동 422는 제외하지만, attempt 9
+        # 에서 PUT은 mutable type 검증용 422를 명시 등록했으므로 PUT 422도
+        # 강제 단언 대상에 포함한다.
         target_routes: list[tuple[str, str, set[str]]] = [
             ("/api/accounts", "post", {"409"}),
-            ("/api/accounts/{account_id}", "put", {"400", "404", "409", "503"}),
+            (
+                "/api/accounts/{account_id}",
+                "put",
+                {"400", "404", "409", "422", "503"},
+            ),
             ("/api/accounts/{account_id}", "delete", {"409"}),
         ]
 
@@ -804,8 +811,32 @@ class TestResponseModelCoverage:
             + "\n".join(f"  - {m}" for m in missing)
         )
 
-    # PUT /api/accounts/{account_id} 422 schema accuracy(mutable 모델 노출 +
-    # 422에 ErrorResponse 참조)는 attempt 8에서 service-layer 위임 전략으로
-    # 전환하면서 라우트 ``responses=``에서 제거되었다. 후속 작업은 #1143에서
-    # 다룬다 — body schema(mutable 모델)와 422 응답 모델을 함께 노출하는
-    # 패턴 자체가 schema accuracy 카테고리의 분리된 결정이다.
+    def test_openapi_put_account_422_references_error_response(self, client):
+        """PUT /api/accounts/{account_id}의 422 응답이 ErrorResponse를 가리킨다.
+
+        attempt 9 P1 회귀 보호: 라우트는 비구조 필드 type 검증 실패를
+        ``HTTPException(status_code=422)``로 명시 변환한다. ``responses[422]``
+        에 ``model: ErrorResponse``가 등록되어 OpenAPI/codegen에서 422가
+        bodyless가 아닌 ``ErrorResponse`` 본문을 갖도록 한다 — 클라이언트는
+        type-safe하게 422 응답을 다룰 수 있다.
+
+        body requestBody schema accuracy(mutable 모델 직접 노출)는
+        후속 이슈 #1143에서 다룬다.
+        """
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        spec = (
+            openapi.get("paths", {})
+            .get("/api/accounts/{account_id}", {})
+            .get("put", {})
+        )
+        responses = spec.get("responses", {})
+        response_422 = responses.get("422")
+        assert response_422 is not None, "PUT 422 응답이 명시 등록되지 않음"
+        json_content = response_422.get("content", {}).get("application/json")
+        assert json_content is not None, "PUT 422에 application/json content 없음"
+        ref = json_content.get("schema", {}).get("$ref", "")
+        assert "ErrorResponse" in ref, (
+            f"PUT 422가 ErrorResponse를 가리키지 않음 (schema ref={ref!r})"
+        )
