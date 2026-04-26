@@ -2723,7 +2723,7 @@ export type components = {
             trading_status?: string | null;
             /**
              * Version
-             * @default 0.1.0
+             * @default 0.9.0
              */
             version: string;
         };

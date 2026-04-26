@@ -2,7 +2,7 @@
 
 <!-- version list -->
 
-## Unreleased
+## v0.9.0 (2026-04-25)
 
 ### BREAKING CHANGES
 
@@ -13,6 +13,8 @@
   토큰·Recovery Key와 함께 화면에 **1회만** 표시된다. 기존 설치는 디렉토리
   삭제 후 재실행하는 방식으로 마이그레이션한다. `MemberService.bootstrap_master()`
   서비스 API 자체는 변경 없음.
+
+> 자세한 변경 사항은 [GitHub Release v0.9.0](https://github.com/joshua-jingu-lee/ante/releases/tag/v0.9.0) 노트를 참조.
 
 ## v0.8.1 (2026-03-29)
 

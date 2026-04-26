@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from ante import __version__
+
 logger = logging.getLogger(__name__)
 
 # 프론트엔드 정적 파일 탐색 순서:
@@ -37,7 +39,7 @@ def create_app(**services: Any) -> FastAPI:
     """
     app = FastAPI(
         title="Ante",
-        version="0.1.0",
+        version=__version__,
         description="AI-Native Trading Engine API",
     )
 

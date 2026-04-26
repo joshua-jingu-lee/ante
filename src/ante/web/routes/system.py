@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from ante import __version__
 from ante.web.deps import (
     get_account_service,
     get_account_service_optional,
@@ -40,7 +41,7 @@ async def get_system_status(
     """시스템 상태 조회."""
     result: dict = {
         "status": "running",
-        "version": "0.1.0",
+        "version": __version__,
     }
 
     if account_service is not None:
