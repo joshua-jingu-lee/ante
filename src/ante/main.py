@@ -1144,7 +1144,10 @@ async def _init_notification(s: Services) -> None:
     try:
         min_level = NotificationLevel(min_level_str)
     except ValueError:
-        logger.warning("notification.min_level 무시: 유효하지 않은 값 %r", min_level_raw)
+        logger.warning(
+            "notification.min_level 무시: 유효하지 않은 값 %r",
+            min_level_raw,
+        )
         min_level = NotificationLevel.INFO
 
     # quiet_hours 파싱
