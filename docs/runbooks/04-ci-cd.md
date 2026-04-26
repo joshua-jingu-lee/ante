@@ -308,7 +308,8 @@ pytest tests/unit/ -v
 
 ## 7. 릴리스 연계
 
-릴리스는 여전히 **수동 dispatch**만 허용한다.
+릴리스는 여전히 **수동 실행**만 허용한다.
+실행 절차의 SSOT는 `.agent/commands/release.md`이며, GitHub Actions `workflow_dispatch`는 `/release`가 호출하거나 비상 복구 시에만 직접 사용한다.
 
 ```
 PR auto-merge
@@ -317,7 +318,7 @@ PR auto-merge
 main 누적
   │
   ▼
-/release 또는 workflow_dispatch
+/release
   │
   ▼
 semantic-release.yml

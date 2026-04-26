@@ -102,6 +102,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 │   ├── plan-preflight.md      # /plan-preflight
 │   ├── implement-issue.md     # /implement-issue
 │   ├── autopilot.md           # /autopilot
+│   ├── release.md             # /release
 │   └── api-docs.md            # /api-docs
 └── skills/                # 도메인 지식 스킬
     ├── module-conventions.md
@@ -154,6 +155,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 - `/plan-preflight #{번호}` — 이슈 본문 구현계획 작성/정비 → Codex Plan Review → `plan-preflight:done` 확정
 - `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성
 - `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 Plan Preflight → `/implement-issue` → merge/post-merge 순차 모니터링
+- `/release` — main 사전 점검 → semantic-release.yml 수동 실행 → publish.yml 모니터링
 - `/api-docs` — OpenAPI 스키마 조회
 
 ### 2.4 도메인 스킬 (skills/)

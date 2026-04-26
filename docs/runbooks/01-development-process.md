@@ -85,6 +85,11 @@ Claude 오케스트레이터
   │     ├── 이슈 체크박스 갱신 + close
   │     └── 원격 head branch 삭제 (GitHub 설정)
   │
+  ├──▶ /release (수동 릴리스 운영)
+  │     ├── main / clean tree / origin/main 동기화 / CI / 릴리스 대상 커밋 점검
+  │     ├── 사용자 승인 후 semantic-release.yml 수동 실행
+  │     └── publish.yml 모니터링
+  │
   ├──▶ /autopilot side lane (Claude 오케스트레이터)
   │     └── implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 수행
   │         (코드 수정, 브랜치 생성, PR 생성 금지)
@@ -103,6 +108,7 @@ Claude 오케스트레이터
 - PR 전 Codex 브랜치 리뷰는 GitHub Actions가 아니라 `/implement-issue` 안에서 `/codex:review --base <base>`로 반복한다.
 - PR 단계의 Claude/Codex 승인 체크는 **같은 head SHA**를 기준으로 독립 실행된다.
 - 머지는 Claude 오케스트레이터가 직접 하지 않고, GitHub auto-merge가 수행한다.
+- 릴리스는 merge/post-merge와 분리된 수동 운영 lane이며, `/release`가 사전 점검과 GitHub Actions dispatch/모니터링을 담당한다.
 
 ## 4. 작업 실행 체계
 
@@ -113,6 +119,7 @@ Claude 오케스트레이터
 | `/plan-preflight` | GitHub 이슈 본문 구현계획 작성/정비 → Codex Plan Review → `plan-preflight:done` 확정 | `.agent/commands/plan-preflight.md` |
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
 | `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → Plan Preflight → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`) | `.agent/commands/autopilot.md` |
+| `/release` | main 누적 변경 사전 점검 → semantic-release.yml 수동 실행 → publish.yml 모니터링 | `.agent/commands/release.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 
 야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 Plan Preflight로 이슈 본문 구현계획을 확정한 뒤 `/implement-issue`에 개별 구현을 위임한다. 확정 계획의 tasks, verification, risk flags, stop conditions는 구현 체크리스트로 승격되며, `/autopilot`은 기본적으로 **한 번에 하나의 이슈만 implement → merge/post-merge까지 순차 모니터링**한다. 다만 현재 구현 lane이 코드 수정, 리뷰, CI, merge 대기 중일 때 다른 후보 이슈의 Plan Preflight는 병렬로 수행할 수 있다.
@@ -158,6 +165,15 @@ Codex Plan Review의 출력은 다음 중 하나다.
 
 모든 구현 작업은 **git worktree**로 격리하여 로컬 main을 보호한다. 생성·재사용·정리 절차의 SSOT는 `/implement-issue`와 [03-git-workflow.md](03-git-workflow.md)다.
 공유 `.venv`를 쓰는 경우 로컬 검증이 현재 worktree의 `src/ante`를 import하는지 확인한다.
+
+### 4.4 릴리스 운영
+
+릴리스 정책은 [06-release.md](06-release.md), 실행 절차는 `/release`가 SSOT다.
+`/release`는 main 브랜치, 클린 워킹 트리, `origin/main` 동기화, 최신 CI 상태, 마지막 태그 이후 릴리스 대상 커밋을 확인한 뒤 사용자 승인으로 `semantic-release.yml`을 수동 실행한다.
+GitHub Release가 생성되면 `publish.yml`을 모니터링해 PyPI 배포 결과까지 보고한다.
+
+`/autopilot`, `/implement-issue`, GitHub auto-merge, post-merge automation은 릴리스를 자동으로 시작하지 않는다.
+릴리스는 배포 가능한 main 누적 상태를 사람이 확인한 뒤 별도로 실행하는 운영 단계다.
 
 ## 5. 실패 복구 루프
 

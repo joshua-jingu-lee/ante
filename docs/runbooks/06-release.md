@@ -1,13 +1,14 @@
 # 06. 릴리스 프로세스
 
-> PyPI 배포까지의 릴리스 절차를 정의한다.
+> PyPI 배포까지의 릴리스 정책을 정의한다.
+> 실행 절차의 SSOT는 `.agent/commands/release.md`다.
 
 ---
 
 ## 1. 릴리스 정책
 
 - **수동 실행만 허용**: main에 머지되었다고 자동 릴리스되지 않는다.
-- **실행 방법**: `/release` 스킬 또는 GitHub Actions에서 semantic-release.yml 수동 dispatch.
+- **실행 방법**: `/release` 커맨드. GitHub Actions의 `semantic-release.yml` 수동 dispatch는 `/release`가 호출하거나 비상 복구 시에만 사용한다.
 - **버전 규칙**: [03-git-workflow.md §2](03-git-workflow.md#2-커밋-컨벤션) Conventional Commits 기반 자동 범프.
 
 ## 2. 릴리스 흐름
@@ -24,10 +25,9 @@
   │
   ├── [1단계] semantic-release.yml 실행
   │     ├── 커밋 메시지 분석 → 버전 결정
-  │     ├── pyproject.toml version 범프
-  │     ├── CHANGELOG.md 갱신
-  │     ├── chore(release): v{version} 커밋 + 태그 push
-  │     └── GitHub Release 생성 (generate_release_notes)
+  │     ├── workflow 작업 디렉터리에서 빌드용 버전 반영
+  │     ├── 프론트엔드/파이썬 패키지 산출물 빌드
+  │     └── GitHub Release 생성 (dist 파일 첨부, generate_release_notes)
   │
   ├── [2단계] publish.yml 자동 트리거
   │     ├── 프론트엔드 빌드 (npm ci && npm run build)

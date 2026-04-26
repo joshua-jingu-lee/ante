@@ -447,7 +447,7 @@ docs/
 │   ├── 03-git-workflow.md
 │   ├── 04-ci-cd.md             # CI/CD와 리뷰 게이트
 │   ├── 05-testing.md
-│   ├── 06-release.md           # 릴리스 절차
+│   ├── 06-release.md           # 릴리스 정책
 │   └── README.md
 ├── specs/                      # 모듈별 세부 설계
 │   ├── README.md
@@ -667,6 +667,7 @@ frontend/src/
 │   ├── plan-preflight.md        # /plan-preflight
 │   ├── implement-issue.md       # /implement-issue
 │   ├── autopilot.md             # /autopilot
+│   ├── release.md               # /release
 │   └── api-docs.md              # /api-docs
 └── skills/                      # 프로젝트 스킬 (컨벤션·패턴 참조)
     ├── asyncio-patterns.md
@@ -674,7 +675,6 @@ frontend/src/
     ├── github-auth.md           # GitHub CLI 로컬 PAT 인증 절차
     ├── github-ops.md            # GitHub 조회/코멘트/PR/재실행 공통 절차
     ├── module-conventions.md
-    ├── release.md               # /release 릴리스 절차
     ├── review-pr.md
     └── sqlite-patterns.md
 ```
