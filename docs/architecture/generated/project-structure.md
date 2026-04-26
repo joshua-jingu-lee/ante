@@ -448,7 +448,6 @@ docs/
 │   ├── 04-ci-cd.md             # CI/CD와 리뷰 게이트
 │   ├── 05-testing.md
 │   ├── 06-release.md           # 릴리스 절차
-│   ├── 08-autopilot-operations.md # 야간 autopilot 큐 운영
 │   └── README.md
 ├── specs/                      # 모듈별 세부 설계
 │   ├── README.md

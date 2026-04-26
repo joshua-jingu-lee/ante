@@ -1,5 +1,7 @@
 오픈 이슈 큐를 야간 배치로 순차 처리하며, 필요 시 Plan Preflight로 구현계획을 확정한 뒤 `/implement-issue`에 위임한다.
 
+이 파일이 `/autopilot` 실행 절차의 SSOT다. 런북은 정책과 링크만 제공하고, 큐 선별·상태 코멘트·리포트·merge/post-merge 모니터링의 실제 순서는 이 커맨드를 따른다.
+
 ## 인자
 
 $ARGUMENTS — 옵션 (생략 가능)
@@ -9,7 +11,7 @@ $ARGUMENTS — 옵션 (생략 가능)
 - `--label {라벨}`: 특정 라벨만 대상으로 제한
 - `--handoff-only`: 예외적으로 PR 생성 후 기존 게이트 인계까지만 처리하고 merge/post-merge 확인은 생략
 - `--strict-merge`: deprecated alias. 현재는 기본 동작과 동일하게 merge/post-merge까지 확인
-- `--dry-run`: 큐 선별과 선행 리뷰 필요 여부만 계산하고 실제 구현은 시작하지 않음
+- `--dry-run`: 큐 선별과 Plan Preflight 필요 여부만 계산하고 실제 구현은 시작하지 않음
 
 ## 목적
 
@@ -302,7 +304,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - `### 있었던 사건`
   - 예: 특정 runner 대기 지연, PR 승인 워커 충돌, stale base, merge conflict, review-loop 반복, 인증 실패, 수동 재실행 필요
 - `### 개선 포인트`
-  - 예: 라벨 규칙 보강, 선행 리뷰 강제, runner capacity 조정, 코멘트 템플릿 정리, 큐 정렬 규칙 수정
+  - 예: 라벨 규칙 보강, Plan Preflight 조건 조정, runner capacity 조정, 코멘트 템플릿 정리, 큐 정렬 규칙 수정
 
 공식 증적은 GitHub 이슈/PR 코멘트와 PR status check다. PR 전 Codex 브랜치 리뷰는 status check가 아니라 이슈 코멘트의 `/codex:review --base <ref>` PASS/FAIL 기록으로 확인한다. `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
 

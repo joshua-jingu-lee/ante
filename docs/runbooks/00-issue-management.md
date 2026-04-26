@@ -228,7 +228,7 @@ GitHub 기본 라벨 또는 프로젝트 보드로 관리:
 ### 5.1 Autopilot과 우선순위
 
 Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge 모니터링은
-[08-autopilot-operations.md](08-autopilot-operations.md)가 SSOT다.
+[.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)가 SSOT다.
 이 문서에서는 이슈에 우선순위와 보류 라벨을 정확히 붙이는 것까지만 다룬다.
 
 ## 6. 이슈 생명주기
@@ -247,7 +247,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 구현 실행 흐름은 [01-development-process.md](01-development-process.md),
 브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),
 리뷰/머지 게이트는 [04-ci-cd.md](04-ci-cd.md),
-autopilot 배치 상태는 [08-autopilot-operations.md](08-autopilot-operations.md)를 따른다.
+autopilot 배치 상태는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)를 따른다.
 
 ### 이슈 close 규칙
 

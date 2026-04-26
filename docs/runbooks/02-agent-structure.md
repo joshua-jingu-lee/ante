@@ -19,7 +19,7 @@
 **역할**:
 - 작업 분석과 분해
 - Plan Preflight 산출물 확인, `plan-preflight:started`/`plan-preflight:done` 라벨 관리, Codex Plan Review 요청/결과 조율
-- 야간 `/autopilot` 배치에서 이슈 큐 snapshot, 선행 리뷰 증적, 구현 위임, merge 모니터링 조율
+- 야간 `/autopilot` 배치에서 이슈 큐 snapshot, Plan Preflight, 구현 위임, merge 모니터링 조율
 - 적절한 Claude 서브에이전트 위임
 - 이슈/브랜치/PR GitHub 기록 관리
 - Codex 브랜치 리뷰 결과를 받아 수정 루프 조율

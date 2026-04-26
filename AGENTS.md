@@ -42,7 +42,6 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 > CI/CD와 리뷰 게이트: [docs/runbooks/04-ci-cd.md](docs/runbooks/04-ci-cd.md)
 > 테스트 전략: [docs/runbooks/05-testing.md](docs/runbooks/05-testing.md)
 > 릴리스 운영: [docs/runbooks/06-release.md](docs/runbooks/06-release.md)
-> Autopilot 운영: [docs/runbooks/08-autopilot-operations.md](docs/runbooks/08-autopilot-operations.md)
 
 
 ## 프로젝트 디렉토리 구조

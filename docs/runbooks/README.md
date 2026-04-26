@@ -16,7 +16,6 @@
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/머지 게이트, 저장소 설정 |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (버전 관리, 태그, 배포 체크리스트) |
-| [08-autopilot-operations.md](08-autopilot-operations.md) | 야간 autopilot 배치 운영 규칙 (`needs-triage`, 큐 선별, Plan Preflight 병렬 lane, `/implement-issue`, merge/post-merge 모니터링) |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)
 
