@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ante.web.deps import (
     get_account_service,
@@ -19,6 +19,7 @@ from ante.web.schemas import (
     AccountListResponse,
     AccountSuspendRequest,
     AccountUpdateRequest,
+    ErrorResponse,
     RuleListResponse,
     RuleUpdateRequest,
     RuleUpdateResponse,
@@ -114,36 +115,33 @@ async def list_accounts(
 
 @router.post(
     "",
+    status_code=409,
+    response_model=ErrorResponse,
     responses={
         409: {
+            "model": ErrorResponse,
             "description": (
                 "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
                 "— 런타임 계좌 생성 차단"
-            )
+            ),
         },
     },
 )
-async def create_account(
-    request: Request,
-    account_service: Annotated[Any, Depends(get_account_service)],
-    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-) -> dict[str, Any]:
+async def create_account(request: Request) -> ErrorResponse:
     """계좌 생성.
 
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
     수행한다.
 
-    body 파라미터를 받지 않는 이유: cold-path 차단은 입력 valid 여부와
-    무관하게 항상 409여야 하므로, FastAPI가 핸들러 진입 전에 body
-    validation을 수행하지 않도록 시그니처에서 의도적으로 제외한다.
-    또한 OpenAPI에서도 requestBody가 노출되지 않아 클라이언트에
-    "런타임 POST는 어떤 body도 받지 않는다"는 계약이 정확히 전달된다.
+    의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해
+    핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는
+    success contract(200/201/204)가 노출되지 않으며, 응답 모델은
+    ``ErrorResponse``로 고정된다(invariant I2/I3).
+
+    이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가
+    담당한다.
     """
-    # 다른 검증/서비스 호출 전, 진입 즉시 cold-path 409 응답.
-    # AccountService 생성 호출, broker connect, 감사 로그 모두 발생하지 않는다.
-    # 이 경로의 회귀 보호는 service-layer 테스트(`tests/unit/test_account.py`)가
-    # 담당한다.
     raise HTTPException(
         status_code=409,
         detail=_cold_path_detail(
@@ -185,10 +183,10 @@ async def get_account(
 )
 async def update_account(
     account_id: str,
-    body: AccountUpdateRequest,
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
+    body: dict[str, Any] | None = Body(default=None),
 ) -> dict[str, Any]:
     """계좌 수정.
 
@@ -197,28 +195,43 @@ async def update_account(
     포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는
     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
+
+    body는 검증되지 않은 raw ``dict``로 받는다(invariant I4). 가드 판정은
+    Pydantic이 변환한 값(``is not None``)이 아니라 **요청 body의 키 존재
+    여부**로 수행하므로, ``{"credentials": null}``처럼 명시적으로 null을
+    보낸 경우와 ``{"buy_commission_rate": "bad"}``처럼 structural 필드가 타입
+    오류인 경우 모두 cold-path 가드보다 먼저 422가 발생하지 않는다. 비구조
+    필드만 추출한 dict로 ``AccountUpdateRequest.model_validate(...)``를 호출해
+    기존 200/404/400/409(deleted) 분기를 보존한다.
     """
     from ante.account.errors import (
         AccountDeletedError,
         AccountNotFoundError,
     )
 
-    # cold-path 가드: structural 필드가 하나라도 명시(`is not None`)되면
-    # DB/서비스 호출 전 409로 즉시 차단한다.
-    # 가드 이후의 service.update는 비구조 필드만 받으므로
+    # cold-path 가드: structural 필드 키가 raw payload에 하나라도 등장하면
+    # DB/서비스 호출 전 409로 즉시 차단한다(invariant I1/I4). 값이 null이거나
+    # 타입이 잘못돼도 동일하게 차단된다 — Pydantic 검증을 통과한 값이 아니라
+    # 키 존재 여부만 본다. 가드 이후의 service.update는 비구조 필드만 받으므로
     # AccountImmutableFieldError/BrokerReconnectFailedError 경로에 도달하지
-    # 않는다. 해당 service-layer 동작 회귀는 `tests/unit/test_account.py`,
+    # 않는다. service-layer 동작 회귀는 `tests/unit/test_account.py`,
     # `tests/unit/test_account_immutable_fields.py`가 보호한다.
-    triggered_structural = [
-        name for name in STRUCTURAL_FIELDS if getattr(body, name, None) is not None
-    ]
-    if triggered_structural:
+    payload = body or {}
+    structural_hits = sorted(set(payload) & set(STRUCTURAL_FIELDS))
+    if structural_hits:
         raise HTTPException(
             status_code=409,
             detail=_cold_path_detail(
-                f"다음 필드는 cold-path 전용입니다: {', '.join(triggered_structural)}"
+                f"다음 필드는 cold-path 전용입니다: {', '.join(structural_hits)}"
             ),
         )
+
+    # 비구조 필드만 모아 Pydantic으로 재검증. 알 수 없는 키는 Pydantic이
+    # 무시(extra='ignore' 기본)하므로 cold-path 가드 통과 후에도 안전하다.
+    non_structural_payload = {
+        k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS
+    }
+    parsed = AccountUpdateRequest.model_validate(non_structural_payload)
 
     # None이 아닌 비구조 필드만 업데이트 대상
     fields: dict[str, Any] = {}
@@ -228,7 +241,7 @@ async def update_account(
         "trading_hours_start",
         "trading_hours_end",
     ):
-        value = getattr(body, field_name, None)
+        value = getattr(parsed, field_name, None)
         if value is not None:
             fields[field_name] = value
 
@@ -332,28 +345,31 @@ async def activate_account(
 
 @router.delete(
     "/{account_id}",
+    status_code=409,
+    response_model=ErrorResponse,
     responses={
         409: {
+            "model": ErrorResponse,
             "description": (
                 "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
                 "— 런타임 계좌 삭제 차단"
-            )
+            ),
         },
     },
 )
-async def delete_account(
-    account_id: str,
-    request: Request,
-    account_service: Annotated[Any, Depends(get_account_service)],
-    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-) -> None:
+async def delete_account(account_id: str, request: Request) -> ErrorResponse:
     """계좌 소프트 딜리트.
 
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
     실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
-    수행한다. service-layer 회귀 보호는 ``tests/unit/test_account.py``의
-    ``test_delete_account``, ``test_delete_already_deleted_account_raises``가
-    담당한다.
+    수행한다.
+
+    의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가
+    반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/
+    204)가 노출되지 않으며, 응답 모델은 ``ErrorResponse``로 고정된다
+    (invariant I2/I3). service-layer 회귀 보호는
+    ``tests/unit/test_account.py``의 ``test_delete_account``,
+    ``test_delete_already_deleted_account_raises``가 담당한다.
     """
     raise HTTPException(
         status_code=409,

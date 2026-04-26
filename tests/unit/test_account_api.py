@@ -345,6 +345,30 @@ class TestCreateAccount:
         ]
         assert create_logs == []
 
+    def test_create_account_returns_409_without_account_service(self) -> None:
+        """AccountService가 미주입된 환경에서도 503이 아니라 409여야 한다.
+
+        invariant I1: 핸들러는 어떤 의존성보다 먼저 cold-path 409를 raise해야
+        하므로, ``app.state.account_service``가 None이어도 503으로 새지 않는다.
+        ``get_account_service`` 의존성을 시그니처에서 제거한 게 회귀 차단의
+        본질이며, 이 테스트가 그 invariant를 직접 단언한다.
+        """
+        app = create_app()  # account_service 미주입
+        # account_service 미주입 확인
+        assert getattr(app.state, "account_service", None) is None
+        with TestClient(app) as bare_client:
+            resp = bare_client.post(
+                "/api/accounts",
+                json={
+                    "account_id": "x",
+                    "name": "x",
+                    "broker_type": "test",
+                },
+            )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+
 
 class TestGetAccount:
     """GET /api/accounts/:id."""
@@ -612,6 +636,87 @@ class TestUpdateAccount:
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
         assert "trading_mode" in detail
 
+    def test_update_blocks_when_structural_field_is_null_explicitly(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """structural 필드가 명시적으로 null이어도 cold-path 409로 차단된다.
+
+        invariant I4: 가드는 검증된 Pydantic 값(``is not None``)이 아니라 raw
+        body의 키 존재 여부로 판정한다. ``credentials: null``이라도 키가 등장
+        했다는 사실이 cold-path 위반이며, Pydantic이 None으로 정규화한다고
+        해서 우회되어선 안 된다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+        original_name = account.name
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": "변경 시도", "credentials": None},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+        # 비구조 필드(name)도 함께 차단되었는지 확인 — service.update 미호출.
+        assert account_service._accounts["test-account"].name == original_name
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
+    def test_update_blocks_when_structural_field_has_type_error(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """structural 필드 타입이 잘못돼도 422가 아니라 409로 차단된다.
+
+        invariant I4: 가드는 Pydantic 검증보다 먼저 raw 키만 확인하므로,
+        ``buy_commission_rate: "bad"``처럼 타입이 어긋나도 cold-path 409가
+        나와야 한다. 만약 422가 먼저 나온다면 cold-path 가드가 schema
+        validation에 의해 우회되는 상황이다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"buy_commission_rate": "bad"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "buy_commission_rate" in detail
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
+    def test_update_blocks_when_payload_has_unknown_structural_extras(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """structural 키와 unknown 키가 섞여도 cold-path 409가 우선한다.
+
+        Pydantic이 무시할 미지의 필드와 structural 키가 같이 와도,
+        키 존재 여부 가드가 먼저 동작해 409를 보장한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"unknown_field": "x", "exchange": "KRX"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "exchange" in detail
+
 
 class TestSuspendAccount:
     """POST /api/accounts/:id/suspend."""
@@ -751,3 +856,18 @@ class TestDeleteAccount:
         assert [
             log for log in audit_logger.logs if log["action"] == "account.delete"
         ] == []
+
+    def test_delete_account_returns_409_without_account_service(self) -> None:
+        """AccountService가 미주입된 환경에서도 503이 아니라 409여야 한다.
+
+        invariant I1: DELETE 핸들러도 ``get_account_service`` 의존성을 거치지
+        않아야 하며, account_service가 None일 때도 cold-path 409가 일관되게
+        반환되어야 한다.
+        """
+        app = create_app()  # account_service 미주입
+        assert getattr(app.state, "account_service", None) is None
+        with TestClient(app) as bare_client:
+            resp = bare_client.delete("/api/accounts/some-id")
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail

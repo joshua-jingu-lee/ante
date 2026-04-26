@@ -25,11 +25,13 @@ export type paths = {
          *     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
          *     수행한다.
          *
-         *     body 파라미터를 받지 않는 이유: cold-path 차단은 입력 valid 여부와
-         *     무관하게 항상 409여야 하므로, FastAPI가 핸들러 진입 전에 body
-         *     validation을 수행하지 않도록 시그니처에서 의도적으로 제외한다.
-         *     또한 OpenAPI에서도 requestBody가 노출되지 않아 클라이언트에
-         *     "런타임 POST는 어떤 body도 받지 않는다"는 계약이 정확히 전달된다.
+         *     의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해
+         *     핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는
+         *     success contract(200/201/204)가 노출되지 않으며, 응답 모델은
+         *     ``ErrorResponse``로 고정된다(invariant I2/I3).
+         *
+         *     이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가
+         *     담당한다.
          */
         post: operations["create_account_api_accounts_post"];
         delete?: never;
@@ -59,6 +61,14 @@ export type paths = {
          *     포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는
          *     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
          *     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
+         *
+         *     body는 검증되지 않은 raw ``dict``로 받는다(invariant I4). 가드 판정은
+         *     Pydantic이 변환한 값(``is not None``)이 아니라 **요청 body의 키 존재
+         *     여부**로 수행하므로, ``{"credentials": null}``처럼 명시적으로 null을
+         *     보낸 경우와 ``{"buy_commission_rate": "bad"}``처럼 structural 필드가 타입
+         *     오류인 경우 모두 cold-path 가드보다 먼저 422가 발생하지 않는다. 비구조
+         *     필드만 추출한 dict로 ``AccountUpdateRequest.model_validate(...)``를 호출해
+         *     기존 200/404/400/409(deleted) 분기를 보존한다.
          */
         put: operations["update_account_api_accounts__account_id__put"];
         post?: never;
@@ -68,9 +78,14 @@ export type paths = {
          *
          *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
          *     실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
-         *     수행한다. service-layer 회귀 보호는 ``tests/unit/test_account.py``의
-         *     ``test_delete_account``, ``test_delete_already_deleted_account_raises``가
-         *     담당한다.
+         *     수행한다.
+         *
+         *     의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가
+         *     반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/
+         *     204)가 노출되지 않으며, 응답 모델은 ``ErrorResponse``로 고정된다
+         *     (invariant I2/I3). service-layer 회귀 보호는
+         *     ``tests/unit/test_account.py``의 ``test_delete_account``,
+         *     ``test_delete_already_deleted_account_raises``가 담당한다.
          */
         delete: operations["delete_account_api_accounts__account_id__delete"];
         options?: never;
@@ -1409,40 +1424,6 @@ export type components = {
             reason: string;
         };
         /**
-         * AccountUpdateRequest
-         * @description 계좌 수정 요청.
-         */
-        AccountUpdateRequest: {
-            /** Broker Config */
-            broker_config?: {
-                [key: string]: unknown;
-            } | null;
-            /** Broker Type */
-            broker_type?: string | null;
-            /** Buy Commission Rate */
-            buy_commission_rate?: number | null;
-            /** Credentials */
-            credentials?: {
-                [key: string]: string;
-            } | null;
-            /** Currency */
-            currency?: string | null;
-            /** Exchange */
-            exchange?: string | null;
-            /** Name */
-            name?: string | null;
-            /** Sell Commission Rate */
-            sell_commission_rate?: number | null;
-            /** Timezone */
-            timezone?: string | null;
-            /** Trading Hours End */
-            trading_hours_end?: string | null;
-            /** Trading Hours Start */
-            trading_hours_start?: string | null;
-            /** Trading Mode */
-            trading_mode?: string | null;
-        };
-        /**
          * ActivateRequest
          * @description 거래 재개 요청.
          */
@@ -1956,6 +1937,37 @@ export type components = {
             items: components["schemas"]["DatasetItem"][];
             /** Total */
             total: number;
+        };
+        /**
+         * ErrorResponse
+         * @description RFC 7807 Problem Details 에러 응답.
+         */
+        ErrorResponse: {
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /**
+             * Instance
+             * @default
+             */
+            instance: string;
+            /**
+             * Status
+             * @default 500
+             */
+            status: number;
+            /**
+             * Title
+             * @default Internal Server Error
+             */
+            title: string;
+            /**
+             * Type
+             * @default /errors/internal
+             */
+            type: string;
         };
         /**
          * FeedStatusResponse
@@ -3123,7 +3135,6 @@ export type AccountDetailResponse = components['schemas']['AccountDetailResponse
 export type AccountListResponse = components['schemas']['AccountListResponse'];
 export type AccountResponse = components['schemas']['AccountResponse'];
 export type AccountSuspendRequest = components['schemas']['AccountSuspendRequest'];
-export type AccountUpdateRequest = components['schemas']['AccountUpdateRequest'];
 export type ActivateRequest = components['schemas']['ActivateRequest'];
 export type ApprovalDetailResponse = components['schemas']['ApprovalDetailResponse'];
 export type ApprovalItem = components['schemas']['ApprovalItem'];
@@ -3153,6 +3164,7 @@ export type DataSchemaResponse = components['schemas']['DataSchemaResponse'];
 export type DatasetDetailResponse = components['schemas']['DatasetDetailResponse'];
 export type DatasetItem = components['schemas']['DatasetItem'];
 export type DatasetListResponse = components['schemas']['DatasetListResponse'];
+export type ErrorResponse = components['schemas']['ErrorResponse'];
 export type FeedStatusResponse = components['schemas']['FeedStatusResponse'];
 export type HaltRequest = components['schemas']['HaltRequest'];
 export type HealthResponse = components['schemas']['HealthResponse'];
@@ -3251,23 +3263,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단 */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3311,9 +3314,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
-                "application/json": components["schemas"]["AccountUpdateRequest"];
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
             };
         };
         responses: {
@@ -3369,21 +3374,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
             /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단 */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
