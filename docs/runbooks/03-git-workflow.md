@@ -15,6 +15,7 @@ docs/#70-api-reference
 test/#81-regression-coverage
 chore/#88-runner-cleanup
 epic/#300-datafeed
+release/v0.9.0
 ```
 
 ### 1.1 이슈와 브랜치 대응 원칙
@@ -35,6 +36,7 @@ epic/#300-datafeed
 | `test` | `test` | `test/` |
 | `chore` | `chore` | `chore/` |
 | `epic` | `epic` | `epic/` |
+| `release` | 릴리스 PR | `release/` |
 
 `/implement-issue`, `/autopilot`, 내부 `/codex:review --base <ref>` 브랜치 리뷰는 이 매핑을 기준으로 정렬한다.
 
@@ -47,6 +49,15 @@ epic/#300-datafeed
   - `git cherry -v origin/epic/#{에픽번호}-{짧은설명} HEAD`
   - 히스토리 정리 전후 검증이 필요하면 `git range-diff <정리 전 브랜치> <정리 후 브랜치>`
 - stale base, duplicate commit, base regression이 보이면 PR 생성/수정보다 히스토리 정리를 먼저 한다.
+
+### 1.4 Release 브랜치
+
+- release 브랜치는 `/release prepare`만 생성한다.
+- 브랜치 이름은 `release/vX.Y.Z`로 고정한다.
+- release 브랜치는 항상 최신 `origin/main`에서 분기한다.
+- open release PR은 한 번에 하나만 허용한다.
+- release PR merge 후 publish 전에 main에 새 커밋이 추가되면 publish하지 않고 `/release prepare`를 다시 수행한다.
+- release 브랜치에는 릴리스 메타데이터만 포함하고, 기능/버그/스펙 변경을 섞지 않는다.
 
 ## 2. 커밋 컨벤션
 
@@ -130,6 +141,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 
 - **제목**: 커밋 컨벤션과 동일한 형식 (70자 이내)
 - **본문**: Summary + Test Plan + `Closes #{번호}`
+- **release PR 예외**: release PR은 연결 이슈가 없어도 되며, 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차를 남긴다.
 - **라벨**: `core`, `web`, `cli`, `docs`, `fix` 중 해당 항목
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
 - **전제 조건**: 최신 branch HEAD의 `/codex:review --base <base>`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음

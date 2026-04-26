@@ -81,6 +81,7 @@ post-merge automation
 
 - **트리거**: `pull_request`
 - **결과**: `ci`
+- **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
 
 예시:
 
@@ -89,6 +90,7 @@ post-merge automation
 - ruff format --check src/ tests/
 - mypy src/
 - pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
+- docker build -t ante:release-pr .  # release/* PR only
 ```
 
 ### Gate C — Claude PR 승인
@@ -198,7 +200,7 @@ post-merge automation
     ├── pr-approvals.yml          # Gate C/D: Claude + Codex PR 승인
     ├── post-merge.yml            # 머지 후 이슈 정리, 후처리 (closed event + workflow_dispatch)
     ├── semantic-release.yml      # 수동 릴리스
-    └── publish.yml               # Release 기반 배포
+    └── publish.yml               # Release 기반 PyPI/Docker 배포
 ```
 
 ### 3.1 현재 저장소와 목표 상태
@@ -309,7 +311,8 @@ pytest tests/unit/ -v
 ## 7. 릴리스 연계
 
 릴리스는 여전히 **수동 실행**만 허용한다.
-실행 절차의 SSOT는 `.agent/commands/release.md`이며, GitHub Actions `workflow_dispatch`는 `/release`가 호출하거나 비상 복구 시에만 직접 사용한다.
+실행 절차의 SSOT는 `.agent/commands/release.md`다.
+`publish.yml`의 수동 `workflow_dispatch`는 build-only 검증이며, 실제 PyPI/Docker 배포는 GitHub Release `published` 이벤트에서만 수행한다.
 
 ```
 PR auto-merge
@@ -318,13 +321,25 @@ PR auto-merge
 main 누적
   │
   ▼
-/release
+/release prepare
+  │
+  ▼
+release PR
+  │
+  ▼
+release PR merge
+  │
+  ▼
+/release publish
   │
   ▼
 semantic-release.yml
   │
   ▼
 publish.yml
+  ├── PyPI
+  └── GHCR Docker image
 ```
 
 main에 머지되었다고 자동 릴리스되지는 않는다.
+release PR에서는 Docker build 검증만 수행하고, registry push는 GitHub Release가 published 된 뒤 `publish.yml`에서만 수행한다.

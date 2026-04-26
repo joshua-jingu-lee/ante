@@ -26,7 +26,7 @@ jobs:
       - name: Install python-semantic-release
         run: pip install python-semantic-release
 
-      # 1. 버전 범프 + 태그 생성
+      # 1. 버전 계산 + 빌드용 버전 반영
       - name: Run semantic-release
         id: semrel
         env:
@@ -72,4 +72,3 @@ jobs:
           tag_name: ${{ steps.semrel.outputs.tag }}
           files: dist/*
           generate_release_notes: true
-
