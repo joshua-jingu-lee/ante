@@ -60,35 +60,15 @@
           "accounts"
         ],
         "summary": "Create Account",
-        "description": "계좌 생성.",
+        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.\n\n의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해\n핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는\nsuccess contract(200/201/204)가 노출되지 않으며, 응답 모델은\n``ErrorResponse``로 고정된다(invariant I2/I3).\n\n이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가\n담당한다.",
         "operationId": "create_account_api_accounts_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountCreateRequest"
-              }
-            }
-          }
-        },
         "responses": {
-          "201": {
-            "description": "Successful Response",
+          "409": {
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountDetailResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -143,7 +123,7 @@
           "accounts"
         ],
         "summary": "Update Account",
-        "description": "계좌 수정.",
+        "description": "계좌 수정.\n\n런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,\n``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도\n포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는\n``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path\n응답과 ``AccountDeletedError`` 경로의 409를 구분한다.\n\nbody는 자유 ``dict[str, Any] | None``로 받는다. FastAPI 선행 Pydantic\n검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가\nstructural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.\n핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,\nstructural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로\n``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{\"name\":\nnull}`` / ``{\"timezone\": {}}`` 같은 잘못된 값이 service/DB까지 흘러가\n상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로\n422로 변환한다.\n\nPUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속\n이슈 #1143에서 다룬다.",
         "operationId": "update_account_api_accounts__account_id__put",
         "parameters": [
           {
@@ -157,11 +137,19 @@
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AccountUpdateRequest"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
               }
             }
           }
@@ -178,23 +166,51 @@
             }
           },
           "400": {
-            "description": "수정할 필드가 없거나 불변 필드 수정 시도"
-          },
-          "404": {
-            "description": "계좌를 찾을 수 없음"
-          },
-          "409": {
-            "description": "삭제된 계좌 수정 시도"
-          },
-          "503": {
-            "description": "DB에는 계좌 정보가 저장되었으나 새 설정으로 브로커 재연결에 실패한 부분 성공 상태. 자격증명/브로커 설정을 확인한 뒤 재시도."
-          },
-          "422": {
-            "description": "Validation Error",
+            "description": "수정할 필드가 없거나 service-layer가 거부한 비구조 필드",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "계좌를 찾을 수 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "비구조(mutable) 필드 type 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Account service not available 또는 broker 재연결 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -206,7 +222,7 @@
           "accounts"
         ],
         "summary": "Delete Account",
-        "description": "계좌 소프트 딜리트.",
+        "description": "계좌 소프트 딜리트.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로\n수행한다.\n\n의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가\n반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/\n204)가 노출되지 않으며, 응답 모델은 ``ErrorResponse``로 고정된다\n(invariant I2/I3). service-layer 회귀 보호는\n``tests/unit/test_account.py``의 ``test_delete_account``,\n``test_delete_already_deleted_account_raises``가 담당한다.",
         "operationId": "delete_account_api_accounts__account_id__delete",
         "parameters": [
           {
@@ -220,8 +236,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "409": {
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3971,84 +3994,6 @@
         "title": "AccountActionResponse",
         "description": "계좌 상태 변경 응답."
       },
-      "AccountCreateRequest": {
-        "properties": {
-          "account_id": {
-            "type": "string",
-            "title": "Account Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "exchange": {
-            "type": "string",
-            "title": "Exchange",
-            "default": ""
-          },
-          "currency": {
-            "type": "string",
-            "title": "Currency",
-            "default": ""
-          },
-          "timezone": {
-            "type": "string",
-            "title": "Timezone",
-            "default": ""
-          },
-          "trading_hours_start": {
-            "type": "string",
-            "title": "Trading Hours Start",
-            "default": ""
-          },
-          "trading_hours_end": {
-            "type": "string",
-            "title": "Trading Hours End",
-            "default": ""
-          },
-          "trading_mode": {
-            "type": "string",
-            "title": "Trading Mode",
-            "default": "virtual"
-          },
-          "broker_type": {
-            "type": "string",
-            "title": "Broker Type",
-            "default": "test"
-          },
-          "credentials": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Credentials",
-            "default": {}
-          },
-          "broker_config": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Broker Config",
-            "default": {}
-          },
-          "buy_commission_rate": {
-            "type": "number",
-            "title": "Buy Commission Rate",
-            "default": 0.0
-          },
-          "sell_commission_rate": {
-            "type": "number",
-            "title": "Sell Commission Rate",
-            "default": 0.0
-          }
-        },
-        "type": "object",
-        "required": [
-          "account_id",
-          "name"
-        ],
-        "title": "AccountCreateRequest",
-        "description": "계좌 생성 요청."
-      },
       "AccountDetailResponse": {
         "properties": {
           "account": {
@@ -4175,149 +4120,6 @@
         "type": "object",
         "title": "AccountSuspendRequest",
         "description": "계좌 정지 요청."
-      },
-      "AccountUpdateRequest": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "exchange": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exchange"
-          },
-          "currency": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Currency"
-          },
-          "timezone": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timezone"
-          },
-          "trading_hours_start": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trading Hours Start"
-          },
-          "trading_hours_end": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trading Hours End"
-          },
-          "trading_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trading Mode"
-          },
-          "broker_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Broker Type"
-          },
-          "credentials": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Credentials"
-          },
-          "broker_config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Broker Config"
-          },
-          "buy_commission_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Buy Commission Rate"
-          },
-          "sell_commission_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sell Commission Rate"
-          }
-        },
-        "type": "object",
-        "title": "AccountUpdateRequest",
-        "description": "계좌 수정 요청."
       },
       "ActivateRequest": {
         "properties": {
@@ -5271,6 +5073,38 @@
         ],
         "title": "DatasetListResponse",
         "description": "데이터셋 목록 응답."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "/errors/internal"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": "Internal Server Error"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "default": ""
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status",
+            "default": 500
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ErrorResponse",
+        "description": "RFC 7807 Problem Details 에러 응답."
       },
       "FeedStatusResponse": {
         "properties": {

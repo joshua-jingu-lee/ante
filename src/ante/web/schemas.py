@@ -73,7 +73,13 @@ class AccountCreateRequest(BaseModel):
 
 
 class AccountUpdateRequest(BaseModel):
-    """계좌 수정 요청."""
+    """계좌 수정 요청.
+
+    하위 호환을 위해 모든 필드를 옵션으로 노출하지만, 런타임 PUT 라우트는
+    structural 필드를 cold-path로 차단한다. 이 모델은 다른 소비자(테스트,
+    CLI 등)와의 하위 호환을 위해 유지한다. PUT requestBody의 schema accuracy
+    회복(mutable 모델 노출)은 후속 이슈 #1143에서 다룬다.
+    """
 
     name: str | None = None
     exchange: str | None = None

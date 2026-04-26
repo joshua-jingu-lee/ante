@@ -20,6 +20,18 @@ export type paths = {
         /**
          * Create Account
          * @description 계좌 생성.
+         *
+         *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
+         *     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
+         *     수행한다.
+         *
+         *     의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해
+         *     핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는
+         *     success contract(200/201/204)가 노출되지 않으며, 응답 모델은
+         *     ``ErrorResponse``로 고정된다(invariant I2/I3).
+         *
+         *     이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가
+         *     담당한다.
          */
         post: operations["create_account_api_accounts_post"];
         delete?: never;
@@ -43,12 +55,42 @@ export type paths = {
         /**
          * Update Account
          * @description 계좌 수정.
+         *
+         *     런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
+         *     ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
+         *     포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는
+         *     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
+         *     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
+         *
+         *     body는 자유 ``dict[str, Any] | None``로 받는다. FastAPI 선행 Pydantic
+         *     검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
+         *     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
+         *     핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
+         *     structural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로
+         *     ``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{"name":
+         *     null}`` / ``{"timezone": {}}`` 같은 잘못된 값이 service/DB까지 흘러가
+         *     상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로
+         *     422로 변환한다.
+         *
+         *     PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
+         *     이슈 #1143에서 다룬다.
          */
         put: operations["update_account_api_accounts__account_id__put"];
         post?: never;
         /**
          * Delete Account
          * @description 계좌 소프트 딜리트.
+         *
+         *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
+         *     실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
+         *     수행한다.
+         *
+         *     의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가
+         *     반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/
+         *     204)가 노출되지 않으며, 응답 모델은 ``ErrorResponse``로 고정된다
+         *     (invariant I2/I3). service-layer 회귀 보호는
+         *     ``tests/unit/test_account.py``의 ``test_delete_account``,
+         *     ``test_delete_already_deleted_account_raises``가 담당한다.
          */
         delete: operations["delete_account_api_accounts__account_id__delete"];
         options?: never;
@@ -1320,75 +1362,6 @@ export type components = {
             message: string;
         };
         /**
-         * AccountCreateRequest
-         * @description 계좌 생성 요청.
-         */
-        AccountCreateRequest: {
-            /** Account Id */
-            account_id: string;
-            /**
-             * Broker Config
-             * @default {}
-             */
-            broker_config: {
-                [key: string]: unknown;
-            };
-            /**
-             * Broker Type
-             * @default test
-             */
-            broker_type: string;
-            /**
-             * Buy Commission Rate
-             * @default 0
-             */
-            buy_commission_rate: number;
-            /**
-             * Credentials
-             * @default {}
-             */
-            credentials: {
-                [key: string]: string;
-            };
-            /**
-             * Currency
-             * @default
-             */
-            currency: string;
-            /**
-             * Exchange
-             * @default
-             */
-            exchange: string;
-            /** Name */
-            name: string;
-            /**
-             * Sell Commission Rate
-             * @default 0
-             */
-            sell_commission_rate: number;
-            /**
-             * Timezone
-             * @default
-             */
-            timezone: string;
-            /**
-             * Trading Hours End
-             * @default
-             */
-            trading_hours_end: string;
-            /**
-             * Trading Hours Start
-             * @default
-             */
-            trading_hours_start: string;
-            /**
-             * Trading Mode
-             * @default virtual
-             */
-            trading_mode: string;
-        };
-        /**
          * AccountDetailResponse
          * @description 계좌 상세 응답.
          */
@@ -1454,40 +1427,6 @@ export type components = {
              * @default
              */
             reason: string;
-        };
-        /**
-         * AccountUpdateRequest
-         * @description 계좌 수정 요청.
-         */
-        AccountUpdateRequest: {
-            /** Broker Config */
-            broker_config?: {
-                [key: string]: unknown;
-            } | null;
-            /** Broker Type */
-            broker_type?: string | null;
-            /** Buy Commission Rate */
-            buy_commission_rate?: number | null;
-            /** Credentials */
-            credentials?: {
-                [key: string]: string;
-            } | null;
-            /** Currency */
-            currency?: string | null;
-            /** Exchange */
-            exchange?: string | null;
-            /** Name */
-            name?: string | null;
-            /** Sell Commission Rate */
-            sell_commission_rate?: number | null;
-            /** Timezone */
-            timezone?: string | null;
-            /** Trading Hours End */
-            trading_hours_end?: string | null;
-            /** Trading Hours Start */
-            trading_hours_start?: string | null;
-            /** Trading Mode */
-            trading_mode?: string | null;
         };
         /**
          * ActivateRequest
@@ -2003,6 +1942,37 @@ export type components = {
             items: components["schemas"]["DatasetItem"][];
             /** Total */
             total: number;
+        };
+        /**
+         * ErrorResponse
+         * @description RFC 7807 Problem Details 에러 응답.
+         */
+        ErrorResponse: {
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /**
+             * Instance
+             * @default
+             */
+            instance: string;
+            /**
+             * Status
+             * @default 500
+             */
+            status: number;
+            /**
+             * Title
+             * @default Internal Server Error
+             */
+            title: string;
+            /**
+             * Type
+             * @default /errors/internal
+             */
+            type: string;
         };
         /**
          * FeedStatusResponse
@@ -3166,12 +3136,10 @@ export type components = {
     pathItems: never;
 };
 export type AccountActionResponse = components['schemas']['AccountActionResponse'];
-export type AccountCreateRequest = components['schemas']['AccountCreateRequest'];
 export type AccountDetailResponse = components['schemas']['AccountDetailResponse'];
 export type AccountListResponse = components['schemas']['AccountListResponse'];
 export type AccountResponse = components['schemas']['AccountResponse'];
 export type AccountSuspendRequest = components['schemas']['AccountSuspendRequest'];
-export type AccountUpdateRequest = components['schemas']['AccountUpdateRequest'];
 export type ActivateRequest = components['schemas']['ActivateRequest'];
 export type ApprovalDetailResponse = components['schemas']['ApprovalDetailResponse'];
 export type ApprovalItem = components['schemas']['ApprovalItem'];
@@ -3201,6 +3169,7 @@ export type DataSchemaResponse = components['schemas']['DataSchemaResponse'];
 export type DatasetDetailResponse = components['schemas']['DatasetDetailResponse'];
 export type DatasetItem = components['schemas']['DatasetItem'];
 export type DatasetListResponse = components['schemas']['DatasetListResponse'];
+export type ErrorResponse = components['schemas']['ErrorResponse'];
 export type FeedStatusResponse = components['schemas']['FeedStatusResponse'];
 export type HaltRequest = components['schemas']['HaltRequest'];
 export type HealthResponse = components['schemas']['HealthResponse'];
@@ -3297,28 +3266,15 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountCreateRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            201: {
+            /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountDetailResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3363,9 +3319,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
-                "application/json": components["schemas"]["AccountUpdateRequest"];
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
             };
         };
         responses: {
@@ -3378,42 +3336,50 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDetailResponse"];
                 };
             };
-            /** @description 수정할 필드가 없거나 불변 필드 수정 시도 */
+            /** @description 수정할 필드가 없거나 service-layer가 거부한 비구조 필드 */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description 계좌를 찾을 수 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description 삭제된 계좌 수정 시도 */
+            /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도 */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description Validation Error */
+            /** @description 비구조(mutable) 필드 type 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description DB에는 계좌 정보가 저장되었으나 새 설정으로 브로커 재연결에 실패한 부분 성공 상태. 자격증명/브로커 설정을 확인한 뒤 재시도. */
+            /** @description Account service not available 또는 broker 재연결 실패 */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3428,12 +3394,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            204: {
+            /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
