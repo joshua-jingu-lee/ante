@@ -231,6 +231,7 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - branch protection required status checks:
   - `ci`
 - AI 승인(`claude-pr-approve`, `codex-pr-approve`)은 advisory check이므로 required status checks에 포함하지 않는다.
+- `main` 외에 `epic/**` 통합 브랜치도 같은 required status checks(`ci`)를 적용해 base가 epic이어도 ci 통과 없이는 머지되지 않도록 한다.
 - `Require conversation resolution before merging`: 활성화 권장
 
 ### 3.4 AI 리뷰 러너 / 검증 환경 체크리스트
