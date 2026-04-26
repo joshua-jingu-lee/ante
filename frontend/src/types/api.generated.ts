@@ -32,6 +32,11 @@ export type paths = {
          *
          *     이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가
          *     담당한다.
+         *
+         *     본 PR(#1143)에서 OpenAPI requestBody schema가 spec-aligned
+         *     ``ACCOUNT_CREATE_REQUEST_SCHEMA``로 노출되어 codegen 클라이언트가
+         *     cold-path payload 필드를 발견할 수 있게 됐다. 런타임은 어떤 body든
+         *     무시하고 409를 반환한다.
          */
         post: operations["create_account_api_accounts_post"];
         delete?: never;
@@ -3266,7 +3271,70 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 고유 식별자 (영문+숫자+하이픈, 3–30자). */
+                    account_id: string;
+                    /**
+                     * @description 브로커 동작 설정 (예: KIS is_paper). 임의 키-값 dict. cold-path 전용.
+                     * @default {}
+                     */
+                    broker_config?: {
+                        [key: string]: unknown;
+                    };
+                    /** @description 브로커 어댑터 유형. */
+                    broker_type: string;
+                    /**
+                     * @description 매수 수수료율 (cold-path 전용).
+                     * @default 0
+                     */
+                    buy_commission_rate?: number;
+                    /**
+                     * @description 브로커 인증 정보 (dict[str, str], 암호화 저장). cold-path 전용.
+                     * @default {}
+                     */
+                    credentials?: {
+                        [key: string]: string;
+                    };
+                    /** @description 거래 통화 (ISO 4217). */
+                    currency: string;
+                    /**
+                     * @description 대상 거래소 코드.
+                     * @enum {string}
+                     */
+                    exchange: "KRX" | "NYSE" | "NASDAQ" | "TEST";
+                    /** @description 사용자에게 표시되는 이름. */
+                    name: string;
+                    /**
+                     * @description 매도 수수료율, 세금 포함 (cold-path 전용).
+                     * @default 0
+                     */
+                    sell_commission_rate?: number;
+                    /**
+                     * @description 거래소 현지 시간대 (IANA).
+                     * @default Asia/Seoul
+                     */
+                    timezone?: string;
+                    /**
+                     * @description 거래 종료 시각 (현지 시간, HH:MM).
+                     * @default 15:30
+                     */
+                    trading_hours_end?: string;
+                    /**
+                     * @description 거래 시작 시각 (현지 시간, HH:MM).
+                     * @default 09:00
+                     */
+                    trading_hours_start?: string;
+                    /**
+                     * @description 거래 모드 (VIRTUAL / LIVE).
+                     * @default VIRTUAL
+                     * @enum {string}
+                     */
+                    trading_mode?: "VIRTUAL" | "LIVE";
+                };
+            };
+        };
         responses: {
             /** @description ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단 */
             409: {

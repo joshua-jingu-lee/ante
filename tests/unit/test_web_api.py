@@ -840,3 +840,256 @@ class TestResponseModelCoverage:
         assert "ErrorResponse" in ref, (
             f"PUT 422가 ErrorResponse를 가리키지 않음 (schema ref={ref!r})"
         )
+
+
+# ── #1143 POST /api/accounts request body schema 노출 ──────────────
+
+
+class TestPostAccountRequestBodySchema:
+    """POST /api/accounts requestBody OpenAPI schema 노출 (이슈 #1143).
+
+    cold-path 가드는 어떤 입력이든 즉시 409로 차단하지만(invariant I1),
+    OpenAPI/codegen 클라이언트는 정확한 입력 contract를 발견할 수 있어야
+    한다. 본 테스트군은 ``openapi_extra``로 노출한 spec-aligned schema가
+    docs/specs/account/03-data-model.md 60-87줄 필드 표와 1:1 정합한지
+    단언한다.
+
+    Pydantic ``AccountCreateRequest.model_json_schema()`` 직접 노출은 금지다
+    (BrokerPreset 자동 채움 때문에 모든 필드가 default를 갖고 있어
+    ``exchange``/``currency``/``broker_type`` required와 어긋남 — attempt 6
+    finding). spec-aligned dict 상수 ``ACCOUNT_CREATE_REQUEST_SCHEMA``로
+    별도 정의해 노출한다.
+    """
+
+    @staticmethod
+    def _post_request_body(client: TestClient) -> dict:
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        spec = openapi.get("paths", {}).get("/api/accounts", {}).get("post", {})
+        request_body = spec.get("requestBody")
+        assert request_body is not None, (
+            "POST /api/accounts requestBody가 OpenAPI에 노출되지 않음"
+        )
+        return request_body
+
+    @staticmethod
+    def _post_request_schema(client: TestClient) -> dict:
+        request_body = TestPostAccountRequestBodySchema._post_request_body(client)
+        json_content = request_body.get("content", {}).get("application/json")
+        assert json_content is not None, (
+            "POST /api/accounts requestBody에 application/json content 없음"
+        )
+        schema = json_content.get("schema")
+        assert isinstance(schema, dict), (
+            "POST /api/accounts requestBody schema가 dict가 아님"
+        )
+        return schema
+
+    def test_openapi_post_account_request_body_is_spec_aligned(self, client):
+        """spec 표(docs/specs/account/03-data-model.md 60-87줄)와 정합."""
+        schema = self._post_request_schema(client)
+
+        # additionalProperties: False — 알 수 없는 키 차단을 contract에 표현
+        ap = schema.get("additionalProperties")
+        assert ap is False, f"additionalProperties가 False가 아님: {ap!r}"
+
+        # required 표현
+        required = schema.get("required", [])
+        for field in ("account_id", "name", "exchange", "currency", "broker_type"):
+            assert field in required, (
+                f"required에 필수 필드 '{field}' 누락: {required!r}"
+            )
+
+        properties = schema.get("properties", {})
+        assert isinstance(properties, dict), f"properties가 dict가 아님: {properties!r}"
+
+        # default 표현
+        assert properties.get("timezone", {}).get("default") == "Asia/Seoul"
+        assert properties.get("trading_hours_start", {}).get("default") == "09:00", (
+            properties.get("trading_hours_start")
+        )
+        assert properties.get("trading_hours_end", {}).get("default") == "15:30", (
+            properties.get("trading_hours_end")
+        )
+        assert properties.get("trading_mode", {}).get("default") == "VIRTUAL", (
+            properties.get("trading_mode")
+        )
+
+        # exchange enum
+        assert properties.get("exchange", {}).get("enum") == [
+            "KRX",
+            "NYSE",
+            "NASDAQ",
+            "TEST",
+        ], properties.get("exchange")
+
+        # trading_mode enum (보조)
+        assert properties.get("trading_mode", {}).get("enum") == [
+            "VIRTUAL",
+            "LIVE",
+        ], properties.get("trading_mode")
+
+        # 어떤 properties도 nullable이 아님 — anyOf/oneOf에 null type 없음,
+        # nullable: True 없음. 각 property는 단일 type을 가져야 한다.
+        for name, prop in properties.items():
+            assert isinstance(prop, dict), f"properties.{name}가 dict가 아님: {prop!r}"
+            assert "nullable" not in prop or prop.get("nullable") is not True, (
+                f"properties.{name}에 nullable: True가 노출됨"
+            )
+            for combinator in ("anyOf", "oneOf"):
+                variants = prop.get(combinator)
+                if variants:
+                    for variant in variants:
+                        assert variant.get("type") != "null", (
+                            f"properties.{name}.{combinator}에 null type 포함"
+                        )
+
+    def test_openapi_post_account_request_body_required_true(self, client):
+        """codegen이 body를 optional로 만들지 않도록 required: True."""
+        request_body = self._post_request_body(client)
+        assert request_body.get("required") is True, (
+            f"requestBody.required가 True가 아님: {request_body.get('required')!r}"
+        )
+
+    def test_openapi_post_account_credentials_is_string_map(self, client):
+        """credentials는 dict[str, str] — codegen Record<string, never> 회피."""
+        schema = self._post_request_schema(client)
+        credentials = schema.get("properties", {}).get("credentials", {})
+        assert credentials.get("type") == "object", credentials
+        assert credentials.get("additionalProperties") == {"type": "string"}, (
+            f"credentials.additionalProperties가 string map이 아님: {credentials!r}"
+        )
+        assert credentials.get("default") == {}, credentials
+
+    def test_openapi_post_account_broker_config_is_open_map(self, client):
+        """broker_config는 임의 dict — additionalProperties: True."""
+        schema = self._post_request_schema(client)
+        broker_config = schema.get("properties", {}).get("broker_config", {})
+        assert broker_config.get("type") == "object", broker_config
+        assert broker_config.get("additionalProperties") is True, (
+            f"broker_config.additionalProperties가 True가 아님: {broker_config!r}"
+        )
+        assert broker_config.get("default") == {}, broker_config
+
+
+class TestGeneratedTsPostAccountRequestBody:
+    """generated TS api.generated.ts에서 POST /api/accounts request body가
+    spec-aligned 형태로 노출되는지 보조 단언한다(이슈 #1143).
+
+    같은 PR에 ``frontend/src/types/api.generated.ts``가 함께 갱신되어야
+    하므로 generated artifact drift를 차단한다.
+    """
+
+    @staticmethod
+    def _generated_ts_text() -> str:
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "frontend"
+            / "src"
+            / "types"
+            / "api.generated.ts"
+        )
+        assert path.exists(), f"generated TS 파일이 존재하지 않음: {path}"
+        return path.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _post_account_operation_block(text: str) -> str:
+        """create_account_api_accounts_post operation 블록을 잘라낸다."""
+        marker = "create_account_api_accounts_post:"
+        idx = text.find(marker)
+        assert idx != -1, "generated TS에 create_account operation이 없음"
+        # 다음 operation 시작 전까지 잘라낸다(들여쓰기 4 + 식별자).
+        rest = text[idx:]
+        # 다음 operation 식별자를 정규식 없이 단순 키워드로 찾는다.
+        next_markers = [
+            "get_account_api_accounts__account_id__get:",
+            "update_account_api_accounts__account_id__put:",
+            "delete_account_api_accounts__account_id__delete:",
+        ]
+        end_offsets = [rest.find(m, 1) for m in next_markers]
+        end_offsets = [o for o in end_offsets if o != -1]
+        end = min(end_offsets) if end_offsets else len(rest)
+        return rest[:end]
+
+    def test_generated_ts_post_account_request_body_not_never(self):
+        """POST /api/accounts에 requestBody?: never가 없어야 한다."""
+        block = self._post_account_operation_block(self._generated_ts_text())
+        assert "requestBody?: never" not in block, (
+            "POST /api/accounts에 requestBody?: never 회귀:\n" + block
+        )
+
+    def test_generated_ts_post_account_request_body_required_not_optional(self):
+        """POST /api/accounts requestBody가 optional 표시(?:)가 아닌 required."""
+        block = self._post_account_operation_block(self._generated_ts_text())
+        # requestBody?: 가 등장하면 codegen이 body를 optional로 만든 것이다.
+        assert "requestBody?:" not in block, (
+            "POST /api/accounts requestBody가 optional로 노출됨:\n" + block
+        )
+        # 명시 requestBody: 정의가 있어야 한다.
+        assert "requestBody:" in block, (
+            "POST /api/accounts에 requestBody: 정의가 없음:\n" + block
+        )
+
+    @staticmethod
+    def _field_type_block(operation_block: str, field_name: str) -> str:
+        """operation 블록에서 ``field_name`` 정의 라인부터 닫는 ``};``까지를 잘라낸다.
+
+        openapi-typescript 멀티라인 출력(예: credentials의 본문은 다음 라인의
+        ``[key: string]: string;``)에서 type 본문을 한 덩어리로 보기 위해 사용한다.
+        """
+        lines = operation_block.splitlines()
+        start_idx: int | None = None
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith(f"{field_name}:") or stripped.startswith(
+                f"{field_name}?:"
+            ):
+                start_idx = idx
+                break
+        assert start_idx is not None, (
+            f"field '{field_name}'가 operation block에 없음:\n{operation_block}"
+        )
+        # 시작 라인이 inline type(같은 줄에 ;로 끝남)이면 그 줄만 반환.
+        first_line = lines[start_idx].rstrip()
+        if first_line.endswith(";") and "{" not in first_line:
+            return first_line
+        # 멀티라인 type — base 들여쓰기 추적해서 매칭되는 ``};``를 찾는다.
+        base_indent = len(first_line) - len(first_line.lstrip())
+        collected = [first_line]
+        for line in lines[start_idx + 1 :]:
+            collected.append(line)
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+            if indent <= base_indent and stripped.startswith("};"):
+                break
+        return "\n".join(collected)
+
+    def test_generated_ts_post_account_credentials_not_record_never(self):
+        """credentials 타입이 Record<string, never> / {}가 아니어야 한다.
+
+        spec dict[str, str] → openapi-typescript는 보통
+        ``Record<string, string>`` 또는 ``{[key: string]: string}``로 생성한다.
+        """
+        operation_block = self._post_account_operation_block(self._generated_ts_text())
+        field_block = self._field_type_block(operation_block, "credentials")
+        assert "Record<string, never>" not in field_block, (
+            "credentials가 Record<string, never>로 좁혀짐:\n" + field_block
+        )
+        # 빈 객체 타입({})만 단독으로 사용되면 안 된다.
+        assert (
+            "Record<string, string>" in field_block
+            or "[key: string]: string" in field_block
+        ), f"credentials가 string-map 형태로 노출되지 않음:\n{field_block}"
+
+    def test_generated_ts_post_account_broker_config_not_record_never(self):
+        """broker_config 타입이 Record<string, never> / {}가 아니어야 한다."""
+        operation_block = self._post_account_operation_block(self._generated_ts_text())
+        field_block = self._field_type_block(operation_block, "broker_config")
+        assert "Record<string, never>" not in field_block, (
+            "broker_config가 Record<string, never>로 좁혀짐:\n" + field_block
+        )
+        assert (
+            "Record<string, unknown>" in field_block
+            or "[key: string]: unknown" in field_block
+        ), f"broker_config가 open-map 형태로 노출되지 않음:\n{field_block}"
