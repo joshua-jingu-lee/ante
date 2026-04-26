@@ -54,6 +54,111 @@ STRUCTURAL_FIELDS: tuple[str, ...] = (
 STRUCTURAL_CHANGE_ERROR_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
 
 
+# POST /api/accounts cold-path 전용 OpenAPI request body 문서.
+# 출처: docs/specs/account/03-data-model.md 60-87줄 필드 표(SSOT) +
+# docs/specs/account/04-account-service.md 51-58줄 cold-path 전용 필드.
+#
+# 런타임 라우트는 cold-path 가드로 어떤 입력이든 즉시 409로 차단되지만
+# (invariant I1), Swagger UI / agent client / SDK는 cold-path 계좌 생성
+# payload 필드를 정확히 발견할 수 있어야 한다(이슈 #1143).
+#
+# ``AccountCreateRequest.model_json_schema()`` 직접 노출 금지: BrokerPreset
+# 자동 채움 때문에 Pydantic 모델은 모든 필드가 default를 갖고 있어 spec 표
+# (``exchange``/``currency``/``broker_type`` required)와 어긋난다(#1143
+# attempt 6 finding). 본 dict 상수는 spec과 1:1 정합한 cold-path 문서 전용
+# schema이며, ``AccountCreateRequest`` Pydantic 모델은 다른 소비자(테스트,
+# CLI 등) 호환을 위해 변경하지 않는다.
+ACCOUNT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "AccountCreateRequest",
+    "description": (
+        "POST /api/accounts cold-path 입력 contract. "
+        "런타임에서는 cold-path 가드가 어떤 입력이든 즉시 409로 차단한다 "
+        "(ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER). "
+        "실제 계좌 생성은 서버 정지 상태에서 ante account create CLI로 수행한다. "
+        "스키마 SSOT: docs/specs/account/03-data-model.md 60-87줄."
+    ),
+    "additionalProperties": False,
+    "required": [
+        "account_id",
+        "name",
+        "exchange",
+        "currency",
+        "broker_type",
+    ],
+    "properties": {
+        "account_id": {
+            "type": "string",
+            "description": "고유 식별자 (영문+숫자+하이픈, 3–30자).",
+        },
+        "name": {
+            "type": "string",
+            "description": "사용자에게 표시되는 이름.",
+        },
+        "exchange": {
+            "type": "string",
+            "enum": ["KRX", "NYSE", "NASDAQ", "TEST"],
+            "description": "대상 거래소 코드.",
+        },
+        "currency": {
+            "type": "string",
+            "description": "거래 통화 (ISO 4217).",
+        },
+        "timezone": {
+            "type": "string",
+            "default": "Asia/Seoul",
+            "description": "거래소 현지 시간대 (IANA).",
+        },
+        "trading_hours_start": {
+            "type": "string",
+            "default": "09:00",
+            "description": "거래 시작 시각 (현지 시간, HH:MM).",
+        },
+        "trading_hours_end": {
+            "type": "string",
+            "default": "15:30",
+            "description": "거래 종료 시각 (현지 시간, HH:MM).",
+        },
+        "trading_mode": {
+            "type": "string",
+            "enum": ["VIRTUAL", "LIVE"],
+            "default": "VIRTUAL",
+            "description": "거래 모드 (VIRTUAL / LIVE).",
+        },
+        "broker_type": {
+            "type": "string",
+            "description": "브로커 어댑터 유형.",
+        },
+        "credentials": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "default": {},
+            "description": (
+                "브로커 인증 정보 (dict[str, str], 암호화 저장). cold-path 전용."
+            ),
+        },
+        "broker_config": {
+            "type": "object",
+            "additionalProperties": True,
+            "default": {},
+            "description": (
+                "브로커 동작 설정 (예: KIS is_paper). 임의 키-값 dict. cold-path 전용."
+            ),
+        },
+        "buy_commission_rate": {
+            "type": "number",
+            "default": 0,
+            "description": "매수 수수료율 (cold-path 전용).",
+        },
+        "sell_commission_rate": {
+            "type": "number",
+            "default": 0,
+            "description": "매도 수수료율, 세금 포함 (cold-path 전용).",
+        },
+    },
+}
+
+
 def _cold_path_detail(message: str) -> str:
     """Cold-path 차단 응답의 표준 detail 문자열을 만든다."""
     return f"{STRUCTURAL_CHANGE_ERROR_CODE}: {message}"
@@ -127,6 +232,16 @@ async def list_accounts(
             ),
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": ACCOUNT_CREATE_REQUEST_SCHEMA,
+                },
+            },
+        },
+    },
 )
 async def create_account(request: Request) -> ErrorResponse:
     """계좌 생성.
@@ -142,6 +257,11 @@ async def create_account(request: Request) -> ErrorResponse:
 
     이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가
     담당한다.
+
+    본 PR(#1143)에서 OpenAPI requestBody schema가 spec-aligned
+    ``ACCOUNT_CREATE_REQUEST_SCHEMA``로 노출되어 codegen 클라이언트가
+    cold-path payload 필드를 발견할 수 있게 됐다. 런타임은 어떤 body든
+    무시하고 409를 반환한다.
     """
     raise HTTPException(
         status_code=409,

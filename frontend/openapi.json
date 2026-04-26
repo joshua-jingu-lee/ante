@@ -60,7 +60,7 @@
           "accounts"
         ],
         "summary": "Create Account",
-        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.\n\n의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해\n핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는\nsuccess contract(200/201/204)가 노출되지 않으며, 응답 모델은\n``ErrorResponse``로 고정된다(invariant I2/I3).\n\n이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가\n담당한다.",
+        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.\n\n의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해\n핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는\nsuccess contract(200/201/204)가 노출되지 않으며, 응답 모델은\n``ErrorResponse``로 고정된다(invariant I2/I3).\n\n이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가\n담당한다.\n\n본 PR(#1143)에서 OpenAPI requestBody schema가 spec-aligned\n``ACCOUNT_CREATE_REQUEST_SCHEMA``로 노출되어 codegen 클라이언트가\ncold-path payload 필드를 발견할 수 있게 됐다. 런타임은 어떤 body든\n무시하고 409를 반환한다.",
         "operationId": "create_account_api_accounts_post",
         "responses": {
           "409": {
@@ -69,6 +69,102 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "AccountCreateRequest",
+                "description": "POST /api/accounts cold-path 입력 contract. 런타임에서는 cold-path 가드가 어떤 입력이든 즉시 409로 차단한다 (ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER). 실제 계좌 생성은 서버 정지 상태에서 ante account create CLI로 수행한다. 스키마 SSOT: docs/specs/account/03-data-model.md 60-87줄.",
+                "additionalProperties": false,
+                "required": [
+                  "account_id",
+                  "name",
+                  "exchange",
+                  "currency",
+                  "broker_type"
+                ],
+                "properties": {
+                  "account_id": {
+                    "type": "string",
+                    "description": "고유 식별자 (영문+숫자+하이픈, 3–30자)."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "사용자에게 표시되는 이름."
+                  },
+                  "exchange": {
+                    "type": "string",
+                    "enum": [
+                      "KRX",
+                      "NYSE",
+                      "NASDAQ",
+                      "TEST"
+                    ],
+                    "description": "대상 거래소 코드."
+                  },
+                  "currency": {
+                    "type": "string",
+                    "description": "거래 통화 (ISO 4217)."
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "default": "Asia/Seoul",
+                    "description": "거래소 현지 시간대 (IANA)."
+                  },
+                  "trading_hours_start": {
+                    "type": "string",
+                    "default": "09:00",
+                    "description": "거래 시작 시각 (현지 시간, HH:MM)."
+                  },
+                  "trading_hours_end": {
+                    "type": "string",
+                    "default": "15:30",
+                    "description": "거래 종료 시각 (현지 시간, HH:MM)."
+                  },
+                  "trading_mode": {
+                    "type": "string",
+                    "enum": [
+                      "VIRTUAL",
+                      "LIVE"
+                    ],
+                    "default": "VIRTUAL",
+                    "description": "거래 모드 (VIRTUAL / LIVE)."
+                  },
+                  "broker_type": {
+                    "type": "string",
+                    "description": "브로커 어댑터 유형."
+                  },
+                  "credentials": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "default": {},
+                    "description": "브로커 인증 정보 (dict[str, str], 암호화 저장). cold-path 전용."
+                  },
+                  "broker_config": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "default": {},
+                    "description": "브로커 동작 설정 (예: KIS is_paper). 임의 키-값 dict. cold-path 전용."
+                  },
+                  "buy_commission_rate": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "매수 수수료율 (cold-path 전용)."
+                  },
+                  "sell_commission_rate": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "매도 수수료율, 세금 포함 (cold-path 전용)."
+                  }
                 }
               }
             }
