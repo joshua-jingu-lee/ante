@@ -966,10 +966,11 @@ class TestInitCredentialsSingleEmission:
         # stderr에 master_bootstrap_complete 이벤트 (복구 수단)
         assert "master_bootstrap_complete" in result.stderr
         # stdout에는 에러 payload, 비밀값 미포함
-        assert _MOCK_TOKEN not in result.output, (
-            f"JSON 실패 payload(stdout)에 토큰 포함: {result.output!r}"
+        stdout = result.stdout
+        assert _MOCK_TOKEN not in stdout, (
+            f"JSON 실패 payload(stdout)에 토큰 포함: {stdout!r}"
         )
-        assert _MOCK_RECOVERY_KEY not in result.output
+        assert _MOCK_RECOVERY_KEY not in stdout
         # stderr에는 비밀값 정확히 1회
         assert result.stderr.count(_MOCK_TOKEN) == 1
         assert result.stderr.count(_MOCK_RECOVERY_KEY) == 1
