@@ -26,10 +26,10 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 
 | 단계 | 담당 | 실행 주체 | GitHub 기록 |
 |------|------|-----------|-------------|
-| 이슈/스펙 분석 | 오케스트레이터 | Claude 메인 세션 | 필요 시 이슈 코멘트 |
-| 이슈 본문 구현계획 작성/정비 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
-| 계획 검증 | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
-| 피드백 반영/라벨 확정 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 라벨 |
+| 이슈/스펙 분석 | 오케스트레이터 | Claude 메인 세션 | 시작/보류 이슈 코멘트 |
+| 이슈 본문 구현계획 작성/정비 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 계획 정비 완료 이슈 코멘트 |
+| 계획 검증 | Codex | `/codex:adversarial-review` | Codex Plan Review 이슈 코멘트 |
+| 피드백 반영/라벨 확정 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 라벨 + 완료/보류 이슈 코멘트 |
 
 ## 실행 절차
 
@@ -54,6 +54,16 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 ```bash
 gh issue edit #{번호} --remove-label "plan-preflight:done" || true
 gh issue edit #{번호} --add-label "plan-preflight:started"
+```
+
+라벨을 정리한 직후 시작 코멘트를 남긴다.
+
+```bash
+gh issue comment #{번호} --body "🤖 **Plan Preflight 시작**
+- status: started
+- mode: {default | refresh}
+- spec-path: {1A Spec-First | 1B Issue-First Bundled | pending}
+- next: 이슈 본문 Implementation Plan 작성/정비 후 Codex Plan Review 요청"
 ```
 
 `--dry-run`이면 라벨을 바꾸지 않고 필요한 라벨 변경만 보고한다.
@@ -108,6 +118,17 @@ gh issue edit #{번호} --add-label "plan-preflight:started"
 - `narrow-scope` 가능성이 있으면 제외 범위와 후속 이슈 후보를 본문에 명시한다.
 - 추론은 추론으로 표시하고, 스펙/코드에서 확인한 사실과 섞지 않는다.
 
+쓰기 모드에서는 이슈 본문 정비 직후 계획 정비 완료 코멘트를 남긴다.
+
+```bash
+gh issue comment #{번호} --body "🤖 **Plan Preflight 계획 정비 완료**
+- status: plan-ready-for-review
+- spec-path: {1A Spec-First | 1B Issue-First Bundled}
+- ssot: {docs/specs/...}
+- risk flags: {none | lifecycle | contract-drift | generated-artifact-sync | mutable-config | health-path | multi-consumer}
+- next: Codex Plan Review 요청"
+```
+
 ### 5단계: Codex Plan Review 요청
 
 정비된 구현계획을 Codex plugin 외부 리뷰 게이트로 넘긴다.
@@ -119,6 +140,15 @@ gh issue edit #{번호} --add-label "plan-preflight:started"
 
 긴 리뷰는 `/codex:status`, `/codex:result`로 결과를 회수한다.
 결과는 이슈 코멘트에 `Codex Plan Review`로 남긴다.
+
+```bash
+gh issue comment #{번호} --body "🤖 **Codex Plan Review**
+- verdict: {approve-implement | narrow-scope | revise-plan | split-issue | invoke-human}
+- reviewed-plan: 이슈 본문 Implementation Plan
+- feedback summary: {요약}
+- required changes: {없음 | 이슈 본문에 반영할 항목}
+- next: {Plan Preflight 완료 | 이슈 본문 보강 후 재요청 | 분리/사람 판단 대기}"
+```
 
 Verdict:
 
@@ -132,9 +162,9 @@ Verdict:
 
 - `approve-implement`: 현재 구현계획을 확정한다.
 - `narrow-scope`: 축소 범위, 제외 범위, 후속 이슈 후보를 이슈 본문에 반영한 뒤 확정한다.
-- `revise-plan`: `plan-preflight:started` 상태를 유지하고 이슈 본문을 보강한 뒤 Codex Plan Review를 다시 요청한다.
-- `split-issue`: 구현계획 확정을 중단하고 필요한 분리안을 이슈 코멘트에 남긴다.
-- `invoke-human`: 구현계획 확정을 중단하고 사람 판단이 필요한 질문을 이슈 코멘트에 남긴다.
+- `revise-plan`: `plan-preflight:started` 상태를 유지하고 이슈 본문을 보강한 뒤 `Codex Plan Review` 코멘트에 재요청 사유를 남기고 다시 요청한다.
+- `split-issue`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 필요한 분리안을 남긴다.
+- `invoke-human`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 사람 판단이 필요한 질문을 남긴다.
 
 ### 7단계: 완료 라벨
 
@@ -145,10 +175,31 @@ gh issue edit #{번호} --remove-label "plan-preflight:started" || true
 gh issue edit #{번호} --add-label "plan-preflight:done"
 ```
 
+완료 직후 이슈 코멘트를 남긴다.
+
+```bash
+gh issue comment #{번호} --body "🤖 **Plan Preflight 완료**
+- status: done
+- verdict: {approve-implement | narrow-scope}
+- implementation plan: 이슈 본문 Implementation Plan 기준
+- labels: plan-preflight:done
+- next: `/implement-issue #{번호}` 실행 가능"
+```
+
 중단 시 라벨 처리:
 
 - `needs-rewrite`, `needs-spec-first`, `blocked`, stale 계획: `plan-preflight:done` 제거
 - 사람 판단 또는 선행 이슈 대기: `plan-preflight:started` 제거 후 보류 사유 코멘트
+
+중단 시에는 아래 코멘트를 남긴다.
+
+```bash
+gh issue comment #{번호} --body "🤖 **Plan Preflight 보류**
+- status: {needs-rewrite | needs-spec-first | blocked | split-issue | invoke-human}
+- reason: {스펙 충돌 | 선행 이슈 미완 | 범위 분리 필요 | 사람 판단 필요 | stale plan}
+- labels: plan-preflight:done 제거, 필요 시 plan-preflight:started 제거
+- next: {스펙 정리 | 선행 이슈 완료 대기 | 후속 이슈 분리 | 사람 답변 대기}"
+```
 
 ## 결과 보고
 

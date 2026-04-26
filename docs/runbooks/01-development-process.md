@@ -39,40 +39,45 @@ Claude 오케스트레이터
   │  ◄──── AGENTS.md + docs/specs/* + docs/architecture/*
   │
   ├── 분석: 이슈 읽기 → 스펙 확인 → 스펙 경로(1A/1B) 판단
+  │     └── 구현 분석 완료 또는 보류 사유: 이슈 코멘트
   │
   ├──▶ /plan-preflight (Claude 오케스트레이터, `superpowers:writing-plans`)
   │     │
-  │     ├── `plan-preflight:started` 라벨 부착
+  │     ├── `plan-preflight:started` 라벨 부착 + 시작: 이슈 코멘트
   │     ├── 이슈 본문 구현계획 작성/정비
   │     │    ├── 파일 맵 / 작업 순서 / risk flags
   │     │    ├── 구현 체크리스트 / 검증 체크리스트
   │     │    └── stop conditions / 비목표
+  │     │        └── 계획 정비 완료: 이슈 코멘트
   │     │
   │     ├──▶ Codex Plan Review (`/codex:adversarial-review`)
+  │     │     ├── 결과 기록: 이슈 코멘트
   │     │     ├── approve-implement → 이슈 본문 구현계획 확정
   │     │     ├── narrow-scope → 축소 범위로 이슈 본문 구현계획 확정
   │     │     ├── revise-plan → Claude가 피드백 반영 후 Codex Plan Review 재요청
   │     │     └── split-issue / invoke-human → 구현 중단 또는 사람 판단
   │     │
-  │     ├── needs-spec-first / blocked → 구현 중단
-  │     └── 확정 → `plan-preflight:started` 제거 + `plan-preflight:done` 라벨 부착
+  │     ├── needs-spec-first / blocked → 구현 중단 + 보류 사유: 이슈 코멘트
+  │     └── 확정 → `plan-preflight:started` 제거 + `plan-preflight:done` 라벨 부착 + 완료: 이슈 코멘트
   │
   ├──▶ /implement-issue (Claude 오케스트레이터)
   │     │
   │     ├── `plan-preflight:done` 및 최신 이슈 본문 구현계획 확인
+  │     │    └── 구현 분석 완료: 이슈 코멘트
   │     │
   │     ├──▶ Claude 개발 에이전트 (`@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev`)
   │     │     ├── 워크트리 격리
   │     │     ├── 착수 기록: 이슈 코멘트
   │     │     ├── 구현 + 로컬 lint/test
-  │     │     └── 로컬 커밋
+  │     │     └── 로컬 커밋 + 로컬 구현 완료: 이슈 코멘트
   │     │
   │     ├──▶ Codex 브랜치 리뷰 (`/codex:review --base <base>`)
+  │     │     ├── 결과 기록: 이슈 코멘트
   │     │     ├── FAIL → Claude 개발 에이전트가 같은 워크트리에서 수정 후 재검토
   │     │     ├── 반복 risk class → Claude `@code-reviewer` 메타 리뷰
   │     │     └── PASS → 브랜치 push
   │     │
-  │     └── PR 생성 (`Closes #이슈`)
+  │     └── PR 생성 (`Closes #이슈`) + PR 생성 완료: 이슈 코멘트
   │
   ├──▶ PR 게이트 (GitHub Actions)
   │     ├── CI (`ci`)
@@ -80,18 +85,20 @@ Claude 오케스트레이터
   │     ├── Codex PR 승인 (`codex-pr-approve`)
   │     ├── content FAIL → Claude PR repair 후 같은 PR에서 재검증
   │     └── 모든 게이트 green → GitHub auto-merge
+  │        └── `/autopilot` 실행 중이면 사이클 상태: 이슈 코멘트
   │
   ├──▶ post-merge automation
-  │     ├── 이슈 체크박스 갱신 + close
+  │     ├── 이슈 체크박스 갱신 + close + post-merge 완료: 이슈 코멘트
   │     └── 원격 head branch 삭제 (GitHub 설정)
   │
-  ├──▶ /release (수동 릴리스 운영)
+  ├──▶ /release (수동 릴리스 운영, 이슈 기반 흐름 아님)
   │     ├── prepare: release/vX.Y.Z PR 생성 + Docker build 검증
   │     └── publish: release PR merge 후 GitHub Release + PyPI + Docker image 배포
   │
   ├──▶ /autopilot side lane (Claude 오케스트레이터)
   │     └── implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 수행
   │         (코드 수정, 브랜치 생성, PR 생성 금지)
+  │         └── Plan Preflight 코멘트 + Autopilot 사이클 상태 코멘트
   │
   ▼
 결과 보고
@@ -99,6 +106,7 @@ Claude 오케스트레이터
 
 **핵심 차이**:
 - 구현 전 Plan Preflight는 `/plan-preflight`가 담당하며, `superpowers:writing-plans` 원칙으로 이슈 본문에 구현계획을 작성하거나 정비하고 Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
+- 이슈 기반 단계의 공식 증적은 이슈 본문, 라벨, 이슈 코멘트에 남긴다. 단계 전환이 코멘트 없이 로컬 메모로만 남으면 안 된다.
 - Plan Preflight가 시작된 이슈는 `plan-preflight:started`, 구현계획이 확정된 이슈는 `plan-preflight:done` 라벨로 구분한다.
 - `plan-preflight:done`은 최신 이슈 본문 구현계획과 Codex Plan Review의 `approve-implement` 또는 `narrow-scope` verdict가 맞물려 구현 착수 가능한 상태라는 뜻이다.
 - 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤, `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 작성한다.

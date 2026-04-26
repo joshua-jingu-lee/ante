@@ -22,9 +22,19 @@
 2. **같은 의미의 코멘트를 중복으로 남기지 않는다**
    - 새 코멘트를 남기기 전에 기존 코멘트 헤더를 먼저 확인한다.
    - 예:
+     - `🤖 **Plan Preflight 시작**`
+     - `🤖 **Plan Preflight 계획 정비 완료**`
+     - `🤖 **Codex Plan Review**`
+     - `🤖 **Plan Preflight 완료**`
+     - `🤖 **Plan Preflight 보류**`
+     - `🤖 **구현 분석 완료**`
      - `🤖 **구현 착수**`
+     - `🤖 **로컬 구현 완료**`
+     - `🤖 **Codex 브랜치 리뷰**`
      - `🤖 **PR 생성 완료**`
+     - `🤖 **Autopilot 사이클 상태**`
      - `🤖 **Autopilot 보류**`
+     - `🤖 **Post-merge 정리 완료**`
 
 3. **조회와 쓰기의 목적을 분리한다**
    - 조회: `gh issue list/view`, `gh pr list/view/diff`, `gh run list/view`
@@ -80,6 +90,7 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 - 첫 줄에 의미가 분명한 헤더를 둔다.
 - 다음 단계 또는 보류 사유를 함께 적는다.
 - 자동화가 읽을 수 있도록 상태 단어를 고정한다.
+- `docs/runbooks/01-development-process.md`의 상호작용 흐름에 있는 이슈 기반 단계는 로컬 메모만 남기지 않고 아래 표준 코멘트 중 하나로 상태를 남긴다.
 
 예:
 
@@ -88,6 +99,24 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 - 사유: needs-triage
 - 다음 단계: triage 후 라벨 제거
 ```
+
+필수 이벤트별 코멘트:
+
+| 이벤트 | 헤더 | 소유 커맨드/자동화 |
+|--------|------|--------------------|
+| Plan Preflight 시작 | `🤖 **Plan Preflight 시작**` | `/plan-preflight` |
+| 이슈 본문 구현계획 정비 완료 | `🤖 **Plan Preflight 계획 정비 완료**` | `/plan-preflight` |
+| 구현계획 외부 검증 결과 | `🤖 **Codex Plan Review**` | `/plan-preflight`, `/implement-issue` |
+| Plan Preflight 완료 | `🤖 **Plan Preflight 완료**` | `/plan-preflight` |
+| Plan Preflight 보류/중단 | `🤖 **Plan Preflight 보류**` | `/plan-preflight`, `/autopilot` |
+| 구현 전 분석 완료 | `🤖 **구현 분석 완료**` | `/implement-issue` |
+| 개발 에이전트 착수 | `🤖 **구현 착수**` | `/implement-issue` |
+| 로컬 구현/검증/커밋 완료 | `🤖 **로컬 구현 완료**` | `/implement-issue` |
+| PR 전 내부 브랜치 리뷰 결과 | `🤖 **Codex 브랜치 리뷰**` | `/implement-issue` |
+| PR 생성 후 게이트 인계 | `🤖 **PR 생성 완료**` | `/implement-issue` |
+| Autopilot 사이클 상태 | `🤖 **Autopilot 사이클 상태**` | `/autopilot` |
+| Autopilot 보류 | `🤖 **Autopilot 보류**` | `/autopilot` |
+| merge 후 이슈 정리 완료 | `🤖 **Post-merge 정리 완료**` | `post-merge.yml` |
 
 ### 5. PR 생성/조회
 
@@ -118,12 +147,19 @@ gh pr create --base {base} --title "{title}" --body "{body}"
 
 ## 커맨드별 기대 동작
 
+- `/plan-preflight`
+  - 시작 라벨 변경과 동시에 `Plan Preflight 시작` 코멘트를 남김
+  - 이슈 본문 Implementation Plan 정비 후 `Plan Preflight 계획 정비 완료` 코멘트를 남김
+  - Codex Plan Review 결과를 `Codex Plan Review` 코멘트로 남김
+  - 완료 시 `Plan Preflight 완료`, 중단 시 `Plan Preflight 보류` 코멘트를 남김
 - `/autopilot`
   - 큐 snapshot, open PR 여부 확인, 보류 코멘트, Plan Preflight 상태 확인
+  - 활성 이슈의 최신 `Autopilot 사이클 상태` 코멘트를 유지하고 merge/post-merge 완료까지 갱신
 - `/implement-issue`
-  - 이슈 조회, 구현 착수 코멘트, 리뷰 요청 코멘트, PR 생성, PR 생성 완료 코멘트
+  - 이슈 조회, 구현 분석 완료 코멘트, 구현 착수 코멘트, 로컬 구현 완료 코멘트, 리뷰 요청/결과 코멘트, PR 생성, PR 생성 완료 코멘트
 - `/release`
   - release PR 중복 확인, `release/vX.Y.Z` 브랜치 PR 생성, workflow dispatch/모니터링
+  - 릴리스는 일반 GitHub 이슈 처리 흐름이 아니므로 이슈 코멘트 대신 release PR 본문, PR 코멘트, GitHub Release, workflow run을 공식 증적으로 삼음
 
 ## 금지 사항
 

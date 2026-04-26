@@ -201,12 +201,54 @@ jobs:
               return;
             }
 
+            async function hasPostMergeComment(issueNumber, prNumber) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              });
+              const prNeedle = prNumber ? `- PR: #${prNumber}` : "- PR: n-a";
+
+              return comments.some((comment) => {
+                const body = comment.body || "";
+                return body.includes("🤖 **Post-merge 정리 완료**") && body.includes(prNeedle);
+              });
+            }
+
+            async function addPostMergeComment(issueNumber, summary) {
+              if (await hasPostMergeComment(issueNumber, summary.prNumber)) {
+                core.info(`Post-merge comment already exists for issue #${issueNumber}.`);
+                return;
+              }
+
+              const prLine = summary.prNumber ? `- PR: #${summary.prNumber}` : "- PR: n-a";
+              const epicLine = summary.epicNumber
+                ? `- epic: #${summary.epicNumber} (${summary.epicStatus})`
+                : "- epic: n-a";
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body:
+                  `🤖 **Post-merge 정리 완료**\n` +
+                  `${prLine}\n` +
+                  `- issue checklist: ${summary.checkboxUpdated ? "updated" : "unchanged"}\n` +
+                  `- issue state: ${summary.issueClosed ? "closed" : "already-closed"}\n` +
+                  `${epicLine}\n` +
+                  "- source: post-merge.yml",
+              });
+            }
+
             async function markIssueDone(issueNumber) {
               const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
               const originalBody = issue.data.body || "";
               const updatedBody = originalBody.replace(/^- \[ \]/gm, "- [x]");
+              const checkboxUpdated = updatedBody !== originalBody;
+              let issueClosed = false;
 
-              if (updatedBody !== originalBody) {
+              if (checkboxUpdated) {
                 await github.rest.issues.update({
                   owner,
                   repo,
@@ -222,10 +264,16 @@ jobs:
                   issue_number: issueNumber,
                   state: "closed",
                 });
+                issueClosed = true;
               }
 
               const epicMatch = originalBody.match(/(?:에픽|Epic)\s*:\s*#(\d+)/i);
               if (!epicMatch) {
+                await addPostMergeComment(issueNumber, {
+                  prNumber: pr?.number,
+                  checkboxUpdated,
+                  issueClosed,
+                });
                 return;
               }
 
@@ -236,6 +284,8 @@ jobs:
                 new RegExp(`- \\[ \\](.*#${issueNumber}\\b)`, "g"),
                 "- [x]$1",
               );
+              let epicChecklistUpdated = false;
+              let epicClosed = false;
 
               if (updatedEpicBody !== epicBody) {
                 await github.rest.issues.update({
@@ -244,6 +294,7 @@ jobs:
                   issue_number: epicNumber,
                   body: updatedEpicBody,
                 });
+                epicChecklistUpdated = true;
               }
 
               if (!updatedEpicBody.match(/^- \[ \]/m) && epic.data.state !== "closed") {
@@ -253,7 +304,18 @@ jobs:
                   issue_number: epicNumber,
                   state: "closed",
                 });
+                epicClosed = true;
               }
+
+              await addPostMergeComment(issueNumber, {
+                prNumber: pr?.number,
+                checkboxUpdated,
+                issueClosed,
+                epicNumber,
+                epicStatus:
+                  `${epicChecklistUpdated ? "checklist-updated" : "checklist-unchanged"}, ` +
+                  `${epicClosed ? "closed" : "open-or-already-closed"}`,
+              });
             }
 
             for (const issueNumber of uniqueRefs) {

@@ -46,6 +46,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - implementation lane이 바쁠 때 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - 이 선행 작업은 `/plan-preflight #{번호}`로 수행하며, 이슈 본문 구현계획 작성/보강, Codex Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지만 허용한다.
 - Plan Preflight를 시작하면 `plan-preflight:started`를 붙이고, 구현계획이 확정되면 이슈 본문을 최신화한 뒤 `plan-preflight:done`으로 교체한다.
+- `/plan-preflight`가 남기는 시작/계획 정비/리뷰/완료 코멘트는 Autopilot 상태 코멘트와 별개로 유지한다.
 - 코드 수정, 브랜치 생성, PR 생성은 현재 implementation lane이 종료된 뒤 해당 이슈가 실제 처리 대상으로 선택될 때 수행한다.
 
 ## 상태 코멘트 계약
@@ -260,6 +261,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - 상태 변화 없이 장시간 대기하거나 `--time-budget`이 소진되면 현재 이슈를 `deferred-merge-monitoring`으로 기록하고 배치를 종료한다.
 - `--handoff-only`일 때만 PR 생성 직후 모니터링을 생략하고 `handed-off`로 기록한다.
 - PR이 생성되는 즉시 상태 코멘트를 `implement-state=done`, `merge-monitor-state=running`, `current-cycle=merge-monitor`로 갱신하고 `pr`/`head`를 채운다.
+- `post-merge.yml`이 연결 이슈에 `🤖 **Post-merge 정리 완료**` 코멘트를 남겼는지 확인한다. 예전 run처럼 코멘트가 없고 이슈 close/체크박스 갱신만 확인되면 Autopilot 상태 코멘트를 `result=merged`로 갱신하면서 누락 사실을 기록한다.
 
 ### 6단계: 결과 분류
 

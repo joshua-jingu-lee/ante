@@ -29,15 +29,15 @@ mkdir -p "$WORKTREE_ROOT"
 
 | 단계 | 담당 | 실행 주체 | GitHub 기록 |
 |------|------|-----------|-------------|
-| 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
+| 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 구현 분석 완료 또는 스킵 이슈 코멘트 |
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
 | 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
 | 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
-| 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 |
+| 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 + 로컬 구현 완료 이슈 코멘트 |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | `/codex:review --base <ref>` + Claude 개발 에이전트 | 이슈 코멘트 |
 | 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
 | 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Closes #이슈`) |
-| 13 (최종 승인/머지) | GitHub automation | Claude/Codex PR 승인 워커 + auto-merge | PR checks |
+| 13 (최종 승인/머지) | GitHub automation + `/autopilot` | Claude/Codex PR 승인 워커 + auto-merge | PR checks + 이슈 상태/post-merge 코멘트 |
 
 ## 작업 흐름
 
@@ -70,7 +70,7 @@ mkdir -p "$WORKTREE_ROOT"
 - 보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.
 - Codex Plan Review가 `approve-implement` 또는 `narrow-scope`를 반환하면 이슈 본문 구현계획을 최신화한 뒤 `plan-preflight:started`를 제거하고 `plan-preflight:done`을 붙인다.
 - `plan-preflight:done`은 구현계획까지 확정됐다는 뜻이며, 이슈 본문이 canonical plan이다.
-- Plan Preflight가 없더라도 작은 이슈라면 이슈 본문 자체가 실행계획 역할을 할 수 있다.
+- 작은 이슈라도 `plan-preflight:done` 라벨과 최신 이슈 본문 구현계획이 있어야 구현을 시작한다.
 
 4b. **Codex Plan Review 요청/대기**: Plan Preflight가 정비한 구현계획을 Codex plugin 외부 리뷰 게이트로 넘긴다.
 
@@ -88,6 +88,19 @@ mkdir -p "$WORKTREE_ROOT"
 ```
 
 Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 `plan-preflight:started` 상태를 유지하고, Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
+
+4c. **구현 분석 완료 코멘트**: 구현에 넘길 수 있는 상태가 확인되면 오케스트레이터가 이슈에 분석 완료 코멘트를 남긴다. 이 코멘트는 개발 에이전트의 착수 기록을 대체하지 않고, 어떤 계획과 기준으로 구현을 위임하는지 고정한다.
+
+```bash
+gh issue comment #{이슈번호} --body "🤖 **구현 분석 완료**
+- status: ready-to-implement
+- spec-path: {1A Spec-First | 1B Issue-First Bundled}
+- plan-preflight: done
+- Codex Plan Review: {approve-implement | narrow-scope}
+- target agent: @{에이전트명}
+- base branch: {main 또는 epic/#{에픽번호}-{설명}}
+- next: 개발 에이전트가 구현 착수 코멘트를 남기고 worktree 격리 후 작업"
+```
 
 ### 구현 시작 기록 (개발 에이전트)
 
@@ -139,9 +152,22 @@ Agent(
 {이슈 본문 Implementation Plan의 tasks, verification, risk flags, stop conditions}
 
 브랜치명과 로컬 HEAD SHA를 반환하라.
+완료 후 이슈에 `로컬 구현 완료` 코멘트를 남겨라.
 """,
   isolation="worktree"
 )
+```
+
+개발 에이전트가 로컬 검증과 커밋을 마치면 이슈 코멘트를 남긴다.
+
+```bash
+gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
+- 담당 에이전트: @{에이전트명}
+- branch: {작업 브랜치}
+- head: {SHA7}
+- checks: {ruff check | ruff format | pytest | 기타 명령과 결과}
+- implementation plan: 이슈 본문 체크리스트 기준
+- next: Codex 브랜치 리뷰 요청"
 ```
 
 ### Codex 브랜치 리뷰 루프
@@ -159,6 +185,16 @@ Agent(
   - 브랜치를 push하고 PR 생성 단계로 진행
 - `FAIL`:
   - Codex가 남긴 blocking finding을 `.agent/skills/receive-review.md` 규칙으로 정리한 뒤 Claude 개발 에이전트에 수정 위임
+
+```bash
+gh issue comment #{이슈번호} --body "🤖 **Codex 브랜치 리뷰**
+- verdict: {PASS | FAIL}
+- base: {main 또는 epic/...}
+- head: {SHA7}
+- attempt: {N}
+- blocking findings: {없음 | finding 요약}
+- next: {브랜치 push 후 PR 생성 | 같은 worktree에서 수정 후 재검토}"
+```
 
 11. **수정 루프**: `/codex:review --base {base}`가 최신 HEAD SHA에서 `PASS`가 될 때까지 내부 반복한다.
 
@@ -222,6 +258,8 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 없이 중단 사유만 남김
 - 모든 체크가 green이면 auto-merge
 - 머지 후 post-merge automation이 이슈 체크박스를 갱신하고 close
+- `/autopilot` 실행 중이면 최신 `🤖 **Autopilot 사이클 상태**` 이슈 코멘트를 `current-cycle=merge-monitor`에서 `completed`까지 갱신한다.
+- `post-merge.yml`은 연결 이슈에 `🤖 **Post-merge 정리 완료**` 코멘트를 남긴다.
 
 이 커맨드는 **직접 머지하지 않는다**.
 
