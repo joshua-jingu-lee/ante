@@ -542,10 +542,7 @@ jobs:
 
   merge-gate:
     name: merge-gate
-    if: ${{ vars.AI_REVIEW_ENABLED == 'true' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false }}
-    needs:
-      - claude-pr-approve
-      - codex-pr-approve
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     permissions:
       actions: write

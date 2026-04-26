@@ -29,15 +29,15 @@ Claude 구현 (worktree 격리)
   │
   ├──▶ [Gate B] ci ─────────────────────── 실패 → Claude 또는 DevOps가 수정
   │
-  ├──▶ [Gate C] claude-pr-approve ─────── content 실패 → Claude 자동 재수정
+  ├──▶ [Gate C] claude-pr-approve (advisory) ─ content 실패 → Claude 자동 재수정 (권고 신호)
   │
-  ├──▶ [Gate D] codex-pr-approve ──────── content 실패 → Claude 자동 재수정
+  ├──▶ [Gate D] codex-pr-approve (advisory) ── content 실패 → Claude 자동 재수정 (권고 신호)
   │
   ├──▶ [Meta] code-reviewer ───────────── 고위험 변경 / 반복 risk class 시 원인 분석
   │
   ├──▶ [Loop] Claude PR repair ────────── 최대 10회, quota/script/auth/infra는 제외
   │
-  ├──▶ [Gate E] merge-gate ────────────── 모든 게이트 성공 시 auto-merge
+  ├──▶ [Gate E] merge-gate ────────────── ci 통과 + 충돌 없음 + 대화 해결 시 auto-merge
   │
   ▼
 post-merge automation
@@ -95,27 +95,29 @@ post-merge automation
 
 ### Gate C — Claude PR 승인
 
-**목적**: PR head SHA 기준 계약/스펙/테스트 최종 확인
+**목적**: PR head SHA 기준 계약/스펙/테스트 최종 확인 (advisory)
 
 - **트리거**: `pull_request` opened / synchronize / ready_for_review
 - **결과**: `claude-pr-approve`
+- **성격**: **advisory check이며 branch protection의 required status check가 아니다.** 머지 게이트(Gate E)는 이 결과를 입력으로 삼지 않는다.
 - **기준**: `.agent/skills/review-pr.md`
 - **후속 처리**:
-  - `content` FAIL → Claude 자동 재수정 루프
+  - `content` FAIL → Claude 자동 재수정 루프 (advisory 환경에서도 동작하나 PR 머지를 차단하는 게이트가 아니라 권고 신호)
   - `quota/script_error/auth_error/infra_error` → 재수정 없이 PR 코멘트로 중단 사유 기록
-- **해석 주의**: review 결과 파일이 있고 마지막 verdict step만 실패하면, 빨간 체크는 실제 finding을 의미한다.
+- **해석 주의**: review 결과 파일이 있고 마지막 verdict step만 실패하면, 빨간 체크는 실제 finding을 의미한다. 머지를 차단하지는 않지만 사람/오케스트레이터가 검토해야 할 신호다.
 
 ### Gate D — Codex PR 승인
 
-**목적**: PR head SHA 기준 독립 교차검증
+**목적**: PR head SHA 기준 독립 교차검증 (advisory)
 
 - **트리거**: `pull_request` opened / synchronize / ready_for_review
 - **결과**: `codex-pr-approve`
+- **성격**: **advisory check이며 branch protection의 required status check가 아니다.** 머지 게이트(Gate E)는 이 결과를 입력으로 삼지 않는다.
 - **기준**: `.agent/skills/review-pr.md`
 - **후속 처리**:
-  - `content` FAIL → Claude 자동 재수정 루프
+  - `content` FAIL → Claude 자동 재수정 루프 (advisory 환경에서도 동작하나 PR 머지를 차단하는 게이트가 아니라 권고 신호)
   - `quota/script_error/auth_error/infra_error` → 재수정 없이 PR 코멘트로 중단 사유 기록
-- **해석 주의**: review 결과 생성 후 verdict gate만 실패한 경우, CI 인프라 문제보다 코드/계약 finding을 먼저 본다.
+- **해석 주의**: review 결과 생성 후 verdict gate만 실패한 경우, CI 인프라 문제보다 코드/계약 finding을 먼저 본다. 머지를 차단하지는 않지만 사람/오케스트레이터가 검토해야 할 신호다.
 
 ### PR 승인 공통 원칙
 
@@ -162,11 +164,12 @@ post-merge automation
 **목적**: 머지 가능성만 판단하는 정책 게이트
 
 입력:
-- `ci`
-- `claude-pr-approve`
-- `codex-pr-approve`
-- 충돌 여부
-- 대화 해결 여부
+- `ci` (required)
+- 충돌 없음
+- 대화 해결 완료
+- auto-merge 활성화 가능 상태
+
+AI 승인(`claude-pr-approve`, `codex-pr-approve`)은 advisory check이므로 merge gate의 입력이 아니다. AI 승인 실패는 머지 게이트를 막지 않는다.
 
 출력:
 - auto-merge 활성화 또는 유지
@@ -176,7 +179,7 @@ post-merge automation
 - 머지 불가 시 대기
 
 **원칙**: merge gate는 세 번째 코드 리뷰어가 아니라 **정책 집행자**다.
-코드 품질을 새로 판단하지 않고, CI와 승인 상태만 집행한다.
+코드 품질을 새로 판단하지 않고, CI와 머지 가능성만 집행한다.
 
 ### Post-merge 책임 분리
 
@@ -218,8 +221,8 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - `codex-pr-approve`는 self-hosted runner label `codex-review`를 전제로 한다.
 - PR 전 Codex 브랜치 리뷰는 runner workflow가 아니라 Claude 세션의 `/codex:review --base <ref>` 내부 루프로 수행한다.
 - `claude-pr-approve`는 self-hosted runner label `claude-review`를 전제로 한다.
-- 저장소 변수 `AI_REVIEW_ENABLED=true`일 때만 PR 단계 AI 리뷰 workflow를 활성화한다.
-- runner가 준비되기 전에는 `AI_REVIEW_ENABLED`를 비워 두거나 `false`로 유지한다.
+- self-hosted runner가 준비되지 않은 상태는 정상 운영 상태다. AI 리뷰는 advisory이므로 runner가 없어도 PR 머지가 차단되지 않는다.
+- 저장소 변수 `AI_REVIEW_ENABLED`는 **선택 리뷰 workflow 활성화 플래그**다. `true`일 때만 advisory 리뷰 잡을 실행하며, 비어 있거나 `false`이면 advisory 리뷰만 생략된다. merge gate는 이 플래그와 무관하게 동작한다.
 
 ### 3.3 저장소 설정 권장값
 
@@ -227,8 +230,8 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - `Automatically delete head branches`: 활성화
 - branch protection required status checks:
   - `ci`
-  - `claude-pr-approve`
-  - `codex-pr-approve`
+- AI 승인(`claude-pr-approve`, `codex-pr-approve`)은 advisory check이므로 required status checks에 포함하지 않는다.
+- `main` 외에 `epic/**` 통합 브랜치도 같은 required status checks(`ci`)를 적용해 base가 epic이어도 ci 통과 없이는 머지되지 않도록 한다.
 - `Require conversation resolution before merging`: 활성화 권장
 
 ### 3.4 AI 리뷰 러너 / 검증 환경 체크리스트
@@ -261,15 +264,15 @@ pytest tests/unit/ -v
 실제 명령 실행과 GitHub 코멘트 절차는 `.agent/skills/github-ops.md`를 따르고,
 구현 전 브랜치 리뷰 실행 루프는 `.agent/commands/implement-issue.md`와 [03-git-workflow.md](03-git-workflow.md)를 따른다.
 
-| 실패 게이트 | 주 원인 | 복구 담당 |
-|------------|--------|----------|
-| `/codex:review` | 설계/코드 품질 문제 | Claude 개발 에이전트 |
-| `ci` | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
-| `claude-pr-approve` | 스펙/계약/테스트 누락 | Claude 자동 재수정 워커 또는 `@devops` |
-| `codex-pr-approve` | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 또는 `@devops` |
+| 실패 게이트 | 성격 | 머지 차단 여부 | 주 원인 | 복구 담당 |
+|------------|-----|---------------|--------|----------|
+| `/codex:review` | PR 전 advisory | PR 생성 차단 (이슈 증적) | 설계/코드 품질 문제 | Claude 개발 에이전트 |
+| `ci` | required | 차단 | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
+| `claude-pr-approve` | advisory | 차단하지 않음 | 스펙/계약/테스트 누락 | Claude 자동 재수정 워커 또는 `@devops` |
+| `codex-pr-approve` | advisory | 차단하지 않음 | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 또는 `@devops` |
 
 내부 `/codex:review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
-`claude-pr-approve` / `codex-pr-approve`는 `content` FAIL일 때만 Claude 자동 재수정을 최대 10회 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다.
+`claude-pr-approve` / `codex-pr-approve`는 advisory check이므로 실패해도 merge gate를 막지 않는다. 다만 `content` FAIL일 때 Claude 자동 재수정 루프는 advisory 신호로 계속 동작하며 최대 10회까지 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다. 자동 재수정 루프 자체는 PR 차단 게이트가 아니라 권고 신호다.
 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
 
 ### 5.1 승인 루프 수동 복구 순서

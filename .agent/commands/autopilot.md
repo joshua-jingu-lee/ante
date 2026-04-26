@@ -23,7 +23,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 - Plan Preflight 결과가 이슈 본문 구현계획으로 확정되었고
 - 이슈가 `/implement-issue`를 통해 실제 수정과 PR 생성까지 진행되었고
-- 같은 이슈의 CI + 승인 + auto-merge + post-merge가 확인되었음
+- 같은 이슈의 `ci` 통과 + auto-merge + post-merge가 확인되었음 (AI 승인은 advisory monitoring)
 
 `--handoff-only`일 때만 PR 생성 후 기존 리뷰 게이트 인계에서 종료한다.
 
@@ -38,8 +38,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
    - `/implement-issue #{번호}`를 호출해 실제 수정, 검증, PR 생성까지 진행한다.
    - Plan Preflight의 tasks, verification, risk flags, stop conditions는 구현 프롬프트에 강제 반영할 항목이다.
 3. **머지 모니터링 사이클**
-   - CI, `claude-pr-approve`, `codex-pr-approve`, auto-merge, `post-merge`까지 같은 이슈를 계속 추적한다.
-   - 승인 워커의 `content` FAIL은 현재 이슈의 수정 루프 일부로 간주하며, 다음 이슈로 넘어가지 않는다.
+   - 머지 조건은 `ci` + `merge-gate` + auto-merge + `post-merge`다. `claude-pr-approve` / `codex-pr-approve`는 advisory monitoring으로 함께 보지만 머지 차단 게이트가 아니다.
+   - 승인 워커의 `content` FAIL은 advisory 신호이므로 머지를 막지 않지만, autopilot은 현재 이슈의 advisory 자동 재수정 루프가 정리될 때까지 다음 이슈로 넘어가지 않는다.
 
 별도 선행 작업:
 
@@ -247,12 +247,16 @@ Plan Preflight는 의견만 남기고 종료하는 단계가 아니다. autopilo
 
 PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대로 모니터링한다.
 
-1. `ci`
-2. `claude-pr-approve`
-3. `codex-pr-approve`
-4. `merge-gate`
-5. auto-merge
-6. `post-merge` 후처리
+1. `ci` (required, 머지 차단 게이트)
+2. `merge-gate`
+3. auto-merge
+4. `post-merge` 후처리
+
+advisory monitoring으로 함께 살피지만 머지 차단 게이트가 아닌 신호:
+
+- `claude-pr-approve` (advisory)
+- `codex-pr-approve` (advisory)
+- `claude-pr-fix` 자동 재수정 루프 (advisory)
 
 모니터링 규칙:
 
