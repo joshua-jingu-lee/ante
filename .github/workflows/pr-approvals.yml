@@ -555,7 +555,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          deadline=$(( $(date +%s) + 1800 ))  # 30분 한도
+          deadline=$(( $(date +%s) + 5400 ))  # 90분 한도 (ci.yml test 잡 timeout 45분 + 큐/다른 step 여유)
           while [ "$(date +%s)" -lt "$deadline" ]; do
             run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&event=pull_request" --jq '[.workflow_runs[] | select(.path == ".github/workflows/ci.yml")] | .[0] // {}')
             status=$(echo "$run_json" | jq -r '.status // "missing"')
