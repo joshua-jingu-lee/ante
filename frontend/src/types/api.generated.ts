@@ -66,10 +66,11 @@ export type paths = {
          *     검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
          *     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
          *     핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
-         *     비구조 필드만 ``AccountMutableUpdateRequest.model_validate(...)``로
-         *     재검증한다. 이 단계의 ``ValidationError``는 422 ``HTTPException``으로
-         *     명시 변환된다(P2 — 회귀 보호). PUT requestBody의 OpenAPI schema accuracy
-         *     회복(mutable 모델 노출)은 후속 이슈 #1143에서 다룬다.
+         *     비구조 필드를 그대로 ``account_service.update``에 forward한다.
+         *     service-layer가 알 수 없는/불변 필드는 자체 검증으로 거부한다
+         *     (`AccountImmutableFieldError → 400`, `ValueError(unknown field)` 등).
+         *     PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
+         *     이슈 #1143에서 다룬다.
          */
         put: operations["update_account_api_accounts__account_id__put"];
         post?: never;
@@ -3332,7 +3333,7 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDetailResponse"];
                 };
             };
-            /** @description 수정할 필드가 없음 */
+            /** @description 수정할 필드가 없거나 service-layer가 거부한 비구조 필드 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3359,16 +3360,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 비구조(mutable) 필드 schema 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다. */
+            /** @description Validation Error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Account service not available */
+            /** @description Account service not available 또는 broker 재연결 실패 */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -6,7 +6,6 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import ValidationError
 
 from ante.web.deps import (
     get_account_service,
@@ -18,7 +17,6 @@ from ante.web.schemas import (
     AccountActionResponse,
     AccountDetailResponse,
     AccountListResponse,
-    AccountMutableUpdateRequest,
     AccountSuspendRequest,
     ErrorResponse,
     RuleListResponse,
@@ -172,7 +170,10 @@ async def get_account(
     "/{account_id}",
     response_model=AccountDetailResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "수정할 필드가 없음"},
+        400: {
+            "model": ErrorResponse,
+            "description": ("수정할 필드가 없거나 service-layer가 거부한 비구조 필드"),
+        },
         404: {"model": ErrorResponse, "description": "계좌를 찾을 수 없음"},
         409: {
             "model": ErrorResponse,
@@ -181,14 +182,10 @@ async def get_account(
                 "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
             ),
         },
-        422: {
+        503: {
             "model": ErrorResponse,
-            "description": (
-                "비구조(mutable) 필드 schema 검증 실패. "
-                "structural 필드 키는 422가 아닌 409로 차단된다."
-            ),
+            "description": "Account service not available 또는 broker 재연결 실패",
         },
-        503: {"model": ErrorResponse, "description": "Account service not available"},
     },
 )
 async def update_account(
@@ -209,14 +206,17 @@ async def update_account(
     검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
     핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
-    비구조 필드만 ``AccountMutableUpdateRequest.model_validate(...)``로
-    재검증한다. 이 단계의 ``ValidationError``는 422 ``HTTPException``으로
-    명시 변환된다(P2 — 회귀 보호). PUT requestBody의 OpenAPI schema accuracy
-    회복(mutable 모델 노출)은 후속 이슈 #1143에서 다룬다.
+    비구조 필드를 그대로 ``account_service.update``에 forward한다.
+    service-layer가 알 수 없는/불변 필드는 자체 검증으로 거부한다
+    (`AccountImmutableFieldError → 400`, `ValueError(unknown field)` 등).
+    PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
+    이슈 #1143에서 다룬다.
     """
     from ante.account.errors import (
         AccountDeletedError,
+        AccountImmutableFieldError,
         AccountNotFoundError,
+        BrokerReconnectFailedError,
     )
 
     # body는 dict로 직접 받으므로 별도 raw bytes 파싱이 필요 없다.
@@ -226,10 +226,7 @@ async def update_account(
     # cold-path 가드: structural 필드 키가 payload에 하나라도 등장하면
     # DB/서비스 호출 전 409로 즉시 차단한다(invariant I1/I4). 값이 null이거나
     # 타입이 잘못돼도 동일하게 차단된다 — Pydantic 검증을 통과한 값이 아니라
-    # 키 존재 여부만 본다. 가드 이후의 service.update는 비구조 필드만 받으므로
-    # AccountImmutableFieldError/BrokerReconnectFailedError 경로에 도달하지
-    # 않는다. service-layer 동작 회귀는 `tests/unit/test_account.py`,
-    # `tests/unit/test_account_immutable_fields.py`가 보호한다.
+    # 키 존재 여부만 본다.
     structural_hits = sorted(set(payload) & set(STRUCTURAL_FIELDS))
     if structural_hits:
         raise HTTPException(
@@ -239,23 +236,9 @@ async def update_account(
             ),
         )
 
-    # 비구조 필드만 모아 mutable schema로 재검증. structural 키는 위 가드에서
-    # 이미 걸렀고, mutable 모델에는 정의되어 있지 않다. 알 수 없는 추가 키는
-    # Pydantic 기본(extra='ignore')으로 무시된다.
-    mutable_payload = {k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS}
-    if not mutable_payload:
-        raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
-
-    try:
-        parsed = AccountMutableUpdateRequest.model_validate(mutable_payload)
-    except ValidationError as e:
-        # FastAPI 자동 422와 동일한 구조화 에러를 반환해 클라이언트가 422를
-        # 잃지 않도록 한다(P2 회귀 보호).
-        raise HTTPException(status_code=422, detail=e.errors())
-
-    # None이 아닌 비구조 필드만 업데이트 대상.
-    fields = parsed.model_dump(exclude_none=True)
-
+    # structural 가드를 통과한 키만 service.update에 forward한다. service가
+    # unknown/invalid 필드를 거부하므로 라우트는 추가 schema 검증을 하지 않는다.
+    fields = {k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS}
     if not fields:
         raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
 
@@ -275,6 +258,13 @@ async def update_account(
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except AccountImmutableFieldError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except BrokerReconnectFailedError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+        )
 
     if audit_logger:
         await audit_logger.log(

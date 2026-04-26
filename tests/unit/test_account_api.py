@@ -98,7 +98,28 @@ class FakeAccountService:
             accounts = [a for a in accounts if a.status == status]
         return accounts
 
+    # 실제 AccountService.update와 동일한 분류로 비구조 필드를 다룬다.
+    # 라우트는 STRUCTURAL_FIELDS를 cold-path 409로 사전 차단하므로, fake는
+    # service.update가 비구조 분기에 forward 받을 수 있는 키 집합만 다룬다.
+    UPDATABLE_FIELDS = frozenset(
+        {
+            "name",
+            "timezone",
+            "trading_hours_start",
+            "trading_hours_end",
+            "credentials",
+            "broker_config",
+            "buy_commission_rate",
+            "sell_commission_rate",
+        }
+    )
+    IMMUTABLE_FIELDS = frozenset(
+        {"exchange", "currency", "trading_mode", "broker_type"}
+    )
+
     async def update(self, account_id: str, **fields: Any) -> Account:
+        from ante.account.errors import AccountImmutableFieldError
+
         if account_id not in self._accounts:
             raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
         account = self._accounts[account_id]
@@ -106,6 +127,19 @@ class FakeAccountService:
             raise AccountDeletedError(
                 f"삭제된 계좌 '{account_id}'는 수정할 수 없습니다."
             )
+
+        # 실제 service와 동일하게 IMMUTABLE/unknown 필드를 거부한다.
+        attempted_immutable = set(fields.keys()) & self.IMMUTABLE_FIELDS
+        if attempted_immutable:
+            raise AccountImmutableFieldError(
+                f"다음 필드는 수정할 수 없습니다: {sorted(attempted_immutable)}"
+            )
+        unrecognized = (
+            set(fields.keys()) - self.UPDATABLE_FIELDS - self.IMMUTABLE_FIELDS
+        )
+        if unrecognized:
+            raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
+
         for key, value in fields.items():
             setattr(account, key, value)
         account.updated_at = datetime.now(UTC)
@@ -717,53 +751,44 @@ class TestUpdateAccount:
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
         assert "exchange" in detail
 
-    def test_update_invalid_mutable_field_type_returns_422(
+    def test_update_unknown_mutable_field_forwarded_to_service(
         self,
         client: TestClient,
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
-        """비구조(mutable) 필드 타입이 잘못되면 422를 반환한다 (P2 회귀 보호).
+        """알 수 없는 비구조 필드는 service-layer가 거부한다 (글로벌 400 매핑).
 
-        ``timezone``은 ``str | None``인데 dict가 들어오면
-        ``AccountMutableUpdateRequest.model_validate``가 ``ValidationError``를
-        던지고, 라우트는 이를 422 ``HTTPException``으로 명시 변환한다.
-        이전 attempt에서는 ``ValidationError``가 그대로 전파되어 클라이언트가
-        FastAPI 자동 422 contract를 잃는 회귀가 있었다.
+        attempt 8에서 라우트 단 ``AccountMutableUpdateRequest`` 검증이 제거
+        되면서 비구조 필드 schema 검증은 service-layer로 위임된다. structural
+        가드를 통과한 unknown 키는 ``account_service.update``로 그대로 forward
+        되며, 실제 ``AccountService.update``는 unknown field에 ``ValueError``를
+        던진다. 글로벌 예외 핸들러(``app.py``의 ValueError handler)가 이를
+        RFC 7807 400 ``ErrorResponse``로 매핑한다.
+
+        본 테스트는 service-위임 동작과 글로벌 400 매핑을 함께 확인한다.
+        라우트가 unknown field를 PUT 422로 명시 매핑하는 schema accuracy 회복은
+        #1143에서 다룬다. service-layer 회귀 보호처:
+        ``tests/unit/test_account_immutable_fields.py``의
+        ``test_update_unknown_field_raises_value_error``.
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
 
         resp = client.put(
             "/api/accounts/test-account",
-            json={"timezone": {}},
+            json={"some_unknown_field": "x"},
         )
-        assert resp.status_code == 422
-        # service.update 미호출 — 계좌 timezone 보존
-        assert account_service._accounts["test-account"].timezone == "Asia/Seoul"
-        # audit 미발행
+        # 글로벌 ValueError 핸들러가 400으로 매핑.
+        assert resp.status_code == 400
+        body = resp.json()
+        # ErrorResponse 형태로 매핑됨.
+        assert body.get("status") == 400
+        assert "some_unknown_field" in body.get("detail", "")
+        # audit 미발행 (service.update가 raise하면 logger 호출 전에 끊긴다)
         assert [
             log for log in audit_logger.logs if log["action"] == "account.update"
         ] == []
-
-    def test_update_invalid_name_type_returns_422(
-        self,
-        client: TestClient,
-        account_service: FakeAccountService,
-    ) -> None:
-        """``name`` 타입 오류도 422 (P2 회귀 보호).
-
-        Pydantic은 dict → str 강제 변환을 허용하지 않으므로 422가 발생해야
-        한다. 422가 아닌 다른 status는 schema validation 회귀 신호다.
-        """
-        account = _make_account()
-        account_service._accounts[account.account_id] = account
-
-        resp = client.put(
-            "/api/accounts/test-account",
-            json={"name": {"nested": "object"}},
-        )
-        assert resp.status_code == 422
 
     def test_update_invalid_json_body_returns_422(
         self,
@@ -813,10 +838,10 @@ class TestUpdateAccount:
     ) -> None:
         """structural 키 + 잘못된 mutable 타입이 같이 와도 cold-path 409 우선.
 
-        attempt 4의 P2 finding 회귀 보호. 구조 필드 가드는 mutable schema
-        검증보다 먼저 실행되어야 한다 — ``credentials`` 키가 등장한 시점에
-        cold-path 위반이 확정되며, 같은 페이로드에 schema 검증 실패 트리거가
-        있어도 응답은 422가 아닌 409여야 한다.
+        구조 필드 가드는 service.update 호출보다 먼저 실행되어야 한다 —
+        ``credentials`` 키가 등장한 시점에 cold-path 위반이 확정되며, 같은
+        페이로드에 비구조 필드가 있어도 응답은 409여야 한다. service.update는
+        호출되지 않으므로 비구조 필드도 변경되지 않는다.
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
