@@ -40,62 +40,68 @@ Claude 오케스트레이터
   │
   ├── 분석: 이슈 읽기 → 스펙 확인 → 스펙 경로(1A/1B) 판단
   │
-  ├── Plan Preflight (`superpowers:writing-plans` 원칙)
-  │         ├── 시작 → `plan-preflight:started` 라벨 부착
-  │         ├── 이슈 본문에 구현계획 작성/정비
-  │         ├── 파일 맵 / 작업 순서 / risk flags
-  │         ├── 구현 체크리스트 / 검증 체크리스트
-  │         ├── stop conditions / 비목표
-  │         ├──▶ Codex Plan Review (`/codex:adversarial-review`)
-  │         │       ├── PASS: approve-implement / narrow-scope
-  │         │       └── FAIL: revise-plan / split-issue / invoke-human
-  │         ├── needs-rewrite → 이슈 본문 재작성 후 Codex Plan Review 재요청
-  │         ├── revise-plan → 피드백 반영 후 이슈 본문 재정비
-  │         ├── approve-implement → 이슈 본문 구현계획 확정
-  │         ├── narrow-scope → 축소 범위로 이슈 본문 구현계획 확정
-  │         ├── 확정 → `plan-preflight:started` 제거 + `plan-preflight:done` 라벨 부착
-  │         ├── needs-spec-first → Spec-First 경로로 전환
-  │         └── split-issue / invoke-human / blocked → 구현 중단
+  ├──▶ /plan-preflight (Claude 오케스트레이터)
+  │     │
+  │     ├── `plan-preflight:started` 라벨 부착
+  │     ├── 이슈 본문 구현계획 작성/정비
+  │     │    ├── 파일 맵 / 작업 순서 / risk flags
+  │     │    ├── 구현 체크리스트 / 검증 체크리스트
+  │     │    └── stop conditions / 비목표
+  │     │
+  │     ├──▶ Codex Plan Review (`/codex:adversarial-review`)
+  │     │     ├── approve-implement → 이슈 본문 구현계획 확정
+  │     │     ├── narrow-scope → 축소 범위로 이슈 본문 구현계획 확정
+  │     │     ├── revise-plan → Claude가 피드백 반영 후 Codex Plan Review 재요청
+  │     │     └── split-issue / invoke-human → 구현 중단 또는 사람 판단
+  │     │
+  │     ├── needs-spec-first / blocked → 구현 중단
+  │     └── 확정 → `plan-preflight:started` 제거 + `plan-preflight:done` 라벨 부착
   │
-  ├──▶ Implement issue (Claude 개발 에이전트)
-  │         │
-  │         ├── 워크트리 격리
-  │         ├── 착수 기록: 이슈 코멘트
-  │         ├── 구현 + 로컬 lint/test
-  │         ├── 로컬 커밋
-  │         ▼
-  │    Codex 브랜치 리뷰 (`/codex:review --base <base>`)
-  │         │
-  │         ├── FAIL → Claude가 같은 워크트리에서 수정 후 재검토
-  │         ├── 고위험 변경 / 반복 risk class → Claude `@code-reviewer` 메타 리뷰
-  │         └── PASS → 브랜치 push 후 PR 생성
+  ├──▶ /implement-issue (Claude 오케스트레이터)
+  │     │
+  │     ├── `plan-preflight:done` 및 최신 이슈 본문 구현계획 확인
+  │     ├── `arch-review` 등 사전 리뷰 증적 수집
+  │     │
+  │     ├──▶ Claude 개발 에이전트 (`@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev`)
+  │     │     ├── 워크트리 격리
+  │     │     ├── 착수 기록: 이슈 코멘트
+  │     │     ├── 구현 + 로컬 lint/test
+  │     │     └── 로컬 커밋
+  │     │
+  │     ├──▶ Codex 브랜치 리뷰 (`/codex:review --base <base>`)
+  │     │     ├── FAIL → Claude 개발 에이전트가 같은 워크트리에서 수정 후 재검토
+  │     │     ├── 반복 risk class → Claude `@code-reviewer` 메타 리뷰
+  │     │     └── PASS → 브랜치 push
+  │     │
+  │     └── PR 생성 (`Closes #이슈`)
   │
-  ├── PR 생성 후
-  │    ├── CI
-  │    ├── Claude PR 승인 (`claude-pr-approve`)
-  │    └── Codex PR 승인 (`codex-pr-approve`)
+  ├──▶ PR 게이트 (GitHub Actions)
+  │     ├── CI (`ci`)
+  │     ├── Claude PR 승인 (`claude-pr-approve`)
+  │     ├── Codex PR 승인 (`codex-pr-approve`)
+  │     ├── content FAIL → Claude PR repair 후 같은 PR에서 재검증
+  │     └── 모든 게이트 green → GitHub auto-merge
   │
-  ├── PR 승인 content FAIL → Claude 자동 재수정 (최대 10회)
+  ├──▶ post-merge automation
+  │     ├── 이슈 체크박스 갱신 + close
+  │     └── 원격 head branch 삭제 (GitHub 설정)
   │
-  ├── 모든 게이트 green → GitHub auto-merge
-  │
-  ├── post-merge automation → 이슈 체크박스 갱신 + close
-  │
-  ├── Autopilot 병렬 사전점검 lane
-  │    └── 한 이슈가 구현/리뷰/CI 중일 때 다른 후보 이슈의 Plan Preflight만 수행
-  │        (코드 수정, 브랜치 생성, PR 생성 금지)
+  ├──▶ /autopilot side lane (Claude 오케스트레이터)
+  │     └── implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 수행
+  │         (코드 수정, 브랜치 생성, PR 생성 금지)
   │
   ▼
 결과 보고
 ```
 
 **핵심 차이**:
-- 구현 전 Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비하고, Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
+- 구현 전 Plan Preflight는 `/plan-preflight`가 담당하며, 이슈 본문에 구현계획을 작성하거나 정비하고 Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
 - Plan Preflight가 시작된 이슈는 `plan-preflight:started`, 구현계획이 확정된 이슈는 `plan-preflight:done` 라벨로 구분한다.
 - `plan-preflight:done`은 최신 이슈 본문 구현계획과 Codex Plan Review의 `approve-implement` 또는 `narrow-scope` verdict가 맞물려 구현 착수 가능한 상태라는 뜻이다.
 - 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤, `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 작성한다.
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
-- Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 브랜치 리뷰**다.
+- Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 내부 브랜치 리뷰**다.
+- PR 전 Codex 브랜치 리뷰는 GitHub Actions가 아니라 `/implement-issue` 안에서 `/codex:review --base <base>`로 반복한다.
 - PR 단계의 Claude/Codex 승인 체크는 **같은 head SHA**를 기준으로 독립 실행된다.
 - 머지는 Claude 오케스트레이터가 직접 하지 않고, GitHub auto-merge가 수행한다.
 
