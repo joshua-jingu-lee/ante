@@ -32,7 +32,6 @@ mkdir -p "$WORKTREE_ROOT"
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
 | 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
-| 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
 | 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
 | 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | `/codex:review --base <ref>` + Claude 개발 에이전트 | 이슈 코멘트 |
@@ -90,30 +89,13 @@ mkdir -p "$WORKTREE_ROOT"
 
 Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 `plan-preflight:started` 상태를 유지하고, Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
 
-4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
-
-- `🏗️ **아키텍트 리뷰**` (`/arch-review`)
-
-정리할 내용:
-
-- latest `arch-review` verdict (`ready | caution | blocked | n-a`)
-- 구현 전에 반드시 반영할 주의사항
-- 테스트 추가/보완이 필요한 항목
-- 구현 완료 전 반드시 체크해야 할 리뷰 체크리스트
-- 최신 리뷰에 `verdict:`가 없거나, 리뷰 이후 이슈 본문/스펙/선행 조건이 바뀌었는지 여부
-
-최신 `arch-review`에 `verdict:`가 없거나 stale하다고 판단되면 refresh를 먼저 요청한다. 최신 verdict가 `blocked`이면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
-
-`ready` / `caution` verdict에서 나온 주의사항은 구현 프롬프트의 **필수 반영 항목**이다. 특히 `caution`은 "좋으면 반영" 메모가 아니라, 코드/테스트/문서 Done criteria로 승격한다.
-
 ### 구현 시작 기록 (개발 에이전트)
 
 5. **이슈에 착수 코멘트**:
 
 착수 코멘트는 `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 남긴다.
-오케스트레이터는 이슈 본문 구현계획과 사전 리뷰 증적을 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
+오케스트레이터는 이슈 본문 구현계획과 Codex Plan Review 결과를 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
 착수 코멘트는 `plan-preflight:done` 라벨이 있고, 이슈 본문 구현계획이 최신 Codex Plan Review verdict를 반영한 뒤에만 남긴다.
-`arch-review`의 `ready`/`caution` 주의사항은 이슈 본문을 다시 확정하는 별도 단계가 아니라, 착수 코멘트와 개발 에이전트 프롬프트의 필수 반영 항목으로 넘긴다.
 
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **구현 착수**
@@ -122,8 +104,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
 - Codex Plan Review: {approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}
-- 사전 리뷰: {arch=ready/caution/n-a}
-- 사전 리뷰 요약: {핵심 주의사항 1~2줄 또는 없음}"
+- 구현계획: 이슈 본문 Implementation Plan 기준"
 ```
 
 ### 구현 단계 (개발 에이전트)
@@ -154,11 +135,8 @@ Agent(
 ## Codex Plan Review
 {verdict, feedback, implementation checklist, verification checklist, stop conditions}
 
-## 사전 리뷰 증적
-{arch-review의 최신 verdict와 핵심 주의사항, 테스트 follow-up}
-
 ## 구현 필수 체크리스트
-{사전 리뷰에서 승격된 must-fix / must-test / must-sync 항목}
+{이슈 본문 Implementation Plan의 tasks, verification, risk flags, stop conditions}
 
 브랜치명과 로컬 HEAD SHA를 반환하라.
 """,

@@ -1,4 +1,4 @@
-오픈 이슈 큐를 야간 배치로 순차 처리하며, 필요 시 사전 리뷰 증적을 남긴 뒤 `/implement-issue`에 위임한다.
+오픈 이슈 큐를 야간 배치로 순차 처리하며, 필요 시 Plan Preflight로 구현계획을 확정한 뒤 `/implement-issue`에 위임한다.
 
 ## 인자
 
@@ -19,7 +19,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 기본 성공 기준:
 
-- 사전 리뷰 결과가 구현 체크리스트로 정리되었고
+- Plan Preflight 결과가 이슈 본문 구현계획으로 확정되었고
 - 이슈가 `/implement-issue`를 통해 실제 수정과 PR 생성까지 진행되었고
 - 같은 이슈의 CI + 승인 + auto-merge + post-merge가 확인되었음
 
@@ -29,12 +29,12 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 `/autopilot`은 아래 3개 사이클을 **같은 이슈에 대해 순차적으로** 끝낸 뒤에만 다음 이슈 구현으로 이동한다.
 
-1. **의견 검토 사이클**
-   - `arch-review`를 재사용 또는 refresh한다.
-   - `ready` / `caution` verdict에서 나온 주의사항, 테스트 follow-up, 범위 경계는 구현 체크리스트로 승격한다.
+1. **Plan Preflight 사이클**
+   - `plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성을 확인한다.
+   - 필요하면 `/plan-preflight #{번호}`로 구현계획과 Codex Plan Review 피드백을 확정한다.
 2. **개별 이슈 실행 사이클**
    - `/implement-issue #{번호}`를 호출해 실제 수정, 검증, PR 생성까지 진행한다.
-   - 사전 리뷰의 `caution`은 종료 사유가 아니라, 구현 프롬프트에 강제 반영할 항목이다.
+   - Plan Preflight의 tasks, verification, risk flags, stop conditions는 구현 프롬프트에 강제 반영할 항목이다.
 3. **머지 모니터링 사이클**
    - CI, `claude-pr-approve`, `codex-pr-approve`, auto-merge, `post-merge`까지 같은 이슈를 계속 추적한다.
    - 승인 워커의 `content` FAIL은 현재 이슈의 수정 루프 일부로 간주하며, 다음 이슈로 넘어가지 않는다.
@@ -63,7 +63,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - `implement-state`: `pending | running | blocked | done`
 - `merge-monitor-state`: `pending | running | blocked | done`
 - `preflight`: `pending | started | done | stale | blocked | n-a`
-- `review-verdicts`: `arch=ready/caution/blocked/n-a`
+- `plan-review`: `approve-implement | narrow-scope | revise-plan | split-issue | invoke-human | n-a`
 - `pr`: `#번호 | n-a`
 - `head`: `{SHA7} | n-a`
 - `result`: `in-progress | merged | handed-off | deferred-* | retry-later-infra | skipped-in-progress`
@@ -81,7 +81,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - implement-state: running
 - merge-monitor-state: pending
 - preflight: done
-- review-verdicts: arch=caution
+- plan-review: approve-implement
 - pr: n-a
 - head: a1b2c3d
 - result: in-progress
@@ -91,13 +91,13 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 상태 전이 원칙:
 
-- 의견 검토 시작: `review-state=running`, 나머지는 `pending`
+- Plan Preflight 사이클 시작: `review-state=running`, 나머지는 `pending`
 - Plan Preflight 시작: `preflight=started`, `plan-preflight:started` 라벨 부착, `plan-preflight:done` 라벨 제거
 - Plan Preflight 완료: 이슈 본문 구현계획 최신화 후 `preflight=done`, `plan-preflight:started` 제거, `plan-preflight:done` 라벨 부착
 - Plan Preflight stale/blocked: `preflight=stale` 또는 `blocked`, `plan-preflight:done` 라벨 제거
-- 사전 리뷰 통과 후 구현 위임: `review-state=done`, `implement-state=running`
+- Plan Preflight 완료 후 구현 위임: `review-state=done`, `implement-state=running`
 - PR 생성 완료: `implement-state=done`, `merge-monitor-state=running`, `pr`/`head` 채움
-- 리뷰/의존성/triage로 보류: 해당 사이클을 `blocked`로 두고 `result`를 `deferred-*`로 기록
+- Plan Preflight/의존성/triage로 보류: 해당 사이클을 `blocked`로 두고 `result`를 `deferred-*`로 기록
 - 머지 및 post-merge 확인 완료: `merge-monitor-state=done`, `current-cycle=completed`, `result=merged`
 - `--handoff-only`: `merge-monitor-state=done`, `result=handed-off`
 
@@ -137,7 +137,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - `--limit`에 `10`보다 큰 값이 들어오면 `10`으로 고정하고, 그 사실을 리포트에 기록한다.
 - 현재 활성 이슈가 merge/post-merge까지 정리되지 않으면, 남은 한도와 무관하게 다음 이슈로 넘어가지 않는다.
 
-## 사전 리뷰 규칙
+## Plan Preflight 규칙
 
 ### Plan Preflight 병렬 lane
 
@@ -153,28 +153,12 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 이미 `plan-preflight:done` 라벨이 있고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않고 확정 계획으로 재사용한다.
 - 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
 
-### `arch-review`를 먼저 거는 경우
+### 구현 전 점검 기준
 
-- API / CLI / schema / field rename 가능성
-- cache / invalidate / reconnect / mutable config / health-path 신호
-- 둘 이상의 모듈과 소비자 경로가 함께 흔들릴 가능성
-- 에픽 하위 이슈의 선행/후속 관계가 불명확
-
-### 재사용 규칙
-
-- 이슈에 최신 `🏗️ **아키텍트 리뷰**` 코멘트가 있으면 그대로 재사용한다.
-- 이미 남아 있는 사전 리뷰 증적을 덮어쓰지 않는다. 새 정보가 없으면 중복 리뷰를 남기지 않는다.
-- 다만 최신 리뷰에 `verdict:`가 없거나, 최신 verdict가 `blocked`/`caution`인데 이슈 본문·스펙·선행 조건이 이후 바뀌었다면 `/arch-review`를 다시 호출해 refresh verdict를 남긴다.
-
-### 판정 해석
-
-- `ready`: `/implement-issue` 인계 가능
-- `caution`: `/implement-issue` 인계 가능하나 주의사항 또는 테스트 follow-up을 반드시 반영
-- `blocked`: autopilot이 구현을 시작하지 않고 다음 이슈로 이동
-
-`ready` / `caution`은 모두 다음 사이클(`/implement-issue`)로 이어져야 한다. `caution` 항목은 착수 코멘트와 구현 프롬프트의 **필수 반영 체크리스트**로 넘기고, `blocked`만 보류 사유가 된다.
-
-`blocked`가 나오면 같은 배치에서 억지로 `/implement-issue`를 호출하지 않는다. 보류 사유를 이슈 코멘트로 남기고 사람 판단이나 후속 이슈를 기다린다.
+- Plan Preflight가 사전점검의 SSOT다.
+- API / CLI / schema / field rename, cache / reconnect / mutable config, multi-consumer 영향, health path 변경, 에픽 의존성 불명확성은 Plan Preflight의 `Risk Flags`와 `Stop Conditions`에 반영한다.
+- `approve-implement` 또는 `narrow-scope`가 이슈 본문에 반영되어 `plan-preflight:done`이 붙은 이슈만 `/implement-issue`로 넘긴다.
+- `revise-plan`, `split-issue`, `invoke-human`, `needs-spec-first`, `blocked`는 같은 배치의 구현 대상으로 넘기지 않는다.
 
 ## 실행 절차
 
@@ -212,7 +196,7 @@ done
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
 - `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다.
 
-### 3단계: 의견 검토 사이클
+### 3단계: Plan Preflight 사이클
 
 각 이슈마다 다음을 순서대로 수행한다.
 
@@ -220,45 +204,41 @@ done
 2. 선행 의존 이슈 close 여부 확인
 3. open PR 존재 여부 확인
 4. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인
-5. `arch-review` 필요 여부 판단
-6. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
+5. 필요 시 `/plan-preflight #{번호}` 실행
 
-최신 사전 리뷰에 `verdict:`가 없거나, 오래된 `blocked` verdict가 최신 이슈 상태를 반영하지 못하면 refresh 리뷰를 먼저 남긴 뒤 그 결과를 사용한다.
 `plan-preflight:done` 라벨이 없거나 stale이면 `/plan-preflight #{번호}`를 먼저 수행하고, 이슈 본문 구현계획이 확정되어 `plan-preflight:done`이 된 뒤에만 `/implement-issue`로 넘긴다.
 
 이 단계에 진입하면 이슈의 최신 `🤖 **Autopilot 사이클 상태**` 코멘트를 `current-cycle=review`, `review-state=running`으로 맞춘다.
 
-`ready` 또는 `caution` verdict가 나오면, autopilot은 다음 정보를 **구현 필수 체크리스트**로 묶어 다음 단계에 넘긴다.
+Plan Preflight가 완료되면, autopilot은 이슈 본문 구현계획의 다음 정보를 **구현 필수 체크리스트**로 묶어 다음 단계에 넘긴다.
 
-- 아키텍처 주의사항
-- 테스트 follow-up
-- 범위에 포함해야 할 스펙/문서/생성 산출물 동기화
+- tasks
+- verification
+- risk flags
+- stop conditions
 - 이번 PR에서 하지 말아야 할 확장
-
-사전 리뷰가 `caution`이라는 이유만으로 같은 배치에서 종료하지 않는다. 구현 착수 여부를 결정하는 기준은 `blocked` 여부와 남은 시간 예산이다.
 
 `needs-triage`는 이미 2단계 server-side snapshot에서 제외되어 있어야 하며, 여기서는 stale snapshot이나 수동 개입 여부를 다시 확인하는 안전 검사를 수행한다.
 
-사전 리뷰 결과가 `blocked`면 이슈 코멘트에 다음을 남기고 스킵한다.
+Plan Preflight 결과가 구현 불가 상태면 이슈 코멘트에 다음을 남기고 스킵한다.
 
 ```markdown
 🤖 **Autopilot 보류**
 - 이슈: #{번호}
-- 사유: {needs-triage | 선행 이슈 미완료 | arch-review blocked}
+- 사유: {needs-triage | 선행 이슈 미완료 | plan-preflight blocked | needs-spec-first | split-issue | invoke-human}
 - 다음 단계: {triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | 테스트 설계 보강}
 ```
 
 ### 4단계: 개별 이슈 실행 사이클
 
-사전 리뷰를 통과한 이슈만 `/implement-issue #{번호}`로 넘긴다.
+`plan-preflight:done` 라벨과 최신 이슈 본문 구현계획이 있는 이슈만 `/implement-issue #{번호}`로 넘긴다.
 
-- `arch-review` 증적은 이슈 코멘트에 남아 있어야 한다.
-- `/implement-issue`는 그 증적을 읽고 구현 착수 코멘트와 개발 에이전트 프롬프트에 요약을 포함한다.
-- `caution` verdict의 주의사항과 테스트 follow-up은 **선택 메모가 아니라 Done criteria**다.
-- 리뷰 의견을 반영한 실제 수정, 테스트, PR 생성이 확인될 때까지 같은 이슈를 유지한다.
+- `/implement-issue`는 이슈 본문 Implementation Plan과 Codex Plan Review 결과를 읽고 구현 착수 코멘트와 개발 에이전트 프롬프트에 포함한다.
+- Plan Preflight의 tasks, verification, risk flags, stop conditions는 **선택 메모가 아니라 Done criteria**다.
+- 확정 계획을 반영한 실제 수정, 테스트, PR 생성이 확인될 때까지 같은 이슈를 유지한다.
 - 이 단계에 진입하면 상태 코멘트를 `review-state=done`, `implement-state=running`, `current-cycle=implement`로 갱신한다.
 
-사전 리뷰는 의견만 남기고 종료하는 단계가 아니다. autopilot은 리뷰 증적을 구현 단계로 연결하지 못한 이슈를 성공으로 취급하지 않는다.
+Plan Preflight는 의견만 남기고 종료하는 단계가 아니다. autopilot은 확정된 구현계획을 구현 단계로 연결하지 못한 이슈를 성공으로 취급하지 않는다.
 
 ### 5단계: 머지 모니터링 사이클
 
@@ -287,8 +267,8 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - `handed-off`: `--handoff-only`에서만 사용
 - `deferred-triage`: `needs-triage`가 남아 있어 보류
 - `deferred-dependency`: 선행 이슈 미완
-- `deferred-review`: `arch-review`가 `blocked`
-- `deferred-scope`: 리뷰 결과를 구현으로 이어가려면 남은 배치 예산을 초과
+- `deferred-preflight`: Plan Preflight가 구현 불가 상태로 끝남
+- `deferred-scope`: 확정 계획을 구현으로 이어가려면 남은 배치 예산을 초과
 - `deferred-merge-monitoring`: PR은 생성됐지만 merge/post-merge 확인 전 시간 예산 또는 대기 임계값 소진
 - `retry-later-infra`: 인증/러너/네트워크 등 공통 인프라 문제
 - `skipped-in-progress`: 이미 open PR 또는 사람이 작업 중
@@ -339,6 +319,6 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 
 1. autopilot은 큐 관리자이지만, review → implement → merge-monitor의 3사이클을 끝까지 잇는 오케스트레이터다
 2. 공식 구현 절차는 `/implement-issue`가 계속 SSOT다
-3. 사전 리뷰 증적은 이슈 코멘트에 남기고 재사용하되, `ready`/`caution`은 구현 체크리스트로 반드시 소비한다
+3. Plan Preflight 결과는 이슈 본문 구현계획과 라벨로 확정하고, 구현 단계에서 반드시 소비한다
 4. `needs-triage`가 붙은 이슈는 사람이 분류하기 전까지 건드리지 않는다
 5. 기본 모드는 merge-confirmation 우선이며, `--handoff-only`는 예외적인 throughput 모드다

@@ -314,8 +314,8 @@ Codex Plan Review를 수행해야 하는 조건:
 이슈 본문 구현계획 확정은 Plan Preflight의 책임이다.
 착수 기록은 `plan-preflight:done` 라벨과 최신 이슈 본문 구현계획을 확인한 뒤 남긴다.
 착수 기록은 `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 작성한다.
-오케스트레이터는 이슈 본문 구현계획과 사전 리뷰 증적을 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
-사전 리뷰 verdict와 핵심 주의사항은 이슈 본문을 다시 확정하는 별도 단계가 아니라, 착수 코멘트와 개발 에이전트 프롬프트의 필수 반영 항목으로 넘긴다.
+오케스트레이터는 이슈 본문 구현계획과 Codex Plan Review 결과를 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
+Plan Preflight의 tasks, verification, risk flags, stop conditions는 착수 코멘트와 개발 에이전트 프롬프트의 필수 반영 항목으로 넘긴다.
 
 이슈에 `🤖 구현 착수` 코멘트를 남긴다.
 
@@ -326,7 +326,7 @@ Codex Plan Review를 수행해야 하는 조건:
 - base 브랜치
 - Codex Plan Review verdict
 - risk flags
-- 사전 리뷰 verdict와 핵심 주의사항
+- Codex Plan Review verdict와 Plan Preflight 핵심 체크리스트
 
 ## 10. 작업 브랜치와 worktree 구현
 

@@ -16,14 +16,12 @@
 ## 기본 원칙
 
 1. **공식 기록은 GitHub에 남긴다**
-   - 이슈 분석, 사전 리뷰, 구현 착수, PR 생성, 보류 사유, 수동 복구 근거는 GitHub 이슈/PR 코멘트에 남긴다.
+   - 이슈 분석, Plan Preflight, 구현 착수, PR 생성, 보류 사유, 수동 복구 근거는 GitHub 이슈/PR 코멘트에 남긴다.
    - `docs/temp/` 리포트는 요약본일 뿐 공식 증적 저장소가 아니다.
 
 2. **같은 의미의 코멘트를 중복으로 남기지 않는다**
    - 새 코멘트를 남기기 전에 기존 코멘트 헤더를 먼저 확인한다.
-   - 단, `arch-review`처럼 verdict를 갱신해야 하는 리뷰는 예외다. 최신 verdict가 없거나 stale하면 같은 헤더로 refresh 코멘트를 새로 남긴다.
    - 예:
-     - `🏗️ **아키텍트 리뷰**`
      - `🤖 **구현 착수**`
      - `🤖 **PR 생성 완료**`
      - `🤖 **Autopilot 보류**`
@@ -120,11 +118,9 @@ gh pr create --base {base} --title "{title}" --body "{body}"
 ## 커맨드별 기대 동작
 
 - `/autopilot`
-  - 큐 snapshot, open PR 여부 확인, 보류 코멘트, 사전 리뷰 증적 재사용
+  - 큐 snapshot, open PR 여부 확인, 보류 코멘트, Plan Preflight 상태 확인
 - `/implement-issue`
   - 이슈 조회, 구현 착수 코멘트, 리뷰 요청 코멘트, PR 생성, PR 생성 완료 코멘트
-- `/arch-review`
-  - 기존 코멘트를 확인하되, stale verdict 또는 verdict 누락 시 refresh 코멘트로 증적 갱신
 
 ## 금지 사항
 

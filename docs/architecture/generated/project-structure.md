@@ -665,10 +665,10 @@ frontend/src/
 .agent/
 ├── agents/                      # 역할별 에이전트 프로필
 ├── commands/                    # 프로젝트 슬래시 커맨드
+│   ├── plan-preflight.md        # /plan-preflight
 │   ├── implement-issue.md       # /implement-issue
 │   ├── autopilot.md             # /autopilot
-│   ├── api-docs.md              # /api-docs
-│   └── arch-review.md           # /arch-review
+│   └── api-docs.md              # /api-docs
 └── skills/                      # 프로젝트 스킬 (컨벤션·패턴 참조)
     ├── asyncio-patterns.md
     ├── frontend-conventions.md

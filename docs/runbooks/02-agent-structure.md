@@ -99,10 +99,10 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 │   ├── strategy-dev.md        # @strategy-dev
 │   └── code-reviewer.md       # @code-reviewer — 구조 리스크 메타 리뷰
 ├── commands/              # 커스텀 슬래시 명령어 (작업 절차 SSOT)
+│   ├── plan-preflight.md      # /plan-preflight
 │   ├── implement-issue.md     # /implement-issue
 │   ├── autopilot.md           # /autopilot
-│   ├── api-docs.md            # /api-docs
-│   └── arch-review.md         # /arch-review
+│   └── api-docs.md            # /api-docs
 └── skills/                # 도메인 지식 스킬
     ├── module-conventions.md
     ├── asyncio-patterns.md
@@ -153,9 +153,8 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 - `/plan-preflight #{번호}` — 이슈 본문 구현계획 작성/정비 → Codex Plan Review → `plan-preflight:done` 확정
 - `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성
-- `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` → `/implement-issue` → merge/post-merge 순차 모니터링
+- `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 Plan Preflight → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/api-docs` — OpenAPI 스키마 조회
-- `/arch-review` — 이슈 사전 점검용 보조 커맨드
 
 ### 2.4 도메인 스킬 (skills/)
 

@@ -1,6 +1,6 @@
 # 08. Autopilot 운영
 
-> 야간/정기 배치에서 오픈 이슈를 순차 처리할 때의 큐 선별, `needs-triage`, 사전 리뷰 증적, `/implement-issue` 인계 규칙을 정의한다.
+> 야간/정기 배치에서 오픈 이슈를 순차 처리할 때의 큐 선별, `needs-triage`, Plan Preflight, `/implement-issue` 인계 규칙을 정의한다.
 
 ---
 
@@ -11,14 +11,14 @@
 
 - autopilot은 새 구현 파이프라인을 만들지 않는다.
 - 실제 구현 절차 SSOT는 계속 `/implement-issue`다.
-- autopilot은 이슈 선별, 보류 판단, 사전 리뷰 증적, 구현 위임, merge/post-merge 모니터링 순서를 책임진다.
+- autopilot은 이슈 선별, 보류 판단, Plan Preflight, 구현 위임, merge/post-merge 모니터링 순서를 책임진다.
 - 병렬 선행 작업은 Plan Preflight까지만 허용하며, 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
 - Plan Preflight는 이슈 본문 구현계획 작성/보강, Codex Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지 포함한다.
 - Plan Preflight가 진행 중인 이슈는 `plan-preflight:started`, 구현계획까지 확정된 이슈는 `plan-preflight:done` 라벨로 표시해 다음 `/autopilot` 또는 `/implement-issue`가 재사용할 수 있게 한다.
 
 기본 성공 기준:
 
-- 사전 리뷰 결과가 구현 체크리스트로 정리되었고
+- Plan Preflight 결과가 이슈 본문 구현계획으로 확정되었고
 - 이슈가 실제 수정/PR 생성까지 진행되었고
 - 같은 이슈의 CI + 승인 + auto-merge + post-merge가 확인되었음
 
@@ -83,11 +83,9 @@
 - 수동 `/implement-issue`도 `needs-triage`가 붙어 있으면 구현을 시작하지 않는다.
 - 사람이 이슈를 검토한 뒤 실제 처리 가치와 범위를 확인하면 라벨을 제거한다.
 
-## 4. 사전 리뷰 증적
+## 4. Plan Preflight
 
-autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
-
-### 4.0 Plan Preflight 병렬 lane
+autopilot은 구현 전에 Plan Preflight로 이슈 본문 구현계획을 확정한다.
 
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 GitHub 이슈 본문을 실행 가능한 계획으로 보강하거나 전면 재작성한다.
@@ -101,55 +99,25 @@ autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
 - 이미 `plan-preflight:done` 라벨이 있고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않고 확정 계획으로 재사용한다.
 - 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
 
-### 4.1 `arch-review`
-
-아래 신호가 있으면 먼저 검토한다.
-
-- API / CLI / schema / field rename
-- cache / invalidate / reconnect / mutable config
-- 둘 이상의 모듈과 소비자 경로 동시 영향
-- health / readiness / background task 변경
-- 선행/후속 이슈 구조가 애매한 경우
-
-### 4.2 증적 위치
-
-공식 증적은 GitHub 이슈 코멘트다.
-
-- `🏗️ **아키텍트 리뷰**`
-
-최신 verdict는 `ready | caution | blocked` 중 하나로 남긴다.
-
-최신 리뷰에 verdict가 없거나, `blocked`/`caution` verdict 이후 이슈 본문·스펙·선행 조건이 바뀌었다면 `/arch-review`를 다시 실행해 refresh verdict를 남길 수 있어야 한다.
-
-### 4.3 verdict 해석
-
-- `ready`: `/implement-issue` 인계 가능
-- `caution`: `/implement-issue` 인계 가능하지만 주의사항과 테스트 follow-up을 반드시 반영
-- `blocked`: autopilot이 구현을 시작하지 않고 사람 판단이나 선행 작업을 기다림
-
-`ready` / `caution`은 모두 구현 사이클로 이어져야 한다. `caution`은 종료 상태가 아니라, 착수 코멘트와 개발 프롬프트의 **필수 반영 체크리스트**로 승격한다.
+아키텍처/의존성/스키마/선행 관계 신호는 별도 보조 verdict가 아니라 Plan Preflight의 `Risk Flags`, `Stop Conditions`, `Tasks`, `Verification`에 반영한다.
+Codex Plan Review의 `approve-implement` 또는 `narrow-scope`가 이슈 본문에 반영되어 `plan-preflight:done`이 붙은 이슈만 구현 대상으로 넘긴다.
 
 ## 5. 운영 사이클
 
-### 5.1 의견 검토 사이클
+### 5.1 Plan Preflight 사이클
 
-- `arch-review` 최신 verdict를 재사용하거나 refresh한다.
 - `plan-preflight:done` 라벨이 없거나 stale이면 `/plan-preflight #{번호}`를 먼저 수행한다.
-- `ready` / `caution` verdict에서 나온 주의사항, 테스트 follow-up, 금지할 확장을 구현 체크리스트로 정리한다.
-- `blocked`만 같은 배치의 보류 사유가 된다.
+- 확정된 이슈 본문 구현계획의 tasks, verification, risk flags, stop conditions를 구현 체크리스트로 정리한다.
+- `needs-rewrite`, `needs-spec-first`, `blocked`, `split-issue`, `invoke-human`은 같은 배치의 보류 사유가 된다.
 
 ### 5.2 개별 이슈 실행 사이클
 
 - autopilot은 직접 코드를 구현하지 않는다.
-- 사전 리뷰를 통과한 이슈만 `/implement-issue #{번호}`로 넘긴다.
-- `/implement-issue`는 이슈 코멘트에 남아 있는 `arch-review` 증적을 읽고:
-  - 구현 착수 코멘트에 요약을 남기고
-  - 개발 에이전트 프롬프트에도 같은 요약을 포함한다
-  - `caution` 항목을 Done criteria로 승격한다
-- verdict가 없거나 stale한 리뷰는 구현 게이트로 쓰지 않고, 해당 리뷰 타입의 refresh 리뷰를 먼저 남긴 뒤 최신 verdict를 사용한다.
-- 구현 게이트는 최신 `arch-review` verdict를 평가한다. `blocked`면 구현을 시작하지 않는다.
+- `plan-preflight:done` 라벨과 최신 이슈 본문 구현계획이 있는 이슈만 `/implement-issue #{번호}`로 넘긴다.
+- `/implement-issue`는 이슈 본문 Implementation Plan과 Codex Plan Review 결과를 읽고 구현 착수 코멘트와 개발 에이전트 프롬프트에 포함한다.
+- Plan Preflight의 tasks, verification, risk flags, stop conditions는 Done criteria로 승격한다.
 
-이렇게 해야 사전 리뷰 증적과 실제 구현이 끊기지 않는다.
+이렇게 해야 구현 전 계획과 실제 구현이 끊기지 않는다.
 
 ### 5.3 머지 모니터링 사이클
 
@@ -175,7 +143,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 - `implement-state`
 - `merge-monitor-state`
 - `preflight`
-- `review-verdicts`
+- `plan-review`
 - `pr`
 - `head`
 - `result`
@@ -200,7 +168,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 - implement-state: done
 - merge-monitor-state: running
 - preflight: done
-- review-verdicts: arch=caution
+- plan-review: approve-implement
 - pr: #1250
 - head: a1b2c3d
 - result: in-progress
@@ -210,7 +178,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 
 전이 규칙:
 
-- 의견 검토 시작 시 `review-state=running`
+- Plan Preflight 사이클 시작 시 `review-state=running`
 - Plan Preflight 시작 시 `preflight=started`, `plan-preflight:started` 라벨 부착, `plan-preflight:done` 라벨 제거
 - Plan Preflight 완료 시 이슈 본문 구현계획 최신화 후 `preflight=done`, `plan-preflight:started` 제거, `plan-preflight:done` 라벨 부착
 - Plan Preflight stale/blocked 시 `preflight=stale` 또는 `blocked`, `plan-preflight:done` 라벨 제거
@@ -227,8 +195,8 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 - `handed-off`: `--handoff-only`에서만 사용
 - `deferred-triage`: `needs-triage`
 - `deferred-dependency`: 선행 이슈 미완료
-- `deferred-review`: `arch-review`가 `blocked`
-- `deferred-scope`: 리뷰 결과를 구현으로 이어가려면 남은 배치 예산을 초과
+- `deferred-preflight`: Plan Preflight가 구현 불가 상태로 끝남
+- `deferred-scope`: 확정 계획을 구현으로 이어가려면 남은 배치 예산을 초과
 - `deferred-merge-monitoring`: PR은 생성됐지만 merge/post-merge 확인 전 시간 예산 또는 대기 임계값 소진
 - `retry-later-infra`: 인증/러너/네트워크/공통 환경 문제
 - `skipped-in-progress`: 이미 open PR이 있거나 사람이 작업 중
@@ -245,7 +213,7 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 
 공식 기록:
 
-- 이슈 코멘트 (`arch-review`, 구현 착수, PR 생성, 보류 사유, `🤖 **Autopilot 사이클 상태**`)
+- 이슈 코멘트 (Plan Preflight 결과, 구현 착수, PR 생성, 보류 사유, `🤖 **Autopilot 사이클 상태**`)
 - PR 코멘트와 status check (`ci`, `claude-pr-approve`, `codex-pr-approve`)
 - 내부 Codex 브랜치 리뷰 이슈 코멘트 (`/codex:review --base <ref>` PASS/FAIL, HEAD SHA, finding 요약)
 
@@ -313,5 +281,5 @@ GitHub 조회/코멘트/PR/재실행 절차는 `.agent/skills/github-ops.md`를 
 1. autopilot은 review → implement → merge-monitor 3사이클을 잇는 큐 관리자다
 2. 구현 절차는 `/implement-issue`가 SSOT다
 3. `needs-triage`는 autopilot 안전핀이다
-4. 사전 리뷰 증적은 GitHub 이슈 코멘트에 남기고 재사용하되, `ready`/`caution`은 구현 체크리스트로 반드시 소비한다
+4. Plan Preflight 결과는 이슈 본문 구현계획과 라벨로 확정하고, 구현 단계에서 반드시 소비한다
 5. 기본 모드는 merge-confirmation 우선, `--handoff-only`는 예외적인 throughput 모드다
