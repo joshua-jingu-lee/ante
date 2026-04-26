@@ -57,8 +57,9 @@ Claude 오케스트레이터
   │         ├── needs-spec-first → Spec-First 경로로 전환
   │         └── split-issue / invoke-human / blocked → 구현 중단
   │
-  ├──▶ Claude 개발 에이전트 (worktree 격리)
+  ├──▶ Implement issue (Claude 개발 에이전트)
   │         │
+  │         ├── 워크트리 격리
   │         ├── 착수 기록: 이슈 코멘트
   │         ├── 구현 + 로컬 lint/test
   │         ├── 브랜치 push
