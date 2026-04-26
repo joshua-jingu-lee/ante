@@ -80,11 +80,11 @@ Claude 오케스트레이터
   │     └── PR 생성 (`Closes #이슈`) + PR 생성 완료: 이슈 코멘트
   │
   ├──▶ PR 게이트 (GitHub Actions)
-  │     ├── CI (`ci`)
-  │     ├── Claude PR 승인 (`claude-pr-approve`)
-  │     ├── Codex PR 승인 (`codex-pr-approve`)
-  │     ├── content FAIL → Claude PR repair 후 같은 PR에서 재검증
-  │     └── 모든 게이트 green → GitHub auto-merge
+  │     ├── CI (`ci`) — required, 머지 차단 게이트
+  │     ├── Claude PR 승인 (`claude-pr-approve`) — advisory
+  │     ├── Codex PR 승인 (`codex-pr-approve`) — advisory
+  │     ├── content FAIL → Claude PR repair 후 같은 PR에서 재검증 (advisory 신호)
+  │     └── `ci` green + 충돌 없음 + 대화 해결 → GitHub auto-merge
   │        └── `/autopilot` 실행 중이면 사이클 상태: 이슈 코멘트
   │
   ├──▶ post-merge automation
@@ -225,9 +225,9 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 > 상세 규칙: [04-ci-cd.md](04-ci-cd.md)
 
 - **브랜치 리뷰 단계**: Codex만 수행한다. GitHub Actions가 아니라 `/codex:review --base <ref>` 내부 루프로 도는 PR 전 품질 게이트다.
-- **PR 승인 단계**: Claude와 Codex가 각각 독립적으로 수행한다.
+- **PR 승인 단계**: Claude와 Codex가 각각 독립적으로 수행한다. 두 승인은 advisory check이며 머지 게이트 입력이 아니다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
-- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, PR 승인과 CI는 **status check 결과**를 merge gate의 기준으로 삼는다.
+- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **`ci` status check + 충돌 없음 + 대화 해결**을 기준으로 삼는다. AI 승인 status check는 advisory 신호이며 머지 가능 여부 판정에 들어가지 않는다.
 - **머지 담당**: GitHub auto-merge
 - **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용

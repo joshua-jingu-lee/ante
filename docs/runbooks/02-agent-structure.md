@@ -76,7 +76,7 @@ Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트에 반응�
 |------|--------|------|
 | **Codex Plan Review 워커** | `plan-preflight:started` 라벨 또는 구현 전 계획 검증 필요 | `/codex:adversarial-review`로 구현계획의 가정, 위험, 대안을 검토하고 이슈 코멘트에 verdict 기록 |
 | **Codex 브랜치 리뷰어** | `/implement-issue`의 PR 생성 전 내부 `/codex:review --base <ref>` 실행 | PR 전 blocking issue 식별, 이슈 코멘트에 PASS/FAIL 기록 |
-| **Codex PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | 최종 승인 체크, `codex-pr-approve` 상태 기록 |
+| **Codex PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | advisory check, branch protection required 아님. `codex-pr-approve` 상태 기록 |
 
 ### 1.8 Claude PR 승인 워커
 
@@ -84,7 +84,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 | 역할 | 트리거 | 책임 |
 |------|--------|------|
-| **Claude PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | 최종 승인 체크, `claude-pr-approve` 상태 기록 |
+| **Claude PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | advisory check, branch protection required 아님. `claude-pr-approve` 상태 기록 |
 
 ## 2. `.agent/` 및 `.claude/` 디렉토리 구조
 
