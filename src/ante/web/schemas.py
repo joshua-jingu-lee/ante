@@ -73,7 +73,13 @@ class AccountCreateRequest(BaseModel):
 
 
 class AccountUpdateRequest(BaseModel):
-    """계좌 수정 요청."""
+    """계좌 수정 요청.
+
+    하위 호환을 위해 모든 필드를 옵션으로 노출하지만, 런타임 PUT 라우트는
+    structural 필드를 cold-path로 차단한다. 런타임 mutable 4 필드만 노출하는
+    schema는 ``AccountMutableUpdateRequest``를 참고한다. 이 모델은 다른
+    소비자(테스트, CLI 등)와의 하위 호환을 위해 유지한다.
+    """
 
     name: str | None = None
     exchange: str | None = None
@@ -87,6 +93,26 @@ class AccountUpdateRequest(BaseModel):
     broker_config: dict[str, Any] | None = None
     buy_commission_rate: float | None = None
     sell_commission_rate: float | None = None
+
+
+class AccountMutableUpdateRequest(BaseModel):
+    """런타임에 PUT /api/accounts/{id}로 수정 가능한 비구조 필드만 노출.
+
+    구조(structural) 필드(``credentials``, ``broker_config``,
+    ``buy_commission_rate``, ``sell_commission_rate``, ``broker_type``,
+    ``exchange``, ``currency``, ``trading_mode``)는 cold-path 전용이므로 이
+    모델에 포함하지 않는다. OpenAPI/타입 생성 소비자에게는 mutable 4 필드만
+    노출되어 schema accuracy가 회복된다.
+
+    라우트는 raw payload(`request.json()`)에서 structural 키 가드를 먼저
+    수행한 뒤(invariant I4) 비구조 필드만 이 모델로 검증한다. 이 단계의
+    ``ValidationError``는 422로 명시 변환된다.
+    """
+
+    name: str | None = None
+    timezone: str | None = None
+    trading_hours_start: str | None = None
+    trading_hours_end: str | None = None
 
 
 class AccountSuspendRequest(BaseModel):

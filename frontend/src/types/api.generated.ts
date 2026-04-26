@@ -62,13 +62,18 @@ export type paths = {
          *     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
          *     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
          *
-         *     body는 검증되지 않은 raw ``dict``로 받는다(invariant I4). 가드 판정은
-         *     Pydantic이 변환한 값(``is not None``)이 아니라 **요청 body의 키 존재
-         *     여부**로 수행하므로, ``{"credentials": null}``처럼 명시적으로 null을
-         *     보낸 경우와 ``{"buy_commission_rate": "bad"}``처럼 structural 필드가 타입
-         *     오류인 경우 모두 cold-path 가드보다 먼저 422가 발생하지 않는다. 비구조
-         *     필드만 추출한 dict로 ``AccountUpdateRequest.model_validate(...)``를 호출해
-         *     기존 200/404/400/409(deleted) 분기를 보존한다.
+         *     OpenAPI 노출용 body schema는 ``AccountMutableUpdateRequest``를 사용해
+         *     mutable 4 필드만 클라이언트에게 노출한다(P3 schema accuracy). 단, raw
+         *     payload key 가드(I4)를 보존하기 위해 라우트 본문에서는 ``body`` 인자를
+         *     사용하지 않고 ``await request.json()``으로 raw dict를 직접 읽는다 —
+         *     Pydantic이 정의 외 키(예: ``credentials``)를 모델 인스턴스에서 제거해도
+         *     structural 키 존재 여부 판정이 우회되지 않아야 하기 때문이다.
+         *
+         *     비구조 필드는 raw payload에서 cold-path 가드를 통과한 뒤
+         *     ``AccountMutableUpdateRequest.model_validate(...)``로 재검증하며, 이
+         *     단계에서 발생하는 ``ValidationError``는 422 ``HTTPException``으로 명시
+         *     변환된다(P2 — 회귀 보호). 이전 attempt에서는 이 경로가 FastAPI의
+         *     자동 ``RequestValidationError`` 422를 잃어 422 contract가 회귀했다.
          */
         put: operations["update_account_api_accounts__account_id__put"];
         post?: never;
@@ -1370,6 +1375,30 @@ export type components = {
         AccountListResponse: {
             /** Accounts */
             accounts: components["schemas"]["AccountResponse"][];
+        };
+        /**
+         * AccountMutableUpdateRequest
+         * @description 런타임에 PUT /api/accounts/{id}로 수정 가능한 비구조 필드만 노출.
+         *
+         *     구조(structural) 필드(``credentials``, ``broker_config``,
+         *     ``buy_commission_rate``, ``sell_commission_rate``, ``broker_type``,
+         *     ``exchange``, ``currency``, ``trading_mode``)는 cold-path 전용이므로 이
+         *     모델에 포함하지 않는다. OpenAPI/타입 생성 소비자에게는 mutable 4 필드만
+         *     노출되어 schema accuracy가 회복된다.
+         *
+         *     라우트는 raw payload(`request.json()`)에서 structural 키 가드를 먼저
+         *     수행한 뒤(invariant I4) 비구조 필드만 이 모델로 검증한다. 이 단계의
+         *     ``ValidationError``는 422로 명시 변환된다.
+         */
+        AccountMutableUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Trading Hours End */
+            trading_hours_end?: string | null;
+            /** Trading Hours Start */
+            trading_hours_start?: string | null;
         };
         /**
          * AccountResponse
@@ -3133,6 +3162,7 @@ export type components = {
 export type AccountActionResponse = components['schemas']['AccountActionResponse'];
 export type AccountDetailResponse = components['schemas']['AccountDetailResponse'];
 export type AccountListResponse = components['schemas']['AccountListResponse'];
+export type AccountMutableUpdateRequest = components['schemas']['AccountMutableUpdateRequest'];
 export type AccountResponse = components['schemas']['AccountResponse'];
 export type AccountSuspendRequest = components['schemas']['AccountSuspendRequest'];
 export type ActivateRequest = components['schemas']['ActivateRequest'];
@@ -3316,9 +3346,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                } | null;
+                "application/json": components["schemas"]["AccountMutableUpdateRequest"] | null;
             };
         };
         responses: {
@@ -3352,14 +3380,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description 비구조(mutable) 필드 schema 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };

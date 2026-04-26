@@ -717,6 +717,138 @@ class TestUpdateAccount:
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
         assert "exchange" in detail
 
+    def test_update_invalid_mutable_field_type_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """비구조(mutable) 필드 타입이 잘못되면 422를 반환한다 (P2 회귀 보호).
+
+        ``timezone``은 ``str | None``인데 dict가 들어오면
+        ``AccountMutableUpdateRequest.model_validate``가 ``ValidationError``를
+        던지고, 라우트는 이를 422 ``HTTPException``으로 명시 변환한다.
+        이전 attempt에서는 ``ValidationError``가 그대로 전파되어 클라이언트가
+        FastAPI 자동 422 contract를 잃는 회귀가 있었다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"timezone": {}},
+        )
+        assert resp.status_code == 422
+        # service.update 미호출 — 계좌 timezone 보존
+        assert account_service._accounts["test-account"].timezone == "Asia/Seoul"
+        # audit 미발행
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
+    def test_update_invalid_name_type_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """``name`` 타입 오류도 422 (P2 회귀 보호).
+
+        Pydantic은 dict → str 강제 변환을 허용하지 않으므로 422가 발생해야
+        한다. 422가 아닌 다른 status는 schema validation 회귀 신호다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": {"nested": "object"}},
+        )
+        assert resp.status_code == 422
+
+    def test_update_invalid_json_body_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """JSON 파싱 자체가 실패하면 422.
+
+        FastAPI는 보통 자동 처리하지만, 이 라우트는 raw body를 직접 읽으므로
+        파싱 실패 경로가 라우트 본문에서 422로 변환되는지 보장한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+    def test_update_non_dict_json_body_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """JSON object가 아닌 body(예: 배열, 문자열)는 422.
+
+        라우트는 dict 형태의 raw payload만 허용한다 — structural 키 가드와
+        mutable schema 검증 모두 dict 가정에 의존한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json=["array", "not", "object"],
+        )
+        assert resp.status_code == 422
+
+
+class TestUpdateAccountOpenAPISchema:
+    """PUT /api/accounts/:id의 OpenAPI requestBody schema 노출 보호 (P3).
+
+    런타임 mutable 4 필드만 노출하는 ``AccountMutableUpdateRequest``가
+    requestBody schema로 노출되어야 한다. 이전 attempt에서는 body가
+    ``dict[str, Any] | None``이라 schema accuracy를 잃었다.
+    """
+
+    def test_openapi_put_uses_mutable_update_request(
+        self,
+        client: TestClient,
+    ) -> None:
+        """OpenAPI document의 PUT requestBody가 mutable 모델을 참조한다."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        spec = resp.json()
+
+        path = spec["paths"]["/api/accounts/{account_id}"]["put"]
+        request_body_schema = path["requestBody"]["content"]["application/json"][
+            "schema"
+        ]
+        # anyOf wrapper로 nullable 표현될 수 있다.
+        if "anyOf" in request_body_schema:
+            refs = [
+                item.get("$ref", "")
+                for item in request_body_schema["anyOf"]
+                if "$ref" in item
+            ]
+        else:
+            refs = [request_body_schema.get("$ref", "")]
+        assert any("AccountMutableUpdateRequest" in ref for ref in refs), (
+            f"expected AccountMutableUpdateRequest reference, got {refs}"
+        )
+
+        # mutable 모델 정의 확인 — mutable 4 필드만 노출되어야 한다.
+        mutable_schema = spec["components"]["schemas"]["AccountMutableUpdateRequest"]
+        properties = set(mutable_schema.get("properties", {}).keys())
+        assert properties == {
+            "name",
+            "timezone",
+            "trading_hours_start",
+            "trading_hours_end",
+        }
+
 
 class TestSuspendAccount:
     """POST /api/accounts/:id/suspend."""

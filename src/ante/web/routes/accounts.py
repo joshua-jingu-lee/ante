@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import ValidationError
 
 from ante.web.deps import (
     get_account_service,
@@ -17,8 +19,8 @@ from ante.web.schemas import (
     AccountActionResponse,
     AccountDetailResponse,
     AccountListResponse,
+    AccountMutableUpdateRequest,
     AccountSuspendRequest,
-    AccountUpdateRequest,
     ErrorResponse,
     RuleListResponse,
     RuleUpdateRequest,
@@ -179,6 +181,12 @@ async def get_account(
                 "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
             )
         },
+        422: {
+            "description": (
+                "비구조(mutable) 필드 schema 검증 실패. "
+                "structural 필드 키는 422가 아닌 409로 차단된다."
+            )
+        },
     },
 )
 async def update_account(
@@ -186,7 +194,7 @@ async def update_account(
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-    body: dict[str, Any] | None = Body(default=None),
+    body: AccountMutableUpdateRequest | None = Body(default=None),
 ) -> dict[str, Any]:
     """계좌 수정.
 
@@ -196,18 +204,46 @@ async def update_account(
     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
 
-    body는 검증되지 않은 raw ``dict``로 받는다(invariant I4). 가드 판정은
-    Pydantic이 변환한 값(``is not None``)이 아니라 **요청 body의 키 존재
-    여부**로 수행하므로, ``{"credentials": null}``처럼 명시적으로 null을
-    보낸 경우와 ``{"buy_commission_rate": "bad"}``처럼 structural 필드가 타입
-    오류인 경우 모두 cold-path 가드보다 먼저 422가 발생하지 않는다. 비구조
-    필드만 추출한 dict로 ``AccountUpdateRequest.model_validate(...)``를 호출해
-    기존 200/404/400/409(deleted) 분기를 보존한다.
+    OpenAPI 노출용 body schema는 ``AccountMutableUpdateRequest``를 사용해
+    mutable 4 필드만 클라이언트에게 노출한다(P3 schema accuracy). 단, raw
+    payload key 가드(I4)를 보존하기 위해 라우트 본문에서는 ``body`` 인자를
+    사용하지 않고 ``await request.json()``으로 raw dict를 직접 읽는다 —
+    Pydantic이 정의 외 키(예: ``credentials``)를 모델 인스턴스에서 제거해도
+    structural 키 존재 여부 판정이 우회되지 않아야 하기 때문이다.
+
+    비구조 필드는 raw payload에서 cold-path 가드를 통과한 뒤
+    ``AccountMutableUpdateRequest.model_validate(...)``로 재검증하며, 이
+    단계에서 발생하는 ``ValidationError``는 422 ``HTTPException``으로 명시
+    변환된다(P2 — 회귀 보호). 이전 attempt에서는 이 경로가 FastAPI의
+    자동 ``RequestValidationError`` 422를 잃어 422 contract가 회귀했다.
     """
     from ante.account.errors import (
         AccountDeletedError,
         AccountNotFoundError,
     )
+
+    # body 인자는 OpenAPI requestBody schema 노출용으로만 선언되며,
+    # 실제 cold-path 가드는 raw payload key 검사로 수행한다(invariant I4).
+    # FastAPI가 이미 body를 한 번 소비했더라도 Starlette가 raw bytes를
+    # 캐싱하므로 `request.body()`는 같은 payload를 다시 돌려준다.
+    _ = body  # OpenAPI schema 전용 — 라우트 본문에서는 raw payload만 사용한다.
+
+    raw_bytes = await request.body()
+    if raw_bytes:
+        try:
+            raw_payload = json.loads(raw_bytes)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"요청 본문이 유효한 JSON이 아닙니다: {e.msg}",
+            )
+        if not isinstance(raw_payload, dict):
+            raise HTTPException(
+                status_code=422,
+                detail="요청 본문은 JSON object 여야 합니다.",
+            )
+    else:
+        raw_payload = {}
 
     # cold-path 가드: structural 필드 키가 raw payload에 하나라도 등장하면
     # DB/서비스 호출 전 409로 즉시 차단한다(invariant I1/I4). 값이 null이거나
@@ -216,8 +252,7 @@ async def update_account(
     # AccountImmutableFieldError/BrokerReconnectFailedError 경로에 도달하지
     # 않는다. service-layer 동작 회귀는 `tests/unit/test_account.py`,
     # `tests/unit/test_account_immutable_fields.py`가 보호한다.
-    payload = body or {}
-    structural_hits = sorted(set(payload) & set(STRUCTURAL_FIELDS))
+    structural_hits = sorted(set(raw_payload) & set(STRUCTURAL_FIELDS))
     if structural_hits:
         raise HTTPException(
             status_code=409,
@@ -226,24 +261,21 @@ async def update_account(
             ),
         )
 
-    # 비구조 필드만 모아 Pydantic으로 재검증. 알 수 없는 키는 Pydantic이
-    # 무시(extra='ignore' 기본)하므로 cold-path 가드 통과 후에도 안전하다.
-    non_structural_payload = {
-        k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS
+    # 비구조 필드만 모아 mutable schema로 재검증. structural 키는 위 가드에서
+    # 이미 걸렀고, mutable 모델에는 정의되어 있지 않다. 알 수 없는 추가 키는
+    # Pydantic 기본(extra='ignore')으로 무시된다.
+    mutable_payload = {
+        k: v for k, v in raw_payload.items() if k not in STRUCTURAL_FIELDS
     }
-    parsed = AccountUpdateRequest.model_validate(non_structural_payload)
+    try:
+        parsed = AccountMutableUpdateRequest.model_validate(mutable_payload)
+    except ValidationError as e:
+        # FastAPI 자동 422와 동일한 구조화 에러를 반환해 클라이언트가 422를
+        # 잃지 않도록 한다(P2 회귀 보호).
+        raise HTTPException(status_code=422, detail=e.errors())
 
-    # None이 아닌 비구조 필드만 업데이트 대상
-    fields: dict[str, Any] = {}
-    for field_name in (
-        "name",
-        "timezone",
-        "trading_hours_start",
-        "trading_hours_end",
-    ):
-        value = getattr(parsed, field_name, None)
-        if value is not None:
-            fields[field_name] = value
+    # None이 아닌 비구조 필드만 업데이트 대상.
+    fields = parsed.model_dump(exclude_none=True)
 
     if not fields:
         raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
