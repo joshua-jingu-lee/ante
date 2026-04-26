@@ -243,20 +243,19 @@ PR 생성 후 이슈에 코멘트를 남긴다:
 gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - PR: #{PR번호}
 - branch-review: `/codex:review --base {base}` PASS
-- 이후 단계: CI + claude-pr-approve + codex-pr-approve + auto-merge"
+- 이후 단계: ci required + AI 승인 advisory + auto-merge"
 ```
 
 ### PR 이후 단계
 
 13. **최종 승인과 머지**: PR 생성 이후에는 GitHub automation이 다음을 수행한다.
 
-- `ci`
-- `claude-pr-approve`
-- `codex-pr-approve`
-- PR 승인 `content` FAIL 시 Claude는 `.agent/skills/receive-review.md` 규칙으로 finding을 정리한 뒤 자동 재수정을 최대 10회 수행
+- `ci` 통과는 머지 차단 게이트다. (required status check)
+- `claude-pr-approve`, `codex-pr-approve`는 advisory check이며 머지 가능 여부를 결정하지 않는다.
+- AI 승인 워커가 `content` FAIL을 남기면 Claude는 `.agent/skills/receive-review.md` 규칙으로 finding을 정리한 뒤 자동 재수정을 최대 10회 수행한다. (advisory 신호)
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선
-- `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 없이 중단 사유만 남김
-- 모든 체크가 green이면 auto-merge
+- AI 워커의 `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 없이 중단 사유만 남긴다. 머지를 막지는 않는다.
+- `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 GitHub auto-merge가 squash merge를 수행한다.
 - 머지 후 post-merge automation이 이슈 체크박스를 갱신하고 close
 - `/autopilot` 실행 중이면 최신 `🤖 **Autopilot 사이클 상태**` 이슈 코멘트를 `current-cycle=merge-monitor`에서 `completed`까지 갱신한다.
 - `post-merge.yml`은 연결 이슈에 `🤖 **Post-merge 정리 완료**` 코멘트를 남긴다.
@@ -296,7 +295,7 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 1. 에픽 브랜치 최신화 및 로컬 검증
 2. `/codex:review --base main` 통과
 3. `epic/* -> main` PR 생성
-4. `ci + claude-pr-approve + codex-pr-approve` 통과 후 auto-merge
+4. `ci` 통과 후 auto-merge (`claude-pr-approve`/`codex-pr-approve`는 advisory)
 
 ### E5. 정리
 
