@@ -73,25 +73,25 @@ Codex Plan Review는 이슈 코멘트에 아래 중 하나의 verdict를 남긴�
 
 ### 3.1 트리거
 
-- 브랜치 push
+- PR 생성 전 `/implement-issue` 내부 리뷰 루프
 - 대상: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
+- 실행: `openai/codex-plugin-cc`의 `/codex:review --base <main 또는 epic/...>`
 
 ### 3.2 결과
 
-- 상태 체크: `codex-branch-review`
 - 이슈 코멘트:
-  - Claude Code 리뷰 요청
-  - Codex 브랜치 리뷰 시작 (workflow 자동)
-  - Codex 브랜치 리뷰 완료 + blocking finding / follow-up
-- 커밋/체크 요약
+  - Codex 브랜치 리뷰 시작
+  - `/codex:review` 결과 + blocking finding / follow-up
+- 커밋/검토 요약
+- 최신 HEAD SHA와 base ref
 
 ### 3.3 처리 규칙
 
-- `success`:
-  - Claude가 PR을 생성할 수 있다
-- `failure`:
-  - Claude가 같은 브랜치에서 수정 후 재push
-- 같은 SHA에 `failure`가 남아 있는 상태에서 PR을 먼저 열지 않는다
+- `PASS`:
+  - Claude가 브랜치를 push하고 PR을 생성할 수 있다
+- `FAIL`:
+  - Claude가 같은 워크트리에서 수정 후 `/codex:review --base <base>`를 다시 실행
+- 같은 SHA에 `FAIL`이 남아 있는 상태에서 PR을 먼저 열지 않는다
 - 실패 횟수는 이슈 코멘트 기준으로 누적한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호를 이슈 코멘트에 남긴다.
 - 같은 `risk class`가 2회 반복되면 Claude 오케스트레이터가 `@code-reviewer` 메타 리뷰를 호출한다.

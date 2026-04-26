@@ -4,7 +4,7 @@
 
 ## 언제 사용하나
 
-- `codex-branch-review` 실패 직후
+- 내부 `/codex:review` 브랜치 리뷰 실패 직후
 - `claude-pr-approve` 또는 `codex-pr-approve`가 `content` FAIL을 반환했을 때
 - 자동 재수정 전에 finding을 이해하고 수정 순서를 다시 잡아야 할 때
 

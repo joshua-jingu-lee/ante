@@ -1,4 +1,4 @@
-GitHub 이슈의 유저스토리를 기반으로 구현하고, Codex 브랜치 리뷰를 통과한 뒤 PR을 생성한다.
+GitHub 이슈의 유저스토리를 기반으로 구현하고, 내부 Codex 브랜치 리뷰를 통과한 뒤 PR을 생성한다.
 
 GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
 
@@ -23,7 +23,7 @@ mkdir -p "$WORKTREE_ROOT"
 
 ## 에이전트 역할 분담
 
-이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. 구현 전 Codex Plan Review와 PR 전 브랜치 리뷰는 Codex가 수행한다. Codex Plan Review는 Claude 내부 단계가 아니라 `openai/codex-plugin-cc`의 `/codex:adversarial-review`로 실행하는 외부 read-only 게이트다.
+이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. 구현 전 Codex Plan Review와 PR 전 브랜치 리뷰는 Codex가 수행한다. Codex Plan Review는 Claude 내부 단계가 아니라 `openai/codex-plugin-cc`의 `/codex:adversarial-review`로 실행하는 외부 read-only 게이트다. PR 전 브랜치 리뷰는 GitHub Actions가 아니라 같은 Claude 세션에서 `/codex:review --base <ref>`를 실행해 내부 반복한다.
 
 구조 리스크가 높거나 반복 failure가 나오면 Claude `@code-reviewer`가 메타 리뷰를 수행한다.
 
@@ -34,8 +34,8 @@ mkdir -p "$WORKTREE_ROOT"
 | 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
 | 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
 | 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
-| 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
-| 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` + 이슈 코멘트 |
+| 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 |
+| 10~11 (사전 리뷰 루프) | Codex + Claude | `/codex:review --base <ref>` + Claude 개발 에이전트 | 이슈 코멘트 |
 | 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
 | 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Closes #이슈`) |
 | 13 (최종 승인/머지) | GitHub automation | Claude/Codex PR 승인 워커 + auto-merge | PR checks |
@@ -145,7 +145,7 @@ Agent(
 6. Worktree 생성
 7. 유저스토리별 구현
 8. 로컬 검증 (ruff check, ruff format, pytest)
-9. 브랜치 push
+9. 로컬 커밋
 
 ## Plan Preflight
 {이슈 본문 또는 이슈 코멘트의 실행계획 요약}
@@ -159,7 +159,7 @@ Agent(
 ## 구현 필수 체크리스트
 {사전 리뷰에서 승격된 must-fix / must-test / must-sync 항목}
 
-브랜치명과 push한 HEAD SHA를 반환하라.
+브랜치명과 로컬 HEAD SHA를 반환하라.
 """,
   isolation="worktree"
 )
@@ -167,28 +167,27 @@ Agent(
 
 ### Codex 브랜치 리뷰 루프
 
-10. **Codex 사전 리뷰 요청 및 대기**: 브랜치 push 직후 Claude가 이슈에 리뷰 요청 코멘트를 남기고, 이후 `codex-branch-review` 상태를 확인한다.
-
-```bash
-gh issue comment #{이슈번호} --body "🤖 **Claude Code 리뷰 요청**
-- 단계: Codex 브랜치 리뷰
-- 브랜치: {브랜치명}
-- HEAD: {SHA}
-- 다음 단계: GitHub Actions가 리뷰를 시작하고, 시작/완료 결과를 이슈 코멘트로 남깁니다."
-```
-
-- `success`:
-  - PR 생성 단계로 진행
-- `failure`:
-  - Codex가 남긴 blocking finding을 `.agent/skills/receive-review.md` 규칙으로 정리한 뒤 Claude 개발 에이전트에 수정 위임
-
-11. **수정 루프**: `codex-branch-review`가 최신 HEAD SHA에서 `success`가 될 때까지 반복한다.
+10. **Codex 사전 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 기준으로 `/codex:review --base {base}`를 실행한다.
 
 ```text
-while codex-branch-review != success:
+/codex:review --base {main 또는 epic/...} --background
+/codex:status
+/codex:result
+```
+
+- 결과는 이슈 코멘트에 `Codex 브랜치 리뷰`로 남긴다.
+- `PASS`:
+  - 브랜치를 push하고 PR 생성 단계로 진행
+- `FAIL`:
+  - Codex가 남긴 blocking finding을 `.agent/skills/receive-review.md` 규칙으로 정리한 뒤 Claude 개발 에이전트에 수정 위임
+
+11. **수정 루프**: `/codex:review --base {base}`가 최신 HEAD SHA에서 `PASS`가 될 때까지 내부 반복한다.
+
+```text
+while /codex:review verdict != PASS:
   Claude 개발 에이전트가 같은 브랜치에서 수정
-  새 커밋 push
-  최신 HEAD SHA의 codex-branch-review 재확인
+  새 로컬 커밋 생성
+  /codex:review --base {base} 재실행
 ```
 
 - 실패 횟수는 이슈 코멘트 기준으로 누적한다.
@@ -207,7 +206,7 @@ while codex-branch-review != success:
 
 ### PR 생성
 
-12. **PR 생성**: 최신 HEAD SHA의 `codex-branch-review`가 성공한 뒤에만 PR을 만든다.
+12. **PR 생성**: 최신 HEAD SHA의 `/codex:review --base {base}`가 PASS한 뒤에만 브랜치를 push하고 PR을 만든다.
 
 ```bash
 gh pr create \
@@ -228,7 +227,7 @@ PR 생성 후 이슈에 코멘트를 남긴다:
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - PR: #{PR번호}
-- branch-review: 통과
+- branch-review: `/codex:review --base {base}` PASS
 - 이후 단계: CI + claude-pr-approve + codex-pr-approve + auto-merge"
 ```
 
@@ -268,8 +267,9 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 각 하위 이슈에 대해 동일한 `/implement-issue #{하위이슈번호}` 흐름을 수행한다.
 
 - 구현
+- 로컬 커밋
+- `/codex:review --base epic/#{에픽번호}-{설명}` 통과
 - 브랜치 push
-- Codex 브랜치 리뷰 통과
 - PR 생성 (`base=epic/#{에픽번호}-{설명}`)
 
 ### E4. 에픽 PR 생성
@@ -277,7 +277,7 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 모든 하위 이슈가 에픽 브랜치에 반영되면, 에픽 브랜치도 동일한 규칙을 따른다.
 
 1. 에픽 브랜치 최신화 및 로컬 검증
-2. `codex-branch-review` 통과
+2. `/codex:review --base main` 통과
 3. `epic/* -> main` PR 생성
 4. `ci + claude-pr-approve + codex-pr-approve` 통과 후 auto-merge
 

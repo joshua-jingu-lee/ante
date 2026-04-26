@@ -323,7 +323,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - `### 개선 포인트`
   - 예: 라벨 규칙 보강, 선행 리뷰 강제, runner capacity 조정, 코멘트 템플릿 정리, 큐 정렬 규칙 수정
 
-공식 증적은 GitHub 이슈/PR 코멘트와 status check이고, `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
+공식 증적은 GitHub 이슈/PR 코멘트와 PR status check다. PR 전 Codex 브랜치 리뷰는 status check가 아니라 이슈 코멘트의 `/codex:review --base <ref>` PASS/FAIL 기록으로 확인한다. `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
 
 ## 중단 규칙
 

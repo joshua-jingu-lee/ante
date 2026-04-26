@@ -437,7 +437,12 @@ def render_issue_comment(args: argparse.Namespace) -> int:
         )
         if short_sha:
             lines.append(f"- HEAD: `{short_sha}`")
-        lines.append("- 다음 단계: GitHub Actions가 리뷰를 시작합니다.")
+        next_step = (
+            "- 다음 단계: Claude 세션에서 `/codex:review --base <ref>`를 실행합니다."
+            if args.phase == "branch"
+            else "- 다음 단계: GitHub Actions가 리뷰를 시작합니다."
+        )
+        lines.append(next_step)
         if args.run_url:
             lines.append(f"- run: {args.run_url}")
     elif args.stage == "started":

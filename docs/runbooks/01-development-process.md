@@ -1,6 +1,6 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 사전 브랜치 리뷰를 담당하며, PR 단계에서는 두 모델이 독립적으로 승인하는 개발 체계를 정의한다.
+> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 내부 사전 브랜치 리뷰를 담당하며, PR 단계에서는 두 모델이 독립적으로 승인하는 개발 체계를 정의한다.
 
 ---
 
@@ -24,7 +24,7 @@
 - **Claude 개발 에이전트**: 구현, 로컬 검증, 브랜치 푸시, Codex 피드백 반영
 - **Codex Plan Review 워커**: `/codex:adversarial-review`로 구현 전 계획의 가정, 위험, 대안을 외부 검증
 - **Claude 코드 리뷰어**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석
-- **Codex 브랜치 리뷰어**: PR 전 브랜치 단위 사전 리뷰, blocking issue 식별
+- **Codex 브랜치 리뷰어**: `/codex:review --base <ref>`로 PR 전 브랜치 단위 사전 리뷰와 blocking issue 식별
 - **Claude PR 승인 워커**: PR head SHA 기준 최종 승인 체크
 - **Codex PR 승인 워커**: PR head SHA 기준 최종 승인 체크
 - **GitHub merge gate**: 두 모델 승인과 CI 성공 여부를 기준으로 auto-merge 실행
@@ -62,13 +62,13 @@ Claude 오케스트레이터
   │         ├── 워크트리 격리
   │         ├── 착수 기록: 이슈 코멘트
   │         ├── 구현 + 로컬 lint/test
-  │         ├── 브랜치 push
+  │         ├── 로컬 커밋
   │         ▼
-  │    Codex 브랜치 리뷰 (`codex-branch-review`)
+  │    Codex 브랜치 리뷰 (`/codex:review --base <base>`)
   │         │
-  │         ├── FAIL → Claude가 같은 브랜치에서 수정 후 재push
+  │         ├── FAIL → Claude가 같은 워크트리에서 수정 후 재검토
   │         ├── 고위험 변경 / 반복 risk class → Claude `@code-reviewer` 메타 리뷰
-  │         └── PASS → PR 생성
+  │         └── PASS → 브랜치 push 후 PR 생성
   │
   ├── PR 생성 후
   │    ├── CI
@@ -149,7 +149,7 @@ Codex Plan Review의 출력은 다음 중 하나다.
 main
   └─ {branch-prefix}/#{issue번호}-{짧은설명}
        ├─ 구현 + push
-       ├─ codex-branch-review PASS
+       ├─ /codex:review --base main PASS
        └─ PR → main → auto-merge
 ```
 
@@ -201,7 +201,7 @@ main
 
 | 실패 유형 | 원인 분류 | 복구 담당 | 복구 후 |
 |-----------|----------|----------|--------|
-| `codex-branch-review` FAIL | 코드/설계 문제 | Claude 개발 에이전트 | 같은 브랜치에서 수정 후 재push |
+| `/codex:review` FAIL | 코드/설계 문제 | Claude 개발 에이전트 | 같은 브랜치에서 수정 후 재검토 |
 | CI 실패 — 코드 문제 | 테스트/lint/type 오류 | Claude 개발 에이전트 | 새 커밋 push 후 체크 재실행 |
 | CI 실패 — 인프라 문제 | Docker/CI 설정/스크립트 | `@devops` | 수정 후 동일 PR에서 재실행 |
 | `claude-pr-approve` FAIL — `content` | 스펙·계약·테스트 누락 | Claude 자동 재수정 워커 | 동일 PR 브랜치 수정 후 재검증 |
@@ -212,7 +212,7 @@ main
 
 ### 5.1 재시도 규칙
 
-- 동일 head SHA에 대해 같은 실패를 반복 판정하지 않는다. 새 커밋이 push되어야 새 시도로 본다.
+- 동일 head SHA에 대해 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
 - 이슈 코멘트에 Codex 브랜치 리뷰 실패 횟수를 누적한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
 - 같은 `risk class` failure가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출하고, 그 전까지는 얕은 auto-fix만 반복하지 않는다.
@@ -240,10 +240,10 @@ main
 
 > 상세 규칙: [07-review-gate.md](07-review-gate.md)
 
-- **브랜치 리뷰 단계**: Codex만 수행한다. PR 전 품질 게이트다.
+- **브랜치 리뷰 단계**: Codex만 수행한다. GitHub Actions가 아니라 `/codex:review --base <ref>` 내부 루프로 도는 PR 전 품질 게이트다.
 - **PR 승인 단계**: Claude와 Codex가 각각 독립적으로 수행한다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
-- **소스 오브 트루스**: GitHub PR review 코멘트보다 **status check 결과**를 merge gate의 기준으로 삼는다.
+- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, PR 승인과 CI는 **status check 결과**를 merge gate의 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
 - **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용

@@ -36,7 +36,7 @@ epic/#300-datafeed
 | `chore` | `chore` | `chore/` |
 | `epic` | `epic` | `epic/` |
 
-`/implement-issue`, `/autopilot`, `codex-branch-review`는 이 매핑을 기준으로 정렬한다.
+`/implement-issue`, `/autopilot`, 내부 `/codex:review --base <ref>` 브랜치 리뷰는 이 매핑을 기준으로 정렬한다.
 
 ### 1.3 에픽 하위 브랜치 최신화
 
@@ -88,21 +88,22 @@ BREAKING CHANGE: BrokerAdapter 인터페이스가 변경되었습니다.
 
 ## 3. 브랜치 리뷰 규칙
 
-PR을 열기 전, 최신 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통과해야 한다.
+PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통과해야 한다.
 
 ### 3.1 브랜치 리뷰 트리거
 
 - 대상 브랜치: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
-- 트리거: 원격 브랜치 push
-- 상태 체크: `codex-branch-review`
+- 트리거: PR 생성 전 `/implement-issue` 내부 리뷰 루프
+- 실행: `openai/codex-plugin-cc`의 `/codex:review --base <main 또는 epic/...>`
+- 증적: 이슈 코멘트 `Codex 브랜치 리뷰`
 
 ### 3.2 브랜치 리뷰 결과 처리
 
-- `codex-branch-review = success`
-  - PR 생성 가능
-- `codex-branch-review = failure`
-  - Claude가 같은 브랜치에서 수정 후 재push
-- 동일 SHA에 실패한 상태에서 PR을 먼저 열지 않는다
+- `/codex:review = PASS`
+  - 브랜치 push 후 PR 생성 가능
+- `/codex:review = FAIL`
+  - Claude가 같은 워크트리에서 수정 후 재검토
+- 동일 SHA에 실패한 상태에서 PR을 먼저 열지 않는다.
 - 실패 횟수는 이슈 코멘트로 누적 관리한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 대상으로 본다.
 - 실패가 10회 누적되면 이슈에 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
@@ -131,7 +132,7 @@ PR을 열기 전, 최신 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통�
 - **본문**: Summary + Test Plan + `Closes #{번호}`
 - **라벨**: `core`, `web`, `cli`, `docs`, `fix` 중 해당 항목
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
-- **전제 조건**: 최신 branch HEAD의 `codex-branch-review`가 success
+- **전제 조건**: 최신 branch HEAD의 `/codex:review --base <base>`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
 
 ### 4.2 PR 머지 조건
 

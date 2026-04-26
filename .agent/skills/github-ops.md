@@ -95,7 +95,7 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 
 PR 생성 전 확인:
 
-- 최신 branch review 성공 여부
+- 최신 내부 branch review (`/codex:review --base <ref>`) PASS 여부
 - open PR 중복 여부
 - base 브랜치 적합성
 

@@ -245,7 +245,8 @@ autopilot은 활성 이슈마다 최신 `🤖 **Autopilot 사이클 상태**` �
 공식 기록:
 
 - 이슈 코멘트 (`arch-review`, 구현 착수, PR 생성, 보류 사유, `🤖 **Autopilot 사이클 상태**`)
-- PR 코멘트와 status check (`codex-branch-review`, `ci`, `claude-pr-approve`, `codex-pr-approve`)
+- PR 코멘트와 status check (`ci`, `claude-pr-approve`, `codex-pr-approve`)
+- 내부 Codex 브랜치 리뷰 이슈 코멘트 (`/codex:review --base <ref>` PASS/FAIL, HEAD SHA, finding 요약)
 
 필수 요약 기록:
 

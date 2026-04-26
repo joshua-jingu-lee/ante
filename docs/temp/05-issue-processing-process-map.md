@@ -360,16 +360,17 @@ Codex Plan Review를 수행해야 하는 조건:
 - integration test
 - 생성 산출물 갱신 여부 확인
 
-검증 후 원격 브랜치에 push한다.
+검증 후 로컬 커밋을 만든다.
 
 ## 12. Codex 브랜치 리뷰
 
-PR 생성 전 최신 브랜치 HEAD는 반드시 `codex-branch-review`를 통과해야 한다.
+PR 생성 전 최신 로컬 브랜치 HEAD는 반드시 `/codex:review --base <main 또는 epic/...>`를 통과해야 한다.
+이 단계는 GitHub Actions workflow가 아니라 Claude 세션 내부의 Codex plugin 명령으로 반복한다.
 
 결과 처리:
 
-- `success`: PR 생성 가능
-- `failure`: 같은 브랜치에서 수정 후 재push
+- `PASS`: 브랜치 push 후 PR 생성 가능
+- `FAIL`: 같은 워크트리에서 수정 후 `/codex:review --base <base>` 재실행
 
 반복 규칙:
 
@@ -381,7 +382,8 @@ PR 생성 전 최신 브랜치 HEAD는 반드시 `codex-branch-review`를 통과
 
 조건:
 
-- 최신 HEAD의 `codex-branch-review`가 `success`여야 한다.
+- 최신 HEAD의 `/codex:review --base <base>`가 `PASS`여야 한다.
+- PASS 결과가 이슈 코멘트에 남아 있어야 한다.
 
 PR 본문:
 
@@ -450,7 +452,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 - 스펙 충돌 발견 시 patch loop를 언제 중단하는지
 - Evidence matrix와 Contract matrix 템플릿
 - stale follow-up 이슈를 닫고 새 dependency graph로 재등록하는 절차
-- GitHub Actions 반복 대기보다 로컬 재현과 스펙 정렬을 우선하는 기준
+- 내부 `/codex:review` 반복이 길어질 때 로컬 재현과 스펙 정렬을 우선하는 기준
 
 ## 18. Review-loop recovery 초안 위치
 

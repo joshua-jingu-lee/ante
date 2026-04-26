@@ -75,7 +75,7 @@ Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트에 반응�
 | 역할 | 트리거 | 책임 |
 |------|--------|------|
 | **Codex Plan Review 워커** | `plan-preflight:started` 라벨 또는 구현 전 계획 검증 필요 | `/codex:adversarial-review`로 구현계획의 가정, 위험, 대안을 검토하고 이슈 코멘트에 verdict 기록 |
-| **Codex 브랜치 리뷰어** | `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push | PR 전 blocking issue 식별, `codex-branch-review` 상태 기록 |
+| **Codex 브랜치 리뷰어** | `/implement-issue`의 PR 생성 전 내부 `/codex:review --base <ref>` 실행 | PR 전 blocking issue 식별, 이슈 코멘트에 PASS/FAIL 기록 |
 | **Codex PR 승인 워커** | `pull_request` opened/synchronize/ready_for_review | 최종 승인 체크, `codex-pr-approve` 상태 기록 |
 
 ### 1.8 Claude PR 승인 워커
@@ -126,7 +126,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 ### 2.2 에이전트 정의 (agents/)
 
-`.agent/agents/*.md`는 Claude 서브에이전트 정의의 SSOT이다. Codex 워커는 GitHub Actions/Webhook 구성의 일부이므로 이 디렉토리에 포함하지 않는다.
+`.agent/agents/*.md`는 Claude 서브에이전트 정의의 SSOT이다. Codex 워커는 Codex plugin 명령 또는 GitHub 이벤트에 반응하는 외부 워커이므로 이 디렉토리에 포함하지 않는다.
 
 ### 2.2.1 모델 및 추론 강도 정책
 
@@ -183,6 +183,8 @@ Codex Plan Review는 `.agent/skills/`가 아니라 `openai/codex-plugin-cc`의 `
 ## 3. 운영 상 주의사항
 
 - Codex는 PR 전 브랜치 리뷰와 PR 후 승인 체크를 모두 담당하지만, 두 단계의 목적은 다르다.
+  - PR 전 브랜치 리뷰는 GitHub Actions가 아니라 Claude 세션의 `/codex:review --base <ref>` 내부 루프로 수행한다.
+  - PR 후 승인 체크는 GitHub status check로 수행한다.
 - `@code-reviewer`는 PR 승인 워커가 아니라 반복 failure 메타 리뷰를 담당한다.
 - PR 단계의 승인 결과는 GitHub PR review보다 **status check**를 기준으로 merge gate에 반영한다.
 - 로컬 worktree 정리는 Codex가 아니라 Claude 측 구현 머신이 담당한다.

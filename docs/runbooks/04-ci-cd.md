@@ -1,6 +1,6 @@
-# 04. CI/CD 파이프라인
+# 04. CI/CD와 리뷰 게이트
 
-> GitHub Actions 기반 CI/CD와 리뷰 게이트 모델을 정의한다.
+> GitHub Actions 기반 CI/CD와 PR 승인, 내부 Codex 브랜치 리뷰 게이트 모델을 정의한다.
 
 ---
 
@@ -18,9 +18,11 @@ Claude 구현 (worktree 격리)
   │
   ├── 로컬 lint / test
   │
-  ├── 브랜치 push
+  ├── 로컬 커밋
   │
-  ├──▶ [Gate A] codex-branch-review ────── 실패 → Claude가 수정 후 재push
+  ├──▶ [Gate A] /codex:review --base ───── 실패 → Claude가 수정 후 재검토
+  │
+  ├── 브랜치 push
   │
   ├── PR 생성
   │
@@ -61,12 +63,14 @@ post-merge automation
 
 **목적**: PR 전 브랜치 품질 게이트
 
-- **트리거**: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*` 브랜치 push
-- **결과**: `codex-branch-review`
-- **실패 시**: Claude가 같은 브랜치에서 수정 후 재push
-- **해석 주의**: 리뷰 단계가 finding을 생성했고 마지막 `Enforce review verdict`만 실패한 경우, 이는 워크플로우 장애가 아니라 **의도된 content fail**이다.
+- **트리거**: PR 생성 전 `/implement-issue` 내부 리뷰 루프
+- **실행**: `openai/codex-plugin-cc`의 `/codex:review --base <main 또는 epic/...>`
+- **결과**: 이슈 코멘트 `Codex 브랜치 리뷰`
+- **성공 시**: 브랜치 push 후 PR 생성
+- **실패 시**: Claude가 같은 워크트리에서 수정 후 `/codex:review --base <base>` 재실행
+- **해석 주의**: 이 단계는 GitHub Actions workflow가 아니라 Claude 세션 안에서 돌아가는 read-only Codex 리뷰다. 코드 수정은 Claude 개발 에이전트가 수행한다.
 
-이 게이트는 보호 브랜치의 required status check는 아니지만, **PR 생성 전 필수 조건**이다.
+이 게이트는 보호 브랜치의 required status check가 아니며, **PR 생성 전 필수 이슈 증적**이다.
 
 ### Gate B — CI
 
@@ -166,7 +170,6 @@ post-merge automation
 .github/
 └── workflows/
     ├── ci.yml                    # Gate B: lint + test
-    ├── codex-branch-review.yml   # Gate A: PR 전 Codex 브랜치 리뷰
     ├── pr-approvals.yml          # Gate C/D: Claude + Codex PR 승인
     ├── post-merge.yml            # 머지 후 이슈 정리, 후처리 (closed event + workflow_dispatch)
     ├── semantic-release.yml      # 수동 릴리스
@@ -175,7 +178,7 @@ post-merge automation
 
 ### 3.1 현재 저장소와 목표 상태
 
-- **현재 존재**: `ci.yml`, `codex-branch-review.yml`, `pr-approvals.yml`, `post-merge.yml`, `semantic-release.yml`, `publish.yml`
+- **현재 존재**: `ci.yml`, `pr-approvals.yml`, `post-merge.yml`, `semantic-release.yml`, `publish.yml`
 - **운영 과제**:
   - review artifact / 코멘트 형식 개선
   - 반복 `risk class` 에스컬레이션 자동화 고도화
@@ -185,9 +188,10 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 
 ### 3.2 AI 리뷰 러너 전제
 
-- `codex-branch-review`, `codex-pr-approve`는 self-hosted runner label `codex-review`를 전제로 한다.
+- `codex-pr-approve`는 self-hosted runner label `codex-review`를 전제로 한다.
+- PR 전 Codex 브랜치 리뷰는 runner workflow가 아니라 Claude 세션의 `/codex:review --base <ref>` 내부 루프로 수행한다.
 - `claude-pr-approve`는 self-hosted runner label `claude-review`를 전제로 한다.
-- 저장소 변수 `AI_REVIEW_ENABLED=true`일 때만 AI 리뷰 workflow를 활성화한다.
+- 저장소 변수 `AI_REVIEW_ENABLED=true`일 때만 PR 단계 AI 리뷰 workflow를 활성화한다.
 - runner가 준비되기 전에는 `AI_REVIEW_ENABLED`를 비워 두거나 `false`로 유지한다.
 
 ### 3.3 AI 리뷰 러너 / 검증 환경 체크리스트
@@ -212,7 +216,7 @@ mypy src/ante/
 pytest tests/unit/ -v
 ```
 
-브랜치 push 전 이 검증을 통과시켜야 Codex 사전 리뷰 루프가 짧아진다.
+내부 Codex 브랜치 리뷰 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
 
 ## 5. CI 실패 시 복구
 
@@ -220,12 +224,12 @@ pytest tests/unit/ -v
 
 | 실패 게이트 | 주 원인 | 복구 담당 |
 |------------|--------|----------|
-| `codex-branch-review` | 설계/코드 품질 문제 | Claude 개발 에이전트 |
+| `/codex:review` | 설계/코드 품질 문제 | Claude 개발 에이전트 |
 | `ci` | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
 | `claude-pr-approve` | 스펙/계약/테스트 누락 | Claude 자동 재수정 워커 또는 `@devops` |
 | `codex-pr-approve` | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 또는 `@devops` |
 
-`codex-branch-review`는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
+내부 `/codex:review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
 `claude-pr-approve` / `codex-pr-approve`는 `content` FAIL일 때만 Claude 자동 재수정을 최대 10회 시도한다. `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정을 건너뛰고 PR 코멘트에 원인을 남긴다.
 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
 
