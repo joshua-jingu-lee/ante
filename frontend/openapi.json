@@ -166,19 +166,54 @@
             }
           },
           "400": {
-            "description": "수정할 필드가 없음"
+            "description": "수정할 필드가 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
-            "description": "계좌를 찾을 수 없음"
+            "description": "계좌를 찾을 수 없음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "409": {
-            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
+            "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
-            "description": "비구조(mutable) 필드 schema 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다."
+            "description": "비구조(mutable) 필드 schema 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "503": {
-            "description": "Account service not available"
+            "description": "Account service not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },

@@ -739,3 +739,93 @@ class TestResponseModelCoverage:
         data = resp.json()
         model = FeedStatusResponse(**data)
         assert model.initialized is False
+
+    def test_openapi_account_routes_have_error_response_models(self, client):
+        """cold-path 라우트의 명시 4xx/5xx 응답이 ErrorResponse를 노출.
+
+        Codex review (이슈 #1140 attempt 6) finding P2 회귀 보호:
+        PUT/DELETE/POST 라우트가 ``responses=`` 데코레이터에 명시 등록한
+        4xx/5xx 응답은 ``model: ErrorResponse``를 일관 등록해야 OpenAPI/
+        codegen에서 bodyless 4xx/5xx로 표현되지 않는다. ``application/json``
+        content가 있고 schema가 ``ErrorResponse``를 가리키는지 확인한다.
+
+        FastAPI가 자동 생성하는 path/dependency 검증용 422 응답은
+        ``HTTPValidationError`` 표준 schema를 사용하므로 본 테스트의
+        검증 대상에서 제외한다 (PUT 422는 핸들러 본문이 명시 raise한
+        ``HTTPException(422)``이므로 ErrorResponse를 가져야 한다).
+        """
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        paths = openapi.get("paths", {})
+
+        # cold-path PUT/POST/DELETE 라우트만 본 attempt에서 강제한다.
+        # 다른 account 라우트(suspend/activate/rules)의 4xx 커버리지 확장은
+        # 후속 이슈(#1143 schema accuracy)에서 다룬다.
+        # 각 튜플의 세 번째 요소는 ``responses=`` 데코레이터에 명시 등록된
+        # 에러 status code 집합 — FastAPI 자동 422는 제외한다.
+        target_routes: list[tuple[str, str, set[str]]] = [
+            ("/api/accounts", "post", {"409"}),
+            ("/api/accounts/{account_id}", "put", {"400", "404", "409", "422", "503"}),
+            ("/api/accounts/{account_id}", "delete", {"409"}),
+        ]
+
+        missing: list[str] = []
+        for path, method, explicit_codes in target_routes:
+            spec = paths.get(path, {}).get(method)
+            assert spec is not None, f"라우트 정의 누락: {method.upper()} {path}"
+
+            responses = spec.get("responses", {})
+            for code in explicit_codes:
+                response_spec = responses.get(code)
+                if response_spec is None:
+                    missing.append(f"{method.upper()} {path} ({code}): 응답 정의 누락")
+                    continue
+                content = response_spec.get("content", {})
+                json_content = content.get("application/json")
+                if json_content is None:
+                    missing.append(
+                        f"{method.upper()} {path} ({code}): "
+                        "application/json content 없음"
+                    )
+                    continue
+                schema = json_content.get("schema", {})
+                ref = schema.get("$ref", "")
+                # FastAPI는 model: ErrorResponse를 받으면
+                # `#/components/schemas/ErrorResponse`로 참조한다.
+                if "ErrorResponse" not in ref:
+                    missing.append(
+                        f"{method.upper()} {path} ({code}): "
+                        f"ErrorResponse 참조 없음 (schema={schema!r})"
+                    )
+
+        assert missing == [], (
+            "cold-path account 라우트 에러 응답에 ErrorResponse 모델 누락:\n"
+            + "\n".join(f"  - {m}" for m in missing)
+        )
+
+    def test_openapi_put_account_422_references_error_response(self, client):
+        """PUT /api/accounts/{account_id} 422 응답이 ErrorResponse 참조를 가진다.
+
+        attempt 6에서 Codex review가 잡은 정확한 finding 회귀 보호:
+        PUT 라우트의 422 응답에 ``model: ErrorResponse``가 빠져 있어
+        OpenAPI/codegen이 bodyless 422로 표현하던 문제가 다시 발생하지 않도록
+        고정한다.
+        """
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+
+        spec = openapi["paths"]["/api/accounts/{account_id}"]["put"]
+        responses = spec["responses"]
+        assert "422" in responses, "PUT 422 응답이 OpenAPI에 없음"
+
+        content = responses["422"].get("content", {})
+        json_content = content.get("application/json")
+        assert json_content is not None, "PUT 422 응답에 application/json content 없음"
+
+        schema = json_content.get("schema", {})
+        ref = schema.get("$ref", "")
+        assert "ErrorResponse" in ref, (
+            f"PUT 422 응답 schema가 ErrorResponse를 참조하지 않음: {schema!r}"
+        )

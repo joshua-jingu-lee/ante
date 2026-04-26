@@ -172,21 +172,23 @@ async def get_account(
     "/{account_id}",
     response_model=AccountDetailResponse,
     responses={
-        400: {"description": "수정할 필드가 없음"},
-        404: {"description": "계좌를 찾을 수 없음"},
+        400: {"model": ErrorResponse, "description": "수정할 필드가 없음"},
+        404: {"model": ErrorResponse, "description": "계좌를 찾을 수 없음"},
         409: {
+            "model": ErrorResponse,
             "description": (
                 "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
                 "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
-            )
+            ),
         },
         422: {
+            "model": ErrorResponse,
             "description": (
                 "비구조(mutable) 필드 schema 검증 실패. "
                 "structural 필드 키는 422가 아닌 409로 차단된다."
-            )
+            ),
         },
-        503: {"description": "Account service not available"},
+        503: {"model": ErrorResponse, "description": "Account service not available"},
     },
 )
 async def update_account(
