@@ -772,8 +772,8 @@ class TestUpdateAccount:
     ) -> None:
         """JSON 파싱 자체가 실패하면 422.
 
-        FastAPI는 보통 자동 처리하지만, 이 라우트는 raw body를 직접 읽으므로
-        파싱 실패 경로가 라우트 본문에서 422로 변환되는지 보장한다.
+        body가 ``dict[str, Any] | None``이므로 FastAPI의 자동
+        ``RequestValidationError`` 처리가 422를 보장한다.
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
@@ -792,8 +792,9 @@ class TestUpdateAccount:
     ) -> None:
         """JSON object가 아닌 body(예: 배열, 문자열)는 422.
 
-        라우트는 dict 형태의 raw payload만 허용한다 — structural 키 가드와
-        mutable schema 검증 모두 dict 가정에 의존한다.
+        body가 ``dict[str, Any] | None``으로 선언되어 있으므로 FastAPI가
+        non-dict JSON을 자동 422로 처리한다 — structural 키 가드와 mutable
+        schema 검증 모두 dict 가정에 의존하기 때문이다.
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
@@ -804,50 +805,40 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 422
 
-
-class TestUpdateAccountOpenAPISchema:
-    """PUT /api/accounts/:id의 OpenAPI requestBody schema 노출 보호 (P3).
-
-    런타임 mutable 4 필드만 노출하는 ``AccountMutableUpdateRequest``가
-    requestBody schema로 노출되어야 한다. 이전 attempt에서는 body가
-    ``dict[str, Any] | None``이라 schema accuracy를 잃었다.
-    """
-
-    def test_openapi_put_uses_mutable_update_request(
+    def test_update_blocks_when_structural_with_invalid_mutable_returns_409(
         self,
         client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
     ) -> None:
-        """OpenAPI document의 PUT requestBody가 mutable 모델을 참조한다."""
-        resp = client.get("/openapi.json")
-        assert resp.status_code == 200
-        spec = resp.json()
+        """structural 키 + 잘못된 mutable 타입이 같이 와도 cold-path 409 우선.
 
-        path = spec["paths"]["/api/accounts/{account_id}"]["put"]
-        request_body_schema = path["requestBody"]["content"]["application/json"][
-            "schema"
-        ]
-        # anyOf wrapper로 nullable 표현될 수 있다.
-        if "anyOf" in request_body_schema:
-            refs = [
-                item.get("$ref", "")
-                for item in request_body_schema["anyOf"]
-                if "$ref" in item
-            ]
-        else:
-            refs = [request_body_schema.get("$ref", "")]
-        assert any("AccountMutableUpdateRequest" in ref for ref in refs), (
-            f"expected AccountMutableUpdateRequest reference, got {refs}"
+        attempt 4의 P2 finding 회귀 보호. 구조 필드 가드는 mutable schema
+        검증보다 먼저 실행되어야 한다 — ``credentials`` 키가 등장한 시점에
+        cold-path 위반이 확정되며, 같은 페이로드에 schema 검증 실패 트리거가
+        있어도 응답은 422가 아닌 409여야 한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"credentials": {"app_key": "x"}, "timezone": {}},
         )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+        # service.update 미호출 — 계좌 timezone 보존
+        assert account_service._accounts["test-account"].timezone == "Asia/Seoul"
+        # audit 미발행
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
 
-        # mutable 모델 정의 확인 — mutable 4 필드만 노출되어야 한다.
-        mutable_schema = spec["components"]["schemas"]["AccountMutableUpdateRequest"]
-        properties = set(mutable_schema.get("properties", {}).keys())
-        assert properties == {
-            "name",
-            "timezone",
-            "trading_hours_start",
-            "trading_hours_end",
-        }
+
+# PUT requestBody schema accuracy(mutable 모델 노출)는 issue #1143에서 처리.
+# 본 이슈는 cold-path invariant(I1~I4)와 P2(ValidationError 422)에 한정한다.
 
 
 class TestSuspendAccount:
