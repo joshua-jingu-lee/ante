@@ -61,7 +61,7 @@ class LeafAwareGroup(click.Group):
         cmd: click.Command = self
         path: list[str] = []
         i = 0
-        while i < len(args) and isinstance(cmd, click.MultiCommand):
+        while i < len(args) and isinstance(cmd, click.Group):
             token = args[i]
             if token.startswith("-"):
                 i += 1
