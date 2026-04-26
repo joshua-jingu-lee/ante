@@ -246,7 +246,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 
 구현 실행 흐름은 [01-development-process.md](01-development-process.md),
 브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),
-리뷰/머지 게이트는 [07-review-gate.md](07-review-gate.md),
+리뷰/머지 게이트는 [04-ci-cd.md](04-ci-cd.md),
 autopilot 배치 상태는 [08-autopilot-operations.md](08-autopilot-operations.md)를 따른다.
 
 ### 이슈 close 규칙

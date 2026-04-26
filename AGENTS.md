@@ -39,10 +39,9 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 > 개발 프로세스: [docs/runbooks/01-development-process.md](docs/runbooks/01-development-process.md)
 > 에이전트 구조: [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)
 > Git 워크플로우: [docs/runbooks/03-git-workflow.md](docs/runbooks/03-git-workflow.md)
-> CI/CD: [docs/runbooks/04-ci-cd.md](docs/runbooks/04-ci-cd.md)
+> CI/CD와 리뷰 게이트: [docs/runbooks/04-ci-cd.md](docs/runbooks/04-ci-cd.md)
 > 테스트 전략: [docs/runbooks/05-testing.md](docs/runbooks/05-testing.md)
 > 릴리스 운영: [docs/runbooks/06-release.md](docs/runbooks/06-release.md)
-> 리뷰 게이트: [docs/runbooks/07-review-gate.md](docs/runbooks/07-review-gate.md)
 > Autopilot 운영: [docs/runbooks/08-autopilot-operations.md](docs/runbooks/08-autopilot-operations.md)
 
 

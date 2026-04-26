@@ -445,10 +445,9 @@ docs/
 │   ├── 01-development-process.md
 │   ├── 02-agent-structure.md   # 에이전트 구조
 │   ├── 03-git-workflow.md
-│   ├── 04-ci-cd.md
+│   ├── 04-ci-cd.md             # CI/CD와 리뷰 게이트
 │   ├── 05-testing.md
 │   ├── 06-release.md           # 릴리스 절차
-│   ├── 07-review-gate.md       # 리뷰 게이트와 merge gate
 │   ├── 08-autopilot-operations.md # 야간 autopilot 큐 운영
 │   └── README.md
 ├── specs/                      # 모듈별 세부 설계

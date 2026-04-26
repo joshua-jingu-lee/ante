@@ -103,7 +103,7 @@ Goal:
 Fix only the blocking findings from the failed PR approval checks below on the current branch.
 
 Requirements:
-1. Treat AGENTS.md, docs/architecture/README.md, docs/runbooks/07-review-gate.md, and relevant docs/specs as the source of truth.
+1. Treat AGENTS.md, docs/architecture/README.md, docs/runbooks/04-ci-cd.md, and relevant docs/specs as the source of truth.
 2. Make the minimal code, test, generated-doc, and spec updates needed to resolve the blocking findings.
 3. Do not widen scope beyond the reported blocking findings.
 4. Run focused validation for the touched area when feasible, and keep the branch in a committable state.

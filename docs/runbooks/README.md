@@ -13,10 +13,9 @@
 | [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Plan Preflight/Codex Plan Review, Claude 구현, Codex 사전 브랜치 리뷰, 메타 리뷰, PR 승인/자동 재수정/merge gate |
 | [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, Codex 외부 리뷰 워커, Claude 메타 리뷰어, `.agent/`와 `.claude/` 레이어 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션 (+ 버전 범프), `Closes #N` 기반 PR 규칙 |
-| [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인 (내부 Codex 브랜치 리뷰, 이중 승인, auto-merge) |
+| [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/머지 게이트, 저장소 설정 |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (버전 관리, 태그, 배포 체크리스트) |
-| [07-review-gate.md](07-review-gate.md) | Codex Plan Review, 내부 브랜치 리뷰, PR 승인 status check, merge gate 책임 분리 |
 | [08-autopilot-operations.md](08-autopilot-operations.md) | 야간 autopilot 배치 운영 규칙 (`needs-triage`, 큐 선별, Plan Preflight 병렬 lane, `/implement-issue`, merge/post-merge 모니터링) |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)

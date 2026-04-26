@@ -86,7 +86,7 @@ Context:
 Instructions:
 1. Review the current checkout against $BASE_REF.
 2. Focus only on blocking issues: correctness bugs, regressions, spec/contract violations, missing critical tests, security issues.
-3. Use AGENTS.md, docs/architecture/README.md, docs/runbooks/07-review-gate.md, and relevant docs/specs for changed modules as the source of truth.
+3. Use AGENTS.md, docs/architecture/README.md, docs/runbooks/04-ci-cd.md, and relevant docs/specs for changed modules as the source of truth.
 4. Do not modify files.
 5. Approve only if there are zero blocking findings.
 6. Return JSON that matches the provided schema exactly.

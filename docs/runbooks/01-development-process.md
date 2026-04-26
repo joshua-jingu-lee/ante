@@ -18,7 +18,7 @@
 ## 2. 역할 구성
 
 > Claude 측 역할과 `.agent/` 구조 상세: [02-agent-structure.md](02-agent-structure.md)
-> 리뷰/승인/머지 게이트 상세: [07-review-gate.md](07-review-gate.md)
+> CI/CD와 리뷰/승인/머지 게이트 상세: [04-ci-cd.md](04-ci-cd.md)
 
 - **Claude 오케스트레이터**: 이슈 분석, 스펙 확인, 구현 에이전트 위임, GitHub 기록 관리
 - **Claude 개발 에이전트**: 구현, 로컬 검증, 브랜치 푸시, Codex 피드백 반영
@@ -163,7 +163,7 @@ Codex Plan Review의 출력은 다음 중 하나다.
 
 ## 5. 실패 복구 루프
 
-구체적 절차는 `/implement-issue`, 리뷰 게이트 상세는 [07-review-gate.md](07-review-gate.md)가 SSOT이며, 이 섹션은 정책만 정의한다.
+구체적 절차는 `/implement-issue`, CI/CD와 리뷰 게이트 정책은 [04-ci-cd.md](04-ci-cd.md)가 SSOT이며, 이 섹션은 정책만 정의한다.
 
 | 실패 유형 | 원인 분류 | 복구 담당 | 복구 후 |
 |-----------|----------|----------|--------|
@@ -204,7 +204,7 @@ Codex Plan Review의 출력은 다음 중 하나다.
 
 ## 6. 리뷰와 머지 게이트
 
-> 상세 규칙: [07-review-gate.md](07-review-gate.md)
+> 상세 규칙: [04-ci-cd.md](04-ci-cd.md)
 
 - **브랜치 리뷰 단계**: Codex만 수행한다. GitHub Actions가 아니라 `/codex:review --base <ref>` 내부 루프로 도는 PR 전 품질 게이트다.
 - **PR 승인 단계**: Claude와 Codex가 각각 독립적으로 수행한다.
@@ -248,6 +248,5 @@ AGENTS.md는 모든 세션에 주입되므로 핵심 규칙만 유지한다.
 | [00-issue-management.md](00-issue-management.md) | 이슈 등록, 분류, 추적 규칙 |
 | [02-agent-structure.md](02-agent-structure.md) | Claude 역할과 Codex 외부 리뷰 워커 구조 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션, 브랜치/PR 규칙 |
-| [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인과 status check 구성 |
+| [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/merge gate 구성 |
 | [05-testing.md](05-testing.md) | 테스트 전략, 커버리지 기준 |
-| [07-review-gate.md](07-review-gate.md) | 브랜치 리뷰, PR 승인, merge gate 상세 |

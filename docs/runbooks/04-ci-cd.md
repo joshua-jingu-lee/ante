@@ -1,6 +1,7 @@
 # 04. CI/CD와 리뷰 게이트
 
-> GitHub Actions 기반 CI/CD와 PR 승인, 내부 Codex 브랜치 리뷰 게이트 모델을 정의한다.
+> GitHub Actions 기반 CI/CD와 PR 승인, 내부 Codex 브랜치 리뷰, merge gate 정책을 정의한다.
+> 에이전트의 실제 실행 절차는 `.agent/commands/`가 SSOT이며, 이 문서는 게이트와 상태 체크의 정책 기준만 둔다.
 
 ---
 
@@ -68,9 +69,11 @@ post-merge automation
 - **결과**: 이슈 코멘트 `Codex 브랜치 리뷰`
 - **성공 시**: 브랜치 push 후 PR 생성
 - **실패 시**: Claude가 같은 워크트리에서 수정 후 `/codex:review --base <base>` 재실행
+- **반복 실패**: 같은 blocking finding 제목이 반복되면 escalation 신호로 보고, 같은 `risk class`가 2회 반복되면 Meta Review를 우선한다.
 - **해석 주의**: 이 단계는 GitHub Actions workflow가 아니라 Claude 세션 안에서 돌아가는 read-only Codex 리뷰다. 코드 수정은 Claude 개발 에이전트가 수행한다.
 
 이 게이트는 보호 브랜치의 required status check가 아니며, **PR 생성 전 필수 이슈 증적**이다.
+동일 HEAD SHA에서 `/codex:review` FAIL이 남아 있으면 PR을 열지 않는다.
 
 ### Gate B — CI
 
@@ -112,6 +115,15 @@ post-merge automation
   - `quota/script_error/auth_error/infra_error` → 재수정 없이 PR 코멘트로 중단 사유 기록
 - **해석 주의**: review 결과 생성 후 verdict gate만 실패한 경우, CI 인프라 문제보다 코드/계약 finding을 먼저 본다.
 
+### PR 승인 공통 원칙
+
+- Claude PR 승인 워커와 Codex PR 승인 워커는 같은 PR head SHA를 본다.
+- 두 워커는 가능한 한 서로의 verdict를 입력으로 삼지 않고 독립적으로 판정한다.
+- 공통 기준은 `.agent/skills/review-pr.md`, `docs/specs/`, `docs/architecture/`다.
+- 캐시, 세션, 연결, mutable config, endpoint/schema/field rename, generated artifact drift, health/readiness/background task 변경, 같은 `risk class` 반복이 보이면 diff만 읽고 끝내지 않는다.
+- 이 경우 생성자, 팩토리, 캐시 저장소, 소비자, 생성 산출물까지 확장해 확인한다.
+- 승인 워커는 verdict와 함께 `blocking findings`, `follow-ups`, `executed checks`, `inferred checks`, `risk flags`를 남긴다.
+
 ### Meta Review — Claude code-reviewer
 
 **목적**: approve / fail 판정보다 앞서 반복 failure와 구조 리스크를 좁힌다.
@@ -141,6 +153,7 @@ post-merge automation
   - 새 커밋 push → `pull_request synchronize`로 Gate B/C/D 재실행
   - 10회 초과 → `blocked:pr-review-loop`
   - `NO_CHANGES` → 자동 루프 중단 후 메타 리뷰 또는 수동 수정으로 승격
+- 각 시도는 새 커밋을 push한 경우에만 다음 승인 사이클로 본다.
 
 ### Gate E — Merge Gate
 
@@ -161,6 +174,18 @@ post-merge automation
 - 머지 불가 시 대기
 
 **원칙**: merge gate는 세 번째 코드 리뷰어가 아니라 **정책 집행자**다.
+코드 품질을 새로 판단하지 않고, CI와 승인 상태만 집행한다.
+
+### Post-merge 책임 분리
+
+| 작업 | 담당 |
+|------|------|
+| PR 머지 | GitHub auto-merge |
+| head branch 삭제 | GitHub repository setting |
+| 이슈 체크박스 갱신 + close | `post-merge.yml` |
+| 로컬 worktree 정리 | Claude 구현 머신 |
+
+이슈 close는 PR 본문의 `Closes #N`에 따른 GitHub 기본 auto-close를 우선 사용하고, `post-merge.yml`은 체크박스/에픽 상태 동기화와 누락 복구를 담당한다.
 
 ## 3. 워크플로우 구성
 
@@ -194,7 +219,17 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - 저장소 변수 `AI_REVIEW_ENABLED=true`일 때만 PR 단계 AI 리뷰 workflow를 활성화한다.
 - runner가 준비되기 전에는 `AI_REVIEW_ENABLED`를 비워 두거나 `false`로 유지한다.
 
-### 3.3 AI 리뷰 러너 / 검증 환경 체크리스트
+### 3.3 저장소 설정 권장값
+
+- `Allow auto-merge`: 활성화
+- `Automatically delete head branches`: 활성화
+- branch protection required status checks:
+  - `ci`
+  - `claude-pr-approve`
+  - `codex-pr-approve`
+- `Require conversation resolution before merging`: 활성화 권장
+
+### 3.4 AI 리뷰 러너 / 검증 환경 체크리스트
 
 - 목표 Python 버전이 저장소 기준과 일치해야 한다.
 - `pytest`, `ruff`, 필요 테스트 의존성이 러너에 설치되어 있어야 한다.
@@ -202,7 +237,7 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - compose 또는 런타임 설정 검증이 필요한 저장소라면 `config/secrets.env` 같은 필수 입력 파일 가용성을 확인한다.
 - 여러 worktree가 하나의 editable install을 공유한다면 `pip show ante`로 editable project location을 확인하고, 필요 시 `PYTHONPATH=$PWD/src` 또는 worktree 기준 재설치를 사용한다.
 
-### 3.4 워크플로우 의존성 유지보수
+### 3.5 워크플로우 의존성 유지보수
 
 - `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact` 등 GitHub-hosted action의 런타임 deprecation 공지는 정기적으로 점검한다.
 - Node 런타임 deprecation warning은 저장소 Python 코드 실패와 분리해서 추적한다.

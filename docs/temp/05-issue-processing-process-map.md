@@ -461,7 +461,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 
 - `docs/runbooks/09-review-loop-recovery.md`
 - `docs/runbooks/01-development-process.md`의 실패 복구 루프
-- `docs/runbooks/07-review-gate.md`의 반복 실패 규칙
+- `docs/runbooks/04-ci-cd.md`의 반복 실패 규칙
 - `.agent/skills/receive-review.md`
 - `.agent/commands/implement-issue.md`
 - `.agent/commands/autopilot.md`
