@@ -23,7 +23,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 - Plan Preflight 결과가 이슈 본문 구현계획으로 확정되었고
 - 이슈가 `/implement-issue`를 통해 실제 수정과 PR 생성까지 진행되었고
-- 같은 이슈의 CI + 승인 + auto-merge + post-merge가 확인되었음
+- 같은 이슈의 `ci` 통과 + auto-merge + post-merge가 확인되었음 (AI 승인은 advisory monitoring)
 
 `--handoff-only`일 때만 PR 생성 후 기존 리뷰 게이트 인계에서 종료한다.
 
