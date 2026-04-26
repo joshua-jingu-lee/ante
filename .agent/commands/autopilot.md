@@ -43,6 +43,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 - implementation lane이 바쁠 때 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - 이 선행 작업은 이슈 본문/코멘트의 실행계획 작성 또는 보강까지만 허용한다.
+- Plan Preflight verdict가 `ready`이면 이슈에 `plan-preflight:ready` 라벨을 붙인다.
 - Codex Plan Review, 코드 수정, 브랜치 생성, PR 생성은 현재 implementation lane이 종료된 뒤 해당 이슈가 실제 처리 대상으로 선택될 때 수행한다.
 
 ## 상태 코멘트 계약
@@ -61,6 +62,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - `review-state`: `pending | running | blocked | done`
 - `implement-state`: `pending | running | blocked | done`
 - `merge-monitor-state`: `pending | running | blocked | done`
+- `preflight`: `pending | ready | stale | blocked | n-a`
 - `review-verdicts`: `arch=ready/caution/blocked/n-a`
 - `pr`: `#번호 | n-a`
 - `head`: `{SHA7} | n-a`
@@ -78,6 +80,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - review-state: done
 - implement-state: running
 - merge-monitor-state: pending
+- preflight: ready
 - review-verdicts: arch=caution
 - pr: n-a
 - head: a1b2c3d
@@ -89,6 +92,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 상태 전이 원칙:
 
 - 의견 검토 시작: `review-state=running`, 나머지는 `pending`
+- Plan Preflight `ready`: `preflight=ready`, `plan-preflight:ready` 라벨 부착
+- Plan Preflight stale/blocked: `preflight=stale` 또는 `blocked`, `plan-preflight:ready` 라벨 제거
 - 사전 리뷰 통과 후 구현 위임: `review-state=done`, `implement-state=running`
 - PR 생성 완료: `implement-state=done`, `merge-monitor-state=running`, `pr`/`head` 채움
 - 리뷰/의존성/triage로 보류: 해당 사이클을 `blocked`로 두고 `result`를 `deferred-*`로 기록
@@ -138,7 +143,10 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
 - Plan Preflight의 `ready`는 Codex Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
+- `ready`이면 `plan-preflight:ready` 라벨을 붙여 다음 `/autopilot` 또는 `/implement-issue`가 재사용할 수 있게 한다.
 - `needs-rewrite`, `needs-spec-first`, `blocked`가 나오면 같은 배치에서 구현 대상으로 넘기지 않는다.
+- `needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:ready` 라벨을 제거한다.
+- 이미 `plan-preflight:ready` 라벨이 있고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않고 Codex Plan Review 후보로 둔다.
 - 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
 
 ### `arch-review`를 먼저 거는 경우
@@ -207,10 +215,12 @@ done
 1. `needs-triage` 여부 재확인
 2. 선행 의존 이슈 close 여부 확인
 3. open PR 존재 여부 확인
-4. `arch-review` 필요 여부 판단
-5. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
+4. `plan-preflight:ready` 라벨과 이슈 본문 구현계획 최신성 확인
+5. `arch-review` 필요 여부 판단
+6. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
 
 최신 사전 리뷰에 `verdict:`가 없거나, 오래된 `blocked` verdict가 최신 이슈 상태를 반영하지 못하면 refresh 리뷰를 먼저 남긴 뒤 그 결과를 사용한다.
+`plan-preflight:ready` 라벨이 없거나 stale이면 Plan Preflight를 먼저 수행하고, `ready`가 된 뒤에만 `/implement-issue`로 넘긴다.
 
 이 단계에 진입하면 이슈의 최신 `🤖 **Autopilot 사이클 상태**` 코멘트를 `current-cycle=review`, `review-state=running`으로 맞춘다.
 

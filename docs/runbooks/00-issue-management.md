@@ -189,6 +189,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 | `epic` | 에픽 (하위 이슈 묶음) | 검정색 |
 | `blocked` | 다른 작업에 의존하여 대기 | 빨간색 |
 | `needs-triage` | 자동 처리 전 사람 분류 필요 | 회색 |
+| `plan-preflight:ready` | Plan Preflight 완료, Codex Plan Review 대기 가능 | 파란색 |
 | `blocked:review-loop` | 브랜치 리뷰 반복 실패로 자동 진행 중단 | 진한 빨간색 |
 | `blocked:pr-review-loop` | PR 승인 반복 실패로 자동 진행 중단 | 진한 빨간색 |
 | `good first issue` | 에이전트가 자율 처리 가능 | 연두색 |
@@ -200,6 +201,15 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
 - 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
 - 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
+
+### 4.2 `plan-preflight:ready` 라벨
+
+- `plan-preflight:ready`는 "이슈 본문 구현계획이 Plan Preflight를 통과했고, Codex Plan Review로 넘길 준비가 됐다"는 뜻이다.
+- 이 라벨은 구현 승인 라벨이 아니다. 구현 착수 전에는 반드시 Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`여야 한다.
+- `/autopilot`의 Plan Preflight lane은 이슈 본문 구현계획을 작성 또는 정비한 뒤 verdict가 `ready`이면 이 라벨을 붙인다.
+- `/implement-issue`는 이 라벨이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건이 이후 바뀌었는지 확인한다.
+- Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 이 라벨을 붙이지 않으며, 이미 붙어 있으면 제거한다.
+- 이슈 본문 구현계획이 stale하다고 판단되면 이 라벨을 제거하고 Plan Preflight를 다시 수행한다.
 
 ## 5. 우선순위
 
@@ -225,6 +235,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 | 상태 | 의미 | 다음 처리 |
 |------|------|-----------|
 | Open | 등록됨 | 분류, 스펙 경로 확인, Plan Preflight |
+| Preflight ready | `plan-preflight:ready` 라벨 존재 | Codex Plan Review 후보. 구현 승인으로 보지 않음 |
 | Needs triage | `needs-triage` 라벨 존재 | 사람/오케스트레이터가 범위와 처리 가치를 확인한 뒤 라벨 제거 |
 | Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
 | Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |

@@ -174,12 +174,13 @@ Plan Preflight가 이슈 본문에 보강해야 할 항목:
 
 Plan Preflight 판정:
 
-- `ready`: Codex Plan Review로 넘길 준비 완료
+- `ready`: Codex Plan Review로 넘길 준비 완료. 이슈에 `plan-preflight:ready` 라벨 부착
 - `needs-rewrite`: 이슈 본문을 전면 재작성한 뒤 다시 확인
 - `needs-spec-first`: `1B`로 진행할 수 없고 `1A`로 전환 필요
 - `blocked`: 선행 결정 또는 선행 이슈 없이는 계획 작성 불가
 
 `needs-spec-first` 또는 `blocked`이면 구현으로 넘기지 않는다.
+`needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:ready` 라벨을 제거한다.
 
 ## 4. 처리 방식 선택
 
@@ -246,12 +247,13 @@ Plan-Preflight Lane의 산출물:
 - 이슈 본문 구현계획 업데이트
 - 필요 시 `🧭 Plan Preflight` 코멘트로 변경 요약 기록
 - verdict: `ready`, `needs-rewrite`, `needs-spec-first`, `blocked`
+- label: `ready`일 때 `plan-preflight:ready`
 - 다음 구현자가 따라야 할 task/checklist
 
 Lane 전환 규칙:
 
 - Plan Preflight가 `ready`인 이슈도 현재 implementation lane이 끝나기 전에는 Codex Plan Review 또는 구현으로 넘기지 않는다.
-- 현재 implementation lane이 종료되면, 이미 `ready`인 이슈를 다음 Codex Plan Review 후보로 삼을 수 있다.
+- 현재 implementation lane이 종료되면, `plan-preflight:ready` 라벨이 있는 이슈를 다음 Codex Plan Review 후보로 삼을 수 있다.
 - Plan Preflight 중 스펙 충돌이 드러나면 해당 이슈는 `1A` 전환 대상으로 기록하고 구현 큐에 올리지 않는다.
 
 ## 7. Codex Plan Review

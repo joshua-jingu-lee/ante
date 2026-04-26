@@ -23,12 +23,13 @@
 - Codex 브랜치 리뷰처럼 요청, 대기, 결과 수신, 수정 루프를 분리한다.
 - Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Codex Plan Review를 요청한다.
 - Codex Plan Review는 그 계획이 구현 가능한지, 더 안전하거나 단순한 대안이 있는지, 숨은 가정과 실패 모드가 있는지 검토한다.
+- Plan Preflight가 `ready`이면 이슈에 `plan-preflight:ready` 라벨을 붙인다. 이 라벨은 Codex Plan Review 후보 표시이며 구현 승인이 아니다.
 
 ### 2.2 트리거
 
 아래 조건이 하나라도 맞으면 Codex Plan Review를 실행한다.
 
-- Plan Preflight가 `ready`인 이슈
+- `plan-preflight:ready` 라벨이 있는 이슈
 - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
 - endpoint / schema / field / CLI rename
 - OpenAPI, 생성 타입, 생성 문서, schema drift 가능성

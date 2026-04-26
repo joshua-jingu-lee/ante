@@ -64,7 +64,10 @@ mkdir -p "$WORKTREE_ROOT"
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
 - 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
 - 이슈 본문의 구현계획에는 파일 맵, 작업 순서, risk flags, 구현 체크리스트, 검증 체크리스트, stop conditions, 비목표를 포함한다.
+- 이슈에 `plan-preflight:ready` 라벨이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건 변경으로 stale하지 않은지 확인한다.
+- Plan Preflight verdict가 `ready`이면 이슈에 `plan-preflight:ready` 라벨을 붙인다.
 - Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 구현을 시작하지 않는다.
+- `needs-rewrite`, `needs-spec-first`, `blocked`이거나 stale한 구현계획이면 `plan-preflight:ready` 라벨을 제거한다.
 - Plan Preflight의 `ready`는 Codex Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
 - Plan Preflight가 없더라도 작은 이슈라면 이슈 본문 자체가 실행계획 역할을 할 수 있다.
 

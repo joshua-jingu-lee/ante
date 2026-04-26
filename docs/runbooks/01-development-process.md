@@ -42,6 +42,7 @@ Claude 오케스트레이터
   │
   ├── Plan Preflight (`superpowers:writing-plans` 원칙)
   │         ├── 이슈 본문에 구현계획 작성/정비
+  │         ├── ready → `plan-preflight:ready` 라벨 부착
   │         ├──▶ Codex Plan Review (`/codex:adversarial-review`)
   │         │       ├── PASS: approve-implement / narrow-scope
   │         │       └── FAIL: revise-plan / split-issue / invoke-human
@@ -91,6 +92,7 @@ Claude 오케스트레이터
 
 **핵심 차이**:
 - 구현 전 Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비하고, Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
+- Plan Preflight가 끝난 이슈는 `plan-preflight:ready` 라벨로 구분한다. 이 라벨은 Codex Plan Review 후보 표시이며 구현 승인이 아니다.
 - 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤에만 작성한다.
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
 - Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 브랜치 리뷰**다.
@@ -109,6 +111,7 @@ Claude 오케스트레이터
 | `/arch-review` | 이슈 사전 아키텍처 검토 | `.agent/commands/arch-review.md` |
 
 야간 배치나 backlog 정리에서는 `/autopilot`이 오픈 이슈 큐 snapshot을 잡고, 필요 시 Plan Preflight와 `/arch-review` 증적을 이슈 코멘트로 남긴 뒤 `/implement-issue`에 개별 구현을 위임한다. 사전 리뷰의 `ready`/`caution`은 구현 체크리스트로 승격되며, `/autopilot`은 기본적으로 **한 번에 하나의 이슈만 implement → merge/post-merge까지 순차 모니터링**한다. 다만 현재 구현 lane이 코드 수정, 리뷰, CI, merge 대기 중일 때 다른 후보 이슈의 Plan Preflight는 병렬로 수행할 수 있다.
+Plan Preflight가 `ready`이면 `plan-preflight:ready` 라벨을 붙이고, 이후 `/implement-issue`는 이 라벨을 단서로 기존 구현계획을 재사용한다.
 
 운영 중인 이슈의 현재 단계는 최신 `🤖 **Autopilot 사이클 상태**` 코멘트로 노출하며, 여기서 `review-state`, `implement-state`, `merge-monitor-state`를 각각 `pending | running | blocked | done`으로 추적한다.
 
