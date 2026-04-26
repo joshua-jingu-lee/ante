@@ -28,9 +28,10 @@ mkdir -p "$WORKTREE_ROOT"
 | 단계 | 담당 | 실행 주체 | GitHub 기록 |
 |------|------|-----------|-------------|
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
-| 4a (Plan Preflight 확인) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문/코멘트 |
-| 4b (Plan Review) | 오케스트레이터 또는 `@code-reviewer` | Claude 메인 세션 / `@code-reviewer` | 필요 시 이슈 코멘트 |
+| 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
+| 4b (Plan Review 피드백 루프) | 오케스트레이터 또는 `@code-reviewer` | Claude 메인 세션 / `@code-reviewer` | 이슈 본문/코멘트 |
 | 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
+| 4d (이슈 본문 구현계획 확정) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
 | 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
 | 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | GitHub workflow + Claude 개발 에이전트 | `codex-branch-review` + 이슈 코멘트 |
@@ -56,15 +57,16 @@ mkdir -p "$WORKTREE_ROOT"
    - 양쪽 모두 변경 → 백엔드 먼저, 프론트엔드 후속
 4. **기존 코드 파악**: 이슈가 기존 모듈 수정을 포함하면 관련 소스를 먼저 읽고 영향 범위를 파악한다.
 
-4a. **Plan Preflight 확인**: 구현 전에 이슈 본문 또는 이슈 코멘트에 Plan Preflight 산출물이 있는지 확인한다.
+4a. **Plan Preflight 구현계획 작성/정비**: 구현 전에 이슈 본문에 실행 가능한 구현계획이 있는지 확인하고, 없거나 부족하면 이슈 본문을 작성 또는 정비한다.
 
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
 - 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
+- 이슈 본문의 구현계획에는 파일 맵, 작업 순서, risk flags, 구현 체크리스트, 검증 체크리스트, stop conditions, 비목표를 포함한다.
 - Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 구현을 시작하지 않는다.
 - Plan Preflight의 `ready`는 Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
 - Plan Preflight가 없더라도 작은 이슈라면 이슈 본문 자체가 실행계획 역할을 할 수 있다.
 
-4b. **Plan Review**: `.agent/skills/plan-review.md` 규칙으로 Plan Preflight 산출물을 검증하고 피드백/verdict를 남긴다. 아래 조건이 하나라도 맞으면 Claude `@code-reviewer`가 Plan Review를 수행한다.
+4b. **Plan Review 피드백 루프**: Plan Preflight가 `.agent/skills/plan-review.md` 규칙으로 Plan Review를 호출해 구현계획 피드백/verdict를 받는다. 아래 조건이 하나라도 맞으면 Claude `@code-reviewer`가 Plan Review를 수행한다.
 
 - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
 - endpoint / schema / field / CLI rename
@@ -73,7 +75,7 @@ mkdir -p "$WORKTREE_ROOT"
 - 운영 health / readiness / background task와 연결된 동작 변경
 - 같은 `risk class` failure가 과거 리뷰에서 2회 반복됨
 
-Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 Plan Preflight 또는 이슈 본문을 보강한 뒤 다시 Plan Review를 수행한다.
+Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Plan Review를 수행한다.
 
 4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
 
@@ -90,6 +92,13 @@ Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6�
 최신 `arch-review`에 `verdict:`가 없거나 stale하다고 판단되면 refresh를 먼저 요청한다. 최신 verdict가 `blocked`이면 구현을 시작하지 않고 이슈에 보류 사유를 남긴다.
 
 `ready` / `caution` verdict에서 나온 주의사항은 구현 프롬프트의 **필수 반영 항목**이다. 특히 `caution`은 "좋으면 반영" 메모가 아니라, 코드/테스트/문서 Done criteria로 승격한다.
+
+4d. **이슈 본문 구현계획 확정**: 착수 기록을 남기기 전에 이슈 본문 구현계획을 최신 Plan Review verdict와 사전 리뷰 증적으로 정비한다.
+
+- `approve-implement`이면 현재 구현계획을 확정한다.
+- `narrow-scope`이면 축소 범위, 제외 범위, 후속 이슈 후보를 이슈 본문에 반영한다.
+- `arch-review`의 `ready`/`caution` 주의사항을 구현 체크리스트와 검증 체크리스트에 반영한다.
+- 구현 착수 코멘트는 이 단계가 끝난 뒤에만 남긴다.
 
 ### 구현 시작 기록 (오케스트레이터)
 

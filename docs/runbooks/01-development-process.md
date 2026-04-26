@@ -40,17 +40,19 @@ Claude 오케스트레이터
   ├── 분석: 이슈 읽기 → 스펙 확인 → 스펙 경로(1A/1B) 판단
   │
   ├── Plan Preflight (`superpowers:writing-plans` 원칙)
-  │         ├── 이슈 본문 보강/전면 재작성
-  │         ├── ready → Plan Review로 넘길 준비
-  │         ├── needs-rewrite → 이슈 본문 보강 후 재확인
+  │         ├── 이슈 본문에 구현계획 작성/정비
+  │         ├── Plan Review 호출 → 피드백/verdict 수신
+  │         ├── needs-rewrite → 이슈 본문 재작성 후 Plan Review 재호출
+  │         ├── revise-plan → 피드백 반영 후 이슈 본문 재정비
+  │         ├── approve-implement → 구현계획 확정
+  │         ├── narrow-scope → 축소 범위로 구현계획 확정
   │         ├── needs-spec-first → Spec-First 경로로 전환
-  │         └── blocked → 구현 중단
+  │         └── split-issue / invoke-human / blocked → 구현 중단
   │
-  ├── Plan Review: 계획 검증 → 피드백 → 구현 체크리스트 확정
-  │         ├── approve-implement → 진행
-  │         ├── revise-plan → Plan Preflight 보강
-  │         ├── narrow-scope → 범위 축소 후 진행
-  │         └── split-issue / invoke-human → 구현 중단
+  ├── 이슈 본문 구현계획 확정
+  │         ├── 파일 맵 / 작업 순서 / risk flags
+  │         ├── 구현 체크리스트 / 검증 체크리스트
+  │         └── stop conditions / 비목표
   │
   ├── 착수 기록: 이슈 코멘트
   │
@@ -85,7 +87,8 @@ Claude 오케스트레이터
 ```
 
 **핵심 차이**:
-- 구현 전 이슈 본문은 Plan Preflight로 실행 가능한 계획까지 보강할 수 있다.
+- 구현 전 Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비하고, Plan Review를 호출해 피드백을 받은 뒤 확정한다.
+- 착수 기록은 Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤에만 작성한다.
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
 - Codex의 첫 리뷰는 **PR 전 브랜치 리뷰**다.
 - PR 단계의 Claude/Codex 승인 체크는 **같은 head SHA**를 기준으로 독립 실행된다.
@@ -109,7 +112,8 @@ Claude 오케스트레이터
 ### 4.1 Plan Review
 
 Plan Review는 GitHub status check가 아니라, **구현 시작 전에만 거는 계획 검증 단계**다.
-Plan Preflight가 계획을 작성하고, Plan Review는 그 계획을 검토해 피드백과 verdict를 남긴다.
+Plan Preflight가 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Plan Review를 호출하고,
+Plan Review는 그 계획을 검토해 Plan Preflight에 피드백과 verdict를 돌려준다.
 
 - Plan Review는 `.agent/skills/plan-review.md`의 형식을 따른다.
 - 오케스트레이터는 Plan Preflight 산출물과 최신 코드/스펙 맥락을 대조한다.
@@ -131,7 +135,7 @@ Plan Review의 출력은 다음 중 하나다.
 - `invoke-human`
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
-`revise-plan`이면 Plan Preflight 또는 이슈 본문을 보강한 뒤 다시 리뷰한다.
+`revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 리뷰한다.
 
 ### 4.2 브랜치 전략
 

@@ -135,14 +135,15 @@ PR 필수 조건:
 
 ## 3. Plan Preflight
 
-Plan Preflight는 구현 착수 전에 GitHub 이슈 본문을 실행 가능한 계획으로 보강하거나
-전면 재작성하는 사전점검 단계다.
+Plan Preflight는 구현 착수 전에 GitHub 이슈 본문을 실행 가능한 구현계획으로
+보강하거나 전면 재작성하는 사전점검 단계다.
+작성한 구현계획은 Plan Review를 호출해 피드백을 받은 뒤 확정한다.
 
 사용 기준:
 
 - `superpowers:writing-plans`의 원칙을 Ante 이슈 본문에 맞게 적용한다.
 - 코드는 수정하지 않는다.
-- 산출물은 GitHub 이슈 본문 또는 이슈 코멘트의 실행계획이다.
+- 산출물의 canonical 위치는 GitHub 이슈 본문이다.
 - 계획 단계 에이전트는 GitHub 이슈 등록과 본문 보강까지만 수행한다.
 
 필수 적용 대상:
@@ -168,6 +169,7 @@ Plan Preflight가 이슈 본문에 보강해야 할 항목:
 - 테스트 계획: 각 task의 failing check, 통과 check, 실행 명령
 - 문서/생성 산출물 동기화 계획
 - 중단 조건: 스펙 충돌, 영향 범위 확장, failing check 불명확 등
+- Plan Review 피드백 반영 결과
 - 커밋 단위 제안
 
 Plan Preflight 판정:
@@ -241,7 +243,8 @@ Plan Preflight 판정:
 
 Plan-Preflight Lane의 산출물:
 
-- 이슈 본문 업데이트 또는 `🧭 Plan Preflight` 코멘트
+- 이슈 본문 구현계획 업데이트
+- 필요 시 `🧭 Plan Preflight` 코멘트로 변경 요약 기록
 - verdict: `ready`, `needs-rewrite`, `needs-spec-first`, `blocked`
 - 다음 구현자가 따라야 할 task/checklist
 
@@ -254,8 +257,8 @@ Lane 전환 규칙:
 ## 7. Plan Review
 
 Plan Review는 Plan Preflight가 작성한 계획을 구현 전에 검증하고 피드백을 주는 단계다.
-계획을 새로 작성하지 않고, 이미 작성된 계획이 현재 스펙/코드/소비자 경로 기준으로
-구현 가능한지 확인한다.
+Plan Preflight가 호출하며, 계획을 새로 작성하지 않고 이미 작성된 계획이 현재 스펙/코드/소비자 경로 기준으로
+구현 가능한지 확인한 뒤 피드백과 verdict를 Plan Preflight에 돌려준다.
 
 검토 항목:
 
@@ -283,6 +286,7 @@ Plan Review는 Plan Preflight가 작성한 계획을 구현 전에 검증하고 
 - `invoke-human`: 스펙/정책/운영 판단 필요
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현으로 넘기지 않는다.
+`revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 정비한 뒤 다시 리뷰한다.
 
 ## 8. `/implement-issue` 분석
 
@@ -299,7 +303,20 @@ Plan Review는 Plan Preflight가 작성한 계획을 구현 전에 검증하고 
 7. 담당 개발 에이전트를 결정한다.
 8. 관련 코드와 소비자 경로를 읽는다.
 
-## 9. 구현 착수 기록
+## 9. 이슈 본문 구현계획 확정과 착수 기록
+
+착수 기록 전에 이슈 본문 구현계획을 최신 상태로 확정한다.
+
+포함 항목:
+
+- Plan Review verdict
+- 확정된 파일 맵
+- 구현 체크리스트
+- 검증 체크리스트
+- risk flags
+- stop conditions
+- `narrow-scope`인 경우 제외 범위와 후속 이슈 후보
+- 사전 리뷰 verdict와 핵심 주의사항
 
 이슈에 `🤖 구현 착수` 코멘트를 남긴다.
 

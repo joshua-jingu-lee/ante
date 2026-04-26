@@ -19,7 +19,8 @@
 
 - GitHub status check가 아니다.
 - 구현 전에만 거는 계획 검증 단계다.
-- Plan Preflight는 계획을 작성하고, Plan Review는 그 계획이 구현 가능한지 검토한다.
+- Plan Preflight는 이슈 본문에 구현계획을 작성하거나 정비한 뒤 Plan Review를 호출한다.
+- Plan Review는 그 계획이 구현 가능한지 검토하고, 피드백과 verdict를 Plan Preflight에 돌려준다.
 - 저위험 이슈는 오케스트레이터가 검토할 수 있고, 고위험 이슈는 `@code-reviewer`가 Plan Review를 수행한다.
 
 ### 2.2 `@code-reviewer` 트리거
@@ -44,7 +45,7 @@ Plan Review는 아래 중 하나를 반환한다.
 - `invoke-human`
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
-`revise-plan`은 Plan Preflight 또는 이슈 본문을 보강한 뒤 다시 Plan Review를 받아야 한다.
+`revise-plan`은 Plan Preflight가 이슈 본문 구현계획을 보강한 뒤 다시 Plan Review를 받아야 한다.
 
 ### 2.4 책임
 
