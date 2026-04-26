@@ -7,7 +7,8 @@ Web API/OpenAPI/CLI 등 공개 버전 표면은 모두 이 값을 참조한다.
 from __future__ import annotations
 
 import tomllib
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 _FALLBACK_VERSION = "0.0.0"
