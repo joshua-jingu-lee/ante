@@ -23,13 +23,13 @@ mkdir -p "$WORKTREE_ROOT"
 
 ## 에이전트 역할 분담
 
-이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. PR 전 기본 사전 리뷰는 Codex가 수행하고, 구현 시작 전 고위험 이슈는 Claude `@code-reviewer`의 조건부 계획 리뷰를 먼저 통과해야 한다. 구조 리스크가 높거나 반복 failure가 나오면 같은 리뷰어가 메타 리뷰도 수행한다.
+이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. PR 전 기본 사전 리뷰는 Codex가 수행한다. 구현 시작 전에는 Plan Preflight 산출물을 Plan Review로 검증하며, 고위험 이슈는 Claude `@code-reviewer`가 Plan Review를 수행한다. 구조 리스크가 높거나 반복 failure가 나오면 같은 리뷰어가 메타 리뷰도 수행한다.
 
 | 단계 | 담당 | 실행 주체 | GitHub 기록 |
 |------|------|-----------|-------------|
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 스킵 시 이슈 코멘트 |
-| 4a (경량 계획) | 오케스트레이터 | Claude 메인 세션 | 필요 시 이슈 코멘트 |
-| 4b (조건부 계획 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈 코멘트 |
+| 4a (Plan Preflight 확인) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문/코멘트 |
+| 4b (Plan Review) | 오케스트레이터 또는 `@code-reviewer` | Claude 메인 세션 / `@code-reviewer` | 필요 시 이슈 코멘트 |
 | 4c (사전 리뷰 증적 수집) | 오케스트레이터 | Claude 메인 세션 | 기존 이슈 코멘트 재사용 |
 | 5 (착수 기록) | 오케스트레이터 | Claude 메인 세션 | 이슈 코멘트 |
 | 6~9 (구현 + push) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 브랜치 push |
@@ -56,15 +56,15 @@ mkdir -p "$WORKTREE_ROOT"
    - 양쪽 모두 변경 → 백엔드 먼저, 프론트엔드 후속
 4. **기존 코드 파악**: 이슈가 기존 모듈 수정을 포함하면 관련 소스를 먼저 읽고 영향 범위를 파악한다.
 
-4a. **경량 계획 체크리스트 작성**: 구현 전에 `.agent/skills/lightweight-planning.md` 규칙으로 아래 다섯 가지를 짧게 정리한다.
+4a. **Plan Preflight 확인**: 구현 전에 이슈 본문 또는 이슈 코멘트에 Plan Preflight 산출물이 있는지 확인한다.
 
-- `파일 맵`: 수정 파일, 반드시 읽을 호출자/소비자, 생성 산출물
-- `작업 분해`: 3~7개의 작은 작업 단위
-- `risk flags`: lifecycle / contract-drift / generated-artifact-sync / mutable-config / health-path 등
-- `verification plan`: 로컬에서 반드시 돌릴 검증
-- `stop conditions`: 같은 risk class 반복, 범위 확장, failing test 정의 불가 등
+- Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
+- 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
+- Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 구현을 시작하지 않는다.
+- Plan Preflight의 `ready`는 Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
+- Plan Preflight가 없더라도 작은 이슈라면 이슈 본문 자체가 실행계획 역할을 할 수 있다.
 
-4b. **조건부 계획 리뷰 판단**: 아래 조건이 하나라도 맞으면 구현을 시작하기 전에 Claude `@code-reviewer`를 호출한다.
+4b. **Plan Review**: `.agent/skills/plan-review.md` 규칙으로 Plan Preflight 산출물을 검증하고 피드백/verdict를 남긴다. 아래 조건이 하나라도 맞으면 Claude `@code-reviewer`가 Plan Review를 수행한다.
 
 - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
 - endpoint / schema / field / CLI rename
@@ -73,7 +73,7 @@ mkdir -p "$WORKTREE_ROOT"
 - 운영 health / readiness / background task와 연결된 동작 변경
 - 같은 `risk class` failure가 과거 리뷰에서 2회 반복됨
 
-`@code-reviewer` verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다.
+Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 Plan Preflight 또는 이슈 본문을 보강한 뒤 다시 Plan Review를 수행한다.
 
 4c. **사전 리뷰 증적 수집**: 최신 이슈 코멘트에서 아래 증적을 읽고 구현 프롬프트에 반영한다.
 
@@ -100,7 +100,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 담당 에이전트: @{에이전트명}
 - 변경 대상: {src/ante/xxx, frontend/ 등}
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
-- 계획 리뷰: {not-required | approve-implement | narrow-scope}
+- Plan Review: {approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}
 - 사전 리뷰: {arch=ready/caution/n-a}
 - 사전 리뷰 요약: {핵심 주의사항 1~2줄 또는 없음}"
@@ -128,11 +128,11 @@ Agent(
 8. 로컬 검증 (ruff check, ruff format, pytest)
 9. 브랜치 push
 
-## 경량 계획
-{파일 맵, 작업 분해, risk flags, verification plan, stop conditions}
+## Plan Preflight
+{이슈 본문 또는 이슈 코멘트의 실행계획 요약}
 
-## 계획 리뷰 verdict
-{not-required | approve-implement | narrow-scope}
+## Plan Review
+{verdict, feedback, implementation checklist, verification checklist, stop conditions}
 
 ## 사전 리뷰 증적
 {arch-review의 최신 verdict와 핵심 주의사항, 테스트 follow-up}

@@ -10,20 +10,20 @@
 | Runbook | 설명 |
 |---------|------|
 | [00-issue-management.md](00-issue-management.md) | GitHub Issues 등록, 분류, 추적 규칙 (이슈 템플릿, 라벨, 우선순위) |
-| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — 조건부 계획 리뷰, Claude 구현, Codex 사전 브랜치 리뷰, 메타 리뷰, PR 승인/자동 재수정/merge gate |
-| [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, 조건부 계획 리뷰어 `@code-reviewer`, Codex 외부 리뷰 워커, `.agent/`와 `.claude/` 레이어 |
+| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Plan Preflight/Plan Review, Claude 구현, Codex 사전 브랜치 리뷰, 메타 리뷰, PR 승인/자동 재수정/merge gate |
+| [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, 고위험 Plan Review 담당 `@code-reviewer`, Codex 외부 리뷰 워커, `.agent/`와 `.claude/` 레이어 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션 (+ 버전 범프), `Closes #N` 기반 PR 규칙 |
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인 (Codex 브랜치 리뷰, 이중 승인, auto-merge) |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (버전 관리, 태그, 배포 체크리스트) |
-| [07-review-gate.md](07-review-gate.md) | 조건부 계획 리뷰, 리뷰 단계와 merge gate의 책임 분리, 확장 리뷰 규칙, status check 기준 |
-| [08-autopilot-operations.md](08-autopilot-operations.md) | 야간 autopilot 배치 운영 규칙 (`needs-triage`, 큐 선별, 사전 리뷰 증적, `/implement-issue`, merge/post-merge 모니터링) |
+| [07-review-gate.md](07-review-gate.md) | Plan Review, 리뷰 단계와 merge gate의 책임 분리, 확장 리뷰 규칙, status check 기준 |
+| [08-autopilot-operations.md](08-autopilot-operations.md) | 야간 autopilot 배치 운영 규칙 (`needs-triage`, 큐 선별, Plan Preflight 병렬 lane, `/implement-issue`, merge/post-merge 모니터링) |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)
 
 | 커맨드 | 설명 |
 |--------|------|
-| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성) |
-| `/autopilot` | 오픈 이슈 큐 순차 처리 (필요 시 `arch-review` 후 `/implement-issue`와 merge/post-merge까지 순차 모니터링, 기본 `limit=10`) |
+| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) |
+| `/autopilot` | 오픈 이슈 큐 순차 처리 (필요 시 Plan Preflight/`arch-review` 후 `/implement-issue`와 merge/post-merge까지 순차 모니터링, 기본 `limit=10`) |
 | `/api-docs` | OpenAPI 스키마 조회 |
 | `/arch-review` | 구현 전 아키텍처/의존성/계약 관점 사전 검토 |

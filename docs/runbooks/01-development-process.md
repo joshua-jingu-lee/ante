@@ -11,7 +11,7 @@
 - PR은 구현 완료 사실을 알리는 문서가 아니라, **이미 한 차례 Codex 사전 리뷰를 통과한 변경**을 통합 후보로 올리는 단계다.
 - 최종 머지 결정은 사람 감각이 아니라 **명시적인 게이트 상태**로 판단한다.
 - `docs/specs/`와 `docs/architecture/`는 코드보다 앞선 계약이며, 리뷰와 승인 단계 모두 이 문서를 기준으로 판정한다.
-- 고위험 변경은 구현 전에 **조건부 계획 리뷰**를 통과해야 한다.
+- 구현 전 계획은 **Plan Preflight로 작성**하고, **Plan Review로 검증**한다.
 - 리뷰는 수정된 파일 목록만으로 끝내지 않는다.
   - 캐시, 연결, 생성 산출물, 소비자 경로가 보이면 호출자와 후속 경로까지 넓혀 본다.
 
@@ -22,7 +22,7 @@
 
 - **Claude 오케스트레이터**: 이슈 분석, 스펙 확인, 구현 에이전트 위임, GitHub 기록 관리
 - **Claude 개발 에이전트**: 구현, 로컬 검증, 브랜치 푸시, Codex 피드백 반영
-- **Claude 코드 리뷰어**: 조건부 계획 리뷰, 구조 리스크 메타 리뷰, 반복 failure 원인 분석
+- **Claude 코드 리뷰어**: 고위험 Plan Review, 구조 리스크 메타 리뷰, 반복 failure 원인 분석
 - **Codex 브랜치 리뷰어**: PR 전 브랜치 단위 사전 리뷰, blocking issue 식별
 - **Claude PR 승인 워커**: PR head SHA 기준 최종 승인 체크
 - **Codex PR 승인 워커**: PR head SHA 기준 최종 승인 체크
@@ -41,15 +41,14 @@ Claude 오케스트레이터
   │
   ├── Plan Preflight (`superpowers:writing-plans` 원칙)
   │         ├── 이슈 본문 보강/전면 재작성
-  │         ├── ready → 구현 준비
+  │         ├── ready → Plan Review로 넘길 준비
   │         ├── needs-rewrite → 이슈 본문 보강 후 재확인
   │         ├── needs-spec-first → Spec-First 경로로 전환
   │         └── blocked → 구현 중단
   │
-  ├── 경량 계획: 파일 맵 → 작업 분해 → risk flags → verification plan → stop conditions
-  │
-  ├── 조건부 계획 리뷰 (`@code-reviewer`)
-  │         ├── not required / approve-implement → 진행
+  ├── Plan Review: 계획 검증 → 피드백 → 구현 체크리스트 확정
+  │         ├── approve-implement → 진행
+  │         ├── revise-plan → Plan Preflight 보강
   │         ├── narrow-scope → 범위 축소 후 진행
   │         └── split-issue / invoke-human → 구현 중단
   │
@@ -98,7 +97,7 @@ Claude 오케스트레이터
 
 | 커맨드 | 역할 | 파일 |
 |--------|------|------|
-| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
+| `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
 | `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → Plan Preflight/의견 검토 → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`) | `.agent/commands/autopilot.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 | `/arch-review` | 이슈 사전 아키텍처 검토 | `.agent/commands/arch-review.md` |
@@ -107,14 +106,15 @@ Claude 오케스트레이터
 
 운영 중인 이슈의 현재 단계는 최신 `🤖 **Autopilot 사이클 상태**` 코멘트로 노출하며, 여기서 `review-state`, `implement-state`, `merge-monitor-state`를 각각 `pending | running | blocked | done`으로 추적한다.
 
-### 4.1 조건부 계획 리뷰
+### 4.1 Plan Review
 
-조건부 계획 리뷰는 GitHub status check가 아니라, **구현 시작 전에만 거는 사전 게이트**다.
+Plan Review는 GitHub status check가 아니라, **구현 시작 전에만 거는 계획 검증 단계**다.
+Plan Preflight가 계획을 작성하고, Plan Review는 그 계획을 검토해 피드백과 verdict를 남긴다.
 
-- 오케스트레이터는 구현 전에 경량 계획 체크리스트를 만든다.
-- 경량 계획은 `.agent/skills/lightweight-planning.md`의 형식을 따른다.
-- 기본 흐름에서는 바로 구현 에이전트로 위임한다.
-- 아래 조건이 하나라도 맞으면 `@code-reviewer` 계획 리뷰를 먼저 통과해야 한다.
+- Plan Review는 `.agent/skills/plan-review.md`의 형식을 따른다.
+- 오케스트레이터는 Plan Preflight 산출물과 최신 코드/스펙 맥락을 대조한다.
+- 저위험 이슈는 오케스트레이터가 Plan Review를 수행할 수 있다.
+- 아래 조건이 하나라도 맞으면 `@code-reviewer`가 Plan Review를 수행한다.
   - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
   - endpoint / schema / field / CLI rename
   - OpenAPI, 생성 타입, 생성 문서, schema drift 가능성
@@ -122,14 +122,16 @@ Claude 오케스트레이터
   - 운영 health / readiness / background task와 연결된 동작 변경
   - 같은 `risk class` failure가 과거 리뷰에서 2회 반복
 
-계획 리뷰의 출력은 다음 중 하나다.
+Plan Review의 출력은 다음 중 하나다.
 
 - `approve-implement`
+- `revise-plan`
 - `narrow-scope`
 - `split-issue`
 - `invoke-human`
 
-`split-issue`나 `invoke-human`이면 구현을 시작하지 않는다.
+`approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
+`revise-plan`이면 Plan Preflight 또는 이슈 본문을 보강한 뒤 다시 리뷰한다.
 
 ### 4.2 브랜치 전략
 
@@ -208,7 +210,7 @@ main
 - 이슈 코멘트에 Codex 브랜치 리뷰 실패 횟수를 누적한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
 - 같은 `risk class` failure가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출하고, 그 전까지는 얕은 auto-fix만 반복하지 않는다.
-- 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 조건부 계획 리뷰 단계로 되돌린다.
+- 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 Plan Review 단계로 되돌린다.
 - 동일 유형의 blocking failure가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 - `blocked:review-loop`가 최초 부착되거나, PR 자동 재수정 결과가 `NO_CHANGES`로 끝나면 얕은 자동 수정 루프를 중단하고 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.

@@ -1,13 +1,13 @@
 # GitHub 이슈 처리 프로세스 맵
 
-> 임시 작업 문서. `docs/temp/`는 gitignore 대상이므로 커밋하지 않는다.
+> 임시 작업 문서. `docs/temp/`는 평소 gitignore 대상이지만, 이 문서는 현재 런북 재정렬 맥락 공유를 위해 명시 허가에 따라 커밋한다.
 > 목적: 현재 런북 기준 GitHub 이슈 처리 흐름과, 새로 합의한 스펙 진입 경로를 번호로 고정해 이후 대화에서 같은 번호를 기준으로 소통한다.
 
 ## 번호 사용 규칙
 
 - 큰 단계는 `1`, `2`, `3`처럼 부른다.
 - 하위 선택지는 `1A`, `1B`처럼 부른다.
-- 세부 규칙은 필요할 때 `1A-충돌`, `13-반복`, `17-회복`처럼 부른다.
+- 세부 규칙은 필요할 때 `1A-충돌`, `12-반복`, `18-회복`처럼 부른다.
 
 ## 1. 스펙 정합성 확인과 진입 경로 선택
 
@@ -172,7 +172,7 @@ Plan Preflight가 이슈 본문에 보강해야 할 항목:
 
 Plan Preflight 판정:
 
-- `ready`: 구현 착수 가능
+- `ready`: Plan Review로 넘길 준비 완료
 - `needs-rewrite`: 이슈 본문을 전면 재작성한 뒤 다시 확인
 - `needs-spec-first`: `1B`로 진행할 수 없고 `1A`로 전환 필요
 - `blocked`: 선행 결정 또는 선행 이슈 없이는 계획 작성 불가
@@ -247,13 +247,26 @@ Plan-Preflight Lane의 산출물:
 
 Lane 전환 규칙:
 
-- Plan Preflight가 `ready`인 이슈도 현재 implementation lane이 끝나기 전에는 구현하지 않는다.
-- 현재 implementation lane이 종료되면, 이미 `ready`인 이슈를 우선 후보로 삼을 수 있다.
+- Plan Preflight가 `ready`인 이슈도 현재 implementation lane이 끝나기 전에는 Plan Review 또는 구현으로 넘기지 않는다.
+- 현재 implementation lane이 종료되면, 이미 `ready`인 이슈를 다음 Plan Review 후보로 삼을 수 있다.
 - Plan Preflight 중 스펙 충돌이 드러나면 해당 이슈는 `1A` 전환 대상으로 기록하고 구현 큐에 올리지 않는다.
 
-## 7. 사전 리뷰 증적 확인
+## 7. Plan Review
 
-아래 신호가 있으면 `/arch-review` 또는 조건부 계획 리뷰를 먼저 확인한다.
+Plan Review는 Plan Preflight가 작성한 계획을 구현 전에 검증하고 피드백을 주는 단계다.
+계획을 새로 작성하지 않고, 이미 작성된 계획이 현재 스펙/코드/소비자 경로 기준으로
+구현 가능한지 확인한다.
+
+검토 항목:
+
+- scope fit: 이슈가 하나의 계약 또는 작은 구현 단위로 닫히는가
+- file map: 수정 파일, 호출자/소비자, generated artifact가 빠지지 않았는가
+- task sequence: 작업이 작은 검증 단위로 나뉘었는가
+- risk flags: lifecycle, contract-drift, generated-artifact-sync, mutable-config, health-path, multi-consumer
+- verification: 실행 가능한 검증 명령과 inferred check가 구분되어 있는가
+- stop conditions: 스펙 충돌, 영향 범위 확장, failing check 불명확 등이 명시되어 있는가
+
+`@code-reviewer`가 Plan Review를 수행해야 하는 조건:
 
 - API, CLI, schema, field rename 가능성
 - cache, invalidate, reconnect, mutable config, health-path 신호
@@ -263,9 +276,13 @@ Lane 전환 규칙:
 
 판정:
 
-- `ready`: 구현 진행 가능
-- `caution`: 구현 진행 가능하나 주의사항을 Done criteria로 승격
-- `blocked`: 구현 시작 금지
+- `approve-implement`: 계획대로 구현 가능
+- `revise-plan`: 구현 전 Plan Preflight 또는 이슈 본문 보강 필요
+- `narrow-scope`: 범위를 줄인 계획으로 구현 가능
+- `split-issue`: 이슈 분리 필요
+- `invoke-human`: 스펙/정책/운영 판단 필요
+
+`approve-implement` 또는 `narrow-scope`가 아니면 구현으로 넘기지 않는다.
 
 ## 8. `/implement-issue` 분석
 
@@ -282,20 +299,7 @@ Lane 전환 규칙:
 7. 담당 개발 에이전트를 결정한다.
 8. 관련 코드와 소비자 경로를 읽는다.
 
-## 9. 경량 계획 작성
-
-구현 전에 아래 다섯 가지를 짧게 정리한다.
-
-1. 파일 맵
-2. 작업 분해
-3. risk flags
-4. verification plan
-5. stop conditions
-
-조건부 계획 리뷰가 필요한 경우에는 구현 전에 `@code-reviewer`를 호출한다.
-`approve-implement` 또는 `narrow-scope`가 아니면 구현하지 않는다.
-
-## 10. 구현 착수 기록
+## 9. 구현 착수 기록
 
 이슈에 `🤖 구현 착수` 코멘트를 남긴다.
 
@@ -304,11 +308,11 @@ Lane 전환 규칙:
 - 담당 에이전트
 - 변경 대상
 - base 브랜치
-- 계획 리뷰 결과
+- Plan Review verdict
 - risk flags
 - 사전 리뷰 verdict와 핵심 주의사항
 
-## 11. 작업 브랜치와 worktree 구현
+## 10. 작업 브랜치와 worktree 구현
 
 원칙:
 
@@ -329,7 +333,7 @@ Lane 전환 규칙:
 
 개발 에이전트는 구현, 로컬 검증, push까지 수행한다.
 
-## 12. 로컬 검증과 push
+## 11. 로컬 검증과 push
 
 개발 에이전트는 변경 범위에 맞는 로컬 검증을 수행한다.
 
@@ -343,7 +347,7 @@ Lane 전환 규칙:
 
 검증 후 원격 브랜치에 push한다.
 
-## 13. Codex 브랜치 리뷰
+## 12. Codex 브랜치 리뷰
 
 PR 생성 전 최신 브랜치 HEAD는 반드시 `codex-branch-review`를 통과해야 한다.
 
@@ -358,7 +362,7 @@ PR 생성 전 최신 브랜치 HEAD는 반드시 `codex-branch-review`를 통과
 - 같은 risk class가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출한다.
 - 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
 
-## 14. PR 생성
+## 13. PR 생성
 
 조건:
 
@@ -372,7 +376,7 @@ PR 본문:
 
 PR 생성 후 이슈에 `🤖 PR 생성 완료` 코멘트를 남긴다.
 
-## 15. PR 승인과 자동 재수정
+## 14. PR 승인과 자동 재수정
 
 PR 생성 후 GitHub automation이 수행한다.
 
@@ -390,7 +394,7 @@ PR 생성 후 GitHub automation이 수행한다.
 - 자동 재수정 결과가 `NO_CHANGES`면 성공으로 보지 않고 메타 리뷰 또는 수동 확인으로 올린다.
 - content 재수정 10회 소진 시 `blocked:pr-review-loop` 라벨을 붙인다.
 
-## 16. Merge gate와 auto-merge
+## 15. Merge gate와 auto-merge
 
 Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 
@@ -404,7 +408,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 
 모두 green이면 GitHub auto-merge가 머지한다.
 
-## 17. Post-merge와 이슈 정리
+## 16. Post-merge와 이슈 정리
 
 머지 후 처리:
 
@@ -415,7 +419,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 
 `/autopilot`은 merge/post-merge 확인 전에는 다음 이슈로 넘어가지 않는다.
 
-## 18. Review-loop 중단 지점
+## 17. Review-loop 중단 지점
 
 현재 런북에 이미 존재하는 중단 지점:
 
@@ -433,7 +437,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 - stale follow-up 이슈를 닫고 새 dependency graph로 재등록하는 절차
 - GitHub Actions 반복 대기보다 로컬 재현과 스펙 정렬을 우선하는 기준
 
-## 19. Review-loop recovery 초안 위치
+## 18. Review-loop recovery 초안 위치
 
 앞으로 정식 런북으로 만들 후보:
 
@@ -444,7 +448,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 - `.agent/commands/implement-issue.md`
 - `.agent/commands/autopilot.md`
 
-## 20. 현재 합의된 핵심 변경점
+## 19. 현재 합의된 핵심 변경점
 
 기존에는 1단계를 "스펙 최신화 -> 이슈 발행 -> 코드 반영" 하나로만 표현했다.
 
@@ -454,6 +458,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 - `1B`: 이슈 발행 -> 같은 작업에서 스펙 수정과 코드 수정
 - `1B` 중 충돌이 발견되면 즉시 `1A`로 승격한다.
 - `3`: Plan Preflight로 이슈 본문을 실행 가능한 계획으로 보강한다.
+- `7`: Plan Review로 계획을 검증하고 피드백/verdict를 남긴다.
 - `6B`: Autopilot은 implementation lane이 바쁜 동안 다른 이슈의 Plan Preflight를 병렬로 수행할 수 있다.
 
 이 합의는 review-loop recovery 논의의 전제다.

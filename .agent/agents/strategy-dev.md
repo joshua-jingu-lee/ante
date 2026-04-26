@@ -4,7 +4,7 @@ description: 매매 전략 개발 에이전트. 시장 데이터 탐색, 전략 
 model: opus
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
-  - lightweight-planning
+  - plan-review
   - receive-review
 ---
 

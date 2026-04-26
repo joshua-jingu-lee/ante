@@ -13,7 +13,7 @@ $ARGUMENTS — 옵션 (생략 가능)
 
 ## 목적
 
-`/autopilot`은 직접 코드를 구현하는 명령이 아니다. 이 커맨드는 오픈 이슈 큐를 정리하고, 지금 자동으로 처리해도 되는 이슈만 골라 **한 번에 하나씩** `/implement-issue`에 넘기고, 각 이슈의 merge/post-merge까지 순차 모니터링하는 야간 배치 오케스트레이터다.
+`/autopilot`은 직접 코드를 구현하는 명령이 아니다. 이 커맨드는 오픈 이슈 큐를 정리하고, 지금 자동으로 처리해도 되는 이슈만 골라 **한 번에 하나씩** `/implement-issue`에 넘기고, 각 이슈의 merge/post-merge까지 순차 모니터링하는 야간 배치 오케스트레이터다. 다만 현재 implementation lane이 코드 수정, 리뷰, CI, merge 대기 중일 때 다른 후보 이슈에 대해 Plan Preflight만 선행 수행할 수 있다.
 
 GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
 
@@ -27,7 +27,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ## 운영 사이클
 
-`/autopilot`은 아래 3개 사이클을 **같은 이슈에 대해 순차적으로** 끝낸 뒤에만 다음 이슈로 이동한다.
+`/autopilot`은 아래 3개 사이클을 **같은 이슈에 대해 순차적으로** 끝낸 뒤에만 다음 이슈 구현으로 이동한다.
 
 1. **의견 검토 사이클**
    - `arch-review`를 재사용 또는 refresh한다.
@@ -38,6 +38,12 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 3. **머지 모니터링 사이클**
    - CI, `claude-pr-approve`, `codex-pr-approve`, auto-merge, `post-merge`까지 같은 이슈를 계속 추적한다.
    - 승인 워커의 `content` FAIL은 현재 이슈의 수정 루프 일부로 간주하며, 다음 이슈로 넘어가지 않는다.
+
+별도 선행 작업:
+
+- implementation lane이 바쁠 때 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
+- 이 선행 작업은 이슈 본문/코멘트의 실행계획 작성 또는 보강까지만 허용한다.
+- Plan Review, 코드 수정, 브랜치 생성, PR 생성은 현재 implementation lane이 종료된 뒤 해당 이슈가 실제 처리 대상으로 선택될 때 수행한다.
 
 ## 상태 코멘트 계약
 
@@ -127,6 +133,14 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ## 사전 리뷰 규칙
 
+### Plan Preflight 병렬 lane
+
+- 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
+- Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
+- Plan Preflight의 `ready`는 Plan Review로 넘길 준비가 되었다는 뜻이며, 구현 승인으로 해석하지 않는다.
+- `needs-rewrite`, `needs-spec-first`, `blocked`가 나오면 같은 배치에서 구현 대상으로 넘기지 않는다.
+- 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
+
 ### `arch-review`를 먼저 거는 경우
 
 - API / CLI / schema / field rename 가능성
@@ -142,8 +156,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ### 판정 해석
 
-- `ready`: 구현 진행 가능
-- `caution`: 구현 진행 가능하나 주의사항 또는 테스트 follow-up을 반드시 반영
+- `ready`: `/implement-issue` 인계 가능
+- `caution`: `/implement-issue` 인계 가능하나 주의사항 또는 테스트 follow-up을 반드시 반영
 - `blocked`: autopilot이 구현을 시작하지 않고 다음 이슈로 이동
 
 `ready` / `caution`은 모두 다음 사이클(`/implement-issue`)로 이어져야 한다. `caution` 항목은 착수 코멘트와 구현 프롬프트의 **필수 반영 체크리스트**로 넘기고, `blocked`만 보류 사유가 된다.

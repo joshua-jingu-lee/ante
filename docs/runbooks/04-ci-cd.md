@@ -7,9 +7,14 @@
 ## 1. 파이프라인 개요
 
 ```
-Claude 구현 (worktree 격리)
+Claude 구현 준비
   │
-  ├── 조건부 계획 리뷰 (`@code-reviewer`, 필요 시)
+  ├── Plan Preflight (이슈 계획 작성/보강)
+  │
+  ├── Plan Review (`@code-reviewer`, 고위험 시)
+  │
+  ▼
+Claude 구현 (worktree 격리)
   │
   ├── 로컬 lint / test
   │
@@ -95,7 +100,7 @@ post-merge automation
 **목적**: approve / fail 판정보다 앞서 계획 적합성과 구조 리스크를 좁힌다.
 
 - **트리거**:
-  - 구현 시작 전 경량 계획에서 고위험 조건 감지
+  - Plan Review에서 고위험 조건 감지
   - 고위험 변경
   - 같은 `risk class` failure 2회 반복
 - **실행 주체**: Claude 오케스트레이터 또는 수동 호출

@@ -1,6 +1,6 @@
 # 07. 리뷰 및 머지 게이트
 
-> Claude 구현 + 조건부 계획 리뷰 + Codex 사전 리뷰 + Claude/Codex 이중 승인 + GitHub auto-merge 구조를 정의한다.
+> Claude 구현 + Plan Review + Codex 사전 리뷰 + Claude/Codex 이중 승인 + GitHub auto-merge 구조를 정의한다.
 
 ---
 
@@ -8,22 +8,23 @@
 
 이 문서는 네 가지를 분리한다.
 
-1. **조건부 계획 리뷰**: 구현 시작 전 고위험 이슈의 계획 적합성 확인
+1. **Plan Review**: Plan Preflight가 작성한 계획을 구현 시작 전에 검증하고 피드백 제공
 2. **Codex 브랜치 리뷰**: PR 전 사전 품질 게이트
 3. **Claude/Codex PR 승인**: PR head SHA 기준 최종 승인
 4. **Merge Gate**: 승인과 CI 결과를 종합해 실제 머지 가능 여부만 판단
 
-## 2. 조건부 계획 리뷰
+## 2. Plan Review
 
 ### 2.1 성격
 
 - GitHub status check가 아니다.
-- 구현 전에만 거는 사전 게이트다.
-- `implement-issue` 오케스트레이터가 경량 계획을 만든 뒤 필요할 때만 `@code-reviewer`를 호출한다.
+- 구현 전에만 거는 계획 검증 단계다.
+- Plan Preflight는 계획을 작성하고, Plan Review는 그 계획이 구현 가능한지 검토한다.
+- 저위험 이슈는 오케스트레이터가 검토할 수 있고, 고위험 이슈는 `@code-reviewer`가 Plan Review를 수행한다.
 
-### 2.2 트리거
+### 2.2 `@code-reviewer` 트리거
 
-아래 조건이 하나라도 맞으면 계획 리뷰를 강제한다.
+아래 조건이 하나라도 맞으면 `@code-reviewer` Plan Review를 강제한다.
 
 - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
 - endpoint / schema / field / CLI rename
@@ -34,19 +35,21 @@
 
 ### 2.3 결과
 
-`@code-reviewer`는 아래 중 하나를 반환한다.
+Plan Review는 아래 중 하나를 반환한다.
 
 - `approve-implement`
+- `revise-plan`
 - `narrow-scope`
 - `split-issue`
 - `invoke-human`
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
+`revise-plan`은 Plan Preflight 또는 이슈 본문을 보강한 뒤 다시 Plan Review를 받아야 한다.
 
 ### 2.4 책임
 
-이 단계의 `@code-reviewer`는 approve / fail 상태 체크를 남기지 않는다.
-대신 구현을 지금 시작해도 되는지, 범위를 줄여야 하는지, 아예 이슈를 나눠야 하는지를 판단한다.
+이 단계는 approve / fail 상태 체크를 남기지 않는다.
+대신 계획이 구현 가능한지, 어떤 피드백을 반영해야 하는지, 범위를 줄이거나 이슈를 나눠야 하는지를 판단한다.
 
 ## 3. Codex 브랜치 리뷰
 

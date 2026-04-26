@@ -6,7 +6,7 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 isolation: worktree
 skills:
   - frontend-conventions
-  - lightweight-planning
+  - plan-review
   - receive-review
 ---
 

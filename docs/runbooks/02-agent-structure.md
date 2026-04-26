@@ -18,7 +18,7 @@
 
 **역할**:
 - 작업 분석과 분해
-- 경량 계획 체크리스트 작성과 조건부 계획 리뷰 여부 판단
+- Plan Preflight 산출물 확인과 Plan Review 조율
 - 야간 `/autopilot` 배치에서 이슈 큐 snapshot, 선행 리뷰 증적, 구현 위임, merge 모니터링 조율
 - 적절한 Claude 서브에이전트 위임
 - 이슈/브랜치/PR GitHub 기록 관리
@@ -35,7 +35,7 @@
 **담당**: Python 백엔드 구현
 
 - `docs/specs/` 설계 문서를 따라 구현, 테스트 작성, 로컬 검증, 브랜치 push까지 수행
-- 조건부 계획 리뷰가 required면 verdict가 나기 전까지 구현을 시작하지 않음
+- Plan Review verdict가 나기 전까지 구현을 시작하지 않음
 - Codex 브랜치 리뷰 또는 PR 승인 실패 시 같은 브랜치에서 수정
 
 ### 1.3 프론트엔드 개발자 (`@frontend-dev`)
@@ -58,18 +58,19 @@
 
 ### 1.6 코드 리뷰어 (`@code-reviewer`)
 
-**담당**: 조건부 계획 리뷰, 계획 정합성 검토, 구조 리스크 메타 리뷰, 반복 review failure 원인 분석
+**담당**: 고위험 Plan Review, 계획 정합성 검토, 구조 리스크 메타 리뷰, 반복 review failure 원인 분석
 
 - `review-pr.md`와 역할이 겹치지 않는다.
 - PR 승인 워커처럼 approve / fail 게이트를 직접 집행하지 않는다.
 - 대신 아래 상황에서 오케스트레이터가 호출한다.
-  - 구현 시작 전 경량 계획 체크리스트에서 고위험 조건이 감지
+  - Plan Review에서 고위험 조건이 감지
   - 캐시, 세션, 연결, long-lived adapter, mutable config 변경
   - OpenAPI, 생성 타입, 생성 문서, schema drift 위험
   - 같은 `risk class` failure가 2회 반복
   - PR 자동 재수정 전에 "무엇을 먼저 고쳐야 하는지"가 불명확
-- 조건부 계획 리뷰 verdict:
+- Plan Review verdict:
   - `approve-implement`
+  - `revise-plan`
   - `narrow-scope`
   - `split-issue`
   - `invoke-human`
@@ -102,7 +103,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 │   ├── frontend-dev.md        # @frontend-dev
 │   ├── devops.md              # @devops
 │   ├── strategy-dev.md        # @strategy-dev
-│   └── code-reviewer.md       # @code-reviewer — 조건부 계획 리뷰 / 구조 리스크 메타 리뷰
+│   └── code-reviewer.md       # @code-reviewer — 고위험 Plan Review / 구조 리스크 메타 리뷰
 ├── commands/              # 커스텀 슬래시 명령어 (작업 절차 SSOT)
 │   ├── implement-issue.md     # /implement-issue
 │   ├── autopilot.md           # /autopilot
@@ -114,7 +115,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
     ├── sqlite-patterns.md
     ├── frontend-conventions.md
     ├── review-pr.md           # PR 승인 공통 체크리스트 계약
-    ├── lightweight-planning.md
+    ├── plan-review.md
     ├── receive-review.md
     ├── lifecycle-review.md    # 캐시/세션/연결/설정 변경 리뷰
     ├── contract-drift-review.md
@@ -144,11 +145,11 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 | 에이전트 | 기본 effort | 높여야 하는 경우 | 낮춰도 되는 경우 |
 |------|------|------|------|
-| `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, 조건부 계획 리뷰 required | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
+| `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, Plan Review 고위험 판정 | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
 | `@frontend-dev` | `high` | API 계약 변경, 생성 타입 동기화, 다중 페이지 상태 흐름, 대규모 화면 리팩터링 | 스타일·문구·단일 컴포넌트 수정 |
 | `@devops` | `high` | CI/CD, 인증, secret, release, merge automation, 운영 스크립트 변경 | 문서성 변경, 작은 경로 수정 |
 | `@strategy-dev` | `xhigh` (`max`) | 새 전략 설계, 파라미터 탐색, 지표 해석, 백테스트 결과 비교 | 단순 validation rerun, 리포트 포맷 정리 |
-| `@code-reviewer` | `xhigh` (`max`) | 반복 risk class failure, lifecycle/contract drift, 범위 축소/이슈 분할/사람 에스컬레이션 판단 | 조건부 계획 리뷰가 명확하고 범위가 매우 국소적인 경우 |
+| `@code-reviewer` | `xhigh` (`max`) | 반복 risk class failure, lifecycle/contract drift, 범위 축소/이슈 분할/사람 에스컬레이션 판단 | Plan Review 범위가 명확하고 매우 국소적인 경우 |
 
 - `@code-reviewer`만 항상 더 무겁게 두는 것이 아니라, **고위험 백엔드/DevOps 작업도 `xhigh`까지 올릴 수 있다.**
 - 반대로 `low`는 품질 게이트 판단보다는 **정형 실행·수집 작업**에 한정한다.
@@ -157,7 +158,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 반복적인 개발 작업을 슬래시 명령으로 정의한다:
 
-- `/implement-issue #{번호}` — 분석 → 경량 계획 → 조건부 계획 리뷰(필요 시) → 구현 → Codex 브랜치 리뷰 → PR 생성
+- `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성
 - `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/api-docs` — OpenAPI 스키마 조회
 - `/arch-review` — 이슈 사전 점검용 보조 커맨드
@@ -171,7 +172,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
   - `github-auth`
   - `github-ops`
 - **구현 품질 보조 스킬**:
-  - `lightweight-planning`
+  - `plan-review`
   - `receive-review`
 - **리뷰 세부 플레이북**:
   - `lifecycle-review`
@@ -179,7 +180,8 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
   - `generated-artifact-sync`
 
 `review-pr.md`는 Claude/Codex PR 승인 워커가 공유하는 최종 승인 계약 문서다.
-`code-reviewer.md`는 그보다 앞단의 조건부 계획 리뷰 / 구조 리스크 메타 리뷰 정의다.
+`plan-review.md`는 Plan Preflight가 작성한 계획을 구현 전에 검증하는 계약 문서다.
+`code-reviewer.md`는 고위험 Plan Review / 구조 리스크 메타 리뷰 정의다.
 
 ### 2.5 권한 및 Hooks (settings.json)
 
