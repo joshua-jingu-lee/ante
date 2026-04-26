@@ -43,6 +43,9 @@ Claude 오케스트레이터
   ├── Plan Preflight (`superpowers:writing-plans` 원칙)
   │         ├── 시작 → `plan-preflight:started` 라벨 부착
   │         ├── 이슈 본문에 구현계획 작성/정비
+  │         ├── 파일 맵 / 작업 순서 / risk flags
+  │         ├── 구현 체크리스트 / 검증 체크리스트
+  │         ├── stop conditions / 비목표
   │         ├──▶ Codex Plan Review (`/codex:adversarial-review`)
   │         │       ├── PASS: approve-implement / narrow-scope
   │         │       └── FAIL: revise-plan / split-issue / invoke-human
@@ -53,11 +56,6 @@ Claude 오케스트레이터
   │         ├── 확정 → `plan-preflight:started` 제거 + `plan-preflight:done` 라벨 부착
   │         ├── needs-spec-first → Spec-First 경로로 전환
   │         └── split-issue / invoke-human / blocked → 구현 중단
-  │
-  ├── 이슈 본문 구현계획 확정
-  │         ├── 파일 맵 / 작업 순서 / risk flags
-  │         ├── 구현 체크리스트 / 검증 체크리스트
-  │         └── stop conditions / 비목표
   │
   ├── 착수 기록: 이슈 코멘트
   │
