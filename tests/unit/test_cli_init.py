@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
 import stat
@@ -41,6 +42,13 @@ def _mock_bootstrap(*args, **kwargs):
 def _mock_create_test_account(*args, **kwargs):
     """_create_test_account mock — test account dict 반환."""
     return _MOCK_TEST_ACCOUNT
+
+
+def _split_stderr_runner() -> CliRunner:
+    """Click 8.1/8.3 양쪽에서 stderr 분리 캡처를 요청한다."""
+    if "mix_stderr" in inspect.signature(CliRunner).parameters:
+        return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 def _patch_init(*, master_exists: bool = False, test_account_exists: bool = False):
@@ -411,8 +419,8 @@ class TestInitFiveStateGuard:
         bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
         create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock"))
 
-        # mix_stderr=False로 stdout/stderr 분리
-        runner_split = CliRunner(mix_stderr=False)
+        # Click 버전별 stderr 캡처 API 차이를 흡수한다.
+        runner_split = _split_stderr_runner()
 
         with (
             patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
@@ -888,7 +896,7 @@ class TestInitCredentialsSingleEmission:
     ):
         """JSON 성공 경로 — stderr에 master_bootstrap_complete 이벤트 없음."""
         target = tmp_path / "config"
-        runner_split = CliRunner(mix_stderr=False)
+        runner_split = _split_stderr_runner()
 
         bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
         create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
@@ -932,7 +940,7 @@ class TestInitCredentialsSingleEmission:
     def test_json_failure_preserves_credentials_in_stderr(self, runner, tmp_path):
         """JSON 실패 경로 — stderr에 master_bootstrap_complete 이벤트(비밀값 포함)."""
         target = tmp_path / "config"
-        runner_split = CliRunner(mix_stderr=False)
+        runner_split = _split_stderr_runner()
 
         bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
         create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock"))
@@ -958,10 +966,11 @@ class TestInitCredentialsSingleEmission:
         # stderr에 master_bootstrap_complete 이벤트 (복구 수단)
         assert "master_bootstrap_complete" in result.stderr
         # stdout에는 에러 payload, 비밀값 미포함
-        assert _MOCK_TOKEN not in result.output, (
-            f"JSON 실패 payload(stdout)에 토큰 포함: {result.output!r}"
+        stdout = result.stdout
+        assert _MOCK_TOKEN not in stdout, (
+            f"JSON 실패 payload(stdout)에 토큰 포함: {stdout!r}"
         )
-        assert _MOCK_RECOVERY_KEY not in result.output
+        assert _MOCK_RECOVERY_KEY not in stdout
         # stderr에는 비밀값 정확히 1회
         assert result.stderr.count(_MOCK_TOKEN) == 1
         assert result.stderr.count(_MOCK_RECOVERY_KEY) == 1
