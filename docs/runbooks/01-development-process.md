@@ -148,59 +148,18 @@ Codex Plan Review의 출력은 다음 중 하나다.
 
 ### 4.2 브랜치 전략
 
-> Git 컨벤션 상세: [03-git-workflow.md](03-git-workflow.md)
+브랜치 prefix, PR 전제 조건, 에픽 브랜치 정렬 규칙의 SSOT는 [03-git-workflow.md](03-git-workflow.md)다.
+이 문서에서는 원칙만 둔다.
 
-**독립 이슈**:
-
-```
-main
-  └─ {branch-prefix}/#{issue번호}-{짧은설명}
-       ├─ 구현 + push
-       ├─ /codex:review --base main PASS
-       └─ PR → main → auto-merge
-```
-
-`branch-prefix`는 [03-git-workflow.md 섹션 1.2](03-git-workflow.md#12-이슈-타입과-브랜치-prefix-매핑)의 canonical 매핑을 따른다.
-
-**에픽 이슈**:
-
-```
-main
-  └─ epic/#{에픽번호}-{짧은설명}
-       ├─ feat/#{하위1} → Codex 브랜치 리뷰 → PR → epic/*
-       ├─ feat/#{하위2} → Codex 브랜치 리뷰 → PR → epic/*
-       └─ feat/#{하위3} → Codex 브랜치 리뷰 → PR → epic/*
-     epic 브랜치 자체도 최종 PR 전에 Codex 브랜치 리뷰를 거친다.
-```
-
-### 4.2.1 에픽 하위 브랜치 정렬 규칙
-
-- 에픽 구현은 통합용 `epic/*` 브랜치 1개와 하위 이슈별 작업 브랜치를 분리한다.
-- 에픽과 하위 이슈를 하나의 공용 작업 브랜치에 순차 누적하지 않는다.
-- sibling PR이 `epic/*`에 머지되면, 아직 열려 있는 다른 하위 이슈 브랜치는 다음 push 전에 최신 에픽 기준으로 재정렬한다.
-- 최소 확인 절차:
-  - `git fetch origin`
-  - `git rebase origin/epic/#{에픽번호}-{짧은설명}` 또는 필요 시 새 브랜치 재생성
-  - `git cherry -v origin/epic/#{에픽번호}-{짧은설명} HEAD`
-  - rebase/히스토리 정리 전후 차이를 확인해야 하면 `git range-diff <정리 전 브랜치> <정리 후 브랜치>`
-- 중복 커밋, stale base, base regression이 보이면 PR 생성이나 리뷰 재시도보다 히스토리 정리를 먼저 수행한다.
+- 독립 이슈는 `{branch-prefix}/#{issue번호}-{짧은설명}` 브랜치에서 작업하고 `main`으로 PR을 낸다.
+- 에픽은 통합용 `epic/*` 브랜치와 하위 이슈별 작업 브랜치를 분리한다.
+- PR 생성 전 최신 HEAD는 내부 `/codex:review --base <base>` PASS 증적을 가져야 한다.
+- stale base, duplicate commit, base regression이 보이면 PR 생성이나 리뷰 재시도보다 히스토리 정리를 먼저 한다.
 
 ### 4.3 Worktree 격리
 
-모든 구현 작업은 **git worktree**로 격리하여 로컬 main을 보호한다.
-
-| 상황 | Worktree 사용 |
-|------|:------------:|
-| 독립 모듈 병렬 구현 | O |
-| 에픽 하위 이슈 병렬 구현 | O |
-| 의존성 있는 순차 구현 | O |
-| PR 승인 실패 후 재수정 | O (같은 이슈 브랜치 재사용) |
-
-### 4.3.1 공유 `.venv` 사용 시 재현성 주의
-
-- 여러 worktree가 하나의 editable install을 공유하면, 현재 작업 중인 worktree가 아닌 다른 worktree의 `src/ante`를 잘못 import할 수 있다.
-- 로컬 검증 전 `pip show ante`로 editable project location을 확인한다.
-- 대상 worktree에서만 검증해야 할 때는 `PYTHONPATH=$PWD/src`를 명시하거나 editable install을 현재 worktree 기준으로 다시 맞춘다.
+모든 구현 작업은 **git worktree**로 격리하여 로컬 main을 보호한다. 생성·재사용·정리 절차의 SSOT는 `/implement-issue`와 [03-git-workflow.md](03-git-workflow.md)다.
+공유 `.venv`를 쓰는 경우 로컬 검증이 현재 worktree의 `src/ante`를 import하는지 확인한다.
 
 ## 5. 실패 복구 루프
 
@@ -258,57 +217,21 @@ main
 
 ## 7. 생성 문서 동기화 규칙
 
-`docs/architecture/generated/` 하위 문서는 소스 코드에서 추출한 정보를 정리한 것이다. 해당 소스가 변경되면 반드시 생성 문서도 함께 갱신한다.
+생성 문서와 스크립트의 SSOT는 [docs/architecture/generated/](../architecture/generated/) 및 각 생성 스크립트다.
+이 문서에서는 원칙만 둔다.
 
-| 생성 문서 | 갱신 트리거 | 대상 소스 | 갱신 방법 |
-|-----------|-----------|----------|----------|
-| `guide/cli.md` | 명령어 추가/삭제, 인자·옵션·scope 변경 | `src/ante/cli/commands/` | `python scripts/generate_cli_reference.py` |
-| `docs/architecture/generated/db-schema.md` | CREATE TABLE / CREATE INDEX 변경, 테이블 추가/삭제 | `src/ante/**/` 내 `_DDL` 상수 | `python scripts/generate_db_schema.py` |
-| `docs/architecture/generated/project-structure.md` | 디렉토리·모듈 추가/삭제/이동 | 프로젝트 디렉토리 트리 | 수동 편집 |
-
-### 7.1 자동 생성 스크립트
-
-| 문서 | 스크립트 | 비고 |
-|------|---------|------|
-| `guide/cli.md` | `python scripts/generate_cli_reference.py` | 스크립트가 SSOT이며 수동 편집 금지 |
-| `docs/architecture/generated/db-schema.md` | `python scripts/generate_db_schema.py` | 스크립트가 SSOT이며 수동 편집 금지 |
-| `docs/architecture/generated/project-structure.md` | 미구현 | 디렉토리 구조 변경 시 수동 편집 |
-
-### 7.2 갱신 규칙
-
-- **CLI 변경 시**: `guide/cli.md`를 재생성한다.
-- **DDL 변경 시**: `db-schema.md`를 재생성한다.
-- **디렉토리 구조 변경 시**: `project-structure.md`를 갱신한다.
-- **API 엔드포인트**: Swagger UI(`/docs`)에 자동 반영되므로 별도 문서 갱신은 불필요하다.
+- CLI, DB DDL, 프로젝트 구조처럼 생성 산출물의 입력이 바뀌면 해당 생성 문서도 같은 작업에서 갱신한다.
+- 스크립트로 생성되는 문서는 수동 편집하지 않는다.
+- Plan Preflight와 리뷰 단계에서 generated artifact sync 위험을 발견하면 구현 체크리스트에 포함한다.
 
 ## 8. API 스키마 변경 규칙
 
-API 응답 스키마(`src/ante/web/schemas.py`의 Pydantic 모델)는 백엔드와 프론트엔드 양쪽에 영향을 미치는 계약(contract)이다. 스키마 변경은 별도 이슈로 분리하여 양쪽 영향을 통제한다.
+API 스키마 계약의 상세 SSOT는 [docs/dashboard/architecture.md](../dashboard/architecture.md), `src/ante/web/schemas.py`, OpenAPI 생성물이다.
+이 문서에서는 프로세스 원칙만 둔다.
 
-### 8.1 스키마 변경 = 별도 이슈
-
-- `src/ante/web/schemas.py`의 Pydantic 모델 추가·수정·삭제는 **구현 이슈와 분리하여 별도 이슈로 등록**한다.
-- 구현 이슈 진행 중 스키마 변경이 필요하다고 판단되면, 해당 이슈 안에서 직접 변경하지 않고 새 이슈를 발행한다.
-- 스키마 변경 이슈와 구현 이슈 사이에 의존성을 명시한다.
-
-### 8.2 오케스트레이터 검증
-
-- 오케스트레이터는 구현 요청에 API 스키마 변경이 포함되어 있는지 감지한다.
-- 스키마 변경이 감지되면, 스키마 변경을 별도 이슈로 분리하도록 안내한다.
-- API 스키마 변경 이슈는 오케스트레이터가 **백엔드·프론트엔드 양쪽 영향**을 확인한 뒤 진행한다.
-
-### 8.3 백엔드 규칙
-
-- 모든 새 엔드포인트는 반드시 `response_model`을 명시한다.
-- `dict`를 직접 반환하는 것은 금지한다.
-- 기존 `response_model` 변경은 별도 스키마 변경 이슈를 거친다.
-
-### 8.4 프론트엔드 규칙
-
-- API 응답 타입은 `openapi-typescript`로 자동 생성된 `api.generated.ts`에서만 import한다.
-- 수동으로 API 응답 인터페이스를 정의하지 않는다.
-- 스키마 변경 이슈가 머지되면 `npm run generate-types`로 타입을 재생성한다.
-- 백엔드에 존재하지 않는 API를 프론트엔드에서 임의로 만들지 않는다.
+- API 응답 스키마 변경은 백엔드와 프론트엔드 양쪽에 영향을 주는 계약 변경으로 본다.
+- 구현 이슈 진행 중 스키마 변경이 드러나면 Plan Preflight에서 별도 이슈 분리 또는 `needs-spec-first` 전환을 판단한다.
+- 새 엔드포인트와 응답 변경은 생성 타입 동기화까지 검증 계획에 포함한다.
 
 ## 9. AGENTS.md 경량화 원칙
 
