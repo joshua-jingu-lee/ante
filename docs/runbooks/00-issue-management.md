@@ -209,6 +209,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - `plan-preflight:done`은 Plan Preflight가 끝났고, Codex Plan Review의 `approve-implement` 또는 `narrow-scope` verdict가 반영되어 이슈 본문 구현계획이 최신 상태로 확정됐다는 뜻이다.
 - Plan Preflight를 시작할 때는 `plan-preflight:started`를 붙이고 `plan-preflight:done`은 제거한다.
 - 구현계획을 확정할 때는 이슈 본문을 최신 계획으로 갱신한 뒤 `plan-preflight:started`를 제거하고 `plan-preflight:done`을 붙인다.
+- Plan Preflight 실행 절차의 SSOT는 `/plan-preflight`다.
 - `/autopilot`과 `/implement-issue`는 `plan-preflight:done`이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건이 이후 바뀌었는지 확인한다.
 - Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이거나 구현계획이 stale하면 `plan-preflight:done`을 제거한다.
 - 보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.

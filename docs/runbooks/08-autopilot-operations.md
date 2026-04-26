@@ -91,6 +91,7 @@ autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
 
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 GitHub 이슈 본문을 실행 가능한 계획으로 보강하거나 전면 재작성한다.
+- Plan Preflight 절차의 SSOT는 `.agent/commands/plan-preflight.md`이며, autopilot은 직접 다른 절차를 만들지 않고 `/plan-preflight #{번호}`를 호출한다.
 - Plan Preflight를 시작하면 `plan-preflight:started` 라벨을 붙이고 `plan-preflight:done`은 제거한다.
 - Plan Preflight는 Codex Plan Review를 요청하고, `approve-implement` 또는 `narrow-scope` 피드백을 이슈 본문 구현계획에 반영한 뒤에만 완료된다.
 - 완료 시 이슈 본문 구현계획을 최신화하고 `plan-preflight:started`를 제거한 뒤 `plan-preflight:done` 라벨을 붙인다.
@@ -133,7 +134,7 @@ autopilot은 필요 시 구현 전에 아키텍처 리뷰 증적을 남긴다.
 ### 5.1 의견 검토 사이클
 
 - `arch-review` 최신 verdict를 재사용하거나 refresh한다.
-- `plan-preflight:done` 라벨이 없거나 stale이면 Plan Preflight를 먼저 수행한다.
+- `plan-preflight:done` 라벨이 없거나 stale이면 `/plan-preflight #{번호}`를 먼저 수행한다.
 - `ready` / `caution` verdict에서 나온 주의사항, 테스트 follow-up, 금지할 확장을 구현 체크리스트로 정리한다.
 - `blocked`만 같은 배치의 보류 사유가 된다.
 

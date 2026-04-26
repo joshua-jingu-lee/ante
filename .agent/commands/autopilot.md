@@ -42,7 +42,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 별도 선행 작업:
 
 - implementation lane이 바쁠 때 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
-- 이 선행 작업은 이슈 본문 구현계획 작성/보강, Codex Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지만 허용한다.
+- 이 선행 작업은 `/plan-preflight #{번호}`로 수행하며, 이슈 본문 구현계획 작성/보강, Codex Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지만 허용한다.
 - Plan Preflight를 시작하면 `plan-preflight:started`를 붙이고, 구현계획이 확정되면 이슈 본문을 최신화한 뒤 `plan-preflight:done`으로 교체한다.
 - 코드 수정, 브랜치 생성, PR 생성은 현재 implementation lane이 종료된 뒤 해당 이슈가 실제 처리 대상으로 선택될 때 수행한다.
 
@@ -143,6 +143,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
+- Plan Preflight 절차의 SSOT는 `.agent/commands/plan-preflight.md`이며, autopilot은 직접 다른 절차를 만들지 않고 `/plan-preflight #{번호}`를 호출한다.
 - Plan Preflight를 시작하면 `plan-preflight:started` 라벨을 붙이고 `plan-preflight:done`은 제거한다.
 - Plan Preflight는 Codex Plan Review를 요청하고, `approve-implement` 또는 `narrow-scope` 피드백을 이슈 본문 구현계획에 반영한 뒤에만 완료된다.
 - 완료 시 `plan-preflight:started`를 제거하고 `plan-preflight:done` 라벨을 붙여 다음 `/autopilot` 또는 `/implement-issue`가 확정 계획으로 재사용할 수 있게 한다.
@@ -223,7 +224,7 @@ done
 6. 기존 리뷰 증적 재사용 또는 신규 리뷰 실행
 
 최신 사전 리뷰에 `verdict:`가 없거나, 오래된 `blocked` verdict가 최신 이슈 상태를 반영하지 못하면 refresh 리뷰를 먼저 남긴 뒤 그 결과를 사용한다.
-`plan-preflight:done` 라벨이 없거나 stale이면 Plan Preflight를 먼저 수행하고, 이슈 본문 구현계획이 확정되어 `plan-preflight:done`이 된 뒤에만 `/implement-issue`로 넘긴다.
+`plan-preflight:done` 라벨이 없거나 stale이면 `/plan-preflight #{번호}`를 먼저 수행하고, 이슈 본문 구현계획이 확정되어 `plan-preflight:done`이 된 뒤에만 `/implement-issue`로 넘긴다.
 
 이 단계에 진입하면 이슈의 최신 `🤖 **Autopilot 사이클 상태**` 코멘트를 `current-cycle=review`, `review-state=running`으로 맞춘다.
 

@@ -58,9 +58,10 @@ mkdir -p "$WORKTREE_ROOT"
    - 양쪽 모두 변경 → 백엔드 먼저, 프론트엔드 후속
 4. **기존 코드 파악**: 이슈가 기존 모듈 수정을 포함하면 관련 소스를 먼저 읽고 영향 범위를 파악한다.
 
-4a. **Plan Preflight 구현계획 작성/정비**: 구현 전에 이슈 본문에 실행 가능한 구현계획이 있는지 확인하고, 없거나 부족하면 이슈 본문을 작성 또는 정비한다.
+4a. **Plan Preflight 구현계획 작성/정비**: 구현 전에 이슈 본문에 실행 가능한 구현계획이 있는지 확인하고, 없거나 부족하거나 stale하면 `/plan-preflight #{번호}`를 먼저 실행한다.
 
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
+- Plan Preflight 절차의 SSOT는 `.agent/commands/plan-preflight.md`다.
 - 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
 - 이슈 본문의 구현계획에는 파일 맵, 작업 순서, risk flags, 구현 체크리스트, 검증 체크리스트, stop conditions, 비목표를 포함한다.
 - 이슈에 `plan-preflight:done` 라벨이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건 변경으로 stale하지 않은지 확인한다.

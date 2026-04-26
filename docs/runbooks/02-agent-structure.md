@@ -151,6 +151,7 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
 
 반복적인 개발 작업을 슬래시 명령으로 정의한다:
 
+- `/plan-preflight #{번호}` — 이슈 본문 구현계획 작성/정비 → Codex Plan Review → `plan-preflight:done` 확정
 - `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성
 - `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 `arch-review` → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/api-docs` — OpenAPI 스키마 조회

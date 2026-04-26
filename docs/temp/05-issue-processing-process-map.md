@@ -138,6 +138,7 @@ PR 필수 조건:
 Plan Preflight는 구현 착수 전에 GitHub 이슈 본문을 실행 가능한 구현계획으로
 보강하거나 전면 재작성하는 사전점검 단계다.
 작성한 구현계획은 Codex Plan Review를 요청해 피드백을 받은 뒤 확정한다.
+실행 절차의 SSOT는 `.agent/commands/plan-preflight.md`다.
 
 사용 기준:
 
@@ -188,7 +189,7 @@ Plan Preflight 상태/판정:
 
 두 실행 방식이 있다.
 
-1. 수동 `/implement-issue #{번호}`
+1. 수동 `/plan-preflight #{번호}` 후 `/implement-issue #{번호}`
 2. `/autopilot` 큐 처리
 
 `/autopilot`은 새 구현 절차가 아니라 큐 관리자다.
