@@ -836,6 +836,49 @@ class TestUpdateAccount:
             log for log in audit_logger.logs if log["action"] == "account.update"
         ] == []
 
+    def test_update_blocks_when_structural_without_account_service(self) -> None:
+        """AccountService 미주입 환경에서도 structural body는 503이 아니라 409.
+
+        attempt 5의 P3 회귀 보호: PUT 핸들러 시그니처가
+        ``Depends(get_account_service)``를 들고 있으면 FastAPI가 핸들러 진입
+        *전* 의존성을 평가해 service 미주입 시 503을 선행한다. 그 결과
+        structural body가 들어와도 cold-path 가드(invariant I1/I4)에 도달하지
+        못해 503이 응답된다.
+
+        attempt 6은 PUT의 ``account_service``를
+        ``request.app.state.account_service``로 lazy 해소해 structural 분기에서
+        service에 의존하지 않도록 한다. 이 테스트가 그 invariant를 직접
+        단언한다 — service 미주입 + ``credentials`` body → 409.
+        """
+        app = create_app()  # account_service 미주입
+        assert getattr(app.state, "account_service", None) is None
+        with TestClient(app) as bare_client:
+            resp = bare_client.put(
+                "/api/accounts/some-id",
+                json={"credentials": {"app_key": "x"}},
+            )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+
+    def test_update_returns_503_for_mutable_when_service_missing(self) -> None:
+        """service 미주입 + 비구조 body → 503 (attempt 6의 명시적 트레이드오프).
+
+        cold-path 가드를 통과한 분기는 ``app.state.account_service``를
+        lazy하게 가져온다. 미주입이면 503으로 응답한다 — 이 동작은 attempt 6의
+        invariant I1 회복(structural body → 409)과 짝을 이룬다.
+        """
+        app = create_app()  # account_service 미주입
+        assert getattr(app.state, "account_service", None) is None
+        with TestClient(app) as bare_client:
+            resp = bare_client.put(
+                "/api/accounts/some-id",
+                json={"name": "변경"},
+            )
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Account service not available"
+
 
 # PUT requestBody schema accuracy(mutable 모델 노출)는 issue #1143에서 처리.
 # 본 이슈는 cold-path invariant(I1~I4)와 P2(ValidationError 422)에 한정한다.

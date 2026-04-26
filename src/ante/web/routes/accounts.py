@@ -186,14 +186,14 @@ async def get_account(
                 "structural 필드 키는 422가 아닌 409로 차단된다."
             )
         },
+        503: {"description": "Account service not available"},
     },
 )
 async def update_account(
     account_id: str,
     request: Request,
-    account_service: Annotated[Any, Depends(get_account_service)],
-    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     body: dict[str, Any] | None = Body(default=None),
+    audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)] = None,
 ) -> dict[str, Any]:
     """계좌 수정.
 
@@ -256,6 +256,16 @@ async def update_account(
 
     if not fields:
         raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
+
+    # service는 비구조 분기에 도달한 뒤에만 lazy 해소한다. structural body가
+    # 들어온 경로에서는 위 가드에서 이미 409가 raise되었기 때문에 service
+    # 미주입 환경에서도 503이 선행되지 않는다(invariant I1/I4 보호 — P3 회귀).
+    account_service = getattr(request.app.state, "account_service", None)
+    if account_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Account service not available",
+        )
 
     try:
         updated = await account_service.update(account_id, **fields)

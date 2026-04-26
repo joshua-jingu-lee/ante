@@ -176,6 +176,9 @@
           },
           "422": {
             "description": "비구조(mutable) 필드 schema 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다."
+          },
+          "503": {
+            "description": "Account service not available"
           }
         }
       },

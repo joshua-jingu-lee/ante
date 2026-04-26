@@ -3360,6 +3360,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Account service not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     delete_account_api_accounts__account_id__delete: {
