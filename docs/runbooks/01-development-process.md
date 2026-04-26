@@ -161,7 +161,8 @@ Codex Plan Review의 출력은 다음 중 하나다.
 
 ## 5. 실패 복구 루프
 
-구체적 절차는 `/implement-issue`, CI/CD와 리뷰 게이트 정책은 [04-ci-cd.md](04-ci-cd.md)가 SSOT이며, 이 섹션은 정책만 정의한다.
+구체적 실행 절차와 실패 임계값은 각 하위 프로세스가 SSOT다.
+이 섹션은 실패가 어느 프로세스로 돌아가야 하는지와 공통 원칙만 정의한다.
 
 | 실패 유형 | 원인 분류 | 복구 담당 | 복구 후 |
 |-----------|----------|----------|--------|
@@ -174,31 +175,26 @@ Codex Plan Review의 출력은 다음 중 하나다.
 | `codex-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
 | 수용 검증 FAIL | 기능 버그 | 오케스트레이터가 버그 이슈 등록 → Claude 개발 에이전트 | 재검증 속행 |
 
-### 5.1 재시도 규칙
+### 5.1 재시도와 중단 원칙
 
-- 동일 head SHA에 대해 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
-- 이슈 코멘트에 Codex 브랜치 리뷰 실패 횟수를 누적한다.
-- 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 본다.
-- 같은 `risk class` failure가 2회 반복되면 `@code-reviewer` 메타 리뷰를 호출하고, 그 전까지는 얕은 auto-fix만 반복하지 않는다.
-- 반복되는 구조 리스크가 현재 계획 자체의 문제로 보이면, 다시 구현을 밀기보다 Codex Plan Review 단계로 되돌린다.
-- 동일 유형의 blocking failure가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
-- `blocked:review-loop`가 최초 부착되거나, PR 자동 재수정 결과가 `NO_CHANGES`로 끝나면 얕은 자동 수정 루프를 중단하고 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
-- Codex 브랜치 리뷰에서 잡힌 이슈는 PR 생성 전에 해소해야 한다.
-- PR 승인 단계에서는 `content` 실패에 한해 Claude 자동 재수정을 최대 10회 시도한다.
-- 자동 재수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
-- `quota`, `script_error`, `auth_error`, `infra_error`는 자동 재수정 예산에 포함하지 않는다.
-- PR 승인 content 실패가 10회 재수정 후에도 해소되지 않으면 `blocked:pr-review-loop` 라벨을 붙이고 자동 재수정을 중단한다.
-- PR 승인에서 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 자동 재수정보다 `@code-reviewer` 또는 사람 개입을 우선한다.
+- 같은 head SHA에서 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
+- `/codex:review` 실패는 PR 생성 전에 같은 worktree에서 해소한다.
+- PR 승인 루프는 `content` 실패만 자동 재수정 대상으로 삼고, `quota`, `script_error`, `auth_error`, `infra_error`는 워커/인프라 복구로 분리한다.
+- 자동 수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
+- 같은 `risk class`가 반복되거나 구조 리스크가 넓어지면 얕은 자동 수정 대신 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
+- 반복 리스크가 구현계획 자체의 문제라면 `/plan-preflight`로 돌아가 이슈 본문 구현계획을 다시 정비하고 Codex Plan Review를 재요청한다.
+- `blocked:review-loop`, `blocked:pr-review-loop` 라벨은 자동 진행 중단 신호이며, 라벨 의미와 큐 제외 규칙은 [00-issue-management.md](00-issue-management.md)와 `/autopilot`을 따른다.
 
-### 5.2 승인 루프 수동 복구
+### 5.2 상세 절차의 SSOT
 
-- 같은 head SHA에서 워크플로우/러너 문제로 보이는 실패는 코드 수정 없이 `gh run rerun`을 우선한다.
-- `NO_CHANGES`는 성공이 아니라 “자동 수정이 안전한 패치를 만들지 못했다”는 신호로 해석한다.
-- `pull_request` 이벤트 자체가 누락되었거나 재트리거가 꼭 필요할 때만 PR `close → reopen`을 예외적으로 허용한다.
-- 수동 복구를 수행한 경우 PR 또는 이슈 코멘트에 다음을 남긴다.
-  - 왜 자동 루프로 복구되지 않았는지
-  - 어떤 방식으로 재트리거했는지
-  - 새 run 링크 또는 확인 근거
+| 상황 | SSOT |
+|------|------|
+| Plan Preflight 재정비와 Codex Plan Review 재요청 | `.agent/commands/plan-preflight.md` |
+| `/codex:review` 브랜치 리뷰 반복, 실패 횟수, PR 생성 전 PASS 조건 | `.agent/commands/implement-issue.md`, [03-git-workflow.md](03-git-workflow.md) |
+| PR 승인 루프, 자동 재수정 예산, `NO_CHANGES`, post-merge 복구 | [04-ci-cd.md](04-ci-cd.md) |
+| 리뷰 finding 수용, 영향 범위 재검토, 수정 전략 선택 | `.agent/skills/receive-review.md` |
+| `gh run rerun`, PR `close → reopen`, 수동 복구 코멘트 | `.agent/skills/github-ops.md` |
+| blocked 라벨 정의 | [00-issue-management.md](00-issue-management.md) |
 
 ## 6. 리뷰와 머지 게이트
 

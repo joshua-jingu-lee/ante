@@ -253,9 +253,11 @@ pytest tests/unit/ -v
 
 내부 Codex 브랜치 리뷰 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
 
-## 5. CI 실패 시 복구
+## 5. CI/승인 실패 시 복구
 
-> 상세 복구 정책: [01-development-process.md §5](01-development-process.md#5-실패-복구-루프)
+이 섹션은 CI, PR 승인, post-merge 복구 정책의 SSOT다.
+실제 명령 실행과 GitHub 코멘트 절차는 `.agent/skills/github-ops.md`를 따르고,
+구현 전 브랜치 리뷰 실행 루프는 `.agent/commands/implement-issue.md`와 [03-git-workflow.md](03-git-workflow.md)를 따른다.
 
 | 실패 게이트 | 주 원인 | 복구 담당 |
 |------------|--------|----------|
