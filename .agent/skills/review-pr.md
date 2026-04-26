@@ -31,6 +31,9 @@ PR diff를 보기 전에 먼저 아래를 맞춘다.
 3. 관련 스펙 문서
 4. 최근 branch review / approval에서 지적된 핵심 finding
 
+release PR은 예외적으로 연결 이슈가 없을 수 있다.
+이 경우 이슈 번호 대신 release PR 본문, 대상 버전, 마지막 태그, 포함 커밋, `docs/runbooks/06-release.md`를 원래 의도로 본다.
+
 이 단계의 질문은 하나다.
 
 `이 PR은 원래 무엇을 바꾸려는 것이었나?`
@@ -66,6 +69,7 @@ gh pr diff #{PR번호}
 | DB/DML/DDL 포함 | `.agent/skills/sqlite-patterns.md`, `.agent/skills/generated-artifact-sync.md` |
 | 캐시/세션/클라이언트/브로커/게이트웨이/설정 변경 | `.agent/skills/lifecycle-review.md` |
 | OpenAPI, schema, 생성 타입, CLI/DB 생성 문서 변경 | `.agent/skills/contract-drift-review.md`, `.agent/skills/generated-artifact-sync.md` |
+| `release/*` PR, `pyproject.toml`, `CHANGELOG.md`, `Dockerfile`, `.github/workflows/publish.yml` | `docs/runbooks/06-release.md`, `docs/runbooks/03-git-workflow.md`, `docs/runbooks/04-ci-cd.md` |
 
 ### 3단계: 리뷰 확장 조건
 
@@ -134,6 +138,14 @@ gh pr diff #{PR번호}
 | F1 | 커밋 메시지 | Conventional Commits 형식을 따르는가 |
 | F2 | PR 크기 | 변경 규모가 한 번에 검토 가능한 수준인가 |
 | F3 | base 브랜치 | 독립 이슈는 `main`, 에픽 하위는 `epic/*`인가 |
+
+release PR이면 추가로 확인한다.
+
+| # | 검증 항목 | 판정 기준 |
+|---|---|---|
+| F4 | release PR 범위 | `pyproject.toml`, `CHANGELOG.md`, 릴리스 노트 같은 메타데이터 변경만 포함하는가 |
+| F5 | release 검증 증거 | PR 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차가 있는가 |
+| F6 | publish 분리 | release PR 단계에서 PyPI/GHCR push를 수행하지 않는가 |
 
 #### G. 프론트엔드
 

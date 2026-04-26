@@ -38,7 +38,8 @@ release/v0.9.0
 | `epic` | `epic` | `epic/` |
 | `release` | 릴리스 PR | `release/` |
 
-`/implement-issue`, `/autopilot`, 내부 `/codex:review --base <ref>` 브랜치 리뷰는 이 매핑을 기준으로 정렬한다.
+일반 구현 이슈는 `/implement-issue`, `/autopilot`, 내부 `/codex:review --base <ref>` 브랜치 리뷰가 이 매핑을 기준으로 정렬한다.
+`release/` 브랜치는 일반 구현 이슈가 아니라 `/release prepare`만 생성한다.
 
 ### 1.3 에픽 하위 브랜치 최신화
 
@@ -145,6 +146,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 - **라벨**: `core`, `web`, `cli`, `docs`, `fix` 중 해당 항목
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
 - **전제 조건**: 최신 branch HEAD의 `/codex:review --base <base>`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
+- **release PR 전제 조건**: release PR은 이슈 코멘트 기반 브랜치 리뷰 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 PR 본문에 남기고, 일반 PR 승인 게이트를 통과한다.
 
 ### 4.2 PR 머지 조건
 

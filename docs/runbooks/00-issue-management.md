@@ -262,11 +262,11 @@ autopilot 배치 상태는 [.agent/commands/autopilot.md](../../.agent/commands/
 
 - 이 문서의 제목/본문 템플릿을 사용한다.
 - 스펙 준비 상태나 중복 여부가 불명확하면 `needs-triage`를 함께 붙인다.
-- review-loop recovery 중에는 단발 follow-up을 즉시 양산하지 않고 recovery 런북의 issue graph rewrite를 따른다.
+- review-loop recovery 중에는 단발 follow-up을 즉시 양산하지 않고 [01-development-process.md §5](01-development-process.md#5-실패-복구-루프)와 [04-ci-cd.md §5](04-ci-cd.md#5-ci승인-실패-시-복구)의 복구 원칙에 따라 원인 정리, 메타 리뷰, 사람 판단을 우선한다.
 - watcher, 외부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.
 
 ## 8. 이슈와 버전 관리의 연결
 
 커밋 메시지와 PR 본문에는 관련 이슈 번호를 포함한다.
 상세 커밋 컨벤션은 [03-git-workflow.md](03-git-workflow.md),
-릴리스/버전 관리는 [04-ci-cd.md](04-ci-cd.md)가 SSOT다.
+릴리스/버전 관리는 [06-release.md](06-release.md)와 `/release`가 SSOT다.

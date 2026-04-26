@@ -260,3 +260,4 @@ AGENTS.md는 모든 세션에 주입되므로 핵심 규칙만 유지한다.
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션, 브랜치/PR 규칙 |
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/merge gate 구성 |
 | [05-testing.md](05-testing.md) | 테스트 전략, 커버리지 기준 |
+| [06-release.md](06-release.md) | release PR, 버전 관리, PyPI/Docker 배포 |

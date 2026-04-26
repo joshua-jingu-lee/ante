@@ -96,6 +96,7 @@ PR 생성 전 확인:
 - 최신 내부 branch review (`/codex:review --base <ref>`) PASS 여부
 - open PR 중복 여부
 - base 브랜치 적합성
+- release PR은 예외적으로 이슈 코멘트 기반 branch review 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 확인한다.
 
 기본 조회:
 
@@ -121,6 +122,8 @@ gh pr create --base {base} --title "{title}" --body "{body}"
   - 큐 snapshot, open PR 여부 확인, 보류 코멘트, Plan Preflight 상태 확인
 - `/implement-issue`
   - 이슈 조회, 구현 착수 코멘트, 리뷰 요청 코멘트, PR 생성, PR 생성 완료 코멘트
+- `/release`
+  - release PR 중복 확인, `release/vX.Y.Z` 브랜치 PR 생성, workflow dispatch/모니터링
 
 ## 금지 사항
 

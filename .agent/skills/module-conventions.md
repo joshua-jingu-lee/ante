@@ -320,5 +320,5 @@ async def list_bots() -> dict:
 **규칙**:
 - 응답 모델은 `src/ante/web/schemas.py`에 Pydantic 모델로 정의한다
 - `dict`를 직접 반환하는 것은 금지한다
-- 기존 `response_model`(Pydantic 모델)을 변경하려면 별도 스키마 변경 이슈를 거친다 (참조: `docs/runbooks/01-development-process.md` §10)
+- 기존 `response_model`(Pydantic 모델)을 변경하려면 별도 스키마 변경 이슈를 거친다 (참조: `docs/runbooks/01-development-process.md` §8)
 - 예외: 204 응답(삭제)과 동적 스키마 엔드포인트는 `response_model` 면제

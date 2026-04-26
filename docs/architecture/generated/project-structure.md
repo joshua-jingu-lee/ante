@@ -671,10 +671,14 @@ frontend/src/
 │   └── api-docs.md              # /api-docs
 └── skills/                      # 프로젝트 스킬 (컨벤션·패턴 참조)
     ├── asyncio-patterns.md
+    ├── contract-drift-review.md
     ├── frontend-conventions.md
+    ├── generated-artifact-sync.md
     ├── github-auth.md           # GitHub CLI 로컬 PAT 인증 절차
     ├── github-ops.md            # GitHub 조회/코멘트/PR/재실행 공통 절차
+    ├── lifecycle-review.md
     ├── module-conventions.md
+    ├── receive-review.md
     ├── review-pr.md
     └── sqlite-patterns.md
 ```

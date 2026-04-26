@@ -111,6 +111,8 @@ Claude도 PR 단계에서는 독립 승인 워커로 동작한다.
     ├── frontend-conventions.md
     ├── review-pr.md           # PR 승인 공통 체크리스트 계약
     ├── receive-review.md
+    ├── github-auth.md
+    ├── github-ops.md
     ├── lifecycle-review.md    # 캐시/세션/연결/설정 변경 리뷰
     ├── contract-drift-review.md
     └── generated-artifact-sync.md
