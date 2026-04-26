@@ -190,8 +190,7 @@ def test_get_data_path_reads_system_toml(
     custom_dir.mkdir()
     custom_data = tmp_path / "shared" / "ante-data"
     (custom_dir / "system.toml").write_text(
-        "[db]\npath = \"/tmp/ante.db\"\n\n"
-        f'[data]\npath = "{custom_data}"\n'
+        f'[db]\npath = "/tmp/ante.db"\n\n[data]\npath = "{custom_data}"\n'
     )
 
     ctx = click.Context(cli, obj={"config_dir": custom_dir})
@@ -204,8 +203,7 @@ def test_get_data_path_env_var(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     env_dir.mkdir()
     custom_data = tmp_path / "env-data"
     (env_dir / "system.toml").write_text(
-        "[db]\npath = \"/tmp/ante.db\"\n\n"
-        f'[data]\npath = "{custom_data}"\n'
+        f'[db]\npath = "/tmp/ante.db"\n\n[data]\npath = "{custom_data}"\n'
     )
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(env_dir))
 
@@ -220,8 +218,7 @@ def test_get_data_path_override_beats_env(
     env_dir = tmp_path / "env-cfg"
     env_dir.mkdir()
     (env_dir / "system.toml").write_text(
-        "[db]\npath = \"/tmp/env-ante.db\"\n\n"
-        '[data]\npath = "/should-not-be-used"\n'
+        '[db]\npath = "/tmp/env-ante.db"\n\n[data]\npath = "/should-not-be-used"\n'
     )
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(env_dir))
 
@@ -229,8 +226,7 @@ def test_get_data_path_override_beats_env(
     override_dir.mkdir()
     custom_data = tmp_path / "override-data"
     (override_dir / "system.toml").write_text(
-        "[db]\npath = \"/tmp/override-ante.db\"\n\n"
-        f'[data]\npath = "{custom_data}"\n'
+        f'[db]\npath = "/tmp/override-ante.db"\n\n[data]\npath = "{custom_data}"\n'
     )
 
     ctx = click.Context(cli, obj={"config_dir": override_dir})
