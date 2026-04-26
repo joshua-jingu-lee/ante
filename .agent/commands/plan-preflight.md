@@ -12,6 +12,7 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 ## 목적
 
 `/plan-preflight`는 구현 착수 전 이슈 본문을 canonical implementation plan으로 만드는 커맨드다.
+계획 작성에는 `superpowers:writing-plans` 원칙을 적용한다. 대화 중 `superpower:write-plan`이라고 부르는 경우도 같은 계획 작성 원칙을 뜻한다.
 이 커맨드는 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
 
 완료 조건:

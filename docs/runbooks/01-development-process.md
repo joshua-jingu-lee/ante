@@ -40,7 +40,7 @@ Claude 오케스트레이터
   │
   ├── 분석: 이슈 읽기 → 스펙 확인 → 스펙 경로(1A/1B) 판단
   │
-  ├──▶ /plan-preflight (Claude 오케스트레이터)
+  ├──▶ /plan-preflight (Claude 오케스트레이터, `superpowers:writing-plans`)
   │     │
   │     ├── `plan-preflight:started` 라벨 부착
   │     ├── 이슈 본문 구현계획 작성/정비
@@ -95,7 +95,7 @@ Claude 오케스트레이터
 ```
 
 **핵심 차이**:
-- 구현 전 Plan Preflight는 `/plan-preflight`가 담당하며, 이슈 본문에 구현계획을 작성하거나 정비하고 Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
+- 구현 전 Plan Preflight는 `/plan-preflight`가 담당하며, `superpowers:writing-plans` 원칙으로 이슈 본문에 구현계획을 작성하거나 정비하고 Codex Plan Review를 외부 게이트로 요청한 뒤 피드백을 반영해 확정한다.
 - Plan Preflight가 시작된 이슈는 `plan-preflight:started`, 구현계획이 확정된 이슈는 `plan-preflight:done` 라벨로 구분한다.
 - `plan-preflight:done`은 최신 이슈 본문 구현계획과 Codex Plan Review의 `approve-implement` 또는 `narrow-scope` verdict가 맞물려 구현 착수 가능한 상태라는 뜻이다.
 - 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤, `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 작성한다.
