@@ -591,9 +591,8 @@ class AccountActivatedEvent(Event):
     activated_by: str = ""
 
 
-@dataclass(frozen=True)
-class AccountDeletedEvent(Event):
-    """AccountService → EventBus: 계좌 삭제."""
-
-    account_id: str = ""
-    deleted_by: str = ""
+# AccountDeletedEvent는 1.0 EventBus 계약에서 제거되었다 (#1139).
+# 계좌 삭제는 cold-path structural operation이며, 서버 실행 중 consumer
+# topology를 hot wiring하지 않는다. 정합 SSOT는
+# docs/specs/eventbus/eventbus.md 119-127줄과
+# docs/specs/account/05-eventbus-integration.md 8-17줄.

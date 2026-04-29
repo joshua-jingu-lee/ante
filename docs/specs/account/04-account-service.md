@@ -22,7 +22,7 @@ AccountService(db: Database, eventbus: EventBus)
 | `update` | `account_id: str, **fields` | `Account` | 부분 수정. 런타임에는 비구조 필드만 허용. structural field 포함 시 `AccountStructuralChangeRequiresStoppedServerError`. DELETED 계좌는 수정 불가 (`AccountDeletedException`). 불변 필드(`exchange`, `currency`, `trading_mode`, `broker_type`) 포함 시 `AccountImmutableFieldError` |
 | `suspend` | `account_id: str, reason: str, suspended_by: str` | `None` | status → SUSPENDED. 이미 SUSPENDED이면 `AccountAlreadySuspendedError` (409). `AccountSuspendedEvent` 발행 + 소속 봇 중지 트리거 |
 | `activate` | `account_id: str, activated_by: str` | `None` | status → ACTIVE. DELETED 계좌는 활성화 불가. `AccountActivatedEvent` 발행 |
-| `delete` | `account_id: str, deleted_by: str` | `None` | 소프트 딜리트 (status=DELETED). **cold-path 전용**. 서버 실행 중에는 거부 |
+| `delete` | `account_id: str, deleted_by: str` | `None` | 소프트 딜리트 (status=DELETED). **cold-path 전용**. active Ante runtime이 살아 있으면 거부. 진입 직후 `bots` 테이블을 검사해 동일 `account_id`의 활성(non-deleted) 봇이 남아 있으면 `AccountHasActiveBotsError`로 차단(orphan bot 무결성). 1.0 정책상 `AccountDeletedEvent`는 발행하지 않는다 |
 | `get_broker` | `account_id: str` | `BrokerAdapter` | 계좌의 BrokerAdapter 인스턴스 반환. lazy init + 캐싱 |
 | `create_default_test_account` | — | `Account` | 테스트 계좌 자동 생성 (`ante init` 시 호출). 이미 존재하면 스킵 |
 | `suspend_all` | `reason: str, suspended_by: str` | `int` | 모든 ACTIVE 계좌를 SUSPENDED로 전환. 전환된 수 반환 (시스템 전체 Kill Switch) |
@@ -59,8 +59,9 @@ AccountService(db: Database, eventbus: EventBus)
 
 서버 실행 중 structural field 변경 요청이 들어오면 DB를 수정하지 않고
 `AccountStructuralChangeRequiresStoppedServerError`를 발생시킨다. CLI cold-path 명령은
-같은 `config_dir`의 PID/socket guard로 서버 실행 여부를 먼저 확인하고, 서버가 실행 중이면
-서비스 메서드를 호출하지 않는다.
+active Ante runtime guard로 서버 실행 여부를 먼저 확인하고, runtime이 살아 있으면
+서비스 메서드를 호출하지 않는다. 1.0 정책상 동일 OS user/home server 기준으로 active
+runtime은 항상 단일이며, `config_dir`은 데이터/설정 프로필 경계지 동시 namespace가 아니다.
 
 ### 에러 클래스
 
@@ -73,6 +74,7 @@ class AccountDeletedException(AccountError): ...  # DELETED 계좌 수정/활성
 class AccountImmutableFieldError(AccountError): ...  # 불변 필드 수정 시도 시 (exchange, currency, trading_mode, broker_type)
 class AccountAlreadySuspendedError(AccountError): ...  # 이미 정지된 계좌 재정지 시도 시 (409)
 class AccountStructuralChangeRequiresStoppedServerError(AccountError): ...  # 런타임 구조 변경 차단
+class AccountHasActiveBotsError(AccountError): ...  # delete() 시 활성(non-deleted) 봇 잔존 시 (orphan bot 무결성)
 ```
 
 소스: `src/ante/account/errors.py`

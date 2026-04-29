@@ -1,6 +1,8 @@
-"""EventBus Account 이벤트 확장 테스트 (#562).
+"""EventBus Account 이벤트 확장 테스트 (#562, #1139).
 
-Account 이벤트 3종 추가 및 기존 이벤트 account_id 필드 하위 호환 검증.
+#1139에서 AccountDeletedEvent는 1.0 EventBus 계약에서 제거되었다.
+잔존 Account 이벤트 2종(Suspended/Activated)과 기존 이벤트 account_id 필드
+하위 호환을 검증한다.
 """
 
 import pytest
@@ -8,7 +10,6 @@ import pytest
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
     AccountActivatedEvent,
-    AccountDeletedEvent,
     AccountSuspendedEvent,
     BalanceSyncedEvent,
     BotErrorEvent,
@@ -77,24 +78,6 @@ class TestAccountEvents:
         assert received[0].account_id == "acc-001"
         assert received[0].activated_by == "admin"
 
-    async def test_account_deleted_event(self, bus: EventBus):
-        """AccountDeletedEvent 생성 및 발행."""
-        received: list[AccountDeletedEvent] = []
-
-        async def handler(event: AccountDeletedEvent) -> None:
-            received.append(event)
-
-        bus.subscribe(AccountDeletedEvent, handler)
-        event = AccountDeletedEvent(
-            account_id="acc-001",
-            deleted_by="admin",
-        )
-        await bus.publish(event)
-
-        assert len(received) == 1
-        assert received[0].account_id == "acc-001"
-        assert received[0].deleted_by == "admin"
-
     async def test_account_events_are_frozen(self):
         """Account 이벤트는 불변이다."""
         event = AccountSuspendedEvent(account_id="acc-001")
@@ -111,10 +94,6 @@ class TestAccountEvents:
         activated = AccountActivatedEvent()
         assert activated.account_id == ""
         assert activated.activated_by == ""
-
-        deleted = AccountDeletedEvent()
-        assert deleted.account_id == ""
-        assert deleted.deleted_by == ""
 
 
 # ── 기존 이벤트 account_id 하위 호환 ─────────────────

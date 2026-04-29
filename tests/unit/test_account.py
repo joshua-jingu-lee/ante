@@ -333,6 +333,75 @@ async def test_delete_account(service):
     assert deleted.status == AccountStatus.DELETED
 
 
+# ── delete preflight: active bot 차단 ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_raises_when_active_bots_present(service, db):
+    """non-deleted 봇이 있으면 delete가 AccountHasActiveBotsError로 차단된다.
+
+    bots 테이블에 status != 'deleted' 행이 있으면 status mutation 전에
+    AccountHasActiveBotsError가 raise되어야 하며, 계좌 status는 ACTIVE 그대로
+    유지되어야 한다.
+    """
+    from ante.account.errors import AccountHasActiveBotsError
+    from ante.bot.manager import BOT_SCHEMA
+
+    await service.create(_make_account())
+    await db.execute_script(BOT_SCHEMA)
+    await db.execute(
+        """INSERT INTO bots
+           (bot_id, name, strategy_id, account_id, config_json, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("bot-1", "테스트봇", "strat", "test", "{}", "running"),
+    )
+
+    with pytest.raises(AccountHasActiveBotsError) as excinfo:
+        await service.delete("test", deleted_by="admin")
+
+    assert excinfo.value.account_id == "test"
+    assert excinfo.value.bot_count == 1
+
+    # 계좌 status는 ACTIVE 그대로 유지되어야 함
+    account = await service.get("test")
+    assert account.status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_delete_succeeds_when_no_active_bots(service, db):
+    """bots 테이블이 비어 있으면 delete는 정상 진행된다."""
+    from ante.bot.manager import BOT_SCHEMA
+
+    await service.create(_make_account())
+    # 빈 bots 테이블
+    await db.execute_script(BOT_SCHEMA)
+
+    await service.delete("test", deleted_by="admin")
+
+    deleted = await service.get("test")
+    assert deleted.status == AccountStatus.DELETED
+
+
+@pytest.mark.asyncio
+async def test_delete_succeeds_when_only_deleted_bots(service, db):
+    """같은 account_id에 status='deleted' 봇만 있으면 delete 정상 진행."""
+    from ante.bot.manager import BOT_SCHEMA
+
+    await service.create(_make_account())
+    await db.execute_script(BOT_SCHEMA)
+    await db.execute(
+        """INSERT INTO bots
+           (bot_id, name, strategy_id, account_id, config_json, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("bot-old", "삭제봇", "strat", "test", "{}", "deleted"),
+    )
+
+    await service.delete("test", deleted_by="admin")
+
+    deleted = await service.get("test")
+    assert deleted.status == AccountStatus.DELETED
+
+
 # ── 일괄 정지/활성화 (suspend_all / activate_all) ──────
 
 

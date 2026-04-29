@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -15,6 +17,7 @@ from ante.cli.middleware import get_member_id, require_auth, require_scope
 if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
+    from ante.cli.formatter import OutputFormatter
     from ante.core.database import Database
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,60 @@ def account() -> None:
 
 def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
+
+
+# ── cold-path active runtime guard ──────────────────────────────
+
+
+# Cold-path 차단 응답 코드. SSOT는 docs/specs/cli/03-commands.md 117-118줄,
+# docs/specs/account/09-cli.md 49-54줄.
+_COLD_PATH_BLOCKED_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
+
+
+def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
+    """active Ante runtime이 있으면 cold-path 명령을 차단한다.
+
+    1.0 정책(단일 active runtime)에 따라 PID 파일이 가리키는 프로세스가
+    살아 있고 IPC socket이 존재하면 active runtime이 있는 것으로 본다.
+    PID는 alive지만 socket이 부재하면 stale PID로 보고 cold-path 진행을
+    허용한다(다른 프로세스가 해당 PID를 차지한 상태일 수 있다).
+
+    monkeypatch 호환을 위해 ``ante.main.read_pid_file``과
+    ``ante.cli.commands.ipc_helpers.get_socket_path``는 함수 내부에서
+    local import한다.
+    """
+    from ante.main import read_pid_file
+
+    pid = read_pid_file()
+    if pid is None:
+        return  # PID 파일 부재 → active runtime 없음
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return  # stale PID → active runtime 없음
+
+    from ante.cli.commands.ipc_helpers import get_socket_path
+
+    try:
+        socket_path = get_socket_path()
+    except Exception:
+        # socket 경로 해석 실패 시는 차단 측으로 판정하지 않는다
+        # (config 부재 등). 그러나 PID alive 단독으로는 단정할 수 없으므로
+        # offline으로 간주한다.
+        return
+
+    if not Path(socket_path).exists():
+        return  # PID alive but socket absent → stale PID/타 프로세스 → 통과
+
+    # PID alive AND socket exists → active runtime 있음 → 차단.
+    # text 출력 경로도 차단 코드를 식별할 수 있도록 메시지에 prefix를 포함한다.
+    fmt.error(
+        f"{_COLD_PATH_BLOCKED_CODE}: 서버가 실행 중입니다. "
+        "cold-path 명령은 서버 정지 상태에서만 실행할 수 있습니다.",
+        code=_COLD_PATH_BLOCKED_CODE,
+    )
+    raise SystemExit(1)
 
 
 async def _create_account_service() -> tuple[AccountService, Database]:
@@ -72,6 +129,9 @@ def _get_selectable_broker_types() -> list[str]:
 def account_create(ctx: click.Context) -> None:
     """대화형 계좌 생성."""
     fmt = get_formatter(ctx)
+
+    # cold-path: active runtime이 있으면 진입 직후 차단
+    _assert_no_active_runtime(fmt)
 
     from ante.account.models import Account, TradingMode
     from ante.account.presets import BROKER_PRESETS
@@ -312,23 +372,50 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
 @require_auth
 @require_scope("account:write")
 def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> None:
-    """계좌 삭제 (소프트 딜리트)."""
-    from ante.cli.commands.ipc_helpers import ipc_send
+    """계좌 삭제 (소프트 딜리트, cold-path 전용).
 
+    1.0 정책: account.delete는 IPC runtime command가 아니다. active Ante
+    runtime이 있으면 차단되며, 서버 정지 상태에서만 AccountService.delete를
+    직접 호출한다. 소속 봇이 살아 있는 계좌는 AccountHasActiveBotsError로
+    차단된다(orphan bot 무결성).
+    """
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
     if not skip_confirm:
         click.confirm(f'계좌 "{account_id}"를 삭제하시겠습니까?', abort=True)
 
+    # cold-path: confirm 통과 직후 active runtime 차단
+    _assert_no_active_runtime(fmt)
+
+    from ante.account.errors import (
+        AccountDeletedError,
+        AccountHasActiveBotsError,
+        AccountNotFoundError,
+    )
+
+    async def _do_delete() -> None:
+        svc, db = await _create_account_service()
+        try:
+            await svc.delete(account_id, deleted_by=member_id)
+        finally:
+            await db.close()
+
     try:
-        _run(
-            ipc_send(
-                "account.delete",
-                {"account_id": account_id},
-                actor=member_id,
-            )
+        _run(_do_delete())
+    except AccountHasActiveBotsError as e:
+        fmt.error(
+            f"계좌 '{e.account_id}'에 활성 봇이 {e.bot_count}개 남아 있어 "
+            f"삭제할 수 없습니다. 봇을 먼저 제거한 뒤 다시 시도하세요.",
+            code="ACCOUNT_HAS_ACTIVE_BOTS",
         )
+        raise SystemExit(1) from e
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
+    except AccountDeletedError as e:
+        fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
+        raise SystemExit(1) from e
     except click.ClickException:
         raise
     except Exception as e:
@@ -395,8 +482,11 @@ def account_set_credentials(
     app_key: str | None,
     app_secret: str | None,
 ) -> None:
-    """인증 정보 재설정 (대화형 또는 --app-key/--app-secret 옵션)."""
+    """인증 정보 재설정 (대화형 또는 --app-key/--app-secret 옵션, cold-path 전용)."""
     fmt = get_formatter(ctx)
+
+    # cold-path: active runtime이 있으면 진입 직후 차단
+    _assert_no_active_runtime(fmt)
 
     from ante.account.presets import BROKER_PRESETS
 

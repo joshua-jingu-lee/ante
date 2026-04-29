@@ -199,49 +199,54 @@ class TestAccountInfoFormatOption:
 
 
 class TestAccountDeleteYes:
-    """ante account delete {id} --yes."""
+    """ante account delete {id} --yes (#1139: IPC → cold-path direct service)."""
 
     def test_delete_with_yes_skips_confirm(self, runner: CliRunner) -> None:
-        mock_response = {"status": "ok", "data": {}}
+        svc = AsyncMock()
+        db = _mock_db()
+        svc.delete.return_value = None
 
-        with patch(
-            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
-        ) as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.send.return_value = mock_response
-            mock_cls.return_value = mock_client
-
-            with patch(
+        with (
+            patch(
+                "ante.cli.commands.account._create_account_service",
+                new_callable=AsyncMock,
+                return_value=(svc, db),
+            ),
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
                 "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/tmp/test.sock",
-            ):
-                result = runner.invoke(cli, ["account", "delete", "test-acct", "--yes"])
+                return_value="/tmp/__ante_offline_fmt_del__.sock",
+            ),
+        ):
+            result = runner.invoke(cli, ["account", "delete", "test-acct", "--yes"])
 
         assert result.exit_code == 0
         assert "삭제 완료" in result.output
-        mock_client.send.assert_called_once()
+        svc.delete.assert_called_once()
 
     def test_delete_without_yes_prompts(self, runner: CliRunner) -> None:
-        """--yes 없이 호출하면 확인 프롬프트가 나타남."""
-        mock_response = {"status": "ok", "data": {}}
+        """--yes 없이 호출하면 확인 프롬프트가 나타남 (cold-path direct service)."""
+        svc = AsyncMock()
+        db = _mock_db()
+        svc.delete.return_value = None
 
-        with patch(
-            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
-        ) as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.send.return_value = mock_response
-            mock_cls.return_value = mock_client
-
-            with patch(
+        with (
+            patch(
+                "ante.cli.commands.account._create_account_service",
+                new_callable=AsyncMock,
+                return_value=(svc, db),
+            ),
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
                 "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/tmp/test.sock",
-            ):
-                result = runner.invoke(
-                    cli, ["account", "delete", "test-acct"], input="y\n"
-                )
+                return_value="/tmp/__ante_offline_fmt_del2__.sock",
+            ),
+        ):
+            result = runner.invoke(cli, ["account", "delete", "test-acct"], input="y\n")
 
         assert result.exit_code == 0
         assert "삭제 완료" in result.output
+        svc.delete.assert_called_once()
 
 
 # ── treasury status --format json ─────────────────────────

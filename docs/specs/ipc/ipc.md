@@ -78,7 +78,10 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | `ante account activate` | `account.activate` | `AccountService.activate()` | `AccountActivatedEvent` → BotManager 봇 재시작 |
 
 `ante account create`, `ante account delete`, `ante account set-credentials`는 IPC 대상이 아니다.
-이 명령들은 cold-path structural 커맨드이며, 서버 실행 중이면 CLI guard에서 차단된다.
+이 명령들은 cold-path structural 커맨드이며, active Ante runtime이 살아 있으면 CLI guard에서 차단된다.
+특히 `account.delete`는 1.0 IPC 계약(`CommandRegistry`)에 등록되지 않으며, cold-path CLI에서
+직접 `AccountService.delete()`를 호출한다. 활성 봇이 남아 있는 계좌는 service preflight
+(`AccountHasActiveBotsError`)에서 차단된다.
 
 #### Bot
 
@@ -157,14 +160,19 @@ maintenance/test 스펙 없이는 제공하지 않는다.
 
 ### Cold-path structural 커맨드
 
-서버 topology를 바꾸는 명령은 IPC로 서버에 위임하지 않는다. 같은 `config_dir`의 서버가
-실행 중이면 실패하고, 서버 정지 상태에서만 직접 DB를 수정한다.
+서버 topology를 바꾸는 명령은 IPC로 서버에 위임하지 않는다. active Ante runtime이
+살아 있으면 실패하고, 서버 정지 상태에서만 직접 DB를 수정한다. 1.0 정책상 동일 OS
+user/home server 기준으로 active runtime은 항상 단일이며, `config_dir`은 데이터/설정
+프로필 경계지 동시 namespace가 아니다.
 
-| CLI 커맨드 | 서버 실행 중 동작 | 이유 |
+| CLI 커맨드 | active runtime 시 동작 | 이유 |
 |-----------|------------------|------|
 | `ante account create` | 차단 | Treasury/RuleEngine/Gateway/Bot hot wiring 비지원 |
-| `ante account delete` | 차단 | 실행 중 consumer 제거와 partial failure 보상 비지원 |
+| `ante account delete` | 차단 | 실행 중 consumer 제거와 partial failure 보상 비지원. 활성 봇이 남아 있으면 service preflight(`AccountHasActiveBotsError`)에서도 차단 |
 | `ante account set-credentials` | 차단 | BrokerAdapter 재초기화와 장기 실행 consumer 전파 비지원 |
+
+`account.delete`는 1.0 IPC 계약에서 제외된다. cold-path CLI는 `AccountService.delete()`를
+직접 호출하며, IPC 라우팅 테이블(`CommandRegistry`)에 등록하지 않는다.
 
 ### 서버 정지 maintenance fallback
 

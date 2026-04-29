@@ -243,13 +243,62 @@ class TestAccountCredentials:
         assert "등록된 인증 정보가 없습니다" in result.output
 
 
+# ── active runtime guard 헬퍼 ──────────────────────────────
+
+
+@pytest.fixture
+def offline_runtime():
+    """active runtime이 없는 상태(PID 파일 부재)를 모사한다.
+
+    cold-path 명령이 active runtime guard를 통과하도록 read_pid_file이
+    None을 반환하게 하고, 보강 socket guard가 호출되어도 안전하도록
+    get_socket_path가 존재하지 않는 임시 경로를 반환하게 한다.
+    """
+    with (
+        patch("ante.main.read_pid_file", return_value=None),
+        patch(
+            "ante.cli.commands.ipc_helpers.get_socket_path",
+            return_value="/tmp/__ante_offline_runtime_test__.sock",
+        ),
+    ):
+        yield
+
+
+@pytest.fixture
+def active_runtime():
+    """active runtime(PID alive + socket present)을 모사한다."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.NamedTemporaryFile(
+        prefix="ante_active_runtime_", suffix=".sock"
+    ) as f:
+        socket_path = f.name
+        # 파일이 존재하는 상태로 patches 적용
+        with (
+            patch("ante.main.read_pid_file", return_value=12345),
+            patch(
+                "ante.cli.commands.account.os.kill",
+                return_value=None,
+            ),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value=socket_path,
+            ),
+        ):
+            assert Path(socket_path).exists()
+            yield
+
+
 # ── account create 대화형 테스트 ──────────────────
 
 
 class TestAccountCreate:
     """ante account create 테스트."""
 
-    def test_create_interactive(self, mock_account_service: AsyncMock) -> None:
+    def test_create_interactive(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
         """대화형 생성 흐름이 정상 동작한다."""
         created = _mock_account("test", "테스트", "TEST", "KRW", "test")
         mock_account_service.create.return_value = created
@@ -260,6 +309,56 @@ class TestAccountCreate:
         result = _invoke(["account", "create"], input_text=input_text)
         assert result.exit_code == 0
         assert "생성 완료" in result.output
+        mock_account_service.create.assert_called_once()
+
+    def test_create_blocked_when_active_runtime(
+        self, mock_account_service: AsyncMock, active_runtime
+    ) -> None:
+        """active runtime이 있으면 cold-path가 차단된다."""
+        input_text = "1\n\n\n1\ntest\ntest\n"
+        result = _invoke(["account", "create"], input_text=input_text)
+        assert result.exit_code == 1
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_offline_succeeds(self, mock_account_service: AsyncMock) -> None:
+        """PID 파일 부재(offline) 시 guard 통과."""
+        created = _mock_account("test", "테스트", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        with (
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_does_not_exist__.sock",
+            ),
+        ):
+            input_text = "1\n\n\n1\ntest\ntest\n"
+            result = _invoke(["account", "create"], input_text=input_text)
+        assert result.exit_code == 0
+        mock_account_service.create.assert_called_once()
+
+    def test_create_offline_when_pid_alive_but_socket_absent(
+        self, mock_account_service: AsyncMock
+    ) -> None:
+        """PID는 alive지만 socket이 부재하면 stale PID로 보고 guard 통과."""
+        created = _mock_account("test", "테스트", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        with (
+            patch("ante.main.read_pid_file", return_value=12345),
+            patch(
+                "ante.cli.commands.account.os.kill",
+                return_value=None,
+            ),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_no_such_socket_xxx__.sock",
+            ),
+        ):
+            input_text = "1\n\n\n1\ntest\ntest\n"
+            result = _invoke(["account", "create"], input_text=input_text)
+        assert result.exit_code == 0
         mock_account_service.create.assert_called_once()
 
 
@@ -311,49 +410,203 @@ class TestAccountStateTransitions:
         assert "활성화 완료" in result.output
         mock_client.send.assert_called_once()
 
-    def test_delete_with_yes(self) -> None:
-        """계좌 삭제 (--yes 옵션, IPC 전환)."""
-        mock_response = {"status": "ok", "data": {}}
+    def test_delete_with_yes(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """계좌 삭제 (--yes 옵션, cold-path direct service 호출)."""
+        mock_account_service.delete.return_value = None
 
-        with patch(
-            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
-        ) as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.send.return_value = mock_response
-            mock_cls.return_value = mock_client
-
-            with patch(
-                "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/tmp/test.sock",
-            ):
-                result = _invoke(["account", "delete", "domestic", "--yes"])
+        result = _invoke(["account", "delete", "domestic", "--yes"])
 
         assert result.exit_code == 0
         assert "삭제 완료" in result.output
-        mock_client.send.assert_called_once()
+        mock_account_service.delete.assert_called_once()
 
-    def test_delete_with_confirm(self) -> None:
-        """계좌 삭제 (확인 프롬프트 y 입력, IPC 전환)."""
-        mock_response = {"status": "ok", "data": {}}
+    def test_delete_with_confirm(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """계좌 삭제 (확인 프롬프트 y 입력, cold-path direct service 호출)."""
+        mock_account_service.delete.return_value = None
 
-        with patch(
-            "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
-        ) as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.send.return_value = mock_response
-            mock_cls.return_value = mock_client
-
-            with patch(
-                "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/tmp/test.sock",
-            ):
-                result = _invoke(["account", "delete", "domestic"], input_text="y\n")
+        result = _invoke(["account", "delete", "domestic"], input_text="y\n")
 
         assert result.exit_code == 0
         assert "삭제 완료" in result.output
-        mock_client.send.assert_called_once()
+        mock_account_service.delete.assert_called_once()
 
     def test_delete_abort(self) -> None:
         """계좌 삭제 취소 (확인 프롬프트 n 입력)."""
         result = _invoke(["account", "delete", "domestic"], input_text="n\n")
         assert result.exit_code == 1
+
+    def test_delete_blocked_when_active_runtime(
+        self, mock_account_service: AsyncMock, active_runtime
+    ) -> None:
+        """active runtime이 있으면 cold-path delete가 차단된다."""
+        result = _invoke(["account", "delete", "domestic", "--yes"])
+        assert result.exit_code == 1
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in result.output
+        mock_account_service.delete.assert_not_called()
+
+    def test_delete_offline_succeeds(self, mock_account_service: AsyncMock) -> None:
+        """PID 파일 부재(offline) 시 guard 통과 후 delete 호출."""
+        mock_account_service.delete.return_value = None
+        with (
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_does_not_exist_del__.sock",
+            ),
+        ):
+            result = _invoke(["account", "delete", "domestic", "--yes"])
+        assert result.exit_code == 0
+        mock_account_service.delete.assert_called_once()
+
+    def test_delete_offline_when_pid_alive_but_socket_absent(
+        self, mock_account_service: AsyncMock
+    ) -> None:
+        """PID alive지만 socket 부재면 stale PID로 보고 guard 통과."""
+        mock_account_service.delete.return_value = None
+        with (
+            patch("ante.main.read_pid_file", return_value=12345),
+            patch("ante.cli.commands.account.os.kill", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_no_socket_del_xxx__.sock",
+            ),
+        ):
+            result = _invoke(["account", "delete", "domestic", "--yes"])
+        assert result.exit_code == 0
+        mock_account_service.delete.assert_called_once()
+
+    def test_delete_blocks_when_active_bots_present(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """non-deleted 봇이 있는 계좌의 delete는 명확한 메시지로 차단된다."""
+        from ante.account.errors import AccountHasActiveBotsError
+
+        mock_account_service.delete.side_effect = AccountHasActiveBotsError(
+            account_id="domestic",
+            bot_count=2,
+        )
+
+        result = _invoke(["account", "delete", "domestic", "--yes"])
+
+        assert result.exit_code == 1
+        assert "domestic" in result.output
+        # bot_count 또는 명확한 메시지가 사용자에게 노출되어야 한다
+        assert "봇" in result.output or "bot" in result.output.lower()
+        mock_account_service.delete.assert_called_once()
+
+
+# ── account set-credentials cold-path guard 테스트 ──────
+
+
+class TestAccountSetCredentialsRuntimeGuard:
+    """ante account set-credentials cold-path active runtime guard."""
+
+    def test_set_credentials_blocked_when_active_runtime(
+        self, mock_account_service: AsyncMock, active_runtime
+    ) -> None:
+        """active runtime이 있으면 cold-path set-credentials가 차단된다."""
+        result = _invoke(
+            [
+                "account",
+                "set-credentials",
+                "domestic",
+                "--app-key",
+                "k",
+                "--app-secret",
+                "s",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in result.output
+        mock_account_service.update.assert_not_called()
+
+    def test_set_credentials_offline_succeeds(
+        self, mock_account_service: AsyncMock
+    ) -> None:
+        """PID 파일 부재(offline) 시 guard 통과 후 update 호출."""
+        from decimal import Decimal
+
+        from ante.account.models import Account, AccountStatus, TradingMode
+
+        mock_account_service.get.return_value = Account(
+            account_id="domestic",
+            name="국내",
+            exchange="KRX",
+            currency="KRW",
+            broker_type="kis-domestic",
+            status=AccountStatus.ACTIVE,
+            trading_mode=TradingMode.VIRTUAL,
+            credentials={},
+            buy_commission_rate=Decimal("0.00015"),
+            sell_commission_rate=Decimal("0.00195"),
+        )
+        mock_account_service.update.return_value = None
+
+        with (
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_offline_setc__.sock",
+            ),
+        ):
+            result = _invoke(
+                [
+                    "account",
+                    "set-credentials",
+                    "domestic",
+                    "--app-key",
+                    "k",
+                    "--app-secret",
+                    "s",
+                ]
+            )
+        assert result.exit_code == 0
+        mock_account_service.update.assert_called_once()
+
+    def test_set_credentials_offline_when_pid_alive_but_socket_absent(
+        self, mock_account_service: AsyncMock
+    ) -> None:
+        """PID alive지만 socket 부재면 stale PID로 보고 guard 통과."""
+        from decimal import Decimal
+
+        from ante.account.models import Account, AccountStatus, TradingMode
+
+        mock_account_service.get.return_value = Account(
+            account_id="domestic",
+            name="국내",
+            exchange="KRX",
+            currency="KRW",
+            broker_type="kis-domestic",
+            status=AccountStatus.ACTIVE,
+            trading_mode=TradingMode.VIRTUAL,
+            credentials={},
+            buy_commission_rate=Decimal("0.00015"),
+            sell_commission_rate=Decimal("0.00195"),
+        )
+        mock_account_service.update.return_value = None
+
+        with (
+            patch("ante.main.read_pid_file", return_value=12345),
+            patch("ante.cli.commands.account.os.kill", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_no_socket_setc_xxx__.sock",
+            ),
+        ):
+            result = _invoke(
+                [
+                    "account",
+                    "set-credentials",
+                    "domestic",
+                    "--app-key",
+                    "k",
+                    "--app-secret",
+                    "s",
+                ]
+            )
+        assert result.exit_code == 0
+        mock_account_service.update.assert_called_once()
