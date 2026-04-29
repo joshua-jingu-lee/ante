@@ -602,13 +602,43 @@ class TestRFC7807ErrorResponse:
                             f"entry는 dict 여야 함 (got {type(entry).__name__})"
                         )
                         continue
-                    model = entry.get("model")
-                    if model is not ErrorResponse:
-                        violations.append(
-                            f"{mod_info.name} {route.path} {code_int}: "
-                            f"model 누락 또는 비-ErrorResponse "
-                            f"(got {model!r}, keys={sorted(entry.keys())})"
-                        )
+
+                    # 조건 1: FastAPI shorthand — ``model: ErrorResponse``
+                    if entry.get("model") is ErrorResponse:
+                        continue
+
+                    # 조건 2: 명시 content map — 후속 이슈에서
+                    # ``application/problem+json``으로 정렬할 때도 통과하도록
+                    # forward-compatible 검사를 함께 둔다. 어느 media type 이든
+                    # schema가 ``ErrorResponse`` 클래스 자체이거나
+                    # ``$ref`` 문자열이 ``/ErrorResponse``로 끝나면 인정.
+                    matched_via_content = False
+                    content = entry.get("content")
+                    if isinstance(content, dict):
+                        for media_obj in content.values():
+                            if not isinstance(media_obj, dict):
+                                continue
+                            schema = media_obj.get("schema")
+                            if schema is ErrorResponse:
+                                matched_via_content = True
+                                break
+                            if isinstance(schema, dict):
+                                ref = schema.get("$ref", "")
+                                if isinstance(ref, str) and ref.endswith(
+                                    "/ErrorResponse"
+                                ):
+                                    matched_via_content = True
+                                    break
+                    if matched_via_content:
+                        continue
+
+                    violations.append(
+                        f"{mod_info.name} {route.path} {code_int}: "
+                        f"ErrorResponse 참조 누락 — model shorthand도 명시 "
+                        f"content map의 $ref도 일치하지 않음 "
+                        f"(model={entry.get('model')!r}, "
+                        f"keys={sorted(entry.keys())})"
+                    )
 
         assert violations == [], (
             "router 명시 4xx/5xx responses=가 ErrorResponse를 참조하지 않음:\n"
