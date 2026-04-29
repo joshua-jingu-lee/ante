@@ -13,6 +13,7 @@ from ante.account.crypto import decrypt_credentials, encrypt_credentials
 from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountDeletedException,
+    AccountHasActiveBotsError,
     AccountImmutableFieldError,
     AccountNotFoundError,
     BrokerReconnectFailedError,
@@ -462,17 +463,38 @@ class AccountService:
         logger.info("계좌 활성화: %s (요청자: %s)", account_id, activated_by)
 
     async def delete(self, account_id: str, deleted_by: str) -> None:
-        """소프트 딜리트 (status -> DELETED).
+        """소프트 딜리트 (status -> DELETED). cold-path 전용.
+
+        진입 직후 ``bots`` 테이블을 검사하여 active(non-deleted) 봇이 남아 있으면
+        ``AccountHasActiveBotsError``를 raise한다 (#1139, orphan bot 무결성).
+        ``bots`` 테이블 자체가 없으면(BotManager 미초기화 환경) active 봇이
+        없는 것으로 간주한다.
+
+        1.0 EventBus 계약: ``AccountDeletedEvent``는 발행하지 않는다. cold-path
+        delete는 consumer wiring을 트리거하지 않는다. ``AccountSuspendedEvent``
+        (reason="Account deletion")는 BotManager가 소속 봇을 중지시키도록 유지한다.
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
-            AccountDeletedException: 삭제된 계좌.
+            AccountDeletedException: 이미 삭제된 계좌.
+            AccountHasActiveBotsError: 활성(non-deleted) 봇이 남아 있음.
         """
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
             raise AccountDeletedException(f"이미 삭제된 계좌입니다: '{account_id}'")
 
-        # 소속 봇 중지 트리거 (이미 SUSPENDED/DELETED면 스킵)
+        # cold-path preflight: orphan bot 무결성 검사.
+        # bots 테이블이 없으면 active 봇이 없는 것으로 간주.
+        active_bot_count = await self._count_active_bots(account_id)
+        if active_bot_count > 0:
+            raise AccountHasActiveBotsError(
+                account_id=account_id, bot_count=active_bot_count
+            )
+
+        # 소속 봇 중지 트리거 (이미 SUSPENDED/DELETED면 스킵).
+        # 봇이 없는 정상 흐름에서는 사실상 no-op이지만, 봇 중지 시점과 cold-path
+        # delete 사이의 race로 잔존 ACTIVE 상태 consumer가 있을 가능성에 대비해
+        # 유지한다.
         if account.status not in (AccountStatus.SUSPENDED, AccountStatus.DELETED):
             from ante.eventbus.events import AccountSuspendedEvent
 
@@ -492,19 +514,34 @@ class AccountService:
             (AccountStatus.DELETED, account.updated_at.isoformat(), account_id),
         )
 
-        # 삭제 완료 이벤트
-        from ante.eventbus.events import AccountDeletedEvent
-
-        await self._eventbus.publish(
-            AccountDeletedEvent(account_id=account_id, deleted_by=deleted_by)
-        )
-
         # 메모리 캐시에서 제거
         self._accounts.pop(account_id, None)
         # 브로커 캐시에서도 제거
         self._brokers.pop(account_id, None)
 
         logger.info("계좌 삭제: %s (요청자: %s)", account_id, deleted_by)
+
+    async def _count_active_bots(self, account_id: str) -> int:
+        """``bots`` 테이블에서 동일 account_id의 non-deleted 봇 수를 센다.
+
+        ``bots`` 테이블이 존재하지 않는 환경(BotManager 미초기화 단위 테스트
+        등)은 0을 반환한다. 운영 서버는 항상 BotManager 초기화 시점에
+        스키마를 적용하므로 이 fallback은 cold-path CLI 실행 환경 차이만
+        흡수한다.
+        """
+        try:
+            row = await self._db.fetch_one(
+                "SELECT COUNT(*) AS cnt FROM bots WHERE account_id = ? AND status != ?",
+                (account_id, "deleted"),
+            )
+        except Exception:
+            # bots 테이블 부재 등 → active 봇 없음으로 간주
+            return 0
+
+        if row is None:
+            return 0
+        cnt = row.get("cnt", 0) if isinstance(row, dict) else row[0]
+        return int(cnt or 0)
 
     # ── 일괄 상태 전이 ──────────────────────────────────
 

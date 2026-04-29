@@ -176,6 +176,19 @@ WebAPI -> DynamicConfigService.update(key, value)
 - SQLite에 저장하므로 재시작 후에도 유지
 - EventBus 알림으로 모듈이 능동적으로 반영 (폴링 불필요)
 
+### 1.0 단일 active runtime 정책
+
+Ante 1.0은 동일 OS user/home server 기준으로 **단일 active runtime server만**
+공식 지원한다. `config_dir`은 데이터/설정 프로필 경계이지 동시 namespace가 아니다.
+즉, 서로 다른 `config_dir`을 사용해도 같은 호스트에서 두 개의 Ante runtime을
+동시에 실행하는 구성은 1.0의 보증 범위 밖이다.
+
+이 정책은 cold-path CLI 명령(`ante account create/delete/set-credentials`)의
+차단 기준에 직접 영향을 준다. CLI는 "active Ante runtime guard"로 서버 실행
+여부를 판정하며, runtime이 살아 있으면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로
+종료한다. 같은 OS user에서 다중 runtime이 필요하다면 별도 인스턴스 분리/스케줄링은
+1.x 후속 결정 사항으로 분리한다.
+
 ### Ante instance/path contract
 
 Ante 인스턴스의 루트는 `config_dir`이다. `system.toml`이 있는 디렉토리와

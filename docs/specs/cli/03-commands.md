@@ -21,7 +21,7 @@
 | `offline` | 서버 프로세스와 무관하게 CLI가 직접 서비스/저장소를 생성해 실행한다. 서버 실행 중에도 live 상태를 바꾸지 않는다. |
 | `runtime IPC` | 서버 프로세스의 서비스 인스턴스, EventBus, 인메모리 상태, 외부 연결, 세션 상태가 필요하므로 IPC로 위임한다. |
 | `runtime IPC + snapshot fallback` | 서버 실행 중에는 IPC로 live 상태를 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다. |
-| `cold-path` | 서버 topology 또는 broker 초기화 입력을 바꾸므로 같은 `config_dir`의 서버가 정지된 상태에서만 직접 DB를 수정한다. |
+| `cold-path` | 서버 topology 또는 broker 초기화 입력을 바꾸므로 active Ante runtime이 없는 상태에서만 직접 DB를 수정한다. |
 | `external process` | 별도 프로세스 실행, OS signal, 장기 실행 파이프/스케줄러처럼 CLI 프로세스 경계를 넘는 작업이다. |
 | `bootstrap/maintenance` | 초기화·복구 목적의 인증 면제 또는 서버 정지 fallback 경로다. |
 
@@ -114,8 +114,11 @@ ante account delete <account_id>              # 계좌 삭제 (cold-path 전용,
 ```
 
 `account create/delete/set-credentials`는 계좌 topology 또는 브로커 초기화 입력을 바꾸므로
-서버 실행 중에는 차단된다. 실행 전 같은 `config_dir`의 PID/socket guard를 확인하고,
-서버가 실행 중이면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로 종료한다.
+서버 실행 중에는 차단된다. 실행 전 active Ante runtime guard를 확인하고,
+runtime이 살아 있으면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로 종료한다.
+1.0 정책상 동일 OS user/home server 기준으로 active runtime은 항상 단일이며,
+`account.delete`는 IPC 런타임 커맨드가 아니므로 cold-path CLI에서 직접
+`AccountService.delete()`를 호출한다.
 
 ### `ante bot` — 봇 관리
 
@@ -300,6 +303,8 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 `system.toml`은 `db.path = "db/ante.db"`, `data.path = "data"`,
 `runtime.socket_path = "run/ante.sock"`, `runtime.pid_path = "run/ante.pid"`,
 `logging.directory = "logs"`처럼 `config_dir` 기준 상대 경로를 기록한다.
+1.0 정책상 `config_dir`은 데이터/설정 프로필 경계이며, 단일 active runtime
+정책 하에서 동시 namespace로 사용하지 않는다.
 
 **내부 실행 순서**: 1. 디렉토리 생성 → 2. master bootstrap → 3. test account 생성
 

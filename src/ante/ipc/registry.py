@@ -72,14 +72,6 @@ async def _handle_account_activate(
     return {"account_id": account_id, "status": "active"}
 
 
-async def _handle_account_delete(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
-    account_id = args["account_id"]
-    await svc.account.delete(account_id, deleted_by=actor)
-    return {"account_id": account_id, "status": "deleted"}
-
-
 async def _handle_bot_create(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -243,12 +235,15 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """18개 런타임 커맨드 핸들러를 일괄 등록."""
+    """18개 런타임 커맨드 핸들러를 일괄 등록.
+
+    `account.delete`는 1.0 IPC 계약에서 제외되었다 (#1139). cold-path CLI에서
+    AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
+    """
     registry.register("system.halt", _handle_system_halt)
     registry.register("system.activate", _handle_system_activate)
     registry.register("account.suspend", _handle_account_suspend)
     registry.register("account.activate", _handle_account_activate)
-    registry.register("account.delete", _handle_account_delete)
     registry.register("bot.create", _handle_bot_create)
     registry.register("bot.remove", _handle_bot_remove)
     registry.register("treasury.allocate", _handle_treasury_allocate)
