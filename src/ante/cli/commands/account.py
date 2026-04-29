@@ -404,11 +404,9 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     try:
         _run(_do_delete())
     except AccountHasActiveBotsError as e:
-        fmt.error(
-            f"계좌 '{e.account_id}'에 활성 봇이 {e.bot_count}개 남아 있어 "
-            f"삭제할 수 없습니다. 봇을 먼저 제거한 뒤 다시 시도하세요.",
-            code="ACCOUNT_HAS_ACTIVE_BOTS",
-        )
+        # 메시지 본문은 errors.py에서 multi-step 복구 절차까지 포함해 빌드한다.
+        # (#1139 R-A) 별도 wording을 만들지 말고 그대로 출력한다.
+        fmt.error(str(e), code="ACCOUNT_HAS_ACTIVE_BOTS")
         raise SystemExit(1) from e
     except AccountNotFoundError as e:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")

@@ -402,6 +402,54 @@ async def test_delete_succeeds_when_only_deleted_bots(service, db):
     assert deleted.status == AccountStatus.DELETED
 
 
+@pytest.mark.asyncio
+async def test_delete_error_message_includes_multistep_procedure(service, db):
+    """AccountHasActiveBotsError 메시지는 multi-step 복구 절차를 안내한다 (#1139 R-A).
+
+    1.0에서 cold-path delete는 active 봇이 있으면 차단되지만, ``ante bot remove``
+    는 IPC 전용이므로 운영자는 (start → bot remove → stop → account delete) 4단계
+    절차를 따라야 한다. 에러 메시지에 이 절차가 정확한 순서로 포함되어야 하며,
+    ``account_id``와 ``bot_count``도 함께 노출되어야 한다 (#1161까지의 mitigation).
+    """
+    import re
+
+    from ante.account.errors import AccountHasActiveBotsError
+    from ante.bot.manager import BOT_SCHEMA
+
+    await service.create(_make_account())
+    await db.execute_script(BOT_SCHEMA)
+    await db.execute(
+        """INSERT INTO bots
+           (bot_id, name, strategy_id, account_id, config_json, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("bot-1", "테스트봇", "strat", "test", "{}", "running"),
+    )
+
+    with pytest.raises(AccountHasActiveBotsError) as excinfo:
+        await service.delete("test", deleted_by="admin")
+
+    message = str(excinfo.value)
+
+    # account_id / bot_count 포함
+    assert "test" in message
+    assert "1" in message
+
+    # 4개 절차 토큰이 모두 포함되어야 한다
+    assert "ante system start" in message
+    assert "ante bot remove" in message
+    assert "ante system stop" in message
+    assert "ante account delete" in message
+
+    # 정확한 순서로 등장해야 한다 (multi-step 절차의 핵심)
+    order_pattern = re.compile(
+        r"ante system start.*?ante bot remove.*?ante system stop.*?ante account delete",
+        re.DOTALL,
+    )
+    assert order_pattern.search(message) is not None, (
+        f"multi-step 절차가 정확한 순서로 메시지에 포함되어야 한다: {message!r}"
+    )
+
+
 # ── 일괄 정지/활성화 (suspend_all / activate_all) ──────
 
 
