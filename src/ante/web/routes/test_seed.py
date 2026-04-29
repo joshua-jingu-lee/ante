@@ -17,7 +17,7 @@ from ante.web.deps import (
     get_db,
     get_treasury_optional,
 )
-from ante.web.schemas import SeedResetResponse
+from ante.web.schemas import ErrorResponse, SeedResetResponse
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,8 @@ BASE_SQL = SCENARIOS_DIR / "_base.sql"
     "/reset",
     response_model=SeedResetResponse,
     responses={
-        400: {"description": "Scenario not found"},
-        503: {"description": "Database not available"},
+        400: {"model": ErrorResponse, "description": "Scenario not found"},
+        503: {"model": ErrorResponse, "description": "Database not available"},
     },
 )
 async def reset_seed(

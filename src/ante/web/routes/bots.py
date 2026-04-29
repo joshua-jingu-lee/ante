@@ -18,7 +18,12 @@ from ante.web.deps import (
     get_trade_service_optional,
     get_treasury_optional,
 )
-from ante.web.schemas import BotDetailResponse, BotListResponse, BotUpdateRequest
+from ante.web.schemas import (
+    BotDetailResponse,
+    BotListResponse,
+    BotUpdateRequest,
+    ErrorResponse,
+)
 
 router = APIRouter()
 
@@ -44,7 +49,12 @@ class BotCreateRequest(BaseModel):
 @router.get(
     "",
     response_model=BotListResponse,
-    responses={503: {"description": "Bot manager not available"}},
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager not available",
+        },
+    },
 )
 async def list_bots(
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
@@ -98,11 +108,20 @@ async def list_bots(
     status_code=201,
     response_model=BotDetailResponse,
     responses={
-        400: {"description": "Strategy loading failed"},
-        404: {"description": "Strategy not found"},
-        409: {"description": "Bot already exists or conflict"},
-        422: {"description": "strategy_id/strategy_name both missing or budget error"},
-        503: {"description": "Bot manager or strategy registry not available"},
+        400: {"model": ErrorResponse, "description": "Strategy loading failed"},
+        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        409: {
+            "model": ErrorResponse,
+            "description": "Bot already exists or conflict",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "strategy_id/strategy_name both missing or budget error",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager or strategy registry not available",
+        },
     },
 )
 async def create_bot(
@@ -216,8 +235,11 @@ async def create_bot(
     "/{bot_id}",
     response_model=BotDetailResponse,
     responses={
-        404: {"description": "Bot not found"},
-        503: {"description": "Bot manager not available"},
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager not available",
+        },
     },
 )
 async def get_bot(
@@ -282,10 +304,16 @@ async def get_bot(
     "/{bot_id}/start",
     response_model=BotDetailResponse,
     responses={
-        404: {"description": "Bot not found"},
-        409: {"description": "Bot state conflict"},
-        422: {"description": "Account credentials not configured"},
-        503: {"description": "Bot manager not available"},
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        409: {"model": ErrorResponse, "description": "Bot state conflict"},
+        422: {
+            "model": ErrorResponse,
+            "description": "Account credentials not configured",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager not available",
+        },
     },
 )
 async def start_bot(
@@ -330,9 +358,12 @@ async def start_bot(
     "/{bot_id}/stop",
     response_model=BotDetailResponse,
     responses={
-        404: {"description": "Bot not found"},
-        409: {"description": "Bot state conflict"},
-        503: {"description": "Bot manager not available"},
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        409: {"model": ErrorResponse, "description": "Bot state conflict"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager not available",
+        },
     },
 )
 async def stop_bot(
@@ -368,10 +399,16 @@ async def stop_bot(
     "/{bot_id}",
     status_code=204,
     responses={
-        404: {"description": "Bot not found"},
-        409: {"description": "Bot state conflict"},
-        422: {"description": "Invalid handle_positions value"},
-        503: {"description": "Bot manager not available"},
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        409: {"model": ErrorResponse, "description": "Bot state conflict"},
+        422: {
+            "model": ErrorResponse,
+            "description": "Invalid handle_positions value",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager not available",
+        },
     },
 )
 async def delete_bot(
@@ -419,10 +456,19 @@ async def delete_bot(
     "/{bot_id}",
     response_model=BotDetailResponse,
     responses={
-        404: {"description": "Bot not found"},
-        409: {"description": "Bot state conflict (not stopped)"},
-        422: {"description": "Budget update failed (e.g. insufficient funds)"},
-        503: {"description": "Bot manager not available"},
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        409: {
+            "model": ErrorResponse,
+            "description": "Bot state conflict (not stopped)",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "Budget update failed (e.g. insufficient funds)",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Bot manager not available",
+        },
     },
 )
 async def update_bot(
@@ -481,8 +527,11 @@ async def update_bot(
 @router.get(
     "/{bot_id}/logs",
     responses={
-        404: {"description": "Bot not found"},
-        503: {"description": "Event history store not available"},
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Event history store not available",
+        },
     },
 )
 async def get_bot_logs(

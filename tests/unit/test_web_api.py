@@ -552,6 +552,128 @@ class TestRFC7807ErrorResponse:
         assert data["type"] == "/errors/validation"
         assert data["detail"] == "invalid input"
 
+    def test_all_router_explicit_4xx_5xx_responses_reference_error_response(
+        self,
+    ):
+        """라우트의 명시 등록된 4xx/5xx ``responses=``가 ``model: ErrorResponse``를
+        참조 (이슈 #1145, invariant C1).
+
+        ``src/ante/web/routes/`` 하위 router 모듈을 모두 import하여
+        ``APIRoute.responses`` **정적 dict**를 순회한다. ``int(code) >= 400``인
+        명시 항목은 모두 ``model is ErrorResponse`` 여야 한다.
+
+        - C1 — ``ANTE_TEST_MODE`` 무관, ``test_seed.py`` 포함
+        - C2 — FastAPI 자동 생성 422(``HTTPValidationError``)는 검사 대상
+          아님. 명시 등록된 422(예: accounts.put mutable type 검증)는 본
+          검사 대상에 포함된다.
+        - C3 — 신규 status code 추가는 본 PR scope 밖. 기존 ``responses=``
+          항목 갱신만 수행한다.
+        """
+        import importlib
+        import pkgutil
+
+        from fastapi.routing import APIRoute
+
+        import ante.web.routes as routes_pkg
+        from ante.web.schemas import ErrorResponse
+
+        violations: list[str] = []
+        for mod_info in pkgutil.iter_modules(routes_pkg.__path__):
+            if mod_info.name == "__init__":
+                continue
+            mod = importlib.import_module(f"ante.web.routes.{mod_info.name}")
+            router = getattr(mod, "router", None)
+            if router is None:
+                continue
+            for route in router.routes:
+                if not isinstance(route, APIRoute):
+                    continue
+                responses = route.responses or {}
+                for code, entry in responses.items():
+                    try:
+                        code_int = int(code)
+                    except (TypeError, ValueError):
+                        continue
+                    if code_int < 400:
+                        continue
+                    if not isinstance(entry, dict):
+                        violations.append(
+                            f"{mod_info.name} {route.path} {code_int}: "
+                            f"entry는 dict 여야 함 (got {type(entry).__name__})"
+                        )
+                        continue
+                    model = entry.get("model")
+                    if model is not ErrorResponse:
+                        violations.append(
+                            f"{mod_info.name} {route.path} {code_int}: "
+                            f"model 누락 또는 비-ErrorResponse "
+                            f"(got {model!r}, keys={sorted(entry.keys())})"
+                        )
+
+        assert violations == [], (
+            "router 명시 4xx/5xx responses=가 ErrorResponse를 참조하지 않음:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+        )
+
+    def test_frontend_openapi_json_matches_live_app_openapi(self):
+        """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
+
+        기본 앱(``create_app()``, ``ANTE_TEST_MODE`` 미설정)이 생성한
+        ``app.openapi()``의 ``paths.*.*.responses`` 트리가
+        ``frontend/openapi.json``의 동일 트리와 정확히 일치해야 한다. version
+        등 노이즈를 피하려고 비교 범위는 ``responses`` 노드로 좁힌다.
+
+        ``test_seed.py``는 ``ANTE_TEST_MODE`` gating으로 양쪽 모두에서
+        빠진다.
+        """
+        import json
+
+        live_app = create_app()
+        live_openapi = live_app.openapi()
+        frontend_openapi_path = (
+            Path(__file__).resolve().parents[2] / "frontend" / "openapi.json"
+        )
+        assert frontend_openapi_path.is_file(), (
+            f"frontend/openapi.json 미존재: {frontend_openapi_path}"
+        )
+        with frontend_openapi_path.open(encoding="utf-8") as fp:
+            frontend_openapi = json.load(fp)
+
+        live_paths = live_openapi.get("paths", {})
+        frontend_paths = frontend_openapi.get("paths", {})
+
+        # path × method 단위 responses 트리 비교
+        # (C4 brittle 시 범위 좁힘 가이드 적용).
+        diffs: list[str] = []
+
+        live_path_set = set(live_paths.keys())
+        frontend_path_set = set(frontend_paths.keys())
+        if live_path_set != frontend_path_set:
+            only_live = sorted(live_path_set - frontend_path_set)
+            only_frontend = sorted(frontend_path_set - live_path_set)
+            if only_live:
+                diffs.append(f"live에만 존재하는 path: {only_live}")
+            if only_frontend:
+                diffs.append(f"frontend에만 존재하는 path: {only_frontend}")
+
+        for path in sorted(live_path_set & frontend_path_set):
+            live_methods = live_paths[path]
+            frontend_methods = frontend_paths[path]
+            method_set = set(live_methods.keys()) | set(frontend_methods.keys())
+            for method in sorted(method_set):
+                live_responses = live_methods.get(method, {}).get("responses")
+                frontend_responses = frontend_methods.get(method, {}).get("responses")
+                if live_responses != frontend_responses:
+                    diffs.append(f"{method.upper()} {path} responses 불일치")
+
+        assert diffs == [], (
+            "frontend/openapi.json이 live app.openapi()와 동기화되지 않음:\n"
+            + "\n".join(f"  - {d}" for d in diffs)
+            + '\n해결: python -c "from ante.web.app import create_app; '
+            "import json; print(json.dumps(create_app().openapi(), "
+            'ensure_ascii=False, indent=2))" > frontend/openapi.json'
+        )
+
 
 # ── App Factory 테스트 ────────────────────────────
 

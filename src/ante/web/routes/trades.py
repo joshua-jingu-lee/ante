@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from ante.web.deps import get_trade_service
-from ante.web.schemas import TradeListResponse
+from ante.web.schemas import ErrorResponse, TradeListResponse
 
 router = APIRouter()
 
@@ -15,7 +15,12 @@ router = APIRouter()
 @router.get(
     "",
     response_model=TradeListResponse,
-    responses={503: {"description": "Trade service not available"}},
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "Trade service not available",
+        },
+    },
 )
 async def list_trades(
     trade_service: Annotated[Any, Depends(get_trade_service)],
