@@ -46,7 +46,7 @@ type DisplayConfig = {
 const DISPLAY_CONFIGS: DisplayConfig[] = [
   { key: 'system.log_level', label: '시스템 로그 수준', desc: 'system.log_level · 로그 출력 상세도', type: 'select', options: ['DEBUG', 'INFO', 'WARNING', 'ERROR'] },
   { key: 'notification.telegram_enabled', label: '텔레그램 알림', desc: '텔레그램 알림 및 명령 수신 사용', type: 'toggle' },
-  { key: 'notification.min_level', label: '알림 최소 레벨', desc: 'notification.min_level · 이 레벨 미만은 발송하지 않음 (CRITICAL은 항상 발송)', type: 'select', options: ['critical', 'error', 'warning', 'info'], defaultOption: 'info', disabledByTelegram: true },
+  { key: 'notification.min_level', label: '알림 최소 레벨', desc: 'notification.min_level · 이 레벨 미만은 발송하지 않음 (CRITICAL은 항상 발송)', type: 'select', options: ['critical', 'error', 'warning', 'info'], defaultOption: 'info' },
 ]
 
 export default function Settings() {
@@ -251,7 +251,7 @@ export default function Settings() {
               </div>
               {cfg.type === 'select' && (
                 <select
-                  value={getConfigValue(cfg.key) || cfg.defaultOption || cfg.options![0]}
+                  value={getConfigValue(cfg.key) || cfg.defaultOption || cfg.options![1]}
                   onChange={(e) => updateConfig.mutate({ key: cfg.key, value: e.target.value })}
                   className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] cursor-pointer"
                   disabled={isTelegramOff}
