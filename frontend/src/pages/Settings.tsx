@@ -33,12 +33,20 @@ const TRADING_CONFIG_GROUPS = [
 ]
 
 /** 표시 및 알림 설정 */
-const DISPLAY_CONFIGS = [
-  { key: 'system.log_level', label: '시스템 로그 수준', desc: 'system.log_level · 로그 출력 상세도', type: 'select' as const, options: ['DEBUG', 'INFO', 'WARNING', 'ERROR'] },
-  { key: 'notification.telegram_enabled', label: '텔레그램 알림', desc: '텔레그램 알림 및 명령 수신 사용', type: 'toggle' as const },
-  { key: 'notification.telegram_level', label: '텔레그램 알림 수준', desc: 'notification.telegram_level · 알림 발송 기준', type: 'select' as const, options: ['all', 'important', 'critical', 'off'], disabledByTelegram: true },
-  { key: 'notification.fill_alert', label: '체결 알림', desc: '매수/매도 체결 시 즉시 알림', type: 'toggle' as const, disabledByTelegram: true },
-  { key: 'notification.daily_report', label: '일일 리포트', desc: '매일 장 마감 후 수익 요약 리포트', type: 'toggle' as const, disabledByTelegram: true },
+type DisplayConfig = {
+  key: string
+  label: string
+  desc: string
+  type: 'select' | 'toggle'
+  options?: string[]
+  defaultOption?: string
+  disabledByTelegram?: boolean
+}
+
+const DISPLAY_CONFIGS: DisplayConfig[] = [
+  { key: 'system.log_level', label: '시스템 로그 수준', desc: 'system.log_level · 로그 출력 상세도', type: 'select', options: ['DEBUG', 'INFO', 'WARNING', 'ERROR'] },
+  { key: 'notification.telegram_enabled', label: '텔레그램 알림', desc: '텔레그램 알림 및 명령 수신 사용', type: 'toggle' },
+  { key: 'notification.min_level', label: '알림 최소 레벨', desc: 'notification.min_level · 이 레벨 미만은 발송하지 않음 (CRITICAL은 항상 발송)', type: 'select', options: ['critical', 'error', 'warning', 'info'], defaultOption: 'info', disabledByTelegram: true },
 ]
 
 export default function Settings() {
@@ -229,7 +237,7 @@ export default function Settings() {
             </div>
           </div>
           {DISPLAY_CONFIGS.map((cfg, idx) => {
-            const isTelegramOff = cfg.disabledByTelegram && getConfigValue('notification.telegram_enabled') === 'false'
+            const isTelegramOff = cfg.disabledByTelegram && String(getConfigValue('notification.telegram_enabled')) === 'false'
             return (
             <div
               key={cfg.key}
@@ -243,7 +251,7 @@ export default function Settings() {
               </div>
               {cfg.type === 'select' && (
                 <select
-                  value={getConfigValue(cfg.key) || cfg.options![1]}
+                  value={getConfigValue(cfg.key) || cfg.defaultOption || cfg.options![0]}
                   onChange={(e) => updateConfig.mutate({ key: cfg.key, value: e.target.value })}
                   className="bg-bg border border-border rounded px-2 py-1 text-text text-[13px] cursor-pointer"
                   disabled={isTelegramOff}
