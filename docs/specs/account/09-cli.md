@@ -50,8 +50,12 @@ ante system activate                # 전체 거래 재개
 | `ante account delete <account_id>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
 | `ante account set-credentials <account_id>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
 
-cold-path 전용 명령은 같은 `config_dir`의 PID/socket guard로 서버 실행 여부를 먼저 확인한다.
-서버가 실행 중이면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 에러로 종료한다.
+cold-path 전용 명령은 active Ante runtime guard로 서버 실행 여부를 먼저 확인한다.
+1.0 정책상 동일 OS user/home server 기준으로 active runtime은 항상 단일이며,
+runtime이 살아 있으면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 에러로 종료한다.
+`ante account delete`는 IPC 런타임 커맨드가 아니다. cold-path CLI에서 직접
+`AccountService.delete()`를 호출하며, 해당 계좌에 활성(non-deleted) 봇이 남아 있으면
+삭제는 `AccountHasActiveBotsError`로 차단된다(orphan bot 무결성).
 
 ### CLI 출력 예시
 

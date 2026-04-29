@@ -37,15 +37,18 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 19개 핸들러를 등록."""
+    """register_all_handlers가 18개 핸들러를 등록 (account.delete 제외).
+
+    `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
+    AccountService를 호출한다.
+    """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 19
+    assert len(registry.commands) == 18
 
     expected = {
         "system.halt",
         "system.activate",
-        "account.delete",
         "account.suspend",
         "account.activate",
         "bot.create",
@@ -64,6 +67,8 @@ def test_register_all_handlers() -> None:
         "broker.reconcile",
     }
     assert set(registry.commands) == expected
+    # account.delete는 cold-path 전용이므로 IPC 등록 대상이 아니다.
+    assert "account.delete" not in registry.commands
 
 
 # ── _handle_bot_create 변환 로직 테스트 ──────────────

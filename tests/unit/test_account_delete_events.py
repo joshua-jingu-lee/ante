@@ -1,4 +1,9 @@
-"""AccountService.delete() 이벤트 발행 테스트 (#717)."""
+"""AccountService.delete() 이벤트 발행 테스트 (#717, #1139).
+
+#1139로 `AccountDeletedEvent`는 1.0 EventBus 계약에서 제거되었다.
+cold-path delete는 consumer wiring을 트리거하지 않으며, 같은 모듈에서
+발행되던 `AccountSuspendedEvent`(소속 봇 중지 트리거) 동작만 회귀 검증한다.
+"""
 
 import pytest
 import pytest_asyncio
@@ -7,10 +12,7 @@ from ante.account.models import Account, AccountStatus
 from ante.account.service import AccountService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
-from ante.eventbus.events import (
-    AccountDeletedEvent,
-    AccountSuspendedEvent,
-)
+from ante.eventbus.events import AccountSuspendedEvent
 
 
 @pytest_asyncio.fixture
@@ -58,12 +60,32 @@ def _make_account(
     )
 
 
+def test_account_deleted_event_is_not_part_of_runtime_contract():
+    """AccountDeletedEvent는 1.0 EventBus 계약에서 제거되었다.
+
+    회귀 가드: 향후 누군가 다시 정의하더라도 이 직접 단언이 fail하여
+    cold-path consumer wiring 트리거 변경이 곧바로 노출된다.
+    """
+    import ante.eventbus.events as events_module
+
+    assert not hasattr(events_module, "AccountDeletedEvent"), (
+        "AccountDeletedEvent는 #1139에서 1.0 비계약으로 분류되었다. "
+        "cold-path delete는 consumer wiring을 트리거하지 않으므로 "
+        "이 이벤트를 다시 도입하지 말 것."
+    )
+
+
 class TestAccountDeleteEvents:
     """AccountService.delete() 이벤트 발행 테스트."""
 
     @pytest.mark.asyncio
-    async def test_delete_publishes_events(self, service, eventbus):
-        """delete()가 AccountSuspendedEvent -> AccountDeletedEvent 순서로 발행."""
+    async def test_delete_publishes_suspend_only(self, service, eventbus):
+        """delete()는 AccountSuspendedEvent만 발행한다.
+
+        AccountDeletedEvent는 1.0 비계약이므로 발행되지 않는다.
+        AccountSuspendedEvent(reason="Account deletion")는 BotManager가 소속
+        봇을 중지시키도록 유지된다.
+        """
         await service.create(_make_account())
 
         published: list = []
@@ -71,25 +93,15 @@ class TestAccountDeleteEvents:
         async def on_suspended(event: AccountSuspendedEvent) -> None:
             published.append(("suspended", event))
 
-        async def on_deleted(event: AccountDeletedEvent) -> None:
-            published.append(("deleted", event))
-
         eventbus.subscribe(AccountSuspendedEvent, on_suspended)
-        eventbus.subscribe(AccountDeletedEvent, on_deleted)
 
         await service.delete("test", deleted_by="admin")
 
-        assert len(published) == 2
-
-        # 순서 검증: suspended -> deleted
+        assert len(published) == 1
         assert published[0][0] == "suspended"
         assert published[0][1].account_id == "test"
         assert published[0][1].reason == "Account deletion"
         assert published[0][1].suspended_by == "admin"
-
-        assert published[1][0] == "deleted"
-        assert published[1][1].account_id == "test"
-        assert published[1][1].deleted_by == "admin"
 
     @pytest.mark.asyncio
     async def test_delete_already_suspended_skips_suspend_event(
@@ -104,19 +116,13 @@ class TestAccountDeleteEvents:
         async def on_suspended(event: AccountSuspendedEvent) -> None:
             published.append(("suspended", event))
 
-        async def on_deleted(event: AccountDeletedEvent) -> None:
-            published.append(("deleted", event))
-
         eventbus.subscribe(AccountSuspendedEvent, on_suspended)
-        eventbus.subscribe(AccountDeletedEvent, on_deleted)
 
         await service.delete("test", deleted_by="admin")
 
-        # AccountSuspendedEvent는 발행되지 않아야 함
-        assert len(published) == 1
-        assert published[0][0] == "deleted"
-        assert published[0][1].account_id == "test"
-        assert published[0][1].deleted_by == "admin"
+        # AccountSuspendedEvent는 새로 발행되지 않아야 함
+        # (이미 suspend 시 1회 발행되었지만 delete()에서는 추가 발행 없음)
+        assert len(published) == 0
 
     @pytest.mark.asyncio
     async def test_delete_sets_status_and_clears_cache(self, service):
