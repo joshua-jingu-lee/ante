@@ -50,6 +50,10 @@ Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경
 브로커 재초기화성 변경은 서버를 정지한 뒤 cold-path CLI로 수행하고, 서버 재시작 시 새
 계좌 topology가 반영된다.
 
+`PUT /api/accounts/:id` 본문은 `Content-Type: application/json` (charset suffix 허용)
+만 허용하며, 다른 media type은 415 Unsupported Media Type을 반환한다. structural 필드
+키 검사(409)는 Content-Type 검사(415)보다 우선한다(invariant I4 — raw key 가드).
+
 ### 기존 엔드포인트 계좌 필터
 
 멀티 계좌 환경에서 모든 거래·잔고·봇 관련 API 응답에 계좌 컨텍스트를 포함한다.

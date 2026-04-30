@@ -67,18 +67,30 @@ export type paths = {
          *     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
          *     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
          *
-         *     body는 자유 ``dict[str, Any] | None``로 받는다. FastAPI 선행 Pydantic
-         *     검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
+         *     body는 raw bytes로 받는다(``request.body()``). FastAPI 선행 Pydantic
+         *     검증을 거치면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
          *     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
-         *     핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
-         *     structural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로
-         *     ``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{"name":
-         *     null}`` / ``{"timezone": {}}`` 같은 잘못된 값이 service/DB까지 흘러가
-         *     상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로
-         *     422로 변환한다.
          *
-         *     PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
-         *     이슈 #1143에서 다룬다.
+         *     핸들러 단계 순서(이슈 #1153 Implementation Plan):
+         *
+         *     1. raw bytes 읽기.
+         *     2. **빈 body**(``b""``) → ``payload = {}``로 두고 Content-Type 검사·JSON
+         *        파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(현재 400 no-op 의미 보존).
+         *     3. **JSON 파싱 실패**: Content-Type ≠ application/json → 415,
+         *        Content-Type 정상 → 422.
+         *     4. **non-dict JSON**: Content-Type ≠ application/json → 415,
+         *        Content-Type 정상 → 422.
+         *     5. **structural 가드(I4 우선)**: dict payload에 structural 키 존재 → 409
+         *        (Content-Type 무관, structural+text/plain도 409).
+         *     6. ``len(payload) == 0`` (``{}`` 명시 송신) → 400 no-op (Content-Type
+         *        검사 건너뜀; #1152 후속에서 422로 정렬).
+         *     7. **Content-Type 415 게이트**: ``application/json``(charset suffix 허용)
+         *        이외 → 415.
+         *     8. **unknown 키 / mutable type**: structural 제외한 raw dict의 unknown
+         *        키 → 422. ``AccountUpdateRequest.model_validate`` ValidationError → 422.
+         *     9. ``model_dump(exclude_none=True)`` 결과 비면 400 (예: ``{"name": null}``
+         *        단독 — 기존 의미 유지).
+         *     10. service 호출.
          */
         put: operations["update_account_api_accounts__account_id__put"];
         post?: never;
@@ -3387,11 +3399,18 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": {
-                    [key: string]: unknown;
-                } | null;
+                    /** @description 사용자에게 표시되는 이름. */
+                    name?: string;
+                    /** @description 거래소 현지 시간대 (IANA). */
+                    timezone?: string;
+                    /** @description 거래 종료 시각 (현지 시간, HH:MM). */
+                    trading_hours_end?: string;
+                    /** @description 거래 시작 시각 (현지 시간, HH:MM). */
+                    trading_hours_start?: string;
+                };
             };
         };
         responses: {
@@ -3431,7 +3450,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 비구조(mutable) 필드 type 검증 실패. structural 필드 키는 422가 아닌 409로 차단된다. */
+            /** @description Content-Type이 application/json이 아님 */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 비구조(mutable) 필드 type 검증 실패 또는 unknown 키. structural 필드 키는 422가 아닌 409로 차단된다. */
             422: {
                 headers: {
                     [name: string]: unknown;

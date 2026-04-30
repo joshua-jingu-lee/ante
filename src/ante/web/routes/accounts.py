@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from ante.web.deps import (
@@ -48,10 +49,68 @@ STRUCTURAL_FIELDS: tuple[str, ...] = (
     "trading_mode",
 )
 
+# PUT /api/accounts/{account_id} 비구조(런타임 mutable) 필드 화이트리스트.
+# 출처: docs/specs/account/10-web-api.md 16-22줄,
+#       docs/specs/account/04-account-service.md.
+# 런타임 PUT은 이 4개 필드만 변경할 수 있으며, 나머지는 STRUCTURAL_FIELDS로 분류되어
+# cold-path 409로 차단된다.
+MUTABLE_FIELDS: tuple[str, ...] = (
+    "name",
+    "timezone",
+    "trading_hours_start",
+    "trading_hours_end",
+)
+
 # 응답 detail prefix로 노출되는 cold-path 식별자.
 # 클라이언트는 이 prefix로 cold-path 응답과 다른 409 경로(예: 삭제된 계좌
 # 수정 시도)를 구분한다.
 STRUCTURAL_CHANGE_ERROR_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
+
+
+# PUT /api/accounts/{account_id} 런타임 mutable 입력 contract.
+# 출처: docs/specs/account/10-web-api.md 16-22줄(런타임 차단 규칙 + mutable 필드).
+#
+# 런타임 PUT 핸들러는 raw body 파싱 → structural 가드(I1/I4) → Content-Type 415
+# 게이트 → mutable 검증 순서로 처리하지만(이슈 #1153), Swagger UI / agent client /
+# SDK는 정확한 mutable 입력 contract를 발견할 수 있어야 한다.
+#
+# ``AccountUpdateRequest.model_json_schema()`` 직접 노출 금지: 다른 소비자(테스트,
+# CLI) 호환을 위해 모든 필드가 ``str | None = None`` 옵션이고 structural 키도
+# 포함되어 있다. 본 dict 상수는 mutable 4 필드만 노출하며, ``required``는 schema
+# 안에 두지 않는다(빈 dict + ``{"name": null}`` 의 기존 400 no-op 의미를
+# 보존하기 위해; #1152 후속에서 422로 정렬). ``required: True``는
+# ``requestBody`` level에 둔다.
+ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "AccountMutableUpdateRequest",
+    "description": (
+        "PUT /api/accounts/{account_id} 런타임 mutable 입력 contract. "
+        "런타임에는 비구조 필드만 변경할 수 있다. "
+        "structural 필드(credentials, broker_config, "
+        "buy_commission_rate, sell_commission_rate, broker_type, exchange, "
+        "currency, trading_mode)는 cold-path 409로 차단된다. "
+        "스키마 SSOT: docs/specs/account/10-web-api.md 16-22줄."
+    ),
+    "additionalProperties": False,
+    "properties": {
+        "name": {
+            "type": "string",
+            "description": "사용자에게 표시되는 이름.",
+        },
+        "timezone": {
+            "type": "string",
+            "description": "거래소 현지 시간대 (IANA).",
+        },
+        "trading_hours_start": {
+            "type": "string",
+            "description": "거래 시작 시각 (현지 시간, HH:MM).",
+        },
+        "trading_hours_end": {
+            "type": "string",
+            "description": "거래 종료 시각 (현지 시간, HH:MM).",
+        },
+    },
+}
 
 
 # POST /api/accounts cold-path 전용 OpenAPI request body 문서.
@@ -304,10 +363,14 @@ async def get_account(
                 "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
             ),
         },
+        415: {
+            "model": ErrorResponse,
+            "description": "Content-Type이 application/json이 아님",
+        },
         422: {
             "model": ErrorResponse,
             "description": (
-                "비구조(mutable) 필드 type 검증 실패. "
+                "비구조(mutable) 필드 type 검증 실패 또는 unknown 키. "
                 "structural 필드 키는 422가 아닌 409로 차단된다."
             ),
         },
@@ -316,11 +379,23 @@ async def get_account(
             "description": "Account service not available 또는 broker 재연결 실패",
         },
     },
+    openapi_extra={
+        "requestBody": {
+            # 빈 body 400 no-op 호환을 위해 schema-level required 강제 X.
+            # 단, requestBody-level은 True로 두어 codegen이 body를 optional로
+            # 만들지 않도록 한다(#1153 패턴 SSOT — POST 패턴 일치).
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA,
+                },
+            },
+        },
+    },
 )
 async def update_account(
     account_id: str,
     request: Request,
-    body: dict[str, Any] | None = Body(default=None),
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)] = None,
 ) -> dict[str, Any]:
     """계좌 수정.
@@ -331,18 +406,30 @@ async def update_account(
     ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path
     응답과 ``AccountDeletedError`` 경로의 409를 구분한다.
 
-    body는 자유 ``dict[str, Any] | None``로 받는다. FastAPI 선행 Pydantic
-    검증이 켜지면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
+    body는 raw bytes로 받는다(``request.body()``). FastAPI 선행 Pydantic
+    검증을 거치면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
-    핸들러 본문에서는 raw payload key 검사로 cold-path 가드를 먼저 수행한 뒤,
-    structural을 제외한 비구조 페이로드만 ``AccountUpdateRequest``로
-    ``model_validate``하여 mutable 필드의 type 검증을 수행한다(``{"name":
-    null}`` / ``{"timezone": {}}`` 같은 잘못된 값이 service/DB까지 흘러가
-    상태를 오염시키는 것을 차단한다 — P1 회귀 보호). 검증 실패는 명시적으로
-    422로 변환한다.
 
-    PUT requestBody의 OpenAPI schema accuracy 회복(mutable 모델 노출)은 후속
-    이슈 #1143에서 다룬다.
+    핸들러 단계 순서(이슈 #1153 Implementation Plan):
+
+    1. raw bytes 읽기.
+    2. **빈 body**(``b""``) → ``payload = {}``로 두고 Content-Type 검사·JSON
+       파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(현재 400 no-op 의미 보존).
+    3. **JSON 파싱 실패**: Content-Type ≠ application/json → 415,
+       Content-Type 정상 → 422.
+    4. **non-dict JSON**: Content-Type ≠ application/json → 415,
+       Content-Type 정상 → 422.
+    5. **structural 가드(I4 우선)**: dict payload에 structural 키 존재 → 409
+       (Content-Type 무관, structural+text/plain도 409).
+    6. ``len(payload) == 0`` (``{}`` 명시 송신) → 400 no-op (Content-Type
+       검사 건너뜀; #1152 후속에서 422로 정렬).
+    7. **Content-Type 415 게이트**: ``application/json``(charset suffix 허용)
+       이외 → 415.
+    8. **unknown 키 / mutable type**: structural 제외한 raw dict의 unknown
+       키 → 422. ``AccountUpdateRequest.model_validate`` ValidationError → 422.
+    9. ``model_dump(exclude_none=True)`` 결과 비면 400 (예: ``{"name": null}``
+       단독 — 기존 의미 유지).
+    10. service 호출.
     """
     from ante.account.errors import (
         AccountDeletedError,
@@ -351,15 +438,55 @@ async def update_account(
         BrokerReconnectFailedError,
     )
 
-    # body는 dict로 직접 받으므로 별도 raw bytes 파싱이 필요 없다.
-    # FastAPI는 JSON 파싱 실패 / non-dict body를 자동 422로 처리한다.
-    payload = body or {}
+    # 1. raw body 읽기.
+    raw = await request.body()
 
-    # cold-path 가드: structural 필드 키가 payload에 하나라도 등장하면
-    # DB/서비스 호출 전 409로 즉시 차단한다(invariant I1/I4). 값이 null이거나
-    # 타입이 잘못돼도 동일하게 차단된다 — Pydantic 검증을 통과한 값이 아니라
-    # 키 존재 여부만 본다. 따라서 structural mutable 검증보다 *먼저* 수행해야
-    # mutable 422가 cold-path 409를 가리지 않는다.
+    # Content-Type media type 추출(charset suffix 허용 — `;` 앞부분 lowercase
+    # 매칭으로 `application/json; charset=utf-8` 같은 정상 변형을 통과시킨다).
+    content_type_header = request.headers.get("content-type", "") or ""
+    media_type = content_type_header.split(";", 1)[0].strip().lower()
+    is_json_media = media_type == "application/json"
+
+    # 2. 빈 body — Content-Type 검사·JSON 파싱 건너뛰고 payload = {} 로 두어
+    # 단계 6의 400 no-op 분기로 떨어지게 한다(기존 의미 보존).
+    if raw == b"":
+        payload: Any = {}
+    else:
+        # 3. JSON 파싱.
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Content-Type 자체가 잘못된 경우 415가 더 정보량이 크므로 우선.
+            if not is_json_media:
+                raise HTTPException(
+                    status_code=415,
+                    detail=(
+                        "Content-Type은 application/json이어야 합니다. "
+                        f"받은 값: {content_type_header!r}"
+                    ),
+                ) from None
+            raise HTTPException(
+                status_code=422,
+                detail="요청 body의 JSON 파싱에 실패했습니다.",
+            ) from None
+
+        # 4. non-dict JSON(예: [], "x", 123): Content-Type 분기.
+        if not isinstance(payload, dict):
+            if not is_json_media:
+                raise HTTPException(
+                    status_code=415,
+                    detail=(
+                        "Content-Type은 application/json이어야 합니다. "
+                        f"받은 값: {content_type_header!r}"
+                    ),
+                )
+            raise HTTPException(
+                status_code=422,
+                detail="요청 body는 JSON object여야 합니다.",
+            )
+
+    # 5. structural 가드(I4 우선): structural 키가 등장하면 Content-Type과
+    # 무관하게 409로 차단(structural+text/plain도 409).
     structural_hits = sorted(set(payload) & set(STRUCTURAL_FIELDS))
     if structural_hits:
         raise HTTPException(
@@ -369,22 +496,39 @@ async def update_account(
             ),
         )
 
-    # 비구조 필드만 모은다. structural 키는 위 가드에서 이미 차단되었으므로
-    # 여기에는 들어오지 않는다. mutable 필드만 들어온 raw dict를 기존
-    # ``AccountUpdateRequest``로 model_validate하여 type 검증한다(새 모델
-    # 추가 없음 — 메타 리뷰 #2 결정 보존). structural 필드는 input에 없으므로
-    # None default로 통과되고, mutable 필드의 잘못된 값(예: null, dict 등)은
-    # ValidationError로 거부된다.
+    # 6. ``len(payload) == 0`` (``{}`` 명시 송신 또는 빈 body): Content-Type
+    # 검사 건너뛰고 400 no-op로 즉시 떨어뜨려 기존 의미 보존(#1152 후속에서
+    # 422로 정렬).
+    if len(payload) == 0:
+        raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
+
+    # 7. Content-Type 415 게이트: 비-application/json은 415.
+    if not is_json_media:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "Content-Type은 application/json이어야 합니다. "
+                f"받은 값: {content_type_header!r}"
+            ),
+        )
+
+    # 8. unknown 키 / mutable type 검증.
     mutable_payload_in = {
         k: v for k, v in payload.items() if k not in STRUCTURAL_FIELDS
     }
+    unknown_keys = sorted(set(mutable_payload_in) - set(MUTABLE_FIELDS))
+    if unknown_keys:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"알 수 없는 필드가 포함되었습니다: {', '.join(unknown_keys)}"),
+        )
 
     try:
         validated = AccountUpdateRequest.model_validate(mutable_payload_in)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors())
+        raise HTTPException(status_code=422, detail=e.errors()) from None
 
-    # ``exclude_none=True``로 set된 mutable 필드만 추출한다. ``{"name": null}``
+    # 9. ``exclude_none=True``로 set된 mutable 필드만 추출. ``{"name": null}``
     # 같이 명시적으로 null이 들어온 경우 model_dump에서 빠지므로 service까지
     # null이 흘러가지 않는다(P1: DB 오염 차단).
     fields = validated.model_dump(exclude_none=True)

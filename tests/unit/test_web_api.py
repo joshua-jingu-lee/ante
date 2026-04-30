@@ -530,10 +530,28 @@ class TestRFC7807ErrorResponse:
             "/errors/unauthorized",
             "/errors/forbidden",
             "/errors/conflict",
+            "/errors/unsupported-media-type",
             "/errors/internal",
         }
         actual_types = {t for t, _ in ERROR_CATALOG.values()}
         assert required_types == actual_types
+
+    def test_error_catalog_has_415_entry(self):
+        """ERROR_CATALOG 415 entry는 RFC 7807 패턴(이슈 #1153).
+
+        PUT /api/accounts/{account_id}의 Content-Type 게이트가 415를 raise할
+        때 fallback ``("/errors/internal", "Error")``로 떨어지지 않도록 415
+        entry를 명시 등록한다.
+        """
+        from ante.web.errors import ERROR_CATALOG
+
+        assert 415 in ERROR_CATALOG, (
+            "ERROR_CATALOG에 415 entry가 없으면 415 HTTPException이 fallback "
+            "type/title로 직렬화된다."
+        )
+        type_uri, title = ERROR_CATALOG[415]
+        assert type_uri == "/errors/unsupported-media-type"
+        assert title == "Unsupported Media Type"
 
     def test_value_error_returns_400(self, app, client):
         from fastapi import APIRouter
@@ -1242,3 +1260,198 @@ class TestGeneratedTsPostAccountRequestBody:
             "Record<string, unknown>" in field_block
             or "[key: string]: unknown" in field_block
         ), f"broker_config가 open-map 형태로 노출되지 않음:\n{field_block}"
+
+
+# ── 이슈 #1153: PUT request body schema accuracy + Content-Type 415 게이트 ─
+
+
+class TestPutAccountRequestBodySchema:
+    """PUT /api/accounts/{account_id} requestBody OpenAPI schema 노출(이슈 #1153).
+
+    런타임 핸들러는 raw body 파싱 + structural 가드(I1/I4) + Content-Type 415
+    게이트 + mutable 검증 순서로 처리한다. OpenAPI/codegen 클라이언트는 정확한
+    mutable 입력 contract(name/timezone/trading_hours_start/trading_hours_end,
+    additionalProperties: False, nullable 없음)를 발견할 수 있어야 한다.
+
+    ``AccountUpdateRequest.model_json_schema()`` 직접 노출은 금지(다른 소비자
+    호환을 위해 모든 필드가 ``str | None`` 옵션이고 structural 키도 포함).
+    spec-aligned dict 상수 ``ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA``로 별도
+    정의해 노출한다.
+    """
+
+    @staticmethod
+    def _put_request_body(client: TestClient) -> dict:
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        spec = (
+            openapi.get("paths", {})
+            .get("/api/accounts/{account_id}", {})
+            .get("put", {})
+        )
+        request_body = spec.get("requestBody")
+        assert request_body is not None, (
+            "PUT /api/accounts/{account_id} requestBody가 OpenAPI에 노출되지 않음"
+        )
+        return request_body
+
+    @staticmethod
+    def _put_request_schema(client: TestClient) -> dict:
+        request_body = TestPutAccountRequestBodySchema._put_request_body(client)
+        json_content = request_body.get("content", {}).get("application/json")
+        assert json_content is not None, (
+            "PUT /api/accounts/{account_id} requestBody에 application/json content 없음"
+        )
+        schema = json_content.get("schema")
+        assert isinstance(schema, dict), (
+            "PUT /api/accounts/{account_id} requestBody schema가 dict가 아님"
+        )
+        return schema
+
+    def test_openapi_put_account_request_body_is_strict_mutable_schema(self, client):
+        """PUT requestBody가 mutable 4 필드 strict schema."""
+        schema = self._put_request_schema(client)
+
+        assert schema.get("type") == "object", schema
+        # additionalProperties: False — 알 수 없는 키 차단을 contract에 표현
+        ap = schema.get("additionalProperties")
+        assert ap is False, f"additionalProperties가 False가 아님: {ap!r}"
+
+        properties = schema.get("properties", {})
+        expected = {
+            "name",
+            "timezone",
+            "trading_hours_start",
+            "trading_hours_end",
+        }
+        actual = set(properties.keys())
+        assert actual == expected, (
+            f"mutable 필드가 정확히 4개여야 함. expected={expected}, actual={actual}"
+        )
+
+        # 각 property는 단일 type=string, nullable이 아님.
+        for name, prop in properties.items():
+            assert isinstance(prop, dict), f"properties.{name}가 dict가 아님: {prop!r}"
+            assert prop.get("type") == "string", (
+                f"properties.{name}.type이 'string'이 아님: {prop!r}"
+            )
+            assert "nullable" not in prop or prop.get("nullable") is not True, (
+                f"properties.{name}에 nullable: True가 노출됨"
+            )
+            for combinator in ("anyOf", "oneOf"):
+                variants = prop.get(combinator)
+                if variants:
+                    for variant in variants:
+                        assert variant.get("type") != "null", (
+                            f"properties.{name}.{combinator}에 null type 포함"
+                        )
+
+    def test_openapi_put_account_request_body_not_anyof_null(self, client):
+        """PUT requestBody schema 자체가 nullable(anyOf null)이 아님."""
+        schema = self._put_request_schema(client)
+
+        # schema-level anyOf/oneOf에 null type 변형이 없어야 함
+        for combinator in ("anyOf", "oneOf"):
+            variants = schema.get(combinator)
+            if variants:
+                for variant in variants:
+                    assert variant.get("type") != "null", (
+                        f"requestBody schema {combinator}에 null type 포함: {schema!r}"
+                    )
+
+    def test_openapi_put_account_request_body_required_true(self, client):
+        """codegen이 body를 optional로 만들지 않도록 requestBody.required: True."""
+        request_body = self._put_request_body(client)
+        assert request_body.get("required") is True, (
+            f"requestBody.required가 True가 아님: {request_body.get('required')!r}"
+        )
+
+    def test_openapi_put_account_415_references_error_response(self, client):
+        """PUT 415 응답이 ErrorResponse를 가리킨다."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        spec = (
+            openapi.get("paths", {})
+            .get("/api/accounts/{account_id}", {})
+            .get("put", {})
+        )
+        responses = spec.get("responses", {})
+        response_415 = responses.get("415")
+        assert response_415 is not None, "PUT 415 응답이 명시 등록되지 않음"
+        json_content = response_415.get("content", {}).get("application/json")
+        assert json_content is not None, "PUT 415에 application/json content 없음"
+        ref = json_content.get("schema", {}).get("$ref", "")
+        assert "ErrorResponse" in ref, (
+            f"PUT 415가 ErrorResponse를 가리키지 않음 (schema ref={ref!r})"
+        )
+
+
+class TestGeneratedTsPutAccountRequestBody:
+    """generated TS api.generated.ts에서 PUT /api/accounts/{account_id} request
+    body가 spec-aligned 형태로 노출되는지 보조 단언(이슈 #1153).
+
+    같은 PR에 ``frontend/src/types/api.generated.ts``가 함께 갱신되어야 하므로
+    generated artifact drift를 차단한다.
+    """
+
+    @staticmethod
+    def _generated_ts_text() -> str:
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "frontend"
+            / "src"
+            / "types"
+            / "api.generated.ts"
+        )
+        assert path.exists(), f"generated TS 파일이 존재하지 않음: {path}"
+        return path.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _put_account_operation_block(text: str) -> str:
+        """update_account_api_accounts__account_id__put operation 블록을 잘라낸다."""
+        marker = "update_account_api_accounts__account_id__put:"
+        idx = text.find(marker)
+        assert idx != -1, "generated TS에 update_account operation이 없음"
+        rest = text[idx:]
+        next_markers = [
+            "delete_account_api_accounts__account_id__delete:",
+            "suspend_account_api_accounts__account_id__suspend_post:",
+            "activate_account_api_accounts__account_id__activate_post:",
+            "get_account_rules_api_accounts__account_id__rules_get:",
+        ]
+        end_offsets = [rest.find(m, 1) for m in next_markers]
+        end_offsets = [o for o in end_offsets if o != -1]
+        end = min(end_offsets) if end_offsets else len(rest)
+        return rest[:end]
+
+    def test_generated_ts_put_account_request_body_not_unknown_or_null(self):
+        """PUT body가 `{ [key: string]: unknown } | null` 패턴이 아니어야 한다."""
+        block = self._put_account_operation_block(self._generated_ts_text())
+        # 회귀 패턴: anyOf null 노출이 sanitize되지 않은 경우 ` | null` 또는
+        # `[key: string]: unknown` 단독 패턴이 등장.
+        assert " | null" not in block, (
+            "PUT body가 nullable로 노출됨(`| null` 회귀):\n" + block
+        )
+        # body가 unknown record로 좁혀지면 안 된다(spec-aligned mutable 4 필드).
+        assert "[key: string]: unknown" not in block, (
+            "PUT body가 unknown record로 좁혀짐:\n" + block
+        )
+
+    def test_generated_ts_put_account_request_body_required_not_optional(self):
+        """PUT body가 optional 표시(?:)가 아닌 required."""
+        block = self._put_account_operation_block(self._generated_ts_text())
+        assert "requestBody?:" not in block, "PUT body가 optional로 노출됨:\n" + block
+        assert "requestBody:" in block, "PUT에 requestBody: 정의가 없음:\n" + block
+
+    def test_generated_ts_put_account_mutable_fields_not_nullable(self):
+        """mutable 필드 4개가 `string | null`이 아니라 `string`."""
+        block = self._put_account_operation_block(self._generated_ts_text())
+        for field in ("name", "timezone", "trading_hours_start", "trading_hours_end"):
+            # `field?: string;` 또는 `field: string;` 패턴 검출. nullable 부재 단언.
+            assert f"{field}?: string | null" not in block, (
+                f"PUT body의 {field}이 nullable로 노출됨:\n" + block
+            )
+            assert f"{field}: string | null" not in block, (
+                f"PUT body의 {field}이 nullable로 노출됨:\n" + block
+            )
