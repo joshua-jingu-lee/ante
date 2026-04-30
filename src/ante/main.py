@@ -227,6 +227,12 @@ async def _init_account(s: Services) -> None:
     # 레거시 system.toml [broker].is_paper → Account.broker_config 마이그레이션
     await _migrate_is_paper_to_broker_config(s)
 
+    # 부팅 mutation(create_default_test_account, is_paper migration)이 모두 끝난
+    # 뒤에야 runtime 플래그를 활성화한다 (#1144 invariant S3).
+    # 이 호출 이후 cold-path 메서드/필드 변경은
+    # ``AccountStructuralChangeRequiresStoppedServerError``로 차단된다.
+    s.account_service.mark_runtime_started()
+
 
 async def _migrate_is_paper_to_broker_config(s: Services) -> None:
     """system.toml [broker].is_paper를 Account.broker_config으로 1회성 이관한다.
