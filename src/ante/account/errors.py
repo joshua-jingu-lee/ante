@@ -71,6 +71,28 @@ class BrokerReconnectFailedError(AccountError):
     pass
 
 
+class AccountStructuralChangeRequiresStoppedServerError(AccountError):
+    """런타임에 계좌 structural 필드/메서드 변경을 시도했을 때 raise (#1144).
+
+    AccountService는 boot/cold-path/runtime을 구분하는 ``_runtime_started``
+    플래그를 갖는다. 서버 부팅이 완료된 뒤 이 플래그가 활성화되면 ``create()``,
+    ``delete()``, structural 키를 포함한 ``update()`` 호출은 즉시 이 예외로
+    차단된다 — DB는 수정되지 않는다.
+
+    cold-path 경로(``ante account create/delete/set-credentials`` 등)는
+    서버를 정지한 뒤에만 사용해야 한다. CLI는 별도의
+    ``_assert_no_active_runtime`` 가드(PID alive + IPC socket exists)로
+    1차 차단되며, 본 예외는 그 가드를 우회한 비정상 경로의 service-layer
+    defense-in-depth 역할이다.
+
+    클래스 레벨 ``code`` 속성은 IPC 서버가 ``getattr(e, "code", "EXECUTION_ERROR")``로
+    안정 코드 ``"ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"``를 노출하도록
+    한다. Web API 라우트는 별도 catch에서 409 + cold-path detail로 매핑한다.
+    """
+
+    code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
+
+
 class AccountHasActiveBotsError(AccountError):
     """delete() 시 해당 계좌에 활성(non-deleted) 봇이 남아 있음 (#1139).
 
