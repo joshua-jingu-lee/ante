@@ -77,9 +77,10 @@ STRUCTURAL_CHANGE_ERROR_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVE
 # ``AccountUpdateRequest.model_json_schema()`` 직접 노출 금지: 다른 소비자(테스트,
 # CLI) 호환을 위해 모든 필드가 ``str | None = None`` 옵션이고 structural 키도
 # 포함되어 있다. 본 dict 상수는 mutable 4 필드만 노출하며, ``required``는 schema
-# 안에 두지 않는다(빈 dict + ``{"name": null}`` 의 기존 400 no-op 의미를
-# 보존하기 위해; #1152 후속에서 422로 정렬). ``required: True``는
-# ``requestBody`` level에 둔다.
+# 안에 두지 않는다(빈 dict + ``{"name": null}``는 422 Unprocessable Entity로
+# 차단된다 — #1152 정렬 완료). ``required: True``는 ``requestBody`` level에
+# 둔다. ``minProperties: 1``은 effective payload가 비는 케이스(``{}`` /
+# ``{"name": null}``)를 OpenAPI/runtime 계약 양쪽에서 거부 의미로 표현한다.
 ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
     "type": "object",
     "title": "AccountMutableUpdateRequest",
@@ -92,6 +93,7 @@ ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
         "스키마 SSOT: docs/specs/account/10-web-api.md 16-22줄."
     ),
     "additionalProperties": False,
+    "minProperties": 1,
     "properties": {
         "name": {
             "type": "string",
