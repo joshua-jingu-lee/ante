@@ -57,11 +57,22 @@ AccountService(db: Database, eventbus: EventBus)
 - `sell_commission_rate`
 - 계좌 생성 후 불변 필드: `exchange`, `currency`, `trading_mode`, `broker_type`
 
-서버 실행 중 structural field 변경 요청이 들어오면 DB를 수정하지 않고
-`AccountStructuralChangeRequiresStoppedServerError`를 발생시킨다. CLI cold-path 명령은
-active Ante runtime guard로 서버 실행 여부를 먼저 확인하고, runtime이 살아 있으면
-서비스 메서드를 호출하지 않는다. 1.0 정책상 동일 OS user/home server 기준으로 active
-runtime은 항상 단일이며, `config_dir`은 데이터/설정 프로필 경계지 동시 namespace가 아니다.
+#### service-layer 가드 (#1144)
+
+`AccountService`는 boot/cold-path/runtime을 구분하는 `_runtime_started: bool` 플래그를 갖는다(기본값 `False`). 부팅 시점에 일어나는 mutation — `create_default_test_account()`(계좌 0개 자동 생성)와 `_migrate_is_paper_to_broker_config()`(KIS 계좌 `broker_config` update) — 이 모두 끝난 직후 `main._init_account`가 `account_service.mark_runtime_started()`를 호출해 플래그를 `True`로 전환한다. `mark_runtime_started`는 멱등이며, 이후 cold-path 전용 메서드/필드 변경 요청은 다음 invariant에 따라 즉시 차단된다.
+
+- **가드 우선순위**: `create()` / `delete()` / `update()`의 런타임 가드는 `get()`/DELETED/IMMUTABLE 등 어떤 다른 검사보다 *먼저* 평가된다. 즉, 존재하지 않거나 DELETED 상태인 계좌에 structural 키가 들어오더라도 cold-path 응답이 우선이다(structural cold-path > existence > deleted > immutable). `update()` 가드는 raw kwargs 키만 보고 값(None 포함)은 무관하다 — `update(account_id, credentials=None)`도 키 존재만으로 차단된다.
+- **mutable-only 흐름**: structural 키와 교집합이 없는 호출(예: `update(account_id, name="…", timezone="…")`)은 런타임에서도 정상 동작한다. 가드는 `set(fields) & STRUCTURAL_FIELDS`가 비어 있으면 통과한다.
+- **structural 필드 정합 (S4)**: service의 `STRUCTURAL_FIELDS` 상수 8개와 `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS` tuple은 정확히 1:1 일치해야 한다. 두 set이 어긋나면 contract-drift이며 `tests/unit/test_account_runtime_guard.py::test_structural_fields_match_route_constant`가 실패한다.
+- **부팅 mutation 보호 (S3)**: `mark_runtime_started` 호출은 boot mutation 종료 *후*로 고정된다. migration이 플래그 활성 후로 옮겨가면 자기 자신의 structural `broker_config` update가 차단되어 부팅이 깨진다 — `tests/unit/test_account_runtime_init_order.py`가 이 순서를 강제한다.
+
+#### 안정 에러 코드 (#1144 S5)
+
+`AccountStructuralChangeRequiresStoppedServerError`는 클래스 레벨 속성 `code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"`를 노출한다. IPC 서버는 모든 핸들러 예외에 대해 `getattr(e, "code", "EXECUTION_ERROR")`로 안정 코드를 우선 사용하며(없으면 기본 `EXECUTION_ERROR`), Web PUT 라우트는 별도 catch에서 409 + `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:` prefix를 붙인 detail로 매핑한다. 기존 예외(`AccountAlreadySuspendedError` 등)는 `code` 속성이 없으므로 자동으로 `EXECUTION_ERROR`로 폴백되어 회귀가 발생하지 않는다.
+
+#### CLI / 다중 active runtime 정책
+
+CLI cold-path 명령(`ante account create/delete/set-credentials`)은 `_assert_no_active_runtime` guard(PID alive + IPC socket exists)로 서버 실행 여부를 먼저 확인하고, runtime이 살아 있으면 서비스 메서드를 호출하지 않는다(#1139). service-layer 가드는 그 1차 가드를 우회한 비정상 경로(예: 직접 코드 호출, 테스트 monkeypatch, 또는 향후 도입될 IPC `account.create/update`/등 핸들러)의 defense-in-depth 역할이다. 1.0 정책상 동일 OS user/home server 기준으로 active runtime은 항상 단일이며, `config_dir`은 데이터/설정 프로필 경계지 동시 namespace가 아니다.
 
 ### 에러 클래스
 
