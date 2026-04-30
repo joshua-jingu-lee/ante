@@ -435,6 +435,7 @@ async def update_account(
         AccountDeletedError,
         AccountImmutableFieldError,
         AccountNotFoundError,
+        AccountStructuralChangeRequiresStoppedServerError,
         BrokerReconnectFailedError,
     )
 
@@ -547,6 +548,13 @@ async def update_account(
 
     try:
         updated = await account_service.update(account_id, **fields)
+    except AccountStructuralChangeRequiresStoppedServerError as e:
+        # Defense-in-depth (#1144): 라우트 1차 가드(I1/I4)가 structural 키를
+        # 이미 409로 차단하므로 이 분기는 정상 흐름에서 도달하지 않는다.
+        # 라우트 가드를 우회하는 비정상 경로(예: 테스트 monkeypatch)에서
+        # service가 직접 raise한 경우에만 도달한다 — cold-path 409 detail로
+        # 매핑한다(``_cold_path_detail``로 STRUCTURAL_CHANGE_ERROR_CODE prefix 부착).
+        raise HTTPException(status_code=409, detail=_cold_path_detail(str(e)))
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
