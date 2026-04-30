@@ -20,6 +20,7 @@ ERROR_CATALOG: dict[int, tuple[str, str]] = {
     403: ("/errors/forbidden", "Forbidden"),
     404: ("/errors/not-found", "Not Found"),
     409: ("/errors/conflict", "Conflict"),
+    415: ("/errors/unsupported-media-type", "Unsupported Media Type"),
     422: ("/errors/validation", "Validation Error"),
     500: ("/errors/internal", "Internal Server Error"),
     503: ("/errors/internal", "Service Unavailable"),

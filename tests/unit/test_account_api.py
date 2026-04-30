@@ -757,18 +757,17 @@ class TestUpdateAccount:
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
-        """알 수 없는 비구조 필드는 라우트의 mutable 검증 단계에서 무시된다.
+        """알 수 없는 비구조 필드는 라우트가 명시적으로 422로 reject한다(이슈 #1153).
 
-        attempt 9는 P1 회귀 보호로 비구조 페이로드를
-        ``AccountUpdateRequest.model_validate``에 통과시킨다. Pydantic의
-        기본 동작은 unknown field를 ignore하므로, ``some_unknown_field``는
-        ``model_dump(exclude_none=True)`` 결과에서 사라진다 → 라우트는
-        ``fields``가 비었다고 판단해 400 "수정할 필드가 없습니다."로 응답한다.
+        이슈 #1153은 PUT 핸들러를 raw body 파싱 + structural 가드(I1/I4) +
+        Content-Type 415 게이트 + mutable 검증 순서로 재구성하면서, unknown
+        키에 대해 ``mutable_payload_in`` 단계에서 ``MUTABLE_FIELDS`` 화이트
+        리스트와 비교하여 422 "알 수 없는 필드가 포함되었습니다"로 명시적
+        reject한다. 그 결과 codegen이 ``additionalProperties: False``로 표현
+        한 contract와 런타임 응답이 1:1 정합한다.
 
-        결과적으로 service.update는 호출되지 않으며, unknown field가 DB에
-        도달할 가능성이 차단된다. unknown field에 대한 schema-accurate 422
-        매핑(라우트가 명시적으로 reject)은 #1143에서 mutable 모델을 직접
-        노출할 때 함께 정리한다.
+        service.update는 호출되지 않으며, unknown field가 DB에 도달할 가능성
+        도 차단된다.
 
         service-layer 회귀 보호처(별도 invariant):
         ``tests/unit/test_account_immutable_fields.py``의
@@ -781,11 +780,10 @@ class TestUpdateAccount:
             "/api/accounts/test-account",
             json={"some_unknown_field": "x"},
         )
-        # 라우트 단 400 — unknown field가 Pydantic에서 무시되어 fields가 비었다.
-        assert resp.status_code == 400
+        # 라우트 단 422 — unknown field가 명시적으로 reject된다.
+        assert resp.status_code == 422
         body = resp.json()
-        assert body.get("status") == 400
-        assert body.get("detail") == "수정할 필드가 없습니다."
+        assert "some_unknown_field" in body.get("detail", "")
         # service.update 미호출 — DB 오염 차단.
         assert account_service._accounts["test-account"].name == "테스트 계좌"
         # audit 미발행
@@ -983,9 +981,361 @@ class TestUpdateAccount:
         assert resp.status_code == 503
         assert resp.json()["detail"] == "Account service not available"
 
+    # ── 이슈 #1153: PUT request body schema accuracy + Content-Type 415 게이트 ──
+    #
+    # 핸들러 단계 순서(이슈 #1153 Implementation Plan)와 1:1 매핑되는 19개
+    # 시나리오. structural 가드(I1/I4)는 어떤 Content-Type/payload 형태에서도
+    # 우선 적용되며, Content-Type 415 게이트는 dict payload + 비어 있지 않은
+    # mutable payload + non-structural 키만 들어온 경로에서 활성화된다.
+    #
+    # 호환성 보존(이슈 #1153 제약): 빈 body / `{}` / `{"name": null}` 의미는
+    # 기존 400 no-op 유지(#1152 후속에서 422로 정렬).
 
-# PUT requestBody schema accuracy(mutable 모델 노출)는 issue #1143에서 처리.
-# 본 이슈는 cold-path invariant(I1~I4)와 P2(ValidationError 422)에 한정한다.
+    # ── structural priority (단계 5: I4 우선) ─────────────────────
+
+    def test_update_structural_without_content_type_returns_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """structural body + Content-Type 부재 → 409 (cold-path 우선)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'{"credentials": {"app_key": "x"}}',
+            # Content-Type 헤더 없음 — TestClient는 명시 미설정 시 보내지 않음
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+
+    def test_update_structural_with_text_plain_returns_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """structural body + Content-Type: text/plain → 409.
+
+        invariant: structural 가드는 Content-Type 415 게이트보다 *먼저*
+        실행되어야 한다(I4 우선). 같은 payload가 415로 새면 cold-path 가드가
+        Content-Type 검증에 의해 우회되는 회귀다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'{"credentials": {"app_key": "x"}}',
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+
+    def test_update_structural_null_value_returns_409_via_raw_key(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """structural raw key + null value(예: `{"credentials": null}`) → 409.
+
+        invariant I4 회귀 유지(#1140): 가드는 Pydantic 검증된 ``is not None``
+        값이 아니라 raw body의 키 존재 여부로 판정한다. 이 시나리오는 #1140
+        에서 도입된 raw key 가드가 신규 raw body 파싱 흐름에서도 보존되는지
+        확인한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"credentials": None},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+
+    # ── 빈 body / `{}` / `{"name": null}` no-op 호환 ─────────────
+
+    def test_update_empty_body_without_content_type_returns_400(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """빈 body(b"") + Content-Type 부재 → 400 no-op (단계 2).
+
+        호환성 보존: 클라이언트가 빈 body로 PUT을 보내면 기존과 동일하게
+        400 "수정할 필드가 없습니다."를 받는다. Content-Type 검사·JSON 파싱을
+        모두 건너뛰고 mutable 단계로 흐른 뒤 ``len(payload) == 0``로 떨어진다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"",
+        )
+        assert resp.status_code == 400
+        assert resp.json().get("detail") == "수정할 필드가 없습니다."
+
+    def test_update_empty_object_with_json_content_type_returns_400(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """`{}` + Content-Type: application/json → 400 no-op (단계 6)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put("/api/accounts/test-account", json={})
+        assert resp.status_code == 400
+        assert resp.json().get("detail") == "수정할 필드가 없습니다."
+
+    def test_update_empty_object_with_text_plain_returns_400(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """`{}` + Content-Type: text/plain → 400 no-op (단계 6).
+
+        명시적 빈 dict는 Content-Type과 무관하게 기존 400 no-op 의미를 보존
+        한다(단계 6이 단계 7 Content-Type 게이트보다 앞).
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"{}",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 400
+        assert resp.json().get("detail") == "수정할 필드가 없습니다."
+
+    def test_update_name_null_with_json_content_type_returns_400(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """`{"name": null}` + Content-Type: application/json → 400 (단계 9).
+
+        ``model_dump(exclude_none=True)``가 결과를 비워 mutable 검증 후
+        400으로 떨어진다(P1 회귀 보호 유지).
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": None},
+        )
+        assert resp.status_code == 400
+        assert resp.json().get("detail") == "수정할 필드가 없습니다."
+
+    def test_update_name_null_with_text_plain_returns_415(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """`{"name": null}` + Content-Type: text/plain → 415 (단계 7 게이트 우선).
+
+        ``len(payload) > 0`` 분기에서는 Content-Type 415 게이트가 활성화된다.
+        호환성 보존 범위는 application/json 또는 빈 body에 한정되며, 비-JSON
+        Content-Type은 Content-Type 자체 위반으로 415가 선행한다.
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'{"name": null}',
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 415
+
+    # ── mutable + Content-Type 415 게이트 (단계 7) ────────────────
+
+    def test_update_missing_content_type_with_mutable_returns_415(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """Content-Type 부재 + mutable body → 415."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'{"name": "x"}',
+        )
+        assert resp.status_code == 415
+
+    def test_update_text_plain_with_mutable_returns_415(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """Content-Type: text/plain + mutable body → 415."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'{"name": "x"}',
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 415
+
+    def test_update_charset_suffix_passes(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """Content-Type: application/json; charset=utf-8 → 200 통과 (단계 7).
+
+        media type 비교는 `;` 앞부분 lowercase 매칭이므로 charset suffix는
+        정상 통과해야 한다(브라우저/axios 기본 변형 호환).
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'{"name": "charset suffix"}',
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["account"]["name"] == "charset suffix"
+
+    # ── parse 실패 (단계 3) ──────────────────────────────────
+
+    def test_update_non_utf8_bytes_with_json_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """non-UTF-8 bytes + Content-Type: application/json → 422 (parse 실패)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"\xff\xfe\xfd",  # invalid UTF-8
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+    def test_update_non_utf8_bytes_with_text_plain_returns_415(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """non-UTF-8 bytes + Content-Type: text/plain → 415.
+
+        parse 실패 + 비-application/json Content-Type → 415 (Content-Type
+        자체가 더 정보량 있는 위반).
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"\xff\xfe\xfd",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 415
+
+    def test_update_invalid_json_with_json_content_type_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """invalid JSON + Content-Type: application/json → 422 (parse 실패)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"not-valid-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+    def test_update_invalid_json_with_text_plain_returns_415(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """invalid JSON + Content-Type: text/plain → 415."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b"not-valid-json",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 415
+
+    # ── non-dict JSON (단계 4) ────────────────────────────
+
+    def test_update_array_json_with_json_content_type_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """non-dict JSON(`[]`) + Content-Type: application/json → 422."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json=["array", "not", "object"],
+        )
+        assert resp.status_code == 422
+
+    def test_update_array_json_with_text_plain_returns_415(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """non-dict JSON + Content-Type: text/plain → 415."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            content=b'["array"]',
+            headers={"Content-Type": "text/plain"},
+        )
+        assert resp.status_code == 415
+
+    # ── unknown 키 + mutable type (단계 8) ───────────────
+
+    def test_update_unknown_mutable_key_with_json_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """unknown mutable key(`{"foo": "bar"}`) → 422 (additionalProperties: False)."""
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"foo": "bar"},
+        )
+        assert resp.status_code == 422
+        assert "foo" in resp.json().get("detail", "")
+
+
+# PUT requestBody schema accuracy(mutable 모델 노출)는 issue #1153에서 처리됨.
 
 
 class TestSuspendAccount:
