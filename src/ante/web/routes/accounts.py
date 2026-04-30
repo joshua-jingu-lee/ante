@@ -412,25 +412,26 @@ async def update_account(
     검증을 거치면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
 
-    핸들러 단계 순서(이슈 #1153 Implementation Plan):
+    핸들러 단계 순서(이슈 #1153 + #1152 Implementation Plan):
 
     1. raw bytes 읽기.
     2. **빈 body**(``b""``) → ``payload = {}``로 두고 Content-Type 검사·JSON
-       파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(현재 400 no-op 의미 보존).
+       파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(단계 6에서 422로 처리).
     3. **JSON 파싱 실패**: Content-Type ≠ application/json → 415,
        Content-Type 정상 → 422.
     4. **non-dict JSON**: Content-Type ≠ application/json → 415,
        Content-Type 정상 → 422.
     5. **structural 가드(I4 우선)**: dict payload에 structural 키 존재 → 409
        (Content-Type 무관, structural+text/plain도 409).
-    6. ``len(payload) == 0`` (``{}`` 명시 송신) → 400 no-op (Content-Type
-       검사 건너뜀; #1152 후속에서 422로 정렬).
+    6. ``len(payload) == 0`` (``{}`` 명시 송신 또는 빈 body) → 422 no-op
+       (Content-Type 검사 건너뜀; #1152 정렬 완료 — schema의
+       ``minProperties: 1``과 정합).
     7. **Content-Type 415 게이트**: ``application/json``(charset suffix 허용)
        이외 → 415.
     8. **unknown 키 / mutable type**: structural 제외한 raw dict의 unknown
        키 → 422. ``AccountUpdateRequest.model_validate`` ValidationError → 422.
-    9. ``model_dump(exclude_none=True)`` 결과 비면 400 (예: ``{"name": null}``
-       단독 — 기존 의미 유지).
+    9. ``model_dump(exclude_none=True)`` 결과 비면 422 (예: ``{"name": null}``
+       단독 — effective payload empty no-op; #1152 정렬 완료).
     10. service 호출.
     """
     from ante.account.errors import (
@@ -499,10 +500,10 @@ async def update_account(
         )
 
     # 6. ``len(payload) == 0`` (``{}`` 명시 송신 또는 빈 body): Content-Type
-    # 검사 건너뛰고 400 no-op로 즉시 떨어뜨려 기존 의미 보존(#1152 후속에서
-    # 422로 정렬).
+    # 검사 건너뛰고 422 no-op로 즉시 떨어뜨린다(#1152 정렬 완료 — schema의
+    # ``minProperties: 1``과 정합).
     if len(payload) == 0:
-        raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
+        raise HTTPException(status_code=422, detail="수정할 필드가 없습니다.")
 
     # 7. Content-Type 415 게이트: 비-application/json은 415.
     if not is_json_media:
@@ -532,10 +533,11 @@ async def update_account(
 
     # 9. ``exclude_none=True``로 set된 mutable 필드만 추출. ``{"name": null}``
     # 같이 명시적으로 null이 들어온 경우 model_dump에서 빠지므로 service까지
-    # null이 흘러가지 않는다(P1: DB 오염 차단).
+    # null이 흘러가지 않는다(P1: DB 오염 차단). effective payload가 비면
+    # 422 — schema의 ``minProperties: 1``과 정합(#1152 정렬 완료).
     fields = validated.model_dump(exclude_none=True)
     if not fields:
-        raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
+        raise HTTPException(status_code=422, detail="수정할 필드가 없습니다.")
 
     # service는 비구조 분기에 도달한 뒤에만 lazy 해소한다. structural body가
     # 들어온 경로에서는 위 가드에서 이미 409가 raise되었기 때문에 service
