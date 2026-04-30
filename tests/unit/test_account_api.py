@@ -1334,6 +1334,53 @@ class TestUpdateAccount:
         assert resp.status_code == 422
         assert "foo" in resp.json().get("detail", "")
 
+    # ── service-layer fallback (#1144 defense-in-depth) ──
+
+    def test_put_update_route_translates_runtime_exception_to_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """라우트 1차 가드(I1/I4)를 우회한 경로에서 service가 직접
+        ``AccountStructuralChangeRequiresStoppedServerError``를 raise해도
+        라우트가 409 + cold-path detail로 매핑한다 (#1144 defense-in-depth).
+
+        시나리오: 정상 mutable payload(``{"name": "..."}``)가 들어와 라우트의
+        structural 가드를 통과한 뒤 ``account_service.update``가 새 예외를
+        raise하도록 monkeypatch한다. 정상 흐름에서는 service의
+        ``_runtime_started`` 플래그와 STRUCTURAL_FIELDS 검사로 mutable-only
+        호출은 통과되지만, 본 회귀 테스트는 매핑 자체를 강제한다.
+        """
+        from ante.account.errors import (
+            AccountStructuralChangeRequiresStoppedServerError,
+        )
+
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        async def raise_runtime_guard(account_id: str, **fields: Any) -> Account:
+            raise AccountStructuralChangeRequiresStoppedServerError(
+                "다음 필드는 cold-path 전용입니다: credentials"
+            )
+
+        # mutable-only payload는 라우트 가드(I1/I4)를 통과한다 — 그 뒤 service의
+        # 가짜 예외가 활성화되도록 monkeypatch.
+        account_service.update = raise_runtime_guard  # type: ignore[method-assign]
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": "변경 시도"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+        # service-layer raise 경로에서는 audit log가 남지 않는다.
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
+
 
 # PUT requestBody schema accuracy(mutable 모델 노출)는 issue #1153에서 처리됨.
 
