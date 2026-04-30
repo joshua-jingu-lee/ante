@@ -562,7 +562,7 @@ class TestRFC7807ErrorResponse:
         ``APIRoute.responses`` **정적 dict**를 순회한다. ``int(code) >= 400``인
         명시 항목은 모두 ``model is ErrorResponse`` 여야 한다.
 
-        - C1 — ``ANTE_TEST_MODE`` 무관, ``test_seed.py`` 포함
+        - C1 — ``src/ante/web/routes/`` 하위 모든 router 모듈을 포함
         - C2 — FastAPI 자동 생성 422(``HTTPValidationError``)는 검사 대상
           아님. 명시 등록된 422(예: accounts.put mutable type 검증)는 본
           검사 대상에 포함된다.
@@ -648,13 +648,10 @@ class TestRFC7807ErrorResponse:
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 
-        기본 앱(``create_app()``, ``ANTE_TEST_MODE`` 미설정)이 생성한
-        ``app.openapi()``의 ``paths.*.*.responses`` 트리가
-        ``frontend/openapi.json``의 동일 트리와 정확히 일치해야 한다. version
-        등 노이즈를 피하려고 비교 범위는 ``responses`` 노드로 좁힌다.
-
-        ``test_seed.py``는 ``ANTE_TEST_MODE`` gating으로 양쪽 모두에서
-        빠진다.
+        기본 앱(``create_app()``)이 생성한 ``app.openapi()``의
+        ``paths.*.*.responses`` 트리가 ``frontend/openapi.json``의 동일
+        트리와 정확히 일치해야 한다. version 등 노이즈를 피하려고 비교
+        범위는 ``responses`` 노드로 좁힌다.
         """
         import json
 
