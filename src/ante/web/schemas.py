@@ -872,16 +872,6 @@ class AuditLogListResponse(BaseModel):
     total: int
 
 
-# ── 테스트 시드 ──────────────────────────────────────────────
-
-
-class SeedResetResponse(BaseModel):
-    """시드 리셋 응답."""
-
-    ok: bool
-    scenario: str
-
-
 # ── 리스크 룰 ──────────────────────────────────────────────
 
 

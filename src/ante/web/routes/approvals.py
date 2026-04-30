@@ -18,6 +18,7 @@ from ante.web.schemas import (
     ApprovalDetailResponse,
     ApprovalListResponse,
     ApprovalUpdateResponse,
+    ErrorResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,12 @@ class ApprovalStatusUpdate(BaseModel):
 @router.get(
     "",
     response_model=ApprovalListResponse,
-    responses={503: {"description": "Approval service not available"}},
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "Approval service not available",
+        },
+    },
 )
 async def list_approvals(
     approval_service: Annotated[Any, Depends(get_approval_service)],
@@ -61,8 +67,11 @@ async def list_approvals(
     "/{approval_id}",
     response_model=ApprovalDetailResponse,
     responses={
-        404: {"description": "Approval not found"},
-        503: {"description": "Approval service not available"},
+        404: {"model": ErrorResponse, "description": "Approval not found"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Approval service not available",
+        },
     },
 )
 async def get_approval(
@@ -92,9 +101,12 @@ async def get_approval(
     "/{approval_id}/status",
     response_model=ApprovalUpdateResponse,
     responses={
-        400: {"description": "Invalid status value"},
-        404: {"description": "Approval not found"},
-        503: {"description": "Approval service not available"},
+        400: {"model": ErrorResponse, "description": "Invalid status value"},
+        404: {"model": ErrorResponse, "description": "Approval not found"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Approval service not available",
+        },
     },
 )
 async def update_approval_status(

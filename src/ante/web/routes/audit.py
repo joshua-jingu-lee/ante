@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from ante.web.deps import get_audit_logger
-from ante.web.schemas import AuditLogListResponse
+from ante.web.schemas import AuditLogListResponse, ErrorResponse
 
 router = APIRouter()
 
@@ -15,7 +15,12 @@ router = APIRouter()
 @router.get(
     "",
     response_model=AuditLogListResponse,
-    responses={503: {"description": "Audit logger not available"}},
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "Audit logger not available",
+        },
+    },
 )
 async def list_audit_logs(
     audit_logger: Annotated[Any, Depends(get_audit_logger)],

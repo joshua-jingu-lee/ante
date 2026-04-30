@@ -19,6 +19,7 @@ from ante.web.schemas import (
     BalanceSetResponse,
     BudgetListResponse,
     BudgetOperationResponse,
+    ErrorResponse,
     SnapshotListResponse,
     SnapshotResponse,
     TransactionListResponse,
@@ -46,8 +47,8 @@ class BalanceSetRequest(BaseModel):
     response_model=TreasurySummaryResponse,
     response_model_exclude_none=True,
     responses={
-        404: {"description": "Account not found"},
-        503: {"description": "Treasury not available"},
+        404: {"model": ErrorResponse, "description": "Account not found"},
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
     },
 )
 async def get_summary(
@@ -130,7 +131,9 @@ async def get_summary(
 @router.get(
     "/transactions",
     response_model=TransactionListResponse,
-    responses={503: {"description": "Treasury not available"}},
+    responses={
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
+    },
 )
 async def list_transactions(
     treasury: Annotated[Any, Depends(get_treasury)],
@@ -197,10 +200,13 @@ async def list_transactions(
     "/bots/{bot_id}/allocate",
     response_model=BudgetOperationResponse,
     responses={
-        400: {"description": "Insufficient funds or invalid amount"},
-        404: {"description": "Bot not found"},
-        409: {"description": "Bot not stopped"},
-        503: {"description": "Treasury not available"},
+        400: {
+            "model": ErrorResponse,
+            "description": "Insufficient funds or invalid amount",
+        },
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        409: {"model": ErrorResponse, "description": "Bot not stopped"},
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
     },
 )
 async def allocate(
@@ -255,10 +261,13 @@ async def allocate(
     "/bots/{bot_id}/deallocate",
     response_model=BudgetOperationResponse,
     responses={
-        400: {"description": "Insufficient available budget"},
-        404: {"description": "Bot not found"},
-        409: {"description": "Bot not stopped"},
-        503: {"description": "Treasury not available"},
+        400: {
+            "model": ErrorResponse,
+            "description": "Insufficient available budget",
+        },
+        404: {"model": ErrorResponse, "description": "Bot not found"},
+        409: {"model": ErrorResponse, "description": "Bot not stopped"},
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
     },
 )
 async def deallocate(
@@ -309,7 +318,9 @@ async def deallocate(
 @router.get(
     "/budgets",
     response_model=BudgetListResponse,
-    responses={503: {"description": "Treasury not available"}},
+    responses={
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
+    },
 )
 async def list_budgets(
     treasury: Annotated[Any, Depends(get_treasury)],
@@ -331,7 +342,9 @@ async def list_budgets(
 @router.post(
     "/balance",
     response_model=BalanceSetResponse,
-    responses={503: {"description": "Treasury not available"}},
+    responses={
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
+    },
 )
 async def set_balance(
     body: BalanceSetRequest,
@@ -383,7 +396,7 @@ def _resolve_treasury(
     "/snapshots/latest",
     response_model=SnapshotResponse,
     responses={
-        503: {"description": "Treasury not available"},
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
     },
 )
 async def get_latest_snapshot(
@@ -424,7 +437,9 @@ async def get_latest_snapshot(
 @router.get(
     "/snapshots",
     response_model=SnapshotListResponse,
-    responses={503: {"description": "Treasury not available"}},
+    responses={
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
+    },
 )
 async def list_snapshots(
     treasury: Annotated[Any, Depends(get_treasury)],
@@ -449,8 +464,8 @@ async def list_snapshots(
     "/snapshots/{date}",
     response_model=SnapshotResponse,
     responses={
-        404: {"description": "Snapshot not found"},
-        503: {"description": "Treasury not available"},
+        404: {"model": ErrorResponse, "description": "Snapshot not found"},
+        503: {"model": ErrorResponse, "description": "Treasury not available"},
     },
 )
 async def get_snapshot_by_date(

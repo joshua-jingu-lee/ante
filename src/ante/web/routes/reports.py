@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ante.web.deps import get_audit_logger_optional, get_report_store
 from ante.web.schemas import (
+    ErrorResponse,
     ReportDetailResponse,
     ReportListResponse,
     ReportSchemaResponse,
@@ -31,7 +32,12 @@ async def get_report_schema() -> dict:
     "",
     status_code=201,
     response_model=ReportSubmitResponse,
-    responses={503: {"description": "Report store not available"}},
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "Report store not available",
+        },
+    },
 )
 async def submit_report(
     body: ReportSubmitRequest,
@@ -87,8 +93,11 @@ async def submit_report(
     "/{report_id}",
     response_model=ReportDetailResponse,
     responses={
-        404: {"description": "Report not found"},
-        503: {"description": "Report store not available"},
+        404: {"model": ErrorResponse, "description": "Report not found"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Report store not available",
+        },
     },
 )
 async def report_view(
@@ -140,7 +149,12 @@ async def report_view(
 @router.get(
     "",
     response_model=ReportListResponse,
-    responses={503: {"description": "Report store not available"}},
+    responses={
+        503: {
+            "model": ErrorResponse,
+            "description": "Report store not available",
+        },
+    },
 )
 async def list_reports(
     report_store: Annotated[Any, Depends(get_report_store)],

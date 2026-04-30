@@ -15,7 +15,12 @@ from ante.web.deps import (
     get_audit_logger_optional,
     get_db_optional,
 )
-from ante.web.schemas import HealthResponse, KillSwitchResponse, StatusResponse
+from ante.web.schemas import (
+    ErrorResponse,
+    HealthResponse,
+    KillSwitchResponse,
+    StatusResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +133,10 @@ async def _check_broker(account_service: Any | None) -> bool:
     "/halt",
     response_model=KillSwitchResponse,
     responses={
-        503: {"description": "Account service not available"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Account service not available",
+        },
     },
 )
 async def halt(
@@ -162,7 +170,10 @@ async def halt(
     "/activate",
     response_model=KillSwitchResponse,
     responses={
-        503: {"description": "Account service not available"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Account service not available",
+        },
     },
 )
 async def activate(

@@ -45,7 +45,6 @@ from ante.web.schemas import (
     ReportDetailResponse,
     ReportListResponse,
     ReportSubmitResponse,
-    SeedResetResponse,
     StatusResponse,
     StorageSummaryResponse,
     StrategyDetailResponse,
@@ -1066,20 +1065,6 @@ class TestErrorResponseModel:
         model = ErrorResponse.model_validate({})
         assert model.type == "/errors/internal"
         assert model.status == 500
-
-
-# ── 테스트 시드 응답 모델 ──────────────────────────
-
-
-class TestSeedResponseModels:
-    """test_seed.py 핸들러 반환값과 응답 모델 호환성."""
-
-    def test_seed_reset_response(self):
-        """POST /api/test/seed/reset."""
-        data = {"ok": True, "scenario": "login-dashboard"}
-        model = SeedResetResponse.model_validate(data)
-        assert model.ok is True
-        assert model.scenario == "login-dashboard"
 
 
 # ── extra="allow" 모델 동적 필드 수용 테스트 ──────────────────────────
