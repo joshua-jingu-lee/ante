@@ -54,6 +54,8 @@ Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경
 만 허용하며, 다른 media type은 415 Unsupported Media Type을 반환한다. structural 필드
 키 검사(409)는 Content-Type 검사(415)보다 우선한다(invariant I4 — raw key 가드).
 
+`PUT /api/accounts/:id` 요청 본문이 빈 dict(`{}`), 빈 body, 또는 `model_dump(exclude_none=True)` 결과가 빈 dict가 되는 페이로드(예: `{"name": null}`)는 422 Unprocessable Entity를 반환한다 (#1152). schema는 `minProperties: 1`로 표현되며, 이는 OpenAPI/runtime 계약이다 — `openapi-typescript`는 이를 TypeScript 타입 제약으로 내리지 않는다. 빈 body / 빈 dict 검사는 단계 6에서 Content-Type 415 게이트(단계 7)보다 앞서 실행되므로 비-application/json + `{}` 조합도 422로 떨어진다.
+
 ### 기존 엔드포인트 계좌 필터
 
 멀티 계좌 환경에서 모든 거래·잔고·봇 관련 API 응답에 계좌 컨텍스트를 포함한다.
