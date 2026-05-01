@@ -152,6 +152,24 @@ class Config:
         base = self._config_dir if self._config_dir is not None else Path.cwd()
         return base / p
 
+    def runtime_pid_path(self) -> Path:
+        """``runtime.pid_path``를 ``config_dir`` 기준 절대 경로로 반환한다.
+
+        Spec: ``docs/specs/config/03-design-decisions.md`` 200-202, 280-281.
+        Default: ``<config_dir>/run/ante.pid``. ``[runtime] pid_path``를
+        ``system.toml``에 두면 사용자 override가 우선한다.
+        """
+        return self.resolve_path("runtime.pid_path", "run/ante.pid")
+
+    def runtime_socket_path(self) -> Path:
+        """``runtime.socket_path``를 ``config_dir`` 기준 절대 경로로 반환한다.
+
+        Spec: ``docs/specs/ipc/ipc.md`` 181-186,
+        ``docs/specs/config/03-design-decisions.md`` 200-202.
+        Default: ``<config_dir>/run/ante.sock``.
+        """
+        return self.resolve_path("runtime.socket_path", "run/ante.sock")
+
     def secret(self, key: str) -> str:
         """비밀값 조회. 환경변수 우선, 없으면 .env에서.
 
