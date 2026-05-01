@@ -19,7 +19,6 @@ from ante.web.schemas import (
     BalanceSetResponse,
     BudgetListResponse,
     BudgetOperationResponse,
-    ErrorResponse,
     SnapshotListResponse,
     SnapshotResponse,
     TransactionListResponse,
@@ -47,8 +46,22 @@ class BalanceSetRequest(BaseModel):
     response_model=TreasurySummaryResponse,
     response_model_exclude_none=True,
     responses={
-        404: {"model": ErrorResponse, "description": "Account not found"},
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        404: {
+            "description": "Account not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def get_summary(
@@ -132,7 +145,14 @@ async def get_summary(
     "/transactions",
     response_model=TransactionListResponse,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def list_transactions(
@@ -201,12 +221,37 @@ async def list_transactions(
     response_model=BudgetOperationResponse,
     responses={
         400: {
-            "model": ErrorResponse,
             "description": "Insufficient funds or invalid amount",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
-        404: {"model": ErrorResponse, "description": "Bot not found"},
-        409: {"model": ErrorResponse, "description": "Bot not stopped"},
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Bot not stopped",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def allocate(
@@ -262,12 +307,37 @@ async def allocate(
     response_model=BudgetOperationResponse,
     responses={
         400: {
-            "model": ErrorResponse,
             "description": "Insufficient available budget",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
-        404: {"model": ErrorResponse, "description": "Bot not found"},
-        409: {"model": ErrorResponse, "description": "Bot not stopped"},
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Bot not stopped",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def deallocate(
@@ -319,7 +389,14 @@ async def deallocate(
     "/budgets",
     response_model=BudgetListResponse,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def list_budgets(
@@ -343,7 +420,14 @@ async def list_budgets(
     "/balance",
     response_model=BalanceSetResponse,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def set_balance(
@@ -396,7 +480,14 @@ def _resolve_treasury(
     "/snapshots/latest",
     response_model=SnapshotResponse,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def get_latest_snapshot(
@@ -438,7 +529,14 @@ async def get_latest_snapshot(
     "/snapshots",
     response_model=SnapshotListResponse,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def list_snapshots(
@@ -464,8 +562,22 @@ async def list_snapshots(
     "/snapshots/{date}",
     response_model=SnapshotResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Snapshot not found"},
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        404: {
+            "description": "Snapshot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def get_snapshot_by_date(

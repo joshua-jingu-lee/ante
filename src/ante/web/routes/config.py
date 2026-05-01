@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ante.web.deps import get_audit_logger_optional, get_dynamic_config
-from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse, ErrorResponse
+from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse
 
 router = APIRouter()
 
@@ -25,8 +25,12 @@ class ConfigUpdateRequest(BaseModel):
     response_model=ConfigListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Config service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -42,10 +46,21 @@ async def list_configs(
     "/{key:path}",
     response_model=ConfigUpdateResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Config key not found"},
+        404: {
+            "description": "Config key not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Config service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

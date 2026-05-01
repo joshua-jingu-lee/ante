@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from ante.member.errors import PermissionDeniedError
 from ante.web.deps import get_audit_logger_optional, get_member_service
 from ante.web.schemas import (
-    ErrorResponse,
     MemberCreateResponse,
     MemberDetailResponse,
     MemberListResponse,
@@ -60,8 +59,12 @@ class ScopesUpdateRequest(BaseModel):
     response_model=MemberListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -99,11 +102,29 @@ async def list_members(
     status_code=201,
     response_model=MemberCreateResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Invalid member data"},
-        403: {"model": ErrorResponse, "description": "Permission denied"},
+        400: {
+            "description": "Invalid member data",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -146,10 +167,21 @@ async def create_member(
     "/{member_id}",
     response_model=MemberDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -174,11 +206,29 @@ async def get_member(
     "/{member_id}/suspend",
     response_model=MemberDetailResponse,
     responses={
-        403: {"model": ErrorResponse, "description": "Permission denied"},
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -212,11 +262,29 @@ async def suspend_member(
     "/{member_id}/reactivate",
     response_model=MemberDetailResponse,
     responses={
-        403: {"model": ErrorResponse, "description": "Permission denied"},
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -250,11 +318,29 @@ async def reactivate_member(
     "/{member_id}/revoke",
     response_model=MemberDetailResponse,
     responses={
-        403: {"model": ErrorResponse, "description": "Permission denied"},
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -288,11 +374,29 @@ async def revoke_member(
     "/{member_id}/rotate-token",
     response_model=MemberTokenResponse,
     responses={
-        403: {"model": ErrorResponse, "description": "Permission denied"},
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -326,11 +430,29 @@ async def rotate_token(
     "/{member_id}/password",
     response_model=OkResponse,
     responses={
-        403: {"model": ErrorResponse, "description": "Permission denied"},
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -365,11 +487,29 @@ async def change_password(
     "/{member_id}/scopes",
     response_model=MemberScopesResponse,
     responses={
-        403: {"model": ErrorResponse, "description": "Permission denied"},
-        404: {"model": ErrorResponse, "description": "Member not found"},
+        403: {
+            "description": "Permission denied",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

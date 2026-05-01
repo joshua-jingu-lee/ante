@@ -20,7 +20,6 @@ from ante.web.deps import (
 )
 from ante.web.schemas import (
     DailySummaryResponse,
-    ErrorResponse,
     MonthlySummaryResponse,
     StatusUpdateRequest,
     StrategyDetailResponse,
@@ -52,8 +51,22 @@ def _find_bot_for_strategy(bot_manager: Any, strategy_id: str) -> dict | None:
     "/validate",
     response_model=StrategyValidateResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Path is required"},
-        404: {"model": ErrorResponse, "description": "Strategy file not found"},
+        400: {
+            "description": "Path is required",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Strategy file not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def validate_strategy(body: dict) -> dict:
@@ -86,8 +99,12 @@ async def validate_strategy(body: dict) -> dict:
     response_model=StrategyListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -169,8 +186,22 @@ async def list_strategies(
     "/{strategy_id}/status",
     status_code=204,
     responses={
-        400: {"model": ErrorResponse, "description": "허용되지 않은 상태 전환"},
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        400: {
+            "description": "허용되지 않은 상태 전환",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def update_strategy_status(
@@ -203,10 +234,21 @@ async def update_strategy_status(
     "/{strategy_id}",
     response_model=StrategyDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -269,10 +311,21 @@ async def get_strategy(
     "/{strategy_id}/performance",
     response_model=StrategyPerformanceResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry or database not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -332,10 +385,21 @@ async def get_strategy_performance(
     "/{strategy_id}/daily-summary",
     response_model=DailySummaryResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry or database not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -376,10 +440,21 @@ async def get_strategy_daily_summary(
     "/{strategy_id}/weekly-summary",
     response_model=WeeklySummaryResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry or database not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -421,10 +496,21 @@ async def get_strategy_weekly_summary(
     "/{strategy_id}/monthly-summary",
     response_model=MonthlySummaryResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry or database not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -465,10 +551,21 @@ async def get_strategy_monthly_summary(
     "/{strategy_id}/trades",
     response_model=StrategyTradesResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Strategy registry or trade service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

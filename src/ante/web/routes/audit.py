@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from ante.web.deps import get_audit_logger
-from ante.web.schemas import AuditLogListResponse, ErrorResponse
+from ante.web.schemas import AuditLogListResponse
 
 router = APIRouter()
 
@@ -17,8 +17,12 @@ router = APIRouter()
     response_model=AuditLogListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Audit logger not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

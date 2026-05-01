@@ -13,7 +13,6 @@ from ante.web.deps import (
     get_session_service,
 )
 from ante.web.schemas import (
-    ErrorResponse,
     LoginRequest,
     LoginResponse,
     LogoutResponse,
@@ -32,10 +31,21 @@ COOKIE_MAX_AGE = 86400  # 24시간
     "/login",
     response_model=LoginResponse,
     responses={
-        401: {"model": ErrorResponse, "description": "Invalid credentials"},
+        401: {
+            "description": "Invalid credentials",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Member or session service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -97,8 +107,12 @@ async def login(
     response_model=LogoutResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Session service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -135,12 +149,20 @@ async def logout(
     response_model=MeResponse,
     responses={
         401: {
-            "model": ErrorResponse,
             "description": "Not authenticated or session expired",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         503: {
-            "model": ErrorResponse,
             "description": "Member or session service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

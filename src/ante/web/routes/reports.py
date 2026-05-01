@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ante.web.deps import get_audit_logger_optional, get_report_store
 from ante.web.schemas import (
-    ErrorResponse,
     ReportDetailResponse,
     ReportListResponse,
     ReportSchemaResponse,
@@ -34,8 +33,12 @@ async def get_report_schema() -> dict:
     response_model=ReportSubmitResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Report store not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -93,10 +96,21 @@ async def submit_report(
     "/{report_id}",
     response_model=ReportDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Report not found"},
+        404: {
+            "description": "Report not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Report store not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -151,8 +165,12 @@ async def report_view(
     response_model=ReportListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Report store not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

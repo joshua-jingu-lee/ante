@@ -60,13 +60,13 @@
           "accounts"
         ],
         "summary": "Create Account",
-        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.\n\n의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해\n핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는\nsuccess contract(200/201/204)가 노출되지 않으며, 응답 모델은\n``ErrorResponse``로 고정된다(invariant I2/I3).\n\n이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가\n담당한다.\n\n본 PR(#1143)에서 OpenAPI requestBody schema가 spec-aligned\n``ACCOUNT_CREATE_REQUEST_SCHEMA``로 노출되어 codegen 클라이언트가\ncold-path payload 필드를 발견할 수 있게 됐다. 런타임은 어떤 body든\n무시하고 409를 반환한다.",
+        "description": "계좌 생성.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로\n수행한다.\n\n의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해\n핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). OpenAPI에는\nsuccess contract(200/201/204)가 노출되지 않으며, 409 응답은 명시\n``responses[409]`` content map의 ``application/problem+json``으로\n``ErrorResponse``를 노출한다(invariant I2/I3, #1164).\n\n이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가\n담당한다.\n\n본 PR(#1143)에서 OpenAPI requestBody schema가 spec-aligned\n``ACCOUNT_CREATE_REQUEST_SCHEMA``로 노출되어 codegen 클라이언트가\ncold-path payload 필드를 발견할 수 있게 됐다. 런타임은 어떤 body든\n무시하고 409를 반환한다.",
         "operationId": "create_account_api_accounts_post",
         "responses": {
           "409": {
             "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 생성 차단",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -246,7 +246,7 @@
           "400": {
             "description": "수정할 필드가 없거나 service-layer가 거부한 비구조 필드",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -256,7 +256,7 @@
           "404": {
             "description": "계좌를 찾을 수 없음",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -266,7 +266,7 @@
           "409": {
             "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER (런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -276,7 +276,7 @@
           "415": {
             "description": "Content-Type이 application/json이 아님",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -286,7 +286,7 @@
           "422": {
             "description": "비구조(mutable) 필드 type 검증 실패 또는 unknown 키. structural 필드 키는 422가 아닌 409로 차단된다.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -296,7 +296,7 @@
           "503": {
             "description": "Account service not available 또는 broker 재연결 실패",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -342,7 +342,7 @@
           "accounts"
         ],
         "summary": "Delete Account",
-        "description": "계좌 소프트 딜리트.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로\n수행한다.\n\n의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가\n반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/\n204)가 노출되지 않으며, 응답 모델은 ``ErrorResponse``로 고정된다\n(invariant I2/I3). service-layer 회귀 보호는\n``tests/unit/test_account.py``의 ``test_delete_account``,\n``test_delete_already_deleted_account_raises``가 담당한다.",
+        "description": "계좌 소프트 딜리트.\n\n런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.\n실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로\n수행한다.\n\n의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가\n반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/\n204)가 노출되지 않으며, 409 응답은 명시 ``responses[409]`` content\nmap의 ``application/problem+json``으로 ``ErrorResponse``를 노출한다\n(invariant I2/I3, #1164). service-layer 회귀 보호는\n``tests/unit/test_account.py``의 ``test_delete_account``,\n``test_delete_already_deleted_account_raises``가 담당한다.",
         "operationId": "delete_account_api_accounts__account_id__delete",
         "parameters": [
           {
@@ -359,7 +359,7 @@
           "409": {
             "description": "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER — 런타임 계좌 삭제 차단",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -619,7 +619,7 @@
           "401": {
             "description": "Invalid credentials",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -629,7 +629,7 @@
           "503": {
             "description": "Member or session service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -689,7 +689,7 @@
           "503": {
             "description": "Session service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -749,7 +749,7 @@
           "401": {
             "description": "Not authenticated or session expired",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -759,7 +759,7 @@
           "503": {
             "description": "Member or session service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -874,7 +874,7 @@
           "503": {
             "description": "Approval service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -927,7 +927,7 @@
           "404": {
             "description": "Approval not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -937,7 +937,7 @@
           "503": {
             "description": "Approval service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1000,7 +1000,7 @@
           "400": {
             "description": "Invalid status value",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1010,7 +1010,7 @@
           "404": {
             "description": "Approval not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1020,7 +1020,7 @@
           "503": {
             "description": "Approval service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1148,7 +1148,7 @@
           "503": {
             "description": "Audit logger not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1208,7 +1208,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1300,7 +1300,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1415,7 +1415,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1465,7 +1465,7 @@
           "400": {
             "description": "Invalid member data",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1475,7 +1475,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1485,7 +1485,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1538,7 +1538,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1548,7 +1548,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1601,7 +1601,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1611,7 +1611,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1621,7 +1621,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1674,7 +1674,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1684,7 +1684,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1694,7 +1694,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1747,7 +1747,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1757,7 +1757,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1767,7 +1767,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1820,7 +1820,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1830,7 +1830,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1840,7 +1840,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1903,7 +1903,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1913,7 +1913,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1923,7 +1923,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1986,7 +1986,7 @@
           "403": {
             "description": "Permission denied",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -1996,7 +1996,7 @@
           "404": {
             "description": "Member not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2006,7 +2006,7 @@
           "503": {
             "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2048,7 +2048,7 @@
           "503": {
             "description": "Config service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2101,7 +2101,7 @@
           "404": {
             "description": "Config key not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2111,7 +2111,7 @@
           "503": {
             "description": "Config service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2207,7 +2207,7 @@
           "503": {
             "description": "Account service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2259,7 +2259,7 @@
           "503": {
             "description": "Account service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2313,7 +2313,7 @@
           "400": {
             "description": "Path is required",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2323,7 +2323,7 @@
           "404": {
             "description": "Strategy file not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2383,7 +2383,7 @@
           "503": {
             "description": "Strategy registry not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2439,7 +2439,7 @@
           "400": {
             "description": "허용되지 않은 상태 전환",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2449,7 +2449,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2502,7 +2502,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2512,7 +2512,7 @@
           "503": {
             "description": "Strategy registry not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2581,7 +2581,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2591,7 +2591,7 @@
           "503": {
             "description": "Strategy registry or database not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2644,7 +2644,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2654,7 +2654,7 @@
           "503": {
             "description": "Strategy registry or database not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2707,7 +2707,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2717,7 +2717,7 @@
           "503": {
             "description": "Strategy registry or database not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2770,7 +2770,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2780,7 +2780,7 @@
           "503": {
             "description": "Strategy registry or database not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2861,7 +2861,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2871,7 +2871,7 @@
           "503": {
             "description": "Strategy registry or trade service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -2945,7 +2945,7 @@
           "503": {
             "description": "Report store not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3029,7 +3029,7 @@
           "503": {
             "description": "Report store not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3082,7 +3082,7 @@
           "404": {
             "description": "Report not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3092,7 +3092,7 @@
           "503": {
             "description": "Report store not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3295,7 +3295,7 @@
           "400": {
             "description": "Invalid dataset_id format",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3305,7 +3305,7 @@
           "404": {
             "description": "Dataset not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3315,7 +3315,7 @@
           "503": {
             "description": "Data store not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3523,7 +3523,7 @@
           "503": {
             "description": "Trade service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3609,7 +3609,7 @@
           "503": {
             "description": "Bot manager not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3659,7 +3659,7 @@
           "400": {
             "description": "Strategy loading failed",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3669,7 +3669,7 @@
           "404": {
             "description": "Strategy not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3679,7 +3679,7 @@
           "409": {
             "description": "Bot already exists or conflict",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3689,7 +3689,7 @@
           "422": {
             "description": "strategy_id/strategy_name both missing or budget error",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3699,7 +3699,7 @@
           "503": {
             "description": "Bot manager or strategy registry not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3742,7 +3742,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3752,7 +3752,7 @@
           "503": {
             "description": "Bot manager not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3806,7 +3806,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3816,7 +3816,7 @@
           "409": {
             "description": "Bot state conflict",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3826,7 +3826,7 @@
           "422": {
             "description": "Invalid handle_positions value",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3836,7 +3836,7 @@
           "503": {
             "description": "Bot manager not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3887,7 +3887,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3897,7 +3897,7 @@
           "409": {
             "description": "Bot state conflict (not stopped)",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3907,7 +3907,7 @@
           "422": {
             "description": "Budget update failed (e.g. insufficient funds)",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3917,7 +3917,7 @@
           "503": {
             "description": "Bot manager not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3960,7 +3960,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3970,7 +3970,7 @@
           "409": {
             "description": "Bot state conflict",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3980,7 +3980,7 @@
           "422": {
             "description": "Account credentials not configured",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -3990,7 +3990,7 @@
           "503": {
             "description": "Bot manager not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4033,7 +4033,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4043,7 +4043,7 @@
           "409": {
             "description": "Bot state conflict",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4053,7 +4053,7 @@
           "503": {
             "description": "Bot manager not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4118,7 +4118,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4128,7 +4128,7 @@
           "503": {
             "description": "Event history store not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4188,7 +4188,7 @@
           "404": {
             "description": "Account not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4198,7 +4198,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4342,7 +4342,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4405,7 +4405,7 @@
           "400": {
             "description": "Insufficient funds or invalid amount",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4415,7 +4415,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4425,7 +4425,7 @@
           "409": {
             "description": "Bot not stopped",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4435,7 +4435,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4498,7 +4498,7 @@
           "400": {
             "description": "Insufficient available budget",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4508,7 +4508,7 @@
           "404": {
             "description": "Bot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4518,7 +4518,7 @@
           "409": {
             "description": "Bot not stopped",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4528,7 +4528,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4570,7 +4570,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4612,7 +4612,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4672,7 +4672,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4764,7 +4764,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4833,7 +4833,7 @@
           "404": {
             "description": "Snapshot not found",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -4843,7 +4843,7 @@
           "503": {
             "description": "Treasury not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
@@ -5963,38 +5963,6 @@
         ],
         "title": "DatasetListResponse",
         "description": "데이터셋 목록 응답."
-      },
-      "ErrorResponse": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "title": "Type",
-            "default": "/errors/internal"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title",
-            "default": "Internal Server Error"
-          },
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "default": ""
-          },
-          "status": {
-            "type": "integer",
-            "title": "Status",
-            "default": 500
-          },
-          "instance": {
-            "type": "string",
-            "title": "Instance",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "ErrorResponse",
-        "description": "RFC 7807 Problem Details 에러 응답."
       },
       "FeedStatusResponse": {
         "properties": {
@@ -8115,6 +8083,38 @@
         ],
         "title": "WeeklySummaryResponse",
         "description": "주별 성과 집계 응답."
+      },
+      "ErrorResponse": {
+        "description": "RFC 7807 Problem Details 에러 응답.",
+        "properties": {
+          "type": {
+            "default": "/errors/internal",
+            "title": "Type",
+            "type": "string"
+          },
+          "title": {
+            "default": "Internal Server Error",
+            "title": "Title",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "status": {
+            "default": 500,
+            "title": "Status",
+            "type": "integer"
+          },
+          "instance": {
+            "default": "",
+            "title": "Instance",
+            "type": "string"
+          }
+        },
+        "title": "ErrorResponse",
+        "type": "object"
       }
     }
   }
