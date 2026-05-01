@@ -26,7 +26,7 @@ from ante.web.schemas import (
 
 router = APIRouter()
 
-_BOT_NOT_FOUND = "봇을 찾을 수 없습니다"
+_BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
 
 
 class BotCreateRequest(BaseModel):

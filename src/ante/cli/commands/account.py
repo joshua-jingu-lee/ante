@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
 
+from ante.cli.cold_path import (
+    ACCOUNT_COLD_PATH_BLOCKED_CODE,
+    assert_no_active_runtime,
+)
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
@@ -37,71 +40,27 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 # Cold-path 차단 응답 코드. SSOT는 docs/specs/cli/03-commands.md 117-118줄,
 # docs/specs/account/09-cli.md 49-54줄.
-_COLD_PATH_BLOCKED_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
+_COLD_PATH_BLOCKED_CODE = ACCOUNT_COLD_PATH_BLOCKED_CODE
 
 
 def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     """active Ante runtime이 있으면 cold-path 명령을 차단한다.
 
-    1.0 정책(단일 active runtime)에 따라 PID 파일이 가리키는 프로세스가
-    살아 있고 IPC socket이 존재하면 active runtime이 있는 것으로 본다.
-    PID는 alive지만 socket이 부재하면 stale PID로 보고 cold-path 진행을
-    허용한다(다른 프로세스가 해당 PID를 차지한 상태일 수 있다).
-
-    Refs #1157: ``--config-dir``로 가리킨 디렉토리의 canonical PID/socket만
-    본다. 명시적으로 ``Config.load(config_dir=get_config_dir())``로 인스턴스를
-    만들어 ``read_pid_file``과 ``get_socket_path`` 양쪽에 같은 ``config_dir``을
-    전파한다 — 0-arg ``read_pid_file()``은 ``ANTE_CONFIG_DIR`` env/default 폴백을
-    보므로, 다른 ``config_dir``로 실행 중인 server runtime을 cold-path가 누락해
-    split-brain 회귀(active server 중에 cold-path mutation 허용)를 일으킬 수 있다.
-
-    monkeypatch 호환을 위해 ``ante.main.read_pid_file``과
-    ``ante.cli.commands.ipc_helpers.get_socket_path``는 함수 내부에서
-    local import한다.
+    공유 헬퍼는 Refs #1157/#1160의 canonical config-dir, PID/socket, startup
+    marker 규칙을 사용한다. 이 래퍼는 기존 account 테스트와 import 경로를
+    유지하기 위한 호환 계층이다.
     """
-    from ante.cli.main import get_config_dir
-    from ante.config import Config
-    from ante.main import _read_starting_marker_pid, read_pid_file
-
-    config_dir = get_config_dir()
-    config = Config.load(config_dir=config_dir)
-
-    pid = read_pid_file(config)
-    if pid is None:
-        return  # PID 파일 부재 → active runtime 없음
-
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return  # stale PID → active runtime 없음
-
-    from ante.cli.commands.ipc_helpers import get_socket_path
-
-    try:
-        socket_path = get_socket_path(config_dir=config_dir)
-    except Exception:
-        # socket 경로 해석 실패 시는 차단 측으로 판정하지 않는다
-        # (config 부재 등). 그러나 PID alive 단독으로는 단정할 수 없으므로
-        # offline으로 간주한다.
-        return
-
-    if not Path(socket_path).exists():
-        # Refs #1160: boot 중에는 PID가 이미 alive지만 IPC socket이 아직 없을
-        # 수 있다. 이때 같은 PID가 기록된 starting marker가 있으면 starting도
-        # active runtime으로 보고 차단한다. marker 부재/손상/다른 PID는 stale
-        # 또는 recycled marker로 보고 기존처럼 통과한다.
-        marker_pid = _read_starting_marker_pid(config)
-        if marker_pid != pid:
-            return  # PID alive but neither socket nor matching marker → stale
-
-    # PID alive AND (socket exists OR matching starting marker) → active runtime.
-    # text 출력 경로도 차단 코드를 식별할 수 있도록 메시지에 prefix를 포함한다.
-    fmt.error(
-        f"{_COLD_PATH_BLOCKED_CODE}: 서버가 실행 중입니다. "
-        "cold-path 명령은 서버 정지 상태에서만 실행할 수 있습니다.",
+    # ``kill=os.kill``은 기존 테스트가 ``ante.cli.commands.account.os.kill``을
+    # monkeypatch하던 계약을 유지하기 위한 호환 주입점이다.
+    assert_no_active_runtime(
+        fmt,
         code=_COLD_PATH_BLOCKED_CODE,
+        message=(
+            "서버가 실행 중입니다. "
+            "cold-path 명령은 서버 정지 상태에서만 실행할 수 있습니다."
+        ),
+        kill=os.kill,
     )
-    raise SystemExit(1)
 
 
 async def _create_account_service() -> tuple[AccountService, Database]:

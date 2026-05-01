@@ -249,14 +249,15 @@ class TestBotCreateIpc:
 
 
 class TestBotRemoveIpc:
-    """bot remove 커맨드가 IPC를 통해 서버에 전달되는지 검증."""
+    """bot remove 커맨드가 runtime/cold-path 분기를 선택하는지 검증."""
 
+    @patch("ante.cli.commands.bot.is_active_runtime", return_value=True)
     @patch(
         "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
     )
     @patch("ante.cli.commands.ipc_helpers.IPCClient")
-    def test_bot_remove_ipc(self, mock_ipc_cls, mock_socket) -> None:
-        """bot remove가 bot.remove IPC 커맨드를 전송한다."""
+    def test_bot_remove_ipc(self, mock_ipc_cls, mock_socket, mock_active) -> None:
+        """active runtime이면 bot.remove IPC 커맨드를 전송한다."""
         mock_client = AsyncMock()
         mock_client.send.return_value = {
             "id": "req-1",
@@ -275,11 +276,68 @@ class TestBotRemoveIpc:
         assert call_args[0][0] == "bot.remove"
         assert call_args[0][1] == {"bot_id": "bot-abc"}
 
+    @patch("ante.cli.commands.bot.is_active_runtime", return_value=False)
+    @patch("ante.cli.commands.bot._run_bot_remove_cold_path")
+    def test_bot_remove_cold_path(self, mock_cold_path, mock_active) -> None:
+        """server stopped이면 cold-path service를 호출한다."""
+        mock_cold_path.return_value = {
+            "bot_id": "bot-abc",
+            "removed": True,
+            "cold_path": True,
+        }
+
+        result = _invoke_cli(["bot", "remove", "bot-abc", "--yes"])
+
+        assert result.exit_code == 0
+        assert "봇 삭제 완료(cold-path)" in result.output
+        mock_cold_path.assert_awaited_once_with("bot-abc")
+
+    @patch("ante.cli.commands.bot.is_active_runtime", return_value=False)
+    @patch("ante.cli.commands.bot._run_bot_remove_cold_path")
+    def test_bot_remove_cold_path_not_found(self, mock_cold_path, mock_active) -> None:
+        """cold-path service의 BOT_NOT_FOUND는 non-zero exit로 노출된다."""
+        from ante.bot.exceptions import BotNotFoundError
+
+        mock_cold_path.side_effect = BotNotFoundError("bot-xxx")
+
+        result = _invoke_cli(["bot", "remove", "bot-xxx", "--yes"])
+
+        assert result.exit_code == 1
+        assert "Bot not found: bot-xxx" in result.output
+
+    @pytest.mark.asyncio
+    async def test_bot_remove_cold_path_closes_db_on_failure(self) -> None:
+        """cold-path helper는 service 실패 시에도 DB close를 보장한다."""
+        from ante.cli.commands.bot import _run_bot_remove_cold_path
+
+        fake_db = AsyncMock()
+        fake_config = MagicMock()
+        fake_config.get.return_value = "strategies"
+
+        with (
+            patch("ante.cli.main.get_db_path", return_value="/tmp/ante-test.db"),
+            patch("ante.cli.main.get_config_dir", return_value=None),
+            patch("ante.config.Config.load", return_value=fake_config),
+            patch("ante.core.database.Database", return_value=fake_db),
+            patch(
+                "ante.bot.cold_path.cold_path_remove_bot",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                await _run_bot_remove_cold_path("bot-abc")
+
+        fake_db.connect.assert_awaited_once()
+        fake_db.close.assert_awaited_once()
+
+    @patch("ante.cli.commands.bot.is_active_runtime", return_value=True)
     @patch(
         "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
     )
     @patch("ante.cli.commands.ipc_helpers.IPCClient")
-    def test_bot_remove_server_error(self, mock_ipc_cls, mock_socket) -> None:
+    def test_bot_remove_server_error(
+        self, mock_ipc_cls, mock_socket, mock_active
+    ) -> None:
         """서버 에러 시 사용자에게 에러 메시지를 출력한다."""
         mock_client = AsyncMock()
         mock_client.send.return_value = {

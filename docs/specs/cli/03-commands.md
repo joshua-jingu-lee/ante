@@ -21,6 +21,7 @@
 | `offline` | 서버 프로세스와 무관하게 CLI가 직접 서비스/저장소를 생성해 실행한다. 서버 실행 중에도 live 상태를 바꾸지 않는다. |
 | `runtime IPC` | 서버 프로세스의 서비스 인스턴스, EventBus, 인메모리 상태, 외부 연결, 세션 상태가 필요하므로 IPC로 위임한다. |
 | `runtime IPC + snapshot fallback` | 서버 실행 중에는 IPC로 live 상태를 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다. |
+| `runtime IPC + cold-path fallback` | 서버 실행 중에는 IPC로 live 상태를 변경하고, 서버 정지 중에는 정해진 persisted cleanup만 직접 수행한다. |
 | `cold-path` | 서버 topology 또는 broker 초기화 입력을 바꾸므로 active Ante runtime이 없는 상태에서만 직접 DB를 수정한다. |
 | `external process` | 별도 프로세스 실행, OS signal, 장기 실행 파이프/스케줄러처럼 CLI 프로세스 경계를 넘는 작업이다. |
 | `bootstrap/maintenance` | 초기화·복구 목적의 인증 면제 또는 서버 정지 fallback 경로다. |
@@ -48,7 +49,7 @@
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
 | `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성 |
 | `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지 |
-| `ante bot remove <bot_id>` | `runtime IPC` | 서버 BotManager 정리 |
+| `ante bot remove <bot_id>` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
 | `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
 | `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
 | `ante trade info <trade_id>` | `offline` | canonical DB 조회 |
@@ -134,11 +135,13 @@ ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
 
-`bot create/start/stop/remove`와 `bot signal-key --rotate`는 서버 BotManager의
-인메모리 `_bots`, 실행 task, EventBus 구독, signal key 연결 상태를 바꾸므로 런타임
-IPC 커맨드다. 서버 실행 중 `bot list/info/status/positions/signal-key` 조회는 IPC로
+`bot create/start/stop`과 `bot signal-key --rotate`는 서버 BotManager의 인메모리
+`_bots`, 실행 task, EventBus 구독, signal key 연결 상태를 바꾸므로 런타임 IPC 커맨드다.
+`bot remove`는 서버 실행 중에는 IPC로 BotManager에 위임하고, 서버 정지 중에는
+cold-path fallback으로 signal key, 전략 스냅샷, Treasury budget, `bots.status`만
+정리한다. 서버 실행 중 `bot list/info/status/positions/signal-key` 조회는 IPC로
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB의 persisted snapshot만
-읽을 수 있으며, 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
+읽을 수 있으며, `bot remove` 외 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
 
 `--strategy`는 등록된 `strategy_id`다. 전략 파일 경로를 직접 넘기려면 먼저
 `ante strategy submit <path>`로 등록해야 한다.

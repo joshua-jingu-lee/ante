@@ -719,7 +719,8 @@ ante bot create [OPTIONS]
 
 ### ante bot remove
 
-봇 삭제.
+봇 삭제. 서버 실행 중에는 IPC로 BotManager에 위임하고, 서버 정지 중에는
+cold-path cleanup으로 persisted state를 정리한다.
 
 - **필요 scope**: `bot:admin`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
@@ -739,6 +740,16 @@ ante bot remove <BOT_ID> [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--yes` | - | BOOLEAN | false | Confirm the action without prompting. |
+
+서버 정지 상태에서 실행하면 `signal_keys`, 전략 스냅샷, Treasury budget,
+`bots.status='deleted'`만 정리하며 포지션 청산은 하지 않는다.
+
+```bash
+ante bot remove bot_001 --yes
+ante --format json bot remove bot_001 --yes
+```
+
+cold-path JSON 출력에는 `"cold_path": true`가 포함된다.
 
 
 ### ante bot signal-key
@@ -2089,4 +2100,3 @@ ante feed inject <PATH> [OPTIONS]
 
 
 ---
-

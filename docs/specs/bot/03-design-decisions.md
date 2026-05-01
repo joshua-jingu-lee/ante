@@ -204,10 +204,19 @@ BotManager.start_bot(bot_id)
     → BotStoppedEvent 발행
 ```
 
-CLI의 `bot create/start/stop/remove`와 `bot signal-key --rotate`는 위 흐름을 서버
+CLI의 `bot create/start/stop`과 `bot signal-key --rotate`는 위 흐름을 서버
 프로세스 안에서 실행해야 하므로 런타임 IPC 전용이다. 직접 DB 수정으로 봇 status나
 signal key를 바꾸면 `_bots`, 실행 task, EventBus 구독, 외부 signal channel이
 어긋나므로 허용하지 않는다.
+
+`bot remove`는 예외적으로 서버 실행 중에는 런타임 IPC, 서버 정지 상태에서는
+cold-path cleanup을 허용한다. cold-path 삭제는 BotManager를 만들지 않고 DB에
+남은 persisted state만 정리하며, 의미는 hot-path `handle_positions="keep"`과
+같다. 즉 broker live 연결이 필요한 포지션 청산은 하지 않고, `signal_keys` 폐기,
+`strategies/.running/{bot_id}` 스냅샷 삭제, Treasury budget 환수, `bots.status =
+'deleted'` 갱신만 수행한다. DB에 `running`/`stopping` 상태가 남아 있어도 서버가
+정지된 상태에서는 실행 task와 EventBus observer가 이미 부재하므로 stale status로
+보고 정리한다. 다음 서버 부팅 시 BotManager는 `deleted` 봇을 로드하지 않는다.
 
 ### 외부 시그널 채널
 

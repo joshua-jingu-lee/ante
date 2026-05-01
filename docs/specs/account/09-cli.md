@@ -56,6 +56,9 @@ runtime이 살아 있으면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 
 `ante account delete`는 IPC 런타임 커맨드가 아니다. cold-path CLI에서 직접
 `AccountService.delete()`를 호출하며, 해당 계좌에 활성(non-deleted) 봇이 남아 있으면
 삭제는 `AccountHasActiveBotsError`로 차단된다(orphan bot 무결성).
+활성 봇이 남아 있으면 `ante bot remove <bot_id>`로 먼저 제거한다. `bot remove`는
+서버 실행 중에는 IPC, 서버 정지 중에는 cold-path cleanup으로 동작하므로 계좌 삭제
+복구를 위해 별도의 `ante system start`/`ante system stop` 왕복이 필요하지 않다.
 
 ### CLI 출력 예시
 
