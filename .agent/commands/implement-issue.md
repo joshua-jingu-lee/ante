@@ -37,7 +37,7 @@ mkdir -p "$WORKTREE_ROOT"
 | 10~11 (사전 리뷰 루프) | Codex + Claude | `/codex:review --base <ref>` + Claude 개발 에이전트 | 이슈 코멘트 |
 | 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
 | 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Closes #이슈`) |
-| 13 (최종 승인/머지) | GitHub automation + `/autopilot` | Claude/Codex PR 승인 워커 + auto-merge | PR checks + 이슈 상태/post-merge 코멘트 |
+| 13 (최종 머지) | GitHub automation + `/autopilot` | `merge-gate` + auto-merge | PR checks + 이슈 상태/post-merge 코멘트 |
 
 ## 작업 흐름
 
@@ -306,5 +306,5 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 
 이 커맨드의 성공 기준은 다음 중 하나다.
 
-- PR이 성공적으로 생성되었고 자동 승인/머지 파이프라인이 인계됨
+- PR이 성공적으로 생성되었고 머지 자동화(`ci` + `merge-gate` + auto-merge)가 인계됨
 - 스펙 불일치 또는 반복 실패로 인해 이슈가 명시적으로 `blocked` 처리됨
