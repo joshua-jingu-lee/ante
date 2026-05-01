@@ -4,6 +4,10 @@
 IPC 소켓 경로 계산까지 일관되게 전파되어야 한다. 과거에는 DB만
 override되고 `system.toml`/`ante.sock`은 기본 설치를 바라보는 회귀가
 있었다.
+
+Refs #1157: socket은 더 이상 ``db.path`` 부모가 아니라
+``runtime.socket_path`` resolver(default ``<config_dir>/run/ante.sock``)를
+따른다. 본 모듈의 expected 경로도 그에 맞춰 갱신되었다.
 """
 
 from __future__ import annotations
@@ -75,7 +79,7 @@ class TestGetSocketPathConfigDirPropagation:
         )
 
         result = get_socket_path(config_dir=cfg)
-        assert result == str(cfg / "db" / "ante.sock")
+        assert result == str(cfg / "run" / "ante.sock")
 
     def test_default_uses_env_fallback(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -94,7 +98,7 @@ class TestGetSocketPathConfigDirPropagation:
         monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
 
         result = get_socket_path()
-        assert result == str(cfg / "db" / "ante.sock")
+        assert result == str(cfg / "run" / "ante.sock")
 
     def test_picks_up_ctx_when_no_explicit_arg(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -112,7 +116,7 @@ class TestGetSocketPathConfigDirPropagation:
         ctx = click.Context(cli, obj={"config_dir": cfg})
         with ctx:
             result = get_socket_path()
-        assert result == str(cfg / "db" / "ante.sock")
+        assert result == str(cfg / "run" / "ante.sock")
 
     def test_explicit_arg_beats_ctx(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -134,7 +138,7 @@ class TestGetSocketPathConfigDirPropagation:
         ctx = click.Context(cli, obj={"config_dir": cfg_ctx})
         with ctx:
             result = get_socket_path(config_dir=cfg_explicit)
-        assert result == str(cfg_explicit / "db" / "ante.sock")
+        assert result == str(cfg_explicit / "run" / "ante.sock")
 
 
 class TestConfigLoadAcceptsConfigDir:
