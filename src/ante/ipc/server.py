@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,7 +47,30 @@ class IPCServer:
         return self._socket_path
 
     async def start(self) -> None:
-        """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성."""
+        """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성.
+
+        Refs #1159: socket 파일 lifecycle은 ``unlink_socket()``이 단독으로
+        책임진다 — cold-path guard가 shutdown 동안 'PID alive AND socket
+        exists'로 active runtime을 판정해야 race window를 회피할 수 있기
+        때문이다.
+
+        Python 버전별 동작 차이:
+
+        * **Python 3.11 / 3.12**: ``loop.create_unix_server``는 ``server.close()``
+          시 socket 파일을 자동으로 unlink하지 **않는다** (해당 동작 자체가
+          stdlib에 없다). 따라서 별도 옵션 없이도 본 모듈의 lifecycle 가정이
+          성립한다.
+        * **Python 3.13+**: ``loop.create_unix_server``에 ``cleanup_socket``
+          인자가 추가되었고 **기본값이 ``True``** 이다 — 즉 ``server.close()``
+          가 socket 파일을 자동으로 unlink하므로 race window 회귀가 깨진다.
+          이를 막기 위해 3.13+에서만 ``cleanup_socket=False``를 명시적으로
+          전달한다.
+
+        ``cleanup_socket`` 인자를 무조건 전달하면 3.11/3.12에서
+        ``TypeError: create_unix_server() got an unexpected keyword argument
+        'cleanup_socket'`` 으로 부팅이 실패한다 (#1159 attempt 1 회귀). 따라서
+        ``sys.version_info`` 분기로 3.13+에서만 인자를 추가한다.
+        """
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -54,14 +78,13 @@ class IPCServer:
         if path.exists():
             path.unlink()
 
-        # Refs #1159: cleanup_socket=False로 server.close() 시 asyncio가
-        # 소켓 파일을 unlink하지 않도록 한다. cold-path guard가 shutdown 동안
-        # 'PID alive AND socket exists'로 active runtime을 판정하므로,
-        # socket 파일 lifecycle은 IPCServer.unlink_socket()이 단독 책임진다.
+        kwargs: dict[str, object] = {"path": self._socket_path}
+        if sys.version_info >= (3, 13):
+            kwargs["cleanup_socket"] = False
+
         self._server = await asyncio.start_unix_server(
             self._handle_connection,
-            path=self._socket_path,
-            cleanup_socket=False,
+            **kwargs,
         )
 
         # 소켓 파일 권한 설정 (소유자만 접근)
