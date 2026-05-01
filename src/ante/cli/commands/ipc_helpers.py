@@ -16,17 +16,17 @@ from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 def get_socket_path(config_dir: Path | None = None) -> str:
     """IPC 소켓 경로 반환.
 
-    Config에서 db.path를 읽고, 그 부모 디렉토리에 ante.sock을 배치한다.
-    `--config-dir`/`ANTE_CONFIG_DIR`이 주어지면 해당 디렉토리의 Config를
-    로드하여 IPC 소켓 위치를 동일한 트리로 일관시킨다.
+    Refs #1157: ``runtime.socket_path`` resolver를 통해 ``<config_dir>/run/
+    ante.sock``(default)을 산출한다. ``[runtime] socket_path`` override가
+    ``system.toml``에 있으면 사용자 값이 우선한다.
 
     Args:
         config_dir: 선택적 설정 디렉토리. None이면 현재 Click 컨텍스트의
-            `ctx.obj["config_dir"]`을 자동 추출하고, 그것도 없으면
-            `resolve_config_dir()` 폴백으로 자동 탐색한다.
+            ``ctx.obj["config_dir"]``을 자동 추출하고, 그것도 없으면
+            ``resolve_config_dir()`` 폴백으로 자동 탐색한다.
 
     Returns:
-        IPC 유닉스 소켓 절대/상대 경로 문자열.
+        IPC 유닉스 소켓 절대 경로 문자열.
     """
     from ante.config import Config
 
@@ -37,8 +37,7 @@ def get_socket_path(config_dir: Path | None = None) -> str:
         config_dir = get_config_dir()
 
     config = Config.load(config_dir=config_dir)
-    db_path = config.get("db.path", "db/ante.db")
-    return str(Path(db_path).parent / "ante.sock")
+    return str(config.runtime_socket_path())
 
 
 # _ipc.py 호환 별칭

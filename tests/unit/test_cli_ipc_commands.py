@@ -312,26 +312,27 @@ class TestIPCErrorResponse:
 
 
 class TestGetSocketPath:
-    def test_default_socket_path(self) -> None:
-        """기본 db.path로부터 소켓 경로 생성."""
+    """Refs #1157: ``get_socket_path``는 ``runtime.socket_path`` resolver를 통해
+    ``<config_dir>/run/ante.sock`` 절대 경로를 산출한다. 더 이상 ``db.path``의
+    부모 디렉토리에 의존하지 않는다.
+    """
+
+    def test_default_socket_path(self, tmp_path) -> None:
+        """default ``runtime.socket_path``로부터 ``<config_dir>/run/ante.sock`` 생성."""
         from ante.cli.commands.ipc_helpers import get_socket_path
 
-        with patch("ante.config.Config") as mock_config_cls:
-            mock_config = mock_config_cls.load.return_value
-            mock_config.get.return_value = "db/ante.db"
+        path = get_socket_path(config_dir=tmp_path)
 
-            path = get_socket_path()
+        assert path == str(tmp_path / "run" / "ante.sock")
 
-        assert path == "db/ante.sock"
-
-    def test_custom_db_path(self) -> None:
-        """커스텀 db.path로부터 소켓 경로 생성."""
+    def test_custom_runtime_socket_path(self, tmp_path) -> None:
+        """``[runtime] socket_path`` override가 적용된다."""
         from ante.cli.commands.ipc_helpers import get_socket_path
 
-        with patch("ante.config.Config") as mock_config_cls:
-            mock_config = mock_config_cls.load.return_value
-            mock_config.get.return_value = "/data/ante/main.db"
+        (tmp_path / "system.toml").write_text(
+            '[runtime]\nsocket_path = "ipc/custom.sock"\n', encoding="utf-8"
+        )
 
-            path = get_socket_path()
+        path = get_socket_path(config_dir=tmp_path)
 
-        assert path == "/data/ante/ante.sock"
+        assert path == str(tmp_path / "ipc" / "custom.sock")
