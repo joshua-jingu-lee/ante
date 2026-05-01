@@ -35,6 +35,23 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 
 
+def _assert_python_313() -> None:
+    """Ante는 CPython 3.13 단일 런타임만 지원한다.
+
+    이 가드는 verify-install.py 진입 시 첫 호출되어, 사용자의 로컬 ``python3``가
+    공식 런타임과 다른 버전이면 즉시 fail-fast로 종료한다. 3.13의 모든 patch
+    버전(3.13.0, 3.13.1, …)에서는 통과한다.
+    """
+    if sys.version_info < (3, 13) or sys.version_info >= (3, 14):
+        print(
+            f"{RED}{BOLD}Ante는 Python 3.13 단일 런타임만 지원합니다 "
+            f"(현재: {sys.version}).{RESET}\n"
+            f"  python3.13 -m venv .venv && source .venv/bin/activate "
+            f'&& pip install -e ".[dev]"'
+        )
+        sys.exit(1)
+
+
 def log_step(msg: str) -> None:
     print(f"\n{CYAN}{BOLD}▶ {msg}{RESET}")
 
@@ -479,6 +496,8 @@ def print_usage() -> None:
 
 
 def main() -> None:
+    _assert_python_313()
+
     if len(sys.argv) < 2:
         print_usage()
         sys.exit(1)

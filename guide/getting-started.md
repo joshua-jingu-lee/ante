@@ -13,6 +13,12 @@ Ante를 설치하고 첫 거래를 시작하기까지의 과정을 안내합니�
 - Python 3.13 free-threaded 빌드 및 JIT는 공식 지원 범위 밖
 - Linux 또는 macOS (Windows는 WSL2 사용)
 
+저장소 루트의 `.python-version`이 `3.13`을 가리키므로 pyenv/asdf/uv 같은 버전 매니저가 자동으로 같은 인터프리터를 선택합니다. venv는 Python 3.13으로 직접 만듭니다:
+
+```bash
+python3.13 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+```
+
 ---
 
 ## 📋 사전 준비
