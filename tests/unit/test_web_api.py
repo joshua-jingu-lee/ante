@@ -1366,6 +1366,19 @@ class TestPutAccountRequestBodySchema:
             f"requestBody.required가 True가 아님: {request_body.get('required')!r}"
         )
 
+    def test_openapi_put_account_request_body_has_min_properties(self, client):
+        """PUT requestBody schema에 ``minProperties: 1``이 노출된다(이슈 #1152).
+
+        빈 dict(``{}``) / 빈 body / ``{"name": null}`` 처럼 effective payload가
+        비는 요청은 422 Unprocessable Entity로 응답한다. 이는 OpenAPI 계약으로
+        ``minProperties: 1``로 표현되며, requestBody schema에만 적용된다 —
+        응답 content-type customizer(#1164)와 entangle 금지.
+        """
+        schema = self._put_request_schema(client)
+        assert schema.get("minProperties") == 1, (
+            f"requestBody schema.minProperties가 1이 아님: {schema!r}"
+        )
+
     def test_openapi_put_account_415_references_error_response(self, client):
         """PUT 415 응답이 ErrorResponse를 가리킨다."""
         resp = client.get("/openapi.json")
