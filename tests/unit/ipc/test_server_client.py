@@ -228,6 +228,9 @@ async def test_lifecycle_state_transitions(
     await server.drain_connections(timeout=0.1)
     assert server.state is IPCServerState.SHUTTING_DOWN
 
+    server.stop_dispatching()
+    assert server.state is IPCServerState.DRAINING
+
     server.unlink_socket()
     assert server.state is IPCServerState.STOPPED
 
@@ -315,6 +318,7 @@ async def test_dispatch_rejects_everything_when_stopped(
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
     await server.stop_accepting()
+    server.stop_dispatching()
     await server.drain_connections(timeout=0.1)
     server.unlink_socket()
 
@@ -329,6 +333,37 @@ async def test_dispatch_rejects_everything_when_stopped(
         assert response["status"] == "error"
         assert response["error"]["code"] == "SERVICE_UNAVAILABLE"
         assert "종료되었습니다" in response["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rejects_everything_while_draining(
+    socket_path: str, service_registry: ServiceRegistry
+) -> None:
+    """DRAINING에서는 read-only 포함 모든 dispatch를 503으로 거부한다."""
+    cmd_registry = CommandRegistry()
+
+    async def read_only_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        return {"read": True}
+
+    cmd_registry.register("test.read", read_only_handler, is_mutating=False)
+
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+    await server.start()
+    try:
+        await server.stop_accepting()
+        server.stop_dispatching()
+
+        response = await server._dispatch(
+            {"id": "r1", "command": "test.read", "args": {}, "actor": "tester"}
+        )
+
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "SERVICE_UNAVAILABLE"
+        assert "리소스 종료 중" in response["error"]["message"]
+    finally:
+        await server.drain_connections(timeout=0.1)
+        if Path(socket_path).exists():
+            server.unlink_socket()
 
 
 @pytest.mark.asyncio
@@ -413,10 +448,10 @@ async def test_unlink_socket_removes_file(
 
 
 @pytest.mark.asyncio
-async def test_stop_facade_runs_all_three_phases(
+async def test_stop_facade_runs_all_phases(
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:
-    """기존 stop() 호출자 호환 facade — listener close → drain → unlink."""
+    """기존 stop() 호출자 호환 facade — listener close → reject → drain → unlink."""
     cmd_registry = CommandRegistry()
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -425,6 +460,7 @@ async def test_stop_facade_runs_all_three_phases(
     # 호출 추적 wrapper로 3단계가 모두 실행되는지 검증
     calls: list[str] = []
     original_stop_accepting = server.stop_accepting
+    original_stop_dispatching = server.stop_dispatching
     original_drain = server.drain_connections
     original_unlink = server.unlink_socket
 
@@ -436,15 +472,25 @@ async def test_stop_facade_runs_all_three_phases(
         calls.append("drain_connections")
         await original_drain(timeout)
 
+    def tracked_stop_dispatching() -> None:
+        calls.append("stop_dispatching")
+        original_stop_dispatching()
+
     def tracked_unlink() -> None:
         calls.append("unlink_socket")
         original_unlink()
 
     server.stop_accepting = tracked_stop_accepting  # type: ignore[method-assign]
+    server.stop_dispatching = tracked_stop_dispatching  # type: ignore[method-assign]
     server.drain_connections = tracked_drain  # type: ignore[method-assign]
     server.unlink_socket = tracked_unlink  # type: ignore[method-assign]
 
     await server.stop()
 
-    assert calls == ["stop_accepting", "drain_connections", "unlink_socket"]
+    assert calls == [
+        "stop_accepting",
+        "stop_dispatching",
+        "drain_connections",
+        "unlink_socket",
+    ]
     assert not Path(socket_path).exists()

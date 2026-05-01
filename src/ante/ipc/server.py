@@ -39,15 +39,17 @@ class IPCServerState(Enum):
     * ``RUNNING`` → ``SHUTTING_DOWN``: ``stop_accepting()`` 진입 직후
       (listener close 호출 **전**)에 전환. 이 시점부터 mutating dispatch는
       ``SERVICE_UNAVAILABLE``로 거부된다.
-    * ``SHUTTING_DOWN`` → ``STOPPED``: ``unlink_socket()`` 마지막에 전환.
-      이 시점부터는 read-only를 포함한 모든 명령이 거부된다 — db close 이후
-      이므로 read-only도 closed DB read attempt 위험이 있다.
+    * ``SHUTTING_DOWN`` → ``DRAINING``: ``stop_dispatching()`` 호출 시 전환.
+      이 시점부터는 read-only를 포함한 모든 명령이 거부된다 — broker/db 등
+      서비스 리소스 종료 구간에 들어가기 때문이다.
+    * ``DRAINING`` → ``STOPPED``: ``unlink_socket()`` 마지막에 전환.
 
     초기 값은 ``STOPPED`` (start 이전 상태).
     """
 
     RUNNING = "running"
     SHUTTING_DOWN = "shutting_down"
+    DRAINING = "draining"
     STOPPED = "stopped"
 
 
@@ -179,13 +181,21 @@ class IPCServer:
         finally:
             self._closing_server = None
 
+    def stop_dispatching(self) -> None:
+        """active connection의 추가 dispatch를 모두 거부하도록 전환.
+
+        ``stop_accepting()`` 이후에도 기존 연결은 살아 있을 수 있다.
+        ``SHUTTING_DOWN`` 초기 구간에서는 read-only 조회를 허용하지만, broker
+        disconnect/DB close 같은 리소스 종료 직전에는 read-only도 closed
+        resource를 밟을 수 있으므로 이 메서드로 전 명령 reject 상태에 들어간다.
+        """
+        self._state = IPCServerState.DRAINING
+        logger.info("IPCServer dispatch 거부 시작: %s", self._socket_path)
+
     def unlink_socket(self) -> None:
         """소켓 파일 제거. lifecycle 마지막 단계에서 호출.
 
-        Refs #1184: 메서드 종료 시 state를 ``STOPPED``으로 전환한다. 이 시점
-        이후의 dispatch는 (read-only 포함) 모두 ``SERVICE_UNAVAILABLE``로
-        거부된다 — db close 이후이므로 read-only도 closed DB read attempt
-        위험이 있다.
+        Refs #1184: 메서드 종료 시 state를 ``STOPPED``으로 전환한다.
         """
         path = Path(self._socket_path)
         if path.exists():
@@ -198,9 +208,11 @@ class IPCServer:
         """기존 호출자 호환 facade. listener close → drain → unlink.
 
         Refs #1184: 내부 메서드들이 lifecycle state 전환을 담당한다 —
-        ``stop_accepting()``이 SHUTTING_DOWN, ``unlink_socket()``이 STOPPED.
+        ``stop_accepting()``이 SHUTTING_DOWN, ``stop_dispatching()``이 DRAINING,
+        ``unlink_socket()``이 STOPPED.
         """
         await self.stop_accepting()
+        self.stop_dispatching()
         await self.drain_connections()
         self.unlink_socket()
 
@@ -267,8 +279,9 @@ class IPCServer:
 
         Refs #1184: lifecycle state-aware reject 분기를 추가한다.
 
-        * ``STOPPED``: 모든 명령(mutating + read-only) ``SERVICE_UNAVAILABLE``.
-          db close 이후이므로 read-only도 closed DB read attempt 위험.
+        * ``DRAINING``/``STOPPED``: 모든 명령(mutating + read-only)
+          ``SERVICE_UNAVAILABLE``. 서비스 리소스 종료 구간 또는 종료 이후이므로
+          read-only도 closed resource 접근 위험.
         * ``SHUTTING_DOWN`` + mutating: ``SERVICE_UNAVAILABLE``.
         * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정,
           dashboard 가시성 보존).
@@ -279,9 +292,14 @@ class IPCServer:
         args = request.get("args", {})
         actor = request.get("actor", "ipc")
 
-        # Refs #1184: STOPPED 단계에서는 모든 명령을 즉시 거부.
-        if self._state == IPCServerState.STOPPED:
-            return self._service_unavailable(request_id, "서버가 종료되었습니다.")
+        # Refs #1184: 리소스 drain/종료 단계에서는 모든 명령을 즉시 거부.
+        if self._state in {IPCServerState.DRAINING, IPCServerState.STOPPED}:
+            message = (
+                "서버 리소스 종료 중입니다. IPC 명령을 받지 않습니다."
+                if self._state == IPCServerState.DRAINING
+                else "서버가 종료되었습니다."
+            )
+            return self._service_unavailable(request_id, message)
 
         spec = self._command_registry.get(command)
         if spec is None:

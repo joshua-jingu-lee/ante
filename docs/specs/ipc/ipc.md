@@ -191,11 +191,13 @@ IPCServer는 shutdown 중 활성 IPC connection이 새 mutating 명령을 dispat
 |------|-----------|------------------|
 | `RUNNING` | `start()`가 Unix socket listener와 파일 권한 설정을 완료한 직후 | 모든 등록 명령을 정상 dispatch |
 | `SHUTTING_DOWN` | `stop_accepting()` 진입 직후, listener `close()` 호출 전 | mutating 명령은 `SERVICE_UNAVAILABLE`로 거부, read-only 명령은 통과 |
+| `DRAINING` | `_shutdown()`이 BrokerAdapter disconnect/DB close 같은 리소스 종료에 들어가기 직전, 또는 `stop()` facade가 drain을 시작하기 직전 | mutating/read-only를 포함한 모든 명령을 `SERVICE_UNAVAILABLE`로 거부 |
 | `STOPPED` | `unlink_socket()` 종료 시점 | mutating/read-only를 포함한 모든 명령을 `SERVICE_UNAVAILABLE`로 거부 |
 
 `SHUTTING_DOWN`에서 read-only 명령을 통과시키는 이유는 BotManager와 DB가 아직 살아
-있는 구간의 운영 가시성을 보존하기 위해서다. 반대로 `STOPPED`는 `_shutdown` 후반부에서
-DB close가 끝난 뒤의 상태이므로 read-only도 closed DB read attempt 위험이 있어 거부한다.
+있는 초기 shutdown 구간의 운영 가시성을 보존하기 위해서다. 반대로 `DRAINING` 이후는
+BrokerAdapter disconnect와 DB close가 시작되는 구간이므로 read-only도 closed resource
+접근 위험이 있어 거부한다.
 
 `stop_accepting()`은 새 연결 수락만 중지하고 소켓 파일을 유지한다. cold-path guard는
 `PID alive AND socket exists`를 active runtime으로 판정하므로, `unlink_socket()`은
@@ -335,9 +337,10 @@ JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 | `__init__` | `(self, socket_path: str, service_registry: ServiceRegistry, command_registry: CommandRegistry)` | 소켓 경로와 서비스/커맨드 레지스트리 |
 | `start` | `async (self) -> None` | 소켓 서버 시작, `asyncio.start_unix_server` 사용, state를 `RUNNING`으로 전환 |
 | `stop_accepting` | `async (self) -> None` | state를 `SHUTTING_DOWN`으로 전환한 뒤 새 연결 수락 중지, 소켓 파일 유지 |
+| `stop_dispatching` | `(self) -> None` | state를 `DRAINING`으로 전환하여 active connection의 추가 dispatch를 모두 거부 |
 | `drain_connections` | `async (self, timeout: float = 5.0) -> None` | active 연결 drain 대기, timeout 시 경고 후 진행 |
 | `unlink_socket` | `(self) -> None` | 소켓 파일 삭제, state를 `STOPPED`로 전환 |
-| `stop` | `async (self) -> None` | 호환 facade: `stop_accepting()` → `drain_connections()` → `unlink_socket()` |
+| `stop` | `async (self) -> None` | 호환 facade: `stop_accepting()` → `stop_dispatching()` → `drain_connections()` → `unlink_socket()` |
 | `_handle_connection` | `async (self, reader, writer) -> None` | 커넥션별 요청 처리 |
 | `_dispatch` | `async (self, request: dict) -> dict` | lifecycle state/taxonomy 검사 → `CommandRegistry`에서 핸들러 조회 → 실행 → 결과 반환 |
 
@@ -400,6 +403,7 @@ class ServiceRegistry:
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
 | shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
+| 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 서버 종료 후 dispatch | `STOPPED` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 
 ## 보안 고려

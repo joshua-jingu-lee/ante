@@ -328,6 +328,60 @@ async def test_active_connection_read_only_command_allowed_during_shutdown(
 
 
 @pytest.mark.asyncio
+async def test_read_only_command_rejected_before_db_close(
+    socket_path: str,
+) -> None:
+    """DB close 직전 리소스 drain 구간에서는 read-only도 503으로 거부된다."""
+    cmd_registry = CommandRegistry()
+    service_registry = _make_service_registry()
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+
+    async def read_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        return {"read": True}
+
+    cmd_registry.register("test.read", read_handler, is_mutating=False)
+    await server.start()
+
+    responses: list[dict] = []
+    states_at_db_close: list[IPCServerState] = []
+
+    class _StubBotManager:
+        async def stop_all(self) -> None:
+            pass
+
+    class _StubDatabase:
+        async def close(self) -> None:
+            states_at_db_close.append(server.state)
+            responses.append(
+                await server._dispatch(
+                    {
+                        "id": "db-close",
+                        "command": "test.read",
+                        "args": {},
+                        "actor": "active-client",
+                    }
+                )
+            )
+
+    s = Services(
+        ipc_server=server,
+        bot_manager=_StubBotManager(),
+        db=_StubDatabase(),
+    )
+
+    try:
+        await _shutdown(s)
+    finally:
+        if Path(socket_path).exists():
+            Path(socket_path).unlink()
+
+    assert states_at_db_close == [IPCServerState.DRAINING]
+    assert responses[0]["status"] == "error"
+    assert responses[0]["error"]["code"] == "SERVICE_UNAVAILABLE"
+    assert "리소스 종료 중" in responses[0]["error"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_post_stopped_dispatch_rejected(
     socket_path: str,
 ) -> None:
