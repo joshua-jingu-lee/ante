@@ -158,6 +158,7 @@ def test_read_pid_file_legacy_fallback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """canonical 부재 + legacy ``db/ante.pid`` 존재 → legacy 읽고 warning."""
+    from ante import main as main_mod
     from ante.main import read_pid_file
 
     config_dir = tmp_path / "ante-config"
@@ -166,6 +167,11 @@ def test_read_pid_file_legacy_fallback(
     cwd.mkdir()
     monkeypatch.setenv("ANTE_CONFIG_DIR", str(config_dir))
     monkeypatch.chdir(cwd)
+
+    # 다른 테스트가 이미 deprecation warning을 1회 emit했을 수 있으므로
+    # 본 테스트 진입 시점에 모듈 가드를 명시적으로 reset한다 (Refs #1157,
+    # plan v3 권고: 1회 emit 전제이므로 테스트 격리만 위해 reset).
+    monkeypatch.setattr(main_mod, "_legacy_pid_warning_emitted", False)
 
     # canonical 부재 — 만들지 않는다
     canonical = config_dir / "run" / "ante.pid"
@@ -180,7 +186,15 @@ def test_read_pid_file_legacy_fallback(
         result = read_pid_file()
 
     assert result == 9999
-    assert any("legacy" in rec.message.lower() for rec in caplog.records)
+    main_records = [rec for rec in caplog.records if rec.name == "ante.main"]
+    assert any("legacy" in rec.message.lower() for rec in main_records)
+    # 두 번째 호출에서는 warning이 emit되지 않는다 (1회 emit 가드 회귀)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="ante.main"):
+        second = read_pid_file()
+    assert second == 9999
+    main_records_2 = [rec for rec in caplog.records if rec.name == "ante.main"]
+    assert not any("legacy" in rec.message.lower() for rec in main_records_2)
 
 
 # ── Task 4: ipc_helpers 회귀 ─────────────────────────────────────

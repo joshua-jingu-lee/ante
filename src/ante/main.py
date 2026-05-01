@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 # 보존하며, write/remove 양쪽에서 stale 정리만 수행한다. 새 write는 canonical
 # `<config_dir>/run/ante.pid`로만 한다.
 _LEGACY_PID_FALLBACK = Path("db/ante.pid")
+# legacy fallback deprecation warning은 프로세스 lifetime 동안 1회만 출력한다
+# (Refs #1157, plan v3 권고). 테스트는 caplog 캡처 후 직접 리셋한다.
+_legacy_pid_warning_emitted = False
 
 
 def _write_pid_file(config: Config) -> None:
@@ -92,11 +95,14 @@ def read_pid_file(config: Config | None = None) -> int | None:
     except (FileNotFoundError, ValueError):
         return None
 
-    logger.warning(
-        "legacy %s 사용 — %s로 마이그레이션 필요 (Refs #1157)",
-        _LEGACY_PID_FALLBACK,
-        canonical,
-    )
+    global _legacy_pid_warning_emitted
+    if not _legacy_pid_warning_emitted:
+        logger.warning(
+            "legacy %s 사용 — %s로 마이그레이션 필요 (Refs #1157)",
+            _LEGACY_PID_FALLBACK,
+            canonical,
+        )
+        _legacy_pid_warning_emitted = True
     return pid
 
 
