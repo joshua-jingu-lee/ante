@@ -56,7 +56,7 @@ history_size = 1000  # 인메모리 링버퍼 크기
 ```
 
 **근거**:
-- TOML은 Python 3.11+ 표준 라이브러리(`tomllib`)로 파싱 가능 — 외부 의존성 없음
+- Ante는 Python 3.13 표준 라이브러리 `tomllib`로 TOML을 파싱한다 — 외부 의존성 없음
 - 사람이 읽기/편집 용이 (JSON보다 코멘트 지원, YAML보다 파싱 안정적)
 - FreqTrade의 JSON 방식은 코멘트 불가, NautilusTrader의 YAML은 보안 이슈(arbitrary code execution) 가능
 

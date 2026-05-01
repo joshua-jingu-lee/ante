@@ -1,7 +1,7 @@
 # Ante Up. Agents Do the Rest.
 
 ![Status](https://img.shields.io/badge/status-beta-yellow)
-![Python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
 ![Market](https://img.shields.io/badge/market-KRX_(국내주식)-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 

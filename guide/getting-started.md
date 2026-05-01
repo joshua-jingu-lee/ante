@@ -9,7 +9,8 @@ Ante를 설치하고 첫 거래를 시작하기까지의 과정을 안내합니�
 
 ## 요구 사항
 
-- Python 3.11 이상
+- Python 3.13 (3.13.x)
+- Python 3.13 free-threaded 빌드 및 JIT는 공식 지원 범위 밖
 - Linux 또는 macOS (Windows는 WSL2 사용)
 
 ---

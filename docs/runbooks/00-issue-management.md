@@ -46,7 +46,7 @@
 [refactor] Broker 어댑터 인터페이스 통일
 [perf] Parquet 읽기 시 컬럼 프루닝 적용
 [docs] API 엔드포인트 레퍼런스 문서 작성
-[chore] GitHub Actions Python 버전 3.12 업그레이드
+[chore] GitHub Actions 캐시 키 정책 정리
 ```
 
 ## 3. 이슈 본문 구조
