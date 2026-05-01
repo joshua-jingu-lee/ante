@@ -157,6 +157,52 @@ class TestConfigValidate:
             config.validate()
 
 
+# ── path-like 정규화 (Refs #1158) ─────────────────
+
+
+class TestConfigResolvePath:
+    """Config.resolve_path() 테스트.
+
+    Spec: docs/specs/config/03-design-decisions.md `Ante instance/path contract`.
+    상대 경로는 `config_dir` 기준, 절대 경로는 그대로, 키 미설정 시 default를 사용한다.
+    """
+
+    def test_resolve_path_returns_absolute_passthrough(self, tmp_path: Path) -> None:
+        """절대 경로로 설정된 키는 `config_dir`과 무관하게 그대로 반환한다."""
+        absolute_db = tmp_path / "elsewhere" / "ante.db"
+        toml_file = tmp_path / "system.toml"
+        toml_file.write_text(f'[db]\npath = "{absolute_db}"\n')
+
+        config = Config.load(config_dir=tmp_path)
+
+        assert config.resolve_path("db.path", "db/ante.db") == absolute_db
+
+    def test_resolve_path_normalizes_relative_against_config_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """상대 경로는 호출 시점 CWD가 아니라 `config_dir` 기준으로 정규화한다."""
+        toml_file = tmp_path / "system.toml"
+        toml_file.write_text('[db]\npath = "custom/ante.db"\n')
+
+        config = Config.load(config_dir=tmp_path)
+
+        assert (
+            config.resolve_path("db.path", "db/ante.db")
+            == tmp_path / "custom" / "ante.db"
+        )
+
+    def test_resolve_path_uses_default_when_key_missing(self, tmp_path: Path) -> None:
+        """TOML에 키가 없으면 default를 `config_dir` 기준으로 정규화한다."""
+        config = Config.load(config_dir=tmp_path)
+
+        # 키가 TOML/DEFAULTS 어디에도 없으면 default가 사용되며,
+        # 결과는 config_dir 기준의 절대 경로여야 한다.
+        assert (
+            config.resolve_path("nonexistent.path", "fallback/ante.db")
+            == tmp_path / "fallback" / "ante.db"
+        )
+
+
 # ── .env 파서 ────────────────────────────────────
 
 

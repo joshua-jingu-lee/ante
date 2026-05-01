@@ -161,6 +161,106 @@ def test_get_db_path_env_used_when_ctx_has_no_override(
 
 
 # ---------------------------------------------------------------------------
+# get_db_path × system.toml `db.path` (Refs #1158)
+#
+# Spec: docs/specs/cli/02-design-decisions.md:62-70.
+# `get_db_path` 는 server runtime과 동일한 resolver(`Config.resolve_path`)
+# 를 통해 `db.path` 를 해석해야 한다. 이로써 cold-path CLI(account create
+# /delete/set-credentials)가 보는 DB와 server runtime이 보는 DB가 항상
+# 일치하여 split-brain이 발생하지 않는다.
+# ---------------------------------------------------------------------------
+
+
+def test_get_db_path_reads_relative_db_path_from_system_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """system.toml 의 [db].path 가 상대 경로면 config_dir 기준으로 정규화."""
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    cfg_dir = tmp_path / "instance-rel"
+    cfg_dir.mkdir()
+    (cfg_dir / "system.toml").write_text('[db]\npath = "custom/ante.db"\n')
+
+    ctx = click.Context(cli, obj={"config_dir": cfg_dir})
+    assert get_db_path(ctx) == str(cfg_dir / "custom" / "ante.db")
+
+
+def test_get_db_path_reads_absolute_db_path_from_system_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """system.toml 의 [db].path 가 절대 경로면 config_dir과 무관하게 그대로 사용."""
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    cfg_dir = tmp_path / "instance-abs"
+    cfg_dir.mkdir()
+    absolute_db = tmp_path / "elsewhere" / "ante.db"
+    (cfg_dir / "system.toml").write_text(f'[db]\npath = "{absolute_db}"\n')
+
+    ctx = click.Context(cli, obj={"config_dir": cfg_dir})
+    assert get_db_path(ctx) == str(absolute_db)
+
+
+def test_explicit_db_path_arg_takes_precedence_over_get_db_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--db-path` 옵션을 가진 커맨드는 자체 인자가 우선이며 get_db_path는 폴백.
+
+    spec: docs/specs/cli/02-design-decisions.md:69 (`--db-path` 가진 커맨드
+    들은 기본값을 None으로 두고, 값이 없을 때 `get_db_path(ctx)`로 폴백).
+    이 테스트는 헬퍼가 system.toml을 읽되, 호출자(서브커맨드 옵션 핸들러)
+    가 명시적 값을 제공하면 헬퍼 결과를 무시할 수 있는 단순 폴백임을 명확히
+    한다 — 즉 헬퍼가 호출자 인자를 가로채지 않는다.
+    """
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    cfg_dir = tmp_path / "fallback-instance"
+    cfg_dir.mkdir()
+    (cfg_dir / "system.toml").write_text('[db]\npath = "should-not-be-used.db"\n')
+
+    ctx = click.Context(cli, obj={"config_dir": cfg_dir})
+    explicit = "/tmp/explicit-override.db"
+
+    # 호출자(`approval`/`backtest` 등)는 명시적 값이 있으면 헬퍼를 건너뛴다.
+    resolved = explicit or get_db_path(ctx)
+    assert resolved == explicit
+
+
+def test_server_runtime_and_cli_resolve_same_db_path_under_chdir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CWD를 다른 곳으로 바꾸어도 server runtime과 CLI가 같은 DB 경로를 본다.
+
+    이 테스트는 #1158이 막아야 하는 split-brain 회귀 가드다. cold-path CLI
+    (`account create/delete/set-credentials`)와 server runtime이 동일
+    `config_dir` 위에서 서로 다른 DB를 보면 안 된다. server runtime은
+    `Config.resolve_path("db.path", ...)` 으로, CLI는 `get_db_path(ctx)` 로
+    각각 해석하지만 둘은 같은 결과여야 한다.
+    """
+    from ante.config import Config
+
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+    cfg_dir = tmp_path / "shared-instance"
+    cfg_dir.mkdir()
+    # 상대 경로로 기록해야 split-brain 회귀가 의미 있다 — 절대 경로면
+    # CWD와 무관하므로 회귀 가드 가치가 없다.
+    (cfg_dir / "system.toml").write_text('[db]\npath = "var/ante.db"\n')
+
+    # 호출 시점 CWD를 다른 곳으로 변경 — 과거 구현은 `Path.cwd()` 기준 결합으로
+    # 깨졌을 수 있다.
+    other_cwd = tmp_path / "elsewhere-cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    # CLI 경로
+    ctx = click.Context(cli, obj={"config_dir": cfg_dir})
+    cli_resolved = get_db_path(ctx)
+
+    # server runtime 경로 (ante.main._init_core가 사용하는 표현식)
+    server_cfg = Config.load(config_dir=cfg_dir)
+    server_resolved = str(server_cfg.resolve_path("db.path", "db/ante.db"))
+
+    assert cli_resolved == server_resolved
+    assert cli_resolved == str(cfg_dir / "var" / "ante.db")
+
+
+# ---------------------------------------------------------------------------
 # get_data_path — Codex 13차 review Finding 1
 #
 # `ante update` 서브프로세스가 v002 Parquet 마이그레이션을 적용할 때

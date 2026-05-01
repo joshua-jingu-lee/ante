@@ -142,28 +142,30 @@ def get_config_dir(ctx: click.Context | None = None) -> Path:
 
 
 def get_db_path(ctx: click.Context | None = None) -> str:
-    """`--config-dir`/`ANTE_CONFIG_DIR` 기반으로 DB 경로를 반환한다.
+    """server runtime과 동일한 resolver로 DB 경로를 반환한다.
 
-    우선순위는 `resolve_config_dir()`를 그대로 따른다:
-      1. `ctx.obj["config_dir"]` (루트 그룹이 `--config-dir` 또는
-         `ANTE_CONFIG_DIR` 환경변수로부터 확정한 Path) — override로 전달
-      2. `ANTE_CONFIG_DIR` 환경변수
-      3. `~/.config/ante/` (디렉토리가 실제로 존재할 때)
-      4. `./config/` (repo-local 폴백)
+    Spec: docs/specs/cli/02-design-decisions.md:62-70 — `system.toml`의
+    `db.path`를 우선 읽고, 미설정 시 `<config_dir>/db/ante.db` 기본값으로
+    폴백한다. 절대 경로면 그대로, 상대 경로면 `config_dir` 기준으로 정규화
+    한다 (`Config.resolve_path`).
 
     이 함수가 필요한 이유: `ante init`은 `<config_dir>/db/ante.db`를 생성하지만
-    후속 CLI들은 과거 `Database("db/ante.db")`를 CWD 기준으로 하드코딩해 다른
-    DB를 바라보는 문제가 있었다. 모든 CLI는 이 헬퍼를 통해 동일한 DB 경로를
-    사용해야 한다.
+    후속 CLI들이 과거 `Database("db/ante.db")` 처럼 CWD 기준으로 하드코딩하면
+    server runtime과 다른 DB를 바라보는 split-brain이 발생한다. cold-path
+    CLI(`account create/delete/set-credentials`)와 server runtime은 모두
+    이 헬퍼/`Config.resolve_path`를 통해 동일한 DB 경로를 본다.
 
     Args:
         ctx: 선택적 Click 컨텍스트. 전달되지 않으면
             `click.get_current_context(silent=True)`로 현재 컨텍스트를 조회한다.
 
     Returns:
-        `<config_dir>/db/ante.db` 형태의 경로 문자열.
+        절대 경로 문자열. 상대 `db.path` 입력은 `config_dir` 기준 절대 경로로
+        정규화된다.
     """
-    return str(get_config_dir(ctx) / "db" / "ante.db")
+    cfg_dir = get_config_dir(ctx)
+    cfg = Config.load(config_dir=cfg_dir)
+    return str(cfg.resolve_path("db.path", "db/ante.db"))
 
 
 def get_data_path(ctx: click.Context | None = None) -> str:
