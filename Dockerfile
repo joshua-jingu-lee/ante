@@ -8,7 +8,7 @@ COPY pyproject.toml ../pyproject.toml
 RUN npm run build
 
 # Stage 2: Python 런타임
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 WORKDIR /app
 
 # 시스템 의존성
