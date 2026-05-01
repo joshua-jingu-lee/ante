@@ -8,9 +8,11 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 
 from ante import __version__
+from ante.web.schemas import ErrorResponse
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +101,42 @@ def create_app(**services: Any) -> FastAPI:
 
     register_exception_handlers(app)
 
+    # OpenAPI customizer 설치 — components.schemas.ErrorResponse 보장 (#1164).
+    _install_openapi_customizer(app)
+
     # 프론트엔드 정적 파일 서빙 (빌드 결과물이 존재할 때만)
     _mount_frontend(app)
 
     return app
+
+
+def _install_openapi_customizer(app: FastAPI) -> None:
+    """OpenAPI customizer 단일 설치 지점 (#1164).
+
+    - ``ErrorResponse``가 ``components.schemas``에 항상 등록되도록 보장.
+      라우트 모듈에서 ``model: ErrorResponse`` shorthand를 제거하고 명시
+      ``$ref`` 매핑만 남기면 FastAPI 기본 동작에서 ``ErrorResponse``
+      component가 누락될 수 있다. ``setdefault``로 fallback 등록한다.
+    - 향후 다른 customizer가 필요하면 같은 함수에 모은다.
+    """
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+            tags=getattr(app, "openapi_tags", None),
+            servers=getattr(app, "servers", None),
+        )
+        schemas = schema.setdefault("components", {}).setdefault("schemas", {})
+        schemas.setdefault("ErrorResponse", ErrorResponse.model_json_schema())
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 def _mount_frontend(app: FastAPI) -> None:

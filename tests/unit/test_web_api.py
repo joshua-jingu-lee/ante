@@ -663,6 +663,107 @@ class TestRFC7807ErrorResponse:
             + "\n".join(f"  - {v}" for v in violations)
         )
 
+    def test_all_router_explicit_4xx_5xx_use_problem_json_only(self):
+        """명시 등록된 4xx/5xx OpenAPI ``responses`` entry는
+        ``application/problem+json`` content-type **만** 노출한다 (이슈 #1164).
+
+        런타임 ``register_exception_handlers``는 ``media_type=PROBLEM_JSON``
+        (``application/problem+json``)으로 응답하므로, OpenAPI doc과 런타임
+        content-type drift를 invariant로 잠근다.
+
+        - FastAPI 자동 생성 422(``HTTPValidationError``) 응답은 검사 대상에서
+          **제외**한다 (``application/json`` 유지가 FastAPI 기본 동작이며
+          본 이슈 Non-Goal). ``$ref``가 ``/HTTPValidationError``로 끝나는
+          422 응답을 정밀 필터링한다.
+        - 명시 등록된 422(``ErrorResponse`` 참조)는 검사 **포함**한다.
+        - ``application/json`` 키가 등장하면 FAIL — shorthand
+          ``model: ErrorResponse``와 명시 ``content`` 매핑이 병합되어 두
+          media type이 동시에 노출되는 split을 차단한다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        violations: list[str] = []
+
+        for path, methods in schema.get("paths", {}).items():
+            if not isinstance(methods, dict):
+                continue
+            for method, spec in methods.items():
+                if not isinstance(spec, dict):
+                    continue
+                responses = spec.get("responses", {})
+                if not isinstance(responses, dict):
+                    continue
+                for code, entry in responses.items():
+                    try:
+                        code_int = int(code)
+                    except (TypeError, ValueError):
+                        continue
+                    if code_int < 400:
+                        continue
+                    if not isinstance(entry, dict):
+                        continue
+                    content = entry.get("content")
+                    if not isinstance(content, dict):
+                        continue
+
+                    # FastAPI 자동 생성 422(HTTPValidationError ref) 제외.
+                    if str(code) == "422":
+                        json_obj = content.get("application/json")
+                        if isinstance(json_obj, dict):
+                            schema_obj = json_obj.get("schema", {})
+                            ref = (
+                                schema_obj.get("$ref", "")
+                                if isinstance(schema_obj, dict)
+                                else ""
+                            )
+                            if isinstance(ref, str) and ref.endswith(
+                                "/HTTPValidationError"
+                            ):
+                                continue
+
+                    media_keys = set(content.keys())
+                    if media_keys != {"application/problem+json"}:
+                        violations.append(
+                            f"{path} {method.upper()} {code}: "
+                            f"{sorted(media_keys)} expected only "
+                            f"application/problem+json"
+                        )
+
+        assert violations == [], (
+            "OpenAPI 명시 4xx/5xx responses content-type drift:\n"
+            + "\n".join(f"  - {v}" for v in violations)
+        )
+
+    def test_openapi_components_includes_error_response(self):
+        """``components.schemas.ErrorResponse``가 항상 등록되어 있다 (이슈 #1164).
+
+        ``model: ErrorResponse`` shorthand를 제거하고 명시 ``$ref`` 매핑만
+        남기면, FastAPI 기본 동작에서 ``ErrorResponse`` component가
+        components 트리에 포함되지 않을 수 있다.
+        ``_install_openapi_customizer(app)``가 ``setdefault``로 fallback
+        등록을 보장한다. 본 테스트는 customizer fallback 경로를 invariant로
+        잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        components = schema.get("components", {})
+        schemas = components.get("schemas", {})
+        assert "ErrorResponse" in schemas, (
+            "ErrorResponse가 components.schemas에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요"
+        )
+        error_schema = schemas["ErrorResponse"]
+        assert isinstance(error_schema, dict)
+        assert error_schema.get("type") == "object", (
+            f"ErrorResponse schema type=object가 아님: {error_schema!r}"
+        )
+        properties = error_schema.get("properties", {})
+        for required_field in ("type", "title", "detail", "status", "instance"):
+            assert required_field in properties, (
+                f"ErrorResponse properties에 {required_field} 누락: "
+                f"{sorted(properties.keys())}"
+            )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 
