@@ -30,13 +30,11 @@ from ante.eventbus import EventBus, EventHistoryStore
 
 logger = logging.getLogger(__name__)
 
-# Legacy cwd-relative PID 경로. Refs #1157: 1릴리스 동안 read-fallback 전용으로
-# 보존하며, write/remove 양쪽에서 stale 정리만 수행한다. 새 write는 canonical
-# `<config_dir>/run/ante.pid`로만 한다.
+# Legacy cwd-relative PID 경로. Refs #1157: 1.0 single-canonical resolver 모델로
+# cutover된 이후 새 read는 canonical만 본다. 이 상수는 transitional cleanup 용도로
+# `_remove_pid_file`이 양쪽 unlink할 때만 사용된다 (legacy 환경에서 stale loop를
+# 차단하기 위한 best-effort 정리).
 _LEGACY_PID_FALLBACK = Path("db/ante.pid")
-# legacy fallback deprecation warning은 프로세스 lifetime 동안 1회만 출력한다
-# (Refs #1157, plan v3 권고). 테스트는 caplog 캡처 후 직접 리셋한다.
-_legacy_pid_warning_emitted = False
 
 
 def _write_pid_file(config: Config) -> None:
@@ -55,9 +53,11 @@ def _write_pid_file(config: Config) -> None:
 def _remove_pid_file(config: Config) -> None:
     """canonical + legacy ``db/ante.pid`` 양쪽 PID 파일을 정리한다.
 
-    Refs #1157: legacy `db/ante.pid` read-fallback과 정합되도록 양쪽을 모두
-    ``unlink(missing_ok=True)`` 처리해 transitional 환경에서 stale loop를 차단.
-    Codex Plan Review v2 high finding 직접 대응.
+    Refs #1157: ``read_pid_file``은 canonical만 보지만, legacy cwd-relative
+    ``db/ante.pid``가 과거 환경에서 남아 있을 수 있으므로 cleanup은 양쪽을
+    ``unlink(missing_ok=True)`` 처리해 transitional 환경에서 stale 잔여를
+    제거한다 (best-effort). 이 책임은 ``read_pid_file``의 single-canonical
+    정책과 분리되며, 단지 호환 cleanup만 수행한다.
     """
     canonical = config.runtime_pid_path()
     for path in (canonical, _LEGACY_PID_FALLBACK):
@@ -69,17 +69,16 @@ def _remove_pid_file(config: Config) -> None:
 
 
 def read_pid_file(config: Config | None = None) -> int | None:
-    """PID 파일에서 PID 읽기. 파일이 없거나 파싱 실패 시 None.
+    """PID 파일에서 PID 읽기. canonical 부재/파싱 실패 시 None.
 
-    우선순위:
-      1. canonical ``config.runtime_pid_path()``
-      2. legacy ``db/ante.pid`` (1릴리스 read-fallback, deprecation warning 1회)
-      3. 둘 다 부재 → None.
+    Refs #1157, docs/specs/config/03-design-decisions.md (1.0 단일 active runtime
+    정책). 1.0은 single-canonical resolver 모델을 따르므로 legacy cwd-relative
+    ``db/ante.pid`` read-fallback은 두지 않는다. canonical
+    ``config.runtime_pid_path()``만 본다.
 
-    Refs #1157. ``config``이 ``None``이면 ``Config.load()``로 env/디폴트
-    기준 canonical을 산출한다. 0-arg 호환을 유지해 기존 ``patch("ante.main.
-    read_pid_file", ...)`` monkeypatch 사용처(test_account_cli, test_cli_update
-    등)가 그대로 동작한다.
+    ``config``이 ``None``이면 ``Config.load()``로 env/디폴트 기준 canonical을
+    산출한다. 0-arg 호환을 유지해 기존 ``patch("ante.main.read_pid_file", ...)``
+    monkeypatch 사용처(test_account_cli, test_cli_update 등)가 그대로 동작한다.
     """
     if config is None:
         config = Config.load()
@@ -88,22 +87,7 @@ def read_pid_file(config: Config | None = None) -> int | None:
     try:
         return int(canonical.read_text().strip())
     except (FileNotFoundError, ValueError):
-        pass
-
-    try:
-        pid = int(_LEGACY_PID_FALLBACK.read_text().strip())
-    except (FileNotFoundError, ValueError):
         return None
-
-    global _legacy_pid_warning_emitted
-    if not _legacy_pid_warning_emitted:
-        logger.warning(
-            "legacy %s 사용 — %s로 마이그레이션 필요 (Refs #1157)",
-            _LEGACY_PID_FALLBACK,
-            canonical,
-        )
-        _legacy_pid_warning_emitted = True
-    return pid
 
 
 @dataclass

@@ -189,6 +189,12 @@ Ante 1.0은 동일 OS user/home server 기준으로 **단일 active runtime serv
 종료한다. 같은 OS user에서 다중 runtime이 필요하다면 별도 인스턴스 분리/스케줄링은
 1.x 후속 결정 사항으로 분리한다.
 
+`runtime.pid_path` / `runtime.socket_path` 도입에 따라 legacy cwd-relative
+`db/ante.pid` 경로의 read-fallback은 두지 않는다 (#1157). canonical PID 파일이
+부재하면 server는 "running" 판정을 받지 않으며, 기존 환경에서 업그레이드는
+`ante system stop` 후 PR을 적용하는 흐름을 표준 시나리오로 한다. legacy 파일이
+잔존하면 `_remove_pid_file`이 canonical 정리 시 best-effort로 함께 unlink한다.
+
 ### Ante instance/path contract
 
 Ante 인스턴스의 루트는 `config_dir`이다. `system.toml`이 있는 디렉토리와

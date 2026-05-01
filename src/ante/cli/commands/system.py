@@ -127,9 +127,9 @@ def stop(ctx: click.Context) -> None:
         raise SystemExit(1)
 
     if not _is_process_alive(pid):
-        # 프로세스가 없으면 canonical + legacy `db/ante.pid` 양쪽 stale PID 정리
-        # (Refs #1157, Codex Plan Review v2 high finding 직접 대응 — legacy만
-        # 남은 환경에서 stale loop 차단).
+        # 프로세스가 없으면 canonical + legacy ``db/ante.pid`` 양쪽 stale PID
+        # 정리 (Refs #1157). ``read_pid_file``은 canonical만 보지만, cleanup은
+        # transitional 환경의 legacy 잔여까지 best-effort로 unlink한다.
         _remove_pid_file(config)
         fmt.error(
             f"프로세스가 존재하지 않습니다 (pid={pid}). PID 파일을 정리했습니다.",

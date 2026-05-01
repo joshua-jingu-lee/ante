@@ -201,11 +201,16 @@ class TestSystemStop:
         expected = str(tmp_path / "run" / "ante.pid")
         assert expected in result.output
 
-    def test_stop_cleans_legacy_pid_when_stale(self, runner, tmp_path, monkeypatch):
-        """Refs #1157: canonical 부재 + legacy ``db/ante.pid``만 stale인 환경에서
-        ``stop``이 legacy까지 정리해 다음 호출이 무한 루프하지 않아야 한다.
+    def test_stop_returns_pid_not_found_when_only_legacy_pid_present(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """Refs #1157: ``stop``은 canonical PID만 본다. legacy ``db/ante.pid``가
+        남아 있어도 canonical이 부재하면 ``PID_NOT_FOUND``로 종료한다.
 
-        Codex Plan Review v2 high finding 직접 회귀.
+        1.0 single-canonical resolver cutover 회귀: legacy read-fallback이
+        제거되었으므로 stop은 legacy 잔여를 알 수 없고, 사용자가 stop을
+        호출해도 legacy는 자동 정리되지 않는다 (legacy cleanup은 별도
+        ``_remove_pid_file`` 단위 회귀에서 검증).
         """
         config_dir = tmp_path / "ante-config"
         config_dir.mkdir()
@@ -218,19 +223,56 @@ class TestSystemStop:
         canonical = config_dir / "run" / "ante.pid"
         assert not canonical.exists()
 
-        # legacy `<cwd>/db/ante.pid` 존재 + stale PID
+        # legacy `<cwd>/db/ante.pid` 존재
         legacy = cwd / "db" / "ante.pid"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("88888")
 
-        # legacy fallback이 동작하도록 read_pid_file은 monkeypatch하지 않는다
+        result = runner.invoke(cli, ["system", "stop"])
+
+        # canonical 부재 → PID_NOT_FOUND, legacy는 무시
+        assert result.exit_code == 1
+        assert "PID 파일이 없습니다" in result.output
+        assert "PID_NOT_FOUND" in result.output or str(canonical) in result.output
+        # stop은 legacy를 손대지 않는다 (read 안 했으니 정리 분기 진입 X)
+        assert legacy.exists()
+        assert not canonical.exists()
+
+    def test_stop_cleans_legacy_pid_when_canonical_stale(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """Refs #1157: canonical PID는 있지만 프로세스가 죽었을 때 ``stop``이
+        canonical + legacy 양쪽을 정리한다 (``_remove_pid_file`` cleanup 책임).
+
+        legacy unlink 책임이 stop 흐름과 통합되어 있는지 회귀 보호. 단,
+        canonical이 존재해야 read_pid_file이 PID를 반환하므로 본 테스트는
+        canonical을 직접 만들고 legacy도 함께 정리되는지 검증한다.
+        """
+        config_dir = tmp_path / "ante-config"
+        config_dir.mkdir()
+        cwd = tmp_path / "workdir"
+        cwd.mkdir()
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(config_dir))
+        monkeypatch.chdir(cwd)
+
+        # canonical에 stale PID 작성
+        canonical = config_dir / "run" / "ante.pid"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("88888")
+
+        # legacy `<cwd>/db/ante.pid`도 같이 잔존
+        legacy = cwd / "db" / "ante.pid"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("88888")
+
         with patch("ante.cli.commands.system._is_process_alive", return_value=False):
             result = runner.invoke(cli, ["system", "stop"])
 
         assert result.exit_code == 1
         assert "프로세스가 존재하지 않습니다" in result.output
-        assert not legacy.exists()
+        # _remove_pid_file이 canonical + legacy 양쪽 unlink
         assert not canonical.exists()
+        assert not legacy.exists()
 
 
 class TestPidFileManagement:
@@ -252,18 +294,15 @@ class TestPidFileManagement:
             _remove_pid_file(config)
 
     def test_read_pid_file_missing(self, tmp_path):
-        """canonical/legacy 모두 부재 시 None."""
+        """canonical 부재 시 None (legacy ``db/ante.pid``는 read 대상이 아님)."""
         from ante.config import Config
         from ante.main import read_pid_file
 
-        # legacy 경로(`db/ante.pid`)가 cwd에 없도록 격리된 디렉토리로 chdir.
-        # tmp_path 자체는 canonical(`run/ante.pid`)도 가지지 않음.
-        with patch("ante.main._LEGACY_PID_FALLBACK", tmp_path / "no-legacy"):
-            config = Config.load(config_dir=tmp_path)
-            assert read_pid_file(config) is None
+        config = Config.load(config_dir=tmp_path)
+        assert read_pid_file(config) is None
 
     def test_read_pid_file_invalid(self, tmp_path):
-        """PID 파일 내용이 숫자가 아니면 None."""
+        """canonical PID 파일 내용이 숫자가 아니면 None."""
         from ante.config import Config
         from ante.main import read_pid_file
 
@@ -271,8 +310,7 @@ class TestPidFileManagement:
         canonical = tmp_path / "run" / "ante.pid"
         canonical.parent.mkdir(parents=True, exist_ok=True)
         canonical.write_text("not-a-number")
-        with patch("ante.main._LEGACY_PID_FALLBACK", tmp_path / "no-legacy"):
-            assert read_pid_file(config) is None
+        assert read_pid_file(config) is None
 
     def test_remove_pid_file(self, tmp_path):
         """canonical PID 파일 삭제."""
@@ -285,6 +323,38 @@ class TestPidFileManagement:
         canonical.write_text("12345")
         _remove_pid_file(config)
         assert not canonical.exists()
+
+    def test_remove_pid_file_cleans_legacy_too(self, tmp_path, monkeypatch):
+        """Refs #1157: ``_remove_pid_file``은 canonical + legacy 양쪽을 unlink한다.
+
+        ``read_pid_file``이 single-canonical로 cutover된 이후에도 ``_remove_pid_file``
+        의 cleanup 책임은 transitional 환경의 legacy ``db/ante.pid`` 잔여를
+        best-effort로 제거하는 것을 보존한다 (책임 분리 회귀).
+        """
+        from ante.config import Config
+        from ante.main import _remove_pid_file
+
+        cwd = tmp_path / "workdir"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+
+        config = Config.load(config_dir=tmp_path)
+
+        # canonical 작성
+        canonical = tmp_path / "run" / "ante.pid"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("12345")
+
+        # legacy `<cwd>/db/ante.pid`도 잔존
+        legacy = cwd / "db" / "ante.pid"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("99999")
+
+        _remove_pid_file(config)
+
+        # 양쪽 모두 정리되어야 한다
+        assert not canonical.exists()
+        assert not legacy.exists()
 
     def test_remove_pid_file_missing(self, tmp_path):
         """PID 파일이 없어도 에러 없이 진행."""
