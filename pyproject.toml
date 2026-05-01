@@ -45,9 +45,11 @@ asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
 # pandas-ta 0.4.71b0 import 시점의 mode.copy_on_write deprecation
 # (pandas 3.0+에서 항상 enabled, pandas 4.0에서 제거 예정).
+# 메시지 정규식 + DeprecationWarning 결합으로 pandas 2.x 환경에서도
+# 클래스 lookup 실패 없이 동작한다 (pandas 3.x의 해당 경고는 DeprecationWarning 자손).
 # default 정책으로 출력은 유지하면서 회귀 가시성을 보전한다 (#1191).
 filterwarnings = [
-    "default::pandas.errors.Pandas4Warning",
+    "default:.*mode\\.copy_on_write.*:DeprecationWarning",
 ]
 
 [tool.ruff]
