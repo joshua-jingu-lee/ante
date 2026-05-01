@@ -42,6 +42,12 @@ timezone = "Asia/Seoul"
 [db]
 path = "{db_path}"
 
+[runtime]
+# `config_dir` 기준 상대 경로. PID/IPC socket 위치 (Refs #1157,
+# docs/specs/config/03-design-decisions.md 200-202).
+pid_path = "run/ante.pid"
+socket_path = "run/ante.sock"
+
 [web]
 host = "0.0.0.0"
 port = 3982

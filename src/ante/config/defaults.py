@@ -5,6 +5,10 @@ DEFAULTS: dict[str, object] = {
     "system.timezone": "Asia/Seoul",
     "db.path": "db/ante.db",
     "db.event_log_retention_days": 30,
+    # ── runtime PID/IPC socket ──
+    # Refs #1157, docs/specs/config/03-design-decisions.md 200-281
+    "runtime.pid_path": "run/ante.pid",
+    "runtime.socket_path": "run/ante.sock",
     "parquet.base_path": "data/",
     "parquet.compression": "snappy",
     "web.host": "0.0.0.0",

@@ -47,10 +47,20 @@ def check_disk_space(db_path: Path) -> tuple[bool, str]:
 
 
 def check_server_running() -> bool:
-    """서버가 실행 중인지 PID 파일로 확인. stale PID는 무시."""
+    """서버가 실행 중인지 PID 파일로 확인. stale PID는 무시.
+
+    Refs #1157: ``--config-dir``로 가리킨 디렉토리의 canonical PID 파일만 본다.
+    명시적으로 ``Config.load(config_dir=get_config_dir())``로 인스턴스를 만들어
+    ``read_pid_file(config)``에 전달한다 — 0-arg ``read_pid_file()``은
+    ``ANTE_CONFIG_DIR`` env/default 폴백을 보므로, 다른 ``config_dir``로 실행 중인
+    server runtime을 누락해 update를 server 실행 중에 진행하는 위험이 있다.
+    """
+    from ante.cli.main import get_config_dir
+    from ante.config import Config
     from ante.main import read_pid_file
 
-    pid = read_pid_file()
+    config = Config.load(config_dir=get_config_dir())
+    pid = read_pid_file(config)
     if pid is None:
         return False
     try:

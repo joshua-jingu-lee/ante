@@ -30,29 +30,62 @@ from ante.eventbus import EventBus, EventHistoryStore
 
 logger = logging.getLogger(__name__)
 
-PID_FILE = Path("db/ante.pid")
+# Legacy cwd-relative PID 경로. Refs #1157: 1.0 single-canonical resolver 모델로
+# cutover된 이후 새 read는 canonical만 본다. 이 상수는 transitional cleanup 용도로
+# `_remove_pid_file`이 양쪽 unlink할 때만 사용된다 (legacy 환경에서 stale loop를
+# 차단하기 위한 best-effort 정리).
+_LEGACY_PID_FALLBACK = Path("db/ante.pid")
 
 
-def _write_pid_file() -> None:
-    """PID 파일 기록."""
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PID_FILE.write_text(str(os.getpid()))
-    logger.info("PID 파일 기록: %s (pid=%d)", PID_FILE, os.getpid())
+def _write_pid_file(config: Config) -> None:
+    """PID 파일을 ``config.runtime_pid_path()`` canonical 위치에 기록한다.
+
+    Refs #1157, docs/specs/config/03-design-decisions.md 200-202.
+    Server runtime, cold-path CLI guard, IPC client가 같은 ``config_dir``을
+    쓰면 같은 PID 파일을 본다.
+    """
+    path = config.runtime_pid_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(os.getpid()))
+    logger.info("PID 파일 기록: %s (pid=%d)", path, os.getpid())
 
 
-def _remove_pid_file() -> None:
-    """PID 파일 삭제."""
+def _remove_pid_file(config: Config) -> None:
+    """canonical + legacy ``db/ante.pid`` 양쪽 PID 파일을 정리한다.
+
+    Refs #1157: ``read_pid_file``은 canonical만 보지만, legacy cwd-relative
+    ``db/ante.pid``가 과거 환경에서 남아 있을 수 있으므로 cleanup은 양쪽을
+    ``unlink(missing_ok=True)`` 처리해 transitional 환경에서 stale 잔여를
+    제거한다 (best-effort). 이 책임은 ``read_pid_file``의 single-canonical
+    정책과 분리되며, 단지 호환 cleanup만 수행한다.
+    """
+    canonical = config.runtime_pid_path()
+    for path in (canonical, _LEGACY_PID_FALLBACK):
+        try:
+            path.unlink(missing_ok=True)
+            logger.info("PID 파일 삭제: %s", path)
+        except OSError:
+            logger.warning("PID 파일 삭제 실패: %s", path, exc_info=True)
+
+
+def read_pid_file(config: Config | None = None) -> int | None:
+    """PID 파일에서 PID 읽기. canonical 부재/파싱 실패 시 None.
+
+    Refs #1157, docs/specs/config/03-design-decisions.md (1.0 단일 active runtime
+    정책). 1.0은 single-canonical resolver 모델을 따르므로 legacy cwd-relative
+    ``db/ante.pid`` read-fallback은 두지 않는다. canonical
+    ``config.runtime_pid_path()``만 본다.
+
+    ``config``이 ``None``이면 ``Config.load()``로 env/디폴트 기준 canonical을
+    산출한다. 0-arg 호환을 유지해 기존 ``patch("ante.main.read_pid_file", ...)``
+    monkeypatch 사용처(test_account_cli, test_cli_update 등)가 그대로 동작한다.
+    """
+    if config is None:
+        config = Config.load()
+
+    canonical = config.runtime_pid_path()
     try:
-        PID_FILE.unlink(missing_ok=True)
-        logger.info("PID 파일 삭제: %s", PID_FILE)
-    except OSError:
-        logger.warning("PID 파일 삭제 실패: %s", PID_FILE, exc_info=True)
-
-
-def read_pid_file() -> int | None:
-    """PID 파일에서 PID 읽기. 파일이 없거나 파싱 실패 시 None."""
-    try:
-        return int(PID_FILE.read_text().strip())
+        return int(canonical.read_text().strip())
     except (FileNotFoundError, ValueError):
         return None
 
@@ -109,8 +142,9 @@ class Services:
 
 async def _init_core(s: Services) -> None:
     """Config, Database, EventBus, DynamicConfig 초기화."""
-    # Config
-    s.config = Config.load()
+    # Config — `main()`이 PID 기록 직전에 미리 로드해 둘 수 있다 (Refs #1157).
+    if s.config is None:
+        s.config = Config.load()
     s.config.validate()
 
     from ante.core.log import setup_logging
@@ -1250,8 +1284,11 @@ async def _init_ipc(s: Services) -> None:
     command_registry = CommandRegistry()
     register_all_handlers(command_registry)
 
-    db_path = s.config.get("db.path", "db/ante.db")
-    socket_path = str(Path(db_path).parent / "ante.sock")
+    # Refs #1157: socket 경로는 `runtime.socket_path` resolver로 통일한다.
+    # default `<config_dir>/run/ante.sock` (또는 `[runtime] socket_path` override).
+    # cold-path CLI guard / IPCClient가 같은 resolver를 쓰므로 같은 socket을 본다.
+    socket_path = str(s.config.runtime_socket_path())
+    Path(socket_path).parent.mkdir(parents=True, exist_ok=True)
     s.ipc_server = IPCServer(socket_path, service_registry, command_registry)
     await s.ipc_server.start()
     logger.info("IPC 서버 초기화 완료: %s", socket_path)
@@ -1473,7 +1510,11 @@ async def main() -> None:
     종료 순서: 역순 (상위 소비자부터 정리)
     """
     s = Services()
-    _write_pid_file()
+    # Refs #1157: PID 기록 전에 Config를 미리 로드해 canonical
+    # `<config_dir>/run/ante.pid` 위치에 기록한다. `_init_core`는 동일
+    # 인스턴스를 그대로 재사용한다.
+    s.config = Config.load()
+    _write_pid_file(s.config)
 
     try:
         await _init_core(s)
@@ -1502,7 +1543,7 @@ async def main() -> None:
         await _init_web(s)
         await _run(s)
     finally:
-        _remove_pid_file()
+        _remove_pid_file(s.config)
 
 
 if __name__ == "__main__":
