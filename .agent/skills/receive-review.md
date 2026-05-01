@@ -1,21 +1,21 @@
 # 리뷰 수용 스킬
 
-> branch review나 PR approval에서 finding을 받았을 때, 곧바로 코드를 고치지 않고 먼저 사실과 영향 범위를 정리하는 스킬이다.
+> Codex 브랜치 리뷰나 사람/오케스트레이터의 수동 리뷰에서 finding을 받았을 때, 곧바로 코드를 고치지 않고 먼저 사실과 영향 범위를 정리하는 스킬이다.
 
 ## 언제 사용하나
 
 - 내부 `/codex:review` 브랜치 리뷰 실패 직후
-- `claude-pr-approve` 또는 `codex-pr-approve`가 `content` FAIL을 반환했을 때
-- 자동 재수정 전에 finding을 이해하고 수정 순서를 다시 잡아야 할 때
+- PR 후 사람/오케스트레이터가 수동으로 다시 호출한 브랜치 리뷰가 finding을 남겼을 때
+- 수정 전에 finding을 이해하고 수정 순서를 다시 잡아야 할 때
 
-`quota`, `script_error`, `auth_error`, `infra_error`는 이 스킬의 대상이 아니다. 그런 경우는 구현이 아니라 인프라 복구가 먼저다.
+리뷰 워커 자체의 인프라 오류(권한 만료, CLI 실행 실패 등)는 이 스킬의 대상이 아니다. 그런 경우는 구현이 아니라 인프라 복구가 먼저다.
 
 ## 기본 절차
 
 ### 1. 실패 유형을 먼저 분류한다
 
-- `content`: 실제 blocking finding
-- `quota` / `script_error` / `auth_error` / `infra_error`: 코드 수정 금지, 워커 복구 우선
+- `content`: 실제 blocking finding (코드/스펙/테스트/계약 문제)
+- 그 외 (CLI/네트워크/인증/quota): 코드 수정 금지, 인프라 복구 우선
 
 `content`가 아니면 구현 루프를 시작하지 않는다.
 
