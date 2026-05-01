@@ -48,13 +48,25 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     PID는 alive지만 socket이 부재하면 stale PID로 보고 cold-path 진행을
     허용한다(다른 프로세스가 해당 PID를 차지한 상태일 수 있다).
 
+    Refs #1157: ``--config-dir``로 가리킨 디렉토리의 canonical PID/socket만
+    본다. 명시적으로 ``Config.load(config_dir=get_config_dir())``로 인스턴스를
+    만들어 ``read_pid_file``과 ``get_socket_path`` 양쪽에 같은 ``config_dir``을
+    전파한다 — 0-arg ``read_pid_file()``은 ``ANTE_CONFIG_DIR`` env/default 폴백을
+    보므로, 다른 ``config_dir``로 실행 중인 server runtime을 cold-path가 누락해
+    split-brain 회귀(active server 중에 cold-path mutation 허용)를 일으킬 수 있다.
+
     monkeypatch 호환을 위해 ``ante.main.read_pid_file``과
     ``ante.cli.commands.ipc_helpers.get_socket_path``는 함수 내부에서
     local import한다.
     """
+    from ante.cli.main import get_config_dir
+    from ante.config import Config
     from ante.main import read_pid_file
 
-    pid = read_pid_file()
+    config_dir = get_config_dir()
+    config = Config.load(config_dir=config_dir)
+
+    pid = read_pid_file(config)
     if pid is None:
         return  # PID 파일 부재 → active runtime 없음
 
@@ -66,7 +78,7 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     from ante.cli.commands.ipc_helpers import get_socket_path
 
     try:
-        socket_path = get_socket_path()
+        socket_path = get_socket_path(config_dir=config_dir)
     except Exception:
         # socket 경로 해석 실패 시는 차단 측으로 판정하지 않는다
         # (config 부재 등). 그러나 PID alive 단독으로는 단정할 수 없으므로
