@@ -252,6 +252,88 @@ def test_account_cold_path_guard_uses_runtime_resolver_under_chdir(
     assert exc_info.value.code == 1
 
 
+# ── #1160: startup booting marker cold-path guard ────────────────
+
+
+def test_account_cold_path_guard_blocks_during_booting_with_matching_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PID alive + socket absent여도 matching marker가 있으면 starting으로 차단."""
+    from ante.cli.commands.account import _assert_no_active_runtime
+    from ante.cli.formatter import OutputFormatter
+    from ante.main import _write_pid_file, _write_starting_marker
+
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
+    config = Config.load(config_dir=tmp_path)
+    _write_starting_marker(config)
+    _write_pid_file(config)
+
+    assert not config.runtime_socket_path().exists()
+
+    fmt = OutputFormatter(fmt="text")
+    with pytest.raises(SystemExit) as exc_info:
+        _assert_no_active_runtime(fmt)
+
+    assert exc_info.value.code == 1
+
+
+def test_account_cold_path_guard_passes_when_marker_has_different_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """다른 PID가 적힌 marker는 stale/recycled marker로 보고 통과한다."""
+    from ante.cli.commands.account import _assert_no_active_runtime
+    from ante.cli.formatter import OutputFormatter
+    from ante.main import _starting_marker_path, _write_pid_file
+
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
+    config = Config.load(config_dir=tmp_path)
+    _write_pid_file(config)
+    marker = _starting_marker_path(config)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(str(os.getpid() + 1))
+
+    assert not config.runtime_socket_path().exists()
+
+    _assert_no_active_runtime(OutputFormatter(fmt="text"))
+
+
+def test_account_cold_path_guard_passes_when_neither_socket_nor_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PID alive지만 socket/marker가 모두 없으면 기존 stale 판정을 유지한다."""
+    from ante.cli.commands.account import _assert_no_active_runtime
+    from ante.cli.formatter import OutputFormatter
+    from ante.main import _write_pid_file
+
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
+    config = Config.load(config_dir=tmp_path)
+    _write_pid_file(config)
+
+    assert not config.runtime_socket_path().exists()
+
+    _assert_no_active_runtime(OutputFormatter(fmt="text"))
+
+
+def test_account_cold_path_guard_passes_when_marker_corrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """손상된 marker는 stale marker로 보고 차단하지 않는다."""
+    from ante.cli.commands.account import _assert_no_active_runtime
+    from ante.cli.formatter import OutputFormatter
+    from ante.main import _starting_marker_path, _write_pid_file
+
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
+    config = Config.load(config_dir=tmp_path)
+    _write_pid_file(config)
+    marker = _starting_marker_path(config)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("not-a-pid")
+
+    assert not config.runtime_socket_path().exists()
+
+    _assert_no_active_runtime(OutputFormatter(fmt="text"))
+
+
 # ── Codex attempt 1 P1 회귀: --config-dir 경로 PID 격리 ─────────────
 #
 # `read_pid_file()` 0-arg 분기는 `Config.load()` → `resolve_config_dir(None)` →
