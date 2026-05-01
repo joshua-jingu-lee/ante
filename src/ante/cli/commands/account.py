@@ -61,7 +61,7 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     """
     from ante.cli.main import get_config_dir
     from ante.config import Config
-    from ante.main import read_pid_file
+    from ante.main import _read_starting_marker_pid, read_pid_file
 
     config_dir = get_config_dir()
     config = Config.load(config_dir=config_dir)
@@ -86,9 +86,15 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
         return
 
     if not Path(socket_path).exists():
-        return  # PID alive but socket absent → stale PID/타 프로세스 → 통과
+        # Refs #1160: boot 중에는 PID가 이미 alive지만 IPC socket이 아직 없을
+        # 수 있다. 이때 같은 PID가 기록된 starting marker가 있으면 starting도
+        # active runtime으로 보고 차단한다. marker 부재/손상/다른 PID는 stale
+        # 또는 recycled marker로 보고 기존처럼 통과한다.
+        marker_pid = _read_starting_marker_pid(config)
+        if marker_pid != pid:
+            return  # PID alive but neither socket nor matching marker → stale
 
-    # PID alive AND socket exists → active runtime 있음 → 차단.
+    # PID alive AND (socket exists OR matching starting marker) → active runtime.
     # text 출력 경로도 차단 코드를 식별할 수 있도록 메시지에 prefix를 포함한다.
     fmt.error(
         f"{_COLD_PATH_BLOCKED_CODE}: 서버가 실행 중입니다. "

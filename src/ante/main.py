@@ -50,6 +50,42 @@ def _write_pid_file(config: Config) -> None:
     logger.info("PID 파일 기록: %s (pid=%d)", path, os.getpid())
 
 
+def _starting_marker_path(config: Config) -> Path:
+    """booting marker 경로를 반환한다.
+
+    Refs #1160: PID 파일과 같은 디렉토리의 ``.starting`` 파일을 사용한다.
+    ``runtime.pid_path`` resolver에서 파생하므로 #1157의 single-canonical
+    runtime path 정책과 자동으로 정합된다.
+    """
+    return config.runtime_pid_path().parent / ".starting"
+
+
+def _write_starting_marker(config: Config) -> None:
+    """booting marker에 현재 PID를 기록한다."""
+    path = _starting_marker_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(os.getpid()))
+    logger.info("Booting marker 기록: %s (pid=%d)", path, os.getpid())
+
+
+def _read_starting_marker_pid(config: Config) -> int | None:
+    """booting marker의 PID를 반환한다. 부재/파싱 실패 시 ``None``."""
+    try:
+        return int(_starting_marker_path(config).read_text().strip())
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+
+
+def _remove_starting_marker(config: Config) -> None:
+    """booting marker를 best-effort로 제거한다."""
+    path = _starting_marker_path(config)
+    try:
+        path.unlink(missing_ok=True)
+        logger.info("Booting marker 제거: %s", path)
+    except OSError:
+        logger.warning("Booting marker 제거 실패: %s", path, exc_info=True)
+
+
 def _remove_pid_file(config: Config) -> None:
     """canonical + legacy ``db/ante.pid`` 양쪽 PID 파일을 정리한다.
 
@@ -1524,6 +1560,7 @@ async def main() -> None:
     """Main asyncio entrypoint.
 
     초기화 순서 (Account 중심):
+    0. Booting marker + PID 기록 (starting도 active runtime으로 표시)
     1. Core: Config, Database, EventBus, DynamicConfig
     2. Services: AuditLogger, MemberService, InstrumentService
     3. Account: AccountService, 테스트 계좌 자동 생성
@@ -1532,7 +1569,7 @@ async def main() -> None:
     6. Feed: DataPipeline, Backtest, Report
     7. Approval: ApprovalService
     8. Notification: Telegram(account_service 주입)
-    9. IPC: Unix 도메인 소켓 서버
+    9. IPC: Unix 도메인 소켓 서버 (성공 후 booting marker 제거)
     10. Web: FastAPI(account_service 주입)
 
     종료 순서: 역순 (상위 소비자부터 정리)
@@ -1542,9 +1579,14 @@ async def main() -> None:
     # `<config_dir>/run/ante.pid` 위치에 기록한다. `_init_core`는 동일
     # 인스턴스를 그대로 재사용한다.
     s.config = Config.load()
-    _write_pid_file(s.config)
 
     try:
+        # Refs #1160: starting 단계도 active runtime으로 판정되도록 marker를
+        # PID보다 먼저 기록한다. marker만 있고 PID가 없는 극소 구간은
+        # cold-path guard가 PID 부재로 통과하므로 mutation race를 만들지 않는다.
+        _write_starting_marker(s.config)
+        _write_pid_file(s.config)
+
         await _init_core(s)
 
         # 서버 시작 시 최신 버전 확인 (non-blocking, fire-and-forget)
@@ -1568,9 +1610,11 @@ async def main() -> None:
         await _init_approval(s)
         await _init_notification(s)
         await _init_ipc(s)
+        _remove_starting_marker(s.config)
         await _init_web(s)
         await _run(s)
     finally:
+        _remove_starting_marker(s.config)
         _remove_pid_file(s.config)
 
 
