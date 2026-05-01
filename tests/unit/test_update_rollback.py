@@ -161,8 +161,11 @@ class TestUpdateMigrationFailureRollback:
             patch("ante.update.executor.snapshot_dependencies", return_value=None),
             # `pathlib.Path.exists` 가 항상 True 를 돌려주는 시나리오에서는
             # `Config.load()` 가 실재하지 않는 system.toml 을 열려다 IOError 가
-            # 난다. update 흐름이 호출하는 get_data_path 를 직접 mocking 한다.
+            # 난다. update 흐름이 호출하는 get_data_path / get_db_path 를 직접
+            # mocking 해 Config.load() 경로를 우회한다 (#1158: get_db_path 도
+            # Config.resolve_path 를 거치므로 같은 mock 가드가 필요하다).
             patch("ante.cli.main.get_data_path", return_value="data/"),
+            patch("ante.cli.main.get_db_path", return_value="db/ante.db"),
         ]
 
     def test_migration_failure_triggers_rollback(self, runner: CliRunner) -> None:
@@ -180,6 +183,7 @@ class TestUpdateMigrationFailureRollback:
             patches[8],
             patches[9],
             patches[10],
+            patches[11],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -204,6 +208,7 @@ class TestUpdateMigrationFailureRollback:
             patches[8],
             patches[9],
             patches[10],
+            patches[11],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -226,6 +231,7 @@ class TestUpdateMigrationFailureRollback:
             patches[8],
             patches[9],
             patches[10],
+            patches[11],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 

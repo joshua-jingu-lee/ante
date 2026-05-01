@@ -139,10 +139,16 @@ class TestSnapshotInRollbackMessage:
             patch("ante.cli.commands.update.check_disk_space", return_value=(True, "")),
             # `pathlib.Path.exists`가 항상 True 를 돌려주는 테스트 시나리오에서는
             # `Config.load()` 가 존재하지도 않는 system.toml 을 열려다 IOError 가
-            # 난다. update 흐름에서 호출되는 get_data_path 를 직접 mocking 한다.
+            # 난다. update 흐름에서 호출되는 get_data_path / get_db_path 를 직접
+            # mocking 해 Config.load() 경로를 우회한다 (#1158: get_db_path 도
+            # Config.resolve_path 를 거치므로 같은 mock 가드가 필요하다).
             patch(
                 "ante.cli.main.get_data_path",
                 return_value="data/",
+            ),
+            patch(
+                "ante.cli.main.get_db_path",
+                return_value="db/ante.db",
             ),
         ]
 
@@ -161,6 +167,7 @@ class TestSnapshotInRollbackMessage:
             patches[8],
             patches[9],
             patches[10],
+            patches[11],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
@@ -183,6 +190,7 @@ class TestSnapshotInRollbackMessage:
             patches[8],
             patches[9],
             patches[10],
+            patches[11],
         ):
             result = runner.invoke(cli, ["update", "-y"])
 
