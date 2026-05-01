@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from ante.bot.bot import Bot
 from ante.bot.config import BotConfig, BotStatus
-from ante.bot.exceptions import BotError
+from ante.bot.exceptions import BotError, BotNotFoundError
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -574,7 +574,7 @@ class BotManager:
         """봇 조회. 없으면 예외."""
         bot = self._bots.get(bot_id)
         if bot is None:
-            raise BotError(f"Bot not found: {bot_id}")
+            raise BotNotFoundError(bot_id)
         return bot
 
     # ── 전략별 룰 관리 ─────────────────────────────────

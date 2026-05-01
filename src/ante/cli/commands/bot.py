@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 import click
 
+from ante.cli.cold_path import is_active_runtime
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -49,6 +51,27 @@ async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
         await al.log(**kwargs)
     except Exception as e:
         logger.warning("감사 로그 기록 실패: %s", e)
+
+
+async def _run_bot_remove_cold_path(bot_id: str) -> dict:
+    """서버 정지 상태에서 BotManager 없이 봇을 soft-delete한다."""
+    from ante.bot.cold_path import cold_path_remove_bot
+    from ante.cli.main import get_config_dir, get_db_path
+    from ante.config import Config
+    from ante.core.database import Database
+
+    db = Database(get_db_path())
+    await db.connect()
+    try:
+        config = Config.load(config_dir=get_config_dir())
+        strategies_dir = Path(str(config.get("strategy.dir", "strategies")))
+        return await cold_path_remove_bot(
+            db,
+            bot_id,
+            strategies_dir=strategies_dir,
+        )
+    finally:
+        await db.close()
 
 
 @bot.command("list")
@@ -256,27 +279,35 @@ def bot_create(
 @require_auth
 @require_scope("bot:admin")
 def bot_remove(ctx: click.Context, bot_id: str) -> None:
-    """봇 삭제."""
+    """봇 삭제.
+
+    서버가 실행 중이면 기존 IPC 경로를 사용하고, 서버가 정지되어 있으면
+    cold-path service가 persisted DB/signal key/snapshot/treasury state를 정리한다.
+    """
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_remove() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        return await ipc_send("bot.remove", {"bot_id": bot_id}, actor=actor)
+        if is_active_runtime():
+            return await ipc_send("bot.remove", {"bot_id": bot_id}, actor=actor)
+        return await _run_bot_remove_cold_path(bot_id)
 
     try:
         result = _run(_run_remove())
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e))
-        return
+        fmt.error(str(e), code=getattr(e, "code", ""))
+        raise SystemExit(1) from e
 
     if result.get("removed"):
-        fmt.success(f"봇 삭제 완료: {bot_id}")
+        suffix = "(cold-path)" if result.get("cold_path") else ""
+        fmt.success(f"봇 삭제 완료{suffix}: {bot_id}", result)
     else:
         fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        raise SystemExit(1)
 
 
 @bot.command("signal-key")

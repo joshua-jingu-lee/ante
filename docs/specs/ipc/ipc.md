@@ -90,12 +90,15 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
 | `ante bot start` | `bot.start` | `BotManager.start_bot()` | asyncio task 생성 + `BotStartedEvent` 발행 |
 | `ante bot stop` | `bot.stop` | `BotManager.stop_bot()` | 실행 task 취소 + `BotStoppedEvent` 발행 |
-| `ante bot remove` | `bot.remove` | `BotManager.remove_bot()` | 실행 중 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요 |
+| `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
 | `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
 
 서버 실행 중 `ante bot list/info/status/positions/signal-key`는 `bot.query` 계열 IPC로
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
-snapshot 조회만 허용하며, 직접 DB 수정으로 봇 상태를 변경하지 않는다.
+snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
+상태에서 `signal_keys`, 전략 스냅샷, Treasury budget, `bots.status='deleted'`만 직접
+정리할 수 있다. `handle_positions=liquidate`는 IPC/Web runtime 경로에서만 의미가 있고,
+cold-path 삭제는 항상 keep 의미다.
 
 #### Treasury
 
