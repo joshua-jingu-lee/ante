@@ -187,6 +187,51 @@ class TestSystemStop:
             assert data["status"] == "ok"
             assert data["pid"] == 12345
 
+    def test_stop_pid_not_found_message_includes_resolver_path(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """Refs #1157: PID 부재 메시지에 ``<config_dir>/run/ante.pid``가 포함된다."""
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
+
+        with patch("ante.main.read_pid_file", return_value=None):
+            result = runner.invoke(cli, ["system", "stop"])
+
+        assert result.exit_code == 1
+        # text 모드 메시지에 resolver-normalized 절대 경로가 포함돼야 한다.
+        expected = str(tmp_path / "run" / "ante.pid")
+        assert expected in result.output
+
+    def test_stop_cleans_legacy_pid_when_stale(self, runner, tmp_path, monkeypatch):
+        """Refs #1157: canonical 부재 + legacy ``db/ante.pid``만 stale인 환경에서
+        ``stop``이 legacy까지 정리해 다음 호출이 무한 루프하지 않아야 한다.
+
+        Codex Plan Review v2 high finding 직접 회귀.
+        """
+        config_dir = tmp_path / "ante-config"
+        config_dir.mkdir()
+        cwd = tmp_path / "workdir"
+        cwd.mkdir()
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(config_dir))
+        monkeypatch.chdir(cwd)
+
+        # canonical 부재 — `<config_dir>/run/ante.pid` 만들지 않는다
+        canonical = config_dir / "run" / "ante.pid"
+        assert not canonical.exists()
+
+        # legacy `<cwd>/db/ante.pid` 존재 + stale PID
+        legacy = cwd / "db" / "ante.pid"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("88888")
+
+        # legacy fallback이 동작하도록 read_pid_file은 monkeypatch하지 않는다
+        with patch("ante.cli.commands.system._is_process_alive", return_value=False):
+            result = runner.invoke(cli, ["system", "stop"])
+
+        assert result.exit_code == 1
+        assert "프로세스가 존재하지 않습니다" in result.output
+        assert not legacy.exists()
+        assert not canonical.exists()
+
 
 class TestPidFileManagement:
     """Refs #1157: PID helpers는 ``Config`` 인자를 받아 ``runtime_pid_path()``로
