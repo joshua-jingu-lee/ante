@@ -87,21 +87,31 @@ def start(ctx: click.Context, config_dir: str | None) -> None:
 @require_scope("system:admin")
 def stop(ctx: click.Context) -> None:
     """시스템 정상 종료 (SIGTERM)."""
-    from ante.main import PID_FILE, read_pid_file
+    from ante.config import Config
+    from ante.main import _remove_pid_file, read_pid_file
 
     fmt = get_formatter(ctx)
 
-    pid = read_pid_file()
+    # Refs #1157: PID 경로는 `runtime.pid_path` resolver로 결정한다.
+    # 같은 `config_dir`을 쓰는 server runtime/IPC client/cold-path guard와
+    # 동일한 canonical 위치(`<config_dir>/run/ante.pid`)를 본다.
+    config_dir = ctx.obj.get("config_dir") if ctx.obj else None
+    config = Config.load(config_dir=config_dir)
+    pid_path = config.runtime_pid_path()
+
+    pid = read_pid_file(config)
     if pid is None:
         fmt.error(
-            f"PID 파일이 없습니다 ({PID_FILE})",
+            f"PID 파일이 없습니다 ({pid_path})",
             code="PID_NOT_FOUND",
         )
         raise SystemExit(1)
 
     if not _is_process_alive(pid):
-        # 프로세스가 없으면 stale PID 파일 정리
-        PID_FILE.unlink(missing_ok=True)
+        # 프로세스가 없으면 canonical + legacy `db/ante.pid` 양쪽 stale PID 정리
+        # (Refs #1157, Codex Plan Review v2 high finding 직접 대응 — legacy만
+        # 남은 환경에서 stale loop 차단).
+        _remove_pid_file(config)
         fmt.error(
             f"프로세스가 존재하지 않습니다 (pid={pid}). PID 파일을 정리했습니다.",
             code="PROCESS_NOT_FOUND",

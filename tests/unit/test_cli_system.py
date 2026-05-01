@@ -145,20 +145,23 @@ class TestSystemStop:
             data = json.loads(result.output)
             assert data["code"] == "PID_NOT_FOUND"
 
-    def test_stop_stale_pid(self, runner, tmp_path):
-        """프로세스가 없으면 stale PID 정리 후 에러."""
-        pid_file = tmp_path / "ante.pid"
-        pid_file.write_text("99999")
+    def test_stop_stale_pid(self, runner, tmp_path, monkeypatch):
+        """프로세스가 없으면 canonical PID 정리 후 에러 (Refs #1157)."""
+        # Refs #1157: ``runtime.pid_path`` resolver가 결정한 canonical 위치에
+        # 기록된 stale PID를 stop이 정리해야 한다.
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(tmp_path))
+        canonical = tmp_path / "run" / "ante.pid"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("99999")
 
         with (
             patch("ante.main.read_pid_file", return_value=99999),
             patch("ante.cli.commands.system._is_process_alive", return_value=False),
-            patch("ante.main.PID_FILE", pid_file),
         ):
             result = runner.invoke(cli, ["system", "stop"])
             assert result.exit_code == 1
             assert "프로세스가 존재하지 않습니다" in result.output
-            assert not pid_file.exists()
+            assert not canonical.exists()
 
     def test_stop_sends_sigterm(self, runner):
         """정상 프로세스에 SIGTERM 전송."""
@@ -186,49 +189,65 @@ class TestSystemStop:
 
 
 class TestPidFileManagement:
-    def test_write_and_read_pid_file(self, tmp_path):
-        """PID 파일 기록 및 읽기."""
-        from ante.main import _write_pid_file, read_pid_file
+    """Refs #1157: PID helpers는 ``Config`` 인자를 받아 ``runtime_pid_path()``로
+    canonical 경로를 산출한다. ``PID_FILE`` 모듈 상수는 제거되었다.
+    """
 
-        pid_file = tmp_path / "ante.pid"
-        with patch("ante.main.PID_FILE", pid_file):
-            _write_pid_file()
-            result = read_pid_file()
-            assert result == os.getpid()
+    def test_write_and_read_pid_file(self, tmp_path):
+        """PID 파일 기록 및 읽기 (canonical resolver 기준)."""
+        from ante.config import Config
+        from ante.main import _remove_pid_file, _write_pid_file, read_pid_file
+
+        config = Config.load(config_dir=tmp_path)
+        try:
+            _write_pid_file(config)
+            assert read_pid_file(config) == os.getpid()
+            assert (tmp_path / "run" / "ante.pid").exists()
+        finally:
+            _remove_pid_file(config)
 
     def test_read_pid_file_missing(self, tmp_path):
-        """PID 파일이 없으면 None."""
+        """canonical/legacy 모두 부재 시 None."""
+        from ante.config import Config
         from ante.main import read_pid_file
 
-        with patch("ante.main.PID_FILE", tmp_path / "nonexistent.pid"):
-            assert read_pid_file() is None
+        # legacy 경로(`db/ante.pid`)가 cwd에 없도록 격리된 디렉토리로 chdir.
+        # tmp_path 자체는 canonical(`run/ante.pid`)도 가지지 않음.
+        with patch("ante.main._LEGACY_PID_FALLBACK", tmp_path / "no-legacy"):
+            config = Config.load(config_dir=tmp_path)
+            assert read_pid_file(config) is None
 
     def test_read_pid_file_invalid(self, tmp_path):
         """PID 파일 내용이 숫자가 아니면 None."""
+        from ante.config import Config
         from ante.main import read_pid_file
 
-        pid_file = tmp_path / "ante.pid"
-        pid_file.write_text("not-a-number")
-        with patch("ante.main.PID_FILE", pid_file):
-            assert read_pid_file() is None
+        config = Config.load(config_dir=tmp_path)
+        canonical = tmp_path / "run" / "ante.pid"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("not-a-number")
+        with patch("ante.main._LEGACY_PID_FALLBACK", tmp_path / "no-legacy"):
+            assert read_pid_file(config) is None
 
     def test_remove_pid_file(self, tmp_path):
-        """PID 파일 삭제."""
+        """canonical PID 파일 삭제."""
+        from ante.config import Config
         from ante.main import _remove_pid_file
 
-        pid_file = tmp_path / "ante.pid"
-        pid_file.write_text("12345")
-        with patch("ante.main.PID_FILE", pid_file):
-            _remove_pid_file()
-            assert not pid_file.exists()
+        config = Config.load(config_dir=tmp_path)
+        canonical = tmp_path / "run" / "ante.pid"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        canonical.write_text("12345")
+        _remove_pid_file(config)
+        assert not canonical.exists()
 
     def test_remove_pid_file_missing(self, tmp_path):
         """PID 파일이 없어도 에러 없이 진행."""
+        from ante.config import Config
         from ante.main import _remove_pid_file
 
-        pid_file = tmp_path / "nonexistent.pid"
-        with patch("ante.main.PID_FILE", pid_file):
-            _remove_pid_file()  # Should not raise
+        config = Config.load(config_dir=tmp_path)
+        _remove_pid_file(config)  # Should not raise
 
 
 class TestIsProcessAlive:
