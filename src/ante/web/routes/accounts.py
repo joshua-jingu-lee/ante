@@ -21,7 +21,6 @@ from ante.web.schemas import (
     AccountListResponse,
     AccountSuspendRequest,
     AccountUpdateRequest,
-    ErrorResponse,
     RuleListResponse,
     RuleUpdateRequest,
     RuleUpdateResponse,
@@ -283,14 +282,17 @@ async def list_accounts(
 @router.post(
     "",
     status_code=409,
-    response_model=ErrorResponse,
     responses={
         409: {
-            "model": ErrorResponse,
             "description": (
                 "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
                 "— 런타임 계좌 생성 차단"
             ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
     openapi_extra={
@@ -304,7 +306,7 @@ async def list_accounts(
         },
     },
 )
-async def create_account(request: Request) -> ErrorResponse:
+async def create_account(request: Request) -> None:
     """계좌 생성.
 
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
@@ -312,9 +314,10 @@ async def create_account(request: Request) -> ErrorResponse:
     수행한다.
 
     의존성/Pydantic body schema/audit logger를 모두 시그니처에서 제외해
-    핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). 또한 OpenAPI에는
-    success contract(200/201/204)가 노출되지 않으며, 응답 모델은
-    ``ErrorResponse``로 고정된다(invariant I2/I3).
+    핸들러 진입 즉시 409가 반환되도록 한다(invariant I1). OpenAPI에는
+    success contract(200/201/204)가 노출되지 않으며, 409 응답은 명시
+    ``responses[409]`` content map의 ``application/problem+json``으로
+    ``ErrorResponse``를 노출한다(invariant I2/I3, #1164).
 
     이 경로의 service-layer 회귀 보호는 ``tests/unit/test_account.py``가
     담당한다.
@@ -354,31 +357,58 @@ async def get_account(
     response_model=AccountDetailResponse,
     responses={
         400: {
-            "model": ErrorResponse,
             "description": ("수정할 필드가 없거나 service-layer가 거부한 비구조 필드"),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
-        404: {"model": ErrorResponse, "description": "계좌를 찾을 수 없음"},
+        404: {
+            "description": "계좌를 찾을 수 없음",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         409: {
-            "model": ErrorResponse,
             "description": (
                 "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
                 "(런타임 구조 변경 차단) 또는 삭제된 계좌 수정 시도"
             ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         415: {
-            "model": ErrorResponse,
             "description": "Content-Type이 application/json이 아님",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         422: {
-            "model": ErrorResponse,
             "description": (
                 "비구조(mutable) 필드 type 검증 실패 또는 unknown 키. "
                 "structural 필드 키는 422가 아닌 409로 차단된다."
             ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         503: {
-            "model": ErrorResponse,
             "description": "Account service not available 또는 broker 재연결 실패",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
     openapi_extra={
@@ -662,18 +692,21 @@ async def activate_account(
 @router.delete(
     "/{account_id}",
     status_code=409,
-    response_model=ErrorResponse,
     responses={
         409: {
-            "model": ErrorResponse,
             "description": (
                 "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER "
                 "— 런타임 계좌 삭제 차단"
             ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
-async def delete_account(account_id: str, request: Request) -> ErrorResponse:
+async def delete_account(account_id: str, request: Request) -> None:
     """계좌 소프트 딜리트.
 
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
@@ -682,8 +715,9 @@ async def delete_account(account_id: str, request: Request) -> ErrorResponse:
 
     의존성/audit logger를 시그니처에서 제외해 핸들러 진입 즉시 409가
     반환되도록 한다(invariant I1). OpenAPI에는 success contract(200/201/
-    204)가 노출되지 않으며, 응답 모델은 ``ErrorResponse``로 고정된다
-    (invariant I2/I3). service-layer 회귀 보호는
+    204)가 노출되지 않으며, 409 응답은 명시 ``responses[409]`` content
+    map의 ``application/problem+json``으로 ``ErrorResponse``를 노출한다
+    (invariant I2/I3, #1164). service-layer 회귀 보호는
     ``tests/unit/test_account.py``의 ``test_delete_account``,
     ``test_delete_already_deleted_account_raises``가 담당한다.
     """

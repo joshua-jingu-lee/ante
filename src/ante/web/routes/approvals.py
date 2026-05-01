@@ -18,7 +18,6 @@ from ante.web.schemas import (
     ApprovalDetailResponse,
     ApprovalListResponse,
     ApprovalUpdateResponse,
-    ErrorResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,8 +37,12 @@ class ApprovalStatusUpdate(BaseModel):
     response_model=ApprovalListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Approval service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -67,10 +70,21 @@ async def list_approvals(
     "/{approval_id}",
     response_model=ApprovalDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Approval not found"},
+        404: {
+            "description": "Approval not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Approval service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -101,11 +115,29 @@ async def get_approval(
     "/{approval_id}/status",
     response_model=ApprovalUpdateResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Invalid status value"},
-        404: {"model": ErrorResponse, "description": "Approval not found"},
+        400: {
+            "description": "Invalid status value",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Approval not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Approval service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

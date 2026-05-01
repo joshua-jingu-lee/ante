@@ -15,7 +15,6 @@ from ante.web.schemas import (
     DataSchemaResponse,
     DatasetDetailResponse,
     DatasetListResponse,
-    ErrorResponse,
     FeedStatusResponse,
     StorageSummaryResponse,
 )
@@ -254,13 +253,28 @@ async def get_storage_summary(
     status_code=204,
     responses={
         400: {
-            "model": ErrorResponse,
             "description": "Invalid dataset_id format",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
-        404: {"model": ErrorResponse, "description": "Dataset not found"},
+        404: {
+            "description": "Dataset not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Data store not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

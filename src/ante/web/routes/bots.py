@@ -22,7 +22,6 @@ from ante.web.schemas import (
     BotDetailResponse,
     BotListResponse,
     BotUpdateRequest,
-    ErrorResponse,
 )
 
 router = APIRouter()
@@ -51,8 +50,12 @@ class BotCreateRequest(BaseModel):
     response_model=BotListResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -108,19 +111,45 @@ async def list_bots(
     status_code=201,
     response_model=BotDetailResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Strategy loading failed"},
-        404: {"model": ErrorResponse, "description": "Strategy not found"},
+        400: {
+            "description": "Strategy loading failed",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        404: {
+            "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         409: {
-            "model": ErrorResponse,
             "description": "Bot already exists or conflict",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         422: {
-            "model": ErrorResponse,
             "description": "strategy_id/strategy_name both missing or budget error",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager or strategy registry not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -235,10 +264,21 @@ async def create_bot(
     "/{bot_id}",
     response_model=BotDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Bot not found"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -304,15 +344,37 @@ async def get_bot(
     "/{bot_id}/start",
     response_model=BotDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Bot not found"},
-        409: {"model": ErrorResponse, "description": "Bot state conflict"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Bot state conflict",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         422: {
-            "model": ErrorResponse,
             "description": "Account credentials not configured",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -358,11 +420,29 @@ async def start_bot(
     "/{bot_id}/stop",
     response_model=BotDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Bot not found"},
-        409: {"model": ErrorResponse, "description": "Bot state conflict"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Bot state conflict",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -399,15 +479,37 @@ async def stop_bot(
     "/{bot_id}",
     status_code=204,
     responses={
-        404: {"model": ErrorResponse, "description": "Bot not found"},
-        409: {"model": ErrorResponse, "description": "Bot state conflict"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Bot state conflict",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         422: {
-            "model": ErrorResponse,
             "description": "Invalid handle_positions value",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -456,18 +558,37 @@ async def delete_bot(
     "/{bot_id}",
     response_model=BotDetailResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Bot not found"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         409: {
-            "model": ErrorResponse,
             "description": "Bot state conflict (not stopped)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         422: {
-            "model": ErrorResponse,
             "description": "Budget update failed (e.g. insufficient funds)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
         503: {
-            "model": ErrorResponse,
             "description": "Bot manager not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -527,10 +648,21 @@ async def update_bot(
 @router.get(
     "/{bot_id}/logs",
     responses={
-        404: {"model": ErrorResponse, "description": "Bot not found"},
+        404: {
+            "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
-            "model": ErrorResponse,
             "description": "Event history store not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

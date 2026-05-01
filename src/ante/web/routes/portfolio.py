@@ -13,7 +13,6 @@ from ante.web.deps import (
     get_treasury_manager_optional,
 )
 from ante.web.schemas import (
-    ErrorResponse,
     PortfolioHistoryResponse,
     PortfolioValueResponse,
 )
@@ -45,7 +44,14 @@ def _resolve_treasury(
     response_model=PortfolioValueResponse,
     response_model_exclude_none=True,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def portfolio_value(
@@ -83,7 +89,14 @@ async def portfolio_value(
     "/history",
     response_model=PortfolioHistoryResponse,
     responses={
-        503: {"model": ErrorResponse, "description": "Treasury not available"},
+        503: {
+            "description": "Treasury not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
     },
 )
 async def portfolio_history(

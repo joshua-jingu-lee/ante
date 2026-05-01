@@ -16,7 +16,6 @@ from ante.web.deps import (
     get_db_optional,
 )
 from ante.web.schemas import (
-    ErrorResponse,
     HealthResponse,
     KillSwitchResponse,
     StatusResponse,
@@ -134,8 +133,12 @@ async def _check_broker(account_service: Any | None) -> bool:
     response_model=KillSwitchResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Account service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )
@@ -171,8 +174,12 @@ async def halt(
     response_model=KillSwitchResponse,
     responses={
         503: {
-            "model": ErrorResponse,
             "description": "Account service not available",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
         },
     },
 )

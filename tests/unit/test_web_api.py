@@ -865,7 +865,14 @@ class TestResponseModelCoverage:
     }
 
     def test_all_endpoints_have_response_model(self, app):
-        """204를 제외한 모든 API 엔드포인트에 response_model이 설정되어야 한다."""
+        """204를 제외한 모든 API 엔드포인트에 response_model이 설정되어야 한다.
+
+        예외:
+        - ``status_code=204`` 라우트 (body 자체가 없음).
+        - ``status_code=409`` cold-path 라우트 (#1164): handler가 항상
+          ``HTTPException(409)``을 raise하므로 ``response_model`` 검증
+          효과가 없으며, 명시 ``responses[409]`` content map이 단일 SSOT.
+        """
         missing = []
         for route in app.routes:
             if not hasattr(route, "methods"):
@@ -878,6 +885,10 @@ class TestResponseModelCoverage:
             # 204 응답(삭제)은 response_model 불필요
             status_code = getattr(route, "status_code", None) or 200
             if status_code == 204:
+                continue
+            # cold-path 라우트(status_code=409로 항상 차단)는 response_model
+            # 이 의미가 없다. 명시 responses[409] content map이 SSOT.
+            if status_code == 409:
                 continue
             response_model = getattr(route, "response_model", None)
             if response_model is None:
@@ -1012,16 +1023,16 @@ class TestResponseModelCoverage:
         """cold-path 라우트의 명시 4xx/5xx 응답이 ErrorResponse를 노출.
 
         PUT/DELETE/POST 라우트가 ``responses=`` 데코레이터에 명시 등록한
-        4xx/5xx 응답은 ``model: ErrorResponse``를 일관 등록해야 OpenAPI/
-        codegen에서 bodyless 4xx/5xx로 표현되지 않는다. ``application/json``
-        content가 있고 schema가 ``ErrorResponse``를 가리키는지 확인한다.
+        4xx/5xx 응답은 ``application/problem+json`` content map에서
+        ``ErrorResponse``를 ``$ref``로 가리켜야 OpenAPI/codegen에서
+        bodyless 4xx/5xx로 표현되지 않는다 (#1164 정렬 후).
 
         FastAPI가 자동 생성하는 path/dependency 검증용 422 응답은
         ``HTTPValidationError`` 표준 schema를 사용하지만, 본 PUT 라우트는
         attempt 9에서 mutable 필드 type 검증 실패에 대한 422 응답을 명시
-        등록(``model: ErrorResponse``)했으므로 본 테스트의 검증 대상에 포함
-        한다. body requestBody의 schema accuracy(mutable 모델 직접 노출)는
-        후속 이슈 #1143에서 다룬다.
+        등록했으므로 본 테스트의 검증 대상에 포함한다. body requestBody의
+        schema accuracy(mutable 모델 직접 노출)는 후속 이슈 #1143에서
+        다룬다.
         """
         resp = client.get("/openapi.json")
         assert resp.status_code == 200
@@ -1057,17 +1068,15 @@ class TestResponseModelCoverage:
                     missing.append(f"{method.upper()} {path} ({code}): 응답 정의 누락")
                     continue
                 content = response_spec.get("content", {})
-                json_content = content.get("application/json")
-                if json_content is None:
+                problem_json_content = content.get("application/problem+json")
+                if problem_json_content is None:
                     missing.append(
                         f"{method.upper()} {path} ({code}): "
-                        "application/json content 없음"
+                        "application/problem+json content 없음"
                     )
                     continue
-                schema = json_content.get("schema", {})
+                schema = problem_json_content.get("schema", {})
                 ref = schema.get("$ref", "")
-                # FastAPI는 model: ErrorResponse를 받으면
-                # `#/components/schemas/ErrorResponse`로 참조한다.
                 if "ErrorResponse" not in ref:
                     missing.append(
                         f"{method.upper()} {path} ({code}): "
@@ -1084,9 +1093,10 @@ class TestResponseModelCoverage:
 
         attempt 9 P1 회귀 보호: 라우트는 비구조 필드 type 검증 실패를
         ``HTTPException(status_code=422)``로 명시 변환한다. ``responses[422]``
-        에 ``model: ErrorResponse``가 등록되어 OpenAPI/codegen에서 422가
-        bodyless가 아닌 ``ErrorResponse`` 본문을 갖도록 한다 — 클라이언트는
-        type-safe하게 422 응답을 다룰 수 있다.
+        의 ``application/problem+json`` content map이 ``ErrorResponse``를
+        ``$ref``로 가리켜 OpenAPI/codegen에서 422가 bodyless가 아닌
+        ``ErrorResponse`` 본문을 갖도록 한다 — 클라이언트는 type-safe하게
+        422 응답을 다룰 수 있다 (#1164 정렬 후).
 
         body requestBody schema accuracy(mutable 모델 직접 노출)는
         후속 이슈 #1143에서 다룬다.
@@ -1102,9 +1112,13 @@ class TestResponseModelCoverage:
         responses = spec.get("responses", {})
         response_422 = responses.get("422")
         assert response_422 is not None, "PUT 422 응답이 명시 등록되지 않음"
-        json_content = response_422.get("content", {}).get("application/json")
-        assert json_content is not None, "PUT 422에 application/json content 없음"
-        ref = json_content.get("schema", {}).get("$ref", "")
+        problem_json_content = response_422.get("content", {}).get(
+            "application/problem+json"
+        )
+        assert problem_json_content is not None, (
+            "PUT 422에 application/problem+json content 없음"
+        )
+        ref = problem_json_content.get("schema", {}).get("$ref", "")
         assert "ErrorResponse" in ref, (
             f"PUT 422가 ErrorResponse를 가리키지 않음 (schema ref={ref!r})"
         )
@@ -1481,7 +1495,11 @@ class TestPutAccountRequestBodySchema:
         )
 
     def test_openapi_put_account_415_references_error_response(self, client):
-        """PUT 415 응답이 ErrorResponse를 가리킨다."""
+        """PUT 415 응답이 ErrorResponse를 가리킨다.
+
+        명시 415 응답은 ``application/problem+json`` content map의
+        ``$ref``로 ``ErrorResponse``를 노출한다 (#1164 정렬 후).
+        """
         resp = client.get("/openapi.json")
         assert resp.status_code == 200
         openapi = resp.json()
@@ -1493,9 +1511,13 @@ class TestPutAccountRequestBodySchema:
         responses = spec.get("responses", {})
         response_415 = responses.get("415")
         assert response_415 is not None, "PUT 415 응답이 명시 등록되지 않음"
-        json_content = response_415.get("content", {}).get("application/json")
-        assert json_content is not None, "PUT 415에 application/json content 없음"
-        ref = json_content.get("schema", {}).get("$ref", "")
+        problem_json_content = response_415.get("content", {}).get(
+            "application/problem+json"
+        )
+        assert problem_json_content is not None, (
+            "PUT 415에 application/problem+json content 없음"
+        )
+        ref = problem_json_content.get("schema", {}).get("$ref", "")
         assert "ErrorResponse" in ref, (
             f"PUT 415가 ErrorResponse를 가리키지 않음 (schema ref={ref!r})"
         )
