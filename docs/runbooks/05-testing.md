@@ -152,5 +152,5 @@ CLI, process lifecycle, health endpoint를 검증해야 하며, repo 내부 DB �
 ### 8.1 단위/통합 테스트 (`@backend-dev`, `@frontend-dev`)
 
 - 모듈 구현 PR에 해당 모듈의 단위 테스트를 반드시 포함
-- 테스트 없는 코드는 내부 `/codex:review` 브랜치 리뷰 또는 PR 승인 게이트에서 blocking failure로 판정한다
+- 테스트 없는 코드는 내부 `/codex:review` 브랜치 리뷰에서 blocking failure로 판정한다
 - 테스트 실패 시 구현 코드를 수정하여 통과시킨 후 PR 업데이트

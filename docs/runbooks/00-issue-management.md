@@ -192,7 +192,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 | `plan-preflight:started` | Plan Preflight 진행 중, 구현계획 작성/리뷰 피드백 반영 중 | 파란색 |
 | `plan-preflight:done` | Plan Preflight 완료, 이슈 본문 구현계획 확정 | 파란색 |
 | `blocked:review-loop` | 브랜치 리뷰 반복 실패로 자동 진행 중단 | 진한 빨간색 |
-| `blocked:pr-review-loop` | PR 승인 반복 실패로 자동 진행 중단 | 진한 빨간색 |
+| `blocked:pr-review-loop` | (legacy) 자동 큐 제외 신호. autopilot/구현 큐가 다루지 않는 사람 개입 대기 상태로만 사용한다. 자동 PR 재수정 루프 의미는 더 이상 없다. | 진한 빨간색 |
 | `good first issue` | 에이전트가 자율 처리 가능 | 연두색 |
 
 ### 4.1 `needs-triage` 라벨

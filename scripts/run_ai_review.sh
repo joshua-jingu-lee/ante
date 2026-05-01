@@ -2,7 +2,12 @@
 set -euo pipefail
 
 ENGINE="${1:?engine is required (claude|codex)}"
-PHASE="${2:?phase is required (branch|pr)}"
+PHASE="${2:?phase is required (branch)}"
+
+if [[ "$PHASE" != "branch" ]]; then
+  echo "Unsupported phase: $PHASE (only 'branch' is available)" >&2
+  exit 2
+fi
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 SCHEMA_PATH="$WORKSPACE/.github/review-output.schema.json"
@@ -65,13 +70,8 @@ BASE_REF="$(
 BASE_SHORT="${BASE_REF#origin/}"
 git fetch --no-tags origin "$BASE_SHORT" || true
 
-if [[ "$PHASE" == "branch" ]]; then
-  REVIEW_ROLE="$ENGINE branch reviewer"
-  PHASE_GOAL="PR을 만들기 전 브랜치 단위 사전 리뷰"
-else
-  REVIEW_ROLE="$ENGINE PR approver"
-  PHASE_GOAL="PR head SHA 기준 최종 승인 판정"
-fi
+REVIEW_ROLE="$ENGINE branch reviewer"
+PHASE_GOAL="PR을 만들기 전 브랜치 단위 사전 리뷰"
 
 PROMPT=$(cat <<EOF
 You are the $REVIEW_ROLE for the ANTE repository.

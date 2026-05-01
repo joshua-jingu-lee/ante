@@ -1,6 +1,6 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 내부 사전 브랜치 리뷰를 담당하며, PR 단계에서는 두 모델이 독립적으로 승인하는 개발 체계를 정의한다.
+> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 PR 전 브랜치 리뷰를 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 `ci` + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
 
 ---
 
@@ -23,11 +23,9 @@
 - **Claude 오케스트레이터**: 이슈 분석, 스펙 확인, 구현 에이전트 위임, GitHub 기록 관리
 - **Claude 개발 에이전트**: 구현, 로컬 검증, 브랜치 푸시, Codex 피드백 반영
 - **Codex Plan Review 워커**: `/codex:adversarial-review`로 구현 전 계획의 가정, 위험, 대안을 외부 검증
-- **Claude 코드 리뷰어**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석
-- **Codex 브랜치 리뷰어**: `/codex:review --base <ref>`로 PR 전 브랜치 단위 사전 리뷰와 blocking issue 식별
-- **Claude PR 승인 워커**: PR head SHA 기준 최종 승인 체크
-- **Codex PR 승인 워커**: PR head SHA 기준 최종 승인 체크
-- **GitHub merge gate**: 두 모델 승인과 CI 성공 여부를 기준으로 auto-merge 실행
+- **Claude 코드 리뷰어**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석 (수동/오케스트레이터 호출)
+- **Codex 브랜치 리뷰어**: `/codex:review --base <ref>`로 PR 전 브랜치 단위 코드 품질 게이트 수행
+- **GitHub merge gate**: `ci` 통과와 충돌 없음·대화 해결·auto-merge 활성화 가능 상태를 기준으로 auto-merge 집행
 
 ## 3. 상호작용 흐름
 
@@ -81,10 +79,8 @@ Claude 오케스트레이터
   │
   ├──▶ PR 게이트 (GitHub Actions)
   │     ├── CI (`ci`) — required, 머지 차단 게이트
-  │     ├── Claude PR 승인 (`claude-pr-approve`) — advisory
-  │     ├── Codex PR 승인 (`codex-pr-approve`) — advisory
-  │     ├── content FAIL → Claude PR repair 후 같은 PR에서 재검증 (advisory 신호)
-  │     └── `ci` green + 충돌 없음 + 대화 해결 → GitHub auto-merge
+  │     ├── merge-gate — `ci` green + 충돌 없음 + 대화 해결 + auto-merge 활성화 가능 상태일 때 GitHub auto-merge 활성화
+  │     └── auto-merge 활성화 직전에 `post-merge.yml` workflow_dispatch로 호출
   │        └── `/autopilot` 실행 중이면 사이클 상태: 이슈 코멘트
   │
   ├──▶ post-merge automation
@@ -111,9 +107,9 @@ Claude 오케스트레이터
 - `plan-preflight:done`은 최신 이슈 본문 구현계획과 Codex Plan Review의 `approve-implement` 또는 `narrow-scope` verdict가 맞물려 구현 착수 가능한 상태라는 뜻이다.
 - 착수 기록은 Codex Plan Review 피드백이 반영된 구현계획이 이슈 본문에 남은 뒤, `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 작성한다.
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
-- Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 내부 브랜치 리뷰**다.
-- PR 전 Codex 브랜치 리뷰는 GitHub Actions가 아니라 `/implement-issue` 안에서 `/codex:review --base <base>`로 반복한다.
-- PR 단계의 Claude/Codex 승인 체크는 **같은 head SHA**를 기준으로 독립 실행된다.
+- Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 Codex 브랜치 리뷰**다.
+- PR 전 Codex 브랜치 리뷰는 GitHub Actions가 아니라 `/implement-issue` 안에서 `/codex:review --base <base>`로 반복하며, 이 단계가 코드 품질 게이트다.
+- PR 단계에서는 자동 AI 승인 워커가 동작하지 않는다. 머지 가능 여부는 `ci` + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다. 추가 AI 감사가 필요하면 별도 수동 절차로 분리한다.
 - 머지는 Claude 오케스트레이터가 직접 하지 않고, GitHub auto-merge가 수행한다.
 - 릴리스는 merge/post-merge와 분리된 수동 운영 lane이며, `/release prepare`가 release PR을 만들고 `/release publish`가 merge된 main에서 배포를 담당한다.
 
@@ -193,21 +189,18 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 | `/codex:review` FAIL | 코드/설계 문제 | Claude 개발 에이전트 | 같은 브랜치에서 수정 후 재검토 |
 | CI 실패 — 코드 문제 | 테스트/lint/type 오류 | Claude 개발 에이전트 | 새 커밋 push 후 체크 재실행 |
 | CI 실패 — 인프라 문제 | Docker/CI 설정/스크립트 | `@devops` | 수정 후 동일 PR에서 재실행 |
-| `claude-pr-approve` FAIL — `content` | 스펙·계약·테스트 누락 | Claude 자동 재수정 워커 | 동일 PR 브랜치 수정 후 재검증 |
-| `codex-pr-approve` FAIL — `content` | 버그/회귀/설계 위반 | Claude 자동 재수정 워커 | 동일 PR 브랜치 수정 후 재검증 |
-| `claude-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
-| `codex-pr-approve` FAIL — `quota/script_error/auth_error/infra_error` | AI CLI/runner 문제 | `@devops` 또는 사람 개입 | 재수정 없이 워커 복구 후 재실행 |
+| `merge-gate` 차단 | 충돌, 대화 미해결, auto-merge 비활성 상태 | Claude 오케스트레이터 또는 사람 | 충돌 해결/대화 마무리 후 PR 재동기화 |
 | 수용 검증 FAIL | 기능 버그 | 오케스트레이터가 버그 이슈 등록 → Claude 개발 에이전트 | 재검증 속행 |
 
 ### 5.1 재시도와 중단 원칙
 
 - 같은 head SHA에서 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
 - `/codex:review` 실패는 PR 생성 전에 같은 worktree에서 해소한다.
-- PR 승인 루프는 `content` 실패만 자동 재수정 대상으로 삼고, `quota`, `script_error`, `auth_error`, `infra_error`는 워커/인프라 복구로 분리한다.
-- 자동 수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
+- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 머지를 진행한다.
+- 수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
 - 같은 `risk class`가 반복되거나 구조 리스크가 넓어지면 얕은 자동 수정 대신 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - 반복 리스크가 구현계획 자체의 문제라면 `/plan-preflight`로 돌아가 이슈 본문 구현계획을 다시 정비하고 Codex Plan Review를 재요청한다.
-- `blocked:review-loop`, `blocked:pr-review-loop` 라벨은 자동 진행 중단 신호이며, 라벨 의미와 큐 제외 규칙은 [00-issue-management.md](00-issue-management.md)와 `/autopilot`을 따른다.
+- `blocked:review-loop`, `blocked:pr-review-loop` 라벨은 자동 큐 제외 신호로 유지된다. 두 라벨이 붙은 이슈는 `/autopilot`이 자동으로 다루지 않으며 사람 개입을 기다린다. 라벨 의미와 큐 제외 규칙은 [00-issue-management.md](00-issue-management.md)와 `/autopilot`을 따른다.
 
 ### 5.2 상세 절차의 SSOT
 
@@ -215,7 +208,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 |------|------|
 | Plan Preflight 재정비와 Codex Plan Review 재요청 | `.agent/commands/plan-preflight.md` |
 | `/codex:review` 브랜치 리뷰 반복, 실패 횟수, PR 생성 전 PASS 조건 | `.agent/commands/implement-issue.md`, [03-git-workflow.md](03-git-workflow.md) |
-| PR 승인 루프, 자동 재수정 예산, `NO_CHANGES`, post-merge 복구 | [04-ci-cd.md](04-ci-cd.md) |
+| `merge-gate`, post-merge 복구 | [04-ci-cd.md](04-ci-cd.md) |
 | 리뷰 finding 수용, 영향 범위 재검토, 수정 전략 선택 | `.agent/skills/receive-review.md` |
 | `gh run rerun`, PR `close → reopen`, 수동 복구 코멘트 | `.agent/skills/github-ops.md` |
 | blocked 라벨 정의 | [00-issue-management.md](00-issue-management.md) |
@@ -224,10 +217,10 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 
 > 상세 규칙: [04-ci-cd.md](04-ci-cd.md)
 
-- **브랜치 리뷰 단계**: Codex만 수행한다. GitHub Actions가 아니라 `/codex:review --base <ref>` 내부 루프로 도는 PR 전 품질 게이트다.
-- **PR 승인 단계**: Claude와 Codex가 각각 독립적으로 수행한다. 두 승인은 advisory check이며 머지 게이트 입력이 아니다.
+- **브랜치 리뷰 단계**: Codex만 수행한다. GitHub Actions가 아니라 `/codex:review --base <ref>` 내부 루프로 도는 PR 전 코드 품질 게이트다.
+- **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 같은 head SHA에서 `/codex:review --base <ref>`를 사람/오케스트레이터가 다시 호출해 검증한다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
-- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **`ci` status check + 충돌 없음 + 대화 해결**을 기준으로 삼는다. AI 승인 status check는 advisory 신호이며 머지 가능 여부 판정에 들어가지 않는다.
+- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **`ci` status check + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
 - **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용

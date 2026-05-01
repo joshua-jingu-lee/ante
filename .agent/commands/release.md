@@ -137,7 +137,7 @@ PR 본문에는 다음을 포함한다.
 - Docker build 검증 결과
 - publish는 merge 후 `/release publish`에서만 수행한다는 문구
 
-release PR도 일반 PR과 동일하게 `ci`를 통과해야 한다. Claude PR 승인, Codex PR 승인은 advisory check이며 머지 차단 게이트가 아니다.
+release PR도 일반 PR과 동일하게 `ci`와 `merge-gate`를 통과해야 한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 호출한다.
 
 ## `/release publish`
 
