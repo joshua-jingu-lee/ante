@@ -49,12 +49,31 @@ def _is_process_alive(pid: int) -> bool:
 @require_scope("system:admin")
 def start(ctx: click.Context, config_dir: str | None) -> None:
     """시스템 시작 (포어그라운드)."""
+    from pathlib import Path
+
+    from ante.config import Config
     from ante.main import read_pid_file
 
     fmt = get_formatter(ctx)
 
+    # Refs #1157: PID 조회는 명시적 ``Config`` 인스턴스로 한다. ``--config-dir``
+    # (서브커맨드 또는 루트 ``ctx.obj["config_dir"]``)이 가리키는 디렉토리의
+    # canonical PID 파일만 본다. 0-arg ``read_pid_file()``은 ``ANTE_CONFIG_DIR``
+    # env 또는 default 폴백을 보므로, 다른 ``config_dir``로 실행 중인 server를
+    # 누락해 중복 실행/IPC socket race를 일으킬 수 있다.
+    if config_dir:
+        resolver_config_dir: Path | None = Path(config_dir)
+    else:
+        root_config_dir = ctx.obj.get("config_dir") if ctx.obj else None
+        resolver_config_dir = (
+            root_config_dir if isinstance(root_config_dir, Path) else None
+        )
+        if resolver_config_dir is None and root_config_dir:
+            resolver_config_dir = Path(root_config_dir)
+    config = Config.load(config_dir=resolver_config_dir)
+
     # 이미 실행 중인지 확인
-    existing_pid = read_pid_file()
+    existing_pid = read_pid_file(config)
     if existing_pid is not None and _is_process_alive(existing_pid):
         fmt.error(
             f"시스템이 이미 실행 중입니다 (pid={existing_pid})", code="ALREADY_RUNNING"
