@@ -12,11 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import sys
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ante.ipc import protocol
 from ante.ipc.exceptions import MessageTooLargeError
@@ -92,22 +91,13 @@ class IPCServer:
 
         Refs #1184: 메서드 종료 시 state를 ``RUNNING``으로 전환한다.
 
-        Python 버전별 동작 차이:
-
-        * **Python 3.11 / 3.12**: ``loop.create_unix_server``는 ``server.close()``
-          시 socket 파일을 자동으로 unlink하지 **않는다** (해당 동작 자체가
-          stdlib에 없다). 따라서 별도 옵션 없이도 본 모듈의 lifecycle 가정이
-          성립한다.
-        * **Python 3.13+**: ``loop.create_unix_server``에 ``cleanup_socket``
-          인자가 추가되었고 **기본값이 ``True``** 이다 — 즉 ``server.close()``
-          가 socket 파일을 자동으로 unlink하므로 race window 회귀가 깨진다.
-          이를 막기 위해 3.13+에서만 ``cleanup_socket=False``를 명시적으로
-          전달한다.
-
-        ``cleanup_socket`` 인자를 무조건 전달하면 3.11/3.12에서
-        ``TypeError: create_unix_server() got an unexpected keyword argument
-        'cleanup_socket'`` 으로 부팅이 실패한다 (#1159 attempt 1 회귀). 따라서
-        ``sys.version_info`` 분기로 3.13+에서만 인자를 추가한다.
+        Refs #1185, #1187: Ante는 Python 3.13 단일 런타임을 공식 계약으로 한다.
+        Python 3.13의 ``asyncio.start_unix_server``는 ``cleanup_socket`` 인자를
+        받으며 기본값이 ``True``이다. 본 메서드는 ``cleanup_socket=False``를
+        명시적으로 전달해 ``server.close()`` 시 socket 파일이 자동 unlink되지
+        않게 만든다 — 이로써 cold-path guard(``PID alive AND socket exists``)가
+        shutdown 동안에도 'active runtime'을 정확히 판정할 수 있는 race window
+        차단 의도가 유지된다 (Refs #1159).
         """
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,13 +106,10 @@ class IPCServer:
         if path.exists():
             path.unlink()
 
-        kwargs: dict[str, Any] = {"path": self._socket_path}
-        if sys.version_info >= (3, 13):
-            kwargs["cleanup_socket"] = False
-
         self._server = await asyncio.start_unix_server(
             self._handle_connection,
-            **kwargs,
+            path=self._socket_path,
+            cleanup_socket=False,
         )
 
         # 소켓 파일 권한 설정 (소유자만 접근)

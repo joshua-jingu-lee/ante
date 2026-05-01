@@ -6,12 +6,12 @@ build-backend = "hatchling.build"
 name = "ante"
 version = "0.9.0"
 description = "AI-Native Trading Engine"
-requires-python = ">=3.11"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "aiohttp>=3.9",
     "aiosqlite>=0.20",
     "polars>=1.0",
-    "pandas-ta>=0.4.67b0",
+    "pandas-ta>=0.4.71b0",
     "click>=8.1",
     "fastapi>=0.115",
     "uvicorn>=0.34",
@@ -45,14 +45,14 @@ asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py313"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 warn_unused_configs = true
 ignore_missing_imports = true
 # CI 단계적 강화: 현재는 위험 오류(attr-defined, operator, call-arg 등)만 차단
