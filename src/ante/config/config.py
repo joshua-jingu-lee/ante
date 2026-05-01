@@ -89,20 +89,28 @@ class Config:
     동적 설정은 DynamicConfigService가 별도 담당.
     """
 
-    def __init__(self, static: dict[str, Any], secrets: dict[str, str]) -> None:
+    def __init__(
+        self,
+        static: dict[str, Any],
+        secrets: dict[str, str],
+        config_dir: Path | None = None,
+    ) -> None:
         self._static = static
         self._secrets = secrets
+        self._config_dir = config_dir
 
     @classmethod
     def load(cls, config_dir: Path | None = None) -> Config:
         """설정 파일 로드 및 Config 인스턴스 생성.
 
         config_dir이 None이면 resolve_config_dir()로 자동 탐색.
+        해석된 디렉토리는 인스턴스에 보존되어 path-like 설정의
+        ``resolve_path()`` 정규화 기준으로 사용된다.
         """
         resolved = resolve_config_dir(config_dir)
         static = _load_toml(resolved / "system.toml")
         secrets = _load_dotenv(resolved / "secrets.env")
-        return cls(static=static, secrets=secrets)
+        return cls(static=static, secrets=secrets, config_dir=resolved)
 
     def get(self, key: str, default: Any = None) -> Any:
         """정적 설정 조회. 점(.) 구분자로 중첩 접근.
@@ -116,6 +124,33 @@ class Config:
         if key in DEFAULTS:
             return DEFAULTS[key]
         return default
+
+    def resolve_path(self, key: str, default: str | None = None) -> Path:
+        """path-like 정적 설정을 ``config_dir`` 기준의 절대 경로로 정규화한다.
+
+        Spec: docs/specs/config/03-design-decisions.md `Ante instance/path contract`.
+        절대 경로로 설정된 값은 그대로, 상대 경로는 ``config_dir`` 기준으로 결합한다.
+        ``Config.load()``로 만든 인스턴스는 자동으로 ``config_dir``을 기억하므로
+        호출 시점 CWD와 무관하게 server runtime과 CLI가 같은 경로를 본다.
+
+        직접 ``Config(...)`` 로 만들었거나 ``config_dir``이 ``None``이면
+        ``Path.cwd()``를 폴백으로 사용한다.
+
+        Args:
+            key: 점(.) 구분자로 표현되는 path-like 정적 설정 키 (예: ``"db.path"``).
+            default: ``key``가 TOML/DEFAULTS 어디에도 없을 때 사용할 fallback 문자열.
+
+        Raises:
+            ConfigError: 키 값을 찾을 수 없고 ``default``도 ``None``인 경우.
+        """
+        raw = self.get(key, default)
+        if raw is None:
+            raise ConfigError(f"Path config missing: {key}")
+        p = Path(str(raw))
+        if p.is_absolute():
+            return p
+        base = self._config_dir if self._config_dir is not None else Path.cwd()
+        return base / p
 
     def secret(self, key: str) -> str:
         """비밀값 조회. 환경변수 우선, 없으면 .env에서.
