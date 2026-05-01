@@ -253,3 +253,192 @@ def test_account_cold_path_guard_uses_runtime_resolver_under_chdir(
             _assert_no_active_runtime(fmt)
 
     assert exc_info.value.code == 1
+
+
+# ── Codex attempt 1 P1 회귀: --config-dir 경로 PID 격리 ─────────────
+#
+# `read_pid_file()` 0-arg 분기는 `Config.load()` → `resolve_config_dir(None)` →
+# env `ANTE_CONFIG_DIR` 또는 default를 본다. CLI 호출부가 ctx의 `--config-dir A`를
+# env에 주입하지 않은 채 0-arg로 호출하면, A가 아니라 default config_dir의 PID를
+# 본다. 결과:
+#   - `system stop`: A의 server PID를 못 찾음 → 잘못된 PID_NOT_FOUND
+#   - account cold-path guard: A의 alive server를 누락 → split-brain mutation 허용
+#   - update.check_server_running: A의 server를 못 찾음 → server 중에 update 진행
+#
+# 아래 3개 테스트는 default와 다른 ``config_dir`` A를 ``--config-dir``로 명시해
+# 호출했을 때, 각 가드가 *A* 의 canonical PID 파일을 정확히 보는지 검증한다.
+# `ante.main.read_pid_file`을 monkeypatch하지 않고 실제 파일을 통해 검증하므로,
+# CLI 호출부가 명시적 ``Config``를 전달하지 않으면 이 테스트가 깨진다 (attempt 1
+# 재현). 호출부 수정 후에는 GREEN.
+
+
+def test_system_start_uses_explicit_config_dir_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``system start``가 ``--config-dir`` A의 canonical PID를 본다.
+
+    Attempt 1 P1 finding 재현: A에 alive PID가 있고 default config_dir에는
+    PID 파일이 없는 환경에서, ``ante --config-dir A system start``가 default를
+    봐 A의 server를 누락하면 ``ALREADY_RUNNING`` 차단을 우회해 중복 실행
+    위험이 발생한다. 명시적 ``Config`` 전달 후에는 A를 정확히 보고 차단해야
+    한다.
+    """
+    from click.testing import CliRunner
+
+    from ante.cli.main import cli
+    from ante.member.models import Member, MemberRole, MemberType
+
+    mock_master = Member(
+        member_id="test-master",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="Test Master",
+        status="active",
+        scopes=[],
+    )
+
+    cfg_a = tmp_path / "config-a"
+    cfg_a.mkdir()
+    cfg_default = tmp_path / "default-config"
+    cfg_default.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+
+    # default와 다른 경로
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(cfg_default))
+    monkeypatch.chdir(cwd)
+
+    # A에 alive PID (self pid). default에는 PID 없음.
+    (cfg_a / "run").mkdir()
+    (cfg_a / "run" / "ante.pid").write_text(str(os.getpid()))
+    assert not (cfg_default / "run" / "ante.pid").exists()
+
+    runner = CliRunner()
+    # 인증 우회: ``authenticate_member``를 mock해 master 멤버를 ctx.obj에 주입.
+    with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+        def _set_member(ctx) -> None:  # type: ignore[no-untyped-def]
+            ctx.ensure_object(dict)
+            ctx.obj["member"] = mock_master
+
+        mock_auth.side_effect = _set_member
+
+        # _is_process_alive는 self pid에 대해 True를 반환해야 한다 (alive PID).
+        # subprocess.run이 호출되면 안 된다 — ALREADY_RUNNING으로 차단되어야 함.
+        with patch(
+            "ante.cli.commands.system._is_process_alive", return_value=True
+        ) as mock_alive:
+            with patch("ante.cli.commands.system.subprocess.run") as mock_subprocess:
+                result = runner.invoke(
+                    cli,
+                    ["--config-dir", str(cfg_a), "system", "start"],
+                    catch_exceptions=False,
+                )
+
+    # 명시 전달이 안 되어 default를 보면 PID 파일 부재로 ALREADY_RUNNING이
+    # 발동하지 않고 subprocess가 실행된다 (중복 실행 위험).
+    assert result.exit_code == 1, (
+        f"start가 A의 alive PID를 무시하고 진행함 (중복 실행 위험). "
+        f"exit_code={result.exit_code}, output={result.output!r}"
+    )
+    assert "ALREADY_RUNNING" in result.output or "이미 실행 중" in result.output, (
+        f"start가 default config_dir만 봐 A의 alive PID를 누락 — "
+        f"중복 실행 차단 실패. output={result.output!r}"
+    )
+    mock_subprocess.assert_not_called()
+    mock_alive.assert_called_with(os.getpid())
+
+
+def test_account_cold_path_guard_uses_explicit_config_dir_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cold-path guard가 ``--config-dir`` A의 canonical PID/socket을 본다.
+
+    A에 alive PID + socket 둘 다 있고 default에는 둘 다 없을 때, cold-path
+    guard는 A 기준으로 active runtime을 감지해 차단해야 한다.
+    """
+    import click
+
+    from ante.cli.commands.account import _assert_no_active_runtime
+    from ante.cli.formatter import OutputFormatter
+
+    cfg_a = tmp_path / "config-a"
+    cfg_a.mkdir()
+    cfg_default = tmp_path / "default-config"
+    cfg_default.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(cfg_default))
+    monkeypatch.chdir(cwd)
+
+    # A: alive PID + socket
+    (cfg_a / "run").mkdir()
+    (cfg_a / "run" / "ante.pid").write_text(str(os.getpid()))
+    (cfg_a / "run" / "ante.sock").touch()
+
+    # default: 비어 있음
+    assert not (cfg_default / "run" / "ante.pid").exists()
+    assert not (cfg_default / "run" / "ante.sock").exists()
+
+    fmt = OutputFormatter(fmt="text")
+
+    # ctx.obj["config_dir"]에 A를 넣어 get_config_dir()이 A를 반환하도록 한다.
+    @click.command()
+    def _runner() -> None:
+        _assert_no_active_runtime(fmt)
+
+    runner_ctx = click.Context(_runner, obj={"config_dir": cfg_a})
+    with runner_ctx:
+        with pytest.raises(SystemExit) as exc_info:
+            _assert_no_active_runtime(fmt)
+
+    assert exc_info.value.code == 1, (
+        f"cold-path guard가 A의 active runtime을 감지하지 못했다 — "
+        f"default config_dir만 본 것. exit_code={exc_info.value.code}"
+    )
+
+
+def test_update_check_server_running_uses_explicit_config_dir_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``update.check_server_running``이 ``--config-dir`` A의 PID를 본다.
+
+    A에 alive PID가 있고 default에는 없을 때 ``check_server_running()``이
+    True를 반환해야 한다. default를 보면 False가 되어 update가 server
+    실행 중에 진행될 수 있다.
+    """
+    import click
+
+    from ante.cli.commands.update import check_server_running
+
+    cfg_a = tmp_path / "config-a"
+    cfg_a.mkdir()
+    cfg_default = tmp_path / "default-config"
+    cfg_default.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(cfg_default))
+    monkeypatch.chdir(cwd)
+
+    # A: alive PID (self pid)
+    (cfg_a / "run").mkdir()
+    (cfg_a / "run" / "ante.pid").write_text(str(os.getpid()))
+
+    # default: 비어 있음
+    assert not (cfg_default / "run" / "ante.pid").exists()
+
+    @click.command()
+    def _runner() -> None:
+        pass
+
+    runner_ctx = click.Context(_runner, obj={"config_dir": cfg_a})
+    with runner_ctx:
+        result = check_server_running()
+
+    assert result is True, (
+        "update.check_server_running이 A의 alive PID를 감지하지 못했다 — "
+        "default config_dir만 본 것."
+    )
