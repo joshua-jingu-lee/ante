@@ -1382,16 +1382,20 @@ async def _run(s: Services) -> None:
 async def _shutdown(s: Services) -> None:
     """종료 정리 (역순).
 
-    종료 순서:
-    1. Telegram, 스케줄러 태스크 취소
-    2. Web API 종료
-    3. DailyReportScheduler, ReconcileScheduler 종료
-    4. 각 계좌의 Treasury sync 중지
-    5. BotManager 전체 봇 중지
-    6. StreamIntegration 종료
-    7. APIGateway 종료
-    8. 각 계좌의 BrokerAdapter disconnect
-    9. Database 종료
+    종료 순서 (Refs #1159 — cold-path race window 차단):
+    1. 종료 알림(NotificationEvent), Telegram, 스케줄러 태스크 취소
+    2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**
+    3. Web API 종료
+    4. DailyReportScheduler, ReconcileScheduler 종료
+    5. 각 계좌의 Treasury sync 중지
+    6. BotManager 전체 봇 중지
+    7. StreamIntegration 종료
+    8. APIGateway 종료
+    9. 각 계좌의 BrokerAdapter disconnect
+    10. Database 종료
+    11. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
+        cold-path guard(`PID alive AND socket exists`)가 이 시점부터 'active 아님'
+        판정.
     """
     logger.info("Ante 종료 시작")
 
@@ -1427,6 +1431,13 @@ async def _shutdown(s: Services) -> None:
             pass
         logger.info("결재 만료 스케줄러 종료")
 
+    # Refs #1159: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
+    # cold-path guard(`PID alive AND socket exists`)가 BotManager/DB 종료 전까지
+    # 'active runtime'으로 판정하도록 unlink_socket()은 lifecycle 마지막에서 호출.
+    if s.ipc_server:
+        await s.ipc_server.stop_accepting()
+        logger.info("IPCServer 새 연결 수락 중지")
+
     if s.web_task and not s.web_task.done():
         s.web_task.cancel()
         try:
@@ -1434,10 +1445,6 @@ async def _shutdown(s: Services) -> None:
         except asyncio.CancelledError:
             pass
         logger.info("Web API 종료")
-
-    if s.ipc_server:
-        await s.ipc_server.stop()
-        logger.info("IPCServer 종료")
 
     if s.daily_report_scheduler:
         await s.daily_report_scheduler.stop()
@@ -1489,6 +1496,15 @@ async def _shutdown(s: Services) -> None:
 
     if s.db:
         await s.db.close()
+
+    # Refs #1159: BotManager/DB 종료 후에야 소켓 파일을 제거한다.
+    # 이로써 cold-path guard는 'PID alive AND socket exists' 동안에는 항상
+    # 봇/DB가 살아있는 active runtime을 정확히 가리킨다.
+    if s.ipc_server:
+        await s.ipc_server.drain_connections(timeout=5.0)
+        s.ipc_server.unlink_socket()
+        logger.info("IPCServer 소켓 파일 제거")
+
     logger.info("Ante 종료 완료")
 
 
