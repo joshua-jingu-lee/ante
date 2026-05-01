@@ -43,6 +43,12 @@ packages = ["src/ante"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
+# pandas-ta 0.4.71b0 import 시점의 mode.copy_on_write deprecation
+# (pandas 3.0+에서 항상 enabled, pandas 4.0에서 제거 예정).
+# default 정책으로 출력은 유지하면서 회귀 가시성을 보전한다 (#1191).
+filterwarnings = [
+    "default::pandas.errors.Pandas4Warning",
+]
 
 [tool.ruff]
 target-version = "py313"
