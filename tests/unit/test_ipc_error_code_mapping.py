@@ -77,7 +77,7 @@ async def test_ipc_server_uses_exception_code_attribute_when_present(
             "테스트: 런타임 cold-path 차단"
         )
 
-    cmd_registry.register("test.cold_path", cold_path_handler)
+    cmd_registry.register("test.cold_path", cold_path_handler, is_mutating=True)
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -104,7 +104,7 @@ async def test_ipc_server_falls_back_to_execution_error_when_no_code(
     async def value_error_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         raise ValueError("no code attribute")
 
-    cmd_registry.register("test.fail", value_error_handler)
+    cmd_registry.register("test.fail", value_error_handler, is_mutating=True)
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -133,7 +133,11 @@ async def test_ipc_server_falls_back_for_account_error_without_code(
     async def already_suspended_handler(svc, args, actor):
         raise AccountAlreadySuspendedError("이미 정지됨")
 
-    cmd_registry.register("test.already_suspended", already_suspended_handler)
+    cmd_registry.register(
+        "test.already_suspended",
+        already_suspended_handler,
+        is_mutating=True,
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()

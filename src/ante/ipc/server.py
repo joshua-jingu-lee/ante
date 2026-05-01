@@ -2,6 +2,9 @@
 
 asyncio.start_unix_server를 사용하여 외부 프로세스(CLI, MCP)의
 명령을 수신하고 처리한다.
+
+Refs #1184: lifecycle state machine을 도입해 shutdown 중 mutating
+명령이 SERVICE_UNAVAILABLE로 거부되도록 한다.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ import logging
 import os
 import sys
 import uuid
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +26,29 @@ if TYPE_CHECKING:
     from ante.ipc.registry import CommandRegistry
 
 logger = logging.getLogger(__name__)
+
+
+class IPCServerState(Enum):
+    """IPCServer lifecycle state.
+
+    Refs #1184: shutdown 중 mutating 명령을 reject하기 위한 명시적 상태 기계.
+
+    State 전이:
+
+    * ``STOPPED`` → ``RUNNING``: ``start()`` 마지막에 전환.
+    * ``RUNNING`` → ``SHUTTING_DOWN``: ``stop_accepting()`` 진입 직후
+      (listener close 호출 **전**)에 전환. 이 시점부터 mutating dispatch는
+      ``SERVICE_UNAVAILABLE``로 거부된다.
+    * ``SHUTTING_DOWN`` → ``STOPPED``: ``unlink_socket()`` 마지막에 전환.
+      이 시점부터는 read-only를 포함한 모든 명령이 거부된다 — db close 이후
+      이므로 read-only도 closed DB read attempt 위험이 있다.
+
+    초기 값은 ``STOPPED`` (start 이전 상태).
+    """
+
+    RUNNING = "running"
+    SHUTTING_DOWN = "shutting_down"
+    STOPPED = "stopped"
 
 
 class IPCServer:
@@ -41,10 +68,17 @@ class IPCServer:
         # drain_connections()이 wait_closed()를 호출할 수 있도록
         # closing reference를 별도 슬롯에 보존한다.
         self._closing_server: asyncio.AbstractServer | None = None
+        # Refs #1184: lifecycle state machine. 초기 상태는 STOPPED.
+        self._state: IPCServerState = IPCServerState.STOPPED
 
     @property
     def socket_path(self) -> str:
         return self._socket_path
+
+    @property
+    def state(self) -> IPCServerState:
+        """현재 lifecycle state (test/debug용 read-only view)."""
+        return self._state
 
     async def start(self) -> None:
         """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성.
@@ -53,6 +87,8 @@ class IPCServer:
         책임진다 — cold-path guard가 shutdown 동안 'PID alive AND socket
         exists'로 active runtime을 판정해야 race window를 회피할 수 있기
         때문이다.
+
+        Refs #1184: 메서드 종료 시 state를 ``RUNNING``으로 전환한다.
 
         Python 버전별 동작 차이:
 
@@ -90,6 +126,9 @@ class IPCServer:
         # 소켓 파일 권한 설정 (소유자만 접근)
         os.chmod(self._socket_path, 0o600)
 
+        # Refs #1184: listener 준비 완료 후 RUNNING으로 전환.
+        self._state = IPCServerState.RUNNING
+
         logger.info("IPCServer 시작: %s", self._socket_path)
 
     async def stop_accepting(self) -> None:
@@ -103,7 +142,15 @@ class IPCServer:
         cold-path guard(``PID alive AND socket exists``)가 shutdown 동안에도
         'active runtime'으로 판정하도록, 소켓 파일은 ``unlink_socket()``이
         호출되기 전까지 유지된다.
+
+        Refs #1184: listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로
+        전환한다. 이래야 close 진행 중에 들어오는 dispatch도 mutating이라면
+        ``SERVICE_UNAVAILABLE``로 거부된다.
         """
+        # Refs #1184: 즉시 SHUTTING_DOWN으로 전환 — close 호출 전에 dispatch
+        # gate가 활성화되어야 race window가 닫힌다.
+        self._state = IPCServerState.SHUTTING_DOWN
+
         if self._server:
             # drain_connections에서 wait_closed를 호출할 수 있도록 reference 보존
             self._closing_server = self._server
@@ -133,14 +180,26 @@ class IPCServer:
             self._closing_server = None
 
     def unlink_socket(self) -> None:
-        """소켓 파일 제거. lifecycle 마지막 단계에서 호출."""
+        """소켓 파일 제거. lifecycle 마지막 단계에서 호출.
+
+        Refs #1184: 메서드 종료 시 state를 ``STOPPED``으로 전환한다. 이 시점
+        이후의 dispatch는 (read-only 포함) 모두 ``SERVICE_UNAVAILABLE``로
+        거부된다 — db close 이후이므로 read-only도 closed DB read attempt
+        위험이 있다.
+        """
         path = Path(self._socket_path)
         if path.exists():
             path.unlink()
+        # Refs #1184: 모든 cleanup 종료 후 STOPPED 전환.
+        self._state = IPCServerState.STOPPED
         logger.info("IPCServer 소켓 파일 제거: %s", self._socket_path)
 
     async def stop(self) -> None:
-        """기존 호출자 호환 facade. listener close → drain → unlink."""
+        """기존 호출자 호환 facade. listener close → drain → unlink.
+
+        Refs #1184: 내부 메서드들이 lifecycle state 전환을 담당한다 —
+        ``stop_accepting()``이 SHUTTING_DOWN, ``unlink_socket()``이 STOPPED.
+        """
         await self.stop_accepting()
         await self.drain_connections()
         self.unlink_socket()
@@ -185,15 +244,47 @@ class IPCServer:
             except Exception:
                 pass
 
+    @staticmethod
+    def _service_unavailable(request_id: str, message: str) -> dict:
+        """``SERVICE_UNAVAILABLE`` error 응답 dict 생성.
+
+        Refs #1184: 기존 error 응답 포맷
+        ``{"id", "status": "error", "error": {"code", "message"}}``과 동일한
+        구조를 사용해 다른 IPC consumer(CLI/MCP/dashboard)가 별도 처리 없이
+        기존 generic error path로 흘러가도록 한다.
+        """
+        return {
+            "id": request_id,
+            "status": "error",
+            "error": {
+                "code": "SERVICE_UNAVAILABLE",
+                "message": message,
+            },
+        }
+
     async def _dispatch(self, request: dict) -> dict:
-        """요청을 적절한 핸들러로 라우팅."""
+        """요청을 적절한 핸들러로 라우팅.
+
+        Refs #1184: lifecycle state-aware reject 분기를 추가한다.
+
+        * ``STOPPED``: 모든 명령(mutating + read-only) ``SERVICE_UNAVAILABLE``.
+          db close 이후이므로 read-only도 closed DB read attempt 위험.
+        * ``SHUTTING_DOWN`` + mutating: ``SERVICE_UNAVAILABLE``.
+        * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정,
+          dashboard 가시성 보존).
+        * ``RUNNING``: 정상 dispatch.
+        """
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
         args = request.get("args", {})
         actor = request.get("actor", "ipc")
 
-        handler = self._command_registry.get(command)
-        if handler is None:
+        # Refs #1184: STOPPED 단계에서는 모든 명령을 즉시 거부.
+        if self._state == IPCServerState.STOPPED:
+            return self._service_unavailable(request_id, "서버가 종료되었습니다.")
+
+        spec = self._command_registry.get(command)
+        if spec is None:
             return {
                 "id": request_id,
                 "status": "error",
@@ -203,8 +294,16 @@ class IPCServer:
                 },
             }
 
+        # Refs #1184: SHUTTING_DOWN 단계에서는 mutating 명령만 거부.
+        # read-only는 통과 (BotManager/DB 아직 살아 있음).
+        if self._state == IPCServerState.SHUTTING_DOWN and spec.is_mutating:
+            return self._service_unavailable(
+                request_id,
+                "서버가 종료 중입니다. 변경 명령을 받지 않습니다.",
+            )
+
         try:
-            result = await handler(self._service_registry, args, actor)
+            result = await spec.handler(self._service_registry, args, actor)
             return {
                 "id": request_id,
                 "status": "ok",

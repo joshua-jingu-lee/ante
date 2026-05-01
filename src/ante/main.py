@@ -1384,7 +1384,9 @@ async def _shutdown(s: Services) -> None:
 
     종료 순서 (Refs #1159 — cold-path race window 차단):
     1. 종료 알림(NotificationEvent), Telegram, 스케줄러 태스크 취소
-    2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**
+    2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**.
+       이 호출 시작 시 IPCServer state는 `SHUTTING_DOWN`으로 전환되어 이후
+       active connection의 mutating command를 `SERVICE_UNAVAILABLE`로 거부한다.
     3. Web API 종료
     4. DailyReportScheduler, ReconcileScheduler 종료
     5. 각 계좌의 Treasury sync 중지
@@ -1431,7 +1433,9 @@ async def _shutdown(s: Services) -> None:
             pass
         logger.info("결재 만료 스케줄러 종료")
 
-    # Refs #1159: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
+    # Refs #1159/#1184: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
+    # stop_accepting() 시작 시 IPCServer state가 SHUTTING_DOWN으로 바뀌어
+    # 이후 active connection의 mutating command는 SERVICE_UNAVAILABLE로 거부된다.
     # cold-path guard(`PID alive AND socket exists`)가 BotManager/DB 종료 전까지
     # 'active runtime'으로 판정하도록 unlink_socket()은 lifecycle 마지막에서 호출.
     if s.ipc_server:

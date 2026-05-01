@@ -96,6 +96,32 @@ class TestIpcSend:
             with pytest.raises(click.ClickException, match="EXECUTION_ERROR"):
                 await ipc_send("bot.remove", {"bot_id": "x"})
 
+    @pytest.mark.asyncio
+    async def test_service_unavailable_response(self) -> None:
+        """SERVICE_UNAVAILABLE 응답은 기존 error path로 사용자에게 노출된다."""
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "abc",
+            "status": "error",
+            "error": {
+                "code": "SERVICE_UNAVAILABLE",
+                "message": "서버가 종료 중입니다. 변경 명령을 받지 않습니다.",
+            },
+        }
+
+        with (
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
+        ):
+            with pytest.raises(click.ClickException) as excinfo:
+                await ipc_send("bot.remove", {"bot_id": "x"})
+
+        assert "SERVICE_UNAVAILABLE" in str(excinfo.value)
+        assert "서버가 종료 중입니다" in str(excinfo.value)
+
 
 # ── Bot CLI IPC 테스트 ──────────────────────────────
 

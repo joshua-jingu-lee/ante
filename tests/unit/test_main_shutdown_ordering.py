@@ -20,7 +20,7 @@ import pytest
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
-from ante.ipc.server import IPCServer
+from ante.ipc.server import IPCServer, IPCServerState
 from ante.main import Services, _shutdown
 
 
@@ -176,6 +176,198 @@ async def test_shutdown_socket_file_present_during_bot_and_db_phase(
     assert not Path(socket_path).exists(), (
         "_shutdown 완료 후에는 socket 파일이 제거되어야 한다"
     )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_sets_shutting_down_before_bot_stop(
+    socket_path: str,
+) -> None:
+    """_shutdown은 BotManager 정지 전에 IPC state를 SHUTTING_DOWN으로 전환한다."""
+    cmd_registry = CommandRegistry()
+    service_registry = _make_service_registry()
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+    await server.start()
+
+    state_at_bot_stop: list[IPCServerState] = []
+
+    class _StubBotManager:
+        async def stop_all(self) -> None:
+            state_at_bot_stop.append(server.state)
+
+    class _StubDatabase:
+        async def close(self) -> None:
+            pass
+
+    s = Services(
+        ipc_server=server,
+        bot_manager=_StubBotManager(),
+        db=_StubDatabase(),
+    )
+
+    try:
+        await _shutdown(s)
+    finally:
+        if Path(socket_path).exists():
+            Path(socket_path).unlink()
+
+    assert state_at_bot_stop == [IPCServerState.SHUTTING_DOWN]
+    assert server.state is IPCServerState.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_active_connection_mutating_command_rejected_during_shutdown(
+    socket_path: str,
+) -> None:
+    """stop_accepting 이후 active connection의 mutating dispatch는 503으로 거부된다."""
+    cmd_registry = CommandRegistry()
+    service_registry = _make_service_registry()
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+
+    mutation_calls: list[str] = []
+
+    async def mutate_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        mutation_calls.append(actor)
+        return {"mutated": True}
+
+    cmd_registry.register("test.mutate", mutate_handler, is_mutating=True)
+    await server.start()
+
+    response_before_shutdown = await server._dispatch(
+        {"id": "before", "command": "test.mutate", "args": {}, "actor": "pre"}
+    )
+    assert response_before_shutdown["status"] == "ok"
+
+    class _StubBotManager:
+        async def stop_all(self) -> None:
+            response = await server._dispatch(
+                {
+                    "id": "during",
+                    "command": "test.mutate",
+                    "args": {},
+                    "actor": "active-client",
+                }
+            )
+            assert response["status"] == "error"
+            assert response["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+    class _StubDatabase:
+        async def close(self) -> None:
+            pass
+
+    s = Services(
+        ipc_server=server,
+        bot_manager=_StubBotManager(),
+        db=_StubDatabase(),
+    )
+
+    try:
+        await _shutdown(s)
+    finally:
+        if Path(socket_path).exists():
+            Path(socket_path).unlink()
+
+    assert mutation_calls == ["pre"]
+
+
+@pytest.mark.asyncio
+async def test_active_connection_read_only_command_allowed_during_shutdown(
+    socket_path: str,
+) -> None:
+    """SHUTTING_DOWN 중 active connection의 read-only dispatch는 통과한다."""
+    cmd_registry = CommandRegistry()
+    service_registry = _make_service_registry()
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+
+    async def read_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        return {"state": server.state.value, "actor": actor}
+
+    cmd_registry.register("test.read", read_handler, is_mutating=False)
+    await server.start()
+
+    responses: list[dict] = []
+
+    class _StubBotManager:
+        async def stop_all(self) -> None:
+            responses.append(
+                await server._dispatch(
+                    {
+                        "id": "during",
+                        "command": "test.read",
+                        "args": {},
+                        "actor": "active-client",
+                    }
+                )
+            )
+
+    class _StubDatabase:
+        async def close(self) -> None:
+            pass
+
+    s = Services(
+        ipc_server=server,
+        bot_manager=_StubBotManager(),
+        db=_StubDatabase(),
+    )
+
+    try:
+        await _shutdown(s)
+    finally:
+        if Path(socket_path).exists():
+            Path(socket_path).unlink()
+
+    assert responses == [
+        {
+            "id": "during",
+            "status": "ok",
+            "result": {
+                "state": IPCServerState.SHUTTING_DOWN.value,
+                "actor": "active-client",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_post_stopped_dispatch_rejected(
+    socket_path: str,
+) -> None:
+    """unlink_socket 이후 이론적 잔여 dispatch는 read-only도 503으로 거부된다."""
+    cmd_registry = CommandRegistry()
+    service_registry = _make_service_registry()
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+
+    async def read_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        return {"read": True}
+
+    cmd_registry.register("test.read", read_handler, is_mutating=False)
+    await server.start()
+
+    class _StubBotManager:
+        async def stop_all(self) -> None:
+            pass
+
+    class _StubDatabase:
+        async def close(self) -> None:
+            pass
+
+    s = Services(
+        ipc_server=server,
+        bot_manager=_StubBotManager(),
+        db=_StubDatabase(),
+    )
+
+    try:
+        await _shutdown(s)
+        response = await server._dispatch(
+            {"id": "after", "command": "test.read", "args": {}, "actor": "client"}
+        )
+    finally:
+        if Path(socket_path).exists():
+            Path(socket_path).unlink()
+
+    assert response["status"] == "error"
+    assert response["error"]["code"] == "SERVICE_UNAVAILABLE"
+    assert "종료되었습니다" in response["error"]["message"]
 
 
 @pytest.mark.asyncio

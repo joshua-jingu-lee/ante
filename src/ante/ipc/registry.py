@@ -1,12 +1,18 @@
 """CommandRegistry — IPC 커맨드 핸들러 등록 및 조회.
 
 각 커맨드 핸들러는 (ServiceRegistry, args: dict, actor: str) -> dict 시그니처를 따른다.
+
+Refs #1184: 각 등록 핸들러는 ``CommandSpec``으로 wrap되어 ``is_mutating``
+taxonomy를 함께 보유한다. ``IPCServer._dispatch``는 lifecycle state가
+``SHUTTING_DOWN``일 때 mutating 핸들러를 ``SERVICE_UNAVAILABLE``로 거부하기
+위해 이 정보를 사용한다.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -17,24 +23,62 @@ CommandHandler = Callable[["ServiceRegistry", dict, str], Awaitable[dict]]
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class CommandSpec:
+    """IPC 커맨드의 메타데이터.
+
+    Refs #1184: lifecycle state machine과 결합하여 shutdown 중
+    mutating 명령을 거부하기 위한 taxonomy를 보유한다.
+
+    Attributes:
+        name: 커맨드 식별자 (예: ``"system.halt"``).
+        handler: 비동기 핸들러 콜러블.
+        is_mutating: 핸들러가 서버 상태/DB를 변경하면 True. 단순 read-only
+            (live 조회) 면 False.
+    """
+
+    name: str
+    handler: CommandHandler
+    is_mutating: bool
+
+
 class CommandRegistry:
-    """커맨드 이름 -> 핸들러 매핑."""
+    """커맨드 이름 -> CommandSpec 매핑.
+
+    Refs #1184: 단순 dict[str, handler]에서 dict[str, CommandSpec]으로
+    전환되었다. 외부 호출자는 ``register(name, handler, *, is_mutating=...)``
+    keyword-only 인자를 명시해야 한다.
+    """
 
     def __init__(self) -> None:
-        self._handlers: dict[str, CommandHandler] = {}
+        self._specs: dict[str, CommandSpec] = {}
 
-    def register(self, command: str, handler: CommandHandler) -> None:
-        """핸들러 등록."""
-        self._handlers[command] = handler
+    def register(
+        self,
+        command: str,
+        handler: CommandHandler,
+        *,
+        is_mutating: bool,
+    ) -> None:
+        """핸들러 등록.
 
-    def get(self, command: str) -> CommandHandler | None:
-        """핸들러 조회. 미등록이면 None."""
-        return self._handlers.get(command)
+        Args:
+            command: 커맨드 이름.
+            handler: 비동기 핸들러.
+            is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
+        """
+        self._specs[command] = CommandSpec(
+            name=command, handler=handler, is_mutating=is_mutating
+        )
+
+    def get(self, command: str) -> CommandSpec | None:
+        """CommandSpec 조회. 미등록이면 None."""
+        return self._specs.get(command)
 
     @property
     def commands(self) -> list[str]:
-        """등록된 커맨드 목록."""
-        return list(self._handlers.keys())
+        """등록된 커맨드 목록 (이름만)."""
+        return list(self._specs.keys())
 
 
 # ── 핸들러 구현 ──────────────────────────────────────
@@ -237,24 +281,37 @@ async def _handle_broker_reconcile(
 def register_all_handlers(registry: CommandRegistry) -> None:
     """18개 런타임 커맨드 핸들러를 일괄 등록.
 
+    Refs #1184: 각 핸들러는 mutating(15개) 또는 read-only(3개)로 분류된다.
+    분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
+    한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
+    ``SERVICE_UNAVAILABLE``로 거부된다.
+
     `account.delete`는 1.0 IPC 계약에서 제외되었다 (#1139). cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
     """
-    registry.register("system.halt", _handle_system_halt)
-    registry.register("system.activate", _handle_system_activate)
-    registry.register("account.suspend", _handle_account_suspend)
-    registry.register("account.activate", _handle_account_activate)
-    registry.register("bot.create", _handle_bot_create)
-    registry.register("bot.remove", _handle_bot_remove)
-    registry.register("treasury.allocate", _handle_treasury_allocate)
-    registry.register("treasury.deallocate", _handle_treasury_deallocate)
-    registry.register("config.set", _handle_config_set)
-    registry.register("approval.request", _handle_approval_request)
-    registry.register("approval.approve", _handle_approval_approve)
-    registry.register("approval.reject", _handle_approval_reject)
-    registry.register("approval.cancel", _handle_approval_cancel)
-    registry.register("approval.reopen", _handle_approval_reopen)
-    registry.register("broker.status", _handle_broker_status)
-    registry.register("broker.balance", _handle_broker_balance)
-    registry.register("broker.positions", _handle_broker_positions)
-    registry.register("broker.reconcile", _handle_broker_reconcile)
+    # ── mutating (15개): 서버 상태/DB를 변경 ──────────
+    registry.register("system.halt", _handle_system_halt, is_mutating=True)
+    registry.register("system.activate", _handle_system_activate, is_mutating=True)
+    registry.register("account.suspend", _handle_account_suspend, is_mutating=True)
+    registry.register("account.activate", _handle_account_activate, is_mutating=True)
+    registry.register("bot.create", _handle_bot_create, is_mutating=True)
+    registry.register("bot.remove", _handle_bot_remove, is_mutating=True)
+    registry.register("treasury.allocate", _handle_treasury_allocate, is_mutating=True)
+    registry.register(
+        "treasury.deallocate", _handle_treasury_deallocate, is_mutating=True
+    )
+    registry.register("config.set", _handle_config_set, is_mutating=True)
+    registry.register("approval.request", _handle_approval_request, is_mutating=True)
+    registry.register("approval.approve", _handle_approval_approve, is_mutating=True)
+    registry.register("approval.reject", _handle_approval_reject, is_mutating=True)
+    registry.register("approval.cancel", _handle_approval_cancel, is_mutating=True)
+    registry.register("approval.reopen", _handle_approval_reopen, is_mutating=True)
+    # broker.reconcile은 reconciler.reconcile()이 correct_position/이벤트
+    # publish를 수행하므로 일괄 mutating으로 분류한다. CLI ``--fix=False``
+    # dryrun 분리는 후속 이슈.
+    registry.register("broker.reconcile", _handle_broker_reconcile, is_mutating=True)
+
+    # ── read-only (3개): BrokerAdapter live 조회만 ────
+    registry.register("broker.status", _handle_broker_status, is_mutating=False)
+    registry.register("broker.balance", _handle_broker_balance, is_mutating=False)
+    registry.register("broker.positions", _handle_broker_positions, is_mutating=False)
