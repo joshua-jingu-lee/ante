@@ -174,7 +174,8 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 
 ### 3.3 검증 환경 체크리스트
 
-- 목표 Python 버전이 저장소 기준과 일치해야 한다.
+- 목표 Python 버전이 저장소 기준과 일치해야 한다. Ante는 CPython 3.13 단일 런타임(`>=3.13,<3.14`)만 공식 지원하며, 검증 환경(러너/로컬)도 동일 버전으로 맞춘다.
+- Python 3.13 free-threaded 빌드와 JIT는 공식 지원 범위 밖이다. 검증 환경에는 표준 CPython 3.13만 사용한다.
 - `pytest`, `ruff`, 필요 테스트 의존성이 러너에 설치되어 있어야 한다.
 - writable temp dir가 있어야 artifact/summary/result 파일을 안정적으로 생성할 수 있다.
 - compose 또는 런타임 설정 검증이 필요한 저장소라면 `config/secrets.env` 같은 필수 입력 파일 가용성을 확인한다.
