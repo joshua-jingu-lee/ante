@@ -23,9 +23,9 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 - Plan Preflight 결과가 이슈 본문 구현계획으로 확정되었고
 - 이슈가 `/implement-issue`를 통해 실제 수정과 PR 생성까지 진행되었고
-- 같은 이슈의 `ci` 통과 + auto-merge + post-merge가 확인되었음 (AI 승인은 advisory monitoring)
+- 같은 이슈의 `ci` 통과 + auto-merge + post-merge가 확인되었음
 
-`--handoff-only`일 때만 PR 생성 후 기존 리뷰 게이트 인계에서 종료한다.
+`--handoff-only`일 때만 PR 생성 후 머지 모니터링을 생략하고 종료한다.
 
 ## 운영 사이클
 
@@ -38,8 +38,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
    - `/implement-issue #{번호}`를 호출해 실제 수정, 검증, PR 생성까지 진행한다.
    - Plan Preflight의 tasks, verification, risk flags, stop conditions는 구현 프롬프트에 강제 반영할 항목이다.
 3. **머지 모니터링 사이클**
-   - 머지 조건은 `ci` + `merge-gate` + auto-merge + `post-merge`다. `claude-pr-approve` / `codex-pr-approve`는 advisory monitoring으로 함께 보지만 머지 차단 게이트가 아니다.
-   - 승인 워커의 `content` FAIL은 advisory 신호이므로 머지를 막지 않지만, autopilot은 현재 이슈의 advisory 자동 재수정 루프가 정리될 때까지 다음 이슈로 넘어가지 않는다.
+   - 머지 조건은 `ci` + `merge-gate` + auto-merge + `post-merge`다.
+   - PR 단계의 자동 AI 승인 워커는 운영하지 않으므로 monitoring에 포함하지 않는다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한 결과를 PR 코멘트로 확인한다.
 
 별도 선행 작업:
 
@@ -144,7 +144,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ### Plan Preflight 병렬 lane
 
-- 현재 활성 이슈가 구현, 브랜치 리뷰, CI, PR 승인, merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
+- 현재 활성 이슈가 구현, 브랜치 리뷰, CI, merge-gate 또는 merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
 - Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
 - Plan Preflight 절차의 SSOT는 `.agent/commands/plan-preflight.md`이며, autopilot은 직접 다른 절차를 만들지 않고 `/plan-preflight #{번호}`를 호출한다.
 - Plan Preflight를 시작하면 `plan-preflight:started` 라벨을 붙이고 `plan-preflight:done`은 제거한다.
@@ -252,16 +252,10 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 3. auto-merge
 4. `post-merge` 후처리
 
-advisory monitoring으로 함께 살피지만 머지 차단 게이트가 아닌 신호:
-
-- `claude-pr-approve` (advisory)
-- `codex-pr-approve` (advisory)
-- `claude-pr-fix` 자동 재수정 루프 (advisory)
-
 모니터링 규칙:
 
-- `content` FAIL이 나오면 Claude 자동 재수정 루프가 새 커밋을 push할 때까지 기다리고, 새 head SHA 기준으로 같은 모니터링을 반복한다.
-- 같은 head SHA에서 `quota`, `script_error`, `auth_error`, `infra_error`로 멈추면 `gh run rerun`을 우선하고, 복구되지 않으면 `retry-later-infra`로 종료한다.
+- 같은 head SHA에서 `ci`/`merge-gate`가 인프라 이슈로 멈추면 `gh run rerun`을 우선하고, 복구되지 않으면 `retry-later-infra`로 종료한다.
+- PR 후 추가 코드 변경이 필요해 보이면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 `ci` 결과를 다시 확인한다.
 - 상태 변화 없이 장시간 대기하거나 `--time-budget`이 소진되면 현재 이슈를 `deferred-merge-monitoring`으로 기록하고 배치를 종료한다.
 - `--handoff-only`일 때만 PR 생성 직후 모니터링을 생략하고 `handed-off`로 기록한다.
 - PR이 생성되는 즉시 상태 코멘트를 `implement-state=done`, `merge-monitor-state=running`, `current-cycle=merge-monitor`로 갱신하고 `pr`/`head`를 채운다.
@@ -308,7 +302,7 @@ advisory monitoring으로 함께 살피지만 머지 차단 게이트가 아닌 
 리포트 말미에는 **프로세스 회고**를 반드시 포함한다.
 
 - `### 있었던 사건`
-  - 예: 특정 runner 대기 지연, PR 승인 워커 충돌, stale base, merge conflict, review-loop 반복, 인증 실패, 수동 재실행 필요
+  - 예: 특정 runner 대기 지연, stale base, merge conflict, review-loop 반복, 인증 실패, 수동 재실행 필요
 - `### 개선 포인트`
   - 예: 라벨 규칙 보강, Plan Preflight 조건 조정, runner capacity 조정, 코멘트 템플릿 정리, 큐 정렬 규칙 수정
 
@@ -320,7 +314,7 @@ advisory monitoring으로 함께 살피지만 머지 차단 게이트가 아닌 
 - 시간 예산이 소진되면 현재 이슈 정리 후 종료한다.
 - 같은 이슈를 같은 배치에서 반복 재집지 않는다.
 - `blocked:review-loop` 또는 `blocked:pr-review-loop`가 붙은 이슈는 배치가 억지로 밀어붙이지 않는다.
-- 위 라벨은 각각 브랜치 리뷰 10회 소진, PR 승인 재수정 10회 소진의 안전장치로 해석하며, autopilot은 해당 이슈를 보류하고 다음 이슈로 넘어간다.
+- `blocked:review-loop`는 브랜치 리뷰 10회 소진의 안전장치로 해석한다. `blocked:pr-review-loop`는 자동 PR 재수정 루프가 더 이상 운영되지 않는 환경에서도 큐 제외 / 사람 개입 대기 신호로 유지하며, autopilot은 해당 이슈를 보류하고 다음 이슈로 넘어간다.
 - 현재 이슈가 merge/post-merge 확인 전 상태라면, 다음 이슈를 시작하지 않고 해당 이슈 상태를 먼저 확정한다.
 
 ## 원칙
