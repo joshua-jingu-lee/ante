@@ -155,17 +155,14 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 3. 미해결 대화 없음
 4. auto-merge 활성화 가능 상태
 
-`claude-pr-approve`와 `codex-pr-approve`는 advisory check이며 머지 조건이 아니다. PR 본문/코멘트에서는 advisory 보조 신호로 참고하지만, 실패해도 머지 게이트를 막지 않는다.
+머지 조건 판정은 `merge-gate` job이 집행한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
 
-### 4.3 PR 승인 실패 처리
+### 4.3 PR 후 추가 변경 처리
 
-- `claude-pr-approve` 또는 `codex-pr-approve`가 `content` FAIL이면 Claude가 같은 PR 브랜치에서 자동 재수정을 시도한다. 두 승인은 advisory check이므로 자동 재수정 루프 자체는 머지를 막는 게이트가 아니라 권고 신호다.
-- 자동 재수정은 최대 10회까지 허용한다.
-- `quota`, `script_error`, `auth_error`, `infra_error`는 코드 내용 실패로 보지 않으며, 자동 재수정 횟수에 포함하지 않는다.
-- 자동 재수정 결과가 `NO_CHANGES`이면, 이를 성공으로 취급하지 않고 메타 리뷰 또는 수동 수정 단계로 승격한다.
-- 같은 head SHA에서 재실행만 필요할 때는 `gh run rerun`을 우선한다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 머지를 진행한다.
+- `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
-- 10회 소진 시 `blocked:pr-review-loop` 라벨을 붙이고 PR을 사람 확인 대상으로 넘긴다. advisory 환경에서도 `blocked:pr-review-loop`는 자동 재수정 루프 종료 신호로 유지하며, 사람이 advisory finding을 검토한 뒤 머지 여부를 판단한다.
+- 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
 
 ### 4.4 머지 방식
 
@@ -186,7 +183,6 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 
 - required status checks:
   - `ci`
-- AI 승인(`claude-pr-approve`, `codex-pr-approve`)은 advisory check이므로 required status checks에 포함하지 않는다.
 - require conversation resolution
 - allow auto-merge
 - automatically delete head branches
