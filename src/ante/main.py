@@ -1384,16 +1384,20 @@ async def _shutdown(s: Services) -> None:
 
     종료 순서 (Refs #1159 — cold-path race window 차단):
     1. 종료 알림(NotificationEvent), Telegram, 스케줄러 태스크 취소
-    2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**
+    2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**.
+       이 호출 시작 시 IPCServer state는 `SHUTTING_DOWN`으로 전환되어 이후
+       active connection의 mutating command를 `SERVICE_UNAVAILABLE`로 거부한다.
     3. Web API 종료
     4. DailyReportScheduler, ReconcileScheduler 종료
     5. 각 계좌의 Treasury sync 중지
     6. BotManager 전체 봇 중지
     7. StreamIntegration 종료
     8. APIGateway 종료
-    9. 각 계좌의 BrokerAdapter disconnect
-    10. Database 종료
-    11. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
+    9. BrokerAdapter/DB 종료 직전 **IPCServer.stop_dispatching()** — active
+        connection의 read-only dispatch까지 `SERVICE_UNAVAILABLE`로 거부.
+    10. 각 계좌의 BrokerAdapter disconnect
+    11. Database 종료
+    12. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
         cold-path guard(`PID alive AND socket exists`)가 이 시점부터 'active 아님'
         판정.
     """
@@ -1431,7 +1435,9 @@ async def _shutdown(s: Services) -> None:
             pass
         logger.info("결재 만료 스케줄러 종료")
 
-    # Refs #1159: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
+    # Refs #1159/#1184: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
+    # stop_accepting() 시작 시 IPCServer state가 SHUTTING_DOWN으로 바뀌어
+    # 이후 active connection의 mutating command는 SERVICE_UNAVAILABLE로 거부된다.
     # cold-path guard(`PID alive AND socket exists`)가 BotManager/DB 종료 전까지
     # 'active runtime'으로 판정하도록 unlink_socket()은 lifecycle 마지막에서 호출.
     if s.ipc_server:
@@ -1478,6 +1484,12 @@ async def _shutdown(s: Services) -> None:
     if s.api_gateway:
         s.api_gateway.stop()
         logger.info("APIGateway 종료")
+
+    # Refs #1184: BrokerAdapter disconnect/DB close 직전에는 read-only도 더는
+    # 안전하지 않다. 기존 active IPC connection의 추가 dispatch를 모두 거부한다.
+    if s.ipc_server:
+        s.ipc_server.stop_dispatching()
+        logger.info("IPCServer dispatch 거부 시작")
 
     # 각 계좌의 BrokerAdapter disconnect
     if s.account_service:

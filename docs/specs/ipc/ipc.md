@@ -182,6 +182,71 @@ bootstrap, recovery, 비상 revoke 같은 운영 복구를 위해 CLI가 MemberS
 생성할 수 있다. 이 fallback은 account cold-path처럼 서버 topology를 바꾸지는 않지만,
 인증·세션 상태를 바꾸므로 서버 실행 중 직접 DB 수정은 금지한다.
 
+## IPCServer lifecycle state
+
+IPCServer는 shutdown 중 활성 IPC connection이 새 mutating 명령을 dispatch하는 race를
+막기 위해 명시적인 lifecycle state를 가진다.
+
+| 상태 | 진입 시점 | IPC dispatch 정책 |
+|------|-----------|------------------|
+| `RUNNING` | `start()`가 Unix socket listener와 파일 권한 설정을 완료한 직후 | 모든 등록 명령을 정상 dispatch |
+| `SHUTTING_DOWN` | `stop_accepting()` 진입 직후, listener `close()` 호출 전 | mutating 명령은 `SERVICE_UNAVAILABLE`로 거부, read-only 명령은 통과 |
+| `DRAINING` | `_shutdown()`이 BrokerAdapter disconnect/DB close 같은 리소스 종료에 들어가기 직전, 또는 `stop()` facade가 drain을 시작하기 직전 | mutating/read-only를 포함한 모든 명령을 `SERVICE_UNAVAILABLE`로 거부 |
+| `STOPPED` | `unlink_socket()` 종료 시점 | mutating/read-only를 포함한 모든 명령을 `SERVICE_UNAVAILABLE`로 거부 |
+
+`SHUTTING_DOWN`에서 read-only 명령을 통과시키는 이유는 BotManager와 DB가 아직 살아
+있는 초기 shutdown 구간의 운영 가시성을 보존하기 위해서다. 반대로 `DRAINING` 이후는
+BrokerAdapter disconnect와 DB close가 시작되는 구간이므로 read-only도 closed resource
+접근 위험이 있어 거부한다.
+
+`stop_accepting()`은 새 연결 수락만 중지하고 소켓 파일을 유지한다. cold-path guard는
+`PID alive AND socket exists`를 active runtime으로 판정하므로, `unlink_socket()`은
+BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
+
+## Handler taxonomy
+
+`CommandRegistry`는 각 등록 명령을 `CommandSpec`으로 보관하며, `is_mutating` taxonomy를
+명시한다. 이 taxonomy는 `SHUTTING_DOWN` 상태에서 mutating 명령만
+`SERVICE_UNAVAILABLE`로 거부하기 위한 서버 측 계약이다.
+
+- **mutating**: 서버 인메모리 상태, DB, 계좌/봇/예산/설정/결재/정산 상태를 변경하거나
+  변경 이벤트를 발행하는 명령
+- **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
+  변경하지 않는 명령
+
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 18개가
+SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
+
+| IPC 커맨드 | taxonomy | 근거 |
+|-----------|----------|------|
+| `system.halt` | mutating | `AccountService.suspend_all()` 호출 |
+| `system.activate` | mutating | `AccountService.activate_all()` 호출 |
+| `account.suspend` | mutating | `AccountService.suspend()` 호출 |
+| `account.activate` | mutating | `AccountService.activate()` 호출 |
+| `bot.create` | mutating | `BotManager.create_bot()` 호출 |
+| `bot.remove` | mutating | `BotManager.remove_bot()` 호출 |
+| `treasury.allocate` | mutating | `Treasury.allocate()` 호출 |
+| `treasury.deallocate` | mutating | `Treasury.deallocate()` 호출 |
+| `config.set` | mutating | `DynamicConfigService.set()` 호출 |
+| `approval.request` | mutating | `ApprovalService.create()` 호출 |
+| `approval.approve` | mutating | `ApprovalService.approve()` 호출 |
+| `approval.reject` | mutating | `ApprovalService.reject()` 호출 |
+| `approval.cancel` | mutating | `ApprovalService.cancel()` 호출 |
+| `approval.reopen` | mutating | `ApprovalService.reopen()` 호출 |
+| `broker.reconcile` | mutating | `PositionReconciler.reconcile()`이 보정/이벤트 경로를 수행 |
+| `broker.status` | read-only | `BrokerAdapter.health_check()` live 조회 |
+| `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
+| `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
+
+`broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
+이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
+IPC command 분리는 별도 이슈 범위다.
+
+`account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
+taxonomy 대상이 아니다. `broker.price`, `member.*`, `bot.start/stop`,
+`bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로 표현되어 있으나 현재
+`register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다.
+
 ## 통신 프로토콜
 
 ### 전송 계층
@@ -269,11 +334,15 @@ JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 
 | 메서드 | 시그니처 | 설명 |
 |--------|---------|------|
-| `__init__` | `(self, socket_path: str, registry: ServiceRegistry)` | 소켓 경로와 서비스 레지스트리 |
-| `start` | `async (self) -> None` | 소켓 서버 시작, `asyncio.start_unix_server` 사용 |
-| `stop` | `async (self) -> None` | 소켓 서버 종료, 소켓 파일 삭제 |
+| `__init__` | `(self, socket_path: str, service_registry: ServiceRegistry, command_registry: CommandRegistry)` | 소켓 경로와 서비스/커맨드 레지스트리 |
+| `start` | `async (self) -> None` | 소켓 서버 시작, `asyncio.start_unix_server` 사용, state를 `RUNNING`으로 전환 |
+| `stop_accepting` | `async (self) -> None` | state를 `SHUTTING_DOWN`으로 전환한 뒤 새 연결 수락 중지, 소켓 파일 유지 |
+| `stop_dispatching` | `(self) -> None` | state를 `DRAINING`으로 전환하여 active connection의 추가 dispatch를 모두 거부 |
+| `drain_connections` | `async (self, timeout: float = 5.0) -> None` | active 연결 drain 대기, timeout 시 경고 후 진행 |
+| `unlink_socket` | `(self) -> None` | 소켓 파일 삭제, state를 `STOPPED`로 전환 |
+| `stop` | `async (self) -> None` | 호환 facade: `stop_accepting()` → `stop_dispatching()` → `drain_connections()` → `unlink_socket()` |
 | `_handle_connection` | `async (self, reader, writer) -> None` | 커넥션별 요청 처리 |
-| `_dispatch` | `async (self, command: str, args: dict, actor: str) -> dict` | `CommandRegistry`에서 핸들러 조회 → 실행 → 결과 반환 |
+| `_dispatch` | `async (self, request: dict) -> dict` | lifecycle state/taxonomy 검사 → `CommandRegistry`에서 핸들러 조회 → 실행 → 결과 반환 |
 
 ### IPCClient
 
@@ -298,10 +367,12 @@ CLI 프로세스에서 서버의 Unix socket에 연결하여 커맨드를 전달
 
 | 메서드 | 시그니처 | 설명 |
 |--------|---------|------|
-| `get` | `(self, command: str) -> CommandHandler \| None` | 커맨드에 대한 핸들러 반환 |
-| `register` | `(self, command: str, handler: CommandHandler) -> None` | 커맨드 핸들러 등록 |
+| `get` | `(self, command: str) -> CommandSpec \| None` | 커맨드에 대한 핸들러와 taxonomy 반환 |
+| `register` | `(self, command: str, handler: CommandHandler, *, is_mutating: bool) -> None` | 커맨드 핸들러와 mutating/read-only taxonomy 등록 |
 
 `CommandHandler` 시그니처: `async (registry: ServiceRegistry, args: dict, actor: str) -> dict`
+
+`CommandSpec` 필드: `name: str`, `handler: CommandHandler`, `is_mutating: bool`
 
 ### ServiceRegistry
 
@@ -331,6 +402,9 @@ class ServiceRegistry:
 | 타임아웃 (기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
+| shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
+| 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
+| 서버 종료 후 dispatch | `STOPPED` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 
 ## 보안 고려
 

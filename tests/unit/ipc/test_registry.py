@@ -2,7 +2,7 @@
 
 import pytest
 
-from ante.ipc.registry import CommandRegistry, register_all_handlers
+from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
 
 
 @pytest.fixture
@@ -16,8 +16,13 @@ def test_register_and_get(registry: CommandRegistry) -> None:
     async def dummy_handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {"ok": True}
 
-    registry.register("test.command", dummy_handler)
-    assert registry.get("test.command") is dummy_handler
+    registry.register("test.command", dummy_handler, is_mutating=True)
+    spec = registry.get("test.command")
+    assert spec == CommandSpec(
+        name="test.command",
+        handler=dummy_handler,
+        is_mutating=True,
+    )
 
 
 def test_get_unregistered_returns_none(registry: CommandRegistry) -> None:
@@ -31,8 +36,8 @@ def test_commands_property(registry: CommandRegistry) -> None:
     async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {}
 
-    registry.register("a.command", handler)
-    registry.register("b.command", handler)
+    registry.register("a.command", handler, is_mutating=True)
+    registry.register("b.command", handler, is_mutating=False)
     assert set(registry.commands) == {"a.command", "b.command"}
 
 
@@ -69,6 +74,45 @@ def test_register_all_handlers() -> None:
     assert set(registry.commands) == expected
     # account.delete는 cold-path 전용이므로 IPC 등록 대상이 아니다.
     assert "account.delete" not in registry.commands
+
+
+def test_register_all_handlers_taxonomy() -> None:
+    """등록된 18개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다."""
+    registry = CommandRegistry()
+    register_all_handlers(registry)
+
+    mutating = {
+        "system.halt",
+        "system.activate",
+        "account.suspend",
+        "account.activate",
+        "bot.create",
+        "bot.remove",
+        "treasury.allocate",
+        "treasury.deallocate",
+        "config.set",
+        "approval.request",
+        "approval.approve",
+        "approval.reject",
+        "approval.cancel",
+        "approval.reopen",
+        "broker.reconcile",
+    }
+    read_only = {"broker.status", "broker.balance", "broker.positions"}
+
+    assert len(mutating) == 15
+    assert len(read_only) == 3
+    assert mutating | read_only == set(registry.commands)
+
+    for command in mutating:
+        spec = registry.get(command)
+        assert spec is not None
+        assert spec.is_mutating is True
+
+    for command in read_only:
+        spec = registry.get(command)
+        assert spec is not None
+        assert spec.is_mutating is False
 
 
 # ── _handle_bot_create 변환 로직 테스트 ──────────────
