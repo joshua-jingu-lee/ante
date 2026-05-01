@@ -120,7 +120,11 @@ async def _init_core(s: Services) -> None:
     logger.info("Ante 시작")
 
     # Database
-    db_path = s.config.get("db.path", "db/ante.db")
+    # `db.path` 는 cold-path CLI(`account create/delete/set-credentials`) 와
+    # 동일한 resolver 를 거쳐야 한다 — 절대 경로면 그대로, 상대 경로면
+    # `config_dir` 기준으로 정규화. 이로써 server runtime 과 CLI 가 같은
+    # DB 를 본다 (Refs #1158).
+    db_path = str(s.config.resolve_path("db.path", "db/ante.db"))
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     s.db = Database(db_path)
     await s.db.connect()

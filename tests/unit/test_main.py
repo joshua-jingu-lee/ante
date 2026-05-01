@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
@@ -780,3 +782,48 @@ async def test_init_context_factory_resolves_live_mode_for_live_account(
     assert resolved == TradingMode.LIVE
 
     await db.close()
+
+
+# ── _init_core × Config.resolve_path (Refs #1158) ─────────────
+
+
+async def test_init_core_uses_resolve_path_for_db_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_init_core 가 `db.path`를 `Config.resolve_path` 로 해석하는지 검증.
+
+    spec: docs/specs/cli/02-design-decisions.md:62-70 + docs/specs/config/
+    03-design-decisions.md `Ante instance/path contract`. server runtime은
+    cold-path CLI(`account create/delete/set-credentials`)와 동일 resolver
+    를 사용해 split-brain을 차단해야 한다.
+
+    이 테스트는 system.toml에 상대 경로 `db.path`를 기록한 뒤, _init_core
+    호출 후 `s.db._db_path`가 `<config_dir>/<relative>` 정규화 결과와 같은지
+    확인한다. 호출 시점 CWD를 다른 곳으로 바꾸어도 동일해야 한다 (split-
+    brain 회귀 가드).
+    """
+    from ante.main import Services, _init_core
+
+    cfg_dir = tmp_path / "instance"
+    cfg_dir.mkdir()
+    (cfg_dir / "system.toml").write_text(
+        '[db]\npath = "var/ante.db"\n[web]\nport = 3982\n'
+    )
+
+    # ANTE_CONFIG_DIR 으로 _init_core 가 부르는 Config.load() 가 cfg_dir 을 보게 한다
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(cfg_dir))
+    # CWD 를 다른 곳으로 — 이전 구현은 `Path.cwd() / db.path`로 결합됐을 수 있다
+    other_cwd = tmp_path / "elsewhere-cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    s = Services()
+    try:
+        await _init_core(s)
+        assert s.db is not None
+        assert s.db._db_path == str(cfg_dir / "var" / "ante.db")
+        # 부모 디렉토리도 생성되어야 한다 (server runtime 부트 보장)
+        assert (cfg_dir / "var").is_dir()
+    finally:
+        if s.db is not None:
+            await s.db.close()
