@@ -290,6 +290,8 @@ tests/
 │   ├── test_visual_verification.py # 시각적 검증 테스트
 │   └── visual_checker.py        # 시각적 검증 유틸리티
 ├── unit/                        # 단위 테스트 (pytest + pytest-asyncio)
+│   ├── test_account_runtime_guard.py  # AccountService 런타임 cold-path 가드 (#1144)
+│   ├── test_account_runtime_init_order.py  # _init_account의 mark_runtime_started 호출 순서 (#1144)
 │   ├── test_api_pagination.py   # Web API cursor 페이지네이션
 │   ├── test_approval.py
 │   ├── test_approval_api.py     # 결재 API 테스트
@@ -329,6 +331,7 @@ tests/
 │   ├── test_instrument_import.py    # 종목 데이터 CSV/JSON import
 │   ├── test_instrument_sync.py  # KIS API 종목 동기화
 │   ├── test_instrument.py
+│   ├── test_ipc_error_code_mapping.py  # IPCServer가 예외 code 속성을 안정 코드로 노출 (#1144)
 │   ├── test_kis_error_handling.py
 │   ├── test_kis_stream.py      # KIS WebSocket 스트리밍
 │   ├── test_listed_only.py      # --listed-only 필터

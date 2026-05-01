@@ -523,7 +523,7 @@ class TestUpdateAccount:
         account_service._accounts[account.account_id] = account
 
         resp = client.put("/api/accounts/test-account", json={})
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     def test_update_credentials_blocked_409(
         self,
@@ -836,19 +836,20 @@ class TestUpdateAccount:
         # service.update 미호출 — name 보존
         assert account_service._accounts["test-account"].name == "테스트 계좌"
 
-    def test_update_null_mutable_field_treated_as_no_op(
+    def test_update_null_mutable_value_returns_422(
         self,
         client: TestClient,
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
-        """``{"name": null}``은 fields가 비어 400으로 차단된다 (P1 회귀 보호).
+        """``{"name": null}``은 fields가 비어 422로 차단된다 (P1 회귀 보호 + #1152).
 
         ``AccountUpdateRequest`` 모든 필드는 ``str | None = None``이라 null도
         Pydantic 검증을 통과한다. 그러나 ``model_dump(exclude_none=True)``로
-        None 필드를 제외하면 fields가 비고, 라우트는 400 "수정할 필드가
+        None 필드를 제외하면 fields가 비고, 라우트는 422 "수정할 필드가
         없습니다."로 응답한다 — null이 service까지 forward되어 DB의 name을
-        지우거나 NOT NULL 제약 위반을 일으킬 가능성을 차단한다.
+        지우거나 NOT NULL 제약 위반을 일으킬 가능성을 차단한다(#1152: 400 → 422
+        정렬).
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
@@ -858,7 +859,7 @@ class TestUpdateAccount:
             "/api/accounts/test-account",
             json={"name": None},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
         assert resp.json().get("detail") == "수정할 필드가 없습니다."
         # service.update 미호출 — name 보존 (DB 오염 차단)
         assert account_service._accounts["test-account"].name == original_name
@@ -1062,15 +1063,16 @@ class TestUpdateAccount:
 
     # ── 빈 body / `{}` / `{"name": null}` no-op 호환 ─────────────
 
-    def test_update_empty_body_without_content_type_returns_400(
+    def test_update_empty_body_without_content_type_returns_422(
         self,
         client: TestClient,
         account_service: FakeAccountService,
     ) -> None:
-        """빈 body(b"") + Content-Type 부재 → 400 no-op (단계 2).
+        """빈 body(b"") + Content-Type 부재 → 422 no-op (단계 2 → 6, #1152).
 
-        호환성 보존: 클라이언트가 빈 body로 PUT을 보내면 기존과 동일하게
-        400 "수정할 필드가 없습니다."를 받는다. Content-Type 검사·JSON 파싱을
+        호환성 보존: 클라이언트가 빈 body로 PUT을 보내면 기존과 동일한 detail
+        텍스트("수정할 필드가 없습니다.")를 받지만 status는 #1152로 422
+        Unprocessable Entity로 정렬되었다. Content-Type 검사·JSON 파싱을
         모두 건너뛰고 mutable 단계로 흐른 뒤 ``len(payload) == 0``로 떨어진다.
         """
         account = _make_account()
@@ -1080,31 +1082,31 @@ class TestUpdateAccount:
             "/api/accounts/test-account",
             content=b"",
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
         assert resp.json().get("detail") == "수정할 필드가 없습니다."
 
-    def test_update_empty_object_with_json_content_type_returns_400(
+    def test_update_empty_object_with_json_content_type_returns_422(
         self,
         client: TestClient,
         account_service: FakeAccountService,
     ) -> None:
-        """`{}` + Content-Type: application/json → 400 no-op (단계 6)."""
+        """`{}` + Content-Type: application/json → 422 no-op (단계 6, #1152)."""
         account = _make_account()
         account_service._accounts[account.account_id] = account
 
         resp = client.put("/api/accounts/test-account", json={})
-        assert resp.status_code == 400
+        assert resp.status_code == 422
         assert resp.json().get("detail") == "수정할 필드가 없습니다."
 
-    def test_update_empty_object_with_text_plain_returns_400(
+    def test_update_empty_object_with_text_plain_returns_422(
         self,
         client: TestClient,
         account_service: FakeAccountService,
     ) -> None:
-        """`{}` + Content-Type: text/plain → 400 no-op (단계 6).
+        """`{}` + Content-Type: text/plain → 422 no-op (단계 6, #1152).
 
-        명시적 빈 dict는 Content-Type과 무관하게 기존 400 no-op 의미를 보존
-        한다(단계 6이 단계 7 Content-Type 게이트보다 앞).
+        명시적 빈 dict는 Content-Type과 무관하게 단계 6의 no-op 분기에서 422로
+        떨어진다(단계 6이 단계 7 Content-Type 게이트보다 앞).
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
@@ -1114,18 +1116,18 @@ class TestUpdateAccount:
             content=b"{}",
             headers={"Content-Type": "text/plain"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
         assert resp.json().get("detail") == "수정할 필드가 없습니다."
 
-    def test_update_name_null_with_json_content_type_returns_400(
+    def test_update_name_null_with_json_content_type_returns_422(
         self,
         client: TestClient,
         account_service: FakeAccountService,
     ) -> None:
-        """`{"name": null}` + Content-Type: application/json → 400 (단계 9).
+        """`{"name": null}` + Content-Type: application/json → 422 (단계 9, #1152).
 
         ``model_dump(exclude_none=True)``가 결과를 비워 mutable 검증 후
-        400으로 떨어진다(P1 회귀 보호 유지).
+        422로 떨어진다(P1 회귀 보호 유지 + #1152: 400 → 422 정렬).
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
@@ -1134,7 +1136,7 @@ class TestUpdateAccount:
             "/api/accounts/test-account",
             json={"name": None},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
         assert resp.json().get("detail") == "수정할 필드가 없습니다."
 
     def test_update_name_null_with_text_plain_returns_415(
@@ -1333,6 +1335,53 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 422
         assert "foo" in resp.json().get("detail", "")
+
+    # ── service-layer fallback (#1144 defense-in-depth) ──
+
+    def test_put_update_route_translates_runtime_exception_to_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """라우트 1차 가드(I1/I4)를 우회한 경로에서 service가 직접
+        ``AccountStructuralChangeRequiresStoppedServerError``를 raise해도
+        라우트가 409 + cold-path detail로 매핑한다 (#1144 defense-in-depth).
+
+        시나리오: 정상 mutable payload(``{"name": "..."}``)가 들어와 라우트의
+        structural 가드를 통과한 뒤 ``account_service.update``가 새 예외를
+        raise하도록 monkeypatch한다. 정상 흐름에서는 service의
+        ``_runtime_started`` 플래그와 STRUCTURAL_FIELDS 검사로 mutable-only
+        호출은 통과되지만, 본 회귀 테스트는 매핑 자체를 강제한다.
+        """
+        from ante.account.errors import (
+            AccountStructuralChangeRequiresStoppedServerError,
+        )
+
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        async def raise_runtime_guard(account_id: str, **fields: Any) -> Account:
+            raise AccountStructuralChangeRequiresStoppedServerError(
+                "다음 필드는 cold-path 전용입니다: credentials"
+            )
+
+        # mutable-only payload는 라우트 가드(I1/I4)를 통과한다 — 그 뒤 service의
+        # 가짜 예외가 활성화되도록 monkeypatch.
+        account_service.update = raise_runtime_guard  # type: ignore[method-assign]
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"name": "변경 시도"},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "credentials" in detail
+        # service-layer raise 경로에서는 audit log가 남지 않는다.
+        assert [
+            log for log in audit_logger.logs if log["action"] == "account.update"
+        ] == []
 
 
 # PUT requestBody schema accuracy(mutable 모델 노출)는 issue #1153에서 처리됨.

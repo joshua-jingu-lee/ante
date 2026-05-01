@@ -16,6 +16,7 @@ from ante.account.errors import (
     AccountHasActiveBotsError,
     AccountImmutableFieldError,
     AccountNotFoundError,
+    AccountStructuralChangeRequiresStoppedServerError,
     BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
@@ -73,6 +74,32 @@ def _register_brokers() -> None:
     _BROKER_REGISTRY["kis-domestic"] = KISAdapter
 
 
+# Cold-path 전용 필드 (서버 실행 중에는 변경 불가).
+# SSOT:
+#   - docs/specs/account/04-account-service.md 51-58줄
+#   - src/ante/web/routes/accounts.py STRUCTURAL_FIELDS (8개 라우트 1차 가드)
+#
+# - credentials, broker_config, buy_commission_rate, sell_commission_rate:
+#   broker adapter 재초기화가 필요한 필드.
+# - exchange, currency, trading_mode, broker_type:
+#   계좌 생성 후 불변 필드 (구조 변경 시 모든 소비자 재구성 필요).
+#
+# 두 set이 어긋나면 contract-drift이므로 cross-import 테스트
+# (test_account_runtime_guard.test_structural_fields_match_route_constant)로 강제한다.
+STRUCTURAL_FIELDS: frozenset[str] = frozenset(
+    {
+        "credentials",
+        "broker_config",
+        "buy_commission_rate",
+        "sell_commission_rate",
+        "broker_type",
+        "exchange",
+        "currency",
+        "trading_mode",
+    }
+)
+
+
 class AccountService:
     """계좌 CRUD, 상태 관리, 브로커 인스턴스 생성."""
 
@@ -81,6 +108,23 @@ class AccountService:
         self._eventbus = eventbus
         self._accounts: dict[str, Account] = {}
         self._brokers: dict[str, BrokerAdapter] = {}
+        # 런타임 인지 플래그(#1144 invariant S1).
+        # boot mutation 종료 직후(``main._init_account`` 마지막)
+        # ``mark_runtime_started()``로 True가 되며, 이후 cold-path 전용 메서드/필드
+        # 변경 요청을 ``AccountStructuralChangeRequiresStoppedServerError``로
+        # 즉시 차단한다.
+        self._runtime_started: bool = False
+
+    def mark_runtime_started(self) -> None:
+        """서버 부팅 mutation을 모두 마쳤음을 표시한다 (#1144 invariant S1/S3).
+
+        이 호출 이후로 ``create()``, ``delete()``, structural 키를 포함한
+        ``update()`` 호출은 ``AccountStructuralChangeRequiresStoppedServerError``로
+        즉시 차단된다 — DB는 수정되지 않는다.
+
+        멱등: 이미 True 상태에서 호출하면 no-op.
+        """
+        self._runtime_started = True
 
     # ── 초기화 ──────────────────────────────────────────
 
@@ -99,7 +143,7 @@ class AccountService:
     # ── CRUD ──────────────────────────────────────────
 
     async def create(self, account: Account) -> Account:
-        """계좌 생성.
+        """계좌 생성. **cold-path 전용**.
 
         Args:
             account: 생성할 계좌 정보.
@@ -108,11 +152,20 @@ class AccountService:
             생성된 Account (created_at, updated_at 포함).
 
         Raises:
+            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
+                호출됨. 다른 어떤 검사보다 먼저 평가된다 (#1144 invariant S2).
             AccountAlreadyExistsError: 동일 account_id가 이미 존재.
             InvalidAccountIdError: account_id 형식이 올바르지 않음.
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
+        # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
+        if self._runtime_started:
+            raise AccountStructuralChangeRequiresStoppedServerError(
+                "계좌 생성은 cold-path 전용입니다. "
+                "서버를 정지한 뒤 ante account create로 수행하세요."
+            )
+
         # account_id 형식 검증
         if not re.fullmatch(r"[a-zA-Z0-9\-]{3,30}", account.account_id):
             raise InvalidAccountIdError(
@@ -243,11 +296,30 @@ class AccountService:
     async def update(self, account_id: str, **fields: Any) -> Account:
         """계좌 부분 수정. updated_at 자동 갱신.
 
+        런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
+        ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중
+        하나라도 키로 등장하면(값이 ``None``이어도) cold-path 위반으로 판단,
+        ``AccountStructuralChangeRequiresStoppedServerError``를 raise한다 — DB
+        조회를 수행하지 않으므로 nonexistent/DELETED 계좌도 cold-path 응답이
+        우선이다 (#1144 invariant S2).
+
         Raises:
+            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
+                structural 키 변경 시도. ``get()``/DELETED/IMMUTABLE 등 다른
+                모든 검사보다 먼저 평가된다 (invariant S2).
             AccountNotFoundError: 계좌를 찾을 수 없음.
             AccountDeletedException: DELETED 계좌는 수정 불가.
             AccountImmutableFieldError: 불변 필드 수정 시도.
         """
+        # 런타임 cold-path 가드(invariant S2): get()/DELETED/IMMUTABLE 검사보다
+        # 먼저 평가한다. raw kwargs 키만 보고 값(None 포함)은 무관하다.
+        if self._runtime_started:
+            structural_hits = sorted(set(fields) & STRUCTURAL_FIELDS)
+            if structural_hits:
+                raise AccountStructuralChangeRequiresStoppedServerError(
+                    f"다음 필드는 cold-path 전용입니다: {', '.join(structural_hits)}"
+                )
+
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
             raise AccountDeletedException(
@@ -475,10 +547,19 @@ class AccountService:
         (reason="Account deletion")는 BotManager가 소속 봇을 중지시키도록 유지한다.
 
         Raises:
+            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
+                호출됨. 다른 어떤 검사보다 먼저 평가된다 (#1144 invariant S2).
             AccountNotFoundError: 계좌를 찾을 수 없음.
             AccountDeletedException: 이미 삭제된 계좌.
             AccountHasActiveBotsError: 활성(non-deleted) 봇이 남아 있음.
         """
+        # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
+        if self._runtime_started:
+            raise AccountStructuralChangeRequiresStoppedServerError(
+                "계좌 삭제는 cold-path 전용입니다. "
+                "서버를 정지한 뒤 ante account delete로 수행하세요."
+            )
+
         account = await self.get(account_id)
         if account.status == AccountStatus.DELETED:
             raise AccountDeletedException(f"이미 삭제된 계좌입니다: '{account_id}'")

@@ -71,25 +71,26 @@ export type paths = {
          *     검증을 거치면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가
          *     structural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.
          *
-         *     핸들러 단계 순서(이슈 #1153 Implementation Plan):
+         *     핸들러 단계 순서(이슈 #1153 + #1152 Implementation Plan):
          *
          *     1. raw bytes 읽기.
          *     2. **빈 body**(``b""``) → ``payload = {}``로 두고 Content-Type 검사·JSON
-         *        파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(현재 400 no-op 의미 보존).
+         *        파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(단계 6에서 422로 처리).
          *     3. **JSON 파싱 실패**: Content-Type ≠ application/json → 415,
          *        Content-Type 정상 → 422.
          *     4. **non-dict JSON**: Content-Type ≠ application/json → 415,
          *        Content-Type 정상 → 422.
          *     5. **structural 가드(I4 우선)**: dict payload에 structural 키 존재 → 409
          *        (Content-Type 무관, structural+text/plain도 409).
-         *     6. ``len(payload) == 0`` (``{}`` 명시 송신) → 400 no-op (Content-Type
-         *        검사 건너뜀; #1152 후속에서 422로 정렬).
+         *     6. ``len(payload) == 0`` (``{}`` 명시 송신 또는 빈 body) → 422 no-op
+         *        (Content-Type 검사 건너뜀; #1152 정렬 완료 — schema의
+         *        ``minProperties: 1``과 정합).
          *     7. **Content-Type 415 게이트**: ``application/json``(charset suffix 허용)
          *        이외 → 415.
          *     8. **unknown 키 / mutable type**: structural 제외한 raw dict의 unknown
          *        키 → 422. ``AccountUpdateRequest.model_validate`` ValidationError → 422.
-         *     9. ``model_dump(exclude_none=True)`` 결과 비면 400 (예: ``{"name": null}``
-         *        단독 — 기존 의미 유지).
+         *     9. ``model_dump(exclude_none=True)`` 결과 비면 422 (예: ``{"name": null}``
+         *        단독 — effective payload empty no-op; #1152 정렬 완료).
          *     10. service 호출.
          */
         put: operations["update_account_api_accounts__account_id__put"];

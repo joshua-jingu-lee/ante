@@ -140,11 +140,16 @@ class IPCServer:
             }
         except Exception as e:
             logger.exception("IPC 커맨드 실행 오류: %s", command)
+            # 예외 인스턴스/클래스에 ``code`` 속성이 있으면 안정 코드로
+            # 노출한다 (#1144 invariant S5). 기존 예외(account.suspend/activate
+            # 등)는 ``code`` 속성이 없어 자동으로 ``EXECUTION_ERROR``로
+            # 폴백된다 — 회귀 없음.
+            error_code = getattr(e, "code", "EXECUTION_ERROR")
             return {
                 "id": request_id,
                 "status": "error",
                 "error": {
-                    "code": "EXECUTION_ERROR",
+                    "code": error_code,
                     "message": str(e),
                 },
             }
