@@ -16,7 +16,7 @@ import sys
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.ipc import protocol
 from ante.ipc.exceptions import MessageTooLargeError
@@ -116,7 +116,7 @@ class IPCServer:
         if path.exists():
             path.unlink()
 
-        kwargs: dict[str, object] = {"path": self._socket_path}
+        kwargs: dict[str, Any] = {"path": self._socket_path}
         if sys.version_info >= (3, 13):
             kwargs["cleanup_socket"] = False
 
