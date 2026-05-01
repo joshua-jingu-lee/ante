@@ -36,6 +36,10 @@ class IPCServer:
         self._service_registry = service_registry
         self._command_registry = command_registry
         self._server: asyncio.AbstractServer | None = None
+        # Refs #1159: stop_accepting()이 self._server를 None으로 비워도
+        # drain_connections()이 wait_closed()를 호출할 수 있도록
+        # closing reference를 별도 슬롯에 보존한다.
+        self._closing_server: asyncio.AbstractServer | None = None
 
     @property
     def socket_path(self) -> str:
@@ -50,9 +54,14 @@ class IPCServer:
         if path.exists():
             path.unlink()
 
+        # Refs #1159: cleanup_socket=False로 server.close() 시 asyncio가
+        # 소켓 파일을 unlink하지 않도록 한다. cold-path guard가 shutdown 동안
+        # 'PID alive AND socket exists'로 active runtime을 판정하므로,
+        # socket 파일 lifecycle은 IPCServer.unlink_socket()이 단독 책임진다.
         self._server = await asyncio.start_unix_server(
             self._handle_connection,
             path=self._socket_path,
+            cleanup_socket=False,
         )
 
         # 소켓 파일 권한 설정 (소유자만 접근)
@@ -60,18 +69,58 @@ class IPCServer:
 
         logger.info("IPCServer 시작: %s", self._socket_path)
 
-    async def stop(self) -> None:
-        """서버 종료 및 소켓 파일 삭제."""
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
+    async def stop_accepting(self) -> None:
+        """새 연결 수락 중지. 소켓 파일과 active 연결은 유지.
 
+        ``asyncio.Server.wait_closed``는 detach된 연결까지 모두 기다리므로
+        ``_handle_connection``이 ``while True`` 루프인 IPCServer에서는 hang
+        위험이 있다 (Refs #1159 Codex Plan v1 [high]). 따라서 본 메서드는
+        ``close()``만 호출하고 wait는 별도 ``drain_connections()``이 담당한다.
+
+        cold-path guard(``PID alive AND socket exists``)가 shutdown 동안에도
+        'active runtime'으로 판정하도록, 소켓 파일은 ``unlink_socket()``이
+        호출되기 전까지 유지된다.
+        """
+        if self._server:
+            # drain_connections에서 wait_closed를 호출할 수 있도록 reference 보존
+            self._closing_server = self._server
+            self._server.close()
+            self._server = None
+        logger.info("IPCServer 새 연결 수락 중지: %s", self._socket_path)
+
+    async def drain_connections(self, timeout: float = 5.0) -> None:
+        """active 연결을 timeout 안에 drain 시도. TimeoutError 삼키고 진행.
+
+        ``stop_accepting()``이 보존한 ``_closing_server`` reference를 사용해
+        ``wait_closed()``를 호출한다. timeout 초과 시 경고 로그를 남기고
+        lifecycle은 계속 진행한다 (강제 종료는 asyncio 루프가 처리).
+        """
+        closing = self._closing_server
+        if closing is None:
+            return
+        try:
+            await asyncio.wait_for(closing.wait_closed(), timeout=timeout)
+        except TimeoutError:
+            logger.warning(
+                "IPCServer drain_connections 타임아웃: %s (%.1fs) — 강제 진행",
+                self._socket_path,
+                timeout,
+            )
+        finally:
+            self._closing_server = None
+
+    def unlink_socket(self) -> None:
+        """소켓 파일 제거. lifecycle 마지막 단계에서 호출."""
         path = Path(self._socket_path)
         if path.exists():
             path.unlink()
+        logger.info("IPCServer 소켓 파일 제거: %s", self._socket_path)
 
-        logger.info("IPCServer 종료: %s", self._socket_path)
+    async def stop(self) -> None:
+        """기존 호출자 호환 facade. listener close → drain → unlink."""
+        await self.stop_accepting()
+        await self.drain_connections()
+        self.unlink_socket()
 
     async def _handle_connection(
         self,
