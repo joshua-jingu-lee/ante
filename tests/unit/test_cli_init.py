@@ -1216,3 +1216,57 @@ class TestInitSystemTomlAbsoluteDbPath:
         toml_text = (target / "system.toml").read_text()
         expected = (target / "db" / "ante.db").resolve()
         assert f'path = "{expected}"' in toml_text
+
+
+class TestInitSystemTomlRuntimeSection:
+    """Refs #1157: ``ante init``이 만든 ``system.toml``에 ``[runtime]`` 섹션이
+    들어가고, 섹션이 없는 기존 설치도 default fallback으로 동작해야 한다.
+    """
+
+    def test_system_toml_template_includes_runtime_section(self, runner, tmp_path):
+        """fresh init 후 system.toml에 ``[runtime] pid_path/socket_path``가 있다."""
+        from ante.cli.commands.init import SYSTEM_TOML_TEMPLATE
+
+        # 1) 템플릿 자체에 [runtime] 섹션과 두 키가 정의되어 있어야 한다.
+        assert "[runtime]" in SYSTEM_TOML_TEMPLATE
+        assert 'pid_path = "run/ante.pid"' in SYSTEM_TOML_TEMPLATE
+        assert 'socket_path = "run/ante.sock"' in SYSTEM_TOML_TEMPLATE
+
+        # 2) 실제 init이 만든 system.toml에도 같은 섹션이 보존된다.
+        target = tmp_path / "init-runtime"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        toml_text = (target / "system.toml").read_text()
+        assert "[runtime]" in toml_text
+        assert 'pid_path = "run/ante.pid"' in toml_text
+        assert 'socket_path = "run/ante.sock"' in toml_text
+
+    def test_existing_system_toml_without_runtime_section_falls_back_to_defaults(
+        self, tmp_path
+    ):
+        """``[runtime]`` 부재 시 default canonical을 산출.
+
+        기존 ``config_dir``에 자동으로 ``[runtime]`` 섹션을 주입할 필요는 없다 —
+        Config DEFAULTS가 ``run/ante.pid``/``run/ante.sock``을 보장한다.
+        """
+        from ante.config import Config
+
+        # [runtime] 섹션이 없는 baseline system.toml
+        (tmp_path / "system.toml").write_text(
+            '[system]\nlog_level = "INFO"\n\n[db]\npath = "db/ante.db"\n',
+            encoding="utf-8",
+        )
+
+        config = Config.load(config_dir=tmp_path)
+
+        assert config.runtime_pid_path() == tmp_path / "run" / "ante.pid"
+        assert config.runtime_socket_path() == tmp_path / "run" / "ante.sock"
