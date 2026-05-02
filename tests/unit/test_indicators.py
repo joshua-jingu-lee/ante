@@ -1,9 +1,13 @@
 """IndicatorCalculator 단위 테스트 (pandas-ta 기반)."""
 
+import logging
+from importlib import metadata
+
 import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
+from packaging.version import Version
 
 from ante.strategy.indicators import (
     INDICATOR_REGISTRY,
@@ -11,6 +15,51 @@ from ante.strategy.indicators import (
     ohlcv_to_dataframe,
     ohlcv_to_numpy,
 )
+
+# ── pandas-ta dependency 회귀 게이트 (Python 3.13 + pandas 3.x + numpy 2.x) ──
+#
+# `pandas-ta`는 `StrategyContext.get_indicator` / `LiveDataProvider.get_indicator`
+# 등 전략 기술 지표 계산 경로의 정규 의존성이다 (#1185, #1191).
+# 본 게이트는 다음 회귀를 사전에 차단한다:
+#   - Python 3.13 환경에서 `import pandas_ta`가 실패
+#   - pandas-ta 버전이 0.4.71b0 미만으로 떨어짐 (pyproject 핀 위반)
+#   - pandas/numpy/numba/llvmlite 조합 회귀 시 root cause 식별 불가
+#
+# `Pandas4Warning` 정책은 `pyproject.toml [tool.pytest.ini_options].filterwarnings`
+# 의 `default::pandas.errors.Pandas4Warning`로 결정되었다.
+# 출력은 유지하되 실패로 승격하지 않아 회귀 가시성을 보전한다 (#1191).
+
+
+def test_pandas_ta_import_smoke() -> None:
+    """pandas-ta가 Python 3.13 환경에서 정상 import되고 버전 핀을 만족한다."""
+    import pandas_ta as ta
+
+    assert ta.version, "pandas-ta version attribute must be populated"
+    assert Version(ta.version) >= Version("0.4.71b0"), (
+        f"pandas-ta {ta.version} is below the pyproject pin (>=0.4.71b0). "
+        "Check the dependency lock and rebuild the venv."
+    )
+
+
+def test_dependency_versions_log(caplog: pytest.LogCaptureFixture) -> None:
+    """지표 계산 경로의 핵심 의존성 버전을 로그로 남긴다 (회귀 root cause 식별용)."""
+    packages = ("pandas", "numpy", "pandas-ta", "numba", "llvmlite")
+    versions: dict[str, str] = {}
+    for name in packages:
+        try:
+            versions[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            versions[name] = "not-installed"
+
+    with caplog.at_level(logging.INFO, logger="ante.tests.indicators"):
+        logger = logging.getLogger("ante.tests.indicators")
+        logger.info("indicator dependency versions: %s", versions)
+
+    # pandas-ta는 정규 의존성이므로 반드시 설치되어 있어야 한다.
+    assert versions["pandas-ta"] != "not-installed", (
+        "pandas-ta is a required dependency; check pyproject.toml and venv"
+    )
+
 
 # ── 테스트용 OHLCV 데이터 (50봉) ──
 
