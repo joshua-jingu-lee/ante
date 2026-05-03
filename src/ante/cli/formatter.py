@@ -78,7 +78,9 @@ class OutputFormatter:
     def error(self, message: str, code: str = "") -> None:
         """에러 출력."""
         if self._format == "json":
-            click.echo(json.dumps({"error": message, "code": code}))
+            click.echo(
+                json.dumps({"status": "error", "code": code, "message": message})
+            )
         else:
             click.echo(f"Error: {message}", err=True)
 

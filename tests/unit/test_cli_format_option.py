@@ -481,7 +481,7 @@ class TestTradeInfoFormatOption:
             assert result.exit_code == 0
             # Not found case produces JSON error
             data = json.loads(result.output)
-            assert "error" in data
+            assert "message" in data
 
 
 # ── account set-credentials 비대화형 테스트 ────────────────
