@@ -118,11 +118,11 @@ def _exit_with_error(fmt: OutputFormatter, code: str, message: str) -> NoReturn:
 
     text/json 양쪽 표면에 에러 코드가 일관되게 노출되도록 한다.
     JSON 모드(`OutputFormatter.is_json`)에서는 `OutputFormatter.error`가
-    `{"error": ..., "code": ...}` 형식으로 dump한다. text 모드에서는
-    `OutputFormatter.error`가 message만 출력하므로, 사람/Agent가 같은
-    표면에서 코드를 읽을 수 있도록 message 본문에 `CODE: ` prefix를
-    덧붙인다(cold-path 헬퍼 ``cold_path.assert_no_active_runtime``과 동일
-    contract).
+    `{"status": "error", "code": ..., "message": ...}` 형식으로 dump한다.
+    text 모드에서는 `OutputFormatter.error`가 message만 출력하므로,
+    사람/Agent가 같은 표면에서 코드를 읽을 수 있도록 message 본문에
+    `CODE: ` prefix를 덧붙인다(cold-path 헬퍼
+    ``cold_path.assert_no_active_runtime``과 동일 contract).
 
     반환 타입은 ``NoReturn``이므로, 호출 후 후속 코드는 mypy 관점에서
     unreachable하다(env/file 분기에서 None narrowing 등).

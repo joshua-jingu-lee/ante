@@ -121,7 +121,7 @@ class TestMemberRevokeYes:
         service.revoke.assert_not_awaited()
         data = json.loads(result.output)
         assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
-        assert "--yes" in data["error"]
+        assert "--yes" in data["message"]
 
     def test_revoke_with_yes_invokes_revoke(self) -> None:
         """`--yes` 명시 시 MemberService.revoke가 실행된다."""
@@ -238,8 +238,8 @@ class TestMemberResetPasswordEnvFile:
         service.reset_password.assert_not_awaited()
         data = json.loads(result.output)
         assert data["code"] == "CLI_MISSING_REQUIRED_INPUT"
-        assert "--new-password-env" in data["error"]
-        assert "--new-password-file" in data["error"]
+        assert "--new-password-env" in data["message"]
+        assert "--new-password-file" in data["message"]
 
     def test_reset_password_both_env_and_file_fails(
         self,
@@ -273,7 +273,7 @@ class TestMemberResetPasswordEnvFile:
         service.reset_password.assert_not_awaited()
         data = json.loads(result.output)
         assert data["code"] == "CLI_MISSING_REQUIRED_INPUT"
-        assert "동시에" in data["error"]
+        assert "동시에" in data["message"]
 
     def test_reset_password_env_unset_fails(
         self,
@@ -466,8 +466,8 @@ class TestMemberRegenerateRecoveryKeyEnvFile:
         service.regenerate_recovery_key.assert_not_awaited()
         data = json.loads(result.output)
         assert data["code"] == "CLI_MISSING_REQUIRED_INPUT"
-        assert "--password-env" in data["error"]
-        assert "--password-file" in data["error"]
+        assert "--password-env" in data["message"]
+        assert "--password-file" in data["message"]
 
     def test_regenerate_both_env_and_file_fails(
         self,
@@ -499,7 +499,7 @@ class TestMemberRegenerateRecoveryKeyEnvFile:
         service.regenerate_recovery_key.assert_not_awaited()
         data = json.loads(result.output)
         assert data["code"] == "CLI_MISSING_REQUIRED_INPUT"
-        assert "동시에" in data["error"]
+        assert "동시에" in data["message"]
 
     def test_regenerate_env_unset_fails(
         self,

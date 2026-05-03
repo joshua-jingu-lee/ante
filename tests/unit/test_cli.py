@@ -135,8 +135,8 @@ class TestOutputFormatter:
         fmt.error("fail", code="ERR01")
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert data["error"] == "fail"
-        assert data["code"] == "ERR01"
+        assert data == {"status": "error", "code": "ERR01", "message": "fail"}
+        assert "error" not in data
 
     def test_success_text(self, capsys):
         fmt = OutputFormatter("text")

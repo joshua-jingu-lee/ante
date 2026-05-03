@@ -759,8 +759,8 @@ class TestInitJsonErrorContract:
             f"exit=1 기대 (got {result.exit_code}): {result.output}"
         )
         data = self._parse_error_json(result.output)
-        assert "error" in data
-        assert "init이 이미 완료된 상태입니다" in data["error"]
+        assert data["status"] == "error"
+        assert "init이 이미 완료된 상태입니다" in data["message"]
         assert data.get("code") == "already_initialized"
 
     def test_init_bootstrap_failure_json_output(self, runner, tmp_path):
@@ -793,8 +793,8 @@ class TestInitJsonErrorContract:
             f"exit=1 기대 (got {result.exit_code}): {result.output}"
         )
         data = self._parse_error_json(result.output)
-        assert "error" in data
-        assert "패스워드 정책 위반" in data["error"]
+        assert data["status"] == "error"
+        assert "패스워드 정책 위반" in data["message"]
         assert data.get("code") == "bootstrap_failed"
 
     def test_init_test_account_failure_json_output(self, runner, tmp_path):
@@ -827,9 +827,9 @@ class TestInitJsonErrorContract:
             f"exit=1 기대 (got {result.exit_code}): {result.output}"
         )
         data = self._parse_error_json(result.output)
-        assert "error" in data
-        assert "테스트 계좌 생성 실패" in data["error"]
-        assert "DB lock" in data["error"]
+        assert data["status"] == "error"
+        assert "테스트 계좌 생성 실패" in data["message"]
+        assert "DB lock" in data["message"]
         assert data.get("code") == "test_account_failed"
 
     def test_init_already_initialized_text_mode_preserves_message(

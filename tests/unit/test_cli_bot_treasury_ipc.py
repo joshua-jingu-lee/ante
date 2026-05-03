@@ -295,7 +295,7 @@ class TestBotRemoveIpc:
 
         data = _json.loads(result.output)
         assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
-        assert "--yes" in data["error"]
+        assert "--yes" in data["message"]
 
     @patch("ante.cli.commands.bot.is_active_runtime", return_value=False)
     @patch("ante.cli.commands.bot._run_bot_remove_cold_path")
