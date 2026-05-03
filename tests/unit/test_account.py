@@ -904,6 +904,77 @@ async def test_create_default_test_account_idempotent(service):
     assert first.account_id == second.account_id
 
 
+# ── _bootstrap seed 가드 (#1216) ────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "default",  # fallback 예약어
+        "random",  # seed 화이트리스트 밖
+        "main",  # 일반 valid이지만 seed 아님
+        "ab",  # 형식 위반 (너무 짧음, 동시에 seed 아님)
+    ],
+)
+async def test_create_with_bootstrap_rejects_non_seed(service, bad_id):
+    """``_bootstrap=True``는 BROKER_PRESETS seed account_id만 허용한다.
+
+    내부 호출자가 ``_bootstrap=True``로 'default'/패턴 위반/임의 ID를 슬쩍
+    통과시키지 못하게 막는 defense-in-depth 가드 (#1216).
+    """
+    account = _make_account(account_id=bad_id)
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account, _bootstrap=True)
+
+    assert "_bootstrap=True" in str(exc_info.value)
+    assert "BROKER_PRESETS" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_create_with_bootstrap_rejects_empty(service):
+    """``_bootstrap=True``로 빈 문자열 account_id는 거부된다 (seed 화이트리스트 밖)."""
+    # _make_account의 default 분기로 직접 만들지 못하므로 명시적으로 구성.
+    account = _make_account(account_id="")
+
+    with pytest.raises(InvalidAccountIdError):
+        await service.create(account, _bootstrap=True)
+
+
+@pytest.mark.asyncio
+async def test_create_with_bootstrap_accepts_seed_test(service):
+    """``_bootstrap=True``로 ``"test"`` (seed)는 통과한다."""
+    preset = BROKER_PRESETS["test"]
+    account = _make_account(
+        account_id=preset.default_account_id,
+        broker_type="test",
+        credentials={k: "test" for k in preset.required_credentials},
+    )
+
+    result = await service.create(account, _bootstrap=True)
+
+    assert result.account_id == "test"
+    assert result.status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_create_default_test_account_bootstrap_path_works(service):
+    """``create_default_test_account`` 흐름이 새 가드 적용 후에도 정상 동작.
+
+    회귀 방지: ``_bootstrap=True`` 경로의 seed 화이트리스트 가드가 기존
+    bootstrap seed 자동 생성 흐름을 깨지 않아야 한다.
+    """
+    account = await service.create_default_test_account()
+
+    assert account.account_id == "test"
+    assert account.broker_type == "test"
+    assert account.status == AccountStatus.ACTIVE
+    # 멱등성도 함께 확인 (기존 계약 유지)
+    again = await service.create_default_test_account()
+    assert again.account_id == "test"
+
+
 # ── DB 영속성 ──────────────────────────────────────
 
 
