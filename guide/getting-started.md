@@ -160,11 +160,27 @@ ante --format json init --member-id operator --name "Operator"
 
 ### 실거래 증권사 계좌 (KIS) 추가
 
+`ante account create`는 비대화형 cold-path 명령입니다. 브로커 종류·계좌 ID·거래 모드(`virtual`/`live`)는 옵션으로 지정하고, 인증정보(`app_key`, `app_secret` 등)는 환경변수(권장) 또는 파일 채널로만 전달합니다. KIS의 `is_paper`(모의투자 여부)는 `--broker-config` free-form 채널로 넘깁니다.
+
 ```bash
-ante account create
+export ANTE_KIS_APP_KEY="..."        # 사전 등록
+export ANTE_KIS_APP_SECRET="..."
+export ANTE_KIS_ACCOUNT_NO="..."     # 8자리 계좌번호 + 2자리 상품코드
+
+ante account create \
+  --broker-type kis-domestic \
+  --account-id domestic \
+  --name "국내주식" \
+  --trading-mode virtual \
+  --credential-env app_key=ANTE_KIS_APP_KEY \
+  --credential-env app_secret=ANTE_KIS_APP_SECRET \
+  --credential-env account_no=ANTE_KIS_ACCOUNT_NO \
+  --broker-config is_paper=true
 ```
 
-`ante account create`는 대화형으로 브로커 종류, 계좌 ID, 거래 모드(VIRTUAL/LIVE), 인증정보(`app_key`, `app_secret`, 계좌번호 등)와 KIS의 `is_paper`(모의투자 여부)를 입력받아 새 계좌를 생성합니다. 인증정보는 이후 `ante account set-credentials`로 갱신할 수 있습니다.
+`kis-domestic` preset은 `app_key`, `app_secret`, `account_no` 세 키를 모두 필수로 요구합니다. 하나라도 누락되면 `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` 에러로 실패합니다.
+
+인증정보는 이후 `ante account set-credentials <ACCOUNT_ID>`로 동일한 `--credential-env` / `--credential-file` 채널을 통해 갱신할 수 있습니다. 도메인 specialize 옵션(`--app-key-env` 등)은 제공되지 않으며, generic credential 계약만 사용합니다.
 
 **TradingMode**(Ante 시스템 레벨의 거래 모드)와 **is_paper**(KIS API 레벨의 모의투자 여부) 조합:
 

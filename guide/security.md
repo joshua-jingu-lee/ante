@@ -86,9 +86,21 @@ ante account activate domestic
 # 인증 정보 확인 (마스킹 출력)
 ante account credentials domestic
 
-# 인증 정보 변경
-ante account set-credentials domestic
+# 인증 정보 변경 (비대화형, cold-path 전용)
+# 환경변수 채널 (권장)
+ante account set-credentials domestic \
+  --credential-env app_key=ANTE_KIS_APP_KEY \
+  --credential-env app_secret=ANTE_KIS_APP_SECRET \
+  --credential-env account_no=ANTE_KIS_ACCOUNT_NO
+
+# 또는 파일 채널 (Docker secret 등)
+ante account set-credentials domestic \
+  --credential-file app_key=/etc/ante/secrets/app_key \
+  --credential-file app_secret=/etc/ante/secrets/app_secret \
+  --credential-file account_no=/etc/ante/secrets/account_no
 ```
+
+> `BrokerPreset.required_credentials`의 모든 키를 한 번에 제공해야 하며, 부분 갱신은 허용되지 않습니다. 채널 셋(`--credential` / `--credential-env` / `--credential-file`)이 모두 비어 있으면 `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` 에러로 실패합니다.
 
 `secrets.env`와 DB 디렉토리는 해당 서버의 파일 시스템 권한으로 보호해야 합니다:
 

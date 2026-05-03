@@ -17,7 +17,22 @@ http://<홈서버 주소>:3982
 
 접속하면 로그인 화면이 나타납니다. `ante init`에서 생성한 Master 계정의 Member ID와 패스워드를 입력합니다.
 
-- **패스워드는 `ante init` 실행 직후 터미널 화면에만 1회 표시**됩니다. DB에는 해시로만 저장되어 이후에는 재확인할 수 없으니, 반드시 안전한 곳에 보관해 두세요. 분실 시에는 `ante init` 출력에 함께 표시된 Recovery Key로 `ante member reset-password --recovery-key ANTE-RK-...`를 실행하여 리셋합니다.
+- **패스워드는 `ante init` 실행 직후 터미널 화면에만 1회 표시**됩니다. DB에는 해시로만 저장되어 이후에는 재확인할 수 없으니, 반드시 안전한 곳에 보관해 두세요. 분실 시에는 `ante init` 출력에 함께 표시된 Recovery Key로 비대화형 절차에 따라 리셋합니다:
+  1. 새 패스워드를 환경변수 또는 파일에 미리 준비합니다 (`export ANTE_NEW_PASSWORD="..."` 또는 `printf '%s' "..." > /tmp/ante-new-password`).
+  2. Recovery Key와 새 패스워드 채널을 함께 전달합니다.
+     ```bash
+     # 환경변수 채널
+     ante member reset-password \
+       --recovery-key ANTE-RK-... \
+       --new-password-env ANTE_NEW_PASSWORD
+
+     # 또는 파일 채널
+     ante member reset-password \
+       --recovery-key ANTE-RK-... \
+       --new-password-file /tmp/ante-new-password
+     ```
+  - `reset-password`는 master 멤버를 자동으로 조회하므로 `member_id`를 인자로 받지 않습니다.
+  - `--new-password-env` / `--new-password-file`는 상호 배타이며, 둘 다 누락 또는 둘 다 지정 시 `CLI_MISSING_REQUIRED_INPUT` 에러로 실패합니다.
 - 인증은 세션 쿠키 기반이며, 24시간 동안 유지됩니다.
 - 세션이 만료되면 자동으로 로그인 화면으로 이동합니다.
 
