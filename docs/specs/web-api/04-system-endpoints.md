@@ -55,12 +55,12 @@
 | `account_id` | string | 계좌 식별자 |
 | `previous_status` | string | 호출 직전 상태 (`ACTIVE` 또는 `SUSPENDED`) |
 | `status` | string | 호출 직후 상태 (`ACTIVE` 또는 `SUSPENDED`) |
-| `changed` | bool | 실제 전환 여부. 이미 대상 상태이거나 DELETED 계좌(대상 외)는 `false` |
+| `changed` | bool | 실제 전환 여부. 이미 목표 상태였던 계좌(예: `clear-halt` 호출 시 이미 ACTIVE인 계좌)는 `false` |
 
 **의미 규칙**:
-- `halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환한다. DELETED 계좌는 대상에서 제외된다.
-- `clear-halt`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. 계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다(BotManager는 `AccountActivatedEvent`를 수신해도 로깅만 수행).
-- `accounts[]`에는 처리 대상 후보 계좌가 모두 포함되며, 상태 변화가 없는 항목(`changed: false`)도 응답에 노출되어 호출자가 멱등 동작을 검증할 수 있다.
+- `halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환한다. DELETED 계좌는 후보에서 제외되며 응답 `accounts[]`에 포함되지 않는다.
+- `clear-halt`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. DELETED 계좌는 후보에서 제외되며 응답 `accounts[]`에 포함되지 않는다. 계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다(BotManager는 `AccountActivatedEvent`를 수신해도 로깅만 수행).
+- `accounts[]`에는 처리 대상 후보 계좌(ACTIVE/SUSPENDED)만 포함되며, 상태 변화가 없는 항목(`changed: false` — 이미 목표 상태였던 계좌)도 응답에 노출되어 호출자가 멱등 동작을 검증할 수 있다. DELETED 계좌는 후보 자체에서 제외되므로 `accounts[]`에 등장하지 않는다.
 
 **에러 envelope (4xx / 5xx)**:
 
