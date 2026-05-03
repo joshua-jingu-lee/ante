@@ -1,8 +1,19 @@
-"""ante member — 멤버 관리 커맨드."""
+"""ante member — 멤버 관리 커맨드.
+
+비대화형 입력 계약(SSOT: docs/specs/cli/02-design-decisions.md):
+- ``member revoke``는 ``--yes`` 누락 시 prompt 없이
+  ``CLI_CONFIRMATION_REQUIRED``로 실패한다.
+- ``member reset-password`` / ``member regenerate-recovery-key``는 비밀값을
+  ``--*-env <ENV_NAME>`` 또는 ``--*-file <PATH>`` 채널로만 받는다. 누락/공란/중복은
+  도메인 prefix 에러 코드(``MEMBER_PASSWORD_ENV_NOT_SET``,
+  ``MEMBER_PASSWORD_FILE_NOT_FOUND``, ``CLI_MISSING_REQUIRED_INPUT``)로 실패한다.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 
 import click
 
@@ -19,6 +30,72 @@ def member() -> None:
 def _run(coro):  # noqa: ANN001, ANN202
     """동기 CLI에서 async 함수 실행."""
     return asyncio.run(coro)
+
+
+def _resolve_secret_non_interactive(
+    fmt,  # noqa: ANN001
+    *,
+    env_name: str | None,
+    file_path: str | None,
+    env_option_label: str,
+    file_option_label: str,
+    missing_input_message: str,
+) -> str:
+    """``--*-env`` / ``--*-file`` 채널에서 비밀값을 비대화형으로 읽어들인다.
+
+    - 둘 다 없으면 ``CLI_MISSING_REQUIRED_INPUT``로 실패한다.
+    - 둘 다 지정되면 (상호 배타) ``CLI_MISSING_REQUIRED_INPUT``로 실패한다.
+    - env 부재/공란이면 ``MEMBER_PASSWORD_ENV_NOT_SET``로 실패한다.
+    - file 부재/읽기 실패/공란이면 ``MEMBER_PASSWORD_FILE_NOT_FOUND``로 실패한다.
+
+    실패는 모두 ``fmt.error(..., code=...)`` 출력 후 ``SystemExit(1)``로 종료한다.
+    """
+    if env_name is None and file_path is None:
+        fmt.error(
+            missing_input_message
+            + f" {env_option_label} 또는 {file_option_label} 중 하나를 지정하세요.",
+            code="CLI_MISSING_REQUIRED_INPUT",
+        )
+        raise SystemExit(1)
+
+    if env_name is not None and file_path is not None:
+        fmt.error(
+            f"{env_option_label}와 {file_option_label}는 동시에 지정할 수 없습니다."
+            " 둘 중 하나만 사용하세요.",
+            code="CLI_MISSING_REQUIRED_INPUT",
+        )
+        raise SystemExit(1)
+
+    if env_name is not None:
+        value = os.environ.get(env_name)
+        if value is None or value.strip() == "":
+            fmt.error(
+                f"환경변수 {env_name}이(가) 설정되어 있지 않거나 공란입니다."
+                f" {env_option_label}는 비밀값이 든 환경변수의 *이름*만 받습니다.",
+                code="MEMBER_PASSWORD_ENV_NOT_SET",
+            )
+            raise SystemExit(1)
+        return value.strip()
+
+    # file_path is not None
+    assert file_path is not None  # noqa: S101 — 위 분기로 보장
+    path = Path(file_path)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as e:
+        fmt.error(
+            f"{file_option_label} 파일을 읽을 수 없습니다: {file_path} ({e})",
+            code="MEMBER_PASSWORD_FILE_NOT_FOUND",
+        )
+        raise SystemExit(1) from e
+    value = raw.strip()
+    if value == "":
+        fmt.error(
+            f"{file_option_label} 파일이 비어 있습니다: {file_path}",
+            code="MEMBER_PASSWORD_FILE_NOT_FOUND",
+        )
+        raise SystemExit(1)
+    return value
 
 
 async def _create_service():  # noqa: ANN202
@@ -296,14 +373,31 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
 
 @member.command("revoke")
 @click.argument("member_id")
-@click.confirmation_option(prompt="이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?")
+@click.option(
+    "--yes",
+    "yes",
+    is_flag=True,
+    default=False,
+    help="삭제를 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패",
+)
 @click.pass_context
 @require_auth
 @require_scope("member:admin")
-def member_revoke(ctx: click.Context, member_id: str) -> None:
-    """멤버 영구 폐기."""
+def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
+    """멤버 영구 폐기.
+
+    ``--yes`` 누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
+    """
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
+
+    if not yes:
+        fmt.error(
+            "위험 명령입니다. --yes를 명시해야 멤버를 폐기합니다."
+            " 이 작업은 되돌릴 수 없습니다.",
+            code="CLI_CONFIRMATION_REQUIRED",
+        )
+        raise SystemExit(1)
 
     async def _run_revoke() -> dict:
         service, db = await _create_service()
@@ -356,12 +450,40 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
 
 @member.command("reset-password")
 @click.option("--recovery-key", required=True, help="Recovery Key")
+@click.option(
+    "--new-password-env",
+    "new_password_env",
+    default=None,
+    help="새 패스워드를 담은 환경변수의 *이름* (값이 아닌 변수명만 받음)",
+)
+@click.option(
+    "--new-password-file",
+    "new_password_file",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="새 패스워드를 담은 파일의 경로 (파일 내용 strip)",
+)
 @click.pass_context
-def member_reset_password(ctx: click.Context, recovery_key: str) -> None:
-    """Recovery Key로 패스워드 리셋 (인증 불필요)."""
+def member_reset_password(
+    ctx: click.Context,
+    recovery_key: str,
+    new_password_env: str | None,
+    new_password_file: str | None,
+) -> None:
+    """Recovery Key로 패스워드 리셋 (인증 불필요).
+
+    새 패스워드는 ``--new-password-env <ENV_NAME>`` 또는
+    ``--new-password-file <PATH>``로만 받으며, 둘 다 없거나 둘 다 지정하면 prompt
+    없이 ``CLI_MISSING_REQUIRED_INPUT``로 실패한다.
+    """
     fmt = get_formatter(ctx)
-    new_password = click.prompt(
-        "새 패스워드", hide_input=True, confirmation_prompt=True
+    new_password = _resolve_secret_non_interactive(
+        fmt,
+        env_name=new_password_env,
+        file_path=new_password_file,
+        env_option_label="--new-password-env",
+        file_option_label="--new-password-file",
+        missing_input_message="새 패스워드 입력이 필요합니다.",
     )
 
     async def _run_reset() -> None:
@@ -386,11 +508,40 @@ def member_reset_password(ctx: click.Context, recovery_key: str) -> None:
 
 
 @member.command("regenerate-recovery-key")
+@click.option(
+    "--password-env",
+    "password_env",
+    default=None,
+    help="현재 패스워드를 담은 환경변수의 *이름* (값이 아닌 변수명만 받음)",
+)
+@click.option(
+    "--password-file",
+    "password_file",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="현재 패스워드를 담은 파일의 경로 (파일 내용 strip)",
+)
 @click.pass_context
-def member_regenerate_recovery_key(ctx: click.Context) -> None:
-    """Recovery Key 재발급 (인증 불필요)."""
+def member_regenerate_recovery_key(
+    ctx: click.Context,
+    password_env: str | None,
+    password_file: str | None,
+) -> None:
+    """Recovery Key 재발급 (인증 불필요).
+
+    현재 패스워드는 ``--password-env <ENV_NAME>`` 또는 ``--password-file <PATH>``로만
+    받으며, 둘 다 없거나 둘 다 지정하면 prompt 없이 ``CLI_MISSING_REQUIRED_INPUT``로
+    실패한다.
+    """
     fmt = get_formatter(ctx)
-    password = click.prompt("현재 패스워드", hide_input=True)
+    password = _resolve_secret_non_interactive(
+        fmt,
+        env_name=password_env,
+        file_path=password_file,
+        env_option_label="--password-env",
+        file_option_label="--password-file",
+        missing_input_message="현재 패스워드 입력이 필요합니다.",
+    )
 
     async def _run_regen() -> str:
         service, db = await _create_service()
