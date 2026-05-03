@@ -1079,7 +1079,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/api/system/activate": {
+    "/api/system/clear-halt": {
         parameters: {
             query?: never;
             header?: never;
@@ -1089,10 +1089,12 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Activate
-         * @description 전체 거래 재개 (모든 계좌 ACTIVE).
+         * Clear Halt
+         * @description 전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE).
+         *
+         *     계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.
          */
-        post: operations["activate_api_system_activate_post"];
+        post: operations["clear_halt_api_system_clear_halt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1110,7 +1112,7 @@ export type paths = {
         put?: never;
         /**
          * Halt
-         * @description 전체 거래 중지 (모든 계좌 SUSPENDED).
+         * @description 전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED).
          */
         post: operations["halt_api_system_halt_post"];
         delete?: never;
@@ -1442,17 +1444,6 @@ export type components = {
          * @description 계좌 정지 요청.
          */
         AccountSuspendRequest: {
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
-        };
-        /**
-         * ActivateRequest
-         * @description 거래 재개 요청.
-         */
-        ActivateRequest: {
             /**
              * Reason
              * @default
@@ -1828,6 +1819,17 @@ export type components = {
             bot_id: string;
         };
         /**
+         * ClearHaltRequest
+         * @description 전역 정지 해제 요청.
+         */
+        ClearHaltRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
          * ConfigItem
          * @description 동적 설정 아이템.
          */
@@ -2061,10 +2063,40 @@ export type components = {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * KillSwitchAccountChange
+         * @description 킬 스위치 처리 대상 계좌의 상태 전환 결과.
+         *
+         *     SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 필드 표.
+         *     필드는 정확히 ``account_id``, ``previous_status``, ``status``, ``changed`` 4개
+         *     키만 사용한다 (``before_status`` / ``after_status`` 사용 금지).
+         */
+        KillSwitchAccountChange: {
+            /** Account Id */
+            account_id: string;
+            /** Changed */
+            changed: boolean;
+            /** Previous Status */
+            previous_status: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * KillSwitchResponse
          * @description 킬 스위치 제어 응답.
+         *
+         *     SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
+         *
+         *     - ``POST /api/system/halt`` → ``status="halted"``
+         *     - ``POST /api/system/clear-halt`` → ``status="halt_cleared"``
          */
         KillSwitchResponse: {
+            /**
+             * Accounts
+             * @default []
+             */
+            accounts: components["schemas"]["KillSwitchAccountChange"][];
+            /** Accounts Changed */
+            accounts_changed: number;
             /** Changed At */
             changed_at: string;
             /** Status */
@@ -3160,7 +3192,6 @@ export type AccountDetailResponse = components['schemas']['AccountDetailResponse
 export type AccountListResponse = components['schemas']['AccountListResponse'];
 export type AccountResponse = components['schemas']['AccountResponse'];
 export type AccountSuspendRequest = components['schemas']['AccountSuspendRequest'];
-export type ActivateRequest = components['schemas']['ActivateRequest'];
 export type ApprovalDetailResponse = components['schemas']['ApprovalDetailResponse'];
 export type ApprovalItem = components['schemas']['ApprovalItem'];
 export type ApprovalListResponse = components['schemas']['ApprovalListResponse'];
@@ -3179,6 +3210,7 @@ export type BudgetChangeRequest = components['schemas']['BudgetChangeRequest'];
 export type BudgetItem = components['schemas']['BudgetItem'];
 export type BudgetListResponse = components['schemas']['BudgetListResponse'];
 export type BudgetOperationResponse = components['schemas']['BudgetOperationResponse'];
+export type ClearHaltRequest = components['schemas']['ClearHaltRequest'];
 export type ConfigItem = components['schemas']['ConfigItem'];
 export type ConfigListResponse = components['schemas']['ConfigListResponse'];
 export type ConfigUpdateRequest = components['schemas']['ConfigUpdateRequest'];
@@ -3194,6 +3226,7 @@ export type FeedStatusResponse = components['schemas']['FeedStatusResponse'];
 export type HaltRequest = components['schemas']['HaltRequest'];
 export type HealthResponse = components['schemas']['HealthResponse'];
 export type HttpValidationError = components['schemas']['HTTPValidationError'];
+export type KillSwitchAccountChange = components['schemas']['KillSwitchAccountChange'];
 export type KillSwitchResponse = components['schemas']['KillSwitchResponse'];
 export type LoginRequest = components['schemas']['LoginRequest'];
 export type LoginResponse = components['schemas']['LoginResponse'];
@@ -5902,7 +5935,7 @@ export interface operations {
             };
         };
     };
-    activate_api_system_activate_post: {
+    clear_halt_api_system_clear_halt_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5911,7 +5944,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ActivateRequest"];
+                "application/json": components["schemas"]["ClearHaltRequest"];
             };
         };
         responses: {

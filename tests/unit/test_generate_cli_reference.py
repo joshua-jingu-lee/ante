@@ -278,6 +278,7 @@ class TestGenerateCliReference:
             "ante bot list",
             "ante strategy validate",
             "ante system halt",
+            "ante system clear-halt",
             "ante trade list",
             "ante feed init",
         ]
@@ -287,6 +288,10 @@ class TestGenerateCliReference:
         # 제거된 커맨드는 문서에 존재하지 않아야 한다 (issue #1125)
         assert "ante member bootstrap" not in content, (
             "제거된 ante member bootstrap이 CLI reference에 남아있습니다"
+        )
+        # legacy `ante system activate`는 #1213에서 제거됨 (SSOT 정책: hard remove)
+        assert "ante system activate" not in content, (
+            "legacy 'ante system activate'가 CLI reference에 남아있습니다 (Refs #1213)"
         )
 
     def test_intro_notice(self) -> None:

@@ -76,8 +76,27 @@ def account_service():
     # 기본: ACTIVE 계좌 1개
     active_account = SimpleNamespace(account_id="test", status=AccountStatus.ACTIVE)
     mock.list.return_value = [active_account]
-    mock.suspend_all = AsyncMock(return_value=1)
-    mock.activate_all = AsyncMock(return_value=1)
+    # Refs #1213: list[dict] 반환 타입.
+    mock.suspend_all = AsyncMock(
+        return_value=[
+            {
+                "account_id": "test",
+                "previous_status": "active",
+                "status": "suspended",
+                "changed": True,
+            }
+        ]
+    )
+    mock.activate_all = AsyncMock(
+        return_value=[
+            {
+                "account_id": "test",
+                "previous_status": "suspended",
+                "status": "active",
+                "changed": True,
+            }
+        ]
+    )
     return mock
 
 
@@ -237,27 +256,34 @@ class TestCommands:
         result = await receiver._execute("unknown", [], 12345, 100)
         assert "알 수 없는 명령" in result
 
-    async def test_activate(self, receiver, account_service):
+    async def test_clear_halt(self, receiver, account_service):
+        """``_cmd_clear_halt``는 ``activate_all``을 호출하고 SSOT 안내 문구를 반환."""
         from ante.account.models import AccountStatus
 
         suspended_account = SimpleNamespace(
             account_id="test", status=AccountStatus.SUSPENDED
         )
         account_service.list.return_value = [suspended_account]
-        result = await receiver._cmd_activate([])
-        assert "거래가 재개되었습니다" in result
+        result = await receiver._cmd_clear_halt([])
+        assert "정지가 해제" in result
+        # SSOT 문구: 봇 자동 재시작 없음
+        assert "자동 재시작되지 않습니다" in result
         account_service.activate_all.assert_called_once_with(activated_by="telegram")
 
-    async def test_activate_already_active(self, receiver, account_service):
-        # fixture default is ACTIVE
-        result = await receiver._cmd_activate([])
+    async def test_clear_halt_already_active(self, receiver, account_service):
+        """이미 ACTIVE면 즉시 안내."""
+        result = await receiver._cmd_clear_halt([])
         assert "이미 거래가 활성 상태입니다" in result
         account_service.activate_all.assert_not_called()
 
-    async def test_activate_no_service(self, receiver):
+    async def test_clear_halt_no_service(self, receiver):
         receiver._account_service = None
-        result = await receiver._cmd_activate([])
+        result = await receiver._cmd_clear_halt([])
         assert "연결되지 않았습니다" in result
+
+    async def test_no_legacy_activate_handler(self, receiver):
+        """legacy ``_cmd_activate`` 메서드는 제거되었다 (Refs #1213)."""
+        assert not hasattr(receiver, "_cmd_activate")
 
     async def test_stop_bot_no_positions(self, receiver, bot_manager):
         """보유 종목 없이 봇 중지 — 메시지 A."""
@@ -331,12 +357,52 @@ class TestCommands:
 class TestConfirmation:
     """위험 명령 확인 절차 테스트."""
 
+    def test_dangerous_commands_set_includes_clear_halt(self):
+        """``_DANGEROUS_COMMANDS``에 ``clear_halt`` 포함 (Refs #1213).
+
+        SSOT: ``docs/specs/notification/notification.md`` 위험 명령 표.
+        ``halt``, ``clear_halt``, ``stop`` 모두 2단계 확인 대상이다.
+        """
+        from ante.notification.telegram_receiver import _DANGEROUS_COMMANDS
+
+        assert _DANGEROUS_COMMANDS == {"halt", "clear_halt", "stop"}
+
     async def test_halt_requires_confirm(self, receiver):
         """halt 명령은 확인을 요구한다."""
         result = await receiver._execute("halt", ["긴급"], 12345, 100)
         assert "/confirm" in result
         assert "긴급" in result
         assert 12345 in receiver._pending_confirm
+
+    async def test_clear_halt_requires_confirm(self, receiver, account_service):
+        """clear_halt 명령은 확인을 요구한다 (Refs #1213, SSOT 위험 명령).
+
+        SSOT: ``docs/specs/notification/notification.md`` 위험 명령 표.
+        """
+        from ante.account.models import AccountStatus
+
+        # SUSPENDED 상태에서 호출해야 confirmation까지 도달.
+        suspended_account = SimpleNamespace(
+            account_id="test", status=AccountStatus.SUSPENDED
+        )
+        account_service.list.return_value = [suspended_account]
+        result = await receiver._execute("clear_halt", [], 12345, 100)
+        assert "/confirm" in result
+        assert "정지" in result
+        assert "자동 재시작" in result
+        assert 12345 in receiver._pending_confirm
+        # confirmation 단계이므로 activate_all은 아직 호출되지 않아야 한다.
+        account_service.activate_all.assert_not_called()
+
+    async def test_clear_halt_short_circuits_when_already_active(
+        self, receiver, account_service
+    ):
+        """이미 ACTIVE이면 confirmation 없이 즉시 안내."""
+        # fixture default is ACTIVE
+        result = await receiver._execute("clear_halt", [], 12345, 100)
+        assert "이미 거래가 활성 상태입니다" in result
+        assert 12345 not in receiver._pending_confirm
+        account_service.activate_all.assert_not_called()
 
     async def test_stop_requires_confirm(self, receiver):
         """stop 명령은 확인을 요구한다."""
@@ -354,6 +420,25 @@ class TestConfirmation:
         account_service.suspend_all.assert_called_once_with(
             reason="점검", suspended_by="telegram"
         )
+
+    async def test_confirm_executes_clear_halt(self, receiver, account_service):
+        """confirm으로 clear_halt가 실행된다 (Refs #1213).
+
+        clear_halt는 SSOT 위험 명령이므로 ``/confirm`` 분기에서 실행되어야 한다.
+        """
+        from ante.account.models import AccountStatus
+
+        suspended_account = SimpleNamespace(
+            account_id="test", status=AccountStatus.SUSPENDED
+        )
+        account_service.list.return_value = [suspended_account]
+
+        await receiver._execute("clear_halt", [], 12345, 100)
+        result = await receiver._handle_confirm(12345)
+        assert "정지가 해제" in result
+        # SSOT: 봇 자동 재시작 없음
+        assert "자동 재시작되지 않습니다" in result
+        account_service.activate_all.assert_called_once_with(activated_by="telegram")
 
     async def test_confirm_executes_stop(self, receiver, bot_manager):
         """confirm으로 stop이 실행된다."""
@@ -519,7 +604,9 @@ class TestIntegrationFlow:
         assert receiver._reply.call_count == 2
         reply_text = receiver._reply.call_args[0][1]
         assert "중지되었습니다" in reply_text
-        assert "/activate" in reply_text
+        # Refs #1213: 안내는 /clear_halt로 정렬 (legacy /activate 제거).
+        assert "/clear_halt" in reply_text
+        assert "/activate" not in reply_text
         account_service.suspend_all.assert_called_once_with(
             reason="긴급 점검", suspended_by="telegram"
         )
@@ -548,6 +635,74 @@ class TestIntegrationFlow:
         assert receiver._reply.call_count == 1
         assert "이미 거래가 중지된 상태입니다" in receiver._reply.call_args[0][1]
         account_service.suspend_all.assert_not_called()
+
+    async def test_full_clear_halt_confirm_flow(self, receiver, account_service):
+        """clear_halt → confirm → 실제 실행 흐름 (Refs #1213).
+
+        SSOT: ``docs/specs/notification/notification.md`` 위험 명령 표.
+        ``/clear_halt``는 2단계 확인 후 ``activate_all``을 호출하며,
+        BotManager 자동 재시작은 수행되지 않는다 (회귀 가드).
+        """
+        from ante.account.models import AccountStatus
+
+        suspended_account = SimpleNamespace(
+            account_id="test", status=AccountStatus.SUSPENDED
+        )
+        account_service.list.return_value = [suspended_account]
+
+        receiver._reply = AsyncMock()
+
+        clear_halt_update = {
+            "message": {
+                "text": "/clear_halt",
+                "from": {"id": 12345},
+                "chat": {"id": 100},
+            }
+        }
+        await receiver._handle_update(clear_halt_update)
+        assert receiver._reply.call_count == 1
+        assert "/confirm" in receiver._reply.call_args[0][1]
+        # 확인 단계에서는 activate_all이 호출되지 않는다.
+        account_service.activate_all.assert_not_called()
+
+        confirm_update = {
+            "message": {
+                "text": "/confirm",
+                "from": {"id": 12345},
+                "chat": {"id": 100},
+            }
+        }
+        await receiver._handle_update(confirm_update)
+        assert receiver._reply.call_count == 2
+        reply_text = receiver._reply.call_args[0][1]
+        assert "정지가 해제" in reply_text
+        assert "자동 재시작되지 않습니다" in reply_text
+        account_service.activate_all.assert_called_once_with(activated_by="telegram")
+
+    async def test_clear_halt_does_not_restart_bots(
+        self, receiver, account_service, bot_manager
+    ):
+        """clear_halt 실행 후 BotManager 자동 재시작이 호출되지 않음 (Refs #1213).
+
+        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT
+        "계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다".
+        BotManager는 ``AccountActivatedEvent`` 수신 시 로깅만 수행한다.
+        """
+        from ante.account.models import AccountStatus
+
+        suspended_account = SimpleNamespace(
+            account_id="test", status=AccountStatus.SUSPENDED
+        )
+        account_service.list.return_value = [suspended_account]
+
+        await receiver._cmd_clear_halt([])
+
+        account_service.activate_all.assert_called_once_with(activated_by="telegram")
+        # BotManager 자동 재시작 메서드들이 호출되지 않아야 한다.
+        bot_manager.start_bot.assert_not_called()
+        bot_manager.restart_bot.assert_not_called()
+        bot_manager.start_all.assert_not_called()
+        bot_manager.start.assert_not_called()
 
     async def test_reply_with_no_chat_id(self, receiver):
         """chat_id가 없어도 에러 없이 처리."""

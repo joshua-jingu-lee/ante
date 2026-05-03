@@ -51,8 +51,27 @@ class FakeDynamicConfig:
 @pytest.fixture
 def account_service():
     mock = AsyncMock()
-    mock.suspend_all = AsyncMock(return_value=1)
-    mock.activate_all = AsyncMock(return_value=1)
+    # Refs #1213: list[dict] 반환 타입 (account_id, previous_status, status, changed).
+    mock.suspend_all = AsyncMock(
+        return_value=[
+            {
+                "account_id": "domestic",
+                "previous_status": "active",
+                "status": "suspended",
+                "changed": True,
+            }
+        ]
+    )
+    mock.activate_all = AsyncMock(
+        return_value=[
+            {
+                "account_id": "domestic",
+                "previous_status": "suspended",
+                "status": "active",
+                "changed": True,
+            }
+        ]
+    )
     return mock
 
 
@@ -67,7 +86,12 @@ def client(account_service, dynamic_config):
     return TestClient(app)
 
 
-class TestHaltActivate:
+class TestHaltClearHalt:
+    """POST /api/system/halt + /api/system/clear-halt SSOT 응답 shape 검증.
+
+    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT.
+    """
+
     def test_halt(self, client, account_service):
         """POST /halt로 전체 거래 중지."""
         resp = client.post(
@@ -76,36 +100,65 @@ class TestHaltActivate:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert "suspended" in data["status"]
+        assert data["status"] == "halted"
+        assert data["accounts_changed"] == 1
         assert "changed_at" in data
+        assert data["accounts"] == [
+            {
+                "account_id": "domestic",
+                "previous_status": "active",
+                "status": "suspended",
+                "changed": True,
+            }
+        ]
         account_service.suspend_all.assert_called_once()
 
-    def test_activate(self, client, account_service):
-        """POST /activate로 거래 재개."""
+    def test_clear_halt(self, client, account_service):
+        """POST /clear-halt로 전역 정지 해제."""
         resp = client.post(
-            "/api/system/activate",
+            "/api/system/clear-halt",
             json={"reason": "재개"},
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert "activated" in data["status"]
+        assert data["status"] == "halt_cleared"
+        assert data["accounts_changed"] == 1
+        assert "changed_at" in data
+        assert data["accounts"] == [
+            {
+                "account_id": "domestic",
+                "previous_status": "suspended",
+                "status": "active",
+                "changed": True,
+            }
+        ]
         account_service.activate_all.assert_called_once()
 
-    def test_halt_activate_lifecycle(self, client, account_service):
-        """halt → activate lifecycle."""
+    def test_halt_clear_halt_lifecycle(self, client, account_service):
+        """halt → clear-halt lifecycle."""
         resp = client.post(
             "/api/system/halt",
             json={"reason": ""},
         )
         assert resp.status_code == 200
-        assert "suspended" in resp.json()["status"]
+        assert resp.json()["status"] == "halted"
 
         resp = client.post(
-            "/api/system/activate",
+            "/api/system/clear-halt",
             json={"reason": ""},
         )
         assert resp.status_code == 200
-        assert "activated" in resp.json()["status"]
+        assert resp.json()["status"] == "halt_cleared"
+
+    def test_legacy_activate_route_removed(self, client):
+        """legacy POST /api/system/activate는 hard remove (SSOT 정책)."""
+        resp = client.post("/api/system/activate", json={"reason": ""})
+        assert resp.status_code == 404
+
+    def test_legacy_kill_switch_route_absent(self, client):
+        """legacy POST /api/system/kill-switch는 등록되지 않음 (SSOT 정책)."""
+        resp = client.post("/api/system/kill-switch", json={"action": "halt"})
+        assert resp.status_code == 404
 
 
 class TestDynamicConfig:

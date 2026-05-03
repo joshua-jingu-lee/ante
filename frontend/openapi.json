@@ -2181,7 +2181,7 @@
           "system"
         ],
         "summary": "Halt",
-        "description": "전체 거래 중지 (모든 계좌 SUSPENDED).",
+        "description": "전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED).",
         "operationId": "halt_api_system_halt_post",
         "requestBody": {
           "content": {
@@ -2227,19 +2227,19 @@
         }
       }
     },
-    "/api/system/activate": {
+    "/api/system/clear-halt": {
       "post": {
         "tags": [
           "system"
         ],
-        "summary": "Activate",
-        "description": "전체 거래 재개 (모든 계좌 ACTIVE).",
-        "operationId": "activate_api_system_activate_post",
+        "summary": "Clear Halt",
+        "description": "전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE).\n\n계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.",
+        "operationId": "clear_halt_api_system_clear_halt_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ActivateRequest"
+                "$ref": "#/components/schemas/ClearHaltRequest"
               }
             }
           },
@@ -5011,18 +5011,6 @@
         "title": "AccountSuspendRequest",
         "description": "계좌 정지 요청."
       },
-      "ActivateRequest": {
-        "properties": {
-          "reason": {
-            "type": "string",
-            "title": "Reason",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "ActivateRequest",
-        "description": "거래 재개 요청."
-      },
       "ApprovalDetailResponse": {
         "properties": {
           "approval": {
@@ -5723,6 +5711,18 @@
         "title": "BudgetOperationResponse",
         "description": "예산 할당/회수 응답."
       },
+      "ClearHaltRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ClearHaltRequest",
+        "description": "전역 정지 해제 요청."
+      },
       "ConfigItem": {
         "properties": {
           "key": {
@@ -6050,24 +6050,66 @@
         "title": "HealthResponse",
         "description": "헬스체크 응답.\n\n- `ok`: 모든 의존성 체크 통과 여부 (`all(checks.values())`).\n- `checks`: 개별 의존성 체크 결과. 1.0 기준 키는 `db`, `broker`.\n  키 확장은 하위 호환이므로 소비자는 존재하는 키만 확인한다.\n\n`ok`와 `checks` 모두 필수 필드 (OpenAPI `required`)."
       },
+      "KillSwitchAccountChange": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "previous_status": {
+            "type": "string",
+            "title": "Previous Status"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "previous_status",
+          "status",
+          "changed"
+        ],
+        "title": "KillSwitchAccountChange",
+        "description": "킬 스위치 처리 대상 계좌의 상태 전환 결과.\n\nSSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 필드 표.\n필드는 정확히 ``account_id``, ``previous_status``, ``status``, ``changed`` 4개\n키만 사용한다 (``before_status`` / ``after_status`` 사용 금지)."
+      },
       "KillSwitchResponse": {
         "properties": {
           "status": {
             "type": "string",
             "title": "Status"
           },
+          "accounts_changed": {
+            "type": "integer",
+            "title": "Accounts Changed"
+          },
           "changed_at": {
             "type": "string",
             "title": "Changed At"
+          },
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/KillSwitchAccountChange"
+            },
+            "type": "array",
+            "title": "Accounts",
+            "default": []
           }
         },
         "type": "object",
         "required": [
           "status",
+          "accounts_changed",
           "changed_at"
         ],
         "title": "KillSwitchResponse",
-        "description": "킬 스위치 제어 응답."
+        "description": "킬 스위치 제어 응답.\n\nSSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.\n\n- ``POST /api/system/halt`` → ``status=\"halted\"``\n- ``POST /api/system/clear-halt`` → ``status=\"halt_cleared\"``"
       },
       "LoginRequest": {
         "properties": {

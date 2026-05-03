@@ -626,35 +626,82 @@ class AccountService:
 
     # ── 일괄 상태 전이 ──────────────────────────────────
 
-    async def suspend_all(self, reason: str, suspended_by: str) -> int:
-        """모든 ACTIVE 계좌를 SUSPENDED로 전환. DELETED 제외.
+    async def suspend_all(self, reason: str, suspended_by: str) -> list[dict[str, Any]]:
+        """모든 ACTIVE 계좌를 SUSPENDED로 전환. DELETED 계좌는 후보 제외.
 
         Returns:
-            전환된 계좌 수.
+            처리 대상 계좌(ACTIVE/SUSPENDED)별 변경 결과 목록. DELETED 계좌는
+            포함되지 않는다. 각 항목은 다음 키를 가진다:
+
+            - ``account_id`` (str)
+            - ``previous_status`` (str): 호출 직전 상태 (소문자 wire 값)
+            - ``status`` (str): 호출 직후 상태 (소문자 wire 값)
+            - ``changed`` (bool): 실제 전환 여부
+
+        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
         """
-        count = 0
+        results: list[dict[str, Any]] = []
         for account_id in list(self._accounts.keys()):
             account = self._accounts[account_id]
+            if account.status == AccountStatus.DELETED:
+                continue
+            previous_status = account.status.value
             if account.status == AccountStatus.ACTIVE:
                 await self.suspend(account_id, reason, suspended_by)
-                count += 1
-        logger.info("전체 계좌 정지: %d개 (사유: %s)", count, reason)
-        return count
+                changed = True
+            else:
+                changed = False
+            results.append(
+                {
+                    "account_id": account_id,
+                    "previous_status": previous_status,
+                    "status": AccountStatus.SUSPENDED.value,
+                    "changed": changed,
+                }
+            )
+        changed_count = sum(1 for r in results if r["changed"])
+        logger.info("전체 계좌 정지: %d개 (사유: %s)", changed_count, reason)
+        return results
 
-    async def activate_all(self, activated_by: str) -> int:
-        """모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED 제외.
+    async def activate_all(self, activated_by: str) -> list[dict[str, Any]]:
+        """모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED 계좌는 후보 제외.
 
         Returns:
-            전환된 계좌 수.
+            처리 대상 계좌(ACTIVE/SUSPENDED)별 변경 결과 목록. DELETED 계좌는
+            포함되지 않는다. 각 항목은 다음 키를 가진다:
+
+            - ``account_id`` (str)
+            - ``previous_status`` (str): 호출 직전 상태 (소문자 wire 값)
+            - ``status`` (str): 호출 직후 상태 (소문자 wire 값)
+            - ``changed`` (bool): 실제 전환 여부
+
+        계좌 상태만 ACTIVE로 복구하며 봇 자동 재시작은 수행하지 않는다
+        (BotManager는 ``AccountActivatedEvent`` 수신 시 로깅만 수행).
+
+        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
         """
-        count = 0
+        results: list[dict[str, Any]] = []
         for account_id in list(self._accounts.keys()):
             account = self._accounts[account_id]
+            if account.status == AccountStatus.DELETED:
+                continue
+            previous_status = account.status.value
             if account.status == AccountStatus.SUSPENDED:
                 await self.activate(account_id, activated_by)
-                count += 1
-        logger.info("전체 계좌 활성화: %d개", count)
-        return count
+                changed = True
+            else:
+                changed = False
+            results.append(
+                {
+                    "account_id": account_id,
+                    "previous_status": previous_status,
+                    "status": AccountStatus.ACTIVE.value,
+                    "changed": changed,
+                }
+            )
+        changed_count = sum(1 for r in results if r["changed"])
+        logger.info("전체 계좌 활성화: %d개", changed_count)
+        return results
 
     # ── 브로커 인스턴스 ──────────────────────────────────
 

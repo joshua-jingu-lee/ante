@@ -53,7 +53,19 @@ class TestSystemHaltIPC:
         """system halt가 IPC로 system.halt 커맨드를 전송."""
         mock_response = {
             "status": "ok",
-            "data": {"suspended_count": 3},
+            "data": {
+                "status": "halted",
+                "accounts_changed": 3,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [
+                    {
+                        "account_id": "acc1",
+                        "previous_status": "active",
+                        "status": "suspended",
+                        "changed": True,
+                    },
+                ],
+            },
         }
 
         with patch(
@@ -78,7 +90,15 @@ class TestSystemHaltIPC:
 
     def test_halt_default_reason(self, runner: CliRunner) -> None:
         """system halt 사유 미지정 시 빈 문자열."""
-        mock_response = {"status": "ok", "data": {"suspended_count": 0}}
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "status": "halted",
+                "accounts_changed": 0,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [],
+            },
+        }
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -99,15 +119,33 @@ class TestSystemHaltIPC:
         )
 
 
-# ── system activate IPC ────────────────────────────
+# ── system clear-halt IPC ────────────────────────────
 
 
-class TestSystemActivateIPC:
-    def test_activate_sends_ipc_command(self, runner: CliRunner) -> None:
-        """system activate가 IPC로 system.activate 커맨드를 전송."""
+class TestSystemClearHaltIPC:
+    def test_clear_halt_sends_ipc_command(self, runner: CliRunner) -> None:
+        """system clear-halt가 IPC로 system.clear_halt 커맨드를 전송."""
         mock_response = {
             "status": "ok",
-            "data": {"activated_count": 2},
+            "data": {
+                "status": "halt_cleared",
+                "accounts_changed": 2,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [
+                    {
+                        "account_id": "acc1",
+                        "previous_status": "suspended",
+                        "status": "active",
+                        "changed": True,
+                    },
+                    {
+                        "account_id": "acc2",
+                        "previous_status": "suspended",
+                        "status": "active",
+                        "changed": True,
+                    },
+                ],
+            },
         }
 
         with patch(
@@ -121,13 +159,15 @@ class TestSystemActivateIPC:
                 "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ):
-                result = runner.invoke(cli, ["system", "activate"])
+                result = runner.invoke(cli, ["system", "clear-halt"])
 
         assert result.exit_code == 0, result.output
-        assert "ACTIVE" in result.output
+        assert "정지 해제" in result.output
         assert "2" in result.output
+        # 봇 자동 재시작 안내 문구 (Refs #1213 SSOT)
+        assert "자동 재시작" in result.output
         mock_client.send.assert_called_once_with(
-            "system.activate", {"reason": ""}, "test-master"
+            "system.clear_halt", {"reason": ""}, "test-master"
         )
 
 

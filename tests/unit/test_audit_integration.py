@@ -159,7 +159,16 @@ class TestHandlerAuditLog:
     def test_halt_audit(self, audit_logger):
         """halt 시 system.halt 감사 로그가 기록된다."""
         account_service_mock = AsyncMock()
-        account_service_mock.suspend_all = AsyncMock(return_value=1)
+        account_service_mock.suspend_all = AsyncMock(
+            return_value=[
+                {
+                    "account_id": "domestic",
+                    "previous_status": "active",
+                    "status": "suspended",
+                    "changed": True,
+                }
+            ]
+        )
 
         app = create_app(
             audit_logger=audit_logger,
@@ -182,10 +191,23 @@ class TestHandlerAuditLog:
         assert handler_calls[0].kwargs["resource"] == "system:kill_switch"
         assert handler_calls[0].kwargs["detail"] == "emergency"
 
-    def test_activate_audit(self, audit_logger):
-        """activate 시 system.activate 감사 로그가 기록된다."""
+    def test_clear_halt_audit(self, audit_logger):
+        """clear-halt 시 system.clear_halt 감사 로그가 기록된다 (Refs #1213).
+
+        SSOT: ``docs/specs/audit/audit.md``. action=``system.clear_halt``,
+        resource=``system:kill_switch`` 유지.
+        """
         account_service_mock = AsyncMock()
-        account_service_mock.activate_all = AsyncMock(return_value=1)
+        account_service_mock.activate_all = AsyncMock(
+            return_value=[
+                {
+                    "account_id": "domestic",
+                    "previous_status": "suspended",
+                    "status": "active",
+                    "changed": True,
+                }
+            ]
+        )
 
         app = create_app(
             audit_logger=audit_logger,
@@ -194,7 +216,7 @@ class TestHandlerAuditLog:
         client = TestClient(app)
 
         resp = client.post(
-            "/api/system/activate",
+            "/api/system/clear-halt",
             json={"reason": "recovered"},
         )
         assert resp.status_code == 200
@@ -202,9 +224,18 @@ class TestHandlerAuditLog:
         handler_calls = [
             c
             for c in audit_logger.log.call_args_list
-            if c.kwargs.get("action") == "system.activate"
+            if c.kwargs.get("action") == "system.clear_halt"
         ]
         assert len(handler_calls) == 1
+        # audit resource 명칭은 그대로 유지 (Refs #1213 명시적 비변경)
+        assert handler_calls[0].kwargs["resource"] == "system:kill_switch"
+        # legacy system.activate 감사 로그는 더 이상 발생하지 않는다.
+        legacy_calls = [
+            c
+            for c in audit_logger.log.call_args_list
+            if c.kwargs.get("action") == "system.activate"
+        ]
+        assert len(legacy_calls) == 0
 
     def test_config_update_audit(self, audit_logger):
         """설정 변경 시 config.update 감사 로그가 기록된다."""

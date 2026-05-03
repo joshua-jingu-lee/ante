@@ -84,19 +84,36 @@ class CommandRegistry:
 # ── 핸들러 구현 ──────────────────────────────────────
 
 
+def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
+    """Kill Switch IPC 응답 envelope.
+
+    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT.
+    Web API와 IPC가 동일한 shape(``status``, ``accounts_changed``, ``changed_at``,
+    ``accounts[]``)을 사용한다.
+    """
+    from datetime import UTC, datetime
+
+    return {
+        "status": status,
+        "accounts_changed": sum(1 for a in accounts if a.get("changed")),
+        "changed_at": datetime.now(UTC).isoformat(),
+        "accounts": accounts,
+    }
+
+
 async def _handle_system_halt(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
     reason = args.get("reason", "IPC halt")
-    count = await svc.account.suspend_all(reason=reason, suspended_by=actor)
-    return {"suspended_count": count}
+    accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
+    return _kill_switch_payload("halted", accounts)
 
 
-async def _handle_system_activate(
+async def _handle_system_clear_halt(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    count = await svc.account.activate_all(activated_by=actor)
-    return {"activated_count": count}
+    accounts = await svc.account.activate_all(activated_by=actor)
+    return _kill_switch_payload("halt_cleared", accounts)
 
 
 async def _handle_account_suspend(
@@ -291,7 +308,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     """
     # ── mutating (15개): 서버 상태/DB를 변경 ──────────
     registry.register("system.halt", _handle_system_halt, is_mutating=True)
-    registry.register("system.activate", _handle_system_activate, is_mutating=True)
+    registry.register("system.clear_halt", _handle_system_clear_halt, is_mutating=True)
     registry.register("account.suspend", _handle_account_suspend, is_mutating=True)
     registry.register("account.activate", _handle_account_activate, is_mutating=True)
     registry.register("bot.create", _handle_bot_create, is_mutating=True)

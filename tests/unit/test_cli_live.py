@@ -61,8 +61,27 @@ class TestSystemCommands:
 
             acct = SimpleNamespace(account_id="test", status=AccountStatus.ACTIVE)
             mock_svc.list = AsyncMock(return_value=[acct])
-        mock_svc.suspend_all = AsyncMock(return_value=1)
-        mock_svc.activate_all = AsyncMock(return_value=1)
+        # Refs #1213: suspend_all/activate_all 반환 타입은 list[dict].
+        mock_svc.suspend_all = AsyncMock(
+            return_value=[
+                {
+                    "account_id": "test",
+                    "previous_status": "active",
+                    "status": "suspended",
+                    "changed": True,
+                }
+            ]
+        )
+        mock_svc.activate_all = AsyncMock(
+            return_value=[
+                {
+                    "account_id": "test",
+                    "previous_status": "suspended",
+                    "status": "active",
+                    "changed": True,
+                }
+            ]
+        )
         return mock_svc
 
     def test_system_status(self, runner):
@@ -98,7 +117,15 @@ class TestSystemCommands:
                 assert data["bot_count"] == 2
 
     def test_system_halt(self, runner):
-        mock_response = {"status": "ok", "data": {"suspended_count": 2}}
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "status": "halted",
+                "accounts_changed": 2,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [],
+            },
+        }
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -115,8 +142,16 @@ class TestSystemCommands:
                 assert result.exit_code == 0
                 assert "HALTED" in result.output
 
-    def test_system_activate(self, runner):
-        mock_response = {"status": "ok", "data": {"activated_count": 2}}
+    def test_system_clear_halt(self, runner):
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "status": "halt_cleared",
+                "accounts_changed": 2,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [],
+            },
+        }
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -129,9 +164,9 @@ class TestSystemCommands:
                 "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ):
-                result = runner.invoke(cli, ["system", "activate"])
+                result = runner.invoke(cli, ["system", "clear-halt"])
                 assert result.exit_code == 0
-                assert "ACTIVE" in result.output
+                assert "정지 해제" in result.output
 
 
 # ── bot 커맨드 ─────────────────────────────────────
