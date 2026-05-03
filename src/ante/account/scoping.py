@@ -80,7 +80,7 @@ def require_account_id(account_id: str | None, *, context: str = "") -> str:
         prefix = f"({context}) " if context else ""
         raise InvalidAccountIdError(
             f"{prefix}유효한 account_id가 필요합니다: {account_id!r}. "
-            "fallback (default, '', None, 'test')은 사용할 수 없습니다."
+            "fallback (default, '', None) 또는 형식 위반 값은 사용할 수 없습니다."
         )
     return account_id  # type: ignore[return-value]
 
