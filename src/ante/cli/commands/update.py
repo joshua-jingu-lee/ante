@@ -75,7 +75,12 @@ def check_server_running() -> bool:
 @click.option(
     "--version", "target_version", default=None, help="특정 버전으로 업데이트"
 )
-@click.option("--yes", "-y", is_flag=True, help="확인 프롬프트 건너뛰기")
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="실제 업데이트 실행 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패",
+)
 @click.option("--force", is_flag=True, help="서버 실행 중이면 자동 중지")
 @format_option
 @click.pass_context
@@ -86,7 +91,12 @@ def update(
     yes: bool,
     force: bool,
 ) -> None:
-    """ante를 최신 버전으로 업데이트합니다."""
+    """ante를 최신 버전으로 업데이트합니다.
+
+    `--check`은 PyPI 버전 조회만 수행한다 (`--yes` 불필요).
+    `--check`이 아닌 실제 업데이트 실행은 `--yes`가 반드시 필요하며,
+    누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
+    """
     from ante.update.checker import (
         get_current_version,
         get_latest_version,
@@ -164,10 +174,17 @@ def update(
         click.echo(msg, err=True)
         raise SystemExit(1)
 
+    # 비대화형 입력 계약 (#1170, #1171 SSOT): `--yes`가 없으면 prompt 없이
+    # ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다. 이 게이트는 디스크 공간
+    # 검사 직후, backup/pip upgrade/migration 호출 전에 위치하므로 조기 종료
+    # 시 부수 효과(백업 생성, 의존성 스냅샷, pip 호출 등)는 발생하지 않는다.
     if not yes:
-        if not click.confirm(f"{current} → {latest}로 업데이트하시겠습니까?"):
-            click.echo("업데이트를 취소했습니다")
-            return
+        fmt.error(
+            f"업데이트 실행에는 --yes가 필요합니다 ({current} → {latest}). "
+            "재실행: ante update --yes",
+            code="CLI_CONFIRMATION_REQUIRED",
+        )
+        raise SystemExit(1)
 
     # Phase A: 백업 + pip upgrade
 

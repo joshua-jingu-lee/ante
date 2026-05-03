@@ -1,6 +1,7 @@
 """check_server_running 유틸 함수 및 --format json 테스트.
 
 이슈 #920: --format json 옵션 지원 검증.
+이슈 #1176: 비대화형 업데이트 계약(`click.confirm` 제거, `--yes` 게이트) 검증.
 """
 
 from __future__ import annotations
@@ -198,3 +199,103 @@ class TestUpdateFormatJsonError:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
+
+
+class TestUpdateNonInteractive:
+    """비대화형 업데이트 계약 검증 (#1176).
+
+    `click.confirm`을 제거하고 `--yes`/`--check`/`--force` 의미를 분리한
+    이후의 동작을 검증한다.
+    """
+
+    def test_update_without_yes_fails_confirmation_required(
+        self, runner: CliRunner
+    ) -> None:
+        """``--yes`` 누락 → exit 1, prompt 없음, ``CLI_CONFIRMATION_REQUIRED``.
+
+        - stdin prompt가 발생하지 않아야 한다 (input=None).
+        - ``pip_upgrade`` 등 부수 효과 함수가 호출되지 않아야 한다.
+        - JSON 에러 코드는 ``CLI_CONFIRMATION_REQUIRED``.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            # input=None → click.confirm이 남아 있으면 stdin EOF로 실패한다.
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["error"]
+
+        # 부수 효과가 발생하지 않아야 한다 (게이트가 막아야 한다).
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+
+    def test_update_with_yes_invokes_pip_upgrade(self, runner: CliRunner) -> None:
+        """업데이트 가능 + ``--yes`` 있음 → 기존 업데이트 플로우 진입.
+
+        - ``--yes`` 게이트를 통과해 ``pip_upgrade``가 호출되어야 한다.
+        - 정상 종료 시 exit 0.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.db.backup.backup_db"),
+            patch("ante.update.executor.snapshot_dependencies", return_value=None),
+            patch(
+                "ante.update.executor.pip_upgrade", return_value=True
+            ) as mock_pip_upgrade,
+            patch(
+                "ante.update.executor.run_post_update_migrations",
+                return_value=True,
+            ) as mock_migrate,
+            patch("pathlib.Path.exists", return_value=False),
+        ):
+            result = runner.invoke(cli, ["update", "--yes"])
+
+        assert result.exit_code == 0
+        mock_pip_upgrade.assert_called_once()
+        mock_migrate.assert_called_once()
+
+    def test_check_alone_succeeds_without_yes(self, runner: CliRunner) -> None:
+        """``--check`` 단독 → exit 0, ``--yes`` 불필요.
+
+        실제 업데이트를 수행하지 않으므로 ``pip_upgrade``는 호출되지 않는다.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+        ):
+            result = runner.invoke(cli, ["update", "--check"])
+
+        assert result.exit_code == 0
+        mock_pip_upgrade.assert_not_called()
