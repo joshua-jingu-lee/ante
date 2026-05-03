@@ -6,7 +6,7 @@
 
 > 각 엔드포인트의 요청/응답 스키마, 파라미터 상세, 에러 코드는 Swagger UI(`/docs`)를 참조한다. 아래 표는 전체 엔드포인트 목록과 용도를 요약한다.
 
-> ⚠️ **구현 상태**: `/api/system/halt`와 `/api/system/clear-halt` 라우트는 본 이슈(#1212)에서 SSOT로 확정되었으나, 실제 FastAPI 라우터·OpenAPI 생성·핸들러 정렬은 [#1213](https://github.com/joshua-jingu-lee/ante/issues/1213)에서 구현된다. #1213 머지 전에는 기존 `/api/system/activate` 경로가 동작하며, 본 스펙의 새 경로를 호출하면 404가 반환된다.
+> ⚠️ **구현 상태**: `POST /api/system/halt` 라우트는 이미 동작한다 (base 코드 `src/ante/web/routes/system.py`에 등록됨). `POST /api/system/clear-halt`는 본 이슈(#1212)에서 SSOT로 확정되었으나, 실제 FastAPI 라우터·OpenAPI 생성·legacy `/api/system/activate` 제거는 [#1213](https://github.com/joshua-jingu-lee/ante/issues/1213)에서 구현된다. #1213 머지 전에는 기존 `/api/system/activate`가 동작하며, `/api/system/clear-halt`를 호출하면 404가 반환된다. 응답 shape(`status`, `accounts_changed`, `accounts[]`)는 본 SSOT를 기준으로 #1213이 구현한다.
 
 | Method | Path | 설명 |
 |--------|------|------|
