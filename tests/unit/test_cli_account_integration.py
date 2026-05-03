@@ -287,7 +287,7 @@ class TestBotCreateAccountOption:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "BOT_MISSING_REQUIRED_ACCOUNT"
-        assert "--account" in data["error"]
+        assert "--account" in data["message"]
 
     def test_bot_create_no_accounts_returns_missing_required_account(self, runner):
         """계좌 미지정 + 활성 계좌 0개 → BOT_MISSING_REQUIRED_ACCOUNT 에러."""

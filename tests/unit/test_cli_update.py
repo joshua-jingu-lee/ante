@@ -182,7 +182,7 @@ class TestUpdateFormatJsonError:
 
         assert result.exit_code == 1
         data = json.loads(result.output)
-        assert "error" in data
+        assert "message" in data
 
     def test_pypi_failure_json_error(self, runner: CliRunner) -> None:
         """PyPI 조회 실패 시 JSON 에러 출력."""
@@ -198,7 +198,7 @@ class TestUpdateFormatJsonError:
 
         assert result.exit_code == 1
         data = json.loads(result.output)
-        assert "error" in data
+        assert "message" in data
 
 
 class TestUpdateNonInteractive:
@@ -243,7 +243,7 @@ class TestUpdateNonInteractive:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
-        assert "--yes" in data["error"]
+        assert "--yes" in data["message"]
 
         # 부수 효과가 발생하지 않아야 한다 (게이트가 막아야 한다).
         mock_pip_upgrade.assert_not_called()
@@ -294,7 +294,7 @@ class TestUpdateNonInteractive:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
-        assert "--yes" in data["error"]
+        assert "--yes" in data["message"]
 
         # 부수 효과가 발생하지 않아야 한다 (게이트가 막아야 한다).
         mock_pip_upgrade.assert_not_called()
@@ -348,8 +348,8 @@ class TestUpdateNonInteractive:
         data = json.loads(result.output)
         # PyPI 실패 메시지가 아닌 confirmation 게이트로 fail 해야 한다.
         assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
-        assert "--yes" in data["error"]
-        assert "PyPI" not in data["error"]
+        assert "--yes" in data["message"]
+        assert "PyPI" not in data["message"]
 
         # 핵심: PyPI 조회가 시도되지 않아야 한다 (게이트가 앞에 위치).
         mock_latest.assert_not_called()
