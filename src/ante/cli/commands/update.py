@@ -96,6 +96,9 @@ def update(
     `--check`은 PyPI 버전 조회만 수행한다 (`--yes` 불필요).
     `--check`이 아닌 실제 업데이트 실행은 `--yes`가 반드시 필요하며,
     누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
+    `--yes` 게이트는 PyPI 조회 **앞에** 평가하므로, 네트워크 느림/실패
+    환경에서도 `--yes` 누락 호출은 PyPI 실패가 아닌 동일한 구조화 에러
+    코드로 거절된다.
     """
     from ante.update.checker import (
         get_current_version,
@@ -142,25 +145,26 @@ def update(
             click.echo("이미 최신 버전입니다")
         return
 
-    # 업데이트 실행
-    latest = target_version or get_latest_version()
-    if latest is None:
-        fmt.error("PyPI 버전 확인 실패")
-        raise SystemExit(1)
-
     # 비대화형 입력 계약 (#1170, #1171 SSOT): `--check`이 아닌 실제 업데이트
-    # 실행 호출에는 `--yes`가 반드시 필요하다. 이 게이트는 no-update 조기
-    # 반환(이미 최신 버전) **앞에** 위치해야 한다 — 그래야 사용자가 명시적
-    # 실행 의사(`--yes`)를 표현하지 않은 호출은 버전 상태와 무관하게
-    # ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (Codex P2 finding).
-    # 게이트 통과 전이므로 backup/pip upgrade/migration 등 부수 효과는
-    # 일체 발생하지 않는다.
+    # 실행 호출에는 `--yes`가 반드시 필요하다. 이 게이트는 PyPI 조회
+    # (`get_latest_version()`) **앞에** 위치해야 한다 — 그래야 네트워크
+    # 느림/실패 환경에서도 `--yes` 누락 호출이 PyPI 실패가 아닌
+    # ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (Codex P2 finding 2차).
+    # 자동화는 네트워크 상태와 무관하게 동일한 구조화 에러 코드를 받는다.
+    # 게이트 통과 전이므로 PyPI 조회/backup/pip upgrade/migration 등
+    # 부수 효과는 일체 발생하지 않는다.
     if not yes:
         fmt.error(
-            f"업데이트 실행에는 --yes가 필요합니다 ({current} → {latest}). "
+            f"업데이트 실행에는 --yes가 필요합니다 (현재 {current}). "
             "재실행: ante update --yes",
             code="CLI_CONFIRMATION_REQUIRED",
         )
+        raise SystemExit(1)
+
+    # 업데이트 실행 — `--yes` 게이트 통과 후에만 PyPI를 조회한다.
+    latest = target_version or get_latest_version()
+    if latest is None:
+        fmt.error("PyPI 버전 확인 실패")
         raise SystemExit(1)
 
     if not target_version and not is_update_available(current, latest):
