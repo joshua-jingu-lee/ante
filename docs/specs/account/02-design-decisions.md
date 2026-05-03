@@ -117,7 +117,10 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 - **runtime invalid**: ``None``/``""``/``"default"``/패턴 위반 — 모든 시점에서 거부
 - **creation invalid**: 위에 더해 ``"test"`` 추가 거부 (bootstrap seed 전용)
 - **bootstrap 우회**: ``AccountService.create_default_test_account``가
-  ``create(_bootstrap=True)``로 helper를 우회. 이 경로 외에는 우회 불가
+  private :meth:`AccountService._create_seed_account` helper를 통해서만
+  RESTRICTED 가드를 우회한다. public ``create()`` API에는 우회 플래그가 없고,
+  seed helper는 ``(broker_type, default_account_id)`` pair가 ``BROKER_PRESETS``
+  와 정확히 일치할 때만 통과시킨다 (#1216 P2). 이 경로 외에는 우회 불가
 
 상세 계약과 helper API는 [14-account-id-contract.md](14-account-id-contract.md)
 참조. 후속 적용은 #1217 (Trade/Treasury), #1218 (CLI/Web/IPC),

@@ -200,8 +200,11 @@ async def test_create_default_account_id_raises(service):
 async def test_create_test_account_id_raises_for_user(service):
     """``"test"``는 bootstrap seed 예약어로 사용자 신규 생성 거부 (#1216).
 
-    ``ante init`` 경로(:meth:`AccountService.create_default_test_account`)는
-    내부 ``_bootstrap=True``로 helper를 우회하므로 별도 테스트로 검증한다.
+    ``ante init`` 경로( :meth:`AccountService.create_default_test_account` )는
+    private :meth:`AccountService._create_seed_account` helper를 통해서만
+    seed 계좌를 만들 수 있다 (#1216 P2). public ``create()`` API에는 우회
+    플래그가 노출되지 않으므로, 외부 호출자가 ``"test"`` 를 신규 생성하는
+    경로는 이 가드에서 차단된다.
     """
     account = _make_account(account_id="test")
 
@@ -904,7 +907,41 @@ async def test_create_default_test_account_idempotent(service):
     assert first.account_id == second.account_id
 
 
-# ── _bootstrap seed 가드 (#1216) ────────────────────
+# ── public create() seed 우회 차단 + private _create_seed_account 가드 (#1216 P2) ──
+
+
+@pytest.mark.asyncio
+async def test_create_public_api_has_no_bootstrap_kwarg(service):
+    """public ``create()`` 시그니처는 ``_bootstrap`` 키워드를 받지 않는다 (#1216 P2).
+
+    외부 호출자가 ``_bootstrap=True`` 로 RESTRICTED 예약어( ``"test"`` ) 검증을
+    우회할 수 없도록 시그니처에서 완전히 제거됐는지 회귀 방지.
+    """
+    import inspect
+
+    sig = inspect.signature(service.create)
+    assert "_bootstrap" not in sig.parameters, (
+        f"public create() must not expose _bootstrap kwarg; got params="
+        f"{list(sig.parameters)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_public_api_rejects_seed_id_for_test_broker(service):
+    """seed account_id ``"test"`` 는 public ``create()`` 에서 broker_type 무관 거부.
+
+    seed 우회가 사라졌으므로, 외부 호출자가 정확한 (broker_type, account_id)
+    pair를 넘겨도 public 경로에서는 RESTRICTED 가드가 막아야 한다 (#1216 P2).
+    bootstrap은 :meth:`AccountService.create_default_test_account` 만의 책임.
+    """
+    account = _make_account(account_id="test", broker_type="test")
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account)
+
+    msg = str(exc_info.value)
+    assert "ante init" in msg
+    assert "시드 계좌" in msg
 
 
 @pytest.mark.asyncio
@@ -917,35 +954,37 @@ async def test_create_default_test_account_idempotent(service):
         "ab",  # 형식 위반 (너무 짧음, 동시에 seed 아님)
     ],
 )
-async def test_create_with_bootstrap_rejects_non_seed(service, bad_id):
-    """``_bootstrap=True``는 (broker_type, default_account_id) pair만 허용한다.
+async def test_create_seed_account_rejects_non_seed(service, bad_id):
+    """private seed helper는 (broker_type, default_account_id) pair만 허용.
 
-    내부 호출자가 ``_bootstrap=True``로 'default'/패턴 위반/임의 ID를 슬쩍
-    통과시키지 못하게 막는 defense-in-depth 가드 (#1216). 여기서는
+    오케스트레이션 helper(``create_default_test_account``)가 잘못된 입력을
+    넘기더라도 'default'/패턴 위반/임의 ID가 슬쩍 통과되지 않게 막는
+    defense-in-depth 가드 (#1216 P2). 여기서는
     broker_type='test'(default_account_id='test')와 mismatch인 케이스들이다.
     """
     account = _make_account(account_id=bad_id, broker_type="test")
 
     with pytest.raises(InvalidAccountIdError) as exc_info:
-        await service.create(account, _bootstrap=True)
+        await service._create_seed_account(account)
 
-    assert "_bootstrap=True" in str(exc_info.value)
-    assert "valid pairs" in str(exc_info.value)
+    msg = str(exc_info.value)
+    assert "seed 계좌 생성" in msg
+    assert "valid pairs" in msg
 
 
 @pytest.mark.asyncio
-async def test_create_with_bootstrap_rejects_empty(service):
-    """``_bootstrap=True``로 빈 문자열 account_id는 거부된다 (pair 불일치)."""
+async def test_create_seed_account_rejects_empty(service):
+    """빈 문자열 account_id는 ``_create_seed_account`` 에서 거부된다 (pair 불일치)."""
     # _make_account의 default 분기로 직접 만들지 못하므로 명시적으로 구성.
     account = _make_account(account_id="", broker_type="test")
 
     with pytest.raises(InvalidAccountIdError):
-        await service.create(account, _bootstrap=True)
+        await service._create_seed_account(account)
 
 
 @pytest.mark.asyncio
-async def test_create_with_bootstrap_accepts_seed_test(service):
-    """``_bootstrap=True``로 정확한 (test, test) pair는 통과한다."""
+async def test_create_seed_account_accepts_seed_test(service):
+    """정확한 (test, test) pair는 ``_create_seed_account`` 에서 통과한다."""
     preset = BROKER_PRESETS["test"]
     account = _make_account(
         account_id=preset.default_account_id,
@@ -953,7 +992,7 @@ async def test_create_with_bootstrap_accepts_seed_test(service):
         credentials={k: "test" for k in preset.required_credentials},
     )
 
-    result = await service.create(account, _bootstrap=True)
+    result = await service._create_seed_account(account)
 
     assert result.account_id == "test"
     assert result.broker_type == "test"
@@ -961,8 +1000,8 @@ async def test_create_with_bootstrap_accepts_seed_test(service):
 
 
 @pytest.mark.asyncio
-async def test_create_with_bootstrap_accepts_seed_kis_domestic(service):
-    """``_bootstrap=True``로 정확한 (kis-domestic, domestic) pair는 통과한다.
+async def test_create_seed_account_accepts_seed_kis_domestic(service):
+    """정확한 (kis-domestic, domestic) pair도 ``_create_seed_account`` 에서 통과.
 
     BROKER_PRESETS에 정의된 모든 pair가 동일하게 허용되는지 회귀 방지.
     """
@@ -973,7 +1012,7 @@ async def test_create_with_bootstrap_accepts_seed_kis_domestic(service):
         credentials={k: "test" for k in preset.required_credentials},
     )
 
-    result = await service.create(account, _bootstrap=True)
+    result = await service._create_seed_account(account)
 
     assert result.account_id == "domestic"
     assert result.broker_type == "kis-domestic"
@@ -981,7 +1020,7 @@ async def test_create_with_bootstrap_accepts_seed_kis_domestic(service):
 
 
 @pytest.mark.asyncio
-async def test_create_bootstrap_rejects_seed_id_with_wrong_broker_type(service):
+async def test_create_seed_account_rejects_seed_id_with_wrong_broker_type(service):
     """``account_id='test'`` + ``broker_type='kis-domestic'``는 거부된다 (#1216 P2).
 
     이전 구현은 account_id가 BROKER_PRESETS의 default_account_id set에
@@ -997,16 +1036,18 @@ async def test_create_bootstrap_rejects_seed_id_with_wrong_broker_type(service):
     )
 
     with pytest.raises(InvalidAccountIdError) as exc_info:
-        await service.create(account, _bootstrap=True)
+        await service._create_seed_account(account)
 
     msg = str(exc_info.value)
-    assert "_bootstrap=True" in msg
+    assert "seed 계좌 생성" in msg
     assert "valid pairs" in msg
     assert "'test'" in msg  # 입력된 account_id가 메시지에 포함
 
 
 @pytest.mark.asyncio
-async def test_create_bootstrap_rejects_cross_pair_domestic_with_test_broker(service):
+async def test_create_seed_account_rejects_cross_pair_domestic_with_test_broker(
+    service,
+):
     """``account_id='domestic'`` + ``broker_type='test'`` (반대 mismatch)도 거부."""
     account = _make_account(
         account_id="domestic",  # kis-domestic preset의 seed
@@ -1015,15 +1056,15 @@ async def test_create_bootstrap_rejects_cross_pair_domestic_with_test_broker(ser
     )
 
     with pytest.raises(InvalidAccountIdError):
-        await service.create(account, _bootstrap=True)
+        await service._create_seed_account(account)
 
 
 @pytest.mark.asyncio
-async def test_create_bootstrap_rejects_unknown_broker_type(service):
-    """알 수 없는 ``broker_type``은 _bootstrap pair 검증에서 거부된다.
+async def test_create_seed_account_rejects_unknown_broker_type(service):
+    """알 수 없는 ``broker_type`` 은 ``_create_seed_account`` pair 검증에서 거부된다.
 
     BROKER_PRESETS.get(broker_type)이 None이므로 InvalidBrokerTypeError가
-    아니라 새 _bootstrap pair 가드가 먼저 InvalidAccountIdError로 차단한다.
+    아니라 seed pair 가드가 먼저 InvalidAccountIdError로 차단한다.
     """
     account = _make_account(
         account_id="test",
@@ -1032,17 +1073,17 @@ async def test_create_bootstrap_rejects_unknown_broker_type(service):
     )
 
     with pytest.raises(InvalidAccountIdError) as exc_info:
-        await service.create(account, _bootstrap=True)
+        await service._create_seed_account(account)
 
-    assert "_bootstrap=True" in str(exc_info.value)
+    assert "seed 계좌 생성" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_create_default_test_account_bootstrap_path_works(service):
-    """``create_default_test_account`` 흐름이 새 가드 적용 후에도 정상 동작.
+async def test_create_default_test_account_seed_path_works(service):
+    """``create_default_test_account`` 흐름이 새 helper 적용 후에도 정상 동작.
 
-    회귀 방지: ``_bootstrap=True`` 경로의 seed 화이트리스트 가드가 기존
-    bootstrap seed 자동 생성 흐름을 깨지 않아야 한다.
+    회귀 방지: private ``_create_seed_account`` 경로의 pair 화이트리스트
+    가드가 기존 bootstrap seed 자동 생성 흐름을 깨지 않아야 한다 (#1216 P2).
     """
     account = await service.create_default_test_account()
 

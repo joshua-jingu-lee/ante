@@ -15,7 +15,7 @@ AccountService(db: Database, eventbus: EventBus)
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `initialize` | — | `None` | 스키마 생성 + DB에서 계좌 목록 로드 |
-| `create` | `account: Account` | `Account` | 계좌 생성. **cold-path 전용**. account_id 형식/정책 검증은 [`validate_new_account_id`](14-account-id-contract.md) helper에 위임 (``"test"``, ``"default"``, ``None``, ``""``, 패턴 위반 거부). account_id 중복 시 `AccountAlreadyExistsError`. broker_type 유효성 검증. 내부 키워드 `_bootstrap=True`는 :meth:`create_default_test_account` 전용으로 helper를 우회한다 |
+| `create` | `account: Account` | `Account` | 계좌 생성. **cold-path 전용**. account_id 형식/정책 검증은 [`validate_new_account_id`](14-account-id-contract.md) helper에 위임 (``"test"``, ``"default"``, ``None``, ``""``, 패턴 위반 거부). 우회 플래그를 노출하지 않으므로 외부 호출자는 RESTRICTED ( ``"test"`` ) 예약어를 신규 생성할 수 없다 (#1216 P2). account_id 중복 시 `AccountAlreadyExistsError`. broker_type 유효성 검증. seed 자동 생성은 :meth:`create_default_test_account` 가 private helper :meth:`_create_seed_account` 를 통해서만 수행한다 |
 | `get` | `account_id: str` | `Account` | 계좌 조회. 없으면 `AccountNotFoundError`. DELETED 상태도 조회 가능 |
 | `get_sync` | `account_id: str` | `Account \| None` | 인메모리 캐시에서 동기적으로 계좌 조회. ContextFactory 등 동기 컨텍스트용. 없으면 `None` 반환 |
 | `list` | `status: AccountStatus \| None` | `list[Account]` | 계좌 목록 조회. status 필터 가능. DELETED 제외가 기본 |

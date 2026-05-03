@@ -55,12 +55,17 @@ account-scoped 데이터/이벤트/명령은 모두 본 문서가 정의한 형�
 |---|---|
 | seed account_id | ``BROKER_PRESETS["test"].default_account_id`` (= ``"test"``) |
 | 진입점 | :meth:`AccountService.create_default_test_account` |
-| 우회 메커니즘 | ``AccountService.create(account, _bootstrap=True)`` 내부 키워드 |
+| 우회 메커니즘 | private :meth:`AccountService._create_seed_account` helper (only invoked by ``create_default_test_account``) |
+| pair 가드 | ``(broker_type, default_account_id)`` 가 ``BROKER_PRESETS`` 의 동일 항목과 정확히 일치해야 함 (#1216 P2) |
 | broker_type | ``"test"`` |
 | trading_mode | ``VIRTUAL`` |
 
-다른 모든 호출자(CLI ``ante account create``, Web POST ``/api/accounts``,
-IPC handlers)는 ``_bootstrap`` 인자를 사용해서는 안 된다.
+public :meth:`AccountService.create` API에는 ``_bootstrap`` 같은 우회 플래그가
+**노출되지 않는다**. CLI ``ante account create``, Web POST ``/api/accounts``,
+IPC handlers를 비롯한 모든 외부 호출자는 ``validate_new_account_id`` 의
+RESTRICTED ( ``"test"`` ) / fallback ( ``"default"`` ) 거부를 거치며,
+seed 자동 생성은 :meth:`AccountService.create_default_test_account` 만의
+책임이다 (#1216 P2).
 
 ## fallback 금지 정책
 
@@ -119,8 +124,9 @@ account_id 형식이 올바르지 않습니다: '<value>'. 영문, 숫자, 하�
 
 | 호출 위치 | 함수 | 비고 |
 |---|---|---|
-| ``AccountService.create`` | ``validate_new_account_id`` | bootstrap 경로는 ``_bootstrap=True``로 우회 |
-| ``AccountService.create_default_test_account`` | (우회) | seed account_id ``"test"`` 직접 사용 |
+| ``AccountService.create`` (public) | ``validate_new_account_id`` | 우회 수단 없음. seed 예약어 ``"test"`` 도 무조건 거부 (#1216 P2) |
+| ``AccountService._create_seed_account`` (private) | ``require_account_id`` + ``(broker_type, default_account_id)`` pair 가드 | ``create_default_test_account`` 만의 호출 경로 |
+| ``AccountService.create_default_test_account`` | (private helper 호출) | seed account_id ``"test"`` 직접 사용 |
 
 후속 사용처는 #1217/#1218/#1219 영역이다 (본 이슈 범위 외):
 
