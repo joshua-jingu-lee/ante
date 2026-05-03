@@ -31,8 +31,8 @@
 | `ante system start [--config-dir <path>]` | `external process` | `python -m ante.main` 실행 |
 | `ante system stop` | `external process` | PID 기반 SIGTERM |
 | `ante system status` | `offline` | canonical DB/PID 상태 조회 |
-| `ante system halt [--account <account_id>]` | `runtime IPC` | 서버 AccountService kill switch |
-| `ante system activate [--account <account_id>]` | `runtime IPC` | 서버 AccountService kill switch 해제 |
+| `ante system halt` | `runtime IPC` | 서버 AccountService 전역 kill switch (모든 ACTIVE 계좌를 SUSPENDED로 전환) |
+| `ante system clear-halt` | `runtime IPC` | 서버 AccountService 전역 kill switch 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님) |
 | `ante account list [--status <status>]` | `offline` | runtime-safe 조회 |
 | `ante account info <account_id>` | `offline` | runtime-safe 조회 |
 | `ante account credentials <account_id>` | `offline` | 마스킹 조회 |
@@ -100,8 +100,8 @@
 ante system start                  # 시스템 시작
 ante system stop                   # 시스템 정상 종료
 ante system status                 # 시스템 상태 조회
-ante system halt [--account <account_id>]   # 거래 긴급 중지 (계좌 지정 시 해당 계좌만, 생략 시 전체)
-ante system activate [--account <account_id>]  # halt 해제, 거래 재개 (계좌 지정 시 해당 계좌만, 생략 시 전체)
+ante system halt                   # 전역 거래 긴급 중지 (모든 ACTIVE 계좌를 SUSPENDED로 전환). 단일 계좌는 `account suspend <account_id>` 사용
+ante system clear-halt             # 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님). 단일 계좌는 `account activate <account_id>` 사용
 ```
 
 ### `ante account` — 계좌 관리

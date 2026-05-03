@@ -94,7 +94,7 @@
 
 **동작 규칙**
 - **비상 거래 정지**: `POST /api/system/halt` — 모든 ACTIVE 계좌를 SUSPENDED로 전환 (`AccountService.suspend_all`)
-- **거래 재개**: `POST /api/system/activate` — 모든 SUSPENDED 계좌를 ACTIVE로 복구 (`AccountService.activate_all`). DELETED 계좌는 대상 제외
+- **거래 재개**: `POST /api/system/clear-halt` — 모든 SUSPENDED 계좌를 ACTIVE로 복구 (`AccountService.activate_all`). DELETED 계좌는 대상 제외. 계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다 (필요 시 봇별 시작 명령으로 별도 재시작)
 - 정지 시 정지 사유(`reason`)와 정지 요청자(`suspended_by`: 현재 로그인 멤버)를 함께 전송
 - 상태 전환 후 카드 표시가 ACTIVE ↔ SUSPENDED로 즉시 전환
 

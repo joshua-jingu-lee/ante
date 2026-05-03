@@ -67,15 +67,15 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 봇 중지 |
-| `ante system activate` | `system.activate` | `AccountService.activate_all()` | `AccountActivatedEvent` → BotManager 봇 재시작 |
+| `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지 |
+| `ante system clear-halt` | `system.clear_halt` | `AccountService.activate_all()` | 계좌 상태만 ACTIVE로 복구; BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행 (자동 재시작은 수행하지 않음) |
 
 #### Account
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante account suspend` | `account.suspend` | `AccountService.suspend()` | `AccountSuspendedEvent` → BotManager 봇 중지 |
-| `ante account activate` | `account.activate` | `AccountService.activate()` | `AccountActivatedEvent` → BotManager 봇 재시작 |
+| `ante account suspend` | `account.suspend` | `AccountService.suspend()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지 |
+| `ante account activate` | `account.activate` | `AccountService.activate()` | 계좌 상태만 ACTIVE로 복구; BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행 (자동 재시작은 수행하지 않음) |
 
 `ante account create`, `ante account delete`, `ante account set-credentials`는 IPC 대상이 아니다.
 이 명령들은 cold-path structural 커맨드이며, active Ante runtime이 살아 있으면 CLI guard에서 차단된다.
@@ -223,7 +223,7 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | IPC 커맨드 | taxonomy | 근거 |
 |-----------|----------|------|
 | `system.halt` | mutating | `AccountService.suspend_all()` 호출 |
-| `system.activate` | mutating | `AccountService.activate_all()` 호출 |
+| `system.clear_halt` | mutating | `AccountService.activate_all()` 호출 |
 | `account.suspend` | mutating | `AccountService.suspend()` 호출 |
 | `account.activate` | mutating | `AccountService.activate()` 호출 |
 | `bot.create` | mutating | `BotManager.create_bot()` 호출 |

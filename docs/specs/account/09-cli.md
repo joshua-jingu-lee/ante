@@ -65,9 +65,9 @@ ante account set-credentials <account_id> \
   --credential-env app_secret=KIS_APP_SECRET \
   --credential account_no=5012XXXX-01
 
-# 시스템 전체 Kill Switch
-ante system halt                    # 전체 거래 정지
-ante system activate                # 전체 거래 재개
+# 시스템 전역 Kill Switch
+ante system halt                    # 전체 거래 정지 (모든 ACTIVE 계좌를 SUSPENDED로 전환)
+ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님)
 ```
 
 ### 런타임/Cold-path 분류

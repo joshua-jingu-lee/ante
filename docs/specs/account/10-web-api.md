@@ -15,7 +15,8 @@ POST   /api/accounts/:id/suspend          — 계좌 정지
 POST   /api/accounts/:id/activate         — 계좌 재활성화
 GET    /api/accounts/:id/credentials      — 인증 정보 마스킹 조회
 DELETE /api/accounts/:id                  — 계좌 삭제 (cold-path 전용, 런타임 서버에서는 409)
-POST   /api/system/kill-switch            — 전체/계좌별 Kill Switch (action=halt|activate, account_id? 생략 시 전체)
+POST   /api/system/halt                   — 시스템 전역 정지 (모든 ACTIVE 계좌를 SUSPENDED로 전환)
+POST   /api/system/clear-halt             — 시스템 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님)
 ```
 
 ### Account payload 필드 계약

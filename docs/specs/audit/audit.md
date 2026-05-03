@@ -135,7 +135,8 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web
 | `POST /treasury/.../allocate` | `treasury.allocate` | `bot:{bot_id}` |
 | `POST /treasury/.../deallocate` | `treasury.deallocate` | `bot:{bot_id}` |
 | `POST /treasury/balance` | `treasury.set_balance` | `treasury` |
-| `POST /system/kill-switch` | `system.halt` / `system.activate` | `system:kill_switch` |
+| `POST /system/halt` | `system.halt` | `system:kill_switch` |
+| `POST /system/clear-halt` | `system.clear_halt` | `system:kill_switch` |
 | `POST /reports` | `report.submit` | `report:{report_id}` |
 | `DELETE /data/datasets/{id}` | `data.delete_dataset` | `dataset:{dataset_id}` |
 
@@ -147,7 +148,7 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web
 | `ante approval reject <id>` | `approval.reject` | `approval:{id}` |
 | `ante approval cancel <id>` | `approval.cancel` | `approval:{id}` |
 | `ante system halt` | `system.halt` | `system:kill_switch` |
-| `ante system activate` | `system.activate` | `system:kill_switch` |
+| `ante system clear-halt` | `system.clear_halt` | `system:kill_switch` |
 | `ante bot create` | `bot.create` | `bot:{bot_id}` |
 | `ante bot start <id>` | `bot.start` | `bot:{bot_id}` |
 | `ante bot stop <id>` | `bot.stop` | `bot:{bot_id}` |

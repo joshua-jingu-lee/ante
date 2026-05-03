@@ -12,5 +12,5 @@
 - **Trade 스펙**: 거래 기록은 `account_id`로 scoping된다. 계좌에 종속되지 않으나 조회·필터링 시 계좌 단위로 분리.
 - **Strategy 스펙**: 전략은 글로벌 Registry에 등록하고, `StrategyMeta.exchange`로 대상 시장을 명시한다. 봇 배정 시 계좌 exchange와 호환성을 검증한다.
 - **Lifecycle cold-path 계약**: 계좌 생성/삭제/credentials 변경/broker_config·commission 변경은 서버 정지 상태에서만 허용한다. 서버 실행 중에는 조회, suspend/activate, 비구조 필드 수정, 계좌별 rule 변경만 허용한다.
-- **Web API 스펙**: 런타임 허용 엔드포인트는 `GET /api/accounts`, `GET /api/accounts/:id`, credentials 마스킹 조회, `POST /api/accounts/:id/suspend`, `/activate`, `POST /api/system/kill-switch`, 계좌별 rule 변경이다. `POST /api/accounts`, `DELETE /api/accounts/:id`, structural `PUT /api/accounts/:id`는 409로 차단한다.
-- **CLI 스펙**: `ante account create/delete/set-credentials`는 cold-path 전용이며 서버 실행 중이면 거부한다. `list/info/credentials/suspend/activate`, `ante system halt/activate`는 런타임 중 실행 가능하다.
+- **Web API 스펙**: 런타임 허용 엔드포인트는 `GET /api/accounts`, `GET /api/accounts/:id`, credentials 마스킹 조회, `POST /api/accounts/:id/suspend`, `POST /api/accounts/:id/activate`, `POST /api/system/halt`, `POST /api/system/clear-halt`, 계좌별 rule 변경이다. `POST /api/accounts`, `DELETE /api/accounts/:id`, structural `PUT /api/accounts/:id`는 409로 차단한다.
+- **CLI 스펙**: `ante account create/delete/set-credentials`는 cold-path 전용이며 서버 실행 중이면 거부한다. `list/info/credentials/suspend/activate`, `ante system halt/clear-halt`는 런타임 중 실행 가능하다.

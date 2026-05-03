@@ -99,7 +99,7 @@ hot-add/hot-remove를 수행하지 않는다.
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
 | `AccountSuspendedEvent` | 계좌 거래 중단 시 (Account.status → SUSPENDED) | BotManager (해당 계좌 봇 중지), 로깅 |
-| `AccountActivatedEvent` | 계좌 거래 재개 시 (Account.status → ACTIVE) | BotManager (해당 계좌 봇 재개), 로깅 |
+| `AccountActivatedEvent` | 계좌 거래 재개 시 (Account.status → ACTIVE) | BotManager (로깅만; 자동 재시작은 수행하지 않음), 로깅 |
 | `NotificationEvent` | 계좌 상태 변경, 시스템 시작/종료 시 | NotificationService → Telegram 어댑터 (category: "system") |
 
 ## 알림 이벤트 정의 (Notification Events)

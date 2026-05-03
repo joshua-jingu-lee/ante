@@ -10,7 +10,61 @@
 |--------|------|------|
 | GET | `/api/system/status` | 시스템 상태 (status, version) |
 | GET | `/api/system/health` | 헬스체크. 응답 스키마는 아래 [헬스체크 상세](#헬스체크-상세-get-apisystemhealth) 참조 |
-| POST | `/api/system/kill-switch` | 킬 스위치 제어 (halt/activate). 파라미터: action, reason, account_id? (생략 시 전체 계좌) |
+| POST | `/api/system/halt` | 시스템 전역 정지. 모든 ACTIVE 계좌를 SUSPENDED로 전환. 파라미터: reason. 응답 shape은 아래 [Kill Switch 응답 SSOT](#kill-switch-응답-ssot-post-apisystemhalt--post-apisystemclear-halt) 참조 |
+| POST | `/api/system/clear-halt` | 시스템 전역 정지 해제. 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. 계좌 상태만 복구하며 봇을 자동 재시작하지 않는다. 응답 shape은 아래 [Kill Switch 응답 SSOT](#kill-switch-응답-ssot-post-apisystemhalt--post-apisystemclear-halt) 참조 |
+
+> 단일 계좌 단위 정지/재개는 Account 모듈 엔드포인트(`POST /api/accounts/{id}/suspend` / `POST /api/accounts/{id}/activate`)를 사용한다. `/api/system/halt` / `/api/system/clear-halt`는 전역 편의 명령이며, 단일 계좌 파라미터를 받지 않는다.
+
+## Kill Switch 응답 SSOT (`POST /api/system/halt` / `POST /api/system/clear-halt`)
+
+`POST /api/system/halt`와 `POST /api/system/clear-halt`는 동일한 응답 shape을 사용한다 (HTTP 200, `application/json`).
+
+```json
+{
+  "status": "halted | halt_cleared",
+  "accounts_changed": 2,
+  "changed_at": "2026-05-03T05:21:33Z",
+  "accounts": [
+    {
+      "account_id": "domestic",
+      "previous_status": "ACTIVE",
+      "status": "SUSPENDED",
+      "changed": true
+    },
+    {
+      "account_id": "overseas",
+      "previous_status": "ACTIVE",
+      "status": "SUSPENDED",
+      "changed": true
+    }
+  ]
+}
+```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `status` | string | `halt` 응답은 `"halted"`, `clear-halt` 응답은 `"halt_cleared"` |
+| `accounts_changed` | int | 실제로 상태가 전환된 계좌 수 (`changed: true`인 항목 수와 동일) |
+| `changed_at` | string (ISO 8601 UTC) | 상태 전환 처리 시각. `Z` suffix를 사용한다 |
+| `accounts` | array | 처리 대상 계좌 목록. 각 항목은 아래 표를 따른다 |
+
+`accounts[]` 항목 필드는 정확히 `account_id`, `previous_status`, `status`, `changed` 네 키만 포함한다 (설계 SSOT — `before_status` / `after_status`는 사용하지 않는다).
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `account_id` | string | 계좌 식별자 |
+| `previous_status` | string | 호출 직전 상태 (`ACTIVE` 또는 `SUSPENDED`) |
+| `status` | string | 호출 직후 상태 (`ACTIVE` 또는 `SUSPENDED`) |
+| `changed` | bool | 실제 전환 여부. 이미 대상 상태이거나 DELETED 계좌(대상 외)는 `false` |
+
+**의미 규칙**:
+- `halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환한다. DELETED 계좌는 대상에서 제외된다.
+- `clear-halt`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. 계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다(BotManager는 `AccountActivatedEvent`를 수신해도 로깅만 수행).
+- `accounts[]`에는 처리 대상 후보 계좌가 모두 포함되며, 상태 변화가 없는 항목(`changed: false`)도 응답에 노출되어 호출자가 멱등 동작을 검증할 수 있다.
+
+**에러 envelope (4xx / 5xx)**:
+
+4xx/5xx 응답은 기존 `ErrorResponse` (RFC 7807 — `type`, `title`, `detail`, `status`, `instance`)을 사용하며 `Content-Type: application/problem+json`으로 반환한다. 상세는 [07-error-format.md](07-error-format.md), [08-pydantic-schemas.md](08-pydantic-schemas.md)를 참조한다. `request_id`는 현재 `ErrorResponse` SSOT에 포함되지 않으므로 본 엔드포인트도 추가하지 않는다.
 
 ## 헬스체크 상세 (`GET /api/system/health`)
 

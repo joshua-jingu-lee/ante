@@ -117,7 +117,8 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 | 인증 정보 마스킹 조회 | `account credentials` | `GET /api/accounts/{id}/credentials` | 읽기 |
 | 계좌 거래 정지 | `account suspend` | `POST /api/accounts/{id}/suspend` | IPC/Web API → `AccountService.suspend()` |
 | 계좌 거래 재개 | `account activate` | `POST /api/accounts/{id}/activate` | IPC/Web API → `AccountService.activate()` |
-| 전체 거래 정지/재개 | `system halt/activate` | `POST /api/system/kill-switch` | IPC/Web API → `suspend_all()` / `activate_all()` |
+| 전체 거래 정지 | `system halt` | `POST /api/system/halt` | IPC/Web API → `AccountService.suspend_all()` |
+| 전체 거래 정지 해제 | `system clear-halt` | `POST /api/system/clear-halt` | IPC/Web API → `AccountService.activate_all()` (계좌 상태 복구만; 봇 자동 재시작 아님) |
 | 비구조 필드 수정 | `account update` 계열 향후 명령 | `PUT /api/accounts/{id}` | `name`, `timezone`, `trading_hours` 등 브로커 재초기화가 필요 없는 필드만 |
 | 계좌별 rule 변경 | `rule`/`config` 계열 명령 | `PUT /api/accounts/{id}/rules/{rule_type}` | DynamicConfig + `ConfigChangedEvent` |
 
