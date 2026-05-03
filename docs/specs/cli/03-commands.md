@@ -36,9 +36,9 @@
 | `ante account list [--status <status>]` | `offline` | runtime-safe 조회 |
 | `ante account info <account_id>` | `offline` | runtime-safe 조회 |
 | `ante account credentials <account_id>` | `offline` | 마스킹 조회 |
-| `ante account create` | `cold-path` | 서버 실행 중 차단 |
+| `ante account create --broker-type <type> --account-id <id> --name <name> --trading-mode virtual\|live ...` | `cold-path` | 서버 실행 중 차단 |
 | `ante account set-credentials <account_id> ...` | `cold-path` | 서버 실행 중 차단 |
-| `ante account delete <account_id>` | `cold-path` | 서버 실행 중 차단 |
+| `ante account delete <account_id> --yes` | `cold-path` | 서버 실행 중 차단 |
 | `ante account suspend <account_id> --reason <reason>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
@@ -49,7 +49,7 @@
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
 | `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성 |
 | `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지 |
-| `ante bot remove <bot_id>` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
+| `ante bot remove <bot_id> --yes` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
 | `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
 | `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
 | `ante trade info <trade_id>` | `offline` | canonical DB 조회 |
@@ -83,7 +83,10 @@
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
 | `ante member register --id <member_id> --type human|agent ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
-| `ante member set-emoji/suspend/reactivate/revoke/rotate-token/reset-password/regenerate-recovery-key ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member set-emoji/suspend/reactivate/rotate-token ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member revoke <member_id> --yes` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member reset-password --recovery-key <key> (--new-password-env <ENV>\|--new-password-file <PATH>)` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member regenerate-recovery-key (--password-env <ENV>\|--password-file <PATH>)` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | 동일 member mutation, 서버 정지 상태 | `bootstrap/maintenance` | recovery/비상 운영 fallback |
 | `ante instrument list/search/sync/import ...` | `offline` | InstrumentService 및 외부 master data 작업 |
 | `ante audit list ...` | `offline` | 감사 로그 조회 |
@@ -106,12 +109,25 @@ ante system activate [--account <account_id>]  # halt 해제, 거래 재개 (계
 ```bash
 ante account list [--status active|suspended|deleted]  # 계좌 목록
 ante account info <account_id>                # 계좌 상세 정보
-ante account create                           # 대화형 계좌 등록 (cold-path 전용, 서버 정지 필요)
+ante account create \
+  --broker-type <broker_type> \
+  --account-id <account_id> \
+  --name <name> \
+  --trading-mode virtual|live \
+  [--credential key=value ...] \
+  [--credential-env key=ENV_NAME ...] \
+  [--credential-file key=PATH ...] \
+  [--broker-config key=value ...] \
+  [--format json]                             # 계좌 등록 (cold-path 전용, 서버 정지 필요)
 ante account credentials <account_id>         # 인증 정보 조회 (마스킹)
-ante account set-credentials <account_id> [--app-key K --app-secret S]  # 인증 정보 재설정 (cold-path 전용)
+ante account set-credentials <account_id> \
+  [--credential key=value ...] \
+  [--credential-env key=ENV_NAME ...] \
+  [--credential-file key=PATH ...] \
+  [--format json]                             # 인증 정보 재설정 (cold-path 전용)
 ante account suspend <account_id> --reason <사유>  # 계좌 거래 정지
 ante account activate <account_id>            # 계좌 거래 재개
-ante account delete <account_id>              # 계좌 삭제 (cold-path 전용, 연결된 봇이 없을 때만)
+ante account delete <account_id> --yes        # 계좌 삭제 (cold-path 전용, 연결된 봇이 없을 때만)
 ```
 
 `account create/delete/set-credentials`는 계좌 topology 또는 브로커 초기화 입력을 바꾸므로
@@ -121,6 +137,131 @@ runtime이 살아 있으면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`�
 `account.delete`는 IPC 런타임 커맨드가 아니므로 cold-path CLI에서 직접
 `AccountService.delete()`를 호출한다.
 
+#### Broker 책임 경계 — `BROKER_REGISTRY` vs `BrokerPreset`
+
+`account create`의 broker 관련 입력 검증 책임은 두 SSOT로 분리된다.
+
+| 책임 | SSOT | 위치 |
+|------|------|------|
+| `broker_type` 문자열 → `BrokerAdapter` 클래스 매핑 | `BROKER_REGISTRY` | `src/ante/broker/registry.py` |
+| broker별 default 값 + `required_credentials` 목록 | `BrokerPreset` (dataclass) | `src/ante/account/models.py` |
+
+- `--broker-type`의 enum 검증(미등록 broker_type 거부)은 `BROKER_REGISTRY`를 참조한다.
+- credential key 검증(`--credential`/`--credential-env`/`--credential-file`로 전달된 key가
+  `required_credentials`에 정의되어 있는지)은 `BrokerPreset.required_credentials`를 참조한다.
+- 필수 credential 누락은 `ACCOUNT_MISSING_REQUIRED_CREDENTIAL`, 정의되지 않은 key는
+  `ACCOUNT_UNKNOWN_CREDENTIAL_KEY`로 실패한다.
+
+`BROKER_REGISTRY`는 broker preset 정보를 보유하지 않으며, broker preset 변경에 영향을 받지 않는다.
+
+#### `--broker-config` 정책 (1.0 범위)
+
+`BrokerPreset`에 `optional_broker_config` 필드를 신설하지 않는다. `--broker-config key=value`는
+free-form pass-through로 받아 `Account.broker_config: dict[str, Any]`에 저장한다.
+broker별 known optional key 검증은 broker adapter 초기화 시점으로 위임한다.
+
+예: `kis-domestic`의 `is_paper`는 `--broker-config is_paper=true`로 전달한다.
+
+**1.0 silent ignore trade-off**: 1.0에서 broker adapter가 unknown `broker_config` key를
+거부하지 않고 silent ignore할 수 있다(예: KIS adapter는 `config.get("is_paper", ...)` 형태로
+known key만 읽음). 사용자가 오타나 잘못된 key를 `--broker-config`로 넘겨도 검증되지 않는다.
+이는 1.0 의도된 trade-off이며, [02-design-decisions.md — 비대화형 입력 계약](02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract)에 위험으로 명시한다.
+후속 이슈에서 `BrokerPreset.optional_broker_config` 모델과 `UNKNOWN_BROKER_CONFIG_KEY`
+검증을 도입한다.
+
+#### `account create` 입력 계약
+
+| 옵션 | 필수/선택 | 설명 |
+|------|----------|------|
+| `--broker-type <broker_type>` | 필수 | `BROKER_REGISTRY` 등록 값 |
+| `--account-id <account_id>` | 필수 | 신규 계좌 식별자 |
+| `--name <name>` | 필수 | 표시 이름 |
+| `--trading-mode virtual\|live` | 필수 | 거래 모드 |
+| `--credential key=value` | 선택 (반복) | credential 직접 값 (테스트/로컬 편의용, 비권장) |
+| `--credential-env key=ENV_NAME` | 선택 (반복) | credential 환경변수 참조 (권장) |
+| `--credential-file key=PATH` | 선택 (반복) | credential 파일 참조 (권장) |
+| `--broker-config key=value` | 선택 (반복) | broker-specific 설정 (free-form pass-through) |
+| `--format json` | 선택 | 출력 포맷 |
+
+**계약**:
+
+- `BrokerPreset.required_credentials`를 모두 충족해야 한다. 누락 시
+  `ACCOUNT_MISSING_REQUIRED_CREDENTIAL`로 실패한다.
+- 정의되지 않은 credential key는 `ACCOUNT_UNKNOWN_CREDENTIAL_KEY`로 실패한다.
+- 같은 credential key를 `--credential`/`--credential-env`/`--credential-file` 중 둘 이상
+  채널로 중복 제공하면 `ACCOUNT_DUPLICATE_CREDENTIAL_KEY`로 실패한다.
+- `--credential-env`이 참조한 환경변수가 설정되지 않으면 `ACCOUNT_CREDENTIAL_ENV_NOT_SET`,
+  `--credential-file`이 가리키는 파일이 존재하지 않으면 `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND`로
+  실패한다.
+- prompt fallback은 없다. 누락 입력은 즉시 구조화된 에러로 종료한다.
+
+#### `account set-credentials` 입력 계약
+
+```bash
+ante account set-credentials <account_id> \
+  [--credential key=value ...] \
+  [--credential-env key=ENV_NAME ...] \
+  [--credential-file key=PATH ...] \
+  [--format json]
+```
+
+**계약**:
+
+- credential 옵션이 하나도 없으면 prompt하지 않고 `ACCOUNT_MISSING_REQUIRED_CREDENTIAL`로 실패한다.
+- "재설정" 의미에 맞춰 대상 account의 `BrokerPreset.required_credentials`를 **모두**
+  충족해야 한다(부분 갱신 허용 안 함).
+- 그 외 검증 규칙(중복 key, env/file 해석 실패, unknown key)은 `account create`와 동일하다.
+
+#### 위험 명령 — `--yes`/`--force` 필수
+
+다음 명령은 prompt confirm을 제거하고 `--yes` 또는 `--force` 없이는 실패한다.
+
+```bash
+ante account delete <account_id> --yes
+ante bot remove <bot_id> --yes
+ante member revoke <member_id> --yes
+```
+
+`--yes` 누락 시 `CLI_CONFIRMATION_REQUIRED`로 실패한다.
+
+`ante update`의 `--check`/`--yes`/`--force` 의미 분리는 [`ante update`](#ante-update--업데이트) 절을 참조한다.
+
+#### `ante bot create`의 `--account` 생략 정책
+
+```bash
+ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] ...
+```
+
+- active 계좌가 정확히 1개일 때만 `--account` 생략을 허용하고, 그 단일 active 계좌가 자동 선택된다.
+- active 계좌가 0개 또는 2개 이상이면 prompt 없이 `BOT_MISSING_REQUIRED_ACCOUNT`로 실패한다.
+- prompt 기반 계좌 선택 경로는 제거되었다.
+
+#### `ante member reset-password` 입력 계약
+
+```bash
+ante member reset-password \
+  --recovery-key <key> \
+  (--new-password-env ENV_NAME | --new-password-file PATH) \
+  [--format json]
+```
+
+- `--new-password-env` 또는 `--new-password-file` 중 정확히 하나를 사용한다.
+- 직접 `--new-password` 값 옵션은 shell history 노출 우려로 본 이슈에서 권장 채널에서 제외한다
+  (env/file만 권장 채널로 확정).
+- 두 옵션 모두 누락이면 `MEMBER_PASSWORD_ENV_NOT_SET` 또는 `MEMBER_PASSWORD_FILE_NOT_FOUND`
+  가 아닌 `CLI_MISSING_REQUIRED_INPUT`(또는 도메인 specialize 코드)으로 실패한다.
+
+#### `ante member regenerate-recovery-key` 입력 계약
+
+```bash
+ante member regenerate-recovery-key \
+  (--password-env ENV_NAME | --password-file PATH) \
+  [--format json]
+```
+
+- `--password-env` 또는 `--password-file` 중 정확히 하나를 사용한다.
+- prompt 기반 현재 패스워드 입력은 제거되었다.
+
 ### `ante bot` — 봇 관리
 
 ```bash
@@ -128,12 +269,14 @@ ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
 ante bot start <bot_id>            # 봇 시작
 ante bot stop <bot_id>             # 봇 중지
-ante bot remove <bot_id>           # 봇 삭제
+ante bot remove <bot_id> --yes     # 봇 삭제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante bot info <bot_id>             # 봇 상세 정보
 ante bot status <bot_id>           # 봇 실행 상태
 ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
+
+`bot create`의 `--account` 생략 시 동작은 [위 절](#ante-bot-create의---account-생략-정책)을 따른다.
 
 `bot create/start/stop`과 `bot signal-key --rotate`는 서버 BotManager의 인메모리
 `_bots`, 실행 task, EventBus 구독, signal key 연결 상태를 바꾸므로 런타임 IPC 커맨드다.
@@ -328,13 +471,14 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 `ante init`은 이들을 다루지 않는다. 필요 시 다음 명령을 사용한다:
 
-- KIS 실계좌: 서버 정지 상태에서 `ante account create` (대화형)
+- KIS 실계좌: 서버 정지 상태에서 `ante account create --broker-type kis-domestic --account-id <id> --name <name> --trading-mode live` 등 [비대화형 시그니처](#ante-account--계좌-관리)로 실행
 - Telegram: `<dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
 - DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
+  ([비대화형 입력 계약의 명시적 예외](02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract))
 
 **비범위:**
 
-- 대화형 프롬프트: 없음
+- stdin prompt: 없음 ([비대화형 입력 계약](02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract))
 - 시드 데이터 주입: 지원하지 않음 (PR #609 이후 관련 인프라 제거됨)
 
 ### `ante member` — 멤버(에이전트) 관리
@@ -347,11 +491,11 @@ ante member list [--type human|agent] [--org <org>] [--status active|suspended|r
 ante member info <member_id>                            # 멤버 상세
 ante member suspend <member_id>                         # 멤버 일시 정지
 ante member reactivate <member_id>                      # 멤버 재활성화
-ante member revoke <member_id>                          # 멤버 권한 영구 해제
+ante member revoke <member_id> --yes                    # 멤버 권한 영구 해제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante member rotate-token <member_id>                    # 인증 토큰 갱신
 ante member set-emoji <member_id> <emoji>               # 멤버 이모지 설정
-ante member reset-password --recovery-key <key>          # 비밀번호 초기화
-ante member regenerate-recovery-key                     # 복구 키 재발급
+ante member reset-password --recovery-key <key> (--new-password-env ENV_NAME | --new-password-file PATH)  # 비밀번호 초기화
+ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file PATH)  # 복구 키 재발급
 ```
 
 `member list/info`는 오프라인 조회가 가능하다. 그 외 member 상태·토큰·패스워드·복구키
@@ -391,3 +535,15 @@ ante signal connect --key <sk_...>   # 양방향 JSON Lines 시그널 채널 수
 ```bash
 ante update [--check] [--version <version>] [--yes] [--force]
 ```
+
+**옵션 의미 분리** (비대화형 입력 계약):
+
+| 옵션 | 의미 | 누락/충돌 시 |
+|------|------|--------------|
+| `--check` | PyPI 버전 조회만 수행 (dry-run, 확인 불필요) | 단독 사용 가능 |
+| `--yes` (`-y`) | 확인 우회 — `--check`이 아닌 모든 실제 업데이트 실행에 필수 | 미사용 + `--check` 미사용 → `CLI_CONFIRMATION_REQUIRED` |
+| `--force` | 서버 실행 중이면 자동 중지 후 업데이트 | 미사용 + 서버 실행 중 → `UPDATE_SERVER_RUNNING` |
+
+- `--check`은 단순 조회이므로 `--yes`/`--force` 영향 없음. `--check`과 `--yes`를 동시에 사용해도
+  `--check`이 우선한다(충돌 정책: `--check` 우선).
+- prompt 기반 확인 경로(`click.confirm`)는 제거되었다. 모든 확인은 옵션으로 명시한다.

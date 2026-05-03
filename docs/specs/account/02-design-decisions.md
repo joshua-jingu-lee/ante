@@ -74,9 +74,30 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 `ante init`은 더 이상 KIS 실계좌 / Telegram / DataFeed / 기존 broker→account 마이그레이션을 다루지 않는다. 사용자/Agent가 후속 명령으로 명시적으로 추가한다:
 
-- 실거래 계좌(KIS 등): 서버 정지 상태에서 `ante account create` (대화형) 또는 추가 옵션이 필요한 경우 동일 명령의 향후 비대화형 플래그
+- 실거래 계좌(KIS 등): 서버 정지 상태에서 `ante account create`에 `--broker-type`, `--account-id`,
+  `--name`, `--trading-mode`와 credential 옵션(`--credential`/`--credential-env`/`--credential-file`)을
+  명시한다. 입력 계약은 [cli/02-design-decisions.md — 비대화형 입력 계약](../cli/02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract),
+  명령 시그니처는 [cli/03-commands.md — `ante account` 계좌 관리](../cli/03-commands.md#ante-account--계좌-관리)를 따른다.
 - Telegram: `<config_dir>/secrets.env` 직접 편집 (`TELEGRAM_BOT_TOKEN=`, `TELEGRAM_CHAT_ID=`)
 - DataFeed API 키: `ante feed config set ANTE_DATAGOKR_API_KEY <key>` / `ANTE_DART_API_KEY`
+
+`account create`에서 broker 책임 경계는 두 SSOT로 분리된다.
+
+- `BROKER_REGISTRY` (`src/ante/broker/registry.py`): `broker_type` 문자열 → `BrokerAdapter`
+  매핑. `--broker-type` enum 검증에 사용한다.
+- `BrokerPreset` (`src/ante/account/models.py`의 dataclass): broker별 default 값 + `required_credentials`
+  목록을 보유. `--credential*` key 검증의 SSOT다.
+
+`--broker-config key=value`는 1.0 범위에서 free-form pass-through로 받아
+`Account.broker_config: dict[str, Any]`에 저장한다. `BrokerPreset`에 `optional_broker_config`
+필드를 신설하지 않으며, broker별 known optional key 검증은 broker adapter 초기화
+시점으로 위임한다.
+
+**1.0 silent ignore trade-off**: 1.0에서 broker adapter가 unknown `broker_config` key를
+거부하지 않고 silent ignore할 수 있다(예: KIS adapter는 `config.get("is_paper", ...)`
+형태로 known key만 읽음). 사용자가 오타나 잘못된 key를 `--broker-config`로 넘겨도
+검증되지 않는다. 이는 1.0 의도된 trade-off이며, 후속 이슈에서 `BrokerPreset.optional_broker_config`
+모델과 `UNKNOWN_BROKER_CONFIG_KEY` 검증을 도입한다.
 
 테스트 계좌(`account_id: "test"`)는 `ante init`이 항상 자동 생성하므로, 사용자는 실계좌 등록 없이도 가상 자금으로 시스템 전체 흐름을 체험할 수 있다.
 

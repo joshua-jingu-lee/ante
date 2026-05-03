@@ -18,6 +18,126 @@
 
 소스: `src/ante/cli/main.py`
 
+### 비대화형 입력 계약 (CLI Non-Interactive Input Contract)
+
+> 본 절은 Ante CLI 입력 계약의 SSOT다. 모든 도메인 스펙(`account/09-cli.md`,
+> `bot/06-cli-usage.md`, `member/06-cli.md`)은 이 계약을 따른다.
+
+**원칙**:
+
+```text
+Ante CLI는 stdin 대화형 입력을 제공하지 않는다.
+필수 입력이 없으면 prompt하지 않고 구조화된 에러로 실패한다.
+모든 입력은 인자, 옵션, 환경변수 참조, 파일 경로 중 하나로 전달한다.
+비밀값은 직접 값 옵션보다 --*-env 또는 --*-file 경로를 우선한다.
+위험 명령은 confirm prompt 대신 --yes 또는 --force를 명시적으로 요구한다.
+```
+
+**stdin prompt 금지**:
+
+CLI 코드에서 다음 API 사용을 금지한다.
+
+- `click.prompt(...)`
+- `click.confirm(...)`
+- `@click.confirmation_option(...)`
+
+`click` 자체는 명령/옵션 파싱과 `--help` 생성을 위해 유지하며, prompt 계열 API만 금지한다.
+
+**입력 채널**:
+
+모든 사용자 입력은 다음 4개 채널 중 하나로 전달한다.
+
+| 채널 | 형식 | 용도 |
+|------|------|------|
+| argument | `<value>` 위치 인자 | account_id, bot_id 등 식별자 |
+| option | `--key value` | 명시적 옵션 값 |
+| env reference | `--*-env <ENV_NAME>` | 비밀값을 환경변수로 전달 |
+| file reference | `--*-file <PATH>` | 비밀값을 파일에서 읽음 |
+
+**비밀값 입력 우선순위**:
+
+비밀값(credential, password 등)은 `--*-env`/`--*-file` 사용을 권장한다. 직접 값 옵션
+(예: `--credential key=value`)은 shell history 노출 우려가 있어 명시적 비권장 경로다.
+직접 값 옵션은 테스트와 로컬 편의용으로만 허용하며, 자동화/Agent 워크플로우에서는
+`--*-env`/`--*-file`을 사용한다.
+
+**위험 명령 확인 방식**:
+
+다음 명령은 prompt 대신 `--yes` 또는 `--force` 옵션을 명시적으로 요구한다.
+
+| 명령 | 옵션 | 누락 시 에러 |
+|------|------|--------------|
+| `ante account delete <account_id>` | `--yes` | `CLI_CONFIRMATION_REQUIRED` |
+| `ante bot remove <bot_id>` | `--yes` | `CLI_CONFIRMATION_REQUIRED` |
+| `ante member revoke <member_id>` | `--yes` | `CLI_CONFIRMATION_REQUIRED` |
+| `ante update [실제 실행]` | `--yes` | `CLI_CONFIRMATION_REQUIRED` |
+| `ante update` (서버 실행 중 자동 중지) | `--force` | `UPDATE_SERVER_RUNNING` |
+
+`ante update --check`는 PyPI 버전 조회만 수행하는 dry-run이므로 `--yes`가 필요하지 않다.
+
+**누락 입력 처리**:
+
+필수 옵션·인자가 누락되면 prompt하지 않고 구조화된 에러로 즉시 종료한다(exit code 1).
+JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "..."}` 형식으로 출력한다.
+
+**에러 코드 명명 규칙 (SSOT)**:
+
+도메인 prefix를 사용하며 `SCREAMING_SNAKE_CASE`로 작성한다. 입력 계약 위반은 도메인이
+명확하면 도메인 prefix를 사용하고(`ACCOUNT_*`, `MEMBER_*`, `BOT_*`, `UPDATE_*`),
+도메인이 없으면 `CLI_*` prefix를 사용한다.
+
+표준 에러 코드 (이번 이슈에서 SSOT로 확정):
+
+| 에러 코드 | 의미 | 발생 명령 |
+|-----------|------|----------|
+| `CLI_MISSING_REQUIRED_INPUT` | 필수 옵션·인자 누락 (도메인 명확 시 도메인 prefix specialize) | 모든 명령 |
+| `CLI_CONFIRMATION_REQUIRED` | 위험 명령에 `--yes`/`--force` 누락 | `account delete`, `bot remove`, `member revoke`, `update` |
+| `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` | `BrokerPreset.required_credentials`에 정의된 credential key 누락 | `account create`, `account set-credentials` |
+| `ACCOUNT_UNKNOWN_CREDENTIAL_KEY` | broker preset의 `required_credentials`에 정의되지 않은 credential key 제공 | `account create`, `account set-credentials` |
+| `ACCOUNT_DUPLICATE_CREDENTIAL_KEY` | 같은 credential key를 `--credential`/`--credential-env`/`--credential-file` 중 둘 이상 채널로 중복 제공 | `account create`, `account set-credentials` |
+| `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND` | `--credential-file`이 가리키는 파일이 존재하지 않음 | `account create`, `account set-credentials` |
+| `ACCOUNT_CREDENTIAL_ENV_NOT_SET` | `--credential-env`이 참조한 환경변수가 설정되지 않음 | `account create`, `account set-credentials` |
+| `MEMBER_PASSWORD_FILE_NOT_FOUND` | `--password-file`/`--new-password-file`이 가리키는 파일이 존재하지 않음 | `member reset-password`, `member regenerate-recovery-key` |
+| `MEMBER_PASSWORD_ENV_NOT_SET` | `--password-env`/`--new-password-env`이 참조한 환경변수가 설정되지 않음 | `member reset-password`, `member regenerate-recovery-key` |
+| `BOT_MISSING_REQUIRED_ACCOUNT` | `--account` 생략 시 active 계좌가 0개 또는 2개 이상 | `bot create` |
+| `UPDATE_SERVER_RUNNING` | `ante update --force` 없이 서버가 실행 중 | `update` |
+
+`--broker-config`는 1.0 범위에서 free-form pass-through(아래 silent ignore trade-off
+참조)이므로 본 이슈에서는 `UNKNOWN_BROKER_CONFIG_KEY`를 정의하지 않는다.
+
+**인간-AI 공용 표면**:
+
+입력 계약(인자/옵션/env/file)은 출력 계약(`--format json`)과 함께 "Agent와 사람이
+공용으로 사용 가능한 CLI 표면"의 일부다. Agent는 stdin prompt에 응답할 수 없으므로,
+prompt 기반 입력은 Agent 사용성을 일방적으로 희생시킨다. 비대화형 입력 계약은
+Agent와 사람이 같은 명령 시그니처로 동일한 결과를 얻도록 보장한다.
+
+**비대상 표면**:
+
+다음은 CLI stdin prompt와 별개의 표면이며 본 원칙의 적용 대상이 아니다.
+
+- Telegram `/confirm` 2단계 확인 — `docs/specs/notification/*` (사용자 단말의 별도 채널)
+- Dashboard 확인 모달 — `docs/specs/dashboard/*` (브라우저 UI의 별도 채널)
+- 서버 측 IPC/Web API 요청 본문 — CLI 입력 계약의 적용 범위 밖
+
+**1.0 trade-off — `--broker-config` silent ignore 위험**:
+
+1.0에서 `BrokerPreset`은 `required_credentials`만 강제 검증하고, broker별 optional
+broker_config key는 free-form pass-through로 받는다(`Account.broker_config: dict[str, Any]`).
+broker adapter가 unknown key를 거부하지 않고 silent ignore할 수 있다(예: KIS adapter는
+`config.get("is_paper", ...)` 형태로 known key만 읽음). 이는 1.0 의도된 trade-off이며,
+후속 이슈에서 `BrokerPreset.optional_broker_config` 모델과 `UNKNOWN_BROKER_CONFIG_KEY`
+검증을 도입한다.
+
+**명시적 예외 — `ante feed config set`**:
+
+`ante feed config set <KEY> <VALUE>`는 `<config_dir>/data/.feed/.env` 파일에 직접
+secret을 기록하기 위한 입력 경로로 1.0 시점에 남아 있다. CLI 입력 계약의 비밀값
+우선순위와 충돌하지만 본 이슈에서는 정리하지 않는다. 후속 이슈에서 `feed config set`에
+`--value-env`/`--value-file` 도입을 별도로 다룬다.
+
+소스: `src/ante/cli/main.py`
+
 ### OutputFormatter
 
 text/json 모드를 지원하는 CLI 출력 포맷터.
