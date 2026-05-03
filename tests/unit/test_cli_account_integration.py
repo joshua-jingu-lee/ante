@@ -282,7 +282,6 @@ class TestBotCreateAccountOption:
                     "--strategy",
                     "s1",
                 ],
-                input="",
             )
 
         assert result.exit_code == 1
@@ -313,7 +312,6 @@ class TestBotCreateAccountOption:
                     "--strategy",
                     "s1",
                 ],
-                input="",
             )
 
         assert result.exit_code == 1

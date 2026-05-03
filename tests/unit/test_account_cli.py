@@ -46,12 +46,12 @@ def _make_cli():
     return cli
 
 
-def _invoke(args: list[str], input_text: str | None = None):
+def _invoke(args: list[str]):
     """CLI를 실행하고 결과를 반환한다."""
     runner = CliRunner()
     cli = _make_cli()
     env = {"ANTE_MEMBER_TOKEN": ""}
-    result = runner.invoke(cli, args, env=env, input=input_text, catch_exceptions=False)
+    result = runner.invoke(cli, args, env=env, catch_exceptions=False)
     return result
 
 
