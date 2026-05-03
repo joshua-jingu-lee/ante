@@ -27,14 +27,14 @@
   "accounts": [
     {
       "account_id": "domestic",
-      "previous_status": "ACTIVE",
-      "status": "SUSPENDED",
+      "previous_status": "active",
+      "status": "suspended",
       "changed": true
     },
     {
       "account_id": "overseas",
-      "previous_status": "ACTIVE",
-      "status": "SUSPENDED",
+      "previous_status": "active",
+      "status": "suspended",
       "changed": true
     }
   ]
@@ -53,8 +53,8 @@
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `account_id` | string | 계좌 식별자 |
-| `previous_status` | string | 호출 직전 상태 (`ACTIVE` 또는 `SUSPENDED`) |
-| `status` | string | 호출 직후 상태 (`ACTIVE` 또는 `SUSPENDED`) |
+| `previous_status` | string | 호출 직전 상태 (`"active"` 또는 `"suspended"`) |
+| `status` | string | 호출 직후 상태 (`"active"` 또는 `"suspended"`) |
 | `changed` | bool | 실제 전환 여부. 이미 목표 상태였던 계좌(예: `clear-halt` 호출 시 이미 ACTIVE인 계좌)는 `false` |
 
 **의미 규칙**:
