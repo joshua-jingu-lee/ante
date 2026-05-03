@@ -165,6 +165,7 @@ ante --format json init --member-id operator --name "Operator"
 ```bash
 export ANTE_KIS_APP_KEY="..."        # 사전 등록
 export ANTE_KIS_APP_SECRET="..."
+export ANTE_KIS_ACCOUNT_NO="..."     # 8자리 계좌번호 + 2자리 상품코드
 
 ante account create \
   --broker-type kis-domestic \
@@ -173,8 +174,11 @@ ante account create \
   --trading-mode virtual \
   --credential-env app_key=ANTE_KIS_APP_KEY \
   --credential-env app_secret=ANTE_KIS_APP_SECRET \
+  --credential-env account_no=ANTE_KIS_ACCOUNT_NO \
   --broker-config is_paper=true
 ```
+
+`kis-domestic` preset은 `app_key`, `app_secret`, `account_no` 세 키를 모두 필수로 요구합니다. 하나라도 누락되면 `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` 에러로 실패합니다.
 
 인증정보는 이후 `ante account set-credentials <ACCOUNT_ID>`로 동일한 `--credential-env` / `--credential-file` 채널을 통해 갱신할 수 있습니다. 도메인 specialize 옵션(`--app-key-env` 등)은 제공되지 않으며, generic credential 계약만 사용합니다.
 

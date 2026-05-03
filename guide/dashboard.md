@@ -22,15 +22,16 @@ http://<홈서버 주소>:3982
   2. Recovery Key와 새 패스워드 채널을 함께 전달합니다.
      ```bash
      # 환경변수 채널
-     ante member reset-password <MEMBER_ID> \
+     ante member reset-password \
        --recovery-key ANTE-RK-... \
        --new-password-env ANTE_NEW_PASSWORD
 
      # 또는 파일 채널
-     ante member reset-password <MEMBER_ID> \
+     ante member reset-password \
        --recovery-key ANTE-RK-... \
        --new-password-file /tmp/ante-new-password
      ```
+  - `reset-password`는 master 멤버를 자동으로 조회하므로 `member_id`를 인자로 받지 않습니다.
   - `--new-password-env` / `--new-password-file`는 상호 배타이며, 둘 다 누락 또는 둘 다 지정 시 `CLI_MISSING_REQUIRED_INPUT` 에러로 실패합니다.
 - 인증은 세션 쿠키 기반이며, 24시간 동안 유지됩니다.
 - 세션이 만료되면 자동으로 로그인 화면으로 이동합니다.

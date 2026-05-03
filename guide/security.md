@@ -90,12 +90,14 @@ ante account credentials domestic
 # 환경변수 채널 (권장)
 ante account set-credentials domestic \
   --credential-env app_key=ANTE_KIS_APP_KEY \
-  --credential-env app_secret=ANTE_KIS_APP_SECRET
+  --credential-env app_secret=ANTE_KIS_APP_SECRET \
+  --credential-env account_no=ANTE_KIS_ACCOUNT_NO
 
 # 또는 파일 채널 (Docker secret 등)
 ante account set-credentials domestic \
   --credential-file app_key=/etc/ante/secrets/app_key \
-  --credential-file app_secret=/etc/ante/secrets/app_secret
+  --credential-file app_secret=/etc/ante/secrets/app_secret \
+  --credential-file account_no=/etc/ante/secrets/account_no
 ```
 
 > `BrokerPreset.required_credentials`의 모든 키를 한 번에 제공해야 하며, 부분 갱신은 허용되지 않습니다. 채널 셋(`--credential` / `--credential-env` / `--credential-file`)이 모두 비어 있으면 `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` 에러로 실패합니다.
