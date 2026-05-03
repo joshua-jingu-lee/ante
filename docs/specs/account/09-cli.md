@@ -18,7 +18,7 @@ ante account create \
   --trading-mode live \
   --credential-env app_key=KIS_APP_KEY \
   --credential-env app_secret=KIS_APP_SECRET \
-  --credential account_number=5012XXXX-01
+  --credential account_no=5012XXXX-01
 
 # (대안) credential을 파일에서 읽기
 ante account create \
@@ -28,7 +28,7 @@ ante account create \
   --trading-mode live \
   --credential-file app_key=/run/secrets/kis_app_key \
   --credential-file app_secret=/run/secrets/kis_app_secret \
-  --credential account_number=5012XXXX-01
+  --credential account_no=5012XXXX-01
 
 # (테스트 계좌) is_paper 같은 broker-specific 설정은 --broker-config로 전달
 ante account create \
@@ -38,7 +38,7 @@ ante account create \
   --trading-mode virtual \
   --credential-env app_key=KIS_PAPER_APP_KEY \
   --credential-env app_secret=KIS_PAPER_APP_SECRET \
-  --credential account_number=5012XXXX-01 \
+  --credential account_no=5012XXXX-01 \
   --broker-config is_paper=true
 
 # 계좌 목록
@@ -63,7 +63,7 @@ ante account credentials <account_id>
 ante account set-credentials <account_id> \
   --credential-env app_key=KIS_APP_KEY \
   --credential-env app_secret=KIS_APP_SECRET \
-  --credential account_number=5012XXXX-01
+  --credential account_no=5012XXXX-01
 
 # 시스템 전체 Kill Switch
 ante system halt                    # 전체 거래 정지
