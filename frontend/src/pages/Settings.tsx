@@ -58,7 +58,10 @@ const DISPLAY_CONFIGS: DisplayConfig[] = [
 
 export default function Settings() {
   const { data: status, isLoading: statusLoading } = useSystemStatus()
-  const { data: accounts, isLoading: accountsLoading } = useAccounts()
+  // CLI/다른 세션의 system halt/clear-halt를 설정 화면 상태에 반영하기 위해 30초 폴링.
+  const { data: accounts, isLoading: accountsLoading } = useAccounts(undefined, {
+    refetchInterval: 30_000,
+  })
   const haltMutation = useHaltSystem()
   const clearHaltMutation = useClearHaltSystem()
   const { data: configs } = useConfigs()

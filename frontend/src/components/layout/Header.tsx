@@ -31,7 +31,10 @@ export default function Header() {
   const location = useLocation()
   const navigate = useNavigate()
   const { data: user } = useUser()
-  const { data: accounts, isLoading: accountsLoading } = useAccounts()
+  // CLI/다른 세션의 system halt/clear-halt를 헤더 상태에 반영하기 위해 30초 폴링.
+  const { data: accounts, isLoading: accountsLoading } = useAccounts(undefined, {
+    refetchInterval: 30_000,
+  })
   const logoutMutation = useLogout()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
