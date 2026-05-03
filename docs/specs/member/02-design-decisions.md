@@ -122,23 +122,30 @@ $ ante init --member-id owner --name "홈트레이더"
 **복구 흐름:**
 
 ```
-1. 사용자가 서버 CLI에서 실행:
-   $ ante member reset-password --recovery-key ANTE-RK-7F3X-...
+1. 사용자가 서버 CLI에서 실행 (새 패스워드는 환경변수 또는 파일로 전달):
+   $ export ANTE_NEW_PASSWORD='새-패스워드-원문'
+   $ ante member reset-password \
+       --recovery-key ANTE-RK-7F3X-... \
+       --new-password-env ANTE_NEW_PASSWORD
 
 2. 시스템이 recovery key 해시를 검증
 
-3. 새 패스워드 입력 (대화형 프롬프트)
+3. 사용자가 --new-password-env 또는 --new-password-file로 새 패스워드를 전달
+   (stdin prompt 없음. 누락 시 CLI_MISSING_REQUIRED_INPUT으로 실패)
 
 4. 패스워드 갱신 + 텔레그램 알림: "master 패스워드가 변경되었습니다"
 
 5. 기존 모든 세션 무효화
 ```
 
+입력 계약 SSOT는 [cli/02-design-decisions.md — 비대화형 입력 계약](../cli/02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract)을 따른다.
+
 **재발급 흐름:**
 
 ```
-$ ante member regenerate-recovery-key
-현재 패스워드: ********
+# 사용자가 --password-env 또는 --password-file로 현재 패스워드를 전달 (stdin prompt 없음)
+$ export ANTE_PASSWORD='현재-패스워드-원문'
+$ ante member regenerate-recovery-key --password-env ANTE_PASSWORD
 ⚠️  기존 복구 키가 폐기되었습니다.
 
 새 복구 키:

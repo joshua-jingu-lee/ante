@@ -6,7 +6,8 @@
 
 CLI 명령 시그니처와 실행 분류의 SSOT는
 [cli/03-commands.md](../cli/03-commands.md#ante-member--멤버에이전트-관리)다. 이 문서는
-Member 관점의 실행 경계와 보안 동작만 설명한다.
+Member 관점의 실행 경계와 보안 동작만 설명한다. 입력 계약(비대화형 옵션 기반, 비밀값
+`--*-env`/`--*-file` 우선, 위험 명령 `--yes` 요구)은 [cli/02-design-decisions.md — 비대화형 입력 계약](../cli/02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract)을 따른다.
 
 ## 실행 경계
 
@@ -74,11 +75,11 @@ ante member suspend strategy-dev-01 [--format json]
 ante member reactivate strategy-dev-01 [--format json]
 ```
 
-### `ante member revoke <member_id>`
+### `ante member revoke <member_id> --yes`
 
 ```
-ante member revoke strategy-dev-01 [--format json]
-# ⚠️ 이 작업은 되돌릴 수 없습니다. 계속하시겠습니까? [y/N]
+ante member revoke strategy-dev-01 --yes [--format json]
+# ⚠️ 이 작업은 되돌릴 수 없습니다. --yes 누락 시 CLI_CONFIRMATION_REQUIRED로 실패합니다.
 ```
 
 ### `ante member rotate-token <member_id>`
@@ -91,18 +92,47 @@ ante member rotate-token strategy-dev-01 [--format json]
 
 ### `ante member reset-password`
 
+새 패스워드는 stdin prompt가 아니라 `--new-password-env <ENV_NAME>` 또는
+`--new-password-file <PATH>`로 전달한다. 직접 `--new-password` 값 옵션은 shell history
+노출 우려로 본 이슈에서 권장 채널에서 제외한다.
+
 ```
-ante member reset-password --recovery-key ANTE-RK-7F3X-...
-# 새 패스워드: ********
-# 패스워드 확인: ********
+# 환경변수에서 새 패스워드 읽기
+$ export ANTE_NEW_PASSWORD='새-패스워드-원문'
+$ ante member reset-password \
+    --recovery-key ANTE-RK-7F3X-... \
+    --new-password-env ANTE_NEW_PASSWORD
+# ✅ 패스워드가 변경되었습니다.
+
+# 또는 파일에서 새 패스워드 읽기
+$ ante member reset-password \
+    --recovery-key ANTE-RK-7F3X-... \
+    --new-password-file /run/secrets/ante_new_password
 # ✅ 패스워드가 변경되었습니다.
 ```
 
+`--new-password-env`/`--new-password-file` 모두 누락이면 prompt 없이 `CLI_MISSING_REQUIRED_INPUT`
+(또는 도메인 specialize 코드)으로 실패한다. 환경변수가 설정되지 않으면 `MEMBER_PASSWORD_ENV_NOT_SET`,
+파일이 존재하지 않으면 `MEMBER_PASSWORD_FILE_NOT_FOUND`로 실패한다.
+
 ### `ante member regenerate-recovery-key`
 
+현재 패스워드는 stdin prompt가 아니라 `--password-env <ENV_NAME>` 또는
+`--password-file <PATH>`로 전달한다.
+
 ```
-ante member regenerate-recovery-key
-# 현재 패스워드: ********
+# 환경변수에서 현재 패스워드 읽기
+$ export ANTE_PASSWORD='현재-패스워드-원문'
+$ ante member regenerate-recovery-key --password-env ANTE_PASSWORD
+# ⚠️ 기존 복구 키가 폐기되었습니다.
+# 새 복구 키: ANTE-RK-2M8P-Q5WN-...
+
+# 또는 파일에서 현재 패스워드 읽기
+$ ante member regenerate-recovery-key --password-file /run/secrets/ante_password
 # ⚠️ 기존 복구 키가 폐기되었습니다.
 # 새 복구 키: ANTE-RK-2M8P-Q5WN-...
 ```
+
+`--password-env`/`--password-file` 모두 누락이면 prompt 없이 `CLI_MISSING_REQUIRED_INPUT`
+(또는 도메인 specialize 코드)으로 실패한다. 환경변수가 설정되지 않으면 `MEMBER_PASSWORD_ENV_NOT_SET`,
+파일이 존재하지 않으면 `MEMBER_PASSWORD_FILE_NOT_FOUND`로 실패한다.

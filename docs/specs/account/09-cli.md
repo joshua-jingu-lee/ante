@@ -6,11 +6,40 @@
 
 CLI 명령 시그니처와 실행 분류의 SSOT는
 [cli/03-commands.md](../cli/03-commands.md#ante-account--계좌-관리)다. 이 문서는
-Account 관점의 lifecycle 경계와 출력 예시만 설명한다.
+Account 관점의 lifecycle 경계와 출력 예시만 설명한다. 입력 계약(비대화형 옵션 기반,
+비밀값 우선순위, 위험 명령 `--yes` 요구)은 [cli/02-design-decisions.md — 비대화형 입력 계약](../cli/02-design-decisions.md#비대화형-입력-계약-cli-non-interactive-input-contract)을 따른다.
 
 ```bash
-# 계좌 생성 (대화형, cold-path 전용)
-ante account create
+# 계좌 생성 (cold-path 전용 — 서버 정지 상태에서만 실행)
+ante account create \
+  --broker-type kis-domestic \
+  --account-id domestic \
+  --name "국내 주식" \
+  --trading-mode live \
+  --credential-env app_key=KIS_APP_KEY \
+  --credential-env app_secret=KIS_APP_SECRET \
+  --credential account_no=5012XXXX-01
+
+# (대안) credential을 파일에서 읽기
+ante account create \
+  --broker-type kis-domestic \
+  --account-id domestic \
+  --name "국내 주식" \
+  --trading-mode live \
+  --credential-file app_key=/run/secrets/kis_app_key \
+  --credential-file app_secret=/run/secrets/kis_app_secret \
+  --credential account_no=5012XXXX-01
+
+# (테스트 계좌) is_paper 같은 broker-specific 설정은 --broker-config로 전달
+ante account create \
+  --broker-type kis-domestic \
+  --account-id paper \
+  --name "모의 투자" \
+  --trading-mode virtual \
+  --credential-env app_key=KIS_PAPER_APP_KEY \
+  --credential-env app_secret=KIS_PAPER_APP_SECRET \
+  --credential account_no=5012XXXX-01 \
+  --broker-config is_paper=true
 
 # 계좌 목록
 ante account list
@@ -23,14 +52,18 @@ ante account info <account_id>
 ante account suspend <account_id>
 ante account activate <account_id>
 
-# 계좌 삭제 (소프트 딜리트, cold-path 전용)
-ante account delete <account_id>
+# 계좌 삭제 (소프트 딜리트, cold-path 전용 — --yes 필수)
+ante account delete <account_id> --yes
 
 # 인증 정보 조회 (마스킹)
 ante account credentials <account_id>
 
-# 인증 정보 재설정 (대화형, 기존 값을 덮어씀, cold-path 전용)
-ante account set-credentials <account_id>
+# 인증 정보 재설정 (cold-path 전용 — 서버 정지 상태에서만 실행)
+# "재설정" 의미상 BrokerPreset.required_credentials를 모두 충족해야 함 (부분 갱신 불가).
+ante account set-credentials <account_id> \
+  --credential-env app_key=KIS_APP_KEY \
+  --credential-env app_secret=KIS_APP_SECRET \
+  --credential account_no=5012XXXX-01
 
 # 시스템 전체 Kill Switch
 ante system halt                    # 전체 거래 정지
@@ -46,9 +79,9 @@ ante system activate                # 전체 거래 재개
 | `ante account credentials <account_id>` | 런타임 허용/오프라인 조회 | 마스킹 조회만 가능 |
 | `ante account suspend <account_id>` | 런타임 허용 | IPC로 서버 `AccountService.suspend()` 호출 |
 | `ante account activate <account_id>` | 런타임 허용 | IPC로 서버 `AccountService.activate()` 호출 |
-| `ante account create` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
-| `ante account delete <account_id>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
-| `ante account set-credentials <account_id>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+| `ante account create --broker-type ... --account-id ... --name ... --trading-mode ... [--credential ...]` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+| `ante account delete <account_id> --yes` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+| `ante account set-credentials <account_id> [--credential ...]` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
 
 cold-path 전용 명령은 active Ante runtime guard로 서버 실행 여부를 먼저 확인한다.
 1.0 정책상 동일 OS user/home server 기준으로 active runtime은 항상 단일이며,
@@ -56,7 +89,7 @@ runtime이 살아 있으면 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 
 `ante account delete`는 IPC 런타임 커맨드가 아니다. cold-path CLI에서 직접
 `AccountService.delete()`를 호출하며, 해당 계좌에 활성(non-deleted) 봇이 남아 있으면
 삭제는 `AccountHasActiveBotsError`로 차단된다(orphan bot 무결성).
-활성 봇이 남아 있으면 `ante bot remove <bot_id>`로 먼저 제거한다. `bot remove`는
+활성 봇이 남아 있으면 `ante bot remove <bot_id> --yes`로 먼저 제거한다. `bot remove`는
 서버 실행 중에는 IPC, 서버 정지 중에는 cold-path cleanup으로 동작하므로 계좌 삭제
 복구를 위해 별도의 `ante system start`/`ante system stop` 왕복이 필요하지 않다.
 
