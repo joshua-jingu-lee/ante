@@ -1,10 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { getAccounts } from '../api/accounts'
 
-export function useAccounts(params?: { status?: string }) {
+export function useAccounts(
+  params?: { status?: string },
+  options?: { refetchInterval?: number },
+) {
   return useQuery({
     queryKey: ['accounts', params],
     queryFn: () => getAccounts(params),
+    refetchInterval: options?.refetchInterval,
   })
 }
 

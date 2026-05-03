@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { useUser, useLogout } from '../../hooks/useAuth'
-import { useSystemStatus } from '../../hooks/useSystemStatus'
+import { useAccounts } from '../../hooks/useAccounts'
 
 const PAGE_TITLES: Record<string, string> = {
   '/approvals': '결재함',
@@ -31,10 +31,26 @@ export default function Header() {
   const location = useLocation()
   const navigate = useNavigate()
   const { data: user } = useUser()
-  const { data: systemStatus } = useSystemStatus()
+  // CLI/다른 세션의 system halt/clear-halt를 헤더 상태에 반영하기 위해 30초 폴링.
+  const { data: accounts, isLoading: accountsLoading } = useAccounts(undefined, {
+    refetchInterval: 30_000,
+  })
   const logoutMutation = useLogout()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // 시스템 상태는 계좌 집계로 산출 (전역 거래 상태 enum은 SSOT 아님).
+  // - active > 0 && suspended === 0 이면 ACTIVE.
+  // - accounts 로딩 중에는 false negative 방지를 위해 중립 상태.
+  const activeCount = accounts?.filter((a) => a.status === 'active').length ?? 0
+  const suspendedCount = accounts?.filter((a) => a.status === 'suspended').length ?? 0
+  const isActive = !accountsLoading && activeCount > 0 && suspendedCount === 0
+  const dotClass = accountsLoading
+    ? 'bg-border'
+    : isActive
+      ? 'bg-positive'
+      : 'bg-negative'
+  const statusLabel = accountsLoading ? '확인 중' : isActive ? 'ACTIVE' : 'HALTED'
 
   const title = getPageTitle(location.pathname)
   const showBack = isDetailPage(location.pathname)
@@ -65,12 +81,8 @@ export default function Header() {
 
       <div className="flex items-center gap-2 md:gap-4">
         <div className="hidden sm:flex items-center gap-1.5 text-[12px] text-text-muted">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              systemStatus?.trading_status === 'ACTIVE' ? 'bg-positive' : 'bg-negative'
-            }`}
-          />
-          {systemStatus?.trading_status ?? '...'}
+          <span className={`w-2 h-2 rounded-full ${dotClass}`} />
+          {statusLabel}
         </div>
 
         <div ref={menuRef} className="relative">
