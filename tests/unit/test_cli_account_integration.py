@@ -91,8 +91,39 @@ def _make_mock_account_service(accounts=None):
     svc.initialize = AsyncMock()
     svc.list = AsyncMock(return_value=accounts or [])
     svc.get = AsyncMock()
-    svc.suspend_all = AsyncMock(return_value=2)
-    svc.activate_all = AsyncMock(return_value=2)
+    # Refs #1213: list[dict] 반환 타입.
+    svc.suspend_all = AsyncMock(
+        return_value=[
+            {
+                "account_id": "domestic",
+                "previous_status": "active",
+                "status": "suspended",
+                "changed": True,
+            },
+            {
+                "account_id": "overseas",
+                "previous_status": "active",
+                "status": "suspended",
+                "changed": True,
+            },
+        ]
+    )
+    svc.activate_all = AsyncMock(
+        return_value=[
+            {
+                "account_id": "domestic",
+                "previous_status": "suspended",
+                "status": "active",
+                "changed": True,
+            },
+            {
+                "account_id": "overseas",
+                "previous_status": "suspended",
+                "status": "active",
+                "changed": True,
+            },
+        ]
+    )
     return svc
 
 
@@ -319,13 +350,21 @@ class TestBotCreateAccountOption:
         assert data["code"] == "BOT_MISSING_REQUIRED_ACCOUNT"
 
 
-# ── system halt/activate (IPC) ──────────────────────────
+# ── system halt/clear-halt (IPC) ──────────────────────────
 
 
-class TestSystemHaltActivate:
+class TestSystemHaltClearHalt:
     def test_system_halt_sends_ipc(self, runner):
         """system halt가 IPC system.halt 커맨드 전송."""
-        mock_response = {"status": "ok", "data": {"suspended_count": 2}}
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "status": "halted",
+                "accounts_changed": 2,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [],
+            },
+        }
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -344,9 +383,17 @@ class TestSystemHaltActivate:
         assert "HALTED" in result.output
         mock_client.send.assert_called_once()
 
-    def test_system_activate_sends_ipc(self, runner):
-        """system activate가 IPC system.activate 커맨드 전송."""
-        mock_response = {"status": "ok", "data": {"activated_count": 2}}
+    def test_system_clear_halt_sends_ipc(self, runner):
+        """system clear-halt가 IPC system.clear_halt 커맨드 전송."""
+        mock_response = {
+            "status": "ok",
+            "data": {
+                "status": "halt_cleared",
+                "accounts_changed": 2,
+                "changed_at": "2026-05-03T05:21:33+00:00",
+                "accounts": [],
+            },
+        }
 
         with patch(
             "ante.cli.commands.ipc_helpers.IPCClient", autospec=True
@@ -359,10 +406,10 @@ class TestSystemHaltActivate:
                 "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ):
-                result = runner.invoke(cli, ["system", "activate"])
+                result = runner.invoke(cli, ["system", "clear-halt"])
 
         assert result.exit_code == 0
-        assert "ACTIVE" in result.output
+        assert "정지 해제" in result.output
         mock_client.send.assert_called_once()
 
 

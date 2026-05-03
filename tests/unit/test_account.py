@@ -452,32 +452,112 @@ async def test_delete_error_message_includes_cold_path_bot_remove_procedure(
 
 @pytest.mark.asyncio
 async def test_suspend_all(service):
-    """모든 ACTIVE 계좌 정지. DELETED 제외."""
+    """모든 ACTIVE 계좌 정지. DELETED 제외.
+
+    SSOT (`docs/specs/web-api/04-system-endpoints.md`): 반환은 처리 대상 계좌
+    list (DELETED 제외). 각 항목은 ``account_id``, ``previous_status``, ``status``,
+    ``changed`` 4개 키만 포함한다.
+    """
     await service.create(_make_account("acc1"))
     await service.create(_make_account("acc2"))
     await service.create(_make_account("acc3"))
     await service.delete("acc3", deleted_by="system")
 
-    count = await service.suspend_all(reason="시스템 긴급 정지", suspended_by="system")
+    results = await service.suspend_all(
+        reason="시스템 긴급 정지", suspended_by="system"
+    )
 
-    assert count == 2  # acc3 (DELETED) 제외
+    # acc3 (DELETED)은 후보에서 제외
+    assert isinstance(results, list)
+    assert len(results) == 2
+    account_ids = {r["account_id"] for r in results}
+    assert account_ids == {"acc1", "acc2"}
+    for r in results:
+        assert set(r.keys()) == {"account_id", "previous_status", "status", "changed"}
+        assert r["previous_status"] == "active"
+        assert r["status"] == "suspended"
+        assert r["changed"] is True
+
+    changed_count = sum(1 for r in results if r["changed"])
+    assert changed_count == 2
     accounts = await service.list(status=AccountStatus.ACTIVE)
     assert len(accounts) == 0
 
 
 @pytest.mark.asyncio
+async def test_suspend_all_idempotent_for_already_suspended(service):
+    """이미 SUSPENDED인 계좌는 응답에 포함되지만 changed=False."""
+    await service.create(_make_account("acc1"))
+    await service.create(_make_account("acc2"))
+    await service.suspend("acc1", reason="이미 정지", suspended_by="system")
+
+    results = await service.suspend_all(reason="긴급", suspended_by="system")
+
+    assert {r["account_id"] for r in results} == {"acc1", "acc2"}
+    by_id = {r["account_id"]: r for r in results}
+    assert by_id["acc1"]["previous_status"] == "suspended"
+    assert by_id["acc1"]["status"] == "suspended"
+    assert by_id["acc1"]["changed"] is False
+    assert by_id["acc2"]["previous_status"] == "active"
+    assert by_id["acc2"]["status"] == "suspended"
+    assert by_id["acc2"]["changed"] is True
+
+
+@pytest.mark.asyncio
 async def test_activate_all(service):
-    """모든 SUSPENDED 계좌 활성화. DELETED 제외."""
+    """모든 SUSPENDED 계좌 활성화. DELETED 제외.
+
+    SSOT (`docs/specs/web-api/04-system-endpoints.md`): 반환은 처리 대상 계좌
+    list (DELETED 제외). 각 항목은 ``account_id``, ``previous_status``, ``status``,
+    ``changed`` 4개 키만 포함한다.
+    """
     await service.create(_make_account("acc1"))
     await service.create(_make_account("acc2"))
     await service.suspend("acc1", reason="테스트", suspended_by="system")
     await service.suspend("acc2", reason="테스트", suspended_by="system")
 
-    count = await service.activate_all(activated_by="admin")
+    results = await service.activate_all(activated_by="admin")
 
-    assert count == 2
+    assert isinstance(results, list)
+    assert len(results) == 2
+    for r in results:
+        assert set(r.keys()) == {"account_id", "previous_status", "status", "changed"}
+        assert r["previous_status"] == "suspended"
+        assert r["status"] == "active"
+        assert r["changed"] is True
+
     accounts = await service.list(status=AccountStatus.ACTIVE)
     assert len(accounts) == 2
+
+
+@pytest.mark.asyncio
+async def test_activate_all_idempotent_for_already_active(service):
+    """이미 ACTIVE인 계좌는 응답에 포함되지만 changed=False."""
+    await service.create(_make_account("acc1"))
+    await service.create(_make_account("acc2"))
+    await service.suspend("acc2", reason="테스트", suspended_by="system")
+
+    results = await service.activate_all(activated_by="admin")
+
+    by_id = {r["account_id"]: r for r in results}
+    assert by_id["acc1"]["previous_status"] == "active"
+    assert by_id["acc1"]["status"] == "active"
+    assert by_id["acc1"]["changed"] is False
+    assert by_id["acc2"]["previous_status"] == "suspended"
+    assert by_id["acc2"]["status"] == "active"
+    assert by_id["acc2"]["changed"] is True
+
+
+@pytest.mark.asyncio
+async def test_activate_all_excludes_deleted(service):
+    """DELETED 계좌는 후보에서 제외 (응답 list에 미포함)."""
+    await service.create(_make_account("acc1"))
+    await service.create(_make_account("acc2"))
+    await service.delete("acc2", deleted_by="system")
+
+    results = await service.activate_all(activated_by="admin")
+
+    assert {r["account_id"] for r in results} == {"acc1"}
 
 
 # ── 브로커 인스턴스 (get_broker) ──────────────────────

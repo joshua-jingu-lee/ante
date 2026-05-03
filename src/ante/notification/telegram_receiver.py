@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # 확인이 필요한 위험 명령
-_DANGEROUS_COMMANDS = {"halt", "stop"}
+# SSOT: docs/specs/notification/notification.md (위험 명령 표).
+# `/halt`, `/clear_halt`, `/stop`은 모두 2단계 확인 대상이다.
+_DANGEROUS_COMMANDS = {"halt", "clear_halt", "stop"}
 
 
 class TelegramCommandReceiver:
@@ -271,6 +273,10 @@ class TelegramCommandReceiver:
                 all_suspended = await self._all_accounts_suspended()
                 if all_suspended:
                     return "이미 거래가 중지된 상태입니다."
+            if command == "clear_halt" and self._account_service:
+                all_active = await self._all_accounts_active()
+                if all_active:
+                    return "이미 거래가 활성 상태입니다."
             return self._request_confirmation(command, args, user_id)
 
         # 즉시 실행 명령
@@ -279,7 +285,6 @@ class TelegramCommandReceiver:
             "status": self._cmd_status,
             "bots": self._cmd_bots,
             "balance": self._cmd_balance,
-            "activate": self._cmd_activate,
             "approve": self._cmd_approve,
             "reject": self._cmd_reject,
         }
@@ -305,6 +310,11 @@ class TelegramCommandReceiver:
             return (
                 f"전체 거래를 중지합니다{detail}. 확인하려면 /confirm 을 입력해 주세요."
             )
+        if command == "clear_halt":
+            return (
+                "전역 정지를 해제합니다 (계좌 상태만 ACTIVE로 복구; 봇은 자동 "
+                "재시작되지 않음). 확인하려면 /confirm 을 입력해 주세요."
+            )
         if command == "stop":
             bot_id = args[0] if args else "?"
             return f"{bot_id}을 중지합니다. 확인하려면 /confirm 을 입력해 주세요."
@@ -326,6 +336,8 @@ class TelegramCommandReceiver:
         # 실제 실행
         if command == "halt":
             return await self._cmd_halt(args)
+        if command == "clear_halt":
+            return await self._cmd_clear_halt(args)
         if command == "stop":
             return await self._cmd_stop(args)
 
@@ -344,6 +356,17 @@ class TelegramCommandReceiver:
             return False
         return all(a.status == AccountStatus.SUSPENDED for a in accounts)
 
+    async def _all_accounts_active(self) -> bool:
+        """모든 계좌가 ACTIVE 상태인지 확인."""
+        if not self._account_service:
+            return False
+        from ante.account.models import AccountStatus
+
+        accounts = await self._account_service.list()
+        if not accounts:
+            return False
+        return all(a.status == AccountStatus.ACTIVE for a in accounts)
+
     # ── 명령 핸들러 ─────────────────────────────────
 
     def _cmd_help(self, args: list[str]) -> str:
@@ -354,7 +377,7 @@ class TelegramCommandReceiver:
             "/bots — 봇 목록 + 상태\n"
             "/balance — 자금 현황 요약\n"
             "/halt [reason] — 전체 거래 중지 (확인 필요)\n"
-            "/activate — 거래 재개\n"
+            "/clear_halt — 전역 정지 해제 (확인 필요; 봇은 자동 재시작되지 않음)\n"
             "/stop <bot_id> — 특정 봇 중지 (확인 필요)\n"
             "/approve <id> — 결재 승인\n"
             "/reject <id> [reason] — 결재 거절\n"
@@ -551,23 +574,22 @@ class TelegramCommandReceiver:
         return (
             "\U0001f6a8 전체 거래가 중지되었습니다.\n"
             f"사유: {reason}\n"
-            "해제하려면 /activate 를 입력하세요."
+            "해제하려면 /clear_halt 를 입력하세요."
         )
 
-    async def _cmd_activate(self, args: list[str]) -> str:
-        """거래 재개."""
+    async def _cmd_clear_halt(self, args: list[str]) -> str:
+        """전역 정지 해제 (계좌 상태만 ACTIVE 복구; 봇 자동 재시작 없음)."""
         if not self._account_service:
             return "AccountService가 연결되지 않았습니다."
 
-        from ante.account.models import AccountStatus
-
-        accounts = await self._account_service.list()
-        all_active = all(a.status == AccountStatus.ACTIVE for a in accounts)
-        if all_active:
+        if await self._all_accounts_active():
             return "이미 거래가 활성 상태입니다."
 
         await self._account_service.activate_all(activated_by="telegram")
-        return "✅ 거래가 재개되었습니다."
+        return (
+            "✅ 전역 정지가 해제되었습니다.\n"
+            "계좌 상태만 ACTIVE로 복구되며 봇은 자동 재시작되지 않습니다."
+        )
 
     async def _cmd_stop(self, args: list[str]) -> str:
         """특정 봇 중지."""

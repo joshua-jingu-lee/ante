@@ -209,23 +209,26 @@ def halt(ctx: click.Context, reason: str) -> None:
 
     result = _run(ipc_send("system.halt", {"reason": reason}, actor=actor))
     data = result.get("data", result)
-    count = data.get("suspended_count", 0)
+    count = data.get("accounts_changed", 0)
     fmt.success(f"시스템 HALTED — {count}개 계좌 거래 중지", data)
 
 
-@system.command()
+@system.command(name="clear-halt")
 @click.option("--reason", default="", help="사유")
 @click.pass_context
 @require_auth
 @require_scope("system:admin")
-def activate(ctx: click.Context, reason: str) -> None:
-    """킬 스위치 해제 (거래 재개)."""
+def clear_halt(ctx: click.Context, reason: str) -> None:
+    """킬 스위치 해제 (전역 정지 해제 — 봇은 자동 재시작되지 않음)."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    result = _run(ipc_send("system.activate", {"reason": reason}, actor=actor))
+    result = _run(ipc_send("system.clear_halt", {"reason": reason}, actor=actor))
     data = result.get("data", result)
-    count = data.get("activated_count", 0)
-    fmt.success(f"시스템 ACTIVE — {count}개 계좌 거래 재개", data)
+    count = data.get("accounts_changed", 0)
+    fmt.success(
+        f"시스템 정지 해제 — {count}개 계좌 ACTIVE 복구 (봇은 자동 재시작되지 않음)",
+        data,
+    )

@@ -135,11 +135,75 @@ class TestSystemResponseModels:
         with pytest.raises(ValidationError):
             HealthResponse.model_validate({"checks": {"db": True, "broker": True}})
 
-    def test_kill_switch_response(self):
-        """POST /api/system/kill-switch."""
-        data = {"status": "halted", "changed_at": "2026-03-19T10:00:00+00:00"}
+    def test_kill_switch_response_halt(self):
+        """POST /api/system/halt 응답 SSOT (Refs #1213).
+
+        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
+        ``status``, ``accounts_changed``, ``changed_at``, ``accounts[]`` 4 필드.
+        """
+        data = {
+            "status": "halted",
+            "accounts_changed": 2,
+            "changed_at": "2026-05-03T05:21:33+00:00",
+            "accounts": [
+                {
+                    "account_id": "domestic",
+                    "previous_status": "active",
+                    "status": "suspended",
+                    "changed": True,
+                },
+                {
+                    "account_id": "overseas",
+                    "previous_status": "active",
+                    "status": "suspended",
+                    "changed": True,
+                },
+            ],
+        }
         model = KillSwitchResponse.model_validate(data)
         assert model.status == "halted"
+        assert model.accounts_changed == 2
+        assert len(model.accounts) == 2
+        assert model.accounts[0].account_id == "domestic"
+        assert model.accounts[0].previous_status == "active"
+        assert model.accounts[0].status == "suspended"
+        assert model.accounts[0].changed is True
+
+    def test_kill_switch_response_clear_halt(self):
+        """POST /api/system/clear-halt 응답 SSOT (Refs #1213)."""
+        data = {
+            "status": "halt_cleared",
+            "accounts_changed": 1,
+            "changed_at": "2026-05-03T05:21:33+00:00",
+            "accounts": [
+                {
+                    "account_id": "domestic",
+                    "previous_status": "suspended",
+                    "status": "active",
+                    "changed": True,
+                },
+                {
+                    "account_id": "overseas",
+                    "previous_status": "active",
+                    "status": "active",
+                    "changed": False,
+                },
+            ],
+        }
+        model = KillSwitchResponse.model_validate(data)
+        assert model.status == "halt_cleared"
+        assert model.accounts_changed == 1
+        assert model.accounts[1].changed is False
+
+    def test_kill_switch_response_empty_accounts_default(self):
+        """``accounts`` 미지정 시 기본 빈 list."""
+        data = {
+            "status": "halted",
+            "accounts_changed": 0,
+            "changed_at": "2026-05-03T05:21:33+00:00",
+        }
+        model = KillSwitchResponse.model_validate(data)
+        assert model.accounts == []
 
 
 # ── 인증 라우트 응답 모델 ──────────────────────────

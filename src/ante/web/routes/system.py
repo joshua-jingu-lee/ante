@@ -32,8 +32,8 @@ class HaltRequest(BaseModel):
     reason: str = ""
 
 
-class ActivateRequest(BaseModel):
-    """거래 재개 요청."""
+class ClearHaltRequest(BaseModel):
+    """전역 정지 해제 요청."""
 
     reason: str = ""
 
@@ -128,6 +128,21 @@ async def _check_broker(account_service: Any | None) -> bool:
     return True
 
 
+def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
+    """Kill Switch 응답 envelope.
+
+    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT.
+    """
+    from datetime import UTC, datetime
+
+    return {
+        "status": status,
+        "accounts_changed": sum(1 for a in accounts if a.get("changed")),
+        "changed_at": datetime.now(UTC).isoformat(),
+        "accounts": accounts,
+    }
+
+
 @router.post(
     "/halt",
     response_model=KillSwitchResponse,
@@ -148,11 +163,11 @@ async def halt(
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """전체 거래 중지 (모든 계좌 SUSPENDED)."""
-    from datetime import UTC, datetime
-
+    """전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED)."""
     reason = body.reason or "dashboard"
-    count = await account_service.suspend_all(reason=reason, suspended_by="dashboard")
+    accounts = await account_service.suspend_all(
+        reason=reason, suspended_by="dashboard"
+    )
 
     if audit_logger:
         await audit_logger.log(
@@ -163,14 +178,11 @@ async def halt(
             ip=request.client.host if request.client else "",
         )
 
-    return {
-        "status": f"suspended ({count} accounts)",
-        "changed_at": datetime.now(UTC).isoformat(),
-    }
+    return _kill_switch_payload("halted", accounts)
 
 
 @router.post(
-    "/activate",
+    "/clear-halt",
     response_model=KillSwitchResponse,
     responses={
         503: {
@@ -183,27 +195,25 @@ async def halt(
         },
     },
 )
-async def activate(
-    body: ActivateRequest,
+async def clear_halt(
+    body: ClearHaltRequest,
     request: Request,
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """전체 거래 재개 (모든 계좌 ACTIVE)."""
-    from datetime import UTC, datetime
+    """전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE).
 
-    count = await account_service.activate_all(activated_by="dashboard")
+    계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.
+    """
+    accounts = await account_service.activate_all(activated_by="dashboard")
 
     if audit_logger:
         await audit_logger.log(
             member_id=getattr(request.state, "member_id", "dashboard"),
-            action="system.activate",
+            action="system.clear_halt",
             resource="system:kill_switch",
             detail=body.reason,
             ip=request.client.host if request.client else "",
         )
 
-    return {
-        "status": f"activated ({count} accounts)",
-        "changed_at": datetime.now(UTC).isoformat(),
-    }
+    return _kill_switch_payload("halt_cleared", accounts)

@@ -135,11 +135,33 @@ class HealthResponse(BaseModel):
     checks: dict[str, bool]
 
 
+class KillSwitchAccountChange(BaseModel):
+    """킬 스위치 처리 대상 계좌의 상태 전환 결과.
+
+    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 필드 표.
+    필드는 정확히 ``account_id``, ``previous_status``, ``status``, ``changed`` 4개
+    키만 사용한다 (``before_status`` / ``after_status`` 사용 금지).
+    """
+
+    account_id: str
+    previous_status: str
+    status: str
+    changed: bool
+
+
 class KillSwitchResponse(BaseModel):
-    """킬 스위치 제어 응답."""
+    """킬 스위치 제어 응답.
+
+    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
+
+    - ``POST /api/system/halt`` → ``status="halted"``
+    - ``POST /api/system/clear-halt`` → ``status="halt_cleared"``
+    """
 
     status: str
+    accounts_changed: int
     changed_at: str
+    accounts: list[KillSwitchAccountChange] = []
 
 
 # ── 인증 ──────────────────────────────────────────────
