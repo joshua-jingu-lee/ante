@@ -103,6 +103,26 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 > 상세 init 계약 (생성 산출물·멱등성·플래그)은 [cli/03-commands.md](../cli/03-commands.md#ante-init--시스템-초기-설정) 참조.
 
+### D-ACC-08: Account ID 계약 (runtime/creation 정책 분리)
+
+**문제**: account-scoped 데이터/이벤트/명령에서 빈 문자열, ``None``,
+``"default"`` 같은 fallback 값이 흘러들 때 cross-module 회귀가 발생한다.
+또한 ``ante init``이 자동 생성하는 ``"test"`` 계좌는 runtime valid이지만
+사용자가 같은 ID로 새 계좌를 만들 수 있어서는 안 된다.
+
+**결정**: runtime invalid와 creation invalid를 분리한 helper 모듈
+``ante.account.scoping``을 도입하고 본 helper를 모든 account-scoped
+진입점의 SSOT로 삼는다.
+
+- **runtime invalid**: ``None``/``""``/``"default"``/패턴 위반 — 모든 시점에서 거부
+- **creation invalid**: 위에 더해 ``"test"`` 추가 거부 (bootstrap seed 전용)
+- **bootstrap 우회**: ``AccountService.create_default_test_account``가
+  ``create(_bootstrap=True)``로 helper를 우회. 이 경로 외에는 우회 불가
+
+상세 계약과 helper API는 [14-account-id-contract.md](14-account-id-contract.md)
+참조. 후속 적용은 #1217 (Trade/Treasury), #1218 (CLI/Web/IPC),
+#1219 (Event/EventBus)에서 반영한다.
+
 ### D-ACC-07: Account lifecycle cold-path contract
 
 **결정**: 계좌 구조 변경은 서버 정지 상태에서만 허용한다. 서버 실행 중에는

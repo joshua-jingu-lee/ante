@@ -62,7 +62,7 @@ class Account:
 | 필드 | 필수 | 기본값 | 수정 | 설명 |
 |------|------|--------|:----:|------|
 | **식별** | | | | |
-| `account_id` | O | — | 불가 | 고유 식별자 (영문+숫자+하이픈, 3–30자) |
+| `account_id` | O | — | 불가 | 고유 식별자 (영문+숫자+하이픈, 3–30자). 형식·정책 SSOT는 [14-account-id-contract.md](14-account-id-contract.md) |
 | `name` | O | — | 가능 | 사용자에게 표시되는 이름 |
 | **시장** | | | | |
 | `exchange` | O | — | 불가 | 대상 거래소 코드 (KRX, NYSE, NASDAQ, TEST) |

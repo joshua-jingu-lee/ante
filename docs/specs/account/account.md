@@ -24,6 +24,7 @@
 | [10-web-api.md](10-web-api.md) | Web API 엔드포인트 |
 | [11-scope-out.md](11-scope-out.md) | Scope Out (1.0에서 제외) |
 | [13-cross-module-notes.md](13-cross-module-notes.md) | 타 모듈 설계 시 참고 |
+| [14-account-id-contract.md](14-account-id-contract.md) | Account ID 형식·정책 계약 (helper SSOT) |
 
 ## 개요
 
@@ -64,6 +65,14 @@
 ### D-ACC-07: Account lifecycle cold-path contract
 
 상세 내용: [02-design-decisions.md](02-design-decisions.md)
+
+### D-ACC-08: Account ID 계약 (runtime/creation 정책 분리)
+
+상세 내용: [02-design-decisions.md](02-design-decisions.md), helper 계약: [14-account-id-contract.md](14-account-id-contract.md)
+
+## Account ID 계약
+
+상세 내용: [14-account-id-contract.md](14-account-id-contract.md)
 
 ## 데이터 모델
 

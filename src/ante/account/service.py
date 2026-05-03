@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -18,12 +17,12 @@ from ante.account.errors import (
     AccountNotFoundError,
     AccountStructuralChangeRequiresStoppedServerError,
     BrokerReconnectFailedError,
-    InvalidAccountIdError,
     InvalidBrokerTypeError,
     MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
+from ante.account.scoping import validate_new_account_id
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -142,11 +141,15 @@ class AccountService:
 
     # ── CRUD ──────────────────────────────────────────
 
-    async def create(self, account: Account) -> Account:
+    async def create(self, account: Account, *, _bootstrap: bool = False) -> Account:
         """계좌 생성. **cold-path 전용**.
 
         Args:
             account: 생성할 계좌 정보.
+            _bootstrap: 내부 전용 플래그. ``True``일 때
+                :func:`validate_new_account_id` 검증을 우회하여 bootstrap
+                seed 계좌(``account_id="test"``) 자동 생성을 허용한다.
+                :meth:`create_default_test_account` 외에는 사용하지 않는다.
 
         Returns:
             생성된 Account (created_at, updated_at 포함).
@@ -155,7 +158,10 @@ class AccountService:
             AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
                 호출됨. 다른 어떤 검사보다 먼저 평가된다 (#1144 invariant S2).
             AccountAlreadyExistsError: 동일 account_id가 이미 존재.
-            InvalidAccountIdError: account_id 형식이 올바르지 않음.
+            InvalidAccountIdError: account_id 형식이 올바르지 않거나
+                ``RESTRICTED_NEW_ACCOUNT_IDS`` (``"test"``) /
+                ``INVALID_RUNTIME_ACCOUNT_IDS`` (``"default"``) 예약어
+                (``_bootstrap=False``인 일반 경로 한정).
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
@@ -166,12 +172,10 @@ class AccountService:
                 "서버를 정지한 뒤 ante account create로 수행하세요."
             )
 
-        # account_id 형식 검증
-        if not re.fullmatch(r"[a-zA-Z0-9\-]{3,30}", account.account_id):
-            raise InvalidAccountIdError(
-                f"account_id 형식이 올바르지 않습니다: '{account.account_id}'. "
-                "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다."
-            )
+        # account_id 형식 + 정책 검증 (bootstrap seed 경로는 우회).
+        # docs/specs/account/14-account-id-contract.md 참조.
+        if not _bootstrap:
+            validate_new_account_id(account.account_id)
 
         if account.account_id in self._accounts:
             raise AccountAlreadyExistsError(
@@ -756,7 +760,13 @@ class AccountService:
     # ── 기본 테스트 계좌 ──────────────────────────────────
 
     async def create_default_test_account(self) -> Account:
-        """테스트 계좌 자동 생성. 이미 존재하면 기존 계좌 반환."""
+        """테스트 계좌 자동 생성. 이미 존재하면 기존 계좌 반환.
+
+        bootstrap seed 경로이므로 ``validate_new_account_id``의 RESTRICTED
+        거부(``"test"``)를 우회한다. ``BROKER_PRESETS["test"].default_account_id``
+        가 ``account_id`` SSOT이며, 이 메서드가 helper를 우회할 수 있는
+        유일한 진입점이다 (``_bootstrap=True``).
+        """
         if "test" in self._accounts:
             return self._accounts["test"]
 
@@ -775,7 +785,7 @@ class AccountService:
             buy_commission_rate=preset.buy_commission_rate,
             sell_commission_rate=preset.sell_commission_rate,
         )
-        return await self.create(account)
+        return await self.create(account, _bootstrap=True)
 
 
 # ── 유틸리티 ──────────────────────────────────────────

@@ -40,7 +40,7 @@ async def service(db, eventbus):
 
 
 def _make_account(
-    account_id: str = "test",
+    account_id: str = "main",
     name: str = "테스트",
     exchange: str = "TEST",
     currency: str = "KRW",
@@ -95,11 +95,11 @@ class TestAccountDeleteEvents:
 
         eventbus.subscribe(AccountSuspendedEvent, on_suspended)
 
-        await service.delete("test", deleted_by="admin")
+        await service.delete("main", deleted_by="admin")
 
         assert len(published) == 1
         assert published[0][0] == "suspended"
-        assert published[0][1].account_id == "test"
+        assert published[0][1].account_id == "main"
         assert published[0][1].reason == "Account deletion"
         assert published[0][1].suspended_by == "admin"
 
@@ -109,7 +109,7 @@ class TestAccountDeleteEvents:
     ):
         """이미 SUSPENDED인 계좌 삭제 시 SuspendedEvent 미발행."""
         await service.create(_make_account())
-        await service.suspend("test", reason="test reason", suspended_by="system")
+        await service.suspend("main", reason="test reason", suspended_by="system")
 
         published: list = []
 
@@ -118,7 +118,7 @@ class TestAccountDeleteEvents:
 
         eventbus.subscribe(AccountSuspendedEvent, on_suspended)
 
-        await service.delete("test", deleted_by="admin")
+        await service.delete("main", deleted_by="admin")
 
         # AccountSuspendedEvent는 새로 발행되지 않아야 함
         # (이미 suspend 시 1회 발행되었지만 delete()에서는 추가 발행 없음)
@@ -128,11 +128,11 @@ class TestAccountDeleteEvents:
     async def test_delete_sets_status_and_clears_cache(self, service):
         """delete() 후 상태가 DELETED로 변경되고 메모리 캐시에서 제거."""
         await service.create(_make_account())
-        await service.delete("test", deleted_by="admin")
+        await service.delete("main", deleted_by="admin")
 
         # 메모리 캐시에서 제거됨
-        assert "test" not in service._accounts
+        assert "main" not in service._accounts
 
         # DB에서 DELETED 상태로 조회 가능
-        account = await service.get("test")
+        account = await service.get("main")
         assert account.status == AccountStatus.DELETED
