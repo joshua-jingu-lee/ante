@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -24,6 +23,7 @@ from ante.account.errors import (
 )
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
+from ante.account.scoping import require_account_id, validate_new_account_id
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -145,6 +145,14 @@ class AccountService:
     async def create(self, account: Account) -> Account:
         """계좌 생성. **cold-path 전용**.
 
+        모든 public 호출자(CLI ``ante account create``, web POST 라우트, IPC
+        등)는 ``account_id`` 정책 검증( :func:`validate_new_account_id` )을 반드시
+        통과해야 한다. RESTRICTED seed 예약어( ``"test"`` )와 fallback 예약어
+        ( ``"default"`` )는 이 경로에서 우회 수단 없이 차단된다. Bootstrap seed
+        계좌 자동 생성은 별도의 private helper :meth:`_create_seed_account`
+        (only invoked by :meth:`create_default_test_account`) 가 담당한다 —
+        public ``create()`` API에는 우회 플래그를 노출하지 않는다 (#1216 P2).
+
         Args:
             account: 생성할 계좌 정보.
 
@@ -155,24 +163,98 @@ class AccountService:
             AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
                 호출됨. 다른 어떤 검사보다 먼저 평가된다 (#1144 invariant S2).
             AccountAlreadyExistsError: 동일 account_id가 이미 존재.
-            InvalidAccountIdError: account_id 형식이 올바르지 않음.
+            InvalidAccountIdError: account_id 형식이 올바르지 않거나
+                ``RESTRICTED_NEW_ACCOUNT_IDS`` ( ``"test"`` ) /
+                ``INVALID_RUNTIME_ACCOUNT_IDS`` ( ``"default"`` ) 예약어와
+                일치하는 경우.
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
         # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
+        self._guard_cold_path_create()
+
+        # account_id 형식 + 정책 검증.
+        # public 경로는 validate_new_account_id로 형식 + RESTRICTED + fallback
+        # 거부를 모두 강제한다. seed bootstrap은 _create_seed_account를 통해서만
+        # 가능하며 그 helper가 별도의 (broker_type, default_account_id) pair
+        # 가드를 적용한다 (#1216 P2).
+        # docs/specs/account/14-account-id-contract.md 참조.
+        validate_new_account_id(account.account_id)
+
+        return await self._persist_account(account)
+
+    async def _create_seed_account(self, account: Account) -> Account:
+        """Bootstrap seed 계좌 생성 (**private**).
+
+        :meth:`create_default_test_account` 전용 진입점. public ``create()`` API
+        에 ``_bootstrap`` 플래그를 노출하지 않기 위해 별도 private helper로
+        캡슐화한다. ``broker_type`` 과 ``account_id`` 가 ``BROKER_PRESETS`` 의
+        동일 항목에서 정의된 ``(broker_type, default_account_id)`` pair와
+        정확히 일치할 때만 허용한다 — 한 preset의 ``default_account_id`` 를 다른
+        preset의 ``broker_type`` 아래로 끼워 넣어 RESTRICTED 예약어( ``"test"`` )
+        를 비-test broker 아래에 저장하는 우회를 막는다 (#1216 P2).
+
+        형식 검증( :func:`require_account_id` )은 ``BROKER_PRESETS`` 자체가 잘못
+        변경되는 경우에 대비한 추가 가드로 적용한다. cold-path 가드와 broker_type
+        / credentials 검증 / DB insert는 public ``create()`` 와 동일한 조건을
+        적용한다 ( :meth:`_persist_account` 공유).
+
+        Raises:
+            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
+                호출됨 (invariant S2).
+            InvalidAccountIdError: ``(broker_type, account_id)`` 가
+                ``BROKER_PRESETS`` 의 어느 ``(broker_type, default_account_id)``
+                pair와도 일치하지 않거나, pair는 일치해도 형식 위반인 경우.
+            AccountAlreadyExistsError, InvalidBrokerTypeError,
+            MissingCredentialsError: :meth:`_persist_account` 와 동일.
+        """
+        # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
+        self._guard_cold_path_create()
+
+        # (broker_type, default_account_id) pair 가드 — RESTRICTED 예약어가
+        # 다른 preset의 broker_type 아래로 새는 것을 차단한다 (#1216 P2).
+        preset = BROKER_PRESETS.get(account.broker_type)
+        if preset is None or preset.default_account_id != account.account_id:
+            valid_pairs = [
+                (bt, p.default_account_id) for bt, p in BROKER_PRESETS.items()
+            ]
+            raise InvalidAccountIdError(
+                f"seed 계좌 생성은 (broker_type, default_account_id) pair만 "
+                f"허용합니다: got broker_type={account.broker_type!r}, "
+                f"account_id={account.account_id!r}; valid pairs={valid_pairs}"
+            )
+        # pair 일치해도 형식 검증은 그대로
+        # (BROKER_PRESETS가 잘못 변경되더라도 가드).
+        require_account_id(account.account_id, context="bootstrap_seed")
+
+        return await self._persist_account(account)
+
+    def _guard_cold_path_create(self) -> None:
+        """``create*()`` 진입 시 런타임 cold-path 가드 (invariant S2).
+
+        ``create()`` 와 ``_create_seed_account()`` 가 동일 메시지/예외 의미론으로
+        가장 먼저 평가하기 위한 공유 helper.
+        """
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
                 "계좌 생성은 cold-path 전용입니다. "
                 "서버를 정지한 뒤 ante account create로 수행하세요."
             )
 
-        # account_id 형식 검증
-        if not re.fullmatch(r"[a-zA-Z0-9\-]{3,30}", account.account_id):
-            raise InvalidAccountIdError(
-                f"account_id 형식이 올바르지 않습니다: '{account.account_id}'. "
-                "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다."
-            )
+    async def _persist_account(self, account: Account) -> Account:
+        """``account_id`` 검증 이후 공통 검증 + DB insert (private helper).
 
+        ``create()`` 와 ``_create_seed_account()`` 가 공유한다. 진입 전 호출자가
+        이미 ``_guard_cold_path_create()`` 와 account_id 정책 검증을 끝냈다고
+        가정한다 — 이 helper는 ``account_id`` 정책에 대해서는 어떤 가드도
+        적용하지 않는다.
+
+        Raises:
+            AccountAlreadyExistsError: 동일 account_id가 메모리/DELETED DB
+                상태로 이미 존재.
+            InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
+            MissingCredentialsError: 필수 credentials 키 누락.
+        """
         if account.account_id in self._accounts:
             raise AccountAlreadyExistsError(
                 f"계좌 '{account.account_id}'가 이미 존재합니다."
@@ -756,7 +838,14 @@ class AccountService:
     # ── 기본 테스트 계좌 ──────────────────────────────────
 
     async def create_default_test_account(self) -> Account:
-        """테스트 계좌 자동 생성. 이미 존재하면 기존 계좌 반환."""
+        """테스트 계좌 자동 생성. 이미 존재하면 기존 계좌 반환.
+
+        bootstrap seed 경로이므로 ``validate_new_account_id`` 의 RESTRICTED
+        거부( ``"test"`` )가 적용되지 않는 private helper
+        :meth:`_create_seed_account` 를 통해 생성한다.
+        ``BROKER_PRESETS["test"].default_account_id`` 가 ``account_id`` SSOT 이며,
+        이 메서드가 seed helper를 호출하는 유일한 진입점이다 (#1216 P2).
+        """
         if "test" in self._accounts:
             return self._accounts["test"]
 
@@ -775,7 +864,7 @@ class AccountService:
             buy_commission_rate=preset.buy_commission_rate,
             sell_commission_rate=preset.sell_commission_rate,
         )
-        return await self.create(account)
+        return await self._create_seed_account(account)
 
 
 # ── 유틸리티 ──────────────────────────────────────────

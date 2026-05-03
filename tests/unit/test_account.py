@@ -46,14 +46,20 @@ async def service(db, eventbus):
 
 
 def _make_account(
-    account_id: str = "test",
+    account_id: str = "main",
     name: str = "테스트",
     exchange: str = "TEST",
     currency: str = "KRW",
     broker_type: str = "test",
     **kwargs,
 ) -> Account:
-    """테스트용 Account 생성 헬퍼."""
+    """테스트용 Account 생성 헬퍼.
+
+    default ``account_id``는 ``"main"``이다. ``"test"``는 bootstrap seed
+    예약어라 :func:`validate_new_account_id`가 신규 생성을 거부하므로
+    직접 helper에서는 ``ante.account.scoping.RESTRICTED_NEW_ACCOUNT_IDS``
+    바깥의 valid ID를 사용한다 (``docs/specs/account/14-account-id-contract.md``).
+    """
     if "credentials" not in kwargs:
         kwargs["credentials"] = {"app_key": "test", "app_secret": "test"}
     return Account(
@@ -75,7 +81,7 @@ async def test_create_account(service):
     account = _make_account()
     result = await service.create(account)
 
-    assert result.account_id == "test"
+    assert result.account_id == "main"
     assert result.name == "테스트"
     assert result.exchange == "TEST"
     assert result.currency == "KRW"
@@ -98,7 +104,7 @@ async def test_create_duplicate_raises(service):
 async def test_create_soft_deleted_duplicate_raises(service):
     """soft-delete된 계좌와 동일 ID로 생성 시 AccountAlreadyExistsError."""
     await service.create(_make_account())
-    await service.delete("test", deleted_by="system")
+    await service.delete("main", deleted_by="system")
 
     # 메모리에서는 제거되었지만 DB에 deleted 상태로 남아 있음
     with pytest.raises(AccountAlreadyExistsError, match="삭제 상태"):
@@ -143,11 +149,11 @@ async def test_create_full_credentials_passes(service):
     )
     result = await service.create(account)
 
-    assert result.account_id == "test"
+    assert result.account_id == "main"
     assert result.credentials["app_key"] == "key1"
 
 
-# ── account_id 형식 검증 ──────────────────────────────
+# ── account_id 형식 검증 (helper SSOT) ────────────────
 
 
 @pytest.mark.asyncio
@@ -163,11 +169,50 @@ async def test_create_full_credentials_passes(service):
     ],
 )
 async def test_create_invalid_account_id_raises(service, bad_id):
-    """형식 미준수 account_id로 생성 시 InvalidAccountIdError."""
+    """형식 미준수 account_id로 생성 시 InvalidAccountIdError.
+
+    형식 위반 메시지 형식은 ``ante account create`` CLI 표면 contract이므로
+    ``validate_new_account_id`` helper에서도 동일하게 보존된다
+    (docs/specs/account/14-account-id-contract.md).
+    """
     account = _make_account(account_id=bad_id)
 
-    with pytest.raises(InvalidAccountIdError):
+    with pytest.raises(InvalidAccountIdError) as exc_info:
         await service.create(account)
+
+    msg = str(exc_info.value)
+    assert "account_id 형식이 올바르지 않습니다" in msg
+    assert "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다." in msg
+
+
+@pytest.mark.asyncio
+async def test_create_default_account_id_raises(service):
+    """``"default"``는 fallback 예약어로 신규 생성 거부 (#1216)."""
+    account = _make_account(account_id="default")
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account)
+
+    assert "fallback" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_create_test_account_id_raises_for_user(service):
+    """``"test"``는 bootstrap seed 예약어로 사용자 신규 생성 거부 (#1216).
+
+    ``ante init`` 경로( :meth:`AccountService.create_default_test_account` )는
+    private :meth:`AccountService._create_seed_account` helper를 통해서만
+    seed 계좌를 만들 수 있다 (#1216 P2). public ``create()`` API에는 우회
+    플래그가 노출되지 않으므로, 외부 호출자가 ``"test"`` 를 신규 생성하는
+    경로는 이 가드에서 차단된다.
+    """
+    account = _make_account(account_id="test")
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account)
+
+    assert "ante init" in str(exc_info.value)
+    assert "시드 계좌" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -176,14 +221,14 @@ async def test_create_invalid_account_id_raises(service, bad_id):
     [
         "abc",
         "a" * 30,
-        "test",
+        "main",
         "my-account-01",
         "ABC",
         "Test-123",
     ],
 )
 async def test_create_valid_account_id_passes(service, good_id):
-    """형식 준수 account_id로 생성 시 정상 통과."""
+    """형식 준수 + non-RESTRICTED account_id로 생성 시 정상 통과."""
     account = _make_account(account_id=good_id)
     result = await service.create(account)
 
@@ -198,8 +243,8 @@ async def test_get_account(service):
     """계좌 조회 성공."""
     await service.create(_make_account())
 
-    result = await service.get("test")
-    assert result.account_id == "test"
+    result = await service.get("main")
+    assert result.account_id == "main"
 
 
 @pytest.mark.asyncio
@@ -243,11 +288,11 @@ async def test_update_account(service):
     """계좌 부분 수정."""
     await service.create(_make_account())
 
-    result = await service.update("test", name="수정된 이름")
+    result = await service.update("main", name="수정된 이름")
     assert result.name == "수정된 이름"
 
     # DB에서 다시 로드해도 동일
-    fetched = await service.get("test")
+    fetched = await service.get("main")
     assert fetched.name == "수정된 이름"
 
 
@@ -255,10 +300,10 @@ async def test_update_account(service):
 async def test_update_deleted_raises(service):
     """삭제된 계좌 수정 시 에러."""
     await service.create(_make_account())
-    await service.delete("test", deleted_by="system")
+    await service.delete("main", deleted_by="system")
 
     with pytest.raises(AccountDeletedException):
-        await service.update("test", name="변경 시도")
+        await service.update("main", name="변경 시도")
 
 
 # ── 정지/활성화 (suspend / activate) ──────────────────
@@ -268,9 +313,9 @@ async def test_update_deleted_raises(service):
 async def test_suspend_account(service):
     """계좌 정지."""
     await service.create(_make_account())
-    await service.suspend("test", reason="위험 감지", suspended_by="rule-engine")
+    await service.suspend("main", reason="위험 감지", suspended_by="rule-engine")
 
-    account = await service.get("test")
+    account = await service.get("main")
     assert account.status == AccountStatus.SUSPENDED
 
 
@@ -278,10 +323,10 @@ async def test_suspend_account(service):
 async def test_activate_account(service):
     """정지된 계좌 활성화."""
     await service.create(_make_account())
-    await service.suspend("test", reason="테스트", suspended_by="system")
-    await service.activate("test", activated_by="admin")
+    await service.suspend("main", reason="테스트", suspended_by="system")
+    await service.activate("main", activated_by="admin")
 
-    account = await service.get("test")
+    account = await service.get("main")
     assert account.status == AccountStatus.ACTIVE
 
 
@@ -289,30 +334,30 @@ async def test_activate_account(service):
 async def test_activate_deleted_raises(service):
     """삭제된 계좌 활성화 시 에러."""
     await service.create(_make_account())
-    await service.delete("test", deleted_by="system")
+    await service.delete("main", deleted_by="system")
 
     with pytest.raises(AccountDeletedException):
-        await service.activate("test", activated_by="admin")
+        await service.activate("main", activated_by="admin")
 
 
 @pytest.mark.asyncio
 async def test_suspend_deleted_account_raises(service):
     """DELETED 계좌에 suspend 시도 시 AccountDeletedException."""
     await service.create(_make_account())
-    await service.delete("test", deleted_by="system")
+    await service.delete("main", deleted_by="system")
 
     with pytest.raises(AccountDeletedException):
-        await service.suspend("test", reason="테스트", suspended_by="system")
+        await service.suspend("main", reason="테스트", suspended_by="system")
 
 
 @pytest.mark.asyncio
 async def test_delete_already_deleted_account_raises(service):
     """이미 DELETED 계좌에 delete 시도 시 AccountDeletedException."""
     await service.create(_make_account())
-    await service.delete("test", deleted_by="system")
+    await service.delete("main", deleted_by="system")
 
     with pytest.raises(AccountDeletedException):
-        await service.delete("test", deleted_by="system")
+        await service.delete("main", deleted_by="system")
 
 
 # ── 삭제 (delete) ──────────────────────────────────
@@ -322,14 +367,14 @@ async def test_delete_already_deleted_account_raises(service):
 async def test_delete_account(service):
     """계좌 소프트 딜리트."""
     await service.create(_make_account())
-    await service.delete("test", deleted_by="admin")
+    await service.delete("main", deleted_by="admin")
 
     # 기본 목록에서는 안 보임
     accounts = await service.list()
     assert len(accounts) == 0
 
     # DELETED 상태도 조회 가능
-    deleted = await service.get("test")
+    deleted = await service.get("main")
     assert deleted.status == AccountStatus.DELETED
 
 
@@ -353,17 +398,17 @@ async def test_delete_raises_when_active_bots_present(service, db):
         """INSERT INTO bots
            (bot_id, name, strategy_id, account_id, config_json, status)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        ("bot-1", "테스트봇", "strat", "test", "{}", "running"),
+        ("bot-1", "테스트봇", "strat", "main", "{}", "running"),
     )
 
     with pytest.raises(AccountHasActiveBotsError) as excinfo:
-        await service.delete("test", deleted_by="admin")
+        await service.delete("main", deleted_by="admin")
 
-    assert excinfo.value.account_id == "test"
+    assert excinfo.value.account_id == "main"
     assert excinfo.value.bot_count == 1
 
     # 계좌 status는 ACTIVE 그대로 유지되어야 함
-    account = await service.get("test")
+    account = await service.get("main")
     assert account.status == AccountStatus.ACTIVE
 
 
@@ -376,9 +421,9 @@ async def test_delete_succeeds_when_no_active_bots(service, db):
     # 빈 bots 테이블
     await db.execute_script(BOT_SCHEMA)
 
-    await service.delete("test", deleted_by="admin")
+    await service.delete("main", deleted_by="admin")
 
-    deleted = await service.get("test")
+    deleted = await service.get("main")
     assert deleted.status == AccountStatus.DELETED
 
 
@@ -393,12 +438,12 @@ async def test_delete_succeeds_when_only_deleted_bots(service, db):
         """INSERT INTO bots
            (bot_id, name, strategy_id, account_id, config_json, status)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        ("bot-old", "삭제봇", "strat", "test", "{}", "deleted"),
+        ("bot-old", "삭제봇", "strat", "main", "{}", "deleted"),
     )
 
-    await service.delete("test", deleted_by="admin")
+    await service.delete("main", deleted_by="admin")
 
-    deleted = await service.get("test")
+    deleted = await service.get("main")
     assert deleted.status == AccountStatus.DELETED
 
 
@@ -418,16 +463,16 @@ async def test_delete_error_message_includes_cold_path_bot_remove_procedure(
         """INSERT INTO bots
            (bot_id, name, strategy_id, account_id, config_json, status)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        ("bot-1", "테스트봇", "strat", "test", "{}", "running"),
+        ("bot-1", "테스트봇", "strat", "main", "{}", "running"),
     )
 
     with pytest.raises(AccountHasActiveBotsError) as excinfo:
-        await service.delete("test", deleted_by="admin")
+        await service.delete("main", deleted_by="admin")
 
     message = str(excinfo.value)
 
     # account_id / bot_count 포함
-    assert "test" in message
+    assert "main" in message
     assert "1" in message
 
     # server start/stop 없이 bot remove → account delete 순서만 안내한다 (#1161).
@@ -568,7 +613,8 @@ async def test_get_broker_test(service):
     """test broker_type으로 TestBrokerAdapter 반환."""
     await service.create(_make_account())
 
-    broker = await service.get_broker("test")
+    broker = await service.get_broker("main")
+    # TestBrokerAdapter.broker_id 클래스 default는 "test" — broker_type SSOT.
     assert broker.broker_id == "test"
 
 
@@ -577,8 +623,8 @@ async def test_get_broker_cached(service):
     """두 번 호출 시 같은 인스턴스 반환 (캐싱)."""
     await service.create(_make_account())
 
-    broker1 = await service.get_broker("test")
-    broker2 = await service.get_broker("test")
+    broker1 = await service.get_broker("main")
+    broker2 = await service.get_broker("main")
     assert broker1 is broker2
 
 
@@ -588,7 +634,7 @@ async def test_get_broker_uses_broker_config(service):
     await service.create(
         _make_account(broker_config={"is_paper": True}),
     )
-    broker = await service.get_broker("test")
+    broker = await service.get_broker("main")
     assert broker.config.get("is_paper") is True
 
 
@@ -596,7 +642,7 @@ async def test_get_broker_uses_broker_config(service):
 async def test_get_broker_broker_config_default(service):
     """broker_config={} -> is_paper 키 없음 (KIS 기본값 사용)."""
     await service.create(_make_account())
-    broker = await service.get_broker("test")
+    broker = await service.get_broker("main")
     assert "is_paper" not in broker.config
 
 
@@ -609,13 +655,13 @@ async def test_update_credentials_invalidates_broker_cache(service):
     수행되어야 이후 호출에서 즉시 사용 가능하다.
     """
     await service.create(_make_account())
-    broker_before = await service.get_broker("test")
+    broker_before = await service.get_broker("main")
     await broker_before.connect()
     assert broker_before.config.get("app_key") == "test"
     assert broker_before.is_connected is True
 
-    await service.update("test", credentials={"app_key": "new", "app_secret": "new"})
-    broker_after = await service.get_broker("test")
+    await service.update("main", credentials={"app_key": "new", "app_secret": "new"})
+    broker_after = await service.get_broker("main")
 
     assert broker_after is not broker_before
     assert broker_after.config.get("app_key") == "new"
@@ -630,12 +676,12 @@ async def test_update_credentials_invalidates_broker_cache(service):
 async def test_update_broker_config_invalidates_broker_cache(service):
     """broker_config 수정 시 캐시된 브로커를 무효화하고 재연결한다."""
     await service.create(_make_account())
-    broker_before = await service.get_broker("test")
+    broker_before = await service.get_broker("main")
     await broker_before.connect()
     assert "is_paper" not in broker_before.config
 
-    await service.update("test", broker_config={"is_paper": True})
-    broker_after = await service.get_broker("test")
+    await service.update("main", broker_config={"is_paper": True})
+    broker_after = await service.get_broker("main")
 
     assert broker_after is not broker_before
     assert broker_after.config.get("is_paper") is True
@@ -654,16 +700,16 @@ async def test_update_commission_rate_invalidates_broker_cache(service):
     값으로 수행된다.
     """
     await service.create(_make_account())
-    broker_before = await service.get_broker("test")
+    broker_before = await service.get_broker("main")
     await broker_before.connect()
     assert float(broker_before.config.get("buy_commission_rate", 0.0)) == 0.0
 
     await service.update(
-        "test",
+        "main",
         buy_commission_rate=Decimal("0.0015"),
         sell_commission_rate=Decimal("0.0025"),
     )
-    broker_after = await service.get_broker("test")
+    broker_after = await service.get_broker("main")
 
     assert broker_after is not broker_before
     assert float(broker_after.config.get("buy_commission_rate")) == pytest.approx(
@@ -679,10 +725,10 @@ async def test_update_commission_rate_invalidates_broker_cache(service):
 async def test_update_non_broker_fields_preserves_broker_cache(service):
     """브로커와 무관한 필드(name 등) 수정 시 캐시는 유지된다."""
     await service.create(_make_account())
-    broker_before = await service.get_broker("test")
+    broker_before = await service.get_broker("main")
 
-    await service.update("test", name="renamed")
-    broker_after = await service.get_broker("test")
+    await service.update("main", name="renamed")
+    broker_after = await service.get_broker("main")
 
     assert broker_after is broker_before
 
@@ -700,7 +746,7 @@ async def test_update_does_not_disconnect_broker_held_by_long_running_consumer(s
     수행할 수 있음을 검증한다.
     """
     await service.create(_make_account())
-    held_by_consumer = await service.get_broker("test")
+    held_by_consumer = await service.get_broker("main")
     await held_by_consumer.connect()
     assert held_by_consumer.is_connected is True
 
@@ -711,7 +757,7 @@ async def test_update_does_not_disconnect_broker_held_by_long_running_consumer(s
     # credentials 업데이트 — 캐시는 새 어댑터로 교체되지만 consumer의 참조는
     # 끊기면 안 된다.
     await service.update(
-        "test", credentials={"app_key": "rotated", "app_secret": "rotated"}
+        "main", credentials={"app_key": "rotated", "app_secret": "rotated"}
     )
 
     # consumer가 붙잡은 어댑터는 여전히 연결된 상태로 동작해야 한다.
@@ -720,7 +766,7 @@ async def test_update_does_not_disconnect_broker_held_by_long_running_consumer(s
     assert isinstance(post_update_balance, dict)
 
     # 새로 get_broker를 호출한 경로(APIGateway 등)는 교체된 어댑터를 받는다.
-    cached_now = await service.get_broker("test")
+    cached_now = await service.get_broker("main")
     assert cached_now is not held_by_consumer
     assert cached_now.is_connected is True
     assert cached_now.config.get("app_key") == "rotated"
@@ -737,18 +783,18 @@ async def test_update_without_cached_broker_is_noop(service):
     통과해야 한다. 이후 get_broker()가 새 설정으로 lazy init한다.
     """
     await service.create(_make_account())
-    assert "test" not in service._brokers  # 아직 get_broker 호출 전
+    assert "main" not in service._brokers  # 아직 get_broker 호출 전
 
     # broker_config 변경 — 캐시가 비어 있어 재연결은 noop이어야 한다
-    await service.update("test", broker_config={"is_paper": True})
+    await service.update("main", broker_config={"is_paper": True})
 
-    account = await service.get("test")
+    account = await service.get("main")
     assert account.broker_config == {"is_paper": True}
     # 캐시는 여전히 비어 있어야 한다 (lazy init은 이후 get_broker가 담당)
-    assert "test" not in service._brokers
+    assert "main" not in service._brokers
 
     # lazy init 후 새 설정이 반영되어야 한다
-    broker = await service.get_broker("test")
+    broker = await service.get_broker("main")
     assert broker.config.get("is_paper") is True
 
 
@@ -765,7 +811,7 @@ async def test_update_preserves_cache_when_new_broker_connect_fails(
     받는다. DB에는 새 설정이 이미 반영된 상태다.
     """
     await service.create(_make_account())
-    broker_before = await service.get_broker("test")
+    broker_before = await service.get_broker("main")
     await broker_before.connect()
     assert broker_before.is_connected is True
 
@@ -779,16 +825,16 @@ async def test_update_preserves_cache_when_new_broker_connect_fails(
 
     with pytest.raises(BrokerReconnectFailedError):
         await service.update(
-            "test", credentials={"app_key": "new", "app_secret": "new"}
+            "main", credentials={"app_key": "new", "app_secret": "new"}
         )
 
     # 캐시는 기존 브로커를 그대로 유지해야 한다
-    cached = await service.get_broker("test")
+    cached = await service.get_broker("main")
     assert cached is broker_before
     assert cached.is_connected is True
 
     # DB에는 새 설정이 반영되어 있음 (재시도 시 새 credentials로 생성됨)
-    account = await service.get("test")
+    account = await service.get("main")
     assert account.credentials == {"app_key": "new", "app_secret": "new"}
 
 
@@ -806,18 +852,18 @@ async def test_broker_operations_work_after_credentials_update(service):
     await service.create(_make_account())
 
     # 1) health check 경로: 미리 get_broker를 호출해 캐시 생성
-    pre_broker = await service.get_broker("test")
+    pre_broker = await service.get_broker("main")
     await pre_broker.connect()
     assert pre_broker.is_connected is True
 
     # 2) 운영 중 credentials 변경
     await service.update(
-        "test",
+        "main",
         credentials={"app_key": "rotated", "app_secret": "rotated"},
     )
 
     # 3) gateway 호출 경로: get_broker가 반환한 어댑터로 즉시 operation 실행
-    post_broker = await service.get_broker("test")
+    post_broker = await service.get_broker("main")
     assert post_broker is not pre_broker
     assert post_broker.is_connected is True
     # 실제 브로커 오퍼레이션이 바로 동작해야 한다 (별도 connect 없이 호출 가능)
@@ -834,7 +880,7 @@ async def test_create_account_with_broker_config(service):
     assert created.broker_config == {"is_paper": True, "hts_id": "myid"}
 
     # DB에서 다시 로드
-    fetched = await service.get("test")
+    fetched = await service.get("main")
     assert fetched.broker_config == {"is_paper": True, "hts_id": "myid"}
 
 
@@ -861,6 +907,194 @@ async def test_create_default_test_account_idempotent(service):
     assert first.account_id == second.account_id
 
 
+# ── public create() seed 우회 차단 + private _create_seed_account 가드 (#1216 P2) ──
+
+
+@pytest.mark.asyncio
+async def test_create_public_api_has_no_bootstrap_kwarg(service):
+    """public ``create()`` 시그니처는 ``_bootstrap`` 키워드를 받지 않는다 (#1216 P2).
+
+    외부 호출자가 ``_bootstrap=True`` 로 RESTRICTED 예약어( ``"test"`` ) 검증을
+    우회할 수 없도록 시그니처에서 완전히 제거됐는지 회귀 방지.
+    """
+    import inspect
+
+    sig = inspect.signature(service.create)
+    assert "_bootstrap" not in sig.parameters, (
+        f"public create() must not expose _bootstrap kwarg; got params="
+        f"{list(sig.parameters)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_public_api_rejects_seed_id_for_test_broker(service):
+    """seed account_id ``"test"`` 는 public ``create()`` 에서 broker_type 무관 거부.
+
+    seed 우회가 사라졌으므로, 외부 호출자가 정확한 (broker_type, account_id)
+    pair를 넘겨도 public 경로에서는 RESTRICTED 가드가 막아야 한다 (#1216 P2).
+    bootstrap은 :meth:`AccountService.create_default_test_account` 만의 책임.
+    """
+    account = _make_account(account_id="test", broker_type="test")
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account)
+
+    msg = str(exc_info.value)
+    assert "ante init" in msg
+    assert "시드 계좌" in msg
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "default",  # fallback 예약어
+        "random",  # seed 화이트리스트 밖
+        "main",  # 일반 valid이지만 seed 아님
+        "ab",  # 형식 위반 (너무 짧음, 동시에 seed 아님)
+    ],
+)
+async def test_create_seed_account_rejects_non_seed(service, bad_id):
+    """private seed helper는 (broker_type, default_account_id) pair만 허용.
+
+    오케스트레이션 helper(``create_default_test_account``)가 잘못된 입력을
+    넘기더라도 'default'/패턴 위반/임의 ID가 슬쩍 통과되지 않게 막는
+    defense-in-depth 가드 (#1216 P2). 여기서는
+    broker_type='test'(default_account_id='test')와 mismatch인 케이스들이다.
+    """
+    account = _make_account(account_id=bad_id, broker_type="test")
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service._create_seed_account(account)
+
+    msg = str(exc_info.value)
+    assert "seed 계좌 생성" in msg
+    assert "valid pairs" in msg
+
+
+@pytest.mark.asyncio
+async def test_create_seed_account_rejects_empty(service):
+    """빈 문자열 account_id는 ``_create_seed_account`` 에서 거부된다 (pair 불일치)."""
+    # _make_account의 default 분기로 직접 만들지 못하므로 명시적으로 구성.
+    account = _make_account(account_id="", broker_type="test")
+
+    with pytest.raises(InvalidAccountIdError):
+        await service._create_seed_account(account)
+
+
+@pytest.mark.asyncio
+async def test_create_seed_account_accepts_seed_test(service):
+    """정확한 (test, test) pair는 ``_create_seed_account`` 에서 통과한다."""
+    preset = BROKER_PRESETS["test"]
+    account = _make_account(
+        account_id=preset.default_account_id,
+        broker_type="test",
+        credentials={k: "test" for k in preset.required_credentials},
+    )
+
+    result = await service._create_seed_account(account)
+
+    assert result.account_id == "test"
+    assert result.broker_type == "test"
+    assert result.status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_create_seed_account_accepts_seed_kis_domestic(service):
+    """정확한 (kis-domestic, domestic) pair도 ``_create_seed_account`` 에서 통과.
+
+    BROKER_PRESETS에 정의된 모든 pair가 동일하게 허용되는지 회귀 방지.
+    """
+    preset = BROKER_PRESETS["kis-domestic"]
+    account = _make_account(
+        account_id=preset.default_account_id,
+        broker_type="kis-domestic",
+        credentials={k: "test" for k in preset.required_credentials},
+    )
+
+    result = await service._create_seed_account(account)
+
+    assert result.account_id == "domestic"
+    assert result.broker_type == "kis-domestic"
+    assert result.status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_create_seed_account_rejects_seed_id_with_wrong_broker_type(service):
+    """``account_id='test'`` + ``broker_type='kis-domestic'``는 거부된다 (#1216 P2).
+
+    이전 구현은 account_id가 BROKER_PRESETS의 default_account_id set에
+    포함되기만 하면 통과시켜, 호출자가 RESTRICTED 예약어 'test'를
+    비-test broker 아래에 저장하는 우회가 가능했다. 새 가드는
+    (broker_type, default_account_id) pair 정확 일치를 요구한다.
+    """
+    preset = BROKER_PRESETS["kis-domestic"]
+    account = _make_account(
+        account_id="test",  # test preset의 seed
+        broker_type="kis-domestic",  # 그러나 broker_type은 다른 preset
+        credentials={k: "test" for k in preset.required_credentials},
+    )
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service._create_seed_account(account)
+
+    msg = str(exc_info.value)
+    assert "seed 계좌 생성" in msg
+    assert "valid pairs" in msg
+    assert "'test'" in msg  # 입력된 account_id가 메시지에 포함
+
+
+@pytest.mark.asyncio
+async def test_create_seed_account_rejects_cross_pair_domestic_with_test_broker(
+    service,
+):
+    """``account_id='domestic'`` + ``broker_type='test'`` (반대 mismatch)도 거부."""
+    account = _make_account(
+        account_id="domestic",  # kis-domestic preset의 seed
+        broker_type="test",  # 그러나 broker_type은 다른 preset
+        credentials={"app_key": "test", "app_secret": "test"},
+    )
+
+    with pytest.raises(InvalidAccountIdError):
+        await service._create_seed_account(account)
+
+
+@pytest.mark.asyncio
+async def test_create_seed_account_rejects_unknown_broker_type(service):
+    """알 수 없는 ``broker_type`` 은 ``_create_seed_account`` pair 검증에서 거부된다.
+
+    BROKER_PRESETS.get(broker_type)이 None이므로 InvalidBrokerTypeError가
+    아니라 seed pair 가드가 먼저 InvalidAccountIdError로 차단한다.
+    """
+    account = _make_account(
+        account_id="test",
+        broker_type="bogus-broker",
+        credentials={"app_key": "test", "app_secret": "test"},
+    )
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service._create_seed_account(account)
+
+    assert "seed 계좌 생성" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_create_default_test_account_seed_path_works(service):
+    """``create_default_test_account`` 흐름이 새 helper 적용 후에도 정상 동작.
+
+    회귀 방지: private ``_create_seed_account`` 경로의 pair 화이트리스트
+    가드가 기존 bootstrap seed 자동 생성 흐름을 깨지 않아야 한다 (#1216 P2).
+    """
+    account = await service.create_default_test_account()
+
+    assert account.account_id == "test"
+    assert account.broker_type == "test"
+    assert account.status == AccountStatus.ACTIVE
+    # 멱등성도 함께 확인 (기존 계약 유지)
+    again = await service.create_default_test_account()
+    assert again.account_id == "test"
+
+
 # ── DB 영속성 ──────────────────────────────────────
 
 
@@ -877,7 +1111,7 @@ async def test_db_persistence(db, eventbus):
 
     accounts = await svc2.list()
     assert len(accounts) == 1
-    assert accounts[0].account_id == "test"
+    assert accounts[0].account_id == "main"
 
 
 # ── 프리셋 ──────────────────────────────────────────
