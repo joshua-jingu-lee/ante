@@ -449,7 +449,7 @@ ante bot create \
 | 옵션 | 설명 |
 |------|------|
 | `--strategy` | 등록된 전략 ID |
-| `--account` | 연결할 계좌 ID. 미지정 시 대화형으로 선택 |
+| `--account` | 연결할 계좌 ID. 활성 계좌가 1개면 자동 선택. 0개면 `BOT_MISSING_REQUIRED_ACCOUNT` 에러로 실패. 2개 이상이면 `--account <id>`로 명시 지정 필수 |
 | `--interval` | `on_step()` 호출 주기 (초, 10~3600) |
 
 봇의 거래 모드는 연결된 계좌의 TradingMode에 의해 결정됩니다. VIRTUAL 계좌에 연결하면 모의투자, LIVE 계좌에 연결하면 실투자가 됩니다.

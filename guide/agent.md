@@ -102,6 +102,6 @@ Scope는 `도메인:권한` 형식입니다. 에이전트 등록 시 필요한 s
 | 토큰 재발급 (기존 즉시 무효화) | `ante member rotate-token <MEMBER_ID>` |
 | 에이전트 일시 정지 | `ante member suspend <MEMBER_ID>` |
 | 에이전트 재활성화 | `ante member reactivate <MEMBER_ID>` |
-| 에이전트 영구 폐기 | `ante member revoke <MEMBER_ID>` |
+| 에이전트 영구 폐기 | `ante member revoke <MEMBER_ID> --yes` |
 
 토큰은 기본 90일 후 만료됩니다. 만료 7일 전부터 경고가 표시되며, `rotate-token`으로 재발급할 수 있습니다.
