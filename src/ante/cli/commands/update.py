@@ -148,6 +148,21 @@ def update(
         fmt.error("PyPI 버전 확인 실패")
         raise SystemExit(1)
 
+    # 비대화형 입력 계약 (#1170, #1171 SSOT): `--check`이 아닌 실제 업데이트
+    # 실행 호출에는 `--yes`가 반드시 필요하다. 이 게이트는 no-update 조기
+    # 반환(이미 최신 버전) **앞에** 위치해야 한다 — 그래야 사용자가 명시적
+    # 실행 의사(`--yes`)를 표현하지 않은 호출은 버전 상태와 무관하게
+    # ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (Codex P2 finding).
+    # 게이트 통과 전이므로 backup/pip upgrade/migration 등 부수 효과는
+    # 일체 발생하지 않는다.
+    if not yes:
+        fmt.error(
+            f"업데이트 실행에는 --yes가 필요합니다 ({current} → {latest}). "
+            "재실행: ante update --yes",
+            code="CLI_CONFIRMATION_REQUIRED",
+        )
+        raise SystemExit(1)
+
     if not target_version and not is_update_available(current, latest):
         if fmt.is_json:
             fmt.output(
@@ -172,18 +187,6 @@ def update(
     ok, msg = check_disk_space(db_path)
     if not ok:
         click.echo(msg, err=True)
-        raise SystemExit(1)
-
-    # 비대화형 입력 계약 (#1170, #1171 SSOT): `--yes`가 없으면 prompt 없이
-    # ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다. 이 게이트는 디스크 공간
-    # 검사 직후, backup/pip upgrade/migration 호출 전에 위치하므로 조기 종료
-    # 시 부수 효과(백업 생성, 의존성 스냅샷, pip 호출 등)는 발생하지 않는다.
-    if not yes:
-        fmt.error(
-            f"업데이트 실행에는 --yes가 필요합니다 ({current} → {latest}). "
-            "재실행: ante update --yes",
-            code="CLI_CONFIRMATION_REQUIRED",
-        )
         raise SystemExit(1)
 
     # Phase A: 백업 + pip upgrade

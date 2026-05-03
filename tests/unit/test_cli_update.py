@@ -247,6 +247,48 @@ class TestUpdateNonInteractive:
         mock_snapshot.assert_not_called()
         mock_migrate.assert_not_called()
 
+    def test_update_without_yes_fails_when_already_latest(
+        self, runner: CliRunner
+    ) -> None:
+        """이미 최신 버전 + ``--yes`` 누락 → exit 1, ``CLI_CONFIRMATION_REQUIRED``.
+
+        Codex P2 finding: ``--yes`` 게이트는 no-update 조기 반환 **앞에**
+        위치해야 한다. 사용자가 명시적 실행 의사(`--yes`)를 표현하지 않은
+        ``ante update`` 호출은 버전 상태와 무관하게 거절되어야 한다.
+
+        - ``current == latest`` (이미 최신) 상태에서도 prompt 없이 exit 1.
+        - JSON 에러 코드는 ``CLI_CONFIRMATION_REQUIRED``.
+        - ``pip_upgrade`` 등 부수 효과 함수는 호출되지 않는다.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.7.0"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["error"]
+
+        # 부수 효과가 발생하지 않아야 한다 (게이트가 막아야 한다).
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+
     def test_update_with_yes_invokes_pip_upgrade(self, runner: CliRunner) -> None:
         """업데이트 가능 + ``--yes`` 있음 → 기존 업데이트 플로우 진입.
 
