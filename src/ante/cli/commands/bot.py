@@ -165,24 +165,29 @@ def _parse_param(value: str) -> tuple[str, object]:
     return key.strip(), parsed
 
 
-def _select_account_interactive(accounts: list) -> str:
-    """활성 계좌 목록에서 대화형으로 계좌를 선택한다."""
-    if not accounts:
-        click.echo("활성 계좌가 없습니다. 먼저 계좌를 등록하세요.")
-        raise SystemExit(1)
+def _resolve_account_non_interactive(accounts: list, fmt) -> str:  # noqa: ANN001
+    """활성 계좌 목록에서 비대화형으로 계좌를 선택한다.
 
+    - 활성 계좌가 정확히 1개면 자동 선택한다.
+    - 활성 계좌가 0개 또는 2개 이상이면 prompt 없이
+      `BOT_MISSING_REQUIRED_ACCOUNT` 에러로 실패한다.
+    """
     if len(accounts) == 1:
-        selected = accounts[0]
-        msg = f"계좌 자동 선택: {selected.account_id}"
-        msg += f" ({selected.exchange} / {selected.currency})"
-        click.echo(msg)
-        return selected.account_id
+        return accounts[0].account_id
 
-    click.echo("계좌를 선택하세요:")
-    for i, acc in enumerate(accounts, 1):
-        click.echo(f"  {i}) {acc.account_id} ({acc.exchange} / {acc.currency})")
-    choice = click.prompt("", type=click.IntRange(1, len(accounts)))
-    return accounts[choice - 1].account_id
+    if not accounts:
+        fmt.error(
+            "활성 계좌가 없습니다. 먼저 계좌를 등록한 뒤 --account <id>로 지정하세요.",
+            code="BOT_MISSING_REQUIRED_ACCOUNT",
+        )
+    else:
+        ids = ", ".join(acc.account_id for acc in accounts)
+        fmt.error(
+            "활성 계좌가 여러 개입니다. --account <id>로 명시하세요."
+            f" (가능한 계좌: {ids})",
+            code="BOT_MISSING_REQUIRED_ACCOUNT",
+        )
+    raise SystemExit(1)
 
 
 @bot.command("create")
@@ -192,7 +197,7 @@ def _select_account_interactive(accounts: list) -> str:
     "--account",
     "account_id",
     default=None,
-    help="계좌 ID (미지정 시 대화형 선택)",
+    help="계좌 ID (미지정 시 단일 active 계좌 자동 선택, 0개/2개 이상 시 에러)",
 )
 @click.option(
     "--interval",
@@ -233,7 +238,8 @@ def bot_create(
             fmt.error(str(e))
             return
 
-    # 계좌 미지정 시 대화형 선택
+    # 계좌 미지정 시 비대화형 resolver — 단일 active 계좌면 자동 선택,
+    # 그 외(0개/2개 이상)에는 BOT_MISSING_REQUIRED_ACCOUNT로 실패한다.
     if account_id is None:
         from ante.account.models import AccountStatus
 
@@ -242,7 +248,7 @@ def bot_create(
             return await account_service.list(status=AccountStatus.ACTIVE)
 
         accounts = _run(_list_accounts())
-        account_id = _select_account_interactive(accounts)
+        account_id = _resolve_account_non_interactive(accounts, fmt)
 
     resolved_account_id = account_id
 
@@ -274,18 +280,32 @@ def bot_create(
 
 @bot.command("remove")
 @click.argument("bot_id")
-@click.confirmation_option(prompt="봇을 삭제합니다. 계속하시겠습니까?")
+@click.option(
+    "--yes",
+    "yes",
+    is_flag=True,
+    default=False,
+    help="삭제를 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패",
+)
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
-def bot_remove(ctx: click.Context, bot_id: str) -> None:
+def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
     """봇 삭제.
 
     서버가 실행 중이면 기존 IPC 경로를 사용하고, 서버가 정지되어 있으면
     cold-path service가 persisted DB/signal key/snapshot/treasury state를 정리한다.
+    `--yes` 누락 시 prompt 없이 `CLI_CONFIRMATION_REQUIRED` 에러로 종료한다.
     """
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
+
+    if not yes:
+        fmt.error(
+            "위험 명령입니다. --yes를 명시해야 봇을 삭제합니다.",
+            code="CLI_CONFIRMATION_REQUIRED",
+        )
+        raise SystemExit(1)
 
     async def _run_remove() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send

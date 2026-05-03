@@ -257,7 +257,7 @@ class TestBotRemoveIpc:
     )
     @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_bot_remove_ipc(self, mock_ipc_cls, mock_socket, mock_active) -> None:
-        """active runtime이면 bot.remove IPC 커맨드를 전송한다."""
+        """active runtime이면 bot.remove IPC 커맨드를 전송한다 (--yes 명시)."""
         mock_client = AsyncMock()
         mock_client.send.return_value = {
             "id": "req-1",
@@ -275,6 +275,28 @@ class TestBotRemoveIpc:
         call_args = mock_client.send.call_args
         assert call_args[0][0] == "bot.remove"
         assert call_args[0][1] == {"bot_id": "bot-abc"}
+
+    @patch("ante.cli.commands.bot.is_active_runtime", return_value=True)
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
+    def test_bot_remove_without_yes_fails_confirmation_required(
+        self, mock_ipc_cls, mock_active
+    ) -> None:
+        """`--yes` 누락 시 prompt 없이 CLI_CONFIRMATION_REQUIRED 에러로 실패."""
+        mock_client = AsyncMock()
+        mock_ipc_cls.return_value = mock_client
+
+        # JSON 모드로 에러 코드를 직접 검증한다.
+        result = _invoke_cli(["--format", "json", "bot", "remove", "bot-abc"])
+
+        assert result.exit_code == 1
+        # IPC가 호출되지 않아야 한다 (확인 게이트 통과 전 차단).
+        mock_client.send.assert_not_awaited()
+
+        import json as _json
+
+        data = _json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["error"]
 
     @patch("ante.cli.commands.bot.is_active_runtime", return_value=False)
     @patch("ante.cli.commands.bot._run_bot_remove_cold_path")
