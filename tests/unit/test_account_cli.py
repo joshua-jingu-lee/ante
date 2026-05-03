@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -290,40 +291,86 @@ def active_runtime():
             yield
 
 
-# ── account create 대화형 테스트 ──────────────────
+# ── account create 비대화형 테스트 ──────────────────
+
+# 비대화형 입력 계약 SSOT: docs/specs/cli/02-design-decisions.md
+# (비대화형 입력 계약 — CLI Non-Interactive Input Contract).
+
+
+def _create_args_test_broker(
+    *,
+    account_id: str = "test2",
+    name: str = "테스트2",
+    trading_mode: str = "virtual",
+    extra: list[str] | None = None,
+) -> list[str]:
+    """``broker-type=test``용 표준 비대화형 인자 세트.
+
+    test broker preset은 ``required_credentials=["app_key", "app_secret"]``이므로
+    두 credential을 ``--credential``로 직접 제공한다.
+    """
+    args = [
+        "account",
+        "create",
+        "--broker-type",
+        "test",
+        "--account-id",
+        account_id,
+        "--name",
+        name,
+        "--trading-mode",
+        trading_mode,
+        "--credential",
+        "app_key=K",
+        "--credential",
+        "app_secret=S",
+    ]
+    if extra:
+        args.extend(extra)
+    return args
 
 
 class TestAccountCreate:
-    """ante account create 테스트."""
+    """ante account create 비대화형 테스트."""
 
-    def test_create_interactive(
+    def test_create_with_options(
         self, mock_account_service: AsyncMock, offline_runtime
     ) -> None:
-        """대화형 생성 흐름이 정상 동작한다."""
-        created = _mock_account("test", "테스트", "TEST", "KRW", "test")
+        """옵션 기반 비대화형 생성이 정상 동작한다."""
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
         mock_account_service.create.return_value = created
 
-        # 입력: 브로커 1(test), 계좌ID(기본), 이름(기본), 거래모드 1(virtual),
-        # 인증정보: app_key=test, app_secret=test
-        input_text = "1\n\n\n1\ntest\ntest\n"
-        result = _invoke(["account", "create"], input_text=input_text)
-        assert result.exit_code == 0
+        result = _invoke(_create_args_test_broker())
+        assert result.exit_code == 0, result.output
         assert "생성 완료" in result.output
         mock_account_service.create.assert_called_once()
+
+    def test_create_json_output(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """--format json 출력이 success 페이로드를 포함한다."""
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        result = _invoke(_create_args_test_broker(extra=["--format", "json"]))
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["status"] == "ok"
+        assert data["account_id"] == "test2"
+        assert data["broker_type"] == "test"
 
     def test_create_blocked_when_active_runtime(
         self, mock_account_service: AsyncMock, active_runtime
     ) -> None:
         """active runtime이 있으면 cold-path가 차단된다."""
-        input_text = "1\n\n\n1\ntest\ntest\n"
-        result = _invoke(["account", "create"], input_text=input_text)
+        result = _invoke(_create_args_test_broker())
         assert result.exit_code == 1
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in result.output
         mock_account_service.create.assert_not_called()
 
     def test_create_offline_succeeds(self, mock_account_service: AsyncMock) -> None:
         """PID 파일 부재(offline) 시 guard 통과."""
-        created = _mock_account("test", "테스트", "TEST", "KRW", "test")
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
         mock_account_service.create.return_value = created
 
         with (
@@ -333,16 +380,15 @@ class TestAccountCreate:
                 return_value="/tmp/__ante_does_not_exist__.sock",
             ),
         ):
-            input_text = "1\n\n\n1\ntest\ntest\n"
-            result = _invoke(["account", "create"], input_text=input_text)
-        assert result.exit_code == 0
+            result = _invoke(_create_args_test_broker())
+        assert result.exit_code == 0, result.output
         mock_account_service.create.assert_called_once()
 
     def test_create_offline_when_pid_alive_but_socket_absent(
         self, mock_account_service: AsyncMock
     ) -> None:
         """PID는 alive지만 socket이 부재하면 stale PID로 보고 guard 통과."""
-        created = _mock_account("test", "테스트", "TEST", "KRW", "test")
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
         mock_account_service.create.return_value = created
 
         with (
@@ -356,10 +402,300 @@ class TestAccountCreate:
                 return_value="/tmp/__ante_no_such_socket_xxx__.sock",
             ),
         ):
-            input_text = "1\n\n\n1\ntest\ntest\n"
-            result = _invoke(["account", "create"], input_text=input_text)
-        assert result.exit_code == 0
+            result = _invoke(_create_args_test_broker())
+        assert result.exit_code == 0, result.output
         mock_account_service.create.assert_called_once()
+
+    def test_create_missing_broker_type(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """필수 옵션 ``--broker-type`` 누락 시 즉시 에러로 종료한다."""
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--account-id",
+                "x",
+                "--name",
+                "X",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential",
+                "app_secret=S",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "CLI_MISSING_REQUIRED_INPUT" in result.output
+        assert "--broker-type" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_missing_required_credential(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """``required_credentials``에 정의된 key 누락 시 명시적 에러."""
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                # app_secret 누락
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_MISSING_REQUIRED_CREDENTIAL" in result.output
+        assert "app_secret" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_unknown_credential_key(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """``required_credentials`` 외 key는 ``ACCOUNT_UNKNOWN_CREDENTIAL_KEY``."""
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential",
+                "app_secret=S",
+                "--credential",
+                "extra_key=X",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_UNKNOWN_CREDENTIAL_KEY" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_duplicate_credential_key_across_channels(
+        self, mock_account_service: AsyncMock, offline_runtime, monkeypatch
+    ) -> None:
+        """같은 key를 두 채널로 입력하면 ``ACCOUNT_DUPLICATE_CREDENTIAL_KEY``."""
+        monkeypatch.setenv("TEST_APP_SECRET_ENV", "S")
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential",
+                "app_secret=S1",
+                "--credential-env",
+                "app_secret=TEST_APP_SECRET_ENV",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_DUPLICATE_CREDENTIAL_KEY" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_credential_env_not_set(
+        self, mock_account_service: AsyncMock, offline_runtime, monkeypatch
+    ) -> None:
+        """``--credential-env``이 참조한 환경변수가 없으면 명시적 에러."""
+        monkeypatch.delenv("TEST_NO_SUCH_ENV", raising=False)
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential-env",
+                "app_secret=TEST_NO_SUCH_ENV",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_CREDENTIAL_ENV_NOT_SET" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_credential_env_blank(
+        self, mock_account_service: AsyncMock, offline_runtime, monkeypatch
+    ) -> None:
+        """``--credential-env`` 환경변수 값이 공란이면 명시적 에러."""
+        monkeypatch.setenv("TEST_BLANK_ENV", "")
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential-env",
+                "app_secret=TEST_BLANK_ENV",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_CREDENTIAL_ENV_NOT_SET" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_credential_file(
+        self, mock_account_service: AsyncMock, offline_runtime, tmp_path
+    ) -> None:
+        """``--credential-file`` 경로의 파일을 읽어 credential로 사용한다."""
+        secret_path = tmp_path / "secret.txt"
+        secret_path.write_text("FILE_SECRET\n", encoding="utf-8")
+
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential-file",
+                f"app_secret={secret_path}",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        mock_account_service.create.assert_called_once()
+        # service.create에 전달된 Account의 credentials 검증
+        account_arg = mock_account_service.create.call_args[0][0]
+        assert account_arg.credentials == {"app_key": "K", "app_secret": "FILE_SECRET"}
+
+    def test_create_credential_file_not_found(
+        self, mock_account_service: AsyncMock, offline_runtime, tmp_path
+    ) -> None:
+        """credential-file 경로가 부재하면 ACCOUNT_CREDENTIAL_FILE_NOT_FOUND."""
+        missing = tmp_path / "nonexistent.txt"
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential-file",
+                f"app_secret={missing}",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_kis_with_env_and_broker_config(
+        self, mock_account_service: AsyncMock, offline_runtime, monkeypatch
+    ) -> None:
+        """KIS 계좌: env credential + ``--broker-config is_paper=true``."""
+        monkeypatch.setenv("ANTE_KIS_APP_KEY", "K")
+        monkeypatch.setenv("ANTE_KIS_APP_SECRET", "S")
+        monkeypatch.setenv("ANTE_KIS_ACCOUNT_NO", "5012XXXX-01")
+
+        created = _mock_account("domestic", "국내 주식", "KRX", "KRW", "kis-domestic")
+        mock_account_service.create.return_value = created
+
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "kis-domestic",
+                "--account-id",
+                "domestic",
+                "--name",
+                "국내 주식",
+                "--trading-mode",
+                "virtual",
+                "--credential-env",
+                "app_key=ANTE_KIS_APP_KEY",
+                "--credential-env",
+                "app_secret=ANTE_KIS_APP_SECRET",
+                "--credential-env",
+                "account_no=ANTE_KIS_ACCOUNT_NO",
+                "--broker-config",
+                "is_paper=true",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        account_arg = mock_account_service.create.call_args[0][0]
+        assert account_arg.credentials == {
+            "app_key": "K",
+            "app_secret": "S",
+            "account_no": "5012XXXX-01",
+        }
+        assert account_arg.broker_config == {"is_paper": True}
+
+    def test_create_unknown_broker_type(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """``BROKER_REGISTRY`` 미등록 broker_type은 입력 단계에서 거부한다."""
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "no-such-broker",
+                "--account-id",
+                "x",
+                "--name",
+                "X",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential",
+                "app_secret=S",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "no-such-broker" in result.output
+        mock_account_service.create.assert_not_called()
 
 
 # ── account suspend/activate/delete 테스트 ──────────
@@ -422,22 +758,17 @@ class TestAccountStateTransitions:
         assert "삭제 완료" in result.output
         mock_account_service.delete.assert_called_once()
 
-    def test_delete_with_confirm(
+    def test_delete_without_yes_requires_confirmation(
         self, mock_account_service: AsyncMock, offline_runtime
     ) -> None:
-        """계좌 삭제 (확인 프롬프트 y 입력, cold-path direct service 호출)."""
-        mock_account_service.delete.return_value = None
+        """``--yes`` 없이 호출하면 prompt 없이 ``CLI_CONFIRMATION_REQUIRED``로 실패한다.
 
-        result = _invoke(["account", "delete", "domestic"], input_text="y\n")
-
-        assert result.exit_code == 0
-        assert "삭제 완료" in result.output
-        mock_account_service.delete.assert_called_once()
-
-    def test_delete_abort(self) -> None:
-        """계좌 삭제 취소 (확인 프롬프트 n 입력)."""
-        result = _invoke(["account", "delete", "domestic"], input_text="n\n")
+        SSOT: docs/specs/cli/02-design-decisions.md — 위험 명령 확인 방식 표.
+        """
+        result = _invoke(["account", "delete", "domestic"])
         assert result.exit_code == 1
+        assert "CLI_CONFIRMATION_REQUIRED" in result.output
+        mock_account_service.delete.assert_not_called()
 
     def test_delete_blocked_when_active_runtime(
         self, mock_account_service: AsyncMock, active_runtime
@@ -502,6 +833,26 @@ class TestAccountStateTransitions:
 # ── account set-credentials cold-path guard 테스트 ──────
 
 
+def _kis_account_for_setcred() -> Any:
+    """KIS 계좌 mock (set-credentials 테스트용)."""
+    from decimal import Decimal
+
+    from ante.account.models import Account, AccountStatus, TradingMode
+
+    return Account(
+        account_id="domestic",
+        name="국내",
+        exchange="KRX",
+        currency="KRW",
+        broker_type="kis-domestic",
+        status=AccountStatus.ACTIVE,
+        trading_mode=TradingMode.VIRTUAL,
+        credentials={},
+        buy_commission_rate=Decimal("0.00015"),
+        sell_commission_rate=Decimal("0.00195"),
+    )
+
+
 class TestAccountSetCredentialsRuntimeGuard:
     """ante account set-credentials cold-path active runtime guard."""
 
@@ -514,10 +865,12 @@ class TestAccountSetCredentialsRuntimeGuard:
                 "account",
                 "set-credentials",
                 "domestic",
-                "--app-key",
-                "k",
-                "--app-secret",
-                "s",
+                "--credential",
+                "app_key=k",
+                "--credential",
+                "app_secret=s",
+                "--credential",
+                "account_no=5012XXXX-01",
             ]
         )
         assert result.exit_code == 1
@@ -528,22 +881,7 @@ class TestAccountSetCredentialsRuntimeGuard:
         self, mock_account_service: AsyncMock
     ) -> None:
         """PID 파일 부재(offline) 시 guard 통과 후 update 호출."""
-        from decimal import Decimal
-
-        from ante.account.models import Account, AccountStatus, TradingMode
-
-        mock_account_service.get.return_value = Account(
-            account_id="domestic",
-            name="국내",
-            exchange="KRX",
-            currency="KRW",
-            broker_type="kis-domestic",
-            status=AccountStatus.ACTIVE,
-            trading_mode=TradingMode.VIRTUAL,
-            credentials={},
-            buy_commission_rate=Decimal("0.00015"),
-            sell_commission_rate=Decimal("0.00195"),
-        )
+        mock_account_service.get.return_value = _kis_account_for_setcred()
         mock_account_service.update.return_value = None
 
         with (
@@ -558,35 +896,28 @@ class TestAccountSetCredentialsRuntimeGuard:
                     "account",
                     "set-credentials",
                     "domestic",
-                    "--app-key",
-                    "k",
-                    "--app-secret",
-                    "s",
+                    "--credential",
+                    "app_key=k",
+                    "--credential",
+                    "app_secret=s",
+                    "--credential",
+                    "account_no=5012XXXX-01",
                 ]
             )
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         mock_account_service.update.assert_called_once()
+        creds = mock_account_service.update.call_args.kwargs["credentials"]
+        assert creds == {
+            "app_key": "k",
+            "app_secret": "s",
+            "account_no": "5012XXXX-01",
+        }
 
     def test_set_credentials_offline_when_pid_alive_but_socket_absent(
         self, mock_account_service: AsyncMock
     ) -> None:
         """PID alive지만 socket 부재면 stale PID로 보고 guard 통과."""
-        from decimal import Decimal
-
-        from ante.account.models import Account, AccountStatus, TradingMode
-
-        mock_account_service.get.return_value = Account(
-            account_id="domestic",
-            name="국내",
-            exchange="KRX",
-            currency="KRW",
-            broker_type="kis-domestic",
-            status=AccountStatus.ACTIVE,
-            trading_mode=TradingMode.VIRTUAL,
-            credentials={},
-            buy_commission_rate=Decimal("0.00015"),
-            sell_commission_rate=Decimal("0.00195"),
-        )
+        mock_account_service.get.return_value = _kis_account_for_setcred()
         mock_account_service.update.return_value = None
 
         with (
@@ -602,11 +933,141 @@ class TestAccountSetCredentialsRuntimeGuard:
                     "account",
                     "set-credentials",
                     "domestic",
-                    "--app-key",
-                    "k",
-                    "--app-secret",
-                    "s",
+                    "--credential",
+                    "app_key=k",
+                    "--credential",
+                    "app_secret=s",
+                    "--credential",
+                    "account_no=5012XXXX-01",
                 ]
             )
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         mock_account_service.update.assert_called_once()
+
+
+class TestAccountSetCredentialsContract:
+    """``account set-credentials`` 비대화형 입력 계약 검증."""
+
+    def test_no_options_fails_without_prompt(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """credential 옵션이 하나도 없으면 prompt 없이 즉시 실패."""
+        mock_account_service.get.return_value = _kis_account_for_setcred()
+
+        result = _invoke(["account", "set-credentials", "domestic"])
+        assert result.exit_code == 1
+        assert "ACCOUNT_MISSING_REQUIRED_CREDENTIAL" in result.output
+        mock_account_service.update.assert_not_called()
+
+    def test_partial_credentials_rejected(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """KIS preset의 required_credentials 일부만 제공하면 실패."""
+        mock_account_service.get.return_value = _kis_account_for_setcred()
+
+        result = _invoke(
+            [
+                "account",
+                "set-credentials",
+                "domestic",
+                "--credential",
+                "app_key=k",
+                "--credential",
+                "app_secret=s",
+                # account_no 누락
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_MISSING_REQUIRED_CREDENTIAL" in result.output
+        assert "account_no" in result.output
+        mock_account_service.update.assert_not_called()
+
+    def test_unknown_credential_key_rejected(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """required_credentials 외 key는 ``ACCOUNT_UNKNOWN_CREDENTIAL_KEY``."""
+        mock_account_service.get.return_value = _kis_account_for_setcred()
+
+        result = _invoke(
+            [
+                "account",
+                "set-credentials",
+                "domestic",
+                "--credential",
+                "app_key=k",
+                "--credential",
+                "app_secret=s",
+                "--credential",
+                "account_no=5012XXXX-01",
+                "--credential",
+                "extra=X",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_UNKNOWN_CREDENTIAL_KEY" in result.output
+        mock_account_service.update.assert_not_called()
+
+    def test_duplicate_key_across_channels_rejected(
+        self,
+        mock_account_service: AsyncMock,
+        offline_runtime,
+        monkeypatch,
+    ) -> None:
+        """같은 key가 둘 이상 채널로 들어오면 ``ACCOUNT_DUPLICATE_CREDENTIAL_KEY``."""
+        mock_account_service.get.return_value = _kis_account_for_setcred()
+
+        monkeypatch.setenv("KIS_APP_SECRET", "S")
+        result = _invoke(
+            [
+                "account",
+                "set-credentials",
+                "domestic",
+                "--credential",
+                "app_key=k",
+                "--credential",
+                "app_secret=s1",
+                "--credential-env",
+                "app_secret=KIS_APP_SECRET",
+                "--credential",
+                "account_no=5012XXXX-01",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_DUPLICATE_CREDENTIAL_KEY" in result.output
+        mock_account_service.update.assert_not_called()
+
+    def test_env_and_file_resolution(
+        self,
+        mock_account_service: AsyncMock,
+        offline_runtime,
+        monkeypatch,
+        tmp_path,
+    ) -> None:
+        """env + file + direct 채널을 합쳐 update에 그대로 전달한다."""
+        mock_account_service.get.return_value = _kis_account_for_setcred()
+        mock_account_service.update.return_value = None
+
+        monkeypatch.setenv("KIS_APP_KEY", "ENV_KEY")
+        secret_path = tmp_path / "kis_secret.txt"
+        secret_path.write_text("FILE_SECRET\n", encoding="utf-8")
+
+        result = _invoke(
+            [
+                "account",
+                "set-credentials",
+                "domestic",
+                "--credential-env",
+                "app_key=KIS_APP_KEY",
+                "--credential-file",
+                f"app_secret={secret_path}",
+                "--credential",
+                "account_no=5012XXXX-01",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        creds = mock_account_service.update.call_args.kwargs["credentials"]
+        assert creds == {
+            "app_key": "ENV_KEY",
+            "app_secret": "FILE_SECRET",
+            "account_no": "5012XXXX-01",
+        }

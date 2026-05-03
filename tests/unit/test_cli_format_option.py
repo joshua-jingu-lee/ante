@@ -224,8 +224,11 @@ class TestAccountDeleteYes:
         assert "삭제 완료" in result.output
         svc.delete.assert_called_once()
 
-    def test_delete_without_yes_prompts(self, runner: CliRunner) -> None:
-        """--yes 없이 호출하면 확인 프롬프트가 나타남 (cold-path direct service)."""
+    def test_delete_without_yes_requires_confirmation(self, runner: CliRunner) -> None:
+        """``--yes`` 없이 호출하면 prompt 없이 ``CLI_CONFIRMATION_REQUIRED``로 실패한다.
+
+        SSOT: docs/specs/cli/02-design-decisions.md — 위험 명령 확인 방식 표.
+        """
         svc = AsyncMock()
         db = _mock_db()
         svc.delete.return_value = None
@@ -242,11 +245,11 @@ class TestAccountDeleteYes:
                 return_value="/tmp/__ante_offline_fmt_del2__.sock",
             ),
         ):
-            result = runner.invoke(cli, ["account", "delete", "test-acct"], input="y\n")
+            result = runner.invoke(cli, ["account", "delete", "test-acct"])
 
-        assert result.exit_code == 0
-        assert "삭제 완료" in result.output
-        svc.delete.assert_called_once()
+        assert result.exit_code == 1
+        assert "CLI_CONFIRMATION_REQUIRED" in result.output
+        svc.delete.assert_not_called()
 
 
 # ── treasury status --format json ─────────────────────────
@@ -485,7 +488,7 @@ class TestTradeInfoFormatOption:
 
 
 class TestAccountSetCredentialsNonInteractive:
-    """ante account set-credentials {id} --app-key KEY --app-secret SECRET."""
+    """ante account set-credentials --credential KEY=VALUE (모든 required key)."""
 
     def test_set_credentials_non_interactive(self, runner: CliRunner) -> None:
         from decimal import Decimal
@@ -507,10 +510,17 @@ class TestAccountSetCredentialsNonInteractive:
             sell_commission_rate=Decimal("0.00195"),
         )
 
-        with patch(
-            "ante.cli.commands.account._create_account_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
+        with (
+            patch(
+                "ante.cli.commands.account._create_account_service",
+                new_callable=AsyncMock,
+                return_value=(svc, db),
+            ),
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_offline_fmt_setc__.sock",
+            ),
         ):
             result = runner.invoke(
                 cli,
@@ -518,21 +528,24 @@ class TestAccountSetCredentialsNonInteractive:
                     "account",
                     "set-credentials",
                     "test-acct",
-                    "--app-key",
-                    "my-key",
-                    "--app-secret",
-                    "my-secret",
+                    "--credential",
+                    "app_key=my-key",
+                    "--credential",
+                    "app_secret=my-secret",
+                    "--credential",
+                    "account_no=50123456-01",
                     "--format",
                     "json",
                 ],
             )
-            assert result.exit_code == 0
+            assert result.exit_code == 0, result.output
             assert "재설정 완료" in result.output
             svc.update.assert_called_once()
-            # 전달된 credentials 확인
+            # 전달된 credentials 확인 (kis-domestic preset의 모든 required key 포함)
             call_kwargs = svc.update.call_args
             creds = call_kwargs.kwargs.get("credentials") or call_kwargs[1].get(
                 "credentials"
             )
             assert creds["app_key"] == "my-key"
             assert creds["app_secret"] == "my-secret"
+            assert creds["account_no"] == "50123456-01"

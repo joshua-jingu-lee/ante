@@ -152,11 +152,15 @@ class TestBrokerConfigMerge:
         assert merged["is_paper"] is True
 
 
-# ── CLI account create is_paper 프롬프트 테스트 ──────────
+# ── CLI account create is_paper 비대화형 테스트 ──────────
+#
+# 1.0 비대화형 입력 계약(docs/specs/cli/02-design-decisions.md)에 따라
+# `ante account create`는 stdin prompt를 사용하지 않는다. ``is_paper``는
+# ``--broker-config is_paper=true|false``로 전달한다.
 
 
 class TestAccountCreateIsPaper:
-    """ante account create에서 kis-domestic 선택 시 is_paper 입력 확인."""
+    """ante account create 비대화형: kis-domestic + ``--broker-config is_paper``."""
 
     @pytest.fixture(autouse=True)
     def bypass_auth(self):
@@ -189,57 +193,121 @@ class TestAccountCreateIsPaper:
         ):
             yield svc
 
-    def test_kis_domestic_asks_is_paper(self, mock_account_service):
-        """kis-domestic 선택 시 모의투자 모드 질문이 표시된다."""
+    @pytest.fixture
+    def offline_runtime(self):
+        """active runtime이 없는 cold-path 통과 환경."""
+        with (
+            patch("ante.main.read_pid_file", return_value=None),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/__ante_offline_is_paper_test__.sock",
+            ),
+        ):
+            yield
+
+    def test_kis_domestic_is_paper_true(self, mock_account_service, offline_runtime):
+        """--broker-config is_paper=true → broker_config={'is_paper': True}."""
         from ante.cli.main import cli
 
         created = _make_account("domestic", "kis-domestic")
         mock_account_service.create.return_value = created
 
         runner = CliRunner()
-        # 브로커 2(kis-domestic), 계좌ID(기본), 이름(기본), 거래모드 1(virtual),
-        # app_key, app_secret, account_no, is_paper=y
-        input_text = "2\n\n\n1\ntest_key\ntest_secret\n50123456-01\ny\n"
-        result = runner.invoke(cli, ["account", "create"], input=input_text)
+        result = runner.invoke(
+            cli,
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "kis-domestic",
+                "--account-id",
+                "domestic",
+                "--name",
+                "국내 주식",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=test_key",
+                "--credential",
+                "app_secret=test_secret",
+                "--credential",
+                "account_no=50123456-01",
+                "--broker-config",
+                "is_paper=true",
+            ],
+        )
 
         assert result.exit_code == 0, result.output
-        assert "모의투자 모드" in result.output
-        # create에 전달된 Account의 broker_config 확인
         call_args = mock_account_service.create.call_args
         account_arg = call_args[0][0]
         assert account_arg.broker_config == {"is_paper": True}
 
-    def test_kis_domestic_is_paper_false(self, mock_account_service):
-        """모의투자 N 선택 시 is_paper=False로 저장된다."""
+    def test_kis_domestic_is_paper_false(self, mock_account_service, offline_runtime):
+        """--broker-config is_paper=false → broker_config={'is_paper': False}."""
         from ante.cli.main import cli
 
         created = _make_account("domestic", "kis-domestic")
         mock_account_service.create.return_value = created
 
         runner = CliRunner()
-        input_text = "2\n\n\n1\ntest_key\ntest_secret\n50123456-01\nn\n"
-        result = runner.invoke(cli, ["account", "create"], input=input_text)
+        result = runner.invoke(
+            cli,
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "kis-domestic",
+                "--account-id",
+                "domestic",
+                "--name",
+                "국내 주식",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=test_key",
+                "--credential",
+                "app_secret=test_secret",
+                "--credential",
+                "account_no=50123456-01",
+                "--broker-config",
+                "is_paper=false",
+            ],
+        )
 
         assert result.exit_code == 0, result.output
         call_args = mock_account_service.create.call_args
         account_arg = call_args[0][0]
         assert account_arg.broker_config == {"is_paper": False}
 
-    def test_test_broker_no_is_paper(self, mock_account_service):
-        """test 브로커 선택 시 is_paper 질문이 없다."""
+    def test_test_broker_no_broker_config(self, mock_account_service, offline_runtime):
+        """test broker는 --broker-config 없이도 broker_config={}로 생성."""
         from ante.cli.main import cli
 
         created = _make_account("test", "test", broker_config={})
         mock_account_service.create.return_value = created
 
         runner = CliRunner()
-        # 브로커 1(test), 계좌ID(기본), 이름(기본), 거래모드 1(virtual),
-        # app_key, app_secret
-        input_text = "1\n\n\n1\ntest_key\ntest_secret\n"
-        result = runner.invoke(cli, ["account", "create"], input=input_text)
+        result = runner.invoke(
+            cli,
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=test_key",
+                "--credential",
+                "app_secret=test_secret",
+            ],
+        )
 
         assert result.exit_code == 0, result.output
-        assert "모의투자 모드" not in result.output
         call_args = mock_account_service.create.call_args
         account_arg = call_args[0][0]
         assert account_arg.broker_config == {}
