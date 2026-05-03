@@ -149,10 +149,13 @@ class AccountService:
             account: 생성할 계좌 정보.
             _bootstrap: 내부 전용 플래그. ``True``일 때
                 :func:`validate_new_account_id`의 RESTRICTED 거부를 우회해
-                bootstrap seed 계좌(``BROKER_PRESETS[*].default_account_id``)
-                자동 생성을 허용한다. seed 화이트리스트 외 값은 여전히
-                ``InvalidAccountIdError``로 차단되며, seed라도 형식 검증
-                (:func:`require_account_id`)은 적용된다 (#1216).
+                bootstrap seed 계좌 자동 생성을 허용한다. 단, ``broker_type``과
+                ``account_id``가 ``BROKER_PRESETS``의 동일 항목에서 정의된
+                ``(broker_type, default_account_id)`` pair와 정확히 일치해야
+                한다 — 한 preset의 ``default_account_id``를 다른 preset의
+                ``broker_type`` 아래로 끼워 넣어 RESTRICTED 예약어를 우회하는
+                것을 막는다. pair 불일치, seed 형식 위반은
+                ``InvalidAccountIdError``로 차단된다 (#1216).
                 :meth:`create_default_test_account` 외에는 사용하지 않는다.
 
         Returns:
@@ -165,9 +168,10 @@ class AccountService:
             InvalidAccountIdError: 일반 경로에서 account_id 형식이 올바르지
                 않거나 ``RESTRICTED_NEW_ACCOUNT_IDS`` (``"test"``) /
                 ``INVALID_RUNTIME_ACCOUNT_IDS`` (``"default"``) 예약어와
-                일치하는 경우. ``_bootstrap=True`` 경로에서도 account_id가
-                ``BROKER_PRESETS``의 ``default_account_id`` 화이트리스트에
-                없거나 형식 위반이면 동일한 예외가 발생한다 (#1216).
+                일치하는 경우. ``_bootstrap=True`` 경로에서도 ``(broker_type,
+                account_id)``가 ``BROKER_PRESETS``의 ``(broker_type,
+                default_account_id)`` pair와 일치하지 않거나 형식 위반이면
+                동일한 예외가 발생한다 (#1216).
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
@@ -180,22 +184,30 @@ class AccountService:
 
         # account_id 형식 + 정책 검증.
         # 일반 경로: validate_new_account_id로 형식 + RESTRICTED 거부.
-        # bootstrap 경로: BROKER_PRESETS의 default_account_id seed만 허용하고,
-        #   형식 검증(require_account_id)은 그대로 적용한다. 이는 내부 호출자가
-        #   _bootstrap=True로 'default'/''/패턴 위반 등을 슬쩍 통과시키지 못하게
-        #   하는 defense-in-depth 가드다 (#1216).
+        # bootstrap 경로: (broker_type, default_account_id) pair가 BROKER_PRESETS와
+        #   정확히 일치할 때만 허용한다. account_id가 어떤 preset의
+        #   default_account_id이기만 해도 되는 건 부족하다 — 호출자가
+        #   account_id='test' + broker_type='kis-domestic'처럼 서로 다른 preset의
+        #   값을 조합해 RESTRICTED ('test') 예약어를 비-test broker 아래에 저장
+        #   하는 우회를 막아야 하기 때문이다 (#1216 P2).
+        #   형식 검증(require_account_id)은 BROKER_PRESETS 자체가 잘못 바뀌는
+        #   경우에 대비한 추가 가드로 그대로 적용한다.
         # docs/specs/account/14-account-id-contract.md 참조.
         if not _bootstrap:
             validate_new_account_id(account.account_id)
         else:
-            seed_ids = {p.default_account_id for p in BROKER_PRESETS.values()}
-            if account.account_id not in seed_ids:
+            preset = BROKER_PRESETS.get(account.broker_type)
+            if preset is None or preset.default_account_id != account.account_id:
+                valid_pairs = [
+                    (bt, p.default_account_id) for bt, p in BROKER_PRESETS.items()
+                ]
                 raise InvalidAccountIdError(
-                    f"_bootstrap=True는 BROKER_PRESETS의 seed account_id만 "
-                    f"허용합니다: got '{account.account_id}', "
-                    f"allowed={sorted(seed_ids)}"
+                    f"_bootstrap=True는 (broker_type, default_account_id) pair만 "
+                    f"허용합니다: got broker_type={account.broker_type!r}, "
+                    f"account_id={account.account_id!r}; valid pairs={valid_pairs}"
                 )
-            # seed라도 형식은 검증 (BROKER_PRESETS가 잘못 변경되더라도 가드).
+            # pair 일치해도 형식 검증은 그대로
+            # (BROKER_PRESETS가 잘못 변경되더라도 가드).
             require_account_id(account.account_id, context="bootstrap_seed")
 
         if account.account_id in self._accounts:

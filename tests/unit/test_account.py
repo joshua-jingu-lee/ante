@@ -918,25 +918,26 @@ async def test_create_default_test_account_idempotent(service):
     ],
 )
 async def test_create_with_bootstrap_rejects_non_seed(service, bad_id):
-    """``_bootstrap=True``는 BROKER_PRESETS seed account_id만 허용한다.
+    """``_bootstrap=True``는 (broker_type, default_account_id) pair만 허용한다.
 
     내부 호출자가 ``_bootstrap=True``로 'default'/패턴 위반/임의 ID를 슬쩍
-    통과시키지 못하게 막는 defense-in-depth 가드 (#1216).
+    통과시키지 못하게 막는 defense-in-depth 가드 (#1216). 여기서는
+    broker_type='test'(default_account_id='test')와 mismatch인 케이스들이다.
     """
-    account = _make_account(account_id=bad_id)
+    account = _make_account(account_id=bad_id, broker_type="test")
 
     with pytest.raises(InvalidAccountIdError) as exc_info:
         await service.create(account, _bootstrap=True)
 
     assert "_bootstrap=True" in str(exc_info.value)
-    assert "BROKER_PRESETS" in str(exc_info.value)
+    assert "valid pairs" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_create_with_bootstrap_rejects_empty(service):
-    """``_bootstrap=True``로 빈 문자열 account_id는 거부된다 (seed 화이트리스트 밖)."""
+    """``_bootstrap=True``로 빈 문자열 account_id는 거부된다 (pair 불일치)."""
     # _make_account의 default 분기로 직접 만들지 못하므로 명시적으로 구성.
-    account = _make_account(account_id="")
+    account = _make_account(account_id="", broker_type="test")
 
     with pytest.raises(InvalidAccountIdError):
         await service.create(account, _bootstrap=True)
@@ -944,7 +945,7 @@ async def test_create_with_bootstrap_rejects_empty(service):
 
 @pytest.mark.asyncio
 async def test_create_with_bootstrap_accepts_seed_test(service):
-    """``_bootstrap=True``로 ``"test"`` (seed)는 통과한다."""
+    """``_bootstrap=True``로 정확한 (test, test) pair는 통과한다."""
     preset = BROKER_PRESETS["test"]
     account = _make_account(
         account_id=preset.default_account_id,
@@ -955,7 +956,85 @@ async def test_create_with_bootstrap_accepts_seed_test(service):
     result = await service.create(account, _bootstrap=True)
 
     assert result.account_id == "test"
+    assert result.broker_type == "test"
     assert result.status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_create_with_bootstrap_accepts_seed_kis_domestic(service):
+    """``_bootstrap=True``로 정확한 (kis-domestic, domestic) pair는 통과한다.
+
+    BROKER_PRESETS에 정의된 모든 pair가 동일하게 허용되는지 회귀 방지.
+    """
+    preset = BROKER_PRESETS["kis-domestic"]
+    account = _make_account(
+        account_id=preset.default_account_id,
+        broker_type="kis-domestic",
+        credentials={k: "test" for k in preset.required_credentials},
+    )
+
+    result = await service.create(account, _bootstrap=True)
+
+    assert result.account_id == "domestic"
+    assert result.broker_type == "kis-domestic"
+    assert result.status == AccountStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_create_bootstrap_rejects_seed_id_with_wrong_broker_type(service):
+    """``account_id='test'`` + ``broker_type='kis-domestic'``는 거부된다 (#1216 P2).
+
+    이전 구현은 account_id가 BROKER_PRESETS의 default_account_id set에
+    포함되기만 하면 통과시켜, 호출자가 RESTRICTED 예약어 'test'를
+    비-test broker 아래에 저장하는 우회가 가능했다. 새 가드는
+    (broker_type, default_account_id) pair 정확 일치를 요구한다.
+    """
+    preset = BROKER_PRESETS["kis-domestic"]
+    account = _make_account(
+        account_id="test",  # test preset의 seed
+        broker_type="kis-domestic",  # 그러나 broker_type은 다른 preset
+        credentials={k: "test" for k in preset.required_credentials},
+    )
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account, _bootstrap=True)
+
+    msg = str(exc_info.value)
+    assert "_bootstrap=True" in msg
+    assert "valid pairs" in msg
+    assert "'test'" in msg  # 입력된 account_id가 메시지에 포함
+
+
+@pytest.mark.asyncio
+async def test_create_bootstrap_rejects_cross_pair_domestic_with_test_broker(service):
+    """``account_id='domestic'`` + ``broker_type='test'`` (반대 mismatch)도 거부."""
+    account = _make_account(
+        account_id="domestic",  # kis-domestic preset의 seed
+        broker_type="test",  # 그러나 broker_type은 다른 preset
+        credentials={"app_key": "test", "app_secret": "test"},
+    )
+
+    with pytest.raises(InvalidAccountIdError):
+        await service.create(account, _bootstrap=True)
+
+
+@pytest.mark.asyncio
+async def test_create_bootstrap_rejects_unknown_broker_type(service):
+    """알 수 없는 ``broker_type``은 _bootstrap pair 검증에서 거부된다.
+
+    BROKER_PRESETS.get(broker_type)이 None이므로 InvalidBrokerTypeError가
+    아니라 새 _bootstrap pair 가드가 먼저 InvalidAccountIdError로 차단한다.
+    """
+    account = _make_account(
+        account_id="test",
+        broker_type="bogus-broker",
+        credentials={"app_key": "test", "app_secret": "test"},
+    )
+
+    with pytest.raises(InvalidAccountIdError) as exc_info:
+        await service.create(account, _bootstrap=True)
+
+    assert "_bootstrap=True" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
