@@ -79,7 +79,7 @@ Ante의 대시보드는 **단일 사용자(운영자)**를 위한 화면이다.
 | portfolio | ✅ | ✅ | 총 자산, 추이 |
 | reports | ✅ | ✅ | 상세 조회 |
 | strategies | ✅ | ✅ | 목록, 상세, 성과, 일/주/월 요약, 거래 내역 |
-| system | ✅ | ✅ | status, health, kill-switch |
+| system | ✅ | ✅ | status, health, halt, clear-halt |
 | treasury | ✅ | ✅ | 요약, 예산, 할당/회수, 거래 이력 |
 | trades | ✅ | — | 프론트에서 strategies/:id/trades로 대체 |
 | audit | ✅ | — | 대시보드 미사용 (CLI/Agent용) |

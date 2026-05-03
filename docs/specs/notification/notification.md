@@ -159,14 +159,14 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `/status` | 시스템 상태 요약 (거래 상태, 봇 현황) | - |
 | `/bots` | 봇 목록 + 상태 | - |
 | `/balance` | 자금 현황 요약 (계좌 잔고, 할당/미할당) | - |
-| `/halt [reason]` | 전체 거래 중지 | 2단계 확인 |
-| `/activate` | 거래 재개 | - |
+| `/halt [reason]` | 전체 거래 중지 (모든 ACTIVE 계좌를 SUSPENDED로 전환) | 2단계 확인 |
+| `/clear_halt` | 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님) | 2단계 확인 |
 | `/stop <bot_id>` | 특정 봇 중지 | 2단계 확인 |
 | `/confirm` | 위험 명령 확인 | - |
 | `/approve <id>` | 결재 승인 | 인라인 버튼 또는 명령어 |
 | `/reject <id> [reason]` | 결재 거절 | 인라인 버튼 또는 명령어 |
 
-**2단계 확인**: `halt`, `stop` 명령은 `_DANGEROUS_COMMANDS`로 분류되며, `/confirm` 입력 후 `confirm_timeout` 내에서만 실행된다.
+**2단계 확인**: `halt`, `clear_halt`, `stop` 명령은 `_DANGEROUS_COMMANDS`로 분류되며, `/confirm` 입력 후 `confirm_timeout` 내에서만 실행된다. `/clear_halt`는 계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.
 
 **보안**: `TELEGRAM_CHAT_ID`와 일치하지 않는 사용자의 명령은 무시하고 로그에 기록한다.
 
@@ -195,7 +195,7 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
 
 ### 텔레그램 명령 응답과 NotificationEvent 중복 방지
 
-텔레그램 명령(`/approve`, `/reject`, `/stop`, `/halt`, `/activate` 등)으로 처리된 작업은 `TelegramCommandReceiver`가 직접 응답(reply)을 발송한다. 이때 동일 내용의 `NotificationEvent`를 발행하면 사용자가 같은 채널에서 메시지를 2번 수신하게 된다.
+텔레그램 명령(`/approve`, `/reject`, `/stop`, `/halt`, `/clear_halt` 등)으로 처리된 작업은 `TelegramCommandReceiver`가 직접 응답(reply)을 발송한다. 이때 동일 내용의 `NotificationEvent`를 발행하면 사용자가 같은 채널에서 메시지를 2번 수신하게 된다.
 
 **정책**: 텔레그램 명령으로 트리거된 작업은 직접 응답만 발송하고, `NotificationEvent`는 발행하지 않는다. 대시보드·CLI 등 텔레그램 외 채널에서 처리된 경우에만 `NotificationEvent`를 발행한다.
 

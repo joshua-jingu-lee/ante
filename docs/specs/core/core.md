@@ -99,7 +99,7 @@ hot-add/hot-remove를 수행하지 않는다.
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
 | `AccountSuspendedEvent` | 계좌 거래 중단 시 (Account.status → SUSPENDED) | BotManager (해당 계좌 봇 중지), 로깅 |
-| `AccountActivatedEvent` | 계좌 거래 재개 시 (Account.status → ACTIVE) | BotManager (해당 계좌 봇 재개), 로깅 |
+| `AccountActivatedEvent` | 계좌 거래 재개 시 (Account.status → ACTIVE) | BotManager (로깅만; 자동 재시작은 수행하지 않음), 로깅 |
 | `NotificationEvent` | 계좌 상태 변경, 시스템 시작/종료 시 | NotificationService → Telegram 어댑터 (category: "system") |
 
 ## 알림 이벤트 정의 (Notification Events)
@@ -175,10 +175,10 @@ Ante 시스템이 종료됩니다.
 ```
 🚨 전체 거래가 중지되었습니다.
 사유: {reason}
-해제하려면 /activate 를 입력하세요.
+해제하려면 /clear_halt 를 입력하세요.
 ```
 
-**`/activate` 응답 메시지 — 결과 분기:**
+**`/clear_halt` 응답 메시지 — 결과 분기:**
 
 | 조건 | 응답 |
 |------|------|

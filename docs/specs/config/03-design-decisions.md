@@ -158,7 +158,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`를 모�
 > 테이블에 포함하지 않는다. 거래 가능 상태의 SSOT는 Account 모듈의
 > `Account.status`이며, 값은 `ACTIVE` / `SUSPENDED` / `DELETED`다.
 > `ante system halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환하는 편의 명령이고,
-> `ante system activate`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다.
+> `ante system clear-halt`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다 (계좌 상태만 복구하며 봇을 자동 재시작하지 않는다).
 > 상태 변경 이벤트는 `TradingStateChangedEvent`가 아니라
 > `AccountSuspendedEvent` / `AccountActivatedEvent`를 사용한다.
 

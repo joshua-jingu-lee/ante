@@ -9,7 +9,7 @@
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
 | `AccountSuspendedEvent` | `suspend()` 호출 시 | BotManager (소속 봇 전체 중지), RuleEngine, Notification |
-| `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (해당 계좌 봇 재개), RuleEngine, Notification |
+| `AccountActivatedEvent` | `activate()` 호출 시 | BotManager (계좌 상태 변화 인지 + 로깅만; 자동 재시작은 수행하지 않음), RuleEngine, Notification |
 
 `AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.
 계좌 생성/삭제는 cold-path 전용이며 active Ante runtime이 없는 상태에서만 수행되므로,
@@ -31,11 +31,16 @@ Account 모듈 자체는 다른 이벤트를 구독하지 않는다. 수동적(�
 ante account suspend domestic       # domestic만 거래 정지
 ante account activate domestic      # domestic 거래 재개
 
-# 시스템 전체 Kill Switch (편의 명령, 모든 ACTIVE 계좌를 suspend)
-ante system halt                    # 전체 거래 정지
-ante system activate                # 전체 거래 재개
+# 시스템 전역 Kill Switch (편의 명령)
+ante system halt                    # 전체 거래 정지 (모든 ACTIVE 계좌를 SUSPENDED로 전환)
+ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 자동 재시작은 수행하지 않음)
 ```
 
-`ante system halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환한다. `ante system activate`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. DELETED 계좌는 영향받지 않는다.
+`ante system halt`는 모든 ACTIVE 계좌를 SUSPENDED로 전환한다. `ante system clear-halt`는 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. DELETED 계좌는 영향받지 않는다. `clear-halt`는 계좌 상태만 ACTIVE로 복구할 뿐 자동 재시작은 수행하지 않는다 (BotManager는 `AccountActivatedEvent` 수신 시 로깅만 수행).
 
-기존 `TradingStateChangedEvent`는 `AccountSuspendedEvent` / `AccountActivatedEvent`로 대체되며, BotManager가 이를 구독하여 해당 계좌의 봇만 중지/재개한다.
+기존 `TradingStateChangedEvent`는 `AccountSuspendedEvent` / `AccountActivatedEvent`로 대체된다.
+
+- `AccountSuspendedEvent`: BotManager가 해당 계좌의 소속 봇을 중지한다.
+- `AccountActivatedEvent`: BotManager는 계좌 상태 변화를 인지하고 로깅만 수행한다. 자동 재시작은 수행하지 않는다.
+
+재시작은 운영자가 명시적으로 `ante bot start <bot_id>` 또는 동등 IPC 명령으로 수행한다.
