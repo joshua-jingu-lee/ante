@@ -144,7 +144,7 @@ def _mock_authenticate(ctx):
     ctx.obj["member"] = _make_member()
 
 
-def _invoke_cli(args: list[str], input_text: str | None = None):
+def _invoke_cli(args: list[str]):
     """CLI를 실행하고 결과를 반환한다 (인증 우회)."""
     from click.testing import CliRunner
 
@@ -157,7 +157,6 @@ def _invoke_cli(args: list[str], input_text: str | None = None):
             args,
             obj={"member": _make_member()},
             env={"ANTE_MEMBER_TOKEN": ""},
-            input=input_text,
             catch_exceptions=False,
         )
     return result
