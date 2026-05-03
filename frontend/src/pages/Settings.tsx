@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { useSystemStatus, useKillSwitch, useConfigs, useUpdateConfig } from '../hooks/useSystemStatus'
+import {
+  useSystemStatus,
+  useHaltSystem,
+  useClearHaltSystem,
+  useConfigs,
+  useUpdateConfig,
+} from '../hooks/useSystemStatus'
+import { useAccounts } from '../hooks/useAccounts'
 import { PageSkeleton } from '../components/common/Skeleton'
 import ApiKeyStatusPanel from '../components/data/ApiKeyStatusPanel'
 
@@ -51,28 +58,37 @@ const DISPLAY_CONFIGS: DisplayConfig[] = [
 
 export default function Settings() {
   const { data: status, isLoading: statusLoading } = useSystemStatus()
-  const killSwitch = useKillSwitch()
+  const { data: accounts, isLoading: accountsLoading } = useAccounts()
+  const haltMutation = useHaltSystem()
+  const clearHaltMutation = useClearHaltSystem()
   const { data: configs } = useConfigs()
   const updateConfig = useUpdateConfig()
   const [rowValues, setRowValues] = useState<Record<string, string>>({})
   const [showHaltModal, setShowHaltModal] = useState(false)
+  const [showClearHaltModal, setShowClearHaltModal] = useState(false)
   const [haltReason, setHaltReason] = useState('')
 
   if (statusLoading) return <PageSkeleton />
 
-  const isActive = status?.trading_status === 'ACTIVE'
+  // 시스템 상태는 계좌 집계로 산출 (전역 거래 상태 enum은 SSOT 아님).
+  // - active > 0 && suspended === 0 이면 ACTIVE.
+  // - accounts 로딩 중에는 false negative 방지를 위해 "확인 중" 처리.
+  const activeCount = accounts?.filter((a) => a.status === 'active').length ?? 0
+  const suspendedCount = accounts?.filter((a) => a.status === 'suspended').length ?? 0
+  const isActive = !accountsLoading && activeCount > 0 && suspendedCount === 0
   const configMap = new Map((configs ?? []).map((c) => [c.key, c.value]))
 
   const getConfigValue = (key: string) => configMap.get(key) ?? ''
 
   const handleHalt = () => {
-    killSwitch.mutate({ action: 'halt', reason: haltReason })
+    haltMutation.mutate({ reason: haltReason })
     setShowHaltModal(false)
     setHaltReason('')
   }
 
-  const handleActivate = () => {
-    killSwitch.mutate({ action: 'activate' })
+  const handleClearHalt = () => {
+    clearHaltMutation.mutate({})
+    setShowClearHaltModal(false)
   }
 
   const getRowValue = (key: string) =>
@@ -91,9 +107,24 @@ export default function Settings() {
         {/* 시스템 상태 */}
         <div className="bg-surface border border-border rounded-lg p-5">
           <h3 className="text-[15px] font-semibold mb-4">시스템 상태</h3>
-          {isActive ? (
+          {accountsLoading ? (
             <div className="flex items-center justify-between py-3">
-              <div className="text-[13px] text-text-muted">현재 모든 봇의 거래가 정상 운용 중입니다.</div>
+              <div className="flex items-center gap-2 text-[13px] text-text-muted">
+                <span className="w-2 h-2 rounded-full bg-border" />
+                계좌 상태 확인 중…
+              </div>
+            </div>
+          ) : isActive ? (
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <div className="flex items-center gap-2 text-[13px] text-text-muted">
+                  <span className="w-2 h-2 rounded-full bg-positive" />
+                  현재 모든 봇의 거래가 정상 운용 중입니다.
+                </div>
+                <div className="text-[12px] text-text-muted mt-1">
+                  활성 계좌 {activeCount}개 · 정지 계좌 {suspendedCount}개
+                </div>
+              </div>
               <button
                 onClick={() => setShowHaltModal(true)}
                 className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-on-primary border-none cursor-pointer hover:bg-negative-hover whitespace-nowrap"
@@ -104,7 +135,13 @@ export default function Settings() {
           ) : (
             <div className="flex items-center justify-between py-3">
               <div>
-                <div className="text-[13px] text-negative font-semibold">거래가 정지되었습니다</div>
+                <div className="flex items-center gap-2 text-[13px] text-negative font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-negative" />
+                  거래가 정지되었습니다
+                </div>
+                <div className="text-[12px] text-text-muted mt-1">
+                  활성 계좌 {activeCount}개 · 정지 계좌 {suspendedCount}개
+                </div>
                 {(status?.halt_time || status?.halt_reason) && (
                   <div className="text-[12px] text-text-muted mt-1">
                     {status.halt_time && `정지 시각: ${status.halt_time}`}
@@ -114,7 +151,7 @@ export default function Settings() {
                 )}
               </div>
               <button
-                onClick={handleActivate}
+                onClick={() => setShowClearHaltModal(true)}
                 className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover whitespace-nowrap"
               >
                 거래 재개
@@ -308,6 +345,25 @@ export default function Settings() {
             <div className="flex justify-end gap-2 pt-4 border-t border-border mt-6">
               <button onClick={() => { setShowHaltModal(false); setHaltReason('') }} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
               <button onClick={handleHalt} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-negative text-on-primary border-none cursor-pointer hover:bg-negative-hover">거래 정지 확인</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 거래 재개(정지 해제) 확인 모달 */}
+      {showClearHaltModal && (
+        <div className="fixed inset-0 bg-overlay flex items-center justify-center z-[200]">
+          <div className="bg-surface border border-border rounded-lg p-6 w-[480px]">
+            <h3 className="text-[18px] font-bold text-positive mb-5">거래 재개</h3>
+            <p className="text-[13px] text-text-muted mb-4">
+              모든 정지된 계좌를 ACTIVE 상태로 되돌립니다.
+            </p>
+            <div className="bg-warning-bg text-warning px-3.5 py-2.5 rounded text-[12px] mb-4">
+              ⚠ 계좌 상태만 복구됩니다. 봇은 자동으로 재시작되지 않으므로 필요 시 봇 관리에서 개별 시작해야 합니다.
+            </div>
+            <div className="flex justify-end gap-2 pt-4 border-t border-border mt-6">
+              <button onClick={() => setShowClearHaltModal(false)} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-transparent text-text-muted border border-border cursor-pointer hover:bg-surface-hover">취소</button>
+              <button onClick={handleClearHalt} className="px-4 py-2 rounded-lg text-[13px] font-medium bg-positive text-on-primary border-none cursor-pointer hover:bg-positive-hover">거래 재개 확인</button>
             </div>
           </div>
         </div>

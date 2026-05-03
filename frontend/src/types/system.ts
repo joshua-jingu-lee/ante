@@ -1,13 +1,13 @@
 /**
  * System 도메인 타입.
  *
- * generated StatusResponse는 trading_status를 string | null로 선언하므로
- * 프론트엔드에서 유니온 리터럴로 명시한다.
+ * 전역 거래 상태는 SSOT가 아니다. 시스템 정지/재개 상태는
+ * `useAccounts()`로 받아온 계좌별 status (active/suspended) 집계로 계산한다.
+ * SSOT: `docs/specs/account/02-design-decisions.md`.
  */
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
 export interface SystemStatus {
-  trading_status: 'ACTIVE' | 'HALTED'
   uptime_seconds: number
   running_bots: number
   version: string
