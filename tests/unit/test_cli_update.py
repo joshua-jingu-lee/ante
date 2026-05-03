@@ -1,6 +1,7 @@
 """check_server_running 유틸 함수 및 --format json 테스트.
 
 이슈 #920: --format json 옵션 지원 검증.
+이슈 #1176: 비대화형 업데이트 계약(`click.confirm` 제거, `--yes` 게이트) 검증.
 """
 
 from __future__ import annotations
@@ -198,3 +199,215 @@ class TestUpdateFormatJsonError:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
+
+
+class TestUpdateNonInteractive:
+    """비대화형 업데이트 계약 검증 (#1176).
+
+    `click.confirm`을 제거하고 `--yes`/`--check`/`--force` 의미를 분리한
+    이후의 동작을 검증한다.
+    """
+
+    def test_update_without_yes_fails_confirmation_required(
+        self, runner: CliRunner
+    ) -> None:
+        """``--yes`` 누락 → exit 1, prompt 없음, ``CLI_CONFIRMATION_REQUIRED``.
+
+        - stdin prompt가 발생하지 않아야 한다 (input=None).
+        - ``pip_upgrade`` 등 부수 효과 함수가 호출되지 않아야 한다.
+        - JSON 에러 코드는 ``CLI_CONFIRMATION_REQUIRED``.
+        - ``get_latest_version`` (PyPI 조회) 호출 횟수가 0이어야 한다 — 게이트가
+          PyPI 조회 앞에 평가되어야 한다 (Codex P2 2차 finding).
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value="0.7.0"
+            ) as mock_latest,
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            # input=None → click.confirm이 남아 있으면 stdin EOF로 실패한다.
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["error"]
+
+        # 부수 효과가 발생하지 않아야 한다 (게이트가 막아야 한다).
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+        # PyPI 조회도 발생하지 않아야 한다 (게이트가 PyPI 앞에 평가).
+        mock_latest.assert_not_called()
+
+    def test_update_without_yes_fails_when_already_latest(
+        self, runner: CliRunner
+    ) -> None:
+        """이미 최신 버전 + ``--yes`` 누락 → exit 1, ``CLI_CONFIRMATION_REQUIRED``.
+
+        Codex P2 finding (1차): ``--yes`` 게이트는 no-update 조기 반환 **앞에**
+        위치해야 한다. 사용자가 명시적 실행 의사(`--yes`)를 표현하지 않은
+        ``ante update`` 호출은 버전 상태와 무관하게 거절되어야 한다.
+
+        Codex P2 finding (2차): ``--yes`` 게이트는 PyPI 조회 **앞에** 평가되어야
+        한다. 이미 최신 버전 케이스도 PyPI 호출 이전에 거절되므로 mock
+        ``get_latest_version`` 호출 횟수는 0이다.
+
+        - ``--yes`` 누락 → prompt 없이 exit 1.
+        - JSON 에러 코드는 ``CLI_CONFIRMATION_REQUIRED``.
+        - ``pip_upgrade`` 등 부수 효과 함수는 호출되지 않는다.
+        - ``get_latest_version`` (PyPI) 호출 횟수 0.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.7.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value="0.7.0"
+            ) as mock_latest,
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["error"]
+
+        # 부수 효과가 발생하지 않아야 한다 (게이트가 막아야 한다).
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+        # PyPI 조회도 발생하지 않아야 한다 (게이트가 PyPI 앞에 평가).
+        mock_latest.assert_not_called()
+
+    def test_update_without_yes_skips_pypi_when_unreachable(
+        self, runner: CliRunner
+    ) -> None:
+        """PyPI 도달 불가 + ``--yes`` 누락 → ``CLI_CONFIRMATION_REQUIRED`` 우선.
+
+        Codex P2 finding (2차): ``--yes`` 게이트는 PyPI 조회 **앞에** 평가되어야
+        한다. PyPI가 도달 불가(``get_latest_version`` 가 ``None`` 반환,
+        타임아웃/네트워크 실패 시뮬레이션)인 환경에서도, ``--yes`` 누락 호출은
+        PyPI 실패가 아닌 ``CLI_CONFIRMATION_REQUIRED``로 거절되어야 한다 —
+        자동화는 네트워크 상태와 무관하게 동일한 구조화 에러 코드를 받는다.
+
+        - ``get_latest_version`` 가 ``None`` (PyPI 실패) 반환하도록 mock.
+        - ``--yes`` 누락 → exit 1, JSON 에러 코드는 ``CLI_CONFIRMATION_REQUIRED``
+          (``"PyPI 버전 확인 실패"`` 가 아니다).
+        - ``get_latest_version`` 호출 횟수 0 — 게이트가 PyPI 앞에 평가됨을 증명.
+        - 부수 효과(pip upgrade/backup/migration) 호출 횟수 0.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            # PyPI 도달 불가 시뮬레이션 — 1차 fix에서는 이 mock이 호출되어
+            # ``"PyPI 버전 확인 실패"`` 분기로 빠질 수 있었다. 2차 fix는 이
+            # mock이 호출되지 않음을 보장한다.
+            patch(
+                "ante.update.checker.get_latest_version", return_value=None
+            ) as mock_latest,
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        # PyPI 실패 메시지가 아닌 confirmation 게이트로 fail 해야 한다.
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["error"]
+        assert "PyPI" not in data["error"]
+
+        # 핵심: PyPI 조회가 시도되지 않아야 한다 (게이트가 앞에 위치).
+        mock_latest.assert_not_called()
+        # 부수 효과도 일체 발생하지 않아야 한다.
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+
+    def test_update_with_yes_invokes_pip_upgrade(self, runner: CliRunner) -> None:
+        """업데이트 가능 + ``--yes`` 있음 → 기존 업데이트 플로우 진입.
+
+        - ``--yes`` 게이트를 통과해 ``pip_upgrade``가 호출되어야 한다.
+        - 정상 종료 시 exit 0.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+            patch(
+                "ante.cli.commands.update.check_disk_space",
+                return_value=(True, ""),
+            ),
+            patch("ante.db.backup.backup_db"),
+            patch("ante.update.executor.snapshot_dependencies", return_value=None),
+            patch(
+                "ante.update.executor.pip_upgrade", return_value=True
+            ) as mock_pip_upgrade,
+            patch(
+                "ante.update.executor.run_post_update_migrations",
+                return_value=True,
+            ) as mock_migrate,
+            patch("pathlib.Path.exists", return_value=False),
+        ):
+            result = runner.invoke(cli, ["update", "--yes"])
+
+        assert result.exit_code == 0
+        mock_pip_upgrade.assert_called_once()
+        mock_migrate.assert_called_once()
+
+    def test_check_alone_succeeds_without_yes(self, runner: CliRunner) -> None:
+        """``--check`` 단독 → exit 0, ``--yes`` 불필요.
+
+        실제 업데이트를 수행하지 않으므로 ``pip_upgrade``는 호출되지 않는다.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running",
+                return_value=False,
+            ),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+        ):
+            result = runner.invoke(cli, ["update", "--check"])
+
+        assert result.exit_code == 0
+        mock_pip_upgrade.assert_not_called()
