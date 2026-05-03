@@ -180,7 +180,7 @@ class TestBotListAccountFilter:
         assert data["bots"][0]["account_id"] == "domestic"
 
 
-# ── bot create --account (대화형 선택) ──────────────────
+# ── bot create --account (비대화형) ─────────────────────
 
 
 class TestBotCreateAccountOption:
@@ -221,7 +221,7 @@ class TestBotCreateAccountOption:
         assert sent_args["account_id"] == "domestic"
 
     def test_bot_create_interactive_single_account(self, runner):
-        """계좌 미지정 + 활성 계좌 1개 → 자동 선택."""
+        """계좌 미지정 + 활성 계좌 1개 → 자동 선택 (비대화형)."""
         mock_account_svc = _make_mock_account_service([_MOCK_ACCOUNT_1])
         mock_client = AsyncMock()
         mock_client.send.return_value = {
@@ -250,29 +250,20 @@ class TestBotCreateAccountOption:
             )
 
         assert result.exit_code == 0
-        assert "계좌 자동 선택" in result.output
-        assert "domestic" in result.output
+        # 단일 active 계좌가 자동 선택되어 IPC payload의 account_id로 전달된다.
+        sent_args = mock_client.send.call_args[0][1]
+        assert sent_args["account_id"] == _MOCK_ACCOUNT_1.account_id
 
-    def test_bot_create_interactive_multiple_accounts(self, runner):
-        """계좌 미지정 + 활성 계좌 여러 개 → 대화형 선택."""
+    def test_bot_create_multiple_accounts_requires_explicit_account(self, runner):
+        """계좌 미지정 + 활성 계좌 여러 개 → BOT_MISSING_REQUIRED_ACCOUNT 에러.
+
+        prompt 없이 즉시 실패해야 한다 (비대화형 입력 계약).
+        """
         mock_account_svc = _make_mock_account_service(
             [_MOCK_ACCOUNT_1, _MOCK_ACCOUNT_2]
         )
-        mock_client = AsyncMock()
-        mock_client.send.return_value = {
-            "id": "req-1",
-            "status": "ok",
-            "result": {"bot_id": "bot-abc123"},
-        }
 
-        with (
-            patch("ante.cli.commands.bot._create_services") as mock_cs,
-            patch(
-                "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/tmp/test.sock",
-            ),
-            patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
-        ):
+        with patch("ante.cli.commands.bot._create_services") as mock_cs:
             mock_cs.return_value = (
                 _make_mock_db(),
                 MagicMock(),
@@ -281,17 +272,26 @@ class TestBotCreateAccountOption:
             )
             result = runner.invoke(
                 cli,
-                ["bot", "create", "--name", "테스트봇", "--strategy", "s1"],
-                input="1\n",
+                [
+                    "--format",
+                    "json",
+                    "bot",
+                    "create",
+                    "--name",
+                    "테스트봇",
+                    "--strategy",
+                    "s1",
+                ],
+                input="",
             )
 
-        assert result.exit_code == 0
-        assert "계좌를 선택하세요" in result.output
-        assert "domestic" in result.output
-        assert "overseas" in result.output
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "BOT_MISSING_REQUIRED_ACCOUNT"
+        assert "--account" in data["error"]
 
-    def test_bot_create_interactive_no_accounts(self, runner):
-        """계좌 미지정 + 활성 계좌 0개 → 에러."""
+    def test_bot_create_no_accounts_returns_missing_required_account(self, runner):
+        """계좌 미지정 + 활성 계좌 0개 → BOT_MISSING_REQUIRED_ACCOUNT 에러."""
         mock_account_svc = _make_mock_account_service([])
 
         with patch("ante.cli.commands.bot._create_services") as mock_cs:
@@ -303,11 +303,22 @@ class TestBotCreateAccountOption:
             )
             result = runner.invoke(
                 cli,
-                ["bot", "create", "--name", "테스트봇", "--strategy", "s1"],
+                [
+                    "--format",
+                    "json",
+                    "bot",
+                    "create",
+                    "--name",
+                    "테스트봇",
+                    "--strategy",
+                    "s1",
+                ],
+                input="",
             )
 
         assert result.exit_code == 1
-        assert "활성 계좌가 없습니다" in result.output
+        data = json.loads(result.output)
+        assert data["code"] == "BOT_MISSING_REQUIRED_ACCOUNT"
 
 
 # ── system halt/activate (IPC) ──────────────────────────
