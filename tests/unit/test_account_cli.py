@@ -697,6 +697,88 @@ class TestAccountCreate:
         assert "no-such-broker" in result.output
         mock_account_service.create.assert_not_called()
 
+    def test_create_rejects_empty_direct_credential(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """직접 채널 ``--credential KEY=`` (빈 값)은 env/file과 일관되게 거부한다.
+
+        Codex P2-2: env 채널은 ``ACCOUNT_CREDENTIAL_ENV_NOT_SET``, file 채널은
+        ``ACCOUNT_CREDENTIAL_FILE_NOT_FOUND``로 빈 값을 거부하지만, 직접
+        채널은 빈 문자열을 그대로 통과시켜 unusable 계좌가 만들어질 위험이
+        있었다. broker adapter 인증에 사용할 수 없는 빈 값은
+        ``ACCOUNT_MISSING_REQUIRED_CREDENTIAL``로 즉시 실패한다.
+        """
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=",  # 빈 값
+                "--credential",
+                "app_secret=S",
+            ]
+        )
+        assert result.exit_code == 1
+        assert "ACCOUNT_MISSING_REQUIRED_CREDENTIAL" in result.output
+        assert "app_key" in result.output
+        mock_account_service.create.assert_not_called()
+
+    def test_create_broker_config_decimal_stored_as_float(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """``--broker-config retry_seconds=1.5`` 같은 소수는 ``float``로 저장한다.
+
+        Codex P2-3: 이전 구현은 ``Decimal(text)`` 검증 후 ``str(text)``를 반환하여
+        broker_config에 string이 저장됐다. KIS adapter는
+        ``config.get("retry.backoff_base_seconds", DEFAULT)``처럼 numeric 값을
+        직접 소비하므로(`src/ante/broker/kis.py`), 문자열 저장은 후속 산술
+        연산에서 ``TypeError``를 유발한다. 또한 ``Account.broker_config``는
+        ``json.dumps(...)``로 직렬화되므로 ``Decimal``은 JSON serializable이
+        아니다 — ``float``로 변환해야 한다.
+        """
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        result = _invoke(
+            [
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential",
+                "app_secret=S",
+                "--broker-config",
+                "retry_seconds=1.5",
+                "--broker-config",
+                "commission_rate=0.00015",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        account_arg = mock_account_service.create.call_args[0][0]
+        assert account_arg.broker_config == {
+            "retry_seconds": 1.5,
+            "commission_rate": 0.00015,
+        }
+        # 값이 float native 타입인지 명시적으로 확인 (str/Decimal 회귀 방지)
+        assert isinstance(account_arg.broker_config["retry_seconds"], float)
+        assert isinstance(account_arg.broker_config["commission_rate"], float)
+
 
 # ── account suspend/activate/delete 테스트 ──────────
 

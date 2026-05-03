@@ -162,8 +162,15 @@ def _parse_broker_config_value(raw: str) -> Any:
 
     1.0 free-form pass-through 정책(`docs/specs/cli/03-commands.md`
     `--broker-config` 정책 절)을 따른다. 알 수 없는 key는 검증하지 않으며,
-    값만 bool/int/Decimal/str 순서로 변환한다. broker adapter는 자기에게
+    값만 bool/int/float/str 순서로 변환한다. broker adapter는 자기에게
     필요한 known key만 읽고 나머지는 silent ignore할 수 있다.
+
+    소수 값(`"1.5"`, `"0.00015"` 등)은 `float`로 변환한다. KIS adapter는
+    `config.get("retry.backoff_base_seconds", ...)`처럼 numeric 값을 직접
+    소비하므로(`src/ante/broker/kis.py`), 문자열로 저장하면 후속 산술
+    연산에서 `TypeError`가 발생한다. 또한 `Account.broker_config`는
+    `service.create()`에서 `json.dumps(...)`로 직렬화되므로(`Decimal`은
+    JSON serializable이 아님) `float`이 안전한 native JSON 타입이다.
     """
     lowered = raw.strip().lower()
     if lowered in ("true", "false"):
@@ -177,18 +184,15 @@ def _parse_broker_config_value(raw: str) -> Any:
     except ValueError:
         pass
 
-    # Decimal 시도. JSON 직렬화 호환을 위해 str로 보내야 하는 소비자
-    # (`json.dumps`)가 있으므로 Decimal은 service 레이어에서 그대로
-    # `dict[str, Any]`에 저장된다. service.create는 broker_config를
-    # `json.dumps(account.broker_config)`로 직렬화하므로 Decimal은
-    # str(Decimal)로 fallback해야 한다 — 따라서 broker_config에는
-    # str을 보낸다.
+    # Decimal로 파싱 가능하면 float 반환. Decimal로 일단 검증한 뒤
+    # ``float(text)``로 변환하여 KIS adapter의 `float` 소비 계약과
+    # `json.dumps`의 native JSON 타입 요구를 동시에 만족시킨다.
     try:
         Decimal(text)
     except InvalidOperation:
         return raw
 
-    return text
+    return float(text)
 
 
 def _resolve_credentials(
@@ -232,6 +236,20 @@ def _resolve_credentials(
 
     for raw in direct_pairs:
         key, value = _split_key_value(raw, fmt=fmt, option_label="--credential")
+        # 직접 채널도 env/file과 일관되게 빈 값(공란)을 거부한다.
+        # 빈 credential은 broker adapter 인증에 사용할 수 없는 unusable 값이며,
+        # `--credential app_key=` 같은 입력은 사용자 실수일 가능성이 매우 높다.
+        # SSOT: docs/specs/cli/02-design-decisions.md 표준 에러 코드 표 —
+        # ``ACCOUNT_MISSING_REQUIRED_CREDENTIAL``.
+        if value == "":
+            _exit_with_error(
+                fmt,
+                "ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
+                (
+                    f"--credential {key}: 값이 비어 있습니다. "
+                    "credential 값은 비어 있을 수 없습니다."
+                ),
+            )
         _set_or_dup(key, value, "--credential")
 
     for raw in env_pairs:
