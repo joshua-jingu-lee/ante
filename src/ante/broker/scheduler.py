@@ -24,11 +24,19 @@ DEFAULT_INTERVAL_SECONDS = 1800  # 30분
 class ReconcileScheduler:
     """주기적으로 모든 활성 봇의 포지션 대사를 수행한다.
 
+    이 스케줄러 인스턴스는 단일 broker(``broker_account_id``)에만 바인딩된다.
+    SPLIT-1 단계에서는 multi-account broker pool이 도입되지 않으므로,
+    다른 계좌의 봇이 같은 스케줄러에 잡히는 경우 잘못된 broker positions가
+    적용되지 않도록 ``run_once()`` 안에서 명시적으로 skip한다.
+    multi-broker pool은 SPLIT-3에서 도입한다.
+
     Args:
         reconciler: 포지션 대사 실행기.
         broker: 브로커 어댑터 (실제 잔고 조회용).
         bot_manager: 활성 봇 목록 조회용.
         eventbus: 이벤트 발행용.
+        broker_account_id: 이 스케줄러가 바인딩된 broker의 account_id.
+            ``run_once()``는 이 account_id에 일치하는 봇만 reconcile한다.
         interval_seconds: 대사 반복 주기 (초). 기본 1800(30분).
     """
 
@@ -38,12 +46,19 @@ class ReconcileScheduler:
         broker: BrokerAdapter,
         bot_manager: BotManager,
         eventbus: EventBus,
+        *,
+        broker_account_id: str,
         interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
+        if not broker_account_id:
+            raise ValueError(
+                "ReconcileScheduler requires a non-empty broker_account_id"
+            )
         self._reconciler = reconciler
         self._broker = broker
         self._bot_manager = bot_manager
         self._eventbus = eventbus
+        self._broker_account_id = broker_account_id
         self._interval = interval_seconds
         self._task: asyncio.Task[None] | None = None
 
@@ -107,6 +122,20 @@ class ReconcileScheduler:
                 logger.warning(
                     "대사 스킵: bot=%s account_id 누락 (DB 정리 필요)",
                     bot_id,
+                )
+                continue
+            if account_id != self._broker_account_id:
+                # SPLIT-1 가드: 이 스케줄러는 단일 broker(self._broker_account_id)
+                # 에 바인딩돼 있다. 다른 계좌의 봇에 이 broker의 positions를
+                # 적용하면 데이터 정합성이 깨지므로 명시적으로 skip한다.
+                # SPLIT-3에서 multi-broker pool 도입 시 이 가드를 제거한다.
+                logger.warning(
+                    "대사 스킵: scheduler is bound to %s; "
+                    "bot %s belongs to %s — "
+                    "skipping until SPLIT-3 multi-broker pool",
+                    self._broker_account_id,
+                    bot_id,
+                    account_id,
                 )
                 continue
             try:

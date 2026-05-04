@@ -570,16 +570,21 @@ async def _init_reconcile_scheduler(s: Services) -> None:
     )
 
     # 첫 번째 연결된 Broker를 ReconcileScheduler에 사용
+    # SPLIT-1: 단일 broker만 주입되므로 해당 broker의 account_id로 scheduler를
+    # 바인딩해, 다른 계좌의 봇에 이 broker의 positions가 잘못 적용되지 않도록
+    # 가드한다. multi-broker pool은 SPLIT-3에서 도입한다.
     broker = None
+    broker_account_id: str | None = None
     accounts = await s.account_service.list()
     for account in accounts:
         try:
             broker = await s.account_service.get_broker(account.account_id)
+            broker_account_id = account.account_id
             break
         except Exception:
             continue
 
-    if not broker:
+    if not broker or not broker_account_id:
         logger.info("ReconcileScheduler 건너뜀 — 연결된 Broker 없음")
         return
 
@@ -588,10 +593,15 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         broker=broker,
         bot_manager=s.bot_manager,
         eventbus=s.eventbus,
+        broker_account_id=broker_account_id,
         interval_seconds=interval,
     )
     await s.reconcile_scheduler.start()
-    logger.info("ReconcileScheduler 시작 완료 (주기: %d초)", interval)
+    logger.info(
+        "ReconcileScheduler 시작 완료 (account=%s, 주기: %d초)",
+        broker_account_id,
+        interval,
+    )
 
 
 async def _init_daily_report_scheduler(s: Services) -> None:
