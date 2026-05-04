@@ -309,7 +309,12 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                     await position_history.initialize()
 
                     broker_positions = await adapter.get_account_positions()
-                    internal_positions = await position_history.get_all_positions()
+                    # Refs #1240 review (P2-2): 단일 계좌 reconcile은 해당 계좌
+                    # 포지션끼리만 비교해야 한다. account_id 필터를 빼면 다른
+                    # 계좌의 positions 가 false discrepancy 로 잡힌다.
+                    internal_positions = await position_history.get_all_positions(
+                        account_id=validated_account_id
+                    )
 
                     broker_map = {p["symbol"]: p for p in broker_positions}
                     internal_map = {p.symbol: p for p in internal_positions}

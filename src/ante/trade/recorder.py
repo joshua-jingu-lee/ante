@@ -300,8 +300,23 @@ class TradeRecorder:
         offset: int = 0,
     ) -> list[TradeRecord]:
         """거래 기록 조회."""
+        from ante.account.scoping import INVALID_RUNTIME_ACCOUNT_IDS
+
         conditions: list[str] = []
         params: list[Any] = []
+
+        # Refs #1240 review (P2-3): legacy invalid account_id row를 SQL 단계에서
+        # 제외해야 LIMIT/OFFSET 페이지네이션이 정확해진다. Python 단계 skip만으로는
+        # legacy default row가 첫 페이지를 가득 채울 때 유효 거래가 다음 페이지에
+        # 묻혀 underflow 가 발생한다. SSOT (``INVALID_RUNTIME_ACCOUNT_IDS``) 와
+        # 빈 문자열/NULL을 함께 제외한다.
+        invalid_ids = sorted(INVALID_RUNTIME_ACCOUNT_IDS)
+        invalid_placeholders = ", ".join("?" for _ in invalid_ids)
+        conditions.append(
+            f"account_id IS NOT NULL AND account_id != '' "
+            f"AND account_id NOT IN ({invalid_placeholders})"
+        )
+        params.extend(invalid_ids)
 
         if account_id:
             conditions.append("account_id = ?")
@@ -325,7 +340,7 @@ class TradeRecorder:
             conditions.append("timestamp <= ?")
             params.append(to_date.isoformat())
 
-        where = " AND ".join(conditions) if conditions else "1=1"
+        where = " AND ".join(conditions)
         query = f"""SELECT * FROM trades
                     WHERE {where}
                     ORDER BY timestamp DESC

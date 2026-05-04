@@ -231,6 +231,86 @@ class TestTradeRecorder:
         failed = await recorder.get_trades(status=TradeStatus.FAILED)
         assert len(failed) == 1
 
+    async def test_get_trades_pagination_skips_legacy_correctly(self, recorder, db):
+        """legacy invalid account_id row 가 SQL 단계에서 제외되어야 페이지네이션이 정확.
+
+        Refs #1240 review (P2-3): 이전 구현은 SQL ``LIMIT/OFFSET`` 으로 행을
+        뽑은 뒤 Python 단계에서 invalid account_id row 를 skip 했다. 첫 페이지가
+        legacy default row 로 가득 차면 유효 거래가 다음 페이지로 밀려 첫
+        페이지가 빈/과소 페이지로 반환됐다. 이제는 SSOT
+        ``INVALID_RUNTIME_ACCOUNT_IDS`` 와 빈 문자열/NULL 을 SQL ``WHERE`` 로
+        함께 제외해 첫 페이지가 항상 유효 거래로 채워진다.
+        """
+        # legacy default account_id row 5개를 먼저 가장 최근 timestamp 로 넣는다.
+        # SQL 정렬은 ``timestamp DESC`` 이므로 LIMIT 으로 자르면 자연히
+        # 첫 페이지가 legacy 만으로 채워졌어야 했다 (SSOT 적용 전 시나리오).
+        from datetime import UTC, datetime, timedelta
+
+        base = datetime.now(UTC)
+        for i in range(5):
+            await db.execute(
+                "INSERT INTO trades "
+                "(trade_id, bot_id, strategy_id, symbol, side, quantity, price, "
+                " status, order_type, reason, commission, timestamp, order_id, "
+                " account_id, currency, exchange) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"legacy-{i}",
+                    "bot-legacy",
+                    "s1",
+                    "005930",
+                    "buy",
+                    1.0,
+                    100.0,
+                    "filled",
+                    "market",
+                    "legacy",
+                    0.0,
+                    (base + timedelta(seconds=100 + i)).isoformat(),
+                    f"ord-legacy-{i}",
+                    "default",  # legacy invalid account_id
+                    "KRW",
+                    "KRX",
+                ),
+            )
+
+        # 유효한 거래 2개를 더 오래된 timestamp 로 넣는다.
+        for i, sym in enumerate(["AAA", "BBB"]):
+            await db.execute(
+                "INSERT INTO trades "
+                "(trade_id, bot_id, strategy_id, symbol, side, quantity, price, "
+                " status, order_type, reason, commission, timestamp, order_id, "
+                " account_id, currency, exchange) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"valid-{i}",
+                    "bot-valid",
+                    "s1",
+                    sym,
+                    "buy",
+                    1.0,
+                    100.0,
+                    "filled",
+                    "market",
+                    "ok",
+                    0.0,
+                    (base + timedelta(seconds=i)).isoformat(),
+                    f"ord-valid-{i}",
+                    "acc-a",
+                    "KRW",
+                    "KRX",
+                ),
+            )
+
+        # limit=5, offset=0 첫 페이지: SQL WHERE 로 legacy row 가 이미 빠지므로
+        # 유효 거래 2개가 그대로 첫 페이지에 올라온다.
+        first_page = await recorder.get_trades(limit=5, offset=0)
+        assert len(first_page) == 2
+        symbols = sorted(t.symbol for t in first_page)
+        assert symbols == ["AAA", "BBB"]
+        # 모든 결과의 account_id 는 acc-a 여야 한다 (legacy default 미포함).
+        assert all(t.account_id == "acc-a" for t in first_page)
+
     async def test_save_adjustment(self, recorder, db):
         """대사 보정 이력 기록."""
         await recorder.save_adjustment(
@@ -1592,7 +1672,13 @@ class TestTradeReadLegacyAccountId:
     async def test_get_trades_skips_legacy_invalid_account_id(
         self, recorder, db, caplog
     ):
-        """get_trades가 legacy 'default' account_id row를 skip한다."""
+        """get_trades가 legacy 'default' account_id row를 skip한다.
+
+        Refs #1240 review (P2-3): 이제 SQL ``WHERE`` 단계에서 legacy
+        invalid account_id row 가 제외된다. 따라서 row 가 ``_row_to_record``
+        까지 도달해 warning 을 남기는 일은 없다 (페이지네이션 underflow
+        방지). 결과의 정확성 (정상 row 만 반환) 은 그대로 유지된다.
+        """
         import logging
 
         legacy_id = str(uuid4())
@@ -1619,29 +1705,24 @@ class TestTradeReadLegacyAccountId:
         assert len(trades) == 1
         assert trades[0].bot_id == "ok-bot"
         assert trades[0].account_id == "acc-test"
-        # warning 로그가 기록되어야 함
-        assert any(
-            "invalid account_id" in record.message and "get_trades" in record.message
-            for record in caplog.records
-        )
 
     async def test_get_trades_account_id_filter_does_not_raise_on_default(
-        self, recorder, db, caplog
+        self, recorder, db
     ):
-        """account_id=None 호출도 legacy default row 있을 때 raise 없이 동작."""
-        import logging
+        """account_id=None 호출도 legacy default row 있을 때 raise 없이 동작.
 
+        Refs #1240 review (P2-3): SQL ``WHERE`` 에서 legacy default row 가
+        제외되므로 빈 결과만 반환되고 raise 도 발생하지 않는다.
+        """
         await self._insert_legacy_trade(
             db,
             trade_id=str(uuid4()),
             account_id="default",
         )
 
-        with caplog.at_level(logging.WARNING, logger="ante.trade.recorder"):
-            trades = await recorder.get_trades(account_id=None)
+        trades = await recorder.get_trades(account_id=None)
 
         assert trades == []
-        assert any("invalid account_id" in record.message for record in caplog.records)
 
     async def test_performance_get_filled_trades_skips_legacy(
         self, performance, db, caplog

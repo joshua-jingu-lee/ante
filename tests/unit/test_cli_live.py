@@ -628,3 +628,52 @@ class TestBrokerCommands:
         result_fix = runner.invoke(cli, ["broker", "reconcile", "--fix"])
         assert result_fix.exit_code != 0
         assert "--account" in result_fix.output
+
+    def test_offline_broker_reconcile_filters_other_account(self, runner):
+        """오프라인 fallback 도 ``--account`` 의 포지션만 비교한다.
+
+        Refs #1240 review (P2-2): 서버 미기동 fallback 의
+        ``position_history.get_all_positions()`` 호출이 모든 계좌를 보면
+        다른 계좌의 포지션이 false discrepancy 로 잡힌다. 단일 계좌
+        reconcile 은 해당 계좌만 보도록 ``account_id`` 필터를 전달해야 한다.
+        """
+        with (
+            patch("ante.cli.commands.broker._get_broker") as mock_get_broker,
+            patch("ante.cli.commands.ipc_helpers.IPCClient") as mock_ipc_cls,
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.core.database.Database") as mock_db_cls,
+            patch("ante.trade.position.PositionHistory") as mock_ph_cls,
+        ):
+            # IPC 는 서버 미기동으로 ClickException → fallback 으로 분기.
+            from ante.ipc.exceptions import ServerNotRunningError
+
+            mock_ipc = AsyncMock()
+            mock_ipc.send = AsyncMock(side_effect=ServerNotRunningError("no server"))
+            mock_ipc_cls.return_value = mock_ipc
+
+            # Broker adapter mock — acc-a 의 포지션만 노출.
+            mock_adapter = AsyncMock()
+            mock_adapter.get_account_positions = AsyncMock(
+                return_value=[{"symbol": "AAA", "quantity": 10.0}]
+            )
+            mock_adapter.disconnect = AsyncMock()
+            mock_db = AsyncMock()
+            mock_db.connect = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db_cls.return_value = mock_db
+            mock_get_broker.return_value = (mock_adapter, mock_db)
+
+            # PositionHistory.get_all_positions(account_id=...) 의 인자 검증을
+            # 위해 spec 을 정확히 맞춘 AsyncMock 사용.
+            mock_ph = AsyncMock()
+            mock_ph.initialize = AsyncMock()
+            mock_ph.get_all_positions = AsyncMock(return_value=[])
+            mock_ph_cls.return_value = mock_ph
+
+            result = runner.invoke(cli, ["broker", "reconcile", "--account", "acc-a"])
+
+            assert result.exit_code == 0, result.output
+            mock_ph.get_all_positions.assert_awaited_once_with(account_id="acc-a")
