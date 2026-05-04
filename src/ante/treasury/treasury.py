@@ -844,8 +844,12 @@ class Treasury:
         await self.sync_balance(balance_data)
 
         # 2) KIS 보유종목 (output1) + Trade 내부 포지션 대조
+        # 자기 계좌 포지션만 조회: 단일 계좌 바인딩 인스턴스에서 cross-account
+        # 데이터가 섞이지 않도록 명시적으로 account_id 필터를 전달한다 (#1240).
         broker_positions = await broker.get_positions()
-        internal_positions = await position_history.get_all_positions()
+        internal_positions = await position_history.get_all_positions(
+            account_id=self._account_id
+        )
         internal_symbols = {p.symbol for p in internal_positions}
 
         external_purchase = 0.0
@@ -894,7 +898,10 @@ class Treasury:
         """
         from ante.eventbus.events import BalanceSyncedEvent
 
-        positions = await position_history.get_all_positions()
+        # 자기 계좌 포지션만 조회 (#1240).
+        positions = await position_history.get_all_positions(
+            account_id=self._account_id
+        )
 
         purchase_amount = 0.0
         eval_amount = 0.0

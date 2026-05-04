@@ -588,3 +588,52 @@ class TestNoTreasuryFallback:
         assert len(report_events) == 1
         assert report_events[0].daily_pnl == 0.0
         assert report_events[0].unrealized_pnl == 0.0
+
+
+# ── #1240 review: cross-account 필터링 회귀 ─────────
+
+
+class TestCrossAccountFilter:
+    """DailyReportScheduler 가 자기 계좌만 집계하는지 검증.
+
+    SPLIT-1 부터 거래/포지션 row 가 실제 account_id 를 갖기 시작하므로,
+    단일 계좌 바인딩된 스케줄러가 cross-account 데이터를 끌어오면
+    DailyReportEvent 에 타 계좌 거래/포지션이 섞이게 된다. 이를 회귀로
+    차단한다.
+    """
+
+    async def test_daily_report_run_once_filters_other_account_trades(
+        self,
+        scheduler,
+        trade_recorder,
+        performance_tracker,
+        position_history,
+        eventbus,
+        treasury,
+    ):
+        """run_once 가 ``account_id=self._account_id`` 를 모든 집계 호출에
+        명시 전달한다.
+
+        ``trade_recorder.get_trades``, ``performance_tracker.get_daily_summary``,
+        ``position_history.get_all_positions`` 호출에 자기 계좌만 명시되어야
+        타 계좌의 거래/포지션이 DailyReportEvent 에 섞이지 않는다.
+        """
+        # trade_recorder/performance/position 모두 빈 리스트 반환 — 필터링
+        # 자체가 호출 인자로 잘 전달되는지가 핵심 검증 포인트.
+        trade_recorder.get_trades.return_value = [_make_trade("buy")]
+        performance_tracker.get_daily_summary.return_value = []
+        position_history.get_all_positions.return_value = []
+
+        await scheduler.run_once(target_date=date(2026, 3, 19))
+
+        # get_trades: account_id 키워드로 자기 계좌(acc-1) 가 명시 전달됨.
+        get_trades_kwargs = trade_recorder.get_trades.await_args.kwargs
+        assert get_trades_kwargs.get("account_id") == "acc-1"
+
+        # get_daily_summary: account_id 키워드로 자기 계좌가 명시 전달됨.
+        gds_kwargs = performance_tracker.get_daily_summary.await_args.kwargs
+        assert gds_kwargs.get("account_id") == "acc-1"
+
+        # get_all_positions: account_id 키워드로 자기 계좌가 명시 전달됨.
+        gap_kwargs = position_history.get_all_positions.await_args.kwargs
+        assert gap_kwargs.get("account_id") == "acc-1"

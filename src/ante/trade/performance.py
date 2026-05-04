@@ -105,6 +105,8 @@ class PerformanceTracker:
         bot_id: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        *,
+        account_id: str | None = None,
     ) -> list[DailySummary]:
         """일별 성과 집계.
 
@@ -112,6 +114,10 @@ class PerformanceTracker:
             bot_id: 봇 ID 필터 (None이면 전체)
             start_date: 시작일 (YYYY-MM-DD)
             end_date: 종료일 (YYYY-MM-DD)
+            account_id: 계좌 ID 필터. ``None`` 이면 모든 계좌의 거래를
+                집계한다 (read query 정책 — #1218 영역). 단일 계좌에
+                바인딩된 호출자(DailyReportScheduler 등)는 자기 계좌만
+                집계되도록 명시적으로 전달해야 한다 (#1240).
         """
         conditions: list[str] = [
             _COND_STATUS_FILLED,
@@ -122,6 +128,9 @@ class PerformanceTracker:
         if bot_id:
             conditions.append(_COND_BOT_ID)
             params.append(bot_id)
+        if account_id:
+            conditions.append("t.account_id = ?")
+            params.append(account_id)
         if start_date:
             conditions.append("date(t.timestamp) >= ?")
             params.append(start_date)

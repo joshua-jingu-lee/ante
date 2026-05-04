@@ -185,13 +185,31 @@ class PositionHistory:
             )
         return self._rows_to_snapshots(rows, context="get_positions")
 
-    async def get_all_positions(self) -> list[PositionSnapshot]:
+    async def get_all_positions(
+        self,
+        *,
+        account_id: str | None = None,
+    ) -> list[PositionSnapshot]:
         """전체 봇의 모든 포지션 조회 (대사 계좌 합산 검증용).
+
+        Args:
+            account_id: 계좌 ID 필터. ``None`` 이면 모든 계좌의 포지션을
+                반환한다 (read query 정책 — #1218 영역). 단일 계좌에
+                바인딩된 호출자(Treasury, DailyReportScheduler 등)는
+                자기 계좌만 보도록 명시적으로 전달해야 한다.
 
         legacy 'default' (또는 기타 invalid) ``account_id`` row는 skip하고
         warning만 남긴다.
         """
-        rows = await self._db.fetch_all("SELECT * FROM positions WHERE quantity > 0")
+        if account_id is None:
+            rows = await self._db.fetch_all(
+                "SELECT * FROM positions WHERE quantity > 0"
+            )
+        else:
+            rows = await self._db.fetch_all(
+                "SELECT * FROM positions WHERE quantity > 0 AND account_id = ?",
+                (account_id,),
+            )
         return self._rows_to_snapshots(rows, context="get_all_positions")
 
     async def get_current(self, bot_id: str, symbol: str) -> dict:

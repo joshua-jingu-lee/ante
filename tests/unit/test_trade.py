@@ -547,6 +547,47 @@ class TestPositionHistory:
         positions = await position_history.get_all_positions()
         assert len(positions) == 2
 
+    async def test_get_all_positions_filter_by_account_id(self, position_history):
+        """``account_id`` 옵션 인자가 주어지면 해당 계좌 포지션만 반환한다.
+
+        #1240 review: 단일 계좌 바인딩된 호출자(Treasury, DailyReportScheduler)
+        가 자기 계좌만 보도록 명시 필터를 사용할 수 있어야 한다.
+        ``account_id=None`` (기본값) 은 기존 all-account 동작을 유지한다.
+        """
+        for bot, acc in [("bot-a", "acc-a"), ("bot-b", "acc-b")]:
+            buy = TradeRecord(
+                trade_id=uuid4(),
+                bot_id=bot,
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                price=50000,
+                status=TradeStatus.FILLED,
+                timestamp=datetime.now(UTC),
+                account_id=acc,
+            )
+            await position_history.on_trade(buy)
+
+        # 기본(account_id 생략) 은 all-account.
+        all_positions = await position_history.get_all_positions()
+        assert len(all_positions) == 2
+
+        # acc-a 만 명시.
+        only_a = await position_history.get_all_positions(account_id="acc-a")
+        assert len(only_a) == 1
+        assert only_a[0].account_id == "acc-a"
+        assert only_a[0].bot_id == "bot-a"
+
+        # acc-b 만 명시.
+        only_b = await position_history.get_all_positions(account_id="acc-b")
+        assert len(only_b) == 1
+        assert only_b[0].account_id == "acc-b"
+
+        # 존재하지 않는 계좌.
+        none = await position_history.get_all_positions(account_id="acc-zzz")
+        assert none == []
+
     async def test_force_update(self, position_history):
         """Reconciler 강제 포지션 덮어쓰기."""
         await position_history.force_update(
@@ -1239,6 +1280,33 @@ class TestAccountIdDbMigration:
         trades = await recorder.get_trades(account_id="acct-1")
         assert len(trades) == 1
         assert trades[0].account_id == "acct-1"
+
+    async def test_get_trades_filter_already_supported_does_not_break(self, recorder):
+        """기존 read 경로(account 생략) 가 여전히 all-account 반환.
+
+        #1240 review: SPLIT-1 의 단일 계좌 바인딩 호출자에 account_id 필터를
+        명시 추가했을 때, account 생략 경로의 user-facing default 정책은
+        그대로(=all-account) 유지되어야 한다 (#1218 영역 분리).
+        """
+        for acct in ("acct-1", "acct-2"):
+            record = TradeRecord(
+                trade_id=uuid4(),
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                price=50000,
+                status=TradeStatus.FILLED,
+                account_id=acct,
+                timestamp=datetime.now(UTC),
+            )
+            await recorder.save(record)
+
+        # account_id 생략 → all-account.
+        trades = await recorder.get_trades()
+        assert len(trades) == 2
+        assert {t.account_id for t in trades} == {"acct-1", "acct-2"}
 
     async def test_position_saved_with_account_id(self, position_history):
         """포지션 갱신 시 account_id가 DB에 저장되는지 확인."""
