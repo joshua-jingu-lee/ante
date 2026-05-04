@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성.
 
-src/ante/ 하위 모든 .py 파일에서 *_SCHEMA 상수(및 특수 명명 패턴)를 찾아
-DDL을 파싱하고 docs/architecture/generated/db-schema.md를 생성한다.
+src/ante/ 하위 모든 .py 파일에서 공식 DDL 상수인 *_SCHEMA를 찾고,
+legacy 예외인 _CREATE_TABLE_SQL을 함께 파싱하여
+docs/architecture/generated/db-schema.md를 생성한다.
 
 SSOT: 모듈 소스 코드 내 DDL 상수 -> docs/architecture/generated/db-schema.md (자동 생성)
 
@@ -97,12 +98,12 @@ LOGICAL_RELATIONS: list[tuple[str, str, str, str]] = [
 
 # ── AST 기반 스키마 상수 추출 ──────────────────────────────────────────
 
-# *_SCHEMA 상수 + account 모듈의 _CREATE_TABLE_SQL 패턴
+# 공식 *_SCHEMA 상수 + account 모듈의 legacy _CREATE_TABLE_SQL 예외
 _SCHEMA_NAME_RE = re.compile(r"^[A-Z_]*SCHEMA$|^_CREATE_TABLE_SQL$")
 
 
 def _extract_schema_constants(filepath: Path) -> list[tuple[str, str, str]]:
-    """AST를 사용하여 파일에서 *_SCHEMA 상수를 추출한다.
+    """AST를 사용하여 파일에서 공식 스키마 상수를 추출한다.
 
     Returns:
         (상수명, DDL 문자열, 모듈 경로) 튜플 리스트
@@ -256,7 +257,7 @@ class IndexInfo:
 
 
 def collect_schemas() -> tuple[list[TableInfo], list[IndexInfo], str]:
-    """src/ante/ 하위에서 모든 *_SCHEMA 상수를 수집하고 파싱한다.
+    """src/ante/ 하위에서 공식 스키마 상수를 수집하고 파싱한다.
 
     Returns:
         (테이블 리스트, 인덱스 리스트, 전체 DDL 문자열)
