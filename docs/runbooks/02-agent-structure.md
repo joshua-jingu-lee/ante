@@ -44,6 +44,7 @@
 
 - `docs/dashboard/architecture.md` 기준으로 구현
 - API 계약은 백엔드 OpenAPI와 자동 생성 타입을 기준으로 사용
+- `api.generated.ts`는 wire contract SSOT로만 보고, UI 계층에는 `frontend/src/api/*.ts` adapter가 변환한 UI/domain model만 전달
 
 ### 1.4 DevOps 엔지니어 (`@devops`)
 

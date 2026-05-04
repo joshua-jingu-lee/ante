@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "generate-types": "bash scripts/generate-types.sh"
+    "generate-types": "bash scripts/generate-types.sh",
+    "check-api-types": "node scripts/check-api-type-boundaries.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",

@@ -23,3 +23,6 @@
 - 문서엔 `kill-switch`인데 구현은 `halt` / `activate`
 - OpenAPI는 갱신됐는데 generated type은 예전 필드를 유지
 - response_model은 바뀌었는데 tests가 예전 shape만 본다
+- 프론트 수동 타입(`frontend/src/types/*.ts`)이 generated response를 shadowing한다
+- `res.data as SomeManualType` 또는 mapper 밖 `as unknown as`로 API drift를 숨긴다
+- hooks/pages/components가 `types/api.generated`를 직접 import해 adapter 경계를 우회한다

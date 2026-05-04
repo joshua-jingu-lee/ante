@@ -224,39 +224,63 @@ CSS 애니메이션 참조(`animation: 'name ...'`)를 제외하고 `style={}` �
 
 ## 6. 타입 안전성
 
-### 타입 시스템 (자동 생성 전용)
+### 타입 시스템 (wire contract / UI model 분리)
 
-**API 응답 타입은 `api.generated.ts`에서만 import한다. 수동 타입 파일(`types/*.ts`)에 API 응답 인터페이스를 정의하지 않는다.**
+**`api.generated.ts`는 백엔드 Web API wire contract의 유일한 SSOT다.**
+수동 타입 파일(`types/*.ts`)은 API 응답/요청 계약을 정의하지 않고,
+프론트 UI/domain model만 정의한다.
 
 - **`api.generated.ts`**: OpenAPI 스키마에서 `npm run generate-types`로 자동 생성 — 직접 수정 금지
-- **수동 타입 허용 범위**: 컴포넌트 Props, UI 상태, 프론트엔드 전용 유틸리티 타입만
-- 백엔드 스키마 변경 시 `npm run generate-types`로 재생성하여 동기화
+- **`frontend/src/api/*.ts`**: generated raw response/request type을 import할 수 있는 유일한 계층. 이 계층에서 raw contract를 UI/domain model로 변환한다.
+- **`frontend/src/types/*.ts`**: UI/domain model only. API 계약처럼 보이는 `Response`, `Request`, `Payload` suffix를 새로 정의하지 않는다.
+- **`hooks/`, `pages/`, `components/`**: generated type 직접 import 금지. `api/*.ts` adapter가 반환한 UI/domain model만 소비한다.
+- 백엔드 스키마 변경 시 `npm run generate-types`로 재생성하고, 같은 변경에서 관련 `api/*.ts` adapter와 UI/domain model을 함께 갱신한다.
 
 ```bash
 # 타입 재생성
 npm run generate-types
 ```
 
-### import 패턴
+### adapter 패턴
 
 ```tsx
-// API 응답 타입: api.generated.ts에서 import
-import type { BotDetailResponse, BotListResponse } from '../types/api.generated'
+// frontend/src/api/bots.ts
+import client from './client'
+import type { BotDetailResponse } from '../types/api.generated'
+import type { BotView } from '../types/bot'
 
-// 프론트엔드 전용 타입: 컴포넌트 파일 내 정의
+function toBotView(raw: BotDetailResponse): BotView {
+  return {
+    botId: raw.bot.bot_id,
+    status: raw.bot.status,
+  }
+}
+
+export async function getBot(id: string): Promise<BotView> {
+  const { data } = await client.get<BotDetailResponse>(`/api/bots/${id}`)
+  return toBotView(data)
+}
+
+// frontend/src/components/bots/BotCard.tsx
+import type { BotView } from '../../types/bot'
+
 interface BotCardProps {
-  bot: BotDetailResponse
-  onStop: (botId: string) => void
+  bot: BotView
 }
 ```
 
 ### 타입 정의 규칙
 
-- **`type`**: 자동 생성 타입의 re-export, 유니온, 별칭에 사용 (`type BotStatus = BotDetailResponse['status']`)
-- **`interface`**: 컴포넌트 Props 등 프론트엔드 전용 객체 정의
+- **`type`**: UI 상태 유니온, view alias, 폼 타입에 사용
+- **`interface`**: 컴포넌트 Props, UI/domain model 등 프론트엔드 전용 객체 정의
+- **읽기 UI model suffix**: API raw response에서 변환한 읽기 모델은 `View`를 사용 (`BotView`, `TreasurySummaryView`)
+- **입력 UI model suffix**: 사용자 입력과 폼 값은 `Input`, `FormValues`를 사용 (`BotFormValues`)
+- **금지 suffix**: 수동 `Response`, `Request`, `Payload` 타입 선언 금지 (`api.generated.ts` 제외)
+- **mapper 함수명**: 기본은 `toXxxView(raw)`. 같은 View를 여러 raw source에서 만들 때만 `toXxxViewFromSource` 형태를 사용
 - **`enum` 미사용**: 백엔드 enum은 string literal union으로 표현
 - **`I` 접두사 금지**: `IBotProps` ✕ → `BotCardProps` ✓
 - **`any` 사용 금지**
+- **`as unknown as` 제한**: `api/*.ts`의 `toXxxView()` mapper 내부에서만 허용한다. mapper 밖에서는 drift 은폐로 본다.
 
 ## 7. 네이밍 규칙
 
