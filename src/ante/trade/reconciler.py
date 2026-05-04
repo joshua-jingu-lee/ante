@@ -47,7 +47,9 @@ class PositionReconciler:
             ReconcileEvent,
         )
 
-        internal = await self._trade_service.get_positions(bot_id)
+        internal = await self._trade_service.get_positions(
+            bot_id, account_id=account_id
+        )
         internal_map: dict[str, dict[str, float]] = {
             p.symbol: {
                 "quantity": p.quantity,
