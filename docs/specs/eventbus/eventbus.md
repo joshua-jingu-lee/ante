@@ -37,6 +37,45 @@ EventBus는 Ante의 **핵심 이벤트 발행/구독 인프라**로, 모듈 간 
 - UUID + timestamp로 이벤트 추적/디버깅 용이
 - dataclass는 외부 의존성 없음 (msgspec 등 도입은 성능 필요 시 전환)
 
+### Account-scoped 이벤트 marker (#1217 → #1240 SPLIT-1)
+
+> 계약: [`docs/specs/account/14-account-id-contract.md`](../account/14-account-id-contract.md)
+
+`Event` 기본 클래스에는 `_requires_account_id: ClassVar[bool] = False` marker가
+있다. 하위 이벤트 클래스에서 `_requires_account_id: ClassVar[bool] = True` 로
+override하면, `Event.__post_init__` 이 다음을 수행한다:
+
+1. 인스턴스의 `account_id` 필드 값을 가져온다.
+2. `ante.account.scoping.is_invalid_account_id` 로 검증한다.
+3. invalid (`""`, `None`, `"default"`, 형식 위반) 면 `InvalidAccountIdError`
+   를 raise한다.
+
+**대상 (account-scoped event)**:
+- 주문 흐름 전체: `OrderRequestEvent`, `OrderCancelEvent`, `OrderModifyEvent`,
+  `OrderModifyRejectedEvent`, `OrderValidatedEvent`, `OrderRejectedEvent`,
+  `OrderApprovedEvent`, `OrderSubmittedEvent`, `OrderFilledEvent`,
+  `OrderCancelledEvent`, `OrderFailedEvent`
+- 봇 lifecycle: `BotStartedEvent`, `BotStoppedEvent`, `BotErrorEvent`,
+  `BotStepCompletedEvent`, `BotRestartExhaustedEvent`
+- 계좌/잔고/리포트: `AccountSuspendedEvent`, `AccountActivatedEvent`,
+  `BalanceSyncedEvent`, `DailyReportEvent`
+
+**비대상 (system-wide event)**:
+- `SystemStartedEvent`, `SystemShutdownEvent`, `NotificationEvent`,
+  `BacktestCompleteEvent`, `ConfigChangedEvent`, `ApprovalCreatedEvent`,
+  `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
+  `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
+  `CircuitBreakerEvent`, `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
+  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`, `StreamConnectedEvent`,
+  `StreamDisconnectedEvent`, `BotStopEvent`, `ExternalSignalEvent`,
+  `PositionMismatchEvent`, `ReconcileEvent` (현재 ext spec 단계에서 marker 미적용)
+
+**구현 노트**:
+- dataclass field ordering 제약 때문에 `account_id` 필드는 default `""` 를
+  유지하지만, `__post_init__` 에서 strict 검증으로 빈 값/fallback 차단.
+- 발행자가 명시적으로 `account_id=` 를 전달하지 않으면 즉시 raise되어
+  silent fallback 제거.
+
 ### 이벤트 타입 전체 정의
 
 D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 상속하며, `event_id`와 `timestamp`는 자동 생성된다.

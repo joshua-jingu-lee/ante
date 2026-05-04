@@ -22,7 +22,14 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_rule_engine():  # noqa: ANN202
+async def _create_rule_engine(account_id: str):  # noqa: ANN202
+    """CLI용 RuleEngine 생성.
+
+    호출자가 ``--account`` 옵션으로 검증된 ``account_id`` 를 반드시 전달
+    해야 한다. fallback 정책상 첫 번째 계좌를 임의로 선택해선 안 된다
+    (#1217). ``RuleEngine`` 생성자가 내부에서 ``require_account_id`` 로
+    재검증한다.
+    """
     from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
@@ -31,7 +38,7 @@ async def _create_rule_engine():  # noqa: ANN202
     db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
-    engine = RuleEngine(eventbus=eventbus)
+    engine = RuleEngine(eventbus=eventbus, account_id=account_id)
     return engine, db
 
 
@@ -81,6 +88,7 @@ def _collect_rules(engine) -> list[dict]:  # noqa: ANN001
 
 
 @rule.command("list")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.option(
     "--scope",
     "scope_filter",
@@ -91,12 +99,12 @@ def _collect_rules(engine) -> list[dict]:  # noqa: ANN001
 @click.pass_context
 @require_auth
 @require_scope("rule:read")
-def rule_list(ctx: click.Context, scope_filter: str | None) -> None:
+def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> None:
     """룰 목록 조회."""
     fmt = get_formatter(ctx)
 
     async def _run_list() -> list[dict]:
-        engine, db = await _create_rule_engine()
+        engine, db = await _create_rule_engine(account_id)
         try:
             try:
                 _load_rules_from_config(engine)
@@ -131,15 +139,16 @@ def rule_list(ctx: click.Context, scope_filter: str | None) -> None:
 
 @rule.command("info")
 @click.argument("rule_id")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("rule:read")
-def rule_info(ctx: click.Context, rule_id: str) -> None:
+def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     """룰 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        engine, db = await _create_rule_engine()
+        engine, db = await _create_rule_engine(account_id)
         try:
             try:
                 _load_rules_from_config(engine)

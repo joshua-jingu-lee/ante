@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+from ante.account.scoping import require_account_id
+
 
 class TradeType(StrEnum):
     """거래 유형."""
@@ -27,7 +29,11 @@ class TradeStatus(StrEnum):
 
 @dataclass
 class TradeRecord:
-    """개별 거래 기록."""
+    """개별 거래 기록.
+
+    ``account_id`` 는 dataclass field ordering 때문에 default를 유지하지만,
+    ``__post_init__`` 에서 :func:`require_account_id` 로 runtime 검증된다.
+    """
 
     trade_id: UUID
     bot_id: str
@@ -43,13 +49,22 @@ class TradeRecord:
     timestamp: datetime | None = None
     order_id: str | None = None
     exchange: str = "KRX"
-    account_id: str = "default"
+    account_id: str = ""
     currency: str = "KRW"
+
+    def __post_init__(self) -> None:
+        self.account_id = require_account_id(
+            self.account_id, context="trade_record.__post_init__"
+        )
 
 
 @dataclass
 class PositionSnapshot:
-    """특정 시점의 포지션 상태."""
+    """특정 시점의 포지션 상태.
+
+    ``account_id`` 는 dataclass field ordering 때문에 default를 유지하지만,
+    ``__post_init__`` 에서 :func:`require_account_id` 로 runtime 검증된다.
+    """
 
     bot_id: str
     symbol: str
@@ -58,7 +73,12 @@ class PositionSnapshot:
     realized_pnl: float = 0.0
     updated_at: str = ""
     exchange: str = "KRX"
-    account_id: str = "default"
+    account_id: str = ""
+
+    def __post_init__(self) -> None:
+        self.account_id = require_account_id(
+            self.account_id, context="position_snapshot.__post_init__"
+        )
 
 
 @dataclass(frozen=True)

@@ -31,7 +31,7 @@ class TestRowToRecordUUIDParsing:
             "commission": 0.0,
             "timestamp": "2026-03-20 10:00:00",
             "order_id": None,
-            "account_id": "default",
+            "account_id": "acc-test",
             "currency": "KRW",
         }
         base.update(overrides)

@@ -260,7 +260,9 @@ async def _handle_approval_reopen(
 async def _handle_broker_status(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args.get("account_id", "")
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(args.get("account_id"), context="ipc.broker.status")
     broker = await svc.account.get_broker(account_id)
     healthy = await broker.health_check()
     return {
@@ -273,7 +275,11 @@ async def _handle_broker_status(
 async def _handle_broker_balance(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args.get("account_id", "")
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.balance"
+    )
     broker = await svc.account.get_broker(account_id)
     return await broker.get_account_balance()
 
@@ -281,7 +287,11 @@ async def _handle_broker_balance(
 async def _handle_broker_positions(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args.get("account_id", "")
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.positions"
+    )
     broker = await svc.account.get_broker(account_id)
     return {"positions": await broker.get_positions()}
 
@@ -289,9 +299,34 @@ async def _handle_broker_positions(
 async def _handle_broker_reconcile(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    from ante.account.errors import InvalidAccountIdError
+    from ante.account.scoping import require_account_id
+
     bot_id = args["bot_id"]
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.reconcile"
+    )
+
+    # Refs #1240 review (P2-1): BotManager로부터 봇의 실제 account_id를 조회해
+    # 요청 payload의 account_id와 일치하지 않으면 거부한다. 잘못된 account_id가
+    # ``correct_position(...)`` 까지 흘러가 다른 계좌의 positions / adjustment
+    # trade가 손상되는 cross-account corruption을 차단하기 위함이다.
+    bot_manager = getattr(svc, "bot_manager", None)
+    if bot_manager is not None:
+        bot = bot_manager.get_bot(bot_id)
+        if bot is not None:
+            bot_account_id = getattr(bot.config, "account_id", None)
+            if bot_account_id and bot_account_id != account_id:
+                raise InvalidAccountIdError(
+                    f"(ipc.broker.reconcile) bot_id={bot_id!r} 의 account_id는 "
+                    f"{bot_account_id!r} 인데 요청은 {account_id!r} 입니다. "
+                    "다른 계좌의 포지션을 조작할 수 없습니다."
+                )
+
     broker_positions = args.get("broker_positions", [])
-    adjustments = await svc.reconciler.reconcile(bot_id, broker_positions)
+    adjustments = await svc.reconciler.reconcile(
+        bot_id, broker_positions, account_id=account_id
+    )
     return {"bot_id": bot_id, "adjustments": adjustments}
 
 

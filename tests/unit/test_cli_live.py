@@ -366,7 +366,7 @@ class TestTreasuryCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_treasury, mock_db)
 
-            result = runner.invoke(cli, ["treasury", "status"])
+            result = runner.invoke(cli, ["treasury", "status", "--account", "domestic"])
             assert result.exit_code == 0
             assert "10,000,000" in result.output
 
@@ -387,7 +387,17 @@ class TestTreasuryCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_treasury, mock_db)
 
-            result = runner.invoke(cli, ["--format", "json", "treasury", "status"])
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "treasury",
+                    "status",
+                    "--account",
+                    "domestic",
+                ],
+            )
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["account_balance"] == 10000000.0
@@ -472,7 +482,7 @@ class TestRuleCommands:
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(cli, ["rule", "list"])
+                result = runner.invoke(cli, ["rule", "list", "--account", "acc-1"])
                 assert result.exit_code == 0
 
     def test_rule_list_with_rules(self, runner):
@@ -492,7 +502,17 @@ class TestRuleCommands:
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(cli, ["--format", "json", "rule", "list"])
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "rule",
+                        "list",
+                        "--account",
+                        "acc-1",
+                    ],
+                )
                 assert result.exit_code == 0
                 data = json.loads(result.output)
                 assert len(data["rules"]) == 1
@@ -508,9 +528,24 @@ class TestRuleCommands:
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(cli, ["rule", "info", "nonexistent"])
+                result = runner.invoke(
+                    cli,
+                    ["rule", "info", "nonexistent", "--account", "acc-1"],
+                )
                 assert result.exit_code == 1
                 assert "찾을 수 없습니다" in result.output
+
+    def test_rule_list_requires_account(self, runner):
+        """--account 옵션 누락 시 click usage error로 실패."""
+        result = runner.invoke(cli, ["rule", "list"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_rule_info_requires_account(self, runner):
+        """rule info도 --account 옵션 누락 시 실패."""
+        result = runner.invoke(cli, ["rule", "info", "some-rule"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
 
 
 # ── broker 커맨드 ───────────────────────────────────
@@ -525,7 +560,7 @@ class TestBrokerCommands:
             mock_adapter.exchange = "KRX"
             mock_create.return_value = (mock_adapter, None)
 
-            result = runner.invoke(cli, ["broker", "status"])
+            result = runner.invoke(cli, ["broker", "status", "--account", "acc-1"])
             assert result.exit_code == 0
             assert "연결됨" in result.output
 
@@ -533,7 +568,7 @@ class TestBrokerCommands:
         with patch("ante.cli.commands.broker._get_broker") as mock_create:
             mock_create.side_effect = Exception("connection failed")
 
-            result = runner.invoke(cli, ["broker", "status"])
+            result = runner.invoke(cli, ["broker", "status", "--account", "acc-1"])
             assert result.exit_code == 0
             assert "미연결" in result.output
 
@@ -546,7 +581,9 @@ class TestBrokerCommands:
             mock_adapter.disconnect = AsyncMock()
             mock_create.return_value = (mock_adapter, None)
 
-            result = runner.invoke(cli, ["--format", "json", "broker", "balance"])
+            result = runner.invoke(
+                cli, ["--format", "json", "broker", "balance", "--account", "acc-1"]
+            )
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["cash"] == 10000000.0
@@ -558,5 +595,85 @@ class TestBrokerCommands:
             mock_adapter.disconnect = AsyncMock()
             mock_create.return_value = (mock_adapter, None)
 
-            result = runner.invoke(cli, ["broker", "positions"])
+            result = runner.invoke(cli, ["broker", "positions", "--account", "acc-1"])
             assert result.exit_code == 0
+
+    def test_broker_status_requires_account(self, runner):
+        """broker status도 --account 옵션 누락 시 user-friendly 에러로 거부.
+
+        #1217 SPLIT-1: account_id fallback 금지. CLI 진입 시점에서 차단.
+        """
+        result = runner.invoke(cli, ["broker", "status"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_broker_balance_requires_account(self, runner):
+        """broker balance도 --account 옵션 누락 시 거부."""
+        result = runner.invoke(cli, ["broker", "balance"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_broker_positions_requires_account(self, runner):
+        """broker positions도 --account 옵션 누락 시 거부."""
+        result = runner.invoke(cli, ["broker", "positions"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_broker_reconcile_requires_account(self, runner):
+        """broker reconcile (--fix 유무 무관) --account 옵션 누락 시 거부."""
+        result = runner.invoke(cli, ["broker", "reconcile"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+        result_fix = runner.invoke(cli, ["broker", "reconcile", "--fix"])
+        assert result_fix.exit_code != 0
+        assert "--account" in result_fix.output
+
+    def test_offline_broker_reconcile_filters_other_account(self, runner):
+        """오프라인 fallback 도 ``--account`` 의 포지션만 비교한다.
+
+        Refs #1240 review (P2-2): 서버 미기동 fallback 의
+        ``position_history.get_all_positions()`` 호출이 모든 계좌를 보면
+        다른 계좌의 포지션이 false discrepancy 로 잡힌다. 단일 계좌
+        reconcile 은 해당 계좌만 보도록 ``account_id`` 필터를 전달해야 한다.
+        """
+        with (
+            patch("ante.cli.commands.broker._get_broker") as mock_get_broker,
+            patch("ante.cli.commands.ipc_helpers.IPCClient") as mock_ipc_cls,
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+            patch("ante.core.database.Database") as mock_db_cls,
+            patch("ante.trade.position.PositionHistory") as mock_ph_cls,
+        ):
+            # IPC 는 서버 미기동으로 ClickException → fallback 으로 분기.
+            from ante.ipc.exceptions import ServerNotRunningError
+
+            mock_ipc = AsyncMock()
+            mock_ipc.send = AsyncMock(side_effect=ServerNotRunningError("no server"))
+            mock_ipc_cls.return_value = mock_ipc
+
+            # Broker adapter mock — acc-a 의 포지션만 노출.
+            mock_adapter = AsyncMock()
+            mock_adapter.get_account_positions = AsyncMock(
+                return_value=[{"symbol": "AAA", "quantity": 10.0}]
+            )
+            mock_adapter.disconnect = AsyncMock()
+            mock_db = AsyncMock()
+            mock_db.connect = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db_cls.return_value = mock_db
+            mock_get_broker.return_value = (mock_adapter, mock_db)
+
+            # PositionHistory.get_all_positions(account_id=...) 의 인자 검증을
+            # 위해 spec 을 정확히 맞춘 AsyncMock 사용.
+            mock_ph = AsyncMock()
+            mock_ph.initialize = AsyncMock()
+            mock_ph.get_all_positions = AsyncMock(return_value=[])
+            mock_ph_cls.return_value = mock_ph
+
+            result = runner.invoke(cli, ["broker", "reconcile", "--account", "acc-a"])
+
+            assert result.exit_code == 0, result.output
+            mock_ph.get_all_positions.assert_awaited_once_with(account_id="acc-a")

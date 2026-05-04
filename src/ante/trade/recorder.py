@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from ante.account.errors import InvalidAccountIdError
 from ante.trade.models import TradeRecord, TradeStatus
 
 if TYPE_CHECKING:
@@ -95,6 +96,7 @@ class TradeRecorder:
             timestamp=event.timestamp,
             order_id=event.order_id,
             exchange=event.exchange,
+            account_id=event.account_id,
         )
         await self._save(record)
         await self._position_history.on_trade(record)
@@ -150,6 +152,7 @@ class TradeRecorder:
             order_type=event.order_type,
             reason=event.reason,
             timestamp=event.timestamp,
+            account_id=event.account_id,
         )
         await self._save(record)
 
@@ -172,6 +175,7 @@ class TradeRecorder:
             order_type=event.order_type,
             reason=event.error_message,
             timestamp=event.timestamp,
+            account_id=event.account_id,
         )
         await self._save(record)
 
@@ -195,6 +199,7 @@ class TradeRecorder:
             reason=event.reason,
             timestamp=event.timestamp,
             order_id=event.order_id,
+            account_id=event.account_id,
         )
         await self._save(record)
 
@@ -257,20 +262,28 @@ class TradeRecorder:
         old_quantity: float,
         new_quantity: float,
         reason: str,
+        *,
+        account_id: str,
     ) -> None:
         """대사 보정 이력 기록."""
+        from ante.account.scoping import require_account_id
+
+        account_id = require_account_id(
+            account_id, context="trade_recorder.save_adjustment"
+        )
         await self._db.execute(
             """INSERT INTO trades
                (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
-                status, order_type, reason, timestamp)
+                status, order_type, reason, timestamp, account_id)
                VALUES (?, ?, '', ?, 'adjustment', ?, 0.0, 'adjusted', '', ?,
-                       datetime('now'))""",
+                       datetime('now'), ?)""",
             (
                 str(uuid4()),
                 bot_id,
                 symbol,
                 abs(new_quantity - old_quantity),
                 reason,
+                account_id,
             ),
         )
 
@@ -287,8 +300,23 @@ class TradeRecorder:
         offset: int = 0,
     ) -> list[TradeRecord]:
         """거래 기록 조회."""
+        from ante.account.scoping import INVALID_RUNTIME_ACCOUNT_IDS
+
         conditions: list[str] = []
         params: list[Any] = []
+
+        # Refs #1240 review (P2-3): legacy invalid account_id row를 SQL 단계에서
+        # 제외해야 LIMIT/OFFSET 페이지네이션이 정확해진다. Python 단계 skip만으로는
+        # legacy default row가 첫 페이지를 가득 채울 때 유효 거래가 다음 페이지에
+        # 묻혀 underflow 가 발생한다. SSOT (``INVALID_RUNTIME_ACCOUNT_IDS``) 와
+        # 빈 문자열/NULL을 함께 제외한다.
+        invalid_ids = sorted(INVALID_RUNTIME_ACCOUNT_IDS)
+        invalid_placeholders = ", ".join("?" for _ in invalid_ids)
+        conditions.append(
+            f"account_id IS NOT NULL AND account_id != '' "
+            f"AND account_id NOT IN ({invalid_placeholders})"
+        )
+        params.extend(invalid_ids)
 
         if account_id:
             conditions.append("account_id = ?")
@@ -312,7 +340,7 @@ class TradeRecorder:
             conditions.append("timestamp <= ?")
             params.append(to_date.isoformat())
 
-        where = " AND ".join(conditions) if conditions else "1=1"
+        where = " AND ".join(conditions)
         query = f"""SELECT * FROM trades
                     WHERE {where}
                     ORDER BY timestamp DESC
@@ -320,7 +348,38 @@ class TradeRecorder:
         params.extend([limit, offset])
 
         rows = await self._db.fetch_all(query, tuple(params))
-        return [self._row_to_record(row) for row in rows]
+        return self._rows_to_records(rows, context="get_trades")
+
+    @classmethod
+    def _rows_to_records(cls, rows: list[dict], *, context: str) -> list[TradeRecord]:
+        """rows → TradeRecord 목록, legacy invalid account_id row는 skip."""
+        records: list[TradeRecord] = []
+        for row in rows:
+            record = cls._row_to_record_safe(row, context=context)
+            if record is not None:
+                records.append(record)
+        return records
+
+    @classmethod
+    def _row_to_record_safe(cls, row: dict, *, context: str) -> TradeRecord | None:
+        """DB row → TradeRecord, legacy invalid account_id row는 skip.
+
+        legacy ``account_id='default'`` (또는 기타 invalid) 값을 가진 row는
+        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
+        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 trade read
+        경로(get_trades, DailyReport 등)가 실패하지 않도록 하기 위함이다.
+        """
+        try:
+            return cls._row_to_record(row)
+        except InvalidAccountIdError as e:
+            logger.warning(
+                "%s: invalid account_id trade row skip "
+                "(legacy migration 필요): %s, row=%s",
+                context,
+                e,
+                dict(row),
+            )
+            return None
 
     @staticmethod
     def _row_to_record(row: dict) -> TradeRecord:
@@ -349,6 +408,6 @@ class TradeRecorder:
             commission=float(row.get("commission", 0)),
             timestamp=datetime.fromisoformat(ts) if ts else None,
             order_id=row.get("order_id"),
-            account_id=row.get("account_id", "default"),
+            account_id=row["account_id"],
             currency=row.get("currency", "KRW"),
         )

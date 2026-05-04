@@ -38,6 +38,7 @@ class TestPositionHistoryTradeId:
             price=70000.0,
             status=TradeStatus.FILLED,
             timestamp=datetime(2026, 3, 23, 10, 0, 0),
+            account_id="acc-test",
         )
 
         await ph.on_trade(record)
@@ -82,6 +83,7 @@ class TestPositionHistoryTradeId:
             price=70000.0,
             status=TradeStatus.FILLED,
             timestamp=datetime(2026, 3, 23, 11, 0, 0),
+            account_id="acc-test",
         )
 
         await ph.on_trade(record)
@@ -115,6 +117,7 @@ class TestPerformanceTrackerTradeIdJoin:
             price=70000.0,
             status=TradeStatus.FILLED,
             timestamp=datetime(2026, 3, 23, 11, 0, 0),
+            account_id="acc-test",
         )
 
         pnl_list = await tracker._calculate_pnl_per_trade([sell_trade], "bot-1")
@@ -171,6 +174,7 @@ class TestPerformanceTrackerTradeIdJoin:
             price=70000.0,
             status=TradeStatus.FILLED,
             timestamp=datetime(2026, 3, 23, 11, 0, 0),
+            account_id="acc-test",
         )
         sell_2 = TradeRecord(
             trade_id=trade_id_2,
@@ -182,6 +186,7 @@ class TestPerformanceTrackerTradeIdJoin:
             price=70000.0,
             status=TradeStatus.FILLED,
             timestamp=datetime(2026, 3, 23, 12, 0, 0),
+            account_id="acc-test",
         )
 
         pnl_list = await tracker._calculate_pnl_per_trade([sell_1, sell_2], "bot-1")

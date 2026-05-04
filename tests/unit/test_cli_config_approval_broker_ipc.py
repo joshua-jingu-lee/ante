@@ -260,25 +260,20 @@ class TestBrokerStatusIPC:
         sent = call_args[0][1]
         assert sent["account_id"] == "acc-1"
 
-    def test_status_without_account(self, runner: CliRunner) -> None:
-        """broker status (계좌 미지정) IPC 전송."""
+    def test_status_without_account_errors(self, runner: CliRunner) -> None:
+        """broker status 미지정 시 click이 user-friendly 에러로 거부한다.
+
+        #1217 SPLIT-1: ``--account`` 는 required. CLI 가 빈 dict 를 IPC 로
+        보내지 않도록 진입 시점에서 차단한다.
+        """
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
-        mock_client.send.return_value = {
-            "id": "req-1",
-            "status": "ok",
-            "result": {
-                "connected": True,
-                "healthy": True,
-                "exchange": "KRX",
-            },
-        }
 
         with ipc_cls_patch, socket_patch:
             result = runner.invoke(cli, ["broker", "status"])
 
-        assert result.exit_code == 0, result.output
-        sent = mock_client.send.call_args[0][1]
-        assert "account_id" not in sent
+        assert result.exit_code != 0
+        assert "--account" in result.output
+        mock_client.send.assert_not_called()
 
     def test_status_fallback_on_server_not_running(self, runner: CliRunner) -> None:
         """서버 미실행 시 직접 연결 폴백. 폴백도 실패하면 에러 표시."""
@@ -291,7 +286,7 @@ class TestBrokerStatusIPC:
                 "ante.cli.commands.broker._get_broker",
                 side_effect=Exception("no broker"),
             ):
-                result = runner.invoke(cli, ["broker", "status"])
+                result = runner.invoke(cli, ["broker", "status", "--account", "acc-1"])
 
         assert result.exit_code == 0
         assert "미연결" in result.output
@@ -320,21 +315,19 @@ class TestBrokerBalanceIPC:
         sent = call_args[0][1]
         assert sent["account_id"] == "acc-1"
 
-    def test_balance_without_account(self, runner: CliRunner) -> None:
-        """broker balance (계좌 미지정) IPC 전송."""
+    def test_balance_without_account_errors(self, runner: CliRunner) -> None:
+        """broker balance 미지정 시 click이 user-friendly 에러로 거부한다.
+
+        #1217 SPLIT-1: ``--account`` required. 빈 dict IPC 호출 차단.
+        """
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
-        mock_client.send.return_value = {
-            "id": "req-1",
-            "status": "ok",
-            "result": {"total_balance": 1000000.0},
-        }
 
         with ipc_cls_patch, socket_patch:
             result = runner.invoke(cli, ["broker", "balance"])
 
-        assert result.exit_code == 0, result.output
-        sent = mock_client.send.call_args[0][1]
-        assert "account_id" not in sent
+        assert result.exit_code != 0
+        assert "--account" in result.output
+        mock_client.send.assert_not_called()
 
 
 class TestBrokerPositionsIPC:
@@ -376,25 +369,23 @@ class TestBrokerPositionsIPC:
         }
 
         with ipc_cls_patch, socket_patch:
-            result = runner.invoke(cli, ["broker", "positions"])
+            result = runner.invoke(cli, ["broker", "positions", "--account", "acc-1"])
 
         assert result.exit_code == 0, result.output
 
-    def test_positions_without_account(self, runner: CliRunner) -> None:
-        """broker positions (계좌 미지정) IPC 전송."""
+    def test_positions_without_account_errors(self, runner: CliRunner) -> None:
+        """broker positions 미지정 시 click이 user-friendly 에러로 거부한다.
+
+        #1217 SPLIT-1: ``--account`` required. 빈 dict IPC 호출 차단.
+        """
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
-        mock_client.send.return_value = {
-            "id": "req-1",
-            "status": "ok",
-            "result": {"positions": []},
-        }
 
         with ipc_cls_patch, socket_patch:
             result = runner.invoke(cli, ["broker", "positions"])
 
-        assert result.exit_code == 0, result.output
-        sent = mock_client.send.call_args[0][1]
-        assert "account_id" not in sent
+        assert result.exit_code != 0
+        assert "--account" in result.output
+        mock_client.send.assert_not_called()
 
 
 # ── Broker reconcile --fix IPC ────────────────────
@@ -429,28 +420,19 @@ class TestBrokerReconcileFixIPC:
         assert sent["fix"] is True
         assert sent["account_id"] == "acc-1"
 
-    def test_reconcile_fix_without_account(self, runner: CliRunner) -> None:
-        """broker reconcile --fix (계좌 미지정)."""
+    def test_reconcile_fix_without_account_errors(self, runner: CliRunner) -> None:
+        """broker reconcile --fix 미지정 시 click이 user-friendly 에러로 거부한다.
+
+        #1217 SPLIT-1: ``--account`` required. 빈 dict IPC 호출 차단.
+        """
         mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
-        mock_client.send.return_value = {
-            "id": "req-1",
-            "status": "ok",
-            "result": {
-                "total_symbols": 0,
-                "discrepancies": [],
-                "match": True,
-                "fix_applied": False,
-                "corrections": 0,
-            },
-        }
 
         with ipc_cls_patch, socket_patch:
             result = runner.invoke(cli, ["broker", "reconcile", "--fix"])
 
-        assert result.exit_code == 0, result.output
-        sent = mock_client.send.call_args[0][1]
-        assert sent["fix"] is True
-        assert "account_id" not in sent
+        assert result.exit_code != 0
+        assert "--account" in result.output
+        mock_client.send.assert_not_called()
 
 
 # ── 서버 미기동 에러 ────────────────────────────────
@@ -485,7 +467,9 @@ class TestServerNotRunningErrors:
         mock_client.send.side_effect = ServerNotRunningError("no server")
 
         with ipc_cls_patch, socket_patch:
-            result = runner.invoke(cli, ["broker", "reconcile", "--fix"])
+            result = runner.invoke(
+                cli, ["broker", "reconcile", "--fix", "--account", "acc-1"]
+            )
 
         assert result.exit_code != 0
         assert "서버가 실행 중이 아닙니다" in result.output

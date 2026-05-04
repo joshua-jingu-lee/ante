@@ -52,7 +52,7 @@ def _make_strategy_cls():
 class TestBotConfigRestartPolicy:
     def test_default_auto_restart(self):
         """기본값 auto_restart=True."""
-        config = BotConfig(bot_id="b1", strategy_id="s1")
+        config = BotConfig(bot_id="b1", strategy_id="s1", account_id="acc-test")
         assert config.auto_restart is True
         assert config.max_restart_attempts == 3
         assert config.restart_cooldown_seconds == 60
@@ -65,6 +65,7 @@ class TestBotConfigRestartPolicy:
             auto_restart=False,
             max_restart_attempts=5,
             restart_cooldown_seconds=30,
+            account_id="acc-test",
         )
         assert config.auto_restart is False
         assert config.max_restart_attempts == 5
@@ -82,6 +83,7 @@ class TestBotAutoRestart:
             strategy_id="s1",
             restart_cooldown_seconds=0,
             max_restart_attempts=3,
+            account_id="acc-test",
         )
         ctx = MagicMock()
         ctx.get_positions.return_value = []
@@ -91,7 +93,9 @@ class TestBotAutoRestart:
         bot = await manager.create_bot(config, _make_strategy_cls(), ctx=ctx)
         bot.status = BotStatus.ERROR
 
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="test"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
+        )
         await asyncio.sleep(0.05)  # cooldown=0 + task 실행 대기
 
         # 재시작 성공 확인 (카운터는 reset_after=0이므로 이미 리셋될 수 있음)
@@ -100,14 +104,14 @@ class TestBotAutoRestart:
     async def test_no_restart_when_disabled(self, manager, eventbus):
         """auto_restart=False → 재시작 안 함."""
         config = BotConfig(
-            bot_id="b1",
-            strategy_id="s1",
-            auto_restart=False,
+            bot_id="b1", strategy_id="s1", auto_restart=False, account_id="acc-test"
         )
         bot = await manager.create_bot(config, _make_strategy_cls(), ctx=MagicMock())
         bot.status = BotStatus.ERROR
 
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="test"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
+        )
         await asyncio.sleep(0.05)
 
         assert bot.status == BotStatus.ERROR
@@ -120,6 +124,7 @@ class TestBotAutoRestart:
             strategy_id="s1",
             max_restart_attempts=2,
             restart_cooldown_seconds=0,
+            account_id="acc-test",
         )
         bot = await manager.create_bot(config, _make_strategy_cls(), ctx=MagicMock())
 
@@ -130,12 +135,14 @@ class TestBotAutoRestart:
         manager._restart_counts["b1"] = 2
 
         bot.status = BotStatus.ERROR
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="fail"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="fail", account_id="acc-test")
+        )
         await asyncio.sleep(0.05)
 
         assert len(exhausted) == 1
         assert exhausted[0].bot_id == "b1"
-        assert exhausted[0].account_id == "test"
+        assert exhausted[0].account_id == "acc-test"
         assert exhausted[0].restart_attempts == 2
 
     async def test_restart_count_increments(self, manager, eventbus):
@@ -145,6 +152,7 @@ class TestBotAutoRestart:
             strategy_id="s1",
             max_restart_attempts=5,
             restart_cooldown_seconds=0,
+            account_id="acc-test",
         )
         ctx = MagicMock()
         ctx.get_positions.return_value = []
@@ -155,20 +163,26 @@ class TestBotAutoRestart:
 
         # 첫 번째 에러 → 재시작
         bot.status = BotStatus.ERROR
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="e1"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="e1", account_id="acc-test")
+        )
         await asyncio.sleep(0.05)
         # cooldown=0 → reset_after=0, 카운터 즉시 리셋 가능
         assert bot.status == BotStatus.RUNNING
 
         # 두 번째 에러 → 재시작
         bot.status = BotStatus.ERROR
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="e2"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="e2", account_id="acc-test")
+        )
         await asyncio.sleep(0.05)
         assert bot.status == BotStatus.RUNNING
 
     async def test_unknown_bot_error_ignored(self, manager, eventbus):
         """등록되지 않은 봇의 에러는 무시."""
-        await eventbus.publish(BotErrorEvent(bot_id="unknown", error_message="test"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="unknown", error_message="test", account_id="acc-test")
+        )
         # 에러 없이 통과
 
 
@@ -183,6 +197,7 @@ class TestRestartCounterReset:
             strategy_id="s1",
             max_restart_attempts=3,
             restart_cooldown_seconds=0,
+            account_id="acc-test",
         )
         ctx = MagicMock()
         ctx.get_positions.return_value = []
@@ -193,7 +208,9 @@ class TestRestartCounterReset:
 
         # 에러 → 재시작
         bot.status = BotStatus.ERROR
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="e1"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="e1", account_id="acc-test")
+        )
         await asyncio.sleep(0.05)
 
         # reset_after = 0 * 3 = 0초이므로 재시작 성공 직후 카운터가 즉시 리셋됨
@@ -207,6 +224,7 @@ class TestRestartCounterReset:
             strategy_id="s1",
             max_restart_attempts=3,
             restart_cooldown_seconds=0,
+            account_id="acc-test",
         )
         ctx = MagicMock()
         ctx.get_positions.return_value = []
@@ -235,11 +253,14 @@ class TestStopCancelsRestart:
             bot_id="b1",
             strategy_id="s1",
             restart_cooldown_seconds=10,
+            account_id="acc-test",
         )
         bot = await manager.create_bot(config, _make_strategy_cls(), ctx=MagicMock())
         bot.status = BotStatus.ERROR
 
-        await eventbus.publish(BotErrorEvent(bot_id="b1", error_message="test"))
+        await eventbus.publish(
+            BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
+        )
         await asyncio.sleep(0.01)
         assert "b1" in manager._restart_tasks
 
@@ -265,6 +286,6 @@ class TestBotRestartExhaustedEvent:
         assert event.last_error == "connection lost"
 
     def test_account_id_default_empty(self):
-        """account_id 기본값은 빈 문자열."""
-        event = BotRestartExhaustedEvent(bot_id="b1")
-        assert event.account_id == ""
+        """account_id 명시값은 보존된다."""
+        event = BotRestartExhaustedEvent(bot_id="b1", account_id="acc-test")
+        assert event.account_id == "acc-test"

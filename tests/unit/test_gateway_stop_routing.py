@@ -87,6 +87,7 @@ class TestStopOrderRouting:
             stop_price=49000.0,
             price=None,
             exchange="KRX",
+            account_id="acc-test",
         )
 
         await gateway._on_order_approved(event)
@@ -101,6 +102,7 @@ class TestStopOrderRouting:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
             limit_price=None,
             exchange="KRX",
         )
@@ -125,6 +127,7 @@ class TestStopOrderRouting:
             stop_price=51000.0,
             price=51500.0,
             exchange="KRX",
+            account_id="acc-test",
         )
 
         await gateway._on_order_approved(event)
@@ -150,6 +153,7 @@ class TestStopOrderRouting:
             quantity=10.0,
             order_type="market",
             exchange="KRX",
+            account_id="acc-test",
         )
 
         await gateway._on_order_approved(event)
@@ -179,6 +183,7 @@ class TestStopOrderRouting:
             order_type="stop",
             stop_price=49000.0,
             exchange="KRX",
+            account_id="acc-test",
         )
 
         await gateway._on_order_approved(event)
@@ -205,6 +210,7 @@ class TestStopOrderRouting:
             order_type="stop",
             stop_price=49000.0,
             exchange="KRX",
+            account_id="acc-test",
         )
 
         await gateway_no_stop._on_order_approved(event)

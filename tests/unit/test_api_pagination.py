@@ -132,6 +132,7 @@ class TestTradesEndpointPagination:
             t = MagicMock()
             t.trade_id = f"trd-{i}"
             t.bot_id = "bot-1"
+            t.account_id = "acc-test"
             t.symbol = "005930"
             t.side = "buy"
             t.quantity = 10

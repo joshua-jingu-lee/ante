@@ -27,6 +27,8 @@ class PositionReconciler:
         self,
         bot_id: str,
         broker_positions: list[dict[str, Any]],
+        *,
+        account_id: str,
     ) -> list[dict[str, Any]]:
         """봇의 내부 포지션과 브로커 포지션을 대조하여 보정.
 
@@ -34,6 +36,7 @@ class PositionReconciler:
             bot_id: 대상 봇 ID.
             broker_positions: 브로커 실제 보유.
                 [{"symbol": str, "quantity": float, "avg_price": float}, ...]
+            account_id: 봇이 귀속된 account_id (포지션 보정 시 명시 필수).
 
         Returns:
             보정 내역 리스트. 불일치가 없으면 빈 리스트.
@@ -123,6 +126,7 @@ class PositionReconciler:
                 quantity=b_qty,
                 avg_price=b_avg if b_avg > 0 else None,
                 reason=reason,
+                account_id=account_id,
             )
             corrections.append(correction)
 

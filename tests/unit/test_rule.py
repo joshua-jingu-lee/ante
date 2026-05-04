@@ -132,7 +132,7 @@ class TestRuleDataModels:
 
     def test_rule_context_no_system_status(self):
         """RuleContext에 system_status 필드가 없다 (account_status로 대체)."""
-        ctx = RuleContext()
+        ctx = RuleContext(account_id="acc-test")
         assert not hasattr(ctx, "system_status")
         assert hasattr(ctx, "account_status")
 
@@ -1228,7 +1228,9 @@ class TestRuleEngineTreasuryIntegration:
 
     async def test_query_treasury_data(self, mock_treasury):
         """Treasury에서 자산/손익 데이터를 정상 조회."""
-        engine = RuleEngine(eventbus=EventBus(), treasury=mock_treasury)
+        engine = RuleEngine(
+            eventbus=EventBus(), treasury=mock_treasury, account_id="acc-test"
+        )
         data = await engine._query_treasury_data()
         assert data["total_pnl"] == 500000.0
         assert data["total_asset"] == 100000000.0
@@ -1238,7 +1240,7 @@ class TestRuleEngineTreasuryIntegration:
 
     async def test_query_treasury_data_none(self):
         """Treasury가 None이면 기본값 반환."""
-        engine = RuleEngine(eventbus=EventBus(), treasury=None)
+        engine = RuleEngine(eventbus=EventBus(), treasury=None, account_id="acc-test")
         data = await engine._query_treasury_data()
         assert all(v == 0.0 for v in data.values())
 
@@ -1247,7 +1249,9 @@ class TestRuleEngineTreasuryIntegration:
         mock_treasury.get_summary.side_effect = Exception("DB error")
         mock_treasury.get_daily_snapshot = AsyncMock(side_effect=Exception("DB error"))
         mock_treasury.get_latest_snapshot = AsyncMock(side_effect=Exception("DB error"))
-        engine = RuleEngine(eventbus=EventBus(), treasury=mock_treasury)
+        engine = RuleEngine(
+            eventbus=EventBus(), treasury=mock_treasury, account_id="acc-test"
+        )
         data = await engine._query_treasury_data()
         assert all(v == 0.0 for v in data.values())
 
@@ -1427,7 +1431,7 @@ class TestRuleEngineStartSync:
         )
 
         # 실제 호출 시 coroutine을 반환하지 않음을 확인
-        engine = RuleEngine(eventbus=EventBus())
+        engine = RuleEngine(eventbus=EventBus(), account_id="acc-test")
         result = engine.start()
         assert not asyncio.iscoroutine(result), (
             "start() 호출 결과가 coroutine이면 안 됩니다"
@@ -1521,7 +1525,7 @@ class TestTradingHoursRuleContextFields:
 
     def test_rule_context_has_trading_hours_fields(self):
         """RuleContext에 trading_hours 필드가 존재하고 기본값이 올바르다."""
-        ctx = RuleContext()
+        ctx = RuleContext(account_id="acc-test")
         assert ctx.trading_hours_start == "09:00"
         assert ctx.trading_hours_end == "15:30"
         assert ctx.timezone == "Asia/Seoul"

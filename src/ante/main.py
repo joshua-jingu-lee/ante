@@ -500,7 +500,12 @@ async def _init_gateway(s: Services) -> None:
             try:
                 broker = await s.account_service.get_broker(account.account_id)
                 broker_config = {**account.credentials, **account.broker_config}
-                await _init_stream_integration(s, broker_config, stop_order_manager)
+                await _init_stream_integration(
+                    s,
+                    broker_config,
+                    stop_order_manager,
+                    account_id=account.account_id,
+                )
             except Exception:
                 logger.warning(
                     "StreamIntegration 초기화 실패: account=%s",
@@ -565,16 +570,21 @@ async def _init_reconcile_scheduler(s: Services) -> None:
     )
 
     # 첫 번째 연결된 Broker를 ReconcileScheduler에 사용
+    # SPLIT-1: 단일 broker만 주입되므로 해당 broker의 account_id로 scheduler를
+    # 바인딩해, 다른 계좌의 봇에 이 broker의 positions가 잘못 적용되지 않도록
+    # 가드한다. multi-broker pool은 SPLIT-3에서 도입한다.
     broker = None
+    broker_account_id: str | None = None
     accounts = await s.account_service.list()
     for account in accounts:
         try:
             broker = await s.account_service.get_broker(account.account_id)
+            broker_account_id = account.account_id
             break
         except Exception:
             continue
 
-    if not broker:
+    if not broker or not broker_account_id:
         logger.info("ReconcileScheduler 건너뜀 — 연결된 Broker 없음")
         return
 
@@ -583,10 +593,15 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         broker=broker,
         bot_manager=s.bot_manager,
         eventbus=s.eventbus,
+        broker_account_id=broker_account_id,
         interval_seconds=interval,
     )
     await s.reconcile_scheduler.start()
-    logger.info("ReconcileScheduler 시작 완료 (주기: %d초)", interval)
+    logger.info(
+        "ReconcileScheduler 시작 완료 (account=%s, 주기: %d초)",
+        broker_account_id,
+        interval,
+    )
 
 
 async def _init_daily_report_scheduler(s: Services) -> None:
@@ -637,8 +652,17 @@ async def _init_stream_integration(
     s: Services,
     broker_config: dict,
     stop_order_manager: Any,
+    *,
+    account_id: str = "",
 ) -> None:
-    """KISStreamClient + StreamIntegration 초기화."""
+    """KISStreamClient + StreamIntegration 초기화.
+
+    SPLIT-1 (#1240): ``OrderFilledEvent``는 strict ``_requires_account_id``
+    marker를 가진다. 본 SPLIT 범위에서는 multi-account StreamIntegration
+    pool화는 하지 않고(SPLIT-3 #1242 영역 보존), 단일 인스턴스에 활성
+    KIS 계좌의 ``account_id``를 보강하여 broker payload fallback 시에도
+    체결 이벤트가 정상 발행되도록 한다.
+    """
     assert s.eventbus is not None
 
     from ante.broker.kis_stream import KISStreamClient
@@ -662,6 +686,7 @@ async def _init_stream_integration(
         stream_client=stream_client,
         cache=s.api_gateway._cache,
         eventbus=s.eventbus,
+        account_id=account_id,
         stop_order_manager=stop_order_manager,
         gateway=s.api_gateway,
         bot_manager=s.bot_manager,

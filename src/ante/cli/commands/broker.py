@@ -71,39 +71,45 @@ async def _get_broker(account_id: str | None = None):  # noqa: ANN202
         raise ValueError(msg)
 
 
-async def _ipc_broker_command(command: str, account_id: str | None, actor: str) -> dict:
+async def _ipc_broker_command(command: str, account_id: str, actor: str) -> dict:
     """IPC를 통해 서버 브로커 인스턴스에 위임한다.
+
+    ``account_id``는 호출자(``--account`` required CLI 옵션 + helper 통과)
+    에서 이미 검증된 값이어야 한다. fallback 금지 정책(#1217 SPLIT-1)에 따라
+    빈 dict 를 IPC 로 보내지 않는다.
 
     ServerNotRunningError, IPCTimeoutError 시 예외를 전파하여 호출자가 폴백 처리한다.
     """
     from ante.cli.commands.ipc_helpers import ipc_send
 
-    args: dict = {}
-    if account_id:
-        args["account_id"] = account_id
+    args: dict = {"account_id": account_id}
     return await ipc_send(command, args, actor=actor)
 
 
 @broker.command()
-@click.option("--account", "account_id", default=None, help="계좌 ID")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def status(ctx: click.Context, account_id: str | None) -> None:
+def status(ctx: click.Context, account_id: str) -> None:
     """증권사 연결 상태 조회."""
+    from ante.account.scoping import require_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
+    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
+    validated_account_id = require_account_id(account_id, context="cli.broker.status")
+
     # IPC 우선 시도
     try:
         actor = get_member_id(ctx)
-        result = _run(_ipc_broker_command("broker.status", account_id, actor))
+        result = _run(_ipc_broker_command("broker.status", validated_account_id, actor))
     except click.ClickException:
         # 서버 미실행 또는 타임아웃 — 기존 직접 연결 폴백
         async def _run_status() -> dict:
             try:
-                adapter, db = await _get_broker(account_id)
+                adapter, db = await _get_broker(validated_account_id)
                 try:
                     healthy = await adapter.health_check()
                     return {
@@ -137,24 +143,30 @@ def status(ctx: click.Context, account_id: str | None) -> None:
 
 
 @broker.command()
-@click.option("--account", "account_id", default=None, help="계좌 ID")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def balance(ctx: click.Context, account_id: str | None) -> None:
+def balance(ctx: click.Context, account_id: str) -> None:
     """증권사 계좌 잔고 조회."""
+    from ante.account.scoping import require_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
+    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
+    validated_account_id = require_account_id(account_id, context="cli.broker.balance")
+
     # IPC 우선 시도
     try:
         actor = get_member_id(ctx)
-        result = _run(_ipc_broker_command("broker.balance", account_id, actor))
+        result = _run(
+            _ipc_broker_command("broker.balance", validated_account_id, actor)
+        )
     except click.ClickException:
         # 서버 미실행 — 기존 직접 연결 폴백
         async def _run_balance() -> dict:
-            adapter, db = await _get_broker(account_id)
+            adapter, db = await _get_broker(validated_account_id)
             try:
                 return await adapter.get_account_balance()
             finally:
@@ -179,24 +191,32 @@ def balance(ctx: click.Context, account_id: str | None) -> None:
 
 
 @broker.command()
-@click.option("--account", "account_id", default=None, help="계좌 ID")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def positions(ctx: click.Context, account_id: str | None) -> None:
+def positions(ctx: click.Context, account_id: str) -> None:
     """증권사 보유 종목 조회."""
+    from ante.account.scoping import require_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
+    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
+    validated_account_id = require_account_id(
+        account_id, context="cli.broker.positions"
+    )
+
     # IPC 우선 시도
     try:
         actor = get_member_id(ctx)
-        result = _run(_ipc_broker_command("broker.positions", account_id, actor))
+        result = _run(
+            _ipc_broker_command("broker.positions", validated_account_id, actor)
+        )
     except click.ClickException:
         # 서버 미실행 — 기존 직접 연결 폴백
         async def _run_positions() -> list[dict]:
-            adapter, db = await _get_broker(account_id)
+            adapter, db = await _get_broker(validated_account_id)
             try:
                 return await adapter.get_positions()
             finally:
@@ -225,18 +245,24 @@ def positions(ctx: click.Context, account_id: str | None) -> None:
 
 
 @broker.command()
-@click.option("--account", "account_id", default=None, help="계좌 ID")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.option(
     "--fix", is_flag=True, default=False, help="불일치 발견 시 자동 보정 수행"
 )
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
+def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
     """내부 데이터와 증권사 데이터 대사."""
+    from ante.account.scoping import require_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
+
+    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
+    validated_account_id = require_account_id(
+        account_id, context="cli.broker.reconcile"
+    )
 
     # --fix 옵션이 있으면 IPC로 서버에 위임 (상태 변경)
     if fix:
@@ -245,9 +271,7 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
         async def _run_fix() -> dict:
             from ante.cli.commands.ipc_helpers import ipc_send
 
-            args: dict = {"fix": True}
-            if account_id:
-                args["account_id"] = account_id
+            args: dict = {"fix": True, "account_id": validated_account_id}
             return await ipc_send("broker.reconcile", args, actor=actor)
 
         try:
@@ -265,9 +289,7 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
             async def _run_ipc_reconcile() -> dict:
                 from ante.cli.commands.ipc_helpers import ipc_send
 
-                args: dict = {"fix": False}
-                if account_id:
-                    args["account_id"] = account_id
+                args: dict = {"fix": False, "account_id": validated_account_id}
                 return await ipc_send("broker.reconcile", args, actor=actor)
 
             result = _run(_run_ipc_reconcile())
@@ -278,7 +300,7 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
                 from ante.core.database import Database
                 from ante.trade.position import PositionHistory
 
-                adapter, adapter_db = await _get_broker(account_id)
+                adapter, adapter_db = await _get_broker(validated_account_id)
                 db = adapter_db or Database(get_db_path())
                 if not adapter_db:
                     await db.connect()
@@ -287,7 +309,12 @@ def reconcile(ctx: click.Context, account_id: str | None, fix: bool) -> None:
                     await position_history.initialize()
 
                     broker_positions = await adapter.get_account_positions()
-                    internal_positions = await position_history.get_all_positions()
+                    # Refs #1240 review (P2-2): 단일 계좌 reconcile은 해당 계좌
+                    # 포지션끼리만 비교해야 한다. account_id 필터를 빼면 다른
+                    # 계좌의 positions 가 false discrepancy 로 잡힌다.
+                    internal_positions = await position_history.get_all_positions(
+                        account_id=validated_account_id
+                    )
 
                     broker_map = {p["symbol"]: p for p in broker_positions}
                     internal_map = {p.symbol: p for p in internal_positions}

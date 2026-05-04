@@ -28,7 +28,9 @@ def eventbus():
 
 @pytest.fixture
 async def treasury(db, eventbus):
-    t = Treasury(db=db, eventbus=eventbus, buy_commission_rate=0.00015)
+    t = Treasury(
+        db=db, eventbus=eventbus, buy_commission_rate=0.00015, account_id="acc-test"
+    )
     await t.initialize()
     return t
 
@@ -65,9 +67,16 @@ class FakePositionHistory:
 
     def __init__(self, positions: list | None = None) -> None:
         self._positions = positions or []
+        self.last_account_id: str | None = "__unset__"  # type: ignore[assignment]
 
-    async def get_all_positions(self) -> list:
-        return self._positions
+    async def get_all_positions(self, *, account_id: str | None = None) -> list:
+        # 호출 시 전달된 account_id 캡처 (테스트 검증용).
+        self.last_account_id = account_id
+        if account_id is None:
+            return list(self._positions)
+        return [
+            p for p in self._positions if getattr(p, "account_id", None) == account_id
+        ]
 
 
 class FailingBroker:
@@ -153,7 +162,7 @@ class TestSyncBalance:
         )
 
         # 새 인스턴스로 복원 확인 (계좌별 행 구조 — 핵심 필드만 영속화)
-        t2 = Treasury(db=db, eventbus=eventbus)
+        t2 = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await t2.initialize()
 
         assert t2._account_balance == 5_000_000.0
@@ -279,6 +288,7 @@ class TestExternalPositions:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=71000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -309,6 +319,7 @@ class TestExternalPositions:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=71000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -490,12 +501,14 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
                 PositionSnapshot(
                     bot_id="bot1",
                     symbol="035720",
                     quantity=50.0,
                     avg_entry_price=60000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -529,12 +542,14 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
                 PositionSnapshot(
                     bot_id="bot1",
                     symbol="035720",
                     quantity=50.0,
                     avg_entry_price=60000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -565,6 +580,7 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -613,6 +629,7 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -646,6 +663,7 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -679,3 +697,101 @@ class TestVirtualSync:
         await treasury.stop_sync()
 
         assert treasury.last_synced_at is not None
+
+
+# ── #1240 review: cross-account 필터링 회귀 ───────
+
+
+class TestCrossAccountFilter:
+    """Treasury 가 자기 계좌 포지션만 집계하는지 검증.
+
+    SPLIT-1 부터 거래/포지션 row 가 실제 account_id 를 갖기 시작하므로,
+    단일 계좌 바인딩된 Treasury 가 cross-account 데이터를 끌어오면
+    treasury_state, BalanceSyncedEvent, 가상 평가금액에 타 계좌 포지션이
+    섞이게 된다. 이를 회귀로 차단한다.
+    """
+
+    async def test_treasury_sync_filters_other_account_positions(
+        self, treasury, eventbus
+    ):
+        """Live sync: Treasury(account='acc-test') 의 sync 가 acc-b 포지션을
+        external 분류에 포함하지 않는다.
+
+        ``FakePositionHistory.get_all_positions(account_id=...)`` 가
+        acc-test 행만 돌려주므로, 005930 도 internal 로 분류되어
+        external_* 가 0 이어야 한다.
+        """
+        broker = FakeBroker(
+            positions=[
+                {
+                    "symbol": "005930",
+                    "quantity": 100.0,
+                    "avg_price": 71000.0,
+                    "eval_amount": 7_200_000.0,
+                },
+            ]
+        )
+        # 같은 symbol 을 acc-test (자기) + acc-b (타) 양쪽이 보유.
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot-a",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=71000.0,
+                    account_id="acc-test",
+                ),
+                PositionSnapshot(
+                    bot_id="bot-b",
+                    symbol="999999",
+                    quantity=10.0,
+                    avg_entry_price=10000.0,
+                    account_id="acc-b",
+                ),
+            ]
+        )
+
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        # Treasury 가 자기 account_id 로 명시 필터링했어야 한다.
+        assert pos_history.last_account_id == "acc-test"
+        # 005930 은 internal 로 분류되어 external 0.
+        assert treasury._external_purchase_amount == 0.0
+        assert treasury._external_eval_amount == 0.0
+
+    async def test_treasury_virtual_sync_filters_other_account(self, treasury):
+        """Virtual sync: 타 계좌 포지션이 자기 계좌의 평가금액에 섞이지 않는다."""
+        pos_history = FakePositionHistory(
+            positions=[
+                PositionSnapshot(
+                    bot_id="bot-a",
+                    symbol="005930",
+                    quantity=100.0,
+                    avg_entry_price=70000.0,
+                    account_id="acc-test",
+                ),
+                PositionSnapshot(
+                    bot_id="bot-b",
+                    symbol="000660",
+                    quantity=50.0,
+                    avg_entry_price=200000.0,
+                    account_id="acc-b",
+                ),
+            ]
+        )
+
+        treasury.start_sync(
+            broker=None,
+            position_history=pos_history,
+            interval_seconds=100,
+            trading_mode="virtual",
+        )
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        # 자기 account_id 로만 집계되었어야 한다.
+        assert pos_history.last_account_id == "acc-test"
+        assert treasury._purchase_amount == 7_000_000.0  # 100 * 70000
+        assert treasury._eval_amount == 7_000_000.0

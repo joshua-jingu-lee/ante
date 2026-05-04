@@ -123,8 +123,11 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
   와 정확히 일치할 때만 통과시킨다 (#1216 P2). 이 경로 외에는 우회 불가
 
 상세 계약과 helper API는 [14-account-id-contract.md](14-account-id-contract.md)
-참조. 후속 적용은 #1217 (Trade/Treasury), #1218 (CLI/Web/IPC),
-#1219 (Event/EventBus)에서 반영한다.
+참조. 후속 적용은 #1240 (SPLIT-1: Event marker + Trade/Treasury/Rule),
+#1241 (SPLIT-2: Bot/Main + Approval payload),
+#1242 (SPLIT-3: APIGateway/Stream + multi-account lifecycle),
+#1218 (Read query / edge resolver), #1219 (DB schema/index)
+에서 반영한다.
 
 ### D-ACC-07: Account lifecycle cold-path contract
 

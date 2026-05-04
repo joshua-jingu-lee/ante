@@ -45,6 +45,7 @@ class TestRegister:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         assert stop_id.startswith("stop-")
@@ -71,6 +72,7 @@ class TestRegister:
             order_type="stop_limit",
             stop_price=51000.0,
             limit_price=51500.0,
+            account_id="acc-test",
         )
 
         order = manager.get_order(stop_id)
@@ -98,6 +100,7 @@ class TestTrigger:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -134,6 +137,7 @@ class TestTrigger:
             quantity=5.0,
             order_type="stop",
             stop_price=51000.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -160,6 +164,7 @@ class TestTrigger:
             order_type="stop_limit",
             stop_price=51000.0,
             limit_price=51500.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -185,6 +190,7 @@ class TestTrigger:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -209,6 +215,7 @@ class TestTrigger:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -229,6 +236,7 @@ class TestTrigger:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -254,6 +262,7 @@ class TestCancel:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         result = manager.cancel(stop_id)
@@ -284,6 +293,7 @@ class TestExpiry:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
 
         eventbus.publish.reset_mock()
@@ -312,6 +322,7 @@ class TestBotOrders:
             quantity=10.0,
             order_type="stop",
             stop_price=49000.0,
+            account_id="acc-test",
         )
         await manager.register(
             order_id="ord-002",
@@ -322,6 +333,7 @@ class TestBotOrders:
             quantity=5.0,
             order_type="stop",
             stop_price=100000.0,
+            account_id="acc-test",
         )
 
         bot1_orders = manager.get_orders_for_bot("bot-001")

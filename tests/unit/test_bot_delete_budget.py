@@ -192,7 +192,7 @@ class TestDeleteBotBudgetRelease:
         m = BotManager(eventbus=eventbus, db=db)
         await m.initialize()
 
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await m.create_bot(config, SimpleStrategy, ctx)
         await m.delete_bot("bot1")
 
@@ -281,7 +281,7 @@ class TestDeleteBotBudgetReleaseFallback:
         다르지만, 예산은 다른 treasury에 할당되어 있는 경우.
         """
         # Treasury 2개 생성: 'default'와 'other'
-        treasury_default = Treasury(db=db, eventbus=eventbus, account_id="default")
+        treasury_default = Treasury(db=db, eventbus=eventbus, account_id="acc-default")
         await treasury_default.initialize()
         await treasury_default.set_account_balance(1_000_000)
 

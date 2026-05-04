@@ -40,6 +40,7 @@ class StopOrder:
     stop_price: float
     limit_price: float | None
     trading_session: str  # "regular" | "extended"
+    account_id: str  # required — trigger 시 OrderRequestEvent에 전파
     registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     triggered: bool = False
     expired: bool = False
@@ -91,6 +92,8 @@ class StopOrderManager:
         quantity: float,
         order_type: str,
         stop_price: float,
+        *,
+        account_id: str,
         limit_price: float | None = None,
         trading_session: str = "regular",
         exchange: str = "KRX",
@@ -115,6 +118,7 @@ class StopOrderManager:
             limit_price=limit_price,
             trading_session=trading_session,
             exchange=exchange,
+            account_id=account_id,
         )
         self._orders[stop_order_id] = order
 
@@ -250,6 +254,7 @@ class StopOrderManager:
         # 변환된 주문을 기존 흐름에 주입
         await self._eventbus.publish(
             OrderRequestEvent(
+                account_id=order.account_id,
                 bot_id=order.bot_id,
                 strategy_id=order.strategy_id,
                 symbol=order.symbol,

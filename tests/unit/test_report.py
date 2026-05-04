@@ -258,6 +258,7 @@ class TestPerformanceFeedback:
                     quantity=100,
                     avg_entry_price=50000.0,
                     realized_pnl=10000.0,
+                    account_id="acc-test",
                 )
             ]
         )

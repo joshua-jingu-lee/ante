@@ -23,7 +23,7 @@ def eventbus():
 
 @pytest.fixture
 async def treasury(db, eventbus):
-    t = Treasury(db=db, eventbus=eventbus)
+    t = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
     await t.initialize()
     await t.set_account_balance(10_000_000.0)
     await t.allocate("bot1", 5_000_000.0)
@@ -79,7 +79,7 @@ class TestBotStopRelease:
         budget_before = treasury.get_budget("bot1")
         available_before = budget_before.available
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id="acc-test"))
 
         budget_after = treasury.get_budget("bot1")
         assert budget_after.reserved == 0.0
@@ -91,7 +91,7 @@ class TestBotStopRelease:
         await treasury.reserve_for_order("bot1", "ord1", 100_000.0)
         await treasury.reserve_for_order("bot2", "ord2", 200_000.0)
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id="acc-test"))
 
         assert treasury.get_reservations("bot2") == {"ord2": 200_000.0}
         budget2 = treasury.get_budget("bot2")
@@ -101,7 +101,7 @@ class TestBotStopRelease:
         """예약 없는 봇 중지 → 아무 변화 없음."""
         budget_before = treasury.get_budget("bot1")
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id="acc-test"))
 
         budget_after = treasury.get_budget("bot1")
         assert budget_after.available == budget_before.available
@@ -111,7 +111,7 @@ class TestBotStopRelease:
         """해제 시 거래 이력에 bot_stopped_release 기록."""
         await treasury.reserve_for_order("bot1", "ord1", 100_000.0)
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id="acc-test"))
 
         rows = await db.fetch_all(
             "SELECT * FROM treasury_transactions "
@@ -128,7 +128,7 @@ class TestBotStopRelease:
         await treasury.reserve_for_order("bot1", "ord2", 250_000.0)
         await treasury.reserve_for_order("bot1", "ord3", 100_000.0)
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id="acc-test"))
 
         budget = treasury.get_budget("bot1")
         assert budget.reserved == 0.0
@@ -137,7 +137,9 @@ class TestBotStopRelease:
 
     async def test_unknown_bot_stopped_no_error(self, treasury, eventbus):
         """존재하지 않는 봇 중지 → 에러 없이 무시."""
-        await eventbus.publish(BotStoppedEvent(bot_id="unknown_bot"))
+        await eventbus.publish(
+            BotStoppedEvent(bot_id="unknown_bot", account_id="acc-test")
+        )
         # 에러 없이 통과
 
 

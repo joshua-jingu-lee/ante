@@ -57,7 +57,7 @@ class TestBotManagerNotifications:
         """봇 시작 시 NotificationEvent 발행."""
         from ante.eventbus.events import BotStartedEvent
 
-        await eventbus.publish(BotStartedEvent(bot_id="bot-1"))
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-test"))
         assert len(notifications) == 1
         assert notifications[0].level == "info"
         assert notifications[0].category == "bot"
@@ -68,7 +68,7 @@ class TestBotManagerNotifications:
         """봇 중지 시 NotificationEvent 발행."""
         from ante.eventbus.events import BotStoppedEvent
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot-1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot-1", account_id="acc-test"))
         assert len(notifications) == 1
         assert notifications[0].level == "info"
         assert notifications[0].category == "bot"
@@ -80,7 +80,11 @@ class TestBotManagerNotifications:
         from ante.eventbus.events import BotErrorEvent
 
         await eventbus.publish(
-            BotErrorEvent(bot_id="bot-1", error_message="Connection timeout")
+            BotErrorEvent(
+                bot_id="bot-1",
+                error_message="Connection timeout",
+                account_id="acc-test",
+            )
         )
         assert len(notifications) == 1
         assert notifications[0].level == "error"
@@ -146,6 +150,7 @@ class TestTradeRecorderNotifications:
                 quantity=100.0,
                 price=72000.0,
                 order_type="market",
+                account_id="acc-test",
             )
         )
         assert len(notifications) == 1
@@ -170,6 +175,7 @@ class TestTradeRecorderNotifications:
                 quantity=50.0,
                 price=73000.0,
                 order_type="market",
+                account_id="acc-test",
             )
         )
         assert len(notifications) == 1
@@ -329,6 +335,7 @@ class TestReconcilerNotification:
             broker_positions=[
                 {"symbol": "005930", "quantity": 50.0, "avg_price": 70000}
             ],
+            account_id="acc-test",
         )
 
         notifs = [n for n in collected if n.category == "broker"]

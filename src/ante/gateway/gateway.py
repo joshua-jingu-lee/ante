@@ -239,6 +239,7 @@ class APIGateway:
                     quantity=event.quantity,
                     order_type=event.order_type,
                     stop_price=event.stop_price or 0.0,
+                    account_id=event.account_id,
                     limit_price=event.price,
                     exchange=event.exchange,
                 )

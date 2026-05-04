@@ -108,15 +108,17 @@ class TestBotStepCompletedEventDefinition:
 
     def test_event_is_frozen(self):
         """이벤트는 frozen dataclass여야 한다."""
-        evt = BotStepCompletedEvent(bot_id="bot1", result="success")
+        evt = BotStepCompletedEvent(
+            bot_id="bot1", result="success", account_id="acc-test"
+        )
         with pytest.raises(AttributeError):
             evt.bot_id = "changed"  # type: ignore[misc]
 
     def test_default_values(self):
-        """기본값 검증."""
-        evt = BotStepCompletedEvent()
+        """account_id 명시 시 다른 필드는 기본값 ''을 갖는다."""
+        evt = BotStepCompletedEvent(account_id="acc-test")
         assert evt.bot_id == ""
-        assert evt.account_id == ""
+        assert evt.account_id == "acc-test"
         assert evt.result == ""
         assert evt.message == ""
 

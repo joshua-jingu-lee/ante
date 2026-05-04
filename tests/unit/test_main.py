@@ -41,7 +41,9 @@ async def test_full_initialization(tmp_path: Path) -> None:
     await dynamic_config.initialize()
 
     # 검증: 이벤트 발행 → 인메모리 히스토리 + SQLite 영속화
-    event = OrderRequestEvent(symbol="005930", side="buy", quantity=10.0)
+    event = OrderRequestEvent(
+        symbol="005930", side="buy", quantity=10.0, account_id="acc-test"
+    )
     await eventbus.publish(event)
 
     # 인메모리 히스토리
@@ -80,7 +82,9 @@ async def test_eventbus_middleware_records_all_events(
 
     # 여러 이벤트 발행
     for i in range(5):
-        await eventbus.publish(OrderRequestEvent(symbol=f"sym{i}"))
+        await eventbus.publish(
+            OrderRequestEvent(symbol=f"sym{i}", account_id="acc-test")
+        )
 
     rows = await store.query(limit=10)
     assert len(rows) == 5

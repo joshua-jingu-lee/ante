@@ -83,8 +83,8 @@ class TestAccountDeleteEvents:
         """delete()는 AccountSuspendedEvent만 발행한다.
 
         AccountDeletedEvent는 1.0 비계약이므로 발행되지 않는다.
-        AccountSuspendedEvent(reason="Account deletion")는 BotManager가 소속
-        봇을 중지시키도록 유지된다.
+        AccountSuspendedEvent(reason="Account deletion")는 BotManager가
+        소속 봇을 중지시키도록 유지된다.
         """
         await service.create(_make_account())
 

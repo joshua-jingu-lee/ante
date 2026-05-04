@@ -277,7 +277,17 @@ class TestTreasuryStatusFormatOption:
             new_callable=AsyncMock,
             return_value=(mock_treasury, db),
         ):
-            result = runner.invoke(cli, ["treasury", "status", "--format", "json"])
+            result = runner.invoke(
+                cli,
+                [
+                    "treasury",
+                    "status",
+                    "--account",
+                    "domestic",
+                    "--format",
+                    "json",
+                ],
+            )
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["account_balance"] == 1000000

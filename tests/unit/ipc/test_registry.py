@@ -276,3 +276,122 @@ class TestSystemKillSwitchHandlers:
         svc.bot_manager.start_bot.assert_not_called()
         svc.bot_manager.restart_bot.assert_not_called()
         svc.bot_manager.start_all.assert_not_called()
+
+
+# ── broker.reconcile cross-account guard (Refs #1240 review P2-1) ──
+
+
+class TestHandleBrokerReconcile:
+    """broker.reconcile IPC 핸들러의 account 일치 가드.
+
+    Refs #1240 review (P2-1): 요청자가 ``bot_id`` 와 다른 ``account_id`` 를
+    보내면 잘못된 account_id 가 ``reconciler.reconcile(...)`` 으로 흘러
+    다른 계좌의 positions / adjustment trade 가 손상된다. BotManager 로
+    봇의 실제 account_id 를 조회하여 일치하지 않으면 거부한다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_broker_reconcile_rejects_account_mismatch(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.account.errors import InvalidAccountIdError
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        # 봇은 acc-a 소속인데 요청은 acc-b 로 들어옴.
+        fake_bot = MagicMock()
+        fake_bot.config = MagicMock()
+        fake_bot.config.account_id = "acc-a"
+
+        fake_bot_manager = MagicMock()
+        fake_bot_manager.get_bot.return_value = fake_bot
+
+        fake_reconciler = AsyncMock()
+
+        svc = MagicMock()
+        svc.bot_manager = fake_bot_manager
+        svc.reconciler = fake_reconciler
+
+        with pytest.raises(InvalidAccountIdError, match="acc-a"):
+            await _handle_broker_reconcile(
+                svc,
+                {
+                    "bot_id": "bot-1",
+                    "account_id": "acc-b",
+                    "broker_positions": [],
+                },
+                "cli-user",
+            )
+
+        # reconcile 까지 절대 도달하지 않아야 한다.
+        fake_reconciler.reconcile.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_broker_reconcile_passes_when_account_matches(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        fake_bot = MagicMock()
+        fake_bot.config = MagicMock()
+        fake_bot.config.account_id = "acc-a"
+
+        fake_bot_manager = MagicMock()
+        fake_bot_manager.get_bot.return_value = fake_bot
+
+        fake_reconciler = AsyncMock()
+        fake_reconciler.reconcile.return_value = []
+
+        svc = MagicMock()
+        svc.bot_manager = fake_bot_manager
+        svc.reconciler = fake_reconciler
+
+        result = await _handle_broker_reconcile(
+            svc,
+            {
+                "bot_id": "bot-1",
+                "account_id": "acc-a",
+                "broker_positions": [],
+            },
+            "cli-user",
+        )
+
+        assert result == {"bot_id": "bot-1", "adjustments": []}
+        fake_reconciler.reconcile.assert_awaited_once_with(
+            "bot-1", [], account_id="acc-a"
+        )
+
+    @pytest.mark.asyncio
+    async def test_broker_reconcile_passes_when_bot_not_found(self):
+        """알 수 없는 ``bot_id`` 는 reconcile 단계에서 처리되도록 통과시킨다.
+
+        BotManager 에 없는 봇이라도 mismatch 검증 단계에서 false negative 로
+        막아버리면 cold-path / migration 시나리오가 깨진다. account_id 형식
+        검증은 ``require_account_id`` 가 이미 수행하므로 이 단계는 mismatch
+        만 책임진다.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        fake_bot_manager = MagicMock()
+        fake_bot_manager.get_bot.return_value = None
+
+        fake_reconciler = AsyncMock()
+        fake_reconciler.reconcile.return_value = []
+
+        svc = MagicMock()
+        svc.bot_manager = fake_bot_manager
+        svc.reconciler = fake_reconciler
+
+        result = await _handle_broker_reconcile(
+            svc,
+            {
+                "bot_id": "unknown-bot",
+                "account_id": "acc-a",
+                "broker_positions": [],
+            },
+            "cli-user",
+        )
+
+        assert result == {"bot_id": "unknown-bot", "adjustments": []}
+        fake_reconciler.reconcile.assert_awaited_once()

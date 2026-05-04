@@ -203,7 +203,11 @@ class MeResponse(BaseModel):
 
 
 class BotInfo(BaseModel):
-    """봇 정보."""
+    """봇 정보 (read 응답).
+
+    write 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가
+    검증되므로 read 응답 schema에는 default를 유지한다.
+    """
 
     bot_id: str
     name: str = ""
@@ -742,7 +746,11 @@ class MemberScopesResponse(BaseModel):
 
 
 class TradeItem(BaseModel):
-    """거래 기록 아이템."""
+    """거래 기록 아이템 (read 응답).
+
+    write 경로(``TradeRecord``)에서 account_id가 검증되므로 read 응답
+    schema에는 default를 유지한다.
+    """
 
     trade_id: str
     bot_id: str

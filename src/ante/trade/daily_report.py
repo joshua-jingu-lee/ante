@@ -90,11 +90,15 @@ class DailyReportScheduler:
         trade_recorder: TradeRecorder,
         position_history: PositionHistory,
         eventbus: EventBus,
+        *,
+        account_id: str,
         report_time: time = DEFAULT_REPORT_TIME,
-        account_id: str = "",
         currency: str = "KRW",
         treasury: Treasury | None = None,
     ) -> None:
+        from ante.account.scoping import require_account_id
+
+        account_id = require_account_id(account_id, context="daily_report.__init__")
         self._performance = performance_tracker
         self._recorder = trade_recorder
         self._positions = position_history
@@ -150,9 +154,12 @@ class DailyReportScheduler:
         yesterday_str = yesterday.isoformat()
 
         # 1) Query today's filled trades
+        # 자기 계좌 거래만 집계 — 단일 계좌 바인딩된 스케줄러가
+        # cross-account 거래를 끌어오지 않도록 명시 필터 (#1240).
         from ante.trade.models import TradeStatus
 
         trades = await self._recorder.get_trades(
+            account_id=self._account_id,
             status=TradeStatus.FILLED,
             from_date=datetime.combine(today, time.min, tzinfo=KST),
             to_date=datetime.combine(today, time.max, tzinfo=KST),
@@ -225,14 +232,18 @@ class DailyReportScheduler:
             return False
 
         # Realized PnL from performance tracker (existing logic)
+        # 자기 계좌 성과만 집계 (#1240).
         summaries = await self._performance.get_daily_summary(
             start_date=today_str,
             end_date=today_str,
+            account_id=self._account_id,
         )
         realized_pnl = summaries[0].realized_pnl if summaries else 0.0
 
-        # Position count
-        all_positions = await self._positions.get_all_positions()
+        # Position count — 자기 계좌 포지션만 집계 (#1240).
+        all_positions = await self._positions.get_all_positions(
+            account_id=self._account_id
+        )
         position_count = len(all_positions)
 
         pnl_formatted = format_currency(realized_pnl, self._currency)

@@ -128,14 +128,69 @@ account_id 형식이 올바르지 않습니다: '<value>'. 영문, 숫자, 하�
 | ``AccountService._create_seed_account`` (private) | ``require_account_id`` + ``(broker_type, default_account_id)`` pair 가드 | ``create_default_test_account`` 만의 호출 경로 |
 | ``AccountService.create_default_test_account`` | (private helper 호출) | seed account_id ``"test"`` 직접 사용 |
 
-후속 사용처는 #1217/#1218/#1219 영역이다 (본 이슈 범위 외):
+### #1217 후속 SPLIT 분담
 
-- **#1217 (Trade/Treasury)** — `account_id` 진입점에서 ``require_account_id``
-  호출, fallback (``"default"``, ``""``) 제거.
-- **#1218 (CLI/Web/IPC)** — account-scoped 명령/엔드포인트 진입점에서
-  ``require_account_id`` 호출.
-- **#1219 (Event/EventBus)** — account-scoped 이벤트 발행 직전
-  ``require_account_id`` 호출, 구독 측 fallback 제거.
+#1217 (단일 PR)이 9회 Codex review FAIL → SPLIT 권고에 따라 다음 3개
+이슈로 분리되어 진행한다. 각 SPLIT은 lifecycle 영향 / 적용 표면을
+구분하며, write/execute 경로 fallback 제거 + Event marker 패턴은
+SPLIT 단위로 다음 표에 기재된 위치에서만 적용한다.
+
+#### #1240 (SPLIT-1) 적용 위치
+
+write/execute 경로 fallback 제거 + Event marker 패턴 (lifecycle 영향
+없는 contract drift). 본 SPLIT에서 적용된다.
+
+| 호출 위치 | 형태 | 비고 |
+|---|---|---|
+| `Event.__post_init__` (eventbus/events.py) | ClassVar marker `_requires_account_id` + `is_invalid_account_id` 검증 | account-scoped 이벤트 20+개. 마커 정책은 [`docs/specs/eventbus/eventbus.md`](../eventbus/eventbus.md) `Account-scoped 이벤트 marker (#1217 → #1240 SPLIT-1)` 섹션 참조 |
+| `Treasury.__init__` | `account_id: str` (kw-only) + `require_account_id` | account-scoped 자금 관리 |
+| `RuleEngine.__init__` | `account_id: str` (kw-only) + `require_account_id` | account-scoped 룰 엔진 |
+| `RuleContext.__post_init__` | `require_account_id` | account-scoped 룰 평가 |
+| `TradeRecord.__post_init__` | `require_account_id` | trades 테이블 write |
+| `PositionSnapshot.__post_init__` | `require_account_id` | positions 캐시 write |
+| `BotBudget` | `account_id: str` (required field) | bot_budgets 테이블 write |
+| `DailyReportScheduler.__init__` | `account_id: str` (kw-only) + `require_account_id` | 일일 리포트 발행 |
+| `PositionReconciler.reconcile` | `account_id: str` (kw-only) | 포지션 보정 |
+| `TradeService.correct_position/insert_adjustment` | `account_id: str` (kw-only) | trade 보정 |
+| `TradeRecorder.save_adjustment` | `account_id: str` (kw-only) + `require_account_id` | adjustment write |
+| `PositionHistory.force_update/_update_position/_update_cache` | `account_id: str` (kw-only) | 포지션 강제 갱신 |
+| IPC handlers (`broker.status/balance/positions/reconcile`) | `args["account_id"]` 진입 시 `require_account_id` | IPC routing (account-scoped command payload) |
+| CLI commands (`treasury status/snapshot/allocate/deallocate`, `rule list/info`) | `--account` required | CLI UX |
+| Web routes (`treasury`, `trades`) | runtime fallback (`getattr(..., "account_id", "")`) 제거 | write 경로 검증 활용 (read endpoint 정책 미변경) |
+
+#### #1241 (SPLIT-2) 적용 위치
+
+Bot/Main + Approval payload validation. 본 SPLIT 머지 후 진행한다.
+
+| 호출 위치 | 형태 | 비고 |
+|---|---|---|
+| `BotConfig.__post_init__` | `require_account_id` | 봇 생성 진입점 |
+| `ApprovalService.create` | account-scoped type (`budget_change`, `rule_change`, `bot_create`) 시 `params["account_id"]` 검증 | approval payload validation |
+| `auto_approve` mode 추출 | account-scoped approval 검증 통과 후 mode 추출 | 자동 승인 |
+| IPC `bot_*` payload | `args["account_id"]` 진입 시 `require_account_id` | IPC bot routing |
+| CLI `bot create/remove/...`, `approval` 호출부 | `--account` required | CLI UX |
+| `main.py` 진입점 fallback (`params.get("account_id", "test")`) | 제거 | bootstrap 경로 정합 |
+
+#### #1242 (SPLIT-3) 적용 위치
+
+APIGateway/Stream + multi-account lifecycle. 본 SPLIT 머지 후 진행한다.
+
+| 호출 위치 | 형태 | 비고 |
+|---|---|---|
+| `APIGateway.get_ohlcv/get_current_price/get_positions/get_account_balance/submit_order/cancel_order` | `account_id: str` (kw-only) + `require_account_id` | broker routing 진입점 |
+| `StreamIntegration.__init__` | `account_id: str` (kw-only) + `require_account_id` | account-scoped 캐시 키 |
+| `LiveDataProvider.__init__` | `account_id: str` (kw-only) + `require_account_id` | 봇 단위 인스턴스화 (StrategyContextFactory가 BotConfig.account_id로 생성) |
+| multi-account lifecycle pool (`s.stream_integrations: dict[str, StreamIntegration]`) | account 별 인스턴스 분리 | shutdown leak 방지 |
+| `StopOrderManager` P1 fix | account-scoped 흐름 정합 | 단순 marker 호환 patch는 본 SPLIT-1에서 선반영 |
+| `StreamConnected/DisconnectedEvent` account_id 전파 | 이벤트 페이로드 정렬 | account 격리 |
+| `ResponseCache` prefix invalidate | account 별 prefix 키 정리 | broker routing 호환 |
+
+후속 영역은 다음 이슈로 이관:
+
+- **#1218 (Read query 정책)** — account 생략 query의 all-account 정책 정렬,
+  edge resolver, `strategy_performance` 계좌 추출.
+- **#1219 (DB schema)** — bot_budgets/treasury_state/trades/positions 테이블의
+  `DEFAULT 'default'`/`DEFAULT 'test'` 제거 + NOT NULL 강제.
 
 ## 테스트 게이트
 

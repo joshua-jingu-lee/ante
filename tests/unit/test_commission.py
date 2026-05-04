@@ -225,6 +225,7 @@ class TestTreasuryCommission:
             eventbus=eventbus,
             buy_commission_rate=0.00015,
             sell_commission_rate=0.00195,
+            account_id="acc-test",
         )
         await t.initialize()
         assert t.buy_commission_rate == 0.00015
@@ -232,13 +233,13 @@ class TestTreasuryCommission:
 
     async def test_treasury_default_sell_commission_rate(self, db, eventbus):
         """Treasury 기본 sell_commission_rate = 0.00195."""
-        t = Treasury(db=db, eventbus=eventbus)
+        t = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await t.initialize()
         assert t.sell_commission_rate == 0.00195
 
     async def test_update_commission_rates(self, db, eventbus):
         """수수료율 동적 업데이트."""
-        t = Treasury(db=db, eventbus=eventbus)
+        t = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await t.initialize()
 
         t.update_commission_rates(0.0001, 0.0018)
@@ -254,6 +255,7 @@ class TestTreasuryCommission:
             eventbus=eventbus,
             buy_commission_rate=0.001,  # 높은 수수료율로 테스트
             sell_commission_rate=0.002,
+            account_id="acc-test",
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)
@@ -272,6 +274,7 @@ class TestTreasuryCommission:
                 quantity=10.0,
                 price=50_000.0,
                 order_type="market",
+                account_id="acc-test",
             )
         )
 

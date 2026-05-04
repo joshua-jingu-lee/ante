@@ -56,14 +56,19 @@ class RuleEngine:
     def __init__(
         self,
         eventbus: EventBus,
-        account_id: str = "default",
+        *,
+        account_id: str,
         account_service: AccountService | None = None,
         bot_strategy_resolver: Callable[[str], str | None] | None = None,
         treasury: Treasury | None = None,
         trade_service: TradeService | None = None,
     ) -> None:
+        from ante.account.scoping import require_account_id
+
         self._eventbus = eventbus
-        self._account_id = account_id
+        self._account_id = require_account_id(
+            account_id, context="rule_engine.__init__"
+        )
         self._account_service = account_service
         self._bot_strategy_resolver = bot_strategy_resolver
         self._treasury = treasury
@@ -627,6 +632,7 @@ class RuleEngine:
                 )
                 await self._eventbus.publish(
                     OrderModifyRejectedEvent(
+                        account_id=event.account_id,
                         order_id=event.order_id,
                         bot_id=event.bot_id,
                         strategy_id=event.strategy_id,
@@ -645,6 +651,7 @@ class RuleEngine:
             logger.exception("주문 정정 룰 평가 실패: %s", event.order_id)
             await self._eventbus.publish(
                 OrderModifyRejectedEvent(
+                    account_id=event.account_id,
                     order_id=event.order_id,
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,

@@ -35,8 +35,8 @@ def bot_manager():
     mock = MagicMock()
     mock.list_bots = MagicMock(
         return_value=[
-            {"bot_id": "bot-1", "status": "running"},
-            {"bot_id": "bot-2", "status": "stopped"},
+            {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+            {"bot_id": "bot-2", "status": "stopped", "account_id": "acc-test"},
         ]
     )
     return mock
@@ -56,6 +56,7 @@ def scheduler(reconciler, broker, bot_manager, eventbus):
         broker=broker,
         bot_manager=bot_manager,
         eventbus=eventbus,
+        broker_account_id="acc-test",
         interval_seconds=0.1,  # 빠른 테스트용
     )
 
@@ -96,7 +97,7 @@ class TestRunOnce:
     async def test_no_active_bots(self, scheduler, bot_manager, broker):
         """활성 봇이 없으면 브로커 호출하지 않는다."""
         bot_manager.list_bots.return_value = [
-            {"bot_id": "bot-1", "status": "stopped"},
+            {"bot_id": "bot-1", "status": "stopped", "account_id": "acc-test"},
         ]
 
         result = await scheduler.run_once()
@@ -118,8 +119,8 @@ class TestRunOnce:
     ):
         """한 봇의 대사 실패가 다른 봇에 영향주지 않는다."""
         bot_manager.list_bots.return_value = [
-            {"bot_id": "bot-1", "status": "running"},
-            {"bot_id": "bot-2", "status": "running"},
+            {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+            {"bot_id": "bot-2", "status": "running", "account_id": "acc-test"},
         ]
         reconciler.reconcile.side_effect = [
             Exception("bot-1 실패"),
@@ -195,6 +196,7 @@ class TestConfiguration:
             broker=broker,
             bot_manager=bot_manager,
             eventbus=eventbus,
+            broker_account_id="acc-test",
         )
         assert sched._interval == DEFAULT_INTERVAL_SECONDS
         assert DEFAULT_INTERVAL_SECONDS == 1800
@@ -206,6 +208,101 @@ class TestConfiguration:
             broker=broker,
             bot_manager=bot_manager,
             eventbus=eventbus,
+            broker_account_id="acc-test",
             interval_seconds=600,
         )
         assert sched._interval == 600
+
+    def test_requires_broker_account_id(
+        self, reconciler, broker, bot_manager, eventbus
+    ):
+        """broker_account_id가 비어있으면 생성에 실패한다."""
+        with pytest.raises(ValueError, match="broker_account_id"):
+            ReconcileScheduler(
+                reconciler=reconciler,
+                broker=broker,
+                bot_manager=bot_manager,
+                eventbus=eventbus,
+                broker_account_id="",
+            )
+
+
+# ── SPLIT-1 multi-account 가드 회귀 테스트 ──────────────
+
+
+class TestBrokerAccountScoping:
+    """ReconcileScheduler가 자기 broker_account_id에 일치하는 봇만
+    reconcile하는지 확인한다 (SPLIT-1 가드).
+    """
+
+    async def test_scheduler_skips_bot_from_other_account(
+        self, reconciler, broker, bot_manager, eventbus, caplog
+    ):
+        """scheduler가 acc-A 바인딩일 때 acc-B 봇은 reconcile되지 않는다."""
+        import logging
+
+        bot_manager.list_bots.return_value = [
+            {"bot_id": "bot-a", "status": "running", "account_id": "acc-A"},
+            {"bot_id": "bot-b", "status": "running", "account_id": "acc-B"},
+        ]
+        sched = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-A",
+            interval_seconds=0.1,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.broker.scheduler"):
+            await sched.run_once()
+
+        # acc-A 봇만 reconcile 호출 — acc-B 봇은 스킵
+        assert reconciler.reconcile.call_count == 1
+        call_args = reconciler.reconcile.call_args
+        assert call_args.kwargs["bot_id"] == "bot-a"
+        assert call_args.kwargs["account_id"] == "acc-A"
+
+        # 미일치 봇에 대한 WARNING 로그
+        skip_logs = [
+            rec
+            for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "bot-b" in rec.getMessage()
+            and "acc-B" in rec.getMessage()
+        ]
+        assert skip_logs, (
+            "scheduler가 미일치 봇(bot-b/acc-B)에 대해 WARNING을 남겨야 한다"
+        )
+        assert any("acc-A" in rec.getMessage() for rec in skip_logs), (
+            "WARNING 메시지에 scheduler의 broker_account_id(acc-A)가 포함돼야 한다"
+        )
+
+    async def test_scheduler_processes_matching_account_bot(
+        self, reconciler, broker, bot_manager, eventbus
+    ):
+        """일치하는 봇은 정상 reconcile 호출된다."""
+        bot_manager.list_bots.return_value = [
+            {"bot_id": "bot-a1", "status": "running", "account_id": "acc-A"},
+            {"bot_id": "bot-a2", "status": "running", "account_id": "acc-A"},
+            {"bot_id": "bot-b", "status": "running", "account_id": "acc-B"},
+        ]
+        sched = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-A",
+            interval_seconds=0.1,
+        )
+
+        await sched.run_once()
+
+        # acc-A 봇 두 개 모두 reconcile 호출
+        assert reconciler.reconcile.call_count == 2
+        called_bot_ids = {
+            call.kwargs["bot_id"] for call in reconciler.reconcile.call_args_list
+        }
+        assert called_bot_ids == {"bot-a1", "bot-a2"}
+        for call in reconciler.reconcile.call_args_list:
+            assert call.kwargs["account_id"] == "acc-A"

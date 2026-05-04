@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from ante.account.scoping import require_account_id
 from ante.treasury.models import BotBudget
 
 if TYPE_CHECKING:
@@ -146,7 +147,8 @@ class Treasury:
         self,
         db: Database,
         eventbus: EventBus,
-        account_id: str = "default",
+        *,
+        account_id: str,
         currency: str = "KRW",
         buy_commission_rate: float = 0.00015,
         sell_commission_rate: float = 0.00195,
@@ -154,7 +156,7 @@ class Treasury:
     ) -> None:
         self._db = db
         self._eventbus = eventbus
-        self._account_id = account_id
+        self._account_id = require_account_id(account_id, context="treasury.__init__")
         self._currency = currency
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
@@ -575,11 +577,15 @@ class Treasury:
     # -- 이벤트 핸들러 -------------------------------------------
 
     def _is_my_event(self, event: object) -> bool:
-        """이벤트가 이 Treasury의 계좌에 해당하는지 확인."""
-        account_id = getattr(event, "account_id", "")
-        # account_id가 비어있으면 (하위 호환) 처리
-        if not account_id:
-            return True
+        """이벤트가 이 Treasury의 계좌에 해당하는지 확인.
+
+        AccountScopedEvent는 ``__post_init__`` 에서 valid account_id 보장이
+        되므로, 여기서는 단순히 일치 여부만 확인한다. account_id 필드가
+        없는 이벤트는 무시한다.
+        """
+        account_id = getattr(event, "account_id", None)
+        if account_id is None:
+            return False
         return account_id == self._account_id
 
     async def _on_order_validated(self, event: object) -> None:
@@ -838,8 +844,12 @@ class Treasury:
         await self.sync_balance(balance_data)
 
         # 2) KIS 보유종목 (output1) + Trade 내부 포지션 대조
+        # 자기 계좌 포지션만 조회: 단일 계좌 바인딩 인스턴스에서 cross-account
+        # 데이터가 섞이지 않도록 명시적으로 account_id 필터를 전달한다 (#1240).
         broker_positions = await broker.get_positions()
-        internal_positions = await position_history.get_all_positions()
+        internal_positions = await position_history.get_all_positions(
+            account_id=self._account_id
+        )
         internal_symbols = {p.symbol for p in internal_positions}
 
         external_purchase = 0.0
@@ -888,7 +898,10 @@ class Treasury:
         """
         from ante.eventbus.events import BalanceSyncedEvent
 
-        positions = await position_history.get_all_positions()
+        # 자기 계좌 포지션만 조회 (#1240).
+        positions = await position_history.get_all_positions(
+            account_id=self._account_id
+        )
 
         purchase_amount = 0.0
         eval_amount = 0.0

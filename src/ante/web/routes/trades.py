@@ -47,9 +47,7 @@ async def list_trades(
         {
             "trade_id": str(t.trade_id),
             "bot_id": str(t.bot_id) if t.bot_id else "",
-            "account_id": str(a)
-            if isinstance(a := getattr(t, "account_id", ""), str)
-            else "",
+            "account_id": t.account_id,
             "symbol": t.symbol,
             "side": t.side,
             "quantity": t.quantity,

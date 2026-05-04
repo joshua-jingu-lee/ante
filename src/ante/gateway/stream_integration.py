@@ -162,15 +162,35 @@ class StreamIntegration:
         """실시간 체결 통보 콜백.
 
         캐시 무효화 + OrderFilledEvent 발행.
+
+        ``account_id``는 broker payload 우선, 없으면 lifecycle에 묶인
+        ``self._account_id``로 fallback한다. 둘 다 비어있으면
+        OrderFilledEvent는 strict marker(``_requires_account_id``)에 의해
+        InvalidAccountIdError를 raise하므로, 발행을 시도하지 않고 WARNING
+        로그 후 skip한다 (캐시 무효화는 그래도 best-effort 수행).
         """
         symbol = execution.get("symbol", "")
-        account_id = execution.get("account_id", self._account_id)
+        account_id = execution.get("account_id", "") or self._account_id
 
         # 캐시 무효화: account_id 범위 내 balance, positions, 해당 종목 시세
-        self._cache.invalidate(f"{account_id}:balance")
-        self._cache.invalidate(f"{account_id}:positions")
-        if symbol:
-            self._cache.invalidate(f"{account_id}:price:{symbol}")
+        # account_id 가 비어 있으면 무효화 키가 의미 없으므로 skip.
+        if account_id:
+            self._cache.invalidate(f"{account_id}:balance")
+            self._cache.invalidate(f"{account_id}:positions")
+            if symbol:
+                self._cache.invalidate(f"{account_id}:price:{symbol}")
+
+        # account_id 가 비어 있으면 strict OrderFilledEvent를 만들 수 없다.
+        # 라이브 경로 보존을 위해 발행을 skip하고 WARNING만 남긴다.
+        if not account_id:
+            logger.warning(
+                "체결 통보에 account_id가 없어 OrderFilledEvent 발행을 skip합니다: "
+                "symbol=%s order_id=%s side=%s",
+                symbol,
+                execution.get("order_id", ""),
+                execution.get("side", ""),
+            )
+            return
 
         # 체결 이벤트 발행
         from ante.eventbus.events import OrderFilledEvent

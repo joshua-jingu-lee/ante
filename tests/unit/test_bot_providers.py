@@ -57,7 +57,7 @@ async def db(tmp_path):
 class TestLivePortfolioView:
     async def test_get_positions_empty(self, db, eventbus):
         """봇에 포지션이 없으면 빈 dict 반환."""
-        treasury = Treasury(db=db, eventbus=eventbus)
+        treasury = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await treasury.initialize()
         position_history = PositionHistory(db=db)
         await position_history.initialize()
@@ -67,7 +67,7 @@ class TestLivePortfolioView:
 
     async def test_get_positions_with_data(self, db, eventbus):
         """포지션이 있으면 심볼별 dict 반환."""
-        treasury = Treasury(db=db, eventbus=eventbus)
+        treasury = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await treasury.initialize()
         position_history = PositionHistory(db=db)
         await position_history.initialize()
@@ -85,6 +85,7 @@ class TestLivePortfolioView:
             price=50000.0,
             status=TradeStatus.FILLED,
             order_type="market",
+            account_id="acc-test",
         )
         await position_history.on_trade(record)
 
@@ -96,7 +97,7 @@ class TestLivePortfolioView:
 
     async def test_get_balance_no_budget(self, db, eventbus):
         """예산 미할당 시 0 반환."""
-        treasury = Treasury(db=db, eventbus=eventbus)
+        treasury = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await treasury.initialize()
         position_history = PositionHistory(db=db)
         await position_history.initialize()
@@ -108,7 +109,7 @@ class TestLivePortfolioView:
 
     async def test_get_balance_with_budget(self, db, eventbus):
         """예산 할당 시 잔고 반환."""
-        treasury = Treasury(db=db, eventbus=eventbus)
+        treasury = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await treasury.initialize()
         await treasury.set_account_balance(10_000_000.0)
         await treasury.allocate("bot1", 1_000_000.0)
@@ -476,10 +477,7 @@ class TestStrategyContextFactory:
             paper_executor=executor,
         )
 
-        config = BotConfig(
-            bot_id="paper1",
-            strategy_id="s1",
-        )
+        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acc-test")
         # AccountService 미설정 → VIRTUAL 모드(paper) 기본 동작
         ctx = factory.create(config)
 
@@ -547,7 +545,9 @@ class TestStrategyContextFactory:
         class FakeTreasury:
             def get_budget(self, bot_id):
                 if bot_id == "paper1":
-                    return BotBudget(bot_id="paper1", allocated=2_000_000.0)
+                    return BotBudget(
+                        bot_id="paper1", allocated=2_000_000.0, account_id="acc-test"
+                    )
                 return None
 
         class FakeTreasuryManager:
@@ -641,10 +641,7 @@ class TestBotManagerWithFactory:
         manager = BotManager(eventbus=eventbus, db=db, context_factory=factory)
         await manager.initialize()
 
-        config = BotConfig(
-            bot_id="paper1",
-            strategy_id="s1",
-        )
+        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acc-test")
         bot = await manager.create_bot(config, SimpleStrategy)
 
         assert bot.bot_id == "paper1"
@@ -672,7 +669,7 @@ class TestBotManagerWithFactory:
                 PaperPortfolioView(bot_id="bot1", initial_balance=1_000_000.0)
             ),
         )
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         bot = await manager.create_bot(config, SimpleStrategy, ctx)
         assert bot.bot_id == "bot1"
 
@@ -690,7 +687,7 @@ class TestBotManagerWithFactory:
         manager = BotManager(eventbus=eventbus, db=db)
         await manager.initialize()
 
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         with pytest.raises(BotError, match="factory"):
             await manager.create_bot(config, SimpleStrategy)
 
@@ -713,7 +710,7 @@ class TestBotManagerWithFactory:
         manager = BotManager(eventbus=eventbus, db=db, context_factory=factory)
         await manager.initialize()
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1")
+        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy)
         assert "paper1" in executor._portfolios
 
@@ -749,6 +746,7 @@ class TestPositionHistoryCache:
             price=50000.0,
             status=TradeStatus.FILLED,
             order_type="market",
+            account_id="acc-test",
         )
         await ph.on_trade(record)
 
@@ -782,6 +780,7 @@ class TestPositionHistoryCache:
             price=50000.0,
             status=TradeStatus.FILLED,
             order_type="market",
+            account_id="acc-test",
         )
         await ph1.on_trade(record)
 
@@ -810,6 +809,7 @@ class TestPositionHistoryCache:
             price=50000.0,
             status=TradeStatus.FILLED,
             order_type="market",
+            account_id="acc-test",
         )
         await ph.on_trade(buy)
 
@@ -823,6 +823,7 @@ class TestPositionHistoryCache:
             price=55000.0,
             status=TradeStatus.FILLED,
             order_type="market",
+            account_id="acc-test",
         )
         await ph.on_trade(sell)
 

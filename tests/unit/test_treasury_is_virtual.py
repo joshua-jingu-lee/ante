@@ -69,7 +69,7 @@ class TestIsVirtualFromTradingMode:
 
     def test_virtual_account_returns_is_virtual_true(self):
         """trading_mode=VIRTUAL 계좌는 is_virtual=True."""
-        treasury = FakeTreasury(account_id="domestic")
+        treasury = FakeTreasury()
         account_service = AsyncMock()
         account_service.get.return_value = _make_account(
             "domestic", TradingMode.VIRTUAL
@@ -85,7 +85,7 @@ class TestIsVirtualFromTradingMode:
 
     def test_live_account_returns_is_virtual_false(self):
         """trading_mode=LIVE 계좌는 is_virtual=False."""
-        treasury = FakeTreasury(account_id="domestic")
+        treasury = FakeTreasury()
         account_service = AsyncMock()
         account_service.get.return_value = _make_account("domestic", TradingMode.LIVE)
 
@@ -99,7 +99,7 @@ class TestIsVirtualFromTradingMode:
 
     def test_live_is_paper_true_returns_is_virtual_false(self):
         """LIVE + is_paper=true 조합에서 is_virtual=False (수용 조건 #2)."""
-        treasury = FakeTreasury(account_id="domestic")
+        treasury = FakeTreasury()
         account_service = AsyncMock()
         account = _make_account("domestic", TradingMode.LIVE)
         account.broker_config = {"is_paper": True}
@@ -116,7 +116,7 @@ class TestIsVirtualFromTradingMode:
 
     def test_no_account_service_defaults_to_virtual(self):
         """account_service가 없으면 is_virtual=True (안전 기본값)."""
-        treasury = FakeTreasury(account_id="domestic")
+        treasury = FakeTreasury()
 
         app = create_app(treasury=treasury)
         client = TestClient(app)
@@ -128,7 +128,7 @@ class TestIsVirtualFromTradingMode:
 
     def test_account_not_found_defaults_to_virtual(self):
         """account_service.get()이 None 반환 시 is_virtual=True."""
-        treasury = FakeTreasury(account_id="unknown")
+        treasury = FakeTreasury()
         account_service = AsyncMock()
         account_service.get.return_value = None
 

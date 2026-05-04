@@ -85,14 +85,14 @@ class TestAccountEvents:
             event.account_id = "changed"  # type: ignore[misc]
 
     async def test_account_events_default_values(self):
-        """Account 이벤트 기본값이 빈 문자열이다."""
-        suspended = AccountSuspendedEvent()
-        assert suspended.account_id == ""
+        """Account 이벤트는 account_id를 보존하고 나머지 필드는 기본값 ''을 가진다."""
+        suspended = AccountSuspendedEvent(account_id="acc-test")
+        assert suspended.account_id == "acc-test"
         assert suspended.reason == ""
         assert suspended.suspended_by == ""
 
-        activated = AccountActivatedEvent()
-        assert activated.account_id == ""
+        activated = AccountActivatedEvent(account_id="acc-test")
+        assert activated.account_id == "acc-test"
         assert activated.activated_by == ""
 
 
@@ -100,44 +100,46 @@ class TestAccountEvents:
 
 
 class TestAccountIdBackwardCompat:
-    """기존 이벤트에 추가된 account_id 필드가 기본값 ''으로 하위 호환된다."""
+    """기존 이벤트에 추가된 account_id 필드가 명시 전달되어 보존된다."""
 
     async def test_order_events_default_account_id(self):
-        """Order 이벤트 기본 account_id는 빈 문자열이다."""
+        """Order 이벤트 account_id는 생성 시 명시값으로 보존된다."""
         events = [
-            OrderRequestEvent(symbol="005930", side="buy", quantity=10.0),
-            OrderCancelEvent(order_id="o1"),
-            OrderModifyEvent(order_id="o1"),
-            OrderModifyRejectedEvent(order_id="o1"),
-            OrderValidatedEvent(order_id="o1"),
-            OrderRejectedEvent(order_id="o1"),
-            OrderApprovedEvent(order_id="o1"),
-            OrderSubmittedEvent(order_id="o1"),
-            OrderFilledEvent(order_id="o1"),
-            OrderCancelledEvent(order_id="o1"),
-            OrderFailedEvent(order_id="o1"),
+            OrderRequestEvent(
+                symbol="005930", side="buy", quantity=10.0, account_id="acc-test"
+            ),
+            OrderCancelEvent(order_id="o1", account_id="acc-test"),
+            OrderModifyEvent(order_id="o1", account_id="acc-test"),
+            OrderModifyRejectedEvent(order_id="o1", account_id="acc-test"),
+            OrderValidatedEvent(order_id="o1", account_id="acc-test"),
+            OrderRejectedEvent(order_id="o1", account_id="acc-test"),
+            OrderApprovedEvent(order_id="o1", account_id="acc-test"),
+            OrderSubmittedEvent(order_id="o1", account_id="acc-test"),
+            OrderFilledEvent(order_id="o1", account_id="acc-test"),
+            OrderCancelledEvent(order_id="o1", account_id="acc-test"),
+            OrderFailedEvent(order_id="o1", account_id="acc-test"),
         ]
         for event in events:
-            assert event.account_id == "", (
-                f"{type(event).__name__}.account_id 기본값이 ''이 아님"
+            assert event.account_id == "acc-test", (
+                f"{type(event).__name__}.account_id 보존 실패"
             )
 
     async def test_bot_events_default_account_id(self):
-        """Bot 이벤트 기본 account_id는 빈 문자열이다."""
+        """Bot 이벤트 account_id는 생성 시 명시값으로 보존된다."""
         events = [
-            BotStartedEvent(bot_id="bot1"),
-            BotStoppedEvent(bot_id="bot1"),
-            BotErrorEvent(bot_id="bot1", error_message="err"),
+            BotStartedEvent(bot_id="bot1", account_id="acc-test"),
+            BotStoppedEvent(bot_id="bot1", account_id="acc-test"),
+            BotErrorEvent(bot_id="bot1", error_message="err", account_id="acc-test"),
         ]
         for event in events:
-            assert event.account_id == "", (
-                f"{type(event).__name__}.account_id 기본값이 ''이 아님"
+            assert event.account_id == "acc-test", (
+                f"{type(event).__name__}.account_id 보존 실패"
             )
 
     async def test_balance_synced_default_account_id(self):
-        """BalanceSyncedEvent 기본 account_id는 빈 문자열이다."""
-        event = BalanceSyncedEvent(account_balance=1000000.0)
-        assert event.account_id == ""
+        """BalanceSyncedEvent account_id는 생성 시 명시값으로 보존된다."""
+        event = BalanceSyncedEvent(account_balance=1000000.0, account_id="acc-test")
+        assert event.account_id == "acc-test"
 
     async def test_order_event_with_account_id(self):
         """account_id를 명시적으로 전달할 수 있다."""

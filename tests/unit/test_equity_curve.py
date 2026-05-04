@@ -156,6 +156,7 @@ async def test_feedback_get_equity_curve():
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime(2025, 1, 10, tzinfo=UTC),
+            account_id="acc-test",
         ),
         TradeRecord(
             trade_id="t2",
@@ -167,6 +168,7 @@ async def test_feedback_get_equity_curve():
             price=52000,
             status=TradeStatus.FILLED,
             timestamp=datetime(2025, 1, 15, tzinfo=UTC),
+            account_id="acc-test",
         ),
     ]
 
