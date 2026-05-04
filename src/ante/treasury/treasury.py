@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 TREASURY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_budgets (
     bot_id       TEXT PRIMARY KEY,
-    account_id   TEXT NOT NULL DEFAULT '',
+    account_id   TEXT NOT NULL,
     allocated    REAL NOT NULL DEFAULT 0.0,
     available    REAL NOT NULL DEFAULT 0.0,
     reserved     REAL NOT NULL DEFAULT 0.0,
@@ -67,47 +67,19 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
     created_at           TEXT    DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, snapshot_date)
 );
+CREATE INDEX IF NOT EXISTS idx_bot_budgets_account
+    ON bot_budgets(account_id);
+CREATE INDEX IF NOT EXISTS idx_treasury_transactions_account
+    ON treasury_transactions(account_id);
 """
 
-# 기존 key-value 테이블에서 계좌별 행 구조로 마이그레이션
+# Legacy compatibility: old dev DB may lack account_id. Do not add fallback default.
 TREASURY_MIGRATION_V2 = """
--- bot_budgets에 account_id 컬럼 추가 (이미 존재하면 무시)
-ALTER TABLE bot_budgets ADD COLUMN account_id TEXT NOT NULL DEFAULT '';
-"""
-
-TREASURY_MIGRATION_V2_STATE = """
--- treasury_state 재생성: key-value -> 계좌별 행 구조
-CREATE TABLE IF NOT EXISTS treasury_state_new (
-    account_id         TEXT PRIMARY KEY,
-    account_balance    REAL NOT NULL DEFAULT 0,
-    purchasable_amount REAL NOT NULL DEFAULT 0,
-    total_evaluation   REAL NOT NULL DEFAULT 0,
-    currency           TEXT NOT NULL DEFAULT 'KRW',
-    last_synced_at     TEXT
-);
-
--- 기존 데이터 마이그레이션
-INSERT OR IGNORE INTO treasury_state_new (
-    account_id, account_balance,
-    purchasable_amount, total_evaluation
-)
-SELECT 'default',
-    COALESCE(
-        (SELECT value FROM treasury_state
-         WHERE key = 'account_balance'), 0),
-    COALESCE(
-        (SELECT value FROM treasury_state
-         WHERE key = 'purchasable_amount'), 0),
-    COALESCE(
-        (SELECT value FROM treasury_state
-         WHERE key = 'total_evaluation'), 0);
-
-DROP TABLE IF EXISTS treasury_state;
-ALTER TABLE treasury_state_new RENAME TO treasury_state;
+ALTER TABLE bot_budgets ADD COLUMN account_id TEXT;
 """
 
 TREASURY_TRANSACTIONS_MIGRATION = """
-ALTER TABLE treasury_transactions ADD COLUMN account_id TEXT DEFAULT '';
+ALTER TABLE treasury_transactions ADD COLUMN account_id TEXT;
 """
 
 # treasury_state에 평가액/매입액 필드 추가 마이그레이션
@@ -1106,6 +1078,9 @@ class Treasury:
 
     async def _save_budget(self, budget: BotBudget) -> None:
         """봇 예산 저장."""
+        account_id = require_account_id(
+            budget.account_id, context="treasury._save_budget"
+        )
         await self._db.execute(
             """INSERT INTO bot_budgets
                (bot_id, account_id, allocated, available, reserved,
@@ -1121,7 +1096,7 @@ class Treasury:
                  last_updated = excluded.last_updated""",
             (
                 budget.bot_id,
-                budget.account_id,
+                account_id,
                 budget.allocated,
                 budget.available,
                 budget.reserved,

@@ -8,7 +8,7 @@
 -- 봇별 예산 상태
 CREATE TABLE bot_budgets (
     bot_id       TEXT PRIMARY KEY,
-    account_id   TEXT NOT NULL,                          -- 소속 계좌 ID
+    account_id   TEXT NOT NULL,                          -- 소속 계좌 ID, fallback default 없음
     allocated    REAL NOT NULL DEFAULT 0.0,
     available    REAL NOT NULL DEFAULT 0.0,
     reserved     REAL NOT NULL DEFAULT 0.0,
@@ -21,7 +21,7 @@ CREATE TABLE bot_budgets (
 CREATE TABLE treasury_transactions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     bot_id           TEXT,
-    account_id       TEXT DEFAULT 'default',              -- 소속 계좌 ID
+    account_id       TEXT NOT NULL,                       -- 소속 계좌 ID, fallback default 없음
     transaction_type TEXT NOT NULL,  -- 'allocate', 'deallocate', 'reserve', 'release', 'fill'
     amount           REAL NOT NULL,
     description      TEXT DEFAULT '',
@@ -37,8 +37,13 @@ CREATE TABLE treasury_state (
     currency           TEXT NOT NULL DEFAULT 'KRW',
     last_synced_at     TEXT
 );
+CREATE INDEX idx_bot_budgets_account ON bot_budgets(account_id);
+CREATE INDEX idx_treasury_transactions_account
+    ON treasury_transactions(account_id);
 ```
 
-> **마이그레이션**: 기존 `treasury_state`는 key-value 구조에서 계좌별 행 구조로 변경되므로, 테이블 재생성이 필요하다. 기존 데이터는 `account_id = "default"` 행으로 변환한다.
+> **마이그레이션**: 1.0 이전 fresh schema 기준으로 Treasury DB는 fallback
+> account 값을 생성하지 않는다. 기존 invalid dev DB 데이터의 자동 보존/변환은
+> 이 계약의 범위가 아니다.
 
 > **참고**: `positions` 테이블은 Trade 모듈이 소유한다. [trade.md](../trade/trade.md) 참조.
