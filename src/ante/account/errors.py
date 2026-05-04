@@ -50,9 +50,15 @@ class AccountSuspendedError(AccountError):
 
 
 class InvalidAccountIdError(AccountError):
-    """account_id 형식이 올바르지 않음."""
+    """account_id 형식 위반 또는 RESTRICTED/INVALID_RUNTIME 예약어 사용.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가 ``getattr(e, "code", "EXECUTION_ERROR")``로
+    안정 코드 ``"VALIDATION_ERROR"``를 노출하도록 한다. ``require_account_id``
+    가 이 예외를 raise하는 모든 IPC 경로(bot.create, treasury.allocate/deallocate,
+    broker.reconcile 등)가 자동으로 ``VALIDATION_ERROR``로 매핑된다.
+    """
+
+    code: str = "VALIDATION_ERROR"
 
 
 class AccountImmutableFieldError(AccountError):
