@@ -49,7 +49,7 @@ CREATE TABLE positions (
     realized_pnl     REAL NOT NULL DEFAULT 0.0,    -- 누적 실현 손익
     exchange         TEXT DEFAULT 'KRX',
     updated_at       TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (bot_id, symbol)
+    PRIMARY KEY (account_id, bot_id, symbol)
 );
 
 -- 포지션 변동 이력
@@ -63,11 +63,19 @@ CREATE TABLE position_history (
     pnl            REAL DEFAULT 0.0,        -- 이 거래의 실현 손익 (sell 시)
     timestamp      TEXT,
     exchange       TEXT DEFAULT 'KRX',      -- v0.2 마이그레이션으로 추가
+    account_id     TEXT NOT NULL,
     created_at     TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX idx_position_history_bot ON position_history(bot_id, timestamp);
+CREATE INDEX idx_position_history_account
+    ON position_history(account_id, bot_id, timestamp);
 ```
+
+`positions.account_id`와 `position_history.account_id`는 fresh schema에서
+필수값이며 `DEFAULT 'default'` 같은 fallback을 두지 않는다. 현재 포지션의
+유일 키는 account를 포함해 동일 `bot_id`/`symbol`이 다른 account에서
+충돌하지 않아야 한다.
 
 **근거**:
 - `trades` 테이블: 모든 거래 시도를 기록 (체결/취소/거부/실패 모두)

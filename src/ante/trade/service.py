@@ -68,26 +68,34 @@ class TradeService:
         self,
         bot_id: str,
         include_closed: bool = False,
+        *,
+        account_id: str | None = None,
     ) -> list[PositionSnapshot]:
         """봇의 현재 포지션 조회."""
         return await self._position_history.get_positions(
             bot_id=bot_id,
             include_closed=include_closed,
+            account_id=account_id,
         )
 
-    async def get_all_positions(self) -> list[PositionSnapshot]:
+    async def get_all_positions(
+        self, *, account_id: str | None = None
+    ) -> list[PositionSnapshot]:
         """전체 봇의 모든 포지션 조회 (대사 계좌 합산 검증용)."""
-        return await self._position_history.get_all_positions()
+        return await self._position_history.get_all_positions(account_id=account_id)
 
     async def get_position_history(
         self,
         bot_id: str,
         symbol: str | None = None,
+        *,
+        account_id: str | None = None,
     ) -> list[dict]:
         """포지션 변동 이력 조회."""
         return await self._position_history.get_history(
             bot_id=bot_id,
             symbol=symbol,
+            account_id=account_id,
         )
 
     # ── 성과 지표 ────────────────────────────────────
@@ -113,9 +121,11 @@ class TradeService:
 
     async def get_summary(self, bot_id: str, account_id: str) -> dict:
         """봇 요약 정보 (대시보드용)."""
-        positions = await self.get_positions(bot_id)
+        positions = await self.get_positions(bot_id, account_id=account_id)
         performance = await self.get_performance(account_id=account_id, bot_id=bot_id)
-        recent_trades = await self.get_trades(bot_id=bot_id, limit=10)
+        recent_trades = await self.get_trades(
+            account_id=account_id, bot_id=bot_id, limit=10
+        )
 
         return {
             "positions": positions,
@@ -145,7 +155,9 @@ class TradeService:
 
         account_id = require_account_id(account_id, context="correct_position")
 
-        old = await self._position_history.get_current(bot_id=bot_id, symbol=symbol)
+        old = await self._position_history.get_current(
+            bot_id=bot_id, symbol=symbol, account_id=account_id
+        )
         old_qty = old.get("quantity", 0)
         old_avg = old.get("avg_entry_price", 0.0)
 

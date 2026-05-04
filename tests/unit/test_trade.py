@@ -398,6 +398,33 @@ class TestTradeRecorder:
 
 
 class TestPositionHistory:
+    async def test_positions_schema_is_account_aware(self, db, position_history):
+        """fresh positions DDL은 account fallback 없이 account-aware PK를 갖는다."""
+        columns = await db.fetch_all("PRAGMA table_info(positions)")
+        account_col = next(row for row in columns if row["name"] == "account_id")
+        assert account_col["notnull"] == 1
+        assert account_col["dflt_value"] is None
+
+        pk_columns = [
+            row["name"]
+            for row in sorted(columns, key=lambda row: row["pk"])
+            if row["pk"]
+        ]
+        assert pk_columns == ["account_id", "bot_id", "symbol"]
+
+    async def test_position_history_schema_is_account_aware(self, db, position_history):
+        """fresh position_history DDL은 account_id와 account 조회 index를 갖는다."""
+        columns = await db.fetch_all("PRAGMA table_info(position_history)")
+        account_col = next(row for row in columns if row["name"] == "account_id")
+        assert account_col["notnull"] == 1
+        assert account_col["dflt_value"] is None
+
+        indexes = await db.fetch_all(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = 'position_history'"
+        )
+        assert "idx_position_history_account" in {row["name"] for row in indexes}
+
     async def test_buy_increases_quantity(self, position_history):
         """매수 시 수량 증가."""
         record = TradeRecord(
@@ -686,6 +713,63 @@ class TestPositionHistory:
         none = await position_history.get_all_positions(account_id="acc-zzz")
         assert none == []
 
+    async def test_same_bot_symbol_keeps_positions_per_account(self, position_history):
+        """동일 bot_id/symbol이라도 account가 다르면 서로 덮어쓰지 않는다."""
+        for account_id, quantity, price in [
+            ("acc-a", 10, 50000),
+            ("acc-b", 3, 70000),
+        ]:
+            await position_history.on_trade(
+                TradeRecord(
+                    trade_id=uuid4(),
+                    bot_id="bot-shared",
+                    strategy_id="s1",
+                    symbol="005930",
+                    side="buy",
+                    quantity=quantity,
+                    price=price,
+                    status=TradeStatus.FILLED,
+                    timestamp=datetime.now(UTC),
+                    account_id=account_id,
+                )
+            )
+
+        pos_a = await position_history.get_current(
+            "bot-shared", "005930", account_id="acc-a"
+        )
+        pos_b = await position_history.get_current(
+            "bot-shared", "005930", account_id="acc-b"
+        )
+        assert pos_a["quantity"] == 10
+        assert pos_a["avg_entry_price"] == 50000
+        assert pos_b["quantity"] == 3
+        assert pos_b["avg_entry_price"] == 70000
+
+        all_positions = await position_history.get_positions("bot-shared")
+        assert {p.account_id for p in all_positions} == {"acc-a", "acc-b"}
+
+        only_a = await position_history.get_positions("bot-shared", account_id="acc-a")
+        assert len(only_a) == 1
+        assert only_a[0].account_id == "acc-a"
+
+    async def test_position_cache_key_includes_account_id(self, position_history):
+        """캐시 key가 account를 포함해 동일 symbol의 account별 snapshot을 보존한다."""
+        for account_id, quantity in [("acc-a", 10), ("acc-b", 20)]:
+            await position_history.force_update(
+                bot_id="bot-cache",
+                symbol="005930",
+                quantity=quantity,
+                avg_entry_price=50000,
+                account_id=account_id,
+            )
+
+        cached_all = position_history.get_positions_sync("bot-cache")
+        assert {p.account_id for p in cached_all} == {"acc-a", "acc-b"}
+
+        cached_a = position_history.get_positions_sync("bot-cache", account_id="acc-a")
+        assert len(cached_a) == 1
+        assert cached_a[0].quantity == 10
+
     async def test_force_update(self, position_history):
         """Reconciler 강제 포지션 덮어쓰기."""
         await position_history.force_update(
@@ -756,6 +840,33 @@ class TestPositionHistory:
 
         history = await position_history.get_history("bot1", "005930")
         assert len(history) == 2  # buy + sell
+
+    async def test_get_history_filters_by_account_id(self, position_history):
+        """position_history 조회가 명시 account_id로 좁혀진다."""
+        for account_id in ["acc-a", "acc-b"]:
+            await position_history.on_trade(
+                TradeRecord(
+                    trade_id=uuid4(),
+                    bot_id="bot-history",
+                    strategy_id="s1",
+                    symbol="005930",
+                    side="buy",
+                    quantity=10,
+                    price=50000,
+                    status=TradeStatus.FILLED,
+                    timestamp=datetime.now(UTC),
+                    account_id=account_id,
+                )
+            )
+
+        all_history = await position_history.get_history("bot-history", "005930")
+        assert {row["account_id"] for row in all_history} == {"acc-a", "acc-b"}
+
+        account_history = await position_history.get_history(
+            "bot-history", "005930", account_id="acc-a"
+        )
+        assert len(account_history) == 1
+        assert account_history[0]["account_id"] == "acc-a"
 
     async def test_save_history_writes_account_id(self, position_history, db):
         """체결 이력 INSERT 시 account_id가 schema default 'default'가 아닌

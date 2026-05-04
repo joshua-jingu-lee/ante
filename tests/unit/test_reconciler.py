@@ -54,14 +54,22 @@ def reconciler(service, eventbus):
     return PositionReconciler(trade_service=service, eventbus=eventbus)
 
 
-async def _set_position(position_history, bot_id, symbol, qty, avg_price):
+async def _set_position(
+    position_history,
+    bot_id,
+    symbol,
+    qty,
+    avg_price,
+    *,
+    account_id="acc-test",
+):
     """테스트용 포지션 설정."""
     await position_history.force_update(
         bot_id=bot_id,
         symbol=symbol,
         quantity=qty,
         avg_entry_price=avg_price,
-        account_id="acc-test",
+        account_id=account_id,
     )
 
 
@@ -157,6 +165,31 @@ class TestNoMismatch:
             bot_id="bot-1", broker_positions=[], account_id="acc-test"
         )
         assert corrections == []
+
+    async def test_other_account_position_is_not_reconciled(
+        self, reconciler, position_history
+    ):
+        """Reconciler는 요청 account_id의 내부 포지션만 대조한다."""
+        await _set_position(
+            position_history,
+            "bot-1",
+            "005930",
+            50,
+            50000,
+            account_id="acc-other",
+        )
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+
+        assert corrections == []
+        other = await position_history.get_current(
+            "bot-1", "005930", account_id="acc-other"
+        )
+        assert other["quantity"] == 50
 
 
 # ── 시나리오 4: 외부 매수 ──────────────────────────

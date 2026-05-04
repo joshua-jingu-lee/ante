@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS positions (
     avg_entry_price  REAL NOT NULL DEFAULT 0.0,
     realized_pnl     REAL NOT NULL DEFAULT 0.0,
     updated_at       TEXT DEFAULT (datetime('now')),
-    account_id       TEXT NOT NULL DEFAULT 'default',
-    PRIMARY KEY (bot_id, symbol)
+    account_id       TEXT NOT NULL,
+    PRIMARY KEY (account_id, bot_id, symbol)
 );
 
 CREATE TABLE IF NOT EXISTS position_history (
@@ -39,12 +39,14 @@ CREATE TABLE IF NOT EXISTS position_history (
     pnl            REAL DEFAULT 0.0,
     timestamp      TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
-    account_id     TEXT NOT NULL DEFAULT 'default',
+    account_id     TEXT NOT NULL,
     exchange       TEXT DEFAULT 'KRX',
     trade_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_position_history_bot
     ON position_history(bot_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_position_history_account
+    ON position_history(account_id, bot_id, timestamp);
 """
 
 
@@ -53,7 +55,7 @@ class PositionHistory:
 
     def __init__(self, db: Database) -> None:
         self._db = db
-        self._position_cache: dict[str, dict[str, PositionSnapshot]] = {}
+        self._position_cache: dict[tuple[str, str], dict[str, PositionSnapshot]] = {}
 
     async def initialize(self) -> None:
         """스키마 생성 + 캐시 워밍."""
@@ -75,21 +77,43 @@ class PositionHistory:
             snapshot = self._row_to_snapshot_safe(row, context="warm cache")
             if snapshot is None:
                 continue
-            self._position_cache.setdefault(snapshot.bot_id, {})[snapshot.symbol] = (
-                snapshot
+            cache_key = self._cache_key(snapshot.account_id, snapshot.bot_id)
+            self._position_cache.setdefault(cache_key, {})[snapshot.symbol] = snapshot
+
+    def get_positions_sync(
+        self,
+        bot_id: str,
+        *,
+        account_id: str | None = None,
+    ) -> list[PositionSnapshot]:
+        """봇의 현재 포지션 동기 조회 (인메모리 캐시). PortfolioView용."""
+        if account_id is not None:
+            account_id = require_account_id(
+                account_id, context="position.get_positions_sync"
+            )
+            return list(
+                self._position_cache.get(
+                    self._cache_key(account_id, bot_id), {}
+                ).values()
             )
 
-    def get_positions_sync(self, bot_id: str) -> list[PositionSnapshot]:
-        """봇의 현재 포지션 동기 조회 (인메모리 캐시). PortfolioView용."""
-        bot_positions = self._position_cache.get(bot_id, {})
-        return list(bot_positions.values())
+        positions: list[PositionSnapshot] = []
+        for cache_account_id, cache_bot_id in sorted(self._position_cache):
+            if cache_bot_id != bot_id:
+                continue
+            positions.extend(
+                self._position_cache[(cache_account_id, cache_bot_id)].values()
+            )
+        return positions
 
     async def on_trade(self, record: TradeRecord) -> None:
         """체결 기록을 반영하여 포지션 상태 갱신."""
         if record.status != TradeStatus.FILLED:
             return
 
-        position = await self._get_current(record.bot_id, record.symbol)
+        position = await self._get_current(
+            record.bot_id, record.symbol, account_id=record.account_id
+        )
 
         if record.side == "buy":
             total_cost = position["avg_entry_price"] * position["quantity"]
@@ -167,6 +191,8 @@ class PositionHistory:
         self,
         bot_id: str,
         include_closed: bool = False,
+        *,
+        account_id: str | None = None,
     ) -> list[PositionSnapshot]:
         """봇의 현재 포지션 조회.
 
@@ -174,15 +200,23 @@ class PositionHistory:
         warning만 남긴다. dashboard / Treasury 동기화가 마이그레이션 전에도
         실패하지 않도록 하기 위함이다.
         """
-        if include_closed:
-            rows = await self._db.fetch_all(
-                "SELECT * FROM positions WHERE bot_id = ?", (bot_id,)
+        conditions = ["bot_id = ?"]
+        params: list[object] = [bot_id]
+
+        if account_id is not None:
+            account_id = require_account_id(
+                account_id, context="position.get_positions"
             )
-        else:
-            rows = await self._db.fetch_all(
-                "SELECT * FROM positions WHERE bot_id = ? AND quantity > 0",
-                (bot_id,),
-            )
+            conditions.append("account_id = ?")
+            params.append(account_id)
+
+        if not include_closed:
+            conditions.append("quantity > 0")
+
+        rows = await self._db.fetch_all(
+            f"SELECT * FROM positions WHERE {' AND '.join(conditions)}",
+            tuple(params),
+        )
         return self._rows_to_snapshots(rows, context="get_positions")
 
     async def get_all_positions(
@@ -206,36 +240,51 @@ class PositionHistory:
                 "SELECT * FROM positions WHERE quantity > 0"
             )
         else:
+            account_id = require_account_id(
+                account_id, context="position.get_all_positions"
+            )
             rows = await self._db.fetch_all(
                 "SELECT * FROM positions WHERE quantity > 0 AND account_id = ?",
                 (account_id,),
             )
         return self._rows_to_snapshots(rows, context="get_all_positions")
 
-    async def get_current(self, bot_id: str, symbol: str) -> dict:
+    async def get_current(
+        self,
+        bot_id: str,
+        symbol: str,
+        *,
+        account_id: str | None = None,
+    ) -> dict:
         """현재 포지션 조회 (public)."""
-        return await self._get_current(bot_id, symbol)
+        return await self._get_current(bot_id, symbol, account_id=account_id)
 
     async def get_history(
         self,
         bot_id: str,
         symbol: str | None = None,
+        *,
+        account_id: str | None = None,
     ) -> list[dict]:
         """포지션 변동 이력 조회."""
+        conditions = ["bot_id = ?"]
+        params: list[object] = [bot_id]
+
+        if account_id is not None:
+            account_id = require_account_id(account_id, context="position.get_history")
+            conditions.append("account_id = ?")
+            params.append(account_id)
+
         if symbol:
-            rows = await self._db.fetch_all(
-                "SELECT * FROM position_history"
-                " WHERE bot_id = ? AND symbol = ?"
-                " ORDER BY created_at DESC",
-                (bot_id, symbol),
-            )
-        else:
-            rows = await self._db.fetch_all(
-                "SELECT * FROM position_history"
-                " WHERE bot_id = ?"
-                " ORDER BY created_at DESC",
-                (bot_id,),
-            )
+            conditions.append("symbol = ?")
+            params.append(symbol)
+
+        rows = await self._db.fetch_all(
+            "SELECT * FROM position_history"
+            f" WHERE {' AND '.join(conditions)}"
+            " ORDER BY created_at DESC",
+            tuple(params),
+        )
         return [dict(row) for row in rows]
 
     async def force_update(
@@ -255,33 +304,51 @@ class PositionHistory:
             """INSERT INTO positions
                (bot_id, symbol, quantity, avg_entry_price, account_id, updated_at)
                VALUES (?, ?, ?, ?, ?, datetime('now'))
-               ON CONFLICT(bot_id, symbol) DO UPDATE SET
+               ON CONFLICT(account_id, bot_id, symbol) DO UPDATE SET
                  quantity = excluded.quantity,
                  avg_entry_price = excluded.avg_entry_price,
-                 account_id = excluded.account_id,
                  updated_at = excluded.updated_at""",
             (bot_id, symbol, quantity, avg_entry_price, validated_account_id),
         )
         # 인메모리 캐시 갱신
         self._update_cache(
-            bot_id, symbol, quantity, avg_entry_price, account_id=account_id
+            bot_id, symbol, quantity, avg_entry_price, account_id=validated_account_id
         )
 
-    async def _get_current(self, bot_id: str, symbol: str) -> dict:
+    async def _get_current(
+        self,
+        bot_id: str,
+        symbol: str,
+        *,
+        account_id: str | None = None,
+    ) -> dict:
         """현재 포지션 조회. 없으면 빈 포지션 반환."""
-        row = await self._db.fetch_one(
-            "SELECT * FROM positions WHERE bot_id = ? AND symbol = ?",
-            (bot_id, symbol),
-        )
+        if account_id is None:
+            row = await self._db.fetch_one(
+                "SELECT * FROM positions"
+                " WHERE bot_id = ? AND symbol = ?"
+                " ORDER BY account_id LIMIT 1",
+                (bot_id, symbol),
+            )
+        else:
+            account_id = require_account_id(account_id, context="position.get_current")
+            row = await self._db.fetch_one(
+                "SELECT * FROM positions"
+                " WHERE account_id = ? AND bot_id = ? AND symbol = ?",
+                (account_id, bot_id, symbol),
+            )
         if row:
             return dict(row)
-        return {
+        empty = {
             "bot_id": bot_id,
             "symbol": symbol,
             "quantity": 0.0,
             "avg_entry_price": 0.0,
             "realized_pnl": 0.0,
         }
+        if account_id is not None:
+            empty["account_id"] = account_id
+        return empty
 
     async def _update_position(
         self,
@@ -294,28 +361,26 @@ class PositionHistory:
         realized_pnl_delta: float = 0.0,
     ) -> None:
         """포지션 상태 갱신."""
+        validated_account_id = require_account_id(
+            account_id, context="position._update_position"
+        )
         await self._db.execute(
             """INSERT INTO positions
                (bot_id, symbol, quantity, avg_entry_price,
                 realized_pnl, updated_at, account_id)
                VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
-               ON CONFLICT(bot_id, symbol) DO UPDATE SET
-                 quantity = ?,
-                 avg_entry_price = ?,
-                 realized_pnl = realized_pnl + ?,
-                 account_id = ?,
-                 updated_at = datetime('now')""",
+               ON CONFLICT(account_id, bot_id, symbol) DO UPDATE SET
+                 quantity = excluded.quantity,
+                 avg_entry_price = excluded.avg_entry_price,
+                 realized_pnl = positions.realized_pnl + excluded.realized_pnl,
+                 updated_at = excluded.updated_at""",
             (
                 bot_id,
                 symbol,
                 quantity,
                 avg_entry_price,
                 realized_pnl_delta,
-                account_id,
-                quantity,
-                avg_entry_price,
-                realized_pnl_delta,
-                account_id,
+                validated_account_id,
             ),
         )
         # 인메모리 캐시 갱신
@@ -324,7 +389,7 @@ class PositionHistory:
             symbol,
             quantity,
             avg_entry_price,
-            account_id=account_id,
+            account_id=validated_account_id,
             realized_pnl_delta=realized_pnl_delta,
         )
 
@@ -339,7 +404,8 @@ class PositionHistory:
         realized_pnl_delta: float = 0.0,
     ) -> None:
         """인메모리 포지션 캐시 갱신."""
-        bot_cache = self._position_cache.setdefault(bot_id, {})
+        cache_key = self._cache_key(account_id, bot_id)
+        bot_cache = self._position_cache.setdefault(cache_key, {})
         existing = bot_cache.get(symbol)
         prev_pnl = existing.realized_pnl if existing else 0.0
 
@@ -354,6 +420,8 @@ class PositionHistory:
             )
         else:
             bot_cache.pop(symbol, None)
+            if not bot_cache:
+                self._position_cache.pop(cache_key, None)
 
     async def _save_history(
         self,
@@ -372,8 +440,8 @@ class PositionHistory:
         """포지션 변동 이력 저장.
 
         ``account_id``는 호출자에서 ``record.account_id``를 그대로 전달하며,
-        :func:`require_account_id`로 검증한다. 누락 시 schema default
-        ``'default'``로 저장되던 회귀(#1240 review)를 차단한다.
+        :func:`require_account_id`로 검증한다. 누락 시 fresh schema NOT NULL
+        제약과 runtime 검증으로 저장을 차단한다.
         """
         validated_account_id = require_account_id(
             account_id, context="position._save_history"
@@ -410,6 +478,11 @@ class PositionHistory:
             updated_at=row.get("updated_at", ""),
             account_id=row["account_id"],
         )
+
+    @staticmethod
+    def _cache_key(account_id: str, bot_id: str) -> tuple[str, str]:
+        """계좌와 bot을 함께 사용해 동일 bot/symbol의 cross-account 충돌을 막는다."""
+        return (account_id, bot_id)
 
     def _row_to_snapshot_safe(
         self, row: dict, *, context: str
