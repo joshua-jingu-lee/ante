@@ -1,4 +1,13 @@
-from scripts import generate_db_schema
+import importlib.util
+from pathlib import Path
+
+_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "generate_db_schema.py"
+_SPEC = importlib.util.spec_from_file_location("generate_db_schema", _SCRIPT_PATH)
+assert _SPEC is not None
+assert _SPEC.loader is not None
+
+generate_db_schema = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(generate_db_schema)
 
 
 def test_schema_name_pattern_collects_official_schema_constants() -> None:
