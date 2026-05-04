@@ -515,17 +515,17 @@ class TestBrokerAccountOption:
         mock_gb.assert_called_once_with("domestic")
 
     def test_broker_balance_without_account(self, runner):
-        """--account 미지정 시 기존 Config 기반 폴백."""
-        mock_adapter = AsyncMock()
-        mock_adapter.get_account_balance = AsyncMock(return_value={"cash": 5000000.0})
-        mock_adapter.disconnect = AsyncMock()
+        """--account 미지정 시 click이 user-friendly 에러로 거부.
 
+        #1217 SPLIT-1: account_id fallback 금지. Config 기반 무계좌 폴백 경로
+        진입을 차단한다. _get_broker 자체는 호출되지 않아야 한다.
+        """
         with patch("ante.cli.commands.broker._get_broker") as mock_gb:
-            mock_gb.return_value = (mock_adapter, None)
             result = runner.invoke(cli, ["broker", "balance"])
 
-        assert result.exit_code == 0
-        mock_gb.assert_called_once_with(None)
+        assert result.exit_code != 0
+        assert "--account" in result.output
+        mock_gb.assert_not_called()
 
     def test_broker_positions_with_account(self, runner):
         """--account 옵션으로 계좌별 포지션 조회."""

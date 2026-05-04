@@ -560,7 +560,7 @@ class TestBrokerCommands:
             mock_adapter.exchange = "KRX"
             mock_create.return_value = (mock_adapter, None)
 
-            result = runner.invoke(cli, ["broker", "status"])
+            result = runner.invoke(cli, ["broker", "status", "--account", "acc-1"])
             assert result.exit_code == 0
             assert "연결됨" in result.output
 
@@ -568,7 +568,7 @@ class TestBrokerCommands:
         with patch("ante.cli.commands.broker._get_broker") as mock_create:
             mock_create.side_effect = Exception("connection failed")
 
-            result = runner.invoke(cli, ["broker", "status"])
+            result = runner.invoke(cli, ["broker", "status", "--account", "acc-1"])
             assert result.exit_code == 0
             assert "미연결" in result.output
 
@@ -581,7 +581,9 @@ class TestBrokerCommands:
             mock_adapter.disconnect = AsyncMock()
             mock_create.return_value = (mock_adapter, None)
 
-            result = runner.invoke(cli, ["--format", "json", "broker", "balance"])
+            result = runner.invoke(
+                cli, ["--format", "json", "broker", "balance", "--account", "acc-1"]
+            )
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["cash"] == 10000000.0
@@ -593,5 +595,36 @@ class TestBrokerCommands:
             mock_adapter.disconnect = AsyncMock()
             mock_create.return_value = (mock_adapter, None)
 
-            result = runner.invoke(cli, ["broker", "positions"])
+            result = runner.invoke(cli, ["broker", "positions", "--account", "acc-1"])
             assert result.exit_code == 0
+
+    def test_broker_status_requires_account(self, runner):
+        """broker status도 --account 옵션 누락 시 user-friendly 에러로 거부.
+
+        #1217 SPLIT-1: account_id fallback 금지. CLI 진입 시점에서 차단.
+        """
+        result = runner.invoke(cli, ["broker", "status"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_broker_balance_requires_account(self, runner):
+        """broker balance도 --account 옵션 누락 시 거부."""
+        result = runner.invoke(cli, ["broker", "balance"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_broker_positions_requires_account(self, runner):
+        """broker positions도 --account 옵션 누락 시 거부."""
+        result = runner.invoke(cli, ["broker", "positions"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_broker_reconcile_requires_account(self, runner):
+        """broker reconcile (--fix 유무 무관) --account 옵션 누락 시 거부."""
+        result = runner.invoke(cli, ["broker", "reconcile"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+        result_fix = runner.invoke(cli, ["broker", "reconcile", "--fix"])
+        assert result_fix.exit_code != 0
+        assert "--account" in result_fix.output
