@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from ante.account.errors import InvalidAccountIdError
 from ante.core.database import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -103,6 +104,23 @@ def _make_filled_event(
 
 
 class TestTradeRecorder:
+    async def test_trades_schema_requires_account_id_without_default(
+        self, db, recorder
+    ):
+        """fresh trades DDL은 fallback account default를 만들지 않는다."""
+        columns = await db.fetch_all("PRAGMA table_info(trades)")
+        account_col = next(row for row in columns if row["name"] == "account_id")
+        assert account_col["notnull"] == 1
+        assert account_col["dflt_value"] is None
+
+    async def test_trades_schema_has_account_index(self, db, recorder):
+        """account 단위 거래 조회용 index가 존재한다."""
+        indexes = await db.fetch_all(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = 'trades'"
+        )
+        assert "idx_trades_account" in {row["name"] for row in indexes}
+
     async def test_on_filled_records_trade(self, recorder, db):
         """OrderFilledEvent → trades 테이블에 기록."""
         event = _make_filled_event()
@@ -1387,6 +1405,34 @@ class TestAccountIdDbMigration:
         trades = await recorder.get_trades()
         assert len(trades) == 2
         assert {t.account_id for t in trades} == {"acct-1", "acct-2"}
+
+    async def test_get_trades_rejects_invalid_account_filter(self, recorder):
+        """명시 account filter의 fallback 값은 all-account로 해석하지 않는다."""
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            await recorder.get_trades(account_id="")
+
+    async def test_save_rejects_invalid_account_id_at_write_boundary(self, recorder):
+        """TradeRecord 생성 우회를 하더라도 recorder write boundary가 막는다."""
+        record = object.__new__(TradeRecord)
+        record.trade_id = uuid4()
+        record.bot_id = "bot1"
+        record.strategy_id = "s1"
+        record.symbol = "005930"
+        record.side = "buy"
+        record.quantity = 10.0
+        record.price = 50000.0
+        record.status = TradeStatus.FILLED
+        record.order_type = "market"
+        record.reason = "test"
+        record.commission = 0.0
+        record.timestamp = datetime.now(UTC)
+        record.order_id = "ord-invalid"
+        record.exchange = "KRX"
+        record.account_id = "default"
+        record.currency = "KRW"
+
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            await recorder.save(record)
 
     async def test_position_saved_with_account_id(self, position_history):
         """포지션 갱신 시 account_id가 DB에 저장되는지 확인."""
