@@ -160,10 +160,14 @@ async def test_price_callback_calls_stop_order_manager(
     stop_order_manager: StopOrderManager,
     eventbus: EventBus,
 ) -> None:
-    """시세 수신 시 StopOrderManager.on_price_update가 호출된다."""
+    """시세 수신 시 StopOrderManager.on_price_update가 호출된다.
+
+    SPLIT-3 (#1242): StreamIntegration 의 account_id 와 StopOrder 의
+    account_id 가 일치할 때만 trigger 된다.
+    """
     await integration.start()
     try:
-        # 스탑 주문 등록
+        # 스탑 주문 등록 — integration._account_id="acc-001" 와 동일하게 설정
         await stop_order_manager.register(
             order_id="ord-1",
             bot_id="bot-1",
@@ -173,7 +177,7 @@ async def test_price_callback_calls_stop_order_manager(
             quantity=10.0,
             order_type="stop",
             stop_price=72000.0,
-            account_id="acc-test",
+            account_id="acc-001",
         )
 
         # 세션 시간을 항상 True로 패치 (테스트 시간에 무관하게 동작)

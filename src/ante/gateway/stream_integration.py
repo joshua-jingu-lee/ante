@@ -150,9 +150,13 @@ class StreamIntegration:
         self._cache.set(cache_key, price, ttl=5)
 
         # StopOrderManager 시세 전달
+        # SPLIT-3 (#1242): 각 KISStreamClient 는 단일 계좌 lifecycle 에 묶인다.
+        # tick 의 account_id 는 stream 인스턴스의 ``self._account_id`` 와 동일하다.
         if self._stop_order_manager:
             try:
-                await self._stop_order_manager.on_price_update(symbol, price)
+                await self._stop_order_manager.on_price_update(
+                    symbol, price, account_id=self._account_id
+                )
             except Exception:
                 logger.exception("StopOrderManager 시세 전달 오류: %s", symbol)
 
@@ -270,7 +274,7 @@ class StreamIntegration:
 
                         if self._stop_order_manager:
                             await self._stop_order_manager.on_price_update(
-                                symbol, price
+                                symbol, price, account_id=self._account_id
                             )
                     except Exception:
                         logger.warning("REST 폴링 실패: %s", symbol, exc_info=True)
