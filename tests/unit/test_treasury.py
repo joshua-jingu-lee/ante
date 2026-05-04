@@ -101,6 +101,37 @@ class TestTreasuryAccountProperties:
         assert summary["currency"] == CURRENCY
 
 
+# -- Treasury DB schema ----------------------------------------
+
+
+class TestTreasurySchema:
+    async def test_bot_budgets_account_id_has_no_fallback_default(self, db, treasury):
+        """fresh bot_budgets DDL은 fallback account default를 만들지 않는다."""
+        columns = await db.fetch_all("PRAGMA table_info(bot_budgets)")
+        account_col = next(row for row in columns if row["name"] == "account_id")
+        assert account_col["notnull"] == 1
+        assert account_col["dflt_value"] is None
+
+    async def test_treasury_account_indexes_exist(self, db, treasury):
+        """Treasury account 단위 조회용 index가 존재한다."""
+        indexes = await db.fetch_all(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name IN "
+            "('bot_budgets', 'treasury_transactions')"
+        )
+        names = {row["name"] for row in indexes}
+        assert "idx_bot_budgets_account" in names
+        assert "idx_treasury_transactions_account" in names
+
+    async def test_save_budget_rejects_invalid_account_id(self, treasury):
+        """BotBudget 생성 우회를 하더라도 write boundary가 fallback을 막는다."""
+        budget = BotBudget(bot_id="bot1", account_id=ACCOUNT_ID)
+        budget.account_id = ""
+
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            await treasury._save_budget(budget)
+
+
 # -- 계좌 잔고 -----------------------------------------------
 
 
