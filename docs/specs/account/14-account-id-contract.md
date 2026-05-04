@@ -177,17 +177,23 @@ Bot/Main + Approval payload validation. 본 SPLIT 에서 적용 완료
 
 #### #1242 (SPLIT-3) 적용 위치
 
-APIGateway/Stream + multi-account lifecycle. 본 SPLIT 머지 후 진행한다.
+APIGateway/Stream + multi-account lifecycle. 본 SPLIT 에서 적용 완료
+(`#1217 → #1242 SPLIT-3`). DB schema (#1219) 와 read query 정책 (#1218)
+은 별도 SPLIT 으로 분리되어 있으며, 동적 account add/remove 의 hot
+reconfig 는 1.0 범위 외이다.
 
 | 호출 위치 | 형태 | 비고 |
 |---|---|---|
-| `APIGateway.get_ohlcv/get_current_price/get_positions/get_account_balance/submit_order/cancel_order` | `account_id: str` (kw-only) + `require_account_id` | broker routing 진입점 |
-| `StreamIntegration.__init__` | `account_id: str` (kw-only) + `require_account_id` | account-scoped 캐시 키 |
-| `LiveDataProvider.__init__` | `account_id: str` (kw-only) + `require_account_id` | 봇 단위 인스턴스화 (StrategyContextFactory가 BotConfig.account_id로 생성) |
-| multi-account lifecycle pool (`s.stream_integrations: dict[str, StreamIntegration]`) | account 별 인스턴스 분리 | shutdown leak 방지 |
-| `StopOrderManager` P1 fix | account-scoped 흐름 정합 | 단순 marker 호환 patch는 본 SPLIT-1에서 선반영 |
-| `StreamConnected/DisconnectedEvent` account_id 전파 | 이벤트 페이로드 정렬 | account 격리 |
-| `ResponseCache` prefix invalidate | account 별 prefix 키 정리 | broker routing 호환 |
+| `APIGateway.get_ohlcv/get_current_price/get_positions/get_account_balance/submit_order/cancel_order` | `account_id: str` (kw-only) + `require_account_id` | broker routing 진입점 (#1217 → #1242 SPLIT-3) |
+| `StreamIntegration.__init__` | `account_id: str` (kw-only) + `require_account_id` | account-scoped 캐시 키 / stop_order trigger 격리 (#1217 → #1242 SPLIT-3) |
+| `LiveDataProvider.__init__` | `account_id: str` (kw-only) + `require_account_id`, 내부 `_gateway.get_*` 호출 시 `account_id=self._account_id` 전달 | 봇 단위 인스턴스화 (`context_factory` 가 `BotConfig.account_id` 로 생성, strategy 인터페이스는 closure 방식으로 무변경) (#1217 → #1242 SPLIT-3) |
+| `s.stream_integrations: dict[str, StreamIntegration]` | KIS 활성 계좌마다 인스턴스 등록, shutdown 에서 dict 순회 정리 | multi-account lifecycle pool, leak 방지 (#1217 → #1242 SPLIT-3) |
+| `s.reconcile_schedulers: dict[str, ReconcileScheduler]` | 활성 broker 가 있는 모든 계좌에 dispatch | multi-broker pool, 첫 broker 선택 가드 제거 (#1217 → #1242 SPLIT-3) |
+| `StopOrderManager.on_price_update` | `account_id: str` (kw-only) + `require_account_id`, `active_for_symbol` 에 `o.account_id == account_id` 필터 | cross-account trigger 차단 (#1217 → #1242 SPLIT-3) |
+| `StopOrder.__post_init__` | `require_account_id(self.account_id)` | trigger payload 정합 (#1217 → #1242 SPLIT-3) |
+| `StreamConnectedEvent` / `StreamDisconnectedEvent` | `_requires_account_id: ClassVar[bool] = True` + `account_id` 발행자 전달 | `KISStreamClient` per-account 인스턴스 정책 (#1217 → #1242 SPLIT-3) |
+| `ResponseCache.invalidate` | substring → prefix-exact (`acc-1` invalidate 가 `acc-12` 유지) | account-scoped 캐시 키 격리 (#1217 → #1242 SPLIT-3) |
+| `PaperExecutor` / `_resolve_price` 호출 사이트 | `account_id` 명시 전달 | gateway/stream_integration ctor required 정렬 (#1217 → #1242 SPLIT-3) |
 
 후속 영역은 다음 이슈로 이관:
 

@@ -37,7 +37,7 @@ EventBus는 Ante의 **핵심 이벤트 발행/구독 인프라**로, 모듈 간 
 - UUID + timestamp로 이벤트 추적/디버깅 용이
 - dataclass는 외부 의존성 없음 (msgspec 등 도입은 성능 필요 시 전환)
 
-### Account-scoped 이벤트 marker (#1217 → #1240 SPLIT-1)
+### Account-scoped 이벤트 marker (#1217 → #1240 SPLIT-1, #1242 SPLIT-3)
 
 > 계약: [`docs/specs/account/14-account-id-contract.md`](../account/14-account-id-contract.md)
 
@@ -59,6 +59,10 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `BotStepCompletedEvent`, `BotRestartExhaustedEvent`
 - 계좌/잔고/리포트: `AccountSuspendedEvent`, `AccountActivatedEvent`,
   `BalanceSyncedEvent`, `DailyReportEvent`
+- 실시간 스트림 (#1242 SPLIT-3): `StreamConnectedEvent`,
+  `StreamDisconnectedEvent` — KIS multi-account 환경에서 각 계좌마다 별도의
+  ``KISStreamClient`` 인스턴스가 발행하므로 `account_id` 가 명시 전달되어야
+  한다 (한 계좌 disconnect 가 다른 계좌의 fallback 을 켜지 않도록 격리).
 
 **비대상 (system-wide event)**:
 - `SystemStartedEvent`, `SystemShutdownEvent`, `NotificationEvent`,
@@ -66,8 +70,8 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
   `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
   `CircuitBreakerEvent`, `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
-  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`, `StreamConnectedEvent`,
-  `StreamDisconnectedEvent`, `BotStopEvent`, `ExternalSignalEvent`,
+  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`,
+  `BotStopEvent`, `ExternalSignalEvent`,
   `PositionMismatchEvent`, `ReconcileEvent` (현재 ext spec 단계에서 marker 미적용)
 
 **구현 노트**:
@@ -315,7 +319,13 @@ Bot.on_signal()
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `StreamConnectedEvent` | KISStreamClient | — | `broker`, `url` |
-| `StreamDisconnectedEvent` | KISStreamClient | — | `broker`, `reason` |
+| `StreamConnectedEvent` | KISStreamClient | StreamIntegration | `account_id`, `broker`, `url` |
+| `StreamDisconnectedEvent` | KISStreamClient | StreamIntegration | `account_id`, `broker`, `reason` |
+
+> #1242 SPLIT-3: KIS multi-account 환경에서 각 계좌마다 별도의
+> `KISStreamClient` 인스턴스가 만들어지고, 발행자는 자신의 `account_id` 를
+> 명시 전달해야 한다. `StreamIntegration` 은 `event.account_id ==
+> self._account_id` 일 때만 fallback toggle 을 변경하므로, 한 계좌의
+> disconnect 가 다른 계좌의 stream 을 fallback 으로 끌고 가지 않는다.
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
