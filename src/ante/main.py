@@ -741,33 +741,73 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
 
 
 def _init_context_factory(s: Services) -> None:
-    """StrategyContextFactory 완성 (Gateway 연결 이후)."""
+    """StrategyContextFactory 완성 (Gateway 연결 이후).
+
+    SPLIT-3 (#1242): ``LiveDataProvider`` 는 봇별로 ``StrategyContextFactory``
+    가 생성한다 (per-bot account binding). ``s.data_provider`` 는 API gateway
+    가 없는 (paper-only test 등) 환경의 fallback 으로 ``_NullDataProvider`` 를
+    설정한다 — 이 경우 strategy 의 OHLCV 호출은 빈 결과를 반환한다.
+    """
     from ante.bot import StrategyContextFactory
     from ante.bot.providers.live import LiveTradeHistoryView
-    from ante.gateway.data_provider import LiveDataProvider
 
     if s.api_gateway:
-        s.data_provider = LiveDataProvider(
-            gateway=s.api_gateway,
-            parquet_store=s.parquet_store,
-        )
         s.paper_executor._gateway = s.api_gateway
 
     live_trade_history = LiveTradeHistoryView(trade_recorder=s.trade_recorder)
 
-    if s.data_provider:
-        context_factory = StrategyContextFactory(
-            data_provider=s.data_provider,
-            account_service=s.account_service,
-            live_portfolio=s.live_portfolio,
-            live_order_view=s.live_order_view,
-            paper_executor=s.paper_executor,
-            live_trade_history=live_trade_history,
-            treasury_manager=s.treasury_manager,
-            position_history=s.position_history,
+    if not s.data_provider:
+        s.data_provider = _NullDataProvider()
+
+    context_factory = StrategyContextFactory(
+        data_provider=s.data_provider,
+        account_service=s.account_service,
+        live_portfolio=s.live_portfolio,
+        live_order_view=s.live_order_view,
+        paper_executor=s.paper_executor,
+        live_trade_history=live_trade_history,
+        treasury_manager=s.treasury_manager,
+        position_history=s.position_history,
+        api_gateway=s.api_gateway,
+        parquet_store=s.parquet_store,
+    )
+    s.bot_manager._context_factory = context_factory
+    logger.info("StrategyContextFactory 설정 완료")
+
+
+class _NullDataProvider:
+    """SPLIT-3 (#1242): API gateway 가 없는 환경에서 사용되는 no-op
+    DataProvider. strategy 인터페이스 호환을 위해 빈 결과를 반환한다."""
+
+    async def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = "1d",
+        limit: int = 100,
+    ) -> Any:
+        import polars as pl
+
+        return pl.DataFrame(
+            schema={
+                "timestamp": pl.Float64,
+                "open": pl.Float64,
+                "high": pl.Float64,
+                "low": pl.Float64,
+                "close": pl.Float64,
+                "volume": pl.Float64,
+            }
         )
-        s.bot_manager._context_factory = context_factory
-        logger.info("StrategyContextFactory 설정 완료")
+
+    async def get_current_price(self, symbol: str) -> float:
+        return 0.0
+
+    async def get_indicator(
+        self,
+        symbol: str,
+        indicator: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {}
 
 
 async def _init_treasury_sync(s: Services, accounts: list) -> None:

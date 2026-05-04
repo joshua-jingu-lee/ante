@@ -538,10 +538,13 @@ class TestLiveDataProvider:
         mock_gateway = AsyncMock()
         mock_gateway.get_current_price = AsyncMock(return_value=50000.0)
 
-        provider = LiveDataProvider(mock_gateway)
+        provider = LiveDataProvider(mock_gateway, account_id="acc-test")
         price = await provider.get_current_price("005930")
         assert price == 50000.0
-        mock_gateway.get_current_price.assert_called_once_with("005930")
+        # SPLIT-3 (#1242): account_id 명시 전달
+        mock_gateway.get_current_price.assert_called_once_with(
+            "005930", account_id="acc-test"
+        )
 
     async def test_get_ohlcv_delegates_to_gateway_without_store(self):
         """ParquetStore 미주입 시 gateway.get_ohlcv()를 호출한다."""
@@ -549,12 +552,12 @@ class TestLiveDataProvider:
 
         mock_gateway = AsyncMock()
         mock_gateway.get_ohlcv = AsyncMock(return_value=[{"close": 50000.0}])
-        provider = LiveDataProvider(mock_gateway)
+        provider = LiveDataProvider(mock_gateway, account_id="acc-test")
         result = await provider.get_ohlcv("005930")
         assert isinstance(result, pl.DataFrame)
         assert result.to_dicts() == [{"close": 50000.0}]
         mock_gateway.get_ohlcv.assert_called_once_with(
-            "005930", timeframe="1d", limit=100
+            "005930", timeframe="1d", limit=100, account_id="acc-test"
         )
 
     async def test_get_ohlcv_reads_from_parquet_store(self):
@@ -575,7 +578,9 @@ class TestLiveDataProvider:
         )
         mock_store.read = MagicMock(return_value=df)
 
-        provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
+        provider = LiveDataProvider(
+            mock_gateway, parquet_store=mock_store, account_id="acc-test"
+        )
         result = await provider.get_ohlcv("005930", timeframe="1d", limit=50)
 
         assert isinstance(result, pl.DataFrame)
@@ -593,7 +598,9 @@ class TestLiveDataProvider:
         mock_store = MagicMock()
         mock_store.read = MagicMock(return_value=pl.DataFrame())
 
-        provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
+        provider = LiveDataProvider(
+            mock_gateway, parquet_store=mock_store, account_id="acc-test"
+        )
         result = await provider.get_ohlcv("005930")
 
         assert isinstance(result, pl.DataFrame)
@@ -610,7 +617,9 @@ class TestLiveDataProvider:
         mock_store = MagicMock()
         mock_store.read = MagicMock(side_effect=Exception("parquet read error"))
 
-        provider = LiveDataProvider(mock_gateway, parquet_store=mock_store)
+        provider = LiveDataProvider(
+            mock_gateway, parquet_store=mock_store, account_id="acc-test"
+        )
         result = await provider.get_ohlcv("005930")
 
         assert isinstance(result, pl.DataFrame)
@@ -621,6 +630,31 @@ class TestLiveDataProvider:
         """OHLCV 데이터 없을 때 빈 dict 반환."""
         mock_gateway = AsyncMock()
         mock_gateway.get_ohlcv = AsyncMock(return_value=[])
-        provider = LiveDataProvider(mock_gateway)
+        provider = LiveDataProvider(mock_gateway, account_id="acc-test")
         result = await provider.get_indicator("005930", "sma")
         assert result == {}
+
+    def test_construction_without_account_id_raises(self):
+        """SPLIT-3 (#1242): account_id 가 빈 문자열이면 InvalidAccountIdError."""
+        from ante.account.errors import InvalidAccountIdError
+
+        mock_gateway = AsyncMock()
+        with pytest.raises(InvalidAccountIdError):
+            LiveDataProvider(mock_gateway, account_id="")
+
+    async def test_per_bot_isolation_passes_distinct_account_ids(self):
+        """SPLIT-3 (#1242): 봇별로 인스턴스를 만들면 각자의 account_id 가
+        gateway 에 명시 전달되어 요청이 격리된다."""
+        mock_gateway = AsyncMock()
+        mock_gateway.get_current_price = AsyncMock(return_value=50000.0)
+
+        provider_a = LiveDataProvider(mock_gateway, account_id="acc-a")
+        provider_b = LiveDataProvider(mock_gateway, account_id="acc-b")
+
+        await provider_a.get_current_price("005930")
+        await provider_b.get_current_price("005930")
+
+        calls = mock_gateway.get_current_price.call_args_list
+        assert len(calls) == 2
+        assert calls[0].kwargs["account_id"] == "acc-a"
+        assert calls[1].kwargs["account_id"] == "acc-b"
