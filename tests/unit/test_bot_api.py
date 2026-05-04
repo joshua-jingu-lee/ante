@@ -1009,7 +1009,7 @@ class TestCreateBotStrategyName:
         assert "전략을 찾을 수 없습니다" in resp.json()["detail"]
 
     def test_create_bot_default_account(self, client_with_registry):
-        """account_id 미전달 시 첫 번째 active 계좌 사용."""
+        """account_id 미전달 + 단일 active 계좌 → 자동 선택 (#1218)."""
         resp = client_with_registry.post(
             "/api/bots",
             json={
@@ -1019,6 +1019,51 @@ class TestCreateBotStrategyName:
         )
         assert resp.status_code == 201
         assert resp.json()["bot"]["bot_id"] == "bot-5"
+
+    def test_create_bot_no_active_returns_400(self, bot_manager, strategy_registry):
+        """account_id 미전달 + active 계좌 0개 → 400 (#1218)."""
+        empty_svc = FakeAccountService()
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=empty_svc,
+            strategy_registry=strategy_registry,
+        )
+        client = TestClient(app)
+        resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-x",
+                "strategy_id": "vol-breakout_v1.0.0",
+            },
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "BOT_MISSING_REQUIRED_ACCOUNT" in detail or "활성 계좌" in detail
+
+    def test_create_bot_multiple_active_returns_400(
+        self, bot_manager, strategy_registry
+    ):
+        """account_id 미전달 + active 계좌 2개 이상 → 400 (#1218)."""
+        multi_svc = FakeAccountService()
+        multi_svc._accounts["acc-1"] = FakeAccount("acc-1", status="active")
+        multi_svc._accounts["acc-2"] = FakeAccount("acc-2", status="active")
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=multi_svc,
+            strategy_registry=strategy_registry,
+        )
+        client = TestClient(app)
+        resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-y",
+                "strategy_id": "vol-breakout_v1.0.0",
+            },
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        # 안내에 다중 계좌 ID가 포함되어야 함.
+        assert "acc-1" in detail and "acc-2" in detail
 
     def test_create_bot_with_budget(self, client_with_registry):
         """budget 필드를 포함한 봇 생성."""
