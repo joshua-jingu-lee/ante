@@ -244,6 +244,7 @@ API 스키마 계약의 상세 SSOT는 [docs/dashboard/architecture.md](../dashb
 - API 응답 스키마 변경은 백엔드와 프론트엔드 양쪽에 영향을 주는 계약 변경으로 본다.
 - 구현 이슈 진행 중 스키마 변경이 드러나면 Plan Preflight에서 별도 이슈 분리 또는 `needs-spec-first` 전환을 판단한다.
 - 새 엔드포인트와 응답 변경은 생성 타입 동기화까지 검증 계획에 포함한다.
+- 프론트 소비자가 있으면 `frontend/src/api/*.ts` adapter와 UI/domain model 동기화도 같은 검증 계획에 포함한다. `api.generated.ts`는 wire contract SSOT이고 hooks/pages/components는 generated type을 직접 소비하지 않는다.
 
 ## 9. AGENTS.md 경량화 원칙
 

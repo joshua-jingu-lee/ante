@@ -159,9 +159,11 @@ release PR이면 추가로 확인한다.
 | G1 | 디자인 토큰 준수 | 시맨틱 토큰만 사용했는가 |
 | G2 | 타이포그래피 체계 | 프로젝트가 정한 타입 스케일을 따르는가 |
 | G3 | API 임의 생성 금지 | 백엔드에 없는 엔드포인트를 만들지 않았는가 |
-| G4 | 자동 생성 타입 사용 | 수동 API 응답 타입 정의가 없는가 |
-| G5 | 데이터 흐름 | `api -> hooks -> pages -> components` 패턴을 따르는가 |
-| G6 | 빌드 통과 | `npm run build` 또는 동등 검증이 성공하는가 |
+| G4 | wire contract SSOT | `api.generated.ts`를 직접 수정하지 않고, generated type import가 `frontend/src/api/*.ts` 밖으로 새지 않았는가 |
+| G5 | adapter 경계 | `api/*.ts`가 generated raw response를 UI/domain `View` model로 변환하고, hooks/pages/components가 generated type을 직접 소비하지 않는가 |
+| G6 | 수동 API 타입 shadowing 금지 | 수동 `Response`/`Request`/`Payload` 타입 선언이나 `res.data as SomeManualType`로 drift를 숨기지 않는가 |
+| G7 | 데이터 흐름 | `api -> hooks -> pages -> components` 패턴을 따르는가 |
+| G8 | 빌드 통과 | `npm run build` 또는 동등 검증이 성공하는가 |
 
 ### 5단계: 결과 구조화
 

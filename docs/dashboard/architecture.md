@@ -63,6 +63,7 @@ Ante의 대시보드는 **단일 사용자(운영자)**를 위한 화면이다.
 
 > **SSOT**: 백엔드 OpenAPI 스키마 (`/openapi.json`)가 API 계약의 단일 진실 원천이다.
 > 프론트엔드 타입은 `npm run generate-types`로 자동 생성한다 ([generate-types.sh](../../frontend/scripts/generate-types.sh)).
+> `frontend/src/types/api.generated.ts`는 Web API wire contract SSOT이고, `frontend/src/api/*.ts`는 raw response를 UI/domain `View` model로 변환하는 adapter boundary다. `hooks/`, `pages/`, `components/`는 generated type을 직접 import하지 않는다.
 
 ### 라우터별 구현 현황
 
@@ -218,10 +219,13 @@ export default function BotDetail() {
 
 #### 타입 정의 규칙
 
-- **`interface`**: 객체 형태 정의 (`interface Bot { ... }`)
-- **`type`**: 유니온·별칭 (`type BotStatus = 'running' | 'stopped'`)
+- **wire contract**: `frontend/src/types/api.generated.ts`만 사용한다. OpenAPI에서 생성하며 직접 수정하지 않는다.
+- **adapter boundary**: `frontend/src/api/*.ts`만 generated type을 import하고, raw response를 UI/domain model로 변환한다.
+- **UI/domain model**: `frontend/src/types/*.ts`에는 `View`, `Input`, `FormValues` 등 프론트 전용 타입만 둔다.
+- **금지 suffix**: 수동 `Response`, `Request`, `Payload` 타입 선언 금지 (`api.generated.ts` 제외)
+- **`interface`**: 컴포넌트 Props, UI/domain model 등 프론트 전용 객체 정의
+- **`type`**: UI 상태 유니온·별칭 (`type BotStatus = 'running' | 'stopped'`)
 - **`enum` 미사용**: 백엔드 enum은 string literal union으로 표현
-- **자동 생성 타입**: `api.generated.ts`는 직접 수정 금지. 수동 타입에서 re-export하여 사용
 
 #### React Query 규칙
 

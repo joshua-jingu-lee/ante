@@ -18,7 +18,7 @@ Ante 대시보드(React)를 구현하는 서브에이전트다.
 - `docs/dashboard/architecture.md`의 화면 구성과 레이아웃을 충실히 구현
 - 디자인 산출물/목업이 있으면 픽셀 단위로 일치시킨다
 - 디자인 토큰(`index.css` `@theme`)과 코딩 컨벤션(`architecture.md` § 코딩 컨벤션)을 준수한다
-- API 연동 시 타입 안전성 확보 (API 응답 → TypeScript 타입 → 컴포넌트)
+- API 연동 시 타입 안전성 확보 (`api.generated.ts` raw contract → `api/*.ts` adapter → UI/domain model → 컴포넌트)
 - **백엔드에 존재하지 않는 API를 임의로 만들어 호출하지 않는다**
 
 ## 모델 및 추론 강도 운영 가이드
@@ -47,6 +47,7 @@ Ante 대시보드(React)를 구현하는 서브에이전트다.
 
 - **디자인 토큰 준수**: `index.css`에 정의된 시맨틱 토큰만 사용. Tailwind 기본 색상(`text-white`, `text-green-600` 등) 사용 금지
 - **API 계약 엄수**: 백엔드 OpenAPI 스키마에 정의된 API만 호출. 없는 API를 추측하여 만들지 않는다
-- **타입 안전성**: API 응답 타입은 `api.generated.ts`에서만 import. 수동 API 타입 정의 금지
+- **타입 안전성**: `api.generated.ts`는 wire contract SSOT이며 `frontend/src/api/*.ts`에서만 import한다. hooks/pages/components는 generated type을 직접 소비하지 않고 adapter가 반환한 UI/domain model만 받는다.
+- **adapter 책임**: `api/*.ts`는 generated raw response를 `View` suffix UI model로 변환한다. 수동 `Response`/`Request`/`Payload` 타입으로 API 계약을 shadowing하지 않는다.
 - **컴포넌트 분리**: 페이지 컴포넌트(`pages/`)와 재사용 컴포넌트(`components/`)를 분리
 - **데이터 흐름**: `api/ → hooks/ → pages/ → components/` — 컴포넌트에서 API 직접 호출 금지
