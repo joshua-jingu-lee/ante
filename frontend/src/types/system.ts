@@ -6,13 +6,12 @@
  * SSOT: `docs/specs/account/02-design-decisions.md`.
  */
 
-// ── 프론트엔드 전용 타입 ──────────────────────────────────
-export interface SystemStatus {
-  uptime_seconds: number
-  running_bots: number
+// ── 프론트엔드 전용 UI/domain 타입 ──────────────────────────
+export interface SystemStatusView {
+  status: string
   version: string
-  halt_time?: string
-  halt_reason?: string
+  haltTime?: string
+  haltReason?: string
 }
 
 export interface BrokerStatus {
@@ -21,7 +20,7 @@ export interface BrokerStatus {
   token_expires_at?: string
 }
 
-export interface DynamicConfig {
+export interface DynamicConfigView {
   key: string
   value: string
   description?: string
