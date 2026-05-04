@@ -115,6 +115,7 @@ class PositionHistory:
                 price=record.price,
                 pnl=0.0,
                 timestamp=record.timestamp,
+                account_id=record.account_id,
                 exchange=record.exchange,
                 trade_id=str(record.trade_id),
             )
@@ -157,6 +158,7 @@ class PositionHistory:
                 price=record.price,
                 pnl=pnl,
                 timestamp=record.timestamp,
+                account_id=record.account_id,
                 exchange=record.exchange,
                 trade_id=str(record.trade_id),
             )
@@ -344,17 +346,38 @@ class PositionHistory:
         price: float,
         pnl: float,
         timestamp: object | None,
+        *,
+        account_id: str,
         exchange: str = "KRX",
         trade_id: str | None = None,
     ) -> None:
-        """포지션 변동 이력 저장."""
+        """포지션 변동 이력 저장.
+
+        ``account_id``는 호출자에서 ``record.account_id``를 그대로 전달하며,
+        :func:`require_account_id`로 검증한다. 누락 시 schema default
+        ``'default'``로 저장되던 회귀(#1240 review)를 차단한다.
+        """
+        validated_account_id = require_account_id(
+            account_id, context="position._save_history"
+        )
         ts = timestamp.isoformat() if hasattr(timestamp, "isoformat") else None
         await self._db.execute(
             """INSERT INTO position_history
                (bot_id, symbol, action, quantity, price, pnl, timestamp,
-                exchange, trade_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (bot_id, symbol, action, quantity, price, pnl, ts, exchange, trade_id),
+                exchange, trade_id, account_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                bot_id,
+                symbol,
+                action,
+                quantity,
+                price,
+                pnl,
+                ts,
+                exchange,
+                trade_id,
+                validated_account_id,
+            ),
         )
 
     @staticmethod

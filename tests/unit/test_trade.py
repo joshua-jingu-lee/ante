@@ -618,6 +618,49 @@ class TestPositionHistory:
         history = await position_history.get_history("bot1", "005930")
         assert len(history) == 2  # buy + sell
 
+    async def test_save_history_writes_account_id(self, position_history, db):
+        """체결 이력 INSERT 시 account_id가 schema default 'default'가 아닌
+        record.account_id로 저장되어야 한다 (#1240 review P2 회귀)."""
+        buy = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10,
+            price=50000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+            account_id="acc-real",
+        )
+        await position_history.on_trade(buy)
+
+        sell = TradeRecord(
+            trade_id=uuid4(),
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=5,
+            price=55000,
+            status=TradeStatus.FILLED,
+            timestamp=datetime.now(UTC),
+            account_id="acc-real",
+        )
+        await position_history.on_trade(sell)
+
+        rows = await db.fetch_all(
+            "SELECT action, account_id FROM position_history"
+            " WHERE bot_id = ? ORDER BY id",
+            ("bot1",),
+        )
+        assert len(rows) == 2
+        for row in rows:
+            assert row["account_id"] == "acc-real", (
+                f"position_history.{row['action']} row의 account_id가 "
+                f"{row['account_id']!r} (expected 'acc-real')"
+            )
+
     async def test_oversell_clamps_pnl_to_held_quantity(self, position_history):
         """초과 매도 시 PnL은 보유 수량 기준으로 계산 (#769)."""
         # 50주 매수 @ 50000

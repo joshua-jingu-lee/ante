@@ -505,3 +505,117 @@ async def test_fallback_not_started_without_gateway(
         assert not integration.is_fallback_active
     finally:
         await integration.stop()
+
+
+# ── account_id 보강 / strict OrderFilledEvent 회귀 (#1240 review) ──
+
+
+@pytest.mark.asyncio
+async def test_execution_without_account_id_skips_event(
+    stream_client: FakeStreamClient,
+    cache: ResponseCache,
+    eventbus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """account_id가 broker payload/lifecycle 모두 없으면 OrderFilledEvent를
+    발행하지 않고 WARNING 로그 후 skip한다 (라이브 경로 보존)."""
+    integration = StreamIntegration(
+        stream_client=stream_client,
+        cache=cache,
+        eventbus=eventbus,
+        # account_id 의도적으로 미주입
+    )
+    await integration.start()
+    try:
+        received: list[OrderFilledEvent] = []
+
+        async def handler(event: OrderFilledEvent) -> None:
+            received.append(event)
+
+        eventbus.subscribe(OrderFilledEvent, handler)
+
+        with caplog.at_level("WARNING", logger="ante.gateway.stream_integration"):
+            await stream_client.fire_execution(
+                {
+                    "symbol": "005930",
+                    "order_id": "ord-noacct",
+                    "side": "buy",
+                    "quantity": 10.0,
+                    "price": 70000.0,
+                }
+            )
+
+        assert received == []
+        assert any(
+            "OrderFilledEvent 발행을 skip" in rec.message for rec in caplog.records
+        )
+    finally:
+        await integration.stop()
+
+
+@pytest.mark.asyncio
+async def test_execution_uses_lifecycle_account_id_when_payload_missing(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    eventbus: EventBus,
+) -> None:
+    """broker payload에 account_id가 없으면 lifecycle account_id로 fallback
+    하여 OrderFilledEvent가 정상 발행된다."""
+    await integration.start()
+    try:
+        received: list[OrderFilledEvent] = []
+
+        async def handler(event: OrderFilledEvent) -> None:
+            received.append(event)
+
+        eventbus.subscribe(OrderFilledEvent, handler)
+
+        # broker payload에 account_id 없음 → integration._account_id="acc-001" 사용
+        await stream_client.fire_execution(
+            {
+                "symbol": "005930",
+                "order_id": "ord-1",
+                "side": "buy",
+                "quantity": 10.0,
+                "price": 70000.0,
+            }
+        )
+
+        assert len(received) == 1
+        assert received[0].account_id == "acc-001"
+        assert received[0].order_id == "ord-1"
+    finally:
+        await integration.stop()
+
+
+@pytest.mark.asyncio
+async def test_execution_payload_account_id_overrides_lifecycle(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    eventbus: EventBus,
+) -> None:
+    """broker payload의 account_id가 lifecycle account_id를 오버라이드한다."""
+    await integration.start()
+    try:
+        received: list[OrderFilledEvent] = []
+
+        async def handler(event: OrderFilledEvent) -> None:
+            received.append(event)
+
+        eventbus.subscribe(OrderFilledEvent, handler)
+
+        await stream_client.fire_execution(
+            {
+                "symbol": "005930",
+                "order_id": "ord-2",
+                "side": "buy",
+                "quantity": 10.0,
+                "price": 70000.0,
+                "account_id": "acc-other",
+            }
+        )
+
+        assert len(received) == 1
+        assert received[0].account_id == "acc-other"
+    finally:
+        await integration.stop()
