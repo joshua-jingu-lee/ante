@@ -45,13 +45,22 @@ class StreamIntegration:
         stream_client: KISStreamClient,
         cache: ResponseCache,
         eventbus: EventBus,
-        account_id: str = "",
+        *,
+        account_id: str,
         stop_order_manager: StopOrderManager | None = None,
         gateway: APIGateway | None = None,
         bot_manager: BotManager | None = None,
         fallback_poll_interval: float = DEFAULT_FALLBACK_POLL_INTERVAL,
         sync_interval: float = DEFAULT_SYNC_INTERVAL,
     ) -> None:
+        # SPLIT-3 (#1242): multi-account StreamIntegration pool 의 핵심 계약 —
+        # 인스턴스마다 단일 KIS 계좌 lifecycle 에 묶이며, fallback / 캐시
+        # 네임스페이스 / stop_order trigger 격리 모두 self._account_id 에 의존
+        # 한다. fallback 금지 (``require_account_id``).
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="stream_integration.__init__")
+
         self._stream = stream_client
         self._cache = cache
         self._eventbus = eventbus
@@ -150,9 +159,13 @@ class StreamIntegration:
         self._cache.set(cache_key, price, ttl=5)
 
         # StopOrderManager 시세 전달
+        # SPLIT-3 (#1242): 각 KISStreamClient 는 단일 계좌 lifecycle 에 묶인다.
+        # tick 의 account_id 는 stream 인스턴스의 ``self._account_id`` 와 동일하다.
         if self._stop_order_manager:
             try:
-                await self._stop_order_manager.on_price_update(symbol, price)
+                await self._stop_order_manager.on_price_update(
+                    symbol, price, account_id=self._account_id
+                )
             except Exception:
                 logger.exception("StopOrderManager 시세 전달 오류: %s", symbol)
 
@@ -212,13 +225,28 @@ class StreamIntegration:
     # ── 스트림 연결/해제 이벤트 ──────────────────────
 
     async def _on_stream_connected(self, event: object) -> None:
-        """스트림 연결 성공 시 폴백 중지."""
+        """스트림 연결 성공 시 폴백 중지.
+
+        SPLIT-3 (#1242): multi-account StreamIntegration pool 에서 다른
+        계좌의 stream 이벤트로 자기 fallback 을 토글하지 않도록
+        ``event.account_id`` 가 ``self._account_id`` 와 일치할 때만 반응한다.
+        """
+        event_account_id = getattr(event, "account_id", "")
+        if event_account_id != self._account_id:
+            return
         await self._stop_fallback()
         logger.info("스트림 연결됨 — REST 폴링 폴백 중지")
 
     async def _on_stream_disconnected(self, event: object) -> None:
-        """스트림 연결 해제 시 REST 폴링 폴백 시작."""
+        """스트림 연결 해제 시 REST 폴링 폴백 시작.
+
+        SPLIT-3 (#1242): account-scoped 필터. 자세한 내용은
+        :meth:`_on_stream_connected` 참조.
+        """
         if not self._running:
+            return
+        event_account_id = getattr(event, "account_id", "")
+        if event_account_id != self._account_id:
             return
         await self._start_fallback()
         logger.warning("스트림 연결 해제 — REST 폴링 폴백 시작")
@@ -270,7 +298,7 @@ class StreamIntegration:
 
                         if self._stop_order_manager:
                             await self._stop_order_manager.on_price_update(
-                                symbol, price
+                                symbol, price, account_id=self._account_id
                             )
                     except Exception:
                         logger.warning("REST 폴링 실패: %s", symbol, exc_info=True)
@@ -319,19 +347,36 @@ class StreamIntegration:
             logger.debug("종목 구독 해제: %s", symbol)
 
     def _get_monitored_symbols(self) -> set[str]:
-        """모니터링 대상 종목 수집 (활성 봇 + StopOrderManager)."""
+        """모니터링 대상 종목 수집 (활성 봇 + StopOrderManager).
+
+        SPLIT-3 (#1242): multi-account StreamIntegration pool 에서 각 인스턴스
+        는 자신의 ``self._account_id`` 에 해당하는 봇만 선택한다. StopOrder
+        역시 같은 account_id 의 active orders 만 모니터링 종목에 포함시켜
+        다른 계좌의 KIS 40종목 한도를 잠식하지 않게 한다.
+        """
         symbols: set[str] = set()
 
-        # 활성 봇의 종목 (봇 info에서 추출 가능한 경우)
+        # 활성 봇의 종목: 봇 config 의 account_id 가 일치하는 것만.
         if self._bot_manager:
             for bot_info in self._bot_manager.list_bots():
-                if bot_info.get("status") == "running":
-                    bot = self._bot_manager.get_bot(bot_info["bot_id"])
-                    if bot and hasattr(bot, "monitored_symbols"):
-                        symbols.update(bot.monitored_symbols)
+                if bot_info.get("status") != "running":
+                    continue
+                bot = self._bot_manager.get_bot(bot_info["bot_id"])
+                if bot is None:
+                    continue
+                bot_account_id = ""
+                bot_config = getattr(bot, "config", None)
+                if bot_config is not None:
+                    bot_account_id = getattr(bot_config, "account_id", "")
+                if bot_account_id != self._account_id:
+                    continue
+                if hasattr(bot, "monitored_symbols"):
+                    symbols.update(bot.monitored_symbols)
 
-        # StopOrderManager의 모니터링 종목
+        # StopOrderManager의 모니터링 종목 — account_id 매칭만.
         if self._stop_order_manager:
-            symbols.update(self._stop_order_manager.monitored_symbols)
+            for order in self._stop_order_manager.active_orders:
+                if order.account_id == self._account_id:
+                    symbols.add(order.symbol)
 
         return symbols

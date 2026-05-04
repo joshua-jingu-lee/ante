@@ -106,7 +106,7 @@ class TestTrigger:
         eventbus.publish.reset_mock()
 
         # 가격이 stop_price 이하로 하락
-        await manager.on_price_update("005930", 48500.0)
+        await manager.on_price_update("005930", 48500.0, account_id="acc-test")
 
         # StopOrderTriggeredEvent + OrderRequestEvent 발행
         assert eventbus.publish.call_count == 2
@@ -141,7 +141,7 @@ class TestTrigger:
         )
 
         eventbus.publish.reset_mock()
-        await manager.on_price_update("005930", 51500.0)
+        await manager.on_price_update("005930", 51500.0, account_id="acc-test")
 
         assert eventbus.publish.call_count == 2
         triggered_event = eventbus.publish.call_args_list[0][0][0]
@@ -168,7 +168,7 @@ class TestTrigger:
         )
 
         eventbus.publish.reset_mock()
-        await manager.on_price_update("005930", 51000.0)
+        await manager.on_price_update("005930", 51000.0, account_id="acc-test")
 
         order_event = eventbus.publish.call_args_list[1][0][0]
         assert isinstance(order_event, OrderRequestEvent)
@@ -194,7 +194,9 @@ class TestTrigger:
         )
 
         eventbus.publish.reset_mock()
-        await manager.on_price_update("005930", 50000.0)  # > stop_price
+        await manager.on_price_update(
+            "005930", 50000.0, account_id="acc-test"
+        )  # > stop_price
 
         # 트리거 안 됨
         assert eventbus.publish.call_count == 0
@@ -219,7 +221,7 @@ class TestTrigger:
         )
 
         eventbus.publish.reset_mock()
-        await manager.on_price_update("000660", 48000.0)
+        await manager.on_price_update("000660", 48000.0, account_id="acc-test")
 
         assert eventbus.publish.call_count == 0
 
@@ -240,7 +242,7 @@ class TestTrigger:
         )
 
         eventbus.publish.reset_mock()
-        await manager.on_price_update("005930", 48000.0)
+        await manager.on_price_update("005930", 48000.0, account_id="acc-test")
 
         # running=False이므로 무시
         assert eventbus.publish.call_count == 0
@@ -362,3 +364,147 @@ class TestSignalTradingSession:
             trading_session="extended",
         )
         assert sig.trading_session == "extended"
+
+
+class TestCrossAccountIsolation:
+    """SPLIT-3 (#1242): StopOrderManager는 같은 종목이라도 account_id 가
+    다른 stop order 끼리 trigger를 격리한다.
+
+    multi-account 환경에서는 account마다 별도의 KISStreamClient
+    인스턴스가 ``account_id`` 명시 호출을 통해 ``on_price_update`` 를
+    호출하므로, 시세가 들어온 account 의 stop order만 평가되어야 한다.
+    """
+
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
+    async def test_register_requires_valid_account_id(
+        self, _mock_session: MagicMock, manager: StopOrderManager
+    ) -> None:
+        """register 시 account_id 가 invalid 면 InvalidAccountIdError."""
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await manager.register(
+                order_id="ord-bad",
+                bot_id="bot-bad",
+                strategy_id="stg-bad",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="",
+            )
+
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
+    async def test_on_price_update_requires_account_id(
+        self, _mock_session: MagicMock, manager: StopOrderManager
+    ) -> None:
+        """on_price_update 호출 시 account_id 가 invalid 면 거부."""
+        from ante.account.errors import InvalidAccountIdError
+
+        manager.start()
+
+        with pytest.raises(InvalidAccountIdError):
+            await manager.on_price_update("005930", 50000.0, account_id="")
+
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
+    async def test_cross_account_isolation_only_triggers_matching_account(
+        self,
+        _mock_session: MagicMock,
+        manager: StopOrderManager,
+        eventbus: MagicMock,
+    ) -> None:
+        """동일 symbol 이라도 account_id 가 다르면 trigger 되지 않는다."""
+        manager.start()
+
+        # acc-1 의 stop sell 주문 등록
+        await manager.register(
+            order_id="ord-acc1",
+            bot_id="bot-acc1",
+            strategy_id="stg-1",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop",
+            stop_price=49000.0,
+            account_id="acc-1",
+        )
+        # acc-2 의 stop sell 주문 등록 (same symbol, same trigger condition)
+        await manager.register(
+            order_id="ord-acc2",
+            bot_id="bot-acc2",
+            strategy_id="stg-2",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop",
+            stop_price=49000.0,
+            account_id="acc-2",
+        )
+
+        eventbus.publish.reset_mock()
+
+        # acc-1 의 stream 에서 가격이 들어옴 → acc-1 주문만 trigger 되어야 한다
+        await manager.on_price_update("005930", 48500.0, account_id="acc-1")
+
+        # 1 trigger × 2 events (StopOrderTriggeredEvent + OrderRequestEvent)
+        assert eventbus.publish.call_count == 2
+
+        triggered_event = eventbus.publish.call_args_list[0][0][0]
+        order_event = eventbus.publish.call_args_list[1][0][0]
+        assert triggered_event.stop_order_id  # 첫 이벤트 stop order id 존재
+        # OrderRequestEvent 는 acc-1 의 account_id 를 들고 발행되어야 한다.
+        assert order_event.account_id == "acc-1"
+        assert order_event.bot_id == "bot-acc1"
+
+        # acc-2 의 주문은 여전히 active 로 남아 있다.
+        active_for_acc2 = [o for o in manager.active_orders if o.account_id == "acc-2"]
+        assert len(active_for_acc2) == 1
+
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
+    async def test_cross_account_each_account_triggers_own_orders(
+        self,
+        _mock_session: MagicMock,
+        manager: StopOrderManager,
+        eventbus: MagicMock,
+    ) -> None:
+        """각 계좌 stream 에서 가격이 들어오면 각자의 주문만 trigger 된다."""
+        manager.start()
+
+        await manager.register(
+            order_id="ord-acc1",
+            bot_id="bot-acc1",
+            strategy_id="stg-1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="stop",
+            stop_price=51000.0,
+            account_id="acc-1",
+        )
+        await manager.register(
+            order_id="ord-acc2",
+            bot_id="bot-acc2",
+            strategy_id="stg-2",
+            symbol="005930",
+            side="buy",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=51000.0,
+            account_id="acc-2",
+        )
+
+        # acc-1 stream 가격
+        await manager.on_price_update("005930", 51500.0, account_id="acc-1")
+        # acc-2 stream 가격
+        await manager.on_price_update("005930", 51500.0, account_id="acc-2")
+
+        # 두 trigger × 2 events 씩 = 4 events
+        order_events = [
+            call.args[0]
+            for call in eventbus.publish.call_args_list
+            if call.args and type(call.args[0]).__name__ == "OrderRequestEvent"
+        ]
+        assert len(order_events) == 2
+        accounts = sorted(e.account_id for e in order_events)
+        assert accounts == ["acc-1", "acc-2"]

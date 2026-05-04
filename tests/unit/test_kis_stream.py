@@ -232,3 +232,69 @@ class TestDisconnect:
         await stream_client.disconnect()
         # clean disconnect에서는 disconnected 이벤트를 발행하지 않음
         # (connection_lost일 때만 발행)
+
+
+class TestPerAccountEventPublication:
+    """SPLIT-3 (#1242): KISStreamClient 가 자신의 ``account_id`` 를 이벤트에
+    명시 전달하는지 검증한다. multi-account 환경에서 다른 stream 의 disconnect
+    가 자기 fallback 을 토글하지 않도록 격리 게이트가 의존하는 핵심 계약이다.
+    """
+
+    async def test_publish_connected_carries_account_id(
+        self, eventbus: MagicMock
+    ) -> None:
+        """``_publish_connected`` 가 account_id 를 실은 StreamConnectedEvent
+        를 발행한다."""
+        from ante.eventbus.events import StreamConnectedEvent
+
+        client = KISStreamClient(
+            websocket_url="ws://ops.koreainvestment.com:31000",
+            app_key="key",
+            app_secret="secret",
+            eventbus=eventbus,
+            account_id="acc-alpha",
+        )
+        await client._publish_connected()
+
+        eventbus.publish.assert_called_once()
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StreamConnectedEvent)
+        assert event.account_id == "acc-alpha"
+        assert event.broker == "kis"
+
+    async def test_publish_disconnected_carries_account_id(
+        self, eventbus: MagicMock
+    ) -> None:
+        """``_publish_disconnected`` 가 account_id 를 실은
+        StreamDisconnectedEvent 를 발행한다."""
+        from ante.eventbus.events import StreamDisconnectedEvent
+
+        client = KISStreamClient(
+            websocket_url="ws://ops.koreainvestment.com:31000",
+            app_key="key",
+            app_secret="secret",
+            eventbus=eventbus,
+            account_id="acc-beta",
+        )
+        await client._publish_disconnected("connection_lost")
+
+        eventbus.publish.assert_called_once()
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StreamDisconnectedEvent)
+        assert event.account_id == "acc-beta"
+        assert event.reason == "connection_lost"
+
+    async def test_publish_without_account_id_raises(self, eventbus: MagicMock) -> None:
+        """account_id 가 빈 문자열이면 strict marker 에 의해
+        InvalidAccountIdError 가 raise 된다 (이벤트 발행 차단)."""
+        from ante.account.errors import InvalidAccountIdError
+
+        client = KISStreamClient(
+            websocket_url="ws://ops.koreainvestment.com:31000",
+            app_key="key",
+            app_secret="secret",
+            eventbus=eventbus,
+            # account_id 미설정 (default "")
+        )
+        with pytest.raises(InvalidAccountIdError):
+            await client._publish_connected()

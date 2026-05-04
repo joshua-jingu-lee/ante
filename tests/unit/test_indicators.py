@@ -389,6 +389,8 @@ async def test_live_data_provider_get_indicator():
             symbol: str,
             timeframe: str = "1d",
             limit: int = 100,
+            *,
+            account_id: str = "",
         ) -> list[dict[str, float]]:
             rng = np.random.default_rng(42)
             n = limit
@@ -408,12 +410,17 @@ async def test_live_data_provider_get_indicator():
                 for i in range(n)
             ]
 
-        async def get_current_price(self, symbol: str) -> float:
+        async def get_current_price(
+            self, symbol: str, *, account_id: str = ""
+        ) -> float:
             return 50000.0
 
     from ante.gateway.data_provider import LiveDataProvider
 
-    provider = LiveDataProvider(gateway=FakeGateway())  # type: ignore[arg-type]
+    provider = LiveDataProvider(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        account_id="acc-test",
+    )
     result = await provider.get_indicator("005930", "rsi", {"length": 14})
     assert "rsi" in result
     assert isinstance(result["rsi"], np.ndarray)
@@ -428,15 +435,22 @@ async def test_live_data_provider_get_indicator_empty_ohlcv():
             symbol: str,
             timeframe: str = "1d",
             limit: int = 100,
+            *,
+            account_id: str = "",
         ) -> list:
             return []
 
-        async def get_current_price(self, symbol: str) -> float:
+        async def get_current_price(
+            self, symbol: str, *, account_id: str = ""
+        ) -> float:
             return 50000.0
 
     from ante.gateway.data_provider import LiveDataProvider
 
-    provider = LiveDataProvider(gateway=FakeGateway())  # type: ignore[arg-type]
+    provider = LiveDataProvider(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        account_id="acc-test",
+    )
     result = await provider.get_indicator("005930", "sma")
     assert result == {}
 
@@ -453,15 +467,22 @@ async def test_live_data_provider_get_ohlcv():
             symbol: str,
             timeframe: str = "1d",
             limit: int = 100,
+            *,
+            account_id: str = "",
         ) -> list:
             return expected_data
 
-        async def get_current_price(self, symbol: str) -> float:
+        async def get_current_price(
+            self, symbol: str, *, account_id: str = ""
+        ) -> float:
             return 50000.0
 
     from ante.gateway.data_provider import LiveDataProvider
 
-    provider = LiveDataProvider(gateway=FakeGateway())  # type: ignore[arg-type]
+    provider = LiveDataProvider(
+        gateway=FakeGateway(),  # type: ignore[arg-type]
+        account_id="acc-test",
+    )
     result = await provider.get_ohlcv("005930")
     assert isinstance(result, pl.DataFrame)
     assert result.to_dicts() == expected_data

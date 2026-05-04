@@ -158,8 +158,12 @@ class Services:
     live_order_view: Any = None
     strategy_snapshot: Any = None
     api_gateway: Any = None
-    stream_integration: Any = None
-    reconcile_scheduler: Any = None
+    # SPLIT-3 (#1242): multi-account StreamIntegration pool. KIS 활성 계좌마다
+    # 하나의 인스턴스를 등록하고 shutdown 에서 dict 순회로 정리한다.
+    stream_integrations: dict[str, Any] = field(default_factory=dict)
+    # SPLIT-3 (#1242): multi-broker ReconcileScheduler pool. 활성 broker 가
+    # 있는 계좌마다 인스턴스를 만들어 dict 에 account_id 키로 등록한다.
+    reconcile_schedulers: dict[str, Any] = field(default_factory=dict)
     daily_report_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
@@ -547,7 +551,13 @@ async def _init_gateway(s: Services) -> None:
 
 
 async def _init_reconcile_scheduler(s: Services) -> None:
-    """ReconcileScheduler 생성 및 시작."""
+    """ReconcileScheduler 생성 및 시작.
+
+    SPLIT-3 (#1242): 활성 broker 가 있는 모든 계좌에 대해 ReconcileScheduler
+    를 만들어 ``s.reconcile_schedulers`` dict 에 등록한다 (multi-broker pool).
+    이전 SPLIT-1 패턴은 첫 번째 broker 만 골라 다른 계좌의 봇 reconcile 을
+    건너뛰었다 (가드만 존재). 본 SPLIT 에서 dispatch 까지 분리한다.
+    """
     assert s.eventbus is not None
 
     from ante.broker.scheduler import ReconcileScheduler
@@ -569,37 +579,42 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         eventbus=s.eventbus,
     )
 
-    # 첫 번째 연결된 Broker를 ReconcileScheduler에 사용
-    # SPLIT-1: 단일 broker만 주입되므로 해당 broker의 account_id로 scheduler를
-    # 바인딩해, 다른 계좌의 봇에 이 broker의 positions가 잘못 적용되지 않도록
-    # 가드한다. multi-broker pool은 SPLIT-3에서 도입한다.
-    broker = None
-    broker_account_id: str | None = None
     accounts = await s.account_service.list()
+    started: list[str] = []
     for account in accounts:
         try:
             broker = await s.account_service.get_broker(account.account_id)
-            broker_account_id = account.account_id
-            break
         except Exception:
             continue
 
-    if not broker or not broker_account_id:
+        scheduler = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=s.bot_manager,
+            eventbus=s.eventbus,
+            broker_account_id=account.account_id,
+            interval_seconds=interval,
+        )
+        try:
+            await scheduler.start()
+        except Exception:
+            logger.warning(
+                "ReconcileScheduler 시작 실패: account=%s",
+                account.account_id,
+                exc_info=True,
+            )
+            continue
+        s.reconcile_schedulers[account.account_id] = scheduler
+        started.append(account.account_id)
+
+    if not started:
         logger.info("ReconcileScheduler 건너뜀 — 연결된 Broker 없음")
         return
 
-    s.reconcile_scheduler = ReconcileScheduler(
-        reconciler=reconciler,
-        broker=broker,
-        bot_manager=s.bot_manager,
-        eventbus=s.eventbus,
-        broker_account_id=broker_account_id,
-        interval_seconds=interval,
-    )
-    await s.reconcile_scheduler.start()
     logger.info(
-        "ReconcileScheduler 시작 완료 (account=%s, 주기: %d초)",
-        broker_account_id,
+        "ReconcileScheduler 시작 완료: 계좌 %d개 (%s, 주기: %d초)",
+        len(started),
+        ", ".join(started),
         interval,
     )
 
@@ -653,17 +668,24 @@ async def _init_stream_integration(
     broker_config: dict,
     stop_order_manager: Any,
     *,
-    account_id: str = "",
+    account_id: str,
 ) -> None:
     """KISStreamClient + StreamIntegration 초기화.
 
-    SPLIT-1 (#1240): ``OrderFilledEvent``는 strict ``_requires_account_id``
-    marker를 가진다. 본 SPLIT 범위에서는 multi-account StreamIntegration
-    pool화는 하지 않고(SPLIT-3 #1242 영역 보존), 단일 인스턴스에 활성
-    KIS 계좌의 ``account_id``를 보강하여 broker payload fallback 시에도
-    체결 이벤트가 정상 발행되도록 한다.
+    SPLIT-3 (#1242): KIS multi-account 환경에서 활성 계좌마다 별도의
+    StreamIntegration 인스턴스를 만들어 ``s.stream_integrations`` dict 에
+    ``account_id`` 키로 등록한다. 한 계좌 stream 의 disconnect 가 다른 계좌
+    의 fallback 을 토글하지 않도록 ``StreamConnectedEvent`` /
+    ``StreamDisconnectedEvent`` 의 account_id marker (C2) 와 함께 작동한다.
+
+    이전 SPLIT-1 패턴 (``s.stream_integration`` 단일 슬롯 덮어쓰기) 은 두 번째
+    KIS 계좌 등록 시 첫 인스턴스를 silently leak 시켰으므로 본 SPLIT 에서
+    수정한다.
     """
     assert s.eventbus is not None
+    from ante.account.scoping import require_account_id
+
+    require_account_id(account_id, context="main._init_stream_integration")
 
     from ante.broker.kis_stream import KISStreamClient
     from ante.gateway.stream_integration import StreamIntegration
@@ -680,9 +702,10 @@ async def _init_stream_integration(
         app_key=broker_config.get("app_key", ""),
         app_secret=broker_config.get("app_secret", ""),
         eventbus=s.eventbus,
+        account_id=account_id,
     )
 
-    s.stream_integration = StreamIntegration(
+    integration = StreamIntegration(
         stream_client=stream_client,
         cache=s.api_gateway._cache,
         eventbus=s.eventbus,
@@ -693,13 +716,19 @@ async def _init_stream_integration(
     )
 
     try:
-        await s.stream_integration.start()
-        logger.info("StreamIntegration 시작 완료 (paper=%s)", is_paper)
+        await integration.start()
+        s.stream_integrations[account_id] = integration
+        logger.info(
+            "StreamIntegration 시작 완료 (account=%s, paper=%s)",
+            account_id,
+            is_paper,
+        )
     except Exception:
         logger.warning(
-            "StreamIntegration 시작 실패 — REST 전용 모드로 운영", exc_info=True
+            "StreamIntegration 시작 실패 — REST 전용 모드로 운영 (account=%s)",
+            account_id,
+            exc_info=True,
         )
-        s.stream_integration = None
 
 
 async def _sync_instruments(s: Services, accounts: list) -> None:
@@ -740,33 +769,73 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
 
 
 def _init_context_factory(s: Services) -> None:
-    """StrategyContextFactory 완성 (Gateway 연결 이후)."""
+    """StrategyContextFactory 완성 (Gateway 연결 이후).
+
+    SPLIT-3 (#1242): ``LiveDataProvider`` 는 봇별로 ``StrategyContextFactory``
+    가 생성한다 (per-bot account binding). ``s.data_provider`` 는 API gateway
+    가 없는 (paper-only test 등) 환경의 fallback 으로 ``_NullDataProvider`` 를
+    설정한다 — 이 경우 strategy 의 OHLCV 호출은 빈 결과를 반환한다.
+    """
     from ante.bot import StrategyContextFactory
     from ante.bot.providers.live import LiveTradeHistoryView
-    from ante.gateway.data_provider import LiveDataProvider
 
     if s.api_gateway:
-        s.data_provider = LiveDataProvider(
-            gateway=s.api_gateway,
-            parquet_store=s.parquet_store,
-        )
         s.paper_executor._gateway = s.api_gateway
 
     live_trade_history = LiveTradeHistoryView(trade_recorder=s.trade_recorder)
 
-    if s.data_provider:
-        context_factory = StrategyContextFactory(
-            data_provider=s.data_provider,
-            account_service=s.account_service,
-            live_portfolio=s.live_portfolio,
-            live_order_view=s.live_order_view,
-            paper_executor=s.paper_executor,
-            live_trade_history=live_trade_history,
-            treasury_manager=s.treasury_manager,
-            position_history=s.position_history,
+    if not s.data_provider:
+        s.data_provider = _NullDataProvider()
+
+    context_factory = StrategyContextFactory(
+        data_provider=s.data_provider,
+        account_service=s.account_service,
+        live_portfolio=s.live_portfolio,
+        live_order_view=s.live_order_view,
+        paper_executor=s.paper_executor,
+        live_trade_history=live_trade_history,
+        treasury_manager=s.treasury_manager,
+        position_history=s.position_history,
+        api_gateway=s.api_gateway,
+        parquet_store=s.parquet_store,
+    )
+    s.bot_manager._context_factory = context_factory
+    logger.info("StrategyContextFactory 설정 완료")
+
+
+class _NullDataProvider:
+    """SPLIT-3 (#1242): API gateway 가 없는 환경에서 사용되는 no-op
+    DataProvider. strategy 인터페이스 호환을 위해 빈 결과를 반환한다."""
+
+    async def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = "1d",
+        limit: int = 100,
+    ) -> Any:
+        import polars as pl
+
+        return pl.DataFrame(
+            schema={
+                "timestamp": pl.Float64,
+                "open": pl.Float64,
+                "high": pl.Float64,
+                "low": pl.Float64,
+                "close": pl.Float64,
+                "volume": pl.Float64,
+            }
         )
-        s.bot_manager._context_factory = context_factory
-        logger.info("StrategyContextFactory 설정 완료")
+
+    async def get_current_price(self, symbol: str) -> float:
+        return 0.0
+
+    async def get_indicator(
+        self,
+        symbol: str,
+        indicator: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {}
 
 
 async def _init_treasury_sync(s: Services, accounts: list) -> None:
@@ -786,9 +855,18 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
                 price_resolver = None
                 if s.api_gateway:
                     gateway = s.api_gateway
+                    # SPLIT-3 (#1242): APIGateway.get_current_price 가
+                    # account_id 를 required 로 받으므로, 봇 계좌의
+                    # account_id 를 closure 에 명시 binding 한다 (late
+                    # binding 차단을 위해 default 인자 사용).
+                    bound_account_id = account.account_id
 
-                    async def _resolve_price(symbol: str) -> float:
-                        return await gateway.get_current_price(symbol)
+                    async def _resolve_price(
+                        symbol: str, _account_id: str = bound_account_id
+                    ) -> float:
+                        return await gateway.get_current_price(
+                            symbol, account_id=_account_id
+                        )
 
                     price_resolver = _resolve_price
 
@@ -1548,9 +1626,18 @@ async def _shutdown(s: Services) -> None:
         await s.daily_report_scheduler.stop()
         logger.info("DailyReportScheduler 종료")
 
-    if s.reconcile_scheduler:
-        await s.reconcile_scheduler.stop()
-        logger.info("ReconcileScheduler 종료")
+    # SPLIT-3 (#1242): multi-broker ReconcileScheduler pool 정리
+    for sched_account_id, scheduler in list(s.reconcile_schedulers.items()):
+        try:
+            await scheduler.stop()
+            logger.info("ReconcileScheduler 종료: account=%s", sched_account_id)
+        except Exception:
+            logger.warning(
+                "ReconcileScheduler 종료 실패: account=%s",
+                sched_account_id,
+                exc_info=True,
+            )
+    s.reconcile_schedulers.clear()
 
     # 각 계좌의 Treasury sync 중지
     if s.treasury_manager:
@@ -1569,9 +1656,18 @@ async def _shutdown(s: Services) -> None:
         await s.bot_manager.stop_all()
         logger.info("BotManager 종료 — 모든 봇 중지")
 
-    if s.stream_integration:
-        await s.stream_integration.stop()
-        logger.info("StreamIntegration 종료")
+    # SPLIT-3 (#1242): multi-account StreamIntegration pool 정리
+    for stream_account_id, integration in list(s.stream_integrations.items()):
+        try:
+            await integration.stop()
+            logger.info("StreamIntegration 종료: account=%s", stream_account_id)
+        except Exception:
+            logger.warning(
+                "StreamIntegration 종료 실패: account=%s",
+                stream_account_id,
+                exc_info=True,
+            )
+    s.stream_integrations.clear()
 
     if s.api_gateway:
         s.api_gateway.stop()

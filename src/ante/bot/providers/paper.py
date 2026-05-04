@@ -187,9 +187,13 @@ class PaperExecutor:
             fill_price = event.price
         else:
             # market 주문: 현재가 기반 + 슬리피지
+            # SPLIT-3 (#1242): APIGateway.get_current_price 가 account_id 를
+            # required 로 받으므로 OrderApprovedEvent.account_id 를 명시 전달.
             if self._gateway:
                 try:
-                    current_price = await self._gateway.get_current_price(symbol)
+                    current_price = await self._gateway.get_current_price(
+                        symbol, account_id=account_id
+                    )
                 except Exception:
                     logger.warning("현재가 조회 실패: %s, 기본가 사용", symbol)
                     current_price = event.price or 0.0

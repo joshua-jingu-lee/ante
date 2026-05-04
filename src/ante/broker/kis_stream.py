@@ -53,6 +53,8 @@ class KISStreamClient:
         approval_key: str | None = None,
         eventbus: EventBus | None = None,
         ping_interval: float = DEFAULT_PING_INTERVAL,
+        *,
+        account_id: str = "",
     ) -> None:
         self._url = websocket_url
         self._app_key = app_key
@@ -60,6 +62,10 @@ class KISStreamClient:
         self._approval_key = approval_key
         self._eventbus = eventbus
         self._ping_interval = ping_interval
+        # SPLIT-3 (#1242): 각 KIS 계좌마다 별도 인스턴스를 만들고 account_id 를
+        # 명시 전달한다. StreamConnectedEvent / StreamDisconnectedEvent 발행 시
+        # 이 값을 그대로 실어 보낸다.
+        self._account_id = account_id
 
         self._ws: Any = None
         self._running = False
@@ -396,19 +402,35 @@ class KISStreamClient:
             self._ws = None
 
     async def _publish_connected(self) -> None:
-        """연결 이벤트 발행."""
+        """연결 이벤트 발행.
+
+        SPLIT-3 (#1242): ``StreamConnectedEvent`` 는 account-scoped marker 를
+        가진다. 발행 시 ``self._account_id`` 를 명시 전달한다.
+        """
         if self._eventbus:
             from ante.eventbus.events import StreamConnectedEvent
 
             await self._eventbus.publish(
-                StreamConnectedEvent(broker="kis", url=self._url)
+                StreamConnectedEvent(
+                    account_id=self._account_id,
+                    broker="kis",
+                    url=self._url,
+                )
             )
 
     async def _publish_disconnected(self, reason: str) -> None:
-        """연결 해제 이벤트 발행."""
+        """연결 해제 이벤트 발행.
+
+        SPLIT-3 (#1242): ``StreamDisconnectedEvent`` 는 account-scoped marker
+        를 가진다. 자세한 내용은 :meth:`_publish_connected` 참조.
+        """
         if self._eventbus:
             from ante.eventbus.events import StreamDisconnectedEvent
 
             await self._eventbus.publish(
-                StreamDisconnectedEvent(broker="kis", reason=reason)
+                StreamDisconnectedEvent(
+                    account_id=self._account_id,
+                    broker="kis",
+                    reason=reason,
+                )
             )

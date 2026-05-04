@@ -27,7 +27,12 @@ EXTENDED_SESSION_END = (9, 0)  # 18:00 KST = 09:00 UTC
 
 @dataclass
 class StopOrder:
-    """스탑 주문 내부 표현."""
+    """스탑 주문 내부 표현.
+
+    SPLIT-3 (#1242): ``account_id`` 는 runtime 시점부터 ``require_account_id``
+    로 검증된다. multi-account 환경에서 같은 종목의 stop order 가 다른
+    계좌의 시세 tick 으로 잘못 trigger 되지 않도록 격리한다.
+    """
 
     stop_order_id: str
     order_id: str
@@ -45,6 +50,13 @@ class StopOrder:
     triggered: bool = False
     expired: bool = False
     exchange: str = "KRX"
+
+    def __post_init__(self) -> None:
+        from ante.account.scoping import require_account_id
+
+        # SPLIT-3 (#1242): account_id fallback 차단. invalid 값으로
+        # StopOrder 가 만들어지면 이후 OrderRequestEvent 발행 시 실패한다.
+        require_account_id(self.account_id, context="stop_order.register")
 
 
 class StopOrderManager:
@@ -167,19 +179,33 @@ class StopOrderManager:
         """봇의 활성 스탑 주문 목록."""
         return [o for o in self.active_orders if o.bot_id == bot_id]
 
-    async def on_price_update(self, symbol: str, price: float) -> None:
+    async def on_price_update(
+        self, symbol: str, price: float, *, account_id: str
+    ) -> None:
         """실시간 시세 수신 시 트리거 판단.
 
         매수 스탑: 현재가 >= stop_price → 트리거
         매도 스탑: 현재가 <= stop_price → 트리거
+
+        SPLIT-3 (#1242): ``account_id`` 는 호출자가 명시 전달해야 한다.
+        multi-account 환경에서는 각 계좌마다 별도의 ``KISStreamClient``
+        인스턴스를 가지므로, tick 이 들어온 stream 의 ``account_id`` 만
+        매칭되는 stop order 를 평가한다. 다른 계좌의 stop order 는 같은
+        symbol 이라도 무시된다.
         """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="stop_order.on_price_update")
+
         if not self._running:
             return
 
         active_for_symbol = [
             o
             for o in self.active_orders
-            if o.symbol == symbol and self._is_in_session(o)
+            if o.symbol == symbol
+            and o.account_id == account_id
+            and self._is_in_session(o)
         ]
 
         for order in active_for_symbol:

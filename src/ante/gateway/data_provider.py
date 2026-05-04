@@ -32,6 +32,12 @@ class LiveDataProvider(DataProvider):
     과거 봉 데이터는 ParquetStore에서 읽고, 현재가는 APIGateway 캐시를 활용한다.
     ParquetStore에 데이터가 없으면 APIGateway 경유로 폴백한다.
 
+    SPLIT-3 (#1242): 봇별 인스턴스 (per-bot account binding) 로 사용된다.
+    ``account_id`` 는 kw-only required 이며, 내부 ``_gateway.get_*`` 호출 시
+    명시 전달된다. strategy 인터페이스 (``StrategyContext.get_ohlcv``) 는
+    변경되지 않으며, ``StrategyContextFactory.create()`` 가 봇별로 새
+    인스턴스를 생성해 closure 방식으로 account_id 를 격리한다.
+
     Note: DataProvider 인터페이스 준수를 위해 async def를 유지한다.
     """
 
@@ -39,9 +45,16 @@ class LiveDataProvider(DataProvider):
         self,
         gateway: APIGateway,
         parquet_store: ParquetStore | None = None,
+        *,
+        account_id: str,
     ) -> None:
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="live_data_provider.__init__")
+
         self._gateway = gateway
         self._store = parquet_store
+        self._account_id = account_id
 
     async def get_ohlcv(
         self,
@@ -77,13 +90,18 @@ class LiveDataProvider(DataProvider):
                 )
 
         records = await self._gateway.get_ohlcv(
-            symbol, timeframe=timeframe, limit=limit
+            symbol,
+            timeframe=timeframe,
+            limit=limit,
+            account_id=self._account_id,
         )
         return _dicts_to_ohlcv_df(records)
 
     async def get_current_price(self, symbol: str) -> float:
         """현재가 조회 (APIGateway 캐시 활용)."""
-        return await self._gateway.get_current_price(symbol)
+        return await self._gateway.get_current_price(
+            symbol, account_id=self._account_id
+        )
 
     async def get_indicator(
         self,

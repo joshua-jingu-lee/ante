@@ -17,6 +17,8 @@ if TYPE_CHECKING:
         LiveOrderView,
         LiveTradeHistoryView,
     )
+    from ante.data.store import ParquetStore
+    from ante.gateway.gateway import APIGateway
     from ante.strategy.base import DataProvider
     from ante.trade.position import PositionHistory
     from ante.treasury.manager import TreasuryManager
@@ -28,6 +30,13 @@ class StrategyContextFactory:
     """Account.trading_mode에 따라 적절한 StrategyContext를 생성.
 
     main.py에서 생성되어 BotManager에 주입된다.
+
+    SPLIT-3 (#1242): live mode 에서는 봇별로 ``LiveDataProvider`` 인스턴스
+    를 새로 생성해 ``account_id`` 를 closure 방식으로 격리한다. strategy
+    인터페이스 (``StrategyContext.get_ohlcv``) 는 변경되지 않는다.
+    ``api_gateway`` / ``parquet_store`` 가 모두 주입되어 있을 때만 봇별
+    인스턴스를 만들고, 미주입이면 fallback ``data_provider`` 를 사용한다
+    (paper-only 환경 호환).
     """
 
     def __init__(
@@ -40,6 +49,8 @@ class StrategyContextFactory:
         live_trade_history: LiveTradeHistoryView | None = None,
         treasury_manager: TreasuryManager | None = None,
         position_history: PositionHistory | None = None,
+        api_gateway: APIGateway | None = None,
+        parquet_store: ParquetStore | None = None,
     ) -> None:
         self._data_provider = data_provider
         self._account_service = account_service
@@ -49,6 +60,8 @@ class StrategyContextFactory:
         self._live_trade_history = live_trade_history
         self._treasury_manager = treasury_manager
         self._position_history = position_history
+        self._api_gateway = api_gateway
+        self._parquet_store = parquet_store
 
     def create(self, config: BotConfig) -> StrategyContext:
         """BotConfig 기반으로 적절한 StrategyContext 생성.
@@ -97,16 +110,32 @@ class StrategyContextFactory:
         raise ValueError(msg)
 
     def _create_live_context(self, config: BotConfig) -> StrategyContext:
-        """Live 봇용 StrategyContext 생성."""
+        """Live 봇용 StrategyContext 생성.
+
+        SPLIT-3 (#1242): ``APIGateway`` 가 주입돼 있으면 봇별로 새
+        ``LiveDataProvider`` 인스턴스를 만들어 ``config.account_id`` 를
+        closure 로 binding 한다. 그 외 환경에서는 공유 ``self._data_provider``
+        를 그대로 사용한다.
+        """
         portfolio = self._get_live_portfolio(config)
 
         if self._live_order_view is None:
             msg = "Live 봇 생성에 필요한 Provider가 설정되지 않았습니다"
             raise ValueError(msg)
 
+        data_provider = self._data_provider
+        if self._api_gateway is not None:
+            from ante.gateway.data_provider import LiveDataProvider
+
+            data_provider = LiveDataProvider(
+                gateway=self._api_gateway,
+                parquet_store=self._parquet_store,
+                account_id=config.account_id,
+            )
+
         ctx = StrategyContext(
             bot_id=config.bot_id,
-            data_provider=self._data_provider,
+            data_provider=data_provider,
             portfolio=portfolio,
             order_view=self._live_order_view,
             trade_history=self._live_trade_history,
@@ -115,7 +144,12 @@ class StrategyContextFactory:
         return ctx
 
     def _create_paper_context(self, config: BotConfig) -> StrategyContext:
-        """Paper 봇용 StrategyContext 생성."""
+        """Paper 봇용 StrategyContext 생성.
+
+        SPLIT-3 (#1242): paper 봇이라도 OHLCV / price 조회는 봇의 account_id
+        로 APIGateway 를 호출해야 한다 (broker routing). live 와 동일하게
+        ``api_gateway`` 가 있으면 봇별 LiveDataProvider 를 생성한다.
+        """
         initial_balance = self._resolve_paper_balance(config)
         paper_portfolio = PaperPortfolioView(
             bot_id=config.bot_id,
@@ -127,9 +161,19 @@ class StrategyContextFactory:
         if self._paper_executor:
             self._paper_executor.register_bot(config.bot_id, paper_portfolio)
 
+        data_provider = self._data_provider
+        if self._api_gateway is not None:
+            from ante.gateway.data_provider import LiveDataProvider
+
+            data_provider = LiveDataProvider(
+                gateway=self._api_gateway,
+                parquet_store=self._parquet_store,
+                account_id=config.account_id,
+            )
+
         ctx = StrategyContext(
             bot_id=config.bot_id,
-            data_provider=self._data_provider,
+            data_provider=data_provider,
             portfolio=paper_portfolio,
             order_view=paper_order_view,
         )

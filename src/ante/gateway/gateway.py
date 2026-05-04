@@ -103,13 +103,21 @@ class APIGateway:
         timeframe: str = "1d",
         limit: int = 100,
         exchange: str = "KRX",
-        account_id: str = "",
+        *,
+        account_id: str,
     ) -> list[dict[str, Any]]:
         """과거 봉 데이터 조회 (캐시 우선).
 
         OHLCV 캐시 키는 exchange 기반을 유지한다 (동일 거래소 데이터 공유).
         BrokerAdapter.get_ohlcv()가 미구현이면 빈 리스트를 반환한다.
+
+        SPLIT-3 (#1242): ``account_id`` 는 broker 라우팅과 rate limiter
+        bucket 결정에 사용되므로 fallback 금지 (``require_account_id``).
         """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="gateway.get_ohlcv")
+
         cache_key = f"ohlcv:{exchange}:{symbol}:{timeframe}:{limit}"
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -128,9 +136,16 @@ class APIGateway:
         return data
 
     async def get_current_price(
-        self, symbol: str, account_id: str = "", exchange: str = "KRX"
+        self, symbol: str, *, account_id: str, exchange: str = "KRX"
     ) -> float:
-        """현재가 조회 (캐시 우선). account_id로 브로커 라우팅."""
+        """현재가 조회 (캐시 우선). account_id로 브로커 라우팅.
+
+        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="gateway.get_current_price")
+
         cache_key = f"{account_id}:price:{symbol}"
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -143,8 +158,15 @@ class APIGateway:
         self._cache.set(cache_key, price, ttl=5)
         return price
 
-    async def get_positions(self, account_id: str = "") -> list[dict[str, Any]]:
-        """포지션 조회 (캐시 우선). account_id로 브로커 라우팅."""
+    async def get_positions(self, *, account_id: str) -> list[dict[str, Any]]:
+        """포지션 조회 (캐시 우선). account_id로 브로커 라우팅.
+
+        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="gateway.get_positions")
+
         cache_key = f"{account_id}:positions"
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -157,8 +179,15 @@ class APIGateway:
         self._cache.set(cache_key, positions, ttl=30)
         return positions
 
-    async def get_account_balance(self, account_id: str = "") -> dict[str, float]:
-        """잔고 조회 (캐시 우선). account_id로 브로커 라우팅."""
+    async def get_account_balance(self, *, account_id: str) -> dict[str, float]:
+        """잔고 조회 (캐시 우선). account_id로 브로커 라우팅.
+
+        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="gateway.get_account_balance")
+
         cache_key = f"{account_id}:balance"
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -179,9 +208,17 @@ class APIGateway:
         quantity: float,
         order_type: str = "market",
         price: float | None = None,
-        account_id: str = "",
+        *,
+        account_id: str,
     ) -> str:
-        """주문 제출. 캐시 없이 rate limit만 적용. account_id로 브로커 라우팅."""
+        """주문 제출. 캐시 없이 rate limit만 적용. account_id로 브로커 라우팅.
+
+        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="gateway.submit_order")
+
         rate_limiter = self._get_rate_limiter(account_id)
         await rate_limiter.acquire()
         broker = await self._get_broker(account_id)
@@ -203,8 +240,15 @@ class APIGateway:
         )
         return broker_order_id
 
-    async def cancel_order(self, order_id: str, account_id: str = "") -> bool:
-        """주문 취소. account_id로 브로커 라우팅."""
+    async def cancel_order(self, order_id: str, *, account_id: str) -> bool:
+        """주문 취소. account_id로 브로커 라우팅.
+
+        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        """
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="gateway.cancel_order")
+
         rate_limiter = self._get_rate_limiter(account_id)
         await rate_limiter.acquire()
         broker = await self._get_broker(account_id)

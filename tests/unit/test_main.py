@@ -264,6 +264,152 @@ async def test_services_dataclass_no_single_broker_treasury_rule(
     assert s.account_service is None
 
 
+async def test_services_stream_integrations_pool_default_empty_dict() -> None:
+    """SPLIT-3 (#1242): Services.stream_integrations 는 dict 기본값을 가지며,
+    단일 슬롯 stream_integration 필드는 제거되었다.
+    """
+    from ante.main import Services
+
+    s = Services()
+    assert not hasattr(s, "stream_integration")
+    assert hasattr(s, "stream_integrations")
+    assert isinstance(s.stream_integrations, dict)
+    assert s.stream_integrations == {}
+
+
+async def test_services_reconcile_schedulers_pool_default_empty_dict() -> None:
+    """SPLIT-3 (#1242): Services.reconcile_schedulers 는 dict 기본값을 가지며,
+    단일 슬롯 reconcile_scheduler 필드는 제거되었다.
+    """
+    from ante.main import Services
+
+    s = Services()
+    assert not hasattr(s, "reconcile_scheduler")
+    assert hasattr(s, "reconcile_schedulers")
+    assert isinstance(s.reconcile_schedulers, dict)
+    assert s.reconcile_schedulers == {}
+
+
+async def test_init_reconcile_scheduler_registers_per_broker_in_pool(
+    tmp_path: Path,
+) -> None:
+    """SPLIT-3 (#1242): _init_reconcile_scheduler 가 활성 broker 가 있는 모든
+    계좌에 대해 별도의 ReconcileScheduler 인스턴스를 만들어 dict 에 등록한다.
+    이전 SPLIT-1 패턴은 첫 번째 broker 만 사용했으므로 본 SPLIT 에서 회귀
+    차단한다.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ante.main import Services, _init_reconcile_scheduler
+
+    eventbus = EventBus(history_size=100)
+
+    # account_service: 두 계좌 모두 broker 연결 가능
+    account_service = MagicMock()
+    accounts_data = [
+        MagicMock(account_id="acc-a"),
+        MagicMock(account_id="acc-b"),
+    ]
+    account_service.list = AsyncMock(return_value=accounts_data)
+
+    broker_a = MagicMock()
+    broker_b = MagicMock()
+    brokers = {"acc-a": broker_a, "acc-b": broker_b}
+    account_service.get_broker = AsyncMock(side_effect=lambda aid: brokers[aid])
+
+    config = MagicMock()
+    config.get = MagicMock(return_value={"enabled": True, "interval_seconds": 1800})
+
+    bot_manager = MagicMock()
+    bot_manager.list_bots.return_value = []
+
+    trade_service = MagicMock()
+
+    s = Services(
+        eventbus=eventbus,
+        account_service=account_service,
+        config=config,
+        bot_manager=bot_manager,
+        trade_service=trade_service,
+    )
+
+    # ReconcileScheduler.start 의 1회성 run_once 가 broker.get_account_positions 를
+    # 호출하므로 mock 으로 가로챈다.
+    broker_a.get_account_positions = AsyncMock(return_value=[])
+    broker_b.get_account_positions = AsyncMock(return_value=[])
+
+    await _init_reconcile_scheduler(s)
+
+    try:
+        assert set(s.reconcile_schedulers.keys()) == {"acc-a", "acc-b"}
+        assert s.reconcile_schedulers["acc-a"]._broker is broker_a
+        assert s.reconcile_schedulers["acc-b"]._broker is broker_b
+        assert s.reconcile_schedulers["acc-a"]._broker_account_id == "acc-a"
+        assert s.reconcile_schedulers["acc-b"]._broker_account_id == "acc-b"
+    finally:
+        for scheduler in s.reconcile_schedulers.values():
+            await scheduler.stop()
+
+
+async def test_init_stream_integration_registers_per_account_in_pool(
+    tmp_path: Path,
+) -> None:
+    """SPLIT-3 (#1242): _init_stream_integration 이 두 개 KIS 계좌에 대해
+    각각 인스턴스를 만들어 stream_integrations dict 에 account_id 키로
+    등록한다 (이전 단일 슬롯 덮어쓰기 버그 회귀 차단).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ante.gateway.cache import ResponseCache
+    from ante.main import Services, _init_stream_integration
+
+    eventbus = EventBus(history_size=100)
+    s = Services(eventbus=eventbus)
+
+    # api_gateway 는 cache 만 노출하면 충분 (StreamIntegration 가 cache 참조).
+    s.api_gateway = MagicMock()
+    s.api_gateway._cache = ResponseCache()
+    s.bot_manager = MagicMock()
+    s.bot_manager.list_bots.return_value = []
+
+    stop_order_manager = MagicMock()
+    stop_order_manager.active_orders = []
+
+    # KISStreamClient.connect 를 mock 으로 가로채 실제 WebSocket 연결을 회피
+    from unittest.mock import patch
+
+    with (
+        patch("ante.broker.kis_stream.KISStreamClient.connect", new_callable=AsyncMock),
+        patch(
+            "ante.broker.kis_stream.KISStreamClient.subscribe_execution",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "ante.broker.kis_stream.KISStreamClient.disconnect", new_callable=AsyncMock
+        ),
+    ):
+        for account_id in ("acc-a", "acc-b"):
+            await _init_stream_integration(
+                s,
+                broker_config={
+                    "is_paper": True,
+                    "app_key": "k",
+                    "app_secret": "s",
+                },
+                stop_order_manager=stop_order_manager,
+                account_id=account_id,
+            )
+
+        try:
+            assert set(s.stream_integrations.keys()) == {"acc-a", "acc-b"}
+            # 각 인스턴스의 account_id 가 정확히 매핑되어야 한다
+            assert s.stream_integrations["acc-a"]._account_id == "acc-a"
+            assert s.stream_integrations["acc-b"]._account_id == "acc-b"
+        finally:
+            for integration in s.stream_integrations.values():
+                await integration.stop()
+
+
 async def test_init_account_creates_test_account(tmp_path: Path) -> None:
     """계좌가 없을 때 _init_account가 테스트 계좌를 자동 생성한다."""
     from ante.main import Services, _init_account
