@@ -45,13 +45,22 @@ class StreamIntegration:
         stream_client: KISStreamClient,
         cache: ResponseCache,
         eventbus: EventBus,
-        account_id: str = "",
+        *,
+        account_id: str,
         stop_order_manager: StopOrderManager | None = None,
         gateway: APIGateway | None = None,
         bot_manager: BotManager | None = None,
         fallback_poll_interval: float = DEFAULT_FALLBACK_POLL_INTERVAL,
         sync_interval: float = DEFAULT_SYNC_INTERVAL,
     ) -> None:
+        # SPLIT-3 (#1242): multi-account StreamIntegration pool 의 핵심 계약 —
+        # 인스턴스마다 단일 KIS 계좌 lifecycle 에 묶이며, fallback / 캐시
+        # 네임스페이스 / stop_order trigger 격리 모두 self._account_id 에 의존
+        # 한다. fallback 금지 (``require_account_id``).
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="stream_integration.__init__")
+
         self._stream = stream_client
         self._cache = cache
         self._eventbus = eventbus
@@ -221,13 +230,10 @@ class StreamIntegration:
         SPLIT-3 (#1242): multi-account StreamIntegration pool 에서 다른
         계좌의 stream 이벤트로 자기 fallback 을 토글하지 않도록
         ``event.account_id`` 가 ``self._account_id`` 와 일치할 때만 반응한다.
-        ``self._account_id`` 가 비어있는 (fallback test wiring) 경우는
-        호환을 위해 모든 이벤트를 받는다.
         """
-        if self._account_id:
-            event_account_id = getattr(event, "account_id", "")
-            if event_account_id and event_account_id != self._account_id:
-                return
+        event_account_id = getattr(event, "account_id", "")
+        if event_account_id != self._account_id:
+            return
         await self._stop_fallback()
         logger.info("스트림 연결됨 — REST 폴링 폴백 중지")
 
@@ -239,10 +245,9 @@ class StreamIntegration:
         """
         if not self._running:
             return
-        if self._account_id:
-            event_account_id = getattr(event, "account_id", "")
-            if event_account_id and event_account_id != self._account_id:
-                return
+        event_account_id = getattr(event, "account_id", "")
+        if event_account_id != self._account_id:
+            return
         await self._start_fallback()
         logger.warning("스트림 연결 해제 — REST 폴링 폴백 시작")
 

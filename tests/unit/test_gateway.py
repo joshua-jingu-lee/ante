@@ -304,6 +304,49 @@ class TestAPIGateway:
         await gateway.get_current_price("005930", account_id="acc-001")
         account_service.get_broker.assert_called_with("acc-001")
 
+    async def test_get_current_price_rejects_empty_account_id(self, gateway):
+        """SPLIT-3 (#1242): 빈 account_id 는 InvalidAccountIdError."""
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await gateway.get_current_price("005930", account_id="")
+
+    async def test_get_ohlcv_rejects_empty_account_id(self, gateway):
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await gateway.get_ohlcv("005930", account_id="")
+
+    async def test_get_positions_rejects_empty_account_id(self, gateway):
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await gateway.get_positions(account_id="")
+
+    async def test_get_account_balance_rejects_empty_account_id(self, gateway):
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await gateway.get_account_balance(account_id="")
+
+    async def test_submit_order_rejects_empty_account_id(self, gateway):
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await gateway.submit_order(
+                bot_id="bot1",
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                account_id="",
+            )
+
+    async def test_cancel_order_rejects_empty_account_id(self, gateway):
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await gateway.cancel_order("ORD001", account_id="")
+
 
 # ── APIGateway EventBus 통합 ──────────────────────
 

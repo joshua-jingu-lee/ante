@@ -528,46 +528,30 @@ async def test_fallback_not_started_without_gateway(
 
 
 @pytest.mark.asyncio
-async def test_execution_without_account_id_skips_event(
+async def test_construction_without_account_id_raises(
     stream_client: FakeStreamClient,
     cache: ResponseCache,
     eventbus: EventBus,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """account_id가 broker payload/lifecycle 모두 없으면 OrderFilledEvent를
-    발행하지 않고 WARNING 로그 후 skip한다 (라이브 경로 보존)."""
-    integration = StreamIntegration(
-        stream_client=stream_client,
-        cache=cache,
-        eventbus=eventbus,
-        # account_id 의도적으로 미주입
-    )
-    await integration.start()
-    try:
-        received: list[OrderFilledEvent] = []
+    """SPLIT-3 (#1242): StreamIntegration 은 account_id 가 required 이며,
+    빈 문자열로 생성하려 하면 InvalidAccountIdError 가 raise 된다.
 
-        async def handler(event: OrderFilledEvent) -> None:
-            received.append(event)
+    SPLIT-1 의 ``test_execution_without_account_id_skips_event`` 는 lifecycle
+    account_id 가 없는 상태로 인스턴스를 만들 수 있다는 가정에 의존했으나,
+    SPLIT-3 에서 ctor 가 require_account_id 로 fallback 을 차단했다. broker
+    payload 만 없을 때 lifecycle account_id 로 fallback 하는 흐름은
+    ``test_execution_uses_lifecycle_account_id_when_payload_missing`` 가 검증
+    한다.
+    """
+    from ante.account.errors import InvalidAccountIdError
 
-        eventbus.subscribe(OrderFilledEvent, handler)
-
-        with caplog.at_level("WARNING", logger="ante.gateway.stream_integration"):
-            await stream_client.fire_execution(
-                {
-                    "symbol": "005930",
-                    "order_id": "ord-noacct",
-                    "side": "buy",
-                    "quantity": 10.0,
-                    "price": 70000.0,
-                }
-            )
-
-        assert received == []
-        assert any(
-            "OrderFilledEvent 발행을 skip" in rec.message for rec in caplog.records
+    with pytest.raises(InvalidAccountIdError):
+        StreamIntegration(
+            stream_client=stream_client,
+            cache=cache,
+            eventbus=eventbus,
+            account_id="",
         )
-    finally:
-        await integration.stop()
 
 
 @pytest.mark.asyncio

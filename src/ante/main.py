@@ -787,9 +787,18 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
                 price_resolver = None
                 if s.api_gateway:
                     gateway = s.api_gateway
+                    # SPLIT-3 (#1242): APIGateway.get_current_price 가
+                    # account_id 를 required 로 받으므로, 봇 계좌의
+                    # account_id 를 closure 에 명시 binding 한다 (late
+                    # binding 차단을 위해 default 인자 사용).
+                    bound_account_id = account.account_id
 
-                    async def _resolve_price(symbol: str) -> float:
-                        return await gateway.get_current_price(symbol)
+                    async def _resolve_price(
+                        symbol: str, _account_id: str = bound_account_id
+                    ) -> float:
+                        return await gateway.get_current_price(
+                            symbol, account_id=_account_id
+                        )
 
                     price_resolver = _resolve_price
 
