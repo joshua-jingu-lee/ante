@@ -82,9 +82,7 @@ async def db(tmp_path) -> Database:  # noqa: ANN001
 
 def _make_config(bot_id: str = "bot-001") -> BotConfig:
     return BotConfig(
-        bot_id=bot_id,
-        strategy_id="stg-001",
-        interval_seconds=60,
+        bot_id=bot_id, strategy_id="stg-001", interval_seconds=60, account_id="acc-test"
     )
 
 
@@ -241,6 +239,7 @@ class TestChannelEventForwarding:
                 quantity=10.0,
                 price=58200.0,
                 commission=87.3,
+                account_id="acc-test",
             )
             await eventbus.publish(fill_event)
 
@@ -280,6 +279,7 @@ class TestChannelEventForwarding:
             side="buy",
             quantity=10.0,
             price=58200.0,
+            account_id="acc-test",
         )
 
         await eventbus.publish(fill_event)
@@ -309,6 +309,7 @@ class TestChannelEventForwarding:
                 order_id="ORD-002",
                 bot_id="bot-001",
                 reason="insufficient funds",
+                account_id="acc-test",
             )
             await eventbus.publish(event)
 
@@ -360,6 +361,7 @@ class TestChannelEventForwarding:
                 side="buy",
                 quantity=5.0,
                 price=59000.0,
+                account_id="acc-test",
             )
 
             await eventbus.publish(fill_event)

@@ -443,7 +443,7 @@ class TestTreasuryStatusAccount:
         mock_ct.assert_called_once_with("domestic")
 
     def test_treasury_status_without_account(self, runner):
-        """--account 미지정 시 기본 자금 현황."""
+        """--account 미지정 시 Click usage error (필수 옵션)."""
         mock_treasury = MagicMock()
         mock_treasury.get_summary.return_value = {
             "account_balance": 10000000,
@@ -462,8 +462,9 @@ class TestTreasuryStatusAccount:
             mock_ct.return_value = (mock_treasury, mock_db)
             result = runner.invoke(cli, ["treasury", "status"])
 
-        assert result.exit_code == 0
-        mock_ct.assert_called_once_with(None)
+        # #1217: --account가 required이므로 missing option은 usage error(2)
+        assert result.exit_code == 2
+        mock_ct.assert_not_called()
 
     def test_treasury_status_with_account_json(self, runner):
         """JSON 모드에서 --account 필터."""

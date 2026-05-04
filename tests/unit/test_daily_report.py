@@ -91,6 +91,7 @@ def _make_trade(
         price=price,
         status=TradeStatus.FILLED,
         timestamp=datetime.now(KST),
+        account_id="acc-test",
     )
 
 
@@ -191,6 +192,7 @@ class TestDailyReportEventAlwaysPublished:
                 symbol="005930",
                 quantity=100.0,
                 avg_entry_price=50000.0,
+                account_id="acc-test",
             )
         ]
 
@@ -342,6 +344,7 @@ class TestNotificationEvent:
                 symbol=f"00593{i}",
                 quantity=100.0,
                 avg_entry_price=50000.0,
+                account_id="acc-test",
             )
             for i in range(4)
         ]
@@ -518,6 +521,7 @@ class TestConfiguration:
             trade_recorder=trade_recorder,
             position_history=position_history,
             eventbus=eventbus,
+            account_id="acc-test",
         )
         assert sched._report_time == DEFAULT_REPORT_TIME
         assert DEFAULT_REPORT_TIME == time(16, 0)
@@ -533,6 +537,7 @@ class TestConfiguration:
             position_history=position_history,
             eventbus=eventbus,
             report_time=custom_time,
+            account_id="acc-test",
         )
         assert sched._report_time == custom_time
 
@@ -569,6 +574,7 @@ class TestNoTreasuryFallback:
             trade_recorder=trade_recorder,
             position_history=position_history,
             eventbus=eventbus,
+            account_id="acc-test",
         )
 
         trade_recorder.get_trades.return_value = []

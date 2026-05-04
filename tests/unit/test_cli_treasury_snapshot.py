@@ -99,7 +99,7 @@ class TestSnapshotDefault:
     def test_default_today(self, runner, mock_auth):
         ctx_patch, mock_t = _make_mock_treasury(get_daily_return=SAMPLE_SNAPSHOT)
         with ctx_patch:
-            result = _invoke(runner, ["snapshot"], mock_auth)
+            result = _invoke(runner, ["snapshot", "--account", "domestic"], mock_auth)
 
         assert result.exit_code == 0
         assert "일별 자산 스냅샷" in result.output
@@ -110,7 +110,7 @@ class TestSnapshotDefault:
     def test_default_no_data(self, runner, mock_auth):
         ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
         with ctx_patch:
-            result = _invoke(runner, ["snapshot"], mock_auth)
+            result = _invoke(runner, ["snapshot", "--account", "domestic"], mock_auth)
 
         assert result.exit_code == 0
         assert "스냅샷이 없습니다" in result.output
@@ -122,7 +122,11 @@ class TestSnapshotDate:
     def test_specific_date(self, runner, mock_auth):
         ctx_patch, mock_t = _make_mock_treasury(get_daily_return=SAMPLE_SNAPSHOT)
         with ctx_patch:
-            result = _invoke(runner, ["snapshot", "--date", "2026-03-21"], mock_auth)
+            result = _invoke(
+                runner,
+                ["snapshot", "--account", "domestic", "--date", "2026-03-21"],
+                mock_auth,
+            )
 
         assert result.exit_code == 0
         assert "2026-03-21" in result.output
@@ -131,7 +135,11 @@ class TestSnapshotDate:
     def test_specific_date_not_found(self, runner, mock_auth):
         ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
         with ctx_patch:
-            result = _invoke(runner, ["snapshot", "--date", "2026-01-01"], mock_auth)
+            result = _invoke(
+                runner,
+                ["snapshot", "--account", "domestic", "--date", "2026-01-01"],
+                mock_auth,
+            )
 
         assert result.exit_code == 0
         assert "2026-01-01" in result.output
@@ -147,7 +155,15 @@ class TestSnapshotRange:
         with ctx_patch:
             result = _invoke(
                 runner,
-                ["snapshot", "--from", "2026-03-20", "--to", "2026-03-21"],
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--from",
+                    "2026-03-20",
+                    "--to",
+                    "2026-03-21",
+                ],
                 mock_auth,
             )
 
@@ -160,7 +176,11 @@ class TestSnapshotRange:
         """--from만 지정하면 오늘까지 조회."""
         ctx_patch, mock_t = _make_mock_treasury(get_range_return=[SAMPLE_SNAPSHOT])
         with ctx_patch:
-            result = _invoke(runner, ["snapshot", "--from", "2026-03-20"], mock_auth)
+            result = _invoke(
+                runner,
+                ["snapshot", "--account", "domestic", "--from", "2026-03-20"],
+                mock_auth,
+            )
 
         assert result.exit_code == 0
         # get_snapshots가 호출되었는지 확인
@@ -173,7 +193,15 @@ class TestSnapshotRange:
         with ctx_patch:
             result = _invoke(
                 runner,
-                ["snapshot", "--from", "2026-01-01", "--to", "2026-01-02"],
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--from",
+                    "2026-01-01",
+                    "--to",
+                    "2026-01-02",
+                ],
                 mock_auth,
             )
 
@@ -199,7 +227,15 @@ class TestSnapshotJson:
         with ctx_patch:
             result = runner.invoke(
                 treasury,
-                ["snapshot", "--date", "2026-03-21", "--format", "json"],
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--date",
+                    "2026-03-21",
+                    "--format",
+                    "json",
+                ],
                 obj={
                     "format": "json",
                     "formatter": OutputFormatter("json"),
@@ -231,6 +267,8 @@ class TestSnapshotJson:
                 treasury,
                 [
                     "snapshot",
+                    "--account",
+                    "domestic",
                     "--from",
                     "2026-03-20",
                     "--to",
@@ -261,7 +299,15 @@ class TestSnapshotValidation:
         with ctx_patch:
             result = _invoke(
                 runner,
-                ["snapshot", "--date", "2026-03-21", "--from", "2026-03-20"],
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--date",
+                    "2026-03-21",
+                    "--from",
+                    "2026-03-20",
+                ],
                 mock_auth,
             )
 

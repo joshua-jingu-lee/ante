@@ -366,7 +366,7 @@ class TestTreasuryCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_treasury, mock_db)
 
-            result = runner.invoke(cli, ["treasury", "status"])
+            result = runner.invoke(cli, ["treasury", "status", "--account", "domestic"])
             assert result.exit_code == 0
             assert "10,000,000" in result.output
 
@@ -387,7 +387,17 @@ class TestTreasuryCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_treasury, mock_db)
 
-            result = runner.invoke(cli, ["--format", "json", "treasury", "status"])
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "treasury",
+                    "status",
+                    "--account",
+                    "domestic",
+                ],
+            )
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["account_balance"] == 10000000.0
@@ -472,7 +482,7 @@ class TestRuleCommands:
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(cli, ["rule", "list"])
+                result = runner.invoke(cli, ["rule", "list", "--account", "acc-1"])
                 assert result.exit_code == 0
 
     def test_rule_list_with_rules(self, runner):
@@ -492,7 +502,17 @@ class TestRuleCommands:
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(cli, ["--format", "json", "rule", "list"])
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "rule",
+                        "list",
+                        "--account",
+                        "acc-1",
+                    ],
+                )
                 assert result.exit_code == 0
                 data = json.loads(result.output)
                 assert len(data["rules"]) == 1
@@ -508,9 +528,24 @@ class TestRuleCommands:
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(cli, ["rule", "info", "nonexistent"])
+                result = runner.invoke(
+                    cli,
+                    ["rule", "info", "nonexistent", "--account", "acc-1"],
+                )
                 assert result.exit_code == 1
                 assert "찾을 수 없습니다" in result.output
+
+    def test_rule_list_requires_account(self, runner):
+        """--account 옵션 누락 시 click usage error로 실패."""
+        result = runner.invoke(cli, ["rule", "list"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
+
+    def test_rule_info_requires_account(self, runner):
+        """rule info도 --account 옵션 누락 시 실패."""
+        result = runner.invoke(cli, ["rule", "info", "some-rule"])
+        assert result.exit_code != 0
+        assert "--account" in result.output
 
 
 # ── broker 커맨드 ───────────────────────────────────

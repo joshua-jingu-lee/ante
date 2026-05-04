@@ -22,11 +22,14 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
+    from ante.account.scoping import require_account_id
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.treasury.treasury import Treasury
+
+    validated_account_id = require_account_id(account_id, context="cli.treasury")
 
     db = Database(get_db_path())
     await db.connect()
@@ -34,30 +37,26 @@ async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
     account_service = AccountService(db=db, eventbus=eventbus)
     await account_service.initialize()
 
-    if account_id:
-        account = await account_service.get(account_id)
-        t = Treasury(
-            db,
-            eventbus,
-            account_id=account.account_id,
-            currency=account.currency,
-            buy_commission_rate=float(account.buy_commission_rate),
-            sell_commission_rate=float(account.sell_commission_rate),
-        )
-    else:
-        t = Treasury(db, eventbus)
-
+    account = await account_service.get(validated_account_id)
+    t = Treasury(
+        db,
+        eventbus,
+        account_id=account.account_id,
+        currency=account.currency,
+        buy_commission_rate=float(account.buy_commission_rate),
+        sell_commission_rate=float(account.sell_commission_rate),
+    )
     await t.initialize()
     return t, db
 
 
 @treasury.command()
-@click.option("--account", "account_id", default=None, help="계좌 ID로 필터링")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @format_option
 @click.pass_context
 @require_auth
 @require_scope("treasury:read")
-def status(ctx: click.Context, account_id: str | None) -> None:
+def status(ctx: click.Context, account_id: str) -> None:
     """자금 현황 요약."""
     fmt = get_formatter(ctx)
 
@@ -165,7 +164,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
 @click.option("--date", "date_str", default=None, help="특정 날짜 조회 (YYYY-MM-DD)")
 @click.option("--from", "from_date", default=None, help="기간 조회 시작일 (YYYY-MM-DD)")
 @click.option("--to", "to_date", default=None, help="기간 조회 종료일 (YYYY-MM-DD)")
-@click.option("--account", "account_id", default=None, help="계좌 ID로 필터링")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
 @format_option
 @click.pass_context
 @require_auth
@@ -175,7 +174,7 @@ def snapshot(
     date_str: str | None,
     from_date: str | None,
     to_date: str | None,
-    account_id: str | None,
+    account_id: str,
 ) -> None:
     """일별 자산 스냅샷 조회."""
     from datetime import UTC, datetime

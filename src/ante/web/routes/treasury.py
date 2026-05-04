@@ -507,7 +507,7 @@ async def get_latest_snapshot(
     today = now.strftime("%Y-%m-%d")
     return {
         "snapshot": {
-            "account_id": getattr(target, "account_id", ""),
+            "account_id": target.account_id,
             "snapshot_date": today,
             "total_asset": summary.get("total_evaluation", 0.0),
             "ante_eval_amount": summary.get("ante_eval_amount", 0.0),

@@ -28,7 +28,9 @@ def eventbus():
 
 @pytest.fixture
 async def treasury(db, eventbus):
-    t = Treasury(db=db, eventbus=eventbus, buy_commission_rate=0.00015)
+    t = Treasury(
+        db=db, eventbus=eventbus, buy_commission_rate=0.00015, account_id="acc-test"
+    )
     await t.initialize()
     return t
 
@@ -153,7 +155,7 @@ class TestSyncBalance:
         )
 
         # 새 인스턴스로 복원 확인 (계좌별 행 구조 — 핵심 필드만 영속화)
-        t2 = Treasury(db=db, eventbus=eventbus)
+        t2 = Treasury(db=db, eventbus=eventbus, account_id="acc-test")
         await t2.initialize()
 
         assert t2._account_balance == 5_000_000.0
@@ -279,6 +281,7 @@ class TestExternalPositions:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=71000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -309,6 +312,7 @@ class TestExternalPositions:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=71000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -490,12 +494,14 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
                 PositionSnapshot(
                     bot_id="bot1",
                     symbol="035720",
                     quantity=50.0,
                     avg_entry_price=60000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -529,12 +535,14 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
                 PositionSnapshot(
                     bot_id="bot1",
                     symbol="035720",
                     quantity=50.0,
                     avg_entry_price=60000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -565,6 +573,7 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -613,6 +622,7 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
             ]
         )
@@ -646,6 +656,7 @@ class TestVirtualSync:
                     symbol="005930",
                     quantity=100.0,
                     avg_entry_price=70000.0,
+                    account_id="acc-test",
                 ),
             ]
         )

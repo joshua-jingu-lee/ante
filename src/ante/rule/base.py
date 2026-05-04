@@ -43,6 +43,9 @@ class RuleContext:
     """룰 평가 컨텍스트.
 
     RuleEngine이 OrderRequestEvent와 계좌 상태를 조합하여 생성한다.
+    ``account_id`` 는 dataclass field ordering 때문에 default를 유지
+    하지만, ``__post_init__`` 에서 :func:`require_account_id` 로 runtime
+    검증된다.
     """
 
     # 주문 정보
@@ -81,6 +84,13 @@ class RuleContext:
 
     # 추가 메타데이터
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        from ante.account.scoping import require_account_id
+
+        self.account_id = require_account_id(
+            self.account_id, context="rule_context.__post_init__"
+        )
 
 
 @dataclass

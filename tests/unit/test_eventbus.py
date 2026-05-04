@@ -25,7 +25,9 @@ async def test_publish_subscribe(bus):
         received.append(event)
 
     bus.subscribe(OrderRequestEvent, handler)
-    event = OrderRequestEvent(symbol="005930", side="buy", quantity=10.0)
+    event = OrderRequestEvent(
+        symbol="005930", side="buy", quantity=10.0, account_id="acc-test"
+    )
     await bus.publish(event)
 
     assert len(received) == 1
@@ -44,14 +46,14 @@ async def test_multiple_handlers(bus):
 
     bus.subscribe(OrderRequestEvent, h1)
     bus.subscribe(OrderRequestEvent, h2)
-    await bus.publish(OrderRequestEvent())
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
 
     assert len(calls) == 2
 
 
 async def test_no_subscribers(bus):
     """구독자 없는 이벤트 발행 시 에러 없음."""
-    await bus.publish(OrderRequestEvent())
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
 
 
 async def test_type_isolation(bus):
@@ -62,7 +64,7 @@ async def test_type_isolation(bus):
         received.append(event)
 
     bus.subscribe(OrderRequestEvent, handler)
-    await bus.publish(BotStartedEvent(bot_id="bot1"))
+    await bus.publish(BotStartedEvent(bot_id="bot1", account_id="acc-test"))
 
     assert len(received) == 0
 
@@ -87,7 +89,7 @@ async def test_priority_order(bus):
     bus.subscribe(OrderRequestEvent, high, priority=100)
     bus.subscribe(OrderRequestEvent, mid, priority=50)
 
-    await bus.publish(OrderRequestEvent())
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
 
     assert order == ["high", "mid", "low"]
 
@@ -108,7 +110,7 @@ async def test_handler_error_isolation(bus):
     bus.subscribe(OrderRequestEvent, failing, priority=100)
     bus.subscribe(OrderRequestEvent, succeeding, priority=0)
 
-    await bus.publish(OrderRequestEvent())
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
 
     assert calls == ["ok"]
 
@@ -124,7 +126,7 @@ async def test_sync_handler(bus):
         received.append(event)
 
     bus.subscribe(OrderRequestEvent, sync_handler)
-    await bus.publish(OrderRequestEvent(symbol="sync"))
+    await bus.publish(OrderRequestEvent(symbol="sync", account_id="acc-test"))
 
     assert len(received) == 1
     assert received[0].symbol == "sync"
@@ -141,11 +143,11 @@ async def test_unsubscribe(bus):
         calls.append(1)
 
     bus.subscribe(OrderRequestEvent, handler)
-    await bus.publish(OrderRequestEvent())
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
     assert len(calls) == 1
 
     bus.unsubscribe(OrderRequestEvent, handler)
-    await bus.publish(OrderRequestEvent())
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
     assert len(calls) == 1
 
 
@@ -154,8 +156,8 @@ async def test_unsubscribe(bus):
 
 async def test_history_records_events(bus):
     """발행된 이벤트가 히스토리에 기록된다."""
-    await bus.publish(OrderRequestEvent(symbol="A"))
-    await bus.publish(OrderRequestEvent(symbol="B"))
+    await bus.publish(OrderRequestEvent(symbol="A", account_id="acc-test"))
+    await bus.publish(OrderRequestEvent(symbol="B", account_id="acc-test"))
 
     history = bus.get_history()
     assert len(history) == 2
@@ -165,9 +167,9 @@ async def test_history_records_events(bus):
 
 async def test_history_type_filter(bus):
     """히스토리를 이벤트 타입으로 필터링한다."""
-    await bus.publish(OrderRequestEvent(symbol="X"))
-    await bus.publish(BotStartedEvent(bot_id="b"))
-    await bus.publish(OrderRequestEvent(symbol="Y"))
+    await bus.publish(OrderRequestEvent(symbol="X", account_id="acc-test"))
+    await bus.publish(BotStartedEvent(bot_id="b", account_id="acc-test"))
+    await bus.publish(OrderRequestEvent(symbol="Y", account_id="acc-test"))
 
     filtered = bus.get_history(event_type=OrderRequestEvent)
     assert len(filtered) == 2
@@ -177,7 +179,7 @@ async def test_history_type_filter(bus):
 async def test_history_ring_buffer(bus):
     """히스토리 크기가 제한된다."""
     for i in range(100):
-        await bus.publish(OrderRequestEvent(symbol=str(i)))
+        await bus.publish(OrderRequestEvent(symbol=str(i), account_id="acc-test"))
 
     history = bus.get_history(limit=200)
     assert len(history) == 50  # history_size=50
@@ -186,7 +188,7 @@ async def test_history_ring_buffer(bus):
 async def test_history_limit(bus):
     """limit으로 반환 건수를 제한한다."""
     for i in range(10):
-        await bus.publish(OrderRequestEvent(symbol=str(i)))
+        await bus.publish(OrderRequestEvent(symbol=str(i), account_id="acc-test"))
 
     history = bus.get_history(limit=3)
     assert len(history) == 3
@@ -218,6 +220,6 @@ async def test_get_handlers(bus):
 
 async def test_event_immutability():
     """frozen 이벤트는 변경할 수 없다."""
-    event = OrderRequestEvent(symbol="005930")
+    event = OrderRequestEvent(symbol="005930", account_id="acc-test")
     with pytest.raises(AttributeError):
         event.symbol = "other"  # type: ignore[misc]

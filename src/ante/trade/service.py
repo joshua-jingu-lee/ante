@@ -130,10 +130,21 @@ class TradeService:
         bot_id: str,
         symbol: str,
         quantity: float,
+        *,
+        account_id: str,
         avg_price: float | None = None,
         reason: str = "",
     ) -> dict:
-        """포지션을 브로커 기준으로 강제 보정. Reconciler가 호출."""
+        """포지션을 브로커 기준으로 강제 보정. Reconciler가 호출.
+
+        ``account_id`` 는 메서드 진입 시 ``require_account_id`` 로 검증한다.
+        force_update는 즉시 DB commit하므로, invalid 값이 일시적으로라도
+        positions 테이블에 들어가지 않도록 사전 차단해야 한다.
+        """
+        from ante.account.scoping import require_account_id
+
+        account_id = require_account_id(account_id, context="correct_position")
+
         old = await self._position_history.get_current(bot_id=bot_id, symbol=symbol)
         old_qty = old.get("quantity", 0)
         old_avg = old.get("avg_entry_price", 0.0)
@@ -143,6 +154,7 @@ class TradeService:
             symbol=symbol,
             quantity=quantity,
             avg_entry_price=avg_price if avg_price else old_avg,
+            account_id=account_id,
         )
 
         await self._recorder.save_adjustment(
@@ -151,6 +163,7 @@ class TradeService:
             old_quantity=old_qty,
             new_quantity=quantity,
             reason=reason,
+            account_id=account_id,
         )
 
         return {
@@ -167,6 +180,8 @@ class TradeService:
         bot_id: str,
         strategy_id: str,
         fill: dict,
+        *,
+        account_id: str,
         reason: str = "reconciliation",
     ) -> None:
         """누락된 체결 기록을 보정 추가. Reconciler가 호출."""
@@ -184,5 +199,6 @@ class TradeService:
             commission=fill.get("commission", 0.0),
             timestamp=fill.get("timestamp"),
             order_id=fill.get("order_id"),
+            account_id=account_id,
         )
         await self._recorder.save(record)

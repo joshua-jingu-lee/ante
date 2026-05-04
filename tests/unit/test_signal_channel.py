@@ -235,6 +235,7 @@ class TestEventForwarding:
             quantity=10.0,
             price=58200.0,
             commission=87.3,
+            account_id="acc-test",
         )
 
         await channel._on_fill(event)
@@ -248,7 +249,9 @@ class TestEventForwarding:
         self, channel: SignalChannel, output: io.StringIO
     ) -> None:
         """다른 봇의 체결은 무시."""
-        event = OrderFilledEvent(order_id="ORD-002", bot_id="bot-999")
+        event = OrderFilledEvent(
+            order_id="ORD-002", bot_id="bot-999", account_id="acc-test"
+        )
         await channel._on_fill(event)
         assert output.getvalue() == ""
 
@@ -260,6 +263,7 @@ class TestEventForwarding:
             order_id="ORD-003",
             bot_id="bot-001",
             reason="insufficient funds",
+            account_id="acc-test",
         )
 
         await channel._on_order_update(event)
@@ -277,6 +281,7 @@ class TestEventForwarding:
             order_id="ORD-004",
             bot_id="bot-001",
             reason="user_cancel",
+            account_id="acc-test",
         )
 
         await channel._on_order_update(event)

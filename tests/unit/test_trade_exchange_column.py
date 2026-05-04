@@ -48,7 +48,7 @@ def _make_record(*, exchange: str = "KRX", side: str = "buy", **kwargs) -> Trade
         exchange=exchange,
     )
     defaults.update(kwargs)
-    return TradeRecord(**defaults)
+    return TradeRecord(**defaults, account_id="acc-test")
 
 
 class TestRecorderExchangeColumn:

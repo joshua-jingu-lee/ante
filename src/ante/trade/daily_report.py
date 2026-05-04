@@ -90,11 +90,15 @@ class DailyReportScheduler:
         trade_recorder: TradeRecorder,
         position_history: PositionHistory,
         eventbus: EventBus,
+        *,
+        account_id: str,
         report_time: time = DEFAULT_REPORT_TIME,
-        account_id: str = "",
         currency: str = "KRW",
         treasury: Treasury | None = None,
     ) -> None:
+        from ante.account.scoping import require_account_id
+
+        account_id = require_account_id(account_id, context="daily_report.__init__")
         self._performance = performance_tracker
         self._recorder = trade_recorder
         self._positions = position_history

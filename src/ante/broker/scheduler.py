@@ -102,10 +102,18 @@ class ReconcileScheduler:
 
         for bot_info in active_bots:
             bot_id = bot_info["bot_id"]
+            account_id = bot_info.get("account_id")
+            if not account_id:
+                logger.warning(
+                    "대사 스킵: bot=%s account_id 누락 (DB 정리 필요)",
+                    bot_id,
+                )
+                continue
             try:
                 corrections = await self._reconciler.reconcile(
                     bot_id=bot_id,
                     broker_positions=broker_positions,
+                    account_id=account_id,
                 )
                 all_corrections.extend(corrections)
             except Exception:

@@ -2,21 +2,51 @@
 
 모든 이벤트는 Event를 상속하는 frozen dataclass.
 이벤트는 순수 데이터 구조로, 비즈니스 로직을 포함하지 않는다.
+
+account-scoped 이벤트는 ``_requires_account_id: ClassVar[bool] = True``
+마커를 추가하면, ``Event.__post_init__``이 ``account_id`` 필드 값을
+:func:`ante.account.scoping.is_invalid_account_id` 로 검증한다. 검증
+실패 시 :class:`ante.account.errors.InvalidAccountIdError` 가 raise되어
+빈 문자열/``"default"``/None/형식 위반 값이 이벤트로 발행되지 못한다.
+system-wide 이벤트(SystemStartedEvent, SystemShutdownEvent 등)는 marker
+없이 default ``False`` 를 유지하므로 검증되지 않는다.
 """
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import ClassVar
 from uuid import UUID, uuid4
+
+from ante.account.errors import InvalidAccountIdError
+from ante.account.scoping import is_invalid_account_id
 
 
 @dataclass(frozen=True)
 class Event:
-    """모든 이벤트의 기본 클래스."""
+    """모든 이벤트의 기본 클래스.
+
+    Attributes:
+        _requires_account_id: 하위 클래스에서 ``True`` 로 override하면
+            ``__post_init__`` 이 ``account_id`` 필드를 runtime 검증한다.
+            system-wide 이벤트는 ``False`` (default).
+    """
+
+    _requires_account_id: ClassVar[bool] = False
 
     event_id: UUID = field(default_factory=uuid4)
     timestamp: datetime = field(
         default_factory=lambda: datetime.now(UTC),
     )
+
+    def __post_init__(self) -> None:
+        if self._requires_account_id:
+            account_id = getattr(self, "account_id", None)
+            if is_invalid_account_id(account_id):
+                raise InvalidAccountIdError(
+                    f"AccountScopedEvent {type(self).__name__}는 valid account_id가 "
+                    f"필수입니다: {account_id!r}. fallback ('', None, 'default') 또는 "
+                    "형식 위반 값은 사용할 수 없습니다."
+                )
 
 
 # ── 주문 흐름 (Order Flow) ────────────────────────
@@ -25,6 +55,8 @@ class Event:
 @dataclass(frozen=True)
 class OrderRequestEvent(Event):
     """봇 → EventBus: 신규 주문 요청."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     bot_id: str = ""
@@ -43,6 +75,8 @@ class OrderRequestEvent(Event):
 class OrderCancelEvent(Event):
     """봇 → EventBus: 주문 취소 요청."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -53,6 +87,8 @@ class OrderCancelEvent(Event):
 @dataclass(frozen=True)
 class OrderModifyEvent(Event):
     """봇 → EventBus: 주문 정정 요청."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     bot_id: str = ""
@@ -69,6 +105,8 @@ class OrderModifyEvent(Event):
 class OrderModifyRejectedEvent(Event):
     """RuleEngine → EventBus: 주문 정정 룰 위반으로 거부."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
@@ -83,6 +121,8 @@ class OrderModifyRejectedEvent(Event):
 @dataclass(frozen=True)
 class OrderValidatedEvent(Event):
     """RuleEngine → EventBus: 룰 검증 통과."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     order_id: str = ""
@@ -102,6 +142,8 @@ class OrderValidatedEvent(Event):
 class OrderRejectedEvent(Event):
     """RuleEngine/Treasury → EventBus: 주문 거부."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
@@ -118,6 +160,8 @@ class OrderRejectedEvent(Event):
 @dataclass(frozen=True)
 class OrderApprovedEvent(Event):
     """Treasury → EventBus: 자금 확보 완료, 주문 실행 허가."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     order_id: str = ""
@@ -137,6 +181,8 @@ class OrderApprovedEvent(Event):
 class OrderSubmittedEvent(Event):
     """APIGateway → EventBus: 증권사에 주문 전송됨."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
@@ -152,6 +198,8 @@ class OrderSubmittedEvent(Event):
 @dataclass(frozen=True)
 class OrderFilledEvent(Event):
     """BrokerAdapter → EventBus: 체결 완료."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     order_id: str = ""
@@ -174,6 +222,8 @@ class OrderFilledEvent(Event):
 class OrderCancelledEvent(Event):
     """BrokerAdapter → EventBus: 취소 완료."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     order_id: str = ""
     broker_order_id: str = ""
@@ -190,6 +240,8 @@ class OrderCancelledEvent(Event):
 @dataclass(frozen=True)
 class OrderFailedEvent(Event):
     """BrokerAdapter → EventBus: 주문 실패."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     order_id: str = ""
@@ -232,6 +284,8 @@ class OrderUpdateEvent(Event):
 class BotStartedEvent(Event):
     """BotManager → EventBus: 봇 시작."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     bot_id: str = ""
 
@@ -248,6 +302,8 @@ class BotStopEvent(Event):
 class BotStoppedEvent(Event):
     """BotManager → EventBus: 봇 중지 완료."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     bot_id: str = ""
 
@@ -255,6 +311,8 @@ class BotStoppedEvent(Event):
 @dataclass(frozen=True)
 class BotErrorEvent(Event):
     """BotManager → EventBus: 봇 에러 발생."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     bot_id: str = ""
@@ -269,6 +327,8 @@ class BotStepCompletedEvent(Event):
     result 값: success, timeout, signal_overflow, error
     """
 
+    _requires_account_id: ClassVar[bool] = True
+
     bot_id: str = ""
     account_id: str = ""
     result: str = ""
@@ -278,6 +338,8 @@ class BotStepCompletedEvent(Event):
 @dataclass(frozen=True)
 class BotRestartExhaustedEvent(Event):
     """BotManager → EventBus: 봇 재시작 한도 소진."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     bot_id: str = ""
     account_id: str = ""
@@ -457,6 +519,8 @@ class MemberAuthFailedEvent(Event):
 class DailyReportEvent(Event):
     """DailyReportScheduler → EventBus: 일일 성과 리포트 발행."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     report_date: str = ""  # YYYY-MM-DD
     trade_count: int = 0
@@ -473,6 +537,8 @@ class DailyReportEvent(Event):
 @dataclass(frozen=True)
 class BalanceSyncedEvent(Event):
     """Treasury → EventBus: 계좌 잔고 동기화 완료."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     account_balance: float = 0.0
@@ -578,6 +644,8 @@ class StreamDisconnectedEvent(Event):
 class AccountSuspendedEvent(Event):
     """AccountService → EventBus: 계좌 정지."""
 
+    _requires_account_id: ClassVar[bool] = True
+
     account_id: str = ""
     reason: str = ""
     suspended_by: str = ""
@@ -586,6 +654,8 @@ class AccountSuspendedEvent(Event):
 @dataclass(frozen=True)
 class AccountActivatedEvent(Event):
     """AccountService → EventBus: 계좌 활성화."""
+
+    _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
     activated_by: str = ""

@@ -366,6 +366,7 @@ class TestGatewayCancelFailed:
                 strategy_id="s1",
                 order_id="ord1",
                 reason="test cancel",
+                account_id="acc-test",
             )
         )
 
@@ -390,10 +391,7 @@ class TestBotCancelFailedHandling:
         mock_strategy.on_order_update = AsyncMock()
 
         eventbus = EventBus()
-        config = BotConfig(
-            bot_id="bot1",
-            strategy_id="s1",
-        )
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         bot = Bot(
             config=config,
             strategy_cls=MagicMock(),

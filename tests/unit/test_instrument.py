@@ -221,18 +221,18 @@ class TestExchangeDefaults:
             OrderRequestEvent,
         )
 
-        req = OrderRequestEvent(symbol="005930")
+        req = OrderRequestEvent(symbol="005930", account_id="acc-test")
         assert req.exchange == "KRX"
 
-        filled = OrderFilledEvent(symbol="005930")
+        filled = OrderFilledEvent(symbol="005930", account_id="acc-test")
         assert filled.exchange == "KRX"
 
     def test_bot_config_default_account_id(self):
-        """BotConfig account_id 기본값 test (exchange는 Account에서 관리)."""
+        """BotConfig account_id는 명시값으로 보존된다 (exchange는 Account에서 관리)."""
         from ante.bot.config import BotConfig
 
-        config = BotConfig(bot_id="bot-1", strategy_id="strat-1")
-        assert config.account_id == "test"
+        config = BotConfig(bot_id="bot-1", strategy_id="strat-1", account_id="acc-test")
+        assert config.account_id == "acc-test"
 
     def test_strategy_meta_default_exchange(self):
         """StrategyMeta exchange 기본값 KRX."""
@@ -256,6 +256,7 @@ class TestExchangeDefaults:
             quantity=10,
             price=70000,
             status=TradeStatus.FILLED,
+            account_id="acc-test",
         )
         assert record.exchange == "KRX"
 
@@ -268,6 +269,7 @@ class TestExchangeDefaults:
             symbol="005930",
             quantity=10,
             avg_entry_price=70000,
+            account_id="acc-test",
         )
         assert pos.exchange == "KRX"
 
@@ -299,5 +301,6 @@ class TestExchangeDefaults:
             side="buy",
             quantity=10,
             order_type="market",
+            account_id="acc-test",
         )
         assert ctx.exchange == "KRX"

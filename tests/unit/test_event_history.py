@@ -24,7 +24,7 @@ async def store(db):
 
 async def test_record_and_query(store):
     """이벤트를 기록하고 조회한다."""
-    event = OrderRequestEvent(symbol="005930", side="buy")
+    event = OrderRequestEvent(symbol="005930", side="buy", account_id="acc-test")
     await store.record(event)
 
     rows = await store.query()
@@ -35,9 +35,9 @@ async def test_record_and_query(store):
 
 async def test_query_by_type(store):
     """이벤트 타입으로 필터링 조회."""
-    await store.record(OrderRequestEvent(symbol="A"))
-    await store.record(BotStartedEvent(bot_id="b"))
-    await store.record(OrderRequestEvent(symbol="B"))
+    await store.record(OrderRequestEvent(symbol="A", account_id="acc-test"))
+    await store.record(BotStartedEvent(bot_id="b", account_id="acc-test"))
+    await store.record(OrderRequestEvent(symbol="B", account_id="acc-test"))
 
     rows = await store.query(event_type="OrderRequestEvent")
     assert len(rows) == 2
@@ -47,7 +47,7 @@ async def test_query_by_type(store):
 async def test_query_limit(store):
     """limit으로 반환 건수를 제한한다."""
     for i in range(10):
-        await store.record(OrderRequestEvent(symbol=str(i)))
+        await store.record(OrderRequestEvent(symbol=str(i), account_id="acc-test"))
 
     rows = await store.query(limit=3)
     assert len(rows) == 3
@@ -55,8 +55,8 @@ async def test_query_limit(store):
 
 async def test_query_order(store):
     """최신순으로 반환한다."""
-    await store.record(OrderRequestEvent(symbol="first"))
-    await store.record(OrderRequestEvent(symbol="second"))
+    await store.record(OrderRequestEvent(symbol="first", account_id="acc-test"))
+    await store.record(OrderRequestEvent(symbol="second", account_id="acc-test"))
 
     rows = await store.query()
     assert rows[0]["payload"]["symbol"] == "second"

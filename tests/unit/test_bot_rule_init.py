@@ -92,7 +92,7 @@ def mock_account_service():
     """AccountService 목 객체."""
     service = AsyncMock()
     account = Account(
-        account_id="default",
+        account_id="acc-default",
         name="테스트",
         exchange="KRX",
         currency="KRW",
@@ -108,7 +108,7 @@ def mock_account_service():
 def rule_engine(eventbus, mock_account_service):
     engine = RuleEngine(
         eventbus=eventbus,
-        account_id="default",
+        account_id="acc-default",
         account_service=mock_account_service,
     )
     return engine
@@ -153,7 +153,10 @@ class TestBotStartLoadsRules:
     async def test_start_bot_loads_strategy_rules(self, manager, ctx, rule_engine):
         """봇 시작 시 전략별 룰이 RuleEngine에 로드된다."""
         config = BotConfig(
-            bot_id="bot1", strategy_id="momentum_v1", interval_seconds=999
+            bot_id="bot1",
+            strategy_id="momentum_v1",
+            interval_seconds=999,
+            account_id="acc-test",
         )
         await manager.create_bot(config, SimpleStrategy, ctx)
 
@@ -169,7 +172,10 @@ class TestBotStartLoadsRules:
     async def test_start_bot_no_config_no_error(self, manager, ctx, rule_engine):
         """전략별 룰 설정이 없는 전략이면 에러 없이 진행."""
         config = BotConfig(
-            bot_id="bot1", strategy_id="unknown_strategy", interval_seconds=999
+            bot_id="bot1",
+            strategy_id="unknown_strategy",
+            interval_seconds=999,
+            account_id="acc-test",
         )
         await manager.create_bot(config, SimpleStrategy, ctx)
 
@@ -186,7 +192,10 @@ class TestBotStopRemovesRules:
     async def test_stop_bot_removes_strategy_rules(self, manager, ctx, rule_engine):
         """봇 중지 시 전략별 룰이 RuleEngine에서 제거된다."""
         config = BotConfig(
-            bot_id="bot1", strategy_id="momentum_v1", interval_seconds=999
+            bot_id="bot1",
+            strategy_id="momentum_v1",
+            interval_seconds=999,
+            account_id="acc-test",
         )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
@@ -199,7 +208,10 @@ class TestBotStopRemovesRules:
     async def test_stop_bot_no_rules_no_error(self, manager, ctx, rule_engine):
         """전략별 룰이 없는 봇도 중지 시 에러 없이 진행."""
         config = BotConfig(
-            bot_id="bot1", strategy_id="unknown_strategy", interval_seconds=999
+            bot_id="bot1",
+            strategy_id="unknown_strategy",
+            interval_seconds=999,
+            account_id="acc-test",
         )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
@@ -216,7 +228,10 @@ class TestRestartRestoresRules:
     async def test_resume_bot_reloads_rules(self, manager, ctx, rule_engine):
         """봇 재시작(resume) 시 전략별 룰이 다시 로드된다."""
         config = BotConfig(
-            bot_id="bot1", strategy_id="momentum_v1", interval_seconds=999
+            bot_id="bot1",
+            strategy_id="momentum_v1",
+            interval_seconds=999,
+            account_id="acc-test",
         )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
@@ -242,7 +257,10 @@ class TestWithoutRuleEngine:
         m = BotManager(eventbus=eventbus, db=db)
         await m.initialize()
         config = BotConfig(
-            bot_id="bot1", strategy_id="momentum_v1", interval_seconds=999
+            bot_id="bot1",
+            strategy_id="momentum_v1",
+            interval_seconds=999,
+            account_id="acc-test",
         )
         await m.create_bot(config, SimpleStrategy, ctx)
 

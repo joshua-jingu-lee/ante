@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ante.account.errors import InvalidAccountIdError
+from ante.account.scoping import require_account_id
 from ante.trade.models import PositionSnapshot, TradeRecord, TradeStatus
 
 if TYPE_CHECKING:
@@ -60,11 +62,19 @@ class PositionHistory:
         logger.info("PositionHistory 초기화 완료")
 
     async def _warm_cache(self) -> None:
-        """DB에서 전체 포지션을 읽어 인메모리 캐시에 적재."""
+        """DB에서 전체 포지션을 읽어 인메모리 캐시에 적재.
+
+        legacy 'default' (또는 기타 invalid) ``account_id`` row는
+        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
+        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 서버 부팅이
+        실패하지 않도록 하기 위함이다.
+        """
         rows = await self._db.fetch_all("SELECT * FROM positions WHERE quantity > 0")
         self._position_cache.clear()
         for row in rows:
-            snapshot = self._row_to_snapshot(row)
+            snapshot = self._row_to_snapshot_safe(row, context="warm cache")
+            if snapshot is None:
+                continue
             self._position_cache.setdefault(snapshot.bot_id, {})[snapshot.symbol] = (
                 snapshot
             )
@@ -156,7 +166,12 @@ class PositionHistory:
         bot_id: str,
         include_closed: bool = False,
     ) -> list[PositionSnapshot]:
-        """봇의 현재 포지션 조회."""
+        """봇의 현재 포지션 조회.
+
+        legacy 'default' (또는 기타 invalid) ``account_id`` row는 skip하고
+        warning만 남긴다. dashboard / Treasury 동기화가 마이그레이션 전에도
+        실패하지 않도록 하기 위함이다.
+        """
         if include_closed:
             rows = await self._db.fetch_all(
                 "SELECT * FROM positions WHERE bot_id = ?", (bot_id,)
@@ -166,12 +181,16 @@ class PositionHistory:
                 "SELECT * FROM positions WHERE bot_id = ? AND quantity > 0",
                 (bot_id,),
             )
-        return [self._row_to_snapshot(row) for row in rows]
+        return self._rows_to_snapshots(rows, context="get_positions")
 
     async def get_all_positions(self) -> list[PositionSnapshot]:
-        """전체 봇의 모든 포지션 조회 (대사 계좌 합산 검증용)."""
+        """전체 봇의 모든 포지션 조회 (대사 계좌 합산 검증용).
+
+        legacy 'default' (또는 기타 invalid) ``account_id`` row는 skip하고
+        warning만 남긴다.
+        """
         rows = await self._db.fetch_all("SELECT * FROM positions WHERE quantity > 0")
-        return [self._row_to_snapshot(row) for row in rows]
+        return self._rows_to_snapshots(rows, context="get_all_positions")
 
     async def get_current(self, bot_id: str, symbol: str) -> dict:
         """현재 포지션 조회 (public)."""
@@ -205,20 +224,28 @@ class PositionHistory:
         symbol: str,
         quantity: float,
         avg_entry_price: float,
+        *,
+        account_id: str,
     ) -> None:
         """Reconciler 전용: 포지션 강제 덮어쓰기."""
+        validated_account_id = require_account_id(
+            account_id, context="position.force_update"
+        )
         await self._db.execute(
             """INSERT INTO positions
-               (bot_id, symbol, quantity, avg_entry_price, updated_at)
-               VALUES (?, ?, ?, ?, datetime('now'))
+               (bot_id, symbol, quantity, avg_entry_price, account_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(bot_id, symbol) DO UPDATE SET
                  quantity = excluded.quantity,
                  avg_entry_price = excluded.avg_entry_price,
+                 account_id = excluded.account_id,
                  updated_at = excluded.updated_at""",
-            (bot_id, symbol, quantity, avg_entry_price),
+            (bot_id, symbol, quantity, avg_entry_price, validated_account_id),
         )
         # 인메모리 캐시 갱신
-        self._update_cache(bot_id, symbol, quantity, avg_entry_price)
+        self._update_cache(
+            bot_id, symbol, quantity, avg_entry_price, account_id=account_id
+        )
 
     async def _get_current(self, bot_id: str, symbol: str) -> dict:
         """현재 포지션 조회. 없으면 빈 포지션 반환."""
@@ -242,8 +269,9 @@ class PositionHistory:
         symbol: str,
         quantity: float,
         avg_entry_price: float,
+        *,
+        account_id: str,
         realized_pnl_delta: float = 0.0,
-        account_id: str = "default",
     ) -> None:
         """포지션 상태 갱신."""
         await self._db.execute(
@@ -272,7 +300,12 @@ class PositionHistory:
         )
         # 인메모리 캐시 갱신
         self._update_cache(
-            bot_id, symbol, quantity, avg_entry_price, realized_pnl_delta, account_id
+            bot_id,
+            symbol,
+            quantity,
+            avg_entry_price,
+            account_id=account_id,
+            realized_pnl_delta=realized_pnl_delta,
         )
 
     def _update_cache(
@@ -281,8 +314,9 @@ class PositionHistory:
         symbol: str,
         quantity: float,
         avg_entry_price: float,
+        *,
+        account_id: str,
         realized_pnl_delta: float = 0.0,
-        account_id: str = "default",
     ) -> None:
         """인메모리 포지션 캐시 갱신."""
         bot_cache = self._position_cache.setdefault(bot_id, {})
@@ -333,5 +367,37 @@ class PositionHistory:
             avg_entry_price=float(row["avg_entry_price"]),
             realized_pnl=float(row.get("realized_pnl", 0)),
             updated_at=row.get("updated_at", ""),
-            account_id=row.get("account_id", "default"),
+            account_id=row["account_id"],
         )
+
+    def _row_to_snapshot_safe(
+        self, row: dict, *, context: str
+    ) -> PositionSnapshot | None:
+        """DB row → PositionSnapshot, legacy invalid account_id row는 skip.
+
+        legacy 'default' (또는 기타 invalid) ``account_id`` row는
+        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
+        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 read 경로가
+        실패하지 않도록 하기 위함이다.
+        """
+        try:
+            return self._row_to_snapshot(row)
+        except InvalidAccountIdError as e:
+            logger.warning(
+                "%s: invalid account_id row skip (legacy migration 필요): %s, row=%s",
+                context,
+                e,
+                dict(row),
+            )
+            return None
+
+    def _rows_to_snapshots(
+        self, rows: list[dict], *, context: str
+    ) -> list[PositionSnapshot]:
+        """rows → snapshots, legacy invalid account_id row는 skip."""
+        snapshots: list[PositionSnapshot] = []
+        for row in rows:
+            snapshot = self._row_to_snapshot_safe(row, context=context)
+            if snapshot is not None:
+                snapshots.append(snapshot)
+        return snapshots

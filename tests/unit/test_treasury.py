@@ -2,6 +2,7 @@
 
 import pytest
 
+from ante.account.errors import InvalidAccountIdError
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -55,7 +56,7 @@ async def treasury(db, eventbus):
 class TestBotBudget:
     def test_defaults(self):
         """BotBudget 기본값 확인."""
-        b = BotBudget(bot_id="bot1")
+        b = BotBudget(bot_id="bot1", account_id="acc-test")
         assert b.allocated == 0.0
         assert b.available == 0.0
         assert b.reserved == 0.0
@@ -440,14 +441,11 @@ class TestTreasuryEvents:
         assert budget.available == 1_000_000.0
         assert budget.reserved == 0.0
 
-    async def test_event_without_account_id_processed(self, treasury, eventbus):
-        """account_id가 비어있는 이벤트는 하위 호환으로 처리한다."""
+    async def test_event_without_account_id_rejected(self, treasury, eventbus):
+        """account_id가 비어있는 이벤트는 생성 단계에서 거부된다 (#1217)."""
         await treasury.allocate("bot1", 1_000_000.0)
 
-        received = []
-        eventbus.subscribe(OrderApprovedEvent, lambda e: received.append(e))
-
-        await eventbus.publish(
+        with pytest.raises(InvalidAccountIdError):
             OrderValidatedEvent(
                 order_id="ord1",
                 bot_id="bot1",
@@ -459,10 +457,6 @@ class TestTreasuryEvents:
                 order_type="market",
                 account_id="",
             )
-        )
-
-        # account_id 비어있으면 처리
-        assert len(received) == 1
 
     async def test_filled_event_filtered_by_account(self, treasury, eventbus):
         """다른 계좌의 체결 이벤트는 무시한다."""

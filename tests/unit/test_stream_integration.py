@@ -173,6 +173,7 @@ async def test_price_callback_calls_stop_order_manager(
             quantity=10.0,
             order_type="stop",
             stop_price=72000.0,
+            account_id="acc-test",
         )
 
         # 세션 시간을 항상 True로 패치 (테스트 시간에 무관하게 동작)
@@ -316,6 +317,7 @@ async def test_fallback_polls_prices(
         quantity=10.0,
         order_type="stop",
         stop_price=60000.0,
+        account_id="acc-test",
     )
 
     await integration.start()
@@ -358,6 +360,7 @@ async def test_subscription_sync_adds_stop_order_symbols(
         quantity=5.0,
         order_type="stop",
         stop_price=100000.0,
+        account_id="acc-test",
     )
 
     await integration.start()
@@ -387,7 +390,7 @@ async def test_subscription_sync_on_bot_event(
     await integration.start()
     try:
         # 봇 시작 이벤트 발행
-        await eventbus.publish(BotStartedEvent(bot_id="bot-1"))
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-test"))
         await asyncio.sleep(0.05)
 
         assert "005930" in stream_client.subscribed_symbols
@@ -412,7 +415,7 @@ async def test_subscription_sync_removes_symbols(
 
     await integration.start()
     try:
-        await eventbus.publish(BotStartedEvent(bot_id="bot-1"))
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-test"))
         await asyncio.sleep(0.05)
         assert "005930" in stream_client.subscribed_symbols
 
@@ -420,7 +423,7 @@ async def test_subscription_sync_removes_symbols(
         bot_manager_mock.list_bots.return_value = []
         bot_manager_mock.get_bot.return_value = None
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot-1"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot-1", account_id="acc-test"))
         await asyncio.sleep(0.05)
 
         assert "005930" not in stream_client.subscribed_symbols

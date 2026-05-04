@@ -8,6 +8,7 @@ import statistics
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ante.account.errors import InvalidAccountIdError
 from ante.trade.models import (
     DailySummary,
     MonthlySummary,
@@ -361,7 +362,7 @@ class PerformanceTracker:
         except sqlite3.OperationalError:
             logger.debug("trades 테이블 없음 — 빈 목록 반환")
             return []
-        return [self._row_to_record(row) for row in rows]
+        return self._rows_to_records(rows, context="_get_filled_trades")
 
     async def _calculate_pnl_per_trade(
         self,
@@ -392,6 +393,37 @@ class PerformanceTracker:
                 pnl_list.append(-trade.commission if trade.commission else 0.0)
         return pnl_list
 
+    @classmethod
+    def _rows_to_records(cls, rows: list[dict], *, context: str) -> list[TradeRecord]:
+        """rows → TradeRecord 목록, legacy invalid account_id row는 skip."""
+        records: list[TradeRecord] = []
+        for row in rows:
+            record = cls._row_to_record_safe(row, context=context)
+            if record is not None:
+                records.append(record)
+        return records
+
+    @classmethod
+    def _row_to_record_safe(cls, row: dict, *, context: str) -> TradeRecord | None:
+        """DB row → TradeRecord, legacy invalid account_id row는 skip.
+
+        legacy ``account_id='default'`` (또는 기타 invalid) 값을 가진 row는
+        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
+        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 성과 산출
+        경로가 실패하지 않도록 하기 위함이다.
+        """
+        try:
+            return cls._row_to_record(row)
+        except InvalidAccountIdError as e:
+            logger.warning(
+                "%s: invalid account_id trade row skip "
+                "(legacy migration 필요): %s, row=%s",
+                context,
+                e,
+                dict(row),
+            )
+            return None
+
     @staticmethod
     def _row_to_record(row: dict) -> TradeRecord:
         """DB row → TradeRecord."""
@@ -419,7 +451,7 @@ class PerformanceTracker:
             commission=float(row.get("commission", 0)),
             timestamp=datetime.fromisoformat(ts) if ts else None,
             order_id=row.get("order_id"),
-            account_id=row.get("account_id", "default"),
+            account_id=row["account_id"],
             currency=row.get("currency", "KRW"),
         )
 

@@ -61,6 +61,7 @@ async def _set_position(position_history, bot_id, symbol, qty, avg_price):
         symbol=symbol,
         quantity=qty,
         avg_entry_price=avg_price,
+        account_id="acc-test",
     )
 
 
@@ -82,6 +83,7 @@ class TestFullExternalSell:
         corrections = await reconciler.reconcile(
             bot_id="bot-1",
             broker_positions=[],  # 브로커에 없음
+            account_id="acc-test",
         )
 
         assert len(corrections) == 1
@@ -116,6 +118,7 @@ class TestPartialExternalSell:
             broker_positions=[
                 {"symbol": "005930", "quantity": 30, "avg_price": 50000},
             ],
+            account_id="acc-test",
         )
 
         assert len(corrections) == 1
@@ -142,6 +145,7 @@ class TestNoMismatch:
             broker_positions=[
                 {"symbol": "005930", "quantity": 50, "avg_price": 50000},
             ],
+            account_id="acc-test",
         )
 
         assert corrections == []
@@ -150,8 +154,7 @@ class TestNoMismatch:
     async def test_no_correction_both_empty(self, reconciler):
         """내부/브로커 모두 빈 포지션."""
         corrections = await reconciler.reconcile(
-            bot_id="bot-1",
-            broker_positions=[],
+            bot_id="bot-1", broker_positions=[], account_id="acc-test"
         )
         assert corrections == []
 
@@ -167,6 +170,7 @@ class TestExternalBuy:
             broker_positions=[
                 {"symbol": "005930", "quantity": 20, "avg_price": 55000},
             ],
+            account_id="acc-test",
         )
 
         assert len(corrections) == 1
@@ -192,6 +196,7 @@ class TestMultipleSymbols:
                 {"symbol": "005930", "quantity": 0, "avg_price": 0},
                 # 000660 은 브로커에 없음
             ],
+            account_id="acc-test",
         )
 
         assert len(corrections) == 2

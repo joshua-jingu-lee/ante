@@ -35,8 +35,8 @@ def bot_manager():
     mock = MagicMock()
     mock.list_bots = MagicMock(
         return_value=[
-            {"bot_id": "bot-1", "status": "running"},
-            {"bot_id": "bot-2", "status": "stopped"},
+            {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+            {"bot_id": "bot-2", "status": "stopped", "account_id": "acc-test"},
         ]
     )
     return mock
@@ -96,7 +96,7 @@ class TestRunOnce:
     async def test_no_active_bots(self, scheduler, bot_manager, broker):
         """활성 봇이 없으면 브로커 호출하지 않는다."""
         bot_manager.list_bots.return_value = [
-            {"bot_id": "bot-1", "status": "stopped"},
+            {"bot_id": "bot-1", "status": "stopped", "account_id": "acc-test"},
         ]
 
         result = await scheduler.run_once()
@@ -118,8 +118,8 @@ class TestRunOnce:
     ):
         """한 봇의 대사 실패가 다른 봇에 영향주지 않는다."""
         bot_manager.list_bots.return_value = [
-            {"bot_id": "bot-1", "status": "running"},
-            {"bot_id": "bot-2", "status": "running"},
+            {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+            {"bot_id": "bot-2", "status": "running", "account_id": "acc-test"},
         ]
         reconciler.reconcile.side_effect = [
             Exception("bot-1 실패"),

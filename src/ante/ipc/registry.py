@@ -260,7 +260,9 @@ async def _handle_approval_reopen(
 async def _handle_broker_status(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args.get("account_id", "")
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(args.get("account_id"), context="ipc.broker.status")
     broker = await svc.account.get_broker(account_id)
     healthy = await broker.health_check()
     return {
@@ -273,7 +275,11 @@ async def _handle_broker_status(
 async def _handle_broker_balance(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args.get("account_id", "")
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.balance"
+    )
     broker = await svc.account.get_broker(account_id)
     return await broker.get_account_balance()
 
@@ -281,7 +287,11 @@ async def _handle_broker_balance(
 async def _handle_broker_positions(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args.get("account_id", "")
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.positions"
+    )
     broker = await svc.account.get_broker(account_id)
     return {"positions": await broker.get_positions()}
 
@@ -289,9 +299,16 @@ async def _handle_broker_positions(
 async def _handle_broker_reconcile(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    from ante.account.scoping import require_account_id
+
     bot_id = args["bot_id"]
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.reconcile"
+    )
     broker_positions = args.get("broker_positions", [])
-    adjustments = await svc.reconciler.reconcile(bot_id, broker_positions)
+    adjustments = await svc.reconciler.reconcile(
+        bot_id, broker_positions, account_id=account_id
+    )
     return {"bot_id": bot_id, "adjustments": adjustments}
 
 

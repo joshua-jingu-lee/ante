@@ -78,6 +78,7 @@ def _make_filled_event(
     commission: float = 0.0,
     order_type: str = "market",
     reason: str = "test",
+    account_id: str = "acc-test",
 ) -> OrderFilledEvent:
     now = datetime.now(UTC)
     return OrderFilledEvent(
@@ -94,6 +95,7 @@ def _make_filled_event(
         commission=commission,
         order_type=order_type,
         reason=reason,
+        account_id=account_id,
     )
 
 
@@ -134,6 +136,7 @@ class TestTradeRecorder:
             price=50000.0,
             order_type="market",
             reason="rule violation",
+            account_id="acc-test",
         )
         await recorder._on_rejected(event)
 
@@ -155,6 +158,7 @@ class TestTradeRecorder:
             price=0.0,
             order_type="market",
             error_message="broker error",
+            account_id="acc-test",
         )
         await recorder._on_failed(event)
 
@@ -176,6 +180,7 @@ class TestTradeRecorder:
             quantity=10.0,
             price=0.0,
             reason="user cancel",
+            account_id="acc-test",
         )
         await recorder._on_cancelled(event)
 
@@ -216,6 +221,7 @@ class TestTradeRecorder:
             price=0.0,
             order_type="market",
             error_message="err",
+            account_id="acc-test",
         )
         await recorder._on_failed(event)
 
@@ -233,6 +239,7 @@ class TestTradeRecorder:
             old_quantity=10,
             new_quantity=15,
             reason="broker mismatch",
+            account_id="acc-test",
         )
 
         rows = await db.fetch_all("SELECT * FROM trades WHERE status = 'adjusted'")
@@ -305,6 +312,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(record)
 
@@ -324,6 +332,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(record1)
 
@@ -337,6 +346,7 @@ class TestPositionHistory:
             price=60000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(record2)
 
@@ -357,6 +367,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -372,6 +383,7 @@ class TestPositionHistory:
             status=TradeStatus.FILLED,
             commission=100,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -393,6 +405,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -406,6 +419,7 @@ class TestPositionHistory:
             price=55000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -425,6 +439,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.CANCELLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(record)
 
@@ -443,6 +458,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -457,6 +473,7 @@ class TestPositionHistory:
             price=100000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy2)
         sell2 = TradeRecord(
@@ -469,6 +486,7 @@ class TestPositionHistory:
             price=110000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell2)
 
@@ -488,6 +506,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
         sell = TradeRecord(
@@ -500,6 +519,7 @@ class TestPositionHistory:
             price=55000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -520,6 +540,7 @@ class TestPositionHistory:
                 price=50000,
                 status=TradeStatus.FILLED,
                 timestamp=datetime.now(UTC),
+                account_id="acc-test",
             )
             await position_history.on_trade(buy)
 
@@ -533,6 +554,7 @@ class TestPositionHistory:
             symbol="005930",
             quantity=100,
             avg_entry_price=45000,
+            account_id="acc-test",
         )
 
         pos = await position_history.get_current("bot1", "005930")
@@ -546,6 +568,7 @@ class TestPositionHistory:
             symbol="005930",
             quantity=50,
             avg_entry_price=60000,
+            account_id="acc-test",
         )
 
         cached = position_history.get_positions_sync("bot1")
@@ -559,6 +582,7 @@ class TestPositionHistory:
             symbol="005930",
             quantity=0,
             avg_entry_price=0,
+            account_id="acc-test",
         )
         assert position_history.get_positions_sync("bot1") == []
 
@@ -574,6 +598,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
         sell = TradeRecord(
@@ -586,6 +611,7 @@ class TestPositionHistory:
             price=55000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -605,6 +631,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -620,6 +647,7 @@ class TestPositionHistory:
             status=TradeStatus.FILLED,
             commission=0.0,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -645,6 +673,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -658,6 +687,7 @@ class TestPositionHistory:
             price=55000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         with caplog.at_level(logging.WARNING, logger="ante.trade.position"):
             await position_history.on_trade(sell)
@@ -676,6 +706,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -689,6 +720,7 @@ class TestPositionHistory:
             price=55000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -709,6 +741,7 @@ class TestPositionHistory:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -723,6 +756,7 @@ class TestPositionHistory:
             status=TradeStatus.FILLED,
             commission=100,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(sell)
 
@@ -771,6 +805,7 @@ class TestPerformanceTracker:
             price=55000.0,
             commission=100.0,
             order_type="market",
+            account_id="acc-test",
         )
         await recorder._on_filled(sell1)
 
@@ -787,6 +822,7 @@ class TestPerformanceTracker:
             quantity=5.0,
             price=100000.0,
             order_type="market",
+            account_id="acc-test",
         )
         await recorder._on_filled(buy2)
 
@@ -804,10 +840,11 @@ class TestPerformanceTracker:
             price=90000.0,
             commission=50.0,
             order_type="market",
+            account_id="acc-test",
         )
         await recorder._on_filled(sell2)
 
-        metrics = await performance.calculate(account_id="default", bot_id="bot1")
+        metrics = await performance.calculate(account_id="acc-test", bot_id="bot1")
         assert metrics.total_trades == 2  # 매도 2건
         assert metrics.winning_trades == 1
         assert metrics.losing_trades == 1
@@ -889,10 +926,11 @@ class TestPerformanceTracker:
             quantity=10.0,
             price=55000.0,
             order_type="market",
+            account_id="acc-test",
         )
         await recorder._on_filled(sell)
 
-        metrics = await performance.calculate(account_id="default", bot_id="bot1")
+        metrics = await performance.calculate(account_id="acc-test", bot_id="bot1")
         assert metrics.profit_factor == float("inf")
 
 
@@ -906,7 +944,7 @@ class TestTradeService:
             _make_filled_event(side="buy", quantity=10, price=50000)
         )
 
-        summary = await service.get_summary("bot1", account_id="default")
+        summary = await service.get_summary("bot1", account_id="acc-default")
         assert "positions" in summary
         assert "performance" in summary
         assert "recent_trades" in summary
@@ -924,6 +962,7 @@ class TestTradeService:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -933,6 +972,7 @@ class TestTradeService:
             quantity=15,
             avg_price=48000,
             reason="broker mismatch",
+            account_id="acc-test",
         )
 
         assert result["old_quantity"] == 10
@@ -956,6 +996,7 @@ class TestTradeService:
             strategy_id="s1",
             fill=fill,
             reason="missed fill",
+            account_id="acc-test",
         )
 
         trades = await recorder.get_trades(bot_id="bot1")
@@ -974,6 +1015,7 @@ class TestTradeService:
             price=50000,
             status=TradeStatus.FILLED,
             timestamp=datetime.now(UTC),
+            account_id="acc-test",
         )
         await position_history.on_trade(buy)
 
@@ -983,7 +1025,7 @@ class TestTradeService:
 
     async def test_get_performance_delegates(self, service):
         """성과 조회 위임."""
-        metrics = await service.get_performance(account_id="default", bot_id="bot1")
+        metrics = await service.get_performance(account_id="acc-default", bot_id="bot1")
         assert isinstance(metrics, PerformanceMetrics)
 
 
@@ -1036,7 +1078,7 @@ class TestAccountIdFields:
         assert record.currency == "USD"
 
     def test_trade_record_default_values(self):
-        """기본값 'default', 'KRW' 확인."""
+        """account_id는 명시값으로 보존되고 currency는 'KRW'가 기본값이다."""
         record = TradeRecord(
             trade_id=uuid4(),
             bot_id="bot1",
@@ -1046,8 +1088,9 @@ class TestAccountIdFields:
             quantity=10,
             price=50000,
             status=TradeStatus.FILLED,
+            account_id="acc-test",
         )
-        assert record.account_id == "default"
+        assert record.account_id == "acc-test"
         assert record.currency == "KRW"
 
     def test_position_snapshot_with_account(self):
@@ -1062,14 +1105,15 @@ class TestAccountIdFields:
         assert snapshot.account_id == "my-account"
 
     def test_position_snapshot_default_account(self):
-        """PositionSnapshot 기본 account_id 확인."""
+        """PositionSnapshot account_id는 명시값으로 보존된다."""
         snapshot = PositionSnapshot(
             bot_id="bot1",
             symbol="005930",
             quantity=10,
             avg_entry_price=50000,
+            account_id="acc-test",
         )
-        assert snapshot.account_id == "default"
+        assert snapshot.account_id == "acc-test"
 
 
 class TestAccountIdDbMigration:
@@ -1192,3 +1236,343 @@ class TestAccountIdDbMigration:
         cached = position_history.get_positions_sync("bot1")
         assert len(cached) == 1
         assert cached[0].account_id == "acct-us"
+
+
+# ── #1217: legacy account_id 처리 / correct_position 사전 검증 ──
+
+
+class TestWarmCacheLegacyAccountId:
+    """#1217: 기존 DB의 invalid account_id row를 warm_cache가 skip해야 한다."""
+
+    async def test_warm_cache_skips_invalid_account_id_row(
+        self, db, position_history, caplog
+    ):
+        """positions 테이블에 'default' account_id row가 있어도 부팅 실패하지 않는다."""
+        import logging
+
+        # legacy 'default' row를 직접 삽입 (정상 경로로는 만들 수 없음)
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("legacy-bot", "005930", 5.0, 10000.0, 0.0, "default"),
+        )
+        # 정상 row도 함께 삽입하여 skip 외 row는 정상 적재되는지 검증
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("ok-bot", "005931", 3.0, 20000.0, 0.0, "acc-test"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.trade.position"):
+            await position_history._warm_cache()
+
+        # legacy bot은 캐시에 적재되지 않음
+        assert position_history.get_positions_sync("legacy-bot") == []
+        # 정상 bot은 적재됨
+        ok_positions = position_history.get_positions_sync("ok-bot")
+        assert len(ok_positions) == 1
+        assert ok_positions[0].account_id == "acc-test"
+
+        # warning 로그가 기록되어야 함
+        assert any("invalid account_id" in record.message for record in caplog.records)
+
+
+class TestCorrectPositionAccountIdValidation:
+    """#1217: correct_position 진입 시 account_id 사전 검증."""
+
+    async def test_correct_position_rejects_invalid_account_id(
+        self, service, position_history
+    ):
+        """invalid account_id ('default') 입력 시 InvalidAccountIdError raise."""
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await service.correct_position(
+                bot_id="bot1",
+                symbol="005930",
+                quantity=5,
+                account_id="default",
+            )
+
+    async def test_correct_position_rejects_empty_account_id(
+        self, service, position_history
+    ):
+        """빈 account_id도 거부."""
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await service.correct_position(
+                bot_id="bot1",
+                symbol="005930",
+                quantity=5,
+                account_id="",
+            )
+
+    async def test_correct_position_invalid_account_id_does_not_touch_db(
+        self, service, position_history, db
+    ):
+        """invalid account_id는 force_update commit 전에 차단되어 DB 변경이 없다."""
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await service.correct_position(
+                bot_id="bot-x",
+                symbol="005932",
+                quantity=99,
+                account_id="default",
+            )
+
+        rows = await db.fetch_all(
+            "SELECT * FROM positions WHERE bot_id = ? AND symbol = ?",
+            ("bot-x", "005932"),
+        )
+        assert rows == []
+
+
+class TestPositionReadLegacyAccountId:
+    """#1217: get_positions / get_all_positions read 경로도 legacy row skip."""
+
+    async def test_get_positions_skips_legacy_invalid_account_id(
+        self, db, position_history, caplog
+    ):
+        """get_positions가 invalid account_id row를 skip하고 정상 row만 반환한다."""
+        import logging
+
+        # legacy 'default' row + 정상 row 동일 봇에 삽입
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("mixed-bot", "005930", 5.0, 10000.0, 0.0, "default"),
+        )
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("mixed-bot", "005931", 3.0, 20000.0, 0.0, "acc-test"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.trade.position"):
+            positions = await position_history.get_positions("mixed-bot")
+
+        # InvalidAccountIdError가 raise되지 않아야 함, 정상 row만 반환
+        assert len(positions) == 1
+        assert positions[0].symbol == "005931"
+        assert positions[0].account_id == "acc-test"
+        # warning 로그가 기록되어야 함
+        assert any(
+            "invalid account_id" in record.message and "get_positions" in record.message
+            for record in caplog.records
+        )
+
+    async def test_get_positions_include_closed_skips_legacy(
+        self, db, position_history, caplog
+    ):
+        """include_closed=True 경로도 legacy row를 skip한다."""
+        import logging
+
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("closed-bot", "005930", 0.0, 10000.0, 100.0, "default"),
+        )
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("closed-bot", "005931", 0.0, 20000.0, 50.0, "acc-test"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.trade.position"):
+            positions = await position_history.get_positions(
+                "closed-bot", include_closed=True
+            )
+
+        assert len(positions) == 1
+        assert positions[0].symbol == "005931"
+
+    async def test_get_all_positions_skips_legacy_invalid_account_id(
+        self, db, position_history, caplog
+    ):
+        """get_all_positions가 invalid account_id row를 skip하고 정상 row만 반환한다."""
+        import logging
+
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("legacy-bot-a", "005930", 5.0, 10000.0, 0.0, "default"),
+        )
+        await db.execute(
+            "INSERT INTO positions "
+            "(bot_id, symbol, quantity, avg_entry_price, "
+            "realized_pnl, account_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("ok-bot-b", "005931", 3.0, 20000.0, 0.0, "acc-test"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.trade.position"):
+            positions = await position_history.get_all_positions()
+
+        assert len(positions) == 1
+        assert positions[0].bot_id == "ok-bot-b"
+        assert positions[0].account_id == "acc-test"
+        assert any(
+            "invalid account_id" in record.message
+            and "get_all_positions" in record.message
+            for record in caplog.records
+        )
+
+
+class TestTradeReadLegacyAccountId:
+    """#1217: get_trades / DailyReport read 경로도 legacy row skip."""
+
+    @staticmethod
+    async def _insert_legacy_trade(
+        db,
+        *,
+        trade_id: str,
+        bot_id: str = "legacy-bot",
+        symbol: str = "005930",
+        side: str = "buy",
+        quantity: float = 1.0,
+        price: float = 10000.0,
+        status: str = "filled",
+        timestamp: str | None = None,
+        account_id: str = "default",
+    ) -> None:
+        ts = timestamp or datetime.now(UTC).isoformat()
+        await db.execute(
+            """INSERT INTO trades
+               (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
+                status, order_type, reason, commission, timestamp, order_id,
+                account_id, currency, exchange)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                trade_id,
+                bot_id,
+                "s-legacy",
+                symbol,
+                side,
+                quantity,
+                price,
+                status,
+                "market",
+                "legacy",
+                0.0,
+                ts,
+                None,
+                account_id,
+                "KRW",
+                "KRX",
+            ),
+        )
+
+    async def test_get_trades_skips_legacy_invalid_account_id(
+        self, recorder, db, caplog
+    ):
+        """get_trades가 legacy 'default' account_id row를 skip한다."""
+        import logging
+
+        legacy_id = str(uuid4())
+        valid_id = str(uuid4())
+
+        # legacy 'default' row + 정상 row 혼재 삽입
+        await self._insert_legacy_trade(
+            db,
+            trade_id=legacy_id,
+            bot_id="legacy-bot",
+            account_id="default",
+        )
+        await self._insert_legacy_trade(
+            db,
+            trade_id=valid_id,
+            bot_id="ok-bot",
+            account_id="acc-test",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.trade.recorder"):
+            trades = await recorder.get_trades()
+
+        # InvalidAccountIdError가 raise되지 않아야 함, 정상 row만 반환
+        assert len(trades) == 1
+        assert trades[0].bot_id == "ok-bot"
+        assert trades[0].account_id == "acc-test"
+        # warning 로그가 기록되어야 함
+        assert any(
+            "invalid account_id" in record.message and "get_trades" in record.message
+            for record in caplog.records
+        )
+
+    async def test_get_trades_account_id_filter_does_not_raise_on_default(
+        self, recorder, db, caplog
+    ):
+        """account_id=None 호출도 legacy default row 있을 때 raise 없이 동작."""
+        import logging
+
+        await self._insert_legacy_trade(
+            db,
+            trade_id=str(uuid4()),
+            account_id="default",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="ante.trade.recorder"):
+            trades = await recorder.get_trades(account_id=None)
+
+        assert trades == []
+        assert any("invalid account_id" in record.message for record in caplog.records)
+
+    async def test_performance_get_filled_trades_skips_legacy(
+        self, performance, db, caplog
+    ):
+        """PerformanceTracker._get_filled_trades 경유 (metrics 등) 도 skip."""
+        import logging
+
+        legacy_id = str(uuid4())
+        valid_id = str(uuid4())
+        ts = datetime.now(UTC).isoformat()
+
+        # legacy 'default' row + 정상 row 혼재
+        await TestTradeReadLegacyAccountId._insert_legacy_trade(
+            db,
+            trade_id=legacy_id,
+            bot_id="legacy-bot",
+            side="sell",
+            account_id="default",
+            timestamp=ts,
+        )
+        await TestTradeReadLegacyAccountId._insert_legacy_trade(
+            db,
+            trade_id=valid_id,
+            bot_id="ok-bot",
+            side="sell",
+            account_id="acc-test",
+            timestamp=ts,
+        )
+
+        # 1) account_id='acc-test' 필터: SQL 단계에서 default 제외, 정상 1건 반환
+        with caplog.at_level(logging.WARNING, logger="ante.trade.performance"):
+            valid_trades = await performance._get_filled_trades(account_id="acc-test")
+        assert len(valid_trades) == 1
+        assert valid_trades[0].account_id == "acc-test"
+
+        # 2) account_id='default' 필터: SQL 매칭은 되지만 모델 변환에서 skip
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="ante.trade.performance"):
+            legacy_trades = await performance._get_filled_trades(account_id="default")
+        assert legacy_trades == []
+        assert any(
+            "invalid account_id" in record.message
+            and "_get_filled_trades" in record.message
+            for record in caplog.records
+        )
