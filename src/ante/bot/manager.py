@@ -90,7 +90,14 @@ class BotManager:
 
         deleted 상태가 아닌 모든 봇을 읽어 stub Bot 인스턴스를 생성한다.
         기존 메모리 상태는 초기화된다. 반환값은 로드된 봇 수.
+
+        Refs #1217 → #1241 SPLIT-2: ``account_id`` 가 invalid (``""``,
+        ``"default"``, 형식 위반) 인 row 는 warning 후 skip 한다 (SPLIT-1
+        패턴). ``BotConfig.__post_init__`` 의 ``require_account_id`` 가
+        :class:`InvalidAccountIdError` 를 raise 하므로 read 경로가 실패하지
+        않도록 본 단계에서 가지치기한다.
         """
+        from ante.account.errors import InvalidAccountIdError
         from ante.strategy.base import Signal, Strategy, StrategyMeta
 
         # NullStrategy: 실제 전략 실행 없이 봇 인스턴스만 생성하기 위한 스텁
@@ -114,18 +121,29 @@ class BotManager:
 
         for row in rows:
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
-            # 마이그레이션: 기존 config에 account_id가 없으면 기본값 사용
-            account_id = row.get("account_id") or config_data.get("account_id", "test")
             # bot_type, exchange 키는 무시 (BotConfig에서 제거됨)
             config_data.pop("bot_type", None)
             config_data.pop("exchange", None)
-            config = BotConfig(
-                bot_id=row["bot_id"],
-                strategy_id=row["strategy_id"],
-                name=row["name"] or config_data.get("name", row["bot_id"]),
-                account_id=account_id,
-                interval_seconds=config_data.get("interval_seconds", 60),
-            )
+            account_id = row.get("account_id") or ""
+            try:
+                config = BotConfig(
+                    bot_id=row["bot_id"],
+                    strategy_id=row["strategy_id"],
+                    name=row["name"] or config_data.get("name", row["bot_id"]),
+                    account_id=account_id,
+                    interval_seconds=config_data.get("interval_seconds", 60),
+                )
+            except InvalidAccountIdError as e:
+                # SPLIT-1 패턴: invalid account_id row 는 skip + warning.
+                # legacy 마이그레이션(#1219)이 완료되기 전까지 read 경로 안전망.
+                logger.warning(
+                    "BotManager.load_from_db: invalid account_id row skip"
+                    " (legacy migration 필요): bot_id=%s account_id=%r — %s",
+                    row.get("bot_id"),
+                    account_id,
+                    e,
+                )
+                continue
             bot = Bot(
                 config=config,
                 strategy_cls=_NullStrategy,

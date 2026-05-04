@@ -138,6 +138,7 @@ async def _handle_bot_create(
 ) -> dict:
     from pathlib import Path
 
+    from ante.account.scoping import require_account_id
     from ante.bot.config import BotConfig
     from ante.strategy.loader import StrategyLoader
 
@@ -149,11 +150,16 @@ async def _handle_bot_create(
 
     strategy_cls = StrategyLoader.load(Path(record.filepath))
 
+    # Refs #1217 → #1241 SPLIT-2: account_id fallback 제거.
+    # ``BotConfig.__post_init__`` 의 require_account_id 와 중복되지만
+    # IPC routing 진입점에서 한 번 더 명시 검증해 ``InvalidAccountIdError`` 의
+    # context 를 ``ipc.bot.create`` 로 표시한다.
+    account_id = require_account_id(args.get("account_id"), context="ipc.bot.create")
     config = BotConfig(
         bot_id=args.get("bot_id", ""),
         strategy_id=strategy_id,
         name=args.get("name", ""),
-        account_id=args.get("account_id", ""),
+        account_id=account_id,
         interval_seconds=args.get("interval_seconds", 60),
     )
 

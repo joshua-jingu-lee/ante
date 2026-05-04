@@ -90,6 +90,7 @@ async def cold_path_remove_bot(
     stale: server tasks and observers are already gone, and the next server boot
     skips ``status='deleted'`` rows.
     """
+    from ante.account.scoping import require_account_id
     from ante.bot.manager import BOT_SCHEMA
     from ante.bot.signal_key import SignalKeyManager
     from ante.strategy.snapshot import StrategySnapshot
@@ -103,7 +104,12 @@ async def cold_path_remove_bot(
     if row is None:
         raise BotNotFoundError(bot_id)
 
-    account_id = row.get("account_id") or "test"
+    # Refs #1217 → #1241 SPLIT-2: account_id fallback (`or "test"`) 제거.
+    # invalid 값은 ``InvalidAccountIdError`` 로 즉시 거부되어 잘못된 account 의
+    # Treasury 환수 / 잘못된 계좌 cleanup 경로가 실행되지 않는다.
+    account_id = require_account_id(
+        row.get("account_id"), context="cold_path_remove_bot"
+    )
     previous_status = row.get("status") or BotStatus.CREATED.value
 
     signal_key_manager = SignalKeyManager(db)
