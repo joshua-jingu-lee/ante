@@ -194,6 +194,69 @@ class TestHandleBotCreate:
                 "cli-user",
             )
 
+    async def test_ipc_bot_create_account_scoped_required(self):
+        """Refs #1217 → #1241 SPLIT-2: ``args["account_id"]`` 누락/invalid 시
+        ``InvalidAccountIdError`` 로 거부한다.
+
+        ``args.get("account_id", "")`` fallback 이 제거되어 IPC routing
+        진입점에서 즉시 거부된다. ``BotConfig.__post_init__`` 까지 도달하기
+        전에 ``ipc.bot.create`` context 로 실패한다.
+        """
+        from dataclasses import dataclass
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.account.errors import InvalidAccountIdError
+        from ante.ipc.registry import _handle_bot_create
+
+        @dataclass
+        class FakeRecord:
+            filepath: str = "/tmp/strategy.py"
+
+        fake_registry = AsyncMock()
+        fake_registry.get.return_value = FakeRecord()
+
+        fake_bot_manager = AsyncMock()
+
+        svc = MagicMock()
+        svc.strategy_registry = fake_registry
+        svc.bot_manager = fake_bot_manager
+
+        import ante.strategy.loader
+
+        original_load = ante.strategy.loader.StrategyLoader.load
+        ante.strategy.loader.StrategyLoader.load = MagicMock(
+            return_value=type("FakeStrategy", (), {})
+        )
+        try:
+            # 누락 → 거부
+            with pytest.raises(InvalidAccountIdError, match="ipc.bot.create"):
+                await _handle_bot_create(
+                    svc,
+                    {"strategy_id": "strat-1"},
+                    "cli-user",
+                )
+
+            # 빈 문자열 → 거부
+            with pytest.raises(InvalidAccountIdError):
+                await _handle_bot_create(
+                    svc,
+                    {"strategy_id": "strat-1", "account_id": ""},
+                    "cli-user",
+                )
+
+            # 'default' 예약어 → 거부
+            with pytest.raises(InvalidAccountIdError):
+                await _handle_bot_create(
+                    svc,
+                    {"strategy_id": "strat-1", "account_id": "default"},
+                    "cli-user",
+                )
+
+            # bot_manager.create_bot 까지 절대 도달하지 않아야 한다
+            fake_bot_manager.create_bot.assert_not_called()
+        finally:
+            ante.strategy.loader.StrategyLoader.load = original_load
+
 
 # ── system.halt / system.clear_halt 응답 shape (Refs #1213) ──
 

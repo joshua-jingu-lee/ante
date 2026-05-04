@@ -93,7 +93,7 @@ class TestCreate:
             requester="agent:strategy-dev",
             title="예산 증액 요청",
             body="수익률 15%, 비중 확대 요청",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
 
         assert req.id
@@ -102,7 +102,11 @@ class TestCreate:
         assert req.requester == "agent:strategy-dev"
         assert req.title == "예산 증액 요청"
         assert req.body == "수익률 15%, 비중 확대 요청"
-        assert req.params == {"bot_id": "bot-1", "amount": 25000000}
+        assert req.params == {
+            "account_id": "acc-test",
+            "bot_id": "bot-1",
+            "amount": 25000000,
+        }
         assert len(req.history) == 1
         assert req.history[0]["action"] == "created"
 
@@ -124,6 +128,7 @@ class TestCreate:
             requester="agent",
             title="테스트",
             expires_at=future,
+            params={"account_id": "acc-test"},
         )
         assert req.expires_at == future
 
@@ -141,6 +146,7 @@ class TestCreate:
             type="bot_create",
             requester="agent",
             title="봇 생성 요청",
+            params={"account_id": "acc-test"},
         )
 
         assert len(received) == 1
@@ -153,6 +159,7 @@ class TestCreate:
             type="budget_change",
             requester="agent",
             title="테스트",
+            params={"account_id": "acc-test"},
         )
 
         fetched = await service.get(created.id)
@@ -166,8 +173,18 @@ class TestCreate:
 
     async def test_list_all(self, service):
         """전체 목록 조회."""
-        await service.create(type="budget_change", requester="agent", title="요청 1")
-        await service.create(type="bot_create", requester="agent", title="요청 2")
+        await service.create(
+            type="budget_change",
+            requester="agent",
+            title="요청 1",
+            params={"account_id": "acc-test"},
+        )
+        await service.create(
+            type="bot_create",
+            requester="agent",
+            title="요청 2",
+            params={"account_id": "acc-test"},
+        )
         await service.create(type="bot_stop", requester="agent", title="요청 3")
 
         all_requests = await service.list_approvals()
@@ -176,9 +193,17 @@ class TestCreate:
     async def test_list_filter_status(self, service):
         """상태 필터 조회."""
         req = await service.create(
-            type="budget_change", requester="agent", title="요청 1"
+            type="budget_change",
+            requester="agent",
+            title="요청 1",
+            params={"account_id": "acc-test"},
         )
-        await service.create(type="bot_create", requester="agent", title="요청 2")
+        await service.create(
+            type="bot_create",
+            requester="agent",
+            title="요청 2",
+            params={"account_id": "acc-test"},
+        )
         await service.approve(req.id)
 
         pending = await service.list_approvals(status="pending")
@@ -189,8 +214,18 @@ class TestCreate:
 
     async def test_list_filter_type(self, service):
         """유형 필터 조회."""
-        await service.create(type="budget_change", requester="agent", title="요청 1")
-        await service.create(type="bot_create", requester="agent", title="요청 2")
+        await service.create(
+            type="budget_change",
+            requester="agent",
+            title="요청 1",
+            params={"account_id": "acc-test"},
+        )
+        await service.create(
+            type="bot_create",
+            requester="agent",
+            title="요청 2",
+            params={"account_id": "acc-test"},
+        )
 
         budget = await service.list_approvals(type="budget_change")
         assert len(budget) == 1
@@ -200,7 +235,10 @@ class TestCreate:
         """페이지네이션."""
         for i in range(5):
             await service.create(
-                type="budget_change", requester="agent", title=f"요청 {i}"
+                type="budget_change",
+                requester="agent",
+                title=f"요청 {i}",
+                params={"account_id": "acc-test"},
             )
 
         page1 = await service.list_approvals(limit=2, offset=0)
@@ -216,7 +254,10 @@ class TestResolve:
     async def test_approve(self, service):
         """결재 승인."""
         req = await service.create(
-            type="budget_change", requester="agent", title="승인 테스트"
+            type="budget_change",
+            requester="agent",
+            title="승인 테스트",
+            params={"account_id": "acc-test"},
         )
         approved = await service.approve(req.id)
 
@@ -243,7 +284,7 @@ class TestResolve:
             type="budget_change",
             requester="agent",
             title="실행 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await svc.approve(req.id)
 
@@ -261,7 +302,10 @@ class TestResolve:
         eventbus.subscribe(ApprovalResolvedEvent, handler)
 
         req = await service.create(
-            type="budget_change", requester="agent", title="이벤트 테스트"
+            type="budget_change",
+            requester="agent",
+            title="이벤트 테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -271,7 +315,10 @@ class TestResolve:
     async def test_approve_non_pending_fails(self, service):
         """pending이 아닌 상태에서 승인 시 에러."""
         req = await service.create(
-            type="budget_change", requester="agent", title="테스트"
+            type="budget_change",
+            requester="agent",
+            title="테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -283,7 +330,10 @@ class TestResolve:
     async def test_reject(self, service):
         """결재 거절."""
         req = await service.create(
-            type="budget_change", requester="agent", title="거절 테스트"
+            type="budget_change",
+            requester="agent",
+            title="거절 테스트",
+            params={"account_id": "acc-test"},
         )
         rejected = await service.reject(req.id, reject_reason="리스크 과다")
 
@@ -294,7 +344,10 @@ class TestResolve:
     async def test_reject_non_pending_fails(self, service):
         """pending이 아닌 상태에서 거절 시 에러."""
         req = await service.create(
-            type="budget_change", requester="agent", title="테스트"
+            type="budget_change",
+            requester="agent",
+            title="테스트",
+            params={"account_id": "acc-test"},
         )
         await service.reject(req.id)
 
@@ -306,7 +359,10 @@ class TestResolve:
     async def test_hold_and_resume(self, service):
         """보류 및 재개."""
         req = await service.create(
-            type="budget_change", requester="agent", title="보류 테스트"
+            type="budget_change",
+            requester="agent",
+            title="보류 테스트",
+            params={"account_id": "acc-test"},
         )
 
         held = await service.hold(req.id)
@@ -320,7 +376,10 @@ class TestResolve:
     async def test_hold_non_pending_fails(self, service):
         """pending이 아닌 상태에서 보류 시 에러."""
         req = await service.create(
-            type="budget_change", requester="agent", title="테스트"
+            type="budget_change",
+            requester="agent",
+            title="테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -332,7 +391,10 @@ class TestResolve:
     async def test_resume_non_hold_fails(self, service):
         """on_hold가 아닌 상태에서 재개 시 에러."""
         req = await service.create(
-            type="budget_change", requester="agent", title="테스트"
+            type="budget_change",
+            requester="agent",
+            title="테스트",
+            params={"account_id": "acc-test"},
         )
 
         with pytest.raises(ValueError, match="on_hold 상태에서만 재개 가능"):
@@ -346,7 +408,10 @@ class TestCancel:
     async def test_cancel_pending(self, service):
         """pending 상태에서 철회."""
         req = await service.create(
-            type="budget_change", requester="agent:dev", title="철회 테스트"
+            type="budget_change",
+            requester="agent:dev",
+            title="철회 테스트",
+            params={"account_id": "acc-test"},
         )
         cancelled = await service.cancel(req.id, requester="agent:dev")
 
@@ -356,7 +421,10 @@ class TestCancel:
     async def test_cancel_on_hold(self, service):
         """on_hold 상태에서 철회."""
         req = await service.create(
-            type="budget_change", requester="agent:dev", title="보류 후 철회"
+            type="budget_change",
+            requester="agent:dev",
+            title="보류 후 철회",
+            params={"account_id": "acc-test"},
         )
         await service.hold(req.id)
         cancelled = await service.cancel(req.id, requester="agent:dev")
@@ -366,7 +434,10 @@ class TestCancel:
     async def test_cancel_wrong_requester_fails(self, service):
         """본인이 아닌 요청자가 철회 시 에러."""
         req = await service.create(
-            type="budget_change", requester="agent:dev", title="테스트"
+            type="budget_change",
+            requester="agent:dev",
+            title="테스트",
+            params={"account_id": "acc-test"},
         )
 
         with pytest.raises(ValueError, match="본인 요청만 철회 가능"):
@@ -375,7 +446,10 @@ class TestCancel:
     async def test_cancel_approved_fails(self, service):
         """이미 승인된 요청 철회 시 에러."""
         req = await service.create(
-            type="budget_change", requester="agent:dev", title="테스트"
+            type="budget_change",
+            requester="agent:dev",
+            title="테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -395,7 +469,10 @@ class TestCancel:
         eventbus.subscribe(ApprovalResolvedEvent, handler)
 
         req = await service.create(
-            type="budget_change", requester="agent:dev", title="이벤트 테스트"
+            type="budget_change",
+            requester="agent:dev",
+            title="이벤트 테스트",
+            params={"account_id": "acc-test"},
         )
         await service.cancel(req.id, requester="agent:dev")
 
@@ -410,7 +487,10 @@ class TestReview:
     async def test_add_review(self, service):
         """검토 의견 추가."""
         req = await service.create(
-            type="budget_change", requester="agent", title="검토 테스트"
+            type="budget_change",
+            requester="agent",
+            title="검토 테스트",
+            params={"account_id": "acc-test"},
         )
 
         reviewed = await service.add_review(
@@ -429,7 +509,10 @@ class TestReview:
     async def test_multiple_reviews(self, service):
         """복수 검토 의견."""
         req = await service.create(
-            type="budget_change", requester="agent", title="복수 검토"
+            type="budget_change",
+            requester="agent",
+            title="복수 검토",
+            params={"account_id": "acc-test"},
         )
 
         await service.add_review(req.id, "treasury", "pass", "잔액 충분")
@@ -452,7 +535,10 @@ class TestHistory:
     async def test_full_lifecycle_history(self, service):
         """전체 생명주기 이력 추적."""
         req = await service.create(
-            type="budget_change", requester="agent:dev", title="이력 테스트"
+            type="budget_change",
+            requester="agent:dev",
+            title="이력 테스트",
+            params={"account_id": "acc-test"},
         )
         await service.add_review(req.id, "treasury", "pass", "잔액 충분")
         await service.hold(req.id)
@@ -471,7 +557,10 @@ class TestHistory:
     async def test_history_persisted(self, service):
         """이력이 DB에 영속화."""
         req = await service.create(
-            type="budget_change", requester="agent", title="영속화 테스트"
+            type="budget_change",
+            requester="agent",
+            title="영속화 테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -494,6 +583,7 @@ class TestExpire:
             requester="agent",
             title="만료 테스트",
             expires_at=past,
+            params={"account_id": "acc-test"},
         )
 
         count = await service.expire_stale()
@@ -511,6 +601,7 @@ class TestExpire:
             requester="agent",
             title="이미 승인됨",
             expires_at=past,
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -519,7 +610,12 @@ class TestExpire:
 
     async def test_expire_skips_no_expiry(self, service):
         """만료 기한이 없는 요청은 만료 처리 안 함."""
-        await service.create(type="budget_change", requester="agent", title="무기한")
+        await service.create(
+            type="budget_change",
+            requester="agent",
+            title="무기한",
+            params={"account_id": "acc-test"},
+        )
 
         count = await service.expire_stale()
         assert count == 0
@@ -532,6 +628,7 @@ class TestExpire:
             requester="agent",
             title="아직 유효",
             expires_at=future,
+            params={"account_id": "acc-test"},
         )
 
         count = await service.expire_stale()
@@ -545,6 +642,7 @@ class TestExpire:
             requester="agent",
             title="만료 이벤트 테스트",
             expires_at=past,
+            params={"account_id": "acc-test"},
         )
 
         received: list[ApprovalResolvedEvent] = []
@@ -723,7 +821,12 @@ class TestValidator:
             type="budget_change",
             requester="agent",
             title="예산 증액",
-            params={"bot_id": "bot-1", "amount": 50000000, "current": 10000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 50000000,
+                "current": 10000000,
+            },
         )
 
         assert req.status == "pending"
@@ -761,7 +864,7 @@ class TestValidator:
             type="rule_change",
             requester="agent",
             title="규칙 변경",
-            params={"bot_id": "bot-1", "rules": {}},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "rules": {}},
         )
         assert req.status == "pending"
 
@@ -806,7 +909,12 @@ class TestValidator:
             type="budget_change",
             requester="agent",
             title="예산 변경",
-            params={"bot_id": "bot-1", "amount": 20000000, "current": 10000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 20000000,
+                "current": 10000000,
+            },
         )
 
         fetched = await svc.get(req.id)
@@ -831,7 +939,7 @@ class TestValidator:
             type="budget_change",
             requester="agent",
             title="예산 변경",
-            params={"bot_id": "bot-1", "amount": 20000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 20000000},
         )
 
         assert "reviewed_at" in req.reviews[0]
@@ -882,7 +990,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent",
             title="실행 실패 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         result = await svc.approve(req.id)
 
@@ -944,7 +1052,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent",
             title="재승인 테스트",
-            params={"bot_id": "bot-1", "amount": 10000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 10000000},
         )
         failed = await svc.approve(req.id)
         assert failed.status == "execution_failed"
@@ -973,7 +1081,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent",
             title="거절 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await svc.approve(req.id)
         rejected = await svc.reject(req.id, reject_reason="원인 해소 불가")
@@ -999,7 +1107,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent",
             title="보류 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await svc.approve(req.id)
         held = await svc.hold(req.id)
@@ -1024,7 +1132,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent:dev",
             title="철회 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await svc.approve(req.id)
         cancelled = await svc.cancel(req.id, requester="agent:dev")
@@ -1056,7 +1164,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent",
             title="이벤트 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await svc.approve(req.id)
 
@@ -1081,7 +1189,7 @@ class TestExecutionFailed:
             type="budget_change",
             requester="agent",
             title="필터 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await svc.approve(req.id)
 
@@ -1100,18 +1208,26 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="재상신 테스트",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await service.reject(req.id, reject_reason="금액 과다")
 
         reopened = await service.reopen(
             id=req.id,
             requester="agent:dev",
-            params={"bot_id": "bot-1", "amount": 15000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 15000000,
+            },
         )
 
         assert reopened.status == "pending"
-        assert reopened.params == {"bot_id": "bot-1", "amount": 15000000}
+        assert reopened.params == {
+            "account_id": "acc-test",
+            "bot_id": "bot-1",
+            "amount": 15000000,
+        }
         assert reopened.reject_reason == ""
         assert any(h["action"] == "reopened" for h in reopened.history)
 
@@ -1122,7 +1238,7 @@ class TestReopen:
             requester="agent:dev",
             title="body 갱신",
             body="원본 사유",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await service.reject(req.id)
 
@@ -1134,7 +1250,11 @@ class TestReopen:
 
         assert reopened.body == "수정된 사유"
         # params는 기존 값 유지
-        assert reopened.params == {"bot_id": "bot-1", "amount": 25000000}
+        assert reopened.params == {
+            "account_id": "acc-test",
+            "bot_id": "bot-1",
+            "amount": 25000000,
+        }
 
     async def test_reopen_keeps_existing_when_none(self, service):
         """body/params를 None으로 전달하면 기존 값이 유지된다."""
@@ -1143,14 +1263,18 @@ class TestReopen:
             requester="agent:dev",
             title="유지 테스트",
             body="원본 본문",
-            params={"bot_id": "bot-1", "amount": 20000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 20000000},
         )
         await service.reject(req.id)
 
         reopened = await service.reopen(id=req.id, requester="agent:dev")
 
         assert reopened.body == "원본 본문"
-        assert reopened.params == {"bot_id": "bot-1", "amount": 20000000}
+        assert reopened.params == {
+            "account_id": "acc-test",
+            "bot_id": "bot-1",
+            "amount": 20000000,
+        }
 
     async def test_reopen_non_rejected_fails(self, service):
         """rejected가 아닌 상태에서 reopen 시 에러."""
@@ -1158,6 +1282,7 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="상태 에러",
+            params={"account_id": "acc-test"},
         )
 
         with pytest.raises(ValueError, match="rejected 상태에서만 reopen 가능"):
@@ -1169,6 +1294,7 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="권한 에러",
+            params={"account_id": "acc-test"},
         )
         await service.reject(req.id)
 
@@ -1200,7 +1326,7 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="검증 실패 테스트",
-            params={"bot_id": "bot-1", "amount": 50000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 50000000},
         )
         await svc_no_validator.reject(req.id)
 
@@ -1208,7 +1334,11 @@ class TestReopen:
             await svc.reopen(
                 id=req.id,
                 requester="agent:dev",
-                params={"bot_id": "bot-1", "amount": 50000000},
+                params={
+                    "account_id": "acc-test",
+                    "bot_id": "bot-1",
+                    "amount": 50000000,
+                },
             )
 
         # 상태가 여전히 rejected인지 확인
@@ -1235,7 +1365,7 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="warn 테스트",
-            params={"bot_id": "bot-1", "amount": 30000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 30000000},
         )
         await svc_no_validator.reject(req.id)
 
@@ -1261,6 +1391,7 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="이벤트 테스트",
+            params={"account_id": "acc-test"},
         )
         created_event_count = len(received)
 
@@ -1278,7 +1409,7 @@ class TestReopen:
             requester="agent:dev",
             title="이력 테스트",
             body="원본",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await service.reject(req.id)
 
@@ -1286,7 +1417,11 @@ class TestReopen:
             id=req.id,
             requester="agent:dev",
             body="수정본",
-            params={"bot_id": "bot-1", "amount": 15000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 15000000,
+            },
         )
 
         reopened_entry = next(h for h in reopened.history if h["action"] == "reopened")
@@ -1300,21 +1435,29 @@ class TestReopen:
             requester="agent:dev",
             title="영속화 테스트",
             body="원본",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await service.reject(req.id)
         await service.reopen(
             id=req.id,
             requester="agent:dev",
             body="수정본",
-            params={"bot_id": "bot-1", "amount": 15000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 15000000,
+            },
         )
 
         fetched = await service.get(req.id)
         assert fetched is not None
         assert fetched.status == "pending"
         assert fetched.body == "수정본"
-        assert fetched.params == {"bot_id": "bot-1", "amount": 15000000}
+        assert fetched.params == {
+            "account_id": "acc-test",
+            "bot_id": "bot-1",
+            "amount": 15000000,
+        }
         assert fetched.reject_reason == ""
         assert fetched.resolved_at == ""
         assert fetched.resolved_by == ""
@@ -1326,13 +1469,17 @@ class TestReopen:
             type="budget_change",
             requester="agent:dev",
             title="전체 흐름",
-            params={"bot_id": "bot-1", "amount": 25000000},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "amount": 25000000},
         )
         await service.reject(req.id, reject_reason="금액 과다")
         await service.reopen(
             id=req.id,
             requester="agent:dev",
-            params={"bot_id": "bot-1", "amount": 15000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 15000000,
+            },
         )
         approved = await service.approve(req.id)
 
@@ -1365,7 +1512,10 @@ class TestSuppressNotification:
         eventbus.subscribe(ApprovalResolvedEvent, on_resolved)
 
         req = await service.create(
-            type="budget_change", requester="agent", title="알림 억제 테스트"
+            type="budget_change",
+            requester="agent",
+            title="알림 억제 테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id, suppress_notification=True)
 
@@ -1389,7 +1539,10 @@ class TestSuppressNotification:
         eventbus.subscribe(NotificationEvent, on_notification)
 
         req = await service.create(
-            type="budget_change", requester="agent", title="기본 동작 테스트"
+            type="budget_change",
+            requester="agent",
+            title="기본 동작 테스트",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -1413,7 +1566,10 @@ class TestSuppressNotification:
         eventbus.subscribe(ApprovalResolvedEvent, on_resolved)
 
         req = await service.create(
-            type="budget_change", requester="agent", title="거절 알림 억제"
+            type="budget_change",
+            requester="agent",
+            title="거절 알림 억제",
+            params={"account_id": "acc-test"},
         )
         await service.reject(req.id, suppress_notification=True)
 
@@ -1437,7 +1593,10 @@ class TestSuppressNotification:
         eventbus.subscribe(NotificationEvent, on_notification)
 
         req = await service.create(
-            type="budget_change", requester="agent", title="거절 기본 동작"
+            type="budget_change",
+            requester="agent",
+            title="거절 기본 동작",
+            params={"account_id": "acc-test"},
         )
         await service.reject(req.id)
 
@@ -1450,7 +1609,10 @@ class TestListSearch:
     async def test_search_by_title(self, service):
         """title LIKE 검색."""
         await service.create(
-            type="budget_change", requester="agent-01", title="예산 증액 요청"
+            type="budget_change",
+            requester="agent-01",
+            title="예산 증액 요청",
+            params={"account_id": "acc-test"},
         )
         await service.create(
             type="strategy_adopt", requester="agent-02", title="전략 채택 요청"
@@ -1463,10 +1625,16 @@ class TestListSearch:
     async def test_search_by_requester(self, service):
         """requester LIKE 검색."""
         await service.create(
-            type="budget_change", requester="agent-alpha", title="요청 A"
+            type="budget_change",
+            requester="agent-alpha",
+            title="요청 A",
+            params={"account_id": "acc-test"},
         )
         await service.create(
-            type="budget_change", requester="agent-beta", title="요청 B"
+            type="budget_change",
+            requester="agent-beta",
+            title="요청 B",
+            params={"account_id": "acc-test"},
         )
 
         results = await service.list_approvals(search="alpha")
@@ -1476,13 +1644,22 @@ class TestListSearch:
     async def test_search_matches_title_or_requester(self, service):
         """title 또는 requester 중 하나라도 매치되면 반환."""
         await service.create(
-            type="budget_change", requester="agent-01", title="검색어포함"
+            type="budget_change",
+            requester="agent-01",
+            title="검색어포함",
+            params={"account_id": "acc-test"},
         )
         await service.create(
-            type="budget_change", requester="검색어포함", title="일반 제목"
+            type="budget_change",
+            requester="검색어포함",
+            title="일반 제목",
+            params={"account_id": "acc-test"},
         )
         await service.create(
-            type="budget_change", requester="agent-02", title="관련 없는 제목"
+            type="budget_change",
+            requester="agent-02",
+            title="관련 없는 제목",
+            params={"account_id": "acc-test"},
         )
 
         results = await service.list_approvals(search="검색어포함")
@@ -1491,7 +1668,10 @@ class TestListSearch:
     async def test_search_no_match(self, service):
         """매치 없으면 빈 목록."""
         await service.create(
-            type="budget_change", requester="agent-01", title="예산 요청"
+            type="budget_change",
+            requester="agent-01",
+            title="예산 요청",
+            params={"account_id": "acc-test"},
         )
 
         results = await service.list_approvals(search="존재하지않는키워드")
@@ -1499,8 +1679,18 @@ class TestListSearch:
 
     async def test_search_empty_string(self, service):
         """빈 문자열이면 전체 반환 (search 미지정과 동일)."""
-        await service.create(type="budget_change", requester="agent-01", title="요청 1")
-        await service.create(type="budget_change", requester="agent-02", title="요청 2")
+        await service.create(
+            type="budget_change",
+            requester="agent-01",
+            title="요청 1",
+            params={"account_id": "acc-test"},
+        )
+        await service.create(
+            type="budget_change",
+            requester="agent-02",
+            title="요청 2",
+            params={"account_id": "acc-test"},
+        )
 
         results = await service.list_approvals(search="")
         assert len(results) == 2
@@ -1508,10 +1698,16 @@ class TestListSearch:
     async def test_search_combined_with_status_filter(self, service):
         """search와 status 필터 조합."""
         req = await service.create(
-            type="budget_change", requester="agent-01", title="승인될 요청"
+            type="budget_change",
+            requester="agent-01",
+            title="승인될 요청",
+            params={"account_id": "acc-test"},
         )
         await service.create(
-            type="budget_change", requester="agent-01", title="대기 중 요청"
+            type="budget_change",
+            requester="agent-01",
+            title="대기 중 요청",
+            params={"account_id": "acc-test"},
         )
         await service.approve(req.id)
 
@@ -1521,7 +1717,182 @@ class TestListSearch:
 
     async def test_search_none_returns_all(self, service):
         """search=None이면 기존 동작 (전체 반환)."""
-        await service.create(type="budget_change", requester="agent-01", title="요청 1")
+        await service.create(
+            type="budget_change",
+            requester="agent-01",
+            title="요청 1",
+            params={"account_id": "acc-test"},
+        )
 
         results = await service.list_approvals(search=None)
         assert len(results) == 1
+
+
+# ── Refs #1241 SPLIT-2: account-scoped payload validation ───────────
+
+
+class TestAccountScopedPayloadValidation:
+    """Refs #1217 → #1241 SPLIT-2.
+
+    ``ApprovalService.create`` / ``ApprovalService.reopen`` 가
+    account-scoped 결재 유형 (`budget_change`, `rule_change`, `bot_create`)
+    에 대해 ``params`` 의 account_id 를 :func:`require_account_id` 로
+    검증하는지 보장한다.
+
+    글로벌 결재 (``strategy_adopt``/``strategy_retire``) 와 bot-id scoped
+    결재 (``bot_stop``/``bot_resume``/``bot_delete``/``bot_assign_strategy``/
+    ``bot_change_strategy``) 는 account_id 없이도 통과해야 한다.
+    """
+
+    async def test_approval_create_account_scoped_payload_validation(self, service):
+        """budget_change / rule_change / bot_create 는 account_id 가 필수."""
+        from ante.account.errors import InvalidAccountIdError
+
+        # account_id 누락 → 거부
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            await service.create(
+                type="budget_change",
+                requester="agent",
+                title="누락",
+                params={"bot_id": "bot-1", "amount": 1_000_000},
+            )
+
+        # 빈 문자열 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            await service.create(
+                type="rule_change",
+                requester="agent",
+                title="빈 값",
+                params={"account_id": "", "bot_id": "bot-1", "rules": []},
+            )
+
+        # ``"default"`` 예약어 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            await service.create(
+                type="bot_create",
+                requester="agent",
+                title="default 예약어",
+                params={"account_id": "default", "strategy_id": "s1"},
+            )
+
+        # 정상 account_id → 통과
+        req = await service.create(
+            type="budget_change",
+            requester="agent",
+            title="정상",
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 1_000_000,
+            },
+        )
+        assert req.status == ApprovalStatus.PENDING
+        assert req.params["account_id"] == "acc-test"
+
+    async def test_approval_create_account_scoped_config_first(self, service):
+        """config-first → flat fallback 우선순위.
+
+        ``params["config"]["account_id"]`` 가 우선 사용되고, 없으면
+        ``params["account_id"]`` 로 폴백한다 (web/CLI 가 BotConfig 형태로
+        래핑해 보내는 신규 형태 호환).
+        """
+        # config-nested 에 account_id 가 있으면 통과
+        req = await service.create(
+            type="bot_create",
+            requester="agent",
+            title="config nested",
+            params={
+                "config": {"account_id": "acc-test", "strategy_id": "s1"},
+            },
+        )
+        assert req.status == ApprovalStatus.PENDING
+
+        # config-nested 에 account_id 가 없고 flat 에도 없으면 거부
+        from ante.account.errors import InvalidAccountIdError
+
+        with pytest.raises(InvalidAccountIdError):
+            await service.create(
+                type="bot_create",
+                requester="agent",
+                title="누락",
+                params={"config": {"strategy_id": "s1"}},
+            )
+
+    async def test_approval_create_global_types_pass_without_account(self, service):
+        """글로벌 결재 (strategy_*) + bot-id scoped 는 account_id 없이 통과."""
+        # strategy_adopt / strategy_retire 는 글로벌 결재 → account_id 불필요
+        for global_type in ("strategy_adopt", "strategy_retire"):
+            req = await service.create(
+                type=global_type,
+                requester="agent",
+                title=f"{global_type} payload",
+                params={"strategy_id": "s1", "report_id": "rpt-1"},
+            )
+            assert req.status == ApprovalStatus.PENDING
+
+        # bot-id scoped: bot_stop / bot_resume / bot_delete / bot_assign_strategy /
+        # bot_change_strategy → bot_id 로 account 가 결정되므로 account_id 불필요
+        for bot_type in (
+            "bot_stop",
+            "bot_resume",
+            "bot_delete",
+            "bot_assign_strategy",
+            "bot_change_strategy",
+        ):
+            req = await service.create(
+                type=bot_type,
+                requester="agent",
+                title=f"{bot_type} payload",
+                params={"bot_id": "bot-1"},
+            )
+            assert req.status == ApprovalStatus.PENDING
+
+    async def test_approval_reopen_account_scoped_payload_validation(self, service):
+        """reopen 시 갱신된 params 에 대해 account_id 재검증.
+
+        params=None 이면 기존 검증된 params 를 유지하므로 스킵한다.
+        params 갱신 시 invalid 면 거부.
+        """
+        from ante.account.errors import InvalidAccountIdError
+
+        # 정상 생성 → 거절
+        req = await service.create(
+            type="budget_change",
+            requester="agent",
+            title="원본",
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 1_000_000,
+            },
+        )
+        await service.reject(req.id, reject_reason="검토 필요")
+
+        # params=None reopen → 기존 params 유지, 통과
+        reopened = await service.reopen(req.id, requester="agent")
+        assert reopened.status == ApprovalStatus.PENDING
+        assert reopened.params["account_id"] == "acc-test"
+
+        # 다시 거절
+        await service.reject(req.id, reject_reason="다시 검토")
+
+        # params 갱신 시 account_id 누락 → 거부
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            await service.reopen(
+                req.id,
+                requester="agent",
+                params={"bot_id": "bot-1", "amount": 2_000_000},
+            )
+
+        # 정상 갱신 → 통과
+        reopened2 = await service.reopen(
+            req.id,
+            requester="agent",
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 2_000_000,
+            },
+        )
+        assert reopened2.status == ApprovalStatus.PENDING
+        assert reopened2.params["amount"] == 2_000_000

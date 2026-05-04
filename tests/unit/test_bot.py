@@ -202,6 +202,39 @@ class TestBotConfig:
                 bot_id="b1", strategy_id="s1", interval_seconds=0, account_id="acc-test"
             )
 
+    def test_bot_config_account_scoped_required(self):
+        """Refs #1241 SPLIT-2: account_id fallback (`""`/`"default"`/None)
+        은 ``InvalidAccountIdError`` 로 거부된다.
+
+        ``"test"`` 는 bootstrap seed 계좌이므로 runtime valid 이다 (Refs
+        #1239 / SPLIT-1 정책 — ``ACCOUNT_ID_PATTERN`` 만 거치면 통과).
+        """
+        from ante.account.errors import InvalidAccountIdError
+
+        # default 값 (account_id 미지정) → 빈 문자열 → 거부
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            BotConfig(bot_id="b1", strategy_id="s1")
+
+        # 명시적 빈 문자열 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            BotConfig(bot_id="b1", strategy_id="s1", account_id="")
+
+        # ``"default"`` fallback 예약어 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            BotConfig(bot_id="b1", strategy_id="s1", account_id="default")
+
+        # 패턴 위반 (특수문자) → 거부
+        with pytest.raises(InvalidAccountIdError):
+            BotConfig(bot_id="b1", strategy_id="s1", account_id="bad acct!")
+
+        # 정상 account_id 는 통과
+        c = BotConfig(bot_id="b1", strategy_id="s1", account_id="acc-test")
+        assert c.account_id == "acc-test"
+
+        # bootstrap seed ``"test"`` 는 runtime valid
+        c2 = BotConfig(bot_id="b1", strategy_id="s1", account_id="test")
+        assert c2.account_id == "test"
+
 
 # ── Bot 생명주기 ─────────────────────────────────
 
@@ -934,6 +967,57 @@ class TestBotManager:
         # bot_type, exchange는 BotConfig에 없으므로 속성 자체가 존재하지 않음
         assert not hasattr(bot.config, "bot_type")
         assert not hasattr(bot.config, "exchange")
+
+    async def test_bot_manager_load_bots_account_scoped_invalid_skip(
+        self, manager, eventbus, ctx, db, caplog
+    ):
+        """Refs #1241 SPLIT-2: legacy invalid account_id row 는 skip + warning.
+
+        SPLIT-1 패턴: ``BotConfig.__post_init__`` 가
+        ``InvalidAccountIdError`` 를 raise 해도 read 경로는 실패하지 않고,
+        해당 row 만 건너뛴다. 형식 위반 / ``"default"`` / ``""`` row 가
+        전체 ``load_from_db`` 를 깨뜨리지 않도록 보장한다.
+        """
+        import json
+        import logging
+
+        # 정상 row 1건 + invalid row 2건 직접 삽입
+        valid_config = json.dumps({"interval_seconds": 60})
+        await db.execute(
+            """INSERT INTO bots
+               (bot_id, name, strategy_id, account_id, config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("good-bot", "good", "s1", "domestic", valid_config, "created"),
+        )
+        # invalid: 빈 문자열
+        await db.execute(
+            """INSERT INTO bots
+               (bot_id, name, strategy_id, account_id, config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("blank-bot", "blank", "s1", "", valid_config, "created"),
+        )
+        # invalid: ``"default"``
+        await db.execute(
+            """INSERT INTO bots
+               (bot_id, name, strategy_id, account_id, config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("legacy-default-bot", "legacy", "s1", "default", valid_config, "created"),
+        )
+
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        with caplog.at_level(logging.WARNING):
+            count = await manager2.load_from_db()
+
+        # invalid 2건은 skip, valid 1건만 로드된다
+        assert count == 1
+        assert manager2.get_bot("good-bot") is not None
+        assert manager2.get_bot("blank-bot") is None
+        assert manager2.get_bot("legacy-default-bot") is None
+        # warning log 가 invalid row 마다 남아있어야 한다 (legacy migration 가시화)
+        warn_messages = [r.message for r in caplog.records if r.levelno >= 30]
+        assert any("blank-bot" in m for m in warn_messages)
+        assert any("legacy-default-bot" in m for m in warn_messages)
 
     async def test_bot_get_info_has_account(self, eventbus, ctx, simple_config):
         """get_info()에 account_id 포함, bot_type 없음."""

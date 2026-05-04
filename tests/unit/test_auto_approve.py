@@ -165,6 +165,51 @@ class TestAutoApproveEvaluator:
             is False
         )
 
+    def test_auto_approve_bot_create_paper_config_nested(self, evaluator):
+        """Refs #1241 SPLIT-2: ``params["config"]["mode"]=="paper"`` 도 자동 승인.
+
+        web/CLI 가 BotConfig 형태로 wrap 해서 보내는 신규 payload 형태도
+        호환해야 한다 (config-first → flat fallback).
+        """
+        assert (
+            evaluator.should_auto_approve(
+                "bot_create",
+                {
+                    "config": {
+                        "account_id": "acc-test",
+                        "mode": "paper",
+                        "strategy_id": "s1",
+                    }
+                },
+            )
+            is True
+        )
+
+    def test_auto_approve_bot_create_paper_flat_legacy(self, evaluator):
+        """Refs #1241 SPLIT-2: legacy flat ``params["mode"]=="paper"`` 도 호환."""
+        # flat-only (config 키 자체가 없음)
+        assert (
+            evaluator.should_auto_approve(
+                "bot_create",
+                {"account_id": "acc-test", "mode": "paper", "strategy_id": "s1"},
+            )
+            is True
+        )
+
+    def test_auto_approve_bot_create_config_first_overrides_flat(self, evaluator):
+        """config-nested 가 flat 보다 우선한다 (config-first 우선순위)."""
+        # config 의 mode=live 가 우선되어 자동 승인되지 않는다
+        assert (
+            evaluator.should_auto_approve(
+                "bot_create",
+                {
+                    "config": {"mode": "live", "strategy_id": "s1"},
+                    "mode": "paper",  # flat 은 무시되어야 함
+                },
+            )
+            is False
+        )
+
     def test_budget_change_within_limit(self, evaluator):
         """예산 변경이 한도 이내이면 자동 승인."""
         assert (
@@ -350,7 +395,12 @@ class TestServiceAutoApprove:
             type="budget_change",
             requester="agent:dev",
             title="예산 대폭 증액",
-            params={"bot_id": "bot-1", "amount": 100000000, "current": 10000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 100000000,
+                "current": 10000000,
+            },
         )
 
         assert req.status == ApprovalStatus.PENDING

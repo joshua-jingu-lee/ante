@@ -54,6 +54,7 @@ def _make_bot(
     config = BotConfig(
         bot_id="bot-test",
         strategy_id="stg-test",
+        account_id="acc-test",
         interval_seconds=interval,
         step_timeout_seconds=step_timeout,
         max_signals_per_step=max_signals,
@@ -245,12 +246,12 @@ class TestBotConfigGuardFields:
 
     def test_default_step_timeout(self) -> None:
         """step_timeout_seconds 기본값 30."""
-        config = BotConfig(bot_id="t", strategy_id="s")
+        config = BotConfig(bot_id="t", strategy_id="s", account_id="acc-test")
         assert config.step_timeout_seconds == 30
 
     def test_default_max_signals(self) -> None:
         """max_signals_per_step 기본값 50."""
-        config = BotConfig(bot_id="t", strategy_id="s")
+        config = BotConfig(bot_id="t", strategy_id="s", account_id="acc-test")
         assert config.max_signals_per_step == 50
 
     def test_custom_values(self) -> None:
@@ -258,6 +259,7 @@ class TestBotConfigGuardFields:
         config = BotConfig(
             bot_id="t",
             strategy_id="s",
+            account_id="acc-test",
             step_timeout_seconds=60,
             max_signals_per_step=100,
         )

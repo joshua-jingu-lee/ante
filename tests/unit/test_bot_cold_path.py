@@ -171,3 +171,28 @@ async def test_cold_path_remove_missing_bot_raises_bot_not_found(
 
     assert exc_info.value.code == BOT_NOT_FOUND_CODE
     assert "missing" in str(exc_info.value)
+
+
+async def test_cold_path_remove_invalid_account_id_rejects(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    """Refs #1241 SPLIT-2: bot row 의 account_id 가 invalid 면
+    ``InvalidAccountIdError`` 로 거부한다.
+
+    legacy row 의 ``"default"`` 또는 빈 문자열 account_id 는 잘못된 계좌의
+    Treasury 환수 / 잘못된 cleanup 경로를 발생시킬 수 있어, ``or "test"``
+    fallback 을 제거하고 명시적으로 거부한다.
+    """
+    from ante.account.errors import InvalidAccountIdError
+    from ante.bot.cold_path import cold_path_remove_bot
+
+    # invalid: 'default' 예약어
+    await _insert_bot(db, account_id="default")
+
+    with pytest.raises(InvalidAccountIdError, match="account_id"):
+        await cold_path_remove_bot(
+            db,
+            "bot-1",
+            strategies_dir=tmp_path / "strategies",
+        )

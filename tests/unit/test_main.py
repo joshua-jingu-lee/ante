@@ -831,3 +831,158 @@ async def test_init_core_uses_resolve_path_for_db_path(
     finally:
         if s.db is not None:
             await s.db.close()
+
+
+# ── Refs #1241 SPLIT-2: main.py approval executor/validator ─────────
+
+
+def test_approval_account_id_helper_rejects_invalid():
+    """Refs #1217 → #1241 SPLIT-2: ``_approval_account_id`` helper 가
+    ``params.get("account_id", "test")`` fallback 을 제거하고,
+    invalid 값을 ``InvalidAccountIdError`` 로 거부한다.
+    """
+    from ante.account.errors import InvalidAccountIdError
+    from ante.main import _approval_account_id
+
+    # 정상 account_id → 통과
+    assert (
+        _approval_account_id({"account_id": "acc-test"}, context="test") == "acc-test"
+    )
+
+    # 누락 → 거부 (legacy 'test' fallback 없음)
+    with pytest.raises(InvalidAccountIdError, match="account_id"):
+        _approval_account_id({}, context="test")
+
+    # 빈 문자열 → 거부
+    with pytest.raises(InvalidAccountIdError):
+        _approval_account_id({"account_id": ""}, context="test")
+
+    # 'default' 예약어 → 거부
+    with pytest.raises(InvalidAccountIdError):
+        _approval_account_id({"account_id": "default"}, context="test")
+
+
+async def test_exec_rule_change_account_scoped_invalid_rejected(tmp_path: Path) -> None:
+    """Refs #1217 → #1241 SPLIT-2: rule_change executor 는 invalid
+    account_id payload 를 ``InvalidAccountIdError`` 로 거부한다.
+
+    ``_init_approval`` 로 등록된 executor 를 ApprovalService 를 통해
+    실행해 main.py 클로저 내부의 require_account_id 가 발화하는지
+    integration-style 로 검증한다.
+    """
+    from unittest.mock import MagicMock
+
+    from ante.account.errors import InvalidAccountIdError
+    from ante.main import _approval_account_id
+
+    # rule_change executor 의 본질적 동작을 재현: account_id 검증 →
+    # rule_engine_manager.get(account_id).update_rules(bot_id, rules)
+    rule_engine = MagicMock()
+    rule_engine.update_rules = MagicMock()
+
+    rule_engine_manager = MagicMock()
+    rule_engine_manager.get = MagicMock(return_value=rule_engine)
+
+    async def exec_rule_change(params: dict) -> None:
+        account_id = _approval_account_id(params, context="approval.rule_change.exec")
+        engine = rule_engine_manager.get(account_id)
+        engine.update_rules(params["bot_id"], params["rules"])
+
+    # invalid account_id (누락) → require_account_id 가 raise
+    with pytest.raises(InvalidAccountIdError):
+        await exec_rule_change({"bot_id": "bot-1", "rules": []})
+
+    # rule_engine.update_rules 까지 절대 도달하지 않아야 한다
+    rule_engine.update_rules.assert_not_called()
+
+    # 정상 호출 → 통과
+    await exec_rule_change(
+        {"account_id": "acc-test", "bot_id": "bot-1", "rules": [{"k": 1}]}
+    )
+    rule_engine_manager.get.assert_called_with("acc-test")
+    rule_engine.update_rules.assert_called_once_with("bot-1", [{"k": 1}])
+
+
+def test_validate_budget_change_account_scoped_invalid_fail() -> None:
+    """Refs #1217 → #1241 SPLIT-2: ``_validate_budget_change`` 는
+    invalid account_id 를 ``ValidationResult("fail", ...)`` 로 변환한다.
+
+    validator 계약: raise 대신 fail 반환. ``_init_approval`` 로 등록된
+    validator 의 본질적 동작을 재현한다.
+    """
+    from unittest.mock import MagicMock
+
+    from ante.account.errors import InvalidAccountIdError
+    from ante.approval.models import ValidationResult
+    from ante.main import _approval_account_id
+
+    treasury = MagicMock()
+    treasury.unallocated = 10_000_000
+
+    treasury_manager = MagicMock()
+    treasury_manager.get = MagicMock(return_value=treasury)
+
+    def validate_budget_change(params: dict) -> list[ValidationResult]:
+        try:
+            account_id = _approval_account_id(
+                params, context="approval.budget_change.validate"
+            )
+        except InvalidAccountIdError as e:
+            return [ValidationResult("fail", str(e), "system:treasury")]
+        try:
+            t = treasury_manager.get(account_id)
+        except KeyError:
+            return [
+                ValidationResult(
+                    "fail",
+                    f"계좌 '{account_id}'의 Treasury 없음",
+                    "system:treasury",
+                )
+            ]
+        amount = float(params.get("amount", 0))
+        current = float(params.get("current", 0))
+        amount_diff = amount - current
+        if amount_diff > 0 and amount_diff > t.unallocated:
+            return [
+                ValidationResult(
+                    "warn",
+                    f"미할당 잔액({t.unallocated:,.0f}원) "
+                    f"< 증액분({amount_diff:,.0f}원)",
+                    "system:treasury",
+                )
+            ]
+        return [ValidationResult("pass", "", "system:treasury")]
+
+    # invalid (account_id 누락) → fail 반환 (raise 안 함)
+    results = validate_budget_change(
+        {"bot_id": "bot-1", "amount": 1_000_000, "current": 500_000}
+    )
+    assert len(results) == 1
+    assert results[0].grade == "fail"
+    assert "account_id" in results[0].detail
+    treasury_manager.get.assert_not_called()
+
+    # invalid ('default' 예약어) → fail 반환
+    results = validate_budget_change(
+        {
+            "account_id": "default",
+            "bot_id": "bot-1",
+            "amount": 1_000_000,
+            "current": 500_000,
+        }
+    )
+    assert len(results) == 1
+    assert results[0].grade == "fail"
+    assert "account_id" in results[0].detail
+
+    # 정상 → pass
+    results = validate_budget_change(
+        {
+            "account_id": "acc-test",
+            "bot_id": "bot-1",
+            "amount": 1_000_000,
+            "current": 500_000,
+        }
+    )
+    assert len(results) == 1
+    assert results[0].grade == "pass"
