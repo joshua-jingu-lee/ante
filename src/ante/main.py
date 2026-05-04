@@ -161,7 +161,9 @@ class Services:
     # SPLIT-3 (#1242): multi-account StreamIntegration pool. KIS 활성 계좌마다
     # 하나의 인스턴스를 등록하고 shutdown 에서 dict 순회로 정리한다.
     stream_integrations: dict[str, Any] = field(default_factory=dict)
-    reconcile_scheduler: Any = None
+    # SPLIT-3 (#1242): multi-broker ReconcileScheduler pool. 활성 broker 가
+    # 있는 계좌마다 인스턴스를 만들어 dict 에 account_id 키로 등록한다.
+    reconcile_schedulers: dict[str, Any] = field(default_factory=dict)
     daily_report_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
@@ -549,7 +551,13 @@ async def _init_gateway(s: Services) -> None:
 
 
 async def _init_reconcile_scheduler(s: Services) -> None:
-    """ReconcileScheduler 생성 및 시작."""
+    """ReconcileScheduler 생성 및 시작.
+
+    SPLIT-3 (#1242): 활성 broker 가 있는 모든 계좌에 대해 ReconcileScheduler
+    를 만들어 ``s.reconcile_schedulers`` dict 에 등록한다 (multi-broker pool).
+    이전 SPLIT-1 패턴은 첫 번째 broker 만 골라 다른 계좌의 봇 reconcile 을
+    건너뛰었다 (가드만 존재). 본 SPLIT 에서 dispatch 까지 분리한다.
+    """
     assert s.eventbus is not None
 
     from ante.broker.scheduler import ReconcileScheduler
@@ -571,37 +579,42 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         eventbus=s.eventbus,
     )
 
-    # 첫 번째 연결된 Broker를 ReconcileScheduler에 사용
-    # SPLIT-1: 단일 broker만 주입되므로 해당 broker의 account_id로 scheduler를
-    # 바인딩해, 다른 계좌의 봇에 이 broker의 positions가 잘못 적용되지 않도록
-    # 가드한다. multi-broker pool은 SPLIT-3에서 도입한다.
-    broker = None
-    broker_account_id: str | None = None
     accounts = await s.account_service.list()
+    started: list[str] = []
     for account in accounts:
         try:
             broker = await s.account_service.get_broker(account.account_id)
-            broker_account_id = account.account_id
-            break
         except Exception:
             continue
 
-    if not broker or not broker_account_id:
+        scheduler = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=s.bot_manager,
+            eventbus=s.eventbus,
+            broker_account_id=account.account_id,
+            interval_seconds=interval,
+        )
+        try:
+            await scheduler.start()
+        except Exception:
+            logger.warning(
+                "ReconcileScheduler 시작 실패: account=%s",
+                account.account_id,
+                exc_info=True,
+            )
+            continue
+        s.reconcile_schedulers[account.account_id] = scheduler
+        started.append(account.account_id)
+
+    if not started:
         logger.info("ReconcileScheduler 건너뜀 — 연결된 Broker 없음")
         return
 
-    s.reconcile_scheduler = ReconcileScheduler(
-        reconciler=reconciler,
-        broker=broker,
-        bot_manager=s.bot_manager,
-        eventbus=s.eventbus,
-        broker_account_id=broker_account_id,
-        interval_seconds=interval,
-    )
-    await s.reconcile_scheduler.start()
     logger.info(
-        "ReconcileScheduler 시작 완료 (account=%s, 주기: %d초)",
-        broker_account_id,
+        "ReconcileScheduler 시작 완료: 계좌 %d개 (%s, 주기: %d초)",
+        len(started),
+        ", ".join(started),
         interval,
     )
 
@@ -1613,9 +1626,18 @@ async def _shutdown(s: Services) -> None:
         await s.daily_report_scheduler.stop()
         logger.info("DailyReportScheduler 종료")
 
-    if s.reconcile_scheduler:
-        await s.reconcile_scheduler.stop()
-        logger.info("ReconcileScheduler 종료")
+    # SPLIT-3 (#1242): multi-broker ReconcileScheduler pool 정리
+    for sched_account_id, scheduler in list(s.reconcile_schedulers.items()):
+        try:
+            await scheduler.stop()
+            logger.info("ReconcileScheduler 종료: account=%s", sched_account_id)
+        except Exception:
+            logger.warning(
+                "ReconcileScheduler 종료 실패: account=%s",
+                sched_account_id,
+                exc_info=True,
+            )
+    s.reconcile_schedulers.clear()
 
     # 각 계좌의 Treasury sync 중지
     if s.treasury_manager:
