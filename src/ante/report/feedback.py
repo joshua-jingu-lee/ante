@@ -21,9 +21,18 @@ class PerformanceFeedback:
         self._bots = bot_manager
 
     async def get_bot_performance(self, bot_id: str) -> dict:
-        """봇의 실전 성과 조회."""
+        """봇의 실전 성과 조회.
+
+        Raises:
+            BotNotFoundError: 봇 미발견 시. 이전에는 ``"default"`` fallback으로
+                덮였지만, #1218 이후 fallback을 금지하고 명시적으로 raise한다.
+        """
+        from ante.bot.exceptions import BotNotFoundError
+
         bot = self._bots.get_bot(bot_id)
-        account_id = bot.config.account_id if bot else "default"
+        if bot is None:
+            raise BotNotFoundError(bot_id)
+        account_id = bot.config.account_id
         metrics = await self._trade.get_performance(
             account_id=account_id, bot_id=bot_id
         )

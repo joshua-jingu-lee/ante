@@ -281,6 +281,34 @@ class TestListStrategies:
         data = resp.json()["strategies"][0]
         assert data["cumulative_return"] is None
 
+    def test_cumulative_return_no_bot_returns_null(self, registry):
+        """봇이 없는 strategy는 cumulative_return=null (default 호출 금지, #1218)."""
+        from unittest.mock import AsyncMock, patch
+
+        fake_db = AsyncMock()
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        # PerformanceTracker.calculate가 호출되면 안 된다
+        # (account_id를 알 수 없으므로).
+        calc_mock = AsyncMock()
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            calc_mock,
+        ):
+            resp = c.get("/api/strategies")
+
+        assert resp.status_code == 200
+        data = resp.json()["strategies"][0]
+        assert data["cumulative_return"] is None
+        # 봇이 없으면 calculate 호출 자체를 skip한다.
+        calc_mock.assert_not_awaited()
+
 
 class TestGetStrategy:
     def test_get_existing(self, client, registry):
@@ -466,7 +494,11 @@ class TestStrategyPerformance:
     """전략 성과 조회 API 테스트."""
 
     def test_performance_no_trades_table(self, registry):
-        """trades 테이블이 없을 때 500이 아닌 200 반환 (#659)."""
+        """trades 테이블이 없을 때 500이 아닌 200 반환 (#659).
+
+        #1218 이후로는 account_id 명시 또는 봇 연결이 필요하므로,
+        ?account_id=... 쿼리를 명시한다.
+        """
         import sqlite3
         from unittest.mock import AsyncMock
 
@@ -485,7 +517,7 @@ class TestStrategyPerformance:
         )
         client = TestClient(app)
 
-        resp = client.get("/api/strategies/s1/performance")
+        resp = client.get("/api/strategies/s1/performance?account_id=acc-test")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_trades"] == 0
@@ -494,7 +526,11 @@ class TestStrategyPerformance:
         assert data["equity_curve"] == []
 
     def test_performance_empty_trades(self, registry):
-        """trades 테이블은 있지만 거래가 없을 때 200 반환."""
+        """trades 테이블은 있지만 거래가 없을 때 200 반환.
+
+        #1218 이후로는 account_id 명시 또는 봇 연결이 필요하므로,
+        ?account_id=... 쿼리를 명시한다.
+        """
         from unittest.mock import AsyncMock
 
         fake_db = AsyncMock()
@@ -510,7 +546,7 @@ class TestStrategyPerformance:
         )
         client = TestClient(app)
 
-        resp = client.get("/api/strategies/s1/performance")
+        resp = client.get("/api/strategies/s1/performance?account_id=acc-test")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_trades"] == 0
@@ -529,6 +565,90 @@ class TestStrategyPerformance:
 
         resp = client.get("/api/strategies/nonexistent/performance")
         assert resp.status_code == 404
+
+    def test_performance_account_required_when_no_bot(self, registry):
+        """account_id query 미지정 + 봇도 없으면 400 (#1218)."""
+        from unittest.mock import AsyncMock
+
+        fake_db = AsyncMock()
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        resp = c.get("/api/strategies/s1/performance")
+        assert resp.status_code == 400
+        assert "account" in resp.json()["detail"].lower()
+
+    def test_performance_account_resolved_from_bot(self, registry, bot_manager):
+        """account_id 미지정이라도 봇에서 추출 가능하면 200 (#1218)."""
+        from unittest.mock import AsyncMock, patch
+
+        from ante.trade.models import PerformanceMetrics
+
+        fake_db = AsyncMock()
+        fake_metrics = PerformanceMetrics(total_trades=0)
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+        bot_manager._bots = [
+            {
+                "bot_id": "bot-1",
+                "strategy_id": "s1",
+                "status": "running",
+                "account_id": "acc-1",
+            }
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            bot_manager=bot_manager,
+            db=fake_db,
+        )
+        c = TestClient(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            return_value=fake_metrics,
+        ) as mock_calc:
+            resp = c.get("/api/strategies/s1/performance")
+
+        assert resp.status_code == 200
+        mock_calc.assert_awaited_once()
+        kwargs = mock_calc.await_args.kwargs
+        assert kwargs["account_id"] == "acc-1"
+
+    def test_performance_with_explicit_account_id(self, registry):
+        """account_id query 명시 시 200 (#1218)."""
+        from unittest.mock import AsyncMock, patch
+
+        from ante.trade.models import PerformanceMetrics
+
+        fake_db = AsyncMock()
+        fake_metrics = PerformanceMetrics(total_trades=0)
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(strategy_registry=registry, db=fake_db)
+        c = TestClient(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            return_value=fake_metrics,
+        ) as mock_calc:
+            resp = c.get("/api/strategies/s1/performance?account_id=acc-explicit")
+
+        assert resp.status_code == 200
+        kwargs = mock_calc.await_args.kwargs
+        assert kwargs["account_id"] == "acc-explicit"
 
 
 class TestUpdateStrategyStatus:

@@ -186,7 +186,9 @@ async def create_bot(
             detail="strategy_id 또는 strategy_name 중 하나를 전달해야 합니다",
         )
 
-    # account_id 기본값: 첫 번째 active 계좌 ───────────────
+    # account_id 결정: 명시 전달이 우선, 미전달 시 단일 active 계좌만 자동 선택.
+    # 0개/2개 이상은 명시적으로 BOT_MISSING_REQUIRED_ACCOUNT 에러 (#1218).
+    # CLI `_resolve_account_non_interactive`와 일관된 정책.
     account_id = body.account_id
     if account_id is None:
         accounts = await account_service.list()
@@ -198,8 +200,25 @@ async def create_bot(
         ]
         if not active:
             raise HTTPException(
-                status_code=422,
-                detail="활성 계좌가 없습니다. 계좌를 먼저 등록하세요",
+                status_code=400,
+                detail=(
+                    "BOT_MISSING_REQUIRED_ACCOUNT: "
+                    "활성 계좌가 없습니다. 먼저 계좌를 등록한 뒤 "
+                    "account_id를 명시하세요."
+                ),
+            )
+        if len(active) > 1:
+            ids = ", ".join(
+                a.account_id if hasattr(a, "account_id") else a["account_id"]
+                for a in active
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "BOT_MISSING_REQUIRED_ACCOUNT: "
+                    f"활성 계좌가 여러 개입니다. account_id를 명시하세요. "
+                    f"(가능한 계좌: {ids})"
+                ),
             )
         account_id = (
             active[0].account_id

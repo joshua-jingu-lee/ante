@@ -137,17 +137,31 @@ async def list_strategies(
 
         tracker = PerformanceTracker(db)
 
-        # N+1 해소: asyncio.gather 로 병렬 호출
-        def _account_id_for(r: Any) -> str:
+        # N+1 해소: asyncio.gather 로 병렬 호출.
+        # 봇이 없는 strategy는 account_id를 결정할 수 없으므로 calculate 호출
+        # 자체를 skip하고 cumulative_return = None으로 응답한다
+        # (`"default"` fallback 금지, #1218).
+        def _account_id_for(r: Any) -> str | None:
             bi = bots_by_strategy.get(r.strategy_id)
-            return bi.get("account_id", "default") if bi else "default"
+            if bi is None:
+                return None
+            account_id = bi.get("account_id")
+            return account_id if isinstance(account_id, str) and account_id else None
+
+        records_with_account: list[tuple[Any, str]] = []
+        for r in records:
+            acc = _account_id_for(r)
+            if acc is None:
+                cumulative_returns[r.strategy_id] = None
+            else:
+                records_with_account.append((r, acc))
 
         tasks = [
-            tracker.calculate(account_id=_account_id_for(r), strategy_id=r.strategy_id)
-            for r in records
+            tracker.calculate(account_id=acc, strategy_id=r.strategy_id)
+            for r, acc in records_with_account
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for r, result in zip(records, results):
+        for (r, _acc), result in zip(records_with_account, results):
             if isinstance(result, BaseException):
                 _logger.debug(
                     "전략 %s cumulative_return 계산 실패",
@@ -342,14 +356,22 @@ async def get_strategy_performance(
     if not record:
         raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
 
-    # account_id 결정: 쿼리 파라미터 우선, 없으면 봇에서 추출
+    # account_id 결정: 쿼리 파라미터 우선, 없으면 봇에서 추출.
+    # 둘 다 실패하면 `"default"` fallback 없이 400으로 명시 실패한다 (#1218 query 정책).
     resolved_account_id = account_id
     if not resolved_account_id:
         bot_info = _find_bot_for_strategy(bot_manager, strategy_id)
         if bot_info:
             resolved_account_id = bot_info.get("account_id")
     if not resolved_account_id:
-        resolved_account_id = "default"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "account_id를 결정할 수 없습니다. "
+                "?account_id=<id> 쿼리 파라미터를 지정하거나, "
+                "해당 전략에 연결된 봇이 있어야 합니다."
+            ),
+        )
 
     from ante.trade.performance import PerformanceTracker
 
