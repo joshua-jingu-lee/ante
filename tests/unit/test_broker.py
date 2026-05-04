@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ante.account.errors import InvalidAccountIdError
 from ante.broker import (
     APIError,
     AuthenticationError,
@@ -447,38 +448,52 @@ class TestOrderRegistry:
 
     async def test_register_and_get(self, registry):
         """주문 등록 및 조회."""
-        await registry.register("ord1", "bot1", "005930")
-        bot_id = await registry.get_bot_id("ord1")
+        await registry.register("ord1", "acc-test", "bot1", "005930")
+        bot_id = await registry.get_bot_id("ord1", "acc-test")
         assert bot_id == "bot1"
 
     async def test_get_nonexistent(self, registry):
         """존재하지 않는 주문 조회."""
-        bot_id = await registry.get_bot_id("nonexistent")
+        bot_id = await registry.get_bot_id("nonexistent", "acc-test")
         assert bot_id is None
 
     async def test_register_upsert(self, registry):
         """중복 등록 시 업데이트."""
-        await registry.register("ord1", "bot1", "005930")
-        await registry.register("ord1", "bot2", "005930")
-        bot_id = await registry.get_bot_id("ord1")
+        await registry.register("ord1", "acc-test", "bot1", "005930")
+        await registry.register("ord1", "acc-test", "bot2", "005930")
+        bot_id = await registry.get_bot_id("ord1", "acc-test")
         assert bot_id == "bot2"
 
     async def test_get_orders_by_bot(self, registry):
         """봇별 주문 조회."""
-        await registry.register("ord1", "bot1", "005930")
-        await registry.register("ord2", "bot1", "000660")
-        await registry.register("ord3", "bot2", "005930")
+        await registry.register("ord1", "acc-test", "bot1", "005930")
+        await registry.register("ord2", "acc-test", "bot1", "000660")
+        await registry.register("ord3", "acc-test", "bot2", "005930")
 
-        orders = await registry.get_orders_by_bot("bot1")
+        orders = await registry.get_orders_by_bot("acc-test", "bot1")
         assert len(orders) == 2
+        assert {order["account_id"] for order in orders} == {"acc-test"}
+
+    async def test_get_orders_by_bot_filters_account(self, registry):
+        """동일 bot_id라도 account_id별 주문만 조회한다."""
+        await registry.register("ord1", "acc-a", "bot1", "005930")
+        await registry.register("ord2", "acc-b", "bot1", "000660")
+
+        orders = await registry.get_orders_by_bot("acc-a", "bot1")
+        assert [order["order_id"] for order in orders] == ["ord1"]
+
+    async def test_register_rejects_invalid_account_id(self, registry):
+        """fallback account_id는 저장하지 않는다."""
+        with pytest.raises(InvalidAccountIdError, match="account_id"):
+            await registry.register("ord1", "default", "bot1", "005930")
 
     async def test_remove(self, registry):
         """매핑 삭제."""
-        await registry.register("ord1", "bot1", "005930")
-        await registry.remove("ord1")
-        bot_id = await registry.get_bot_id("ord1")
+        await registry.register("ord1", "acc-test", "bot1", "005930")
+        await registry.remove("ord1", "acc-test")
+        bot_id = await registry.get_bot_id("ord1", "acc-test")
         assert bot_id is None
 
     async def test_remove_nonexistent(self, registry):
         """존재하지 않는 주문 삭제 (무시)."""
-        await registry.remove("nonexistent")  # should not raise
+        await registry.remove("nonexistent", "acc-test")  # should not raise
