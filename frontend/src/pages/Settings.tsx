@@ -145,11 +145,11 @@ export default function Settings() {
                 <div className="text-[12px] text-text-muted mt-1">
                   활성 계좌 {activeCount}개 · 정지 계좌 {suspendedCount}개
                 </div>
-                {(status?.halt_time || status?.halt_reason) && (
+                {(status?.haltTime || status?.haltReason) && (
                   <div className="text-[12px] text-text-muted mt-1">
-                    {status.halt_time && `정지 시각: ${status.halt_time}`}
-                    {status.halt_time && status.halt_reason && ' · '}
-                    {status.halt_reason && `사유: ${status.halt_reason}`}
+                    {status.haltTime && `정지 시각: ${status.haltTime}`}
+                    {status.haltTime && status.haltReason && ' · '}
+                    {status.haltReason && `사유: ${status.haltReason}`}
                   </div>
                 )}
               </div>

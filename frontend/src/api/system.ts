@@ -1,10 +1,39 @@
 import client from './client'
-import type { SystemStatus, DynamicConfig } from '../types/system'
-import type { KillSwitchResponse } from '../types/api.generated'
+import type { SystemStatusView, DynamicConfigView } from '../types/system'
+import type {
+  ClearHaltRequest,
+  ConfigItem,
+  ConfigListResponse,
+  ConfigUpdateResponse,
+  HaltRequest,
+  KillSwitchResponse,
+  StatusResponse,
+} from '../types/api.generated'
 
-export async function getSystemStatus(): Promise<SystemStatus> {
-  const res = await client.get('/api/system/status')
-  return res.data
+function optionalString(value: string | null | undefined): string | undefined {
+  return value ?? undefined
+}
+
+function toSystemStatusView(raw: StatusResponse): SystemStatusView {
+  return {
+    status: raw.status,
+    version: raw.version,
+    haltTime: optionalString(raw.halt_time),
+    haltReason: optionalString(raw.halt_reason),
+  }
+}
+
+function toDynamicConfigView(raw: ConfigItem): DynamicConfigView {
+  return {
+    key: raw.key,
+    value: raw.value == null ? '' : String(raw.value),
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+  }
+}
+
+export async function getSystemStatus(): Promise<SystemStatusView> {
+  const res = await client.get<StatusResponse>('/api/system/status')
+  return toSystemStatusView(res.data)
 }
 
 /**
@@ -14,7 +43,8 @@ export async function getSystemStatus(): Promise<SystemStatus> {
  * 백엔드: `POST /api/system/halt` (HaltRequest { reason: string }).
  */
 export async function haltSystem(reason?: string): Promise<KillSwitchResponse> {
-  const res = await client.post('/api/system/halt', { reason: reason ?? '' })
+  const body: HaltRequest = { reason: reason ?? '' }
+  const res = await client.post<KillSwitchResponse>('/api/system/halt', body)
   return res.data
 }
 
@@ -26,15 +56,16 @@ export async function haltSystem(reason?: string): Promise<KillSwitchResponse> {
  * 백엔드: `POST /api/system/clear-halt` (ClearHaltRequest { reason: string }).
  */
 export async function clearHaltSystem(reason?: string): Promise<KillSwitchResponse> {
-  const res = await client.post('/api/system/clear-halt', { reason: reason ?? '' })
+  const body: ClearHaltRequest = { reason: reason ?? '' }
+  const res = await client.post<KillSwitchResponse>('/api/system/clear-halt', body)
   return res.data
 }
 
-export async function getConfigs(): Promise<DynamicConfig[]> {
-  const res = await client.get('/api/config')
-  return res.data.configs ?? res.data
+export async function getConfigs(): Promise<DynamicConfigView[]> {
+  const res = await client.get<ConfigListResponse>('/api/config')
+  return res.data.configs.map(toDynamicConfigView)
 }
 
 export async function updateConfig(key: string, value: string): Promise<void> {
-  await client.put(`/api/config/${encodeURIComponent(key)}`, { value })
+  await client.put<ConfigUpdateResponse>(`/api/config/${encodeURIComponent(key)}`, { value })
 }
