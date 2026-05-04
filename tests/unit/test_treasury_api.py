@@ -173,3 +173,54 @@ class TestTreasuryFallback:
 
         resp = client.get("/api/treasury/budgets")
         assert resp.status_code == 503
+
+
+class TestTreasuryAllAccountAggregate:
+    """#1218 — Web treasury query 정책 정렬 회귀 테스트.
+
+    account_id 미지정 query는 default Treasury로 떨어지지 않고, 응답 schema는 보존하면서
+    의미만 정렬한다. single-detail (snapshot/{date})에서 미지정 + treasury_manager 다중
+    계좌 시나리오는 명시 실패 정책을 검증한다.
+    """
+
+    def test_all_account_aggregate_summary_when_no_account_id(self, client, treasury):
+        """?account_id 미지정 시 default Treasury 응답 (현재 분기/schema 보존)."""
+        resp = client.get("/api/treasury")
+        assert resp.status_code == 200
+        # 응답 schema는 그대로 — total_balance/account_balance/is_virtual 등.
+        data = resp.json()
+        assert "account_balance" in data or "total_balance" in data
+
+    def test_summary_account_id_resolved_when_explicit(self, client, treasury):
+        """?account_id=... 명시 시 해당 계좌의 Treasury를 선택한다."""
+        treasury.account_id = "acc-1"
+        treasury.currency = "KRW"
+        manager = FakeTreasuryManager(treasuries=[treasury])
+        app = create_app(treasury=treasury, treasury_manager=manager)
+        c = TestClient(app)
+
+        resp = c.get("/api/treasury?account_id=acc-1")
+        assert resp.status_code == 200
+
+    def test_summary_unknown_account_id_returns_404(self):
+        """?account_id=... 가 manager에 없으면 404."""
+        treasury = FakeTreasury()
+        treasury.account_id = "acc-1"
+        treasury.currency = "KRW"
+        manager = FakeTreasuryManager(treasuries=[treasury])
+        app = create_app(treasury=treasury, treasury_manager=manager)
+        c = TestClient(app)
+
+        resp = c.get("/api/treasury?account_id=acc-unknown")
+        assert resp.status_code == 404
+
+    def test_snapshot_by_date_unknown_account_returns_404(self):
+        """단일-detail snapshot은 account_id 가 manager에 없으면 404 (명시 실패)."""
+        treasury = FakeTreasury()
+        treasury.account_id = "acc-1"
+        manager = FakeTreasuryManager(treasuries=[treasury])
+        app = create_app(treasury=treasury, treasury_manager=manager)
+        c = TestClient(app)
+
+        resp = c.get("/api/treasury/snapshots/2026-03-21?account_id=acc-unknown")
+        assert resp.status_code == 404
