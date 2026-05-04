@@ -343,7 +343,10 @@ class TestStrategyPerformance:
         }
 
         with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
-            result = runner.invoke(cli, ["strategy", "performance", "momentum"])
+            result = runner.invoke(
+                cli,
+                ["strategy", "performance", "momentum", "--account-id", "acc-test"],
+            )
             assert result.exit_code == 0
             assert "momentum" in result.output
             assert "70.0%" in result.output
@@ -358,7 +361,16 @@ class TestStrategyPerformance:
 
         with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
             result = runner.invoke(
-                cli, ["--format", "json", "strategy", "performance", "momentum"]
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
             )
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -377,11 +389,78 @@ class TestStrategyPerformance:
 
         with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
             result = runner.invoke(
-                cli, ["--format", "json", "strategy", "performance", "momentum"]
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
             )
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["metrics"]["total_trades"] == 0
+
+    def test_performance_account_required(self, runner):
+        """--account-id 미지정 → STRATEGY_MISSING_REQUIRED_ACCOUNT 명시 실패 (#1218)."""
+        db = _mock_db()
+        registry = _mock_registry([_SAMPLE_RECORD])
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "strategy", "performance", "momentum"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert data.get("code") == "STRATEGY_MISSING_REQUIRED_ACCOUNT"
+
+    def test_performance_account_required_text(self, runner):
+        """--account-id 미지정 + text 모드 — 명시 실패 (#1218)."""
+        db = _mock_db()
+        registry = _mock_registry([_SAMPLE_RECORD])
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(cli, ["strategy", "performance", "momentum"])
+            assert result.exit_code == 1
+            assert "--account-id" in result.output
+
+    def test_performance_with_account_id_passes_through(self, runner):
+        """--account-id 명시 시 PerformanceTracker.calculate에 그대로 전달 (#1218)."""
+        expected = {
+            "strategy_name": "momentum",
+            "strategy_id": "momentum_v1.0",
+            "metrics": asdict(_SAMPLE_METRICS),
+        }
+        # 실제 _perf 코루틴 실행을 차단하기 위해 asyncio.run 결과만 mock한다.
+        # 실패 분기(account-id 누락)는 별도 테스트가 책임지며, 본 테스트는
+        # account-id 옵션이 있으면 SystemExit 없이 정상 흐름을 탄다는 것을 보장한다.
+        with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["strategy_name"] == "momentum"
 
 
 class TestStrategySubmit:

@@ -386,13 +386,28 @@ def _load_strategy_params(filepath: str) -> dict | None:
 
 @strategy.command("performance")
 @click.argument("name")
-@click.option("--account-id", default=None, help="계좌 ID (미지정 시 'default')")
+@click.option(
+    "--account-id",
+    default=None,
+    help="계좌 ID (필수, 미지정 시 STRATEGY_MISSING_REQUIRED_ACCOUNT 에러)",
+)
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
 def strategy_performance(ctx: click.Context, name: str, account_id: str | None) -> None:
-    """전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용)."""
+    """전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용).
+
+    --account-id 옵션은 필수다. 미지정 시 fallback 없이 명시적으로 실패한다
+    (#1218 Edge resolver 정렬, query 정책 일관).
+    """
     fmt = get_formatter(ctx)
+
+    if account_id is None:
+        fmt.error(
+            "계좌 ID를 지정해야 합니다. --account-id <id> 옵션을 사용하세요.",
+            code="STRATEGY_MISSING_REQUIRED_ACCOUNT",
+        )
+        raise SystemExit(1)
 
     async def _perf() -> dict | None:
         from ante.cli.main import get_db_path
@@ -411,9 +426,8 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
             tracker = PerformanceTracker(db)
             # 최신 버전의 strategy_id 기준으로 성과 계산
             record = records[0]
-            resolved = account_id or "default"
             metrics = await tracker.calculate(
-                account_id=resolved, strategy_id=record.name
+                account_id=account_id, strategy_id=record.name
             )
 
             return {
