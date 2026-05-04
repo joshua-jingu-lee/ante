@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 # 브로커 어댑터 레지스트리 — broker_type → 어댑터 클래스
 _BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {}
 
+# AccountService.list 메서드명이 클래스 내부 후속 메서드의 ``list[...]`` 어노테이션과
+# mypy 평가 시점에 충돌하므로(``Function "AccountService.list" is not valid as a type``)
+# 모듈 스코프에서 builtin ``list``를 캡처한 alias를 사용한다.
+_AccountStatusReport = list[dict[str, Any]]
+
 _CREATE_TABLE_SQL = """\
 CREATE TABLE IF NOT EXISTS accounts (
     account_id   TEXT PRIMARY KEY,
@@ -708,7 +713,7 @@ class AccountService:
 
     # ── 일괄 상태 전이 ──────────────────────────────────
 
-    async def suspend_all(self, reason: str, suspended_by: str) -> list[dict[str, Any]]:
+    async def suspend_all(self, reason: str, suspended_by: str) -> _AccountStatusReport:
         """모든 ACTIVE 계좌를 SUSPENDED로 전환. DELETED 계좌는 후보 제외.
 
         Returns:
@@ -745,7 +750,7 @@ class AccountService:
         logger.info("전체 계좌 정지: %d개 (사유: %s)", changed_count, reason)
         return results
 
-    async def activate_all(self, activated_by: str) -> list[dict[str, Any]]:
+    async def activate_all(self, activated_by: str) -> _AccountStatusReport:
         """모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED 계좌는 후보 제외.
 
         Returns:
