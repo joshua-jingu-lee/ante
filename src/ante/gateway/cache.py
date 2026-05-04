@@ -53,11 +53,19 @@ class ResponseCache:
         return f"{endpoint}?{param_str}"
 
     def invalidate(self, pattern: str = "") -> None:
-        """패턴에 매칭되는 캐시 무효화. 빈 문자열이면 전체 초기화."""
+        """``pattern`` 으로 시작하는 캐시 key 무효화. 빈 문자열이면 전체 초기화.
+
+        SPLIT-3 (#1242): substring match → prefix-exact match. multi-account
+        환경에서 ``"balance"`` 같은 substring 으로 다른 namespace 의 cache 가
+        함께 지워지는 cross-account leakage 를 차단한다. 호출 사이트
+        (``stream_integration._on_execution``,
+        ``gateway._on_order_filled``) 는 이미 ``f"{account_id}:..."`` 형태로
+        prefix 를 명시하고 있어 회귀 영향 없음.
+        """
         if not pattern:
             self._cache.clear()
         else:
-            keys_to_delete = [k for k in self._cache if pattern in k]
+            keys_to_delete = [k for k in self._cache if k.startswith(pattern)]
             for k in keys_to_delete:
                 del self._cache[k]
 
