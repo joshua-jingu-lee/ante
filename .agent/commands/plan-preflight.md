@@ -14,6 +14,7 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 `/plan-preflight`는 구현 착수 전 이슈 본문을 canonical implementation plan으로 만드는 커맨드다.
 계획 작성에는 `superpowers:writing-plans` 원칙을 적용한다. 대화 중 `superpower:write-plan`이라고 부르는 경우도 같은 계획 작성 원칙을 뜻한다.
 이 커맨드는 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
+이슈 범위가 너무 크거나 여러 invariant/consumer/계약을 한 번에 건드리면 이 커맨드는 구현계획을 확정하지 않고 `split-issue`로 보류한다. 이때 `/plan-preflight`는 하위 이슈를 직접 만들거나 `/autopilot` 실행을 유도하지 않고, 사람이 후속 이슈로 옮길 수 있는 구조화된 split plan만 남긴다.
 
 완료 조건:
 
@@ -117,6 +118,13 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 시작**
 - 테스트 계획은 추상 문장이 아니라 실제 실행 명령 또는 확인 가능한 check로 쓴다.
 - `narrow-scope` 가능성이 있으면 제외 범위와 후속 이슈 후보를 본문에 명시한다.
 - 추론은 추론으로 표시하고, 스펙/코드에서 확인한 사실과 섞지 않는다.
+- 다음 신호 중 하나가 있으면 계획 확정보다 `split-issue` 판정을 우선 검토한다.
+  - 서로 다른 invariant가 한 PR 안에 섞인다.
+  - API / CLI / schema / generated artifact / runtime lifecycle 중 둘 이상의 계약 축을 동시에 바꾼다.
+  - producer와 consumer 경로를 모두 추적해야 하는데 한 계획 안에서 소비자 목록을 닫을 수 없다.
+  - 예상 변경이 `40 files` 또는 `+1000 insertions`를 넘을 가능성이 높다.
+  - Non-Goals로 둔 파일/경로를 건드리지 않으면 계획을 성립시킬 수 없다.
+  - 선행/후속 관계가 있는 하위 작업을 한 이슈 안에서 동시에 구현해야 한다.
 
 쓰기 모드에서는 이슈 본문 정비 직후 계획 정비 완료 코멘트를 남긴다.
 
@@ -163,8 +171,47 @@ Verdict:
 - `approve-implement`: 현재 구현계획을 확정한다.
 - `narrow-scope`: 축소 범위, 제외 범위, 후속 이슈 후보를 이슈 본문에 반영한 뒤 확정한다.
 - `revise-plan`: `plan-preflight:started` 상태를 유지하고 이슈 본문을 보강한 뒤 `Codex Plan Review` 코멘트에 재요청 사유를 남기고 다시 요청한다.
-- `split-issue`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 필요한 분리안을 남긴다.
+- `split-issue`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 아래 형식의 분리안을 남긴다. 하위 이슈 생성, 라벨 조작, 큐 편입, 부모 이슈 close 자동화는 하지 않는다.
 - `invoke-human`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 사람 판단이 필요한 질문을 남긴다.
+
+`split-issue` 보류 코멘트에는 다음 구조를 사용한다.
+
+```markdown
+🤖 **Plan Preflight 보류**
+- status: split-issue
+- reason: {범위 과대 | 다중 invariant | 다중 consumer | 계약 축 혼재 | 선행/후속 관계 필요}
+- autonomous action: none
+- labels: plan-preflight:done 제거, plan-preflight:started 제거
+- next: 사람 또는 별도 오케스트레이션이 아래 split plan을 기준으로 후속 이슈 등록
+
+## Split Plan
+
+### 후보 A
+- 목표:
+- 포함:
+- 제외:
+- 선행:
+- 후속:
+- 예상 수정 파일:
+- 읽어야 할 소비자:
+- 검증:
+- risk class:
+- stop conditions:
+
+### 후보 B
+- 목표:
+- 포함:
+- 제외:
+- 선행:
+- 후속:
+- 예상 수정 파일:
+- 읽어야 할 소비자:
+- 검증:
+- risk class:
+- stop conditions:
+```
+
+split plan은 파일 묶음이 아니라 flow/invariant 기준으로 나눈다. 각 후보는 독립적으로 검증 가능해야 하며, 후속 이슈가 merge되기 전의 중간 상태가 안전한지 명시한다.
 
 ### 7단계: 완료 라벨
 
@@ -189,7 +236,7 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 완료**
 중단 시 라벨 처리:
 
 - `needs-rewrite`, `needs-spec-first`, `blocked`, stale 계획: `plan-preflight:done` 제거
-- 사람 판단 또는 선행 이슈 대기: `plan-preflight:started` 제거 후 보류 사유 코멘트
+- `split-issue`, 사람 판단 또는 선행 이슈 대기: `plan-preflight:started` 제거 후 보류 사유 코멘트
 
 중단 시에는 아래 코멘트를 남긴다.
 
@@ -200,6 +247,8 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 보류**
 - labels: plan-preflight:done 제거, 필요 시 plan-preflight:started 제거
 - next: {스펙 정리 | 선행 이슈 완료 대기 | 후속 이슈 분리 | 사람 답변 대기}"
 ```
+
+`split-issue` 상태의 `next`는 자동 실행이 아니라 "후속 이슈 분리"다. 자동 하위 이슈 생성, 자동 실행 상태값, 부모 이슈 자동 close 같은 실행 계약은 이 커맨드 범위 밖이다.
 
 ## 결과 보고
 

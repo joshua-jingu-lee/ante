@@ -153,6 +153,7 @@ Codex Plan Review의 출력은 다음 중 하나다.
 
 `approve-implement` 또는 `narrow-scope`가 아니면 구현을 시작하지 않는다.
 `revise-plan`이면 Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
+`split-issue`는 자동 실행 신호가 아니라 Plan Preflight 단계의 안전 판정이다. 이 경우 Plan Preflight는 `plan-preflight:done`을 붙이지 않고 보류 코멘트에 구조화된 split plan만 남긴다. 하위 이슈 생성, 라벨 조작, 큐 편입, 부모 이슈 자동 close 같은 실행 동작은 하지 않는다.
 
 ### 4.2 브랜치 전략
 
