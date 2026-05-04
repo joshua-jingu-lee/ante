@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ante.account.errors import InvalidAccountIdError
+from ante.account.scoping import require_account_id
 from ante.trade.models import TradeRecord, TradeStatus
 
 if TYPE_CHECKING:
@@ -33,10 +34,11 @@ CREATE TABLE IF NOT EXISTS trades (
     timestamp      TEXT,
     order_id       TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
-    account_id     TEXT NOT NULL DEFAULT 'default',
+    account_id     TEXT NOT NULL,
     currency       TEXT DEFAULT 'KRW',
     exchange       TEXT DEFAULT 'KRX'
 );
+CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_bot ON trades(bot_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol, timestamp);
@@ -225,6 +227,9 @@ class TradeRecorder:
 
     async def _save(self, record: TradeRecord) -> None:
         """거래 기록을 SQLite에 저장."""
+        account_id = require_account_id(
+            record.account_id, context="trade_recorder._save"
+        )
         await self._db.execute(
             """INSERT OR IGNORE INTO trades
                (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
@@ -245,7 +250,7 @@ class TradeRecorder:
                 record.commission,
                 record.timestamp.isoformat() if record.timestamp else None,
                 record.order_id,
-                record.account_id,
+                account_id,
                 record.currency,
                 record.exchange,
             ),
@@ -304,6 +309,11 @@ class TradeRecorder:
 
         conditions: list[str] = []
         params: list[Any] = []
+        validated_account_id: str | None = None
+        if account_id is not None:
+            validated_account_id = require_account_id(
+                account_id, context="trade_recorder.get_trades"
+            )
 
         # Refs #1240 review (P2-3): legacy invalid account_id row를 SQL 단계에서
         # 제외해야 LIMIT/OFFSET 페이지네이션이 정확해진다. Python 단계 skip만으로는
@@ -318,9 +328,9 @@ class TradeRecorder:
         )
         params.extend(invalid_ids)
 
-        if account_id:
+        if validated_account_id is not None:
             conditions.append("account_id = ?")
-            params.append(account_id)
+            params.append(validated_account_id)
         if bot_id:
             conditions.append("bot_id = ?")
             params.append(bot_id)

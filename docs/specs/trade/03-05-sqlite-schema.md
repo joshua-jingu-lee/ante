@@ -8,7 +8,7 @@
 -- 개별 거래 기록
 CREATE TABLE trades (
     trade_id       TEXT PRIMARY KEY,
-    account_id     TEXT NOT NULL,
+    account_id     TEXT NOT NULL,          -- fallback default 없음
     bot_id         TEXT NOT NULL,
     strategy_id    TEXT NOT NULL,
     symbol         TEXT NOT NULL,
@@ -32,8 +32,14 @@ CREATE INDEX idx_trades_bot ON trades(bot_id, timestamp);
 CREATE INDEX idx_trades_strategy ON trades(strategy_id, timestamp);
 CREATE INDEX idx_trades_symbol ON trades(symbol, timestamp);
 CREATE INDEX idx_trades_status ON trades(status);
+```
 
--- 봇별 종목 포지션 현재 상태
+`trades.account_id`는 fresh schema에서 필수값이며 `DEFAULT 'default'` 같은
+fallback을 두지 않는다. `TradeRecorder`는 저장 직전과 명시 account 조회
+필터에서 Account ID scoping helper로 `None`, 빈 문자열, `default`를 거부한다.
+
+봇별 종목 포지션 현재 상태:
+```sql
 CREATE TABLE positions (
     account_id       TEXT NOT NULL,
     bot_id           TEXT NOT NULL,
