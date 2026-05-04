@@ -276,6 +276,11 @@ class TestPerformanceFeedback:
 
     async def test_get_bot_performance(self, mock_trade_service, mock_bot_manager):
         """봇 성과 조회."""
+        # bot_manager.get_bot이 BotConfig.account_id를 반환하도록 stub.
+        mock_bot = MagicMock()
+        mock_bot.config.account_id = "acc-test"
+        mock_bot_manager.get_bot = MagicMock(return_value=mock_bot)
+
         fb = PerformanceFeedback(mock_trade_service, mock_bot_manager)
         result = await fb.get_bot_performance("bot1")
 
@@ -285,6 +290,20 @@ class TestPerformanceFeedback:
         assert result["metrics"]["net_pnl"] == 49000.0
         assert len(result["current_positions"]) == 1
         assert result["current_positions"][0]["symbol"] == "005930"
+        # 봇 config의 account_id가 trade service로 전달 (#1218 default fallback 금지).
+        mock_trade_service.get_performance.assert_awaited_with(
+            account_id="acc-test", bot_id="bot1"
+        )
+
+    async def test_feedback_bot_not_found(self, mock_trade_service, mock_bot_manager):
+        """봇이 없으면 BotNotFoundError raise (#1218: default fallback 금지)."""
+        from ante.bot.exceptions import BotNotFoundError
+
+        mock_bot_manager.get_bot = MagicMock(return_value=None)
+        fb = PerformanceFeedback(mock_trade_service, mock_bot_manager)
+
+        with pytest.raises(BotNotFoundError):
+            await fb.get_bot_performance("missing-bot")
 
     async def test_get_strategy_performance(self, mock_trade_service, mock_bot_manager):
         """전략 성과 집계."""
