@@ -158,7 +158,9 @@ class Services:
     live_order_view: Any = None
     strategy_snapshot: Any = None
     api_gateway: Any = None
-    stream_integration: Any = None
+    # SPLIT-3 (#1242): multi-account StreamIntegration pool. KIS 활성 계좌마다
+    # 하나의 인스턴스를 등록하고 shutdown 에서 dict 순회로 정리한다.
+    stream_integrations: dict[str, Any] = field(default_factory=dict)
     reconcile_scheduler: Any = None
     daily_report_scheduler: Any = None
     data_provider: Any = None
@@ -653,17 +655,24 @@ async def _init_stream_integration(
     broker_config: dict,
     stop_order_manager: Any,
     *,
-    account_id: str = "",
+    account_id: str,
 ) -> None:
     """KISStreamClient + StreamIntegration 초기화.
 
-    SPLIT-1 (#1240): ``OrderFilledEvent``는 strict ``_requires_account_id``
-    marker를 가진다. 본 SPLIT 범위에서는 multi-account StreamIntegration
-    pool화는 하지 않고(SPLIT-3 #1242 영역 보존), 단일 인스턴스에 활성
-    KIS 계좌의 ``account_id``를 보강하여 broker payload fallback 시에도
-    체결 이벤트가 정상 발행되도록 한다.
+    SPLIT-3 (#1242): KIS multi-account 환경에서 활성 계좌마다 별도의
+    StreamIntegration 인스턴스를 만들어 ``s.stream_integrations`` dict 에
+    ``account_id`` 키로 등록한다. 한 계좌 stream 의 disconnect 가 다른 계좌
+    의 fallback 을 토글하지 않도록 ``StreamConnectedEvent`` /
+    ``StreamDisconnectedEvent`` 의 account_id marker (C2) 와 함께 작동한다.
+
+    이전 SPLIT-1 패턴 (``s.stream_integration`` 단일 슬롯 덮어쓰기) 은 두 번째
+    KIS 계좌 등록 시 첫 인스턴스를 silently leak 시켰으므로 본 SPLIT 에서
+    수정한다.
     """
     assert s.eventbus is not None
+    from ante.account.scoping import require_account_id
+
+    require_account_id(account_id, context="main._init_stream_integration")
 
     from ante.broker.kis_stream import KISStreamClient
     from ante.gateway.stream_integration import StreamIntegration
@@ -683,7 +692,7 @@ async def _init_stream_integration(
         account_id=account_id,
     )
 
-    s.stream_integration = StreamIntegration(
+    integration = StreamIntegration(
         stream_client=stream_client,
         cache=s.api_gateway._cache,
         eventbus=s.eventbus,
@@ -694,13 +703,19 @@ async def _init_stream_integration(
     )
 
     try:
-        await s.stream_integration.start()
-        logger.info("StreamIntegration 시작 완료 (paper=%s)", is_paper)
+        await integration.start()
+        s.stream_integrations[account_id] = integration
+        logger.info(
+            "StreamIntegration 시작 완료 (account=%s, paper=%s)",
+            account_id,
+            is_paper,
+        )
     except Exception:
         logger.warning(
-            "StreamIntegration 시작 실패 — REST 전용 모드로 운영", exc_info=True
+            "StreamIntegration 시작 실패 — REST 전용 모드로 운영 (account=%s)",
+            account_id,
+            exc_info=True,
         )
-        s.stream_integration = None
 
 
 async def _sync_instruments(s: Services, accounts: list) -> None:
@@ -1619,9 +1634,18 @@ async def _shutdown(s: Services) -> None:
         await s.bot_manager.stop_all()
         logger.info("BotManager 종료 — 모든 봇 중지")
 
-    if s.stream_integration:
-        await s.stream_integration.stop()
-        logger.info("StreamIntegration 종료")
+    # SPLIT-3 (#1242): multi-account StreamIntegration pool 정리
+    for stream_account_id, integration in list(s.stream_integrations.items()):
+        try:
+            await integration.stop()
+            logger.info("StreamIntegration 종료: account=%s", stream_account_id)
+        except Exception:
+            logger.warning(
+                "StreamIntegration 종료 실패: account=%s",
+                stream_account_id,
+                exc_info=True,
+            )
+    s.stream_integrations.clear()
 
     if s.api_gateway:
         s.api_gateway.stop()

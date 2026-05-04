@@ -347,19 +347,36 @@ class StreamIntegration:
             logger.debug("종목 구독 해제: %s", symbol)
 
     def _get_monitored_symbols(self) -> set[str]:
-        """모니터링 대상 종목 수집 (활성 봇 + StopOrderManager)."""
+        """모니터링 대상 종목 수집 (활성 봇 + StopOrderManager).
+
+        SPLIT-3 (#1242): multi-account StreamIntegration pool 에서 각 인스턴스
+        는 자신의 ``self._account_id`` 에 해당하는 봇만 선택한다. StopOrder
+        역시 같은 account_id 의 active orders 만 모니터링 종목에 포함시켜
+        다른 계좌의 KIS 40종목 한도를 잠식하지 않게 한다.
+        """
         symbols: set[str] = set()
 
-        # 활성 봇의 종목 (봇 info에서 추출 가능한 경우)
+        # 활성 봇의 종목: 봇 config 의 account_id 가 일치하는 것만.
         if self._bot_manager:
             for bot_info in self._bot_manager.list_bots():
-                if bot_info.get("status") == "running":
-                    bot = self._bot_manager.get_bot(bot_info["bot_id"])
-                    if bot and hasattr(bot, "monitored_symbols"):
-                        symbols.update(bot.monitored_symbols)
+                if bot_info.get("status") != "running":
+                    continue
+                bot = self._bot_manager.get_bot(bot_info["bot_id"])
+                if bot is None:
+                    continue
+                bot_account_id = ""
+                bot_config = getattr(bot, "config", None)
+                if bot_config is not None:
+                    bot_account_id = getattr(bot_config, "account_id", "")
+                if bot_account_id != self._account_id:
+                    continue
+                if hasattr(bot, "monitored_symbols"):
+                    symbols.update(bot.monitored_symbols)
 
-        # StopOrderManager의 모니터링 종목
+        # StopOrderManager의 모니터링 종목 — account_id 매칭만.
         if self._stop_order_manager:
-            symbols.update(self._stop_order_manager.monitored_symbols)
+            for order in self._stop_order_manager.active_orders:
+                if order.account_id == self._account_id:
+                    symbols.add(order.symbol)
 
         return symbols

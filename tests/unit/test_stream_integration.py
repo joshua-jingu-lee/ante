@@ -364,7 +364,11 @@ async def test_subscription_sync_adds_stop_order_symbols(
     stop_order_manager: StopOrderManager,
     eventbus: EventBus,
 ) -> None:
-    """StopOrderManager 종목이 스트림에 구독된다."""
+    """StopOrderManager 종목이 스트림에 구독된다.
+
+    SPLIT-3 (#1242): integration._account_id="acc-001" 와 동일한 account_id
+    의 stop order 만 모니터링 대상에 포함된다.
+    """
     await stop_order_manager.register(
         order_id="ord-1",
         bot_id="bot-1",
@@ -374,7 +378,7 @@ async def test_subscription_sync_adds_stop_order_symbols(
         quantity=5.0,
         order_type="stop",
         stop_price=100000.0,
-        account_id="acc-test",
+        account_id="acc-001",
     )
 
     await integration.start()
@@ -394,17 +398,22 @@ async def test_subscription_sync_on_bot_event(
     eventbus: EventBus,
     bot_manager_mock: MagicMock,
 ) -> None:
-    """봇 시작/종료 이벤트 시 종목 구독이 즉시 동기화된다."""
-    # 봇이 모니터링 종목을 가지도록 설정
+    """봇 시작/종료 이벤트 시 종목 구독이 즉시 동기화된다.
+
+    SPLIT-3 (#1242): bot.config.account_id 가 integration._account_id 와
+    동일한 봇만 모니터링 대상에 포함된다.
+    """
+    # 봇이 모니터링 종목을 가지도록 설정 — integration._account_id="acc-001" 와 동일
     mock_bot = MagicMock()
     mock_bot.monitored_symbols = {"005930", "035720"}
+    mock_bot.config.account_id = "acc-001"
     bot_manager_mock.list_bots.return_value = [{"bot_id": "bot-1", "status": "running"}]
     bot_manager_mock.get_bot.return_value = mock_bot
 
     await integration.start()
     try:
         # 봇 시작 이벤트 발행
-        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-test"))
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-001"))
         await asyncio.sleep(0.05)
 
         assert "005930" in stream_client.subscribed_symbols
@@ -424,12 +433,13 @@ async def test_subscription_sync_removes_symbols(
     # 먼저 봇이 있는 상태
     mock_bot = MagicMock()
     mock_bot.monitored_symbols = {"005930"}
+    mock_bot.config.account_id = "acc-001"
     bot_manager_mock.list_bots.return_value = [{"bot_id": "bot-1", "status": "running"}]
     bot_manager_mock.get_bot.return_value = mock_bot
 
     await integration.start()
     try:
-        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-test"))
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-001"))
         await asyncio.sleep(0.05)
         assert "005930" in stream_client.subscribed_symbols
 
@@ -437,7 +447,7 @@ async def test_subscription_sync_removes_symbols(
         bot_manager_mock.list_bots.return_value = []
         bot_manager_mock.get_bot.return_value = None
 
-        await eventbus.publish(BotStoppedEvent(bot_id="bot-1", account_id="acc-test"))
+        await eventbus.publish(BotStoppedEvent(bot_id="bot-1", account_id="acc-001"))
         await asyncio.sleep(0.05)
 
         assert "005930" not in stream_client.subscribed_symbols
@@ -620,3 +630,133 @@ async def test_execution_payload_account_id_overrides_lifecycle(
         assert received[0].account_id == "acc-other"
     finally:
         await integration.stop()
+
+
+# ── multi_account_pool 회귀 (#1242 SPLIT-3) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_multi_account_pool_disconnect_does_not_cross_fallback(
+    cache: ResponseCache,
+    eventbus: EventBus,
+    stop_order_manager: StopOrderManager,
+    bot_manager_mock: MagicMock,
+    gateway_mock: MagicMock,
+) -> None:
+    """SPLIT-3 (#1242): multi-account StreamIntegration pool 에서 한 계좌의
+    StreamDisconnectedEvent 가 다른 계좌의 fallback 을 켜지 않는다.
+    """
+    client_a = FakeStreamClient()
+    client_b = FakeStreamClient()
+
+    integration_a = StreamIntegration(
+        stream_client=client_a,
+        cache=cache,
+        eventbus=eventbus,
+        account_id="acc-a",
+        stop_order_manager=stop_order_manager,
+        gateway=gateway_mock,
+        bot_manager=bot_manager_mock,
+        fallback_poll_interval=0.1,
+        sync_interval=0.1,
+    )
+    integration_b = StreamIntegration(
+        stream_client=client_b,
+        cache=cache,
+        eventbus=eventbus,
+        account_id="acc-b",
+        stop_order_manager=stop_order_manager,
+        gateway=gateway_mock,
+        bot_manager=bot_manager_mock,
+        fallback_poll_interval=0.1,
+        sync_interval=0.1,
+    )
+
+    await integration_a.start()
+    await integration_b.start()
+
+    try:
+        assert not integration_a.is_fallback_active
+        assert not integration_b.is_fallback_active
+
+        # acc-a 의 stream 만 disconnect 발생
+        await eventbus.publish(
+            StreamDisconnectedEvent(account_id="acc-a", broker="kis", reason="test")
+        )
+        await asyncio.sleep(0.05)
+
+        # acc-a 만 fallback 활성, acc-b 는 영향 없음
+        assert integration_a.is_fallback_active
+        assert not integration_b.is_fallback_active
+
+        # acc-a reconnect 시 acc-a 만 fallback 종료
+        await eventbus.publish(
+            StreamConnectedEvent(account_id="acc-a", broker="kis", url="ws://a")
+        )
+        await asyncio.sleep(0.05)
+
+        assert not integration_a.is_fallback_active
+        assert not integration_b.is_fallback_active
+    finally:
+        await integration_a.stop()
+        await integration_b.stop()
+
+
+@pytest.mark.asyncio
+async def test_multi_account_pool_monitored_symbols_are_isolated(
+    cache: ResponseCache,
+    eventbus: EventBus,
+    stop_order_manager: StopOrderManager,
+    bot_manager_mock: MagicMock,
+    gateway_mock: MagicMock,
+) -> None:
+    """SPLIT-3 (#1242): 각 StreamIntegration 은 자기 account 의 봇 +
+    StopOrder 만 모니터링 종목으로 수집한다."""
+    client_a = FakeStreamClient()
+    client_b = FakeStreamClient()
+
+    bot_a = MagicMock()
+    bot_a.monitored_symbols = {"005930"}
+    bot_a.config.account_id = "acc-a"
+    bot_b = MagicMock()
+    bot_b.monitored_symbols = {"000660"}
+    bot_b.config.account_id = "acc-b"
+
+    bot_manager_mock.list_bots.return_value = [
+        {"bot_id": "bot-a", "status": "running"},
+        {"bot_id": "bot-b", "status": "running"},
+    ]
+    bot_manager_mock.get_bot.side_effect = lambda bot_id: {
+        "bot-a": bot_a,
+        "bot-b": bot_b,
+    }.get(bot_id)
+
+    integration_a = StreamIntegration(
+        stream_client=client_a,
+        cache=cache,
+        eventbus=eventbus,
+        account_id="acc-a",
+        stop_order_manager=stop_order_manager,
+        gateway=gateway_mock,
+        bot_manager=bot_manager_mock,
+        fallback_poll_interval=0.1,
+        sync_interval=0.1,
+    )
+    integration_b = StreamIntegration(
+        stream_client=client_b,
+        cache=cache,
+        eventbus=eventbus,
+        account_id="acc-b",
+        stop_order_manager=stop_order_manager,
+        gateway=gateway_mock,
+        bot_manager=bot_manager_mock,
+        fallback_poll_interval=0.1,
+        sync_interval=0.1,
+    )
+
+    # 각 instance 가 자기 account 의 봇 종목만 수집해야 한다.
+    symbols_a = integration_a._get_monitored_symbols()
+    symbols_b = integration_b._get_monitored_symbols()
+
+    assert symbols_a == {"005930"}
+    assert symbols_b == {"000660"}
