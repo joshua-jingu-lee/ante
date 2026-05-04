@@ -623,16 +623,33 @@ class StopOrderExpiredEvent(Event):
 
 @dataclass(frozen=True)
 class StreamConnectedEvent(Event):
-    """KISStreamClient → EventBus: WebSocket 연결 성공."""
+    """KISStreamClient → EventBus: WebSocket 연결 성공.
 
+    SPLIT-3 (#1242): KIS multi-account 환경에서 각 계좌마다 별도의
+    ``KISStreamClient`` 인스턴스가 생성되며, 발행자는 자신의
+    ``account_id`` 를 명시 전달해야 한다. ``StreamIntegration`` 의
+    fallback toggle 이 다른 계좌 stream 의 disconnect 로 잘못 켜지지
+    않도록 한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     broker: str = ""
     url: str = ""
 
 
 @dataclass(frozen=True)
 class StreamDisconnectedEvent(Event):
-    """KISStreamClient → EventBus: WebSocket 연결 해제."""
+    """KISStreamClient → EventBus: WebSocket 연결 해제.
 
+    SPLIT-3 (#1242): account-scoped marker 적용. 자세한 내용은
+    :class:`StreamConnectedEvent` 를 참조한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     broker: str = ""
     reason: str = ""
 

@@ -680,6 +680,7 @@ async def _init_stream_integration(
         app_key=broker_config.get("app_key", ""),
         app_secret=broker_config.get("app_secret", ""),
         eventbus=s.eventbus,
+        account_id=account_id,
     )
 
     s.stream_integration = StreamIntegration(

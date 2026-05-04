@@ -271,7 +271,9 @@ async def test_fallback_starts_on_stream_disconnect(
     try:
         assert not integration.is_fallback_active
 
-        await eventbus.publish(StreamDisconnectedEvent(broker="kis", reason="test"))
+        await eventbus.publish(
+            StreamDisconnectedEvent(account_id="acc-001", broker="kis", reason="test")
+        )
         # 이벤트 처리 후 폴백 태스크 생성 대기
         await asyncio.sleep(0.05)
 
@@ -289,12 +291,16 @@ async def test_fallback_stops_on_stream_reconnect(
     await integration.start()
     try:
         # 먼저 폴백 시작
-        await eventbus.publish(StreamDisconnectedEvent(broker="kis", reason="test"))
+        await eventbus.publish(
+            StreamDisconnectedEvent(account_id="acc-001", broker="kis", reason="test")
+        )
         await asyncio.sleep(0.05)
         assert integration.is_fallback_active
 
         # 재연결 시 폴백 중지
-        await eventbus.publish(StreamConnectedEvent(broker="kis", url="ws://test"))
+        await eventbus.publish(
+            StreamConnectedEvent(account_id="acc-001", broker="kis", url="ws://test")
+        )
         await asyncio.sleep(0.05)
 
         assert not integration.is_fallback_active
@@ -312,6 +318,8 @@ async def test_fallback_polls_prices(
 ) -> None:
     """REST 폴링 폴백 시 모니터링 종목의 시세를 REST로 조회한다."""
     # 스탑 주문 등록 (모니터링 종목 생성)
+    # SPLIT-3 (#1242): integration._account_id="acc-001" 와 동일하게 설정해야
+    # cross-account isolation 게이트 통과.
     await stop_order_manager.register(
         order_id="ord-1",
         bot_id="bot-1",
@@ -321,13 +329,15 @@ async def test_fallback_polls_prices(
         quantity=10.0,
         order_type="stop",
         stop_price=60000.0,
-        account_id="acc-test",
+        account_id="acc-001",
     )
 
     await integration.start()
     try:
         # 스트림 해제 → 폴백 시작
-        await eventbus.publish(StreamDisconnectedEvent(broker="kis", reason="test"))
+        await eventbus.publish(
+            StreamDisconnectedEvent(account_id="acc-001", broker="kis", reason="test")
+        )
         await asyncio.sleep(0.3)
 
         # REST API가 호출되었는지 확인
@@ -499,11 +509,14 @@ async def test_fallback_not_started_without_gateway(
         stream_client=stream_client,
         cache=cache,
         eventbus=eventbus,
+        account_id="acc-001",
         gateway=None,
     )
     await integration.start()
     try:
-        await eventbus.publish(StreamDisconnectedEvent(broker="kis", reason="test"))
+        await eventbus.publish(
+            StreamDisconnectedEvent(account_id="acc-001", broker="kis", reason="test")
+        )
         await asyncio.sleep(0.05)
 
         assert not integration.is_fallback_active

@@ -216,14 +216,33 @@ class StreamIntegration:
     # ── 스트림 연결/해제 이벤트 ──────────────────────
 
     async def _on_stream_connected(self, event: object) -> None:
-        """스트림 연결 성공 시 폴백 중지."""
+        """스트림 연결 성공 시 폴백 중지.
+
+        SPLIT-3 (#1242): multi-account StreamIntegration pool 에서 다른
+        계좌의 stream 이벤트로 자기 fallback 을 토글하지 않도록
+        ``event.account_id`` 가 ``self._account_id`` 와 일치할 때만 반응한다.
+        ``self._account_id`` 가 비어있는 (fallback test wiring) 경우는
+        호환을 위해 모든 이벤트를 받는다.
+        """
+        if self._account_id:
+            event_account_id = getattr(event, "account_id", "")
+            if event_account_id and event_account_id != self._account_id:
+                return
         await self._stop_fallback()
         logger.info("스트림 연결됨 — REST 폴링 폴백 중지")
 
     async def _on_stream_disconnected(self, event: object) -> None:
-        """스트림 연결 해제 시 REST 폴링 폴백 시작."""
+        """스트림 연결 해제 시 REST 폴링 폴백 시작.
+
+        SPLIT-3 (#1242): account-scoped 필터. 자세한 내용은
+        :meth:`_on_stream_connected` 참조.
+        """
         if not self._running:
             return
+        if self._account_id:
+            event_account_id = getattr(event, "account_id", "")
+            if event_account_id and event_account_id != self._account_id:
+                return
         await self._start_fallback()
         logger.warning("스트림 연결 해제 — REST 폴링 폴백 시작")
 
