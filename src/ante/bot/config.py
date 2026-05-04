@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ante.account.scoping import require_account_id
+
 
 class BotStatus(StrEnum):
     """봇 상태."""
@@ -24,12 +26,16 @@ MAX_INTERVAL_SECONDS = 3600
 
 @dataclass
 class BotConfig:
-    """봇 설정."""
+    """봇 설정.
+
+    ``account_id`` 는 봇 생성 진입점에서 검증된다 (#1217 → #1241 SPLIT-2).
+    fallback (`""`, ``None``, ``"default"``) 또는 형식 위반 값은 거부된다.
+    """
 
     bot_id: str
     strategy_id: str
     name: str = ""
-    account_id: str = "test"
+    account_id: str = ""
     interval_seconds: int = 60
     auto_restart: bool = True
     max_restart_attempts: int = 3
@@ -38,6 +44,9 @@ class BotConfig:
     max_signals_per_step: int = 50
 
     def __post_init__(self) -> None:
+        # account-scoped 봇 진입점: invalid account_id를 차단.
+        # ``InvalidAccountIdError`` 가 raise 되어 호출자에 전달된다.
+        self.account_id = require_account_id(self.account_id, context="BotConfig")
         validate_interval(self.interval_seconds)
 
 

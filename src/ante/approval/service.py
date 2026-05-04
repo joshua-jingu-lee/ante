@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ante.account.scoping import require_account_id
 from ante.approval.auto_approve import AutoApproveEvaluator
 from ante.approval.models import (
     ApprovalRequest,
@@ -23,6 +24,39 @@ if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+
+# Refs #1217 → #1241 SPLIT-2: ``docs/specs/account/14-account-id-contract.md``
+# §6 ApprovalService 표 기준. account-scoped payload 가 필수인 결재 유형만
+# 포함한다. ``bot_stop``, ``bot_resume``, ``bot_delete``, ``bot_assign_strategy``,
+# ``bot_change_strategy`` 는 ``bot_id`` 로 봇/계좌가 결정되므로 제외하고,
+# ``strategy_adopt``/``strategy_retire`` 는 글로벌 결재이므로 제외한다.
+_ACCOUNT_SCOPED_APPROVAL_TYPES: frozenset[str] = frozenset(
+    {"budget_change", "rule_change", "bot_create"}
+)
+
+
+def _extract_account_id(type: str, params: dict | None) -> str | None:
+    """account-scoped approval payload 에서 account_id 를 꺼낸다.
+
+    우선순위 (config-first → flat fallback):
+
+    1. ``params["config"]["account_id"]`` (web/CLI 가 BotConfig 형태로
+       래핑해 보내는 신규 형태)
+    2. ``params["account_id"]`` (legacy 평면 형태)
+
+    어느 위치에서든 발견되지 않으면 ``None`` 을 반환하고, 호출자가
+    :func:`ante.account.scoping.require_account_id` 로 거부한다.
+    """
+    if params is None:
+        return None
+    config = params.get("config")
+    if isinstance(config, dict):
+        candidate = config.get("account_id")
+        if candidate is not None:
+            return candidate  # type: ignore[no-any-return]
+    return params.get("account_id")
+
 
 APPROVAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals (
@@ -79,9 +113,22 @@ class ApprovalService:
         reference_id: str = "",
         expires_at: str = "",
     ) -> ApprovalRequest:
-        """결재 요청 생성."""
+        """결재 요청 생성.
+
+        Refs #1217 → #1241 SPLIT-2: ``type`` 이 account-scoped 결재 유형
+        (``budget_change``, ``rule_change``, ``bot_create``) 이면
+        ``params`` 에서 account_id 를 추출해 :func:`require_account_id` 로
+        검증한다. invalid 면 :class:`InvalidAccountIdError` 가 raise 되어
+        호출자에 전달된다.
+        """
         now = datetime.now(UTC).isoformat()
         params = params or {}
+
+        if type in _ACCOUNT_SCOPED_APPROVAL_TYPES:
+            require_account_id(
+                _extract_account_id(type, params),
+                context=f"approval.{type}.create",
+            )
 
         reviews = await self._validate_params(type, params, now)
 
@@ -289,6 +336,15 @@ class ApprovalService:
             request.body = body
         if params is not None:
             request.params = params
+
+        # Refs #1217 → #1241 SPLIT-2: account-scoped 결재 유형 reopen 시
+        # 갱신된 params 에 대해 account_id 재검증. params 가 None 이면 기존
+        # request.params 가 이미 create() 단계에서 검증됐으므로 스킵한다.
+        if params is not None and request.type in _ACCOUNT_SCOPED_APPROVAL_TYPES:
+            require_account_id(
+                _extract_account_id(request.type, params),
+                context=f"approval.{request.type}.reopen",
+            )
 
         # 사전 검증(validator) 재실행
         now = datetime.now(UTC).isoformat()

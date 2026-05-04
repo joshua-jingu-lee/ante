@@ -189,7 +189,9 @@ class TestBotManagerSignalKey:
         manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
 
         ctx = MagicMock()
-        config = BotConfig(bot_id="bot-001", strategy_id="accepting")
+        config = BotConfig(
+            bot_id="bot-001", strategy_id="accepting", account_id="acc-test"
+        )
 
         await manager.create_bot(config, _AcceptingStrategy, ctx=ctx)
 
@@ -212,7 +214,9 @@ class TestBotManagerSignalKey:
         manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
 
         ctx = MagicMock()
-        config = BotConfig(bot_id="bot-002", strategy_id="normal")
+        config = BotConfig(
+            bot_id="bot-002", strategy_id="normal", account_id="acc-test"
+        )
 
         await manager.create_bot(config, _NormalStrategy, ctx=ctx)
 
@@ -238,7 +242,9 @@ class TestBotManagerSignalKey:
         manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
 
         ctx = MagicMock()
-        config = BotConfig(bot_id="bot-003", strategy_id="accepting")
+        config = BotConfig(
+            bot_id="bot-003", strategy_id="accepting", account_id="acc-test"
+        )
         await manager.create_bot(config, _AcceptingStrategy, ctx=ctx)
 
         await manager.remove_bot("bot-003")
@@ -263,7 +269,9 @@ class TestBotManagerSignalKey:
         manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
 
         ctx = MagicMock()
-        config = BotConfig(bot_id="bot-004", strategy_id="accepting")
+        config = BotConfig(
+            bot_id="bot-004", strategy_id="accepting", account_id="acc-test"
+        )
         await manager.create_bot(config, _AcceptingStrategy, ctx=ctx)
 
         new_key = await manager.rotate_signal_key("bot-004")
@@ -288,7 +296,9 @@ class TestBotManagerSignalKey:
         manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
 
         ctx = MagicMock()
-        config = BotConfig(bot_id="bot-005", strategy_id="accepting")
+        config = BotConfig(
+            bot_id="bot-005", strategy_id="accepting", account_id="acc-test"
+        )
         await manager.create_bot(config, _AcceptingStrategy, ctx=ctx)
 
         key = await manager.get_signal_key("bot-005")

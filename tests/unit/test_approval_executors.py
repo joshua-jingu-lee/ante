@@ -167,6 +167,7 @@ class TestBotCreateExecutor:
     async def test_approve_calls_create_bot(self, service_with_executors):
         svc, mocks = service_with_executors
         params = {
+            "account_id": "acc-test",
             "strategy_name": "momentum",
             "budget": 10000000,
             "mode": "paper",
@@ -269,7 +270,12 @@ class TestBudgetChangeExecutor:
             type="budget_change",
             requester="agent",
             title="예산 변경",
-            params={"bot_id": "bot-1", "amount": 25000000, "current": 10000000},
+            params={
+                "account_id": "acc-test",
+                "bot_id": "bot-1",
+                "amount": 25000000,
+                "current": 10000000,
+            },
         )
         await svc.approve(req.id)
         mocks["treasury"].update_budget.assert_awaited_once_with("bot-1", 25000000)
@@ -285,7 +291,7 @@ class TestRuleChangeExecutor:
             type="rule_change",
             requester="agent",
             title="규칙 변경",
-            params={"bot_id": "bot-1", "rules": rules},
+            params={"account_id": "acc-test", "bot_id": "bot-1", "rules": rules},
         )
         await svc.approve(req.id)
         mocks["rule_engine"].update_rules.assert_called_once_with("bot-1", rules)

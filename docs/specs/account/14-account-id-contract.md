@@ -160,16 +160,20 @@ write/execute 경로 fallback 제거 + Event marker 패턴 (lifecycle 영향
 
 #### #1241 (SPLIT-2) 적용 위치
 
-Bot/Main + Approval payload validation. 본 SPLIT 머지 후 진행한다.
+Bot/Main + Approval payload validation. 본 SPLIT 에서 적용 완료
+(`#1217 → #1241 SPLIT-2`). CLI `--account required` 부분은 #1218 / #1219
+범위로 분리되어 있어 본 SPLIT 에는 포함되지 않는다.
 
 | 호출 위치 | 형태 | 비고 |
 |---|---|---|
-| `BotConfig.__post_init__` | `require_account_id` | 봇 생성 진입점 |
-| `ApprovalService.create` | account-scoped type (`budget_change`, `rule_change`, `bot_create`) 시 `params["account_id"]` 검증 | approval payload validation |
-| `auto_approve` mode 추출 | account-scoped approval 검증 통과 후 mode 추출 | 자동 승인 |
-| IPC `bot_*` payload | `args["account_id"]` 진입 시 `require_account_id` | IPC bot routing |
-| CLI `bot create/remove/...`, `approval` 호출부 | `--account` required | CLI UX |
-| `main.py` 진입점 fallback (`params.get("account_id", "test")`) | 제거 | bootstrap 경로 정합 |
+| `BotConfig.__post_init__` | `require_account_id` | 봇 생성 진입점 (#1217 → #1241 SPLIT-2) |
+| `BotManager.load_from_db` | invalid account_id row warning + skip | SPLIT-1 패턴 (#1217 → #1241 SPLIT-2) |
+| `cold_path_remove_bot` | `or "test"` fallback 제거 → `require_account_id` | cold-path bot delete (#1217 → #1241 SPLIT-2) |
+| `ApprovalService.create/reopen` | account-scoped type (`budget_change`, `rule_change`, `bot_create`) 시 config-first → flat `params["account_id"]` 검증 | approval payload validation (#1217 → #1241 SPLIT-2) |
+| `AutoApproveEvaluator.should_auto_approve` (`bot_create`) | mode 추출도 config-first → flat fallback | 자동 승인 (#1217 → #1241 SPLIT-2) |
+| IPC `bot.create` payload | `args["account_id"]` 진입 시 `require_account_id` | IPC bot routing (#1217 → #1241 SPLIT-2) |
+| `main.py` `_exec_rule_change` / `_exec_budget_change` / `_validate_budget_change` | `params.get("account_id", "test")` 제거 → `require_account_id` (validator 는 fail 반환) | approval executor/validator (#1217 → #1241 SPLIT-2) |
+| CLI `bot create/remove/...`, `approval` 호출부 | `--account` required | CLI UX (#1218 영역, 본 SPLIT 미포함) |
 
 #### #1242 (SPLIT-3) 적용 위치
 

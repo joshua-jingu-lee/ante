@@ -900,6 +900,19 @@ async def _init_feed(s: Services) -> None:
     logger.info("ReportDraftGenerator 초기화 완료")
 
 
+def _approval_account_id(params: dict, *, context: str) -> str:
+    """approval params 에서 검증된 account_id 를 추출.
+
+    Refs #1217 → #1241 SPLIT-2: ``params.get("account_id", "test")`` fallback
+    제거. ``ApprovalService`` 가 create()/reopen() 진입점에서 이미 동일한
+    검증을 수행하지만, executor / validator 가 main.py 외부에서도 호출될 수
+    있으므로 진입점 단위로 한 번 더 명시 검증한다.
+    """
+    from ante.account.scoping import require_account_id
+
+    return require_account_id(params.get("account_id"), context=context)
+
+
 async def _init_approval(s: Services) -> None:
     """ApprovalService 초기화: Executor, Validator, 전결 설정, 만료 스케줄러."""
     assert s.db is not None
@@ -911,9 +924,16 @@ async def _init_approval(s: Services) -> None:
     from ante.report.models import ReportStatus
 
     async def _exec_rule_change(params: dict) -> None:
-        account_id = params.get("account_id", "test")
+        account_id = _approval_account_id(params, context="approval.rule_change.exec")
         engine = s.rule_engine_manager.get(account_id)
         engine.update_rules(params["bot_id"], params["rules"])
+
+    async def _exec_budget_change(params: dict) -> None:
+        # Refs #1217 → #1241 SPLIT-2: lambda 내부 fallback 제거. named func 으로
+        # 추출하여 require_account_id 진입점을 lambda 안으로 가져온다.
+        account_id = _approval_account_id(params, context="approval.budget_change.exec")
+        treasury = s.treasury_manager.get(account_id)
+        await treasury.update_budget(params["bot_id"], params["amount"])
 
     from ante.strategy.registry import StrategyStatus
 
@@ -976,9 +996,7 @@ async def _init_approval(s: Services) -> None:
         "bot_resume": lambda params: s.bot_manager.resume_bot(params["bot_id"]),
         "bot_delete": lambda params: s.bot_manager.delete_bot(params["bot_id"]),
         # 자금·규칙
-        "budget_change": lambda params: s.treasury_manager.get(
-            params.get("account_id", "test")
-        ).update_budget(params["bot_id"], params["amount"]),
+        "budget_change": _exec_budget_change,
         "rule_change": _exec_rule_change,
     }
 
@@ -1099,8 +1117,21 @@ async def _init_approval(s: Services) -> None:
         return [ValidationResult("pass", "", "system:bot_manager")]
 
     def _validate_budget_change(params: dict) -> list[ValidationResult]:
-        """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn)."""
-        account_id = params.get("account_id", "test")
+        """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn).
+
+        Refs #1217 → #1241 SPLIT-2: ``params.get("account_id", "test")``
+        fallback 제거. invalid account_id 는 ``ValidationResult("fail", ...)``
+        으로 변환해 ``ApprovalService`` 가 ``ApprovalValidationError`` 로
+        변환하도록 한다 (validator 계약: raise 대신 fail 반환).
+        """
+        from ante.account.errors import InvalidAccountIdError
+
+        try:
+            account_id = _approval_account_id(
+                params, context="approval.budget_change.validate"
+            )
+        except InvalidAccountIdError as e:
+            return [ValidationResult("fail", str(e), "system:treasury")]
         try:
             treasury = s.treasury_manager.get(account_id)
         except KeyError:

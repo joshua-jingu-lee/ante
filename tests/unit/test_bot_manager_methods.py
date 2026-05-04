@@ -104,7 +104,7 @@ async def manager(eventbus, db):
 class TestAssignStrategy:
     async def test_assign_to_stopped_bot(self, manager, ctx):
         """중지 상태 봇에 전략 배정."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         await manager.assign_strategy("bot1", "s2")
@@ -114,7 +114,9 @@ class TestAssignStrategy:
 
     async def test_assign_to_running_bot_restarts(self, manager, ctx):
         """running 봇에 전략 배정 시 중지 후 재시작."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
         assert manager.get_bot("bot1").status == BotStatus.RUNNING
@@ -127,7 +129,7 @@ class TestAssignStrategy:
 
     async def test_assign_updates_db(self, manager, ctx, db):
         """전략 배정 시 DB에 strategy_id가 갱신된다."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         await manager.assign_strategy("bot1", "s2")
@@ -142,7 +144,7 @@ class TestAssignStrategy:
 
     async def test_assign_to_created_bot(self, manager, ctx):
         """created 상태 봇에 전략 배정."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         assert manager.get_bot("bot1").status == BotStatus.CREATED
 
@@ -157,7 +159,9 @@ class TestAssignStrategy:
 class TestChangeStrategy:
     async def test_change_stopped_bot(self, manager, ctx):
         """중지 상태 봇의 전략 교체."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
         await manager.stop_bot("bot1")
@@ -169,7 +173,9 @@ class TestChangeStrategy:
 
     async def test_change_running_raises(self, manager, ctx):
         """running 봇 전략 변경 시 예외."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
@@ -178,7 +184,7 @@ class TestChangeStrategy:
 
     async def test_change_updates_db(self, manager, ctx, db):
         """전략 교체 시 DB에 strategy_id가 갱신된다."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         await manager.change_strategy("bot1", "s2")
@@ -193,7 +199,7 @@ class TestChangeStrategy:
 
     async def test_change_created_bot(self, manager, ctx):
         """created 상태 봇의 전략 교체 가능."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         await manager.change_strategy("bot1", "s2")
@@ -202,7 +208,7 @@ class TestChangeStrategy:
 
     async def test_change_error_bot(self, manager, ctx):
         """error 상태 봇의 전략 교체 가능."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         # 수동으로 error 상태 설정
         manager.get_bot("bot1").status = BotStatus.ERROR
@@ -218,7 +224,9 @@ class TestChangeStrategy:
 class TestResumeBot:
     async def test_resume_stopped_bot(self, manager, ctx):
         """stopped 봇 재시작."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
         await manager.stop_bot("bot1")
@@ -230,7 +238,9 @@ class TestResumeBot:
 
     async def test_resume_error_bot(self, manager, ctx):
         """error 봇 재시작."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         # 수동으로 error 상태 설정
         bot = manager.get_bot("bot1")
@@ -244,7 +254,9 @@ class TestResumeBot:
 
     async def test_resume_resets_error_counter(self, manager, ctx):
         """재개 시 에러 카운터가 리셋된다."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         bot = manager.get_bot("bot1")
         bot.status = BotStatus.ERROR
@@ -256,7 +268,9 @@ class TestResumeBot:
 
     async def test_resume_running_raises(self, manager, ctx):
         """running 봇 재개 시 예외."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
@@ -265,7 +279,7 @@ class TestResumeBot:
 
     async def test_resume_created_raises(self, manager, ctx):
         """created 상태 봇 재개 시 예외."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         assert manager.get_bot("bot1").status == BotStatus.CREATED
 
@@ -289,7 +303,9 @@ class TestStopBotSuppressNotification:
         notifications: list[NotificationEvent] = []
         eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
 
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
         await manager.stop_bot("bot1")
@@ -304,7 +320,9 @@ class TestStopBotSuppressNotification:
         notifications: list[NotificationEvent] = []
         eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
 
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
         await manager.stop_bot("bot1", suppress_notification=True)
@@ -319,7 +337,9 @@ class TestStopBotSuppressNotification:
         notifications: list[NotificationEvent] = []
         eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
 
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         # 1회차: suppress
@@ -341,7 +361,9 @@ class TestStopBotSuppressNotification:
         stopped_events: list[BotStoppedEvent] = []
         eventbus.subscribe(BotStoppedEvent, lambda e: stopped_events.append(e))
 
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
         await manager.stop_bot("bot1", suppress_notification=True)
@@ -356,7 +378,7 @@ class TestStopBotSuppressNotification:
 class TestUpdateBot:
     async def test_update_name(self, manager, ctx):
         """중지 상태 봇의 이름 변경."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         bot = await manager.update_bot("bot1", name="new-name")
@@ -365,7 +387,9 @@ class TestUpdateBot:
 
     async def test_update_interval(self, manager, ctx):
         """실행 간격 변경."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=60)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=60, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         bot = await manager.update_bot("bot1", interval_seconds=120)
@@ -374,7 +398,7 @@ class TestUpdateBot:
 
     async def test_update_multiple_fields(self, manager, ctx):
         """여러 필드 동시 변경."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         bot = await manager.update_bot(
@@ -398,6 +422,7 @@ class TestUpdateBot:
             name="original",
             interval_seconds=60,
             auto_restart=True,
+            account_id="acc-test",
         )
         await manager.create_bot(config, SimpleStrategy, ctx)
 
@@ -411,7 +436,9 @@ class TestUpdateBot:
 
     async def test_update_running_raises(self, manager, ctx):
         """running 상태에서 수정 시 예외."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", interval_seconds=999)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", interval_seconds=999, account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
@@ -420,7 +447,7 @@ class TestUpdateBot:
 
     async def test_update_created_allowed(self, manager, ctx):
         """created 상태에서 수정 허용."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         assert manager.get_bot("bot1").status == BotStatus.CREATED
 
@@ -429,7 +456,7 @@ class TestUpdateBot:
 
     async def test_update_error_allowed(self, manager, ctx):
         """error 상태에서 수정 허용."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
         manager.get_bot("bot1").status = BotStatus.ERROR
 
@@ -438,7 +465,9 @@ class TestUpdateBot:
 
     async def test_update_saves_to_db(self, manager, ctx, db):
         """수정 결과가 DB에 반영된다."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1", name="old")
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", name="old", account_id="acc-test"
+        )
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         await manager.update_bot("bot1", name="new")
@@ -456,7 +485,7 @@ class TestUpdateBot:
 
     async def test_update_no_changes_returns_bot(self, manager, ctx):
         """변경 사항 없으면 그대로 반환."""
-        config = BotConfig(bot_id="bot1", strategy_id="s1")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
         bot = await manager.update_bot("bot1")

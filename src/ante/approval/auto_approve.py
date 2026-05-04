@@ -70,7 +70,14 @@ class AutoApproveEvaluator:
             return True
 
         if type == "bot_create" and self.config.bot_create_paper:
-            if params.get("mode") == "paper":
+            # Refs #1217 → #1241 SPLIT-2: bot_create payload 형태가
+            # config-nested (``params["config"]["mode"]``) / flat
+            # (``params["mode"]``) 둘 다 호환되도록 config-first → flat
+            # fallback. ApprovalService.create() 가 account_id 를 이미
+            # 동일한 우선순위로 검증하므로 여기서도 같은 순서를 사용한다.
+            config = params.get("config") or {}
+            mode = config.get("mode") or params.get("mode")
+            if mode == "paper":
                 return True
 
         if type == "budget_change" and self.config.budget_change_max > 0:
