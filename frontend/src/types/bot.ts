@@ -1,15 +1,15 @@
 /**
  * Bot 도메인 타입.
  *
- * API 응답 타입은 api.generated.ts에서 자동 생성된 타입을 사용한다.
- * 백엔드가 dict 기반(extra="allow") 응답을 반환하므로 상세 필드를 프론트엔드에서 명시한다.
+ * `api.generated.ts`의 BotInfo raw contract를
+ * `frontend/src/api/bots.ts` adapter가 UI/domain model로 변환한다.
  */
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
 export type BotStatus = 'created' | 'running' | 'stopping' | 'stopped' | 'error' | 'deleted'
 export type BotMode = 'live' | 'paper'
 
-export interface Bot {
+export interface BotView {
   bot_id: string
   name: string
   strategy_name?: string
@@ -18,6 +18,8 @@ export interface Bot {
   interval_seconds?: number
   created_at: string
 }
+
+export type Bot = BotView
 
 export interface BotConfig {
   interval_seconds: number
@@ -51,7 +53,7 @@ export interface BotPosition {
   realized_pnl: number
 }
 
-export interface BotDetail extends Bot {
+export interface BotDetailView extends BotView {
   interval_seconds: number
   symbols: string[]
   allocated_budget: number
@@ -64,6 +66,8 @@ export interface BotDetail extends Bot {
   positions?: BotPosition[]
 }
 
+export type BotDetail = BotDetailView
+
 export type BotLogResult = 'success' | 'failure' | 'stopped'
 
 export interface BotLog {
@@ -73,7 +77,7 @@ export interface BotLog {
   message?: string
 }
 
-export interface BotCreateRequest {
+export interface BotCreateInput {
   bot_id: string
   name?: string
   strategy_id?: string
@@ -83,7 +87,7 @@ export interface BotCreateRequest {
   budget?: number
 }
 
-export interface BotUpdateRequest {
+export interface BotUpdateInput {
   name?: string
   strategy_name?: string
   interval_seconds?: number

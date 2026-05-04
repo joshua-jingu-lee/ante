@@ -1,13 +1,13 @@
 /**
  * Account 도메인 타입.
  *
- * 백엔드 AccountResponse 스키마 기반.
- * api.generated.ts에 Account 타입이 아직 없으므로 프론트엔드에서 명시 정의한다.
+ * `api.generated.ts`의 AccountResponse raw contract를
+ * `frontend/src/api/accounts.ts` adapter가 UI/domain model로 변환한다.
  */
 
-export type AccountStatus = 'active' | 'suspended' | 'deleted'
+export type AccountStatus = 'active' | 'suspended' | 'deleted' | (string & {})
 
-export interface Account {
+export interface AccountView {
   account_id: string
   name: string
   exchange: string
@@ -24,3 +24,5 @@ export interface Account {
   created_at: string
   updated_at: string
 }
+
+export type Account = AccountView
