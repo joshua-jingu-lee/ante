@@ -262,13 +262,15 @@ total = price * quantity
 
 ## 11. DDL 컨벤션 (db-schema.md SSOT)
 
-모든 모듈의 테이블 정의는 모듈 레벨 `_DDL` 문자열 상수로 관리한다. 이 상수가 `docs/architecture/generated/db-schema.md` 자동 생성의 원본(SSOT)이다.
+모든 모듈의 테이블 정의는 모듈 레벨 `*_SCHEMA` 문자열 상수로 관리한다. 이 상수가 `docs/architecture/generated/db-schema.md` 자동 생성의 원본(SSOT)이다.
+
+기존 Account 모듈의 `_CREATE_TABLE_SQL`은 legacy 예외로만 허용한다. 새 테이블 정의에는 `*_SCHEMA`를 사용한다.
 
 ### 규칙
 
-- 새 테이블 추가 시 해당 모듈의 `store.py` 또는 `service.py`에 `_DDL` 상수 필수
-- `_DDL`에 `CREATE TABLE IF NOT EXISTS`와 `CREATE INDEX IF NOT EXISTS`를 모두 포함
-- 스키마 변경 시 `_DDL`을 먼저 수정 → `python scripts/generate_db_schema.py` 실행으로 문서 재생성
+- 새 테이블 추가 시 해당 모듈의 `store.py` 또는 `service.py`에 `{DOMAIN}_SCHEMA` 상수 필수
+- `{DOMAIN}_SCHEMA`에 `CREATE TABLE IF NOT EXISTS`와 `CREATE INDEX IF NOT EXISTS`를 모두 포함
+- 스키마 변경 시 `{DOMAIN}_SCHEMA`를 먼저 수정 → `python scripts/generate_db_schema.py` 실행으로 문서 재생성
 - `docs/architecture/generated/db-schema.md`를 직접 편집하지 않는다 (스크립트가 SSOT)
 
 ### 패턴
@@ -276,7 +278,7 @@ total = price * quantity
 ```python
 # src/ante/{모듈}/store.py
 
-_DDL = """
+{DOMAIN}_SCHEMA = """
 CREATE TABLE IF NOT EXISTS {테이블명} (
     id        TEXT PRIMARY KEY,
     name      TEXT NOT NULL,
