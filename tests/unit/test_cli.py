@@ -149,8 +149,26 @@ class TestOutputFormatter:
         fmt.success("ok", {"count": 5})
         captured = capsys.readouterr()
         data = json.loads(captured.out)
+        assert set(data) == {"status", "message", "data"}
         assert data["status"] == "ok"
-        assert data["count"] == 5
+        assert data["message"] == "ok"
+        assert data["data"] == {"count": 5}
+        assert "count" not in data
+
+    def test_success_json_no_data(self, capsys):
+        fmt = OutputFormatter("json")
+        fmt.success("done!")
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data == {"status": "ok", "message": "done!", "data": {}}
+
+    def test_success_json_preserves_payload_status(self, capsys):
+        fmt = OutputFormatter("json")
+        fmt.success("member revoked", {"status": "revoked"})
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["status"] == "ok"
+        assert data["data"]["status"] == "revoked"
 
     def test_is_json(self):
         assert OutputFormatter("json").is_json is True

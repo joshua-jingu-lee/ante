@@ -185,7 +185,7 @@ class TestSystemStop:
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data["status"] == "ok"
-            assert data["pid"] == 12345
+            assert data["data"]["pid"] == 12345
 
     def test_stop_pid_not_found_message_includes_resolver_path(
         self, runner, tmp_path, monkeypatch
