@@ -26,9 +26,11 @@ export default function AccountSummary({ summary }: { summary: TreasurySummary }
         {summary.account_number && (
           <span className="text-[13px] font-mono">{summary.account_number}</span>
         )}
-        <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${summary.is_demo_trading ? 'bg-warning-bg text-warning' : 'bg-positive-bg text-positive'}`}>
-          {summary.is_demo_trading ? '모의투자' : '실전투자'}
-        </span>
+        {summary.is_demo_trading !== undefined && (
+          <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${summary.is_demo_trading ? 'bg-warning-bg text-warning' : 'bg-positive-bg text-positive'}`}>
+            {summary.is_demo_trading ? 'KIS 모의투자' : 'KIS 실전투자'}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-4 text-[13px] text-text-muted">
           <span>수수료 {(summary.commission_rate * 100).toFixed(3)}%</span>
           <span>매도세 {(summary.sell_tax_rate * 100).toFixed(2)}%</span>

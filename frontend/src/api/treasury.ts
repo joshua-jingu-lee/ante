@@ -55,7 +55,7 @@ function toTreasurySummaryView(raw: TreasurySummaryResponse): TreasurySummaryVie
     account_balance: numberValue(e.account_balance, raw.total_balance),
     purchasable_amount: numberValue(e.purchasable_amount),
     account_number: optionalString(e.account_number) ?? raw.account_no ?? undefined,
-    is_demo_trading: optionalBoolean(e.is_demo_trading) ?? raw.is_virtual ?? undefined,
+    is_demo_trading: optionalBoolean(e.is_demo_trading),
     last_sync_time: optionalString(e.last_sync_time) ?? raw.synced_at ?? undefined,
     total_reserved: numberValue(e.total_reserved),
     total_available: numberValue(e.total_available, raw.unallocated),

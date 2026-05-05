@@ -23,7 +23,7 @@ export default function Bots() {
     .filter((b) => b.status !== 'deleted')
     .sort((a, b) => (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99))
 
-  const isVirtual = allBots.length > 0 && allBots.every((b) => b.mode === 'paper')
+  const isVirtual = allBots.length > 0 && allBots.every((b) => b.trading_mode === 'virtual')
 
   return (
     <>

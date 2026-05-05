@@ -7,14 +7,14 @@
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
 export type BotStatus = 'created' | 'running' | 'stopping' | 'stopped' | 'error' | 'deleted'
-export type BotMode = 'live' | 'paper'
+export type BotTradingMode = 'virtual' | 'live'
 
 export interface BotView {
   bot_id: string
   name: string
   strategy_name?: string
   status: BotStatus
-  mode: BotMode
+  trading_mode: BotTradingMode
   interval_seconds?: number
   created_at: string
 }

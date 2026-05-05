@@ -6,10 +6,10 @@ import type {
   BotDetailView,
   BotLog,
   BotLogResult,
-  BotMode,
   BotPosition,
   BotStatus,
   BotStrategy,
+  BotTradingMode,
   BotUpdateInput,
   BotView,
   HandlePositions,
@@ -57,8 +57,8 @@ function toBotStatus(value: string): BotStatus {
   return BOT_STATUSES.has(value as BotStatus) ? (value as BotStatus) : 'error'
 }
 
-function toBotMode(value: unknown): BotMode {
-  return value === 'live' ? 'live' : 'paper'
+function toTradingMode(value: unknown): BotTradingMode {
+  return typeof value === 'string' && value.toLowerCase() === 'live' ? 'live' : 'virtual'
 }
 
 function toStringArray(value: unknown): string[] {
@@ -142,7 +142,7 @@ function toBotView(raw: BotInfo): BotView {
     name: raw.name,
     strategy_name: raw.strategy_name ?? raw.strategy_id,
     status: toBotStatus(raw.status),
-    mode: toBotMode(extra.mode ?? extra.bot_type),
+    trading_mode: toTradingMode(extra.trading_mode),
     interval_seconds: raw.interval_seconds,
     created_at: stringValue(extra.created_at),
   }
