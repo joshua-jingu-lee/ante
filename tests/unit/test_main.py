@@ -1008,6 +1008,40 @@ def test_approval_account_id_helper_rejects_invalid():
         _approval_account_id({"account_id": "default"}, context="test")
 
 
+def test_approval_bot_create_config_requires_nested_config():
+    """#1283: bot_create approval payload 는 params.config 기반이다."""
+    from ante.main import _approval_bot_create_config
+
+    with pytest.raises(ValueError, match="params.config"):
+        _approval_bot_create_config({"account_id": "acc-test"})
+
+    with pytest.raises(ValueError, match="strategy_id"):
+        _approval_bot_create_config({"config": {"account_id": "acc-test"}})
+
+
+def test_approval_bot_create_config_builds_bot_config():
+    """#1283: params.config 를 BotConfig로 변환한다."""
+    from ante.main import _approval_bot_create_config
+
+    config = _approval_bot_create_config(
+        {
+            "config": {
+                "bot_id": "bot-1",
+                "strategy_id": "strat-1",
+                "name": "momentum-bot",
+                "account_id": "acc-test",
+                "interval_seconds": 60,
+            }
+        }
+    )
+
+    assert config.bot_id == "bot-1"
+    assert config.strategy_id == "strat-1"
+    assert config.name == "momentum-bot"
+    assert config.account_id == "acc-test"
+    assert config.interval_seconds == 60
+
+
 async def test_exec_rule_change_account_scoped_invalid_rejected(tmp_path: Path) -> None:
     """Refs #1217 → #1241 SPLIT-2: rule_change executor 는 invalid
     account_id payload 를 ``InvalidAccountIdError`` 로 거부한다.
