@@ -85,15 +85,17 @@ Frontend OpenAPI 타입 경계 검사는 zero-violation 정책을 사용한다.
 
 - Report-only 진단: `cd frontend && npm run check-api-types`
 - Blocking 명령: `cd frontend && npm run check-api-types:strict`
+- CI job: `frontend-api-types`
 - Baseline/allowlist: 사용하지 않는다. #1261/#1262/#1263 이후 findings 0을 기준선으로 삼는다.
 - Changed-file mode: 사용하지 않는다. 전체 `frontend/src` 경계를 검사한다.
-- CI workflow required check 적용은 별도 후속 이슈에서 수행한다. 이 문서는 후속 적용의 acceptance criteria만 정의한다.
+- `ci` aggregate job은 `frontend-api-types`를 `needs`에 포함한다. branch protection이 `ci`를 required status check로 사용하면 API 타입 경계 위반도 `ci` 실패로 머지를 차단한다.
 
-후속 CI 적용 PR은 `check-api-types:strict`가 findings 0으로 통과하고, 동일 PR에서 `.github/workflows/ci.yml`에 blocking step을 추가해야 한다.
+branch protection repository setting은 이 저장소 밖 운영 설정이므로 워크플로우가 직접 수정하지 않는다.
 
 예시:
 
 ```yaml
+- cd frontend && npm run check-api-types:strict
 - ruff check src/ tests/
 - ruff format --check src/ tests/
 - mypy src/
