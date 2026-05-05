@@ -153,7 +153,7 @@ class Services:
     performance_tracker: Any = None
     trade_service: Any = None
     bot_manager: Any = None
-    paper_executor: Any = None
+    virtual_executor: Any = None
     live_portfolio: Any = None
     live_order_view: Any = None
     strategy_snapshot: Any = None
@@ -403,14 +403,14 @@ async def _init_trading(s: Services) -> None:
 
     # BotManager
     from ante.bot import BotManager  # noqa: F401
-    from ante.bot.providers.paper import PaperExecutor
+    from ante.bot.providers.virtual import VirtualExecutor
     from ante.strategy.snapshot import StrategySnapshot
 
-    s.paper_executor = PaperExecutor(
+    s.virtual_executor = VirtualExecutor(
         eventbus=s.eventbus,
         gateway=None,  # APIGateway 연결 후 설정
     )
-    s.paper_executor.subscribe()
+    s.virtual_executor.subscribe()
 
     from ante.bot.providers.live import LiveOrderView
 
@@ -773,14 +773,14 @@ def _init_context_factory(s: Services) -> None:
 
     SPLIT-3 (#1242): ``LiveDataProvider`` 는 봇별로 ``StrategyContextFactory``
     가 생성한다 (per-bot account binding). ``s.data_provider`` 는 API gateway
-    가 없는 (paper-only test 등) 환경의 fallback 으로 ``_NullDataProvider`` 를
+    가 없는 (virtual-only test 등) 환경의 fallback 으로 ``_NullDataProvider`` 를
     설정한다 — 이 경우 strategy 의 OHLCV 호출은 빈 결과를 반환한다.
     """
     from ante.bot import StrategyContextFactory
     from ante.bot.providers.live import LiveTradeHistoryView
 
     if s.api_gateway:
-        s.paper_executor._gateway = s.api_gateway
+        s.virtual_executor._gateway = s.api_gateway
 
     live_trade_history = LiveTradeHistoryView(trade_recorder=s.trade_recorder)
 
@@ -792,7 +792,7 @@ def _init_context_factory(s: Services) -> None:
         account_service=s.account_service,
         live_portfolio=s.live_portfolio,
         live_order_view=s.live_order_view,
-        paper_executor=s.paper_executor,
+        virtual_executor=s.virtual_executor,
         live_trade_history=live_trade_history,
         treasury_manager=s.treasury_manager,
         position_history=s.position_history,

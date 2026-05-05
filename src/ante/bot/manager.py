@@ -468,9 +468,9 @@ class BotManager:
 
         self._unregister_bot_events(bot)
 
-        # PaperExecutor 등록 해제 (봇이 등록되어 있는 경우)
-        if self._context_factory and self._context_factory._paper_executor:
-            self._context_factory._paper_executor.unregister_bot(bot_id)
+        # VirtualExecutor 등록 해제 (봇이 등록되어 있는 경우)
+        if self._context_factory and self._context_factory._virtual_executor:
+            self._context_factory._virtual_executor.unregister_bot(bot_id)
 
         # 시그널 키 폐기
         if self._signal_key_manager:

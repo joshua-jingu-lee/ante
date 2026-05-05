@@ -193,7 +193,7 @@ reconfig 는 1.0 범위 외이다.
 | `StopOrder.__post_init__` | `require_account_id(self.account_id)` | trigger payload 정합 (#1217 → #1242 SPLIT-3) |
 | `StreamConnectedEvent` / `StreamDisconnectedEvent` | `_requires_account_id: ClassVar[bool] = True` + `account_id` 발행자 전달 | `KISStreamClient` per-account 인스턴스 정책 (#1217 → #1242 SPLIT-3) |
 | `ResponseCache.invalidate` | substring → prefix-exact (`acc-1` invalidate 가 `acc-12` 유지) | account-scoped 캐시 키 격리 (#1217 → #1242 SPLIT-3) |
-| `PaperExecutor` / `_resolve_price` 호출 사이트 | `account_id` 명시 전달 | gateway/stream_integration ctor required 정렬 (#1217 → #1242 SPLIT-3) |
+| `VirtualExecutor` / `_resolve_price` 호출 사이트 | `account_id` 명시 전달 | gateway/stream_integration ctor required 정렬 (#1217 → #1242 SPLIT-3) |
 
 후속 영역은 다음 이슈로 이관:
 

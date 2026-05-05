@@ -57,7 +57,7 @@ ante signal connect --key sk_a1b2c3d4
 
 cold-path `bot remove`는 BotManager를 만들지 않으며, `signal_keys` 행 삭제,
 전략 스냅샷 정리, Treasury budget 환수, `bots.status='deleted'` 갱신만 수행한다.
-PaperExecutor unregister, EventBus 구독 해제, `BotStoppedEvent` 발행은 서버 정지
+VirtualExecutor unregister, EventBus 구독 해제, `BotStoppedEvent` 발행은 서버 정지
 상태에서 대상 인메모리 객체가 없으므로 수행하지 않는다. cold-path에서
 `running`/`stopping` 상태는 stale status로 간주하며 포지션 청산은 지원하지 않는다.
 

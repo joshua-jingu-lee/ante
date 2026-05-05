@@ -811,11 +811,11 @@ async def test_init_context_factory_wires_account_and_treasury(
     StrategyContextFactory에 모두 주입한다 (#1124 회귀 방지).
 
     이 wiring이 누락되면 _resolve_trading_mode가 VIRTUAL로 단락되어
-    trading_mode=live 계좌의 봇이 Paper context로 생성되는 버그가 재발한다.
+    trading_mode=live 계좌의 봇이 virtual context로 생성되는 버그가 재발한다.
     """
     from ante.account import AccountService
     from ante.bot import BotManager
-    from ante.bot.providers.paper import PaperExecutor
+    from ante.bot.providers.virtual import VirtualExecutor
     from ante.main import Services, _init_context_factory
     from ante.strategy.base import DataProvider
     from ante.trade.position import PositionHistory
@@ -860,7 +860,7 @@ async def test_init_context_factory_wires_account_and_treasury(
         position_history=position_history,
         bot_manager=bot_manager,
         data_provider=_FakeDataProvider(),
-        paper_executor=PaperExecutor(eventbus=eventbus),
+        virtual_executor=VirtualExecutor(eventbus=eventbus),
     )
 
     # trade_recorder는 LiveTradeHistoryView 생성에 필요
