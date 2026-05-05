@@ -1,21 +1,10 @@
 /**
  * Strategy 도메인 타입.
  *
- * API 응답 타입은 api.generated.ts에서 자동 생성된 타입을 사용한다.
- * generated 타입에 누락된 필드는 프론트엔드에서 확장하여 정의한다.
+ * API 계약 타입은 frontend/src/api/strategies.ts 어댑터 안에서만 사용한다.
+ * 이 파일은 화면과 훅이 공유하는 프론트엔드 전용 타입만 노출한다.
  */
-import type {
-  DailySummaryItem,
-  WeeklySummaryItem,
-  MonthlySummaryItem,
-} from './api.generated'
 
-// ── API 응답 타입 re-export (generated 완전 대응) ────────
-export type DailySummary = DailySummaryItem
-export type WeeklySummary = WeeklySummaryItem
-export type MonthlySummary = MonthlySummaryItem
-
-/** 에쿼티 커브 포인트 — StrategyPerformance.equity_curve 원소 타입. */
 export interface EquityCurvePoint {
   date: string
   value: number
@@ -83,7 +72,7 @@ export interface StrategyPerformance {
   realized_pnl?: number
   unrealized_pnl?: number
   budget_allocated?: number
-  equity_curve: { date: string; value: number }[]
+  equity_curve: EquityCurvePoint[]
 }
 
 /**
@@ -91,7 +80,7 @@ export interface StrategyPerformance {
  * generated StrategyTradeItem과 필드명이 다르므로 프론트엔드에서 명시.
  */
 export interface Trade {
-  id?: number
+  id?: string | number
   trade_id?: string
   strategy_id?: number
   bot_id: string
@@ -105,4 +94,28 @@ export interface Trade {
   status?: string
   pnl?: number
   commission?: number
+}
+
+export interface DailySummary {
+  date: string
+  realized_pnl: number
+  trade_count: number
+  win_rate: number
+}
+
+export interface WeeklySummary {
+  week_start: string
+  week_end: string
+  week_label: string
+  realized_pnl: number
+  trade_count: number
+  win_rate: number
+}
+
+export interface MonthlySummary {
+  year: number
+  month: number
+  realized_pnl: number
+  trade_count: number
+  win_rate: number
 }
