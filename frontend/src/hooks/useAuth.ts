@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { login, logout, getMe } from '../api/auth'
-import type { LoginRequest } from '../types/auth'
+import type { LoginInput } from '../types/auth'
 
 export function useUser() {
   return useQuery({
@@ -18,7 +18,7 @@ export function useLogin() {
   const [searchParams] = useSearchParams()
 
   return useMutation({
-    mutationFn: (data: LoginRequest) => login(data),
+    mutationFn: (data: LoginInput) => login(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
       const redirect = searchParams.get('redirect') || '/treasury'

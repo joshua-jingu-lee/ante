@@ -1,23 +1,31 @@
 /**
  * Auth 도메인 타입.
  *
- * API 응답 타입은 api.generated.ts에서 자동 생성된 타입을 사용한다.
- * 프론트엔드 전용 타입만 이 파일에 직접 정의한다.
+ * API 계약 타입은 frontend/src/api/auth.ts 어댑터 안에서만 사용한다.
+ * 이 파일은 화면과 훅이 공유하는 프론트엔드 전용 타입만 노출한다.
  */
-import type {
-  LoginRequest as GeneratedLoginRequest,
-  LoginResponse as GeneratedLoginResponse,
-  MeResponse,
-} from './api.generated'
-
-// ── API 응답 타입 re-export ──────────────────────────────
-export type LoginRequest = GeneratedLoginRequest
-export type LoginResponse = GeneratedLoginResponse
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
 
-/** /api/auth/me 응답 — generated MeResponse에 scopes, org 필드 추가 */
-export interface User extends MeResponse {
-  org: string
+export interface LoginInput {
+  member_id: string
+  password: string
+}
+
+export interface LoginResultView {
+  member_id: string
+  name: string
+  type: string
+}
+
+export interface AuthUserView {
+  member_id: string
+  name: string
+  type: string
+  role: string
+  emoji?: string
+  login_at?: string
   scopes: string[]
 }
+
+export type User = AuthUserView
