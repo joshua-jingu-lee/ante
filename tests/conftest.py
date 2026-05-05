@@ -3,18 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
 
+def _load_import_guard():
+    guard_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "check_import_path.py"
+    )
+    spec = importlib.util.spec_from_file_location("check_import_path", guard_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load import guard: {guard_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Fail collection if ``ante`` resolves outside this checkout."""
-    from scripts.check_import_path import ImportPathCheckError, check_import_path
-
+    guard = _load_import_guard()
     try:
-        check_import_path()
-    except ImportPathCheckError as exc:
+        guard.check_import_path()
+    except guard.ImportPathCheckError as exc:
         raise pytest.UsageError(str(exc)) from exc
 
 
