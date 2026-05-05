@@ -125,7 +125,24 @@ class TestReportSubmitWithRun:
             }
             result = runner.invoke(
                 cli,
-                ["report", "submit", str(report_file), "--run", "run-1"],
+                [
+                    "--format",
+                    "json",
+                    "report",
+                    "submit",
+                    str(report_file),
+                    "--run",
+                    "run-1",
+                ],
             )
             assert result.exit_code == 0
-            assert "rpt-123" in result.output
+            data = json.loads(result.output)
+            assert set(data) == {"status", "message", "data"}
+            assert data["status"] == "ok"
+            assert data["message"] == "Report submitted: rpt-123"
+            assert data["data"] == {
+                "report_id": "rpt-123",
+                "strategy": "momentum",
+                "status": "submitted",
+                "backtest_run_id": "run-1",
+            }

@@ -356,8 +356,8 @@ class TestAccountCreate:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["status"] == "ok"
-        assert data["account_id"] == "test2"
-        assert data["broker_type"] == "test"
+        assert data["data"]["account_id"] == "test2"
+        assert data["data"]["broker_type"] == "test"
 
     def test_create_blocked_when_active_runtime(
         self, mock_account_service: AsyncMock, active_runtime

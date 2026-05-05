@@ -200,4 +200,4 @@ class TestBotCreateWithParams:
             )
             assert result.exit_code == 0
             data = json.loads(result.output)
-            assert data["params"]["window"] == 30
+            assert data["data"]["params"]["window"] == 30

@@ -87,9 +87,11 @@ class OutputFormatter:
     def success(self, message: str, data: dict | None = None) -> None:
         """성공 메시지 출력."""
         if self._format == "json":
-            result = {"status": "ok", "message": message}
-            if data:
-                result.update(data)
+            result = {
+                "status": "ok",
+                "message": message,
+                "data": data if data is not None else {},
+            }
             click.echo(json.dumps(result, indent=2, default=str, ensure_ascii=False))
         else:
             click.echo(message)
