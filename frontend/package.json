@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "generate-types": "bash scripts/generate-types.sh",
-    "check-api-types": "node scripts/check-api-type-boundaries.mjs"
+    "check-api-types": "node scripts/check-api-type-boundaries.mjs",
+    "check-api-types:strict": "node scripts/check-api-type-boundaries.mjs --fail-on-findings"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",

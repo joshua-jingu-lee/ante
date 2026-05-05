@@ -14,6 +14,9 @@ const unknownCastPattern = /\bas\s+unknown\s+as\b/g
 const ignoredDirs = new Set(['node_modules', 'dist', '.vite-temp'])
 const sourceExtensions = new Set(['.ts', '.tsx'])
 const findings = []
+const strictMode =
+  process.argv.includes('--fail-on-findings')
+  || process.env.ANTE_API_TYPE_BOUNDARY_STRICT === '1'
 
 function walk(dir) {
   const files = []
@@ -133,7 +136,7 @@ const byRule = findings.reduce((acc, finding) => {
   return acc
 }, {})
 
-console.log('Frontend API type boundary report (report-only)')
+console.log(`Frontend API type boundary report (${strictMode ? 'strict' : 'report-only'})`)
 console.log(`Scanned: ${rel(srcRoot)}`)
 console.log(`Findings: ${findings.length}`)
 for (const [rule, count] of Object.entries(byRule).sort()) {
@@ -149,4 +152,9 @@ if (findings.length > 0) {
   }
 }
 
-console.log('\nResult: report-only, exit 0')
+if (strictMode && findings.length > 0) {
+  console.log('\nResult: strict, exit 1')
+  process.exit(1)
+}
+
+console.log(`\nResult: ${strictMode ? 'strict' : 'report-only'}, exit 0`)

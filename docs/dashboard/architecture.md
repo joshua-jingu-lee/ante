@@ -223,9 +223,17 @@ export default function BotDetail() {
 - **adapter boundary**: `frontend/src/api/*.ts`만 generated type을 import하고, raw response를 UI/domain model로 변환한다.
 - **UI/domain model**: `frontend/src/types/*.ts`에는 `View`, `Input`, `FormValues` 등 프론트 전용 타입만 둔다.
 - **금지 suffix**: 수동 `Response`, `Request`, `Payload` 타입 선언 금지 (`api.generated.ts` 제외)
+- **경계 검사**: `npm run check-api-types`는 report-only 진단, `npm run check-api-types:strict`는 zero-finding blocking 기준이다.
 - **`interface`**: 컴포넌트 Props, UI/domain model 등 프론트 전용 객체 정의
 - **`type`**: UI 상태 유니온·별칭 (`type BotStatus = 'running' | 'stopped'`)
 - **`enum` 미사용**: 백엔드 enum은 string literal union으로 표현
+
+#### API 타입 경계 Gate 준비 기준
+
+- strict gate 정책은 `zero-violation`이다. findings가 0인 상태를 baseline으로 삼고 allowlist는 두지 않는다.
+- 후속 CI 적용 이슈는 `cd frontend && npm run check-api-types:strict`를 blocking command로 사용한다.
+- 새 API adapter는 generated response/request 타입을 `frontend/src/api/*.ts` 내부에서만 import해야 하며, hooks/pages/components/types 계층으로 누수되면 strict gate 실패 대상이다.
+- `as unknown as`는 API adapter의 `toXxxView()` mapper 내부에서만 예외적으로 허용한다.
 
 #### React Query 규칙
 
