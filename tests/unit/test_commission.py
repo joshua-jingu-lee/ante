@@ -95,23 +95,23 @@ class TestKISCommissionInfo:
         assert info.sell_commission_rate == 0.002
 
 
-# ── US-2: PaperExecutor 매도 세금 반영 ────────────
+# ── US-2: VirtualExecutor 매도 세금 반영 ────────────
 
 
-class TestPaperExecutorCommission:
+class TestVirtualExecutorCommission:
     async def test_buy_commission(self):
-        """PaperExecutor 매수 수수료 = buy_commission_rate만 적용."""
-        from ante.bot.providers.paper import PaperExecutor, PaperPortfolioView
+        """VirtualExecutor 매수 수수료 = buy_commission_rate만 적용."""
+        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
         from ante.eventbus.events import OrderApprovedEvent
 
         eventbus = EventBus()
-        executor = PaperExecutor(
+        executor = VirtualExecutor(
             eventbus=eventbus,
             commission_rate=0.00015,
             sell_tax_rate=0.0023,
         )
 
-        portfolio = PaperPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
+        portfolio = VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
         executor.register_bot("bot1", portfolio)
         executor.subscribe()
 
@@ -138,18 +138,18 @@ class TestPaperExecutorCommission:
         assert received[0].commission == pytest.approx(expected_commission)
 
     async def test_sell_commission_includes_tax(self):
-        """PaperExecutor 매도 수수료 = commission_rate + sell_tax_rate."""
-        from ante.bot.providers.paper import PaperExecutor, PaperPortfolioView
+        """VirtualExecutor 매도 수수료 = commission_rate + sell_tax_rate."""
+        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
         from ante.eventbus.events import OrderApprovedEvent
 
         eventbus = EventBus()
-        executor = PaperExecutor(
+        executor = VirtualExecutor(
             eventbus=eventbus,
             commission_rate=0.00015,
             sell_tax_rate=0.0023,
         )
 
-        portfolio = PaperPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
+        portfolio = VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
         # 먼저 보유 포지션 설정
         portfolio._positions["005930"] = {
             "quantity": 100.0,

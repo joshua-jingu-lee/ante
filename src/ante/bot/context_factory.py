@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 from ante.account.models import TradingMode
 from ante.bot.config import BotConfig
 from ante.bot.providers.live import LivePortfolioView
-from ante.bot.providers.paper import PaperExecutor, PaperOrderView, PaperPortfolioView
+from ante.bot.providers.virtual import (
+    VirtualExecutor,
+    VirtualOrderView,
+    VirtualPortfolioView,
+)
 from ante.strategy.context import StrategyContext
 
 if TYPE_CHECKING:
@@ -36,7 +40,7 @@ class StrategyContextFactory:
     인터페이스 (``StrategyContext.get_ohlcv``) 는 변경되지 않는다.
     ``api_gateway`` / ``parquet_store`` 가 모두 주입되어 있을 때만 봇별
     인스턴스를 만들고, 미주입이면 fallback ``data_provider`` 를 사용한다
-    (paper-only 환경 호환).
+    (virtual-only 환경 호환).
     """
 
     def __init__(
@@ -45,7 +49,7 @@ class StrategyContextFactory:
         account_service: AccountService | None = None,
         live_portfolio: LivePortfolioView | None = None,
         live_order_view: LiveOrderView | None = None,
-        paper_executor: PaperExecutor | None = None,
+        virtual_executor: VirtualExecutor | None = None,
         live_trade_history: LiveTradeHistoryView | None = None,
         treasury_manager: TreasuryManager | None = None,
         position_history: PositionHistory | None = None,
@@ -56,7 +60,7 @@ class StrategyContextFactory:
         self._account_service = account_service
         self._live_portfolio = live_portfolio
         self._live_order_view = live_order_view
-        self._paper_executor = paper_executor
+        self._virtual_executor = virtual_executor
         self._live_trade_history = live_trade_history
         self._treasury_manager = treasury_manager
         self._position_history = position_history
@@ -67,11 +71,11 @@ class StrategyContextFactory:
         """BotConfig 기반으로 적절한 StrategyContext 생성.
 
         AccountService가 주입된 경우 Account.trading_mode로 분기하고,
-        없으면 기본값(paper)으로 동작한다.
+        없으면 기본값(VIRTUAL)으로 동작한다.
         """
         trading_mode = self._resolve_trading_mode(config)
         if trading_mode == TradingMode.VIRTUAL:
-            return self._create_paper_context(config)
+            return self._create_virtual_context(config)
         return self._create_live_context(config)
 
     def _resolve_trading_mode(self, config: BotConfig) -> TradingMode:
@@ -143,23 +147,23 @@ class StrategyContextFactory:
         logger.info("Live StrategyContext 생성: %s", config.bot_id)
         return ctx
 
-    def _create_paper_context(self, config: BotConfig) -> StrategyContext:
-        """Paper 봇용 StrategyContext 생성.
+    def _create_virtual_context(self, config: BotConfig) -> StrategyContext:
+        """Virtual 계좌 봇용 StrategyContext 생성.
 
-        SPLIT-3 (#1242): paper 봇이라도 OHLCV / price 조회는 봇의 account_id
+        SPLIT-3 (#1242): virtual 계좌 봇이라도 OHLCV / price 조회는 봇의 account_id
         로 APIGateway 를 호출해야 한다 (broker routing). live 와 동일하게
         ``api_gateway`` 가 있으면 봇별 LiveDataProvider 를 생성한다.
         """
-        initial_balance = self._resolve_paper_balance(config)
-        paper_portfolio = PaperPortfolioView(
+        initial_balance = self._resolve_virtual_balance(config)
+        virtual_portfolio = VirtualPortfolioView(
             bot_id=config.bot_id,
             initial_balance=initial_balance,
         )
-        paper_order_view = PaperOrderView(portfolio=paper_portfolio)
+        virtual_order_view = VirtualOrderView(portfolio=virtual_portfolio)
 
-        # PaperExecutor에 봇 등록
-        if self._paper_executor:
-            self._paper_executor.register_bot(config.bot_id, paper_portfolio)
+        # VirtualExecutor에 봇 등록
+        if self._virtual_executor:
+            self._virtual_executor.register_bot(config.bot_id, virtual_portfolio)
 
         data_provider = self._data_provider
         if self._api_gateway is not None:
@@ -174,18 +178,18 @@ class StrategyContextFactory:
         ctx = StrategyContext(
             bot_id=config.bot_id,
             data_provider=data_provider,
-            portfolio=paper_portfolio,
-            order_view=paper_order_view,
+            portfolio=virtual_portfolio,
+            order_view=virtual_order_view,
         )
         logger.info(
-            "Paper StrategyContext 생성: %s (잔고: %s)",
+            "Virtual StrategyContext 생성: %s (잔고: %s)",
             config.bot_id,
             initial_balance,
         )
         return ctx
 
-    def _resolve_paper_balance(self, config: BotConfig) -> float:
-        """Paper 봇의 초기 잔고를 Account 레벨(Treasury)에서 조회.
+    def _resolve_virtual_balance(self, config: BotConfig) -> float:
+        """Virtual 계좌 봇의 초기 잔고를 Account 레벨(Treasury)에서 조회.
 
         Treasury에 해당 봇의 예산이 배정되어 있으면 allocated 값을 사용하고,
         Treasury가 없으면 0.0을 반환한다.
@@ -198,7 +202,7 @@ class StrategyContextFactory:
                     return budget.allocated
             except KeyError:
                 logger.warning(
-                    "Paper 봇 '%s': 계좌 '%s'의 Treasury 미발견 -- 잔고 0",
+                    "Virtual 계좌 봇 '%s': 계좌 '%s'의 Treasury 미발견 -- 잔고 0",
                     config.bot_id,
                     config.account_id,
                 )

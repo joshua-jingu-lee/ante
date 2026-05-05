@@ -15,7 +15,7 @@
 - 예외 발생 시 해당 봇만 ERROR, 다른 봇 영향 없음 확인
 - stop() → Task 취소 + on_stop() 호출 + BotStoppedEvent 발행 확인
 - OrderFilledEvent 수신 → 해당 bot_id만 on_fill() 호출 확인
-- VIRTUAL 계좌 봇: PaperPortfolioView 가상 자금 관리 정상 동작
+- VIRTUAL 계좌 봇: VirtualPortfolioView 가상 자금 관리 정상 동작
 - BotManager: 복수 봇 동시 운영 + 개별 시작/중지 확인
 - BotManager: 봇 생성 시 Account 존재·상태 검증 확인
 - BotManager: Strategy.meta.exchange와 Account.exchange 불일치 시 에러 확인

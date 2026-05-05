@@ -91,7 +91,7 @@ src/ante/
 │   ├── signal_key.py                 # SignalKeyManager — 봇별 시그널 키 발급/관리
 │   ├── providers/
 │   │   ├── live.py                   # LiveProvider — 실전 봇 데이터 공급
-│   │   ├── paper.py                  # PaperProvider — 모의 봇 데이터 공급
+│   │   ├── virtual.py                # VirtualProvider — 가상 실행 봇 데이터 공급
 │   │   └── __init__.py
 │   ├── __init__.py
 │   └── cold_path.py

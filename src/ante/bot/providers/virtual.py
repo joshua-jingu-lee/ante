@@ -1,4 +1,4 @@
-"""Paper 봇용 Provider 구현체 + PaperExecutor.
+"""Virtual 계좌 봇용 Provider 구현체 + VirtualExecutor.
 
 인메모리 가상 자금/포지션으로 실제 계좌 영향 없이 전략을 검증한다.
 """
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PaperPortfolioView(PortfolioView):
-    """Paper 봇용 PortfolioView. 인메모리 가상 잔고/포지션 관리."""
+class VirtualPortfolioView(PortfolioView):
+    """Virtual 계좌 봇용 PortfolioView. 인메모리 가상 잔고/포지션 관리."""
 
     def __init__(self, bot_id: str, initial_balance: float) -> None:
         self._bot_id = bot_id
@@ -103,10 +103,10 @@ class PaperPortfolioView(PortfolioView):
             self._reserved -= order["amount"]
 
 
-class PaperOrderView(OrderView):
-    """Paper 봇용 OrderView. PaperPortfolioView의 미체결 주문 추적."""
+class VirtualOrderView(OrderView):
+    """Virtual 계좌 봇용 OrderView. VirtualPortfolioView의 미체결 주문 추적."""
 
-    def __init__(self, portfolio: PaperPortfolioView) -> None:
+    def __init__(self, portfolio: VirtualPortfolioView) -> None:
         self._portfolio = portfolio
 
     def get_open_orders(self, bot_id: str) -> list[dict[str, Any]]:
@@ -117,10 +117,10 @@ class PaperOrderView(OrderView):
         ]
 
 
-class PaperExecutor:
-    """Paper 봇의 주문을 가상 체결하는 실행기.
+class VirtualExecutor:
+    """Virtual 계좌 봇의 주문을 가상 체결하는 실행기.
 
-    EventBus에서 OrderApprovedEvent를 구독하여 paper 봇의 주문만 처리한다.
+    EventBus에서 OrderApprovedEvent를 구독하여 virtual 계좌 봇의 주문만 처리한다.
     RuleEngine → Treasury 파이프라인을 거친 승인된 주문만 체결한다.
     """
 
@@ -139,18 +139,18 @@ class PaperExecutor:
             sell_commission_rate=commission_rate + sell_tax_rate,
         )
         self._slippage_rate = slippage_rate
-        self._portfolios: dict[str, PaperPortfolioView] = {}
+        self._portfolios: dict[str, VirtualPortfolioView] = {}
         self._bot_configs: dict[str, Any] = {}
 
-    def register_bot(self, bot_id: str, portfolio: PaperPortfolioView) -> None:
-        """Paper 봇의 PortfolioView 등록."""
+    def register_bot(self, bot_id: str, portfolio: VirtualPortfolioView) -> None:
+        """Virtual 계좌 봇의 PortfolioView 등록."""
         self._portfolios[bot_id] = portfolio
-        logger.info("PaperExecutor: 봇 등록 %s", bot_id)
+        logger.info("VirtualExecutor: 봇 등록 %s", bot_id)
 
     def unregister_bot(self, bot_id: str) -> None:
-        """Paper 봇 등록 해제."""
+        """Virtual 계좌 봇 등록 해제."""
         self._portfolios.pop(bot_id, None)
-        logger.info("PaperExecutor: 봇 해제 %s", bot_id)
+        logger.info("VirtualExecutor: 봇 해제 %s", bot_id)
 
     def subscribe(self) -> None:
         """EventBus에 OrderApprovedEvent 구독."""
@@ -159,10 +159,10 @@ class PaperExecutor:
         self._eventbus.subscribe(
             OrderApprovedEvent, self._on_order_approved, priority=50
         )
-        logger.info("PaperExecutor 구독 완료")
+        logger.info("VirtualExecutor 구독 완료")
 
     async def _on_order_approved(self, event: object) -> None:
-        """OrderApprovedEvent 처리. paper 봇의 주문만 처리."""
+        """OrderApprovedEvent 처리. virtual 계좌 봇의 주문만 처리."""
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderFilledEvent,
@@ -219,7 +219,7 @@ class PaperExecutor:
         await self._eventbus.publish(
             OrderFilledEvent(
                 order_id=order_id,
-                broker_order_id=f"paper-{order_id[:8]}",
+                broker_order_id=f"virtual-{order_id[:8]}",
                 bot_id=event.bot_id,
                 strategy_id=event.strategy_id,
                 account_id=account_id,
@@ -233,7 +233,7 @@ class PaperExecutor:
             )
         )
         logger.info(
-            "Paper 체결: %s %s %s qty=%s price=%s commission=%s",
+            "Virtual 체결: %s %s %s qty=%s price=%s commission=%s",
             event.bot_id,
             side,
             symbol,

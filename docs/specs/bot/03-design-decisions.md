@@ -39,7 +39,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 **제거된 필드**:
 - `bot_type`: Bot은 trading_mode를 직접 알지 못한다. Account의 `trading_mode`(LIVE/VIRTUAL)에 따라 ContextFactory가 실행 경로를 결정한다.
 - `exchange`: Account의 속성이다. 봇이 독립적으로 exchange를 가지면 Account와 불일치할 수 있으므로 제거. 필요 시 `AccountService.get(account_id).exchange`로 조회한다.
-- `paper_initial_balance`: 가상 자금은 Account 레벨에서 관리한다.
+- `virtual_initial_balance`: 가상 자금은 Account 레벨에서 관리한다.
 
 **실행 간격 제한**: `interval_seconds`는 `MIN_INTERVAL_SECONDS`(10초) 이상 `MAX_INTERVAL_SECONDS`(3600초) 이하여야 한다. 범위 밖이면 `ValueError` 발생. `validate_interval()` 함수로 검증.
 
@@ -61,7 +61,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 **설계 근거**:
 
 1. **Bot은 구체 클래스 (ABC 아닌)**
-   - 이전 초안은 Bot을 ABC로 정의하고 LiveBot/PaperBot이 상속
+   - 이전 초안은 Bot을 ABC로 정의하고 LiveBot/VirtualBot이 상속
    - 실제로 실행 루프는 동일 — 차이는 StrategyContext에 주입되는 DataProvider와 PortfolioView
    - LIVE/VIRTUAL 차이는 Bot이 아니라 ContextFactory가 Account의 trading_mode를 참조하여 결정
 
@@ -96,7 +96,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | `start_bot` | `bot_id: str` | `None` | 봇 시작. `bot.start()` 호출 |
 | `stop_bot` | `bot_id: str` | `None` | 봇 중지 |
 | `update_bot` | `bot_id: str, updates: dict` | `Bot` | 봇 설정 수정. **중지 상태에서만 가능** — RUNNING이면 `BotError` 발생. BotConfig는 frozen dataclass이므로 재생성 패턴 적용: 기존 config를 dict로 풀고 → updates 병합 → 새 BotConfig 생성 → Bot.config 교체 → DB 갱신. `budget` 키가 포함되면 `Treasury.deallocate()` + `Treasury.allocate()`로 예산 재조정. `strategy_id` 변경 시 StrategyRegistry 존재 확인 + exchange 호환성 검증 |
-| `delete_bot` | `bot_id: str, handle_positions: str = "keep"` | `None` | 봇 삭제. 실행 중이면 먼저 중지. `handle_positions="liquidate"` 시 TradeService를 통해 보유 종목 시장가 매도 주문 발행 후 삭제 진행. `"keep"`(기본)은 포지션 유지한 채 봇만 삭제. 이벤트 구독 해제 + VIRTUAL 계좌 봇의 PaperExecutor 해제 + 시그널 키 폐기 + DB 레코드 삭제. `remove_bot`은 동일 기능의 별칭(alias) |
+| `delete_bot` | `bot_id: str, handle_positions: str = "keep"` | `None` | 봇 삭제. 실행 중이면 먼저 중지. `handle_positions="liquidate"` 시 TradeService를 통해 보유 종목 시장가 매도 주문 발행 후 삭제 진행. `"keep"`(기본)은 포지션 유지한 채 봇만 삭제. 이벤트 구독 해제 + VIRTUAL 계좌 봇의 VirtualExecutor 해제 + 시그널 키 폐기 + DB 레코드 삭제. `remove_bot`은 동일 기능의 별칭(alias) |
 | `stop_all` | — | `None` | 모든 실행 중 봇 중지 + 재시작 태스크 취소. 시스템 셧다운 시 호출 |
 | `list_bots` | — | `list[dict[str, Any]]` | 봇 목록 조회 |
 | `get_bot` | `bot_id: str` | `Bot \| None` | 봇 조회. 없으면 None |
@@ -134,12 +134,12 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 | 측면 | LIVE 계좌 봇 | VIRTUAL 계좌 봇 |
 |------|-------------|----------------|
-| PortfolioView | Treasury(잔고) + Trade(포지션) 경유 | PaperPortfolioView, 가상 자금 인메모리 관리 |
-| 주문 처리 | OrderRequestEvent → RuleEngine → BrokerAdapter → 실제 주문 | OrderRequestEvent → RuleEngine → PaperExecutor → 가상 체결 |
+| PortfolioView | Treasury(잔고) + Trade(포지션) 경유 | VirtualPortfolioView, 가상 자금 인메모리 관리 |
+| 주문 처리 | OrderRequestEvent → RuleEngine → BrokerAdapter → 실제 주문 | OrderRequestEvent → RuleEngine → VirtualExecutor → 가상 체결 |
 | 데이터 | 실시간 시세 (API Gateway 경유) | 실시간 시세 (동일) |
 | 자금 | Treasury에서 할당받은 실제 자금 | Account 레벨에서 설정된 가상 자금 |
-| 체결 | BrokerAdapter가 실제 체결 후 OrderFilledEvent 발행 | PaperExecutor가 즉시 가상 체결 후 OrderFilledEvent 발행 |
-| 브로커 접근 | `AccountService.get_broker(account_id)` | — (PaperExecutor 사용) |
+| 체결 | BrokerAdapter가 실제 체결 후 OrderFilledEvent 발행 | VirtualExecutor가 즉시 가상 체결 후 OrderFilledEvent 발행 |
+| 브로커 접근 | `AccountService.get_broker(account_id)` | — (VirtualExecutor 사용) |
 | 예산 접근 | `TreasuryManager.get(account_id)` | 가상 자금 관리 |
 
 **근거**:

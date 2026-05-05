@@ -1,12 +1,16 @@
-"""Bot Provider 구현체 — live/paper 봇용 DataProvider, PortfolioView, OrderView."""
+"""Bot Provider 구현체 — live/virtual 봇용 DataProvider, PortfolioView, OrderView."""
 
 from ante.bot.providers.live import LiveOrderView, LivePortfolioView
-from ante.bot.providers.paper import PaperExecutor, PaperOrderView, PaperPortfolioView
+from ante.bot.providers.virtual import (
+    VirtualExecutor,
+    VirtualOrderView,
+    VirtualPortfolioView,
+)
 
 __all__ = [
     "LiveOrderView",
     "LivePortfolioView",
-    "PaperExecutor",
-    "PaperOrderView",
-    "PaperPortfolioView",
+    "VirtualExecutor",
+    "VirtualOrderView",
+    "VirtualPortfolioView",
 ]

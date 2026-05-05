@@ -28,7 +28,7 @@ Virtual 모드에는 외부 매매와 비거래 변동이 존재하지 않으므
 Treasury 동기화는 `trading_mode`에 따라 분기한다:
 
 - **Live**: 기존대로 `broker.get_account_balance()` + `broker.get_positions()` 사용
-- **Virtual**: Trade DB(`PositionHistory`)에서 해당 `account_id`의 미청산 Paper 포지션을 조회하여 `_purchase_amount`, `_eval_amount` 계산
+- **Virtual**: Trade DB(`PositionHistory`)에서 해당 `account_id`의 미청산 virtual 포지션을 조회하여 `_purchase_amount`, `_eval_amount` 계산
 
 ```
 Virtual 모드 동기화 흐름:

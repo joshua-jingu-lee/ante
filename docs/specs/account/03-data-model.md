@@ -89,7 +89,7 @@ class Account:
 
 `exchange`, `currency`, `trading_mode`, `broker_type`는 생성 후 수정할 수 없다. 이 4개 필드는 계좌의 정체성을 결정하는 근본 속성이며, 런타임 중 변경 시 다음 정합성 문제가 발생한다:
 
-- **trading_mode**: 봇 시작 시 Paper/Live 컨텍스트가 결정되므로, 변경 시 실행 중인 컨텍스트와 DB 상태가 불일치
+- **trading_mode**: 봇 시작 시 Virtual/Live 컨텍스트가 결정되므로, 변경 시 실행 중인 컨텍스트와 DB 상태가 불일치
 - **broker_type**: 브로커 어댑터 인스턴스가 캐싱되므로, 변경 시 기존 어댑터와 새 타입이 충돌
 - **exchange / currency**: Treasury 잔고, 거래 기록, 종목 체계가 시장에 종속되므로, 변경 시 모든 하위 데이터의 정합성이 파괴됨
 

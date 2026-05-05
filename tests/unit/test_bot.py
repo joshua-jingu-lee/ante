@@ -943,7 +943,7 @@ class TestBotManager:
             {
                 "bot_id": "old-bot",
                 "strategy_id": "s1",
-                "bot_type": "paper",
+                "bot_type": "legacy",
                 "exchange": "KRX",
                 "interval_seconds": 60,
             }

@@ -37,8 +37,8 @@ StrategyContext에 주입되는 인터페이스. 라이브/백테스트/모의�
 
 **구현체 매핑**:
 
-| ABC | live 봇 | paper 봇 | 백테스트 |
+| ABC | live 봇 | virtual 봇 | 백테스트 |
 |-----|---------|---------|---------|
 | DataProvider | LiveDataProvider (API Gateway 경유) | LiveDataProvider (동일) | BacktestDataProvider (Parquet) |
-| PortfolioView | LivePortfolioView (Treasury + Trade) | PaperPortfolioView (인메모리) | BacktestPortfolioView |
-| OrderView | LiveOrderView (BrokerAdapter 경유) | PaperOrderView (인메모리) | BacktestOrderView |
+| PortfolioView | LivePortfolioView (Treasury + Trade) | VirtualPortfolioView (인메모리) | BacktestPortfolioView |
+| OrderView | LiveOrderView (BrokerAdapter 경유) | VirtualOrderView (인메모리) | BacktestOrderView |

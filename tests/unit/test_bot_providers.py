@@ -7,7 +7,11 @@ import pytest
 from ante.bot.config import BotConfig
 from ante.bot.context_factory import StrategyContextFactory
 from ante.bot.providers.live import LiveOrderView, LivePortfolioView
-from ante.bot.providers.paper import PaperExecutor, PaperOrderView, PaperPortfolioView
+from ante.bot.providers.virtual import (
+    VirtualExecutor,
+    VirtualOrderView,
+    VirtualPortfolioView,
+)
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -130,97 +134,99 @@ class TestLiveOrderView:
         assert view.get_open_orders("bot1") == []
 
 
-# ── US-2: PaperPortfolioView / PaperOrderView ───
+# ── US-2: VirtualPortfolioView / VirtualOrderView ───
 
 
-class TestPaperPortfolioView:
+class TestVirtualPortfolioView:
     def test_initial_balance(self):
         """초기 잔고 확인."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        balance = pv.get_balance("paper1")
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
+        balance = pv.get_balance("virtual1")
         assert balance["allocated"] == 10_000_000.0
         assert balance["available"] == 10_000_000.0
         assert balance["reserved"] == 0.0
 
     def test_empty_positions(self):
         """초기 포지션 없음."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        assert pv.get_positions("paper1") == {}
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
+        assert pv.get_positions("virtual1") == {}
 
     def test_apply_fill_buy(self):
         """매수 체결 시 포지션/잔고 갱신."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         pv.apply_fill("005930", "buy", 10.0, 50000.0, commission=75.0)
 
-        positions = pv.get_positions("paper1")
+        positions = pv.get_positions("virtual1")
         assert positions["005930"]["quantity"] == 10.0
         assert positions["005930"]["avg_entry_price"] == 50000.0
 
-        balance = pv.get_balance("paper1")
+        balance = pv.get_balance("virtual1")
         assert balance["available"] == 10_000_000.0 - 500000.0 - 75.0
 
     def test_apply_fill_sell(self):
         """매도 체결 시 포지션/잔고 갱신."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         pv.apply_fill("005930", "buy", 10.0, 50000.0, commission=75.0)
         pv.apply_fill("005930", "sell", 10.0, 55000.0, commission=82.5)
 
-        positions = pv.get_positions("paper1")
+        positions = pv.get_positions("virtual1")
         # 수량 0이면 포지션에서 제외
         assert "005930" not in positions
 
     def test_check_balance_sufficient(self):
         """잔고 충분 확인."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         assert pv.check_balance(5_000_000.0) is True
 
     def test_check_balance_insufficient(self):
         """잔고 부족 확인."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         assert pv.check_balance(15_000_000.0) is False
 
     def test_reserve_and_release(self):
         """자금 예약/해제."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         pv.reserve("ord1", 500_000.0)
 
-        balance = pv.get_balance("paper1")
+        balance = pv.get_balance("virtual1")
         assert balance["reserved"] == 500_000.0
         assert balance["available"] == 9_500_000.0
 
         pv.release_reservation("ord1")
-        balance = pv.get_balance("paper1")
+        balance = pv.get_balance("virtual1")
         assert balance["reserved"] == 0.0
 
 
-class TestPaperOrderView:
+class TestVirtualOrderView:
     def test_empty_orders(self):
         """미체결 주문 없으면 빈 목록."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        ov = PaperOrderView(portfolio=pv)
-        assert ov.get_open_orders("paper1") == []
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
+        ov = VirtualOrderView(portfolio=pv)
+        assert ov.get_open_orders("virtual1") == []
 
     def test_pending_orders_tracked(self):
         """예약된 주문이 미체결 목록에 나타남."""
-        pv = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         pv.reserve("ord1", 500_000.0)
 
-        ov = PaperOrderView(portfolio=pv)
-        orders = ov.get_open_orders("paper1")
+        ov = VirtualOrderView(portfolio=pv)
+        orders = ov.get_open_orders("virtual1")
         assert len(orders) == 1
         assert orders[0]["order_id"] == "ord1"
 
 
-# ── US-3: PaperExecutor ─────────────────────────
+# ── US-3: VirtualExecutor ─────────────────────────
 
 
-class TestPaperExecutor:
-    async def test_paper_fill_buy(self, eventbus):
-        """Paper 봇의 매수 주문 → 가상 체결."""
-        executor = PaperExecutor(eventbus=eventbus, commission_rate=0.00015)
+class TestVirtualExecutor:
+    async def test_virtual_fill_buy(self, eventbus):
+        """Virtual 계좌 봇의 매수 주문 → 가상 체결."""
+        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
 
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        executor.register_bot("paper1", portfolio)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
         filled = []
@@ -230,7 +236,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="buy",
@@ -241,7 +247,7 @@ class TestPaperExecutor:
         )
 
         assert len(filled) == 1
-        assert filled[0].bot_id == "paper1"
+        assert filled[0].bot_id == "virtual1"
         assert filled[0].symbol == "005930"
         assert filled[0].quantity == 10.0
         assert filled[0].price == 50000.0
@@ -250,14 +256,16 @@ class TestPaperExecutor:
         assert filled[0].account_id == "acct1"
 
         # 포지션 반영 확인
-        positions = portfolio.get_positions("paper1")
+        positions = portfolio.get_positions("virtual1")
         assert positions["005930"]["quantity"] == 10.0
 
-    async def test_paper_fill_sell(self, eventbus):
-        """Paper 봇의 매도 주문 → 가상 체결."""
-        executor = PaperExecutor(eventbus=eventbus, commission_rate=0.00015)
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        executor.register_bot("paper1", portfolio)
+    async def test_virtual_fill_sell(self, eventbus):
+        """Virtual 계좌 봇의 매도 주문 → 가상 체결."""
+        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
         # 먼저 매수
@@ -265,7 +273,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="buy",
@@ -283,7 +291,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-002",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="sell",
@@ -300,7 +308,7 @@ class TestPaperExecutor:
 
     async def test_ignores_live_bot(self, eventbus):
         """live 봇의 주문은 무시."""
-        executor = PaperExecutor(eventbus=eventbus)
+        executor = VirtualExecutor(eventbus=eventbus)
         executor.subscribe()
 
         filled = []
@@ -324,12 +332,14 @@ class TestPaperExecutor:
 
     async def test_commission_calculation(self, eventbus):
         """수수료 계산 검증."""
-        executor = PaperExecutor(
+        executor = VirtualExecutor(
             eventbus=eventbus,
             commission_rate=0.001,  # 0.1%
         )
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        executor.register_bot("paper1", portfolio)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
         filled = []
@@ -339,7 +349,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="buy",
@@ -353,9 +363,11 @@ class TestPaperExecutor:
 
     async def test_slippage_buy(self, eventbus):
         """매수 슬리피지: 체결가 = 현재가 × (1 + slippage_rate)."""
-        executor = PaperExecutor(eventbus=eventbus, slippage_rate=0.001)
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        executor.register_bot("paper1", portfolio)
+        executor = VirtualExecutor(eventbus=eventbus, slippage_rate=0.001)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
         filled = []
@@ -365,7 +377,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="buy",
@@ -380,11 +392,13 @@ class TestPaperExecutor:
 
     async def test_slippage_sell(self, eventbus):
         """매도 슬리피지: 체결가 = 현재가 × (1 - slippage_rate)."""
-        executor = PaperExecutor(eventbus=eventbus, slippage_rate=0.001)
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
+        executor = VirtualExecutor(eventbus=eventbus, slippage_rate=0.001)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
         # 먼저 포지션 만들기
         portfolio.apply_fill("005930", "buy", 10.0, 50000.0, 0.0)
-        executor.register_bot("paper1", portfolio)
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
         filled = []
@@ -394,7 +408,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="sell",
@@ -409,12 +423,14 @@ class TestPaperExecutor:
 
     async def test_limit_order_no_slippage(self, eventbus):
         """지정가 주문: 슬리피지 없이 지정가 그대로 체결."""
-        executor = PaperExecutor(
+        executor = VirtualExecutor(
             eventbus=eventbus,
             slippage_rate=0.01,  # 1% 슬리피지 설정해도
         )
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        executor.register_bot("paper1", portfolio)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
         filled = []
@@ -424,7 +440,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="buy",
@@ -438,12 +454,14 @@ class TestPaperExecutor:
 
     async def test_unregister_bot(self, eventbus):
         """봇 등록 해제 후 주문 무시."""
-        executor = PaperExecutor(eventbus=eventbus)
-        portfolio = PaperPortfolioView(bot_id="paper1", initial_balance=10_000_000.0)
-        executor.register_bot("paper1", portfolio)
+        executor = VirtualExecutor(eventbus=eventbus)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
         executor.subscribe()
 
-        executor.unregister_bot("paper1")
+        executor.unregister_bot("virtual1")
 
         filled = []
         eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
@@ -452,7 +470,7 @@ class TestPaperExecutor:
             OrderApprovedEvent(
                 order_id="ord-001",
                 account_id="acct1",
-                bot_id="paper1",
+                bot_id="virtual1",
                 strategy_id="s1",
                 symbol="005930",
                 side="buy",
@@ -469,23 +487,23 @@ class TestPaperExecutor:
 
 
 class TestStrategyContextFactory:
-    def test_create_paper_context(self, eventbus):
-        """Paper 봇 StrategyContext 생성."""
-        executor = PaperExecutor(eventbus=eventbus)
+    def test_create_virtual_context(self, eventbus):
+        """Virtual 계좌 봇 StrategyContext 생성."""
+        executor = VirtualExecutor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
-            paper_executor=executor,
+            virtual_executor=executor,
         )
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acc-test")
-        # AccountService 미설정 → VIRTUAL 모드(paper) 기본 동작
+        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acc-test")
+        # AccountService 미설정 → VIRTUAL 기본 동작
         ctx = factory.create(config)
 
         assert isinstance(ctx, StrategyContext)
-        assert ctx.bot_id == "paper1"
+        assert ctx.bot_id == "virtual1"
 
-        # Paper 봇이 PaperExecutor에 등록되었는지 확인
-        assert "paper1" in executor._portfolios
+        # Virtual 계좌 봇이 VirtualExecutor에 등록되었는지 확인
+        assert "virtual1" in executor._portfolios
 
         # Treasury 미설정 시 초기 잔고 0
         balance = ctx.get_balance()
@@ -538,15 +556,15 @@ class TestStrategyContextFactory:
         assert isinstance(ctx, StrategyContext)
         assert ctx.bot_id == "live1"
 
-    def test_resolve_paper_balance_with_budget(self, eventbus):
+    def test_resolve_virtual_balance_with_budget(self, eventbus):
         """TreasuryManager 존재 + BotBudget 배정 시 allocated 값 반환."""
         from ante.treasury.models import BotBudget
 
         class FakeTreasury:
             def get_budget(self, bot_id):
-                if bot_id == "paper1":
+                if bot_id == "virtual1":
                     return BotBudget(
-                        bot_id="paper1", allocated=2_000_000.0, account_id="acc-test"
+                        bot_id="virtual1", allocated=2_000_000.0, account_id="acc-test"
                     )
                 return None
 
@@ -554,34 +572,34 @@ class TestStrategyContextFactory:
             def get(self, account_id):
                 return FakeTreasury()
 
-        executor = PaperExecutor(eventbus=eventbus)
+        executor = VirtualExecutor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
-            paper_executor=executor,
+            virtual_executor=executor,
             treasury_manager=FakeTreasuryManager(),
         )
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acct1")
+        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acct1")
         ctx = factory.create(config)
 
         balance = ctx.get_balance()
         assert balance["allocated"] == 2_000_000.0
 
-    def test_resolve_paper_balance_key_error(self, eventbus):
+    def test_resolve_virtual_balance_key_error(self, eventbus):
         """TreasuryManager 존재하나 bot_id 미배정 시 0.0 반환."""
 
         class FakeTreasuryManager:
             def get(self, account_id):
                 raise KeyError(account_id)
 
-        executor = PaperExecutor(eventbus=eventbus)
+        executor = VirtualExecutor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
-            paper_executor=executor,
+            virtual_executor=executor,
             treasury_manager=FakeTreasuryManager(),
         )
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="no-acct")
+        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="no-acct")
         ctx = factory.create(config)
 
         balance = ctx.get_balance()
@@ -633,19 +651,19 @@ class TestBotManagerWithFactory:
             async def on_step(self, context):
                 return []
 
-        executor = PaperExecutor(eventbus=eventbus)
+        executor = VirtualExecutor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
-            paper_executor=executor,
+            virtual_executor=executor,
         )
         manager = BotManager(eventbus=eventbus, db=db, context_factory=factory)
         await manager.initialize()
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acc-test")
+        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acc-test")
         bot = await manager.create_bot(config, SimpleStrategy)
 
-        assert bot.bot_id == "paper1"
-        assert "paper1" in executor._portfolios
+        assert bot.bot_id == "virtual1"
+        assert "virtual1" in executor._portfolios
 
     async def test_create_bot_with_explicit_ctx(self, eventbus, db):
         """기존 방식: ctx 직접 주입."""
@@ -664,9 +682,9 @@ class TestBotManagerWithFactory:
         ctx = StrategyContext(
             bot_id="bot1",
             data_provider=FakeDataProvider(),
-            portfolio=PaperPortfolioView(bot_id="bot1", initial_balance=1_000_000.0),
-            order_view=PaperOrderView(
-                PaperPortfolioView(bot_id="bot1", initial_balance=1_000_000.0)
+            portfolio=VirtualPortfolioView(bot_id="bot1", initial_balance=1_000_000.0),
+            order_view=VirtualOrderView(
+                VirtualPortfolioView(bot_id="bot1", initial_balance=1_000_000.0)
             ),
         )
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
@@ -691,8 +709,8 @@ class TestBotManagerWithFactory:
         with pytest.raises(BotError, match="factory"):
             await manager.create_bot(config, SimpleStrategy)
 
-    async def test_remove_paper_bot_unregisters(self, eventbus, db):
-        """Paper 봇 삭제 시 PaperExecutor에서 등록 해제."""
+    async def test_remove_virtual_bot_unregisters(self, eventbus, db):
+        """Virtual 계좌 봇 삭제 시 VirtualExecutor에서 등록 해제."""
         from ante.bot import BotManager, StrategyContextFactory
         from ante.strategy.base import Strategy, StrategyMeta
 
@@ -702,20 +720,20 @@ class TestBotManagerWithFactory:
             async def on_step(self, context):
                 return []
 
-        executor = PaperExecutor(eventbus=eventbus)
+        executor = VirtualExecutor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
-            paper_executor=executor,
+            virtual_executor=executor,
         )
         manager = BotManager(eventbus=eventbus, db=db, context_factory=factory)
         await manager.initialize()
 
-        config = BotConfig(bot_id="paper1", strategy_id="s1", account_id="acc-test")
+        config = BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acc-test")
         await manager.create_bot(config, SimpleStrategy)
-        assert "paper1" in executor._portfolios
+        assert "virtual1" in executor._portfolios
 
-        await manager.remove_bot("paper1")
-        assert "paper1" not in executor._portfolios
+        await manager.remove_bot("virtual1")
+        assert "virtual1" not in executor._portfolios
 
 
 # ── PositionHistory 캐시 테스트 ──────────────────
