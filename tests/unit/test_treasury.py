@@ -676,6 +676,286 @@ class TestTreasuryEvents:
         assert budget.reserved == 200_000.0
 
 
+# -- _on_order_validated guard 회귀 테스트 (#1292) --------------
+
+
+class TestOnOrderValidatedGuards:
+    """매수 시장가 quote 부재, reserve 실패 등 terminal event 누락 회귀 테스트."""
+
+    async def test_on_order_validated_market_buy_without_price_publishes_rejected(
+        self, treasury, eventbus, monkeypatch
+    ):
+        """market buy + price=None -> reserve 호출 없이 OrderRejected 발행.
+
+        Order lifecycle invariant: terminal event(OrderRejected)가 정확히 1건
+        발행되어야 하고, reserve_for_order는 호출되지 않아야 한다.
+        """
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        reserve_calls: list = []
+
+        async def spy_reserve(bot_id, order_id, amount):
+            reserve_calls.append((bot_id, order_id, amount))
+            return True
+
+        monkeypatch.setattr(treasury, "reserve_for_order", spy_reserve)
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-buy",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 0
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("market_buy_quote_unavailable")
+        assert "order_type=market" in rejected[0].reason
+        assert "price=None" in rejected[0].reason
+        assert rejected[0].account_id == ACCOUNT_ID
+        assert rejected[0].order_id == "ord-mkt-buy"
+        # reserve_for_order는 절대 호출되지 않아야 한다.
+        assert reserve_calls == []
+
+        # 예산도 변경 없음.
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.available == 1_000_000.0
+        assert budget.reserved == 0.0
+
+    async def test_on_order_validated_market_sell_without_price_publishes_approved(
+        self, treasury, eventbus
+    ):
+        """market sell + price=None -> Approved 발행 (회귀 가드)."""
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        rejected: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-sell",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(rejected) == 0
+        assert len(approved) == 1
+        assert approved[0].reserved_amount == 0.0
+        assert approved[0].order_id == "ord-mkt-sell"
+
+    async def test_on_order_validated_limit_buy_with_budget_publishes_approved(
+        self, treasury, eventbus
+    ):
+        """limit buy with sufficient budget -> 기존 동작 유지."""
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        rejected: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-lim-buy",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=50_000.0,
+                order_type="limit",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(rejected) == 0
+        assert len(approved) == 1
+        assert approved[0].reserved_amount > 0
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved > 0
+
+    async def test_on_order_validated_zero_quantity_market_buy_publishes_rejected_with_reserve_amount_invalid(  # noqa: E501
+        self, treasury, eventbus
+    ):
+        """quantity=0 + price 양수 시장가 매수 -> reserve_amount_invalid 거부.
+
+        price=None이면 market_buy_quote_unavailable이 먼저, price 양수+quantity=0이면
+        reserve_amount_invalid가 발행된다.
+        """
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        # price 양수 + quantity=0 -> Guard 1을 통과하고 Guard 2에서 거부.
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-zero-qty",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=0.0,
+                price=50_000.0,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 0
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("reserve_amount_invalid")
+        assert "total_reserve=0" in rejected[0].reason
+
+        # price=None + quantity=0 -> Guard 1이 먼저 매칭.
+        rejected.clear()
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-zero-qty-no-price",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=0.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("market_buy_quote_unavailable")
+
+    async def test_on_order_validated_reserve_for_order_exception_publishes_rejected(
+        self, treasury, eventbus, monkeypatch
+    ):
+        """reserve_for_order가 예외를 던져도 OrderRejected가 발행된다."""
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        async def boom(bot_id, order_id, amount):
+            raise RuntimeError("simulated reserve failure")
+
+        monkeypatch.setattr(treasury, "reserve_for_order", boom)
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-exc",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=50_000.0,
+                order_type="limit",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 0
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("reserve_failed")
+        assert "simulated reserve failure" in rejected[0].reason
+
+    async def test_on_order_validated_account_id_mismatch_does_not_publish(
+        self, treasury, eventbus
+    ):
+        """다른 account_id 이벤트는 새 guard보다 먼저 _is_my_event 필터에서 무시.
+
+        market buy + price=None 시그니처라도, 다른 계좌의 이벤트라면
+        OrderRejected/OrderApproved 어느 쪽도 publish되지 않아야 한다.
+        """
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-other",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=None,
+                order_type="market",
+                account_id="other-account",
+            )
+        )
+
+        assert len(rejected) == 0
+        assert len(approved) == 0
+
+    async def test_on_order_validated_warn_path_market_buy_publishes_rejected(
+        self, treasury, eventbus
+    ):
+        """RuleEngine WARN 분기에서 발행된 OrderValidatedEvent도 동일하게 거부.
+
+        WARN 경로에서도 동일한 OrderValidatedEvent가 publish되므로
+        Treasury 핸들러는 같은 guard를 적용해야 한다 (이슈 #1292의
+        실제 재현 경로).
+        """
+        await treasury.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        # WARN 분기는 reason 필드에 경고 텍스트를 담아 publish한다.
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-warn",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+                reason="WARN: position size near limit",
+            )
+        )
+
+        assert len(approved) == 0
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("market_buy_quote_unavailable")
+
+
 # -- 모니터링 -------------------------------------------------
 
 
