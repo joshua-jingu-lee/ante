@@ -30,11 +30,11 @@ ante account create \
   --credential-file app_secret=/run/secrets/kis_app_secret \
   --credential account_no=5012XXXX-01
 
-# (테스트 계좌) is_paper 같은 broker-specific 설정은 --broker-config로 전달
+# (KIS 모의투자 엔드포인트 계좌) broker-specific 설정은 --broker-config로 전달
 ante account create \
   --broker-type kis-domestic \
-  --account-id paper \
-  --name "모의 투자" \
+  --account-id domestic-demo \
+  --name "국내 모의투자" \
   --trading-mode virtual \
   --credential-env app_key=KIS_PAPER_APP_KEY \
   --credential-env app_secret=KIS_PAPER_APP_SECRET \

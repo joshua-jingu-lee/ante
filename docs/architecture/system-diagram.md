@@ -24,7 +24,7 @@
 │  │ │ (StgB) │ │ └─────────┘ └────────┘                            │
 │  │ ├────────┤ │                                                     │
 │  │ │ Bot C  │ │ ┌──────────────────────────────────────────┐        │
-│  │ │ (paper)│ │ │ APIGateway (Rate Limiter)                │        │
+│  │ │ virtual│ │ │ APIGateway (Rate Limiter)                │        │
 │  │ └────────┘ │ │  - request queueing, caching, throttle   │        │
 │  └────────────┘ │  - bot request merging                   │        │
 │                  └──────────────────┬───────────────────────┘        │

@@ -6,25 +6,28 @@
     python scripts/verify-install.py install
 
     # 2단계: KIS 조회 API 검증 (장 시간 무관)
-    python scripts/verify-install.py query
+    python scripts/verify-install.py query [account_id]
 
     # 3단계: KIS 주문 API 검증 (장 시간 필요: 09:00-15:30)
-    python scripts/verify-install.py order
+    python scripts/verify-install.py order [account_id]
 
     # 전체 실행
-    python scripts/verify-install.py all
+    python scripts/verify-install.py all [account_id]
 
 필수 조건:
-    - config/secrets.env 에 KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO 설정
+    - `ante account create`로 등록된 KIS 국내 계좌
+    - KIS 조회/주문 검증은 해당 계좌의 broker_config.is_paper=true 필요
 """
 
 from __future__ import annotations
 
 import asyncio
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 # 색상 출력
 GREEN = "\033[92m"
@@ -33,6 +36,9 @@ YELLOW = "\033[93m"
 CYAN = "\033[96m"
 RESET = "\033[0m"
 BOLD = "\033[1m"
+
+DEFAULT_VERIFY_ACCOUNT_ID = "domestic-demo"
+KIS_REQUIRED_CREDENTIALS = ("app_key", "app_secret", "account_no")
 
 
 def _assert_python_313() -> None:
@@ -70,6 +76,139 @@ def log_warn(msg: str) -> None:
 
 def log_info(msg: str) -> None:
     print(f"  {msg}")
+
+
+def _ensure_src_path(project_root: Path) -> None:
+    src_path = str(project_root / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _mask_secret(value: Any, *, visible: int = 4) -> str:
+    text = str(value)
+    if not text:
+        return "****"
+    return f"{text[:visible]}****"
+
+
+def _kis_adapter_config_from_account(account: Any) -> dict[str, Any]:
+    return {
+        "exchange": account.exchange,
+        "trading_mode": _enum_value(account.trading_mode),
+        "buy_commission_rate": float(account.buy_commission_rate),
+        "sell_commission_rate": float(account.sell_commission_rate),
+        **account.credentials,
+        **account.broker_config,
+    }
+
+
+def _is_paper_endpoint(adapter_config: dict[str, Any]) -> bool:
+    return bool(adapter_config.get("is_paper", True))
+
+
+def _guard_paper_endpoint(
+    adapter_config: dict[str, Any],
+    *,
+    account_id: str,
+    action: str,
+) -> bool:
+    if _is_paper_endpoint(adapter_config):
+        return True
+    log_fail(f"실전투자 엔드포인트 계좌로는 {action} 검증을 수행할 수 없습니다")
+    log_info(f"account_id={account_id}의 broker_config.is_paper=true 여부를 확인하세요")
+    return False
+
+
+def _account_table_exists(db_path: Path) -> bool:
+    try:
+        with sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'accounts'"
+            ).fetchone()
+    except sqlite3.Error as e:
+        log_fail(f"Account DB 확인 실패: {e}")
+        return False
+    return row is not None
+
+
+def _print_account_create_hint(account_id: str) -> None:
+    log_info("서버를 정지한 뒤 아래 형식으로 검증 계좌를 먼저 등록하세요:")
+    log_info(
+        "ante account create --broker-type kis-domestic "
+        f'--account-id {account_id} --name "국내 모의투자" '
+        "--trading-mode virtual "
+        "--credential-env app_key=KIS_PAPER_APP_KEY "
+        "--credential-env app_secret=KIS_PAPER_APP_SECRET "
+        "--credential account_no=5012XXXX-01 "
+        "--broker-config is_paper=true"
+    )
+
+
+async def _load_kis_adapter_config(account_id: str) -> dict[str, Any] | None:
+    project_root = Path(__file__).resolve().parent.parent
+    _ensure_src_path(project_root)
+
+    from ante.account import AccountNotFoundError, AccountService
+    from ante.config import Config
+    from ante.core import Database
+    from ante.eventbus import EventBus
+
+    config = Config.load(config_dir=project_root / "config")
+    db_path = config.resolve_path("db.path", "db/ante.db")
+    if not db_path.exists():
+        log_fail(f"Account DB를 찾을 수 없습니다: {db_path}")
+        _print_account_create_hint(account_id)
+        return None
+    if not _account_table_exists(db_path):
+        log_fail(f"Account DB에 accounts 테이블이 없습니다: {db_path}")
+        _print_account_create_hint(account_id)
+        return None
+
+    db = Database(str(db_path))
+    await db.connect()
+    try:
+        account_service = AccountService(db=db, eventbus=EventBus(history_size=100))
+        await account_service.initialize()
+        try:
+            account = await account_service.get(account_id)
+        except AccountNotFoundError:
+            log_fail(f"검증 계좌를 찾을 수 없습니다: account_id={account_id}")
+            _print_account_create_hint(account_id)
+            return None
+
+        if account.broker_type != "kis-domestic":
+            log_fail(
+                "KIS 검증은 kis-domestic 계좌만 지원합니다: "
+                f"account_id={account.account_id}, broker_type={account.broker_type}"
+            )
+            return None
+
+        adapter_config = _kis_adapter_config_from_account(account)
+        missing = [
+            key for key in KIS_REQUIRED_CREDENTIALS if not adapter_config.get(key)
+        ]
+        if missing:
+            log_fail(
+                "KIS 계좌 credential이 부족합니다: "
+                f"account_id={account.account_id}, missing={', '.join(missing)}"
+            )
+            _print_account_create_hint(account.account_id)
+            return None
+
+        log_ok(
+            "계좌 설정 확인: "
+            f"account_id={account.account_id}, "
+            f"trading_mode={_enum_value(account.trading_mode)}, "
+            f"is_paper={_is_paper_endpoint(adapter_config)}, "
+            f"account={_mask_secret(adapter_config['account_no'])}"
+        )
+        return adapter_config
+    finally:
+        await db.close()
 
 
 # ── Stage 1: 클린 설치 + 부팅 ─────────────────────────
@@ -231,47 +370,22 @@ asyncio.run(boot_test())
 # ── Stage 2: KIS 조회 API 검증 ────────────────────────
 
 
-async def stage_query() -> bool:
+async def stage_query(account_id: str) -> bool:
     """KIS 모의투자 조회 API를 테스트한다 (장 시간 무관)."""
-    log_step("Stage 2: KIS 조회 API 검증")
+    log_step(f"Stage 2: KIS 조회 API 검증 (account_id={account_id})")
 
-    # 프로젝트 루트에서 실행
-    project_root = Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(project_root / "src"))
-
-    from ante.config import Config
-
-    config = Config.load(config_dir=project_root / "config")
-
-    broker_config = config.get("broker", {})
-    try:
-        app_key = config.secret("KIS_APP_KEY")
-        app_secret = config.secret("KIS_APP_SECRET")
-    except Exception:
-        log_fail("KIS_APP_KEY / KIS_APP_SECRET 가 설정되지 않았습니다")
-        log_info("config/secrets.env 파일을 확인하세요")
+    adapter_config = await _load_kis_adapter_config(account_id)
+    if adapter_config is None:
         return False
-
-    try:
-        account_no = config.secret("KIS_ACCOUNT_NO")
-    except Exception:
-        log_fail("KIS_ACCOUNT_NO 가 설정되지 않았습니다")
-        log_info("config/secrets.env 파일을 확인하세요")
+    if not _guard_paper_endpoint(
+        adapter_config,
+        account_id=account_id,
+        action="조회 API",
+    ):
         return False
-
-    log_ok(f"설정 확인: app_key={app_key[:4]}****, account={account_no}")
 
     # KISAdapter 생성 + 연결
     from ante.broker import KISAdapter
-
-    adapter_config = {
-        "app_key": app_key,
-        "app_secret": app_secret,
-        "account_no": account_no,
-        "is_paper": broker_config.get("is_paper", True),
-        "commission_rate": broker_config.get("commission_rate", 0.00015),
-        "sell_tax_rate": broker_config.get("sell_tax_rate", 0.0023),
-    }
 
     adapter = KISAdapter(config=adapter_config)
     ok = True
@@ -347,9 +461,9 @@ async def stage_query() -> bool:
 # ── Stage 3: KIS 주문 API 검증 ────────────────────────
 
 
-async def stage_order() -> bool:
+async def stage_order(account_id: str) -> bool:
     """KIS 모의투자 주문 API를 테스트한다 (장 시간 필요: 09:00-15:30)."""
-    log_step("Stage 3: KIS 주문 API 검증 (장 시간 필요)")
+    log_step(f"Stage 3: KIS 주문 API 검증 (account_id={account_id}, 장 시간 필요)")
 
     import datetime
 
@@ -359,32 +473,17 @@ async def stage_order() -> bool:
         log_info("장 시간에 다시 실행해 주세요")
         return False
 
-    project_root = Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(project_root / "src"))
-
-    from ante.config import Config
-
-    config = Config.load(config_dir=project_root / "config")
-
-    broker_config = config.get("broker", {})
-    app_key = config.secret("KIS_APP_KEY")
-    app_secret = config.secret("KIS_APP_SECRET")
-    account_no = config.secret("KIS_ACCOUNT_NO")
+    adapter_config = await _load_kis_adapter_config(account_id)
+    if adapter_config is None:
+        return False
 
     from ante.broker import KISAdapter
 
-    adapter_config = {
-        "app_key": app_key,
-        "app_secret": app_secret,
-        "account_no": account_no,
-        "is_paper": broker_config.get("is_paper", True),
-        "commission_rate": broker_config.get("commission_rate", 0.00015),
-        "sell_tax_rate": broker_config.get("sell_tax_rate", 0.0023),
-    }
-
-    if not adapter_config.get("is_paper", True):
-        log_fail("실전투자 계좌로는 주문 검증을 수행할 수 없습니다")
-        log_info("config/system.toml에서 is_paper = true 를 확인하세요")
+    if not _guard_paper_endpoint(
+        adapter_config,
+        account_id=account_id,
+        action="주문 API",
+    ):
         return False
 
     adapter = KISAdapter(config=adapter_config)
@@ -486,33 +585,42 @@ def print_usage() -> None:
     print(f"""
 {BOLD}Ante E2E 검증 스크립트{RESET}
 
-사용법: python scripts/verify-install.py <stage>
+사용법: python scripts/verify-install.py <stage> [account_id]
 
   {CYAN}install{RESET}  Stage 1: 클린 설치 + 부팅 검증 (장 시간 무관)
   {CYAN}query{RESET}    Stage 2: KIS 조회 API 검증 (장 시간 무관)
   {CYAN}order{RESET}    Stage 3: KIS 주문 API 검증 (장 시간 필요 09:00-15:30)
   {CYAN}all{RESET}      전체 단계 실행
+
+account_id 기본값: {DEFAULT_VERIFY_ACCOUNT_ID}
+query/order/all은 `ante account create`로 등록된 kis-domestic 계좌를 사용합니다.
+query/order는 해당 계좌의 broker_config.is_paper=true일 때만 실행합니다.
 """)
 
 
 def main() -> None:
     _assert_python_313()
 
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
         print_usage()
         sys.exit(1)
 
     stage = sys.argv[1]
+    account_id = sys.argv[2] if len(sys.argv) == 3 else DEFAULT_VERIFY_ACCOUNT_ID
     results: dict[str, bool] = {}
+
+    if stage == "install" and len(sys.argv) == 3:
+        print_usage()
+        sys.exit(1)
 
     if stage in ("install", "all"):
         results["install"] = stage_install()
 
     if stage in ("query", "all"):
-        results["query"] = asyncio.run(stage_query())
+        results["query"] = asyncio.run(stage_query(account_id))
 
     if stage in ("order", "all"):
-        results["order"] = asyncio.run(stage_order())
+        results["order"] = asyncio.run(stage_order(account_id))
 
     if stage not in ("install", "query", "order", "all"):
         print_usage()
