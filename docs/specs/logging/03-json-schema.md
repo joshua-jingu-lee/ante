@@ -39,7 +39,7 @@ JSONL 파일에 기록되는 한 줄의 구조를 정의한다. stdout 평문 �
 **예시**:
 
 ```json
-{"ts":"2026-04-17T20:15:32.145Z","level":"ERROR","logger":"ante.broker.kis","msg":"주문 전송 실패","env":"staging","account_id":"paper01","order_id":"ord-123","extra":{"code":403}}
+{"ts":"2026-04-17T20:15:32.145Z","level":"ERROR","logger":"ante.broker.kis","msg":"주문 전송 실패","env":"staging","account_id":"domestic-demo","order_id":"ord-123","extra":{"code":403}}
 ```
 
 ## 예약어 처리

@@ -16,7 +16,7 @@
 
 일반 운영 CLI의 `ante broker order`는 제공하지 않는다. 수동 주문 테스트는
 Bot/Strategy → RuleEngine → BrokerAdapter 경로를 우회할 수 있으므로, 별도
-maintenance/test 스펙에서 승인, 감사 로그, paper/live 보호 장치, 권한 scope를 정한
+maintenance/test 스펙에서 승인, 감사 로그, virtual/live 운용 보호 장치, 권한 scope를 정한
 뒤에만 도입한다.
 
 ### KISOverseasAdapter 구현

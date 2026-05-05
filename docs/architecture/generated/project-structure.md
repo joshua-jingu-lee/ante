@@ -419,7 +419,8 @@ tests/
 │   │   └── test_service_registry.py
 │   ├── specs/
 │   │   ├── __init__.py
-│   │   └── test_cold_path_terminology.py
+│   │   ├── test_cold_path_terminology.py
+│   │   └── test_virtual_mode_terminology.py
 │   ├── __init__.py
 │   ├── test_account.py
 │   ├── test_account_api.py
