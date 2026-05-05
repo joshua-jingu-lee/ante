@@ -991,6 +991,33 @@ def _approval_account_id(params: dict, *, context: str) -> str:
     return require_account_id(params.get("account_id"), context=context)
 
 
+def _approval_bot_create_config(params: dict) -> Any:
+    """bot_create approval params 를 BotManager.create_bot 계약으로 변환."""
+    from ante.account.scoping import require_account_id
+    from ante.bot.config import BotConfig
+
+    config_params = params.get("config")
+    if not isinstance(config_params, dict):
+        raise ValueError("bot_create params.config가 누락되었습니다")
+
+    strategy_id = str(config_params.get("strategy_id") or "")
+    if not strategy_id:
+        raise ValueError("bot_create config.strategy_id가 누락되었습니다")
+
+    bot_id = str(config_params.get("bot_id") or "")
+    account_id = require_account_id(
+        config_params.get("account_id"), context="approval.bot_create.config"
+    )
+    interval_seconds = int(config_params.get("interval_seconds", 60))
+    return BotConfig(
+        bot_id=bot_id,
+        strategy_id=strategy_id,
+        name=str(config_params.get("name") or bot_id),
+        account_id=account_id,
+        interval_seconds=interval_seconds,
+    )
+
+
 async def _init_approval(s: Services) -> None:
     """ApprovalService 초기화: Executor, Validator, 전결 설정, 만료 스케줄러."""
     assert s.db is not None
@@ -1058,12 +1085,32 @@ async def _init_approval(s: Services) -> None:
                 )
             )
 
+    async def _exec_bot_create(params: dict) -> None:
+        from ante.strategy.loader import StrategyLoader
+
+        config = _approval_bot_create_config(params)
+        record = await s.strategy_registry.get(config.strategy_id)
+        if record is None:
+            raise ValueError(f"전략을 찾을 수 없습니다: {config.strategy_id}")
+        if record.status != StrategyStatus.ADOPTED:
+            raise ValueError(
+                f"전략이 adopted 상태가 아닙니다: {config.strategy_id} "
+                f"({record.status})"
+            )
+
+        strategy_cls = StrategyLoader.load(Path(record.filepath))
+        await s.bot_manager.create_bot(
+            config=config,
+            strategy_cls=strategy_cls,
+            source_path=Path(record.filepath),
+        )
+
     approval_executors: dict = {
         # 전략 관련
         "strategy_adopt": _exec_strategy_adopt,
         "strategy_retire": _exec_strategy_retire,
         # 봇 생명주기
-        "bot_create": lambda params: s.bot_manager.create_bot(**params),
+        "bot_create": _exec_bot_create,
         "bot_assign_strategy": lambda params: s.bot_manager.assign_strategy(
             params["bot_id"], params["strategy_id"]
         ),
@@ -1106,10 +1153,15 @@ async def _init_approval(s: Services) -> None:
             return [ValidationResult("fail", "이미 보관된 전략입니다", "system")]
         return [ValidationResult("pass", "", "system")]
 
-    def _validate_bot_create(params: dict) -> list[ValidationResult]:
+    async def _validate_bot_create(params: dict) -> list[ValidationResult]:
         """봇 생성 사전 검증: 전략 adopted 상태, 동일 봇 미존재."""
         results: list[ValidationResult] = []
-        bot_id = params.get("bot_id", "")
+        try:
+            config = _approval_bot_create_config(params)
+        except Exception as e:
+            return [ValidationResult("fail", str(e), "system:bot_manager")]
+
+        bot_id = config.bot_id
         if bot_id and s.bot_manager.get_bot(bot_id):
             results.append(
                 ValidationResult(
@@ -1118,11 +1170,23 @@ async def _init_approval(s: Services) -> None:
                     "system:bot_manager",
                 )
             )
-        strategy_id = params.get("strategy_id", "")
-        if strategy_id:
-            # strategy_id로 리포트 확인은 비동기 — 동기 호출 불가이므로
-            # 이 검증은 executor 2단계 검증에 위임
-            pass
+        record = await s.strategy_registry.get(config.strategy_id)
+        if record is None:
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"전략을 찾을 수 없습니다: {config.strategy_id}",
+                    "system:strategy_registry",
+                )
+            )
+        elif record.status != StrategyStatus.ADOPTED:
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"전략이 adopted 상태가 아닙니다: {config.strategy_id}",
+                    "system:strategy_registry",
+                )
+            )
         return results or [ValidationResult("pass", "", "system:bot_manager")]
 
     def _validate_bot_delete(params: dict) -> list[ValidationResult]:

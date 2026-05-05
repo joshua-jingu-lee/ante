@@ -5,10 +5,13 @@ Refs #446: 8건 executor 신규 등록 검증.
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ante.approval.models import ApprovalValidationError, ValidationResult
 from ante.approval.service import ApprovalService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
@@ -36,13 +39,24 @@ def _build_executors() -> tuple[dict, dict]:
     """
     from ante.strategy.registry import StrategyStatus
 
+    class FakeStrategy:
+        pass
+
     report_store = MagicMock()
     report_store.update_status = AsyncMock()
 
     strategy_registry = MagicMock()
+    strategy_record = SimpleNamespace(
+        strategy_id="strat-1",
+        filepath="/tmp/strategy.py",
+        status=StrategyStatus.ADOPTED,
+    )
+    strategy_registry.get = AsyncMock(return_value=strategy_record)
     strategy_registry.update_status = AsyncMock()
+    strategy_loader = MagicMock(return_value=FakeStrategy)
 
     bot_manager = MagicMock()
+    bot_manager.get_bot = MagicMock(return_value=None)
     bot_manager.create_bot = AsyncMock()
     bot_manager.assign_strategy = AsyncMock()
     bot_manager.change_strategy = AsyncMock()
@@ -71,10 +85,26 @@ def _build_executors() -> tuple[dict, dict]:
     async def _exec_rule_change(params: dict) -> None:
         rule_engine.update_rules(params["bot_id"], params["rules"])
 
+    async def _exec_bot_create(params: dict) -> None:
+        from ante.main import _approval_bot_create_config
+
+        config = _approval_bot_create_config(params)
+        record = await strategy_registry.get(config.strategy_id)
+        if record is None:
+            raise ValueError(f"전략을 찾을 수 없습니다: {config.strategy_id}")
+        if record.status != StrategyStatus.ADOPTED:
+            raise ValueError(f"전략이 adopted 상태가 아닙니다: {config.strategy_id}")
+        strategy_cls = strategy_loader(Path(record.filepath))
+        await bot_manager.create_bot(
+            config=config,
+            strategy_cls=strategy_cls,
+            source_path=Path(record.filepath),
+        )
+
     executors = {
         "strategy_adopt": _exec_strategy_adopt,
         "strategy_retire": _exec_strategy_retire,
-        "bot_create": lambda params: bot_manager.create_bot(**params),
+        "bot_create": _exec_bot_create,
         "bot_assign_strategy": lambda params: bot_manager.assign_strategy(
             params["bot_id"], params["strategy_id"]
         ),
@@ -93,6 +123,9 @@ def _build_executors() -> tuple[dict, dict]:
     mocks = {
         "report_store": report_store,
         "strategy_registry": strategy_registry,
+        "strategy_record": strategy_record,
+        "strategy_loader": strategy_loader,
+        "strategy_cls": FakeStrategy,
         "bot_manager": bot_manager,
         "treasury": treasury,
         "rule_engine": rule_engine,
@@ -100,11 +133,61 @@ def _build_executors() -> tuple[dict, dict]:
     return executors, mocks
 
 
+def _build_validators(mocks: dict) -> dict:
+    """mock validator dict를 생성."""
+    from ante.strategy.registry import StrategyStatus
+
+    async def _validate_bot_create(params: dict) -> list[ValidationResult]:
+        from ante.main import _approval_bot_create_config
+
+        try:
+            config = _approval_bot_create_config(params)
+        except Exception as e:
+            return [ValidationResult("fail", str(e), "system:bot_manager")]
+
+        results: list[ValidationResult] = []
+        if config.bot_id and mocks["bot_manager"].get_bot(config.bot_id):
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"동일 ID의 봇이 이미 존재: {config.bot_id}",
+                    "system:bot_manager",
+                )
+            )
+
+        record = await mocks["strategy_registry"].get(config.strategy_id)
+        if record is None:
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"전략을 찾을 수 없습니다: {config.strategy_id}",
+                    "system:strategy_registry",
+                )
+            )
+        elif record.status != StrategyStatus.ADOPTED:
+            results.append(
+                ValidationResult(
+                    "fail",
+                    f"전략이 adopted 상태가 아닙니다: {config.strategy_id}",
+                    "system:strategy_registry",
+                )
+            )
+        return results or [ValidationResult("pass", "", "system:bot_manager")]
+
+    return {"bot_create": _validate_bot_create}
+
+
 @pytest.fixture
 async def service_with_executors(db, eventbus):
     """모든 executor가 등록된 ApprovalService."""
     executors, mocks = _build_executors()
-    svc = ApprovalService(db=db, eventbus=eventbus, executors=executors)
+    validators = _build_validators(mocks)
+    svc = ApprovalService(
+        db=db,
+        eventbus=eventbus,
+        executors=executors,
+        validators=validators,
+    )
     await svc.initialize()
     return svc, mocks
 
@@ -165,12 +248,17 @@ class TestBotCreateExecutor:
     """bot_create executor 테스트."""
 
     async def test_approve_calls_create_bot(self, service_with_executors):
+        from ante.bot.config import BotConfig
+
         svc, mocks = service_with_executors
         params = {
-            "account_id": "acc-test",
-            "strategy_name": "momentum",
-            "budget": 10000000,
-            "mode": "paper",
+            "config": {
+                "bot_id": "bot-1",
+                "strategy_id": "strat-1",
+                "name": "momentum-bot",
+                "account_id": "acc-test",
+                "interval_seconds": 60,
+            }
         }
         req = await svc.create(
             type="bot_create",
@@ -179,7 +267,51 @@ class TestBotCreateExecutor:
             params=params,
         )
         await svc.approve(req.id)
-        mocks["bot_manager"].create_bot.assert_awaited_once_with(**params)
+        expected_config = BotConfig(
+            bot_id="bot-1",
+            strategy_id="strat-1",
+            name="momentum-bot",
+            account_id="acc-test",
+            interval_seconds=60,
+        )
+        mocks["bot_manager"].create_bot.assert_awaited_once_with(
+            config=expected_config,
+            strategy_cls=mocks["strategy_cls"],
+            source_path=Path("/tmp/strategy.py"),
+        )
+        mocks["strategy_registry"].get.assert_awaited_with("strat-1")
+        mocks["strategy_loader"].assert_called_once_with(Path("/tmp/strategy.py"))
+
+    async def test_create_rejects_legacy_flat_payload(self, service_with_executors):
+        svc, mocks = service_with_executors
+        with pytest.raises(ApprovalValidationError, match="params.config"):
+            await svc.create(
+                type="bot_create",
+                requester="agent",
+                title="봇 생성",
+                params={"account_id": "acc-test", "strategy_id": "strat-1"},
+            )
+        mocks["bot_manager"].create_bot.assert_not_awaited()
+
+    async def test_create_rejects_unadopted_strategy(self, service_with_executors):
+        from ante.strategy.registry import StrategyStatus
+
+        svc, mocks = service_with_executors
+        mocks["strategy_record"].status = StrategyStatus.REGISTERED
+        with pytest.raises(ApprovalValidationError, match="adopted"):
+            await svc.create(
+                type="bot_create",
+                requester="agent",
+                title="봇 생성",
+                params={
+                    "config": {
+                        "bot_id": "bot-1",
+                        "strategy_id": "strat-1",
+                        "account_id": "acc-test",
+                    }
+                },
+            )
+        mocks["bot_manager"].create_bot.assert_not_awaited()
 
 
 class TestBotAssignStrategyExecutor:

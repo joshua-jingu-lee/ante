@@ -42,6 +42,13 @@
 `trading_mode`가 `"virtual"`일 때만 자동 승인한다. `mode` 필드나
 `broker_config.is_paper`는 자동승인 판단에 사용하지 않는다.
 
+`bot_create` 실행 계약은 `params["config"]`를 표준 payload로 사용한다.
+executor는 이 값을 `BotConfig`로 변환하고, `strategy_id`로
+`StrategyRegistry`의 ADOPTED 전략 레코드를 조회한 뒤 `StrategyLoader`로
+전략 클래스를 로드해 `BotManager.create_bot(config=..., strategy_cls=...,
+source_path=...)`를 호출한다. `strategy_cls`는 JSON params에 저장하지 않으며,
+예산 배정은 별도 `budget_change` 결재로 처리한다.
+
 ### 만료 스케줄러
 
 `expire_stale()`은 **주기적 스케줄러**로 호출한다. `main.py`의 `asyncio` 이벤트 루프에서 5분 간격 태스크로 등록한다.
@@ -69,7 +76,7 @@ asyncio.create_task(_expire_loop(approval_service))
 executors = {
     "strategy_adopt": lambda params: report_store.adopt(params["report_id"]),
     "budget_change": lambda params: treasury.update_budget(params["bot_id"], params["amount"]),
-    "bot_create": lambda params: bot_manager.create_bot(**params),
+    "bot_create": exec_bot_create,  # params["config"] -> BotConfig + StrategyLoader
     "bot_stop": lambda params: bot_manager.stop_bot(params["bot_id"]),
     "rule_change": lambda params: rule_engine.update_rules(params["bot_id"], params["rules"]),
 }
@@ -95,8 +102,9 @@ executors = {
 | 유형 | 검증 내용 | 등급 | 검증 주체 |
 |------|----------|------|----------|
 | `strategy_retire` | 전략이 이미 ARCHIVED 상태인가 | `fail` | StrategyRegistry |
-| `bot_create` | 전략이 adopted 상태인가 | `fail` | ReportStore |
-| `bot_create` | 동일 이름의 봇이 이미 존재하는가 | `fail` | BotManager |
+| `bot_create` | `params.config`가 `BotConfig`로 변환 가능한가 | `fail` | BotManager |
+| `bot_create` | 전략이 adopted 상태인가 | `fail` | StrategyRegistry |
+| `bot_create` | 동일 ID의 봇이 이미 존재하는가 | `fail` | BotManager |
 | `bot_delete` | 보유 포지션이 있는가 | `fail` | Trade |
 | `bot_delete` | 봇이 stopped 상태인가 | `fail` | BotManager |
 | `bot_change_strategy` | 봇이 stopped 상태인가 | `fail` | BotManager |
@@ -125,7 +133,7 @@ if validator:
 |------|-----------------|--------|
 | `strategy_retire` | 전략이 REGISTERED 또는 ADOPTED 상태 | 거부 — 이미 ARCHIVED 상태 |
 | `budget_change` | Treasury 미할당 잔액 ≥ 증액분 | 거부 — 자금 부족 |
-| `bot_create` | 전략이 adopted 상태, 동일 봇 미존재 | 거부 — 전략 미채택 또는 봇 중복 |
+| `bot_create` | `params.config`가 `BotConfig`로 변환 가능, 전략이 adopted 상태, 동일 봇 미존재 | 거부 — payload 오류, 전략 미채택 또는 봇 중복 |
 | `bot_delete` | 봇이 stopped 상태, 보유 포지션 없음 | 거부 — 봇 중지 및 포지션 청산 필요 |
 | `bot_change_strategy` | 봇이 stopped 상태 | 거부 — running 중에는 전략 변경 불가 |
 | `bot_resume` | 봇이 stopped 또는 error 상태 | 거부 — 이미 running 상태 |
