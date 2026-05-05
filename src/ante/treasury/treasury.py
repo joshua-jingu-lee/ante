@@ -561,7 +561,12 @@ class Treasury:
         return account_id == self._account_id
 
     async def _on_order_validated(self, event: object) -> None:
-        """룰 검증 통과 후 자금 예약 -> 승인/거부 발행."""
+        """룰 검증 통과 후 자금 예약 -> 승인/거부 발행.
+
+        EventBus는 핸들러 예외를 ``logger.exception`` 후 swallow하므로,
+        매수 경로에서 발생할 수 있는 모든 실패는 명시적으로 terminal
+        ``OrderRejectedEvent``로 변환해야 한다 (Order lifecycle invariant).
+        """
         from ante.eventbus.events import (
             OrderApprovedEvent,
             OrderRejectedEvent,
@@ -574,17 +579,40 @@ class Treasury:
         if not self._is_my_event(event):
             return
 
+        # Guard 1: 매수 + 시장가 + price 부재 시그니처는 quote source가 없으면
+        # reserve 금액을 산정할 수 없으므로 즉시 거부한다.
+        # narrow-scope: total_reserve <= 0 전체가 아니라 정확한 quote 부재
+        # 시그니처만 잡아 quantity=0 같은 다른 경계 케이스와 분리한다.
+        if event.side == "buy" and event.order_type == "market" and event.price is None:
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    account_id=self._account_id,
+                    reason=(
+                        f"market_buy_quote_unavailable: "
+                        f"order_type={event.order_type}, price={event.price}"
+                    ),
+                )
+            )
+            return
+
         price = event.price or 0.0
         estimated_cost = event.quantity * price
         commission_estimate = estimated_cost * self._buy_commission_rate
         total_reserve = estimated_cost + commission_estimate
 
         if event.side == "buy":
-            success = await self.reserve_for_order(
-                event.bot_id, event.order_id, total_reserve
-            )
-            if not success:
-                available = self.get_available(event.bot_id)
+            # Guard 2: quote는 있으나 reserve 금액이 비양수인 경계 케이스
+            # (예: quantity=0). reserve_for_order는 amount > 0을 요구하므로
+            # ValueError로 빠지지 않도록 사전에 거부한다.
+            if total_reserve <= 0:
                 await self._eventbus.publish(
                     OrderRejectedEvent(
                         order_id=event.order_id,
@@ -597,13 +625,82 @@ class Treasury:
                         order_type=event.order_type,
                         account_id=self._account_id,
                         reason=(
-                            f"insufficient_budget: need {total_reserve:,.0f}, "
-                            f"available {available:,.0f}"
+                            f"reserve_amount_invalid: "
+                            f"total_reserve={total_reserve}, "
+                            f"price={event.price}, "
+                            f"quantity={event.quantity}"
                         ),
                     )
                 )
                 return
 
+            # 안전망: reserve_for_order 또는 후속 publish에서 예외가 나도
+            # terminal OrderRejectedEvent로 변환한다. EventBus.publish는
+            # 핸들러 예외를 swallow하므로 핸들러 안에서 막아야 한다.
+            try:
+                success = await self.reserve_for_order(
+                    event.bot_id, event.order_id, total_reserve
+                )
+                if not success:
+                    available = self.get_available(event.bot_id)
+                    await self._eventbus.publish(
+                        OrderRejectedEvent(
+                            order_id=event.order_id,
+                            bot_id=event.bot_id,
+                            strategy_id=event.strategy_id,
+                            symbol=event.symbol,
+                            side=event.side,
+                            quantity=event.quantity,
+                            price=event.price,
+                            order_type=event.order_type,
+                            account_id=self._account_id,
+                            reason=(
+                                f"insufficient_budget: need {total_reserve:,.0f}, "
+                                f"available {available:,.0f}"
+                            ),
+                        )
+                    )
+                    return
+
+                await self._eventbus.publish(
+                    OrderApprovedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        stop_price=event.stop_price,
+                        reserved_amount=total_reserve,
+                        account_id=self._account_id,
+                    )
+                )
+                return
+            except Exception as exc:
+                logger.exception(
+                    "Treasury reserve_for_order 실패: order_id=%s, bot_id=%s",
+                    event.order_id,
+                    event.bot_id,
+                )
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=f"reserve_failed: {exc!s}",
+                    )
+                )
+                return
+
+        # Sell-side: 자금 예약 없이 즉시 승인.
         await self._eventbus.publish(
             OrderApprovedEvent(
                 order_id=event.order_id,
@@ -615,7 +712,7 @@ class Treasury:
                 price=event.price,
                 order_type=event.order_type,
                 stop_price=event.stop_price,
-                reserved_amount=(total_reserve if event.side == "buy" else 0.0),
+                reserved_amount=0.0,
                 account_id=self._account_id,
             )
         )
