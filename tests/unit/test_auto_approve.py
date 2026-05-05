@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from ante.account.models import Account, TradingMode
 from ante.approval.auto_approve import (
     EXCLUDED_TYPES,
     AutoApproveConfig,
@@ -18,13 +19,39 @@ from ante.eventbus.events import ApprovalCreatedEvent, ApprovalResolvedEvent
 # ── Fixtures ─────────────────────────────────────────
 
 
+def _account(account_id: str, trading_mode: TradingMode) -> Account:
+    return Account(
+        account_id=account_id,
+        name=account_id,
+        exchange="KRX",
+        currency="KRW",
+        trading_mode=trading_mode,
+    )
+
+
+@pytest.fixture
+def accounts() -> dict[str, Account]:
+    return {
+        "virtual-acc": _account("virtual-acc", TradingMode.VIRTUAL),
+        "live-acc": _account("live-acc", TradingMode.LIVE),
+    }
+
+
+@pytest.fixture
+def account_resolver(accounts):
+    async def resolve(account_id: str) -> Account | None:
+        return accounts.get(account_id)
+
+    return resolve
+
+
 @pytest.fixture
 def enabled_config() -> AutoApproveConfig:
     """전결 활성화 설정."""
     return AutoApproveConfig(
         enabled=True,
         bot_stop=True,
-        bot_create_paper=True,
+        bot_create_virtual=True,
         budget_change_max=5_000_000,
     )
 
@@ -36,8 +63,13 @@ def disabled_config() -> AutoApproveConfig:
 
 
 @pytest.fixture
-def evaluator(enabled_config: AutoApproveConfig) -> AutoApproveEvaluator:
-    return AutoApproveEvaluator(config=enabled_config)
+def evaluator(
+    enabled_config: AutoApproveConfig, account_resolver
+) -> AutoApproveEvaluator:
+    return AutoApproveEvaluator(
+        config=enabled_config,
+        account_resolver=account_resolver,
+    )
 
 
 @pytest.fixture
@@ -66,7 +98,17 @@ async def service_with_auto_approve(db, eventbus, enabled_config):
     async def mock_executor(params: dict) -> None:
         executed.append(params)
 
-    evaluator = AutoApproveEvaluator(config=enabled_config)
+    async def resolve_account(account_id: str) -> Account | None:
+        accounts = {
+            "virtual-acc": _account("virtual-acc", TradingMode.VIRTUAL),
+            "live-acc": _account("live-acc", TradingMode.LIVE),
+        }
+        return accounts.get(account_id)
+
+    evaluator = AutoApproveEvaluator(
+        config=enabled_config,
+        account_resolver=resolve_account,
+    )
     svc = ApprovalService(
         db=db,
         eventbus=eventbus,
@@ -94,7 +136,7 @@ class TestAutoApproveConfig:
         config = AutoApproveConfig()
         assert config.enabled is False
         assert config.bot_stop is True
-        assert config.bot_create_paper is True
+        assert config.bot_create_virtual is True
         assert config.budget_change_max == 5_000_000
 
     def test_from_dict(self):
@@ -103,14 +145,14 @@ class TestAutoApproveConfig:
             "enabled": True,
             "rules": {
                 "bot_stop": True,
-                "bot_create_paper": False,
+                "bot_create_virtual": False,
                 "budget_change_max": 3000000,
             },
         }
         config = AutoApproveConfig.from_dict(data)
         assert config.enabled is True
         assert config.bot_stop is True
-        assert config.bot_create_paper is False
+        assert config.bot_create_virtual is False
         assert config.budget_change_max == 3_000_000
 
     def test_from_dict_empty(self):
@@ -131,138 +173,154 @@ class TestAutoApproveConfig:
 
 
 class TestAutoApproveEvaluator:
-    def test_disabled_returns_false(self, disabled_evaluator):
+    async def test_disabled_returns_false(self, disabled_evaluator):
         """비활성화 시 항상 False."""
-        assert disabled_evaluator.should_auto_approve("bot_stop") is False
-        assert disabled_evaluator.should_auto_approve("budget_change") is False
+        assert await disabled_evaluator.should_auto_approve("bot_stop") is False
+        assert await disabled_evaluator.should_auto_approve("budget_change") is False
 
-    def test_bot_stop_auto_approved(self, evaluator):
+    async def test_bot_stop_auto_approved(self, evaluator):
         """bot_stop은 자동 승인."""
-        assert evaluator.should_auto_approve("bot_stop", {"bot_id": "bot-1"}) is True
-
-    def test_bot_create_paper_auto_approved(self, evaluator):
-        """모의투자 봇 생성은 자동 승인."""
         assert (
-            evaluator.should_auto_approve(
-                "bot_create", {"mode": "paper", "strategy_name": "test"}
+            await evaluator.should_auto_approve("bot_stop", {"bot_id": "bot-1"}) is True
+        )
+
+    async def test_bot_create_virtual_account_auto_approved(self, evaluator):
+        """virtual Account 봇 생성은 자동 승인."""
+        assert (
+            await evaluator.should_auto_approve(
+                "bot_create",
+                {"account_id": "virtual-acc", "strategy_name": "test"},
             )
             is True
         )
 
-    def test_bot_create_live_not_auto_approved(self, evaluator):
-        """실전투자 봇 생성은 자동 승인 안 됨."""
+    async def test_bot_create_live_account_not_auto_approved(self, evaluator):
+        """live Account 봇 생성은 자동 승인 안 됨."""
         assert (
-            evaluator.should_auto_approve(
-                "bot_create", {"mode": "live", "strategy_name": "test"}
+            await evaluator.should_auto_approve(
+                "bot_create",
+                {"account_id": "live-acc", "strategy_name": "test"},
             )
             is False
         )
 
-    def test_bot_create_no_mode_not_auto_approved(self, evaluator):
-        """mode 없는 봇 생성은 자동 승인 안 됨."""
+    async def test_bot_create_no_account_not_auto_approved(self, evaluator):
+        """account_id 없는 봇 생성은 자동 승인 안 됨."""
         assert (
-            evaluator.should_auto_approve("bot_create", {"strategy_name": "test"})
+            await evaluator.should_auto_approve("bot_create", {"strategy_name": "test"})
             is False
         )
 
-    def test_auto_approve_bot_create_paper_config_nested(self, evaluator):
-        """Refs #1241 SPLIT-2: ``params["config"]["mode"]=="paper"`` 도 자동 승인.
-
-        web/CLI 가 BotConfig 형태로 wrap 해서 보내는 신규 payload 형태도
-        호환해야 한다 (config-first → flat fallback).
-        """
+    async def test_bot_create_config_account_id_first(self, evaluator):
+        """config.account_id가 flat account_id보다 우선한다."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "bot_create",
                 {
                     "config": {
-                        "account_id": "acc-test",
-                        "mode": "paper",
+                        "account_id": "virtual-acc",
                         "strategy_id": "s1",
-                    }
+                    },
+                    "account_id": "live-acc",
                 },
             )
             is True
         )
 
-    def test_auto_approve_bot_create_paper_flat_legacy(self, evaluator):
-        """Refs #1241 SPLIT-2: legacy flat ``params["mode"]=="paper"`` 도 호환."""
-        # flat-only (config 키 자체가 없음)
+    async def test_bot_create_flat_account_id_fallback(self, evaluator):
+        """flat account_id도 resolver 입력으로 사용한다."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "bot_create",
-                {"account_id": "acc-test", "mode": "paper", "strategy_id": "s1"},
+                {"account_id": "virtual-acc", "strategy_id": "s1"},
             )
             is True
         )
 
-    def test_auto_approve_bot_create_config_first_overrides_flat(self, evaluator):
-        """config-nested 가 flat 보다 우선한다 (config-first 우선순위)."""
-        # config 의 mode=live 가 우선되어 자동 승인되지 않는다
+    async def test_bot_create_missing_account_not_auto_approved(self, evaluator):
+        """Account 조회 실패 시 자동 승인하지 않는다."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "bot_create",
-                {
-                    "config": {"mode": "live", "strategy_id": "s1"},
-                    "mode": "paper",  # flat 은 무시되어야 함
-                },
+                {"account_id": "missing-acc", "strategy_id": "s1"},
             )
             is False
         )
 
-    def test_budget_change_within_limit(self, evaluator):
+    async def test_bot_create_mode_value_is_ignored(self, evaluator):
+        """mode 값만으로는 자동 승인하지 않는다."""
+        assert (
+            await evaluator.should_auto_approve(
+                "bot_create",
+                {"account_id": "live-acc", "mode": "virtual", "strategy_id": "s1"},
+            )
+            is False
+        )
+
+    async def test_bot_create_without_resolver_not_auto_approved(self, enabled_config):
+        """Account resolver가 없으면 bot_create를 자동 승인하지 않는다."""
+        evaluator = AutoApproveEvaluator(config=enabled_config)
+        assert (
+            await evaluator.should_auto_approve(
+                "bot_create",
+                {"account_id": "virtual-acc", "strategy_id": "s1"},
+            )
+            is False
+        )
+
+    async def test_budget_change_within_limit(self, evaluator):
         """예산 변경이 한도 이내이면 자동 승인."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "budget_change",
                 {"bot_id": "bot-1", "amount": 15000000, "current": 10000000},
             )
             is True
         )
 
-    def test_budget_change_at_limit(self, evaluator):
+    async def test_budget_change_at_limit(self, evaluator):
         """예산 변경이 정확히 한도이면 자동 승인."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "budget_change",
                 {"bot_id": "bot-1", "amount": 15000000, "current": 10000000},
             )
             is True
         )
 
-    def test_budget_change_over_limit(self, evaluator):
+    async def test_budget_change_over_limit(self, evaluator):
         """예산 변경이 한도 초과이면 자동 승인 안 됨."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "budget_change",
                 {"bot_id": "bot-1", "amount": 20000000, "current": 10000000},
             )
             is False
         )
 
-    def test_budget_change_decrease_within_limit(self, evaluator):
+    async def test_budget_change_decrease_within_limit(self, evaluator):
         """예산 감액도 변경액 기준으로 평가."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "budget_change",
                 {"bot_id": "bot-1", "amount": 7000000, "current": 10000000},
             )
             is True
         )
 
-    def test_strategy_adopt_excluded(self, evaluator):
+    async def test_strategy_adopt_excluded(self, evaluator):
         """strategy_adopt는 전결 대상에서 제외."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "strategy_adopt", {"strategy_name": "test", "report_id": "r1"}
             )
             is False
         )
 
-    def test_strategy_retire_excluded(self, evaluator):
+    async def test_strategy_retire_excluded(self, evaluator):
         """strategy_retire는 전결 대상에서 제외."""
         assert (
-            evaluator.should_auto_approve(
+            await evaluator.should_auto_approve(
                 "strategy_retire", {"strategy_name": "test", "report_id": "r1"}
             )
             is False
@@ -273,28 +331,29 @@ class TestAutoApproveEvaluator:
         assert "strategy_adopt" in EXCLUDED_TYPES
         assert "strategy_retire" in EXCLUDED_TYPES
 
-    def test_unknown_type_not_auto_approved(self, evaluator):
+    async def test_unknown_type_not_auto_approved(self, evaluator):
         """알 수 없는 유형은 자동 승인 안 됨."""
-        assert evaluator.should_auto_approve("unknown_type") is False
+        assert await evaluator.should_auto_approve("unknown_type") is False
 
-    def test_rule_change_not_auto_approved(self, evaluator):
+    async def test_rule_change_not_auto_approved(self, evaluator):
         """rule_change는 전결 규칙에 없으므로 자동 승인 안 됨."""
         assert (
-            evaluator.should_auto_approve("rule_change", {"bot_id": "bot-1"}) is False
+            await evaluator.should_auto_approve("rule_change", {"bot_id": "bot-1"})
+            is False
         )
 
-    def test_bot_stop_disabled_in_config(self):
+    async def test_bot_stop_disabled_in_config(self):
         """bot_stop 규칙이 비활성화된 경우."""
         config = AutoApproveConfig(enabled=True, bot_stop=False)
         ev = AutoApproveEvaluator(config=config)
-        assert ev.should_auto_approve("bot_stop", {"bot_id": "bot-1"}) is False
+        assert await ev.should_auto_approve("bot_stop", {"bot_id": "bot-1"}) is False
 
-    def test_budget_change_max_zero_disables(self):
+    async def test_budget_change_max_zero_disables(self):
         """budget_change_max가 0이면 예산 변경 전결 비활성화."""
         config = AutoApproveConfig(enabled=True, budget_change_max=0)
         ev = AutoApproveEvaluator(config=config)
         assert (
-            ev.should_auto_approve(
+            await ev.should_auto_approve(
                 "budget_change",
                 {"bot_id": "bot-1", "amount": 10000000, "current": 10000000},
             )
@@ -340,6 +399,39 @@ class TestServiceAutoApprove:
 
         assert len(executed) == 1
         assert executed[0]["bot_id"] == "bot-1"
+
+    async def test_bot_create_virtual_account_auto_approved_by_service(
+        self, service_with_auto_approve
+    ):
+        """bot_create는 virtual Account 기준으로 자동 승인된다."""
+        svc, executed = service_with_auto_approve
+        req = await svc.create(
+            type="bot_create",
+            requester="agent:dev",
+            title="봇 생성 요청",
+            params={"account_id": "virtual-acc", "strategy_id": "s1"},
+        )
+
+        assert req.status == ApprovalStatus.APPROVED
+        assert req.resolved_by == "system:auto_approve"
+        assert len(executed) == 1
+        assert executed[0]["account_id"] == "virtual-acc"
+
+    async def test_bot_create_live_account_stays_pending_by_service(
+        self, service_with_auto_approve
+    ):
+        """bot_create live Account는 자동 승인되지 않는다."""
+        svc, executed = service_with_auto_approve
+        req = await svc.create(
+            type="bot_create",
+            requester="agent:dev",
+            title="봇 생성 요청",
+            params={"account_id": "live-acc", "strategy_id": "s1"},
+        )
+
+        assert req.status == ApprovalStatus.PENDING
+        assert req.resolved_by == ""
+        assert len(executed) == 0
 
     async def test_auto_approve_publishes_created_event_with_flag(
         self, service_with_auto_approve, eventbus

@@ -3,12 +3,33 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from ante.account.models import TradingMode
+
+if TYPE_CHECKING:
+    from ante.account.models import Account
 
 logger = logging.getLogger(__name__)
 
 # 전결 대상에서 제외되는 유형
 EXCLUDED_TYPES: frozenset[str] = frozenset({"strategy_adopt", "strategy_retire"})
+AccountResolver = Callable[[str], Awaitable["Account | None"]]
+
+
+def _extract_bot_create_account_id(params: dict) -> str | None:
+    """bot_create payload 에서 account_id 를 config-first 순서로 추출."""
+    config = params.get("config")
+    if isinstance(config, dict):
+        candidate = config.get("account_id")
+        if candidate is not None:
+            return str(candidate)
+    candidate = params.get("account_id")
+    if candidate is None:
+        return None
+    return str(candidate)
 
 
 @dataclass(frozen=True)
@@ -20,7 +41,7 @@ class AutoApproveConfig:
 
     enabled: bool = False
     bot_stop: bool = True
-    bot_create_paper: bool = True
+    bot_create_virtual: bool = True
     budget_change_max: float = 5_000_000
 
     @classmethod
@@ -33,7 +54,7 @@ class AutoApproveConfig:
         return cls(
             enabled=bool(data.get("enabled", False)),
             bot_stop=bool(rules.get("bot_stop", True)),
-            bot_create_paper=bool(rules.get("bot_create_paper", True)),
+            bot_create_virtual=bool(rules.get("bot_create_virtual", True)),
             budget_change_max=float(rules.get("budget_change_max", 5_000_000)),
         )
 
@@ -47,8 +68,9 @@ class AutoApproveEvaluator:
     """
 
     config: AutoApproveConfig = field(default_factory=AutoApproveConfig)
+    account_resolver: AccountResolver | None = None
 
-    def should_auto_approve(self, type: str, params: dict | None = None) -> bool:
+    async def should_auto_approve(self, type: str, params: dict | None = None) -> bool:
         """전결 조건 평가.
 
         Args:
@@ -69,16 +91,8 @@ class AutoApproveEvaluator:
         if type == "bot_stop" and self.config.bot_stop:
             return True
 
-        if type == "bot_create" and self.config.bot_create_paper:
-            # Refs #1217 → #1241 SPLIT-2: bot_create payload 형태가
-            # config-nested (``params["config"]["mode"]``) / flat
-            # (``params["mode"]``) 둘 다 호환되도록 config-first → flat
-            # fallback. ApprovalService.create() 가 account_id 를 이미
-            # 동일한 우선순위로 검증하므로 여기서도 같은 순서를 사용한다.
-            config = params.get("config") or {}
-            mode = config.get("mode") or params.get("mode")
-            if mode == "paper":
-                return True
+        if type == "bot_create" and self.config.bot_create_virtual:
+            return await self._should_auto_approve_bot_create(params)
 
         if type == "budget_change" and self.config.budget_change_max > 0:
             amount = params.get("amount", 0)
@@ -88,3 +102,17 @@ class AutoApproveEvaluator:
                 return True
 
         return False
+
+    async def _should_auto_approve_bot_create(self, params: dict) -> bool:
+        """Account.trading_mode 기반 bot_create 자동승인 판단."""
+        if self.account_resolver is None:
+            return False
+
+        account_id = _extract_bot_create_account_id(params)
+        if not account_id:
+            return False
+
+        account = await self.account_resolver(account_id)
+        if account is None:
+            return False
+        return account.trading_mode == TradingMode.VIRTUAL

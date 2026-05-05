@@ -112,7 +112,7 @@ enabled = false                  # 전결 기능 전체 on/off (기본: false)
 # 유형별 전결 규칙 (enabled = true일 때만 적용)
 [approval.auto_approve.rules]
 bot_stop = true                  # 봇 중지는 항상 자동 승인
-bot_create_paper = true          # 모의투자 봇 생성은 자동 승인
+bot_create_virtual = true        # Account.trading_mode == "virtual" 봇 생성은 자동 승인
 budget_change_max = 5000000      # 예산 변경 500만원 이하 자동 승인 (0이면 비활성)
 ```
 
@@ -123,7 +123,7 @@ ApprovalService.create()
   → auto_approve.enabled == true?
     → 유형별 규칙 매칭:
       - bot_stop: 항상 자동 승인
-      - bot_create: params.mode == "paper"이면 자동 승인
+      - bot_create: params.account_id로 Account를 조회해 trading_mode == "virtual"이면 자동 승인
       - budget_change: params.amount <= budget_change_max이면 자동 승인
     → 매칭 시: status를 APPROVED로 설정, executor 즉시 실행
       - history에 actor: "system:auto_approve" 기록
