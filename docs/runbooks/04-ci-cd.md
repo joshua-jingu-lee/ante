@@ -96,10 +96,11 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 
 ```yaml
 - cd frontend && npm run check-api-types:strict
-- ruff check src/ tests/
-- ruff format --check src/ tests/
-- mypy src/
-- pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
+- PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
+- PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
+- PYTHONPATH=$PWD/src .venv/bin/python -m ruff format --check src/ tests/
+- PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/
+- PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
 - docker build -t ante:release-pr .  # release/* PR only
 ```
 
@@ -209,10 +210,11 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 ## 4. 로컬 개발 시 사전 검증
 
 ```bash
-ruff check src/ tests/
-ruff format src/ tests/
-mypy src/ante/
-pytest tests/unit/ -v
+PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
+PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
+PYTHONPATH=$PWD/src .venv/bin/python -m ruff format src/ tests/
+PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/ante/
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 ```
 
 내부 Codex 브랜치 리뷰 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.

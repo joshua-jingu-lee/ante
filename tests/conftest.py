@@ -8,6 +8,16 @@ import os
 import pytest
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Fail collection if ``ante`` resolves outside this checkout."""
+    from scripts.check_import_path import ImportPathCheckError, check_import_path
+
+    try:
+        check_import_path()
+    except ImportPathCheckError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _set_encryption_key():
     """테스트용 Fernet 키 자동 설정 (session scope — 전체 세션에서 1회만 생성)."""

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib.util
 import re
 import subprocess
 import sys
@@ -93,6 +94,7 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "frontend": "React 대시보드 (Vite + TypeScript)",
     "guide": "사용자·운용 가이드 문서",
     "scripts": "설치·운영·문서 생성 스크립트",
+    "scripts/check_import_path.py": "현재 worktree import sanity check",
     "scripts/generate_db_schema.py": "DB 스키마 문서 자동 생성",
     "scripts/generate_project_structure.py": "프로젝트 구조 Agent INDEX 생성/check",
     "src/ante": "Python 백엔드 패키지",
@@ -105,6 +107,26 @@ TREE_LINE_RE = re.compile(
     r"^(?P<prefix>[│ ]*)(?:├|└)── (?P<name>.*?)(?:\s+#\s*(?P<comment>.*))?$"
 )
 GENERATED_AT_RE = re.compile(r"^> 마지막 생성 시점: (?P<value>.+)$", re.MULTILINE)
+
+
+def _load_import_guard():
+    guard_path = PROJECT_ROOT / "scripts" / "check_import_path.py"
+    spec = importlib.util.spec_from_file_location("check_import_path", guard_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load import guard: {guard_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _assert_current_worktree_import_path() -> None:
+    guard = _load_import_guard()
+    try:
+        guard.check_import_path(PROJECT_ROOT)
+    except guard.ImportPathCheckError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 def _run_git_ls_files() -> list[str]:
@@ -351,10 +373,14 @@ def _render_markdown(
     out = StringIO()
     out.write("# Ante 프로젝트 디렉토리 구조\n\n")
     out.write("> 역할: Agent용 프로젝트 구조 INDEX의 단일 SSOT입니다.\n")
-    out.write("> 생성 명령: `.venv/bin/python scripts/generate_project_structure.py`\n")
+    out.write(
+        "> 생성 명령: "
+        "`PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`\n"
+    )
     out.write(
         "> Check 명령: "
-        "`.venv/bin/python scripts/generate_project_structure.py --check`\n"
+        "`PYTHONPATH=$PWD/src .venv/bin/python "
+        "scripts/generate_project_structure.py --check`\n"
     )
     out.write(
         "> 생성 기준: 현재 Git 추적/비무시 파일 트리 "
@@ -394,7 +420,10 @@ def _check_output(output_path: Path, content: str) -> int:
 
     rel_output = output_path.relative_to(PROJECT_ROOT)
     print(f"{rel_output} is stale.")
-    print("Run: .venv/bin/python scripts/generate_project_structure.py")
+    print(
+        "Run: "
+        "PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py"
+    )
     print()
     _print_diff_summary(current, content, rel_output)
     return 1
@@ -436,6 +465,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _assert_current_worktree_import_path()
     args = parse_args(argv or sys.argv[1:])
     output_path = args.output
     if not output_path.is_absolute():

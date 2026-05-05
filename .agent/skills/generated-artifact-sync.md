@@ -24,8 +24,8 @@
 
 | 산출물 | 입력/SSOT | Generate | Check | 기대 동작 |
 |---|---|---|---|---|
-| `docs/architecture/generated/project-structure.md` | 현재 Git 추적/비무시 파일 트리 | `.venv/bin/python scripts/generate_project_structure.py` | `.venv/bin/python scripts/generate_project_structure.py --check` | generate는 파일 구조 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
-| `docs/architecture/generated/db-schema.md` | 모듈 소스 코드의 DDL 상수 | `.venv/bin/python scripts/generate_db_schema.py` | `.venv/bin/python scripts/generate_db_schema.py --check` | generate는 DB schema 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
+| `docs/architecture/generated/project-structure.md` | 현재 Git 추적/비무시 파일 트리 | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py` | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check` | generate는 파일 구조 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
+| `docs/architecture/generated/db-schema.md` | 모듈 소스 코드의 DDL 상수 | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py` | `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check` | generate는 DB schema 문서를 재생성한다. check는 산출물이 최신이면 0으로 종료하고, 불일치하면 실패하며 재생성 명령을 안내한다. |
 | `guide/cli.md` | Click CLI command tree | `.venv/bin/python scripts/generate_cli_reference.py` | `.venv/bin/python scripts/generate_cli_reference.py && git diff --exit-code -- guide/cli.md` | generate는 CLI 레퍼런스를 재생성한다. 전용 `--check`가 없으므로 생성 후 diff가 비어 있어야 최신이다. |
 | `frontend/openapi.json` | 실행 중인 백엔드 `/openapi.json` | `curl http://localhost:3982/openapi.json -o frontend/openapi.json` | `git diff --exit-code -- frontend/openapi.json` | 백엔드 API 계약 변경 시 OpenAPI JSON을 갱신한다. 전용 check가 없으므로 재수집 후 diff가 비어 있어야 최신이다. |
 | `frontend/src/types/api.generated.ts` | `frontend/openapi.json` 또는 백엔드 `/openapi.json` | `cd frontend && npm run generate-types` | `cd frontend && npm run generate-types && git diff --exit-code -- src/types/api.generated.ts` | OpenAPI에서 TypeScript wire contract를 재생성한다. 전용 check가 없으므로 생성 후 diff가 비어 있어야 최신이다. |
