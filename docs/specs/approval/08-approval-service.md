@@ -12,6 +12,7 @@
 | `eventbus` | EventBus | 이벤트 발행용 |
 | `executors` | dict[str, Callable] | 유형별 승인 시 실행 핸들러 |
 | `validators` | dict[str, Callable] | 유형별 사전 검증 핸들러. `fail` 시 요청 생성 차단, `warn` 시 reviews에 경고 첨부 |
+| `auto_approve_evaluator` | AutoApproveEvaluator \| None | 전결 규칙 평가기. `bot_create` 자동승인은 Account resolver로 조회한 `Account.trading_mode == "virtual"`일 때만 허용 |
 
 **메서드:**
 
@@ -29,6 +30,17 @@
 | `get` | id | ApprovalRequest \| None | 단건 조회 |
 | `list` | status, type, search, limit, offset | list[ApprovalRequest] | 필터 조회. `search`: title/requester LIKE 키워드 검색 |
 | `expire_stale` | — | int | 만료 기한이 지난 요청 일괄 expired 처리. 처리 건수 반환 |
+
+### 전결 평가
+
+`create()`는 요청을 저장하기 전 `AutoApproveEvaluator.should_auto_approve()`를 await한다.
+전결이 성립하면 요청은 즉시 `APPROVED`가 되고, `resolved_by`는
+`"system:auto_approve"`로 기록되며 executor가 실행된다.
+
+`bot_create` 전결은 `params["config"]["account_id"]`를 먼저 보고, 없으면
+`params["account_id"]`를 사용해 Account를 조회한다. 조회된 Account의
+`trading_mode`가 `"virtual"`일 때만 자동 승인한다. `mode` 필드나
+`broker_config.is_paper`는 자동승인 판단에 사용하지 않는다.
 
 ### 만료 스케줄러
 

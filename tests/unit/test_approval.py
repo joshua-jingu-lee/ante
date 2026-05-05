@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ante.account.models import Account, TradingMode
+from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
 from ante.approval.models import (
     ApprovalRequest,
     ApprovalStatus,
@@ -1817,6 +1819,40 @@ class TestAccountScopedPayloadValidation:
                 title="누락",
                 params={"config": {"strategy_id": "s1"}},
             )
+
+    async def test_bot_create_mode_paper_no_longer_auto_approves(self, db, eventbus):
+        """mode 값은 bot_create 자동승인 근거가 아니다."""
+
+        async def resolve_account(account_id: str) -> Account | None:
+            if account_id == "acc-test":
+                return Account(
+                    account_id="acc-test",
+                    name="실전 계좌",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
+            return None
+
+        svc = ApprovalService(
+            db=db,
+            eventbus=eventbus,
+            auto_approve_evaluator=AutoApproveEvaluator(
+                config=AutoApproveConfig(enabled=True, bot_create_virtual=True),
+                account_resolver=resolve_account,
+            ),
+        )
+        await svc.initialize()
+
+        req = await svc.create(
+            type="bot_create",
+            requester="agent",
+            title="mode 값은 무시",
+            params={"account_id": "acc-test", "mode": "paper", "strategy_id": "s1"},
+        )
+
+        assert req.status == ApprovalStatus.PENDING
+        assert req.resolved_by == ""
 
     async def test_approval_create_global_types_pass_without_account(self, service):
         """글로벌 결재 (strategy_*) + bot-id scoped 는 account_id 없이 통과."""

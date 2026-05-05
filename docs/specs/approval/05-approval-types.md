@@ -8,7 +8,7 @@
 |------|------|-------------|------------------|--------------|
 | `strategy_adopt` | 전략 채택 | `{"strategy_name": "...", "strategy_id": "...", "report_id": "..."}` | `ReportStore.update_status(report_id, "adopted")` + `StrategyRegistry.update_status(strategy_id, "adopted")` 호출 → 전략이 ADOPTED 상태로 전환되어 봇에 배정 가능해진다 | 등록됨 |
 | `strategy_retire` | 전략 폐기 | `{"strategy_name": "...", "strategy_id": "...", "report_id": "...", "reason": "성과 부진"}` | `ReportStore.update_status(report_id, "retired")` + `StrategyRegistry.update_status(strategy_id, "archived")` 호출 → 전략이 ARCHIVED 상태로 전환된다. 봇은 전략 복제본을 사용하므로 운영 중인 봇에는 영향 없음 | **미등록** |
-| `bot_create` | 봇 신규 생성 | `{"strategy_name": "...", "budget": 10000000, "mode": "paper"}` | `BotManager.create_bot(**params)` 호출 → 전략을 실행하는 새 봇이 생성되고, Treasury에서 예산이 할당된다 | **미등록** |
+| `bot_create` | 봇 신규 생성 | `{"account_id": "domestic-demo", "strategy_id": "...", "budget": 10000000}` | `BotManager.create_bot(**params)` 호출 → 전략을 실행하는 새 봇이 생성되고, Treasury에서 예산이 할당된다 | **미등록** |
 | `bot_assign_strategy` | 봇에 전략 배정 | `{"bot_id": "...", "strategy_id": "..."}` | `BotManager.assign_strategy(bot_id, strategy_id)` 호출 → 봇에 채택된 전략을 배정한다. running 상태이면 즉시 새 전략으로 전환된다 | **미등록** |
 | `bot_change_strategy` | 봇 전략 변경 | `{"bot_id": "...", "strategy_id": "..."}` | `BotManager.change_strategy(bot_id, strategy_id)` 호출 → 중지 상태의 봇에 다른 전략을 교체 배정한다. running 상태이면 거부된다 | **미등록** |
 | `bot_stop` | 봇 중지 | `{"bot_id": "...", "reason": "손실 누적"}` | `BotManager.stop_bot(bot_id)` 호출 → 봇의 전략 루프가 중지되고, 미체결 주문이 취소된다. 보유 포지션은 유지된다 | 등록됨 |

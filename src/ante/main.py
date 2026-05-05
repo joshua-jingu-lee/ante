@@ -1250,7 +1250,22 @@ async def _init_approval(s: Services) -> None:
     auto_approve_config = AutoApproveConfig.from_dict(
         auto_approve_raw if isinstance(auto_approve_raw, dict) else {}
     )
-    auto_approve_evaluator = AutoApproveEvaluator(config=auto_approve_config)
+
+    async def _resolve_auto_approve_account(account_id: str):
+        """전결 판단용 Account 조회. 없으면 자동승인하지 않는다."""
+        from ante.account.errors import AccountNotFoundError
+
+        if s.account_service is None:
+            return None
+        try:
+            return await s.account_service.get(account_id)
+        except AccountNotFoundError:
+            return None
+
+    auto_approve_evaluator = AutoApproveEvaluator(
+        config=auto_approve_config,
+        account_resolver=_resolve_auto_approve_account,
+    )
     if auto_approve_config.enabled:
         logger.info("전결 기능 활성화")
 

@@ -22,7 +22,7 @@
 |----|------|------------------|
 | `STRATEGY_ADOPT` | 전략 채택 | `ReportStore.update_status(report_id, "adopted")` + `StrategyRegistry.update_status(strategy_id, "adopted")` → 전략이 ADOPTED 상태로 전환되어 봇에 배정 가능해진다. 전결 대상에서 제외된다 |
 | `STRATEGY_RETIRE` | 전략 폐기 | `ReportStore.update_status(report_id, "retired")` + `StrategyRegistry.update_status(strategy_id, "archived")` → 전략이 ARCHIVED 상태로 전환된다. 봇은 전략 복제본을 사용하므로 운영 중인 봇에는 영향 없음. 전결 대상에서 제외된다 |
-| `BOT_CREATE` | 봇 신규 생성 | `BotManager.create_bot(**params)` → 전략을 실행하는 새 봇이 생성되고, Treasury에서 예산이 할당된다 |
+| `BOT_CREATE` | 봇 신규 생성 | `BotManager.create_bot(**params)` → 전략을 실행하는 새 봇이 생성되고, Treasury에서 예산이 할당된다. 전결은 Account 조회 결과 `trading_mode == "virtual"`일 때만 가능하다 |
 | `BOT_ASSIGN_STRATEGY` | 봇에 전략 배정 | `BotManager.assign_strategy(bot_id, strategy_id)` → 봇에 채택된 전략을 배정한다. 봇이 running 상태이면 즉시 새 전략으로 전환된다 |
 | `BOT_CHANGE_STRATEGY` | 봇 전략 변경 | `BotManager.change_strategy(bot_id, strategy_id)` → 중지 상태의 봇에 다른 전략을 교체 배정한다. 봇이 running 상태이면 거부된다 |
 | `BOT_STOP` | 봇 중지 | `BotManager.stop_bot(bot_id)` → 봇의 전략 루프가 중지되고, 미체결 주문이 취소된다. 보유 포지션은 유지된다 |

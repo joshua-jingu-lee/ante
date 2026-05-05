@@ -150,7 +150,7 @@ class ApprovalService:
         )
 
         # 전결 평가
-        auto_approved = self._auto_approve.should_auto_approve(type, params)
+        auto_approved = await self._auto_approve.should_auto_approve(type, params)
         if auto_approved:
             request.status = ApprovalStatus.APPROVED
             request.resolved_at = now
