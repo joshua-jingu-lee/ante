@@ -56,6 +56,20 @@ const DISPLAY_CONFIGS: DisplayConfig[] = [
   { key: 'notification.min_level', label: '알림 최소 레벨', desc: 'notification.min_level · 이 레벨 미만은 발송하지 않음 (CRITICAL은 항상 발송)', type: 'select', options: ['critical', 'error', 'warning', 'info'], defaultOption: 'info' },
 ]
 
+function formatTradingMode(mode: string | undefined) {
+  const normalized = mode?.toLowerCase()
+  if (normalized === 'live') return '실거래'
+  if (normalized === 'virtual') return '가상거래'
+  return mode || '-'
+}
+
+function formatKisEndpoint(brokerConfig: Record<string, unknown> | undefined) {
+  const isPaper = brokerConfig?.is_paper
+  if (isPaper === true) return 'KIS 모의투자'
+  if (isPaper === false) return 'KIS 실전투자'
+  return '-'
+}
+
 export default function Settings() {
   const { data: status, isLoading: statusLoading } = useSystemStatus()
   // CLI/다른 세션의 system halt/clear-halt를 설정 화면 상태에 반영하기 위해 30초 폴링.
@@ -80,6 +94,7 @@ export default function Settings() {
   const suspendedCount = accounts?.filter((a) => a.status === 'suspended').length ?? 0
   const isActive = !accountsLoading && activeCount > 0 && suspendedCount === 0
   const configMap = new Map((configs ?? []).map((c) => [c.key, c.value]))
+  const primaryAccount = accounts?.[0]
 
   const getConfigValue = (key: string) => configMap.get(key) ?? ''
 
@@ -182,7 +197,13 @@ export default function Settings() {
             <div className="flex justify-between py-2 border-b border-border text-[13px]">
               <span className="text-text-muted">거래 모드</span>
               <span className="inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold bg-primary/15 text-primary">
-                {getConfigValue('broker.mode') || '실전'}
+                {formatTradingMode(primaryAccount?.trading_mode)}
+              </span>
+            </div>
+            <div className="flex justify-between py-2 border-b border-border text-[13px]">
+              <span className="text-text-muted">KIS 엔드포인트</span>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-[10px] text-[11px] font-semibold bg-warning-bg text-warning">
+                {formatKisEndpoint(primaryAccount?.broker_config)}
               </span>
             </div>
             <div className="flex justify-between py-2 border-b border-border text-[13px]">

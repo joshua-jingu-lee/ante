@@ -16,7 +16,7 @@ export interface SystemStatusView {
 
 export interface BrokerStatus {
   connected: boolean
-  mode: 'live' | 'paper'
+  endpoint?: 'demo' | 'live'
   token_expires_at?: string
 }
 

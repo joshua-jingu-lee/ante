@@ -44,8 +44,8 @@ export default function BotTable({ items, onStart, onStop, onDelete }: BotTableP
                   <StatusBadge variant={STATUS_VARIANT[bot.status] as 'positive'}>{BOT_STATUS_LABELS[bot.status] || bot.status}</StatusBadge>
                 </td>
                 <td className="px-3 py-3 border-b border-border text-[13px]">
-                  <StatusBadge variant={bot.mode === 'live' ? 'warning' : 'info'}>
-                    {bot.mode === 'live' ? '실전' : '모의'}
+                  <StatusBadge variant={bot.trading_mode === 'live' ? 'warning' : 'info'}>
+                    {bot.trading_mode === 'live' ? '실거래' : '가상거래'}
                   </StatusBadge>
                 </td>
                 <td className="px-3 py-3 border-b border-border text-[13px] text-right">

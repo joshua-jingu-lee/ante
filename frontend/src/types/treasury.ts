@@ -25,6 +25,7 @@ export interface TreasurySummaryView {
   account_balance?: number
   purchasable_amount?: number
   account_number?: string
+  /** KIS 모의/실전투자 엔드포인트 메타데이터. Account.trading_mode와 별개다. */
   is_demo_trading?: boolean
   last_sync_time?: string | null
   total_reserved?: number
