@@ -145,11 +145,12 @@ pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
 # report-only 진단
 cd frontend && npm run check-api-types
 
-# blocking 기준 dry-run
+# blocking/CI 기준
 cd frontend && npm run check-api-types:strict
 ```
 
 - `check-api-types:strict`는 findings가 1건 이상이면 non-zero로 종료한다.
+- GitHub Actions job 이름은 `frontend-api-types`이며 최종 `ci` aggregate job의 입력이다.
 - 기준선은 findings 0이다. baseline/allowlist는 두지 않는다.
 - generated type import는 `frontend/src/api/*.ts`와 `frontend/src/types/api.generated.ts`에만 허용한다.
 - 수동 `Response`, `Request`, `Payload` 타입 선언은 `api.generated.ts` 밖에서 금지한다.
