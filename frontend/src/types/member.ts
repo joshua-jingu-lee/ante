@@ -1,8 +1,8 @@
 /**
  * Member 도메인 타입.
  *
- * 백엔드가 dict 기반(extra="allow") 응답을 반환하므로
- * 프론트엔드에서 상세 필드를 명시적으로 정의한다.
+ * API 계약 타입은 frontend/src/api/members.ts 어댑터 안에서만 사용한다.
+ * 이 파일은 화면과 훅이 공유하는 프론트엔드 전용 타입만 노출한다.
  */
 
 // ── 프론트엔드 전용 타입 ──────────────────────────────────
@@ -10,7 +10,7 @@ export type MemberStatus = 'active' | 'suspended' | 'revoked'
 export type MemberType = 'human' | 'agent'
 export type HumanRole = 'owner' | 'master' | 'admin'
 
-export interface Member {
+export interface MemberView {
   member_id: string
   name: string
   type: MemberType
@@ -23,20 +23,29 @@ export interface Member {
   created_at: string
 }
 
-export interface MemberDetail extends Member {
+export interface MemberDetailView extends MemberView {
   scopes: string[]
   created_by?: string
   token_prefix?: string
   suspended_at?: string
 }
 
-export interface MemberCreateRequest {
+export interface MemberCreateInput {
   member_id: string
   member_type: MemberType
   name: string
   org: string
+  role?: HumanRole | 'default'
   scopes: string[]
 }
+
+export interface MemberTokenView {
+  member: MemberDetailView
+  token: string
+}
+
+export type Member = MemberView
+export type MemberDetail = MemberDetailView
 
 export const ALL_SCOPES = [
   'strategy:read',
