@@ -79,6 +79,18 @@ PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/codex
 - **결과**: `ci`
 - **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
 
+#### Frontend API Type Boundary Gate 준비 기준
+
+Frontend OpenAPI 타입 경계 검사는 zero-violation 정책을 사용한다.
+
+- Report-only 진단: `cd frontend && npm run check-api-types`
+- Blocking 명령: `cd frontend && npm run check-api-types:strict`
+- Baseline/allowlist: 사용하지 않는다. #1261/#1262/#1263 이후 findings 0을 기준선으로 삼는다.
+- Changed-file mode: 사용하지 않는다. 전체 `frontend/src` 경계를 검사한다.
+- CI workflow required check 적용은 별도 후속 이슈에서 수행한다. 이 문서는 후속 적용의 acceptance criteria만 정의한다.
+
+후속 CI 적용 PR은 `check-api-types:strict`가 findings 0으로 통과하고, 동일 PR에서 `.github/workflows/ci.yml`에 blocking step을 추가해야 한다.
+
 예시:
 
 ```yaml

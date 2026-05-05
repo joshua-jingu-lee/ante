@@ -136,7 +136,27 @@ pytest tests/unit/test_eventbus.py -v
 pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
 ```
 
-## 7. 배포 이미지 시뮬레이션 테스트
+## 7. 프론트엔드 API 타입 경계 검사
+
+대시보드 API 계약은 OpenAPI generated type을 wire contract로 사용하고,
+`frontend/src/api/*.ts` adapter가 UI/domain model로 변환한다.
+
+```bash
+# report-only 진단
+cd frontend && npm run check-api-types
+
+# blocking 기준 dry-run
+cd frontend && npm run check-api-types:strict
+```
+
+- `check-api-types:strict`는 findings가 1건 이상이면 non-zero로 종료한다.
+- 기준선은 findings 0이다. baseline/allowlist는 두지 않는다.
+- generated type import는 `frontend/src/api/*.ts`와 `frontend/src/types/api.generated.ts`에만 허용한다.
+- 수동 `Response`, `Request`, `Payload` 타입 선언은 `api.generated.ts` 밖에서 금지한다.
+- `client.get/post/put/patch/delete` 호출은 adapter 안에서 generated response type parameter를 명시한다.
+- `as unknown as`는 API adapter의 `toXxxView()` mapper 내부에서만 예외적으로 허용한다.
+
+## 8. 배포 이미지 시뮬레이션 테스트
 
 기존 repo-local QA 체계는 1.0 테스트 계약에서 제외한다.
 저장소는 더 이상 QA 전용 Docker image, QA compose, TC 파일, QA seed script를
@@ -147,9 +167,9 @@ pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
 CLI, process lifecycle, health endpoint를 검증해야 하며, repo 내부 DB 직접
 시딩이나 QA 전용 entrypoint에 의존하지 않는다.
 
-## 8. 에이전트의 테스트 작성 규칙
+## 9. 에이전트의 테스트 작성 규칙
 
-### 8.1 단위/통합 테스트 (`@backend-dev`, `@frontend-dev`)
+### 9.1 단위/통합 테스트 (`@backend-dev`, `@frontend-dev`)
 
 - 모듈 구현 PR에 해당 모듈의 단위 테스트를 반드시 포함
 - 테스트 없는 코드는 내부 `/codex:review` 브랜치 리뷰에서 blocking failure로 판정한다
