@@ -2,6 +2,8 @@
 
 Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니다. 각 테이블의 DDL, 인덱스, ER 다이어그램, 보존 정책을 확인할 수 있습니다.
 
+> 생성 명령: `.venv/bin/python scripts/generate_db_schema.py`
+> Check 명령: `.venv/bin/python scripts/generate_db_schema.py --check`
 > 마지막 갱신: 2026-05-05
 
 - 테이블: **22**개

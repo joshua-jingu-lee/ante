@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성.
+"""*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성/check.
 
 src/ante/ 하위 모든 .py 파일에서 공식 DDL 상수인 *_SCHEMA를 찾고,
 legacy 예외인 _CREATE_TABLE_SQL을 함께 파싱하여
@@ -11,6 +11,7 @@ SSOT: 모듈 소스 코드 내 DDL 상수 -> docs/architecture/generated/db-sche
     python scripts/generate_db_schema.py
     python scripts/generate_db_schema.py --output <path>
     python scripts/generate_db_schema.py --stdout
+    python scripts/generate_db_schema.py --check
 
     <path> 기본값: docs/architecture/generated/db-schema.md
 """
@@ -19,9 +20,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import difflib
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from typing import TextIO
 
@@ -29,6 +32,9 @@ from typing import TextIO
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src" / "ante"
+DEFAULT_OUTPUT = PROJECT_ROOT / "docs" / "architecture" / "generated" / "db-schema.md"
+KST = timezone(timedelta(hours=9))
+LAST_UPDATED_RE = re.compile(r"^> 마지막 갱신: (?P<value>.+)$", re.MULTILINE)
 
 # ── 테이블 설명 매핑 ──────────────────────────────────────────────────────
 
@@ -320,17 +326,23 @@ def collect_schemas() -> tuple[list[TableInfo], list[IndexInfo], str]:
 # ── Markdown 생성 ────────────────────────────────────────────────────────
 
 
-def _write_header(out: TextIO, table_count: int, index_count: int) -> None:
+def _write_header(
+    out: TextIO,
+    table_count: int,
+    index_count: int,
+    generated_at: str,
+) -> None:
     """문서 헤더 및 통계 요약을 출력한다."""
-    kst = timezone(timedelta(hours=9))
-    today = datetime.now(tz=kst).strftime("%Y-%m-%d")
-
     out.write("# Ante DB Schema Reference\n\n")
     out.write(
         "Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니다. "
         "각 테이블의 DDL, 인덱스, ER 다이어그램, 보존 정책을 확인할 수 있습니다.\n\n"
     )
-    out.write(f"> 마지막 갱신: {today}\n\n")
+    out.write("> 생성 명령: `.venv/bin/python scripts/generate_db_schema.py`\n")
+    out.write(
+        "> Check 명령: `.venv/bin/python scripts/generate_db_schema.py --check`\n"
+    )
+    out.write(f"> 마지막 갱신: {generated_at}\n\n")
     out.write(f"- 테이블: **{table_count}**개\n")
     out.write(f"- 인덱스: **{index_count}**개\n\n")
 
@@ -460,11 +472,16 @@ def _write_retention(out: TextIO, tables: list[TableInfo]) -> None:
 # ── 메인 생성 함수 ──────────────────────────────────────────────────────
 
 
-def generate_db_schema(out: TextIO) -> tuple[int, int]:
+def generate_db_schema(
+    out: TextIO,
+    *,
+    generated_at: str | None = None,
+) -> tuple[int, int]:
     """DB 스키마 문서를 생성하고 (테이블 수, 인덱스 수)를 반환한다."""
     tables, indexes, all_ddl = collect_schemas()
+    generated_at = generated_at or _today_kst()
 
-    _write_header(out, len(tables), len(indexes))
+    _write_header(out, len(tables), len(indexes), generated_at)
     _write_toc(out)
     _write_er_diagram(out, tables, all_ddl)
     _write_table_list(out, tables)
@@ -475,18 +492,83 @@ def generate_db_schema(out: TextIO) -> tuple[int, int]:
     return len(tables), len(indexes)
 
 
+def render_db_schema(*, generated_at: str | None = None) -> tuple[str, int, int]:
+    """DB 스키마 문서를 문자열로 생성한다."""
+    out = StringIO()
+    table_count, index_count = generate_db_schema(out, generated_at=generated_at)
+    return out.getvalue(), table_count, index_count
+
+
+def _today_kst() -> str:
+    return datetime.now(tz=KST).strftime("%Y-%m-%d")
+
+
+def _extract_last_updated(text: str) -> str | None:
+    match = LAST_UPDATED_RE.search(text)
+    if match is None:
+        return None
+    return match.group("value")
+
+
+def _existing_or_today(output_path: Path) -> str:
+    if output_path.exists():
+        existing = _extract_last_updated(output_path.read_text(encoding="utf-8"))
+        if existing:
+            return existing
+    return _today_kst()
+
+
+def _print_diff_summary(current: str, expected: str, rel_output: Path) -> None:
+    diff = list(
+        difflib.unified_diff(
+            current.splitlines(),
+            expected.splitlines(),
+            fromfile=f"a/{rel_output}",
+            tofile=f"b/{rel_output}",
+            lineterm="",
+        )
+    )
+    max_lines = 120
+    for line in diff[:max_lines]:
+        print(line)
+    if len(diff) > max_lines:
+        print(f"... diff truncated ({len(diff) - max_lines} more lines)")
+
+
+def _display_path(output_path: Path) -> Path:
+    try:
+        return output_path.relative_to(PROJECT_ROOT)
+    except ValueError:
+        return output_path
+
+
+def _check_output(output_path: Path, content: str) -> int:
+    current = output_path.read_text(encoding="utf-8") if output_path.exists() else ""
+    rel_output = _display_path(output_path)
+    if current == content:
+        print(f"{rel_output} is up to date.")
+        return 0
+
+    print(f"{rel_output} is stale.")
+    print("Run: .venv/bin/python scripts/generate_db_schema.py")
+    print()
+    _print_diff_summary(current, content, rel_output)
+    return 1
+
+
 # ── CLI entrypoint ───────────────────────────────────────────────────────
 
 
 def main() -> None:
     """스크립트 진입점."""
     parser = argparse.ArgumentParser(
-        description="*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성",
+        description="*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성/check",
     )
     parser.add_argument(
         "--output",
         "-o",
-        default="docs/architecture/generated/db-schema.md",
+        type=Path,
+        default=DEFAULT_OUTPUT,
         help="출력 파일 경로 (기본: docs/architecture/generated/db-schema.md)",
     )
     parser.add_argument(
@@ -494,7 +576,19 @@ def main() -> None:
         action="store_true",
         help="파일 대신 stdout으로 출력",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="파일을 수정하지 않고 generated 문서가 최신인지 확인",
+    )
     args = parser.parse_args()
+
+    output_path = args.output
+    if not output_path.is_absolute():
+        output_path = PROJECT_ROOT / output_path
+
+    if args.stdout and args.check:
+        parser.error("--stdout and --check cannot be used together")
 
     if args.stdout:
         table_count, index_count = generate_db_schema(sys.stdout)
@@ -502,14 +596,19 @@ def main() -> None:
             f"\n<!-- {table_count} tables, {index_count} indexes documented -->",
             file=sys.stderr,
         )
+    elif args.check:
+        content, _table_count, _index_count = render_db_schema(
+            generated_at=_existing_or_today(output_path)
+        )
+        raise SystemExit(_check_output(output_path, content))
     else:
-        output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with output_path.open("w", encoding="utf-8") as f:
             table_count, index_count = generate_db_schema(f)
 
-        print(f"Generated {output_path} ({table_count} tables, {index_count} indexes)")
+        rel_output = _display_path(output_path)
+        print(f"Generated {rel_output} ({table_count} tables, {index_count} indexes)")
 
 
 if __name__ == "__main__":
