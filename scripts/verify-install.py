@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import shutil
 import sqlite3
 import subprocess
@@ -82,6 +83,26 @@ def _ensure_src_path(project_root: Path) -> None:
     src_path = str(project_root / "src")
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
+
+
+def _load_import_guard(project_root: Path):
+    guard_path = project_root / "scripts" / "check_import_path.py"
+    spec = importlib.util.spec_from_file_location("check_import_path", guard_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load import guard: {guard_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _assert_current_worktree_import_path(project_root: Path) -> None:
+    guard = _load_import_guard(project_root)
+    try:
+        guard.check_import_path(project_root)
+    except guard.ImportPathCheckError as exc:
+        log_fail(str(exc))
+        raise SystemExit(1) from exc
 
 
 def _enum_value(value: Any) -> Any:
@@ -150,6 +171,7 @@ def _print_account_create_hint(account_id: str) -> None:
 
 async def _load_kis_adapter_config(account_id: str) -> dict[str, Any] | None:
     project_root = Path(__file__).resolve().parent.parent
+    _assert_current_worktree_import_path(project_root)
     _ensure_src_path(project_root)
 
     from ante.account import AccountNotFoundError, AccountService

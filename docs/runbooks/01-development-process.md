@@ -236,11 +236,12 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - 스크립트로 생성되는 문서는 수동 편집하지 않는다.
 - 구현 단계에서 생성 산출물 입력이 바뀌면 먼저 대응하는 regenerate 명령을 실행한다.
 - 리뷰/CI 전에는 전용 check 명령이 있는 산출물을 실제 check 명령으로 검증한다.
-  - 프로젝트 구조: `.venv/bin/python scripts/generate_project_structure.py --check`
-  - DB schema: `.venv/bin/python scripts/generate_db_schema.py --check`
+  - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
+  - DB schema: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
 - 전용 check 명령이 없는 생성 산출물은 generate 명령을 다시 실행한 뒤 `git diff --exit-code -- <산출물>`로 변경 없음 상태를 확인한다.
-- 프로젝트 구조 regenerate 명령은 `.venv/bin/python scripts/generate_project_structure.py`다.
-- DB schema regenerate 명령은 `.venv/bin/python scripts/generate_db_schema.py`다.
+- 프로젝트 구조 regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`다.
+- DB schema regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`다.
+- 로컬 검증 전에는 `PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `src/ante/__init__.py`가 import되는지 확인한다.
 - Plan Preflight와 리뷰 단계에서 generated artifact sync 위험을 발견하면 구현 체크리스트와 검증 체크리스트에 regenerate/check 흐름을 함께 포함한다.
 
 ## 8. API 스키마 변경 규칙

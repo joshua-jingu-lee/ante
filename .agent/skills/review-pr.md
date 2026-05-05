@@ -110,8 +110,8 @@ gh pr diff #{PR번호}
 
 생성 산출물 신호가 있으면 B3 판정 전에 `.agent/skills/generated-artifact-sync.md`를 읽고 아래 검증 증거를 확인한다.
 
-- 프로젝트 구조 변경: `.venv/bin/python scripts/generate_project_structure.py`로 regenerate했는지, 리뷰/CI 전 `.venv/bin/python scripts/generate_project_structure.py --check`를 실행했는지 확인한다.
-- DB DDL/schema 변경: `.venv/bin/python scripts/generate_db_schema.py`로 regenerate했는지, 리뷰/CI 전 `.venv/bin/python scripts/generate_db_schema.py --check`를 실행했는지 확인한다.
+- 프로젝트 구조 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`를 실행했는지 확인한다.
+- DB DDL/schema 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`를 실행했는지 확인한다.
 - CLI reference, OpenAPI JSON, frontend generated types처럼 전용 check 명령이 없는 산출물은 대응 generate 명령 실행 후 `git diff --exit-code -- <산출물>` 결과가 검증 증거에 남았는지 확인한다.
 - 실행 증거가 없고 코드 독해로만 최신이라고 추론했다면 B3는 PASS가 아니라 FAIL 또는 follow-up으로 분리한다.
 

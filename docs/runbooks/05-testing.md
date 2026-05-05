@@ -120,20 +120,23 @@ def db_path(tmp_path):
 ## 6. 테스트 실행 명령
 
 ```bash
+# 현재 worktree import sanity check
+PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
+
 # 단위 테스트만
-pytest tests/unit/ -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 # 통합 테스트만
-pytest tests/integration/ -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
 
 # 전체 + 커버리지
-pytest tests/ -v --cov=src/ante --cov-report=term-missing
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/ -v --cov=src/ante --cov-report=term-missing
 
 # 특정 모듈만
-pytest tests/unit/test_eventbus.py -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/test_eventbus.py -v
 
 # 특정 테스트만
-pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
 ```
 
 ## 7. 프론트엔드 API 타입 경계 검사

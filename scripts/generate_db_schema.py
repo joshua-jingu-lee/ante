@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import ast
 import difflib
+import importlib.util
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,27 @@ SRC_DIR = PROJECT_ROOT / "src" / "ante"
 DEFAULT_OUTPUT = PROJECT_ROOT / "docs" / "architecture" / "generated" / "db-schema.md"
 KST = timezone(timedelta(hours=9))
 LAST_UPDATED_RE = re.compile(r"^> 마지막 갱신: (?P<value>.+)$", re.MULTILINE)
+
+
+def _load_import_guard():
+    guard_path = PROJECT_ROOT / "scripts" / "check_import_path.py"
+    spec = importlib.util.spec_from_file_location("check_import_path", guard_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load import guard: {guard_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _assert_current_worktree_import_path() -> None:
+    guard = _load_import_guard()
+    try:
+        guard.check_import_path(PROJECT_ROOT)
+    except guard.ImportPathCheckError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+
 
 # ── 테이블 설명 매핑 ──────────────────────────────────────────────────────
 
@@ -338,9 +360,13 @@ def _write_header(
         "Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니다. "
         "각 테이블의 DDL, 인덱스, ER 다이어그램, 보존 정책을 확인할 수 있습니다.\n\n"
     )
-    out.write("> 생성 명령: `.venv/bin/python scripts/generate_db_schema.py`\n")
     out.write(
-        "> Check 명령: `.venv/bin/python scripts/generate_db_schema.py --check`\n"
+        "> 생성 명령: "
+        "`PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`\n"
+    )
+    out.write(
+        "> Check 명령: "
+        "`PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`\n"
     )
     out.write(f"> 마지막 갱신: {generated_at}\n\n")
     out.write(f"- 테이블: **{table_count}**개\n")
@@ -550,7 +576,7 @@ def _check_output(output_path: Path, content: str) -> int:
         return 0
 
     print(f"{rel_output} is stale.")
-    print("Run: .venv/bin/python scripts/generate_db_schema.py")
+    print("Run: PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py")
     print()
     _print_diff_summary(current, content, rel_output)
     return 1
@@ -561,6 +587,7 @@ def _check_output(output_path: Path, content: str) -> int:
 
 def main() -> None:
     """스크립트 진입점."""
+    _assert_current_worktree_import_path()
     parser = argparse.ArgumentParser(
         description="*_SCHEMA 상수 파싱 기반 DB 스키마 문서 자동 생성/check",
     )
