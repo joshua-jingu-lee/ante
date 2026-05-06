@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,14 @@ _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 _VALID_ORDER_TYPES: frozenset[str] = frozenset(
     {"market", "limit", "stop", "stop_limit"}
 )
+
+# 현재 Ante KIS-domestic contract: 6자리 숫자 PDNO. KRX 전체 단축코드 SSOT 아님.
+# docs/specs/data-feed/04-schema.md 와
+# docs/specs/broker-adapter/08-kis-domestic-adapter.md 기준으로 KRX 주문 경로는
+# 6자리 numeric 단축코드를 가정한다. "INVALID" 같은 비수치 symbol이 RuleEngine을
+# 통과하면 KIS 40070000(매매불가 종목)을 유발하므로(#1299 A7 oracle 회귀), 룰 평가
+# 이전에 fail-closed로 거부한다.
+_KRX_NUMERIC_SYMBOL_PATTERN = re.compile(r"^[0-9]{6}$")
 
 # 룰 타입 → 클래스 매핑
 RULE_REGISTRY: dict[str, type[Rule]] = {
@@ -408,17 +417,21 @@ class RuleEngine:
         # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
         if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
             reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
-            # OrderRejectedEvent.side / .order_type은 TradeRecorder가 sqlite
-            # TEXT NOT NULL 컬럼에 바인딩하므로, 비문자열(list/dict/set/None 등)이
-            # 들어올 경우 InterfaceError/NOT NULL 위반으로 거부 audit trail이
+            # OrderRejectedEvent.side / .order_type / .symbol은 TradeRecorder가
+            # sqlite TEXT NOT NULL 컬럼에 바인딩하므로, 비문자열(list/dict/set/None
+            # 등)이 들어올 경우 InterfaceError/NOT NULL 위반으로 거부 audit trail이
             # 깨진다. repr()로 강제 정규화하여 텍스트 호환성을 보장한다.
-            # cross-field 보강(#1298): side만 invalid해도 동시에 order_type까지
-            # 비문자열이면 reject 이벤트가 broken되므로 양쪽 모두 정규화한다.
+            # cross-field 보강(#1298/#1299): side만 invalid해도 동시에 order_type
+            # 또는 symbol까지 비문자열이면 reject 이벤트가 broken되므로 세 필드
+            # 모두 정규화한다.
             safe_side = event.side if isinstance(event.side, str) else repr(event.side)
             safe_order_type = (
                 event.order_type
                 if isinstance(event.order_type, str)
                 else repr(event.order_type)
+            )
+            safe_symbol = (
+                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
             )
             await self._eventbus.publish(
                 OrderRejectedEvent(
@@ -426,7 +439,7 @@ class RuleEngine:
                     order_id=str(event.event_id),
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
-                    symbol=event.symbol,
+                    symbol=safe_symbol,
                     side=safe_side,
                     quantity=event.quantity,
                     price=event.price,
@@ -452,6 +465,11 @@ class RuleEngine:
                 if isinstance(event.order_type, str)
                 else repr(event.order_type)
             )
+            # cross-field 보강(#1299): symbol도 sqlite TEXT 컬럼에 바인딩되므로
+            # 비문자열이면 repr()로 정규화한다.
+            safe_symbol = (
+                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
+            )
             reason = (
                 f"Invalid order type: {event.order_type!r} "
                 f"(allowed: market, limit, stop, stop_limit)"
@@ -462,11 +480,46 @@ class RuleEngine:
                     order_id=str(event.event_id),
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
-                    symbol=event.symbol,
+                    symbol=safe_symbol,
                     side=event.side,
                     quantity=event.quantity,
                     price=event.price,
                     order_type=safe_order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
+            return
+
+        # OrderRequestEvent 계약 preflight: KRX numeric symbol 검증.
+        # 회귀(#1299): A7 oracle이 검출한 버그 — Signal.symbol="INVALID",
+        # exchange="KRX" 주문이 RuleEngine→Treasury→broker까지 진행되어
+        # KIS 40070000(매매불가 종목)이 발생했다. 현재 Ante KIS-domestic 경로는
+        # 6자리 숫자 PDNO(예: "005930", "069500")만 가정하므로, 그 형식을
+        # 만족하지 않는 KRX symbol은 룰 평가/Treasury 조회 이전에 fail-closed로
+        # 거부한다. 비-KRX exchange는 broker adapter에 위임한다.
+        if event.exchange == "KRX" and (
+            not isinstance(event.symbol, str)
+            or not _KRX_NUMERIC_SYMBOL_PATTERN.fullmatch(event.symbol)
+        ):
+            safe_symbol = (
+                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
+            )
+            reason = (
+                f"Invalid KRX numeric symbol: {event.symbol!r} "
+                f"(expected 6-digit numeric per current Ante KIS-domestic contract)"
+            )
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=safe_symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
                     reason=reason,
                     exchange=event.exchange,
                 )

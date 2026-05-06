@@ -1105,6 +1105,305 @@ class TestRuleEngineEventBus:
         assert isinstance(ev.order_type, str)
         assert ev.order_type == repr([])  # "[]"
 
+    async def test_rule_engine_rejects_cross_field_invalid_symbol_payload(
+        self, engine, eventbus, monkeypatch
+    ):
+        """side·order_type·symbol이 동시에 비문자열이어도 reject 이벤트가 깨지지 않는다.
+
+        회귀(#1299 cross-field 보강): invalid-side 게이트가 먼저 fire하지만,
+        ``OrderRejectedEvent.symbol``을 정규화하지 않으면 sqlite TEXT 컬럼 바인딩이
+        실패해 audit trail이 깨진다. 세 필드 모두 ``repr()``로 정규화돼 ``str``로
+        발행돼야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid payload")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid payload"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol=[],  # type: ignore[arg-type]
+            side=[],  # type: ignore[arg-type]
+            quantity=10.0,
+            order_type=[],  # type: ignore[arg-type]
+            price=1000.0,
+            exchange="KRX",
+            reason="Cross-field invalid symbol payload regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        # invalid-side 게이트가 먼저 fire한다 (symbol 게이트보다 우선).
+        assert "Invalid signal side" in ev.reason
+        # 세 필드 모두 sqlite TEXT 바인딩 가능한 str이어야 한다.
+        assert isinstance(ev.side, str)
+        assert ev.side == repr([])  # "[]"
+        assert isinstance(ev.order_type, str)
+        assert ev.order_type == repr([])  # "[]"
+        # #1299 cross-field 회귀 잠금: symbol도 repr()로 정규화돼야 한다.
+        assert isinstance(ev.symbol, str)
+        assert ev.symbol == repr([])  # "[]"
+
+    async def test_rule_engine_rejects_invalid_krx_numeric_symbol(
+        self, engine, eventbus, monkeypatch
+    ):
+        """exchange='KRX'에서 6자리 숫자가 아닌 symbol은 룰 평가 이전에 거부한다.
+
+        회귀(#1299): A7 oracle이 검출한 버그 — Signal.symbol='INVALID',
+        exchange='KRX' 주문이 RuleEngine→Treasury→broker까지 진행되어
+        KIS 40070000(매매불가 종목)이 발생했다. 현재 Ante KIS-domestic 경로는
+        6자리 숫자 PDNO만 가정하므로, 그 형식을 만족하지 않는 KRX symbol은
+        fail-closed로 거부한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid KRX symbol")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid KRX symbol"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="INVALID",
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle KRX symbol regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid KRX numeric symbol" in ev.reason
+        assert "'INVALID'" in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert isinstance(ev.symbol, str)
+        assert ev.symbol == "INVALID"
+        assert ev.side == "buy"
+        assert ev.quantity == 10.0
+        assert ev.price == 1000.0
+        assert ev.order_type == "limit"
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+
+    @pytest.mark.parametrize(
+        "bad_symbol",
+        ["12345", "1234567", "05A123", ""],
+        ids=["too-short", "too-long", "alpha-mixed", "empty"],
+    )
+    async def test_rule_engine_rejects_short_or_long_krx_numeric_symbol(
+        self, engine, eventbus, monkeypatch, bad_symbol
+    ):
+        """6자리 숫자가 아닌 KRX symbol은 모두 거부한다 (5자리/7자리/혼용/빈문자열)."""
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid KRX symbol")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid KRX symbol"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol=bad_symbol,
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle KRX symbol shape regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid KRX numeric symbol" in ev.reason
+        assert isinstance(ev.symbol, str)
+        assert ev.symbol == bad_symbol
+        assert ev.exchange == "KRX"
+
+    async def test_rule_engine_accepts_valid_krx_numeric_symbol(self, engine, eventbus):
+        """6자리 숫자 KRX symbol은 형식 게이트를 통과해 룰 평가 흐름에 진입한다."""
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="069500",  # KODEX 200 ETF
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=30000.0,
+            exchange="KRX",
+            reason="valid KRX numeric symbol",
+        )
+        await eventbus.publish(order)
+
+        # 형식 게이트는 통과해야 하므로 KRX-symbol reason의 reject은 없어야 한다.
+        # (룰이 비어있으므로 OrderValidatedEvent가 발행돼야 한다.)
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].symbol == "069500"
+        assert validated[0].order_id == str(order.event_id)
+
+    @pytest.mark.parametrize(
+        "bad_symbol",
+        [[], {}, set(), 123, None],
+        ids=["list", "dict", "set", "int", "none"],
+    )
+    async def test_rule_engine_rejects_unhashable_krx_symbol(
+        self, engine, eventbus, monkeypatch, bad_symbol
+    ):
+        """비문자열 KRX symbol(unhashable 포함)도 fail-closed 거부 + repr() 정규화."""
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid KRX symbol")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid KRX symbol"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol=bad_symbol,  # type: ignore[arg-type]
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="Codex P2 unhashable-symbol regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid KRX numeric symbol" in ev.reason
+        # OrderRejectedEvent.symbol은 sqlite TEXT NOT NULL 컬럼에 바인딩되므로
+        # 항상 str로 정규화돼야 한다 (#1299 cross-field 보강).
+        assert isinstance(ev.symbol, str)
+        assert ev.symbol == repr(bad_symbol)
+        assert ev.exchange == "KRX"
+
+    async def test_rule_engine_skips_symbol_check_for_non_krx_exchange(
+        self, engine, eventbus
+    ):
+        """비-KRX exchange는 symbol 형식 게이트를 스킵하고 broker adapter에 위임한다."""
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        # 다른 account_id로 보내면 _on_order_request 핸들러가 즉시 return하므로,
+        # 같은 account_id="domestic"으로 NASDAQ exchange 주문을 보낸다.
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="AAPL",  # 비-숫자, KRX였다면 거부됐을 것
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=150.0,
+            exchange="NASDAQ",
+            reason="non-KRX exchange should bypass symbol gate",
+        )
+        await eventbus.publish(order)
+
+        # KRX symbol 게이트가 스킵되므로 형식 reject은 없어야 한다.
+        # (룰이 비어있으므로 룰 평가 후 OrderValidatedEvent가 발행돼야 한다.)
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].symbol == "AAPL"
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
