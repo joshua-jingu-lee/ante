@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 # Signal.side 허용값 — docs/specs/strategy/03-02-signal-fields.md 기준
 _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 
+# Signal.order_type 허용값 — docs/specs/strategy/03-02-signal-fields.md 기준.
+# "trail" 등 미지원 order_type은 broker adapter 단계에서 4건 누적 실패를
+# 일으킨 회귀이므로(#1298), 룰 평가 이전에 fail-closed로 거부한다.
+_VALID_ORDER_TYPES: frozenset[str] = frozenset(
+    {"market", "limit", "stop", "stop_limit"}
+)
+
 # 룰 타입 → 클래스 매핑
 RULE_REGISTRY: dict[str, type[Rule]] = {
     "daily_loss_limit": DailyLossLimitRule,
@@ -401,11 +408,18 @@ class RuleEngine:
         # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
         if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
             reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
-            # OrderRejectedEvent.side는 TradeRecorder가 sqlite TEXT NOT NULL 컬럼에
-            # 바인딩하므로, 비문자열(list/dict/set/None 등)이 들어올 경우
-            # InterfaceError/NOT NULL 위반으로 거부 audit trail이 깨진다.
-            # repr()로 강제 정규화하여 텍스트 호환성을 보장한다.
+            # OrderRejectedEvent.side / .order_type은 TradeRecorder가 sqlite
+            # TEXT NOT NULL 컬럼에 바인딩하므로, 비문자열(list/dict/set/None 등)이
+            # 들어올 경우 InterfaceError/NOT NULL 위반으로 거부 audit trail이
+            # 깨진다. repr()로 강제 정규화하여 텍스트 호환성을 보장한다.
+            # cross-field 보강(#1298): side만 invalid해도 동시에 order_type까지
+            # 비문자열이면 reject 이벤트가 broken되므로 양쪽 모두 정규화한다.
             safe_side = event.side if isinstance(event.side, str) else repr(event.side)
+            safe_order_type = (
+                event.order_type
+                if isinstance(event.order_type, str)
+                else repr(event.order_type)
+            )
             await self._eventbus.publish(
                 OrderRejectedEvent(
                     account_id=self._account_id,
@@ -416,7 +430,43 @@ class RuleEngine:
                     side=safe_side,
                     quantity=event.quantity,
                     price=event.price,
-                    order_type=event.order_type,
+                    order_type=safe_order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
+            return
+
+        # OrderRequestEvent 계약 preflight: Signal.order_type 허용값 검증.
+        # docs/specs/strategy/03-02-signal-fields.md —
+        # order_type ∈ {"market", "limit", "stop", "stop_limit"}.
+        # 회귀(#1298): order_type="trail" 등 미지원 값이 RuleEngine을 통과해
+        # Treasury 예약 → broker adapter 호출까지 진행되어 broker 실패 4건이
+        # 누적되었다. 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다.
+        if (
+            not isinstance(event.order_type, str)
+            or event.order_type not in _VALID_ORDER_TYPES
+        ):
+            safe_order_type = (
+                event.order_type
+                if isinstance(event.order_type, str)
+                else repr(event.order_type)
+            )
+            reason = (
+                f"Invalid order type: {event.order_type!r} "
+                f"(allowed: market, limit, stop, stop_limit)"
+            )
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=safe_order_type,
                     reason=reason,
                     exchange=event.exchange,
                 )
