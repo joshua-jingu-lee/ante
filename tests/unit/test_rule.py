@@ -902,6 +902,209 @@ class TestRuleEngineEventBus:
         assert ev.exchange == "KRX"
         assert ev.order_id == str(order.event_id)
 
+    async def test_rule_engine_rejects_invalid_order_type(
+        self, engine, eventbus, monkeypatch
+    ):
+        """order_type이 허용 집합 외 값이면 룰 평가 이전에 거부한다.
+
+        회귀(#1298): A7 oracle이 검출한 버그 — Signal.order_type='trail' 주문이
+        RuleEngine을 통과해 Treasury 예약 → broker adapter 호출까지 진행되어
+        broker 실패 4건이 누적되었다.
+        docs/specs/strategy/03-02-signal-fields.md에 따라 order_type은
+        "market" | "limit" | "stop" | "stop_limit"만 허용된다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid order_type")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid order_type"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="trail",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle order_type regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid order type" in ev.reason
+        assert "'trail'" in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == "buy"
+        assert ev.quantity == 10.0
+        assert ev.price == 1000.0
+        # 입력이 정상 문자열인 경우 그대로 전파
+        assert isinstance(ev.order_type, str)
+        assert ev.order_type == "trail"
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+
+    @pytest.mark.parametrize(
+        "bad_order_type",
+        [[], {}, set(), {"limit": True}, 123, None],
+        ids=["list-empty", "dict-empty", "set", "dict-limit", "int", "none"],
+    )
+    async def test_rule_engine_rejects_unhashable_order_type(
+        self, engine, eventbus, monkeypatch, bad_order_type
+    ):
+        """비문자열(특히 unhashable) order_type 값도 fail-closed 거부한다.
+
+        회귀(#1298): list/dict 같은 unhashable 타입이 ``event.order_type``으로
+        들어오면 ``frozenset`` membership 검사가 ``TypeError: unhashable type``을
+        raise해 ``OrderRejectedEvent``가 발행되지 않는다. 또한 sqlite TEXT 컬럼에
+        바인딩되므로 ``OrderRejectedEvent.order_type``은 항상 str로 정규화돼야
+        한다(side 게이트와 동일한 패턴).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid order_type")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid order_type"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type=bad_order_type,  # type: ignore[arg-type]
+            price=1000.0,
+            exchange="KRX",
+            reason="Codex P2 unhashable-order-type regression",
+        )
+
+        # publish가 TypeError를 leak하지 않고 정상적으로 reject 이벤트를
+        # 발행해야 한다 (fail-closed).
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid order type" in ev.reason
+        assert repr(bad_order_type) in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == "buy"
+        assert ev.quantity == 10.0
+        assert ev.price == 1000.0
+        # 비문자열 order_type은 sqlite TEXT 컬럼에 바인딩할 수 없으므로
+        # RuleEngine이 repr()로 정규화해야 한다 ([] → "[]", None → "None", 등).
+        assert isinstance(ev.order_type, str)
+        assert ev.order_type == repr(bad_order_type)
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+
+    async def test_rule_engine_rejects_cross_field_invalid_payload(
+        self, engine, eventbus, monkeypatch
+    ):
+        """side와 order_type이 동시에 비문자열이어도 reject 이벤트가 깨지지 않는다.
+
+        회귀(#1298 cross-field 보강): #1306 invalid-side 게이트가 먼저 fire하지만,
+        이때 ``OrderRejectedEvent.order_type``을 정규화하지 않으면 sqlite TEXT
+        바인딩이 실패해 audit trail이 깨진다. 두 필드 모두 ``repr()``로 정규화돼
+        ``str``로 발행돼야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid payload")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid payload"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=[],  # type: ignore[arg-type]
+            quantity=10.0,
+            order_type=[],  # type: ignore[arg-type]
+            price=1000.0,
+            exchange="KRX",
+            reason="Cross-field invalid payload regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        # invalid-side 게이트가 먼저 fire한다.
+        assert "Invalid signal side" in ev.reason
+        # 두 필드 모두 sqlite TEXT 바인딩 가능한 str이어야 한다.
+        assert isinstance(ev.side, str)
+        assert ev.side == repr([])  # "[]"
+        # cross-field 보강 회귀 잠금: order_type도 정규화돼야 한다.
+        assert isinstance(ev.order_type, str)
+        assert ev.order_type == repr([])  # "[]"
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
