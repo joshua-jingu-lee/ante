@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Signal.side 허용값 — docs/specs/strategy/03-02-signal-fields.md 기준
+_VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
+
 # 룰 타입 → 클래스 매핑
 RULE_REGISTRY: dict[str, type[Rule]] = {
     "daily_loss_limit": DailyLossLimitRule,
@@ -389,6 +392,28 @@ class RuleEngine:
 
         # account_id 필터링: 자기 계좌 이벤트만 처리
         if event.account_id != self._account_id:
+            return
+
+        # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
+        # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
+        # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.
+        if event.side not in _VALID_ORDER_SIDES:
+            reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
             return
 
         # 계좌 상태 조회
