@@ -818,6 +818,9 @@ class TestRuleEngineEventBus:
         assert ev.bot_id == "bot1"
         assert ev.strategy_id == "s1"
         assert ev.symbol == "005930"
+        # OrderRejectedEvent.side는 sqlite TEXT NOT NULL 컬럼에 바인딩되므로
+        # 항상 str이어야 한다. 문자열 입력은 그대로 전파된다.
+        assert isinstance(ev.side, str)
         assert ev.side == "hold"
         assert ev.quantity == 10.0
         assert ev.price == 1000.0
@@ -888,7 +891,11 @@ class TestRuleEngineEventBus:
         assert ev.bot_id == "bot1"
         assert ev.strategy_id == "s1"
         assert ev.symbol == "005930"
-        assert ev.side == bad_side
+        # Codex P2 #2 회귀: 비문자열 side는 TradeRecorder가 sqlite TEXT 컬럼에
+        # 바인딩할 수 없으므로 RuleEngine이 repr()로 정규화해야 한다.
+        # ([] → "[]", None → "None", 등)
+        assert isinstance(ev.side, str)
+        assert ev.side == repr(bad_side)
         assert ev.quantity == 10.0
         assert ev.price == 1000.0
         assert ev.order_type == "limit"

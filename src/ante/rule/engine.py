@@ -401,6 +401,11 @@ class RuleEngine:
         # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
         if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
             reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
+            # OrderRejectedEvent.side는 TradeRecorder가 sqlite TEXT NOT NULL 컬럼에
+            # 바인딩하므로, 비문자열(list/dict/set/None 등)이 들어올 경우
+            # InterfaceError/NOT NULL 위반으로 거부 audit trail이 깨진다.
+            # repr()로 강제 정규화하여 텍스트 호환성을 보장한다.
+            safe_side = event.side if isinstance(event.side, str) else repr(event.side)
             await self._eventbus.publish(
                 OrderRejectedEvent(
                     account_id=self._account_id,
@@ -408,7 +413,7 @@ class RuleEngine:
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
                     symbol=event.symbol,
-                    side=event.side,
+                    side=safe_side,
                     quantity=event.quantity,
                     price=event.price,
                     order_type=event.order_type,
