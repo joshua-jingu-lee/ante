@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Signal.side 허용값 — docs/specs/strategy/03-02-signal-fields.md 기준
+_VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
+
 # 룰 타입 → 클래스 매핑
 RULE_REGISTRY: dict[str, type[Rule]] = {
     "daily_loss_limit": DailyLossLimitRule,
@@ -389,6 +392,35 @@ class RuleEngine:
 
         # account_id 필터링: 자기 계좌 이벤트만 처리
         if event.account_id != self._account_id:
+            return
+
+        # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
+        # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
+        # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.
+        # `isinstance(..., str)` 가드로 list/dict 같은 unhashable 값이 들어와도
+        # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
+        if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
+            reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
+            # OrderRejectedEvent.side는 TradeRecorder가 sqlite TEXT NOT NULL 컬럼에
+            # 바인딩하므로, 비문자열(list/dict/set/None 등)이 들어올 경우
+            # InterfaceError/NOT NULL 위반으로 거부 audit trail이 깨진다.
+            # repr()로 강제 정규화하여 텍스트 호환성을 보장한다.
+            safe_side = event.side if isinstance(event.side, str) else repr(event.side)
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=safe_side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
             return
 
         # 계좌 상태 조회
