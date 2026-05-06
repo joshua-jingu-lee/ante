@@ -397,7 +397,9 @@ class RuleEngine:
         # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
         # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
         # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.
-        if event.side not in _VALID_ORDER_SIDES:
+        # `isinstance(..., str)` 가드로 list/dict 같은 unhashable 값이 들어와도
+        # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
+        if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
             reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
             await self._eventbus.publish(
                 OrderRejectedEvent(

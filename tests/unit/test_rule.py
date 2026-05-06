@@ -825,6 +825,76 @@ class TestRuleEngineEventBus:
         assert ev.exchange == "KRX"
         assert ev.order_id == str(order.event_id)
 
+    @pytest.mark.parametrize(
+        "bad_side",
+        [[], {}, ["buy"], {"buy": True}, set(), 123, None],
+        ids=["list-empty", "dict-empty", "list-buy", "dict-buy", "set", "int", "none"],
+    )
+    async def test_rule_engine_rejects_unhashable_signal_side(
+        self, engine, eventbus, monkeypatch, bad_side
+    ):
+        """비문자열(특히 unhashable) side 값도 fail-closed 거부한다.
+
+        Codex P2 회귀: list/dict 같은 unhashable 타입이 ``event.side``로
+        들어오면 ``frozenset`` membership 검사가 ``TypeError: unhashable type``을
+        raise해 ``OrderRejectedEvent``가 발행되지 않고 EventBus가 로그만
+        남기던 결함. ``isinstance(event.side, str)`` 가드로 차단한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid side")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for invalid side")
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=bad_side,  # type: ignore[arg-type]
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="Codex P2 unhashable-side regression",
+        )
+
+        # publish가 TypeError를 leak하지 않고 정상적으로 reject 이벤트를
+        # 발행해야 한다 (fail-closed).
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid signal side" in ev.reason
+        assert repr(bad_side) in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == bad_side
+        assert ev.quantity == 10.0
+        assert ev.price == 1000.0
+        assert ev.order_type == "limit"
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
