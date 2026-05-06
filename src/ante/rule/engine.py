@@ -526,6 +526,41 @@ class RuleEngine:
             )
             return
 
+        # OrderRequestEvent 계약 preflight: limit / stop_limit price 필수.
+        # 회귀(#1300): A7 oracle이 검출한 버그 — order_type="limit", side="sell",
+        # price=None 주문이 RuleEngine→Treasury→broker까지 진행되어 KIS 호출
+        # 단계에서 HTTP 500이 발생했다. limit / stop_limit는 가격 지정이 invariant
+        # 이므로, price=None이면 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다.
+        # market의 price=None은 스펙상 옵션이므로 통과시키며, 0/음수/NaN/비-number
+        # price 검증은 본 PR 범위 밖(#1303)이다.
+        if event.order_type in ("limit", "stop_limit") and event.price is None:
+            reason = (
+                f"Missing price for {event.order_type} order: "
+                f"price is required for limit and stop_limit orders"
+            )
+            # cross-field 보강(#1297/#1298/#1299): symbol은 sqlite TEXT 컬럼에
+            # 바인딩되므로 비문자열이면 repr()로 정규화한다. side / order_type은
+            # 본 게이트 도달 시점에 위 게이트들에서 이미 문자열로 잠겼다.
+            safe_symbol = (
+                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
+            )
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=safe_symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
+            return
+
         # 계좌 상태 조회
         account_status = "active"
         currency = "KRW"
