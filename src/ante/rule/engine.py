@@ -778,6 +778,33 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: price 값이 있으면 양수여야 한다.
+            # 회귀(#1316): A7 oracle이 검출한 버그 — Signal.price=-1000, side='buy',
+            # order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
+            # Treasury까지 진행되어 ``reserve_amount_invalid`` 거부 + 음수 reserve
+            # 시도가 발생했다. 음수 price는 Treasury 예약/주문 호출 이전에
+            # fail-closed로 거부한다.
+            #
+            # price는 #1303 게이트에서 finite ``int|float``로 잠금됐으므로
+            # ``< 0`` 비교는 안전하다. market 옵션의 ``price=None``은 본 게이트
+            # 진입 전에 통과되어 영향 없다. limit/stop_limit ``price=None``은
+            # #1300 게이트가 별도 처리한다. 0/NaN price 검증은 본 PR 범위 밖
+            # (#1303 finite는 NaN을 잠그고, 0은 #1318 별도 이슈).
+            #
+            # _build_safe_rejected_event는 invalid finite price를 보존하므로
+            # ev.price 페이로드에는 음수 그대로 실린다 (audit-trail invariant 동일,
+            # 선례 #1304 negative quantity와 일관).
+            if event.price is not None and event.price < 0:
+                reason = f"Negative price: {event.price} (price must be positive)"
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # OrderRequestEvent 계약 preflight: quantity는 양수여야 한다.
             # 회귀(#1304): A7 oracle이 검출한 버그 — Signal.quantity=-1, side='buy',
             # order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
