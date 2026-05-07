@@ -2584,14 +2584,147 @@ class TestRuleEngineEventBus:
         assert validated[0].order_type == "limit"
         assert validated[0].price == 1000.0
 
-    async def test_rule_engine_zero_quantity_passes_negative_gate(
-        self, engine, eventbus
+    async def test_rule_engine_rejects_zero_quantity(
+        self, engine, eventbus, monkeypatch
     ):
-        """quantity=0은 본 게이트(#1304)를 통과한다 (0은 음수가 아니다).
+        """quantity=0(int)이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        본 PR(#1304)은 ``< 0`` 만 차단한다. 0 quantity의 거부는 #1305 별도
-        이슈에서 처리될 예정이므로, 본 게이트 단계에서는 통과해야 한다.
-        OrderValidatedEvent 발행을 통해 본 게이트가 0을 거부하지 않음을 잠근다.
+        회귀(#1305): A7 oracle이 검출한 버그 — Signal.quantity=0, side='buy',
+        order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
+        Treasury까지 진행되어 ``reserve_amount_invalid``(total_reserve=0.0)
+        거부가 발생했다. 0 quantity는 no-op 주문이므로 Treasury 예약 호출
+        이전에 fail-closed로 거부한다. evaluate/_query_treasury_data/
+        _calculate_bot_unrealized_pnl 모두 호출되지 않아야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for zero quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for zero quantity")
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for zero quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle zero-quantity regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Zero quantity" in ev.reason
+        # int 0의 f-string 표현은 ``"0"``
+        assert "0" in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == "buy"
+        assert ev.order_type == "limit"
+        assert ev.price == 1000.0
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+        # rejection payload의 quantity는 finite float로 정규화된다.
+        assert ev.quantity == 0.0
+
+    @pytest.mark.parametrize(
+        ("zero_quantity", "expected_repr"),
+        [(0.0, "0.0"), (-0.0, "-0.0")],
+    )
+    async def test_rule_engine_rejects_zero_float_quantity(
+        self, engine, eventbus, monkeypatch, zero_quantity, expected_repr
+    ):
+        """quantity=0.0/-0.0이면 본 게이트가 fire한다.
+
+        Python에서 ``0 == 0.0 == -0.0``이 True이므로 ``== 0`` 비교가 모두
+        잠근다. reason은 f-string으로 ``0.0`` / ``-0.0``를 audit trail에
+        보존하여 부호 정보를 잃지 않는다 (#1305 plan v2의 audit 요구사항).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for zero quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for zero quantity")
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=zero_quantity,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle zero-float-quantity regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Zero quantity" in ev.reason
+        # f-string으로 부호 보존: ``0.0`` vs ``-0.0``
+        assert expected_repr in ev.reason
+        assert ev.quantity == 0.0
+
+    @pytest.mark.parametrize("good_quantity", [0.001, 0.5, 1])
+    async def test_rule_engine_accepts_positive_quantity_after_zero_gate(
+        self, engine, eventbus, good_quantity
+    ):
+        """양수 quantity는 0-quantity 게이트(#1305)를 통과한다.
+
+        본 PR(#1305)은 ``== 0``만 차단한다. 양수 finite quantity (정수/실수,
+        매우 작은 양수까지)는 계속 통과해야 하며, 기존 정상 흐름이 깨지지
+        않는지 회귀 잠금. OrderValidatedEvent 발행을 통해 게이트 통과를 잠근다.
         """
         validated: list[OrderValidatedEvent] = []
         rejected: list[OrderRejectedEvent] = []
@@ -2604,18 +2737,19 @@ class TestRuleEngineEventBus:
             strategy_id="s1",
             symbol="005930",
             side="buy",
-            quantity=0,
+            quantity=good_quantity,
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="zero quantity passes #1304 gate (handled by #1305)",
+            reason="positive quantity should pass zero-quantity gate",
         )
         await eventbus.publish(order)
 
-        # #1304 게이트는 0을 거부하지 않으므로, 본 게이트 단계에서는 reject 없음.
         assert len(rejected) == 0
         assert len(validated) == 1
-        assert validated[0].quantity == 0
+        assert validated[0].quantity == good_quantity
+        assert validated[0].order_type == "limit"
+        assert validated[0].price == 1000.0
 
     @pytest.mark.parametrize(
         ("quantity", "side", "order_type", "price", "stop_price", "expected_reason"),
