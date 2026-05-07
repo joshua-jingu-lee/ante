@@ -6,7 +6,7 @@ import logging
 import math
 import re
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from ante.rule.base import (
     EvaluationResult,
@@ -54,7 +54,7 @@ _VALID_ORDER_TYPES: frozenset[str] = frozenset(
 _KRX_NUMERIC_SYMBOL_PATTERN = re.compile(r"^[0-9]{6}$")
 
 
-def _is_finite_quantity(value: object) -> bool:
+def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
     """``value``가 finite ``float``-호환 quantity인지 판정.
 
     비-number, ``bool``, ``NaN``, ``inf``는 모두 ``False``로 잠근다.
@@ -67,6 +67,11 @@ def _is_finite_quantity(value: object) -> bool:
 
     ``isinstance(True, int) == True`` 이므로 ``bool``을 명시적으로 제외한다.
     ``math.isfinite``는 numeric type 확인 뒤에만 호출한다 (가드 순서 중요).
+
+    반환 타입은 ``TypeGuard[int | float]``로 선언하여 mypy가 호출부 ``True``
+    분기에서 ``value``를 ``int | float``로 좁히게 한다 (#1302 P1 #5). 이를
+    통해 ``_coerce_finite_quantity``의 ``float(value)``가 ``object`` 인자
+    overload 미스매치 없이 통과한다.
     """
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return False
