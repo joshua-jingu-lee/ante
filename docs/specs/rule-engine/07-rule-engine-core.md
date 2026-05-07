@@ -74,7 +74,7 @@ RuleEngine은 RuleContext 생성과 룰 평가 이전에 `OrderRequestEvent` pay
 - `order_type`: 허용 집합(`limit` / `market` / `stop` / `stop_limit`) 외 거부
 - `symbol`: KRX numeric 형식 (6자리 숫자) 검증
 - `price`: `limit` / `stop_limit`은 finite positive (`None` / `0` / `-x` / `NaN` / `±inf` 거부). `market`은 `None` 허용
-- `stop_price`: `stop` / `stop_limit`은 `None` 거부 (도메인 invariant는 후속 이슈에서 추가)
+- `stop_price`: `stop` / `stop_limit`은 `None` 거부, 제공된 `stop_price`는 finite number여야 하며 음수 `stop_price`는 거부 (`NaN` / `±inf` / non-number / 음수 거부, 0 검증은 #1320 별도 이슈)
 - `quantity`: finite positive (`0` / `-x` / `NaN` / `±inf` 거부)
 
 Reject payload 정규화 (`_build_safe_rejected_event`):

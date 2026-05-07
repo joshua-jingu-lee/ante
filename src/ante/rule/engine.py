@@ -723,6 +723,54 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: stop_price 값이 있으면 finite number.
+            # 회귀(#1319 #1321 #1324): A7 oracle이 검출한 버그 —
+            # Signal.stop_price=NaN/inf 또는 음수가 RuleEngine→OrderValidatedEvent까지
+            # 진행되어 broker terminal_event 누락 또는 Treasury 거부로 누적됐다.
+            # NaN/inf/non-number stop_price는 Treasury/Gateway 호출 이전에
+            # fail-closed로 거부한다.
+            #
+            # _is_finite_quantity는 비-number/bool/NaN/inf 및 거대 정수
+            # (float 변환 시 OverflowError)를 모두 함께 잠근다. None은 정상 흐름이며
+            # 위 #1301 게이트가 None을 별도 처리한다.
+            if event.stop_price is not None and not _is_finite_quantity(
+                event.stop_price
+            ):
+                reason = (
+                    f"Invalid stop_price: {_safe_repr(event.stop_price)} "
+                    f"(stop_price must be a finite number when provided)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # OrderRequestEvent 계약 preflight: stop_price는 양수여야 한다.
+            # 회귀(#1319 #1322): A7 oracle 회귀 — 음수 stop_price가 Treasury 예약/주문
+            # 호출 이전에 fail-closed로 거부되어야 한다. stop_price는 위 finite 게이트로
+            # 잠금됐으므로 < 0 비교는 안전하다. 0 stop_price 검증은 #1320 별도 이슈.
+            #
+            # OrderRejectedEvent 스키마에 stop_price 필드가 없으므로 reason 문자열에만
+            # 음수 stop_price가 등장한다 (audit trail). _build_safe_rejected_event는
+            # stop_price를 싣지 않으므로 변경하지 않는다 (선례 #1301 docstring).
+            if event.stop_price is not None and event.stop_price < 0:
+                reason = (
+                    f"Negative stop_price: {event.stop_price} "
+                    f"(stop_price must be positive)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # OrderRequestEvent 계약 preflight: quantity는 finite number여야 한다.
             # 회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN,
             # side='buy', order_type='limit', price=1000 주문이 RuleEngine→
