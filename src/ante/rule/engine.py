@@ -771,6 +771,30 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: quantity는 양수여야 한다.
+            # 회귀(#1304): A7 oracle이 검출한 버그 — Signal.quantity=-1, side='buy',
+            # order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
+            # Treasury까지 진행되어 ``reserve_amount_invalid``(total_reserve=-1000.15)
+            # 거부 + 음수 예약 시도가 발생했다. 음수 quantity는 Treasury 예약/주문
+            # 호출 이전에 fail-closed로 거부한다.
+            #
+            # quantity는 #1302 게이트에서 finite ``int|float``로 잠금됐으므로
+            # ``< 0`` 비교는 안전하다. 도메인 가드를 분리하여 NaN/inf/non-number
+            # (#1302) 와 음수(#1304)의 책임 영역을 명확히 한다. 0 quantity는
+            # #1305 별도 이슈에서 처리된다.
+            if event.quantity < 0:
+                reason = (
+                    f"Negative quantity: {event.quantity} (quantity must be positive)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # 계좌 상태 조회
             account_status = "active"
             currency = "KRW"
