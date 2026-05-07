@@ -795,6 +795,30 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: quantity는 0이 아니어야 한다.
+            # 회귀(#1305): A7 oracle이 검출한 버그 — Signal.quantity=0 주문이
+            # RuleEngine→OrderValidatedEvent→Treasury까지 진행되어
+            # ``reserve_amount_invalid``(total_reserve=0.0) 거부가 발생했다.
+            # 0 quantity는 no-op 주문이므로 Treasury 예약/주문 호출 이전에
+            # fail-closed로 거부한다.
+            #
+            # quantity는 #1302 게이트에서 finite ``int|float``로 잠금됐고,
+            # #1304 게이트에서 ``< 0``이 거부됐으므로 본 게이트의 비교 대상은
+            # ``0``, ``0.0``, ``-0.0`` 등이다. Python에서
+            # ``0 == 0.0 == -0.0``이 True이므로 ``== 0``으로 모두 잠근다.
+            # reason은 f-string으로 실제 값을 보존하여 audit trail에서
+            # ``0``/``0.0``/``-0.0``를 구분할 수 있게 한다.
+            if event.quantity == 0:
+                reason = f"Zero quantity: {event.quantity} (quantity must be positive)"
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # 계좌 상태 조회
             account_status = "active"
             currency = "KRW"
