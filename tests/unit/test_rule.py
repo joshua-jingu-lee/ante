@@ -2104,6 +2104,82 @@ class TestRuleEngineEventBus:
         assert validated[0].order_type == "limit"
         assert validated[0].price == 1000.0
 
+    async def test_rule_engine_rejects_overflow_int_quantity(
+        self, engine, eventbus, monkeypatch
+    ):
+        """``float`` 변환 시 ``OverflowError``를 유발하는 거대 ``int`` quantity 거부.
+
+        회귀(#1302 P2): Python ``int``는 임의 정밀도라 ``10**400`` 같은 거대한
+        정수는 ``math.isfinite`` (또는 ``math.isnan``/``math.isinf``) 호출 시
+        ``float(value)`` 변환에서 ``OverflowError: int too large to convert to
+        float``를 던진다. 본 게이트가 ``_on_order_request``의 ``try`` 블록
+        밖이라 예외가 EventBus 핸들러까지 leak되면 ``OrderRejectedEvent``가
+        발행되지 않아 audit trail이 끊기고 게이트가 fail-open된다.
+        ``_is_finite_quantity`` helper 내부에서 ``OverflowError``를 가드하여
+        fail-closed reject 경로로 빠지는지 잠근다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for overflow int quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for overflow int quantity"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for overflow int quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        # 10**400은 float(...) 변환 시 OverflowError를 안정적으로 재현한다.
+        overflow_quantity = 10**400
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=overflow_quantity,  # type: ignore[arg-type]
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle overflow-int-quantity regression",
+        )
+
+        # OverflowError가 EventBus 핸들러까지 leak되면 publish가 예외를 던지므로,
+        # 이 호출이 정상 반환되는 것 자체가 게이트가 fail-closed인지 확인하는
+        # primary assertion이다.
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        # rejection payload의 quantity는 sqlite REAL NOT NULL 호환을 위해
+        # 0.0으로 정규화된다 (overflow int → 0.0).
+        assert ev.quantity == 0.0
+
     @pytest.mark.parametrize(
         ("quantity", "side", "order_type", "price", "stop_price", "expected_reason"),
         [

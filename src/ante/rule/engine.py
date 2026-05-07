@@ -54,22 +54,39 @@ _VALID_ORDER_TYPES: frozenset[str] = frozenset(
 _KRX_NUMERIC_SYMBOL_PATTERN = re.compile(r"^[0-9]{6}$")
 
 
-def _coerce_finite_quantity(value: object) -> float:
-    """``OrderRejectedEvent.quantity`` payload용 안전한 finite ``float`` 변환.
+def _is_finite_quantity(value: object) -> bool:
+    """``value``가 finite ``float``-호환 quantity인지 판정.
 
-    비-number, ``bool``, ``NaN``, ``inf``는 ``0.0``으로 정규화한다.
-    ``trades.quantity REAL NOT NULL`` 컬럼 호환을 보장하여, 임의의
-    cross-field invalid payload (#1297/#1298/#1299/#1300/#1301)에서
-    quantity 자리에 비-finite 값이 함께 실려도 audit trail이 깨지지 않는다.
+    비-number, ``bool``, ``NaN``, ``inf``는 모두 ``False``로 잠근다.
+    Python ``int``는 임의 정밀도라 ``10**10000`` 같은 거대한 정수는
+    ``math.isfinite`` 호출 시 ``float(value)`` 변환에서
+    ``OverflowError`` (또는 ``ValueError``/``TypeError``)를 던진다 (#1302 P2).
+    이때도 finite-호환이 아니므로 ``False``로 떨어뜨려 호출부가
+    fail-closed reject 경로로 빠지게 한다.
 
     ``isinstance(True, int) == True`` 이므로 ``bool``을 명시적으로 제외한다.
     ``math.isfinite``는 numeric type 확인 뒤에만 호출한다 (가드 순서 중요).
     """
-    if (
-        not isinstance(value, (int, float))
-        or isinstance(value, bool)
-        or not math.isfinite(value)
-    ):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
+
+
+def _coerce_finite_quantity(value: object) -> float:
+    """``OrderRejectedEvent.quantity`` payload용 안전한 finite ``float`` 변환.
+
+    비-number, ``bool``, ``NaN``, ``inf``, 그리고 ``float`` 변환 시
+    ``OverflowError``를 유발하는 거대 ``int`` (#1302 P2)는 ``0.0``으로
+    정규화한다. ``trades.quantity REAL NOT NULL`` 컬럼 호환을 보장하여,
+    임의의 cross-field invalid payload (#1297/#1298/#1299/#1300/#1301)에서
+    quantity 자리에 비-finite 값이 함께 실려도 audit trail이 깨지지 않는다.
+
+    판정은 ``_is_finite_quantity``에 위임하여 단일 진입점을 유지한다.
+    """
+    if not _is_finite_quantity(value):
         return 0.0
     return float(value)
 
@@ -626,14 +643,12 @@ class RuleEngine:
         # NaN/inf/non-number quantity는 Treasury 예약/주문 호출 이전에 fail-closed
         # 로 거부한다. 0/음수 quantity, NaN price 검증은 본 PR 범위 밖
         # (#1304/#1305/#1303)이다.
-        # bool은 isinstance(True, int)==True이므로 명시적으로 제외한다.
-        # math.isnan/isinf는 numeric type 확인 뒤에만 호출 (가드 순서 중요).
-        if (
-            not isinstance(event.quantity, (int, float))
-            or isinstance(event.quantity, bool)
-            or math.isnan(event.quantity)
-            or math.isinf(event.quantity)
-        ):
+        #
+        # _is_finite_quantity는 비-number/bool/NaN/inf뿐 아니라 ``10**10000``
+        # 같은 거대 정수 (float 변환 시 ``OverflowError``)도 함께 잠근다 (#1302 P2).
+        # 게이트가 ``_on_order_request``의 ``try`` 블록 밖에 있으므로
+        # 예외가 EventBus까지 leak되지 않도록 helper 내부에서 가드한다.
+        if not _is_finite_quantity(event.quantity):
             reason = (
                 f"Invalid quantity: {event.quantity!r} "
                 f"(quantity must be a finite number)"
@@ -642,9 +657,10 @@ class RuleEngine:
                 event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
             )
             # OrderRejectedEvent.quantity는 trades.quantity REAL NOT NULL로
-            # 이어지므로 NaN/inf/비-number는 0.0으로 정규화해 audit/PnL 호환을
-            # 유지한다. 본 PR의 cross-field 보강(#1302)에서 모든 reject 경로가
-            # 동일한 _coerce_finite_quantity helper로 통일됐다.
+            # 이어지므로 NaN/inf/비-number/overflow int는 0.0으로 정규화해
+            # audit/PnL 호환을 유지한다. 본 PR의 cross-field 보강(#1302)에서
+            # 모든 reject 경로가 동일한 _coerce_finite_quantity helper로 통일됐다.
+            safe_quantity = _coerce_finite_quantity(event.quantity)
             await self._eventbus.publish(
                 OrderRejectedEvent(
                     account_id=self._account_id,
@@ -653,7 +669,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=event.side,
-                    quantity=_coerce_finite_quantity(event.quantity),
+                    quantity=safe_quantity,
                     price=event.price,
                     order_type=event.order_type,
                     reason=reason,
