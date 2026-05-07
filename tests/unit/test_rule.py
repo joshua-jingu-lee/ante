@@ -2300,6 +2300,132 @@ class TestRuleEngineEventBus:
         assert isinstance(ev.quantity, float)
         assert ev.quantity == 0.0
 
+    async def test_rule_engine_safe_builder_handles_unrenderable_repr(
+        self, engine, eventbus, monkeypatch
+    ):
+        """``__repr__``가 raise하는 input에서도 fail-closed reject 발행 잠금.
+
+        회귀(#1302 메타 리뷰): preflight 게이트의 ``raise``가 EventBus 핸들러
+        예외 swallow에 걸려 ``OrderRejectedEvent`` 미발행 → audit fail-open.
+        catch-all ``except``와 ``_build_safe_rejected_event`` (raise하지 않는
+        builder)가 receive하는지 검증한다.
+
+        ``Unrenderable.__repr__``가 ``RuntimeError``를 던지는 ``side``를 넣어
+        invalid-side 게이트의 ``f"...{_safe_str(event.side)}..."`` reason 조립
+        자체가 raise해도 catch-all이 builder로 generic reject를 발행해야 한다.
+
+        ``_safe_str``는 ``repr`` 실패 시 ``"<unrenderable {type}>"`` placeholder
+        를 반환하므로 실제로 reason 조립은 raise하지 않는다 — 하지만 test의
+        목적은 invariant 보호이므로, ``_safe_str`` 구현이 향후 약화되어도
+        catch-all이 잡아내는지 정적으로 확인한다.
+        """
+
+        class Unrenderable:
+            def __repr__(self) -> str:
+                raise RuntimeError("repr deliberately fails")
+
+            def __str__(self) -> str:
+                raise RuntimeError("str deliberately fails")
+
+            def __hash__(self) -> int:
+                return 0
+
+            def __eq__(self, other: object) -> bool:
+                return False
+
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        # 본 입력은 invalid-side 게이트에서 fire (frozenset membership에서
+        # str 가드로 잠긴 후 reason 조립 단계로 진입).
+        bad_side = Unrenderable()
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=bad_side,  # type: ignore[arg-type]
+            quantity=10.0,
+            order_type="market",
+            exchange="KRX",
+            reason="unrenderable repr regression",
+        )
+
+        # publish가 정상 반환되는 것 자체가 catch-all 안전망 검증.
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        # 정확히 1건 발행되어야 한다 (게이트 발행 또는 catch-all 발행 중 하나).
+        assert len(rejected) == 1
+        ev = rejected[0]
+        # quantity는 finite float (10.0 → 정규화된 동일 값) 호환.
+        assert isinstance(ev.quantity, float)
+        # symbol/side/order_type 모두 sqlite TEXT 호환을 위해 str 정규화.
+        assert isinstance(ev.symbol, str)
+        assert isinstance(ev.side, str)
+        assert isinstance(ev.order_type, str)
+        # reason은 typed message 또는 generic "preflight error" 어느 쪽이든 OK.
+        assert isinstance(ev.reason, str)
+        assert ev.reason  # non-empty
+
+    async def test_rule_engine_catch_all_reject_for_synthetic_raise(
+        self, engine, eventbus, monkeypatch
+    ):
+        """preflight 도중 helper가 강제로 raise해도 catch-all이 reject 발행.
+
+        회귀(#1302 메타 리뷰): ``_query_treasury_data``를 monkeypatch로 raise
+        하도록 만들어 preflight 게이트 통과 후 evaluate 진입 직전에 강제 예외를
+        주입한다. catch-all ``except``가 잡아 ``_build_safe_rejected_event``로
+        generic reject를 발행하는지 (audit trail이 fail-closed로 잠기는지)
+        검증한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            raise RuntimeError("synthetic preflight failure")
+
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        # 모든 preflight 게이트를 통과하는 정상 입력. evaluate 직전 단계인
+        # _query_treasury_data에서 강제 raise → catch-all로 fail-closed.
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+            exchange="KRX",
+            reason="synthetic raise regression",
+        )
+
+        # catch-all 안전망이 동작하면 publish가 정상 반환된다.
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        # generic catch-all reason
+        assert "preflight error" in ev.reason
+        # 모든 sqlite TEXT 컬럼은 str로 정규화돼야 한다.
+        assert isinstance(ev.symbol, str)
+        assert isinstance(ev.side, str)
+        assert isinstance(ev.order_type, str)
+        assert isinstance(ev.bot_id, str)
+        assert isinstance(ev.strategy_id, str)
+        assert isinstance(ev.exchange, str)
+        # quantity는 finite float
+        assert isinstance(ev.quantity, float)
+        assert ev.quantity == 10.0
+
 
 # ── RuleEngine.update_rules ──────────────────────
 

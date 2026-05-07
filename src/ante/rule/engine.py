@@ -62,7 +62,8 @@ def _is_finite_quantity(value: object) -> bool:
     ``math.isfinite`` 호출 시 ``float(value)`` 변환에서
     ``OverflowError`` (또는 ``ValueError``/``TypeError``)를 던진다 (#1302 P2).
     이때도 finite-호환이 아니므로 ``False``로 떨어뜨려 호출부가
-    fail-closed reject 경로로 빠지게 한다.
+    fail-closed reject 경로로 빠지게 한다. helper 자체가 절대 raise하지 않는
+    invariant를 유지하여 outer try 유무와 관계없이 정상 동작을 보장한다.
 
     ``isinstance(True, int) == True`` 이므로 ``bool``을 명시적으로 제외한다.
     ``math.isfinite``는 numeric type 확인 뒤에만 호출한다 (가드 순서 중요).
@@ -89,6 +90,105 @@ def _coerce_finite_quantity(value: object) -> float:
     if not _is_finite_quantity(value):
         return 0.0
     return float(value)
+
+
+def _safe_str(value: object) -> str:
+    """sqlite ``TEXT`` 컬럼 바인딩용 안전한 ``str`` 정규화.
+
+    Python 3.13의 ``int`` ↔ ``str`` 변환 4300자리 제한
+    (``sys.set_int_max_str_digits``), 사용자 정의 ``__repr__``가 raise하는
+    모든 경우, ``MemoryError``까지 포괄한다. builder가 절대 raise하지 않는
+    invariant를 지키기 위한 단일 진입점.
+
+    ``str``은 그대로 통과시켜 sqlite ``TEXT`` 컬럼 호환을 유지하고
+    (``"hold"``→``"hold"``), 그 외 값은 ``repr()`` 시도 후 실패 시
+    ``"<unrenderable {type}>"`` placeholder로 떨어뜨린다.
+
+    ``reason`` 메시지 조립에는 quote 보존이 필요하므로 ``_safe_repr``를 사용한다
+    (``"hold"``→``"'hold'"``).
+    """
+    if isinstance(value, str):
+        return value
+    try:
+        return repr(value)
+    except Exception:  # noqa: BLE001
+        # 사용자 정의 ``__repr__``이 임의의 예외를 던질 수 있으므로
+        # ``BaseException``을 제외한 모든 예외를 잡아 placeholder로 떨어뜨린다.
+        # builder가 절대 raise하지 않는 invariant 유지.
+        return f"<unrenderable {type(value).__name__}>"
+
+
+def _safe_repr(value: object) -> str:
+    """``reason`` 메시지 조립용 안전한 ``repr``-스타일 변환.
+
+    ``_safe_str``과 달리 ``str``도 quote로 감싼 ``repr`` 형태로 반환하여
+    ``"Invalid signal side: 'hold' (allowed: ...)"`` 같은 audit-friendly 포맷을
+    유지한다. 사용자 정의 ``__repr__``이 임의의 예외를 던져도 잡아 placeholder
+    로 떨어뜨린다 (``BaseException`` 제외). builder의 raise-free invariant와
+    동일한 보호.
+
+    builder에는 사용하지 않는다 (sqlite 컬럼 호환은 ``_safe_str`` 책임).
+    """
+    try:
+        return repr(value)
+    except Exception:  # noqa: BLE001
+        return f"<unrenderable {type(value).__name__}>"
+
+
+def _safe_order_id(value: object) -> str:
+    """``OrderRejectedEvent.order_id`` 바인딩용 안전한 평문 ``str`` 변환.
+
+    ``UUID`` 같은 ``__str__``이 안정적인 객체는 ``str()`` 결과를 그대로 사용
+    (``UUID(...)`` 같은 ``repr`` 형식이 아닌 ``"058c026b-..."`` 평문). ``str``은
+    그대로 통과시키고, ``__str__``이 raise하면 ``repr`` 시도 후 placeholder로
+    떨어진다. builder가 절대 raise하지 않는 invariant 유지.
+    """
+    if isinstance(value, str):
+        return value
+    try:
+        return str(value)
+    except Exception:  # noqa: BLE001
+        try:
+            return repr(value)
+        except Exception:  # noqa: BLE001
+            return f"<unrenderable {type(value).__name__}>"
+
+
+def _build_safe_rejected_event(
+    *,
+    account_id: str,
+    event: object,
+    reason: str,
+) -> Any:
+    """모든 source 필드를 정규화한 fail-closed ``OrderRejectedEvent`` 빌더.
+
+    builder 자체가 절대 raise하지 않는다 (#1302 메타 리뷰). 호출자는 catch-all
+    ``except`` 안에서 안전하게 호출할 수 있다.
+
+    - ``symbol`` / ``side`` / ``order_type`` / ``bot_id`` / ``strategy_id`` /
+      ``exchange``: ``_safe_str``로 정규화 (sqlite ``TEXT`` 컬럼 호환).
+    - ``quantity``: ``_coerce_finite_quantity``로 finite ``float`` 정규화
+      (NaN/inf/비-number/large-int 모두 0.0).
+    - ``price``: ``None`` 허용 (게이트 통과 후 limit/stop_limit 외에는 nullable).
+    - ``order_id``: ``getattr``+``_safe_str`` (``event_id``가 없거나 raise하는
+      pathological 상황 대응).
+    - ``reason``: 호출자가 미리 만든 문자열. 호출자도 ``_safe_str`` 사용 권장.
+    """
+    from ante.eventbus.events import OrderRejectedEvent
+
+    return OrderRejectedEvent(
+        account_id=account_id,
+        order_id=_safe_order_id(getattr(event, "event_id", "")),
+        bot_id=_safe_str(getattr(event, "bot_id", "")),
+        strategy_id=_safe_str(getattr(event, "strategy_id", "")),
+        symbol=_safe_str(getattr(event, "symbol", "")),
+        side=_safe_str(getattr(event, "side", "")),
+        quantity=_coerce_finite_quantity(getattr(event, "quantity", 0.0)),
+        price=getattr(event, "price", None),
+        order_type=_safe_str(getattr(event, "order_type", "")),
+        reason=reason,
+        exchange=_safe_str(getattr(event, "exchange", "KRX")),
+    )
 
 
 # 룰 타입 → 클래스 매핑
@@ -434,10 +534,23 @@ class RuleEngine:
     # ── EventBus 핸들러 ──────────────────────────────
 
     async def _on_order_request(self, event: object) -> None:
-        """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행."""
+        """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행.
+
+        구조 invariant (#1302 메타 리뷰): isinstance/account_id 필터링 직후부터
+        모든 preflight 게이트(#1297-#1302) + evaluate + Treasury 조회 + reject
+        경로 전체를 단일 ``try`` 블록으로 감싼다. 게이트별 ``raise`` (예: f-string
+        ``repr`` 시 ``OverflowError``, 사용자 정의 ``__repr__`` 예외 등)가 EventBus
+        핸들러까지 leak되어 ``OrderRejectedEvent`` 발행이 swallow되면 audit
+        trail이 끊겨 fail-open이 된다. catch-all ``except``가 잡아 ``_build_safe_
+        rejected_event`` (절대 raise하지 않는 builder)로 generic reject를
+        강제 발행하는 것이 본 함수의 핵심 invariant.
+
+        Pathological large-int 등 strategy 코드가 정상적으로 만들 수 없는 입력은
+        catch-all builder가 receive하며, 게이트별 typed reject reason은 강제하지
+        않는다.
+        """
         from ante.eventbus.events import (
             NotificationEvent,
-            OrderRejectedEvent,
             OrderRequestEvent,
             OrderValidatedEvent,
         )
@@ -449,290 +562,202 @@ class RuleEngine:
         if event.account_id != self._account_id:
             return
 
-        # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
-        # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
-        # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.
-        # `isinstance(..., str)` 가드로 list/dict 같은 unhashable 값이 들어와도
-        # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
-        if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
-            reason = f"Invalid signal side: {event.side!r} (allowed: buy, sell)"
-            # OrderRejectedEvent.side / .order_type / .symbol은 TradeRecorder가
-            # sqlite TEXT NOT NULL 컬럼에 바인딩하므로, 비문자열(list/dict/set/None
-            # 등)이 들어올 경우 InterfaceError/NOT NULL 위반으로 거부 audit trail이
-            # 깨진다. repr()로 강제 정규화하여 텍스트 호환성을 보장한다.
-            # cross-field 보강(#1298/#1299): side만 invalid해도 동시에 order_type
-            # 또는 symbol까지 비문자열이면 reject 이벤트가 broken되므로 세 필드
-            # 모두 정규화한다.
-            safe_side = event.side if isinstance(event.side, str) else repr(event.side)
-            safe_order_type = (
-                event.order_type
-                if isinstance(event.order_type, str)
-                else repr(event.order_type)
-            )
-            safe_symbol = (
-                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
-            )
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=safe_symbol,
-                    side=safe_side,
-                    quantity=_coerce_finite_quantity(event.quantity),
-                    price=event.price,
-                    order_type=safe_order_type,
-                    reason=reason,
-                    exchange=event.exchange,
-                )
-            )
-            return
-
-        # OrderRequestEvent 계약 preflight: Signal.order_type 허용값 검증.
-        # docs/specs/strategy/03-02-signal-fields.md —
-        # order_type ∈ {"market", "limit", "stop", "stop_limit"}.
-        # 회귀(#1298): order_type="trail" 등 미지원 값이 RuleEngine을 통과해
-        # Treasury 예약 → broker adapter 호출까지 진행되어 broker 실패 4건이
-        # 누적되었다. 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다.
-        if (
-            not isinstance(event.order_type, str)
-            or event.order_type not in _VALID_ORDER_TYPES
-        ):
-            safe_order_type = (
-                event.order_type
-                if isinstance(event.order_type, str)
-                else repr(event.order_type)
-            )
-            # cross-field 보강(#1299): symbol도 sqlite TEXT 컬럼에 바인딩되므로
-            # 비문자열이면 repr()로 정규화한다.
-            safe_symbol = (
-                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
-            )
-            reason = (
-                f"Invalid order type: {event.order_type!r} "
-                f"(allowed: market, limit, stop, stop_limit)"
-            )
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=safe_symbol,
-                    side=event.side,
-                    quantity=_coerce_finite_quantity(event.quantity),
-                    price=event.price,
-                    order_type=safe_order_type,
-                    reason=reason,
-                    exchange=event.exchange,
-                )
-            )
-            return
-
-        # OrderRequestEvent 계약 preflight: KRX numeric symbol 검증.
-        # 회귀(#1299): A7 oracle이 검출한 버그 — Signal.symbol="INVALID",
-        # exchange="KRX" 주문이 RuleEngine→Treasury→broker까지 진행되어
-        # KIS 40070000(매매불가 종목)이 발생했다. 현재 Ante KIS-domestic 경로는
-        # 6자리 숫자 PDNO(예: "005930", "069500")만 가정하므로, 그 형식을
-        # 만족하지 않는 KRX symbol은 룰 평가/Treasury 조회 이전에 fail-closed로
-        # 거부한다. 비-KRX exchange는 broker adapter에 위임한다.
-        if event.exchange == "KRX" and (
-            not isinstance(event.symbol, str)
-            or not _KRX_NUMERIC_SYMBOL_PATTERN.fullmatch(event.symbol)
-        ):
-            safe_symbol = (
-                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
-            )
-            reason = (
-                f"Invalid KRX numeric symbol: {event.symbol!r} "
-                f"(expected 6-digit numeric per current Ante KIS-domestic contract)"
-            )
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=safe_symbol,
-                    side=event.side,
-                    quantity=_coerce_finite_quantity(event.quantity),
-                    price=event.price,
-                    order_type=event.order_type,
-                    reason=reason,
-                    exchange=event.exchange,
-                )
-            )
-            return
-
-        # OrderRequestEvent 계약 preflight: limit / stop_limit price 필수.
-        # 회귀(#1300): A7 oracle이 검출한 버그 — order_type="limit", side="sell",
-        # price=None 주문이 RuleEngine→Treasury→broker까지 진행되어 KIS 호출
-        # 단계에서 HTTP 500이 발생했다. limit / stop_limit는 가격 지정이 invariant
-        # 이므로, price=None이면 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다.
-        # market의 price=None은 스펙상 옵션이므로 통과시키며, 0/음수/NaN/비-number
-        # price 검증은 본 PR 범위 밖(#1303)이다.
-        if event.order_type in ("limit", "stop_limit") and event.price is None:
-            reason = (
-                f"Missing price for {event.order_type} order: "
-                f"price is required for limit and stop_limit orders"
-            )
-            # cross-field 보강(#1297/#1298/#1299): symbol은 sqlite TEXT 컬럼에
-            # 바인딩되므로 비문자열이면 repr()로 정규화한다. side / order_type은
-            # 본 게이트 도달 시점에 위 게이트들에서 이미 문자열로 잠겼다.
-            safe_symbol = (
-                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
-            )
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=safe_symbol,
-                    side=event.side,
-                    quantity=_coerce_finite_quantity(event.quantity),
-                    price=event.price,
-                    order_type=event.order_type,
-                    reason=reason,
-                    exchange=event.exchange,
-                )
-            )
-            return
-
-        # OrderRequestEvent 계약 preflight: stop / stop_limit stop_price 필수.
-        # 회귀(#1301): A7 oracle이 검출한 버그 — order_type="stop", side="sell",
-        # stop_price=None 주문이 RuleEngine→OrderApproved→StopOrderRegistered까지
-        # 진행되어 terminal event(체결/거부)가 누락되었다. stop / stop_limit는
-        # 트리거 가격(stop_price) 지정이 invariant이므로, stop_price=None이면
-        # 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다. OrderRejectedEvent
-        # 스키마에 stop_price 필드가 없으므로 reason 문자열에만 명시한다.
-        # 0/음수/NaN stop_price 검증은 본 PR 범위 밖(별도 후속 이슈)이다.
-        if event.order_type in ("stop", "stop_limit") and event.stop_price is None:
-            reason = (
-                f"Missing stop_price for {event.order_type} order: "
-                f"stop_price is required for stop and stop_limit orders"
-            )
-            # symbol은 sqlite TEXT 컬럼에 바인딩되므로 비문자열이면 repr()로
-            # 정규화한다. side / order_type은 본 게이트 도달 시점에 위 게이트들에서
-            # 이미 문자열로 잠겼다.
-            safe_symbol = (
-                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
-            )
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=safe_symbol,
-                    side=event.side,
-                    quantity=_coerce_finite_quantity(event.quantity),
-                    price=event.price,
-                    order_type=event.order_type,
-                    reason=reason,
-                    exchange=event.exchange,
-                )
-            )
-            return
-
-        # OrderRequestEvent 계약 preflight: quantity는 finite number여야 한다.
-        # 회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN, side='buy',
-        # order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
-        # Treasury 진입 후 sqlite `bot_budgets.available NOT NULL` 위반으로 실패했다.
-        # NaN/inf/non-number quantity는 Treasury 예약/주문 호출 이전에 fail-closed
-        # 로 거부한다. 0/음수 quantity, NaN price 검증은 본 PR 범위 밖
-        # (#1304/#1305/#1303)이다.
-        #
-        # _is_finite_quantity는 비-number/bool/NaN/inf뿐 아니라 ``10**10000``
-        # 같은 거대 정수 (float 변환 시 ``OverflowError``)도 함께 잠근다 (#1302 P2).
-        # 게이트가 ``_on_order_request``의 ``try`` 블록 밖에 있으므로
-        # 예외가 EventBus까지 leak되지 않도록 helper 내부에서 가드한다.
-        if not _is_finite_quantity(event.quantity):
-            reason = (
-                f"Invalid quantity: {event.quantity!r} "
-                f"(quantity must be a finite number)"
-            )
-            safe_symbol = (
-                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
-            )
-            # OrderRejectedEvent.quantity는 trades.quantity REAL NOT NULL로
-            # 이어지므로 NaN/inf/비-number/overflow int는 0.0으로 정규화해
-            # audit/PnL 호환을 유지한다. 본 PR의 cross-field 보강(#1302)에서
-            # 모든 reject 경로가 동일한 _coerce_finite_quantity helper로 통일됐다.
-            safe_quantity = _coerce_finite_quantity(event.quantity)
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=safe_symbol,
-                    side=event.side,
-                    quantity=safe_quantity,
-                    price=event.price,
-                    order_type=event.order_type,
-                    reason=reason,
-                    exchange=event.exchange,
-                )
-            )
-            return
-
-        # 계좌 상태 조회
-        account_status = "active"
-        currency = "KRW"
-        trading_hours_start = "09:00"
-        trading_hours_end = "15:30"
-        timezone = "Asia/Seoul"
-        if self._account_service is not None:
-            try:
-                account = await self._account_service.get(self._account_id)
-                account_status = account.status.value
-                currency = account.currency
-                trading_hours_start = account.trading_hours_start
-                trading_hours_end = account.trading_hours_end
-                timezone = account.timezone
-            except Exception:
-                logger.warning(
-                    "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
-                )
-
-        # Treasury 데이터 조회
-        treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
-
-        # 미실현 손익 조회
-        current_price = event.price or 0.0
-        unrealized_pnl = await self._calculate_bot_unrealized_pnl(
-            bot_id=event.bot_id,
-            current_price=current_price,
-            order_symbol=event.symbol,
-        )
-
-        context = RuleContext(
-            bot_id=event.bot_id,
-            account_id=self._account_id,
-            strategy_id=event.strategy_id,
-            symbol=event.symbol,
-            side=event.side,
-            quantity=event.quantity,
-            order_type=event.order_type,
-            price=event.price,
-            current_price=current_price,
-            account_status=account_status,
-            currency=currency,
-            unrealized_pnl=unrealized_pnl,
-            daily_pnl=treasury_data["daily_pnl"],
-            total_pnl=treasury_data["total_pnl"],
-            prev_day_total_asset=treasury_data["prev_day_total_asset"],
-            total_asset=treasury_data["total_asset"],
-            total_exposure=treasury_data["total_exposure"],
-            bot_allocated_budget=treasury_data["bot_allocated_budget"],
-            trading_hours_start=trading_hours_start,
-            trading_hours_end=trading_hours_end,
-            timezone=timezone,
-        )
-
         try:
+            # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
+            # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
+            # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.
+            # `isinstance(..., str)` 가드로 list/dict 같은 unhashable 값이 들어와도
+            # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
+            if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
+                # cross-field 보강(#1297/#1298/#1299): side만 invalid해도 동시에
+                # order_type/symbol까지 비문자열이면 reject 이벤트가 broken되므로
+                # builder가 모든 sqlite TEXT NOT NULL 필드를 _safe_str로 정규화.
+                reason = (
+                    f"Invalid signal side: {_safe_repr(event.side)} "
+                    f"(allowed: buy, sell)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # OrderRequestEvent 계약 preflight: Signal.order_type 허용값 검증.
+            # docs/specs/strategy/03-02-signal-fields.md —
+            # order_type ∈ {"market", "limit", "stop", "stop_limit"}.
+            # 회귀(#1298): order_type="trail" 등 미지원 값이 RuleEngine을 통과해
+            # Treasury 예약 → broker adapter 호출까지 진행되어 broker 실패 4건이
+            # 누적되었다. 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다.
+            if (
+                not isinstance(event.order_type, str)
+                or event.order_type not in _VALID_ORDER_TYPES
+            ):
+                reason = (
+                    f"Invalid order type: {_safe_repr(event.order_type)} "
+                    f"(allowed: market, limit, stop, stop_limit)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # OrderRequestEvent 계약 preflight: KRX numeric symbol 검증.
+            # 회귀(#1299): A7 oracle이 검출한 버그 — Signal.symbol="INVALID",
+            # exchange="KRX" 주문이 RuleEngine→Treasury→broker까지 진행되어
+            # KIS 40070000(매매불가 종목)이 발생했다. 현재 Ante KIS-domestic 경로는
+            # 6자리 숫자 PDNO(예: "005930", "069500")만 가정하므로, 그 형식을
+            # 만족하지 않는 KRX symbol은 룰 평가/Treasury 조회 이전에 fail-closed로
+            # 거부한다. 비-KRX exchange는 broker adapter에 위임한다.
+            if event.exchange == "KRX" and (
+                not isinstance(event.symbol, str)
+                or not _KRX_NUMERIC_SYMBOL_PATTERN.fullmatch(event.symbol)
+            ):
+                reason = (
+                    f"Invalid KRX numeric symbol: {_safe_repr(event.symbol)} "
+                    f"(expected 6-digit numeric per current Ante "
+                    f"KIS-domestic contract)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # OrderRequestEvent 계약 preflight: limit / stop_limit price 필수.
+            # 회귀(#1300): A7 oracle이 검출한 버그 — order_type="limit", side="sell",
+            # price=None 주문이 RuleEngine→Treasury→broker까지 진행되어 KIS 호출
+            # 단계에서 HTTP 500이 발생했다. limit / stop_limit는 가격 지정이
+            # invariant이므로, price=None이면 룰 평가/Treasury 조회 이전에
+            # fail-closed로 거부한다.
+            # market의 price=None은 스펙상 옵션이므로 통과시키며, 0/음수/NaN/비-number
+            # price 검증은 본 PR 범위 밖(#1303)이다.
+            if event.order_type in ("limit", "stop_limit") and event.price is None:
+                reason = (
+                    f"Missing price for {_safe_str(event.order_type)} order: "
+                    f"price is required for limit and stop_limit orders"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # OrderRequestEvent 계약 preflight: stop / stop_limit stop_price 필수.
+            # 회귀(#1301): A7 oracle이 검출한 버그 — order_type="stop", side="sell",
+            # stop_price=None 주문이 RuleEngine→OrderApproved→StopOrderRegistered까지
+            # 진행되어 terminal event(체결/거부)가 누락되었다. stop / stop_limit는
+            # 트리거 가격(stop_price) 지정이 invariant이므로, stop_price=None이면
+            # 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다. OrderRejectedEvent
+            # 스키마에 stop_price 필드가 없으므로 reason 문자열에만 명시한다.
+            # 0/음수/NaN stop_price 검증은 본 PR 범위 밖(별도 후속 이슈)이다.
+            if event.order_type in ("stop", "stop_limit") and event.stop_price is None:
+                reason = (
+                    f"Missing stop_price for {_safe_str(event.order_type)} order: "
+                    f"stop_price is required for stop and stop_limit orders"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # OrderRequestEvent 계약 preflight: quantity는 finite number여야 한다.
+            # 회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN,
+            # side='buy', order_type='limit', price=1000 주문이 RuleEngine→
+            # OrderValidatedEvent→Treasury 진입 후 sqlite
+            # `bot_budgets.available NOT NULL` 위반으로 실패했다.
+            # NaN/inf/non-number quantity는 Treasury 예약/주문 호출 이전에 fail-closed
+            # 로 거부한다. 0/음수 quantity, NaN price 검증은 본 PR 범위 밖
+            # (#1304/#1305/#1303)이다.
+            #
+            # _is_finite_quantity는 비-number/bool/NaN/inf뿐 아니라 ``10**10000``
+            # 같은 거대 정수 (float 변환 시 ``OverflowError``)도 함께 잠근다 (#1302 P2).
+            # 본 게이트가 outer try 블록 안에 있으므로 reason 조립의 ``_safe_str``
+            # 가 raise해도 catch-all이 receive해 generic reject를 발행한다.
+            if not _is_finite_quantity(event.quantity):
+                reason = (
+                    f"Invalid quantity: {_safe_repr(event.quantity)} "
+                    f"(quantity must be a finite number)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
+            # 계좌 상태 조회
+            account_status = "active"
+            currency = "KRW"
+            trading_hours_start = "09:00"
+            trading_hours_end = "15:30"
+            timezone = "Asia/Seoul"
+            if self._account_service is not None:
+                try:
+                    account = await self._account_service.get(self._account_id)
+                    account_status = account.status.value
+                    currency = account.currency
+                    trading_hours_start = account.trading_hours_start
+                    trading_hours_end = account.trading_hours_end
+                    timezone = account.timezone
+                except Exception:
+                    logger.warning(
+                        "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
+                    )
+
+            # Treasury 데이터 조회
+            treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
+
+            # 미실현 손익 조회
+            current_price = event.price or 0.0
+            unrealized_pnl = await self._calculate_bot_unrealized_pnl(
+                bot_id=event.bot_id,
+                current_price=current_price,
+                order_symbol=event.symbol,
+            )
+
+            context = RuleContext(
+                bot_id=event.bot_id,
+                account_id=self._account_id,
+                strategy_id=event.strategy_id,
+                symbol=event.symbol,
+                side=event.side,
+                quantity=event.quantity,
+                order_type=event.order_type,
+                price=event.price,
+                current_price=current_price,
+                account_status=account_status,
+                currency=currency,
+                unrealized_pnl=unrealized_pnl,
+                daily_pnl=treasury_data["daily_pnl"],
+                total_pnl=treasury_data["total_pnl"],
+                prev_day_total_asset=treasury_data["prev_day_total_asset"],
+                total_asset=treasury_data["total_asset"],
+                total_exposure=treasury_data["total_exposure"],
+                bot_allocated_budget=treasury_data["bot_allocated_budget"],
+                trading_hours_start=trading_hours_start,
+                trading_hours_end=trading_hours_end,
+                timezone=timezone,
+            )
+
             result = self.evaluate(context)
 
             if result.overall_result in (RuleResult.PASS, RuleResult.WARN):
@@ -764,40 +789,40 @@ class RuleEngine:
             else:
                 # 정상 흐름의 OrderValidatedEvent는 RuleEngine 내부 검증을
                 # 통과한 OrderRequest에서만 가므로 quantity는 이미 finite로
-                # 보장되지만, defensive 차원에서 동일한 helper를 적용해 audit
+                # 보장되지만, defensive 차원에서 builder를 적용해 audit
                 # trail의 finite-float 불변성을 일관되게 잠근다 (#1302).
                 await self._eventbus.publish(
-                    OrderRejectedEvent(
+                    _build_safe_rejected_event(
                         account_id=self._account_id,
-                        order_id=str(event.event_id),
-                        bot_id=event.bot_id,
-                        strategy_id=event.strategy_id,
-                        symbol=event.symbol,
-                        side=event.side,
-                        quantity=_coerce_finite_quantity(event.quantity),
-                        price=event.price,
-                        order_type=event.order_type,
+                        event=event,
                         reason=result.rejection_reason,
                     )
                 )
                 await self._execute_actions(result.actions, event)
 
-        except Exception:
-            logger.exception("룰 평가 실패: %s", event.event_id)
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    account_id=self._account_id,
-                    order_id=str(event.event_id),
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=event.symbol,
-                    side=event.side,
-                    quantity=_coerce_finite_quantity(event.quantity),
-                    price=event.price,
-                    order_type=event.order_type,
-                    reason="Rule evaluation error",
-                )
+        except Exception:  # noqa: BLE001
+            # catch-all (#1302 메타 리뷰 invariant): preflight 게이트나 evaluate
+            # 단계 어디에서든 raise가 일어나도 audit trail이 fail-closed로
+            # 잠기도록 generic reject를 강제 발행한다. builder는 절대 raise하지
+            # 않으며, 만약 publish 자체가 raise해도 안쪽 try가 다시 잡아
+            # logger.exception으로만 남긴다.
+            logger.exception(
+                "OrderRequest preflight unexpected failure: event_id=%s",
+                getattr(event, "event_id", "<unknown>"),
             )
+            try:
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason="OrderRequest preflight error (see logs)",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to publish safe-fallback OrderRejectedEvent: event_id=%s",
+                    getattr(event, "event_id", "<unknown>"),
+                )
 
     async def _execute_actions(self, actions: list[RuleAction], event: object) -> None:
         """룰 위반 조치 실행."""
