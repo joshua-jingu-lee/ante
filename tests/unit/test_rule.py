@@ -3335,17 +3335,173 @@ class TestRuleEngineEventBus:
         assert validated[0].stop_price == good_stop_price
         assert validated[0].order_type == "stop"
 
-    @pytest.mark.parametrize("good_stop_price", [0, 0.0, -0.0])
-    async def test_rule_engine_zero_stop_price_passes_negative_gate(
+    @pytest.mark.parametrize(
+        ("bad_stop_price", "bad_side"),
+        [(0, "buy"), (0.0, "buy"), (-0.0, "sell")],
+    )
+    async def test_rule_engine_rejects_zero_stop_price_stop(
+        self, engine, eventbus, monkeypatch, bad_stop_price, bad_side
+    ):
+        """stop_price==0 + order_type='stop'이면 룰 평가/Treasury 조회 이전에 거부.
+
+        회귀(#1320): A7 oracle이 검출한 버그 — Signal.stop_price=0,
+        order_type='stop' 주문이 RuleEngine→OrderValidatedEvent까지 진행되어
+        Treasury 예약 단계에서 거부됐다. 0 stop_price는 무의미한 트리거이므로
+        Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
+
+        stop_price는 #1319 finite 게이트에서 finite int|float로 잠금됐고, #1319
+        negative 게이트에서 음수가 거부됐으므로 본 게이트의 비교 대상은
+        0, 0.0, -0.0이다. Python에서 0 == 0.0 == -0.0 = True이므로 == 0으로
+        모두 잠근다 (선례 #1305/#1318 패턴). -0.0 reason 부호도 audit trail에
+        그대로 보존되는지 잠근다.
+
+        OrderRejectedEvent 스키마에 stop_price 필드가 없으므로 reason 문자열에만
+        zero stop_price가 등장한다 (audit trail).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for zero stop_price")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for zero stop_price"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for zero stop_price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=bad_side,
+            quantity=1,
+            order_type="stop",
+            price=None,
+            stop_price=bad_stop_price,
+            exchange="KRX",
+            reason="A7 oracle zero-stop_price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Zero stop_price" in ev.reason
+        # f-string은 -0.0의 부호를 보존하므로 reason 안에서 그대로 등장한다.
+        assert str(bad_stop_price) in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == bad_side
+        assert ev.order_type == "stop"
+        assert ev.exchange == "KRX"
+        assert ev.quantity == 1.0
+        assert ev.order_id == str(order.event_id)
+        # stop 주문이므로 price=None 보존
+        assert ev.price is None
+
+    async def test_rule_engine_rejects_zero_stop_price_stop_limit(
+        self, engine, eventbus, monkeypatch
+    ):
+        """order_type='stop_limit'에서도 zero stop_price는 본 게이트로 거부된다.
+
+        본 게이트는 order_type 무관하게 stop_price==0을 잠그므로, stop_limit 주문에
+        zero stop_price가 실려도 동일하게 fail-closed로 거부되어야 한다.
+        cross-order_type #1323 회귀(stop_limit zero stop_price terminal_event 누락)를
+        함께 잠근다. payload의 price=1000.0은 finite positive이므로 보존된다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for zero stop_limit stop_price")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for zero stop_limit stop_price"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for "
+                "zero stop_limit stop_price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1,
+            order_type="stop_limit",
+            price=1000.0,
+            stop_price=0,
+            exchange="KRX",
+            reason="zero stop_price stop_limit regression (#1323)",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Zero stop_price" in ev.reason
+        assert ev.order_type == "stop_limit"
+        # stop_limit는 limit price도 보존되어야 한다 (finite positive)
+        assert ev.price == 1000.0
+        assert ev.order_id == str(order.event_id)
+
+    @pytest.mark.parametrize("good_stop_price", [0.001, 1, 1000.0])
+    async def test_rule_engine_accepts_positive_stop_price_after_zero_gate(
         self, engine, eventbus, good_stop_price
     ):
-        """zero stop_price는 본 게이트(#1319)를 통과한다.
+        """양수 stop_price는 본 게이트(#1320)를 통과해 OrderValidatedEvent 발행.
 
-        본 PR(#1319)은 음수/non-finite stop_price만 차단한다. zero stop_price 거부는
-        #1320 별도 이슈에서 처리되므로, 본 게이트만으로는 통과해야 한다 (narrow-scope
-        invariant 잠금). 0/0.0/-0.0 모두 본 게이트는 통과한다 (``< 0`` 비교에서
-        False). spy를 사용하지 않아 valid 이벤트가 downstream까지 도달하는지 함께
-        검증.
+        본 PR(#1320)은 zero stop_price만 추가로 거부한다. 양수 finite stop_price는
+        계속 통과해야 하며, 기존 정상 흐름이 깨지지 않는지 회귀 잠금. 정수/실수,
+        매우 작은 양수까지 잠근다. spy를 사용하지 않아 valid 이벤트가 downstream
+        evaluate/Treasury까지 도달하는지 함께 검증.
         """
         validated: list[OrderValidatedEvent] = []
         rejected: list[OrderRejectedEvent] = []
@@ -3363,13 +3519,91 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=good_stop_price,
             exchange="KRX",
-            reason="zero stop_price should pass negative-stop_price gate (#1320 별도)",
+            reason="positive stop_price should pass zero-stop_price gate",
         )
         await eventbus.publish(order)
 
         assert len(rejected) == 0
         assert len(validated) == 1
+        assert validated[0].stop_price == good_stop_price
         assert validated[0].order_type == "stop"
+
+    async def test_rule_engine_zero_stop_price_fires_before_negative_quantity_gate(
+        self, engine, eventbus, monkeypatch
+    ):
+        """zero stop_price 게이트가 negative quantity 게이트보다 먼저 fire.
+
+        cross-field invariant: stop_price=0 + quantity=-1 + order_type='stop' 주문이
+        들어오면 zero-stop_price 게이트(#1320)가 negative-quantity 게이트(#1304)
+        보다 먼저 fire되어 reason은 'Zero stop_price ...'가 되어야 한다 (게이트
+        선후 순서 잠금). negative-quantity 게이트가 먼저 트리거되면 audit trail의
+        근본 원인이 어긋난다.
+
+        payload의 quantity=-1.0은 finite negative이므로 _coerce_finite_quantity가
+        그대로 보존하여 audit trail에 실린다 (선례 #1304 negative-quantity 패턴).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError(
+                "evaluate must not run for zero stop_price + negative quantity"
+            )
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for "
+                "zero stop_price + negative quantity"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for "
+                "zero stop_price + negative quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=-1,
+            order_type="stop",
+            price=None,
+            stop_price=0,
+            exchange="KRX",
+            reason="zero stop_price + negative quantity cross-field gate ordering",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        # zero-stop_price 게이트가 우선 fire — negative-quantity 게이트보다 먼저 잡힘
+        assert "Zero stop_price" in ev.reason
+        assert "Negative quantity" not in ev.reason
+        # audit 보존: 음수 finite quantity가 그대로 payload에 실린다.
+        assert ev.quantity == -1.0
+        assert ev.order_type == "stop"
+        assert ev.order_id == str(order.event_id)
 
     @pytest.mark.parametrize("bad_quantity", [-1, -100, -0.5, -0.001])
     async def test_rule_engine_rejects_negative_quantity(
