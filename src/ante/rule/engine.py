@@ -92,6 +92,37 @@ def _coerce_finite_quantity(value: object) -> float:
     return float(value)
 
 
+def _coerce_finite_optional_price(value: object) -> float | None:
+    """``OrderRejectedEvent.price`` payload용 안전한 ``float | None`` 정규화.
+
+    회귀(#1302 P2 #4): 본 PR 이전에는 ``_build_safe_rejected_event``가
+    ``price=getattr(event, "price", None)``로 원본 값을 그대로 전파했다.
+    ``price=float("nan")`` / ``inf``, 또는 ``list``/``dict``/``str``/``bool``
+    같은 비-number truthy 값이 들어오면 ``TradeRecorder``의 ``event.price or
+    0.0`` 처리(NaN과 비빈 list는 truthy)에서 그대로 sqlite ``trades.price
+    REAL`` 컬럼에 bind 시도되어 ``InterfaceError`` 또는 NaN 저장을 유발해
+    PnL 계산이 깨지고, 본 PR이 보장하려는 reject audit trail도 깨진다.
+
+    ``None``은 그대로 통과시킨다 — market 주문 등 정상 흐름에서 ``price=None``
+    이 유효하므로, invalid 케이스도 ``None``으로 떨어뜨려 ``trades.price``
+    컬럼(nullable)과 호환을 유지한다. finite numeric은 ``float``로 보존하여
+    정상 reject payload를 깨뜨리지 않는다.
+
+    ``OrderRejectedEvent.stop_price`` 필드는 스키마에 존재하지 않고 builder도
+    싣지 않으므로 본 helper의 cover 범위 밖이다 (#1301 plan 확인).
+    """
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        if not math.isfinite(value):
+            return None
+    except (OverflowError, ValueError, TypeError):
+        return None
+    return float(value)
+
+
 def _safe_str(value: object) -> str:
     """sqlite ``TEXT`` 컬럼 바인딩용 안전한 ``str`` 정규화.
 
@@ -169,7 +200,10 @@ def _build_safe_rejected_event(
       ``exchange``: ``_safe_str``로 정규화 (sqlite ``TEXT`` 컬럼 호환).
     - ``quantity``: ``_coerce_finite_quantity``로 finite ``float`` 정규화
       (NaN/inf/비-number/large-int 모두 0.0).
-    - ``price``: ``None`` 허용 (게이트 통과 후 limit/stop_limit 외에는 nullable).
+    - ``price``: ``_coerce_finite_optional_price``로 finite ``float | None``
+      정규화 (NaN/inf/비-number/large-int 모두 ``None``). ``trades.price``
+      sqlite REAL 컬럼(nullable) 호환 + ``TradeRecorder``의 ``event.price
+      or 0.0`` 처리에서도 NaN/비-number bind를 차단한다 (#1302 P2 #4).
     - ``order_id``: ``getattr``+``_safe_str`` (``event_id``가 없거나 raise하는
       pathological 상황 대응).
     - ``reason``: 호출자가 미리 만든 문자열. 호출자도 ``_safe_str`` 사용 권장.
@@ -184,7 +218,7 @@ def _build_safe_rejected_event(
         symbol=_safe_str(getattr(event, "symbol", "")),
         side=_safe_str(getattr(event, "side", "")),
         quantity=_coerce_finite_quantity(getattr(event, "quantity", 0.0)),
-        price=getattr(event, "price", None),
+        price=_coerce_finite_optional_price(getattr(event, "price", None)),
         order_type=_safe_str(getattr(event, "order_type", "")),
         reason=reason,
         exchange=_safe_str(getattr(event, "exchange", "KRX")),

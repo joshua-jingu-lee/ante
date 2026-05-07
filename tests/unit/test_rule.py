@@ -2426,6 +2426,196 @@ class TestRuleEngineEventBus:
         assert isinstance(ev.quantity, float)
         assert ev.quantity == 10.0
 
+    @pytest.mark.parametrize(
+        ("price", "side", "order_type", "expected_reason"),
+        [
+            # quantity=NaN 게이트로 fire하면서 price=NaN을 함께 실어 보낸다.
+            (float("nan"), "buy", "limit", "Invalid quantity"),
+            # invalid-side 게이트로 fire하면서 price=inf를 함께 실어 보낸다.
+            (float("inf"), "hold", "market", "Invalid signal side"),
+        ],
+    )
+    async def test_rule_engine_normalizes_nan_price_in_rejected_event(
+        self,
+        engine,
+        eventbus,
+        price,
+        side,
+        order_type,
+        expected_reason,
+    ):
+        """``OrderRejectedEvent.price``의 NaN/inf payload는 ``None``으로 정규화.
+
+        회귀(#1302 P2 #4): 본 PR 이전에는 ``_build_safe_rejected_event``가
+        ``price=getattr(event, "price", None)``으로 원본을 그대로 전파했다.
+        ``price=float("nan")`` / ``inf``가 reject 이벤트에 그대로 실리면
+        ``TradeRecorder``의 ``event.price or 0.0`` 처리(NaN은 truthy)에서
+        sqlite ``trades.price REAL`` 컬럼에 NaN이 bind되어 PnL 계산이 깨지고
+        본 PR이 보장하려는 reject audit trail도 깨진다.
+
+        cross-field 케이스(quantity 게이트 + invalid price, invalid side +
+        invalid price)에서 builder가 ``_coerce_finite_optional_price``로
+        ``None`` 정규화를 강제하는지 잠근다. reason은 먼저 fire한 게이트의
+        reason을 그대로 유지한다 (price-only 검증은 본 PR 범위 밖이므로
+        새 게이트가 fire하면 안 됨).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=side,
+            quantity=float("nan") if expected_reason == "Invalid quantity" else 10.0,
+            order_type=order_type,
+            price=price,
+            exchange="KRX",
+            reason="Codex P2 #4 NaN price regression",
+        )
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert expected_reason in ev.reason
+        # price는 trades.price REAL nullable 컬럼 호환 + TradeRecorder의
+        # ``event.price or 0.0`` 처리 안전성을 위해 None으로 정규화돼야 한다.
+        assert ev.price is None
+
+    @pytest.mark.parametrize(
+        "bad_price",
+        [
+            [],
+            {},
+            "100",
+            True,
+            False,
+            object(),
+        ],
+    )
+    async def test_rule_engine_normalizes_non_number_price_in_rejected_event(
+        self,
+        engine,
+        eventbus,
+        bad_price,
+    ):
+        """``OrderRejectedEvent.price``의 비-number payload는 ``None``으로 정규화.
+
+        회귀(#1302 P2 #4): ``list`` (비빈), ``dict``, ``str``, ``bool`` 같은
+        비-number truthy 값이 ``event.price``로 들어오면 builder가 그대로
+        전파해 ``TradeRecorder``가 sqlite ``trades.price REAL`` 컬럼에 bind
+        시도 시 ``InterfaceError``가 발생한다. ``False``/빈 컨테이너 같은
+        falsy 비-number도 일관성을 위해 ``None``으로 떨어뜨린다.
+
+        invalid-side 게이트로 fire시켜 reject 경로를 강제하고, builder의
+        price 정규화만 단독 검증한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="hold",  # invalid-side 게이트 fire
+            quantity=10.0,
+            order_type="market",
+            price=bad_price,  # type: ignore[arg-type]
+            exchange="KRX",
+            reason="Codex P2 #4 non-number price regression",
+        )
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert "Invalid signal side" in ev.reason
+        # 비-number는 모두 None으로 정규화돼야 한다.
+        assert ev.price is None
+
+    async def test_rule_engine_preserves_finite_price_in_rejected_event(
+        self, engine, eventbus
+    ):
+        """정상 finite ``price`` payload는 ``float``로 보존된다.
+
+        회귀(#1302 P2 #4): builder의 price 정규화가 정상 reject payload까지
+        과도하게 ``None``으로 떨어뜨리면 audit trail의 가격 정보가 손실되어
+        뒤따르는 PnL/보고 계산이 부정확해진다. quantity=NaN 게이트로 fire한
+        cross-field 케이스에서 finite price (1000.0)는 그대로 보존되는지
+        잠근다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=float("nan"),  # quantity 게이트 fire
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="Codex P2 #4 finite price preservation regression",
+        )
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        # 정상 finite price는 보존돼야 한다 (정규화의 false-positive 방지).
+        assert ev.price == 1000.0
+        assert isinstance(ev.price, float)
+
+    async def test_rule_engine_normalizes_overflow_int_price(self, engine, eventbus):
+        """``float`` 변환 시 ``OverflowError``를 유발하는 거대 ``int`` price 정규화.
+
+        회귀(#1302 P2 #4): Python ``int``는 임의 정밀도라 ``10**400`` 같은
+        거대 정수는 ``math.isfinite`` 호출 시 ``float(value)`` 변환에서
+        ``OverflowError``를 던진다. ``_coerce_finite_optional_price`` helper
+        가 ``OverflowError``/``ValueError``/``TypeError``를 가드해 ``None``
+        으로 떨어뜨리는지 (builder가 절대 raise하지 않는 invariant 유지)
+        잠근다. invalid-side 게이트로 fire시켜 reject 경로를 강제한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="hold",  # invalid-side 게이트 fire
+            quantity=10.0,
+            order_type="market",
+            price=10**400,  # type: ignore[arg-type]
+            exchange="KRX",
+            reason="Codex P2 #4 overflow int price regression",
+        )
+
+        # builder가 OverflowError를 leak하면 publish가 raise하므로,
+        # 정상 반환되는 것 자체가 fail-closed 잠금 검증.
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert "Invalid signal side" in ev.reason
+        assert ev.price is None
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
