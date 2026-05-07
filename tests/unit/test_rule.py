@@ -2180,6 +2180,301 @@ class TestRuleEngineEventBus:
         # 0.0으로 정규화된다 (overflow int → 0.0).
         assert ev.quantity == 0.0
 
+    async def test_rule_engine_rejects_nan_price(self, engine, eventbus, monkeypatch):
+        """price=NaN이면 룰 평가/Treasury 조회 이전에 거부한다.
+
+        회귀(#1303): A7 oracle이 검출한 버그 — Signal.price=NaN, side='buy',
+        order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
+        Treasury 진입 후 sqlite NOT NULL 위반으로 실패했다. NaN price는
+        Treasury 예약 호출 이전에 fail-closed로 거부해야 한다. rejection
+        payload의 price는 ``_coerce_finite_optional_price``로 ``None``으로
+        정규화된다 (trades.price REAL nullable 호환).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for NaN price")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for NaN price")
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for NaN price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="limit",
+            price=float("nan"),
+            exchange="KRX",
+            reason="A7 oracle NaN-price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid price" in ev.reason
+        assert "nan" in ev.reason.lower()
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == "buy"
+        assert ev.order_type == "limit"
+        assert ev.quantity == 1.0
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+        # rejection payload의 price는 trades.price REAL nullable 호환을 위해
+        # None으로 정규화된다 (NaN → None via _coerce_finite_optional_price).
+        assert ev.price is None
+
+    @pytest.mark.parametrize("bad_price", [float("inf"), float("-inf")])
+    async def test_rule_engine_rejects_inf_price(
+        self, engine, eventbus, monkeypatch, bad_price
+    ):
+        """price=±inf이면 룰 평가/Treasury 조회 이전에 거부한다."""
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for inf price")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for inf price")
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for inf price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="limit",
+            price=bad_price,
+            exchange="KRX",
+            reason="A7 oracle inf-price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid price" in ev.reason
+        assert "inf" in ev.reason.lower()
+        # builder가 inf price를 None으로 정규화 (trades.price REAL nullable 호환).
+        assert ev.price is None
+        assert ev.symbol == "005930"
+        assert ev.order_type == "limit"
+
+    @pytest.mark.parametrize("bad_price", ["100", [], {}, True, 10**400])
+    async def test_rule_engine_rejects_non_number_price(
+        self, engine, eventbus, monkeypatch, bad_price
+    ):
+        """price가 number가 아니면 (str/list/dict/bool/large-int) 거부한다.
+
+        - bool은 isinstance(True, int)==True이므로 명시적으로 거부 대상에 포함.
+        - 10**400은 float(...) 변환 시 OverflowError를 유발하는 거대 int.
+          ``_is_finite_quantity`` helper의 OverflowError 가드가 동작해
+          fail-closed 거부 경로로 빠지는지 함께 잠근다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for non-number price")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for non-number price"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for non-number price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="limit",
+            price=bad_price,  # type: ignore[arg-type]
+            exchange="KRX",
+            reason="A7 oracle non-number-price regression",
+        )
+
+        # OverflowError가 EventBus 핸들러까지 leak되면 publish가 예외를 던지므로,
+        # 정상 반환되는 것 자체가 fail-closed 잠금 검증 (large-int 케이스).
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid price" in ev.reason
+        # reason에 repr(bad_price)가 포함되어 audit trail에 원시값 보존
+        assert repr(bad_price) in ev.reason
+        # rejection payload의 price는 trades.price REAL nullable 호환을 위해
+        # None으로 정규화된다 (비-number → None).
+        assert ev.price is None
+
+    async def test_rule_engine_accepts_market_with_none_price(self, engine, eventbus):
+        """price=None + order_type='market'은 본 게이트를 통과한다.
+
+        market 주문의 price=None은 스펙상 정상이며 #1300 게이트도 limit/stop_limit
+        에만 해당한다. 본 PR이 추가하는 NaN/inf 게이트가 ``price is None`` 케이스를
+        false-positive로 거부하지 않는지 회귀 잠금.
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="market",
+            price=None,
+            exchange="KRX",
+            reason="market with None price should pass price gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].price is None
+        assert validated[0].order_type == "market"
+
+    async def test_rule_engine_accepts_finite_price(self, engine, eventbus):
+        """price=1000.0 + order_type='limit'은 본 게이트를 통과한다.
+
+        finite numeric price는 본 PR 게이트의 정상 흐름. limit 주문의 정상
+        진행이 깨지지 않는지 회귀 잠금.
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="finite limit price should pass price gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].price == 1000.0
+        assert validated[0].order_type == "limit"
+
+    async def test_rule_engine_accepts_market_with_finite_price(self, engine, eventbus):
+        """price=1000.0 + order_type='market'은 본 게이트를 통과한다.
+
+        market 주문에 price 값이 함께 실려도 (extra field 거부는 본 PR 비대상)
+        finite numeric이면 본 게이트는 통과해야 한다. 회귀 잠금.
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=1.0,
+            order_type="market",
+            price=1000.0,
+            exchange="KRX",
+            reason="market with finite price should pass price gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].price == 1000.0
+        assert validated[0].order_type == "market"
+
     @pytest.mark.parametrize(
         ("quantity", "side", "order_type", "price", "stop_price", "expected_reason"),
         [

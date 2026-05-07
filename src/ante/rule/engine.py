@@ -743,6 +743,34 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: price 값이 있으면 finite number.
+            # 회귀(#1303): A7 oracle이 검출한 버그 — Signal.price=NaN, side='buy',
+            # order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
+            # Treasury 진입 후 sqlite NOT NULL 위반으로 실패했다. NaN/inf/non-number
+            # price는 Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
+            #
+            # ``price=None``은 정상 흐름이다 — market 주문은 None이 옵션이며,
+            # limit/stop_limit의 price=None은 #1300 게이트가 별도 처리한다. 본
+            # 게이트는 price 값이 있을 때만 finite numeric을 강제한다.
+            #
+            # ``_is_finite_quantity``는 비-number/bool/NaN/inf 및 ``10**400`` 같은
+            # 거대 정수 (float 변환 시 ``OverflowError``)를 모두 함께 잠근다.
+            # 0/음수 price 검증, NaN stop_price, OrderModifyEvent price 검증은
+            # 본 PR 범위 밖(별도 후속 이슈)이다.
+            if event.price is not None and not _is_finite_quantity(event.price):
+                reason = (
+                    f"Invalid price: {_safe_repr(event.price)} "
+                    f"(price must be a finite number when provided)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # 계좌 상태 조회
             account_status = "active"
             currency = "KRW"
