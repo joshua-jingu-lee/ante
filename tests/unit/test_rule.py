@@ -1874,6 +1874,748 @@ class TestRuleEngineEventBus:
         assert "Missing stop_price" not in ev.reason
         assert ev.order_type == "stop_limit"
 
+    async def test_rule_engine_rejects_nan_quantity(
+        self, engine, eventbus, monkeypatch
+    ):
+        """quantity=NaN이면 룰 평가/Treasury 조회 이전에 거부한다.
+
+        회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN, side='buy',
+        order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
+        Treasury 진입 후 sqlite `bot_budgets.available NOT NULL` 위반으로
+        실패했다. NaN quantity는 Treasury 예약 호출 이전에 fail-closed로
+        거부해야 한다. rejection payload의 quantity는 sqlite REAL NOT NULL
+        호환을 위해 0.0으로 정규화된다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for NaN quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for NaN quantity")
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for NaN quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=float("nan"),
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle NaN-quantity regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        assert "nan" in ev.reason.lower()
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == "buy"
+        assert ev.order_type == "limit"
+        assert ev.price == 1000.0
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+        # rejection payload의 quantity는 sqlite REAL NOT NULL 호환을 위해
+        # 0.0으로 정규화된다.
+        assert ev.quantity == 0.0
+
+    @pytest.mark.parametrize("bad_quantity", [float("inf"), float("-inf")])
+    async def test_rule_engine_rejects_inf_quantity(
+        self, engine, eventbus, monkeypatch, bad_quantity
+    ):
+        """quantity=±inf이면 룰 평가/Treasury 조회 이전에 거부한다."""
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for inf quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError("_query_treasury_data must not run for inf quantity")
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for inf quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=bad_quantity,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle inf-quantity regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        assert "inf" in ev.reason.lower()
+        assert ev.quantity == 0.0
+        assert ev.symbol == "005930"
+        assert ev.order_type == "limit"
+
+    @pytest.mark.parametrize("bad_quantity", ["10", None, [], True])
+    async def test_rule_engine_rejects_non_number_quantity(
+        self, engine, eventbus, monkeypatch, bad_quantity
+    ):
+        """quantity가 number가 아니면 (str/None/list/bool) 룰 평가 이전에 거부한다.
+
+        bool은 isinstance(True, int)==True이므로 명시적으로 거부 대상에 포함한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for non-number quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for non-number quantity"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for non-number quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=bad_quantity,  # type: ignore[arg-type]
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle non-number-quantity regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        # reason에 repr(bad_quantity)이 포함되어 audit trail에 원시값 보존
+        assert repr(bad_quantity) in ev.reason
+        # rejection payload의 quantity는 sqlite REAL NOT NULL 호환을 위해
+        # 0.0으로 정규화된다.
+        assert ev.quantity == 0.0
+
+    async def test_rule_engine_accepts_positive_finite_quantity(self, engine, eventbus):
+        """quantity=10.0이면 본 게이트를 통과해 OrderValidatedEvent가 발행된다.
+
+        기존 흐름이 유지됨을 보장하는 회귀 테스트. 본 PR은 NaN/inf/non-number
+        quantity만 거부하므로, 양수 finite quantity는 계속 통과해야 한다.
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="positive finite quantity should pass quantity gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].quantity == 10.0
+        assert validated[0].order_type == "limit"
+        assert validated[0].price == 1000.0
+
+    async def test_rule_engine_rejects_overflow_int_quantity(
+        self, engine, eventbus, monkeypatch
+    ):
+        """``float`` 변환 시 ``OverflowError``를 유발하는 거대 ``int`` quantity 거부.
+
+        회귀(#1302 P2): Python ``int``는 임의 정밀도라 ``10**400`` 같은 거대한
+        정수는 ``math.isfinite`` (또는 ``math.isnan``/``math.isinf``) 호출 시
+        ``float(value)`` 변환에서 ``OverflowError: int too large to convert to
+        float``를 던진다. 본 게이트가 ``_on_order_request``의 ``try`` 블록
+        밖이라 예외가 EventBus 핸들러까지 leak되면 ``OrderRejectedEvent``가
+        발행되지 않아 audit trail이 끊기고 게이트가 fail-open된다.
+        ``_is_finite_quantity`` helper 내부에서 ``OverflowError``를 가드하여
+        fail-closed reject 경로로 빠지는지 잠근다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+        unrealized_calls: list[tuple[str, float, str]] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for overflow int quantity")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for overflow int quantity"
+            )
+
+        async def _spy_unrealized(bot_id, current_price, order_symbol):
+            unrealized_calls.append((bot_id, current_price, order_symbol))
+            raise AssertionError(
+                "_calculate_bot_unrealized_pnl must not run for overflow int quantity"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+        monkeypatch.setattr(engine, "_calculate_bot_unrealized_pnl", _spy_unrealized)
+
+        # 10**400은 float(...) 변환 시 OverflowError를 안정적으로 재현한다.
+        overflow_quantity = 10**400
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=overflow_quantity,  # type: ignore[arg-type]
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="A7 oracle overflow-int-quantity regression",
+        )
+
+        # OverflowError가 EventBus 핸들러까지 leak되면 publish가 예외를 던지므로,
+        # 이 호출이 정상 반환되는 것 자체가 게이트가 fail-closed인지 확인하는
+        # primary assertion이다.
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert unrealized_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        # rejection payload의 quantity는 sqlite REAL NOT NULL 호환을 위해
+        # 0.0으로 정규화된다 (overflow int → 0.0).
+        assert ev.quantity == 0.0
+
+    @pytest.mark.parametrize(
+        ("quantity", "side", "order_type", "price", "stop_price", "expected_reason"),
+        [
+            # #1300 limit-price 게이트: NaN quantity + price=None
+            (
+                float("nan"),
+                "buy",
+                "limit",
+                None,
+                None,
+                "Missing price",
+            ),
+            # #1298 invalid-order_type 게이트: inf quantity + order_type='trail'
+            (
+                float("inf"),
+                "buy",
+                "trail",
+                1000.0,
+                None,
+                "Invalid order type",
+            ),
+            # #1301 stop_price 게이트: NaN quantity + stop_price=None
+            (
+                float("nan"),
+                "buy",
+                "stop",
+                None,
+                None,
+                "Missing stop_price",
+            ),
+            # #1297 invalid-side 게이트: str quantity + invalid side
+            (
+                "bad",
+                "hold",
+                "market",
+                None,
+                None,
+                "Invalid signal side",
+            ),
+        ],
+    )
+    async def test_rule_engine_normalizes_nan_quantity_in_cross_field_rejects(
+        self,
+        engine,
+        eventbus,
+        monkeypatch,
+        quantity,
+        side,
+        order_type,
+        price,
+        stop_price,
+        expected_reason,
+    ):
+        """cross-field invalid payload에서 quantity도 0.0으로 정규화된다.
+
+        회귀(#1302 cross-field 보강): 본 PR 이전에는 새 NaN/inf/non-number
+        quantity 게이트가 stop_price 게이트(#1301) 직후에 위치했으나, 그보다
+        앞선 게이트들(invalid-side / invalid-order_type / invalid-krx-symbol /
+        limit-price / stop-price)은 ``OrderRejectedEvent.quantity`` payload에
+        ``event.quantity``를 그대로 실어 NaN/inf/str이 ``trades.quantity REAL
+        NOT NULL`` 컬럼 바인딩을 깨뜨릴 수 있었다. 모든 reject 경로가 동일한
+        ``_coerce_finite_quantity`` helper로 통일됐는지 잠근다.
+
+        각 케이스는 quantity 게이트 도달 전에 다른 게이트가 먼저 fire하므로
+        reason은 첫 게이트의 reason을 그대로 유지하고 ('Invalid quantity'가
+        아님), quantity만 0.0으로 정규화돼야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        # 본 게이트들은 모두 룰 평가/Treasury 조회 이전에 fire하므로
+        # 호출되어선 안 된다.
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError(
+                "evaluate must not run for cross-field invalid payload"
+            )
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for cross-field invalid payload"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=side,
+            quantity=quantity,  # type: ignore[arg-type]
+            order_type=order_type,
+            price=price,
+            stop_price=stop_price,
+            exchange="KRX",
+            reason="cross-field quantity normalization regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        # reason은 cross-field로 먼저 fire한 게이트의 reason을 그대로 유지한다.
+        assert expected_reason in ev.reason
+        # rejection payload의 quantity는 trades.quantity REAL NOT NULL 호환을
+        # 위해 finite float (0.0)로 정규화된다.
+        assert isinstance(ev.quantity, float)
+        assert ev.quantity == 0.0
+
+    async def test_rule_engine_safe_builder_handles_unrenderable_repr(
+        self, engine, eventbus, monkeypatch
+    ):
+        """``__repr__``가 raise하는 input에서도 fail-closed reject 발행 잠금.
+
+        회귀(#1302 메타 리뷰): preflight 게이트의 ``raise``가 EventBus 핸들러
+        예외 swallow에 걸려 ``OrderRejectedEvent`` 미발행 → audit fail-open.
+        catch-all ``except``와 ``_build_safe_rejected_event`` (raise하지 않는
+        builder)가 receive하는지 검증한다.
+
+        ``Unrenderable.__repr__``가 ``RuntimeError``를 던지는 ``side``를 넣어
+        invalid-side 게이트의 ``f"...{_safe_str(event.side)}..."`` reason 조립
+        자체가 raise해도 catch-all이 builder로 generic reject를 발행해야 한다.
+
+        ``_safe_str``는 ``repr`` 실패 시 ``"<unrenderable {type}>"`` placeholder
+        를 반환하므로 실제로 reason 조립은 raise하지 않는다 — 하지만 test의
+        목적은 invariant 보호이므로, ``_safe_str`` 구현이 향후 약화되어도
+        catch-all이 잡아내는지 정적으로 확인한다.
+        """
+
+        class Unrenderable:
+            def __repr__(self) -> str:
+                raise RuntimeError("repr deliberately fails")
+
+            def __str__(self) -> str:
+                raise RuntimeError("str deliberately fails")
+
+            def __hash__(self) -> int:
+                return 0
+
+            def __eq__(self, other: object) -> bool:
+                return False
+
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        # 본 입력은 invalid-side 게이트에서 fire (frozenset membership에서
+        # str 가드로 잠긴 후 reason 조립 단계로 진입).
+        bad_side = Unrenderable()
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=bad_side,  # type: ignore[arg-type]
+            quantity=10.0,
+            order_type="market",
+            exchange="KRX",
+            reason="unrenderable repr regression",
+        )
+
+        # publish가 정상 반환되는 것 자체가 catch-all 안전망 검증.
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        # 정확히 1건 발행되어야 한다 (게이트 발행 또는 catch-all 발행 중 하나).
+        assert len(rejected) == 1
+        ev = rejected[0]
+        # quantity는 finite float (10.0 → 정규화된 동일 값) 호환.
+        assert isinstance(ev.quantity, float)
+        # symbol/side/order_type 모두 sqlite TEXT 호환을 위해 str 정규화.
+        assert isinstance(ev.symbol, str)
+        assert isinstance(ev.side, str)
+        assert isinstance(ev.order_type, str)
+        # reason은 typed message 또는 generic "preflight error" 어느 쪽이든 OK.
+        assert isinstance(ev.reason, str)
+        assert ev.reason  # non-empty
+
+    async def test_rule_engine_catch_all_reject_for_synthetic_raise(
+        self, engine, eventbus, monkeypatch
+    ):
+        """preflight 도중 helper가 강제로 raise해도 catch-all이 reject 발행.
+
+        회귀(#1302 메타 리뷰): ``_query_treasury_data``를 monkeypatch로 raise
+        하도록 만들어 preflight 게이트 통과 후 evaluate 진입 직전에 강제 예외를
+        주입한다. catch-all ``except``가 잡아 ``_build_safe_rejected_event``로
+        generic reject를 발행하는지 (audit trail이 fail-closed로 잠기는지)
+        검증한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            raise RuntimeError("synthetic preflight failure")
+
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        # 모든 preflight 게이트를 통과하는 정상 입력. evaluate 직전 단계인
+        # _query_treasury_data에서 강제 raise → catch-all로 fail-closed.
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+            exchange="KRX",
+            reason="synthetic raise regression",
+        )
+
+        # catch-all 안전망이 동작하면 publish가 정상 반환된다.
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        # generic catch-all reason
+        assert "preflight error" in ev.reason
+        # 모든 sqlite TEXT 컬럼은 str로 정규화돼야 한다.
+        assert isinstance(ev.symbol, str)
+        assert isinstance(ev.side, str)
+        assert isinstance(ev.order_type, str)
+        assert isinstance(ev.bot_id, str)
+        assert isinstance(ev.strategy_id, str)
+        assert isinstance(ev.exchange, str)
+        # quantity는 finite float
+        assert isinstance(ev.quantity, float)
+        assert ev.quantity == 10.0
+
+    @pytest.mark.parametrize(
+        ("price", "side", "order_type", "expected_reason"),
+        [
+            # quantity=NaN 게이트로 fire하면서 price=NaN을 함께 실어 보낸다.
+            (float("nan"), "buy", "limit", "Invalid quantity"),
+            # invalid-side 게이트로 fire하면서 price=inf를 함께 실어 보낸다.
+            (float("inf"), "hold", "market", "Invalid signal side"),
+        ],
+    )
+    async def test_rule_engine_normalizes_nan_price_in_rejected_event(
+        self,
+        engine,
+        eventbus,
+        price,
+        side,
+        order_type,
+        expected_reason,
+    ):
+        """``OrderRejectedEvent.price``의 NaN/inf payload는 ``None``으로 정규화.
+
+        회귀(#1302 P2 #4): 본 PR 이전에는 ``_build_safe_rejected_event``가
+        ``price=getattr(event, "price", None)``으로 원본을 그대로 전파했다.
+        ``price=float("nan")`` / ``inf``가 reject 이벤트에 그대로 실리면
+        ``TradeRecorder``의 ``event.price or 0.0`` 처리(NaN은 truthy)에서
+        sqlite ``trades.price REAL`` 컬럼에 NaN이 bind되어 PnL 계산이 깨지고
+        본 PR이 보장하려는 reject audit trail도 깨진다.
+
+        cross-field 케이스(quantity 게이트 + invalid price, invalid side +
+        invalid price)에서 builder가 ``_coerce_finite_optional_price``로
+        ``None`` 정규화를 강제하는지 잠근다. reason은 먼저 fire한 게이트의
+        reason을 그대로 유지한다 (price-only 검증은 본 PR 범위 밖이므로
+        새 게이트가 fire하면 안 됨).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=side,
+            quantity=float("nan") if expected_reason == "Invalid quantity" else 10.0,
+            order_type=order_type,
+            price=price,
+            exchange="KRX",
+            reason="Codex P2 #4 NaN price regression",
+        )
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert expected_reason in ev.reason
+        # price는 trades.price REAL nullable 컬럼 호환 + TradeRecorder의
+        # ``event.price or 0.0`` 처리 안전성을 위해 None으로 정규화돼야 한다.
+        assert ev.price is None
+
+    @pytest.mark.parametrize(
+        "bad_price",
+        [
+            [],
+            {},
+            "100",
+            True,
+            False,
+            object(),
+        ],
+    )
+    async def test_rule_engine_normalizes_non_number_price_in_rejected_event(
+        self,
+        engine,
+        eventbus,
+        bad_price,
+    ):
+        """``OrderRejectedEvent.price``의 비-number payload는 ``None``으로 정규화.
+
+        회귀(#1302 P2 #4): ``list`` (비빈), ``dict``, ``str``, ``bool`` 같은
+        비-number truthy 값이 ``event.price``로 들어오면 builder가 그대로
+        전파해 ``TradeRecorder``가 sqlite ``trades.price REAL`` 컬럼에 bind
+        시도 시 ``InterfaceError``가 발생한다. ``False``/빈 컨테이너 같은
+        falsy 비-number도 일관성을 위해 ``None``으로 떨어뜨린다.
+
+        invalid-side 게이트로 fire시켜 reject 경로를 강제하고, builder의
+        price 정규화만 단독 검증한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="hold",  # invalid-side 게이트 fire
+            quantity=10.0,
+            order_type="market",
+            price=bad_price,  # type: ignore[arg-type]
+            exchange="KRX",
+            reason="Codex P2 #4 non-number price regression",
+        )
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert "Invalid signal side" in ev.reason
+        # 비-number는 모두 None으로 정규화돼야 한다.
+        assert ev.price is None
+
+    async def test_rule_engine_preserves_finite_price_in_rejected_event(
+        self, engine, eventbus
+    ):
+        """정상 finite ``price`` payload는 ``float``로 보존된다.
+
+        회귀(#1302 P2 #4): builder의 price 정규화가 정상 reject payload까지
+        과도하게 ``None``으로 떨어뜨리면 audit trail의 가격 정보가 손실되어
+        뒤따르는 PnL/보고 계산이 부정확해진다. quantity=NaN 게이트로 fire한
+        cross-field 케이스에서 finite price (1000.0)는 그대로 보존되는지
+        잠근다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=float("nan"),  # quantity 게이트 fire
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="Codex P2 #4 finite price preservation regression",
+        )
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert "Invalid quantity" in ev.reason
+        # 정상 finite price는 보존돼야 한다 (정규화의 false-positive 방지).
+        assert ev.price == 1000.0
+        assert isinstance(ev.price, float)
+
+    async def test_rule_engine_normalizes_overflow_int_price(self, engine, eventbus):
+        """``float`` 변환 시 ``OverflowError``를 유발하는 거대 ``int`` price 정규화.
+
+        회귀(#1302 P2 #4): Python ``int``는 임의 정밀도라 ``10**400`` 같은
+        거대 정수는 ``math.isfinite`` 호출 시 ``float(value)`` 변환에서
+        ``OverflowError``를 던진다. ``_coerce_finite_optional_price`` helper
+        가 ``OverflowError``/``ValueError``/``TypeError``를 가드해 ``None``
+        으로 떨어뜨리는지 (builder가 절대 raise하지 않는 invariant 유지)
+        잠근다. invalid-side 게이트로 fire시켜 reject 경로를 강제한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="hold",  # invalid-side 게이트 fire
+            quantity=10.0,
+            order_type="market",
+            price=10**400,  # type: ignore[arg-type]
+            exchange="KRX",
+            reason="Codex P2 #4 overflow int price regression",
+        )
+
+        # builder가 OverflowError를 leak하면 publish가 raise하므로,
+        # 정상 반환되는 것 자체가 fail-closed 잠금 검증.
+        await eventbus.publish(order)
+
+        assert len(validated) == 0
+        assert len(rejected) == 1
+        ev = rejected[0]
+        assert "Invalid signal side" in ev.reason
+        assert ev.price is None
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
