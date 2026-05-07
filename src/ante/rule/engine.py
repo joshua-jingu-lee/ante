@@ -53,6 +53,27 @@ _VALID_ORDER_TYPES: frozenset[str] = frozenset(
 # 이전에 fail-closed로 거부한다.
 _KRX_NUMERIC_SYMBOL_PATTERN = re.compile(r"^[0-9]{6}$")
 
+
+def _coerce_finite_quantity(value: object) -> float:
+    """``OrderRejectedEvent.quantity`` payload용 안전한 finite ``float`` 변환.
+
+    비-number, ``bool``, ``NaN``, ``inf``는 ``0.0``으로 정규화한다.
+    ``trades.quantity REAL NOT NULL`` 컬럼 호환을 보장하여, 임의의
+    cross-field invalid payload (#1297/#1298/#1299/#1300/#1301)에서
+    quantity 자리에 비-finite 값이 함께 실려도 audit trail이 깨지지 않는다.
+
+    ``isinstance(True, int) == True`` 이므로 ``bool``을 명시적으로 제외한다.
+    ``math.isfinite``는 numeric type 확인 뒤에만 호출한다 (가드 순서 중요).
+    """
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+    ):
+        return 0.0
+    return float(value)
+
+
 # 룰 타입 → 클래스 매핑
 RULE_REGISTRY: dict[str, type[Rule]] = {
     "daily_loss_limit": DailyLossLimitRule,
@@ -442,7 +463,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=safe_side,
-                    quantity=event.quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=safe_order_type,
                     reason=reason,
@@ -483,7 +504,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=event.side,
-                    quantity=event.quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=safe_order_type,
                     reason=reason,
@@ -518,7 +539,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=event.side,
-                    quantity=event.quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=event.order_type,
                     reason=reason,
@@ -553,7 +574,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=event.side,
-                    quantity=event.quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=event.order_type,
                     reason=reason,
@@ -589,7 +610,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=event.side,
-                    quantity=event.quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=event.order_type,
                     reason=reason,
@@ -622,14 +643,8 @@ class RuleEngine:
             )
             # OrderRejectedEvent.quantity는 trades.quantity REAL NOT NULL로
             # 이어지므로 NaN/inf/비-number는 0.0으로 정규화해 audit/PnL 호환을
-            # 유지한다.
-            safe_quantity = (
-                event.quantity
-                if isinstance(event.quantity, (int, float))
-                and not isinstance(event.quantity, bool)
-                and math.isfinite(event.quantity)
-                else 0.0
-            )
+            # 유지한다. 본 PR의 cross-field 보강(#1302)에서 모든 reject 경로가
+            # 동일한 _coerce_finite_quantity helper로 통일됐다.
             await self._eventbus.publish(
                 OrderRejectedEvent(
                     account_id=self._account_id,
@@ -638,7 +653,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=safe_symbol,
                     side=event.side,
-                    quantity=safe_quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=event.order_type,
                     reason=reason,
@@ -731,6 +746,10 @@ class RuleEngine:
                                 )
                             )
             else:
+                # 정상 흐름의 OrderValidatedEvent는 RuleEngine 내부 검증을
+                # 통과한 OrderRequest에서만 가므로 quantity는 이미 finite로
+                # 보장되지만, defensive 차원에서 동일한 helper를 적용해 audit
+                # trail의 finite-float 불변성을 일관되게 잠근다 (#1302).
                 await self._eventbus.publish(
                     OrderRejectedEvent(
                         account_id=self._account_id,
@@ -739,7 +758,7 @@ class RuleEngine:
                         strategy_id=event.strategy_id,
                         symbol=event.symbol,
                         side=event.side,
-                        quantity=event.quantity,
+                        quantity=_coerce_finite_quantity(event.quantity),
                         price=event.price,
                         order_type=event.order_type,
                         reason=result.rejection_reason,
@@ -757,7 +776,7 @@ class RuleEngine:
                     strategy_id=event.strategy_id,
                     symbol=event.symbol,
                     side=event.side,
-                    quantity=event.quantity,
+                    quantity=_coerce_finite_quantity(event.quantity),
                     price=event.price,
                     order_type=event.order_type,
                     reason="Rule evaluation error",

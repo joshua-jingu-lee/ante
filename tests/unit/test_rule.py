@@ -2104,6 +2104,126 @@ class TestRuleEngineEventBus:
         assert validated[0].order_type == "limit"
         assert validated[0].price == 1000.0
 
+    @pytest.mark.parametrize(
+        ("quantity", "side", "order_type", "price", "stop_price", "expected_reason"),
+        [
+            # #1300 limit-price 게이트: NaN quantity + price=None
+            (
+                float("nan"),
+                "buy",
+                "limit",
+                None,
+                None,
+                "Missing price",
+            ),
+            # #1298 invalid-order_type 게이트: inf quantity + order_type='trail'
+            (
+                float("inf"),
+                "buy",
+                "trail",
+                1000.0,
+                None,
+                "Invalid order type",
+            ),
+            # #1301 stop_price 게이트: NaN quantity + stop_price=None
+            (
+                float("nan"),
+                "buy",
+                "stop",
+                None,
+                None,
+                "Missing stop_price",
+            ),
+            # #1297 invalid-side 게이트: str quantity + invalid side
+            (
+                "bad",
+                "hold",
+                "market",
+                None,
+                None,
+                "Invalid signal side",
+            ),
+        ],
+    )
+    async def test_rule_engine_normalizes_nan_quantity_in_cross_field_rejects(
+        self,
+        engine,
+        eventbus,
+        monkeypatch,
+        quantity,
+        side,
+        order_type,
+        price,
+        stop_price,
+        expected_reason,
+    ):
+        """cross-field invalid payload에서 quantity도 0.0으로 정규화된다.
+
+        회귀(#1302 cross-field 보강): 본 PR 이전에는 새 NaN/inf/non-number
+        quantity 게이트가 stop_price 게이트(#1301) 직후에 위치했으나, 그보다
+        앞선 게이트들(invalid-side / invalid-order_type / invalid-krx-symbol /
+        limit-price / stop-price)은 ``OrderRejectedEvent.quantity`` payload에
+        ``event.quantity``를 그대로 실어 NaN/inf/str이 ``trades.quantity REAL
+        NOT NULL`` 컬럼 바인딩을 깨뜨릴 수 있었다. 모든 reject 경로가 동일한
+        ``_coerce_finite_quantity`` helper로 통일됐는지 잠근다.
+
+        각 케이스는 quantity 게이트 도달 전에 다른 게이트가 먼저 fire하므로
+        reason은 첫 게이트의 reason을 그대로 유지하고 ('Invalid quantity'가
+        아님), quantity만 0.0으로 정규화돼야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        # 본 게이트들은 모두 룰 평가/Treasury 조회 이전에 fire하므로
+        # 호출되어선 안 된다.
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError(
+                "evaluate must not run for cross-field invalid payload"
+            )
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for cross-field invalid payload"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=side,
+            quantity=quantity,  # type: ignore[arg-type]
+            order_type=order_type,
+            price=price,
+            stop_price=stop_price,
+            exchange="KRX",
+            reason="cross-field quantity normalization regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        # reason은 cross-field로 먼저 fire한 게이트의 reason을 그대로 유지한다.
+        assert expected_reason in ev.reason
+        # rejection payload의 quantity는 trades.quantity REAL NOT NULL 호환을
+        # 위해 finite float (0.0)로 정규화된다.
+        assert isinstance(ev.quantity, float)
+        assert ev.quantity == 0.0
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
