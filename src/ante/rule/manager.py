@@ -99,21 +99,43 @@ class RuleEngineManager:
         self,
         accounts: list[Account],
         config: Any = None,
+        dynamic_config: Any = None,
     ) -> None:
         """시스템 시작 시 모든 계좌의 RuleEngine 초기화.
 
         각 계좌에 대해 RuleEngine을 생성하고, 계좌별 룰 설정을 로드한다.
 
+        Stored rules 우선순위 (명시 우선 정책 — #1296 P2):
+
+        1. ``dynamic_config`` (런타임 PUT으로 저장된 override). 재시작 시
+           사용자가 명시적으로 비활성화한 룰이 default 재주입으로 되살아나지
+           않도록 ``static config``보다 우선한다.
+        2. ``config`` (정적 YAML/TOML 등 startup snapshot).
+        3. 둘 다 없으면 ``stored_rules=None`` → broker_type별 default만 적용.
+
         Args:
             accounts: 초기화할 계좌 목록.
-            config: 전체 설정 객체 (룰 설정 추출용). None이면 빈 룰.
+            config: 전체 설정 객체 (룰 설정 추출용). None이면 static fallback 없음.
+            dynamic_config: ``DynamicConfigService`` 인스턴스. None이면 runtime
+                override 조회를 건너뛴다 (하위 호환).
         """
         for account in accounts:
+            key = f"accounts.{account.account_id}.rules"
             stored_rules: list[dict[str, Any]] | None = None
 
-            # config에서 계좌별 룰 설정 추출 (explicit overrides)
-            if config is not None and hasattr(config, "get"):
-                account_rules = config.get(f"accounts.{account.account_id}.rules", None)
+            # 1순위: DynamicConfig (런타임 override). API PUT으로 저장된 명시
+            # 비활성화가 재시작 후에도 살아 있도록 static보다 먼저 본다 (#1296).
+            if dynamic_config is not None:
+                try:
+                    dyn_rules = await dynamic_config.get(key, default=None)
+                except Exception:  # noqa: BLE001 — DynamicConfig 백엔드 불일치 fallback
+                    dyn_rules = None
+                if isinstance(dyn_rules, list):
+                    stored_rules = dyn_rules
+
+            # 2순위: 정적 config fallback.
+            if stored_rules is None and config is not None and hasattr(config, "get"):
+                account_rules = config.get(key, None)
                 if isinstance(account_rules, list):
                     stored_rules = account_rules
 

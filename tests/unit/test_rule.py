@@ -3775,6 +3775,133 @@ class TestRuleEngineManager:
             "reload 후에도 KIS default trading_hours가 유지되어야 한다 (#1296)"
         )
 
+    async def test_initialize_all_uses_dynamic_config_override_over_static(
+        self, manager
+    ):
+        """재시작 시 DynamicConfig에 저장된 명시 override는 static config보다
+        우선한다 — default trading_hours가 다시 주입되어 사용자의 비활성화를
+        덮어쓰면 안 된다 (#1296 P2 명시 우선 정책).
+        """
+
+        class _FakeDynamicConfig:
+            def __init__(self, data):
+                self._data = data
+
+            async def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        class _FakeStaticConfig:
+            def get(self, key, default=None):  # noqa: ARG002
+                return default
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        # static에는 키가 전혀 없고, dynamic에만 명시 비활성화가 저장된 상태.
+        dyn_cfg = _FakeDynamicConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+        static_cfg = _FakeStaticConfig()
+
+        await manager.initialize_all(
+            accounts, config=static_cfg, dynamic_config=dyn_cfg
+        )
+
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        # default가 재주입되면 enabled=True 룰이 새로 생기지만, dynamic override
+        # 가 우선되면 enabled=False 룰 1개만 존재해야 한다.
+        assert len(trading_hours_rules) == 1, (
+            "DynamicConfig override가 default 재주입을 막아야 한다 (#1296 P2)"
+        )
+        assert trading_hours_rules[0].enabled is False, (
+            "사용자가 명시 비활성화한 룰은 재시작 후에도 비활성 상태를 유지해야 한다"
+        )
+
+    async def test_initialize_all_falls_back_to_static_when_dynamic_missing(
+        self, manager
+    ):
+        """DynamicConfig에 키가 없으면 static config가 fallback으로 동작한다."""
+
+        class _FakeDynamicConfig:
+            async def get(self, key, default=None):  # noqa: ARG002
+                return default
+
+        class _FakeStaticConfig:
+            def __init__(self, data):
+                self._data = data
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        dyn_cfg = _FakeDynamicConfig()
+        static_cfg = _FakeStaticConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+
+        await manager.initialize_all(
+            accounts, config=static_cfg, dynamic_config=dyn_cfg
+        )
+
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is False, (
+            "dynamic이 비어 있으면 static config의 명시 비활성화가 유지되어야 한다"
+        )
+
+    async def test_initialize_all_default_when_neither_static_nor_dynamic(
+        self, manager
+    ):
+        """DynamicConfig·static 모두 stored 없음 → broker_type별 default가 주입된다."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+
+        await manager.initialize_all(accounts)
+
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is True, (
+            "stored가 없으면 KIS default trading_hours가 enabled=True로 주입되어야 한다"
+        )
+
     async def test_on_config_changed_ignores_other_account_rule_events(
         self, manager, eventbus
     ):
