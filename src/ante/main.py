@@ -398,7 +398,9 @@ async def _init_trading(s: Services) -> None:
         treasury_manager=s.treasury_manager,
         trade_service=s.trade_service,
     )
-    await s.rule_engine_manager.initialize_all(accounts, config=s.config)
+    await s.rule_engine_manager.initialize_all(
+        accounts, config=s.config, dynamic_config=s.dynamic_config
+    )
     logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(accounts))
 
     # BotManager

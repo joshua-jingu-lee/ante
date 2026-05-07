@@ -1,6 +1,10 @@
 """KIS API 에러코드 분류.
 
 KIS rt_cd / msg_cd 기반으로 재시도 가능 여부를 판별한다.
+
+KIS msg_cd는 ``APBK*`` 형식 또는 numeric business code(예: ``40580000``)
+모두 가능하다. 두 형식 모두 동일하게 ``PERMANENT_MSG_CODES`` /
+``TRANSIENT_MSG_CODES`` set에 등록한다.
 """
 
 # ── 재시도 불가 (permanent) KIS msg_cd ─────────────────
@@ -19,6 +23,7 @@ PERMANENT_MSG_CODES: frozenset[str] = frozenset(
         "APBK0501",  # 잘못된 계좌번호
         "APBK0502",  # 잘못된 비밀번호
         "APBK0503",  # 잘못된 주문 유형
+        "40580000",  # 장종료 또는 주문불가 시간 (#1296: A7 oracle 회귀)
     }
 )
 
@@ -52,6 +57,7 @@ KIS_ERROR_MESSAGES: dict[str, str] = {
     "APBK0600": "서버 과부하 (재시도 가능)",
     "APBK0601": "처리 지연 (재시도 가능)",
     "APBK0602": "일시적 서비스 불가 (재시도 가능)",
+    "40580000": "장종료 또는 주문불가 시간",
 }
 
 

@@ -42,6 +42,25 @@ fallback으로만 사용한다. 웹/API에서 룰을 수정하면 `dynamic_confi
 
 > `trading_hours` 룰의 시간대와 거래 시간은 Account 모델에서 자동 주입되므로, 룰 설정에서 별도로 지정하지 않는다. Account의 `trading_hours_start`, `trading_hours_end`, `timezone` 필드가 곧 TradingHoursRule의 설정이 된다.
 
+### Stored rules vs effective rules
+
+`accounts.{account_id}.rules` config는 사용자/Agent가 명시한 explicit
+overrides(stored rules)다. 시스템이 RuleEngine에 적용하는 effective rules는
+broker_type별 defaults와 stored overrides의 merge다.
+
+- broker_type별 defaults: `kis-domestic`은 `trading_hours`를 자동 포함한다
+  (KIS 모의투자/실거래 모두 KRX 장중에만 주문 수용; A7 oracle 회귀 #1296).
+  `test` broker는 default가 없다(24h 거래 가정).
+- merge 정책: type-key 기반. stored 항목이 default와 같은 `type`이면 stored가
+  default를 override한다. 사용자/Agent는 `enabled: false`로 default를 명시
+  비활성화할 수 있으며, audit/UI/API 응답에서 그 결정이 드러나야 한다
+  (UI/API의 effective view는 후속 이슈).
+- reload: `ConfigChangedEvent` 처리 시에도 같은 merge 정책이 적용되어, PUT
+  이후 reload 결과가 default를 잃지 않는다.
+
+GET/PUT API(`/api/accounts/{id}/rules*`)는 stored rules만 노출한다. effective
+rules의 별도 노출은 본 스펙의 후속 이슈에서 다룬다.
+
 ### Static TOML seed
 
 정적 TOML은 운영 중 룰 수정의 저장소가 아니다. 초기 계좌 seed나 복구용 기본값이 필요할

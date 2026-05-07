@@ -824,6 +824,13 @@ async def update_account_rule(
 
     RULE_REGISTRY에 등록된 타입만 허용하며,
     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
+
+    저장되는 ``accounts.{account_id}.rules`` 값은 explicit overrides(stored
+    rules)다. RuleEngine이 실제로 적용하는 effective rules는
+    ``ante.rule.defaults.resolve_effective_rules``가 broker_type별 defaults와
+    이 stored rules를 merge한 결과이며, ``ConfigChangedEvent`` reload 시
+    동일 helper가 다시 호출된다. 본 GET/PUT API는 stored rules만 다룬다 —
+    effective view는 후속 이슈에서 별도 엔드포인트로 노출한다 (#1296).
     """
     from ante.account.errors import AccountNotFoundError
     from ante.rule.engine import RULE_REGISTRY

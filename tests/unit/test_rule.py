@@ -3420,7 +3420,7 @@ class TestRuleEngineConfigReload:
         assert "dl" not in rule_ids
 
     async def test_rule_category_reload(self, engine, eventbus):
-        """category='rule'도 계좌 룰 재로드를 트리거한다."""
+        """category='rule'도 계좌 룰 재로드를 트리거한다 (자기 계좌 키일 때만)."""
         import json
 
         from ante.eventbus.events import ConfigChangedEvent
@@ -3439,13 +3439,54 @@ class TestRuleEngineConfigReload:
         await eventbus.publish(
             ConfigChangedEvent(
                 category="rule",
-                key="rules.global",
+                key="accounts.domestic.rules",
                 new_value=json.dumps(new_rules),
             )
         )
 
         assert len(engine._global_rules) == 1
         assert engine._global_rules[0].rule_id == "exp2"
+
+    async def test_rule_category_ignored_when_key_belongs_to_other_account(
+        self, engine, eventbus
+    ):
+        """category='rule' 이벤트라도 다른 계좌 키면 자기 rules로 merge하지 않는다.
+
+        다중 KIS 계좌 환경에서 ``ConfigChangedEvent``는 모든 RuleEngine subscriber에게
+        broadcast되므로, ``key`` 가드가 없으면 한 계좌의 rule PUT이 다른 계좌의
+        effective rule에 cross-contamination을 일으킨다 (#1296 P1).
+        """
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        # 자기(=domestic) 계좌의 룰을 미리 설정.
+        engine.load_rules_from_config(
+            [{"type": "daily_loss_limit", "id": "dl", "max_daily_loss_percent": 0.05}]
+        )
+        assert len(engine._global_rules) == 1
+        assert engine._global_rules[0].rule_id == "dl"
+
+        # 다른 계좌(other_account)의 rule 변경 이벤트 — 자기 룰은 변경되지 말아야 한다.
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="rule",
+                key="accounts.other-account.rules",
+                new_value=json.dumps(
+                    [
+                        {
+                            "type": "total_exposure_limit",
+                            "id": "exp_other",
+                            "max_exposure_percent": 0.99,
+                        }
+                    ]
+                ),
+            )
+        )
+
+        # 자기 rule은 그대로여야 한다.
+        assert len(engine._global_rules) == 1
+        assert engine._global_rules[0].rule_id == "dl"
 
     async def test_strategy_rule_reload_on_config_changed(self, engine, eventbus):
         """category='strategy_rule' ConfigChangedEvent로 전략 룰이 재로드된다."""
@@ -3620,6 +3661,321 @@ class TestRuleEngineManager:
 
         assert len(engine1._global_rules) == 1
         assert len(engine2._global_rules) == 0
+
+    async def test_initialize_all_injects_default_trading_hours_for_kis_domestic(
+        self, manager
+    ):
+        """KIS domestic 계좌는 stored rule이 없어도 default ``TradingHoursRule``이
+        자동 주입된다 (#1296 A7 oracle 회귀)."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+
+        await manager.initialize_all(accounts)  # config 미전달 → stored 없음
+
+        engine = manager.get("domestic")
+        rule_types = {type(r).__name__ for r in engine._account_rules}
+        assert "TradingHoursRule" in rule_types
+
+    async def test_initialize_all_respects_explicit_disable(self, manager):
+        """KIS + ``trading_hours.enabled=False``로 stored되어 있으면 RuleEngine은
+        해당 룰을 건너뛴다 (config 명시 비활성화 존중)."""
+
+        class _FakeConfig:
+            def __init__(self, data):
+                self._data = data
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        config = _FakeConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+
+        await manager.initialize_all(accounts, config=config)
+
+        engine = manager.get("domestic")
+        # 룰 인스턴스는 1개 생성되되 enabled=False여야 한다 — is_applicable이
+        # False를 반환해 평가 시 건너뛴다.
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is False
+
+    async def test_initialize_all_no_default_for_test_broker(self, manager):
+        """test broker는 default rule이 없으므로 stored=None이면 룰 0건."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="test",
+            ),
+        ]
+
+        await manager.initialize_all(accounts)
+
+        engine = manager.get("domestic")
+        assert engine._account_rules == []
+
+    async def test_initialize_all_kis_domestic_preserves_default_after_reload(
+        self, manager, eventbus
+    ):
+        """KIS engine 생성 후 ``ConfigChangedEvent``로 빈 stored list reload →
+        engine effective rule에 default ``trading_hours``가 여전히 존재한다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        await manager.initialize_all(accounts)
+        engine = manager.get("domestic")
+
+        # 사용자가 stored를 비우는 PUT 흐름 (모든 룰 삭제) — ConfigChangedEvent
+        # new_value=[]이 발행됨.
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="rule",
+                key="accounts.domestic.rules",
+                new_value=json.dumps([]),
+            )
+        )
+
+        rule_types = {type(r).__name__ for r in engine._account_rules}
+        assert "TradingHoursRule" in rule_types, (
+            "reload 후에도 KIS default trading_hours가 유지되어야 한다 (#1296)"
+        )
+
+    async def test_initialize_all_uses_dynamic_config_override_over_static(
+        self, manager
+    ):
+        """재시작 시 DynamicConfig에 저장된 명시 override는 static config보다
+        우선한다 — default trading_hours가 다시 주입되어 사용자의 비활성화를
+        덮어쓰면 안 된다 (#1296 P2 명시 우선 정책).
+        """
+
+        class _FakeDynamicConfig:
+            def __init__(self, data):
+                self._data = data
+
+            async def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        class _FakeStaticConfig:
+            def get(self, key, default=None):  # noqa: ARG002
+                return default
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        # static에는 키가 전혀 없고, dynamic에만 명시 비활성화가 저장된 상태.
+        dyn_cfg = _FakeDynamicConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+        static_cfg = _FakeStaticConfig()
+
+        await manager.initialize_all(
+            accounts, config=static_cfg, dynamic_config=dyn_cfg
+        )
+
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        # default가 재주입되면 enabled=True 룰이 새로 생기지만, dynamic override
+        # 가 우선되면 enabled=False 룰 1개만 존재해야 한다.
+        assert len(trading_hours_rules) == 1, (
+            "DynamicConfig override가 default 재주입을 막아야 한다 (#1296 P2)"
+        )
+        assert trading_hours_rules[0].enabled is False, (
+            "사용자가 명시 비활성화한 룰은 재시작 후에도 비활성 상태를 유지해야 한다"
+        )
+
+    async def test_initialize_all_falls_back_to_static_when_dynamic_missing(
+        self, manager
+    ):
+        """DynamicConfig에 키가 없으면 static config가 fallback으로 동작한다."""
+
+        class _FakeDynamicConfig:
+            async def get(self, key, default=None):  # noqa: ARG002
+                return default
+
+        class _FakeStaticConfig:
+            def __init__(self, data):
+                self._data = data
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        dyn_cfg = _FakeDynamicConfig()
+        static_cfg = _FakeStaticConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+
+        await manager.initialize_all(
+            accounts, config=static_cfg, dynamic_config=dyn_cfg
+        )
+
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is False, (
+            "dynamic이 비어 있으면 static config의 명시 비활성화가 유지되어야 한다"
+        )
+
+    async def test_initialize_all_default_when_neither_static_nor_dynamic(
+        self, manager
+    ):
+        """DynamicConfig·static 모두 stored 없음 → broker_type별 default가 주입된다."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+
+        await manager.initialize_all(accounts)
+
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is True, (
+            "stored가 없으면 KIS default trading_hours가 enabled=True로 주입되어야 한다"
+        )
+
+    async def test_on_config_changed_ignores_other_account_rule_events(
+        self, manager, eventbus
+    ):
+        """다중 KIS 계좌 환경에서 한 계좌의 rule PUT은 다른 계좌의 effective rule을
+        오염시키지 않는다 (#1296 P1).
+
+        ``ConfigChangedEvent``는 모든 RuleEngine subscriber에게 broadcast되므로,
+        각 engine은 ``event.key``가 자기 계좌의 ``accounts.{account_id}.rules``인
+        경우에만 reload해야 한다. 그렇지 않으면 다른 계좌의 stored rules가
+        자기 effective rules로 merge되어 default ``trading_hours``가 cross-account로
+        비활성화된다.
+        """
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        accounts = [
+            Account(
+                account_id="domestic-a",
+                name="국내주식 A",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+            Account(
+                account_id="domestic-b",
+                name="국내주식 B",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        await manager.initialize_all(accounts)
+
+        engine_a = manager.get("domestic-a")
+        engine_b = manager.get("domestic-b")
+
+        # 두 엔진 모두 default trading_hours가 주입되어 있어야 한다.
+        def _trading_hours_rules(engine):
+            return [
+                r
+                for r in engine._account_rules
+                if type(r).__name__ == "TradingHoursRule"
+            ]
+
+        assert len(_trading_hours_rules(engine_a)) == 1
+        assert _trading_hours_rules(engine_a)[0].enabled is True
+        assert len(_trading_hours_rules(engine_b)) == 1
+        assert _trading_hours_rules(engine_b)[0].enabled is True
+
+        # domestic-a의 trading_hours만 비활성화하는 PUT — broadcast됨.
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="rule",
+                key="accounts.domestic-a.rules",
+                new_value=json.dumps([{"type": "trading_hours", "enabled": False}]),
+            )
+        )
+
+        # domestic-a는 trading_hours가 비활성화되어야 한다.
+        a_rules = _trading_hours_rules(engine_a)
+        assert len(a_rules) == 1
+        assert a_rules[0].enabled is False, (
+            "domestic-a는 자기 키 이벤트에 따라 trading_hours가 비활성화되어야 한다"
+        )
+
+        # domestic-b는 default trading_hours가 그대로 유지되어야 한다.
+        b_rules = _trading_hours_rules(engine_b)
+        assert len(b_rules) == 1, (
+            "domestic-b는 다른 계좌의 rule 이벤트로 영향받지 않아야 한다 (#1296)"
+        )
+        assert b_rules[0].enabled is True, (
+            "domestic-b의 default trading_hours가 오염되면 안 된다 (#1296)"
+        )
 
 
 # ── RuleEngine Treasury 연동 ────────────────────

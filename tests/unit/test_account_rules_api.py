@@ -559,3 +559,66 @@ class TestRuleConfigValidation:
             json={"enabled": True, "params": {"max_daily_loss_percent": "abc"}},
         )
         assert resp.status_code == 422
+
+
+class TestAccountRulesEffectiveMergeContract:
+    """PUT API와 effective rules merge의 계약 검증 (#1296).
+
+    PUT API는 stored(explicit overrides)만 다룬다. RuleEngine이 reload 시
+    실제 적용하는 effective rules는
+    ``ante.rule.defaults.resolve_effective_rules``가 broker_type별 default와
+    stored를 merge한 결과다.
+
+    회귀: KIS domestic 계좌에서 ``daily_loss_limit`` 같은 custom rule을
+    PUT으로 추가했을 때, default ``trading_hours``가 effective에서 사라지면
+    A7 oracle (#1296) 회귀가 재현된다. 본 테스트는 stored가
+    explicit-only로 저장되되, helper가 merge하면 default + custom이 모두
+    살아 있음을 검증한다.
+    """
+
+    def test_account_rules_api_put_preserves_default(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """KIS 계좌에 custom rule PUT 후 effective merge에 default가 보존된다."""
+        from ante.rule.defaults import resolve_effective_rules
+
+        # KIS domestic 계좌 등록.
+        kis_account = Account(
+            account_id="acct-kis",
+            name="KIS 국내",
+            exchange="KRX",
+            currency="KRW",
+            timezone="Asia/Seoul",
+            trading_hours_start="09:00",
+            trading_hours_end="15:30",
+            trading_mode=TradingMode.VIRTUAL,
+            broker_type="kis-domestic",
+            credentials={},
+            buy_commission_rate=Decimal("0"),
+            sell_commission_rate=Decimal("0"),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        account_service._accounts["acct-kis"] = kis_account
+
+        # custom rule PUT.
+        resp = client.put(
+            "/api/accounts/acct-kis/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": 0.05}},
+        )
+        assert resp.status_code == 200
+
+        # stored에는 explicit override만 — default trading_hours는 빠져 있다.
+        stored = dynamic_config._store["accounts.acct-kis.rules"]
+        stored_types = {r.get("type") for r in stored}
+        assert stored_types == {"daily_loss_limit"}
+
+        # effective merge 시 default trading_hours + custom daily_loss_limit
+        # 모두 살아 있어야 한다 (#1296: reload 후에도 KIS default 보존).
+        effective = resolve_effective_rules(kis_account, stored)
+        effective_types = [r.get("type") for r in effective]
+        assert "trading_hours" in effective_types
+        assert "daily_loss_limit" in effective_types
