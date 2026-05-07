@@ -1118,6 +1118,16 @@ class RuleEngine:
         if event.category not in ("rule", "global_rule", "strategy_rule"):
             return
 
+        # 다중 계좌 환경에서 ConfigChangedEvent는 모든 RuleEngine subscriber에게
+        # broadcast된다. category="rule"은 계좌별 룰(`accounts.{account_id}.rules`)
+        # 변경을 의미하므로, 자기 계좌 키가 아니면 무시해야 한다. 그렇지 않으면
+        # 다른 계좌의 stored rules가 자기 effective rules로 잘못 merge되어
+        # 계좌간 default rule(예: trading_hours)이 cross-contamination 된다 (#1296).
+        if event.category == "rule":
+            expected_key = f"accounts.{self._account_id}.rules"
+            if event.key != expected_key:
+                return
+
         logger.info("룰 설정 변경 감지, 재로딩 시작: %s", event.key)
 
         try:
