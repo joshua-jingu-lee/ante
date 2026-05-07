@@ -16,9 +16,9 @@ RuleEngine이 OrderRequestEvent와 Account 상태를 조합하여 생성하는 �
 | `strategy_id` | `str` | — | 전략 ID |
 | `symbol` | `str` | — | 종목 코드 |
 | `side` | `str` | — | 매수/매도 (`"buy"` \| `"sell"`) |
-| `quantity` | `float` | — | 주문 수량 |
+| `quantity` | `float` | — | 주문 수량 (preflight 이후 finite positive) |
 | `order_type` | `str` | — | 주문 유형 |
-| `price` | `float \| None` | `None` | 주문 가격 |
+| `price` | `float \| None` | `None` | 주문 가격 (preflight 이후 limit/stop_limit은 finite positive, market은 None 허용) |
 | `exchange` | `str` | `"KRX"` | 거래소 코드 |
 | `currency` | `str` | `"KRW"` | 통화 코드 |
 | **시장/포지션 정보** | | | |
