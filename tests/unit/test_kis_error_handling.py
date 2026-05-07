@@ -32,6 +32,24 @@ class TestErrorCodeClassification:
         # 안 된다.
         assert is_retryable_msg_code("40580000") is False
 
+    def test_permanent_msg_code_40570000_not_retryable(self):
+        """KIS msg_cd 40570000(장시작전)은 permanent.
+
+        회귀(#1317): A7 oracle은 KIS 모의투자 장시작전 응답이 transient처럼 retry되고
+        circuit breaker failure count에 누적되는 것을 검출했다. 40580000(#1296)과 동일한
+        장운영 시간 계열 business rejection이므로 permanent로 분류한다.
+        """
+        assert is_retryable_msg_code("40570000") is False
+
+    def test_error_message_40570000(self):
+        """KIS msg_cd 40570000의 한글 메시지는 'oracle 관찰값 \"장시작전\"으로 좁힘'.
+
+        회귀(#1317): KIS 공식 페이지에서 40570000의 정확 문구 근거가 공개되지 않아
+        관찰값 "장시작전"을 그대로 잠근다. 후속 데이터에서 공식 문구가 확인되면
+        별도 PR에서 정정한다.
+        """
+        assert get_error_message("40570000") == "장시작전"
+
     def test_transient_msg_code_retryable(self):
         """서버 과부하 등 transient 에러는 재시도 가능."""
         assert is_retryable_msg_code("APBK0600") is True  # 서버 과부하
