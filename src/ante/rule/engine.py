@@ -771,6 +771,29 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: stop_price는 0이 아니어야 한다.
+            # 회귀(#1320 #1323): A7 oracle이 검출한 버그 — Signal.stop_price=0
+            # 주문이 RuleEngine→OrderValidatedEvent까지 진행되어 broker terminal_event
+            # 누락 또는 Treasury 거부로 누적됐다. 0 stop_price는 무의미한 트리거이므로
+            # Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
+            #
+            # stop_price는 #1319 finite 게이트에서 finite int|float로 잠금됐고, #1319
+            # negative 게이트에서 음수가 거부됐으므로 본 게이트의 비교 대상은
+            # 0, 0.0, -0.0이다. Python에서 0 == 0.0 == -0.0이 True이므로 == 0으로
+            # 모두 잠근다 (선례 #1305/#1318 패턴). reason은 f-string으로 부호 보존.
+            if event.stop_price is not None and event.stop_price == 0:
+                reason = (
+                    f"Zero stop_price: {event.stop_price} (stop_price must be positive)"
+                )
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # OrderRequestEvent 계약 preflight: quantity는 finite number여야 한다.
             # 회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN,
             # side='buy', order_type='limit', price=1000 주문이 RuleEngine→
