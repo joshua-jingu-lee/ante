@@ -27,6 +27,10 @@ class TestErrorCodeClassification:
         assert is_retryable_msg_code("APBK0919") is False  # 잔고 부족
         assert is_retryable_msg_code("APBK0013") is False  # 잘못된 종목코드
         assert is_retryable_msg_code("APBK1002") is False  # 시장 마감
+        # #1296 A7 oracle: 모의투자 KRX 장종료 상태에서 시장가 주문 시
+        # 반환되는 numeric msg_cd. retry/circuit breaker를 더 이상 오염시키면
+        # 안 된다.
+        assert is_retryable_msg_code("40580000") is False
 
     def test_transient_msg_code_retryable(self):
         """서버 과부하 등 transient 에러는 재시도 가능."""
@@ -68,6 +72,8 @@ class TestErrorCodeClassification:
         """알려진 에러코드에 한글 메시지 반환."""
         assert get_error_message("APBK0919") == "잔고 부족"
         assert get_error_message("APBK1002") == "시장 마감"
+        # #1296 A7 oracle 회귀
+        assert get_error_message("40580000") == "장종료 또는 주문불가 시간"
 
     def test_error_message_unknown_code(self):
         """알 수 없는 에러코드에 fallback 메시지."""

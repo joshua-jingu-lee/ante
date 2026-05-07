@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from ante.rule.defaults import resolve_effective_rules
 from ante.rule.engine import RuleEngine
 
 if TYPE_CHECKING:
@@ -37,12 +38,20 @@ class RuleEngineManager:
         self,
         account_id: str,
         rule_configs: list[dict[str, Any]] | None = None,
+        *,
+        account: Account | None = None,
     ) -> RuleEngine:
         """계좌별 RuleEngine 생성. EventBus에 자동 구독.
 
         Args:
             account_id: 계좌 ID.
-            rule_configs: 계좌 룰 설정 리스트. None이면 빈 룰.
+            rule_configs: 계좌 룰 설정 리스트. ``None``이면 빈 룰.
+                ``initialize_all`` 호출 경로에서는 broker_type별 default를 이미
+                merge한 effective list가 들어온다.
+            account: 계좌 snapshot. 전달되면 RuleEngine에 캐시되어 reload
+                경로(``_on_config_changed``)에서 broker_type별 default를 다시
+                merge할 때 사용된다. ``None``이면 reload 경로는 stored 그대로
+                적용 (하위 호환).
 
         Returns:
             생성된 RuleEngine 인스턴스.
@@ -60,6 +69,7 @@ class RuleEngineManager:
             account_service=self._account_service,
             treasury=treasury,
             trade_service=self._trade_service,
+            account=account,
         )
 
         if rule_configs:
@@ -99,15 +109,21 @@ class RuleEngineManager:
             config: 전체 설정 객체 (룰 설정 추출용). None이면 빈 룰.
         """
         for account in accounts:
-            rule_configs: list[dict[str, Any]] = []
+            stored_rules: list[dict[str, Any]] | None = None
 
-            # config에서 계좌별 룰 설정 추출
+            # config에서 계좌별 룰 설정 추출 (explicit overrides)
             if config is not None and hasattr(config, "get"):
                 account_rules = config.get(f"accounts.{account.account_id}.rules", None)
                 if isinstance(account_rules, list):
-                    rule_configs = account_rules
+                    stored_rules = account_rules
 
-            self.create_engine(account.account_id, rule_configs)
+            # broker_type별 default + stored override를 merge하여 effective rules 산출.
+            # KIS domestic 계좌는 stored가 비어 있어도 ``trading_hours`` default가
+            # 자동 주입된다 (스펙 09-rule-management.md L43, #1296 회귀).
+            rule_configs = resolve_effective_rules(account, stored_rules)
+
+            # account snapshot을 함께 전달하여 reload 경로에서도 default merge 유지.
+            self.create_engine(account.account_id, rule_configs, account=account)
 
         logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(self._engines))
 

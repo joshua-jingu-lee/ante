@@ -28,6 +28,7 @@ from ante.rule.strategy_rules import (
 )
 
 if TYPE_CHECKING:
+    from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.trade.service import TradeService
@@ -259,6 +260,7 @@ class RuleEngine:
         bot_strategy_resolver: Callable[[str], str | None] | None = None,
         treasury: Treasury | None = None,
         trade_service: TradeService | None = None,
+        account: Account | None = None,
     ) -> None:
         from ante.account.scoping import require_account_id
 
@@ -270,6 +272,11 @@ class RuleEngine:
         self._bot_strategy_resolver = bot_strategy_resolver
         self._treasury = treasury
         self._trade_service = trade_service
+        # Account snapshot — reload 경로(``_on_config_changed``)에서 broker_type별
+        # default를 다시 merge할 때 참조한다. 생명주기 동안 broker_type 불변 가정.
+        # 기존 호출자(테스트 fixture 등) 호환을 위해 ``None`` 허용 — None일 때
+        # reload 경로는 helper를 우회하여 stored 그대로 적용한다 (#1296).
+        self._account = account
 
         self._account_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
@@ -1125,7 +1132,16 @@ class RuleEngine:
 
         if event.category in ("rule", "global_rule"):
             self._account_rules.clear()
-            self.load_rules_from_config(new_rules)
+            # account snapshot이 있으면 broker_type별 default를 다시 merge하여
+            # reload 후에도 effective rule 집합이 유지되도록 한다 (#1296).
+            # account가 없는 호출자(테스트 fixture 등)에서는 기존 동작 유지.
+            if self._account is not None:
+                from ante.rule.defaults import resolve_effective_rules
+
+                effective = resolve_effective_rules(self._account, new_rules)
+                self.load_rules_from_config(effective)
+            else:
+                self.load_rules_from_config(new_rules)
             logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
         elif event.category == "strategy_rule":
             # key 형식: "rules.strategy.<strategy_id>" 또는 strategy_id 직접

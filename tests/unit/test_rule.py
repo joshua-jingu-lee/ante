@@ -3621,6 +3621,119 @@ class TestRuleEngineManager:
         assert len(engine1._global_rules) == 1
         assert len(engine2._global_rules) == 0
 
+    async def test_initialize_all_injects_default_trading_hours_for_kis_domestic(
+        self, manager
+    ):
+        """KIS domestic 계좌는 stored rule이 없어도 default ``TradingHoursRule``이
+        자동 주입된다 (#1296 A7 oracle 회귀)."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+
+        await manager.initialize_all(accounts)  # config 미전달 → stored 없음
+
+        engine = manager.get("domestic")
+        rule_types = {type(r).__name__ for r in engine._account_rules}
+        assert "TradingHoursRule" in rule_types
+
+    async def test_initialize_all_respects_explicit_disable(self, manager):
+        """KIS + ``trading_hours.enabled=False``로 stored되어 있으면 RuleEngine은
+        해당 룰을 건너뛴다 (config 명시 비활성화 존중)."""
+
+        class _FakeConfig:
+            def __init__(self, data):
+                self._data = data
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        config = _FakeConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+
+        await manager.initialize_all(accounts, config=config)
+
+        engine = manager.get("domestic")
+        # 룰 인스턴스는 1개 생성되되 enabled=False여야 한다 — is_applicable이
+        # False를 반환해 평가 시 건너뛴다.
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is False
+
+    async def test_initialize_all_no_default_for_test_broker(self, manager):
+        """test broker는 default rule이 없으므로 stored=None이면 룰 0건."""
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="test",
+            ),
+        ]
+
+        await manager.initialize_all(accounts)
+
+        engine = manager.get("domestic")
+        assert engine._account_rules == []
+
+    async def test_initialize_all_kis_domestic_preserves_default_after_reload(
+        self, manager, eventbus
+    ):
+        """KIS engine 생성 후 ``ConfigChangedEvent``로 빈 stored list reload →
+        engine effective rule에 default ``trading_hours``가 여전히 존재한다."""
+        import json
+
+        from ante.eventbus.events import ConfigChangedEvent
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        await manager.initialize_all(accounts)
+        engine = manager.get("domestic")
+
+        # 사용자가 stored를 비우는 PUT 흐름 (모든 룰 삭제) — ConfigChangedEvent
+        # new_value=[]이 발행됨.
+        await eventbus.publish(
+            ConfigChangedEvent(
+                category="rule",
+                key="accounts.domestic.rules",
+                new_value=json.dumps([]),
+            )
+        )
+
+        rule_types = {type(r).__name__ for r in engine._account_rules}
+        assert "TradingHoursRule" in rule_types, (
+            "reload 후에도 KIS default trading_hours가 유지되어야 한다 (#1296)"
+        )
+
 
 # ── RuleEngine Treasury 연동 ────────────────────
 
