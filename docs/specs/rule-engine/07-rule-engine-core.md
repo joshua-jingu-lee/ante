@@ -25,7 +25,7 @@ RuleEngine(
 
 ### 이벤트 구독
 
-- `OrderRequestEvent` (priority=100): 주문 평가 — `event.account_id` 필터링 → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행
+- `OrderRequestEvent` (priority=100): 주문 평가 — `event.account_id` 필터링 → **OrderRequestEvent preflight** (아래 소절 참조) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행
 - `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행. 거부 시 `OrderModifyRejectedEvent` 발행
 - `ConfigChangedEvent`: 룰 설정 변경 감지. `category="rule"` + `key="accounts.{account_id}.rules"`이면 해당 계좌 엔진만 계좌 룰을 재로드하고, `category="strategy_rule"`이면 해당 전략 룰을 재로드한다.
 
@@ -64,3 +64,21 @@ RuleEngine(
 - **결과 발행**: PASS/WARN → `OrderValidatedEvent` 발행 (WARN 시 `NotificationEvent` 추가), BLOCK/REJECT → `OrderRejectedEvent` 발행 + 조치 실행
 - **조치 실행**: `NOTIFY` → NotificationEvent, `STOP_BOT` → BotStopEvent, `HALT_ACCOUNT` → `AccountService.suspend(account_id)` 호출
 - **에러 처리**: 평가 중 예외 발생 시 안전하게 `OrderRejectedEvent` 발행 (fail-closed)
+
+### OrderRequestEvent preflight
+
+RuleEngine은 RuleContext 생성과 룰 평가 이전에 `OrderRequestEvent` payload의 도메인 invariant를 검증한다. invalid payload는 Treasury 예약 호출 이전에 `OrderRejectedEvent`로 fail-closed 거부되며, 룰 평가/Treasury 조회는 호출되지 않는다.
+
+검증 항목:
+- `side`: `"buy"` | `"sell"`만 허용 (그 외 거부)
+- `order_type`: 허용 집합(`limit` / `market` / `stop` / `stop_limit`) 외 거부
+- `symbol`: KRX numeric 형식 (6자리 숫자) 검증
+- `price`: `limit` / `stop_limit`은 finite positive (`None` / `0` / `-x` / `NaN` / `±inf` 거부). `market`은 `None` 허용
+- `stop_price`: `stop` / `stop_limit`은 `None` 거부 (도메인 invariant는 후속 이슈에서 추가)
+- `quantity`: finite positive (`0` / `-x` / `NaN` / `±inf` 거부)
+
+Reject payload 정규화 (`_build_safe_rejected_event`):
+- finite numeric `price` / `quantity`는 원본 부호와 값을 보존한다 (audit trail).
+- non-finite/non-number `quantity`는 `0.0`으로 정규화 (sqlite `trades.quantity REAL NOT NULL` 호환).
+- non-finite/non-number `price`는 `None`으로 정규화 (sqlite `trades.price REAL nullable` 호환).
+- reason 문자열은 `_safe_repr`로 안전 조립하며 `0` / `0.0` / `-0.0` 부호와 값을 그대로 보존한다.

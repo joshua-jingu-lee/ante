@@ -805,6 +805,28 @@ class RuleEngine:
                 )
                 return
 
+            # OrderRequestEvent 계약 preflight: price는 0이 아니어야 한다.
+            # 회귀(#1318): A7 oracle이 검출한 버그 — Signal.price=0 주문이 RuleEngine→
+            # OrderValidatedEvent→Treasury까지 진행되어 reserve_amount_invalid
+            # (total_reserve=0) 거부가 발생했다. 0 price는 무의미한 주문이므로
+            # Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
+            #
+            # price는 #1303 게이트에서 finite int|float로 잠금됐고, #1316 게이트에서
+            # 음수가 거부됐으므로 본 게이트의 비교 대상은 0, 0.0, -0.0이다.
+            # Python에서 0 == 0.0 == -0.0이 True이므로 ``== 0``으로 모두 잠근다
+            # (선례 #1305 zero quantity). reason은 f-string으로 실제 값을 보존하여
+            # audit trail에서 0/0.0/-0.0를 구분한다.
+            if event.price is not None and event.price == 0:
+                reason = f"Zero price: {event.price} (price must be positive)"
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=reason,
+                    )
+                )
+                return
+
             # OrderRequestEvent 계약 preflight: quantity는 양수여야 한다.
             # 회귀(#1304): A7 oracle이 검출한 버그 — Signal.quantity=-1, side='buy',
             # order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
