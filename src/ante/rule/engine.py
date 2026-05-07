@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -589,6 +590,55 @@ class RuleEngine:
                     symbol=safe_symbol,
                     side=event.side,
                     quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
+            return
+
+        # OrderRequestEvent 계약 preflight: quantity는 finite number여야 한다.
+        # 회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN, side='buy',
+        # order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
+        # Treasury 진입 후 sqlite `bot_budgets.available NOT NULL` 위반으로 실패했다.
+        # NaN/inf/non-number quantity는 Treasury 예약/주문 호출 이전에 fail-closed
+        # 로 거부한다. 0/음수 quantity, NaN price 검증은 본 PR 범위 밖
+        # (#1304/#1305/#1303)이다.
+        # bool은 isinstance(True, int)==True이므로 명시적으로 제외한다.
+        # math.isnan/isinf는 numeric type 확인 뒤에만 호출 (가드 순서 중요).
+        if (
+            not isinstance(event.quantity, (int, float))
+            or isinstance(event.quantity, bool)
+            or math.isnan(event.quantity)
+            or math.isinf(event.quantity)
+        ):
+            reason = (
+                f"Invalid quantity: {event.quantity!r} "
+                f"(quantity must be a finite number)"
+            )
+            safe_symbol = (
+                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
+            )
+            # OrderRejectedEvent.quantity는 trades.quantity REAL NOT NULL로
+            # 이어지므로 NaN/inf/비-number는 0.0으로 정규화해 audit/PnL 호환을
+            # 유지한다.
+            safe_quantity = (
+                event.quantity
+                if isinstance(event.quantity, (int, float))
+                and not isinstance(event.quantity, bool)
+                and math.isfinite(event.quantity)
+                else 0.0
+            )
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=safe_symbol,
+                    side=event.side,
+                    quantity=safe_quantity,
                     price=event.price,
                     order_type=event.order_type,
                     reason=reason,
