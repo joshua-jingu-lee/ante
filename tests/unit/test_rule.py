@@ -1591,6 +1591,289 @@ class TestRuleEngineEventBus:
         assert validated[0].order_type == "limit"
         assert validated[0].price == 1000.0
 
+    @pytest.mark.parametrize("side", ["buy", "sell"])
+    async def test_rule_engine_rejects_stop_order_without_stop_price(
+        self, engine, eventbus, monkeypatch, side
+    ):
+        """order_type='stop'이고 stop_price=None이면 룰 평가 이전에 거부한다.
+
+        회귀(#1301): A7 oracle이 검출한 버그 — Signal.order_type='stop',
+        side='sell', stop_price=None 주문이 RuleEngine→OrderApproved→
+        StopOrderRegistered까지 진행되어 terminal event가 누락되었다.
+        stop은 트리거 가격(stop_price) 지정이 invariant이므로 fail-closed로
+        거부한다. side='buy'/'sell' 양쪽에서 동일하게 동작해야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError(
+                "evaluate must not run for stop order without stop_price"
+            )
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for stop order without stop_price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=side,
+            quantity=10.0,
+            order_type="stop",
+            price=None,
+            stop_price=None,
+            exchange="KRX",
+            reason="A7 oracle stop-without-stop_price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Missing stop_price" in ev.reason
+        assert "stop" in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == side
+        assert ev.quantity == 10.0
+        assert ev.order_type == "stop"
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+
+    async def test_rule_engine_rejects_stop_limit_order_without_stop_price(
+        self, engine, eventbus, monkeypatch
+    ):
+        """order_type='stop_limit'이고 stop_price=None이면 룰 평가 이전에 거부한다.
+
+        회귀(#1301): stop_limit도 트리거 가격 지정이 invariant이므로 stop와
+        동일하게 fail-closed로 거부한다. price는 지정되어 있어 #1300 price
+        게이트는 통과하지만, stop_price=None이면 본 게이트에서 거부된다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError(
+                "evaluate must not run for stop_limit order without stop_price"
+            )
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for stop_limit order "
+                "without stop_price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop_limit",
+            price=1000.0,
+            stop_price=None,
+            exchange="KRX",
+            reason="A7 oracle stop_limit-without-stop_price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Missing stop_price" in ev.reason
+        assert "stop_limit" in ev.reason
+        assert ev.symbol == "005930"
+        assert ev.side == "sell"
+        assert ev.order_type == "stop_limit"
+        assert ev.price == 1000.0
+        assert ev.exchange == "KRX"
+
+    async def test_rule_engine_accepts_stop_order_with_stop_price(
+        self, engine, eventbus
+    ):
+        """order_type='stop'이고 stop_price가 지정되면 본 게이트를 통과한다."""
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop",
+            price=None,
+            stop_price=950.0,
+            exchange="KRX",
+            reason="stop with stop_price should pass gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].symbol == "005930"
+        assert validated[0].order_type == "stop"
+        assert validated[0].stop_price == 950.0
+
+    async def test_rule_engine_accepts_market_order_without_stop_price(
+        self, engine, eventbus
+    ):
+        """order_type='market'이고 stop_price=None이면 본 게이트는 통과한다.
+
+        market은 stop_price 게이트 대상이 아니므로 영향이 없어야 한다.
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=None,
+            stop_price=None,
+            exchange="KRX",
+            reason="market without stop_price should pass stop_price gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].order_type == "market"
+        assert validated[0].stop_price is None
+
+    async def test_rule_engine_accepts_limit_order_without_stop_price(
+        self, engine, eventbus
+    ):
+        """order_type='limit'이고 stop_price=None이면 본 게이트는 통과한다.
+
+        limit은 stop_price 게이트 대상이 아니므로 영향이 없어야 한다.
+        price만 지정되어 있으면 #1300 price 게이트도 통과해 OrderValidatedEvent가
+        발행된다.
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            stop_price=None,
+            exchange="KRX",
+            reason="limit without stop_price should pass stop_price gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].order_type == "limit"
+        assert validated[0].price == 1000.0
+        assert validated[0].stop_price is None
+
+    async def test_rule_engine_stop_limit_price_gate_fires_before_stop_price_gate(
+        self, engine, eventbus, monkeypatch
+    ):
+        """stop_limit + price=None + stop_price=None이면 #1300 price 게이트가 우선 fire.
+
+        preflight 체인 우선순위 잠금: limit/stop_limit price 게이트(#1300)가
+        stop/stop_limit stop_price 게이트(#1301)보다 위에 위치해야 한다.
+        reason에 'Missing price'가 포함되고 'Missing stop_price'는 미포함이어야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run when price gate fires")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run when price gate fires"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop_limit",
+            price=None,
+            stop_price=None,
+            exchange="KRX",
+            reason="stop_limit missing both price and stop_price",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        # price 게이트(#1300)가 우선 fire — stop_price 게이트보다 먼저 거부
+        assert "Missing price" in ev.reason
+        assert "Missing stop_price" not in ev.reason
+        assert ev.order_type == "stop_limit"
+
 
 # ── RuleEngine.update_rules ──────────────────────
 

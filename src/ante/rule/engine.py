@@ -561,6 +561,42 @@ class RuleEngine:
             )
             return
 
+        # OrderRequestEvent 계약 preflight: stop / stop_limit stop_price 필수.
+        # 회귀(#1301): A7 oracle이 검출한 버그 — order_type="stop", side="sell",
+        # stop_price=None 주문이 RuleEngine→OrderApproved→StopOrderRegistered까지
+        # 진행되어 terminal event(체결/거부)가 누락되었다. stop / stop_limit는
+        # 트리거 가격(stop_price) 지정이 invariant이므로, stop_price=None이면
+        # 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다. OrderRejectedEvent
+        # 스키마에 stop_price 필드가 없으므로 reason 문자열에만 명시한다.
+        # 0/음수/NaN stop_price 검증은 본 PR 범위 밖(별도 후속 이슈)이다.
+        if event.order_type in ("stop", "stop_limit") and event.stop_price is None:
+            reason = (
+                f"Missing stop_price for {event.order_type} order: "
+                f"stop_price is required for stop and stop_limit orders"
+            )
+            # symbol은 sqlite TEXT 컬럼에 바인딩되므로 비문자열이면 repr()로
+            # 정규화한다. side / order_type은 본 게이트 도달 시점에 위 게이트들에서
+            # 이미 문자열로 잠겼다.
+            safe_symbol = (
+                event.symbol if isinstance(event.symbol, str) else repr(event.symbol)
+            )
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=str(event.event_id),
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=safe_symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
+            return
+
         # 계좌 상태 조회
         account_status = "active"
         currency = "KRW"
