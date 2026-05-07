@@ -1404,6 +1404,193 @@ class TestRuleEngineEventBus:
         assert len(validated) == 1
         assert validated[0].symbol == "AAPL"
 
+    @pytest.mark.parametrize("side", ["buy", "sell"])
+    async def test_rule_engine_rejects_limit_order_without_price(
+        self, engine, eventbus, monkeypatch, side
+    ):
+        """order_type='limit'이고 price=None이면 룰 평가 이전에 거부한다.
+
+        회귀(#1300): A7 oracle이 검출한 버그 — Signal.order_type='limit',
+        side='sell', price=None 주문이 RuleEngine→Treasury→broker까지 진행되어
+        KIS 호출 단계에서 HTTP 500이 발생했다. limit는 가격 지정이 invariant이므로
+        fail-closed로 거부한다. side='buy'/'sell' 양쪽에서 동일하게 동작해야 한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for limit order without price")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for limit order without price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side=side,
+            quantity=10.0,
+            order_type="limit",
+            price=None,
+            exchange="KRX",
+            reason="A7 oracle limit-without-price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Missing price" in ev.reason
+        assert "limit" in ev.reason
+        assert ev.account_id == "domestic"
+        assert ev.bot_id == "bot1"
+        assert ev.strategy_id == "s1"
+        assert ev.symbol == "005930"
+        assert ev.side == side
+        assert ev.quantity == 10.0
+        assert ev.price is None
+        assert ev.order_type == "limit"
+        assert ev.exchange == "KRX"
+        assert ev.order_id == str(order.event_id)
+
+    async def test_rule_engine_rejects_stop_limit_order_without_price(
+        self, engine, eventbus, monkeypatch
+    ):
+        """order_type='stop_limit'이고 price=None이면 룰 평가 이전에 거부한다.
+
+        회귀(#1300): stop_limit도 가격 지정이 invariant이므로 limit와 동일하게
+        fail-closed로 거부한다.
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError(
+                "evaluate must not run for stop_limit order without price"
+            )
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for stop_limit order without price"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop_limit",
+            price=None,
+            stop_price=49000.0,
+            exchange="KRX",
+            reason="A7 oracle stop_limit-without-price regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Missing price" in ev.reason
+        assert "stop_limit" in ev.reason
+        assert ev.symbol == "005930"
+        assert ev.side == "sell"
+        assert ev.order_type == "stop_limit"
+        assert ev.price is None
+        assert ev.exchange == "KRX"
+
+    async def test_rule_engine_accepts_market_order_without_price(
+        self, engine, eventbus
+    ):
+        """order_type='market'이고 price=None이면 본 게이트는 통과한다.
+
+        market의 price=None은 스펙상 옵션이므로 RuleEngine 단의 limit/stop_limit
+        게이트는 영향이 없어야 한다. (buy market quote=None 처리는 Treasury #1294
+        별도 분기 책임이므로 본 단위 테스트는 RuleEngine까지만 검증한다 — Treasury
+        미구독 상태이므로 OrderValidatedEvent가 발행돼야 한다.)
+        """
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=None,
+            exchange="KRX",
+            reason="market without price should pass limit/stop_limit gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].symbol == "005930"
+        assert validated[0].order_type == "market"
+        assert validated[0].price is None
+
+    async def test_rule_engine_accepts_limit_order_with_price(self, engine, eventbus):
+        """order_type='limit'이고 price가 지정되면 본 게이트를 통과한다."""
+        validated: list[OrderValidatedEvent] = []
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="limit with price should pass gate",
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 0
+        assert len(validated) == 1
+        assert validated[0].symbol == "005930"
+        assert validated[0].order_type == "limit"
+        assert validated[0].price == 1000.0
+
 
 # ── RuleEngine.update_rules ──────────────────────
 
