@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from ante.treasury.treasury import Treasury
@@ -27,7 +28,8 @@ class TreasuryManager:
         """Account 정보로 Treasury 인스턴스 생성 및 등록.
 
         Args:
-            account: Account 엔티티. account_id, currency, commission 정보 사용.
+            account: Account 엔티티. account_id, currency, commission, market
+                buy reserve buffer 정보 사용.
 
         Returns:
             생성된 Treasury 인스턴스.
@@ -39,11 +41,36 @@ class TreasuryManager:
             currency=account.currency,
             buy_commission_rate=float(account.buy_commission_rate),
             sell_commission_rate=float(account.sell_commission_rate),
+            market_order_reserve_buffer_rate=account.market_order_reserve_buffer_rate,
         )
         await treasury.initialize()
         self._treasuries[account.account_id] = treasury
         logger.info("Treasury 생성: account_id=%s", account.account_id)
         return treasury
+
+    def set_order_reserve_price_resolver(
+        self,
+        account_id: str,
+        resolver: Callable[[str], Awaitable[float]],
+    ) -> None:
+        """특정 계좌의 Treasury 에 시장가 매수 reserve estimate 용 resolver 주입.
+
+        ``main._init_gateway()`` 끝에서 account-scoped wrapper 로 호출된다 — 부팅
+        순서상 ``initialize_all`` 직후에는 APIGateway 가 아직 준비되지 않았기
+        때문이다 (#1333). resolver 미주입 상태에서 시장가 매수 + price=None
+        시도가 들어오면 Treasury 가 terminal ``market_buy_quote_unavailable`` 로
+        거부한다.
+
+        Raises:
+            KeyError: 해당 계좌의 Treasury 가 등록돼 있지 않을 때.
+        """
+        if account_id not in self._treasuries:
+            raise KeyError(f"Treasury not found: account_id={account_id}")
+        self._treasuries[account_id].set_order_reserve_price_resolver(resolver)
+        logger.info(
+            "TreasuryManager: order_reserve_price_resolver 주입 완료 (account=%s)",
+            account_id,
+        )
 
     def get(self, account_id: str) -> Treasury:
         """계좌의 Treasury 인스턴스 반환.

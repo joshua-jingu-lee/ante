@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import signal
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -539,6 +540,34 @@ async def _init_gateway(s: Services) -> None:
 
     # StrategyContextFactory 완성 (Gateway 연결 이후)
     _init_context_factory(s)
+
+    # #1333: Treasury 의 시장가 매수 reserve estimate 용 quote resolver 주입.
+    # ``_init_trading()`` 시점에는 APIGateway 가 아직 만들어지지 않았으므로
+    # ``initialize_all`` 시점에 주입할 수 없고, 본 ``_init_gateway()`` 끝에서
+    # account-scoped wrapper 로 후속 주입한다. resolver 자체는 자산 평가 sync
+    # 용 ``price_resolver`` 와 별도 객체다.
+    if s.treasury_manager is not None and s.api_gateway is not None:
+        gateway = s.api_gateway
+        for account in accounts:
+
+            def _make_resolver(account_id: str) -> Callable[[str], Awaitable[float]]:
+                async def _resolver(symbol: str) -> float:
+                    return await gateway.get_current_price(
+                        symbol, account_id=account_id
+                    )
+
+                return _resolver
+
+            try:
+                s.treasury_manager.set_order_reserve_price_resolver(
+                    account.account_id, _make_resolver(account.account_id)
+                )
+            except KeyError:
+                # 해당 계좌의 Treasury 가 없는 환경(예: 단위 테스트 partial wiring).
+                logger.debug(
+                    "Treasury 미등록 계좌 — order_reserve_price_resolver 주입 생략: %s",
+                    account.account_id,
+                )
 
     # Treasury 잔고 동기화 (Broker 연결 이후)
     await _init_treasury_sync(s, accounts)
