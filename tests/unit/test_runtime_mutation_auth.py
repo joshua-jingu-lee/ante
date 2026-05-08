@@ -798,6 +798,109 @@ class TestUpdateBotAuthFirstOverBodyValidation:
         assert bot_manager.update_calls == []
 
 
+class TestSuspendAccountAuthFirstOverBodyValidation:
+    """``suspend_account``도 raw body 패턴 + 401 우선이어야 한다 (#1352 2차 fix).
+
+    이전에는 ``body: AccountSuspendRequest | None = None`` typed 인자를 사용해
+    FastAPI가 dependency 해결 전에 JSON body를 파싱했고, 그 결과 malformed body
+    + unauth 케이스에서 422가 401/403보다 먼저 반환되어 ``update_bot``/
+    ``set_balance``/``update_scopes``의 auth-first 계약과 어긋났다.
+    """
+
+    def test_suspend_unauth_malformed_json_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """Authorization 없음 + malformed JSON → 401 (NOT 422)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body 파싱보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert account_service.suspend_calls == []
+
+    def test_suspend_unauth_non_object_json_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """Authorization 없음 + JSON이 object가 아님 → 401 (NOT 422)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json=["not", "an", "object"],
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert account_service.suspend_calls == []
+
+    def test_suspend_invalid_bearer_invalid_body_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """invalid Bearer + invalid body → 401 (NOT 422)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": 123},  # reason은 str여야 함
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+        assert account_service.suspend_calls == []
+
+    def test_suspend_master_empty_body_returns_200_with_default_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + 빈 body → 200, default reason (``dashboard``)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            content=b"",
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_calls[-1]["reason"] == "dashboard"
+        assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
+
+    def test_suspend_master_malformed_json_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + malformed JSON → 422 (정상 검증 경로)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_calls == []
+
+    def test_suspend_master_non_object_json_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + JSON이 object가 아님 → 422."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_calls == []
+
+    def test_suspend_master_extra_key_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + extra key → 422 (``extra="forbid"`` 정합)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": "x", "unexpected": True},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_calls == []
+
+
 class TestSetBalanceAuthFirstOverBodyValidation:
     """``set_balance``도 raw body 패턴 + 401 우선이어야 한다."""
 

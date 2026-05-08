@@ -729,10 +729,49 @@ async def suspend_account(
     caller_id: Annotated[str, Depends(require_master_caller)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-    body: AccountSuspendRequest | None = None,
 ) -> dict[str, Any]:
-    """계좌 정지. 인증된 master만 호출 가능 (#1352)."""
+    """계좌 정지. 인증된 master만 호출 가능 (#1352).
+
+    ``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱
+    패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352
+    Codex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로
+    먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어
+    ``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
+       (기존 의미 보존).
+    3. JSON 파싱 실패 → 422.
+    4. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
+       포함) → 422.
+    5. service 호출.
+    """
     from ante.account.errors import AccountAlreadySuspendedError, AccountNotFoundError
+
+    # 1. raw body 읽기 + JSON 파싱 (인증은 dependency에서 이미 통과한 상태).
+    raw = await request.body()
+    if raw == b"":
+        # 빈 body는 기존 의미를 보존한다 — default reason.
+        body = None
+    else:
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(
+                status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+            ) from None
+        if not isinstance(payload, dict):
+            raise HTTPException(
+                status_code=422, detail="요청 body는 JSON object여야 합니다."
+            )
+        # 2. Pydantic 검증 — 인증 통과 후에만 실행된다.
+        try:
+            body = AccountSuspendRequest.model_validate(payload)
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=e.errors()) from None
 
     reason = (body.reason if body else None) or "dashboard"
 
