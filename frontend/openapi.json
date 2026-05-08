@@ -1592,7 +1592,7 @@
           "members"
         ],
         "summary": "Suspend Member",
-        "description": "멤버 일시 정지.",
+        "description": "멤버 일시 정지. 인증된 master만 호출 가능 (#1351).",
         "operationId": "suspend_member_api_members__member_id__suspend_post",
         "parameters": [
           {
@@ -1612,6 +1612,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemberDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1665,7 +1675,7 @@
           "members"
         ],
         "summary": "Reactivate Member",
-        "description": "멤버 재활성화.",
+        "description": "멤버 재활성화. 인증된 master만 호출 가능 (#1351).",
         "operationId": "reactivate_member_api_members__member_id__reactivate_post",
         "parameters": [
           {
@@ -1685,6 +1695,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemberDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1738,7 +1758,7 @@
           "members"
         ],
         "summary": "Revoke Member",
-        "description": "멤버 영구 폐기.",
+        "description": "멤버 영구 폐기. 인증된 master만 호출 가능 (#1351).",
         "operationId": "revoke_member_api_members__member_id__revoke_post",
         "parameters": [
           {
@@ -1758,6 +1778,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemberDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1811,7 +1841,7 @@
           "members"
         ],
         "summary": "Rotate Token",
-        "description": "토큰 재발급.",
+        "description": "토큰 재발급. 인증된 master만 호출 가능 (#1351).\n\n인증 없이 token rotation 응답에 접근하면 token 값 자체가 노출되므로,\n가장 먼저 차단해야 한다.",
         "operationId": "rotate_token_api_members__member_id__rotate_token_post",
         "parameters": [
           {
@@ -1831,6 +1861,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemberTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1967,7 +2007,7 @@
           "members"
         ],
         "summary": "Update Scopes",
-        "description": "권한 범위 변경.",
+        "description": "권한 범위 변경. 인증된 master만 호출 가능 (#1351).\n\n``create_member``와 동일한 raw body 파싱 패턴을 적용해 인증 가드가 body\nvalidation보다 우선 실행되도록 한다(#1351 — Codex Plan Review). FastAPI가\n``body: ScopesUpdateRequest``를 먼저 검증하면 unauth + bad-body 시 401이\n아닌 422가 먼저 반환되어 contract가 깨진다.\n\n핸들러 단계 순서:\n1. 인증 가드 (최우선) — 실패 시 401.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``ScopesUpdateRequest.model_validate`` — ValidationError → 422.\n4. ``svc.update_scopes`` 호출. ``ValueError`` → 404,\n   ``PermissionError``/``PermissionDeniedError`` → 403.",
         "operationId": "update_scopes_api_members__member_id__scopes_put",
         "parameters": [
           {
@@ -1980,16 +2020,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScopesUpdateRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1997,6 +2027,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MemberScopesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2021,8 +2061,8 @@
               }
             }
           },
-          "503": {
-            "description": "Member service not available",
+          "422": {
+            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1351).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2031,12 +2071,12 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "503": {
+            "description": "Member service not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -7117,23 +7157,6 @@
         ],
         "title": "RuleUpdateResponse",
         "description": "룰 설정 변경 응답."
-      },
-      "ScopesUpdateRequest": {
-        "properties": {
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Scopes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "scopes"
-        ],
-        "title": "ScopesUpdateRequest",
-        "description": "권한 범위 변경 요청."
       },
       "SnapshotItem": {
         "properties": {
