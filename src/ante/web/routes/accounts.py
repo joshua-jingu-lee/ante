@@ -104,11 +104,19 @@ ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
         },
         "trading_hours_start": {
             "type": "string",
-            "description": "거래 시작 시각 (현지 시간, HH:MM).",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": (
+                "거래 시작 시각 (현지 시간, strict HH:MM 24시간 형식). "
+                "초/마이크로초 포함, 빈 문자열, invalid 시간은 422로 거부된다 (#1334)."
+            ),
         },
         "trading_hours_end": {
             "type": "string",
-            "description": "거래 종료 시각 (현지 시간, HH:MM).",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": (
+                "거래 종료 시각 (현지 시간, strict HH:MM 24시간 형식). "
+                "초/마이크로초 포함, 빈 문자열, invalid 시간은 422로 거부된다 (#1334)."
+            ),
         },
     },
 }
@@ -172,12 +180,20 @@ ACCOUNT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "trading_hours_start": {
             "type": "string",
             "default": "09:00",
-            "description": "거래 시작 시각 (현지 시간, HH:MM).",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": (
+                "거래 시작 시각 (현지 시간, strict HH:MM 24시간 형식). "
+                "초/마이크로초 포함, invalid 시간은 422로 거부된다 (#1334)."
+            ),
         },
         "trading_hours_end": {
             "type": "string",
             "default": "15:30",
-            "description": "거래 종료 시각 (현지 시간, HH:MM).",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": (
+                "거래 종료 시각 (현지 시간, strict HH:MM 24시간 형식). "
+                "초/마이크로초 포함, invalid 시간은 422로 거부된다 (#1334)."
+            ),
         },
         "trading_mode": {
             "type": "string",
