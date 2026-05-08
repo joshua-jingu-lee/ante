@@ -144,8 +144,11 @@ class StopOrderManager:
 
         from ante.eventbus.events import StopOrderRegisteredEvent
 
+        # Refs #1336: ``account_id`` 를 명시 전달하여 BotManager /
+        # SignalChannel 이 account-scoped 통보 경로로 전달할 수 있도록 한다.
         await self._eventbus.publish(
             StopOrderRegisteredEvent(
+                account_id=account_id,
                 stop_order_id=stop_order_id,
                 bot_id=bot_id,
                 strategy_id=strategy_id,
@@ -264,8 +267,12 @@ class StopOrderManager:
         from ante.eventbus.events import OrderRequestEvent, StopOrderTriggeredEvent
 
         # 트리거 이벤트 발행
+        # Refs #1336: ``account_id`` 보존. 변환된 ``OrderRequestEvent`` 는
+        # 자체 라이프사이클 이벤트를 발행하지만, stop 식별 단위 (stop_order_id)
+        # 가 다르므로 stop 트리거 통보를 별도로 보존한다.
         await self._eventbus.publish(
             StopOrderTriggeredEvent(
+                account_id=order.account_id,
                 stop_order_id=order.stop_order_id,
                 bot_id=order.bot_id,
                 strategy_id=order.strategy_id,
@@ -305,8 +312,12 @@ class StopOrderManager:
 
         from ante.eventbus.events import StopOrderExpiredEvent
 
+        # Refs #1336: ``account_id`` 보존. ``reason`` 은 호출 위치에서
+        # ``"session_ended"`` (세션 종료) 또는 ``"manager_stopped"``
+        # (매니저 stop()) 로 분류되어 들어온다.
         await self._eventbus.publish(
             StopOrderExpiredEvent(
+                account_id=order.account_id,
                 stop_order_id=order.stop_order_id,
                 bot_id=order.bot_id,
                 strategy_id=order.strategy_id,
