@@ -267,6 +267,7 @@ class Bot:
             OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
         )
@@ -314,6 +315,18 @@ class Bot:
                 "symbol": "",
                 "side": "",
                 "reason": event.error_message,
+            }
+        elif isinstance(event, OrderModifyRejectedEvent):
+            # #1331: 정정 거부 (rule reject / rule exception / gateway
+            # not-implemented) 통보를 전략에 전달. status는 신규 키
+            # ``"modify_rejected"``로 분리하여 기존 ``"rejected"``(신규
+            # 주문 거부)와 충돌하지 않도록 한다.
+            update = {
+                "order_id": event.order_id,
+                "status": "modify_rejected",
+                "symbol": event.symbol,
+                "side": event.side,
+                "reason": event.reason,
             }
 
         if update:
@@ -379,19 +392,26 @@ class Bot:
 
         for action in actions:
             if action.action == "cancel":
+                # #1331: ``strategy_id`` 보강. 기존에는 비워서 발행되어 룰
+                # 평가/리포팅/외부 채널이 strategy 단위로 식별하지 못했다.
+                # symbol/side는 ``OrderAction`` 입력에 없고 ``OrderView``가
+                # 보장하지 않으므로 본 PR 범위 밖.
                 await self._eventbus.publish(
                     OrderCancelEvent(
                         bot_id=self.bot_id,
                         account_id=self.config.account_id,
+                        strategy_id=self.config.strategy_id,
                         order_id=action.order_id,
                         reason=action.reason,
                     )
                 )
             elif action.action == "modify":
+                # #1331: ``strategy_id`` 보강. 동일 사유.
                 await self._eventbus.publish(
                     OrderModifyEvent(
                         bot_id=self.bot_id,
                         account_id=self.config.account_id,
+                        strategy_id=self.config.strategy_id,
                         order_id=action.order_id,
                         quantity=action.quantity or 0.0,
                         price=action.price,

@@ -846,18 +846,23 @@ class BotManager:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
         )
 
         self._eventbus.subscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.subscribe(ExternalSignalEvent, bot.on_external_signal)
+        # #1331: ``OrderModifyRejectedEvent`` 추가 — rule reject / rule
+        # exception / gateway not-implemented 통보가 ``Bot.on_order_update``
+        # 를 거쳐 ``strategy.on_order_update``까지 전달되도록 한다.
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyRejectedEvent,
         ):
             self._eventbus.subscribe(event_type, bot.on_order_update)
 
@@ -869,18 +874,21 @@ class BotManager:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.unsubscribe(ExternalSignalEvent, bot.on_external_signal)
+        # #1331: 등록과 동일하게 ``OrderModifyRejectedEvent`` 해지 추가.
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyRejectedEvent,
         ):
             self._eventbus.unsubscribe(event_type, bot.on_order_update)
 

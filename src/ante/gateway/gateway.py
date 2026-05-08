@@ -397,15 +397,46 @@ class APIGateway:
             )
 
     async def _on_order_modify(self, event: object) -> None:
-        """주문 정정 요청 → 로깅만 (정정은 추후 구현).
+        """주문 정정 요청 → 미구현이므로 즉시 거부 이벤트 발행 (#1331).
+
+        RuleEngine이 이미 정정 요청을 거부하면 ``_consumed=True`` transient
+        marker를 set한다(``object.__setattr__``). 본 핸들러는 그 경우
+        추가 terminal event를 발행하지 않고 바로 반환하여, 동일 정정 요청에
+        대해 ``OrderModifyRejectedEvent``가 중복 발행되지 않도록 한다.
+
+        그 외 흐름(rule pass / rule이 marker를 set하지 않음)에서는
+        정정이 아직 broker-level로 구현되지 않았음을 전략에 명시 전달하기
+        위해 ``OrderModifyRejectedEvent(reason="modify_not_implemented")``를
+        발행한다. 기존 ``logger.warning`` 트레이스는 유지하여 운영 가시성을
+        보존한다.
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
         """
-        from ante.eventbus.events import OrderModifyEvent
+        from ante.eventbus.events import OrderModifyEvent, OrderModifyRejectedEvent
 
         if not isinstance(event, OrderModifyEvent):
             return
+
+        # rule engine 거부 흐름이 이미 terminal event를 발행했으면 skip.
+        # ``_consumed`` 는 dataclass field가 아닌 transient marker이므로
+        # ``getattr`` default False로 안전하게 확인한다 (#1331).
+        if getattr(event, "_consumed", False):
+            return
+
         logger.warning("주문 정정은 추후 구현: %s", event.order_id)
+        await self._eventbus.publish(
+            OrderModifyRejectedEvent(
+                account_id=event.account_id,
+                order_id=event.order_id,
+                bot_id=event.bot_id,
+                strategy_id=event.strategy_id,
+                symbol=event.symbol,
+                side=event.side,
+                quantity=event.quantity,
+                price=event.price,
+                reason="modify_not_implemented",
+            )
+        )
 
     async def _on_order_filled(self, event: object) -> None:
         """체결 시 해당 account_id 범위 내 캐시 무효화.
