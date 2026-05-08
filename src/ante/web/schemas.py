@@ -45,6 +45,8 @@ class AccountResponse(BaseModel):
     broker_config: dict[str, Any] = {}
     buy_commission_rate: float
     sell_commission_rate: float
+    # 시장가 매수 reserve buffer 비율 (cold-path 전용 — #1333).
+    market_order_reserve_buffer_rate: float = 0.0
     status: str
     created_at: str
     updated_at: str
@@ -78,6 +80,9 @@ class AccountCreateRequest(BaseModel):
     broker_config: dict[str, Any] = {}
     buy_commission_rate: float = 0.0
     sell_commission_rate: float = 0.0
+    # 시장가 매수 reserve buffer 비율. omit 시 service-layer에서 BrokerPreset
+    # 기본값을 사용한다. cold-path 전용 (#1333).
+    market_order_reserve_buffer_rate: float | None = None
 
     @field_validator("trading_hours_start", "trading_hours_end")
     @classmethod
@@ -125,6 +130,9 @@ class AccountUpdateRequest(BaseModel):
     broker_config: dict[str, Any] | None = None
     buy_commission_rate: float | None = None
     sell_commission_rate: float | None = None
+    # 다른 structural 필드와 동일하게 모델에는 노출하지만, PUT 라우트는
+    # ``STRUCTURAL_FIELDS`` 가드로 cold-path 409 차단한다 (#1333).
+    market_order_reserve_buffer_rate: float | None = None
 
     @field_validator("trading_hours_start", "trading_hours_end")
     @classmethod

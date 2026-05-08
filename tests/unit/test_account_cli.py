@@ -345,6 +345,44 @@ class TestAccountCreate:
         assert "생성 완료" in result.output
         mock_account_service.create.assert_called_once()
 
+    def test_create_market_buffer_default_uses_preset(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """``--market-order-reserve-buffer-rate`` 누락 시 BrokerPreset 기본값을
+        그대로 사용한다 (test broker → 0; #1333).
+        """
+        from decimal import Decimal
+
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        result = _invoke(_create_args_test_broker())
+        assert result.exit_code == 0, result.output
+        new_account = mock_account_service.create.call_args.args[0]
+        assert new_account.market_order_reserve_buffer_rate == Decimal("0")
+
+    def test_create_market_buffer_explicit_decimal_conversion(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """명시한 ``--market-order-reserve-buffer-rate`` 값이 ``Decimal(str(...))``
+        로 변환되어 Account 에 전달된다 (#1333).
+        """
+        from decimal import Decimal
+
+        created = _mock_account("test2", "테스트2", "TEST", "KRW", "test")
+        mock_account_service.create.return_value = created
+
+        result = _invoke(
+            _create_args_test_broker(
+                extra=["--market-order-reserve-buffer-rate", "0.0075"]
+            )
+        )
+        assert result.exit_code == 0, result.output
+        new_account = mock_account_service.create.call_args.args[0]
+        # ``Decimal(str(0.0075))`` 는 정확히 ``Decimal("0.0075")``.
+        assert new_account.market_order_reserve_buffer_rate == Decimal("0.0075")
+        assert isinstance(new_account.market_order_reserve_buffer_rate, Decimal)
+
     def test_create_json_output(
         self, mock_account_service: AsyncMock, offline_runtime
     ) -> None:

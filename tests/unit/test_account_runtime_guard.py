@@ -252,21 +252,22 @@ def test_structural_fields_match_route_constant() -> None:
 
     # route는 tuple, service는 frozenset이지만 set 비교로 동일 멤버를 강제.
     assert set(ROUTE_FIELDS) == set(STRUCTURAL_FIELDS)
-    # 8필드 정확히 일치
-    assert len(set(ROUTE_FIELDS)) == 8
-    assert len(STRUCTURAL_FIELDS) == 8
+    # 9필드 정확히 일치 (#1333: market_order_reserve_buffer_rate 추가).
+    assert len(set(ROUTE_FIELDS)) == 9
+    assert len(STRUCTURAL_FIELDS) == 9
 
 
 def test_structural_fields_matches_spec() -> None:
-    """spec에 명시된 8필드와 service ``STRUCTURAL_FIELDS``가 정확히 일치.
+    """spec에 명시된 9필드와 service ``STRUCTURAL_FIELDS``가 정확히 일치.
 
-    spec SSOT: docs/specs/account/04-account-service.md 51-58줄.
+    spec SSOT: docs/specs/account/04-account-service.md.
     """
     expected = {
         "credentials",
         "broker_config",
         "buy_commission_rate",
         "sell_commission_rate",
+        "market_order_reserve_buffer_rate",
         "broker_type",
         "exchange",
         "currency",
