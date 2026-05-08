@@ -389,6 +389,7 @@ class APIGateway:
             logger.error("주문 취소 실패: %s — %s", event.order_id, e)
             await self._eventbus.publish(
                 OrderCancelFailedEvent(
+                    account_id=event.account_id,
                     order_id=event.order_id,
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
