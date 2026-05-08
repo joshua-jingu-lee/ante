@@ -652,6 +652,19 @@ export type paths = {
         /**
          * Create Member
          * @description 멤버 등록. 토큰 1회 반환.
+         *
+         *     인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2 — Codex
+         *     finding). FastAPI가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면
+         *     Authorization 헤더 미존재 + 필수 필드 누락 케이스에서 401이 아니라 422가
+         *     먼저 응답되어 "missing or invalid Authorization header는 401" 계약이 깨진다.
+         *     이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
+         *     (``update_account`` SSOT 패턴 일치).
+         *
+         *     핸들러 단계 순서:
+         *     1. **인증 가드 (최우선)**: ``_caller_id(request)`` 비면 401.
+         *     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
+         *     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
+         *     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
          */
         post: operations["create_member_api_members_post"];
         delete?: never;
@@ -2143,36 +2156,6 @@ export type components = {
             ok: boolean;
         };
         /**
-         * MemberCreateRequest
-         * @description 멤버 등록 요청.
-         */
-        MemberCreateRequest: {
-            /** Member Id */
-            member_id: string;
-            /** Member Type */
-            member_type: string;
-            /**
-             * Name
-             * @default
-             */
-            name: string;
-            /**
-             * Org
-             * @default default
-             */
-            org: string;
-            /**
-             * Role
-             * @default default
-             */
-            role: string;
-            /**
-             * Scopes
-             * @default []
-             */
-            scopes: string[];
-        };
-        /**
          * MemberCreateResponse
          * @description 멤버 생성 응답 (토큰 포함).
          */
@@ -3244,7 +3227,6 @@ export type KillSwitchResponse = components['schemas']['KillSwitchResponse'];
 export type LoginRequest = components['schemas']['LoginRequest'];
 export type LoginResponse = components['schemas']['LoginResponse'];
 export type LogoutResponse = components['schemas']['LogoutResponse'];
-export type MemberCreateRequest = components['schemas']['MemberCreateRequest'];
 export type MemberCreateResponse = components['schemas']['MemberCreateResponse'];
 export type MemberDetailResponse = components['schemas']['MemberDetailResponse'];
 export type MemberInfo = components['schemas']['MemberInfo'];
@@ -4823,7 +4805,35 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MemberCreateRequest"];
+                "application/json": {
+                    /** @description 고유 식별자. */
+                    member_id: string;
+                    /**
+                     * @description 멤버 타입.
+                     * @enum {string}
+                     */
+                    member_type: "human" | "agent";
+                    /**
+                     * @description 사용자에게 표시되는 이름.
+                     * @default
+                     */
+                    name?: string;
+                    /**
+                     * @description 소속 조직.
+                     * @default default
+                     */
+                    org?: string;
+                    /**
+                     * @description 역할 (default / master).
+                     * @default default
+                     */
+                    role?: string;
+                    /**
+                     * @description 권한 범위 목록.
+                     * @default []
+                     */
+                    scopes?: string[];
+                };
             };
         };
         responses: {
@@ -4863,13 +4873,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, Authorization 헤더가 없거나 invalid token이면 body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Member service not available */

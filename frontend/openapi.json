@@ -1443,18 +1443,8 @@
           "members"
         ],
         "summary": "Create Member",
-        "description": "멤버 등록. 토큰 1회 반환.",
+        "description": "멤버 등록. 토큰 1회 반환.\n\n인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2 — Codex\nfinding). FastAPI가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면\nAuthorization 헤더 미존재 + 필수 필드 누락 케이스에서 401이 아니라 422가\n먼저 응답되어 \"missing or invalid Authorization header는 401\" 계약이 깨진다.\n이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다\n(``update_account`` SSOT 패턴 일치).\n\n핸들러 단계 순서:\n1. **인증 가드 (최우선)**: ``_caller_id(request)`` 비면 401.\n2. raw bytes 읽고 JSON 파싱 — 실패 시 422.\n3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.\n4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.",
         "operationId": "create_member_api_members_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MemberCreateRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -1496,6 +1486,16 @@
               }
             }
           },
+          "422": {
+            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, Authorization 헤더가 없거나 invalid token이면 body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Member service not available",
             "content": {
@@ -1505,13 +1505,57 @@
                 }
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "MemberCreateRequest",
+                "description": "POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Authorization 헤더가 없거나 invalid token이면 body validation 전에 401로 차단된다.",
+                "additionalProperties": false,
+                "required": [
+                  "member_id",
+                  "member_type"
+                ],
+                "properties": {
+                  "member_id": {
+                    "type": "string",
+                    "description": "고유 식별자."
+                  },
+                  "member_type": {
+                    "type": "string",
+                    "enum": [
+                      "human",
+                      "agent"
+                    ],
+                    "description": "멤버 타입."
+                  },
+                  "role": {
+                    "type": "string",
+                    "default": "default",
+                    "description": "역할 (default / master)."
+                  },
+                  "org": {
+                    "type": "string",
+                    "default": "default",
+                    "description": "소속 조직."
+                  },
+                  "name": {
+                    "type": "string",
+                    "default": "",
+                    "description": "사용자에게 표시되는 이름."
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "권한 범위 목록."
+                  }
                 }
               }
             }
@@ -6231,48 +6275,6 @@
         ],
         "title": "MeResponse",
         "description": "현재 사용자 정보 응답."
-      },
-      "MemberCreateRequest": {
-        "properties": {
-          "member_id": {
-            "type": "string",
-            "title": "Member Id"
-          },
-          "member_type": {
-            "type": "string",
-            "title": "Member Type"
-          },
-          "role": {
-            "type": "string",
-            "title": "Role",
-            "default": "default"
-          },
-          "org": {
-            "type": "string",
-            "title": "Org",
-            "default": "default"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "default": ""
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Scopes",
-            "default": []
-          }
-        },
-        "type": "object",
-        "required": [
-          "member_id",
-          "member_type"
-        ],
-        "title": "MemberCreateRequest",
-        "description": "멤버 등록 요청."
       },
       "MemberCreateResponse": {
         "properties": {

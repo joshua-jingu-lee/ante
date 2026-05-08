@@ -198,3 +198,53 @@ class TestCreateMemberAuthGuard:
         resp = client.post("/api/members", json=_payload())
         assert resp.status_code == 401
         assert member_service.register_calls == []
+
+    def test_create_member_without_auth_returns_401_even_if_body_invalid(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 가드는 body validation보다 우선이어야 한다 (#1339 P2 Codex).
+
+        Authorization 헤더 없음 + body에 필수 필드 누락 → 401 (NOT 422).
+
+        FastAPI가 ``body: MemberCreateRequest`` 파라미터를 라우트 함수 호출 전에
+        파싱·검증해 버리면, 인증 가드 진입 전에 422가 먼저 반환되어
+        "missing or invalid Authorization header는 401" 계약이 깨진다.
+        본 테스트가 이 회귀를 직접 잠근다.
+        """
+        # 필수 필드 ``member_id``, ``member_type`` 모두 누락된 invalid body.
+        invalid_payload: dict[str, object] = {"role": "default"}
+        resp = client.post("/api/members", json=invalid_payload)
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert member_service.register_calls == []
+
+    def test_create_member_with_invalid_token_returns_401_even_if_body_invalid(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """Invalid token + invalid body → 401 (NOT 422). #1339 P2 Codex."""
+        invalid_payload: dict[str, object] = {}
+        resp = client.post(
+            "/api/members",
+            json=invalid_payload,
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, (
+            f"인증 실패가 body validation보다 우선이어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert member_service.register_calls == []
+
+    def test_create_member_authenticated_with_invalid_body_returns_422(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 통과 + body에 필수 필드 누락 → 422 (정상 검증 경로)."""
+        invalid_payload: dict[str, object] = {"role": "default"}  # 필수 필드 누락.
+        resp = client.post(
+            "/api/members",
+            json=invalid_payload,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert member_service.register_calls == []

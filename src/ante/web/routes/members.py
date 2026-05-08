@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ante.member.errors import PermissionDeniedError
 from ante.web.deps import get_audit_logger_optional, get_member_service
@@ -39,6 +40,60 @@ class MemberCreateRequest(BaseModel):
     org: str = "default"
     name: str = ""
     scopes: list[str] = []
+
+
+# POST /api/members OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작하지만(이슈 #1339 P2 — Codex finding), Swagger UI / agent client / SDK는
+# 정확한 입력 contract를 발견할 수 있어야 한다.
+#
+# ``MemberCreateRequest.model_json_schema()`` 직접 노출은 가능하지만 본 dict 상수로
+# manual schema를 두는 편이 OpenAPI 표면 안정성과 spec 정합성 측면에서 더 안전하다.
+MEMBER_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "MemberCreateRequest",
+    "description": (
+        "POST /api/members 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1339). "
+        "Authorization 헤더가 없거나 invalid token이면 body validation 전에 401로 "
+        "차단된다."
+    ),
+    "additionalProperties": False,
+    "required": ["member_id", "member_type"],
+    "properties": {
+        "member_id": {
+            "type": "string",
+            "description": "고유 식별자.",
+        },
+        "member_type": {
+            "type": "string",
+            "enum": ["human", "agent"],
+            "description": "멤버 타입.",
+        },
+        "role": {
+            "type": "string",
+            "default": "default",
+            "description": "역할 (default / master).",
+        },
+        "org": {
+            "type": "string",
+            "default": "default",
+            "description": "소속 조직.",
+        },
+        "name": {
+            "type": "string",
+            "default": "",
+            "description": "사용자에게 표시되는 이름.",
+        },
+        "scopes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "권한 범위 목록.",
+        },
+    },
+}
 
 
 class PasswordChangeRequest(BaseModel):
@@ -128,6 +183,18 @@ async def list_members(
                 },
             },
         },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, "
+                "type mismatch). 단, Authorization 헤더가 없거나 invalid token이면 "
+                "body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Member service not available",
             "content": {
@@ -137,14 +204,38 @@ async def list_members(
             },
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": MEMBER_CREATE_REQUEST_SCHEMA,
+                },
+            },
+        },
+    },
 )
 async def create_member(
-    body: MemberCreateRequest,
     request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """멤버 등록. 토큰 1회 반환."""
+    """멤버 등록. 토큰 1회 반환.
+
+    인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2 — Codex
+    finding). FastAPI가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면
+    Authorization 헤더 미존재 + 필수 필드 누락 케이스에서 401이 아니라 422가
+    먼저 응답되어 "missing or invalid Authorization header는 401" 계약이 깨진다.
+    이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
+    (``update_account`` SSOT 패턴 일치).
+
+    핸들러 단계 순서:
+    1. **인증 가드 (최우선)**: ``_caller_id(request)`` 비면 401.
+    2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
+    3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
+    4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
+    """
+    # 1. 인증 가드 (body validation보다 우선).
     caller = _caller_id(request)
     if not caller:
         raise HTTPException(
@@ -153,6 +244,34 @@ async def create_member(
                 "인증이 필요합니다. Authorization: Bearer <token> 헤더를 제공하세요."
             ),
         )
+
+    # 2. raw body 읽기 + JSON 파싱.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(
+            status_code=422,
+            detail="요청 body가 비어 있습니다.",
+        )
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422,
+            detail="요청 body의 JSON 파싱에 실패했습니다.",
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="요청 body는 JSON object여야 합니다.",
+        )
+
+    # 3. Pydantic 검증 — 인증 통과 후에만 실행된다.
+    try:
+        body = MemberCreateRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    # 4. service 호출.
     try:
         member, token = await svc.register(
             member_id=body.member_id,
