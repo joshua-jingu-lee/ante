@@ -633,6 +633,46 @@ class TestUpdateScopesAuthFirstOverBodyValidation:
         assert member_service.update_scopes_calls == []
 
 
+# ── update_scopes extra="forbid" 회귀 (#1351 2차 fix — Finding P2) ──────
+
+
+class TestUpdateScopesExtraForbid:
+    """``ScopesUpdateRequest``는 ``extra="forbid"``를 강제한다.
+
+    OpenAPI ``MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA``가 ``additionalProperties:
+    false``를 선언하므로, 런타임 모델도 미지정 필드를 거부해 contract와 동작이
+    어긋나지 않도록 한다 (#1351 2차 Codex review FAIL — Finding P2).
+    """
+
+    def test_update_scopes_rejects_unknown_field_with_422(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """master 인증 통과 + 미지정 필드(extra=forbid) → 422."""
+        resp = client.put(
+            "/api/members/target-active/scopes",
+            json={"scopes": ["data:read"], "unexpected": True},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422, (
+            f"미지정 필드는 OpenAPI additionalProperties:false에 따라 422여야 함 "
+            f"({resp.status_code}: {resp.text})"
+        )
+        assert member_service.update_scopes_calls == []
+
+    def test_update_scopes_accepts_canonical_payload(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """기존 정상 payload({"scopes": [...]})는 200을 유지한다."""
+        resp = client.put(
+            "/api/members/target-active/scopes",
+            json={"scopes": ["data:read"]},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["member"]["scopes"] == ["data:read"]
+        assert member_service.update_scopes_calls[-1]["scopes"] == ["data:read"]
+
+
 # ── OpenAPI 응답에 401 추가 회귀 ─────────────────────────────────────────
 
 

@@ -169,7 +169,15 @@ class PasswordChangeRequest(BaseModel):
 
 
 class ScopesUpdateRequest(BaseModel):
-    """권한 범위 변경 요청."""
+    """권한 범위 변경 요청.
+
+    OpenAPI ``MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA``는 ``additionalProperties:
+    false``를 선언한다. 런타임 모델도 ``extra="forbid"``로 동일하게 강제해
+    OpenAPI contract와 동작을 일치시킨다(#1351 2차 Codex review FAIL — Finding
+    P2: ScopesUpdateRequest contract drift). ``MemberCreateRequest`` SSOT.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     scopes: list[str]
 
