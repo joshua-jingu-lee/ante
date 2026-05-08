@@ -171,6 +171,13 @@ class VirtualExecutor:
         if not isinstance(event, OrderApprovedEvent):
             return
 
+        # 등록 단계의 stop / stop_limit 주문은 가상 체결하지 않는다 (#1337).
+        # StopOrderManager가 trigger 시 변환된 OrderRequestEvent를 발행하면
+        # 그 변환 주문이 일반 limit/market로 다시 RuleEngine → Treasury →
+        # OrderApprovedEvent 경로를 타고 들어와 정상 체결된다.
+        if event.order_type in ("stop", "stop_limit"):
+            return
+
         portfolio = self._portfolios.get(event.bot_id)
         if portfolio is None:
             return  # live 봇의 주문 → 무시 (APIGateway가 처리)

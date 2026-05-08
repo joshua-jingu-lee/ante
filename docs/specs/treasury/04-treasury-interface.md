@@ -51,6 +51,26 @@ Treasury(
 
 `set_account_balance(balance)` 입력 invariant: balance는 finite이며 `>=0`. 위반 시 ValueError. POST /api/treasury/balance도 동일 invariant를 ValidationError로 거부한다.
 
+### Reserve 정책 (`_on_order_validated`)
+
+`OrderValidatedEvent` 수신 시 Treasury가 자금을 잠그는지 여부는 주문 종류에 따라 다르다. 본 정책은 한국 증권사 예약주문 표준(예약주문 등록 시점에 잔고를 체크하지 않고, 본주문 전환 시점에 자금 검증)과 일치한다.
+
+| `side` | `order_type` | 등록 시점 동작 | 비고 |
+|--------|--------------|---------------|------|
+| `buy` | `market`, `limit` | `reserve_for_order(...)` 호출 후 `OrderApprovedEvent(reserved_amount>0)` 발행 | `quantity * price * (1 + buy_commission_rate)` 만큼 잠금. `price=None` 시그니처는 별도 거부. |
+| `buy` | `stop`, `stop_limit` | **자금 잠금 없이** `OrderApprovedEvent(reserved_amount=0.0)` 발행 (#1337) | 트리거 발동 후 변환된 일반 매수 주문이 정상 reserve 절차를 거친다. `price=None`이어도 거부하지 않는다. |
+| `sell` | 모든 타입 | 자금 잠금 없이 즉시 `OrderApprovedEvent(reserved_amount=0.0)` | 매도는 보유 포지션 기반이므로 reserve 대상이 아님. |
+
+**매수 stop / stop_limit no-reserve invariant (#1337)**:
+
+- 매수 stop / stop_limit 주문은 등록 시점에 자금을 잠그지 않는다. 따라서 사용자(또는 다른 봇)는 같은 자금에 대해 다른 매수 주문을 자유롭게 걸 수 있다.
+- 트리거 시점에 StopOrderManager가 발행하는 변환된 `OrderRequestEvent`(market/limit)가 RuleEngine → Treasury를 거치며 그때 처음 reserve가 호출된다. 자금 부족이면 일반 매수 주문 실패와 동일하게 거부된다.
+- 등록 단계에서 자금을 잠그지 않았으므로 stop 주문 취소·만료 시 Treasury 호출은 불필요하다. StopOrderManager는 stop 주문 목록에서 항목 제거만 수행한다.
+- Treasury가 stop 주문에 대해 reserve 계산 로직을 갖지 않는다. 트리거 변환 이벤트에 "이미 reserved" 플래그 같은 새 필드도 도입하지 않는다 — 등록 시점에 reserve 자체를 안 하므로 플래그가 불필요하다.
+- StopOrderManager는 Treasury를 직접 호출하지 않는다. 두 모듈은 자금 처리상 직교한다.
+
+배경 및 사용자 정책 결정 근거는 GitHub 이슈 #1337 본문 "정책 결정 (사용자 승인, 2026-05-08)" 섹션을 참조한다.
+
 ### 자산 평가 동기화 계약
 
 `start_sync`는 `Account.trading_mode`에 따라 자산 평가 소스를 분기한다.

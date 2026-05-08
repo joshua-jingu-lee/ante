@@ -588,6 +588,31 @@ class Treasury:
         if not self._is_my_event(event):
             return
 
+        # 매수 stop / stop_limit 주문은 등록 시점에 자금을 잠그지 않는다 (#1337).
+        # 정책: 한국 증권사 예약주문 표준과 동일하게, 트리거가 발동되어 일반
+        # 매수 주문(market/limit)으로 변환된 시점에야 비로소 정상 reserve 절차를
+        # 거친다. 등록 단계에서는 가격 조건만 StopOrderManager에 등록되고,
+        # 자금은 사용자가 같은 자금으로 다른 매수 주문을 자유롭게 걸 수 있도록
+        # 잠그지 않는다. 취소/만료 시에도 잠근 게 없으므로 별도 해제 불필요.
+        if event.side == "buy" and event.order_type in ("stop", "stop_limit"):
+            await self._eventbus.publish(
+                OrderApprovedEvent(
+                    account_id=event.account_id,
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    stop_price=event.stop_price,
+                    reserved_amount=0.0,
+                    exchange=event.exchange,
+                )
+            )
+            return
+
         # Guard 1: 매수 + 시장가 + price 부재 시그니처는 quote source가 없으면
         # reserve 금액을 산정할 수 없으므로 즉시 거부한다.
         # narrow-scope: total_reserve <= 0 전체가 아니라 정확한 quote 부재
