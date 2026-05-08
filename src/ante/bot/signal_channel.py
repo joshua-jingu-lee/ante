@@ -163,11 +163,17 @@ class SignalChannel:
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
+            StopOrderExpiredEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
         )
 
         self._eventbus.subscribe(OrderFilledEvent, self._on_fill)
         # #1331: ``OrderModifyRejectedEvent`` 추가 — 외부 채널 구독자에게도
         # 정정 거부/미구현 통보를 ``order_update`` 메시지로 전달한다.
+        # #1336: stop 주문 등록·발동·만료를 외부 채널에도 동일한
+        # ``{type:"order_update", ...}`` shape 로 전달한다 (외부 소비자
+        # 파싱 분기 추가 부담 회피).
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -175,6 +181,9 @@ class SignalChannel:
             OrderFailedEvent,
             OrderCancelFailedEvent,
             OrderModifyRejectedEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
+            StopOrderExpiredEvent,
         ):
             self._eventbus.subscribe(evt, self._on_order_update)
 
@@ -188,10 +197,14 @@ class SignalChannel:
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
+            StopOrderExpiredEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, self._on_fill)
         # #1331: 등록과 동일하게 ``OrderModifyRejectedEvent`` 해지 추가.
+        # #1336: stop 이벤트 3종 해지 추가.
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -199,6 +212,9 @@ class SignalChannel:
             OrderFailedEvent,
             OrderCancelFailedEvent,
             OrderModifyRejectedEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
+            StopOrderExpiredEvent,
         ):
             self._eventbus.unsubscribe(evt, self._on_order_update)
 
@@ -243,10 +259,16 @@ class SignalChannel:
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
+            StopOrderExpiredEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
         )
 
         status = ""
         reason = ""
+        # 외부 dict shape 호환을 위해 ``order_id`` 는 일반 주문이면 그대로
+        # ``event.order_id``, stop 이벤트면 ``stop_order_id`` 를 사용한다.
+        order_id = getattr(event, "order_id", "")
         if isinstance(event, OrderSubmittedEvent):
             status = "submitted"
         elif isinstance(event, OrderRejectedEvent):
@@ -269,12 +291,28 @@ class SignalChannel:
             # 분기를 추가해야 하므로 의도적으로 잠갔다.
             status = "modify_rejected"
             reason = event.reason
+        elif isinstance(event, StopOrderRegisteredEvent):
+            # #1336: stop 등록 통보. 외부 채널에는 식별 핵심인 stop_order_id
+            # 만 ``order_id`` 키로 전달하고, dict shape 는 기존
+            # ``{type:"order_update", order_id, status, reason}`` 그대로 유지.
+            status = "stop_registered"
+            order_id = event.stop_order_id
+        elif isinstance(event, StopOrderTriggeredEvent):
+            # #1336: stop 트리거 통보.
+            status = "stop_triggered"
+            order_id = event.stop_order_id
+        elif isinstance(event, StopOrderExpiredEvent):
+            # #1336: stop 만료 통보. ``reason`` 은
+            # ``"session_ended"`` | ``"manager_stopped"``.
+            status = "stop_expired"
+            order_id = event.stop_order_id
+            reason = event.reason
 
         if status:
             self._write(
                 {
                     "type": "order_update",
-                    "order_id": getattr(event, "order_id", ""),
+                    "order_id": order_id,
                     "status": status,
                     "reason": reason,
                 }

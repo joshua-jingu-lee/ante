@@ -270,6 +270,9 @@ class Bot:
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
+            StopOrderExpiredEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
         )
 
         bot_id = getattr(event, "bot_id", None)
@@ -326,6 +329,47 @@ class Bot:
                 "status": "modify_rejected",
                 "symbol": event.symbol,
                 "side": event.side,
+                "reason": event.reason,
+            }
+        elif isinstance(event, StopOrderRegisteredEvent):
+            # #1336: stop / stop_limit 주문 등록 통보. 기존 ``order_id``
+            # 키와의 호환을 위해 ``stop_order_id`` 를 그대로 ``order_id`` 에도
+            # 채운다 (전략이 후속 ``cancel/modify`` 에 그대로 사용 가능).
+            # ``stop_order_id`` 키는 명시 식별자로 별도 노출.
+            update = {
+                "order_id": event.stop_order_id,
+                "stop_order_id": event.stop_order_id,
+                "status": "stop_registered",
+                "symbol": event.symbol,
+                "side": event.side,
+                "quantity": event.quantity,
+                "stop_price": event.stop_price,
+                "limit_price": event.limit_price,
+            }
+        elif isinstance(event, StopOrderTriggeredEvent):
+            # #1336: stop 트리거 통보. 변환된 일반 주문은 자체
+            # ``OrderSubmittedEvent`` 로 별도 통보되며, 본 dict 는 stop
+            # 식별 단위 (stop_order_id, trigger_price) 를 보존한다.
+            update = {
+                "order_id": event.stop_order_id,
+                "stop_order_id": event.stop_order_id,
+                "status": "stop_triggered",
+                "symbol": event.symbol,
+                "side": event.side,
+                "quantity": event.quantity,
+                "trigger_price": event.trigger_price,
+                "converted_order_type": event.converted_order_type,
+            }
+        elif isinstance(event, StopOrderExpiredEvent):
+            # #1336: stop 만료 통보. ``reason`` 은
+            # ``"session_ended"`` | ``"manager_stopped"``.
+            # ``StopOrderExpiredEvent`` 자체에 side/quantity/stop_price 가
+            # 없으므로 dict 도 누락한 채 노출한다.
+            update = {
+                "order_id": event.stop_order_id,
+                "stop_order_id": event.stop_order_id,
+                "status": "stop_expired",
+                "symbol": event.symbol,
                 "reason": event.reason,
             }
 

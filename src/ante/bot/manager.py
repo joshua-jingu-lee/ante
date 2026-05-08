@@ -888,6 +888,9 @@ class BotManager:
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
+            StopOrderExpiredEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
         )
 
         self._eventbus.subscribe(OrderFilledEvent, bot.on_order_filled)
@@ -895,6 +898,9 @@ class BotManager:
         # #1331: ``OrderModifyRejectedEvent`` 추가 — rule reject / rule
         # exception / gateway not-implemented 통보가 ``Bot.on_order_update``
         # 를 거쳐 ``strategy.on_order_update``까지 전달되도록 한다.
+        # #1336: ``StopOrderRegistered/Triggered/ExpiredEvent`` 추가 —
+        # stop / stop_limit 주문 등록·발동·만료 통보를 일반 주문 통보 채널과
+        # 동일한 ``on_order_update`` 로 변환한다 (별도 콜백 신설 금지 정책).
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -902,6 +908,9 @@ class BotManager:
             OrderFailedEvent,
             OrderCancelFailedEvent,
             OrderModifyRejectedEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
+            StopOrderExpiredEvent,
         ):
             self._eventbus.subscribe(event_type, bot.on_order_update)
 
@@ -916,11 +925,15 @@ class BotManager:
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
+            StopOrderExpiredEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.unsubscribe(ExternalSignalEvent, bot.on_external_signal)
         # #1331: 등록과 동일하게 ``OrderModifyRejectedEvent`` 해지 추가.
+        # #1336: stop 이벤트 3종 해지 추가.
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -928,6 +941,9 @@ class BotManager:
             OrderFailedEvent,
             OrderCancelFailedEvent,
             OrderModifyRejectedEvent,
+            StopOrderRegisteredEvent,
+            StopOrderTriggeredEvent,
+            StopOrderExpiredEvent,
         ):
             self._eventbus.unsubscribe(event_type, bot.on_order_update)
 
