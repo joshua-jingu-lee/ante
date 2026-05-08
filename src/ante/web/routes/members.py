@@ -8,7 +8,7 @@ from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ante.member.errors import PermissionDeniedError
 from ante.web.deps import (
@@ -37,6 +37,8 @@ def _caller_id(request: Request) -> str:
 
 class MemberCreateRequest(BaseModel):
     """멤버 등록 요청."""
+
+    model_config = ConfigDict(extra="forbid")
 
     member_id: str
     member_type: str  # "human" | "agent"
