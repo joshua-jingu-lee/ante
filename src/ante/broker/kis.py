@@ -12,6 +12,7 @@ KIS REST API를 통해 주문, 조회를 처리한다.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from abc import abstractmethod
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 from ante.broker.base import BrokerAdapter
 from ante.broker.circuit_breaker import CircuitBreaker
 from ante.broker.error_codes import (
+    PERMANENT_MSG_CODES,
+    TRANSIENT_MSG_CODES,
     is_retryable_http_status,
     is_retryable_msg_code,
 )
@@ -348,10 +351,57 @@ class KISBaseAdapter(BrokerAdapter):
         }
 
     async def _handle_response(self, response: Any) -> dict[str, Any]:
-        """API 응답 처리 (에러 분류 포함)."""
+        """API 응답 처리 (에러 분류 포함).
+
+        HTTP status != 200이면서 응답 body에 KIS business payload(``rt_cd`` /
+        ``msg_cd``)가 함께 들어오는 경우 broker business error로 승격해
+        ``APIError.error_code``에 ``msg_cd``를 보존한다.
+
+        retryable 우선순위 (#1338):
+            1. ``msg_cd`` ∈ ``PERMANENT_MSG_CODES`` → ``False`` (강제).
+            2. HTTP status가 non-retryable(401/403/404/422 등) → ``False`` (강제).
+            3. ``msg_cd`` ∈ ``TRANSIENT_MSG_CODES`` → ``True``.
+            4. 그 외 unknown msg_cd는 HTTP status retryable에 따른다.
+
+        JSON 파싱 실패, ``rt_cd`` 부재, ``rt_cd == "0"`` 등 KIS payload로
+        판정되지 않는 경우는 generic ``HTTP <status>: <text>``로 fallback한다.
+        """
         if response.status != 200:
             text = await response.text()
+            if isinstance(text, bytes):
+                text = text.decode("utf-8", errors="replace")
             retryable = is_retryable_http_status(response.status)
+            msg_cd = ""
+            msg1 = ""
+            try:
+                payload = json.loads(text) if text else {}
+                if isinstance(payload, dict) and payload.get("rt_cd", "") not in (
+                    "",
+                    "0",
+                ):
+                    msg_cd = str(payload.get("msg_cd", ""))
+                    msg1 = str(payload.get("msg1", text))
+            except (ValueError, TypeError):
+                pass
+            if msg_cd:
+                # retryable 우선순위 (#1338, Codex Plan Review v2):
+                # 1. PERMANENT_MSG_CODES → false 강제.
+                # 2. HTTP non-retryable (auth/client) → false 강제.
+                # 3. TRANSIENT_MSG_CODES → true.
+                # 4. 기본은 HTTP retryable.
+                if msg_cd in PERMANENT_MSG_CODES:
+                    retryable = False
+                elif not is_retryable_http_status(response.status):
+                    retryable = False
+                elif msg_cd in TRANSIENT_MSG_CODES:
+                    retryable = True
+                # else: HTTP 기준 retryable 유지
+                raise APIError(
+                    f"KIS API Error [{msg_cd}]: {msg1}",
+                    error_code=msg_cd,
+                    status_code=response.status,
+                    retryable=retryable,
+                )
             raise APIError(
                 f"HTTP {response.status}: {text}",
                 status_code=response.status,
