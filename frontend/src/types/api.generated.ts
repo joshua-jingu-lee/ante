@@ -2166,7 +2166,7 @@ export type components = {
         };
         /**
          * MemberCreateRequest
-         * @description POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Authorization 헤더가 없거나 invalid token이면 body validation 전에 401로 차단된다.
+         * @description POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         MemberCreateRequest: {
             /** @description 고유 식별자. */
