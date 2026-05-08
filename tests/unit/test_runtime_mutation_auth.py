@@ -1,0 +1,945 @@
+"""Account/Bot/Treasury mutation route 인증 가드 테스트 (issue #1352).
+
+oracle A7 시그니처에서 발견된 5개 mutation route는 인증된 master 호출자만
+사용할 수 있어야 한다.
+- ``PUT  /api/accounts/{id}``
+- ``POST /api/accounts/{id}/suspend``
+- ``POST /api/accounts/{id}/activate``
+- ``PUT  /api/bots/{id}``
+- ``POST /api/treasury/balance``
+
+각 라우트 × 인증 시나리오:
+- Authorization 헤더 + 세션 쿠키 모두 없음 → 401
+- invalid Bearer token → 401
+- invalid 세션 쿠키 → 401
+- ``session_service`` is None 배포 + Bearer 없음 → 401 (cookie fallback skip)
+- 정상 Bearer master → 200
+- 정상 ante_session master → 200 + ``request.state.member_id`` 갱신
+- 인증된 non-master → 403
+- master + 존재하지 않는 target → 404
+
+401/403 응답 시 service mutation은 호출되지 않아야 한다 (early return).
+
+#1351 ``test_member_routes_mutation_auth.py`` 패턴을 그대로 답습한다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import pytest
+
+httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from ante.account.errors import AccountNotFoundError  # noqa: E402
+from ante.web.app import create_app  # noqa: E402
+
+# ── Member / Session fakes (#1351 패턴) ──────────────────────────────────
+
+
+@dataclass
+class FakeMember:
+    member_id: str
+    type: str = "agent"
+    role: str = "default"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = field(default_factory=list)
+
+
+class FakeMemberService:
+    """테스트용 MemberService stub.
+
+    토큰 → member_id 매핑으로 ``authenticate``를 흉내낸다. ``get`` 메서드는
+    ``require_master_caller`` dependency가 호출하므로 정확한 ``Member`` 형태를
+    반환해야 한다.
+    """
+
+    def __init__(self) -> None:
+        self._members: dict[str, FakeMember] = {}
+        self._tokens: dict[str, str] = {}
+
+    def add_member(
+        self,
+        member_id: str,
+        token: str = "",
+        role: str = "default",
+        member_type: str = "agent",
+    ) -> FakeMember:
+        member = FakeMember(member_id=member_id, role=role, type=member_type)
+        self._members[member_id] = member
+        if token:
+            self._tokens[token] = member_id
+        return member
+
+    async def authenticate(self, token: str) -> FakeMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("유효하지 않은 토큰")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> FakeMember | None:
+        return self._members.get(member_id)
+
+
+class FakeSessionService:
+    def __init__(self) -> None:
+        self._sessions: dict[str, str] = {}
+        self.validate_calls: list[str] = []
+
+    def add_session(self, session_id: str, member_id: str) -> None:
+        self._sessions[session_id] = member_id
+
+    async def validate(self, session_id: str) -> dict | None:
+        self.validate_calls.append(session_id)
+        member_id = self._sessions.get(session_id)
+        if member_id is None:
+            return None
+        return {"member_id": member_id, "created_at": "2026-05-09 00:00:00"}
+
+
+# ── domain service fakes (account/bot/treasury) ─────────────────────────
+
+
+@dataclass
+class FakeAccount:
+    account_id: str = "acc-target"
+    name: str = "Target"
+    exchange: str = "TEST"
+    currency: str = "KRW"
+    timezone: str = "Asia/Seoul"
+    trading_hours_start: str = "09:00"
+    trading_hours_end: str = "15:30"
+    trading_mode: str = "VIRTUAL"
+    broker_type: str = "test"
+    broker_config: dict = field(default_factory=dict)
+    buy_commission_rate: float = 0.0
+    sell_commission_rate: float = 0.0
+    market_order_reserve_buffer_rate: float = 0.0
+    status: str = "active"
+    created_at: str = ""
+    updated_at: str = ""
+    credentials: dict = field(default_factory=dict)
+
+
+class FakeAccountService:
+    """``account_service.update / suspend / activate / get / list`` stub.
+
+    실제 도메인 객체와 호환되는 dict-like getter를 제공한다 (timezone,
+    trading_hours 같은 옵셔널 필드도 포함). 401/403 차단 시 mutation 호출이
+    발생하지 않아야 함을 검증한다.
+    """
+
+    def __init__(self) -> None:
+        self.update_calls: list[dict] = []
+        self.suspend_calls: list[dict] = []
+        self.activate_calls: list[dict] = []
+        self._accounts: dict[str, FakeAccount] = {
+            "acc-target": FakeAccount(account_id="acc-target", status="active"),
+            "acc-suspended": FakeAccount(
+                account_id="acc-suspended", status="suspended"
+            ),
+        }
+
+    async def get(self, account_id: str) -> FakeAccount:
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(account_id)
+        return account
+
+    async def list(self, status=None):  # noqa: A003 — domain API mirror
+        return list(self._accounts.values())
+
+    async def update(self, account_id: str, **fields) -> FakeAccount:
+        self.update_calls.append({"account_id": account_id, **fields})
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(account_id)
+        for key, value in fields.items():
+            setattr(account, key, value)
+        return account
+
+    async def suspend(
+        self, account_id: str, reason: str = "", suspended_by: str = ""
+    ) -> None:
+        self.suspend_calls.append(
+            {
+                "account_id": account_id,
+                "reason": reason,
+                "suspended_by": suspended_by,
+            }
+        )
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(account_id)
+        account.status = "suspended"
+
+    async def activate(self, account_id: str, activated_by: str = "") -> None:
+        self.activate_calls.append(
+            {"account_id": account_id, "activated_by": activated_by}
+        )
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(account_id)
+        account.status = "active"
+
+
+@dataclass
+class _FakeBotConfig:
+    bot_id: str
+    account_id: str = "acc-target"
+    strategy_id: str = "strat-1"
+    name: str = ""
+    interval_seconds: int = 60
+
+
+class _FakeBotInfo(dict):
+    pass
+
+
+class _FakeBot:
+    def __init__(self, bot_id: str, name: str = "") -> None:
+        self.config = _FakeBotConfig(bot_id=bot_id, name=name or bot_id)
+        self._name = name or bot_id
+
+    def get_info(self) -> dict:
+        return {
+            "bot_id": self.config.bot_id,
+            "name": self._name,
+            "status": "stopped",
+            "account_id": self.config.account_id,
+            "strategy_id": self.config.strategy_id,
+            "interval_seconds": self.config.interval_seconds,
+        }
+
+
+class FakeBotManager:
+    """``bot_manager.get_bot / update_bot`` stub."""
+
+    def __init__(self) -> None:
+        self.update_calls: list[dict] = []
+        self._bots: dict[str, _FakeBot] = {
+            "bot-target": _FakeBot("bot-target", name="Original"),
+        }
+
+    def get_bot(self, bot_id: str):
+        return self._bots.get(bot_id)
+
+    def list_bots(self):
+        return [b.get_info() for b in self._bots.values()]
+
+    async def update_bot(self, bot_id: str, **kwargs):
+        self.update_calls.append({"bot_id": bot_id, **kwargs})
+        bot = self._bots.get(bot_id)
+        if bot is None:
+            raise ValueError(f"bot not found: {bot_id}")
+        if "name" in kwargs and kwargs["name"] is not None:
+            bot._name = kwargs["name"]
+        return bot
+
+
+class FakeTreasury:
+    """``treasury.set_account_balance`` stub."""
+
+    def __init__(self) -> None:
+        self.set_balance_calls: list[float] = []
+        self._balance: float = 0.0
+        self.account_id = "acc-target"
+        self.currency = "KRW"
+
+    @property
+    def account_balance(self) -> float:
+        return self._balance
+
+    async def set_account_balance(self, balance: float) -> None:
+        self.set_balance_calls.append(balance)
+        self._balance = balance
+
+    def get_summary(self) -> dict:
+        return {"account_balance": self._balance, "total_balance": self._balance}
+
+    def get_budget(self, bot_id: str):
+        return None
+
+    def list_budgets(self):
+        return []
+
+
+# ── fixtures ────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def member_service() -> FakeMemberService:
+    svc = FakeMemberService()
+    svc.add_member("master-user", token="master-token", role="master")
+    svc.add_member("agent-01", token="agent-token", role="default")
+    return svc
+
+
+@pytest.fixture
+def session_service() -> FakeSessionService:
+    svc = FakeSessionService()
+    svc.add_session("master-session-id", member_id="master-user")
+    svc.add_session("agent-session-id", member_id="agent-01")
+    return svc
+
+
+@pytest.fixture
+def account_service() -> FakeAccountService:
+    return FakeAccountService()
+
+
+@pytest.fixture
+def bot_manager() -> FakeBotManager:
+    return FakeBotManager()
+
+
+@pytest.fixture
+def treasury() -> FakeTreasury:
+    return FakeTreasury()
+
+
+@pytest.fixture
+def client(
+    member_service: FakeMemberService,
+    session_service: FakeSessionService,
+    account_service: FakeAccountService,
+    bot_manager: FakeBotManager,
+    treasury: FakeTreasury,
+) -> TestClient:
+    app = create_app(
+        member_service=member_service,
+        session_service=session_service,
+        account_service=account_service,
+        bot_manager=bot_manager,
+        treasury=treasury,
+    )
+    return TestClient(app)
+
+
+@pytest.fixture
+def client_no_session_service(
+    member_service: FakeMemberService,
+    account_service: FakeAccountService,
+    bot_manager: FakeBotManager,
+    treasury: FakeTreasury,
+) -> TestClient:
+    """``session_service is None`` 배포 분기 시뮬레이션."""
+    app = create_app(
+        member_service=member_service,
+        account_service=account_service,
+        bot_manager=bot_manager,
+        treasury=treasury,
+    )
+    return TestClient(app)
+
+
+# ── 라우트별 호출 헬퍼 ──────────────────────────────────────────────────
+
+
+def _account_update(
+    client: TestClient, headers: dict | None = None, payload: dict | None = None
+):
+    return client.put(
+        "/api/accounts/acc-target",
+        json=payload if payload is not None else {"name": "Renamed"},
+        headers=headers or {},
+    )
+
+
+def _account_suspend(
+    client: TestClient, headers: dict | None = None, payload: dict | None = None
+):
+    return client.post(
+        "/api/accounts/acc-target/suspend",
+        json=payload if payload is not None else {"reason": "test"},
+        headers=headers or {},
+    )
+
+
+def _account_activate(client: TestClient, headers: dict | None = None, **_):
+    return client.post(
+        "/api/accounts/acc-suspended/activate",
+        headers=headers or {},
+    )
+
+
+def _bot_update(
+    client: TestClient, headers: dict | None = None, payload: dict | None = None
+):
+    return client.put(
+        "/api/bots/bot-target",
+        json=payload if payload is not None else {"name": "Renamed Bot"},
+        headers=headers or {},
+    )
+
+
+def _treasury_set_balance(
+    client: TestClient, headers: dict | None = None, payload: dict | None = None
+):
+    return client.post(
+        "/api/treasury/balance",
+        json=payload if payload is not None else {"balance": 12345.0},
+        headers=headers or {},
+    )
+
+
+MUTATION_ROUTES = [
+    ("account_update", _account_update, "account_service", "update_calls"),
+    ("account_suspend", _account_suspend, "account_service", "suspend_calls"),
+    ("account_activate", _account_activate, "account_service", "activate_calls"),
+    ("bot_update", _bot_update, "bot_manager", "update_calls"),
+    ("treasury_set_balance", _treasury_set_balance, "treasury", "set_balance_calls"),
+]
+
+
+def _service_calls(fixtures: dict, service_attr: str, calls_attr: str) -> list:
+    svc = fixtures[service_attr]
+    return getattr(svc, calls_attr)
+
+
+# ── 401: 인증 자체가 없는 케이스 ──────────────────────────────────────
+
+
+class TestNoAuth401:
+    """Authorization 헤더 + 세션 쿠키 모두 없음 → 401."""
+
+    @pytest.mark.parametrize(
+        "name,call,service_attr,calls_attr",
+        MUTATION_ROUTES,
+        ids=[r[0] for r in MUTATION_ROUTES],
+    )
+    def test_returns_401_without_any_auth(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        bot_manager: FakeBotManager,
+        treasury: FakeTreasury,
+        name: str,
+        call,
+        service_attr: str,
+        calls_attr: str,
+    ) -> None:
+        resp = call(client)
+        assert resp.status_code == 401, (
+            f"{name}: 인증 없는 호출이 401이 아님 ({resp.status_code}: {resp.text})"
+        )
+        fixtures = {
+            "account_service": account_service,
+            "bot_manager": bot_manager,
+            "treasury": treasury,
+        }
+        assert _service_calls(fixtures, service_attr, calls_attr) == [], (
+            f"{name}: 401 차단 시 service mutation이 호출되어선 안 된다"
+        )
+
+
+class TestInvalidBearerToken401:
+    """invalid Bearer token → 401, mutation 미호출."""
+
+    @pytest.mark.parametrize(
+        "name,call,service_attr,calls_attr",
+        MUTATION_ROUTES,
+        ids=[r[0] for r in MUTATION_ROUTES],
+    )
+    def test_returns_401_with_invalid_bearer(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        bot_manager: FakeBotManager,
+        treasury: FakeTreasury,
+        name: str,
+        call,
+        service_attr: str,
+        calls_attr: str,
+    ) -> None:
+        resp = call(client, headers={"Authorization": "Bearer invalid-token"})
+        assert resp.status_code == 401, (
+            f"{name}: invalid Bearer가 401이 아님 ({resp.status_code}: {resp.text})"
+        )
+        fixtures = {
+            "account_service": account_service,
+            "bot_manager": bot_manager,
+            "treasury": treasury,
+        }
+        assert _service_calls(fixtures, service_attr, calls_attr) == []
+
+
+class TestInvalidSessionCookie401:
+    """등록되지 않은 ``ante_session`` 쿠키 → 401."""
+
+    @pytest.mark.parametrize(
+        "name,call,service_attr,calls_attr",
+        MUTATION_ROUTES,
+        ids=[r[0] for r in MUTATION_ROUTES],
+    )
+    def test_returns_401_with_invalid_session_cookie(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        bot_manager: FakeBotManager,
+        treasury: FakeTreasury,
+        session_service: FakeSessionService,
+        name: str,
+        call,
+        service_attr: str,
+        calls_attr: str,
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = call(client)
+        assert resp.status_code == 401, (
+            f"{name}: invalid 세션 쿠키가 401이 아님 ({resp.status_code}: {resp.text})"
+        )
+        fixtures = {
+            "account_service": account_service,
+            "bot_manager": bot_manager,
+            "treasury": treasury,
+        }
+        assert _service_calls(fixtures, service_attr, calls_attr) == []
+        assert "unknown-session-id" in session_service.validate_calls
+        client.cookies.delete("ante_session")
+
+
+class TestSessionServiceNoneFallbackSkip:
+    """``session_service is None`` 배포 분기 + Bearer 없음 → 401."""
+
+    @pytest.mark.parametrize(
+        "name,call,service_attr,calls_attr",
+        MUTATION_ROUTES,
+        ids=[r[0] for r in MUTATION_ROUTES],
+    )
+    def test_returns_401_when_session_service_none_and_no_bearer(
+        self,
+        client_no_session_service: TestClient,
+        account_service: FakeAccountService,
+        bot_manager: FakeBotManager,
+        treasury: FakeTreasury,
+        name: str,
+        call,
+        service_attr: str,
+        calls_attr: str,
+    ) -> None:
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = call(client_no_session_service)
+        assert resp.status_code == 401, (
+            f"{name}: session_service None + 쿠키만 있으면 401이어야 함 "
+            f"({resp.status_code}: {resp.text})"
+        )
+        fixtures = {
+            "account_service": account_service,
+            "bot_manager": bot_manager,
+            "treasury": treasury,
+        }
+        assert _service_calls(fixtures, service_attr, calls_attr) == []
+        client_no_session_service.cookies.delete("ante_session")
+
+
+# ── 200: 정상 인증 케이스 ───────────────────────────────────────────────
+
+
+class TestBearerMasterSuccess:
+    """master Bearer 토큰 → 200, audit subject = master-user."""
+
+    def test_account_update_with_master_bearer_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.put(
+            "/api/accounts/acc-target",
+            json={"name": "Renamed"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["account"]["name"] == "Renamed"
+        assert account_service.update_calls[-1]["account_id"] == "acc-target"
+
+    def test_account_suspend_with_master_bearer_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": "test"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
+
+    def test_account_activate_with_master_bearer_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            "/api/accounts/acc-suspended/activate",
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.activate_calls[-1]["activated_by"] == "master-user"
+
+    def test_bot_update_with_master_bearer_succeeds(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.put(
+            "/api/bots/bot-target",
+            json={"name": "Renamed Bot"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert bot_manager.update_calls[-1]["bot_id"] == "bot-target"
+        assert bot_manager.update_calls[-1].get("name") == "Renamed Bot"
+
+    def test_treasury_set_balance_with_master_bearer_succeeds(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/balance",
+            json={"balance": 50000.0},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert treasury.set_balance_calls == [50000.0]
+
+
+class TestSessionCookieMasterSuccess:
+    """master ``ante_session`` 쿠키 → 200 + ``request.state.member_id`` 갱신.
+
+    audit subject가 caller_id(=master-user)로 기록되는지 검증한다.
+    """
+
+    def test_account_suspend_with_master_session_cookie_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": "via cookie"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
+        client.cookies.delete("ante_session")
+
+    def test_account_activate_with_master_session_cookie_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post("/api/accounts/acc-suspended/activate")
+        assert resp.status_code == 200, resp.text
+        assert account_service.activate_calls[-1]["activated_by"] == "master-user"
+        client.cookies.delete("ante_session")
+
+    def test_bot_update_with_master_session_cookie_succeeds(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.put("/api/bots/bot-target", json={"name": "C"})
+        assert resp.status_code == 200, resp.text
+        assert bot_manager.update_calls[-1]["bot_id"] == "bot-target"
+        client.cookies.delete("ante_session")
+
+    def test_treasury_set_balance_with_master_session_cookie_succeeds(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post("/api/treasury/balance", json={"balance": 100.0})
+        assert resp.status_code == 200, resp.text
+        assert treasury.set_balance_calls == [100.0]
+        client.cookies.delete("ante_session")
+
+
+# ── 403: 인증된 non-master ─────────────────────────────────────────────
+
+
+class TestNonMaster403:
+    """인증된 non-master → 403, mutation 미호출."""
+
+    @pytest.mark.parametrize(
+        "name,call,service_attr,calls_attr",
+        MUTATION_ROUTES,
+        ids=[r[0] for r in MUTATION_ROUTES],
+    )
+    def test_non_master_bearer_returns_403(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        bot_manager: FakeBotManager,
+        treasury: FakeTreasury,
+        name: str,
+        call,
+        service_attr: str,
+        calls_attr: str,
+    ) -> None:
+        resp = call(client, headers={"Authorization": "Bearer agent-token"})
+        assert resp.status_code == 403, (
+            f"{name}: non-master Bearer가 403이 아님 ({resp.status_code}: {resp.text})"
+        )
+        fixtures = {
+            "account_service": account_service,
+            "bot_manager": bot_manager,
+            "treasury": treasury,
+        }
+        assert _service_calls(fixtures, service_attr, calls_attr) == [], (
+            f"{name}: 403 차단 시 service mutation이 호출되어선 안 된다"
+        )
+
+
+# ── 404: master + missing target ───────────────────────────────────────
+
+
+class TestMasterMissingTarget404:
+    """master 인증 통과 + 존재하지 않는 target → 404."""
+
+    def test_account_update_missing_returns_404(self, client: TestClient) -> None:
+        resp = client.put(
+            "/api/accounts/no-such-account",
+            json={"name": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404
+
+    def test_account_suspend_missing_returns_404(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/accounts/no-such-account/suspend",
+            json={"reason": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404
+
+    def test_account_activate_missing_returns_404(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/accounts/no-such-account/activate",
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404
+
+    def test_bot_update_missing_returns_404(self, client: TestClient) -> None:
+        resp = client.put(
+            "/api/bots/no-such-bot",
+            json={"name": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404
+
+
+# ── raw body 패턴: 401 우선 ────────────────────────────────────────────
+
+
+class TestUpdateBotAuthFirstOverBodyValidation:
+    """``update_bot``은 ``update_scopes``와 동일하게 인증 가드가 body
+    validation보다 먼저 실행되어야 한다 (#1352).
+
+    Authorization 없음 + body invalid → 401 (NOT 422).
+    """
+
+    def test_update_bot_unauth_invalid_body_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.put(
+            "/api/bots/bot-target", json={"interval_seconds": "not-a-number"}
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert bot_manager.update_calls == []
+
+    def test_update_bot_invalid_bearer_invalid_body_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.put(
+            "/api/bots/bot-target",
+            json={"interval_seconds": "x"},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+        assert bot_manager.update_calls == []
+
+    def test_update_bot_master_invalid_body_returns_422(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        """인증 통과 + body invalid → 422 (정상 검증 경로)."""
+        resp = client.put(
+            "/api/bots/bot-target",
+            json={"interval_seconds": "not-a-number"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert bot_manager.update_calls == []
+
+    def test_update_bot_master_empty_body_returns_422(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.put(
+            "/api/bots/bot-target",
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert bot_manager.update_calls == []
+
+    def test_update_bot_master_non_json_body_returns_422(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.put(
+            "/api/bots/bot-target",
+            content=b"not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert bot_manager.update_calls == []
+
+
+class TestSetBalanceAuthFirstOverBodyValidation:
+    """``set_balance``도 raw body 패턴 + 401 우선이어야 한다."""
+
+    def test_set_balance_unauth_invalid_body_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post("/api/treasury/balance", json={"balance": "not-a-number"})
+        assert resp.status_code == 401
+        assert treasury.set_balance_calls == []
+
+    def test_set_balance_invalid_bearer_invalid_body_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/balance",
+            json={},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+        assert treasury.set_balance_calls == []
+
+    def test_set_balance_master_invalid_body_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/balance",
+            json={"balance": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert treasury.set_balance_calls == []
+
+
+# ── extra="forbid" 회귀 ────────────────────────────────────────────────
+
+
+class TestExtraForbid:
+    """``BotUpdateRequest`` / ``BalanceSetRequest`` / ``AccountSuspendRequest``는
+    ``extra="forbid"``를 강제한다.
+
+    OpenAPI ``additionalProperties: false``와 런타임 검증 동작을 일치시킨다
+    (#1351 2차 review 회귀 예방 패턴).
+    """
+
+    def test_update_bot_rejects_unknown_field_with_422(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.put(
+            "/api/bots/bot-target",
+            json={"name": "x", "unexpected": True},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert bot_manager.update_calls == []
+
+    def test_set_balance_rejects_unknown_field_with_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/balance",
+            json={"balance": 100.0, "unexpected": True},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert treasury.set_balance_calls == []
+
+    def test_suspend_rejects_unknown_field_with_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": "x", "unexpected": True},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_calls == []
+
+
+# ── OpenAPI 응답 401/403 회귀 ──────────────────────────────────────────
+
+
+class TestOpenAPIResponses401403:
+    """5개 mutation route의 OpenAPI ``responses``에 401/403 항목이 있어야 한다.
+
+    ``frontend/openapi.json`` codegen 산출물이 401/403 분기를 인식할 수 있도록
+    contract에 명시해야 한다(#1352 risk: contract-drift).
+    """
+
+    @pytest.mark.parametrize(
+        "path,method",
+        [
+            ("/api/accounts/{account_id}", "put"),
+            ("/api/accounts/{account_id}/suspend", "post"),
+            ("/api/accounts/{account_id}/activate", "post"),
+            ("/api/bots/{bot_id}", "put"),
+            ("/api/treasury/balance", "post"),
+        ],
+    )
+    def test_openapi_lists_401_response(self, path: str, method: str) -> None:
+        app = create_app()
+        schema = app.openapi()
+        operation = schema["paths"][path][method]
+        responses = operation.get("responses", {})
+        assert "401" in responses, (
+            f"{method.upper()} {path} 응답에 401 항목이 없음: "
+            f"{sorted(responses.keys())}"
+        )
+
+    @pytest.mark.parametrize(
+        "path,method",
+        [
+            ("/api/accounts/{account_id}", "put"),
+            ("/api/accounts/{account_id}/suspend", "post"),
+            ("/api/accounts/{account_id}/activate", "post"),
+            ("/api/bots/{bot_id}", "put"),
+            ("/api/treasury/balance", "post"),
+        ],
+    )
+    def test_openapi_lists_403_response(self, path: str, method: str) -> None:
+        app = create_app()
+        schema = app.openapi()
+        operation = schema["paths"][path][method]
+        responses = operation.get("responses", {})
+        assert "403" in responses, (
+            f"{method.upper()} {path} 응답에 403 항목이 없음: "
+            f"{sorted(responses.keys())}"
+        )
+
+    @pytest.mark.parametrize(
+        "schema_name",
+        ["BotUpdateRequest", "BalanceSetRequest"],
+    )
+    def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
+        """``BotUpdateRequest`` / ``BalanceSetRequest``는 raw body 패턴 적용으로
+        FastAPI 자동 등록 경로를 거치지 않으므로, ``_install_openapi_customizer``
+        가 ``components.schemas``에 명시 등록해야 frontend codegen이
+        ``export type``을 만들 수 있다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        components = schema.get("components", {}).get("schemas", {})
+        assert schema_name in components, (
+            f"components.schemas에 {schema_name}가 등록되어 있지 않음: "
+            f"{sorted(components.keys())[:30]}..."
+        )

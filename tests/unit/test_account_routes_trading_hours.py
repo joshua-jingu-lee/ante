@@ -9,6 +9,8 @@ POST 라우트 테스트는 본 모듈 비목표 — POST는 항상 cold-path 40
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -25,7 +27,49 @@ from ante.account.errors import (  # noqa: E402
     InvalidBrokerTypeError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode  # noqa: E402
+from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+
+# 인증 가드(#1352) 도입으로 PUT /api/accounts/{id}는 master Bearer 또는
+# 유효한 ante_session 쿠키가 필요하다. 회귀 본질(trading_hours 422)을 그대로
+# 검증하기 위해 client에 master 토큰을 default 헤더로 적용한다.
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
+
+
+@dataclass
+class _StubMember:
+    member_id: str
+    role: str = "default"
+    type: str = "agent"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = dc_field(default_factory=list)
+
+
+class _StubMemberService:
+    """``require_master_caller`` dependency를 만족시키기 위한 최소 stub."""
+
+    def __init__(self) -> None:
+        self._members: dict[str, _StubMember] = {
+            "master-user": _StubMember(
+                member_id="master-user", role=MemberRole.MASTER.value
+            ),
+        }
+        self._tokens: dict[str, str] = {"master-token": "master-user"}
+
+    async def authenticate(self, token: str) -> _StubMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("invalid token")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _StubMember | None:
+        return self._members.get(member_id)
 
 
 class FakeBrokerAdapter:
@@ -150,12 +194,17 @@ def app(account_service: FakeAccountService, audit_logger: FakeAuditLogger):
     return create_app(
         account_service=account_service,
         audit_logger=audit_logger,
+        member_service=_StubMemberService(),
     )
 
 
 @pytest.fixture
 def client(app) -> TestClient:
-    return TestClient(app)
+    client = TestClient(app)
+    # 인증 가드(#1352) 회귀 — 기존 trading_hours 422 본질 검증을 보존하기 위해
+    # master Bearer 토큰을 default header로 주입한다.
+    client.headers.update(_MASTER_HEADERS)
+    return client
 
 
 def _make_account(

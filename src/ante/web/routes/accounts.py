@@ -14,6 +14,7 @@ from ante.web.deps import (
     get_audit_logger_optional,
     get_config,
     get_dynamic_config,
+    require_master_caller,
 )
 from ante.web.schemas import (
     AccountActionResponse,
@@ -397,6 +398,27 @@ async def get_account(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "계좌를 찾을 수 없음",
             "content": {
@@ -461,9 +483,16 @@ async def get_account(
 async def update_account(
     account_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)] = None,
 ) -> dict[str, Any]:
     """계좌 수정.
+
+    인증된 master 호출자만 사용할 수 있다(이슈 #1352 — oracle A7). dependency
+    ``require_master_caller``가 인증/권한 검증을 담당하며, 401/403은 raw body
+    파싱과 cold-path 가드(invariant I1/I4)보다 먼저 평가된다 — Bearer 또는
+    ``ante_session`` 쿠키 어느 쪽으로도 caller가 결정되지 않으면 401, master가
+    아니면 403.
 
     런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
     ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
@@ -636,7 +665,7 @@ async def update_account(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "dashboard"),
+            member_id=caller_id,
             action="account.update",
             resource=f"account:{account_id}",
             detail=f"계좌 수정: {list(fields.keys())}",
@@ -646,24 +675,69 @@ async def update_account(
     return {"account": _account_to_response(updated)}
 
 
-@router.post("/{account_id}/suspend", response_model=AccountActionResponse)
+_AUTH_REQUIRED_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Authentication required (missing or invalid Authorization header "
+        "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+        "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+        "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+    ),
+    "content": {
+        "application/problem+json": {
+            "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+        },
+    },
+}
+
+_PERMISSION_DENIED_RESPONSE: dict[str, Any] = {
+    "description": "Permission denied (master 권한 필요)",
+    "content": {
+        "application/problem+json": {
+            "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+        },
+    },
+}
+
+
+@router.post(
+    "/{account_id}/suspend",
+    response_model=AccountActionResponse,
+    responses={
+        401: _AUTH_REQUIRED_RESPONSE,
+        403: _PERMISSION_DENIED_RESPONSE,
+        404: {
+            "description": "Account not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Account already suspended",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+)
 async def suspend_account(
     account_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     body: AccountSuspendRequest | None = None,
 ) -> dict[str, Any]:
-    """계좌 정지."""
+    """계좌 정지. 인증된 master만 호출 가능 (#1352)."""
     from ante.account.errors import AccountAlreadySuspendedError, AccountNotFoundError
 
     reason = (body.reason if body else None) or "dashboard"
-    suspended_by = getattr(request.state, "member_id", "dashboard")
 
     try:
-        await account_service.suspend(
-            account_id, reason=reason, suspended_by=suspended_by
-        )
+        await account_service.suspend(account_id, reason=reason, suspended_by=caller_id)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountAlreadySuspendedError as e:
@@ -673,7 +747,7 @@ async def suspend_account(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=suspended_by,
+            member_id=caller_id,
             action="account.suspend",
             resource=f"account:{account_id}",
             detail=f"계좌 정지: {reason}",
@@ -686,20 +760,42 @@ async def suspend_account(
     }
 
 
-@router.post("/{account_id}/activate", response_model=AccountActionResponse)
+@router.post(
+    "/{account_id}/activate",
+    response_model=AccountActionResponse,
+    responses={
+        401: _AUTH_REQUIRED_RESPONSE,
+        403: _PERMISSION_DENIED_RESPONSE,
+        404: {
+            "description": "Account not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Account deleted",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+)
 async def activate_account(
     account_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 재활성화."""
+    """계좌 재활성화. 인증된 master만 호출 가능 (#1352)."""
     from ante.account.errors import AccountDeletedError, AccountNotFoundError
 
-    activated_by = getattr(request.state, "member_id", "dashboard")
-
     try:
-        await account_service.activate(account_id, activated_by=activated_by)
+        await account_service.activate(account_id, activated_by=caller_id)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
@@ -709,7 +805,7 @@ async def activate_account(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=activated_by,
+            member_id=caller_id,
             action="account.activate",
             resource=f"account:{account_id}",
             detail="계좌 활성화",

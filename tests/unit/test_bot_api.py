@@ -2,13 +2,60 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
+
 import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+
+# 인증 가드(#1352) — PUT /api/bots/{bot_id}에 master 인증이 필요해졌다.
+# 본 모듈의 update_bot 회귀(이름/예산/strategy 등)는 인증 가드와 무관하므로
+# fixture에 master member_service를 주입하고 client에 default header를 단다.
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
+
+
+@dataclass
+class _StubMember:
+    member_id: str
+    role: str = "default"
+    type: str = "agent"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = dc_field(default_factory=list)
+
+
+class _StubMemberService:
+    def __init__(self) -> None:
+        self._members: dict[str, _StubMember] = {
+            "master-user": _StubMember(
+                member_id="master-user", role=MemberRole.MASTER.value
+            ),
+        }
+        self._tokens: dict[str, str] = {"master-token": "master-user"}
+
+    async def authenticate(self, token: str) -> _StubMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("invalid token")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _StubMember | None:
+        return self._members.get(member_id)
+
+
+def _new_member_service() -> _StubMemberService:
+    return _StubMemberService()
 
 
 class FakeBotConfig:
@@ -225,8 +272,11 @@ def client(bot_manager, default_account_service):
     app = create_app(
         bot_manager=bot_manager,
         account_service=default_account_service,
+        member_service=_new_member_service(),
     )
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update(_MASTER_HEADERS)
+    return client
 
 
 @pytest.fixture
@@ -236,8 +286,11 @@ def client_with_services(bot_manager, treasury, trade_service, default_account_s
         treasury=treasury,
         trade_service=trade_service,
         account_service=default_account_service,
+        member_service=_new_member_service(),
     )
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update(_MASTER_HEADERS)
+    return client
 
 
 class TestListBots:
@@ -866,8 +919,10 @@ class TestUpdateBot:
         app = create_app(
             bot_manager=bot_manager,
             account_service=default_account_service,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
         bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
         resp = client.put("/api/bots/bot-1", json={"budget": 2000000})
         assert resp.status_code == 422
@@ -898,8 +953,11 @@ class TestUpdateBotStrategy:
             bot_manager=bot_manager,
             strategy_registry=strategy_registry,
             account_service=default_account_service,
+            member_service=_new_member_service(),
         )
-        return TestClient(app)
+        client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
+        return client
 
     def test_update_strategy_name(
         self, client_with_registry, bot_manager, strategy_registry

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ante.web.deps import (
     get_account_service,
@@ -18,6 +19,7 @@ from ante.web.deps import (
     get_strategy_registry_optional,
     get_trade_service_optional,
     get_treasury_optional,
+    require_master_caller,
 )
 from ante.web.schemas import (
     BotDetailResponse,
@@ -634,10 +636,98 @@ async def delete_bot(
         )
 
 
+# PUT /api/bots/{bot_id} OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(이슈 #1352). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema로 두면 frontend codegen이 ``export type BotUpdateRequest``를
+# 만들지 못한다. 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고
+# 본체 schema는 ``_install_openapi_customizer``가 ``components.schemas``에
+# 등록한다(#1351 ``ScopesUpdateRequest`` SSOT 패턴).
+BOT_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "BotUpdateRequest",
+    "description": (
+        "PUT /api/bots/{bot_id} 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1352). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
+        "None/null인 필드는 변경하지 않는다."
+    ),
+    "additionalProperties": False,
+    # 모든 필드는 ``str | None = None`` Pydantic 정의와 정합하도록 nullable로
+    # 노출한다 — 기존 frontend axios 클라이언트(``frontend/src/api/bots.ts``)는
+    # 각 옵셔널 필드에 ``null`` 또는 값으로 전달하므로 nullable 누락 시 codegen
+    # 결과에서 ``null`` payload가 type error로 거부된다.
+    "properties": {
+        "name": {
+            "type": ["string", "null"],
+            "description": "사용자에게 표시되는 봇 이름.",
+        },
+        "strategy_name": {
+            "type": ["string", "null"],
+            "description": "변경할 전략 이름. 최신 버전의 strategy_id로 자동 변환된다.",
+        },
+        "interval_seconds": {
+            "type": ["integer", "null"],
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "봇 step 주기 (초).",
+        },
+        "budget": {
+            "type": ["number", "null"],
+            "exclusiveMinimum": 0,
+            "description": "예산 할당액 (원). 양수만 허용.",
+        },
+        "auto_restart": {
+            "type": ["boolean", "null"],
+            "description": "봇 자동 재시작 여부.",
+        },
+        "max_restart_attempts": {
+            "type": ["integer", "null"],
+            "description": "재시작 최대 시도 횟수.",
+        },
+        "restart_cooldown_seconds": {
+            "type": ["integer", "null"],
+            "description": "재시작 쿨다운(초).",
+        },
+        "step_timeout_seconds": {
+            "type": ["integer", "null"],
+            "description": "step 타임아웃(초).",
+        },
+        "max_signals_per_step": {
+            "type": ["integer", "null"],
+            "description": "step당 최대 signal 수.",
+        },
+    },
+}
+
+
 @router.put(
     "/{bot_id}",
     response_model=BotDetailResponse,
     responses={
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Bot not found",
             "content": {
@@ -655,7 +745,11 @@ async def delete_bot(
             },
         },
         422: {
-            "description": "Budget update failed (e.g. insufficient funds)",
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, "
+                "미지정 필드) 또는 budget update 실패. 단, 인증이 실패하면 body "
+                "validation은 실행되지 않고 401이 우선 반환된다(#1352)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -671,19 +765,65 @@ async def delete_bot(
             },
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/BotUpdateRequest"},
+                },
+            },
+        },
+    },
 )
 async def update_bot(
     bot_id: str,
-    body: BotUpdateRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 설정 수정. 중지 상태에서만 허용."""
+    """봇 설정 수정. 인증된 master만 호출 가능 (#1352). 중지 상태에서만 허용.
+
+    ``create_member`` / ``update_scopes``와 동일한 raw body 파싱 패턴을 적용해
+    인증 가드가 body validation보다 우선 실행되도록 한다(#1352 — Codex Plan
+    Review). FastAPI가 ``body: BotUpdateRequest``를 먼저 검증하면 unauth +
+    bad-body 시 401이 아닌 422가 먼저 반환되어 contract가 깨진다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``BotUpdateRequest.model_validate`` — ValidationError → 422.
+    4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
+    """
     from ante.bot.exceptions import BotError
     from ante.treasury.exceptions import TreasuryError
 
+    # 1. raw body 읽기 + JSON 파싱.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증 — 인증 통과 후에만 실행된다.
+    try:
+        body = BotUpdateRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    # 3. 봇 존재 확인.
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
@@ -692,7 +832,7 @@ async def update_bot(
     if not updates:
         return {"bot": bot.get_info()}
 
-    # strategy_name → strategy_id 변환
+    # 4. strategy_name → strategy_id 변환.
     strategy_name = updates.pop("strategy_name", None)
     if strategy_name is not None:
         if registry is None:
@@ -715,7 +855,7 @@ async def update_bot(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="bot.update",
             resource=f"bot:{bot_id}",
             detail=f"fields={list(updates.keys())}",

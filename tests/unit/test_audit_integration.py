@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,7 +12,50 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+
+# 인증 가드(#1352) — POST /api/treasury/balance에 master 인증이 필요해졌다.
+# 본 모듈은 audit 통합을 검증하므로 master 토큰을 default header로 적용한다.
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
+
+
+@dataclass
+class _StubMember:
+    member_id: str
+    role: str = "default"
+    type: str = "agent"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = dc_field(default_factory=list)
+
+
+class _StubMemberService:
+    def __init__(self) -> None:
+        self._members: dict[str, _StubMember] = {
+            "master-user": _StubMember(
+                member_id="master-user", role=MemberRole.MASTER.value
+            ),
+        }
+        self._tokens: dict[str, str] = {"master-token": "master-user"}
+
+    async def authenticate(self, token: str) -> _StubMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("invalid token")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _StubMember | None:
+        return self._members.get(member_id)
+
+
+def _new_member_service() -> _StubMemberService:
+    return _StubMemberService()
 
 
 @pytest.fixture
@@ -273,8 +318,10 @@ class TestHandlerAuditLog:
         app = create_app(
             audit_logger=audit_logger,
             treasury=treasury_mock,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
 
         resp = client.post(
             "/api/treasury/balance",

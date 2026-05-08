@@ -9,9 +9,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Annotated, Any
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 # ── 필수 의존성 ─────────────────────────────────────────
 
@@ -126,6 +129,16 @@ def get_member_service(request: Request) -> Any:
     return svc
 
 
+def get_member_service_optional(request: Request) -> Any | None:
+    """멤버 서비스 (선택적). 없으면 None.
+
+    ``require_master_caller``는 ``member_service`` 미주입 환경에서도 cold-path
+    invariant I1(예: ``test_update_blocks_when_structural_without_account_service``)
+    을 깨지 않고 401로 떨어뜨리기 위해 optional 버전을 사용한다.
+    """
+    return getattr(request.app.state, "member_service", None)
+
+
 def get_session_service(request: Request) -> Any:
     """세션 서비스 (필수)."""
     svc = getattr(request.app.state, "session_service", None)
@@ -232,3 +245,95 @@ def get_event_history_store_optional(request: Request) -> Any | None:
 def get_eventbus_optional(request: Request) -> Any | None:
     """EventBus (선택적). 없으면 None."""
     return getattr(request.app.state, "eventbus", None)
+
+
+# ── Master 인증 가드 (#1352) ───────────────────────────────────────
+
+
+_MASTER_AUTH_REQUIRED_DETAIL = (
+    "인증이 필요합니다. Authorization: Bearer <token> 헤더 또는 "
+    "유효한 ante_session 쿠키가 필요합니다."
+)
+
+_MASTER_PERMISSION_DENIED_DETAIL = "이 작업은 master 권한이 필요합니다."
+
+
+async def require_master_caller(
+    request: Request,
+    member_service: Annotated[Any | None, Depends(get_member_service_optional)],
+    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
+) -> str:
+    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고 master 권한을
+    강제하는 FastAPI dependency.
+
+    이슈 #1352: oracle A7 시그니처에서 발견된 5개 mutation route(account
+    update/suspend/activate, bot update, treasury set_balance)는 인증 없이
+    상태 변경을 허용하고 있었다. 이 dependency는 #1351 ``_resolve_caller_or_401``
+    패턴을 web layer 공통 가드로 끌어올리고, 추가로 caller가 ``MASTER`` role을
+    가지는지 검증한다.
+
+    절차:
+
+    1. ``TokenAuthMiddleware``가 채운 ``request.state.member_id``를 우선 사용
+       (Bearer 토큰 경로).
+    2. 비어 있으면 ``ante_session`` 쿠키 fallback. 단, ``session_service is
+       None`` 배포 분기에서는 fallback을 건너뛰고 caller 빈 상태를 유지 → 401.
+       ``session_service.validate`` 자체가 raise하면 401로 흡수한다.
+    3. caller가 빈 문자열이면 ``HTTPException(401)``을 raise.
+    4. ``member_service.get(caller)``로 멤버를 조회. 멤버가 None이거나
+       role이 ``MemberRole.MASTER``가 아니면 ``HTTPException(403)``.
+    5. 세션 쿠키 fallback에서 caller가 결정된 경우 ``request.state.member_id``
+       를 갱신해 ``AuditMiddleware``의 자동 감사 로그 주체와 일관성 유지.
+
+    Returns:
+        caller_id (str): 인증/권한 검증을 통과한 master member_id.
+
+    Raises:
+        HTTPException(401): 인증 누락/실패.
+        HTTPException(403): 인증은 통과했으나 master가 아님.
+    """
+    from ante.member.models import MemberRole
+
+    caller = getattr(request.state, "member_id", "") or ""
+
+    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
+    # ante_session 쿠키 fallback (#1351 SSOT 패턴).
+    if not caller and session_service is not None:
+        ante_session = request.cookies.get("ante_session")
+        if ante_session:
+            try:
+                session = await session_service.validate(ante_session)
+            except Exception:
+                logger.exception(
+                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
+                )
+                session = None
+            if session:
+                resolved = session.get("member_id", "") or ""
+                if resolved:
+                    caller = resolved
+                    # AuditMiddleware의 자동 감사 로그 주체 일관성을 위해
+                    # request.state.member_id에도 반영한다.
+                    request.state.member_id = caller
+
+    if not caller:
+        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
+
+    # ``member_service`` 미주입 분기는 본 dependency가 자체적으로 401로
+    # 떨어뜨려 cold-path invariant I1(``account_service`` 미주입에서도 409
+    # 회복)을 깨지 않는다. 정상 배포에서는 항상 주입돼 있다.
+    if member_service is None:
+        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
+
+    member = None
+    try:
+        member = await member_service.get(caller)
+    except Exception:
+        logger.exception("멤버 조회 실패 (member_id=%s)", caller)
+
+    role = getattr(member, "role", None) if member is not None else None
+    role_value = getattr(role, "value", role)
+    if member is None or role_value != MemberRole.MASTER.value:
+        raise HTTPException(status_code=403, detail=_MASTER_PERMISSION_DENIED_DETAIL)
+
+    return caller
