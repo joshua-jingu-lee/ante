@@ -57,6 +57,8 @@ Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경
 
 `PUT /api/accounts/:id` 요청 본문이 빈 dict(`{}`), 빈 body, 또는 `model_dump(exclude_none=True)` 결과가 빈 dict가 되는 페이로드(예: `{"name": null}`)는 422 Unprocessable Entity를 반환한다 (#1152). schema는 `minProperties: 1`로 표현되며, 이는 OpenAPI/runtime 계약이다 — `openapi-typescript`는 이를 TypeScript 타입 제약으로 내리지 않는다. 빈 body / 빈 dict 검사는 단계 6에서 Content-Type 415 게이트(단계 7)보다 앞서 실행되므로 비-application/json + `{}` 조합도 422로 떨어진다.
 
+Account API의 `trading_hours_start`/`trading_hours_end`는 strict `HH:MM` 24시간 형식이다 (regex `^([01]\d|2[0-3]):[0-5]\d$`, OpenAPI `pattern`으로도 노출). 초/마이크로초 포함(`09:30:00`), invalid 시간(`99:99`), 그리고 `PUT`의 빈 문자열(`""`)은 422 Unprocessable Entity로 거부된다. `POST /api/accounts`의 `AccountCreateRequest`는 `""`를 default 의미(생략 동치)로 허용하여 CLI/seed 경로의 BrokerPreset fallback과 정합을 유지하지만, 런타임 `POST` 자체는 항상 409 cold-path로 차단된다 — 실제 검증 효과는 `PUT` 경로와 schema 소비자(CLI 등)에서 발생한다 (#1334).
+
 ### 기존 엔드포인트 계좌 필터
 
 멀티 계좌 환경에서 모든 거래·잔고·봇 관련 API 응답에 계좌 컨텍스트를 포함한다.
