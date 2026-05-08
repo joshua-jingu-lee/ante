@@ -166,6 +166,10 @@
                     "type": "number",
                     "default": 0,
                     "description": "매도 수수료율, 세금 포함 (cold-path 전용)."
+                  },
+                  "market_order_reserve_buffer_rate": {
+                    "type": "number",
+                    "description": "시장가 매수 reserve buffer 비율 (cold-path 전용, #1333). omit 시 BrokerPreset 기본값을 사용한다 (예: kis-domestic=0.005, test=0)."
                   }
                 }
               }
@@ -4989,6 +4993,11 @@
           "sell_commission_rate": {
             "type": "number",
             "title": "Sell Commission Rate"
+          },
+          "market_order_reserve_buffer_rate": {
+            "type": "number",
+            "title": "Market Order Reserve Buffer Rate",
+            "default": 0.0
           },
           "status": {
             "type": "string",
