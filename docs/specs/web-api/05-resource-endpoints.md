@@ -34,7 +34,7 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/bots` | 봇 목록 (cursor 페이지네이션, 필터: account_id, limit, cursor). 응답에 `strategy_name` 포함 — StrategyRegistry 조인 |
-| POST | `/api/bots` | 봇 생성. Body: bot_id, strategy_id, name, bot_type, interval_seconds. 계좌 정지 상태이면 409 Conflict |
+| POST | `/api/bots` | 봇 생성. Body: bot_id, strategy_id, name, bot_type, interval_seconds, budget?. 계좌 정지 상태이면 409 Conflict. **budget 처리 (#1335):** budget 포함 시 봇 생성 후 Treasury 배정을 시도한다. 배정이 `TreasuryError`(insufficient funds, treasury not configured for account 등)로 실패하면 422를 반환하고 신규 봇은 `delete_bot(handle_positions="keep")`로 best-effort 롤백된다. 롤백 자체가 실패하면 500과 함께 `budget allocation failed: ... rollback also failed; bot {bot_id} may be in partial state. Check bot status and treasury manually.` detail이 노출된다. 비-`TreasuryError`는 422로 매핑하지 않고 propagate한다 (bot create + budget 배정은 atomic transaction이 아닌 best-effort 롤백 정책). |
 | GET | `/api/bots/{bot_id}` | 봇 상세 조회 (전략/예산/포지션 포함) |
 | POST | `/api/bots/{bot_id}/start` | 봇 시작 |
 | POST | `/api/bots/{bot_id}/stop` | 봇 중지 |

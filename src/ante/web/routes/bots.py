@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -23,6 +24,8 @@ from ante.web.schemas import (
     BotListResponse,
     BotUpdateRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -136,7 +139,25 @@ async def list_bots(
             },
         },
         422: {
-            "description": "strategy_id/strategy_name both missing or budget error",
+            "description": (
+                "strategy_id/strategy_name both missing, or budget allocation"
+                " failed (Treasury error: insufficient funds, treasury not"
+                " configured for account, etc.). On budget failure the newly"
+                " created bot is rolled back via delete_bot(handle_positions="
+                "'keep')."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        500: {
+            "description": (
+                "Internal error (e.g. budget allocation failed AND rollback"
+                " also failed; bot may be left in partial state — manual"
+                " inspection of bot status and treasury required)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -261,11 +282,51 @@ async def create_bot(
         raise HTTPException(status_code=409, detail=str(e)) from e
 
     # budget이 지정된 경우 예산 배정 ────────────────────────
+    # Refs #1335: 과거에는 ``except Exception: pass`` 로 모든 실패를 삼켜
+    # client 가 예산 배정 실패를 감지할 수 없었다. 이제 ``TreasuryError``
+    # 는 422 로 매핑하고, 신규 봇은 best-effort 롤백한다. 비-TreasuryError
+    # (예: BotNotFoundError) 는 매핑하지 않고 propagate 시켜 기존 거동을
+    # 유지한다 (대부분 500 으로 표면화).
     if body.budget is not None:
+        from ante.treasury.exceptions import TreasuryError
+
         try:
             await bot_manager.update_bot(body.bot_id, budget=body.budget)
-        except Exception:
-            pass  # 봇은 이미 생성됨, budget 배정 실패는 무시 (이후 수정 가능)
+        except TreasuryError as e:
+            # 롤백 try/except 는 별도 블록으로 분리한다. 같은 try 안에서
+            # 422 HTTPException 을 raise 하면 외부 ``except Exception``
+            # 에 잡혀 500 으로 오분류될 수 있기 때문이다.
+            rollback_failed = False
+            try:
+                # Refs #1335 P2: ``hard=True`` — soft delete 만 수행하면
+                # ``status='deleted'`` row 가 남아 같은 ``bot_id`` 재시도
+                # 시 ``_save_bot_config()`` UPSERT 가 status 를 복구하지
+                # 않으므로, 재시도가 ``201`` 을 반환해도 봇은 메모리에만
+                # 존재하고 재시작 후 ``load_from_db()`` 에서 제외된다.
+                # 생성 실패 rollback 경로에서는 row 자체를 제거해
+                # 재시도 의미를 보존한다.
+                await bot_manager.delete_bot(
+                    body.bot_id, handle_positions="keep", hard=True
+                )
+            except Exception as rollback_error:
+                rollback_failed = True
+                logger.exception(
+                    "budget 배정 실패 후 봇 롤백도 실패: %s — 부분 생성 상태 유지",
+                    body.bot_id,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"budget allocation failed: {e}. "
+                        f"rollback also failed; bot {body.bot_id} may be in "
+                        "partial state. Check bot status and treasury manually."
+                    ),
+                ) from rollback_error
+            # rollback 성공: 원 422 에러를 client 에 전달한다.
+            # (rollback_failed 는 type checker 를 위한 가드 -- 위 raise 후
+            # 도달하지 않지만 명시한다.)
+            if not rollback_failed:
+                raise HTTPException(status_code=422, detail=str(e)) from e
 
     if audit_logger:
         await audit_logger.log(

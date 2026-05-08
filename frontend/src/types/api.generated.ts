@@ -4123,8 +4123,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description strategy_id/strategy_name both missing or budget error */
+            /** @description strategy_id/strategy_name both missing, or budget allocation failed (Treasury error: insufficient funds, treasury not configured for account, etc.). On budget failure the newly created bot is rolled back via delete_bot(handle_positions='keep'). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error (e.g. budget allocation failed AND rollback also failed; bot may be left in partial state — manual inspection of bot status and treasury required). */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
