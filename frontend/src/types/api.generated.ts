@@ -652,6 +652,28 @@ export type paths = {
         /**
          * Create Member
          * @description 멤버 등록. 토큰 1회 반환.
+         *
+         *     인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2 — Codex
+         *     finding). FastAPI가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면
+         *     Authorization 헤더 미존재 + 필수 필드 누락 케이스에서 401이 아니라 422가
+         *     먼저 응답되어 "missing or invalid Authorization header는 401" 계약이 깨진다.
+         *     이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
+         *     (``update_account`` SSOT 패턴 일치).
+         *
+         *     인증 경로는 두 가지를 모두 받는다(#1339 P1 — Codex finding):
+         *     - **Bearer 토큰**: ``TokenAuthMiddleware``가 ``request.state.member_id``를
+         *       세팅한다. 에이전트 클라이언트(`MCP`, CLI 등)와 ``frontend`` axios의
+         *       ``Authorization`` 헤더 호출이 이 경로를 탄다.
+         *     - **세션 쿠키**: 대시보드는 패스워드 로그인 후 ``ante_session`` HttpOnly
+         *       쿠키만 가진 상태로 axios에 ``Authorization`` 헤더를 추가하지 않는다.
+         *       ``session_service.validate``로 세션 → ``member_id``를 복원한다.
+         *
+         *     핸들러 단계 순서:
+         *     1. **인증 가드 (최우선)**: token 또는 세션 쿠키 어느 쪽도 caller를 결정
+         *        하지 못하면 401.
+         *     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
+         *     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
+         *     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
          */
         post: operations["create_member_api_members_post"];
         delete?: never;
@@ -2144,30 +2166,33 @@ export type components = {
         };
         /**
          * MemberCreateRequest
-         * @description 멤버 등록 요청.
+         * @description POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         MemberCreateRequest: {
-            /** Member Id */
+            /** @description 고유 식별자. */
             member_id: string;
-            /** Member Type */
-            member_type: string;
             /**
-             * Name
+             * @description 멤버 타입.
+             * @enum {string}
+             */
+            member_type: "human" | "agent";
+            /**
+             * @description 사용자에게 표시되는 이름.
              * @default
              */
             name: string;
             /**
-             * Org
+             * @description 소속 조직.
              * @default default
              */
             org: string;
             /**
-             * Role
+             * @description 역할 (default / master).
              * @default default
              */
             role: string;
             /**
-             * Scopes
+             * @description 권한 범위 목록.
              * @default []
              */
             scopes: string[];
@@ -4845,6 +4870,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Permission denied */
             403: {
                 headers: {
@@ -4854,13 +4888,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, Authorization 헤더와 ante_session 쿠키 모두 유효하지 않으면 body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2 / P1 cookie auth). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Member service not available */

@@ -205,6 +205,17 @@ def get_audit_logger_optional(request: Request) -> Any | None:
     return getattr(request.app.state, "audit_logger", None)
 
 
+def get_session_service_optional(request: Request) -> Any | None:
+    """세션 서비스 (선택적). 없으면 None.
+
+    ``POST /api/members`` 같은 라우트는 Bearer 토큰 인증을 1순위로 쓰고,
+    세션 쿠키 인증은 fallback이므로 session_service가 부재한 환경에서도
+    503으로 실패해서는 안 된다(#1339 P1). 일반 인증 라우트(``/api/auth/*``)
+    는 그대로 ``get_session_service`` (필수)를 사용한다.
+    """
+    return getattr(request.app.state, "session_service", None)
+
+
 def get_event_history_store(request: Request) -> Any:
     """이벤트 히스토리 저장소 (필수)."""
     svc = getattr(request.app.state, "event_history_store", None)
