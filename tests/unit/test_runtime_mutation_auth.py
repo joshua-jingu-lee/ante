@@ -861,6 +861,65 @@ class TestSuspendAccountAuthFirstOverBodyValidation:
         assert account_service.suspend_calls[-1]["reason"] == "dashboard"
         assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
 
+    def test_suspend_master_null_body_returns_200_with_default_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + JSON ``null`` → 200, default reason (#1352 3차 fix).
+
+        이전 ``body: AccountSuspendRequest | None = Body(None)`` 계약에서는
+        ``null`` body 가 ``body is None`` 과 동등하게 default reason 으로
+        흘러갔다. raw body 패턴 도입 후에도 이 호환성을 유지해야 한다.
+        """
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            content=b"null",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_calls[-1]["reason"] == "dashboard"
+        assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
+
+    def test_suspend_master_empty_object_body_returns_200_with_default_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + ``{}`` → 200, default reason."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_calls[-1]["reason"] == "dashboard"
+        assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
+
+    def test_suspend_master_with_reason_returns_200_and_propagates_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + ``{"reason": "X"}`` → 200, reason 그대로 전달."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": "manual override"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_calls[-1]["reason"] == "manual override"
+        assert account_service.suspend_calls[-1]["suspended_by"] == "master-user"
+
+    def test_suspend_master_reason_with_extra_key_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + reason + extra key → 422 (``extra="forbid"`` 유지)."""
+        resp = client.post(
+            "/api/accounts/acc-target/suspend",
+            json={"reason": "X", "extra": "Y"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_calls == []
+
     def test_suspend_master_malformed_json_returns_422(
         self, client: TestClient, account_service: FakeAccountService
     ) -> None:

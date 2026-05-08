@@ -796,9 +796,12 @@ async def suspend_account(
     2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
        (기존 의미 보존).
     3. JSON 파싱 실패 → 422.
-    4. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
+    4. JSON ``null`` (``payload is None``) → 빈 body와 동일하게 default
+       reason 경로로 흘려보낸다 (이전 ``Optional[Body(...)]`` 계약 호환,
+       #1352 Codex review 3차).
+    5. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
        포함) → 422.
-    5. service 호출.
+    6. service 호출.
     """
     from ante.account.errors import AccountAlreadySuspendedError, AccountNotFoundError
 
@@ -814,15 +817,20 @@ async def suspend_account(
             raise HTTPException(
                 status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
             ) from None
-        if not isinstance(payload, dict):
+        if payload is None:
+            # JSON ``null`` 은 nullable contract 시절 ``body is None`` 과
+            # 동일한 의미였다 — default reason 으로 흘려보낸다.
+            body = None
+        elif not isinstance(payload, dict):
             raise HTTPException(
                 status_code=422, detail="요청 body는 JSON object여야 합니다."
             )
-        # 2. Pydantic 검증 — 인증 통과 후에만 실행된다.
-        try:
-            body = AccountSuspendRequest.model_validate(payload)
-        except ValidationError as e:
-            raise HTTPException(status_code=422, detail=e.errors()) from None
+        else:
+            # 2. Pydantic 검증 — 인증 통과 후에만 실행된다.
+            try:
+                body = AccountSuspendRequest.model_validate(payload)
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=e.errors()) from None
 
     reason = (body.reason if body else None) or "dashboard"
 
