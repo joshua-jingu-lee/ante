@@ -239,6 +239,22 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 
 **발행 이벤트**: `StopOrderRegisteredEvent`, `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`. 트리거 시 변환된 `OrderRequestEvent`를 발행하여 기존 주문 흐름에 주입.
 
+### StopOrderManager — 자금 처리 정책 (#1337)
+
+매수 stop / stop_limit 주문의 자금 처리는 한국 증권사 예약주문 표준과 일치한다. 본 정책은 GitHub 이슈 #1337 사용자 승인(2026-05-08) 결정에 따른다.
+
+| 단계 | Treasury 호출 | 동작 |
+|------|---------------|------|
+| 등록 (`OrderApprovedEvent` 수신 → `StopOrderManager.register`) | **없음** | Treasury는 매수 stop/stop_limit `OrderValidatedEvent`에서 자금 잠금 없이 `OrderApprovedEvent(reserved_amount=0.0)`를 즉시 발행한다. StopOrderManager는 가격 조건만 등록한다. |
+| 트리거 (`stop_price` 도달 → 변환된 `OrderRequestEvent` 발행) | **있음** | 변환된 일반 매수 주문(market/limit)이 일반 RuleEngine → Treasury 경로를 그대로 탄다. 그때 처음 `reserve_for_order(...)`가 호출되며, 자금 부족이면 일반 매수 주문 실패와 동일하게 `OrderRejectedEvent`로 거부된다. |
+| 취소 / 만료 (`StopOrderManager.cancel` / `check_session_expiry`) | **없음** | 등록 시점에 자금을 잠그지 않았으므로 별도 자금 해제 불필요. StopOrderManager는 stop 주문 목록에서 항목 제거만 수행한다. |
+
+**Invariant**:
+
+- 트리거 변환 이벤트는 일반 `OrderRequestEvent`와 구분되지 않는다. RuleEngine과 Treasury는 변환 주문을 stop이 아닌 일반 주문으로 인식해 한 번만 reserve를 수행한다 (double reserve 방지).
+- StopOrderManager는 Treasury를 직접 호출하지 않는다. 자금 처리는 항상 변환 주문의 일반 흐름을 통해 일어난다.
+- 매도 stop은 자금 reserve와 무관하므로 본 정책 영향 밖이다 (매도 reserve invariant 자체가 별도).
+
 ## 실시간 시세 연동 (stream_integration)
 
 > 소스: [`src/ante/gateway/stream_integration.py`](../../../src/ante/gateway/stream_integration.py)
