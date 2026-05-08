@@ -475,6 +475,7 @@ class AccountService:
             "broker_config",
             "buy_commission_rate",
             "sell_commission_rate",
+            "market_order_reserve_buffer_rate",
         }
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
