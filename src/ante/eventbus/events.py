@@ -583,8 +583,19 @@ class OrderCancelFailedEvent(Event):
 
 @dataclass(frozen=True)
 class StopOrderRegisteredEvent(Event):
-    """StopOrderManager → EventBus: 스탑 주문 등록."""
+    """StopOrderManager → EventBus: 스탑 주문 등록.
 
+    Refs #1336: 본 이벤트는 ``BotManager`` / ``Bot.on_order_update`` /
+    ``SignalChannel._on_order_update`` 가 구독하여 전략 ``on_order_update``
+    콜백 ``status="stop_registered"`` 로 변환한다. 다른 account-scoped
+    주문 이벤트와 같은 컨벤션으로 ``account_id`` 를 첫 데이터 필드로
+    배치하고, ``_requires_account_id`` 마커로 invalid fallback (``""``,
+    ``"default"``, 형식 위반) 을 ``Event.__post_init__`` 에서 차단한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     stop_order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -598,8 +609,18 @@ class StopOrderRegisteredEvent(Event):
 
 @dataclass(frozen=True)
 class StopOrderTriggeredEvent(Event):
-    """StopOrderManager → EventBus: 스탑 주문 트리거."""
+    """StopOrderManager → EventBus: 스탑 주문 트리거.
 
+    Refs #1336: 변환된 일반 주문(``OrderRequestEvent``)이 자체 라이프사이클
+    이벤트를 발행하지만, stop_order_id 등 stop 식별 단위가 다르므로 본
+    이벤트를 별도로 발행하여 전략 ``on_order_update``
+    (``status="stop_triggered"``) 로 통보한다. ``account_id`` 는 다른
+    account-scoped 이벤트와 동일하게 ``__post_init__`` 에서 검증된다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     stop_order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
@@ -612,8 +633,26 @@ class StopOrderTriggeredEvent(Event):
 
 @dataclass(frozen=True)
 class StopOrderExpiredEvent(Event):
-    """StopOrderManager → EventBus: 스탑 주문 만료 (세션 종료)."""
+    """StopOrderManager → EventBus: 스탑 주문 만료.
 
+    Refs #1336: 등록된 stop 주문이 트리거되지 않은 채 자동 해제될 때
+    발행된다. ``reason`` 허용 값 (현재 코드 기준):
+
+    - ``"session_ended"``: ``check_session_expiry()`` 가 거래 세션 종료를
+      감지하고 미트리거 주문을 만료시킬 때.
+    - ``"manager_stopped"``: ``StopOrderManager.stop()`` 이 매니저를
+      중지시키며 활성 주문을 일괄 만료시킬 때.
+
+    추후 ``manual_cancel`` 등 다른 reason 도입은 별도 이슈로 분리한다
+    (현재 ``cancel()`` 은 expired event 를 발행하지 않음).
+
+    ``account_id`` 는 다른 account-scoped 이벤트와 동일하게
+    ``__post_init__`` 에서 검증된다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     stop_order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""

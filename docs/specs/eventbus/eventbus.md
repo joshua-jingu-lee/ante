@@ -346,9 +346,27 @@ Bot.on_signal()
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `StopOrderRegisteredEvent` | StopOrderManager | — | `stop_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `order_type`, `stop_price`, `limit_price?` |
-| `StopOrderTriggeredEvent` | StopOrderManager | — | `stop_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `trigger_price`, `converted_order_type` |
-| `StopOrderExpiredEvent` | StopOrderManager | — | `stop_order_id`, `bot_id`, `strategy_id`, `symbol`, `reason` |
+| `StopOrderRegisteredEvent` | StopOrderManager | Bot, SignalChannel | `account_id`, `stop_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `order_type`, `stop_price`, `limit_price?` |
+| `StopOrderTriggeredEvent` | StopOrderManager | Bot, SignalChannel | `account_id`, `stop_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `trigger_price`, `converted_order_type` |
+| `StopOrderExpiredEvent` | StopOrderManager | Bot, SignalChannel | `account_id`, `stop_order_id`, `bot_id`, `strategy_id`, `symbol`, `reason` |
+
+> #1336: 위 세 이벤트는 모두 `_requires_account_id: ClassVar[bool] = True`
+> 마커를 갖는 account-scoped 이벤트로, `account_id` 가 첫 데이터 필드이며
+> `Event.__post_init__` 이 invalid fallback (`""`, `"default"`, 형식 위반)
+> 을 거부한다. `BotManager` 가 본 이벤트들을 `Bot.on_order_update` 에
+> 구독하여 전략 콜백 (`status="stop_registered" | "stop_triggered" |
+> "stop_expired"`) 으로 변환하고, `SignalChannel` 도 외부 채널에 동일한
+> `{type:"order_update", ...}` 메시지로 전달한다.
+>
+> `StopOrderExpiredEvent.reason` 허용 값 (현재 코드 기준):
+>
+> - `"session_ended"`: `check_session_expiry()` 가 거래 세션 종료를 감지하고
+>   미트리거 주문을 만료시킬 때.
+> - `"manager_stopped"`: `StopOrderManager.stop()` 이 매니저를 중지시키며
+>   활성 주문을 일괄 만료시킬 때.
+>
+> 추후 `"manual_cancel"` 등 다른 reason 도입은 별도 이슈로 분리한다 (현재
+> `cancel()` 은 expired event 를 발행하지 않음).
 
 #### 실시간 스트림 (Stream)
 
