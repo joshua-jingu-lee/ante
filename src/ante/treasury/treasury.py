@@ -689,6 +689,30 @@ class Treasury:
             # Decimal 정밀도로 reserve 산정. ``OrderApprovedEvent.reserved_amount``
             # 와 Treasury budget 의 float 경계에서만 ``float`` 로 변환한다 — 기존
             # commission/budget float 계약과 일관됨.
+            #
+            # NaN/Inf/non-positive quote 는 ``Decimal(str(quote))`` 가 예외를 내지
+            # 않으므로 명시 거부 (#1333 P2 — Codex 브랜치 리뷰).
+            if not (
+                isinstance(quote, int | float) and math.isfinite(quote) and quote > 0
+            ):
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=(
+                            f"market_buy_quote_unavailable: "
+                            f"non-finite or non-positive quote {quote!r}"
+                        ),
+                    )
+                )
+                return
             try:
                 quote_d = Decimal(str(quote))
             except Exception as exc:
