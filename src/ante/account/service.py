@@ -56,12 +56,28 @@ CREATE TABLE IF NOT EXISTS accounts (
     broker_config TEXT NOT NULL DEFAULT '{}',
     buy_commission_rate  REAL NOT NULL DEFAULT 0,
     sell_commission_rate REAL NOT NULL DEFAULT 0,
+    market_order_reserve_buffer_rate REAL NOT NULL DEFAULT 0.005,
     status       TEXT NOT NULL DEFAULT 'active'
         CHECK(status IN ('active', 'suspended', 'deleted')),
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
+
+# Migration: legacy 데이터베이스에 ``market_order_reserve_buffer_rate`` 컬럼을
+# 추가한다. 한 번 ALTER한 뒤 broker_type별 backfill을 수행한다 (#1333).
+# DDL의 default(0.005)는 신규 column 추가 시 모든 row에 적용되며, ``test``
+# broker의 결정적 거동을 위해 backfill로 0으로 정정한다. ``kis-overseas``는
+# 1.0 BROKER_REGISTRY가 지원하지 않지만 legacy row가 있을 가능성에 대비해
+# default 0.005를 유지한다.
+_ACCOUNTS_BUFFER_MIGRATION = (
+    "ALTER TABLE accounts "
+    "ADD COLUMN market_order_reserve_buffer_rate REAL NOT NULL DEFAULT 0.005;"
+)
+_ACCOUNTS_BUFFER_BACKFILL_TEST = (
+    "UPDATE accounts SET market_order_reserve_buffer_rate = 0 "
+    "WHERE broker_type = 'test';"
+)
 
 
 def _register_brokers() -> None:
@@ -81,11 +97,12 @@ def _register_brokers() -> None:
 
 # Cold-path 전용 필드 (서버 실행 중에는 변경 불가).
 # SSOT:
-#   - docs/specs/account/04-account-service.md 51-58줄
-#   - src/ante/web/routes/accounts.py STRUCTURAL_FIELDS (8개 라우트 1차 가드)
+#   - docs/specs/account/04-account-service.md (9개 cold-path 필드)
+#   - src/ante/web/routes/accounts.py STRUCTURAL_FIELDS (라우트 1차 가드)
 #
-# - credentials, broker_config, buy_commission_rate, sell_commission_rate:
-#   broker adapter 재초기화가 필요한 필드.
+# - credentials, broker_config, buy_commission_rate, sell_commission_rate,
+#   market_order_reserve_buffer_rate:
+#   broker adapter / Treasury reserve 정책에 영향을 주는 필드.
 # - exchange, currency, trading_mode, broker_type:
 #   계좌 생성 후 불변 필드 (구조 변경 시 모든 소비자 재구성 필요).
 #
@@ -97,6 +114,7 @@ STRUCTURAL_FIELDS: frozenset[str] = frozenset(
         "broker_config",
         "buy_commission_rate",
         "sell_commission_rate",
+        "market_order_reserve_buffer_rate",
         "broker_type",
         "exchange",
         "currency",
@@ -136,6 +154,32 @@ class AccountService:
     async def initialize(self) -> None:
         """스키마 생성 + DB에서 계좌 목록 로드."""
         await self._db.execute_script(_CREATE_TABLE_SQL)
+        # Migration: legacy DB에 ``market_order_reserve_buffer_rate``가 없으면
+        # 추가하고 broker_type별 backfill을 적용한다 (#1333). 신규 DB는
+        # ``CREATE TABLE``에서 default 값으로 컬럼이 만들어지므로 ALTER가
+        # ``OperationalError(duplicate column name)``로 실패한다.
+        # backfill은 **ALTER가 실제로 성공한 1회성 마이그레이션 경로에서만**
+        # 실행한다. 이미 컬럼이 있는 경우 backfill을 다시 돌리면 운영자가
+        # CLI로 직접 지정한 ``test`` 계좌의 buffer 값을 0으로 덮어쓰는
+        # idempotency 위반이 된다 — Plan v4의 backfill 정책은 첫 마이그레이션
+        # 시점만을 의미한다.
+        migrated = False
+        try:
+            await self._db.execute_script(_ACCOUNTS_BUFFER_MIGRATION)
+            migrated = True
+        except Exception:
+            # 이미 컬럼이 존재 → 1회성 마이그레이션 완료 상태.
+            pass
+        if migrated:
+            try:
+                await self._db.execute(_ACCOUNTS_BUFFER_BACKFILL_TEST)
+            except Exception:
+                # backfill 실패는 운영을 막지 않는다 (테이블이 비어 있거나 권한
+                # 이슈 등의 환경 차이). DDL default(0.005)가 신규 row 안전망.
+                logger.debug(
+                    "market_order_reserve_buffer_rate backfill 무시.",
+                    exc_info=True,
+                )
         rows = await self._db.fetch_all(
             "SELECT * FROM accounts WHERE status != ?",
             (AccountStatus.DELETED,),
@@ -304,8 +348,9 @@ class AccountService:
                 trading_hours_start, trading_hours_end, trading_mode,
                 broker_type, credentials, broker_config,
                 buy_commission_rate, sell_commission_rate,
+                market_order_reserve_buffer_rate,
                 status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 account.account_id,
                 account.name,
@@ -320,6 +365,7 @@ class AccountService:
                 json.dumps(account.broker_config),
                 float(account.buy_commission_rate),
                 float(account.sell_commission_rate),
+                float(account.market_order_reserve_buffer_rate),
                 account.status.value,
                 now.isoformat(),
                 now.isoformat(),
@@ -429,6 +475,7 @@ class AccountService:
             "broker_config",
             "buy_commission_rate",
             "sell_commission_rate",
+            "market_order_reserve_buffer_rate",
         }
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
@@ -454,6 +501,7 @@ class AccountService:
                trading_hours_start=?, trading_hours_end=?, trading_mode=?,
                broker_type=?, credentials=?, broker_config=?,
                buy_commission_rate=?, sell_commission_rate=?,
+               market_order_reserve_buffer_rate=?,
                updated_at=?
                WHERE account_id=?""",
             (
@@ -469,6 +517,7 @@ class AccountService:
                 json.dumps(account.broker_config),
                 float(account.buy_commission_rate),
                 float(account.sell_commission_rate),
+                float(account.market_order_reserve_buffer_rate),
                 now.isoformat(),
                 account_id,
             ),
@@ -868,6 +917,7 @@ class AccountService:
             credentials={k: "test" for k in preset.required_credentials},
             buy_commission_rate=preset.buy_commission_rate,
             sell_commission_rate=preset.sell_commission_rate,
+            market_order_reserve_buffer_rate=preset.market_order_reserve_buffer_rate,
         )
         return await self._create_seed_account(account)
 
@@ -890,6 +940,13 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         else (broker_config_raw or {})
     )
 
+    # legacy DB는 ``market_order_reserve_buffer_rate`` 컬럼이 없을 수 있다.
+    # ``initialize()``의 ALTER + backfill이 정상 경로지만, 마이그레이션 직전
+    # ``_row_to_account``를 통해 fetch하는 환경(예: 단위 테스트의 짧은
+    # in-memory DB lifecycle)에서도 안전하게 fallback한다.
+    buffer_raw = row.get("market_order_reserve_buffer_rate", "0")
+    buffer_value = Decimal("0") if buffer_raw is None else Decimal(str(buffer_raw))
+
     return Account(
         account_id=row["account_id"],
         name=row["name"],
@@ -904,6 +961,7 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         broker_config=broker_config,
         buy_commission_rate=Decimal(str(row["buy_commission_rate"])),
         sell_commission_rate=Decimal(str(row["sell_commission_rate"])),
+        market_order_reserve_buffer_rate=buffer_value,
         status=AccountStatus(row["status"]),
         created_at=datetime.fromisoformat(row["created_at"])
         if row.get("created_at")

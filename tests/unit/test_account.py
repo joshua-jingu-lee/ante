@@ -1130,6 +1130,8 @@ def test_broker_preset_test_values():
     assert preset.currency == "KRW"
     assert preset.buy_commission_rate == Decimal("0")
     assert preset.sell_commission_rate == Decimal("0")
+    # #1333: market buy reserve buffer 기본값. test는 결정적 거동을 위해 0.
+    assert preset.market_order_reserve_buffer_rate == Decimal("0")
     assert preset.required_credentials == ["app_key", "app_secret"]
 
 
@@ -1140,4 +1142,66 @@ def test_broker_preset_kis_domestic_values():
     assert preset.currency == "KRW"
     assert preset.buy_commission_rate == Decimal("0.00015")
     assert preset.sell_commission_rate == Decimal("0.00195")
+    # #1333: market buy reserve buffer 기본값 0.5%.
+    assert preset.market_order_reserve_buffer_rate == Decimal("0.005")
     assert "app_key" in preset.required_credentials
+
+
+# ── #1333: market_order_reserve_buffer_rate ──────────────
+
+
+@pytest.mark.asyncio
+async def test_market_order_reserve_buffer_rate_db_roundtrip(service):
+    """Account 의 market_order_reserve_buffer_rate 가 DB 왕복에서 Decimal 정밀도로
+    보존된다 (#1333).
+    """
+    account = _make_account(
+        "buffer-roundtrip",
+        market_order_reserve_buffer_rate=Decimal("0.0075"),
+    )
+    await service.create(account)
+
+    # 캐시 우회: 신규 service 인스턴스로 DB에서 다시 로드.
+    svc2 = AccountService(service._db, service._eventbus)
+    await svc2.initialize()
+    loaded = await svc2.get("buffer-roundtrip")
+
+    assert loaded.market_order_reserve_buffer_rate == Decimal("0.0075")
+    assert isinstance(loaded.market_order_reserve_buffer_rate, Decimal)
+
+
+@pytest.mark.asyncio
+async def test_market_order_reserve_buffer_rate_default_zero(service):
+    """Account dataclass default 는 Decimal('0') (#1333)."""
+    a = _make_account("buffer-default")
+    assert a.market_order_reserve_buffer_rate == Decimal("0")
+
+
+@pytest.mark.asyncio
+async def test_market_order_reserve_buffer_rate_blocked_at_runtime_update(
+    service,
+) -> None:
+    """런타임에서 ``market_order_reserve_buffer_rate`` 변경 시도는 cold-path
+    409 (``AccountStructuralChangeRequiresStoppedServerError``)로 차단된다 (#1333).
+    """
+    from ante.account.errors import (
+        AccountStructuralChangeRequiresStoppedServerError,
+    )
+
+    await service.create(_make_account("buffer-cold-path"))
+    service.mark_runtime_started()
+
+    with pytest.raises(AccountStructuralChangeRequiresStoppedServerError):
+        await service.update(
+            "buffer-cold-path",
+            market_order_reserve_buffer_rate=Decimal("0.01"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_default_test_account_uses_preset_buffer(service) -> None:
+    """``create_default_test_account`` 가 BrokerPreset 의 buffer(0)를 그대로
+    Account 에 반영한다 (#1333).
+    """
+    acct = await service.create_default_test_account()
+    assert acct.market_order_reserve_buffer_rate == Decimal("0")

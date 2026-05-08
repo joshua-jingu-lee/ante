@@ -32,16 +32,18 @@ router = APIRouter()
 
 
 # Cold-path 전용 필드: 서버 실행 중에는 변경할 수 없다.
-# 출처: docs/specs/account/04-account-service.md 51-58줄.
-# - credentials, broker_config, buy_commission_rate, sell_commission_rate:
-#   broker adapter 재초기화가 필요한 필드
+# 출처: docs/specs/account/04-account-service.md.
+# - credentials, broker_config, buy_commission_rate, sell_commission_rate,
+#   market_order_reserve_buffer_rate:
+#   broker adapter / Treasury reserve 정책에 영향을 주는 필드.
 # - exchange, currency, trading_mode, broker_type:
-#   계좌 생성 후 불변 필드 (구조 변경 시 모든 소비자 재구성 필요)
+#   계좌 생성 후 불변 필드 (구조 변경 시 모든 소비자 재구성 필요).
 STRUCTURAL_FIELDS: tuple[str, ...] = (
     "credentials",
     "broker_config",
     "buy_commission_rate",
     "sell_commission_rate",
+    "market_order_reserve_buffer_rate",
     "broker_type",
     "exchange",
     "currency",
@@ -235,6 +237,14 @@ ACCOUNT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
             "default": 0,
             "description": "매도 수수료율, 세금 포함 (cold-path 전용).",
         },
+        "market_order_reserve_buffer_rate": {
+            "type": "number",
+            "description": (
+                "시장가 매수 reserve buffer 비율 (cold-path 전용, #1333). "
+                "omit 시 BrokerPreset 기본값을 사용한다 "
+                "(예: kis-domestic=0.005, test=0)."
+            ),
+        },
     },
 }
 
@@ -266,6 +276,9 @@ def _account_to_response(account: Any) -> dict[str, Any]:
         "broker_config": account.broker_config,
         "buy_commission_rate": float(account.buy_commission_rate),
         "sell_commission_rate": float(account.sell_commission_rate),
+        "market_order_reserve_buffer_rate": float(
+            account.market_order_reserve_buffer_rate
+        ),
         "status": (
             account.status.value
             if hasattr(account.status, "value")

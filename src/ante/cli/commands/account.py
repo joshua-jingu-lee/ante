@@ -431,6 +431,16 @@ def _validate_broker_type(fmt: OutputFormatter, broker_type: str) -> None:
     metavar="KEY=VALUE",
     help="broker-specific 설정 (free-form pass-through, 예: is_paper=true)",
 )
+@click.option(
+    "--market-order-reserve-buffer-rate",
+    "market_order_reserve_buffer_rate_opt",
+    type=float,
+    default=None,
+    help=(
+        "시장가 매수 reserve buffer 비율 (예: 0.005=0.5%). "
+        "omit 시 BrokerPreset 기본값을 사용한다 (#1333)."
+    ),
+)
 @format_option
 @click.pass_context
 @require_auth
@@ -445,6 +455,7 @@ def account_create(
     credentials_env: tuple[str, ...],
     credentials_file: tuple[str, ...],
     broker_config_pairs: tuple[str, ...],
+    market_order_reserve_buffer_rate_opt: float | None,
 ) -> None:
     """비대화형 계좌 생성 (cold-path 전용).
 
@@ -514,6 +525,13 @@ def account_create(
         else TradingMode.LIVE
     )
 
+    # market_order_reserve_buffer_rate: 옵션 omit 시 preset 기본값을 그대로
+    # 사용하고, 명시된 경우 ``Decimal(str(...))``로 정밀도를 보존한다 (#1333).
+    if market_order_reserve_buffer_rate_opt is None:
+        market_order_buffer = preset.market_order_reserve_buffer_rate
+    else:
+        market_order_buffer = Decimal(str(market_order_reserve_buffer_rate_opt))
+
     # 7) Account 생성
     new_account = Account(
         account_id=account_id_opt,
@@ -529,6 +547,7 @@ def account_create(
         broker_config=broker_config,
         buy_commission_rate=preset.buy_commission_rate,
         sell_commission_rate=preset.sell_commission_rate,
+        market_order_reserve_buffer_rate=market_order_buffer,
     )
 
     async def _do_create() -> Account:
@@ -950,6 +969,7 @@ def _account_to_detail(acct: Account) -> dict:
         "trading_mode": acct.trading_mode.value,
         "buy_commission_rate": str(acct.buy_commission_rate),
         "sell_commission_rate": str(acct.sell_commission_rate),
+        "market_order_reserve_buffer_rate": str(acct.market_order_reserve_buffer_rate),
         "status": acct.status.value,
         "timezone": acct.timezone,
         "trading_hours": f"{acct.trading_hours_start}-{acct.trading_hours_end}",
@@ -970,18 +990,23 @@ def _print_account_detail(detail: dict) -> None:
         "trading_mode": "거래 모드",
         "buy_commission_rate": "매수 수수료",
         "sell_commission_rate": "매도 수수료",
+        "market_order_reserve_buffer_rate": "시장가 매수 버퍼",
         "status": "상태",
         "timezone": "시간대",
         "trading_hours": "거래 시간",
         "created_at": "생성일",
     }
+    pct_keys = (
+        "buy_commission_rate",
+        "sell_commission_rate",
+        "market_order_reserve_buffer_rate",
+    )
     for key, label in labels.items():
         value = detail.get(key, "")
-        if key in ("buy_commission_rate", "sell_commission_rate") and value:
-            # 퍼센트로 표시
+        if key in pct_keys and value not in ("", None):
             try:
                 pct = float(value) * 100
                 value = f"{pct:.3f}%"
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
         click.echo(f"  {label:14s}: {value}")

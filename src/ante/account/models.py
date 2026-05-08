@@ -53,6 +53,12 @@ class Account:
     # --- 비용 ---
     buy_commission_rate: Decimal = Decimal("0")
     sell_commission_rate: Decimal = Decimal("0")
+    # 시장가 매수 주문 reserve buffer 비율 (Account-level Treasury reserve policy).
+    # 시장가 매수는 체결 가격이 보장되지 않으므로 현재가만으로 reserve하면 부족할
+    # 수 있다. Treasury는 ``reserve_basis = quantity * quote * (1 + buffer)``
+    # 식으로 자금을 보수적으로 잠근다. ``broker_config``에 들어가지 않으며,
+    # 1.0에서는 cold-path 전용(structural) 필드다 (#1333).
+    market_order_reserve_buffer_rate: Decimal = Decimal("0")
 
     # --- 상태 ---
     status: AccountStatus = AccountStatus.ACTIVE
@@ -74,6 +80,10 @@ class BrokerPreset:
     trading_hours_end: str
     buy_commission_rate: Decimal
     sell_commission_rate: Decimal
+    # 시장가 매수 reserve buffer 비율의 broker별 기본값. Account 생성 시 이
+    # 값이 ``Account.market_order_reserve_buffer_rate``의 초기값으로 사용된다
+    # (#1333).
+    market_order_reserve_buffer_rate: Decimal
     default_account_id: str
     default_name: str
     required_credentials: list[str]

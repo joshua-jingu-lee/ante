@@ -55,10 +55,12 @@ Treasury(
 
 `OrderValidatedEvent` 수신 시 Treasury가 자금을 잠그는지 여부는 주문 종류에 따라 다르다. 본 정책은 한국 증권사 예약주문 표준(예약주문 등록 시점에 잔고를 체크하지 않고, 본주문 전환 시점에 자금 검증)과 일치한다.
 
-| `side` | `order_type` | 등록 시점 동작 | 비고 |
-|--------|--------------|---------------|------|
-| `buy` | `market`, `limit` | `reserve_for_order(...)` 호출 후 `OrderApprovedEvent(reserved_amount>0)` 발행 | `quantity * price * (1 + buy_commission_rate)` 만큼 잠금. `price=None` 시그니처는 별도 거부. |
-| `buy` | `stop`, `stop_limit` | **자금 잠금 없이** `OrderApprovedEvent(reserved_amount=0.0)` 발행 (#1337) | 트리거 발동 후 변환된 일반 매수 주문이 정상 reserve 절차를 거친다. `price=None`이어도 거부하지 않는다. |
+| `side` | `order_type` / `price` | 등록 시점 동작 | 비고 |
+|--------|------------------------|---------------|------|
+| `buy` | `limit` (price 명시) | `reserve_for_order(...)` 호출 후 `OrderApprovedEvent(reserved_amount>0)` 발행 | `quantity * price * (1 + buy_commission_rate)` 만큼 잠금 (기존 산식). |
+| `buy` | `market` + `price=None` | account-scoped quote resolver 호출 → reserve 산정 후 `OrderApprovedEvent(price=None, reserved_amount>0)` 발행 (#1333) | resolver 가 반환한 현재가에 `market_order_reserve_buffer_rate` 와 `buy_commission_rate` 를 함께 반영해 보수적으로 잠근다. resolved quote 는 `OrderApprovedEvent.price` 에 넣지 않고 reserve estimate 로만 사용한다. resolver 미주입/예외 시 terminal `OrderRejectedEvent(reason="market_buy_quote_unavailable: ...")` 로 종료. |
+| `buy` | `market` (price 명시) | `reserve_for_order(...)` 호출 후 `OrderApprovedEvent(reserved_amount>0)` 발행 | 기존 산식 (`quantity * price * (1 + buy_commission_rate)`). |
+| `buy` | `stop`, `stop_limit` | **자금 잠금 없이** `OrderApprovedEvent(reserved_amount=0.0)` 발행 (#1337) | 트리거 발동 후 변환된 일반 매수 주문이 정상 reserve 절차를 거친다. `price=None` 이어도 거부하지 않는다. **분기 우선순위 1** — market buy quote resolver 분기보다 먼저 평가된다. |
 | `sell` | 모든 타입 | 자금 잠금 없이 즉시 `OrderApprovedEvent(reserved_amount=0.0)` | 매도는 보유 포지션 기반이므로 reserve 대상이 아님. |
 
 **매수 stop / stop_limit no-reserve invariant (#1337)**:
@@ -70,6 +72,48 @@ Treasury(
 - StopOrderManager는 Treasury를 직접 호출하지 않는다. 두 모듈은 자금 처리상 직교한다.
 
 배경 및 사용자 정책 결정 근거는 GitHub 이슈 #1337 본문 "정책 결정 (사용자 승인, 2026-05-08)" 섹션을 참조한다.
+
+**시장가 매수 quote resolver invariant (#1333)**:
+
+- 시장가 매수 (`order_type="market"`, `price=None`) 는 즉시 실행 주문이므로 stop
+  처럼 trigger 대기 없이 제출 전 자금을 잠가야 한다.
+- Treasury 는 account-scoped resolver
+  (`Callable[[str], Awaitable[float]]`) 를 통해 현재가를 조회한다. 기본 경로는
+  `APIGateway.get_current_price(symbol, account_id=...)` 이며 `_init_gateway()`
+  끝에서 `TreasuryManager.set_order_reserve_price_resolver` 로 후속 주입된다.
+  자산 평가 sync 용 `start_sync(price_resolver=...)` 와는 **별도 객체** 다.
+- reserve 산식 (Decimal 정밀도):
+
+  ```text
+  reserve_basis = quantity * quote * (1 + market_order_reserve_buffer_rate)
+  commission_estimate = reserve_basis * buy_commission_rate
+  total_reserve = reserve_basis + commission_estimate
+  ```
+
+  Decimal 연산 결과는 `OrderApprovedEvent.reserved_amount` / Treasury budget 의
+  float 경계에서만 `float` 로 변환한다 (기존 commission/budget float 계약과 일관).
+- resolved quote 는 reserve estimate 일 뿐 주문 가격이 아니다. Treasury 는
+  `OrderApprovedEvent.price` 를 `None` 그대로 유지하며, BrokerAdapter 는 시장가
+  주문 계약을 그대로 사용한다 (KIS 국내: `ORD_DVSN="01"`, `ORD_UNPR="0"`).
+- resolver 미주입 또는 resolver 호출이 예외를 raise 하면 Treasury 는 broker
+  호출 전 terminal `OrderRejectedEvent(reason="market_buy_quote_unavailable: ...")`
+  를 발행한다. EventBus handler 예외로 삼키면 안 된다.
+- `market_order_reserve_buffer_rate` 는 Account-level 정책 (`Account` 필드,
+  cold-path) 이며 broker_config 에 들어가지 않는다. 기본값은 BrokerPreset 이
+  제공한다 (`kis-domestic=0.005`, `test=0`).
+
+**시장가 매수 shortfall 정산 invariant (#1333)**:
+
+- `OrderFilledEvent` 수신 시 Treasury 는 실제 체결 비용
+  (`event.price * event.quantity + event.commission`) 으로 정산한다.
+- `actual_cost <= reserved_amount` 면 잔여 reserve 를 `available` 로 환수한다
+  (기존 거동).
+- `actual_cost > reserved_amount` 면 초과분을 `available` 에서 추가 차감한다 —
+  결과적으로 `available` 이 음수가 될 수 있다. 음수는 정상 운영 상태가 아니지만
+  시장가 매수의 가격 변동을 정확히 정산하기 위해 허용한다. 다음 매수 reserve 가
+  거부되는 것은 자연스러운 결과 (insufficient funds) 다.
+- shortfall 발생 시 `logger.warning("market_order_reserve_shortfall: ...")` 가
+  남고, 별도 EventBus 이벤트는 신설하지 않는다 (Stop Condition 명시).
 
 ### 자산 평가 동기화 계약
 

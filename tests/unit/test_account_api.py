@@ -439,6 +439,26 @@ class TestGetAccount:
         data = resp.json()
         assert "credentials" not in data["account"]
 
+    def test_account_response_exposes_market_order_reserve_buffer_rate(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """AccountResponse 가 ``market_order_reserve_buffer_rate`` 를 float 로
+        노출한다 (#1333).
+        """
+        account = _make_account()
+        account.market_order_reserve_buffer_rate = Decimal("0.005")
+        account_service._accounts[account.account_id] = account
+
+        resp = client.get("/api/accounts/test-account")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "market_order_reserve_buffer_rate" in data["account"]
+        assert data["account"]["market_order_reserve_buffer_rate"] == pytest.approx(
+            0.005
+        )
+
 
 class TestUpdateAccount:
     """PUT /api/accounts/:id.
@@ -601,6 +621,26 @@ class TestUpdateAccount:
         detail = resp.json()["detail"]
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
         assert "sell_commission_rate" in detail
+
+    def test_update_market_order_reserve_buffer_rate_blocked_409(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """``market_order_reserve_buffer_rate`` 변경 시도는 cold-path 409 차단
+        (#1333).
+        """
+        account = _make_account()
+        account_service._accounts[account.account_id] = account
+
+        resp = client.put(
+            "/api/accounts/test-account",
+            json={"market_order_reserve_buffer_rate": 0.01},
+        )
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in detail
+        assert "market_order_reserve_buffer_rate" in detail
 
     def test_update_broker_type_blocked_409(
         self,

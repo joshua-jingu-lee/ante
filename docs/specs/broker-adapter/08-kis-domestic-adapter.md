@@ -52,6 +52,12 @@ KISDomesticAdapter는 `order_type` 문자열을 KIS ORD_DVSN 코드로 매핑한
 
 > KIS는 추가로 `05` 장전시간외, `06` 장후시간외, `07` 시간외단일가, `11`~`16` IOC/FOK 변형(실전투자 전용)을 지원한다.
 
+**시장가 매수와 Treasury reserve estimate 분리 (#1333)**: 시장가 매수 시 KIS
+주문 파라미터는 `ORD_DVSN="01"`, `ORD_UNPR="0"` 계약을 그대로 유지한다.
+Treasury 가 reserve estimate 를 위해 `get_current_price` 로 현재가를 조회해
+보수적으로 자금을 잠그더라도, 그 quote 는 reserve 산정 입력일 뿐이며 KIS 에
+전달되는 주문 자체는 limit 으로 변환되지 않는다.
+
 ### KIS 주문 상태 코드 매핑
 
 | KIS 상태 코드 | Ante 상태 | 설명 |
