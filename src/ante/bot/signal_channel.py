@@ -160,17 +160,21 @@ class SignalChannel:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
         )
 
         self._eventbus.subscribe(OrderFilledEvent, self._on_fill)
+        # #1331: ``OrderModifyRejectedEvent`` 추가 — 외부 채널 구독자에게도
+        # 정정 거부/미구현 통보를 ``order_update`` 메시지로 전달한다.
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyRejectedEvent,
         ):
             self._eventbus.subscribe(evt, self._on_order_update)
 
@@ -181,17 +185,20 @@ class SignalChannel:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, self._on_fill)
+        # #1331: 등록과 동일하게 ``OrderModifyRejectedEvent`` 해지 추가.
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyRejectedEvent,
         ):
             self._eventbus.unsubscribe(evt, self._on_order_update)
 
@@ -233,6 +240,7 @@ class SignalChannel:
             OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
         )
@@ -253,6 +261,14 @@ class SignalChannel:
         elif isinstance(event, OrderCancelFailedEvent):
             status = "cancel_failed"
             reason = event.error_message
+        elif isinstance(event, OrderModifyRejectedEvent):
+            # #1331: 정정 거부/미구현 통보를 status로 잠그고, 외부 dict
+            # shape는 기존 ``{type:"order_update", ...}`` 패턴을 그대로
+            # 유지한다. ``type``을 ``"modify_rejected"`` 같은 새 형태로
+            # 바꾸면 외부 소비자(stdin/stdout 기반 에이전트)가 파싱
+            # 분기를 추가해야 하므로 의도적으로 잠갔다.
+            status = "modify_rejected"
+            reason = event.reason
 
         if status:
             self._write(

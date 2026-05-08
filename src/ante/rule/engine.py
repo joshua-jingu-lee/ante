@@ -1201,9 +1201,14 @@ class RuleEngine:
                         reason=result.rejection_reason,
                     )
                 )
-                # 거부 시 이벤트 소비 — 후속 핸들러(Gateway)에 전달 방지
-                if hasattr(event, "_consumed"):
-                    object.__setattr__(event, "_consumed", True)
+                # 거부 시 이벤트 소비 — 후속 핸들러(Gateway)가 추가 terminal
+                # event를 발행하지 않도록 transient marker를 set한다 (#1331).
+                # ``OrderModifyEvent``는 ``_consumed`` 필드를 정의하지 않은
+                # frozen dataclass이므로 ``hasattr`` guard를 두면 항상 False가
+                # 되어 marker가 전혀 set되지 않는다 (dead code). 가드를 제거하고
+                # ``object.__setattr__``로 직접 주입한다. dataclass 필드가
+                # 아니므로 영속 history 직렬화에는 노출되지 않는다.
+                object.__setattr__(event, "_consumed", True)
 
         except Exception:
             logger.exception("주문 정정 룰 평가 실패: %s", event.order_id)
@@ -1220,6 +1225,12 @@ class RuleEngine:
                     reason="Rule evaluation error",
                 )
             )
+            # 룰 평가 예외 경로도 후속 Gateway가 추가 terminal event를 발행하지
+            # 못하도록 transient marker를 set한다 (#1331). reason은 이미
+            # ``"Rule evaluation error"``로 강제됐으므로 Gateway의
+            # ``"modify_not_implemented"``가 같은 정정 요청에 중첩 발행되면
+            # audit trail이 깨진다.
+            object.__setattr__(event, "_consumed", True)
 
     async def _on_config_changed(self, event: object) -> None:
         """설정 변경 시 룰 재로딩.
