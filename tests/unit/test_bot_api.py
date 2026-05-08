@@ -97,8 +97,14 @@ class FakeBotManager:
         if bot:
             bot._status = "stopped"
 
-    async def delete_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
+    async def delete_bot(
+        self,
+        bot_id: str,
+        handle_positions: str = "keep",
+        hard: bool = False,
+    ) -> None:
         self.last_delete_handle_positions = handle_positions
+        self.last_delete_hard = hard
         if bot_id in self._bots:
             del self._bots[bot_id]
 

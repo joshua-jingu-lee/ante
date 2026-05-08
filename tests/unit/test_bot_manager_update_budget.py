@@ -205,3 +205,75 @@ class TestUpdateBotBudgetSuccess:
         budget = treasury.get_budget(bot_id)
         assert budget is not None
         assert budget.allocated == pytest.approx(200_000.0)
+
+
+class TestDeleteBotHard:
+    """Refs #1335 P2: ``hard=True`` 는 row 자체를 삭제한다."""
+
+    async def test_delete_bot_default_soft_deletes_row(self, eventbus, db, ctx) -> None:
+        """기본 ``hard=False`` 는 기존 soft delete 거동 유지."""
+        manager = BotManager(eventbus=eventbus, db=db)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(manager, ctx, account_id="acc-test")
+
+        await manager.delete_bot(bot_id)
+
+        # row 는 status='deleted' 로 남아 있어야 한다.
+        row = await db.fetch_one(
+            "SELECT bot_id, status FROM bots WHERE bot_id = ?", (bot_id,)
+        )
+        assert row is not None
+        assert row["status"] == "deleted"
+
+    async def test_delete_bot_hard_removes_row_from_db(self, eventbus, db, ctx) -> None:
+        """``hard=True`` 는 ``DELETE FROM bots`` 로 row 자체를 제거한다.
+
+        rollback 경로(POST /api/bots budget 실패) 가 사용하는 분기.
+        soft delete 가 남기는 ``status='deleted'`` row 가 같은 bot_id
+        재시도를 막는 문제를 해결한다.
+        """
+        manager = BotManager(eventbus=eventbus, db=db)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(manager, ctx, account_id="acc-test")
+
+        await manager.delete_bot(bot_id, hard=True)
+
+        # row 가 DB 에서 완전히 사라져야 한다.
+        row = await db.fetch_one(
+            "SELECT bot_id, status FROM bots WHERE bot_id = ?", (bot_id,)
+        )
+        assert row is None
+
+        # 인메모리 상태도 정리되어 있어야 한다.
+        assert manager.get_bot(bot_id) is None
+
+    async def test_delete_bot_hard_then_recreate_same_bot_id_succeeds(
+        self, eventbus, db, ctx
+    ) -> None:
+        """hard delete 후 같은 ``bot_id`` 로 재생성 시 정상 row 유지.
+
+        soft delete 였다면 재생성 후 row 가 ``status='deleted'`` 로 남아
+        ``load_from_db()`` 에서 제외되었을 것. hard delete 가 이 문제를
+        해결함을 검증한다.
+        """
+        manager = BotManager(eventbus=eventbus, db=db)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(manager, ctx, account_id="acc-test")
+
+        await manager.delete_bot(bot_id, hard=True)
+
+        # 같은 bot_id 로 재생성.
+        config = BotConfig(bot_id=bot_id, strategy_id="s1", account_id="acc-test")
+        await manager.create_bot(config, _SimpleStrategy, ctx)
+
+        row = await db.fetch_one(
+            "SELECT bot_id, status FROM bots WHERE bot_id = ?", (bot_id,)
+        )
+        assert row is not None
+        # status 는 default ``created`` 로 시작해야 한다 (deleted 잔존 없음).
+        assert row["status"] == "created"
+
+        # load_from_db 도 새 봇을 정상 로드해야 한다 (status != 'deleted').
+        loaded = await manager.load_from_db()
+        assert loaded == 1
+        assert manager.get_bot(bot_id) is not None

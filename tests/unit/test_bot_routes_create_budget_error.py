@@ -144,7 +144,12 @@ class TestCreateBotBudgetError:
     def test_create_bot_budget_failure_rolls_back_bot(
         self, client, bot_manager
     ) -> None:
-        """422 후 GET /api/bots/{id} → 404 (롤백 확인)."""
+        """422 후 GET /api/bots/{id} → 404 (롤백 확인).
+
+        Refs #1335 P2: rollback 호출은 ``hard=True`` 로 위임되어 row 가
+        남지 않아야 한다. ``FakeBotManager.delete_bot`` 은 마지막 호출의
+        ``hard`` 인자를 ``last_delete_hard`` 에 기록한다.
+        """
         from ante.treasury.exceptions import InsufficientFundsError
 
         _install_treasury_error_on_update(
@@ -166,6 +171,71 @@ class TestCreateBotBudgetError:
         get_resp = client.get(f"/api/bots/{bot_id}")
         assert get_resp.status_code == 404
         assert bot_manager.get_bot(bot_id) is None
+        # Refs #1335 P2: rollback 은 hard delete 여야 한다.
+        assert getattr(bot_manager, "last_delete_hard", None) is True
+
+    def test_create_bot_budget_failure_then_retry_with_valid_budget_succeeds(
+        self, client, bot_manager
+    ) -> None:
+        """422 rollback 후 같은 bot_id 로 정상 budget 재시도 → 201.
+
+        Refs #1335 P2: soft delete 만 수행하면 row 가 ``status='deleted'``
+        로 남고 ``_save_bot_config()`` UPSERT 가 status 를 복구하지 않아
+        재시도가 ``201`` 을 반환해도 ``load_from_db()`` 에서 제외된다.
+        rollback 경로의 ``hard=True`` 가 row 자체를 제거해 재시도가
+        깔끔하게 동작함을 검증한다.
+
+        이 테스트는 ``FakeBotManager`` 레벨에서 1차만 실패시키고 2차는
+        정상으로 흐르도록 한다 (실제 ``BotManager`` 의 row 상태 영향은
+        ``test_delete_bot_hard_removes_row_from_db`` 에서 별도 검증).
+        """
+        from ante.treasury.exceptions import InsufficientFundsError
+
+        original_update_bot = bot_manager.update_bot
+        call_count = {"n": 0}
+
+        async def _patched(bot_id, **kwargs):
+            if "budget" in kwargs and kwargs["budget"] is not None:
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    raise InsufficientFundsError("insufficient")
+            return await original_update_bot(bot_id, **kwargs)
+
+        bot_manager.update_bot = _patched  # type: ignore[assignment]
+
+        bot_id = "bot-retry"
+
+        # 1차: budget 배정 실패 → 422 + rollback.
+        first_resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": bot_id,
+                "strategy_id": "s1",
+                "account_id": "test",
+                "budget": 1_000_000_000.0,
+            },
+        )
+        assert first_resp.status_code == 422
+        assert bot_manager.get_bot(bot_id) is None
+        assert getattr(bot_manager, "last_delete_hard", None) is True
+
+        # 2차: 정상 budget 재시도 → 201.
+        retry_resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": bot_id,
+                "strategy_id": "s1",
+                "account_id": "test",
+                "budget": 1_000_000.0,
+            },
+        )
+        assert retry_resp.status_code == 201, retry_resp.text
+        assert retry_resp.json()["bot"]["bot_id"] == bot_id
+        # 메모리에서도 정상 조회되어야 한다.
+        assert bot_manager.get_bot(bot_id) is not None
+
+        get_resp = client.get(f"/api/bots/{bot_id}")
+        assert get_resp.status_code == 200
 
     def test_create_bot_with_valid_budget_succeeds(self, client, bot_manager) -> None:
         """budget 배정 성공 → 201."""
@@ -197,7 +267,7 @@ class TestCreateBotBudgetError:
         )
 
         # delete_bot 도 실패하도록 패치.
-        async def _failing_delete(bot_id, handle_positions="keep"):
+        async def _failing_delete(bot_id, handle_positions="keep", hard=False):
             raise BotError(f"delete failed for {bot_id}")
 
         bot_manager.delete_bot = _failing_delete  # type: ignore[assignment]

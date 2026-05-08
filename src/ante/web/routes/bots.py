@@ -298,7 +298,16 @@ async def create_bot(
             # 에 잡혀 500 으로 오분류될 수 있기 때문이다.
             rollback_failed = False
             try:
-                await bot_manager.delete_bot(body.bot_id, handle_positions="keep")
+                # Refs #1335 P2: ``hard=True`` — soft delete 만 수행하면
+                # ``status='deleted'`` row 가 남아 같은 ``bot_id`` 재시도
+                # 시 ``_save_bot_config()`` UPSERT 가 status 를 복구하지
+                # 않으므로, 재시도가 ``201`` 을 반환해도 봇은 메모리에만
+                # 존재하고 재시작 후 ``load_from_db()`` 에서 제외된다.
+                # 생성 실패 rollback 경로에서는 row 자체를 제거해
+                # 재시도 의미를 보존한다.
+                await bot_manager.delete_bot(
+                    body.bot_id, handle_positions="keep", hard=True
+                )
             except Exception as rollback_error:
                 rollback_failed = True
                 logger.exception(

@@ -453,14 +453,31 @@ class BotManager:
         await bot.stop()
         self._remove_strategy_rules(bot.config.strategy_id)
 
-    async def delete_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
-        """봇 소프트 딜리트. 실행 중이면 먼저 중지.
+    async def delete_bot(
+        self,
+        bot_id: str,
+        handle_positions: str = "keep",
+        hard: bool = False,
+    ) -> None:
+        """봇 삭제. 실행 중이면 먼저 중지.
 
         Args:
             bot_id: 삭제할 봇 ID.
             handle_positions: 포지션 처리 방식.
                 - ``keep`` (기본): 포지션을 유지한 채 봇만 삭제.
                 - ``liquidate``: 보유 종목 시장가 매도 주문 발행 후 삭제.
+            hard: ``True`` 이면 ``DELETE FROM bots`` 로 row 자체를 삭제한다.
+                기본 ``False`` 는 기존 soft delete 거동 (``status='deleted'``)
+                을 유지한다.
+
+                Refs #1335: ``POST /api/bots`` budget 배정 실패 후 rollback
+                경로에서는 같은 ``bot_id`` 로의 재시도가 가능해야 한다.
+                soft delete 만 수행하면 row 가 ``status='deleted'`` 로
+                남아 ``_save_bot_config()`` UPSERT 가 status 를 복구하지
+                않으므로, 재시도가 ``201`` 을 반환해도 봇은 메모리에만
+                존재하고 재시작 후 ``load_from_db()`` 에서 제외된다.
+                rollback 경로에서는 ``hard=True`` 로 row 자체를 제거해
+                재시도 의미를 보존한다.
         """
         if handle_positions not in ("keep", "liquidate"):
             raise BotError(
@@ -514,16 +531,28 @@ class BotManager:
 
         bot.status = BotStatus.DELETED
         del self._bots[bot_id]
-        await self._db.execute(
-            "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
-            " WHERE bot_id = ?",
-            (bot_id,),
-        )
-        logger.info("봇 삭제 (soft delete): %s", bot_id)
+        if hard:
+            await self._db.execute(
+                "DELETE FROM bots WHERE bot_id = ?",
+                (bot_id,),
+            )
+            logger.info("봇 삭제 (hard delete): %s", bot_id)
+        else:
+            await self._db.execute(
+                "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
+                " WHERE bot_id = ?",
+                (bot_id,),
+            )
+            logger.info("봇 삭제 (soft delete): %s", bot_id)
 
-    async def remove_bot(self, bot_id: str, handle_positions: str = "keep") -> None:
+    async def remove_bot(
+        self,
+        bot_id: str,
+        handle_positions: str = "keep",
+        hard: bool = False,
+    ) -> None:
         """봇 삭제. delete_bot()의 별칭 (하위 호환)."""
-        await self.delete_bot(bot_id, handle_positions=handle_positions)
+        await self.delete_bot(bot_id, handle_positions=handle_positions, hard=hard)
 
     async def _liquidate_positions(self, bot: Bot) -> None:
         """봇의 보유 포지션에 대해 시장가 매도 주문을 발행한다.
