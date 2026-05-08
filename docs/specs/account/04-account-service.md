@@ -48,13 +48,14 @@ AccountService(db: Database, eventbus: EventBus)
 - `trading_hours_end`
 - 향후 추가되는 표시/운영 메타데이터 중 브로커 재초기화가 필요 없는 필드
 
-**cold-path 전용 필드/작업**:
+**cold-path 전용 필드/작업** (9 필드):
 - `create()`
 - `delete()`
 - `credentials`
 - `broker_config`
 - `buy_commission_rate`
 - `sell_commission_rate`
+- `market_order_reserve_buffer_rate` (#1333: Treasury 시장가 매수 reserve 정책)
 - 계좌 생성 후 불변 필드: `exchange`, `currency`, `trading_mode`, `broker_type`
 
 #### service-layer 가드 (#1144)
@@ -63,7 +64,7 @@ AccountService(db: Database, eventbus: EventBus)
 
 - **가드 우선순위**: `create()` / `delete()` / `update()`의 런타임 가드는 `get()`/DELETED/IMMUTABLE 등 어떤 다른 검사보다 *먼저* 평가된다. 즉, 존재하지 않거나 DELETED 상태인 계좌에 structural 키가 들어오더라도 cold-path 응답이 우선이다(structural cold-path > existence > deleted > immutable). `update()` 가드는 raw kwargs 키만 보고 값(None 포함)은 무관하다 — `update(account_id, credentials=None)`도 키 존재만으로 차단된다.
 - **mutable-only 흐름**: structural 키와 교집합이 없는 호출(예: `update(account_id, name="…", timezone="…")`)은 런타임에서도 정상 동작한다. 가드는 `set(fields) & STRUCTURAL_FIELDS`가 비어 있으면 통과한다.
-- **structural 필드 정합 (S4)**: service의 `STRUCTURAL_FIELDS` 상수 8개와 `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS` tuple은 정확히 1:1 일치해야 한다. 두 set이 어긋나면 contract-drift이며 `tests/unit/test_account_runtime_guard.py::test_structural_fields_match_route_constant`가 실패한다.
+- **structural 필드 정합 (S4)**: service의 `STRUCTURAL_FIELDS` 상수 9개(#1333 으로 `market_order_reserve_buffer_rate` 추가)와 `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS` tuple은 정확히 1:1 일치해야 한다. 두 set이 어긋나면 contract-drift이며 `tests/unit/test_account_runtime_guard.py::test_structural_fields_match_route_constant`가 실패한다.
 - **부팅 mutation 보호 (S3)**: `mark_runtime_started` 호출은 boot mutation 종료 *후*로 고정된다. migration이 플래그 활성 후로 옮겨가면 자기 자신의 structural `broker_config` update가 차단되어 부팅이 깨진다 — `tests/unit/test_account_runtime_init_order.py`가 이 순서를 강제한다.
 
 #### 안정 에러 코드 (#1144 S5)

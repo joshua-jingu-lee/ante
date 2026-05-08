@@ -54,6 +54,8 @@ BrokerAdapter는 증권사 API 어댑터의 추상 기본 클래스다. 생성 �
 
 **`place_order()` 참고사항**: `stop`/`stop_limit` 주문은 BrokerAdapter가 직접 실행하지 않는다. KRX는 stop order를 네이티브로 지원하지 않으므로, 상위 계층(StopOrderManager)이 가격 모니터링 후 market/limit으로 변환하여 호출한다. 향후 네이티브 stop을 지원하는 브로커(예: Interactive Brokers) 구현 시 이 파라미터를 직접 활용할 수 있다.
 
+**시장가 주문과 reserve estimate 의 분리 (#1333)**: `place_order(order_type="market", price=None)` 은 가격을 지정하지 않는 시장가 주문을 의미하며, BrokerAdapter 는 broker 의 시장가 주문 계약을 그대로 사용한다. Treasury 가 시장가 매수 reserve estimate 를 위해 별도로 `get_current_price` 를 호출해 잠금 금액을 산정하지만, 그 quote 는 reserve 산정 입력이지 주문 가격이 아니다. BrokerAdapter 에 새 quote-estimate API 는 추가하지 않는다 — 기본 resolver 경로는 APIGateway / `BrokerAdapter.get_current_price` 다.
+
 **`get_account_positions()` 참고사항**: `get_positions()`와 동일한 API를 호출하되, 대사 전용으로 명시적으로 분리하여 용도를 명확히 한다. 반환 형식: `[{"symbol": "005930", "quantity": 900, "avg_price": 1000.0}, ...]`
 
 **`get_order_history()` 반환 형식**: `[{"order_id": "...", "symbol": "005930", "side": "buy", "quantity": 100, "filled_quantity": 100, "price": 1000.0, "status": "filled", "timestamp": "..."}, ...]`

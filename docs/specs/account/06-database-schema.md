@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     -- 비용
     buy_commission_rate  REAL NOT NULL DEFAULT 0,
     sell_commission_rate REAL NOT NULL DEFAULT 0,
+    -- 시장가 매수 reserve buffer 비율 (#1333). Account-level Treasury reserve
+    -- policy. Decimal 정밀도는 Account dataclass / Treasury 내부에서만
+    -- 유지되고, DB 컬럼은 REAL 로 저장한다.
+    market_order_reserve_buffer_rate REAL NOT NULL DEFAULT 0.005,
     -- 상태
     status       TEXT NOT NULL DEFAULT 'active'
         CHECK(status IN ('active', 'suspended', 'deleted')),
@@ -31,6 +35,29 @@ CREATE TABLE IF NOT EXISTS accounts (
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
+
+### Migration: market_order_reserve_buffer_rate (#1333)
+
+legacy DB(이 컬럼이 없는 단계) 가 켜질 때 `AccountService.initialize` 가 1 회성
+ALTER 와 backfill 을 적용한다.
+
+```sql
+-- 1) 컬럼 추가 (default 0.005). 이미 있으면 OperationalError 로 무시.
+ALTER TABLE accounts
+    ADD COLUMN market_order_reserve_buffer_rate REAL NOT NULL DEFAULT 0.005;
+
+-- 2) broker_type 별 backfill — ALTER 가 실제 성공한 1 회성 마이그레이션
+--    경로에서만 실행한다. 2 회 이상 실행되면 운영자가 CLI 로 직접 지정한
+--    ``test`` 계좌의 buffer 값을 0 으로 덮어쓰는 idempotency 위반이 된다.
+UPDATE accounts SET market_order_reserve_buffer_rate = 0
+    WHERE broker_type = 'test';
+```
+
+`broker_type='kis-domestic'` row 는 DDL default(0.005) 를 그대로 두며,
+`broker_type='kis-overseas'` 같은 1.0 미지원 broker_type 의 legacy row 도
+default 를 유지한다 — 1.1 에서 KISOverseasAdapter 와 함께 적합 값으로
+backfill 한다. NULL/unknown broker_type 도 보수적으로 default 0.005 를
+유지한다.
 
 ### credentials 암호화
 

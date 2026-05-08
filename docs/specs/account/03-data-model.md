@@ -48,6 +48,11 @@ class Account:
     # --- 비용 ---
     buy_commission_rate: Decimal = Decimal("0")    # 매수 수수료율
     sell_commission_rate: Decimal = Decimal("0")   # 매도 수수료율 (세금 포함)
+    # 시장가 매수 reserve buffer 비율 (Account-level Treasury reserve policy, #1333).
+    # quote 만으로 reserve 하면 가격 변동을 흡수하지 못하므로
+    # ``reserve_basis = quantity * quote * (1 + market_order_reserve_buffer_rate)``
+    # 식으로 보수적으로 잠근다.
+    market_order_reserve_buffer_rate: Decimal = Decimal("0")
 
     # --- 상태 ---
     status: AccountStatus = AccountStatus.ACTIVE
@@ -79,6 +84,7 @@ class Account:
 | **비용** | | | | |
 | `buy_commission_rate` | - | `0` | cold-path | 매수 수수료율 |
 | `sell_commission_rate` | - | `0` | cold-path | 매도 수수료율 (세금 포함) |
+| `market_order_reserve_buffer_rate` | - | BrokerPreset 기본값 | cold-path | 시장가 매수 reserve buffer 비율 (#1333). Treasury 가 시장가 매수 reserve 산정 시 보수적으로 잠가둘 추가 비율. `broker_config` 가 아니라 Account 소속 reserve policy 다. |
 | **상태** | | | | |
 | `status` | - | `ACTIVE` | 상태 전이 | 계좌 상태 (ACTIVE / SUSPENDED / DELETED) |
 
@@ -109,6 +115,8 @@ class BrokerPreset:
     trading_hours_end: str
     buy_commission_rate: Decimal
     sell_commission_rate: Decimal
+    # #1333: Account 의 ``market_order_reserve_buffer_rate`` 초기값.
+    market_order_reserve_buffer_rate: Decimal
     default_account_id: str
     default_name: str
     required_credentials: list[str]
@@ -124,6 +132,7 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
         exchange="TEST", currency="KRW", timezone="Asia/Seoul",
         trading_hours_start="00:00", trading_hours_end="23:59",
         buy_commission_rate=Decimal("0"), sell_commission_rate=Decimal("0"),
+        market_order_reserve_buffer_rate=Decimal("0"),  # #1333: 결정적 거동.
         default_account_id="test", default_name="테스트",
         required_credentials=["app_key", "app_secret"],
     ),
@@ -131,30 +140,30 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
         exchange="KRX", currency="KRW", timezone="Asia/Seoul",
         trading_hours_start="09:00", trading_hours_end="15:30",
         buy_commission_rate=Decimal("0.00015"), sell_commission_rate=Decimal("0.00195"),
+        market_order_reserve_buffer_rate=Decimal("0.005"),  # #1333: 0.5%.
         default_account_id="domestic", default_name="국내 주식",
         required_credentials=["app_key", "app_secret", "account_no"],
     ),
-    # kis-overseas 프리셋은 정의만 해둔다.
-    # KISOverseasAdapter 구현 및 BROKER_REGISTRY 등록은 1.1에서 지원.
-    "kis-overseas": BrokerPreset(
-        exchange="NYSE", currency="USD", timezone="America/New_York",
-        trading_hours_start="09:30", trading_hours_end="16:00",
-        buy_commission_rate=Decimal("0.001"), sell_commission_rate=Decimal("0.001"),
-        default_account_id="us-stock", default_name="미국 주식",
-        required_credentials=["app_key", "app_secret", "account_no"],
-    ),
+    # kis-overseas 프리셋은 1.0 BROKER_REGISTRY 가 미지원이므로 본 1.0 stage
+    # 에서는 정의하지 않는다 (#1333). 1.1 KISOverseasAdapter 도입 시 함께
+    # 추가하며, ``market_order_reserve_buffer_rate`` 는 그때 시장 사례에 맞춰
+    # 결정한다. legacy DB 의 ``broker_type='kis-overseas'`` row 는
+    # ``accounts.market_order_reserve_buffer_rate`` DDL default(0.005) 를
+    # 그대로 유지한다.
 }
 ```
 
 소스: `src/ante/account/presets.py`
 
-| broker_type | exchange | currency | timezone | trading_hours | buy_commission | sell_commission |
-|-------------|----------|----------|----------|--------------|----------------|----------------|
-| `test` | `TEST` | `KRW` | `Asia/Seoul` | 00:00–23:59 | 0 | 0 |
-| `kis-domestic` | `KRX` | `KRW` | `Asia/Seoul` | 09:00–15:30 | 0.015% | 0.195% |
-| `kis-overseas` | `NYSE`, `NASDAQ`, `AMEX` | `USD` | `America/New_York` | 09:30–16:00 | 0.1% | 0.1% |
+| broker_type | exchange | currency | timezone | trading_hours | buy_commission | sell_commission | market_order_buffer |
+|-------------|----------|----------|----------|--------------|----------------|----------------|---------------------|
+| `test` | `TEST` | `KRW` | `Asia/Seoul` | 00:00–23:59 | 0 | 0 | 0 |
+| `kis-domestic` | `KRX` | `KRW` | `Asia/Seoul` | 09:00–15:30 | 0.015% | 0.195% | 0.5% |
 
-> **향후 지원**: `kis-overseas`는 프리셋만 정의해두고, KISOverseasAdapter 구현 및 `BROKER_REGISTRY` 등록은 1.1에서 지원한다. 따라서 "us-stock" Account 생성은 1.1 이후 가능하다. 향후 `ib` (Interactive Brokers) 등 프리셋 추가로 대응.
+> **향후 지원**: `kis-overseas` 는 1.0 단계에서 BROKER_REGISTRY 가 미지원이므로
+> BROKER_PRESETS 에 정의하지 않는다. KISOverseasAdapter 구현, `BROKER_REGISTRY`
+> 등록, 그리고 그에 맞는 `market_order_reserve_buffer_rate` 결정은 1.1 이후로
+> 미룬다. 향후 `ib` (Interactive Brokers) 등 프리셋 추가로 대응.
 
 ### BROKER_REGISTRY
 
@@ -162,9 +171,13 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
 _BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {
     "test": TestBrokerAdapter,
     "kis-domestic": KISDomesticAdapter,
-    # "kis-overseas": KISOverseasAdapter,  ← 1.1에서 등록
+    # "kis-overseas": KISOverseasAdapter,  ← 1.1 에서 등록
 }
 ```
+
+`BROKER_PRESETS` 와 `BROKER_REGISTRY` 의 keys 가 일치해야 신규 계좌 생성이
+preset 기본값과 어댑터 클래스를 동시에 찾는다. 1.0 에서는 양쪽 모두
+`{"test", "kis-domestic"}` 만 노출한다 (#1333).
 
 `AccountService.get_broker()`가 `broker_type`으로 이 레지스트리에서 어댑터 클래스를 조회한다. 등록되지 않은 `broker_type`으로 브로커 생성을 시도하면 `InvalidBrokerTypeError`가 발생한다.
 

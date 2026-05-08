@@ -11,9 +11,9 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/accounts` | 계좌 목록 |
-| POST | `/api/accounts` | 계좌 등록. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환. Body: account_id, exchange, currency, broker_type, trading_mode, credentials, broker_config, buy_commission_rate, sell_commission_rate |
-| GET | `/api/accounts/{account_id}` | 계좌 상세 조회 |
-| PUT | `/api/accounts/{account_id}` | 계좌 수정. 런타임에는 `name`, `timezone`, `trading_hours_start`, `trading_hours_end` 같은 비구조 필드만 허용. `credentials`, `broker_config`, `buy_commission_rate`, `sell_commission_rate`, `broker_type`, `exchange`, `currency`, `trading_mode` 포함 시 409. 본문은 `Content-Type: application/json`(charset suffix 허용)만 허용하며, 그 외 media type은 415 반환. 다른 mutate 라우트의 415 게이트 도입은 본 변경 범위 밖. |
+| POST | `/api/accounts` | 계좌 등록. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환. Body: account_id, exchange, currency, broker_type, trading_mode, credentials, broker_config, buy_commission_rate, sell_commission_rate, market_order_reserve_buffer_rate (#1333). |
+| GET | `/api/accounts/{account_id}` | 계좌 상세 조회. 응답에 `market_order_reserve_buffer_rate` (float) 포함 (#1333). |
+| PUT | `/api/accounts/{account_id}` | 계좌 수정. 런타임에는 `name`, `timezone`, `trading_hours_start`, `trading_hours_end` 같은 비구조 필드만 허용. `credentials`, `broker_config`, `buy_commission_rate`, `sell_commission_rate`, `market_order_reserve_buffer_rate`, `broker_type`, `exchange`, `currency`, `trading_mode` 포함 시 409 (#1333: 9 STRUCTURAL_FIELDS). 본문은 `Content-Type: application/json`(charset suffix 허용)만 허용하며, 그 외 media type은 415 반환. 다른 mutate 라우트의 415 게이트 도입은 본 변경 범위 밖. |
 | GET | `/api/accounts/{account_id}/credentials` | 인증 정보 마스킹 조회 |
 | POST | `/api/accounts/{account_id}/suspend` | 계좌 거래 정지. Body: reason. 이미 정지 상태이면 409 Conflict |
 | POST | `/api/accounts/{account_id}/activate` | 계좌 거래 재개. 이미 활성 상태이면 409 Conflict |

@@ -22,7 +22,7 @@ POST   /api/system/clear-halt             — 시스템 전역 정지 해제 (�
 ### Account payload 필드 계약
 
 Account Web API의 request/response schema는 Account 모델/DB 필드명을 그대로 사용한다.
-표준 structural field는 다음과 같다.
+표준 structural field는 다음과 같다 (#1333: 9 필드).
 
 - `account_id`
 - `exchange`
@@ -33,6 +33,7 @@ Account Web API의 request/response schema는 Account 모델/DB 필드명을 그
 - `broker_config`
 - `buy_commission_rate`
 - `sell_commission_rate`
+- `market_order_reserve_buffer_rate`
 
 `credentials_ref`, `commission_rate`, `sell_tax_rate`는 Web API 필드가 아니다. 이 이름들은
 legacy config migration 입력을 설명할 때만 사용하며, API alias로 허용하지 않는다.
@@ -45,7 +46,8 @@ Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경
 - `POST /api/accounts`
 - `DELETE /api/accounts/:id`
 - `PUT /api/accounts/:id` 중 `credentials`, `broker_config`, `buy_commission_rate`,
-  `sell_commission_rate`, `broker_type`, `exchange`, `currency`, `trading_mode`를 포함한 요청
+  `sell_commission_rate`, `market_order_reserve_buffer_rate`, `broker_type`,
+  `exchange`, `currency`, `trading_mode`를 포함한 요청 (#1333)
 
 에러 코드는 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`이다. 계좌 생성/삭제와
 브로커 재초기화성 변경은 서버를 정지한 뒤 cold-path CLI로 수행하고, 서버 재시작 시 새
