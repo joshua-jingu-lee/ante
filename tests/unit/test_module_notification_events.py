@@ -187,6 +187,7 @@ class TestTradeRecorderNotifications:
 
         await eventbus.publish(
             OrderCancelFailedEvent(
+                account_id="test-account",
                 order_id="o1",
                 bot_id="bot-1",
                 strategy_id="s1",

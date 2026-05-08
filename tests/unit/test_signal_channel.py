@@ -296,6 +296,7 @@ class TestEventForwarding:
         from ante.eventbus.events import OrderCancelFailedEvent
 
         event = OrderCancelFailedEvent(
+            account_id="test-account",
             order_id="ORD-005",
             bot_id="bot-001",
             error_message="cancel_rejected",

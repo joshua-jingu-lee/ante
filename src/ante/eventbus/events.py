@@ -569,6 +569,9 @@ class CircuitBreakerEvent(Event):
 class OrderCancelFailedEvent(Event):
     """주문 취소 실패."""
 
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""

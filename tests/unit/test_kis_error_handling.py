@@ -223,6 +223,7 @@ class TestOrderCancelFailedEvent:
     def test_event_fields(self):
         """OrderCancelFailedEvent 필드 확인."""
         event = OrderCancelFailedEvent(
+            account_id="test-account",
             order_id="ord1",
             bot_id="bot1",
             strategy_id="s1",
@@ -240,6 +241,7 @@ class TestOrderCancelFailedEvent:
 
         await eventbus.publish(
             OrderCancelFailedEvent(
+                account_id="test-account",
                 order_id="ord1",
                 bot_id="bot1",
                 strategy_id="s1",
@@ -426,6 +428,7 @@ class TestBotCancelFailedHandling:
 
         await bot.on_order_update(
             OrderCancelFailedEvent(
+                account_id="acc-test",
                 order_id="ord1",
                 bot_id="bot1",
                 strategy_id="s1",
