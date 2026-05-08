@@ -624,3 +624,130 @@ class TestPromptApiAbsent:
         assert "confirmation_option" not in src, (
             "confirmation_option이 member.py에 남아 있다"
         )
+
+
+# ── PermissionDeniedError 처리 회귀 ───────────────────
+
+
+class TestNonMasterCliPermissionDenied:
+    """비-master CLI 호출이 traceback 없이 의미 있는 메시지로 종료한다 (#1351).
+
+    ``MemberService._assert_master``는 ``PermissionDeniedError``(``MemberError``의
+    하위 클래스 — Python 내장 ``PermissionError``와 별개)를 raise한다.
+    suspend / reactivate / revoke / rotate-token / register CLI 핸들러가 이
+    예외를 catch하지 않으면 uncaught traceback이 노출된다(이슈 #1351 1차 Codex
+    review FAIL — Finding 2).
+    """
+
+    def _patch_service_with_permission_denied(
+        self,
+        method_name: str,
+    ):  # noqa: ANN202
+        """``MemberService.<method_name>``이 ``PermissionDeniedError``를
+        raise하도록 mock한 ``_create_service`` 패치 컨텍스트.
+        """
+        from ante.member.errors import PermissionDeniedError
+
+        service = MagicMock()
+        service.list_members = AsyncMock(return_value=[])
+        denied = AsyncMock(
+            side_effect=PermissionDeniedError(
+                f"'{method_name}'은(는) master만 수행할 수 있습니다."
+            )
+        )
+        setattr(service, method_name, denied)
+        db = MagicMock()
+        db.close = AsyncMock(return_value=None)
+        return (
+            patch(
+                "ante.cli.commands.member._create_service",
+                new_callable=AsyncMock,
+                return_value=(service, db),
+            ),
+            service,
+            denied,
+        )
+
+    def test_suspend_non_master_exits_without_traceback(self) -> None:
+        ctx, _service, denied = self._patch_service_with_permission_denied("suspend")
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "suspend", "agent-1"],
+            )
+
+        assert result.exit_code == 1, result.output
+        denied.assert_awaited_once()
+        # JSON formatter에서 의미 있는 메시지로 종료한다 (traceback 부재).
+        data = json.loads(result.output)
+        assert "master" in data["message"]
+        assert "Traceback" not in result.output
+
+    def test_reactivate_non_master_exits_without_traceback(self) -> None:
+        ctx, _service, denied = self._patch_service_with_permission_denied("reactivate")
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "reactivate", "agent-1"],
+            )
+
+        assert result.exit_code == 1, result.output
+        denied.assert_awaited_once()
+        data = json.loads(result.output)
+        assert "master" in data["message"]
+        assert "Traceback" not in result.output
+
+    def test_revoke_non_master_exits_without_traceback(self) -> None:
+        ctx, _service, denied = self._patch_service_with_permission_denied("revoke")
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "member",
+                    "revoke",
+                    "agent-1",
+                    "--yes",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        denied.assert_awaited_once()
+        data = json.loads(result.output)
+        assert "master" in data["message"]
+        assert "Traceback" not in result.output
+
+    def test_rotate_token_non_master_exits_without_traceback(self) -> None:
+        ctx, _service, denied = self._patch_service_with_permission_denied(
+            "rotate_token"
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "rotate-token", "agent-1"],
+            )
+
+        assert result.exit_code == 1, result.output
+        denied.assert_awaited_once()
+        data = json.loads(result.output)
+        assert "master" in data["message"]
+        assert "Traceback" not in result.output
+
+    def test_register_non_master_exits_without_traceback(self) -> None:
+        ctx, _service, denied = self._patch_service_with_permission_denied("register")
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "member",
+                    "register",
+                    "--id",
+                    "agent-1",
+                    "--type",
+                    "agent",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        denied.assert_awaited_once()
+        data = json.loads(result.output)
+        assert "master" in data["message"]
+        assert "Traceback" not in result.output

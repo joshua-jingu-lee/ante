@@ -496,7 +496,13 @@ class MemberService:
     # ── 상태 변경 ──────────────────────────────────────
 
     async def suspend(self, member_id: str, suspended_by: str = "") -> Member:
-        """멤버 일시 정지."""
+        """멤버 일시 정지.
+
+        ``suspended_by``는 master 권한 caller여야 한다(#1351 — 보안 회귀
+        잠금). 빈 문자열을 포함한 non-master는 ``PermissionDeniedError``로
+        거부된다. 라우트 인증 가드와 무관하게 service-layer 자체 invariant.
+        """
+        await self._assert_master(suspended_by, "suspend")
         member = await self._get_or_raise(member_id)
         self._assert_not_master(member, "suspend")
         self._assert_status(member, MemberStatus.ACTIVE, "suspend")
@@ -522,7 +528,11 @@ class MemberService:
         return member
 
     async def reactivate(self, member_id: str, reactivated_by: str = "") -> Member:
-        """멤버 재활성화."""
+        """멤버 재활성화.
+
+        ``reactivated_by``는 master 권한 caller여야 한다(#1351).
+        """
+        await self._assert_master(reactivated_by, "reactivate")
         member = await self._get_or_raise(member_id)
         self._assert_status(member, MemberStatus.SUSPENDED, "reactivate")
 
@@ -545,7 +555,11 @@ class MemberService:
         return member
 
     async def revoke(self, member_id: str, revoked_by: str = "") -> Member:
-        """멤버 영구 폐기. 토큰 해시 삭제."""
+        """멤버 영구 폐기. 토큰 해시 삭제.
+
+        ``revoked_by``는 master 권한 caller여야 한다(#1351).
+        """
+        await self._assert_master(revoked_by, "revoke")
         member = await self._get_or_raise(member_id)
         self._assert_not_master(member, "revoke")
         self._assert_status(
@@ -580,7 +594,12 @@ class MemberService:
     async def rotate_token(
         self, member_id: str, rotated_by: str = ""
     ) -> tuple[Member, str]:
-        """토큰 재발급. 기존 토큰 즉시 무효화."""
+        """토큰 재발급. 기존 토큰 즉시 무효화.
+
+        ``rotated_by``는 master 권한 caller여야 한다(#1351). 인증 없는 token
+        재발급 표면을 제거한다.
+        """
+        await self._assert_master(rotated_by, "rotate_token")
         member = await self._get_or_raise(member_id)
         return await self._token_manager.rotate_token(member, rotated_by)
 
@@ -616,9 +635,13 @@ class MemberService:
     async def update_scopes(
         self, member_id: str, scopes: list[str], updated_by: str = ""
     ) -> Member:
-        """권한 범위 변경."""
-        if updated_by:
-            await self._assert_master(updated_by, "update_scopes")
+        """권한 범위 변경.
+
+        ``updated_by``는 master 권한 caller여야 한다(#1351). 이전에는
+        ``if updated_by:`` 가드 때문에 빈 caller가 master 검증을 우회했으나,
+        본 가드를 제거해 빈 caller도 거부한다.
+        """
+        await self._assert_master(updated_by, "update_scopes")
         member = await self._get_or_raise(member_id)
         self._assert_active(member, "update_scopes")
 

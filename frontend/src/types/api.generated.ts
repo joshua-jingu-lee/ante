@@ -733,7 +733,7 @@ export type paths = {
         put?: never;
         /**
          * Reactivate Member
-         * @description 멤버 재활성화.
+         * @description 멤버 재활성화. 인증된 master만 호출 가능 (#1351).
          */
         post: operations["reactivate_member_api_members__member_id__reactivate_post"];
         delete?: never;
@@ -753,7 +753,7 @@ export type paths = {
         put?: never;
         /**
          * Revoke Member
-         * @description 멤버 영구 폐기.
+         * @description 멤버 영구 폐기. 인증된 master만 호출 가능 (#1351).
          */
         post: operations["revoke_member_api_members__member_id__revoke_post"];
         delete?: never;
@@ -773,7 +773,10 @@ export type paths = {
         put?: never;
         /**
          * Rotate Token
-         * @description 토큰 재발급.
+         * @description 토큰 재발급. 인증된 master만 호출 가능 (#1351).
+         *
+         *     인증 없이 token rotation 응답에 접근하면 token 값 자체가 노출되므로,
+         *     가장 먼저 차단해야 한다.
          */
         post: operations["rotate_token_api_members__member_id__rotate_token_post"];
         delete?: never;
@@ -792,7 +795,19 @@ export type paths = {
         get?: never;
         /**
          * Update Scopes
-         * @description 권한 범위 변경.
+         * @description 권한 범위 변경. 인증된 master만 호출 가능 (#1351).
+         *
+         *     ``create_member``와 동일한 raw body 파싱 패턴을 적용해 인증 가드가 body
+         *     validation보다 우선 실행되도록 한다(#1351 — Codex Plan Review). FastAPI가
+         *     ``body: ScopesUpdateRequest``를 먼저 검증하면 unauth + bad-body 시 401이
+         *     아닌 422가 먼저 반환되어 contract가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *     1. 인증 가드 (최우선) — 실패 시 401.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``ScopesUpdateRequest.model_validate`` — ValidationError → 422.
+         *     4. ``svc.update_scopes`` 호출. ``ValueError`` → 404,
+         *        ``PermissionError``/``PermissionDeniedError`` → 403.
          */
         put: operations["update_scopes_api_members__member_id__scopes_put"];
         post?: never;
@@ -813,7 +828,7 @@ export type paths = {
         put?: never;
         /**
          * Suspend Member
-         * @description 멤버 일시 정지.
+         * @description 멤버 일시 정지. 인증된 master만 호출 가능 (#1351).
          */
         post: operations["suspend_member_api_members__member_id__suspend_post"];
         delete?: never;
@@ -2713,10 +2728,10 @@ export type components = {
         };
         /**
          * ScopesUpdateRequest
-         * @description 권한 범위 변경 요청.
+         * @description PUT /api/members/{member_id}/scopes 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1351). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         ScopesUpdateRequest: {
-            /** Scopes */
+            /** @description 변경할 권한 범위 목록. */
             scopes: string[];
         };
         /**
@@ -5046,6 +5061,15 @@ export interface operations {
                     "application/json": components["schemas"]["MemberDetailResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Permission denied */
             403: {
                 headers: {
@@ -5104,6 +5128,15 @@ export interface operations {
                     "application/json": components["schemas"]["MemberDetailResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Permission denied */
             403: {
                 headers: {
@@ -5160,6 +5193,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberTokenResponse"];
+                };
+            };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Permission denied */
@@ -5224,6 +5266,15 @@ export interface operations {
                     "application/json": components["schemas"]["MemberScopesResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Permission denied */
             403: {
                 headers: {
@@ -5242,13 +5293,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1351). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Member service not available */
@@ -5280,6 +5331,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberDetailResponse"];
+                };
+            };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Permission denied */

@@ -233,6 +233,7 @@ class TestAuthenticate:
             await service.authenticate("ante_ak_nonexistent_token")
 
     async def test_authenticate_suspended_member(self, service):
+        await service.bootstrap_master("owner", "pass123")
         _, token = await service.register("agent-01", MemberType.AGENT)
         await service.suspend("agent-01", suspended_by="owner")
         with pytest.raises(PermissionError, match="비활성 멤버"):
@@ -276,6 +277,7 @@ class TestAuthenticatePassword:
 
 class TestSuspendReactivateRevoke:
     async def test_suspend_and_reactivate(self, service):
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         m = await service.suspend("agent-01", suspended_by="owner")
         assert m.status == MemberStatus.SUSPENDED
@@ -286,15 +288,17 @@ class TestSuspendReactivateRevoke:
     async def test_suspend_master_fails(self, service):
         await service.bootstrap_master("owner", "pass123")
         with pytest.raises(PermissionError, match="master는 suspend"):
-            await service.suspend("owner")
+            await service.suspend("owner", suspended_by="owner")
 
     async def test_revoke(self, service):
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         m = await service.revoke("agent-01", revoked_by="owner")
         assert m.status == MemberStatus.REVOKED
         assert m.token_hash == ""
 
     async def test_revoke_suspended_member(self, service):
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.suspend("agent-01", suspended_by="owner")
         m = await service.revoke("agent-01", revoked_by="owner")
@@ -302,6 +306,7 @@ class TestSuspendReactivateRevoke:
         assert m.token_hash == ""
 
     async def test_revoke_already_revoked_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.revoke("agent-01", revoked_by="owner")
         with pytest.raises(PermissionError, match="active, suspended 상태에서만"):
@@ -310,16 +315,18 @@ class TestSuspendReactivateRevoke:
     async def test_revoke_master_fails(self, service):
         await service.bootstrap_master("owner", "pass123")
         with pytest.raises(PermissionError, match="master는 revoke"):
-            await service.revoke("owner")
+            await service.revoke("owner", revoked_by="owner")
 
     async def test_reactivate_active_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         with pytest.raises(PermissionError, match="suspended 상태에서만"):
-            await service.reactivate("agent-01")
+            await service.reactivate("agent-01", reactivated_by="owner")
 
     async def test_suspend_publishes_event(self, service, eventbus):
         events = []
         eventbus.subscribe(MemberSuspendedEvent, events.append)
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.suspend("agent-01", suspended_by="owner")
         assert len(events) == 1
@@ -330,6 +337,7 @@ class TestSuspendReactivateRevoke:
 
         events: list = []
         eventbus.subscribe(MemberReactivatedEvent, events.append)
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.suspend("agent-01", suspended_by="owner")
         await service.reactivate("agent-01", reactivated_by="owner")
@@ -340,6 +348,7 @@ class TestSuspendReactivateRevoke:
     async def test_revoke_publishes_event(self, service, eventbus):
         events = []
         eventbus.subscribe(MemberRevokedEvent, events.append)
+        await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.revoke("agent-01", revoked_by="owner")
         assert len(events) == 1
@@ -347,6 +356,7 @@ class TestSuspendReactivateRevoke:
 
 class TestRotateToken:
     async def test_rotate_token(self, service):
+        await service.bootstrap_master("owner", "pass123")
         _, old_token = await service.register("agent-01", MemberType.AGENT)
         _, new_token = await service.rotate_token("agent-01", rotated_by="owner")
         assert old_token != new_token
@@ -477,11 +487,18 @@ class TestMasterPermissionCheck:
         )
         assert m.scopes == ["strategy:write"]
 
-    async def test_update_scopes_without_caller_succeeds(self, service):
-        """updated_by가 빈 문자열(내부 호출)이면 검증 스킵."""
+    async def test_update_scopes_without_caller_fails(self, service):
+        """``updated_by``가 빈 문자열이면 PermissionDeniedError (#1351 회귀 잠금).
+
+        과거에는 빈 caller가 master 검증을 우회했으나(``if updated_by:`` 가드),
+        oracle finding #1351에 따라 빈 caller도 거부된다. 내부 호출에서도
+        반드시 master 권한 caller를 명시해야 한다.
+        """
+        from ante.member.errors import PermissionDeniedError
+
         await service.register("agent-01", MemberType.AGENT)
-        m = await service.update_scopes("agent-01", ["data:read"])
-        assert m.scopes == ["data:read"]
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.update_scopes("agent-01", ["data:read"])
 
 
 class TestList:

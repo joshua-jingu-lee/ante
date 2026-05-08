@@ -814,6 +814,56 @@ class TestRFC7807ErrorResponse:
             f"{body_schema!r}"
         )
 
+    def test_openapi_components_includes_scopes_update_request(self):
+        """``components.schemas.ScopesUpdateRequest``가 항상 등록되어 있다 (#1351).
+
+        PUT /api/members/{member_id}/scopes 라우트도 ``create_member`` 와 동일한
+        raw body 패턴(``request: Request``)으로 전환되었다(인증 가드 우선).
+        그 결과 ``body: ScopesUpdateRequest`` 인자가 시그니처에서 사라져 FastAPI
+        자동 components 등록 경로를 타지 않으며, inline schema로 두면 frontend
+        ``openapi-typescript`` 산출물이 ``export type ScopesUpdateRequest``를
+        잃고 ``frontend/src/api/members.ts``의 ``tsc -b``가 깨진다.
+        ``_install_openapi_customizer``가 ``setdefault``로 fallback 등록해 이
+        회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "ScopesUpdateRequest" in schemas, (
+            "ScopesUpdateRequest가 components.schemas에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1351 1차 Codex review)"
+        )
+        scopes_schema = schemas["ScopesUpdateRequest"]
+        assert isinstance(scopes_schema, dict)
+        assert scopes_schema.get("type") == "object"
+        required = scopes_schema.get("required", [])
+        assert "scopes" in required, (
+            f"ScopesUpdateRequest.required에 scopes 누락: {required}"
+        )
+        properties = scopes_schema.get("properties", {})
+        scopes_field = properties.get("scopes", {})
+        assert scopes_field.get("type") == "array", (
+            f"ScopesUpdateRequest.scopes는 array여야 함: {scopes_field!r}"
+        )
+
+    def test_put_members_scopes_request_body_uses_component_ref(self):
+        """PUT /api/members/{id}/scopes requestBody가 ``$ref`` 매핑을 노출한다 (#1351).
+
+        inline schema로 두면 frontend codegen이 ``export type
+        ScopesUpdateRequest``를 만들지 못해 ``frontend/src/api/members.ts``의
+        import가 깨진다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        put_op = schema["paths"]["/api/members/{member_id}/scopes"]["put"]
+        request_body = put_op.get("requestBody", {})
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/ScopesUpdateRequest"}, (
+            "PUT /api/members/{member_id}/scopes requestBody schema가 component "
+            f"$ref가 아님: {body_schema!r}"
+        )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 
