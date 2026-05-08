@@ -1476,6 +1476,16 @@
               }
             }
           },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "403": {
             "description": "Permission denied",
             "content": {

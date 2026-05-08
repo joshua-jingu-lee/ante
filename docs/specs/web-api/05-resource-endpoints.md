@@ -135,6 +135,8 @@ member/security 알림을 같은 프로세스에서 처리한다.
 | PATCH | `/api/members/{member_id}/password` | 비밀번호 변경 (human 멤버 전용) |
 | PUT | `/api/members/{member_id}/scopes` | 권한 범위 변경 |
 
+`POST /api/members`는 master 권한 인증된 호출자만 사용할 수 있다. `Authorization: Bearer <token>` 헤더가 없거나 invalid token이면 `401 Unauthorized`로 거부되며 새 멤버나 토큰이 생성되지 않는다. 인증된 non-master 호출자는 `MemberService.register`의 `_assert_master`에서 발생한 `PermissionError` 매핑으로 `403 Forbidden`을 반환한다. 다른 멤버 mutation API(`suspend`, `reactivate`, `revoke`, `rotate-token`, `password`, `scopes`)의 인증 강제는 별도 후속 이슈에서 일괄 정리한다.
+
 ## 설정 관리 (`/api/config`)
 
 | Method | Path | 설명 |

@@ -167,6 +167,24 @@ def member_service():
 
 @pytest.fixture
 def client(member_service):
+    """인증 컨텍스트가 미리 주입된 기본 클라이언트.
+
+    member 라우트 대다수는 인증된 호출자를 전제로 한다. 인증 자체의 동작
+    검증은 ``test_member_routes_create_auth.py``에서 별도로 수행한다.
+    """
+    app = create_app(member_service=member_service)
+
+    @app.middleware("http")
+    async def inject_member_id(request, call_next):
+        request.state.member_id = "master-user"
+        return await call_next(request)
+
+    return TestClient(app)
+
+
+@pytest.fixture
+def client_unauthenticated(member_service):
+    """인증 컨텍스트가 주입되지 않은 클라이언트."""
     app = create_app(member_service=member_service)
     return TestClient(app)
 
@@ -415,22 +433,29 @@ class TestCallerIdPropagation:
         assert resp.status_code == 200
         assert captured["updated_by"] == "master-user"
 
-    def test_no_auth_passes_empty_string(self, client, member_service):
-        """인증 컨텍스트 없을 때 빈 문자열 전달 (내부 호출)."""
-        captured: dict[str, str] = {}
+    def test_no_auth_create_member_blocked_with_401(
+        self, client_unauthenticated, member_service
+    ):
+        """인증 컨텍스트 없으면 POST /api/members는 401로 차단된다 (issue #1339).
+
+        과거에는 빈 caller로 register를 호출하는 동작이었으나, 보안 이슈
+        #1339에 따라 unauthenticated 호출은 401로 거부되며 register는 호출되지
+        않는다.
+        """
+        called: list[dict[str, str]] = []
         original_register = member_service.register
 
         async def spy_register(**kwargs):
-            captured["registered_by"] = kwargs.get("registered_by", "")
+            called.append({"registered_by": kwargs.get("registered_by", "")})
             return await original_register(**kwargs)
 
         member_service.register = spy_register
-        resp = client.post(
+        resp = client_unauthenticated.post(
             "/api/members",
             json={"member_id": "new-agent", "member_type": "agent"},
         )
-        assert resp.status_code == 201
-        assert captured["registered_by"] == ""
+        assert resp.status_code == 401
+        assert called == []
 
 
 class TestPermissionDeniedErrorHandling:

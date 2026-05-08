@@ -110,6 +110,16 @@ async def list_members(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header)"
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         403: {
             "description": "Permission denied",
             "content": {
@@ -136,6 +146,13 @@ async def create_member(
 ) -> dict:
     """멤버 등록. 토큰 1회 반환."""
     caller = _caller_id(request)
+    if not caller:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "인증이 필요합니다. Authorization: Bearer <token> 헤더를 제공하세요."
+            ),
+        )
     try:
         member, token = await svc.register(
             member_id=body.member_id,
