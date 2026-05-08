@@ -7,6 +7,7 @@ import logging
 import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from ante.account.scoping import require_account_id
@@ -125,6 +126,8 @@ class Treasury:
         currency: str = "KRW",
         buy_commission_rate: float = 0.00015,
         sell_commission_rate: float = 0.00195,
+        market_order_reserve_buffer_rate: Decimal = Decimal("0"),
+        order_reserve_price_resolver: Callable[[str], Awaitable[float]] | None = None,
         bot_status_checker: Callable[[str], str] | None = None,
     ) -> None:
         self._db = db
@@ -133,6 +136,16 @@ class Treasury:
         self._currency = currency
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
+        # 시장가 매수 reserve buffer (#1333). Account-level Treasury reserve
+        # policy로, broker_config가 아니라 ``Account.market_order_reserve_buffer_rate``
+        # 에서 주입된다. ``_on_order_validated``의 market buy + price=None
+        # 분기에서만 사용한다.
+        self._market_order_reserve_buffer_rate = market_order_reserve_buffer_rate
+        # 시장가 매수 reserve estimate를 위한 account-scoped 현재가 resolver
+        # (#1333). 기존 ``start_sync(price_resolver=...)``의 자산 평가 sync
+        # resolver와 **별도** 객체이며, ``_init_gateway()`` 끝에서
+        # ``set_order_reserve_price_resolver``로 후속 주입된다.
+        self._order_reserve_price_resolver = order_reserve_price_resolver
         self._bot_status_checker = bot_status_checker
 
         self._account_balance: float = 0.0
@@ -296,6 +309,20 @@ class Treasury:
     def set_bot_status_checker(self, checker: Callable[[str], str]) -> None:
         """봇 상태 확인 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
         self._bot_status_checker = checker
+
+    def set_order_reserve_price_resolver(
+        self, resolver: Callable[[str], Awaitable[float]]
+    ) -> None:
+        """시장가 매수 reserve estimate 용 현재가 resolver 주입 (#1333).
+
+        ``_init_gateway()`` 끝에서 account-scoped wrapper로 주입한다. 기존
+        ``start_sync(price_resolver=...)``의 자산 평가 sync resolver와는
+        별도다. resolver는 ``await resolver(symbol) -> float`` 시그니처를
+        만족해야 하며, 실패 시 예외를 raise하면 Treasury가 terminal
+        ``OrderRejectedEvent(reason="market_buy_quote_unavailable: ...")``로
+        변환한다.
+        """
+        self._order_reserve_price_resolver = resolver
 
     def update_commission_rates(
         self, buy_commission_rate: float, sell_commission_rate: float
@@ -613,29 +640,174 @@ class Treasury:
             )
             return
 
-        # Guard 1: 매수 + 시장가 + price 부재 시그니처는 quote source가 없으면
-        # reserve 금액을 산정할 수 없으므로 즉시 거부한다.
-        # narrow-scope: total_reserve <= 0 전체가 아니라 정확한 quote 부재
-        # 시그니처만 잡아 quantity=0 같은 다른 경계 케이스와 분리한다.
+        # #1333: 매수 + 시장가 + price 부재 시그니처는 즉시 실행 주문이므로
+        # 제출 전에 자금을 잠가야 한다 (stop처럼 trigger 대기 X). resolver 가
+        # 주입돼 있으면 현재가를 조회해 reserve estimate 를 산정하고, 실패
+        # (resolver 미주입/예외)는 terminal ``market_buy_quote_unavailable``
+        # 거부로 종료한다 — 사용자 정책 사전 승인 + Plan v4.
+        # 분기 우선순위: #1337 (직전 stop/stop_limit) > #1333 (이 분기) >
+        # 기존 limit / market(price 있음) 분기.
         if event.side == "buy" and event.order_type == "market" and event.price is None:
-            await self._eventbus.publish(
-                OrderRejectedEvent(
-                    order_id=event.order_id,
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=event.symbol,
-                    side=event.side,
-                    quantity=event.quantity,
-                    price=event.price,
-                    order_type=event.order_type,
-                    account_id=self._account_id,
-                    reason=(
-                        f"market_buy_quote_unavailable: "
-                        f"order_type={event.order_type}, price={event.price}"
-                    ),
+            resolver = self._order_reserve_price_resolver
+            if resolver is None:
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=(
+                            "market_buy_quote_unavailable: resolver not configured"
+                        ),
+                    )
                 )
-            )
-            return
+                return
+            try:
+                quote = await resolver(event.symbol)
+            except Exception as exc:
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=f"market_buy_quote_unavailable: {exc!s}",
+                    )
+                )
+                return
+
+            # Decimal 정밀도로 reserve 산정. ``OrderApprovedEvent.reserved_amount``
+            # 와 Treasury budget 의 float 경계에서만 ``float`` 로 변환한다 — 기존
+            # commission/budget float 계약과 일관됨.
+            try:
+                quote_d = Decimal(str(quote))
+            except Exception as exc:
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=(
+                            f"market_buy_quote_unavailable: "
+                            f"invalid quote {quote!r}: {exc!s}"
+                        ),
+                    )
+                )
+                return
+
+            quantity_d = Decimal(str(event.quantity))
+            buffer = self._market_order_reserve_buffer_rate
+            reserve_basis = quantity_d * quote_d * (Decimal("1") + buffer)
+            commission_d = reserve_basis * Decimal(str(self._buy_commission_rate))
+            total_reserve_d = reserve_basis + commission_d
+            total_reserve_market_buy = float(total_reserve_d)
+
+            if total_reserve_market_buy <= 0:
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=(
+                            f"reserve_amount_invalid: "
+                            f"total_reserve={total_reserve_market_buy}, "
+                            f"quote={quote}, "
+                            f"quantity={event.quantity}"
+                        ),
+                    )
+                )
+                return
+
+            try:
+                success = await self.reserve_for_order(
+                    event.bot_id, event.order_id, total_reserve_market_buy
+                )
+                if not success:
+                    available = self.get_available(event.bot_id)
+                    await self._eventbus.publish(
+                        OrderRejectedEvent(
+                            order_id=event.order_id,
+                            bot_id=event.bot_id,
+                            strategy_id=event.strategy_id,
+                            symbol=event.symbol,
+                            side=event.side,
+                            quantity=event.quantity,
+                            price=event.price,
+                            order_type=event.order_type,
+                            account_id=self._account_id,
+                            reason=(
+                                f"insufficient_budget: "
+                                f"need {total_reserve_market_buy:,.0f}, "
+                                f"available {available:,.0f}"
+                            ),
+                        )
+                    )
+                    return
+
+                # Stop Condition: resolved quote 를 OrderApprovedEvent.price 에
+                # 절대 넣지 않는다 — quote 는 reserve estimate 이지 주문가가
+                # 아니다. price=None 그대로 유지해 broker adapter 가 시장가
+                # 주문으로 제출하게 한다.
+                await self._eventbus.publish(
+                    OrderApprovedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=None,
+                        order_type=event.order_type,
+                        stop_price=event.stop_price,
+                        reserved_amount=total_reserve_market_buy,
+                        account_id=self._account_id,
+                    )
+                )
+                return
+            except Exception as exc:
+                logger.exception(
+                    "Treasury reserve_for_order 실패 (market buy): "
+                    "order_id=%s, bot_id=%s",
+                    event.order_id,
+                    event.bot_id,
+                )
+                await self._eventbus.publish(
+                    OrderRejectedEvent(
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        symbol=event.symbol,
+                        side=event.side,
+                        quantity=event.quantity,
+                        price=event.price,
+                        order_type=event.order_type,
+                        account_id=self._account_id,
+                        reason=f"reserve_failed: {exc!s}",
+                    )
+                )
+                return
 
         price = event.price or 0.0
         estimated_cost = event.quantity * price
@@ -776,7 +948,27 @@ class Treasury:
             budget.spent += actual_cost
             surplus = reserved_amount - actual_cost
             if surplus > 0:
+                # 체결가가 reserve 보다 낮음 — 잔여 reserve 를 available 로 환수.
                 budget.available += surplus
+            elif surplus < 0:
+                # 체결가가 reserve 보다 높음 (시장가 매수의 가격 변동 등).
+                # 초과분을 available 에서 추가 차감한다 — invariant: 결과적으로
+                # available 이 음수가 될 수 있으나 이는 정상 운영 상태가 아니며
+                # 후속 매수 reserve 가 거부되는 것은 자연스러운 결과다 (#1333).
+                # 별도 EventBus 이벤트는 신설하지 않으며 audit 용 warning 만
+                # 남긴다.
+                extra_cost = -surplus
+                budget.available -= extra_cost
+                logger.warning(
+                    "market_order_reserve_shortfall: bot=%s order=%s "
+                    "extra_cost=%s reserved=%s actual=%s "
+                    "(available may be negative)",
+                    event.bot_id,
+                    event.order_id,
+                    f"{extra_cost:,.2f}",
+                    f"{reserved_amount:,.2f}",
+                    f"{actual_cost:,.2f}",
+                )
         else:
             actual_proceeds = fill_value - commission
             budget.returned += actual_proceeds

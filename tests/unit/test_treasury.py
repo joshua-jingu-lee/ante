@@ -685,7 +685,8 @@ class TestOnOrderValidatedGuards:
     async def test_on_order_validated_market_buy_without_price_publishes_rejected(
         self, treasury, eventbus, monkeypatch
     ):
-        """market buy + price=None -> reserve 호출 없이 OrderRejected 발행.
+        """market buy + price=None & resolver 미주입 -> reserve 호출 없이
+        OrderRejected 발행 (#1333).
 
         Order lifecycle invariant: terminal event(OrderRejected)가 정확히 1건
         발행되어야 하고, reserve_for_order는 호출되지 않아야 한다.
@@ -721,9 +722,10 @@ class TestOnOrderValidatedGuards:
 
         assert len(approved) == 0
         assert len(rejected) == 1
+        # #1333: reason은 ``market_buy_quote_unavailable: ...`` prefix.
+        # resolver 미주입 시 ``resolver not configured`` detail 이 포함된다.
         assert rejected[0].reason.startswith("market_buy_quote_unavailable")
-        assert "order_type=market" in rejected[0].reason
-        assert "price=None" in rejected[0].reason
+        assert "resolver not configured" in rejected[0].reason
         assert rejected[0].account_id == ACCOUNT_ID
         assert rejected[0].order_id == "ord-mkt-buy"
         # reserve_for_order는 절대 호출되지 않아야 한다.
@@ -954,6 +956,422 @@ class TestOnOrderValidatedGuards:
         assert len(approved) == 0
         assert len(rejected) == 1
         assert rejected[0].reason.startswith("market_buy_quote_unavailable")
+
+
+# -- #1333 시장가 매수 reserve estimate (quote resolver) -----
+
+
+class TestMarketBuyQuoteResolver:
+    """Account-scoped quote resolver 가 주입돼 있을 때 market buy + price=None
+    이 정상 reserve 후 OrderApproved 로 흘러가는지, 미주입/실패 시 terminal
+    reject 인지 검증한다 (#1333).
+    """
+
+    async def _make_treasury_with_buffer(
+        self,
+        db,
+        eventbus,
+        *,
+        buffer: str,
+        resolver=None,
+    ):
+        from decimal import Decimal as _Decimal
+
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            account_id=ACCOUNT_ID,
+            currency=CURRENCY,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
+            market_order_reserve_buffer_rate=_Decimal(buffer),
+            order_reserve_price_resolver=resolver,
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        return t
+
+    async def test_market_buy_resolver_success_publishes_approved_with_price_none(
+        self, db, eventbus
+    ):
+        """resolver 가 quote 를 반환하면 reserve 산정 후 OrderApproved 가
+        ``price=None`` + ``reserved_amount > 0`` 로 발행된다.
+        """
+
+        async def resolver(symbol: str) -> float:
+            assert symbol == "069500"
+            return 10_000.0
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        rejected: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="069500",
+                side="buy",
+                quantity=1.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(rejected) == 0
+        assert len(approved) == 1
+        ev = approved[0]
+        # resolved quote 는 OrderApprovedEvent.price 에 절대 들어가지 않는다.
+        assert ev.price is None
+        # reserve 금액에 buffer (0.5%) + buy_commission (0.015%) 반영.
+        # 1 * 10_000 * (1 + 0.005) * (1 + 0.00015) = 10_051.5075...
+        expected = 1.0 * 10_000.0 * (1 + 0.005) * (1 + 0.00015)
+        assert ev.reserved_amount == pytest.approx(expected)
+
+    async def test_market_buy_buffer_and_commission_in_reserve_amount(
+        self, db, eventbus
+    ):
+        """buffer = 0 일 때 reserve = quantity * quote * (1 + commission)
+        가 그대로 적용되는지 검증 (commission 단독 영향 분리).
+        """
+
+        async def resolver(symbol: str) -> float:
+            return 5_000.0
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-2",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=2.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 1
+        # 2 * 5_000 * (1 + 0) * (1 + 0.00015) = 10_001.5
+        expected = 2.0 * 5_000.0 * (1 + 0) * (1 + 0.00015)
+        assert approved[0].reserved_amount == pytest.approx(expected)
+
+    async def test_market_buy_resolver_missing_publishes_rejected(self, db, eventbus):
+        """resolver 미주입 상태에서 terminal reject (resolver not configured)."""
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=None
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-3",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 0
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("market_buy_quote_unavailable")
+        assert "resolver not configured" in rejected[0].reason
+
+    async def test_market_buy_resolver_raises_publishes_rejected(self, db, eventbus):
+        """resolver 가 예외를 raise 하면 terminal reject 로 변환."""
+
+        async def resolver(symbol: str) -> float:
+            raise RuntimeError("KIS quote API 503")
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-4",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("market_buy_quote_unavailable")
+        assert "KIS quote API 503" in rejected[0].reason
+
+    async def test_market_sell_price_none_unchanged(self, db, eventbus):
+        """market **sell** + price=None 은 기존 거동대로 reserve 없이 즉시 승인."""
+
+        async def resolver(symbol: str) -> float:
+            return 99_999.0  # 호출돼서는 안 됨
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-mkt-sell",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="sell",
+                quantity=1.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 1
+        # sell-side 는 reserve 0
+        assert approved[0].reserved_amount == 0.0
+        assert approved[0].side == "sell"
+        # resolver 가 호출되더라도 reserve estimate 산정에는 쓰이지 않는다.
+        # budget 도 변동 없음.
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        assert budget.available == 1_000_000.0
+        assert budget.reserved == 0.0
+
+    async def test_limit_buy_unchanged_no_resolver_call(self, db, eventbus):
+        """limit buy (price 명시) 는 기존 reserve 산식이 그대로 적용되며
+        resolver 가 호출되지 않는다.
+        """
+        resolver_calls: list = []
+
+        async def resolver(symbol: str) -> float:
+            resolver_calls.append(symbol)
+            return 99_999.0
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-limit-buy",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=2.0,
+                price=1_000.0,
+                order_type="limit",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 1
+        # 기존 limit buy 산식: quantity * price + commission (buffer 적용 안 함).
+        expected = 2.0 * 1_000.0 + (2.0 * 1_000.0) * 0.00015
+        assert approved[0].reserved_amount == pytest.approx(expected)
+        # market buy quote resolver 는 호출되지 않는다.
+        assert resolver_calls == []
+
+    async def test_buy_stop_does_not_reach_market_resolver(self, db, eventbus):
+        """buy stop 분기 (#1337) 가 진입 우선순위 1로 유지되어 #1333 resolver
+        분기에 도달하지 않는다 — Stop Condition 반영.
+        """
+        resolver_calls: list = []
+
+        async def resolver(symbol: str) -> float:
+            resolver_calls.append(symbol)
+            return 99_999.0
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        rejected: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-stop",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1.0,
+                price=None,
+                order_type="stop",
+                stop_price=900.0,
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        # #1337: stop 은 트리거 전이라 reserve 0 으로 즉시 OrderApproved.
+        assert len(rejected) == 0
+        assert len(approved) == 1
+        assert approved[0].reserved_amount == 0.0
+        # resolver 는 호출되지 않는다.
+        assert resolver_calls == []
+
+    async def test_buy_stop_limit_does_not_reach_market_resolver(self, db, eventbus):
+        """buy stop_limit 도 #1337 분기 우선순위 1 유지 — resolver 미호출."""
+        resolver_calls: list = []
+
+        async def resolver(symbol: str) -> float:
+            resolver_calls.append(symbol)
+            return 99_999.0
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0.005", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        approved: list = []
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-stop-limit",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1.0,
+                price=910.0,
+                order_type="stop_limit",
+                stop_price=900.0,
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert len(approved) == 1
+        assert approved[0].reserved_amount == 0.0
+        assert resolver_calls == []
+
+
+# -- #1333 shortfall 정산 -----
+
+
+class TestMarketOrderReserveShortfall:
+    """체결가가 reserve 보다 높은 시장가 매수의 정산 invariant 검증 (#1333)."""
+
+    async def test_buy_fill_actual_cost_exceeds_reserved_warns_and_decrements_available(
+        self, db, eventbus, caplog
+    ):
+        """actual_cost > reserved_amount 면 초과분이 available 에서 추가 차감되며
+        ``market_order_reserve_shortfall`` warning 이 logged 된다. available 이
+        음수가 되는 것이 invariant 다 (#1333 정책 5).
+        """
+        import logging as _logging
+
+        async def resolver(symbol: str) -> float:
+            return 1_000.0  # buffer 0 이라 reserve = 1 * 1000 * (1 + 0.00015)
+
+        from decimal import Decimal as _Decimal
+
+        t = Treasury(
+            db=db,
+            eventbus=eventbus,
+            account_id=ACCOUNT_ID,
+            currency=CURRENCY,
+            buy_commission_rate=0.00015,
+            sell_commission_rate=0.00195,
+            market_order_reserve_buffer_rate=_Decimal("0"),
+            order_reserve_price_resolver=resolver,
+        )
+        await t.initialize()
+        await t.set_account_balance(10_000_000.0)
+        await t.allocate("bot1", 1_100.0)
+
+        # 1) market buy → reserve 산정.
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-fill-1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        reserved_before = budget.reserved
+        assert reserved_before > 0
+
+        # 2) 실체결가가 reserve 보다 높다 → shortfall 정산.
+        with caplog.at_level(_logging.WARNING):
+            await eventbus.publish(
+                OrderFilledEvent(
+                    order_id="ord-fill-1",
+                    bot_id="bot1",
+                    strategy_id="s1",
+                    symbol="A",
+                    side="buy",
+                    quantity=1.0,
+                    price=2_000.0,  # reserve(=1000.15)보다 훨씬 높다
+                    commission=0.3,
+                    account_id=ACCOUNT_ID,
+                )
+            )
+
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        # actual_cost = 1*2000 + 0.3 = 2000.3, reserved ~= 1000.15 → extra 1000.15+
+        # available 은 (1100 - 1000.15) - extra = 음수 가능.
+        assert budget.available < 0
+        assert budget.reserved == pytest.approx(0.0, abs=1e-6)
+        # warning 로그 점검.
+        assert any(
+            "market_order_reserve_shortfall" in rec.getMessage()
+            for rec in caplog.records
+        )
 
 
 # -- 모니터링 -------------------------------------------------
