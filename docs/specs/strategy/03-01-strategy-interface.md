@@ -56,7 +56,7 @@
 | `on_stop` | — | `None` | 봇 중지 시 1회 호출. 정리 로직 (선택) |
 | `async on_step` **(필수)** | `context: dict[str, Any]` | `list[Signal]` | 주기적 호출. 매매 시그널 반환. context에 timestamp, portfolio, balance 등 포함 |
 | `async on_fill` | `fill: dict[str, Any]` | `list[Signal]` | 주문 체결 통보. 후속 주문(손절/익절) 발행 가능 (선택) |
-| `async on_order_update` | `update: dict[str, Any]` | `None` | 주문 상태 변경(접수/거부/취소) 통보 (선택) |
+| `async on_order_update` | `update: dict[str, Any]` | `None` | 주문 상태 변경(접수/거부/취소/정정거부/스탑 등록·발동·만료) 통보 (선택). 상태값과 키 명세는 아래 ["on_order_update 알림 명세"](#on_order_update-알림-명세) 참고 |
 | `async on_data` | `data: dict[str, Any]` | `list[Signal]` | 외부 데이터(뉴스, 이벤트, AI 시그널) 수신 시 호출. 즉시 주문 발행 가능 (선택) |
 | `async on_position_corrected` | `correction: dict[str, Any]` | `None` | 대사(Reconciliation) 포지션 보정 통보 (선택) |
 | `get_rules` | — | `dict[str, Any]` | 전략별 거래 룰 반환. Rule Engine이 전역 룰과 함께 검증 (선택) |
@@ -87,3 +87,61 @@
 4. **`get_rules()` 전략별 룰 선언**
    - Rule Engine이 전역 룰과 함께 검증할 수 있도록 전략이 자체 룰을 선언
    - architecture.md의 2중 룰 구조(전역 + 전략별) 구현
+
+#### on_order_update 알림 명세
+
+`Bot.on_order_update`가 변환하여 전략에 전달하는 `update: dict[str, Any]`의
+`status` 값과 dict 키 명세는 다음과 같다. 일반 주문과 스탑 주문 모두 동일한
+콜백으로 전달되며, 별도 콜백(`on_stop_order_update` 등)은 신설하지 않는다
+(시장 표준 패턴 + 전략 작성자 부담 최소화).
+
+##### 일반 주문 상태값
+
+| `status` | 발생 시점 | 변환 원본 이벤트 | 필수 키 |
+|---|---|---|---|
+| `submitted` | 브로커가 주문 접수 | `OrderSubmittedEvent` | `order_id`, `status`, `symbol`, `side` |
+| `rejected` | 신규 주문 거부 (룰 / 브로커) | `OrderRejectedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
+| `cancelled` | 주문 취소 완료 | `OrderCancelledEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
+| `failed` | 주문 발행 실패 (네트워크/시스템 오류) | `OrderFailedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
+| `cancel_failed` | 취소 실패 | `OrderCancelFailedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
+| `modify_rejected` | 정정 거부 (룰 거부 / 룰 예외 / 미구현) | `OrderModifyRejectedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
+
+##### 스탑 주문 상태값 (#1336)
+
+스탑 주문 (`stop` / `stop_limit`)은 KRX가 네이티브 지원하지 않으므로
+`StopOrderManager`가 에뮬레이션한다. 등록·발동·만료 세 시점 모두
+`on_order_update`로 전달된다 (정책: 일반 주문과 동일 채널, 별도 콜백
+신설 금지).
+
+| `status` | 발생 시점 | 변환 원본 이벤트 | 필수 키 |
+|---|---|---|---|
+| `stop_registered` | 등록 직후 (가격 조건이 시스템에 잡힘) | `StopOrderRegisteredEvent` | `order_id` (= `stop_order_id`), `stop_order_id`, `status`, `symbol`, `side`, `quantity`, `stop_price`, `limit_price` |
+| `stop_triggered` | 가격 조건 충족 → 일반 주문으로 변환 | `StopOrderTriggeredEvent` | `order_id` (= `stop_order_id`), `stop_order_id`, `status`, `symbol`, `side`, `quantity`, `trigger_price`, `converted_order_type` |
+| `stop_expired` | 자동 해제 (세션 종료 또는 매니저 중지) | `StopOrderExpiredEvent` | `order_id` (= `stop_order_id`), `stop_order_id`, `status`, `symbol`, `reason` |
+
+스탑 알림에서:
+
+- `order_id`에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를
+  맞춘다 (전략이 후속 `cancel/modify`에 그대로 사용 가능). `stop_order_id`
+  키도 명시 식별자로 함께 노출한다.
+- 발동(`stop_triggered`) 알림은 변환된 일반 주문이 자체 라이프사이클 이벤트
+  (`OrderSubmittedEvent` 등)를 별도로 발행하므로, 스탑 식별 단위로 받고 싶은
+  경우 본 알림으로 분기한다.
+- 만료(`stop_expired`) 알림의 `reason` 허용 값: `"session_ended"`,
+  `"manager_stopped"` (현재 코드 기준). 추후 `manual_cancel` 등 도입은 별도
+  이슈로 분리한다.
+- 스탑 알림에는 자금 reserve 정보가 포함되지 않는다 (#1337 정책: 매수 stop은
+  등록 시점 자금 잠금 없음, 트리거 시점 잠금).
+
+활용 예시 — "스탑 주문 재등록":
+
+```python
+async def on_order_update(self, update):
+    if update["status"] == "stop_expired" and update["reason"] == "session_ended":
+        # 다음 세션에서 동일 stop 주문 다시 등록
+        ...
+    elif update["status"] == "stop_triggered":
+        # 발동된 stop의 변환 주문 자체 라이프사이클은
+        # 별도 OrderSubmittedEvent 등으로 통보된다
+        ...
+```

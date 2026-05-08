@@ -237,7 +237,26 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 
 **세션 관리**: 정규 세션(09:00-15:30 KST), 확장 세션(08:30-18:00 KST). 세션 외 시간에는 트리거하지 않음.
 
-**발행 이벤트**: `StopOrderRegisteredEvent`, `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`. 트리거 시 변환된 `OrderRequestEvent`를 발행하여 기존 주문 흐름에 주입.
+**발행 이벤트**: `StopOrderRegisteredEvent`, `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`. 트리거 시 변환된 `OrderRequestEvent`를 발행하여 기존 주문 흐름에 주입. 세 이벤트 모두 account-scoped (`account_id` 필드 + `_requires_account_id` 마커, #1336) 이며, 발행 시 `StopOrderManager`가 `account_id`를 명시 채운다.
+
+### StopOrderManager — 전략 통보 정책 (#1336)
+
+스탑 주문(`stop` / `stop_limit`)의 등록·발동·만료 세 시점은 모두 일반 주문과 동일한 통보 채널인 `Strategy.on_order_update`로 전달된다. 별도 콜백(`on_stop_order_update` 등)은 신설하지 않는다 — 시장 표준 패턴(IBKR / Alpaca 등)과 전략 작성자 부담 최소화를 따른다.
+
+| 시점 | 발행 이벤트 | `Bot.on_order_update` 변환 status | 비고 |
+|------|-------------|-----------------------------------|------|
+| 등록 (`StopOrderManager.register`) | `StopOrderRegisteredEvent` | `"stop_registered"` | dict에 `stop_order_id`, `stop_price`, `limit_price` 포함. 전략은 이 시점에 후속 취소·정정에 쓸 식별자를 획득. |
+| 발동 (`_trigger_order`) | `StopOrderTriggeredEvent` (+ 별도 `OrderRequestEvent`) | `"stop_triggered"` | 변환된 일반 주문은 자체 라이프사이클(`OrderSubmittedEvent` 등)을 별도로 통보한다. `StopOrderTriggeredEvent`는 stop 식별 단위(`stop_order_id`, `trigger_price`, `converted_order_type`)를 보존한다. |
+| 만료 (`_expire_order`) | `StopOrderExpiredEvent` | `"stop_expired"` | `reason` 허용 값: `"session_ended"` (세션 종료) / `"manager_stopped"` (매니저 stop). |
+
+**dict shape 호환**:
+
+- 스탑 알림에서 `order_id` 키에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를 맞춘다 (외부 채널 / 전략의 후속 cancel·modify 호환). `stop_order_id` 키도 명시 식별자로 함께 노출한다.
+- `SignalChannel`도 외부 채널에 동일한 `{type:"order_update", order_id, status, reason}` 메시지로 전달한다 — `type` 값을 새로 만들지 않아 외부 소비자(stdin/stdout 기반 에이전트)의 파싱 분기를 추가 강제하지 않는다.
+
+**비포함 정보** (#1337 정책 직교):
+
+- 스탑 알림에는 자금 reserve 정보가 포함되지 않는다 (매수 stop은 등록 시점 자금 잠금 없음, 트리거 시점 잠금이며 변환 주문이 자체 통보).
 
 ### StopOrderManager — 자금 처리 정책 (#1337)
 
