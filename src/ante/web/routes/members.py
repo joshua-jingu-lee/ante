@@ -174,6 +174,38 @@ class ScopesUpdateRequest(BaseModel):
     scopes: list[str]
 
 
+# PUT /api/members/{member_id}/scopes OpenAPI request body 문서.
+#
+# ``update_scopes``는 ``create_member``와 동일하게 raw body 파싱 패턴을 쓰며
+# (인증 가드 우선, body validation 후행 — 이슈 #1351 P1) ``body:
+# ScopesUpdateRequest`` 인자를 라우트 시그니처에서 제거했다. 그 결과 FastAPI
+# 자동 components 등록 경로를 거치지 않아 inline schema로 노출하면 frontend
+# codegen이 ``export type ScopesUpdateRequest``를 만들지 못한다(이슈 #1351 1차
+# Codex review FAIL — Finding 1).
+#
+# 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고 본체 schema는
+# ``_install_openapi_customizer``가 ``components.schemas``에 등록한다.
+MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "ScopesUpdateRequest",
+    "description": (
+        "PUT /api/members/{member_id}/scopes 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1351). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다."
+    ),
+    "additionalProperties": False,
+    "required": ["scopes"],
+    "properties": {
+        "scopes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "변경할 권한 범위 목록.",
+        },
+    },
+}
+
+
 @router.get(
     "",
     response_model=MemberListResponse,
@@ -774,6 +806,25 @@ async def change_password(
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        # ``$ref`` 매핑을 사용해 ``components.schemas.ScopesUpdateRequest``를
+        # 외부 노출한다(이슈 #1351 1차 Codex review FAIL — Finding 1). raw body
+        # 패턴으로 라우트 시그니처에서 ``body: ScopesUpdateRequest`` 인자를
+        # 제거하면서 FastAPI 자동 components 등록 경로가 사라졌고, 본 schema
+        # ref가 없으면 frontend codegen이 ``ScopesUpdateRequest`` 타입을
+        # export하지 않는다. ``frontend/src/api/members.ts``는 이 타입을
+        # import하므로 ``tsc -b`` 빌드가 깨진다. 본체 schema는
+        # ``_install_openapi_customizer``가 ``MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA``로
+        # ``components.schemas``에 등록한다(``app.py``).
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/ScopesUpdateRequest"},
                 },
             },
         },

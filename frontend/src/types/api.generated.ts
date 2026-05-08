@@ -2727,6 +2727,14 @@ export type components = {
             rule_type: string;
         };
         /**
+         * ScopesUpdateRequest
+         * @description PUT /api/members/{member_id}/scopes 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1351). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
+         */
+        ScopesUpdateRequest: {
+            /** @description 변경할 권한 범위 목록. */
+            scopes: string[];
+        };
+        /**
          * SnapshotItem
          * @description 일별 자산 스냅샷 아이템.
          */
@@ -3306,6 +3314,7 @@ export type RuleItem = components['schemas']['RuleItem'];
 export type RuleListResponse = components['schemas']['RuleListResponse'];
 export type RuleUpdateRequest = components['schemas']['RuleUpdateRequest'];
 export type RuleUpdateResponse = components['schemas']['RuleUpdateResponse'];
+export type ScopesUpdateRequest = components['schemas']['ScopesUpdateRequest'];
 export type SnapshotItem = components['schemas']['SnapshotItem'];
 export type SnapshotListResponse = components['schemas']['SnapshotListResponse'];
 export type SnapshotResponse = components['schemas']['SnapshotResponse'];
@@ -5242,7 +5251,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScopesUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

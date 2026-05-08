@@ -20,6 +20,15 @@ import click
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.member.errors import PermissionDeniedError
+
+# CLI 핸들러에서 master guard 위반을 사용자 친화 메시지로 종료하기 위한 메시지.
+# ``MemberService._assert_master``가 raise하는 ``PermissionDeniedError``는 Python
+# 내장 ``PermissionError``와 별개 계열(``MemberError`` → ``Exception``)이라 기존
+# ``except (ValueError, PermissionError)``로는 잡히지 않고 traceback이 노출된다
+# (이슈 #1351 1차 Codex review FAIL — Finding 2). suspend / reactivate / revoke /
+# rotate-token 등 master 검증이 추가된 모든 CLI 핸들러에서 동일 메시지로 종료한다.
+_MASTER_REQUIRED_MESSAGE = "권한이 없습니다: master만 수행할 수 있습니다."
 
 
 @click.group()
@@ -277,6 +286,9 @@ def member_register(
 
     try:
         result, token = _run(_run_register())
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         return
@@ -337,6 +349,9 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
 
     try:
         result = _run(_run_suspend())
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         return
@@ -364,6 +379,9 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
 
     try:
         result = _run(_run_reactivate())
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         return
@@ -409,6 +427,9 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
 
     try:
         result = _run(_run_revoke())
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         return
@@ -436,6 +457,9 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
 
     try:
         result, token = _run(_run_rotate())
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         return

@@ -2081,6 +2081,16 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopesUpdateRequest"
+              }
+            }
+          }
         }
       }
     },
@@ -8217,6 +8227,24 @@
             },
             "default": [],
             "description": "권한 범위 목록."
+          }
+        }
+      },
+      "ScopesUpdateRequest": {
+        "type": "object",
+        "title": "ScopesUpdateRequest",
+        "description": "PUT /api/members/{member_id}/scopes 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1351). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.",
+        "additionalProperties": false,
+        "required": [
+          "scopes"
+        ],
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "변경할 권한 범위 목록."
           }
         }
       }

@@ -132,11 +132,22 @@ class TestTokenExpiryOnAuth:
 class TestTokenExpiryOnRotate:
     @pytest.mark.asyncio
     async def test_rotate_sets_new_expiry(self):
-        """토큰 재발급 시 새 만료 시각 설정."""
-        row = _make_member_row()
+        """토큰 재발급 시 새 만료 시각 설정.
+
+        ``rotate_token``은 #1351에서 ``_assert_master(rotated_by, ...)``를 가장
+        먼저 호출하므로, 첫 ``fetch_one``은 master row(``admin``)를, 두 번째는
+        target member row를 반환해야 한다. 그렇지 않으면 토큰 만료 검증
+        지점에 도달하기 전에 ``PermissionDeniedError``가 raise된다.
+        """
+        master_row = _make_member_row(
+            member_id="admin",
+            member_type=MemberType.HUMAN,
+        )
+        master_row["role"] = "master"
+        target_row = _make_member_row()
 
         db = AsyncMock()
-        db.fetch_one = AsyncMock(return_value=row)
+        db.fetch_one = AsyncMock(side_effect=[master_row, target_row])
         db.execute = AsyncMock()
         eventbus = MagicMock()
         eventbus.publish = AsyncMock()
