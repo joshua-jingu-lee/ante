@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import re
+from datetime import time as dtime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ante import __version__
+
+# Account `trading_hours_start`/`trading_hours_end`의 strict HH:MM 24시간 형식.
+# SSOT: docs/specs/account/03-data-model.md (HH:MM), docs/specs/account/10-web-api.md.
+# 초/마이크로초 포함, 빈 문자열(update만), invalid 시간은 422로 거부한다.
+HH_MM_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+_HH_MM_RE = re.compile(HH_MM_PATTERN)
 
 
 class ErrorResponse(BaseModel):
@@ -71,6 +79,30 @@ class AccountCreateRequest(BaseModel):
     buy_commission_rate: float = 0.0
     sell_commission_rate: float = 0.0
 
+    @field_validator("trading_hours_start", "trading_hours_end")
+    @classmethod
+    def _validate_trading_hours_create(cls, v: str) -> str:
+        """strict HH:MM 24시간 형식 검증.
+
+        ``""``는 default 의미를 보존하기 위해 통과시킨다 — CLI/seed 경로에서
+        BrokerPreset fallback이 ``""``를 preset value로 채우기 때문이다 (#1334
+        plan v5: AccountCreateRequest의 ``""`` 통과는 default 의미 보존).
+        non-empty 값은 regex 매치 후 ``time.fromisoformat``으로 이중 검증한다.
+        """
+        if v == "":
+            return v
+        if not _HH_MM_RE.fullmatch(v):
+            raise ValueError(
+                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
+            )
+        try:
+            dtime.fromisoformat(v)
+        except ValueError as exc:
+            raise ValueError(
+                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
+            ) from exc
+        return v
+
 
 class AccountUpdateRequest(BaseModel):
     """계좌 수정 요청.
@@ -93,6 +125,29 @@ class AccountUpdateRequest(BaseModel):
     broker_config: dict[str, Any] | None = None
     buy_commission_rate: float | None = None
     sell_commission_rate: float | None = None
+
+    @field_validator("trading_hours_start", "trading_hours_end")
+    @classmethod
+    def _validate_trading_hours_update(cls, v: str | None) -> str | None:
+        """strict HH:MM 24시간 형식 검증 (update 경로).
+
+        ``None``은 통과(필드 미제공). 그 외(``""`` 포함)는 regex + fromisoformat
+        검증 — update 경로는 broker preset fallback이 없기 때문이다 (#1334).
+        실패 시 ``ValueError``로 422 Unprocessable Entity를 유도한다.
+        """
+        if v is None:
+            return v
+        if not _HH_MM_RE.fullmatch(v):
+            raise ValueError(
+                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
+            )
+        try:
+            dtime.fromisoformat(v)
+        except ValueError as exc:
+            raise ValueError(
+                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
+            ) from exc
+        return v
 
 
 class AccountSuspendRequest(BaseModel):
