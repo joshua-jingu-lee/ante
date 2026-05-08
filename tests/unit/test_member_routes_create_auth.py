@@ -1,10 +1,14 @@
 """POST /api/members 인증 가드 테스트 (issue #1339).
 
 create_member 라우트는 인증된 master 호출자만 사용할 수 있어야 한다.
-- Authorization 헤더 없음 또는 invalid token: 401
-- 인증된 master: 201
+- Authorization 헤더 없음 또는 invalid token + 세션 쿠키 없음: 401
+- 인증된 master (Bearer 또는 세션 쿠키): 201
 - 인증된 non-master: 403 (PermissionError 매핑)
 - 401 응답 시 service.register는 호출되지 않아야 한다.
+
+대시보드 사용자는 패스워드 로그인 후 ``ante_session`` 쿠키만 가지고
+``POST /api/members``를 호출하므로 세션 쿠키 인증 경로도 함께 검증한다
+(#1339 P1 — Codex finding).
 """
 
 from __future__ import annotations
@@ -116,6 +120,31 @@ class FakeMemberService:
         return member, f"ante_ak_{self._token_counter}"
 
 
+class FakeSessionService:
+    """테스트용 SessionService stub.
+
+    ``ante_session`` 쿠키 인증 경로(#1339 P1)를 검증하기 위해 session_id →
+    member_id 매핑을 저장한다. 실제 SQLite 백엔드 의존성을 피한다.
+    """
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, str] = {}  # session_id → member_id
+        self.validate_calls: list[str] = []
+
+    def add_session(self, session_id: str, member_id: str) -> None:
+        self._sessions[session_id] = member_id
+
+    async def validate(self, session_id: str) -> dict | None:
+        """session_id 매핑이 있으면 SessionService.validate와 동일한
+        dict 형태(``{"member_id": ..., ...}``)를 반환, 없으면 None.
+        """
+        self.validate_calls.append(session_id)
+        member_id = self._sessions.get(session_id)
+        if member_id is None:
+            return None
+        return {"member_id": member_id, "created_at": "2026-05-08 00:00:00"}
+
+
 @pytest.fixture
 def member_service() -> FakeMemberService:
     svc = FakeMemberService()
@@ -125,8 +154,24 @@ def member_service() -> FakeMemberService:
 
 
 @pytest.fixture
-def client(member_service: FakeMemberService) -> TestClient:
-    app = create_app(member_service=member_service)
+def session_service() -> FakeSessionService:
+    svc = FakeSessionService()
+    # master-user의 유효한 세션 (대시보드 로그인 후 발급된 쿠키 시뮬레이션).
+    svc.add_session("master-session-id", member_id="master-user")
+    # 일반 agent-01 멤버의 세션 (non-master cookie auth 검증용).
+    svc.add_session("agent-session-id", member_id="agent-01")
+    return svc
+
+
+@pytest.fixture
+def client(
+    member_service: FakeMemberService,
+    session_service: FakeSessionService,
+) -> TestClient:
+    app = create_app(
+        member_service=member_service,
+        session_service=session_service,
+    )
     return TestClient(app)
 
 
@@ -248,3 +293,65 @@ class TestCreateMemberAuthGuard:
         )
         assert resp.status_code == 422
         assert member_service.register_calls == []
+
+    # ── 세션 쿠키 인증 (#1339 P1 — 대시보드 axios 호환) ────────────────
+
+    def test_create_member_with_valid_session_cookie_succeeds(
+        self,
+        client: TestClient,
+        member_service: FakeMemberService,
+        session_service: FakeSessionService,
+    ) -> None:
+        """master 멤버의 ``ante_session`` 쿠키만으로 호출 → 201.
+
+        대시보드는 패스워드 로그인 후 axios에 ``Authorization`` 헤더를 추가
+        하지 않고 ``ante_session`` HttpOnly 쿠키만 가진 상태로 POST한다.
+        세션 쿠키가 유효한 master를 가리키면 토큰 인증과 동일하게 통과해야
+        한다.
+        """
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post("/api/members", json=_payload())
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        assert data["member"]["member_id"] == "new-agent"
+        assert data["token"].startswith("ante_ak_")
+        assert "new-agent" in member_service._members
+        # session_service.validate가 실제로 호출됐는지 확인.
+        assert "master-session-id" in session_service.validate_calls
+        # registered_by가 세션의 member_id로 설정됐는지 확인.
+        assert member_service.register_calls[-1]["registered_by"] == "master-user"
+
+    def test_create_member_with_invalid_session_cookie_returns_401(
+        self,
+        client: TestClient,
+        member_service: FakeMemberService,
+        session_service: FakeSessionService,
+    ) -> None:
+        """등록되지 않은 session_id를 가진 쿠키 → 401, register 미호출."""
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.post("/api/members", json=_payload())
+        assert resp.status_code == 401, resp.text
+        assert member_service.register_calls == []
+        assert "new-agent" not in member_service._members
+        # 세션 검증 시도는 한 번 일어나야 한다(가드가 cookie 분기를 탔는지 확인).
+        assert "unknown-session-id" in session_service.validate_calls
+
+    def test_create_member_with_session_cookie_non_master_returns_403(
+        self,
+        client: TestClient,
+        member_service: FakeMemberService,
+    ) -> None:
+        """일반 멤버의 세션 쿠키 → 403 (PermissionError 매핑).
+
+        세션 쿠키 인증은 통과(401 아님)하지만, ``MemberService.register``가
+        master가 아닌 caller를 거부해서 403으로 매핑되어야 한다. 토큰 경로
+        의 동등 케이스(``test_create_member_with_non_master_token_returns_403``)
+        와 동일한 결과 보장.
+        """
+        client.cookies.set("ante_session", "agent-session-id")
+        resp = client.post("/api/members", json=_payload())
+        assert resp.status_code == 403, resp.text
+        assert "new-agent" not in member_service._members
+        # register는 호출됐어야 한다 (caller 결정 후 진입).
+        assert len(member_service.register_calls) == 1
+        assert member_service.register_calls[0]["registered_by"] == "agent-01"

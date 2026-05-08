@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ValidationError
 
 from ante.member.errors import PermissionDeniedError
-from ante.web.deps import get_audit_logger_optional, get_member_service
+from ante.web.deps import (
+    get_audit_logger_optional,
+    get_member_service,
+    get_session_service_optional,
+)
 from ante.web.schemas import (
     MemberCreateResponse,
     MemberDetailResponse,
@@ -167,7 +171,10 @@ async def list_members(
         },
         401: {
             "description": (
-                "Authentication required (missing or invalid Authorization header)"
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
             ),
             "content": {
                 "application/problem+json": {
@@ -186,8 +193,9 @@ async def list_members(
         422: {
             "description": (
                 "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, "
-                "type mismatch). 단, Authorization 헤더가 없거나 invalid token이면 "
-                "body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2)."
+                "type mismatch). 단, Authorization 헤더와 ante_session 쿠키 모두 "
+                "유효하지 않으면 body validation은 실행되지 않고 401이 우선 "
+                "반환된다(#1339 P2 / P1 cookie auth)."
             ),
             "content": {
                 "application/problem+json": {
@@ -224,6 +232,7 @@ async def list_members(
 async def create_member(
     request: Request,
     svc: Annotated[Any, Depends(get_member_service)],
+    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
     """멤버 등록. 토큰 1회 반환.
@@ -235,19 +244,44 @@ async def create_member(
     이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
     (``update_account`` SSOT 패턴 일치).
 
+    인증 경로는 두 가지를 모두 받는다(#1339 P1 — Codex finding):
+    - **Bearer 토큰**: ``TokenAuthMiddleware``가 ``request.state.member_id``를
+      세팅한다. 에이전트 클라이언트(`MCP`, CLI 등)와 ``frontend`` axios의
+      ``Authorization`` 헤더 호출이 이 경로를 탄다.
+    - **세션 쿠키**: 대시보드는 패스워드 로그인 후 ``ante_session`` HttpOnly
+      쿠키만 가진 상태로 axios에 ``Authorization`` 헤더를 추가하지 않는다.
+      ``session_service.validate``로 세션 → ``member_id``를 복원한다.
+
     핸들러 단계 순서:
-    1. **인증 가드 (최우선)**: ``_caller_id(request)`` 비면 401.
+    1. **인증 가드 (최우선)**: token 또는 세션 쿠키 어느 쪽도 caller를 결정
+       하지 못하면 401.
     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
     """
     # 1. 인증 가드 (body validation보다 우선).
+    #    1-a) Bearer 토큰 (TokenAuthMiddleware가 request.state.member_id 세팅).
     caller = _caller_id(request)
+    #    1-b) ante_session 쿠키 fallback (#1339 P1 — 대시보드 axios 호환).
+    if not caller and session_service is not None:
+        ante_session = request.cookies.get("ante_session")
+        if ante_session:
+            try:
+                session = await session_service.validate(ante_session)
+            except Exception:
+                # session_service 실패는 인증 실패로 간주한다 (logged + 401).
+                logger.exception(
+                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
+                )
+                session = None
+            if session:
+                caller = session.get("member_id", "") or ""
     if not caller:
         raise HTTPException(
             status_code=401,
             detail=(
-                "인증이 필요합니다. Authorization: Bearer <token> 헤더를 제공하세요."
+                "인증이 필요합니다. Authorization: Bearer <token> 헤더 또는 "
+                "유효한 ante_session 쿠키가 필요합니다."
             ),
         )
 

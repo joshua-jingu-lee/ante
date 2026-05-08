@@ -660,8 +660,17 @@ export type paths = {
          *     이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
          *     (``update_account`` SSOT 패턴 일치).
          *
+         *     인증 경로는 두 가지를 모두 받는다(#1339 P1 — Codex finding):
+         *     - **Bearer 토큰**: ``TokenAuthMiddleware``가 ``request.state.member_id``를
+         *       세팅한다. 에이전트 클라이언트(`MCP`, CLI 등)와 ``frontend`` axios의
+         *       ``Authorization`` 헤더 호출이 이 경로를 탄다.
+         *     - **세션 쿠키**: 대시보드는 패스워드 로그인 후 ``ante_session`` HttpOnly
+         *       쿠키만 가진 상태로 axios에 ``Authorization`` 헤더를 추가하지 않는다.
+         *       ``session_service.validate``로 세션 → ``member_id``를 복원한다.
+         *
          *     핸들러 단계 순서:
-         *     1. **인증 가드 (최우선)**: ``_caller_id(request)`` 비면 401.
+         *     1. **인증 가드 (최우선)**: token 또는 세션 쿠키 어느 쪽도 caller를 결정
+         *        하지 못하면 401.
          *     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
          *     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
          *     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
@@ -4861,7 +4870,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Authentication required (missing or invalid Authorization header) */
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -4879,7 +4888,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, Authorization 헤더가 없거나 invalid token이면 body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, Authorization 헤더와 ante_session 쿠키 모두 유효하지 않으면 body validation은 실행되지 않고 401이 우선 반환된다(#1339 P2 / P1 cookie auth). */
             422: {
                 headers: {
                     [name: string]: unknown;
