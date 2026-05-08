@@ -278,6 +278,10 @@ async def create_member(
                 session = None
             if session:
                 caller = session.get("member_id", "") or ""
+                if caller:
+                    # AuditMiddleware가 자동 감사 로그에 주체를 남길 수 있도록
+                    # request.state에도 반영한다 (#1339 P2 — Codex finding).
+                    request.state.member_id = caller
     if not caller:
         raise HTTPException(
             status_code=401,
