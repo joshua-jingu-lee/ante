@@ -531,7 +531,7 @@
           "accounts"
         ],
         "summary": "Update Account Rule",
-        "description": "계좌 리스크 룰 개별 수정.\n\nRULE_REGISTRY에 등록된 타입만 허용하며,\nDynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.",
+        "description": "계좌 리스크 룰 개별 수정.\n\nRULE_REGISTRY에 등록된 타입만 허용하며,\nDynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.\n\n저장되는 ``accounts.{account_id}.rules`` 값은 explicit overrides(stored\nrules)다. RuleEngine이 실제로 적용하는 effective rules는\n``ante.rule.defaults.resolve_effective_rules``가 broker_type별 defaults와\n이 stored rules를 merge한 결과이며, ``ConfigChangedEvent`` reload 시\n동일 helper가 다시 호출된다. 본 GET/PUT API는 stored rules만 다룬다 —\neffective view는 후속 이슈에서 별도 엔드포인트로 노출한다 (#1296).",
         "operationId": "update_account_rule_api_accounts__account_id__rules__rule_type__put",
         "parameters": [
           {
@@ -5255,6 +5255,7 @@
         "properties": {
           "balance": {
             "type": "number",
+            "minimum": 0.0,
             "title": "Balance"
           }
         },
@@ -5472,7 +5473,7 @@
           "bot_id"
         ],
         "title": "BotInfo",
-        "description": "봇 정보."
+        "description": "봇 정보 (read 응답).\n\nwrite 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가\n검증되므로 read 응답 schema에는 default를 유지한다."
       },
       "BotListResponse": {
         "properties": {
@@ -7813,7 +7814,7 @@
           "status"
         ],
         "title": "TradeItem",
-        "description": "거래 기록 아이템."
+        "description": "거래 기록 아이템 (read 응답).\n\nwrite 경로(``TradeRecord``)에서 account_id가 검증되므로 read 응답\nschema에는 default를 유지한다."
       },
       "TradeListResponse": {
         "properties": {

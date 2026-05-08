@@ -175,6 +175,13 @@ export type paths = {
          *
          *     RULE_REGISTRY에 등록된 타입만 허용하며,
          *     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
+         *
+         *     저장되는 ``accounts.{account_id}.rules`` 값은 explicit overrides(stored
+         *     rules)다. RuleEngine이 실제로 적용하는 effective rules는
+         *     ``ante.rule.defaults.resolve_effective_rules``가 broker_type별 defaults와
+         *     이 stored rules를 merge한 결과이며, ``ConfigChangedEvent`` reload 시
+         *     동일 helper가 다시 호출된다. 본 GET/PUT API는 stored rules만 다룬다 —
+         *     effective view는 후속 이슈에서 별도 엔드포인트로 노출한다 (#1296).
          */
         put: operations["update_account_rule_api_accounts__account_id__rules__rule_type__put"];
         post?: never;
@@ -1671,7 +1678,10 @@ export type components = {
         };
         /**
          * BotInfo
-         * @description 봇 정보.
+         * @description 봇 정보 (read 응답).
+         *
+         *     write 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가
+         *     검증되므로 read 응답 schema에는 default를 유지한다.
          */
         BotInfo: {
             /**
@@ -3018,7 +3028,10 @@ export type components = {
         };
         /**
          * TradeItem
-         * @description 거래 기록 아이템.
+         * @description 거래 기록 아이템 (read 응답).
+         *
+         *     write 경로(``TradeRecord``)에서 account_id가 검증되므로 read 응답
+         *     schema에는 default를 유지한다.
          */
         TradeItem: {
             /**
