@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ante.web.deps import (
     get_audit_logger_optional,
@@ -38,7 +38,7 @@ class BudgetChangeRequest(BaseModel):
 class BalanceSetRequest(BaseModel):
     """잔고 수동 설정 요청."""
 
-    balance: float
+    balance: Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
 @router.get(

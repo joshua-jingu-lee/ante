@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -230,7 +231,15 @@ class Treasury:
     # -- 계좌 잔고 -----------------------------------------------
 
     async def set_account_balance(self, balance: float) -> None:
-        """계좌 잔고 설정. 미할당 자금을 자동 재계산."""
+        """계좌 잔고 설정. 미할당 자금을 자동 재계산.
+
+        Raises:
+            ValueError: balance가 finite가 아니거나 음수인 경우.
+        """
+        if not (math.isfinite(balance) and balance >= 0):
+            raise ValueError(
+                f"account balance must be finite and >= 0, got {balance!r}"
+            )
         self._account_balance = balance
         total_allocated = sum(b.allocated for b in self._budgets.values())
         self._unallocated = balance - total_allocated
