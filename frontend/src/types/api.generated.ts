@@ -209,6 +209,23 @@ export type paths = {
         /**
          * Suspend Account
          * @description 계좌 정지. 인증된 master만 호출 가능 (#1352).
+         *
+         *     ``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱
+         *     패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352
+         *     Codex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로
+         *     먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어
+         *     ``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        non-master → 403.
+         *     2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
+         *        (기존 의미 보존).
+         *     3. JSON 파싱 실패 → 422.
+         *     4. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
+         *        포함) → 422.
+         *     5. service 호출.
          */
         post: operations["suspend_account_api_accounts__account_id__suspend_post"];
         delete?: never;
@@ -1523,16 +1540,11 @@ export type components = {
         };
         /**
          * AccountSuspendRequest
-         * @description 계좌 정지 요청.
-         *
-         *     OpenAPI ``additionalProperties`` 정합성을 위해 ``extra="forbid"``로 미지정
-         *     필드를 거부한다(#1352 — Codex Plan Review). 같은 PR에서 ``BotUpdateRequest``,
-         *     ``BalanceSetRequest``도 동일 정책을 적용해 5개 mutation route 입력 contract
-         *     drift를 예방한다.
+         * @description POST /api/accounts/{account_id}/suspend 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1352). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. 빈 body도 허용되며 reason은 default 'dashboard'로 채워진다.
          */
         AccountSuspendRequest: {
             /**
-             * Reason
+             * @description 정지 사유. 빈 문자열 또는 omit 시 server-side default 'dashboard'로 기록된다.
              * @default
              */
             reason: string;
@@ -3807,7 +3819,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["AccountSuspendRequest"] | null;
+                "application/json": components["schemas"]["AccountSuspendRequest"];
             };
         };
         responses: {

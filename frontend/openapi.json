@@ -413,7 +413,7 @@
           "accounts"
         ],
         "summary": "Suspend Account",
-        "description": "계좌 정지. 인증된 master만 호출 가능 (#1352).",
+        "description": "계좌 정지. 인증된 master만 호출 가능 (#1352).\n\n``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱\n패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352\nCodex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로\n먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어\n``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,\n   non-master → 403.\n2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다\n   (기존 의미 보존).\n3. JSON 파싱 실패 → 422.\n4. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid\n   포함) → 422.\n5. service 호출.",
         "operationId": "suspend_account_api_accounts__account_id__suspend_post",
         "parameters": [
           {
@@ -426,23 +426,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/AccountSuspendRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -501,6 +484,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountSuspendRequest"
               }
             }
           }
@@ -5222,19 +5215,6 @@
         "title": "AccountResponse",
         "description": "계좌 응답. credentials는 보안상 포함하지 않는다."
       },
-      "AccountSuspendRequest": {
-        "properties": {
-          "reason": {
-            "type": "string",
-            "title": "Reason",
-            "default": ""
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "AccountSuspendRequest",
-        "description": "계좌 정지 요청.\n\nOpenAPI ``additionalProperties`` 정합성을 위해 ``extra=\"forbid\"``로 미지정\n필드를 거부한다(#1352 — Codex Plan Review). 같은 PR에서 ``BotUpdateRequest``,\n``BalanceSetRequest``도 동일 정책을 적용해 5개 mutation route 입력 contract\ndrift를 예방한다."
-      },
       "ApprovalDetailResponse": {
         "properties": {
           "approval": {
@@ -8352,6 +8332,19 @@
             "type": "number",
             "minimum": 0,
             "description": "수동 설정할 계좌 총 잔고 (음수 불가, NaN/Inf 불가)."
+          }
+        }
+      },
+      "AccountSuspendRequest": {
+        "type": "object",
+        "title": "AccountSuspendRequest",
+        "description": "POST /api/accounts/{account_id}/suspend 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1352). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. 빈 body도 허용되며 reason은 default 'dashboard'로 채워진다.",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "default": "",
+            "description": "정지 사유. 빈 문자열 또는 omit 시 server-side default 'dashboard'로 기록된다."
           }
         }
       }

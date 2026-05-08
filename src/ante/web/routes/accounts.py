@@ -699,6 +699,42 @@ _PERMISSION_DENIED_RESPONSE: dict[str, Any] = {
 }
 
 
+# POST /api/accounts/{account_id}/suspend OpenAPI request body 문서.
+#
+# ``suspend_account``는 ``create_member`` / ``update_scopes`` / ``update_bot`` /
+# ``set_balance``와 동일하게 raw body 파싱 패턴을 쓰며(인증 가드 우선, body
+# validation 후행 — 이슈 #1352 Codex review 2차) ``body: AccountSuspendRequest``
+# 인자가 라우트 시그니처에서 제거됐다. 그 결과 FastAPI 자동 components 등록
+# 경로를 거치지 않으므로 inline schema로 두면 frontend ``openapi-typescript``
+# 산출물에서 ``export type AccountSuspendRequest``가 사라진다.
+#
+# 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고 본체 schema는
+# ``_install_openapi_customizer``가 ``components.schemas``에 등록한다(#1351
+# ``ScopesUpdateRequest`` SSOT 패턴).
+ACCOUNT_SUSPEND_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "AccountSuspendRequest",
+    "description": (
+        "POST /api/accounts/{account_id}/suspend 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1352). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
+        "빈 body도 허용되며 reason은 default 'dashboard'로 채워진다."
+    ),
+    "additionalProperties": False,
+    "properties": {
+        "reason": {
+            "type": "string",
+            "default": "",
+            "description": (
+                "정지 사유. 빈 문자열 또는 omit 시 server-side default "
+                "'dashboard'로 기록된다."
+            ),
+        },
+    },
+}
+
+
 @router.post(
     "/{account_id}/suspend",
     response_model=AccountActionResponse,
@@ -718,6 +754,21 @@ _PERMISSION_DENIED_RESPONSE: dict[str, Any] = {
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        # 빈 body도 허용되므로(default reason 흘려보내기) requestBody-level
+        # ``required: False``. ``$ref`` 매핑은 frontend codegen이
+        # ``export type AccountSuspendRequest``를 export할 수 있도록 노출하며,
+        # 본체 schema는 ``_install_openapi_customizer``가
+        # ``components.schemas``에 등록한다(#1352 2차 Codex review FAIL).
+        "requestBody": {
+            "required": False,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/AccountSuspendRequest"},
                 },
             },
         },
