@@ -1512,51 +1512,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "title": "MemberCreateRequest",
-                "description": "POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Authorization 헤더가 없거나 invalid token이면 body validation 전에 401로 차단된다.",
-                "additionalProperties": false,
-                "required": [
-                  "member_id",
-                  "member_type"
-                ],
-                "properties": {
-                  "member_id": {
-                    "type": "string",
-                    "description": "고유 식별자."
-                  },
-                  "member_type": {
-                    "type": "string",
-                    "enum": [
-                      "human",
-                      "agent"
-                    ],
-                    "description": "멤버 타입."
-                  },
-                  "role": {
-                    "type": "string",
-                    "default": "default",
-                    "description": "역할 (default / master)."
-                  },
-                  "org": {
-                    "type": "string",
-                    "default": "default",
-                    "description": "소속 조직."
-                  },
-                  "name": {
-                    "type": "string",
-                    "default": "",
-                    "description": "사용자에게 표시되는 이름."
-                  },
-                  "scopes": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "default": [],
-                    "description": "권한 범위 목록."
-                  }
-                }
+                "$ref": "#/components/schemas/MemberCreateRequest"
               }
             }
           }
@@ -8184,6 +8140,53 @@
         },
         "title": "ErrorResponse",
         "type": "object"
+      },
+      "MemberCreateRequest": {
+        "type": "object",
+        "title": "MemberCreateRequest",
+        "description": "POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Authorization 헤더가 없거나 invalid token이면 body validation 전에 401로 차단된다.",
+        "additionalProperties": false,
+        "required": [
+          "member_id",
+          "member_type"
+        ],
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "description": "고유 식별자."
+          },
+          "member_type": {
+            "type": "string",
+            "enum": [
+              "human",
+              "agent"
+            ],
+            "description": "멤버 타입."
+          },
+          "role": {
+            "type": "string",
+            "default": "default",
+            "description": "역할 (default / master)."
+          },
+          "org": {
+            "type": "string",
+            "default": "default",
+            "description": "소속 조직."
+          },
+          "name": {
+            "type": "string",
+            "default": "",
+            "description": "사용자에게 표시되는 이름."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "권한 범위 목록."
+          }
+        }
       }
     }
   }

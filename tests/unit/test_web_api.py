@@ -764,6 +764,56 @@ class TestRFC7807ErrorResponse:
                 f"{sorted(properties.keys())}"
             )
 
+    def test_openapi_components_includes_member_create_request(self):
+        """``components.schemas.MemberCreateRequest``가 항상 등록되어 있다 (#1339 P1).
+
+        POST /api/members 라우트는 raw body 패턴(``request: Request``)으로
+        동작하므로 FastAPI 자동 components 등록 경로를 타지 않는다.
+        ``openapi_extra``를 inline schema로 두면 ``components.schemas``에
+        ``MemberCreateRequest``가 노출되지 않아, frontend
+        ``openapi-typescript`` 산출물에서 ``export type MemberCreateRequest``
+        가 사라지고 ``frontend/src/api/members.ts`` 빌드가 깨진다.
+        ``_install_openapi_customizer``가 ``setdefault``로 fallback 등록해
+        이 회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "MemberCreateRequest" in schemas, (
+            "MemberCreateRequest가 components.schemas에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1339 P1)"
+        )
+        member_schema = schemas["MemberCreateRequest"]
+        assert isinstance(member_schema, dict)
+        assert member_schema.get("type") == "object"
+        # 필수 필드 contract 보존 검증.
+        required = member_schema.get("required", [])
+        assert "member_id" in required, (
+            f"MemberCreateRequest.required에 member_id 누락: {required}"
+        )
+        assert "member_type" in required, (
+            f"MemberCreateRequest.required에 member_type 누락: {required}"
+        )
+
+    def test_post_members_request_body_uses_component_ref(self):
+        """POST /api/members requestBody가 ``$ref`` 매핑을 노출한다 (#1339 P1).
+
+        inline schema로 두면 frontend codegen이
+        ``export type MemberCreateRequest``를 생성하지 않는다.
+        ``$ref: #/components/schemas/MemberCreateRequest``로 노출되어야
+        ``frontend/src/api/members.ts``의 import가 깨지지 않는다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        post_op = schema["paths"]["/api/members"]["post"]
+        request_body = post_op.get("requestBody", {})
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/MemberCreateRequest"}, (
+            "POST /api/members requestBody schema가 component $ref가 아님: "
+            f"{body_schema!r}"
+        )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 

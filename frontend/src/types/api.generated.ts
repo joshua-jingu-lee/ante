@@ -2156,6 +2156,39 @@ export type components = {
             ok: boolean;
         };
         /**
+         * MemberCreateRequest
+         * @description POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Authorization 헤더가 없거나 invalid token이면 body validation 전에 401로 차단된다.
+         */
+        MemberCreateRequest: {
+            /** @description 고유 식별자. */
+            member_id: string;
+            /**
+             * @description 멤버 타입.
+             * @enum {string}
+             */
+            member_type: "human" | "agent";
+            /**
+             * @description 사용자에게 표시되는 이름.
+             * @default
+             */
+            name: string;
+            /**
+             * @description 소속 조직.
+             * @default default
+             */
+            org: string;
+            /**
+             * @description 역할 (default / master).
+             * @default default
+             */
+            role: string;
+            /**
+             * @description 권한 범위 목록.
+             * @default []
+             */
+            scopes: string[];
+        };
+        /**
          * MemberCreateResponse
          * @description 멤버 생성 응답 (토큰 포함).
          */
@@ -3227,6 +3260,7 @@ export type KillSwitchResponse = components['schemas']['KillSwitchResponse'];
 export type LoginRequest = components['schemas']['LoginRequest'];
 export type LoginResponse = components['schemas']['LoginResponse'];
 export type LogoutResponse = components['schemas']['LogoutResponse'];
+export type MemberCreateRequest = components['schemas']['MemberCreateRequest'];
 export type MemberCreateResponse = components['schemas']['MemberCreateResponse'];
 export type MemberDetailResponse = components['schemas']['MemberDetailResponse'];
 export type MemberInfo = components['schemas']['MemberInfo'];
@@ -4805,35 +4839,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /** @description 고유 식별자. */
-                    member_id: string;
-                    /**
-                     * @description 멤버 타입.
-                     * @enum {string}
-                     */
-                    member_type: "human" | "agent";
-                    /**
-                     * @description 사용자에게 표시되는 이름.
-                     * @default
-                     */
-                    name?: string;
-                    /**
-                     * @description 소속 조직.
-                     * @default default
-                     */
-                    org?: string;
-                    /**
-                     * @description 역할 (default / master).
-                     * @default default
-                     */
-                    role?: string;
-                    /**
-                     * @description 권한 범위 목록.
-                     * @default []
-                     */
-                    scopes?: string[];
-                };
+                "application/json": components["schemas"]["MemberCreateRequest"];
             };
         };
         responses: {

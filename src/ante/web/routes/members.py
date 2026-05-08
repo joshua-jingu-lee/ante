@@ -205,11 +205,17 @@ async def list_members(
         },
     },
     openapi_extra={
+        # ``$ref`` 매핑을 사용해 ``components.schemas.MemberCreateRequest``를
+        # 외부 노출한다(이슈 #1339 P1 — Codex finding). inline schema로 두면
+        # FastAPI 자동 components 등록 경로를 거치지 않아 frontend codegen이
+        # ``MemberCreateRequest`` 타입을 export하지 않는다. 실제 schema 본체는
+        # ``_install_openapi_customizer``가 ``MEMBER_CREATE_REQUEST_SCHEMA``로
+        # ``components.schemas``에 등록한다(``app.py``).
         "requestBody": {
             "required": True,
             "content": {
                 "application/json": {
-                    "schema": MEMBER_CREATE_REQUEST_SCHEMA,
+                    "schema": {"$ref": "#/components/schemas/MemberCreateRequest"},
                 },
             },
         },
