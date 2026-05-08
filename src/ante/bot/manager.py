@@ -343,16 +343,26 @@ class BotManager:
         # DB 갱신
         await self._save_bot_config(new_config)
 
-        # budget 변경 시 Treasury 연동
-        if new_budget is not None and self._treasury_manager:
+        # budget 변경 시 Treasury 연동.
+        # Refs #1335: 과거에는 ``new_budget is not None`` 인 경로에서도
+        # ``TreasuryManager`` 부재 / account 미등록을 silent 하게 흘려보내
+        # 호출자(POST /api/bots) 가 budget 배정 실패를 감지하지 못했다.
+        # 이제 budget 배정 의도가 있는 경우(``new_budget is not None``)에는
+        # ``TreasuryNotConfiguredError`` 를 raise 하여 라우트 계층이 422 로
+        # 매핑할 수 있도록 한다. ``new_budget is None`` 인 단순 update
+        # 경로는 기존과 동일하게 무영향(no-op)이다.
+        if new_budget is not None:
+            from ante.treasury.exceptions import TreasuryNotConfiguredError
+
+            if self._treasury_manager is None:
+                raise TreasuryNotConfiguredError("treasury manager not configured")
             try:
                 treasury = self._treasury_manager.get(new_config.account_id)
-                await treasury.update_budget(bot_id, new_budget)
-            except KeyError:
-                logger.debug(
-                    "봇 수정 시 Treasury 미존재: account_id=%s",
-                    new_config.account_id,
-                )
+            except KeyError as ke:
+                raise TreasuryNotConfiguredError(
+                    f"treasury not configured for account {new_config.account_id}"
+                ) from ke
+            await treasury.update_budget(bot_id, new_budget)
 
         logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
         return bot
