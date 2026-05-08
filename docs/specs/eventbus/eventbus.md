@@ -232,6 +232,41 @@ canonical DB 상태를 남긴 뒤 서버 재시작 시 반영된다.
    - 한 핸들러의 예외가 다른 핸들러 실행을 막지 않음
    - 예외 발생 시 로깅 후 다음 핸들러 계속 실행
 
+### Transient `_consumed` marker (Gateway-only stop, OrderModifyEvent — #1331)
+
+`OrderModifyEvent`의 정정 라이프사이클에서 RuleEngine이 거부 결정을 내린 뒤
+같은 이벤트를 후속 `APIGateway._on_order_modify`(priority=50)가 다시 처리하면
+동일 정정 요청에 대해 `OrderModifyRejectedEvent`가 두 번(룰 거부 사유 +
+`"modify_not_implemented"`) 발행되어 audit trail이 깨진다. 이를 막기 위해
+RuleEngine은 거부/예외 경로에서 다음 marker를 set한다.
+
+```python
+object.__setattr__(event, "_consumed", True)
+```
+
+- **dataclass field가 아니다.** `Event`/`OrderModifyEvent`는 frozen
+  dataclass이며 `_consumed`는 정의된 필드가 아니다. 따라서 `__setattr__`은
+  `object.__setattr__`로 우회 주입해야 하고, dataclass 직렬화 경로
+  (영속 history `event_log` payload, msgspec 기반 직렬화 등)에는
+  노출되지 않는다.
+- **본 PR의 적용 범위는 `OrderModifyEvent`의 gateway pass-through 차단에
+  한정한다.** cancel 경로의 동일 결함은 별도 이슈에서 같은 패턴으로
+  다룬다 (#1332).
+- **Gateway-only stop marker 의미.** RuleEngine이 거부한 뒤 marker를
+  set하면 `APIGateway._on_order_modify`(priority=50)는 추가 terminal
+  event 발행을 건너뛴다. priority 50~100 사이의 audit/모니터링 subscriber
+  (예: TradeRecorder, NotificationService 등)는 본 marker의 영향을 받지
+  않으며, 자기 책임 영역에서 동일 이벤트를 정상 처리한다.
+- **인메모리 history 노출 가능성.** `EventBus._history`는 같은 객체 참조를
+  보존하므로, `_consumed=True`가 set된 이벤트가 `get_history()` 결과에서
+  marker가 붙은 채 보일 수 있다. 영속 history(SQLite/middleware 직렬화)에는
+  dataclass 필드가 아니므로 직렬화되지 않는다.
+- **`EventBus.publish` 자체는 marker를 인식하지 않는다.** consumer가 직접
+  `getattr(event, "_consumed", False)`로 확인할 책임이 있다. 새로운
+  실행성 subscriber를 50~100 priority 대역에 추가할 때는, 거부된 이벤트도
+  본인에게 도달할 수 있음을 인지하고 필요 시 marker를 명시적으로 확인
+  하도록 설계한다.
+
 ### 와일드카드/토픽 계층은 도입하지 않음
 
 **근거**:
