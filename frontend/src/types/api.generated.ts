@@ -223,9 +223,12 @@ export type paths = {
          *     2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
          *        (기존 의미 보존).
          *     3. JSON 파싱 실패 → 422.
-         *     4. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
+         *     4. JSON ``null`` (``payload is None``) → 빈 body와 동일하게 default
+         *        reason 경로로 흘려보낸다 (이전 ``Optional[Body(...)]`` 계약 호환,
+         *        #1352 Codex review 3차).
+         *     5. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
          *        포함) → 422.
-         *     5. service 호출.
+         *     6. service 호출.
          */
         post: operations["suspend_account_api_accounts__account_id__suspend_post"];
         delete?: never;
@@ -3819,7 +3822,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["AccountSuspendRequest"];
+                "application/json": components["schemas"]["AccountSuspendRequest"] | null;
             };
         };
         responses: {

@@ -905,17 +905,29 @@ class TestRFC7807ErrorResponse:
         )
 
     def test_post_accounts_suspend_request_body_uses_component_ref(self):
-        """POST /api/accounts/{id}/suspend requestBody가 ``$ref`` 매핑을 노출한다.
+        """POST /api/accounts/{id}/suspend requestBody가 nullable ``$ref``를 노출.
 
-        Codex review #1352 2차에서 식별된 회귀를 잠근다.
+        Codex review #1352 2차/3차/4차에서 식별된 회귀를 잠근다.
 
         inline schema로 두면 frontend codegen이 ``export type
         AccountSuspendRequest``를 만들지 못해 frontend 빌드가 깨진다.
         ``required: False``는 빈 body도 허용하기 위함이며(default reason),
         다른 mutation 라우트와 패턴 정합을 위해 ``$ref``는 그대로 유지한다.
+
+        4차 review (P2): 런타임은 JSON ``null`` body를 빈 body와 동일하게
+        default reason 으로 흘려보내지만, 이전에는 schema가 ``$ref`` 단일
+        이라 codegen 타입이 null body를 거부해 OpenAPI 계약과 drift가
+        있었다. OpenAPI 3.1.0 기준 nullable은 ``oneOf``/``anyOf`` +
+        ``{"type": "null"}`` 로 표현해야 하므로 body schema는 ``$ref`` +
+        ``{"type": "null"}`` 의 ``oneOf`` 를 노출한다.
         """
         app = create_app()
         schema = app.openapi()
+        # OpenAPI 3.1.0 가정 — nullable 표현이 oneOf/anyOf + {"type":"null"}.
+        assert schema.get("openapi", "").startswith("3.1"), (
+            "ante OpenAPI 버전이 3.1 계열이 아님 — nullable 표현 재검토 필요: "
+            f"{schema.get('openapi')!r}"
+        )
         post_op = schema["paths"]["/api/accounts/{account_id}/suspend"]["post"]
         request_body = post_op.get("requestBody", {})
         # 빈 body도 허용되므로 required는 False다.
@@ -925,9 +937,19 @@ class TestRFC7807ErrorResponse:
         )
         json_content = request_body.get("content", {}).get("application/json", {})
         body_schema = json_content.get("schema", {})
-        assert body_schema == {"$ref": "#/components/schemas/AccountSuspendRequest"}, (
-            "POST /api/accounts/{account_id}/suspend requestBody schema가 component "
-            f"$ref가 아님: {body_schema!r}"
+        # Nullable: oneOf [$ref, {"type":"null"}].
+        one_of = body_schema.get("oneOf")
+        assert isinstance(one_of, list) and len(one_of) == 2, (
+            "POST /api/accounts/{account_id}/suspend body schema가 nullable "
+            f"oneOf 형태가 아님: {body_schema!r}"
+        )
+        assert {"$ref": "#/components/schemas/AccountSuspendRequest"} in one_of, (
+            "POST /api/accounts/{account_id}/suspend body oneOf에 "
+            f"AccountSuspendRequest $ref 누락: {one_of!r}"
+        )
+        assert {"type": "null"} in one_of, (
+            "POST /api/accounts/{account_id}/suspend body oneOf에 null 타입 "
+            f"누락 — JSON null body 호환 계약: {one_of!r}"
         )
 
     def test_frontend_openapi_json_matches_live_app_openapi(self):

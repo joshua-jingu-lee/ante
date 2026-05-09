@@ -764,11 +764,25 @@ ACCOUNT_SUSPEND_REQUEST_SCHEMA: dict[str, Any] = {
         # ``export type AccountSuspendRequest``를 export할 수 있도록 노출하며,
         # 본체 schema는 ``_install_openapi_customizer``가
         # ``components.schemas``에 등록한다(#1352 2차 Codex review FAIL).
+        #
+        # JSON ``null`` body(런타임은 빈 body와 동일하게 default reason으로
+        # 흘려보낸다, #1352 3차 Codex review FAIL)도 OpenAPI 계약에서
+        # 허용되어야 한다 — schema를 ``$ref`` 단일이 아닌 ``oneOf`` +
+        # ``{"type": "null"}`` 로 표현해 frontend codegen이
+        # ``AccountSuspendRequest | null`` 형태의 body 타입을 만들도록 한다
+        # (#1352 4차 Codex review P2). OpenAPI 3.1.0 (현재 ante 사용 버전)
+        # 에서 nullable은 ``nullable: true`` 가 아닌 ``oneOf``/``anyOf`` +
+        # ``{"type": "null"}`` 로 표현해야 한다.
         "requestBody": {
             "required": False,
             "content": {
                 "application/json": {
-                    "schema": {"$ref": "#/components/schemas/AccountSuspendRequest"},
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/AccountSuspendRequest"},
+                            {"type": "null"},
+                        ],
+                    },
                 },
             },
         },

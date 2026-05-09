@@ -413,7 +413,7 @@
           "accounts"
         ],
         "summary": "Suspend Account",
-        "description": "계좌 정지. 인증된 master만 호출 가능 (#1352).\n\n``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱\n패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352\nCodex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로\n먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어\n``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,\n   non-master → 403.\n2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다\n   (기존 의미 보존).\n3. JSON 파싱 실패 → 422.\n4. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid\n   포함) → 422.\n5. service 호출.",
+        "description": "계좌 정지. 인증된 master만 호출 가능 (#1352).\n\n``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱\n패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352\nCodex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로\n먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어\n``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,\n   non-master → 403.\n2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다\n   (기존 의미 보존).\n3. JSON 파싱 실패 → 422.\n4. JSON ``null`` (``payload is None``) → 빈 body와 동일하게 default\n   reason 경로로 흘려보낸다 (이전 ``Optional[Body(...)]`` 계약 호환,\n   #1352 Codex review 3차).\n5. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid\n   포함) → 422.\n6. service 호출.",
         "operationId": "suspend_account_api_accounts__account_id__suspend_post",
         "parameters": [
           {
@@ -493,7 +493,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AccountSuspendRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AccountSuspendRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           }
