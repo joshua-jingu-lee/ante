@@ -3328,6 +3328,10 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "ohlcv",
+                    "fundamental"
+                  ],
                   "type": "string"
                 },
                 {
@@ -3517,6 +3521,10 @@
             "in": "query",
             "required": false,
             "schema": {
+              "enum": [
+                "ohlcv",
+                "fundamental"
+              ],
               "type": "string",
               "description": "데이터 유형 (ohlcv, fundamental)",
               "default": "ohlcv",
