@@ -6,7 +6,7 @@ import asyncio
 import logging
 import shutil
 from concurrent.futures import ThreadPoolExecutor
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -34,7 +34,7 @@ async def list_datasets(
     store: Annotated[Any | None, Depends(get_data_store)],
     symbol: str | None = None,
     timeframe: str | None = None,
-    data_type: str | None = Query(
+    data_type: Literal["ohlcv", "fundamental"] | None = Query(
         None, description="데이터 유형 (ohlcv, fundamental, 미지정 시 전체)"
     ),
     offset: int = 0,
@@ -201,7 +201,9 @@ async def get_dataset_detail(
 
 @router.get("/schema", response_model=DataSchemaResponse)
 async def get_data_schema(
-    data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+    data_type: Literal["ohlcv", "fundamental"] = Query(
+        "ohlcv", description="데이터 유형 (ohlcv, fundamental)"
+    ),
 ) -> dict:
     """데이터 스키마 조회. data_type에 따라 해당 스키마를 반환."""
     if data_type == "fundamental":

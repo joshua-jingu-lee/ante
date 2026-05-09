@@ -4800,7 +4800,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description 데이터 유형 (ohlcv, fundamental, 미지정 시 전체) */
-                data_type?: string | null;
+                data_type?: ("ohlcv" | "fundamental") | null;
                 limit?: number;
                 offset?: number;
                 symbol?: string | null;
@@ -4946,7 +4946,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description 데이터 유형 (ohlcv, fundamental) */
-                data_type?: string;
+                data_type?: "ohlcv" | "fundamental";
             };
             header?: never;
             path?: never;
