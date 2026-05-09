@@ -132,13 +132,16 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
     """Kill Switch 응답 envelope.
 
     SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT.
+    ``changed_at``은 ISO 8601 UTC ``Z`` suffix를 사용한다 (Refs #1360).
     """
     from datetime import UTC, datetime
+
+    from ante.core.time import format_utc
 
     return {
         "status": status,
         "accounts_changed": sum(1 for a in accounts if a.get("changed")),
-        "changed_at": datetime.now(UTC).isoformat(),
+        "changed_at": format_utc(datetime.now(UTC)),
         "accounts": accounts,
     }
 
