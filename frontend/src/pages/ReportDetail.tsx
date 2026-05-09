@@ -44,8 +44,10 @@ function formatPct(value: number | null | undefined, sign = false): string {
 // 본 코드는 win_rate를 항상 ratio(0~1)로 가정한다. legacy heuristic
 // (`value <= 1.0 ? value*100 : value`)은 0.5(legacy 0.5%)와 0.5(new ratio 50%)를
 // 구분할 수 없어 본질적으로 ambiguous하므로 제거되었다. 과거 DB record에
-// 남아 있을 수 있는 percent 단위 win_rate 값(예: 62.2)의 마이그레이션은
-// 별도 follow-up 이슈에서 처리한다.
+// 남아 있던 percent 단위 win_rate 값(예: 62.2)은 v005 마이그레이션
+// (src/ante/db/versions/v005_report_win_rate_ratio.py)이 historical percent를
+// ratio로 정규화(`win_rate > 1.0` → `win_rate / 100.0`)하므로 frontend는
+// 별도 보정 없이 단순 `value * 100` 환산으로 percent 문자열을 만든다.
 function formatRatioAsPct(value: number | null | undefined): string {
   if (value == null) return '-'
   return formatPct(value * 100)
