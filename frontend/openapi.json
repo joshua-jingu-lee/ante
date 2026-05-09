@@ -1154,7 +1154,7 @@
           "audit"
         ],
         "summary": "List Audit Logs",
-        "description": "감사 로그 조회.",
+        "description": "감사 로그 조회.\n\nNOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.\n이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서\npagination contract 일관성을 위해 클램프를 제거하고 Query\nvalidation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가\n이 범위를 강제하면 별도 endpoint로 분리한다.",
         "operationId": "list_audit_logs_api_audit_get",
         "parameters": [
           {
@@ -1227,6 +1227,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
               "default": 50,
               "title": "Limit"
             }
@@ -1237,6 +1239,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 0,
               "default": 0,
               "title": "Offset"
             }
@@ -3162,6 +3165,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
               "default": 20,
               "title": "Limit"
             }
@@ -3349,6 +3354,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 0,
               "default": 0,
               "title": "Offset"
             }
@@ -3359,6 +3365,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
               "default": 50,
               "title": "Limit"
             }
@@ -3664,6 +3672,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
               "default": 20,
               "title": "Limit"
             }
@@ -3750,6 +3760,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
               "default": 20,
               "title": "Limit"
             }
@@ -4303,6 +4315,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
               "default": 50,
               "title": "Limit"
             }
@@ -4519,6 +4533,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
               "default": 20,
               "title": "Limit"
             }
@@ -4529,6 +4545,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 0,
               "default": 0,
               "title": "Offset"
             }

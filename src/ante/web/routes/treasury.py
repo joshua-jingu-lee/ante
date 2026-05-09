@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ante.web.deps import (
@@ -200,8 +200,8 @@ async def list_transactions(
     bot_id: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ) -> dict:
     """자금 변동 이력 조회."""
     db = getattr(treasury, "_db", None)
