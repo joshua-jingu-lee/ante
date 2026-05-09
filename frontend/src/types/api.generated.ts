@@ -308,6 +308,14 @@ export type paths = {
          * List Audit Logs
          * @description 감사 로그 조회.
          *
+         *     인증/권한:
+         *         oracle A7 시그니처(#1359)에서 본 라우트는 인증 없이 감사 로그 목록을
+         *         반환하고 있었다. 감사 로그는 운영 행위 추적 정보(member_id, action,
+         *         resource, IP 등)를 담으므로 ``require_master_caller`` (#1352에서 도입)
+         *         를 적용해 master 권한자만 조회 가능하도록 막는다. 인증 누락은 401,
+         *         non-master는 403. ``audit:read`` scope strict 모델은 ``Member.scopes``
+         *         가 자유 문자열이라 별도 정의가 필요하므로 본 PR scope 외 follow-up.
+         *
          *     NOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.
          *     이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서
          *     pagination contract 일관성을 위해 클램프를 제거하고 Query
@@ -4117,6 +4125,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditLogListResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Master permission required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
