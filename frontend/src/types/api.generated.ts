@@ -2647,6 +2647,12 @@ export type components = {
             [key: string]: unknown;
         };
         /**
+         * ReportStatus
+         * @description 리포트 상태.
+         * @enum {string}
+         */
+        ReportStatus: "draft" | "submitted" | "reviewed" | "adopted" | "rejected" | "archived";
+        /**
          * ReportSubmitRequest
          * @description 리포트 제출 요청.
          *
@@ -3377,6 +3383,7 @@ export type ReportDetailResponse = components['schemas']['ReportDetailResponse']
 export type ReportListItem = components['schemas']['ReportListItem'];
 export type ReportListResponse = components['schemas']['ReportListResponse'];
 export type ReportSchemaResponse = components['schemas']['ReportSchemaResponse'];
+export type ReportStatus = components['schemas']['ReportStatus'];
 export type ReportSubmitRequest = components['schemas']['ReportSubmitRequest'];
 export type ReportSubmitResponse = components['schemas']['ReportSubmitResponse'];
 export type RuleItem = components['schemas']['RuleItem'];
@@ -5644,7 +5651,7 @@ export interface operations {
             query?: {
                 cursor?: string | null;
                 limit?: number;
-                status?: string | null;
+                status?: components["schemas"]["ReportStatus"] | null;
             };
             header?: never;
             path?: never;

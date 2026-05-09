@@ -3147,7 +3147,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ReportStatus"
                 },
                 {
                   "type": "null"
@@ -6958,6 +6958,19 @@
         "type": "object",
         "title": "ReportSchemaResponse",
         "description": "리포트 스키마 응답."
+      },
+      "ReportStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "submitted",
+          "reviewed",
+          "adopted",
+          "rejected",
+          "archived"
+        ],
+        "title": "ReportStatus",
+        "description": "리포트 상태."
       },
       "ReportSubmitRequest": {
         "properties": {
