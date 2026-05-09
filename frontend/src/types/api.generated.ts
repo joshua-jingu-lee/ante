@@ -2649,6 +2649,18 @@ export type components = {
         /**
          * ReportSubmitRequest
          * @description 리포트 제출 요청.
+         *
+         *     SSOT: ``docs/specs/report-store/report-store.md`` 리포트 제출 스키마.
+         *     ``win_rate``는 ratio 단위 (0~1, ``"win_rate": 0.58`` 예시)다.
+         *
+         *     invariants (#1353):
+         *     - ``total_trades >= 0`` (거래 수는 음수 불가).
+         *     - ``win_rate``는 ``[0, 1]`` ratio 단위 또는 ``None``.
+         *     - ``total_return_pct``/``sharpe_ratio``/``max_drawdown_pct``/``win_rate``는
+         *       finite. NaN/Inf는 후속 분석/표시에서 버그 또는 잘못된 결정으로 이어지므로
+         *       submit 단에서 422로 거부한다.
+         *     - 미지정 키는 ``extra='forbid'``로 거부 — agent의 오타/잘못된 키가 store에
+         *       유실되는 대신 빠르게 fail하도록 한다.
          */
         ReportSubmitRequest: {
             /**

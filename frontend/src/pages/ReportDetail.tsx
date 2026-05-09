@@ -37,6 +37,14 @@ function formatPct(value: number | null | undefined, sign = false): string {
   return `${prefix}${value.toFixed(1)}%`
 }
 
+// win_rate 같은 ratio 값(0~1)을 사람이 읽는 percent 문자열로 변환한다.
+// SSOT: docs/specs/report-store/report-store.md (`"win_rate": 0.58`).
+// total_return_pct/max_drawdown_pct는 이미 percent 단위라 formatPct 직접 사용.
+function formatRatioAsPct(value: number | null | undefined): string {
+  if (value == null) return '-'
+  return formatPct(value * 100)
+}
+
 /* ── 리포트 정보 카드 ── */
 function ReportInfoCard({ report }: { report: ReportDetailType }) {
   const status = STATUS_BADGE[report.status] || { label: report.status, variant: 'muted' }
@@ -126,7 +134,7 @@ function PerformanceCard({ report }: { report: ReportDetailType }) {
         }
       />
       <InfoRow label="총 거래 수" value={`${report.total_trades}회`} />
-      <InfoRow label="승률" value={formatPct(report.win_rate)} />
+      <InfoRow label="승률" value={formatRatioAsPct(report.win_rate)} />
       <InfoRow label="수익 팩터" value={report.metrics?.profit_factor?.toFixed(2) ?? '-'} />
       <InfoRow label="샤프 비율" value={report.sharpe_ratio?.toFixed(2) ?? '-'} />
       <InfoRow

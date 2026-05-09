@@ -66,8 +66,10 @@ def calculate_metrics(
     metrics["total_trades"] = total_trades
     metrics["winning_trades"] = winning_trades
     metrics["losing_trades"] = losing_trades
+    # win_rate는 ratio 단위 (0~1) — SSOT: docs/specs/report-store/report-store.md
+    # 예시 ``"win_rate": 0.58``. ReportSubmitRequest도 ratio로 검증한다 (#1353).
     metrics["win_rate"] = (
-        round(winning_trades / total_trades * 100, 2) if total_trades > 0 else 0.0
+        round(winning_trades / total_trades, 4) if total_trades > 0 else 0.0
     )
     metrics["profit_factor"] = (
         round(total_profit / total_loss, 4)

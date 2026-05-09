@@ -81,7 +81,7 @@ class TestCalculateMetrics:
         assert metrics["total_trades"] == 1  # sell 1건
         assert metrics["winning_trades"] == 1
         assert metrics["losing_trades"] == 0
-        assert metrics["win_rate"] == 100.0
+        assert metrics["win_rate"] == 1.0  # ratio (1/1)
         assert metrics["total_return"] > 0
         assert metrics["total_commission"] > 0
 
@@ -148,7 +148,7 @@ class TestCalculateMetrics:
         assert metrics["total_trades"] == 2
         assert metrics["winning_trades"] == 1
         assert metrics["losing_trades"] == 1
-        assert metrics["win_rate"] == 50.0
+        assert metrics["win_rate"] == 0.5  # ratio (1/2)
         assert metrics["profit_factor"] > 0
 
     def test_profit_factor_no_loss(self):
@@ -315,7 +315,7 @@ class TestCLIFormatMetrics:
             "sharpe_ratio": 1.23,
             "max_drawdown": 5.0,
             "total_trades": 20,
-            "win_rate": 60.0,
+            "win_rate": 0.6,  # ratio (12 wins / 20 trades) — SSOT spec
         }
         rows = _format_metrics(metrics)
         assert isinstance(rows, list)

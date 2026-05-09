@@ -240,6 +240,10 @@ def _format_metrics(metrics: dict) -> list[dict[str, str]]:
         "avg_loss": ("평균 손실", "원"),
         "total_commission": ("총 수수료", "원"),
     }
+    # SSOT: docs/specs/report-store/report-store.md — win_rate은 ratio (0~1).
+    # CLI는 percent suffix(%)로 표시하므로 ratio→percent 변환을 적용한다 (#1353).
+    ratio_as_percent_keys = {"win_rate"}
+
     rows = []
     for key, (label, unit) in labels.items():
         value = metrics.get(key)
@@ -249,7 +253,10 @@ def _format_metrics(metrics: dict) -> list[dict[str, str]]:
             if value == float("inf"):
                 formatted = "∞"
             else:
-                formatted = f"{value:,.4f}" if unit == "" else f"{value:,.2f}"
+                display_value = value * 100 if key in ratio_as_percent_keys else value
+                formatted = (
+                    f"{display_value:,.4f}" if unit == "" else f"{display_value:,.2f}"
+                )
             if unit:
                 formatted += unit
         else:
