@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from ante.web.deps import (
@@ -68,7 +68,7 @@ async def list_bots(
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     account_id: str | None = None,
-    limit: int = 20,
+    limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> dict:
     """봇 목록 조회 (cursor 기반 페이지네이션)."""
@@ -893,7 +893,7 @@ async def get_bot_logs(
         Any | None, Depends(get_event_history_store_optional)
     ],
     eventbus: Annotated[Any | None, Depends(get_eventbus_optional)],
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=100),
 ) -> dict:
     """봇 실행 로그 조회.
 

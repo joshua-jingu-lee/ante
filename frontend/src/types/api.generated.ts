@@ -307,6 +307,12 @@ export type paths = {
         /**
          * List Audit Logs
          * @description 감사 로그 조회.
+         *
+         *     NOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.
+         *     이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서
+         *     pagination contract 일관성을 위해 클램프를 제거하고 Query
+         *     validation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가
+         *     이 범위를 강제하면 별도 endpoint로 분리한다.
          */
         get: operations["list_audit_logs_api_audit_get"];
         put?: never;

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ante.web.deps import get_trade_service
 from ante.web.schemas import TradeListResponse
@@ -31,7 +31,7 @@ async def list_trades(
     account_id: str | None = None,
     bot_id: str | None = None,
     symbol: str | None = None,
-    limit: int = 20,
+    limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> dict:
     """거래 기록 목록 조회 (cursor 기반 페이지네이션)."""

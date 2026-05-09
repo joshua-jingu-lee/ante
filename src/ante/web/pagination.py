@@ -33,7 +33,15 @@ def paginate(
 
     Returns:
         {"items": [...], "next_cursor": "..." | None}
+
+    Raises:
+        ValueError: ``limit < 1``일 때. 라우트 단의 ``Query(ge=1)``이 1차
+            방어선이지만 helper 자체도 invariant를 보장한다 (#1356).
+            ``ante.web.errors.value_error_handler``가 400으로 매핑.
     """
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+
     if cursor:
         decoded = decode_cursor(cursor)
         start_idx = 0

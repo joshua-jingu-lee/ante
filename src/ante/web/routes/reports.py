@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ante.report.models import ReportStatus
 from ante.web.deps import get_audit_logger_optional, get_report_store
@@ -178,7 +178,7 @@ async def report_view(
 async def list_reports(
     report_store: Annotated[Any, Depends(get_report_store)],
     status: ReportStatus | None = None,
-    limit: int = 20,
+    limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> dict:
     """리포트 목록 조회 (cursor 기반 페이지네이션)."""
