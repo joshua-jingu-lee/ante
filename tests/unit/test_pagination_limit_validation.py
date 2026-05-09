@@ -210,20 +210,38 @@ class TestTreasuryTxLimitValidation:
 # ---------------------------------------------------------------------------
 
 
-def _make_audit_app() -> TestClient:
+def _make_audit_app() -> tuple[TestClient, dict[str, str]]:
+    """``GET /api/audit``는 #1359에서 ``require_master_caller`` 가 적용됐다.
+
+    pagination 검증 회귀 테스트용으로 master Bearer 토큰 + member_service stub
+    을 함께 주입해 인증 가드가 422 검증 흐름을 가리지 않도록 한다.
+    """
+    from tests.unit.test_audit_routes_auth import FakeMemberService
+
     mock_logger = AsyncMock()
     mock_logger.query = AsyncMock(return_value=[])
     mock_logger.count = AsyncMock(return_value=0)
-    return TestClient(create_app(audit_logger=mock_logger))
+    member_service = FakeMemberService()
+    member_service.add_member("master-user", token="master-token", role="master")
+    client = TestClient(
+        create_app(
+            audit_logger=mock_logger,
+            member_service=member_service,
+        )
+    )
+    headers = {"Authorization": "Bearer master-token"}
+    return client, headers
 
 
 class TestAuditLimitValidation:
     def test_negative_limit_returns_422(self) -> None:
-        resp = _make_audit_app().get("/api/audit?limit=-1")
+        client, headers = _make_audit_app()
+        resp = client.get("/api/audit?limit=-1", headers=headers)
         assert resp.status_code == 422
 
     def test_limit_at_max_returns_200(self) -> None:
-        resp = _make_audit_app().get("/api/audit?limit=100")
+        client, headers = _make_audit_app()
+        resp = client.get("/api/audit?limit=100", headers=headers)
         assert resp.status_code == 200
 
     def test_limit_200_returns_422(self) -> None:
@@ -233,9 +251,11 @@ class TestAuditLimitValidation:
         다른 list endpoint와의 일관성 (`le=100`)을 위해 클램프 제거.
         101..200 범위 요청이 새로 422로 거부된다 (breaking change).
         """
-        resp = _make_audit_app().get("/api/audit?limit=200")
+        client, headers = _make_audit_app()
+        resp = client.get("/api/audit?limit=200", headers=headers)
         assert resp.status_code == 422
 
     def test_negative_offset_returns_422(self) -> None:
-        resp = _make_audit_app().get("/api/audit?offset=-1")
+        client, headers = _make_audit_app()
+        resp = client.get("/api/audit?offset=-1", headers=headers)
         assert resp.status_code == 422
