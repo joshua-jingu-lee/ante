@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ante.approval.models import ApprovalStatus
 from ante.web.deps import (
     get_approval_service,
     get_audit_logger_optional,
@@ -48,7 +49,10 @@ class ApprovalStatusUpdate(BaseModel):
 )
 async def list_approvals(
     approval_service: Annotated[Any, Depends(get_approval_service)],
-    status: str | None = Query(default=None),
+    status: ApprovalStatus | None = Query(default=None),
+    # NOTE: ``type``은 본 PR scope 외 (frontend ApprovalType과 backend SSOT
+    # 옵션 정렬이 필요하므로 follow-up). enum 강제 시 frontend 일부 호출이
+    # 깨질 수 있어 ``str | None``을 유지한다 (Refs #1357 follow-up).
     type: str | None = Query(default=None),
     search: str | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
