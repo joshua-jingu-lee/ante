@@ -258,7 +258,7 @@ _MASTER_AUTH_REQUIRED_DETAIL = (
 _MASTER_PERMISSION_DENIED_DETAIL = "이 작업은 master 권한이 필요합니다."
 
 _AUDIT_READ_PERMISSION_DENIED_DETAIL = (
-    "이 작업은 master 권한 또는 audit:read scope가 필요합니다."
+    "이 작업은 human 멤버 또는 audit:read scope를 보유한 agent만 수행할 수 있습니다."
 )
 
 
@@ -349,32 +349,34 @@ async def require_audit_read(
     session_service: Annotated[Any | None, Depends(get_session_service_optional)],
 ) -> str:
     """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고
-    ``master`` role 또는 ``audit:read`` scope 보유자를 허용하는 FastAPI dependency.
+    audit 도메인 read 권한을 강제하는 FastAPI dependency.
 
-    배경 (Codex P2 #1359 fix loop):
-        ``require_master_caller``를 ``GET /api/audit``에 그대로 적용하면
-        ``docs/specs/member/02-design-decisions.md:188-229`` 의 모니터링 agent
-        ("``audit:read`` scope만 보유한 default role agent")가 차단된다.
-        spec은 audit 도메인 read 권한을 ``master`` role 또는 ``audit:read``
-        scope 중 하나로 정의하므로, 이 dependency는 두 조건의 OR로 통과시킨다.
+    배경 (Codex P2 #1359 fix loop 3차):
+        spec ``docs/specs/member/02-design-decisions.md:210-221`` 의
+        ``require_scope`` predicate는 ``member.type == "human"`` 이면 scope 검증을
+        무조건 통과시킨다. scope는 오직 agent 멤버를 제한하기 위한 장치이므로,
+        human admin/default 멤버도 audit 로그를 읽을 수 있어야 한다.
+        2차 패치는 master role 또는 ``audit:read`` scope만 허용해 human admin/
+        default 사용자를 403으로 차단하는 회귀가 있었다. 본 패치는 spec
+        predicate를 그대로 반영해 다음 OR 분기로 통과시킨다:
+
+    - caller_member.role == ``MemberRole.MASTER`` → 통과
+    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관)
+    - ``"audit:read"`` ∈ caller_member.scopes → 통과 (agent의 정상 경로)
+    - 그 외 (agent without scope) → ``HTTPException(403)``
 
     인증 절차는 ``require_master_caller``와 동일하다 (Bearer 우선,
     ``session_service`` 가용 시 ``ante_session`` 쿠키 fallback,
     ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403으로 흡수).
-    유일한 차이는 권한 검증 분기다:
-
-    - caller_member.role == ``MemberRole.MASTER`` → 통과
-    - ``"audit:read"`` ∈ ``caller_member.scopes`` → 통과
-    - 둘 다 아니면 ``HTTPException(403)``
 
     Returns:
         caller_id (str): 인증/권한 검증을 통과한 member_id.
 
     Raises:
         HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 master도 아니고 audit:read도 없음.
+        HTTPException(403): 인증은 통과했으나 audit 도메인 read 권한 없음.
     """
-    from ante.member.models import MemberRole
+    from ante.member.models import MemberRole, MemberType
 
     caller = getattr(request.state, "member_id", "") or ""
 
@@ -417,10 +419,14 @@ async def require_audit_read(
     role_value = getattr(role, "value", role)
     is_master = role_value == MemberRole.MASTER.value
 
+    member_type = getattr(member, "type", None)
+    member_type_value = getattr(member_type, "value", member_type)
+    is_human = member_type_value == MemberType.HUMAN.value
+
     scopes = getattr(member, "scopes", None) or []
     has_audit_read = "audit:read" in scopes
 
-    if not is_master and not has_audit_read:
+    if not is_master and not is_human and not has_audit_read:
         raise HTTPException(
             status_code=403, detail=_AUDIT_READ_PERMISSION_DENIED_DETAIL
         )

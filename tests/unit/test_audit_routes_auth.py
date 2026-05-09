@@ -2,8 +2,9 @@
 
 oracle A7 시그니처에서 발견된 ``list_audit_logs`` 라우트는 인증 없이도
 감사 로그 목록을 200으로 반환하고 있었다. 본 PR은 ``GET /api/audit``에
-``require_audit_read`` dependency (master role OR ``audit:read`` scope)를
-적용해 인증되지 않은/권한 없는 호출자가 감사 로그를 읽지 못하도록 막는다.
+``require_audit_read`` dependency (master role OR human bypass OR
+``audit:read`` scope)를 적용해 인증되지 않은/권한 없는 호출자가 감사 로그를
+읽지 못하도록 막는다.
 
 각 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -12,10 +13,14 @@ oracle A7 시그니처에서 발견된 ``list_audit_logs`` 라우트는 인증 �
 - ``session_service`` is None 배포 + Bearer 없음 → 401 (cookie fallback skip)
 - 정상 Bearer master → 200
 - 정상 ante_session master → 200
-- 인증된 non-master + ``audit:read`` scope 없음 → 403
-- 인증된 non-master + ``audit:read`` scope 보유 → 200
+- 인증된 agent non-master + ``audit:read`` scope 없음 → 403
+- 인증된 agent non-master + ``audit:read`` scope 보유 → 200
   (Codex P2 #1359 fix loop 2차: spec
    ``docs/specs/member/02-design-decisions.md:188-229`` 모니터링 agent 시나리오)
+- 인증된 human admin/default (scope 없어도) → 200
+  (Codex P2 #1359 fix loop 3차: spec
+   ``docs/specs/member/02-design-decisions.md:210-221`` ``require_scope``
+   predicate ``member.type == "human"`` 자동 통과)
 
 401/403 응답 시 ``AuditLogger.query`` 는 호출되지 않아야 한다 (early return).
 
@@ -139,15 +144,43 @@ def _make_audit_logger() -> AsyncMock:
 @pytest.fixture
 def member_service() -> FakeMemberService:
     svc = FakeMemberService()
-    svc.add_member("master-user", token="master-token", role="master")
-    svc.add_member("agent-01", token="agent-token", role="default")
+    # master는 spec상 type=human (docs/specs/member/02-design-decisions.md:236-247).
+    svc.add_member(
+        "master-user",
+        token="master-token",
+        role="master",
+        member_type="human",
+    )
+    # agent default — scope 없음 (403 회귀 케이스).
+    svc.add_member(
+        "agent-01",
+        token="agent-token",
+        role="default",
+        member_type="agent",
+    )
     # 모니터링 agent: default role + audit:read scope만 보유
     # (spec docs/specs/member/02-design-decisions.md:188-229).
     svc.add_member(
         "audit-reader",
         token="audit-reader-token",
         role="default",
+        member_type="agent",
         scopes=["bot:read", "trade:read", "audit:read"],
+    )
+    # human admin — scope 없어도 require_scope predicate 자동 통과
+    # (spec docs/specs/member/02-design-decisions.md:210-221).
+    svc.add_member(
+        "human-admin",
+        token="human-admin-token",
+        role="admin",
+        member_type="human",
+    )
+    # human default — scope 없어도 자동 통과.
+    svc.add_member(
+        "human-default",
+        token="human-default-token",
+        role="default",
+        member_type="human",
     )
     return svc
 
@@ -330,13 +363,13 @@ class TestSessionCookieMasterSuccess:
             client.cookies.delete("ante_session")
 
 
-# ── 403: 인증된 non-master ─────────────────────────────────────────────
+# ── 403: 인증된 agent non-master + scope 없음 ───────────────────────────
 
 
 class TestNonMaster403:
-    """인증된 non-master + ``audit:read`` scope 없음 → 403, audit query 미호출."""
+    """인증된 agent non-master + ``audit:read`` scope 없음 → 403, audit query 미호출."""
 
-    def test_non_master_bearer_returns_403(
+    def test_agent_default_without_scope_returns_403(
         self, client: TestClient, audit_logger: AsyncMock
     ) -> None:
         resp = client.get(
@@ -344,12 +377,59 @@ class TestNonMaster403:
             headers={"Authorization": "Bearer agent-token"},
         )
         assert resp.status_code == 403, (
-            f"non-master Bearer가 403이 아님 ({resp.status_code}: {resp.text})"
+            f"agent non-master Bearer가 403이 아님 ({resp.status_code}: {resp.text})"
         )
         assert audit_logger.query.await_count == 0, (
             "403 차단 시 audit_logger.query가 호출되어선 안 된다"
         )
         assert audit_logger.count.await_count == 0
+
+
+# ── 200: human 멤버 bypass (Codex P2 #1359 fix loop 3차) ───────────────
+
+
+class TestHumanBypassSuccess:
+    """human 멤버는 scope 검증을 자동 통과한다.
+
+    spec ``docs/specs/member/02-design-decisions.md:210-221`` 의
+    ``require_scope`` predicate: ``member.type == "human"`` → True.
+    scope는 오직 agent 제한 장치이므로 human admin/default 사용자는
+    audit:read scope를 보유하지 않아도 audit 로그 조회가 가능해야 한다.
+    """
+
+    def test_human_admin_without_scope_succeeds(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """human admin (scope 없음) → 200."""
+        resp = client.get(
+            "/api/audit?limit=1",
+            headers={"Authorization": "Bearer human-admin-token"},
+        )
+        assert resp.status_code == 200, (
+            f"human admin (scope 없음)이 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        body = resp.json()
+        assert "logs" in body
+        assert "total" in body
+        assert audit_logger.query.await_count == 1
+        assert audit_logger.count.await_count == 1
+
+    def test_human_default_without_scope_succeeds(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """human default (scope 없음) → 200."""
+        resp = client.get(
+            "/api/audit?limit=1",
+            headers={"Authorization": "Bearer human-default-token"},
+        )
+        assert resp.status_code == 200, (
+            f"human default (scope 없음)이 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        body = resp.json()
+        assert "logs" in body
+        assert "total" in body
+        assert audit_logger.query.await_count == 1
+        assert audit_logger.count.await_count == 1
 
 
 # ── 200: audit:read scope 보유 non-master (Codex P2 #1359 fix loop 2차) ──

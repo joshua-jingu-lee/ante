@@ -1,16 +1,22 @@
-"""``require_audit_read`` dependency 단위 테스트 (issue #1359 Codex P2 fix loop 2차).
+"""``require_audit_read`` dependency 단위 테스트 (issue #1359 Codex P2 fix loop 3차).
 
 dependency 자체의 동작(Bearer 우선, 쿠키 fallback, session_service None skip,
-master OR ``audit:read`` scope 검증, ``request.state.member_id`` 갱신)을 라우트
-통합 없이 검증한다. 라우트 통합 테스트는
+human bypass / master / ``audit:read`` scope 검증, ``request.state.member_id``
+갱신)을 라우트 통합 없이 검증한다. 라우트 통합 테스트는
 ``tests/unit/test_audit_routes_auth.py``에 있다.
 
 배경:
-    초기 패치는 ``GET /api/audit``에 ``require_master_caller``를 적용해 master
-    role만 허용했다. 그러나 spec ``docs/specs/member/02-design-decisions.md:188-229``
-    은 audit 도메인 read 권한을 ``master`` role 또는 ``audit:read`` scope 중
-    하나로 정의하므로, 모니터링 전용 agent(default role + ``audit:read`` scope)
-    가 차단되는 회귀가 발생했다. 본 dependency는 두 조건의 OR로 통과시킨다.
+    1차 패치는 ``GET /api/audit``에 ``require_master_caller``를 적용해 master
+    role만 허용했다. 2차 패치는 ``master`` 또는 ``audit:read`` scope OR로 완화했지만
+    human admin/default 사용자를 여전히 403으로 차단했다. spec
+    ``docs/specs/member/02-design-decisions.md:210-221`` 의 ``require_scope``
+    predicate는 ``member.type == "human"`` 이면 scope 검증을 무조건 통과시키므로,
+    3차 패치(현재)는 다음 OR 분기를 적용한다:
+
+    - master role → 통과
+    - human 멤버 → 통과 (scope 무관)
+    - ``audit:read`` ∈ scopes → 통과 (agent의 정상 경로)
+    - 그 외 (agent without scope) → 403
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from ante.member.models import MemberRole
+from ante.member.models import MemberRole, MemberType
 from ante.web.deps import require_audit_read
 
 
@@ -29,6 +35,7 @@ from ante.web.deps import require_audit_read
 class _StubMember:
     member_id: str
     role: str
+    type: str = MemberType.AGENT.value
     scopes: list[str] = field(default_factory=list)
 
 
@@ -41,11 +48,13 @@ class _StubMemberService:
         self,
         member_id: str,
         role: str = "default",
+        member_type: str = MemberType.AGENT.value,
         scopes: list[str] | None = None,
     ) -> None:
         self._members[member_id] = _StubMember(
             member_id=member_id,
             role=role,
+            type=member_type,
             scopes=list(scopes) if scopes else [],
         )
 
@@ -97,7 +106,11 @@ def _make_request(
 async def test_returns_caller_when_bearer_master() -> None:
     """master role → 통과 (scope와 무관)."""
     svc = _StubMemberService()
-    svc.add("master-user", role=MemberRole.MASTER.value)
+    svc.add(
+        "master-user",
+        role=MemberRole.MASTER.value,
+        member_type=MemberType.HUMAN.value,
+    )
     request = _make_request(state_member_id="master-user")
 
     caller = await require_audit_read(request, svc, None)
@@ -107,8 +120,51 @@ async def test_returns_caller_when_bearer_master() -> None:
 
 
 @pytest.mark.asyncio
+async def test_returns_caller_when_human_admin_without_scope() -> None:
+    """human admin 멤버 → 통과 (scope 미보유여도 human bypass).
+
+    spec docs/specs/member/02-design-decisions.md:210-221 ``require_scope``
+    predicate: ``member.type == "human"`` 이면 scope 검증 자동 통과.
+    """
+    svc = _StubMemberService()
+    svc.add(
+        "human-admin",
+        role=MemberRole.ADMIN.value,
+        member_type=MemberType.HUMAN.value,
+        scopes=[],
+    )
+    request = _make_request(state_member_id="human-admin")
+
+    caller = await require_audit_read(request, svc, None)
+
+    assert caller == "human-admin"
+    assert svc.calls == ["human-admin"]
+
+
+@pytest.mark.asyncio
+async def test_returns_caller_when_human_default_without_scope() -> None:
+    """human default 멤버 → 통과 (scope 미보유여도 human bypass).
+
+    spec ``require_scope`` predicate는 type만 보고 scope 비검사.
+    """
+    svc = _StubMemberService()
+    svc.add(
+        "human-default",
+        role=MemberRole.DEFAULT.value,
+        member_type=MemberType.HUMAN.value,
+        scopes=[],
+    )
+    request = _make_request(state_member_id="human-default")
+
+    caller = await require_audit_read(request, svc, None)
+
+    assert caller == "human-default"
+    assert svc.calls == ["human-default"]
+
+
+@pytest.mark.asyncio
 async def test_returns_caller_when_default_with_audit_read_scope() -> None:
-    """default role + ``audit:read`` scope → 통과 (모니터링 agent 시나리오).
+    """agent default role + ``audit:read`` scope → 통과 (모니터링 agent 시나리오).
 
     spec docs/specs/member/02-design-decisions.md:188-229 모니터링 agent.
     """
@@ -116,6 +172,7 @@ async def test_returns_caller_when_default_with_audit_read_scope() -> None:
     svc.add(
         "monitor-agent",
         role=MemberRole.DEFAULT.value,
+        member_type=MemberType.AGENT.value,
         scopes=["bot:read", "trade:read", "audit:read"],
     )
     request = _make_request(state_member_id="monitor-agent")
@@ -128,9 +185,14 @@ async def test_returns_caller_when_default_with_audit_read_scope() -> None:
 
 @pytest.mark.asyncio
 async def test_returns_caller_when_admin_with_audit_read_scope() -> None:
-    """admin role + ``audit:read`` scope → 통과."""
+    """agent admin role + ``audit:read`` scope → 통과."""
     svc = _StubMemberService()
-    svc.add("admin-1", role=MemberRole.ADMIN.value, scopes=["audit:read"])
+    svc.add(
+        "admin-1",
+        role=MemberRole.ADMIN.value,
+        member_type=MemberType.AGENT.value,
+        scopes=["audit:read"],
+    )
     request = _make_request(state_member_id="admin-1")
 
     caller = await require_audit_read(request, svc, None)
@@ -140,11 +202,12 @@ async def test_returns_caller_when_admin_with_audit_read_scope() -> None:
 
 @pytest.mark.asyncio
 async def test_falls_back_to_session_cookie_when_bearer_missing() -> None:
-    """Bearer 미설정 + 유효 세션 쿠키(audit:read 보유) → caller 결정 + state 갱신."""
+    """Bearer 미설정 + 유효 세션 쿠키(agent + audit:read) → caller 결정 + state 갱신."""
     member_svc = _StubMemberService()
     member_svc.add(
         "cookie-monitor",
         role=MemberRole.DEFAULT.value,
+        member_type=MemberType.AGENT.value,
         scopes=["audit:read"],
     )
 
@@ -165,7 +228,11 @@ async def test_falls_back_to_session_cookie_when_bearer_missing() -> None:
 async def test_bearer_caller_takes_precedence_over_cookie() -> None:
     """Bearer 토큰이 caller를 결정하면 쿠키 검증을 다시 호출하지 않는다."""
     member_svc = _StubMemberService()
-    member_svc.add("bearer-master", role=MemberRole.MASTER.value)
+    member_svc.add(
+        "bearer-master",
+        role=MemberRole.MASTER.value,
+        member_type=MemberType.HUMAN.value,
+    )
     session_svc = _StubSessionService()
     session_svc.add_session("sid-1", "cookie-user")
 
@@ -253,10 +320,15 @@ async def test_raises_401_when_member_service_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_raises_403_when_default_without_audit_read_scope() -> None:
-    """default role + ``audit:read`` 미보유 → 403."""
+async def test_raises_403_when_agent_default_without_audit_read_scope() -> None:
+    """agent default role + ``audit:read`` 미보유 → 403."""
     svc = _StubMemberService()
-    svc.add("plain-agent", role=MemberRole.DEFAULT.value, scopes=["bot:read"])
+    svc.add(
+        "plain-agent",
+        role=MemberRole.DEFAULT.value,
+        member_type=MemberType.AGENT.value,
+        scopes=["bot:read"],
+    )
     request = _make_request(state_member_id="plain-agent")
 
     with pytest.raises(HTTPException) as exc:
@@ -266,10 +338,15 @@ async def test_raises_403_when_default_without_audit_read_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_raises_403_when_default_with_empty_scopes() -> None:
-    """default role + scopes 비어있음 → 403."""
+async def test_raises_403_when_agent_default_with_empty_scopes() -> None:
+    """agent default role + scopes 비어있음 → 403."""
     svc = _StubMemberService()
-    svc.add("plain-agent", role=MemberRole.DEFAULT.value, scopes=[])
+    svc.add(
+        "plain-agent",
+        role=MemberRole.DEFAULT.value,
+        member_type=MemberType.AGENT.value,
+        scopes=[],
+    )
     request = _make_request(state_member_id="plain-agent")
 
     with pytest.raises(HTTPException) as exc:
@@ -279,12 +356,16 @@ async def test_raises_403_when_default_with_empty_scopes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_raises_403_when_admin_without_audit_read_scope() -> None:
-    """admin role + ``audit:read`` 미보유 → 403 (admin도 자동 통과 아님)."""
+async def test_raises_403_when_agent_admin_without_audit_read_scope() -> None:
+    """agent admin role + ``audit:read`` 미보유 → 403 (agent admin은 자동 통과 아님).
+
+    agent는 type bypass 대상이 아니므로 scope 검증을 받는다.
+    """
     svc = _StubMemberService()
     svc.add(
         "admin-no-scope",
         role=MemberRole.ADMIN.value,
+        member_type=MemberType.AGENT.value,
         scopes=["bot:admin", "approval:write"],
     )
     request = _make_request(state_member_id="admin-no-scope")
