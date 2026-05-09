@@ -691,6 +691,13 @@ export type paths = {
         /**
          * List Members
          * @description 멤버 목록 조회.
+         *
+         *     ``type``과 ``status``는 도메인 enum SSOT(``MemberType`` /
+         *     ``MemberStatus``)로 강제한다(#1358 — Codex Plan Review). 알 수 없는 값은
+         *     FastAPI/Pydantic이 자동으로 422를 반환하므로 "200 빈 목록"으로 가려지지
+         *     않는다. ``MemberService.list_members`` / ``count``는 ``str | None``을
+         *     받으므로 ``StrEnum`` 인스턴스를 그대로 전달해도 SQL 비교(``type = ?`` /
+         *     ``status = ?``)에서 문자열로 동작한다.
          */
         get: operations["list_members_api_members_get"];
         put?: never;
@@ -2400,6 +2407,12 @@ export type components = {
             member: components["schemas"]["MemberInfo"];
         };
         /**
+         * MemberStatus
+         * @description 멤버 상태.
+         * @enum {string}
+         */
+        MemberStatus: "active" | "suspended" | "revoked";
+        /**
          * MemberTokenResponse
          * @description 토큰 재발급 응답.
          */
@@ -2408,6 +2421,12 @@ export type components = {
             /** Token */
             token: string;
         };
+        /**
+         * MemberType
+         * @description 멤버 타입.
+         * @enum {string}
+         */
+        MemberType: "human" | "agent";
         /**
          * MeResponse
          * @description 현재 사용자 정보 응답.
@@ -3383,7 +3402,9 @@ export type MemberDetailResponse = components['schemas']['MemberDetailResponse']
 export type MemberInfo = components['schemas']['MemberInfo'];
 export type MemberListResponse = components['schemas']['MemberListResponse'];
 export type MemberScopesResponse = components['schemas']['MemberScopesResponse'];
+export type MemberStatus = components['schemas']['MemberStatus'];
 export type MemberTokenResponse = components['schemas']['MemberTokenResponse'];
+export type MemberType = components['schemas']['MemberType'];
 export type MeResponse = components['schemas']['MeResponse'];
 export type MonthlySummaryItem = components['schemas']['MonthlySummaryItem'];
 export type MonthlySummaryResponse = components['schemas']['MonthlySummaryResponse'];
@@ -5020,8 +5041,8 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 org?: string | null;
-                status?: string | null;
-                type?: string | null;
+                status?: components["schemas"]["MemberStatus"] | null;
+                type?: components["schemas"]["MemberType"] | null;
             };
             header?: never;
             path?: never;

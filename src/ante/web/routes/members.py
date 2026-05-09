@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ante.member.errors import PermissionDeniedError
+from ante.member.models import MemberStatus, MemberType
 from ante.web.deps import (
     get_audit_logger_optional,
     get_member_service,
@@ -230,13 +231,21 @@ MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
 )
 async def list_members(
     svc: Annotated[Any, Depends(get_member_service)],
-    type: str | None = Query(default=None),
+    type: MemberType | None = Query(default=None),
     org: str | None = Query(default=None),
-    status: str | None = Query(default=None),
+    status: MemberStatus | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """멤버 목록 조회."""
+    """멤버 목록 조회.
+
+    ``type``과 ``status``는 도메인 enum SSOT(``MemberType`` /
+    ``MemberStatus``)로 강제한다(#1358 — Codex Plan Review). 알 수 없는 값은
+    FastAPI/Pydantic이 자동으로 422를 반환하므로 "200 빈 목록"으로 가려지지
+    않는다. ``MemberService.list_members`` / ``count``는 ``str | None``을
+    받으므로 ``StrEnum`` 인스턴스를 그대로 전달해도 SQL 비교(``type = ?`` /
+    ``status = ?``)에서 문자열로 동작한다.
+    """
     try:
         members = await svc.list_members(
             member_type=type, org=org, status=status, limit=limit, offset=offset
