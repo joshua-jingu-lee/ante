@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ante.report.models import ReportStatus
 from ante.web.deps import get_audit_logger_optional, get_report_store
 from ante.web.schemas import (
     ReportDetailResponse,
@@ -176,7 +177,7 @@ async def report_view(
 )
 async def list_reports(
     report_store: Annotated[Any, Depends(get_report_store)],
-    status: str | None = None,
+    status: ReportStatus | None = None,
     limit: int = 20,
     cursor: str | None = None,
 ) -> dict:
