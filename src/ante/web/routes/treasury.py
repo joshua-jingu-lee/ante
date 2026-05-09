@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ante.web.deps import (
     get_audit_logger_optional,
     get_bot_manager_optional,
     get_treasury,
     get_treasury_manager_optional,
+    require_master_caller,
 )
 from ante.web.schemas import (
     BalanceSetResponse,
@@ -36,9 +38,45 @@ class BudgetChangeRequest(BaseModel):
 
 
 class BalanceSetRequest(BaseModel):
-    """잔고 수동 설정 요청."""
+    """잔고 수동 설정 요청.
+
+    OpenAPI ``BALANCE_SET_REQUEST_SCHEMA``는 ``additionalProperties: false``를
+    선언한다. 런타임 모델도 ``extra="forbid"``로 동일하게 강제해 OpenAPI
+    contract와 동작을 일치시킨다(#1352 — Codex Plan Review).
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     balance: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+
+# POST /api/treasury/balance OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(이슈 #1352). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema로 두면 frontend codegen이 ``export type BalanceSetRequest``를
+# 만들지 못한다. 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고
+# 본체 schema는 ``_install_openapi_customizer``가 ``components.schemas``에
+# 등록한다(#1351 ``ScopesUpdateRequest`` SSOT 패턴).
+BALANCE_SET_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "BalanceSetRequest",
+    "description": (
+        "POST /api/treasury/balance 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1352). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다."
+    ),
+    "additionalProperties": False,
+    "required": ["balance"],
+    "properties": {
+        "balance": {
+            "type": "number",
+            "minimum": 0,
+            "description": "수동 설정할 계좌 총 잔고 (음수 불가, NaN/Inf 불가).",
+        },
+    },
+}
 
 
 @router.get(
@@ -420,6 +458,39 @@ async def list_budgets(
     "/balance",
     response_model=BalanceSetResponse,
     responses={
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, 미지정 필드, "
+                "balance 음수/NaN/Inf). 단, 인증이 실패하면 body validation은 "
+                "실행되지 않고 401이 우선 반환된다(#1352)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -429,21 +500,65 @@ async def list_budgets(
             },
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/BalanceSetRequest"},
+                },
+            },
+        },
+    },
 )
 async def set_balance(
-    body: BalanceSetRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     treasury: Annotated[Any, Depends(get_treasury)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """계좌 총 잔고 수동 설정."""
-    from datetime import UTC, datetime
+    """계좌 총 잔고 수동 설정. 인증된 master만 호출 가능 (#1352).
+
+    ``create_member`` / ``update_scopes`` / ``update_bot``과 동일한 raw body
+    파싱 패턴을 적용해 인증 가드가 body validation보다 우선 실행되도록 한다
+    (#1352 — Codex Plan Review). FastAPI가 ``body: BalanceSetRequest``를 먼저
+    검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어 contract가
+    깨진다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``BalanceSetRequest.model_validate`` — ValidationError → 422.
+    4. ``treasury.set_account_balance`` 호출.
+    """
+    # 1. raw body 읽기 + JSON 파싱.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증 — 인증 통과 후에만 실행된다.
+    try:
+        body = BalanceSetRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
 
     await treasury.set_account_balance(body.balance)
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="treasury.set_balance",
             resource="treasury",
             detail=f"balance={body.balance:,.0f}",

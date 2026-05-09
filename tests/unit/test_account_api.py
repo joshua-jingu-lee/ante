@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -18,7 +20,52 @@ from ante.account.errors import (  # noqa: E402
     InvalidBrokerTypeError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode  # noqa: E402
+from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+
+# 인증 가드(#1352) — PUT/POST mutation route는 master 인증이 필요.
+# 본 모듈의 회귀 본질(structural 가드, mutable 검증, audit 등)은 인증 가드와
+# 무관하므로 fixture에 master member_service를 주입하고 client에 default
+# header를 단다. 인증 자체 검증은 ``test_runtime_mutation_auth.py``에 있다.
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
+
+
+@dataclass
+class _StubMember:
+    member_id: str
+    role: str = "default"
+    type: str = "agent"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = dc_field(default_factory=list)
+
+
+class _StubMemberService:
+    def __init__(self) -> None:
+        self._members: dict[str, _StubMember] = {
+            "master-user": _StubMember(
+                member_id="master-user", role=MemberRole.MASTER.value
+            ),
+        }
+        self._tokens: dict[str, str] = {"master-token": "master-user"}
+
+    async def authenticate(self, token: str) -> _StubMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("invalid token")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _StubMember | None:
+        return self._members.get(member_id)
+
+
+def _new_member_service() -> _StubMemberService:
+    return _StubMemberService()
 
 
 class FakeBrokerAdapter:
@@ -214,12 +261,15 @@ def app(account_service: FakeAccountService, audit_logger: FakeAuditLogger):
     return create_app(
         account_service=account_service,
         audit_logger=audit_logger,
+        member_service=_new_member_service(),
     )
 
 
 @pytest.fixture
 def client(app) -> TestClient:
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update(_MASTER_HEADERS)
+    return client
 
 
 def _make_account(
@@ -991,14 +1041,18 @@ class TestUpdateAccount:
         attempt 6은 PUT의 ``account_service``를
         ``request.app.state.account_service``로 lazy 해소해 structural 분기에서
         service에 의존하지 않도록 한다. 이 테스트가 그 invariant를 직접
-        단언한다 — service 미주입 + ``credentials`` body → 409.
+        단언한다 — master 인증 통과 + service 미주입 + ``credentials`` body → 409.
+
+        #1352 인증 가드 도입 후에는 master 인증이 cold-path 가드보다 먼저
+        평가되므로 invariant I1을 단언하려면 인증을 통과시켜야 한다.
         """
-        app = create_app()  # account_service 미주입
+        app = create_app(member_service=_new_member_service())  # account_service 미주입
         assert getattr(app.state, "account_service", None) is None
         with TestClient(app) as bare_client:
             resp = bare_client.put(
                 "/api/accounts/some-id",
                 json={"credentials": {"app_key": "x"}},
+                headers=_MASTER_HEADERS,
             )
         assert resp.status_code == 409
         detail = resp.json()["detail"]
@@ -1011,13 +1065,17 @@ class TestUpdateAccount:
         cold-path 가드를 통과한 분기는 ``app.state.account_service``를
         lazy하게 가져온다. 미주입이면 503으로 응답한다 — 이 동작은 attempt 6의
         invariant I1 회복(structural body → 409)과 짝을 이룬다.
+
+        #1352 인증 가드 도입 후에는 master 인증이 service-resolution보다 먼저
+        평가되므로 503 invariant를 단언하려면 인증을 통과시켜야 한다.
         """
-        app = create_app()  # account_service 미주입
+        app = create_app(member_service=_new_member_service())  # account_service 미주입
         assert getattr(app.state, "account_service", None) is None
         with TestClient(app) as bare_client:
             resp = bare_client.put(
                 "/api/accounts/some-id",
                 json={"name": "변경"},
+                headers=_MASTER_HEADERS,
             )
         assert resp.status_code == 503
         assert resp.json()["detail"] == "Account service not available"

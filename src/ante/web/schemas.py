@@ -159,7 +159,15 @@ class AccountUpdateRequest(BaseModel):
 
 
 class AccountSuspendRequest(BaseModel):
-    """계좌 정지 요청."""
+    """계좌 정지 요청.
+
+    OpenAPI ``additionalProperties`` 정합성을 위해 ``extra="forbid"``로 미지정
+    필드를 거부한다(#1352 — Codex Plan Review). 같은 PR에서 ``BotUpdateRequest``,
+    ``BalanceSetRequest``도 동일 정책을 적용해 5개 mutation route 입력 contract
+    drift를 예방한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     reason: str = ""
 
@@ -290,7 +298,14 @@ class BotInfo(BaseModel):
 
 
 class BotUpdateRequest(BaseModel):
-    """봇 설정 수정 요청. None인 필드는 변경하지 않는다."""
+    """봇 설정 수정 요청. None인 필드는 변경하지 않는다.
+
+    OpenAPI ``BOT_UPDATE_REQUEST_SCHEMA``는 ``additionalProperties: false``를
+    선언한다. 런타임 모델도 ``extra="forbid"``로 동일하게 강제해 OpenAPI
+    contract와 동작을 일치시킨다(#1352 — Codex Plan Review).
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     strategy_name: str | None = None

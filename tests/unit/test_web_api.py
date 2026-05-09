@@ -864,6 +864,94 @@ class TestRFC7807ErrorResponse:
             f"$ref가 아님: {body_schema!r}"
         )
 
+    def test_openapi_components_includes_account_suspend_request(self):
+        """``components.schemas.AccountSuspendRequest``가 항상 등록되어 있다.
+
+        Codex review #1352 2차에서 식별된 회귀를 잠근다.
+
+        POST /api/accounts/{account_id}/suspend 라우트도 ``create_member`` /
+        ``update_scopes`` / ``update_bot`` / ``set_balance`` 와 동일한 raw body
+        패턴(``request: Request``)으로 전환되었다(인증 가드 우선). 그 결과
+        ``body: AccountSuspendRequest`` 인자가 시그니처에서 사라져 FastAPI 자동
+        components 등록 경로를 타지 않으며, inline schema로 두면 frontend
+        ``openapi-typescript`` 산출물이 ``export type AccountSuspendRequest``를
+        잃어 빌드가 깨진다. ``_install_openapi_customizer``가 ``setdefault``로
+        fallback 등록해 이 회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "AccountSuspendRequest" in schemas, (
+            "AccountSuspendRequest가 components.schemas에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1352 2차 Codex review)"
+        )
+        suspend_schema = schemas["AccountSuspendRequest"]
+        assert isinstance(suspend_schema, dict)
+        assert suspend_schema.get("type") == "object"
+        # 빈 body 허용이므로 ``required``는 비어 있어야 한다.
+        assert not suspend_schema.get("required", []), (
+            "AccountSuspendRequest는 빈 body를 허용해야 하므로 required가 비어야 함: "
+            f"{suspend_schema.get('required')!r}"
+        )
+        # ``additionalProperties: false``로 unknown 키를 차단한다.
+        assert suspend_schema.get("additionalProperties") is False, (
+            "AccountSuspendRequest.additionalProperties는 False여야 함: "
+            f"{suspend_schema.get('additionalProperties')!r}"
+        )
+        properties = suspend_schema.get("properties", {})
+        reason_field = properties.get("reason", {})
+        assert reason_field.get("type") == "string", (
+            f"AccountSuspendRequest.reason은 string이어야 함: {reason_field!r}"
+        )
+
+    def test_post_accounts_suspend_request_body_uses_component_ref(self):
+        """POST /api/accounts/{id}/suspend requestBody가 nullable ``$ref``를 노출.
+
+        Codex review #1352 2차/3차/4차에서 식별된 회귀를 잠근다.
+
+        inline schema로 두면 frontend codegen이 ``export type
+        AccountSuspendRequest``를 만들지 못해 frontend 빌드가 깨진다.
+        ``required: False``는 빈 body도 허용하기 위함이며(default reason),
+        다른 mutation 라우트와 패턴 정합을 위해 ``$ref``는 그대로 유지한다.
+
+        4차 review (P2): 런타임은 JSON ``null`` body를 빈 body와 동일하게
+        default reason 으로 흘려보내지만, 이전에는 schema가 ``$ref`` 단일
+        이라 codegen 타입이 null body를 거부해 OpenAPI 계약과 drift가
+        있었다. OpenAPI 3.1.0 기준 nullable은 ``oneOf``/``anyOf`` +
+        ``{"type": "null"}`` 로 표현해야 하므로 body schema는 ``$ref`` +
+        ``{"type": "null"}`` 의 ``oneOf`` 를 노출한다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        # OpenAPI 3.1.0 가정 — nullable 표현이 oneOf/anyOf + {"type":"null"}.
+        assert schema.get("openapi", "").startswith("3.1"), (
+            "ante OpenAPI 버전이 3.1 계열이 아님 — nullable 표현 재검토 필요: "
+            f"{schema.get('openapi')!r}"
+        )
+        post_op = schema["paths"]["/api/accounts/{account_id}/suspend"]["post"]
+        request_body = post_op.get("requestBody", {})
+        # 빈 body도 허용되므로 required는 False다.
+        assert request_body.get("required") is False, (
+            "POST /api/accounts/{id}/suspend requestBody.required는 False여야 함 — "
+            "빈 body는 default reason으로 흘려보낸다."
+        )
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        # Nullable: oneOf [$ref, {"type":"null"}].
+        one_of = body_schema.get("oneOf")
+        assert isinstance(one_of, list) and len(one_of) == 2, (
+            "POST /api/accounts/{account_id}/suspend body schema가 nullable "
+            f"oneOf 형태가 아님: {body_schema!r}"
+        )
+        assert {"$ref": "#/components/schemas/AccountSuspendRequest"} in one_of, (
+            "POST /api/accounts/{account_id}/suspend body oneOf에 "
+            f"AccountSuspendRequest $ref 누락: {one_of!r}"
+        )
+        assert {"type": "null"} in one_of, (
+            "POST /api/accounts/{account_id}/suspend body oneOf에 null 타입 "
+            f"누락 — JSON null body 호환 계약: {one_of!r}"
+        )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 

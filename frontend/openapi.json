@@ -225,7 +225,7 @@
           "accounts"
         ],
         "summary": "Update Account",
-        "description": "계좌 수정.\n\n런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,\n``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도\n포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는\n``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path\n응답과 ``AccountDeletedError`` 경로의 409를 구분한다.\n\nbody는 raw bytes로 받는다(``request.body()``). FastAPI 선행 Pydantic\n검증을 거치면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가\nstructural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.\n\n핸들러 단계 순서(이슈 #1153 + #1152 Implementation Plan):\n\n1. raw bytes 읽기.\n2. **빈 body**(``b\"\"``) → ``payload = {}``로 두고 Content-Type 검사·JSON\n   파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(단계 6에서 422로 처리).\n3. **JSON 파싱 실패**: Content-Type ≠ application/json → 415,\n   Content-Type 정상 → 422.\n4. **non-dict JSON**: Content-Type ≠ application/json → 415,\n   Content-Type 정상 → 422.\n5. **structural 가드(I4 우선)**: dict payload에 structural 키 존재 → 409\n   (Content-Type 무관, structural+text/plain도 409).\n6. ``len(payload) == 0`` (``{}`` 명시 송신 또는 빈 body) → 422 no-op\n   (Content-Type 검사 건너뜀; #1152 정렬 완료 — schema의\n   ``minProperties: 1``과 정합).\n7. **Content-Type 415 게이트**: ``application/json``(charset suffix 허용)\n   이외 → 415.\n8. **unknown 키 / mutable type**: structural 제외한 raw dict의 unknown\n   키 → 422. ``AccountUpdateRequest.model_validate`` ValidationError → 422.\n9. ``model_dump(exclude_none=True)`` 결과 비면 422 (예: ``{\"name\": null}``\n   단독 — effective payload empty no-op; #1152 정렬 완료).\n10. service 호출.",
+        "description": "계좌 수정.\n\n인증된 master 호출자만 사용할 수 있다(이슈 #1352 — oracle A7). dependency\n``require_master_caller``가 인증/권한 검증을 담당하며, 401/403은 raw body\n파싱과 cold-path 가드(invariant I1/I4)보다 먼저 평가된다 — Bearer 또는\n``ante_session`` 쿠키 어느 쪽으로도 caller가 결정되지 않으면 401, master가\n아니면 403.\n\n런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,\n``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도\n포함되면 cold-path 409로 즉시 차단된다 — 클라이언트는\n``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER:`` prefix로 cold-path\n응답과 ``AccountDeletedError`` 경로의 409를 구분한다.\n\nbody는 raw bytes로 받는다(``request.body()``). FastAPI 선행 Pydantic\n검증을 거치면 cold-path 가드(invariant I1/I4) 도달 전 422가 먼저 나가\nstructural 키 존재가 schema validation 신호로 흘러갈 수 있기 때문이다.\n\n핸들러 단계 순서(이슈 #1153 + #1152 Implementation Plan):\n\n1. raw bytes 읽기.\n2. **빈 body**(``b\"\"``) → ``payload = {}``로 두고 Content-Type 검사·JSON\n   파싱 모두 건너뛰고 mutable 단계까지 흘려보낸다(단계 6에서 422로 처리).\n3. **JSON 파싱 실패**: Content-Type ≠ application/json → 415,\n   Content-Type 정상 → 422.\n4. **non-dict JSON**: Content-Type ≠ application/json → 415,\n   Content-Type 정상 → 422.\n5. **structural 가드(I4 우선)**: dict payload에 structural 키 존재 → 409\n   (Content-Type 무관, structural+text/plain도 409).\n6. ``len(payload) == 0`` (``{}`` 명시 송신 또는 빈 body) → 422 no-op\n   (Content-Type 검사 건너뜀; #1152 정렬 완료 — schema의\n   ``minProperties: 1``과 정합).\n7. **Content-Type 415 게이트**: ``application/json``(charset suffix 허용)\n   이외 → 415.\n8. **unknown 키 / mutable type**: structural 제외한 raw dict의 unknown\n   키 → 422. ``AccountUpdateRequest.model_validate`` ValidationError → 422.\n9. ``model_dump(exclude_none=True)`` 결과 비면 422 (예: ``{\"name\": null}``\n   단독 — effective payload empty no-op; #1152 정렬 완료).\n10. service 호출.",
         "operationId": "update_account_api_accounts__account_id__put",
         "parameters": [
           {
@@ -251,6 +251,26 @@
           },
           "400": {
             "description": "수정할 필드가 없거나 service-layer가 거부한 비구조 필드",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (master 권한 필요)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -393,7 +413,7 @@
           "accounts"
         ],
         "summary": "Suspend Account",
-        "description": "계좌 정지.",
+        "description": "계좌 정지. 인증된 master만 호출 가능 (#1352).\n\n``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱\n패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352\nCodex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로\n먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어\n``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,\n   non-master → 403.\n2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다\n   (기존 의미 보존).\n3. JSON 파싱 실패 → 422.\n4. JSON ``null`` (``payload is None``) → 빈 body와 동일하게 default\n   reason 경로로 흘려보낸다 (이전 ``Optional[Body(...)]`` 계약 호환,\n   #1352 Codex review 3차).\n5. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid\n   포함) → 422.\n6. service 호출.",
         "operationId": "suspend_account_api_accounts__account_id__suspend_post",
         "parameters": [
           {
@@ -406,23 +426,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/AccountSuspendRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -430,6 +433,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccountActionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Account already suspended",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -444,6 +487,23 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AccountSuspendRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -453,7 +513,7 @@
           "accounts"
         ],
         "summary": "Activate Account",
-        "description": "계좌 재활성화.",
+        "description": "계좌 재활성화. 인증된 master만 호출 가능 (#1352).",
         "operationId": "activate_account_api_accounts__account_id__activate_post",
         "parameters": [
           {
@@ -473,6 +533,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AccountActionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Account deleted",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3928,7 +4028,7 @@
           "bots"
         ],
         "summary": "Update Bot",
-        "description": "봇 설정 수정. 중지 상태에서만 허용.",
+        "description": "봇 설정 수정. 인증된 master만 호출 가능 (#1352). 중지 상태에서만 허용.\n\n``create_member`` / ``update_scopes``와 동일한 raw body 파싱 패턴을 적용해\n인증 가드가 body validation보다 우선 실행되도록 한다(#1352 — Codex Plan\nReview). FastAPI가 ``body: BotUpdateRequest``를 먼저 검증하면 unauth +\nbad-body 시 401이 아닌 422가 먼저 반환되어 contract가 깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,\n   non-master → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``BotUpdateRequest.model_validate`` — ValidationError → 422.\n4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).",
         "operationId": "update_bot_api_bots__bot_id__put",
         "parameters": [
           {
@@ -3941,16 +4041,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BotUpdateRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3958,6 +4048,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BotDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3983,7 +4093,7 @@
             }
           },
           "422": {
-            "description": "Budget update failed (e.g. insufficient funds)",
+            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, 미지정 필드) 또는 budget update 실패. 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1352).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3999,6 +4109,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotUpdateRequest"
               }
             }
           }
@@ -4664,7 +4784,7 @@
           "treasury"
         ],
         "summary": "Set Balance",
-        "description": "계좌 총 잔고 수동 설정.",
+        "description": "계좌 총 잔고 수동 설정. 인증된 master만 호출 가능 (#1352).\n\n``create_member`` / ``update_scopes`` / ``update_bot``과 동일한 raw body\n파싱 패턴을 적용해 인증 가드가 body validation보다 우선 실행되도록 한다\n(#1352 — Codex Plan Review). FastAPI가 ``body: BalanceSetRequest``를 먼저\n검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어 contract가\n깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,\n   non-master → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``BalanceSetRequest.model_validate`` — ValidationError → 422.\n4. ``treasury.set_account_balance`` 호출.",
         "operationId": "set_balance_api_treasury_balance_post",
         "requestBody": {
           "content": {
@@ -4687,8 +4807,18 @@
               }
             }
           },
-          "503": {
-            "description": "Treasury not available",
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (master 권한 필요)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4698,11 +4828,21 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, 미지정 필드, balance 음수/NaN/Inf). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1352).",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Treasury not available",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -5082,18 +5222,6 @@
         "title": "AccountResponse",
         "description": "계좌 응답. credentials는 보안상 포함하지 않는다."
       },
-      "AccountSuspendRequest": {
-        "properties": {
-          "reason": {
-            "type": "string",
-            "title": "Reason",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "AccountSuspendRequest",
-        "description": "계좌 정지 요청."
-      },
       "ApprovalDetailResponse": {
         "properties": {
           "approval": {
@@ -5334,21 +5462,6 @@
         "title": "AuditLogListResponse",
         "description": "감사 로그 목록 응답."
       },
-      "BalanceSetRequest": {
-        "properties": {
-          "balance": {
-            "type": "number",
-            "minimum": 0.0,
-            "title": "Balance"
-          }
-        },
-        "type": "object",
-        "required": [
-          "balance"
-        ],
-        "title": "BalanceSetRequest",
-        "description": "잔고 수동 설정 요청."
-      },
       "BalanceSetResponse": {
         "properties": {
           "total_balance": {
@@ -5585,115 +5698,6 @@
         ],
         "title": "BotListResponse",
         "description": "봇 목록 응답."
-      },
-      "BotUpdateRequest": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "strategy_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strategy Name"
-          },
-          "interval_seconds": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 3600.0,
-                "minimum": 10.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Interval Seconds"
-          },
-          "budget": {
-            "anyOf": [
-              {
-                "type": "number",
-                "exclusiveMinimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget"
-          },
-          "auto_restart": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Auto Restart"
-          },
-          "max_restart_attempts": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Restart Attempts"
-          },
-          "restart_cooldown_seconds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Restart Cooldown Seconds"
-          },
-          "step_timeout_seconds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Step Timeout Seconds"
-          },
-          "max_signals_per_step": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Signals Per Step"
-          }
-        },
-        "type": "object",
-        "title": "BotUpdateRequest",
-        "description": "봇 설정 수정 요청. None인 필드는 변경하지 않는다."
       },
       "BudgetChangeRequest": {
         "properties": {
@@ -8245,6 +8249,109 @@
               "type": "string"
             },
             "description": "변경할 권한 범위 목록."
+          }
+        }
+      },
+      "BotUpdateRequest": {
+        "type": "object",
+        "title": "BotUpdateRequest",
+        "description": "PUT /api/bots/{bot_id} 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1352). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. None/null인 필드는 변경하지 않는다.",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "사용자에게 표시되는 봇 이름."
+          },
+          "strategy_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "변경할 전략 이름. 최신 버전의 strategy_id로 자동 변환된다."
+          },
+          "interval_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "봇 step 주기 (초)."
+          },
+          "budget": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0,
+            "description": "예산 할당액 (원). 양수만 허용."
+          },
+          "auto_restart": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "봇 자동 재시작 여부."
+          },
+          "max_restart_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "재시작 최대 시도 횟수."
+          },
+          "restart_cooldown_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "재시작 쿨다운(초)."
+          },
+          "step_timeout_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "step 타임아웃(초)."
+          },
+          "max_signals_per_step": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "step당 최대 signal 수."
+          }
+        }
+      },
+      "BalanceSetRequest": {
+        "type": "object",
+        "title": "BalanceSetRequest",
+        "description": "POST /api/treasury/balance 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1352). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.",
+        "additionalProperties": false,
+        "required": [
+          "balance"
+        ],
+        "properties": {
+          "balance": {
+            "type": "number",
+            "minimum": 0,
+            "description": "수동 설정할 계좌 총 잔고 (음수 불가, NaN/Inf 불가)."
+          }
+        }
+      },
+      "AccountSuspendRequest": {
+        "type": "object",
+        "title": "AccountSuspendRequest",
+        "description": "POST /api/accounts/{account_id}/suspend 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1352). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. 빈 body도 허용되며 reason은 default 'dashboard'로 채워진다.",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "default": "",
+            "description": "정지 사유. 빈 문자열 또는 omit 시 server-side default 'dashboard'로 기록된다."
           }
         }
       }

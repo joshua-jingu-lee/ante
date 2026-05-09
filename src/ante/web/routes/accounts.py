@@ -14,6 +14,7 @@ from ante.web.deps import (
     get_audit_logger_optional,
     get_config,
     get_dynamic_config,
+    require_master_caller,
 )
 from ante.web.schemas import (
     AccountActionResponse,
@@ -397,6 +398,27 @@ async def get_account(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "계좌를 찾을 수 없음",
             "content": {
@@ -461,9 +483,16 @@ async def get_account(
 async def update_account(
     account_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)] = None,
 ) -> dict[str, Any]:
     """계좌 수정.
+
+    인증된 master 호출자만 사용할 수 있다(이슈 #1352 — oracle A7). dependency
+    ``require_master_caller``가 인증/권한 검증을 담당하며, 401/403은 raw body
+    파싱과 cold-path 가드(invariant I1/I4)보다 먼저 평가된다 — Bearer 또는
+    ``ante_session`` 쿠키 어느 쪽으로도 caller가 결정되지 않으면 401, master가
+    아니면 403.
 
     런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
     ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
@@ -636,7 +665,7 @@ async def update_account(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "dashboard"),
+            member_id=caller_id,
             action="account.update",
             resource=f"account:{account_id}",
             detail=f"계좌 수정: {list(fields.keys())}",
@@ -646,24 +675,181 @@ async def update_account(
     return {"account": _account_to_response(updated)}
 
 
-@router.post("/{account_id}/suspend", response_model=AccountActionResponse)
+_AUTH_REQUIRED_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Authentication required (missing or invalid Authorization header "
+        "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+        "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+        "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+    ),
+    "content": {
+        "application/problem+json": {
+            "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+        },
+    },
+}
+
+_PERMISSION_DENIED_RESPONSE: dict[str, Any] = {
+    "description": "Permission denied (master 권한 필요)",
+    "content": {
+        "application/problem+json": {
+            "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+        },
+    },
+}
+
+
+# POST /api/accounts/{account_id}/suspend OpenAPI request body 문서.
+#
+# ``suspend_account``는 ``create_member`` / ``update_scopes`` / ``update_bot`` /
+# ``set_balance``와 동일하게 raw body 파싱 패턴을 쓰며(인증 가드 우선, body
+# validation 후행 — 이슈 #1352 Codex review 2차) ``body: AccountSuspendRequest``
+# 인자가 라우트 시그니처에서 제거됐다. 그 결과 FastAPI 자동 components 등록
+# 경로를 거치지 않으므로 inline schema로 두면 frontend ``openapi-typescript``
+# 산출물에서 ``export type AccountSuspendRequest``가 사라진다.
+#
+# 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고 본체 schema는
+# ``_install_openapi_customizer``가 ``components.schemas``에 등록한다(#1351
+# ``ScopesUpdateRequest`` SSOT 패턴).
+ACCOUNT_SUSPEND_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "AccountSuspendRequest",
+    "description": (
+        "POST /api/accounts/{account_id}/suspend 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1352). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
+        "빈 body도 허용되며 reason은 default 'dashboard'로 채워진다."
+    ),
+    "additionalProperties": False,
+    "properties": {
+        "reason": {
+            "type": "string",
+            "default": "",
+            "description": (
+                "정지 사유. 빈 문자열 또는 omit 시 server-side default "
+                "'dashboard'로 기록된다."
+            ),
+        },
+    },
+}
+
+
+@router.post(
+    "/{account_id}/suspend",
+    response_model=AccountActionResponse,
+    responses={
+        401: _AUTH_REQUIRED_RESPONSE,
+        403: _PERMISSION_DENIED_RESPONSE,
+        404: {
+            "description": "Account not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Account already suspended",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        # 빈 body도 허용되므로(default reason 흘려보내기) requestBody-level
+        # ``required: False``. ``$ref`` 매핑은 frontend codegen이
+        # ``export type AccountSuspendRequest``를 export할 수 있도록 노출하며,
+        # 본체 schema는 ``_install_openapi_customizer``가
+        # ``components.schemas``에 등록한다(#1352 2차 Codex review FAIL).
+        #
+        # JSON ``null`` body(런타임은 빈 body와 동일하게 default reason으로
+        # 흘려보낸다, #1352 3차 Codex review FAIL)도 OpenAPI 계약에서
+        # 허용되어야 한다 — schema를 ``$ref`` 단일이 아닌 ``oneOf`` +
+        # ``{"type": "null"}`` 로 표현해 frontend codegen이
+        # ``AccountSuspendRequest | null`` 형태의 body 타입을 만들도록 한다
+        # (#1352 4차 Codex review P2). OpenAPI 3.1.0 (현재 ante 사용 버전)
+        # 에서 nullable은 ``nullable: true`` 가 아닌 ``oneOf``/``anyOf`` +
+        # ``{"type": "null"}`` 로 표현해야 한다.
+        "requestBody": {
+            "required": False,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/AccountSuspendRequest"},
+                            {"type": "null"},
+                        ],
+                    },
+                },
+            },
+        },
+    },
+)
 async def suspend_account(
     account_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-    body: AccountSuspendRequest | None = None,
 ) -> dict[str, Any]:
-    """계좌 정지."""
+    """계좌 정지. 인증된 master만 호출 가능 (#1352).
+
+    ``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱
+    패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352
+    Codex review 2차). FastAPI가 ``body: AccountSuspendRequest``를 typed로
+    먼저 검증하면 unauth + malformed body 시 401이 아닌 422가 먼저 반환되어
+    ``update_bot`` / ``set_balance``의 auth-first 계약과 어긋난다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
+       (기존 의미 보존).
+    3. JSON 파싱 실패 → 422.
+    4. JSON ``null`` (``payload is None``) → 빈 body와 동일하게 default
+       reason 경로로 흘려보낸다 (이전 ``Optional[Body(...)]`` 계약 호환,
+       #1352 Codex review 3차).
+    5. ``AccountSuspendRequest.model_validate`` ValidationError(extra forbid
+       포함) → 422.
+    6. service 호출.
+    """
     from ante.account.errors import AccountAlreadySuspendedError, AccountNotFoundError
 
+    # 1. raw body 읽기 + JSON 파싱 (인증은 dependency에서 이미 통과한 상태).
+    raw = await request.body()
+    if raw == b"":
+        # 빈 body는 기존 의미를 보존한다 — default reason.
+        body = None
+    else:
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(
+                status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+            ) from None
+        if payload is None:
+            # JSON ``null`` 은 nullable contract 시절 ``body is None`` 과
+            # 동일한 의미였다 — default reason 으로 흘려보낸다.
+            body = None
+        elif not isinstance(payload, dict):
+            raise HTTPException(
+                status_code=422, detail="요청 body는 JSON object여야 합니다."
+            )
+        else:
+            # 2. Pydantic 검증 — 인증 통과 후에만 실행된다.
+            try:
+                body = AccountSuspendRequest.model_validate(payload)
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=e.errors()) from None
+
     reason = (body.reason if body else None) or "dashboard"
-    suspended_by = getattr(request.state, "member_id", "dashboard")
 
     try:
-        await account_service.suspend(
-            account_id, reason=reason, suspended_by=suspended_by
-        )
+        await account_service.suspend(account_id, reason=reason, suspended_by=caller_id)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountAlreadySuspendedError as e:
@@ -673,7 +859,7 @@ async def suspend_account(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=suspended_by,
+            member_id=caller_id,
             action="account.suspend",
             resource=f"account:{account_id}",
             detail=f"계좌 정지: {reason}",
@@ -686,20 +872,42 @@ async def suspend_account(
     }
 
 
-@router.post("/{account_id}/activate", response_model=AccountActionResponse)
+@router.post(
+    "/{account_id}/activate",
+    response_model=AccountActionResponse,
+    responses={
+        401: _AUTH_REQUIRED_RESPONSE,
+        403: _PERMISSION_DENIED_RESPONSE,
+        404: {
+            "description": "Account not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        409: {
+            "description": "Account deleted",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+)
 async def activate_account(
     account_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 재활성화."""
+    """계좌 재활성화. 인증된 master만 호출 가능 (#1352)."""
     from ante.account.errors import AccountDeletedError, AccountNotFoundError
 
-    activated_by = getattr(request.state, "member_id", "dashboard")
-
     try:
-        await account_service.activate(account_id, activated_by=activated_by)
+        await account_service.activate(account_id, activated_by=caller_id)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except AccountDeletedError as e:
@@ -709,7 +917,7 @@ async def activate_account(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=activated_by,
+            member_id=caller_id,
             action="account.activate",
             resource=f"account:{account_id}",
             detail="계좌 활성화",
