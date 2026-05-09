@@ -261,6 +261,8 @@ _AUDIT_READ_PERMISSION_DENIED_DETAIL = (
     "이 작업은 human 멤버 또는 audit:read scope를 보유한 agent만 수행할 수 있습니다."
 )
 
+_MEMBER_INACTIVE_DETAIL = "멤버가 비활성 상태입니다."
+
 
 async def require_master_caller(
     request: Request,
@@ -365,6 +367,14 @@ async def require_audit_read(
     - ``"audit:read"`` ∈ caller_member.scopes → 통과 (agent의 정상 경로)
     - 그 외 (agent without scope) → ``HTTPException(403)``
 
+    배경 (Codex P2 #1359 fix loop 4차):
+        ``TokenAuthMiddleware``는 토큰 인증 시점에 비활성 멤버
+        (``status != ACTIVE``)를 거부하지만, ``ante_session`` 쿠키 fallback에서는
+        ``SessionService.validate``가 세션 만료만 검사하므로 suspended/revoked
+        상태로 전환된 멤버가 기존 세션을 그대로 사용해 통과할 수 있었다.
+        본 패치는 권한 분기 직전에 ``MemberStatus.ACTIVE`` 검사를 추가해 두
+        인증 경로 모두에서 비활성 멤버를 차단한다.
+
     인증 절차는 ``require_master_caller``와 동일하다 (Bearer 우선,
     ``session_service`` 가용 시 ``ante_session`` 쿠키 fallback,
     ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403으로 흡수).
@@ -374,9 +384,10 @@ async def require_audit_read(
 
     Raises:
         HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 audit 도메인 read 권한 없음.
+        HTTPException(403): 인증은 통과했으나 audit 도메인 read 권한 없음
+            또는 멤버 비활성 상태.
     """
-    from ante.member.models import MemberRole, MemberType
+    from ante.member.models import MemberRole, MemberStatus, MemberType
 
     caller = getattr(request.state, "member_id", "") or ""
 
@@ -414,6 +425,16 @@ async def require_audit_read(
         raise HTTPException(
             status_code=403, detail=_AUDIT_READ_PERMISSION_DENIED_DETAIL
         )
+
+    # 비활성 멤버 차단 (Codex P2 #1359 fix loop 4차).
+    # ``TokenAuthMiddleware``는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
+    # fallback에서는 ``SessionService.validate``가 만료만 보므로, suspended/
+    # revoked 상태로 전환된 멤버가 통과할 수 있다. 권한 분기 직전에 명시적으로
+    # 차단해 두 경로 모두에서 일관된 invariant를 유지한다.
+    status = getattr(member, "status", None)
+    status_value = getattr(status, "value", status)
+    if status_value != MemberStatus.ACTIVE.value:
+        raise HTTPException(status_code=403, detail=_MEMBER_INACTIVE_DETAIL)
 
     role = getattr(member, "role", None)
     role_value = getattr(role, "value", role)

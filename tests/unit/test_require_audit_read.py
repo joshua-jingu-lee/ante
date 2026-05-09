@@ -27,7 +27,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from ante.member.models import MemberRole, MemberType
+from ante.member.models import MemberRole, MemberStatus, MemberType
 from ante.web.deps import require_audit_read
 
 
@@ -37,6 +37,7 @@ class _StubMember:
     role: str
     type: str = MemberType.AGENT.value
     scopes: list[str] = field(default_factory=list)
+    status: str = MemberStatus.ACTIVE.value
 
 
 class _StubMemberService:
@@ -50,12 +51,14 @@ class _StubMemberService:
         role: str = "default",
         member_type: str = MemberType.AGENT.value,
         scopes: list[str] | None = None,
+        status: str = MemberStatus.ACTIVE.value,
     ) -> None:
         self._members[member_id] = _StubMember(
             member_id=member_id,
             role=role,
             type=member_type,
             scopes=list(scopes) if scopes else [],
+            status=status,
         )
 
     async def get(self, member_id: str) -> _StubMember | None:
@@ -383,6 +386,93 @@ async def test_raises_403_when_caller_id_unknown_to_member_service() -> None:
     """
     svc = _StubMemberService()
     request = _make_request(state_member_id="ghost-id")
+
+    with pytest.raises(HTTPException) as exc:
+        await require_audit_read(request, svc, None)
+
+    assert exc.value.status_code == 403
+
+
+# ── 403: 비활성 멤버 차단 (Codex P2 #1359 fix loop 4차) ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_raises_403_when_master_suspended() -> None:
+    """master role이지만 ``status == SUSPENDED`` → 403.
+
+    ``TokenAuthMiddleware``는 토큰 경로에서 비활성 멤버를 거부하지만
+    ``ante_session`` 쿠키 fallback은 ``SessionService.validate``가 만료만
+    검사하므로, 권한 분기 직전에 명시적으로 차단해야 한다.
+    """
+    svc = _StubMemberService()
+    svc.add(
+        "master-suspended",
+        role=MemberRole.MASTER.value,
+        member_type=MemberType.HUMAN.value,
+        status=MemberStatus.SUSPENDED.value,
+    )
+    request = _make_request(state_member_id="master-suspended")
+
+    with pytest.raises(HTTPException) as exc:
+        await require_audit_read(request, svc, None)
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_raises_403_when_master_revoked() -> None:
+    """master role이지만 ``status == REVOKED`` → 403."""
+    svc = _StubMemberService()
+    svc.add(
+        "master-revoked",
+        role=MemberRole.MASTER.value,
+        member_type=MemberType.HUMAN.value,
+        status=MemberStatus.REVOKED.value,
+    )
+    request = _make_request(state_member_id="master-revoked")
+
+    with pytest.raises(HTTPException) as exc:
+        await require_audit_read(request, svc, None)
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_raises_403_when_human_admin_suspended() -> None:
+    """human admin (type bypass 대상)이라도 ``status == SUSPENDED`` → 403.
+
+    type bypass가 status 검사보다 우선해서는 안 된다.
+    """
+    svc = _StubMemberService()
+    svc.add(
+        "human-admin-suspended",
+        role=MemberRole.ADMIN.value,
+        member_type=MemberType.HUMAN.value,
+        status=MemberStatus.SUSPENDED.value,
+    )
+    request = _make_request(state_member_id="human-admin-suspended")
+
+    with pytest.raises(HTTPException) as exc:
+        await require_audit_read(request, svc, None)
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_raises_403_when_agent_with_audit_read_scope_suspended() -> None:
+    """agent + ``audit:read`` scope 보유라도 ``status == SUSPENDED`` → 403.
+
+    scope 보유가 status 검사보다 우선해서는 안 된다.
+    """
+    svc = _StubMemberService()
+    svc.add(
+        "monitor-agent-suspended",
+        role=MemberRole.DEFAULT.value,
+        member_type=MemberType.AGENT.value,
+        scopes=["audit:read"],
+        status=MemberStatus.SUSPENDED.value,
+    )
+    request = _make_request(state_member_id="monitor-agent-suspended")
 
     with pytest.raises(HTTPException) as exc:
         await require_audit_read(request, svc, None)
