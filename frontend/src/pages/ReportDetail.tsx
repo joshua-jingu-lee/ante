@@ -40,9 +40,15 @@ function formatPct(value: number | null | undefined, sign = false): string {
 // win_rate 같은 ratio 값(0~1)을 사람이 읽는 percent 문자열로 변환한다.
 // SSOT: docs/specs/report-store/report-store.md (`"win_rate": 0.58`).
 // total_return_pct/max_drawdown_pct는 이미 percent 단위라 formatPct 직접 사용.
+//
+// Legacy 호환: 새 schema는 win_rate를 ratio(0~1)로 정규화하지만, 과거 DB record
+// 또는 새 검증을 우회한 submit 경로에서 percent 값(예: 62.2)이 남아 있을 수 있다.
+// value <= 1.0이면 ratio로 보고 *100, 그 외(>1.0)는 이미 percent 단위로 간주해
+// 그대로 표시한다. 경계값 win_rate=1.0은 ratio(100% 승률)로 해석한다.
 function formatRatioAsPct(value: number | null | undefined): string {
   if (value == null) return '-'
-  return formatPct(value * 100)
+  const pct = value <= 1.0 ? value * 100 : value
+  return formatPct(pct)
 }
 
 /* ── 리포트 정보 카드 ── */
