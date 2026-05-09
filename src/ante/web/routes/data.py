@@ -38,7 +38,7 @@ async def list_datasets(
         None, description="데이터 유형 (ohlcv, fundamental, 미지정 시 전체)"
     ),
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=10000),
 ) -> dict:
     """보유 데이터셋 목록 (페이지네이션 지원).
 

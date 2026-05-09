@@ -150,12 +150,29 @@ def _make_data_app() -> TestClient:
 
 
 class TestDataLimitValidation:
+    """`/api/data/datasets`는 dashboard caller (BacktestData.tsx)가
+    `limit=10000`으로 호출하므로 ceiling을 10000으로 둔다.
+
+    다른 list endpoints는 `le=100` 유지.
+    """
+
     def test_negative_limit_returns_422(self) -> None:
         resp = _make_data_app().get("/api/data/datasets?limit=-1")
         assert resp.status_code == 422
 
-    def test_above_max_returns_422(self) -> None:
+    def test_limit_999_returns_200(self) -> None:
+        """`le=10000` 적용 후 999는 통과 (기존 le=100 시에는 422였음)."""
         resp = _make_data_app().get("/api/data/datasets?limit=999")
+        assert resp.status_code == 200
+
+    def test_limit_at_max_returns_200(self) -> None:
+        """ceiling 값(10000)은 inclusive로 허용."""
+        resp = _make_data_app().get("/api/data/datasets?limit=10000")
+        assert resp.status_code == 200
+
+    def test_above_max_returns_422(self) -> None:
+        """ceiling 초과(10001)는 422."""
+        resp = _make_data_app().get("/api/data/datasets?limit=10001")
         assert resp.status_code == 422
 
     def test_negative_offset_returns_422(self) -> None:
