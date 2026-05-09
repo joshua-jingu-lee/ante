@@ -1,9 +1,9 @@
 """``GET /api/audit`` 인증 가드 테스트 (issue #1359).
 
 oracle A7 시그니처에서 발견된 ``list_audit_logs`` 라우트는 인증 없이도
-감사 로그 목록을 200으로 반환하고 있었다. 본 PR은 #1352에서 도입된
-``require_master_caller`` dependency를 ``GET /api/audit`` 에 적용해
-인증되지 않은 호출자가 감사 로그를 읽지 못하도록 막는다.
+감사 로그 목록을 200으로 반환하고 있었다. 본 PR은 ``GET /api/audit``에
+``require_audit_read`` dependency (master role OR ``audit:read`` scope)를
+적용해 인증되지 않은/권한 없는 호출자가 감사 로그를 읽지 못하도록 막는다.
 
 각 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -12,7 +12,10 @@ oracle A7 시그니처에서 발견된 ``list_audit_logs`` 라우트는 인증 �
 - ``session_service`` is None 배포 + Bearer 없음 → 401 (cookie fallback skip)
 - 정상 Bearer master → 200
 - 정상 ante_session master → 200
-- 인증된 non-master Bearer → 403
+- 인증된 non-master + ``audit:read`` scope 없음 → 403
+- 인증된 non-master + ``audit:read`` scope 보유 → 200
+  (Codex P2 #1359 fix loop 2차: spec
+   ``docs/specs/member/02-design-decisions.md:188-229`` 모니터링 agent 시나리오)
 
 401/403 응답 시 ``AuditLogger.query`` 는 호출되지 않아야 한다 (early return).
 
@@ -65,8 +68,14 @@ class FakeMemberService:
         token: str = "",
         role: str = "default",
         member_type: str = "agent",
+        scopes: list[str] | None = None,
     ) -> FakeMember:
-        member = FakeMember(member_id=member_id, role=role, type=member_type)
+        member = FakeMember(
+            member_id=member_id,
+            role=role,
+            type=member_type,
+            scopes=list(scopes) if scopes else [],
+        )
         self._members[member_id] = member
         if token:
             self._tokens[token] = member_id
@@ -132,6 +141,14 @@ def member_service() -> FakeMemberService:
     svc = FakeMemberService()
     svc.add_member("master-user", token="master-token", role="master")
     svc.add_member("agent-01", token="agent-token", role="default")
+    # 모니터링 agent: default role + audit:read scope만 보유
+    # (spec docs/specs/member/02-design-decisions.md:188-229).
+    svc.add_member(
+        "audit-reader",
+        token="audit-reader-token",
+        role="default",
+        scopes=["bot:read", "trade:read", "audit:read"],
+    )
     return svc
 
 
@@ -317,7 +334,7 @@ class TestSessionCookieMasterSuccess:
 
 
 class TestNonMaster403:
-    """인증된 non-master → 403, audit query 미호출."""
+    """인증된 non-master + ``audit:read`` scope 없음 → 403, audit query 미호출."""
 
     def test_non_master_bearer_returns_403(
         self, client: TestClient, audit_logger: AsyncMock
@@ -333,6 +350,36 @@ class TestNonMaster403:
             "403 차단 시 audit_logger.query가 호출되어선 안 된다"
         )
         assert audit_logger.count.await_count == 0
+
+
+# ── 200: audit:read scope 보유 non-master (Codex P2 #1359 fix loop 2차) ──
+
+
+class TestAuditReadScopeSuccess:
+    """non-master + ``audit:read`` scope → 200.
+
+    spec ``docs/specs/member/02-design-decisions.md:188-229`` 의 모니터링 agent
+    시나리오: default role이지만 ``audit:read`` scope를 가진 agent는 감사 로그
+    조회가 가능해야 한다. 1차 패치는 ``require_master_caller``로 모두 차단했으나,
+    2차 패치(``require_audit_read``)는 master OR ``audit:read`` ∈ scopes를 허용한다.
+    """
+
+    def test_non_master_with_audit_read_scope_succeeds(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        resp = client.get(
+            "/api/audit?limit=1",
+            headers={"Authorization": "Bearer audit-reader-token"},
+        )
+        assert resp.status_code == 200, (
+            f"audit:read scope 보유 default agent가 200이 아님 "
+            f"({resp.status_code}: {resp.text})"
+        )
+        body = resp.json()
+        assert "logs" in body
+        assert "total" in body
+        assert audit_logger.query.await_count == 1
+        assert audit_logger.count.await_count == 1
 
 
 # ── audit_logger 미주입 + 인증 dependency 순서 회귀 (Codex P2 #1359) ───

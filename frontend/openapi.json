@@ -1154,7 +1154,7 @@
           "audit"
         ],
         "summary": "List Audit Logs",
-        "description": "감사 로그 조회.\n\n인증/권한:\n    oracle A7 시그니처(#1359)에서 본 라우트는 인증 없이 감사 로그 목록을\n    반환하고 있었다. 감사 로그는 운영 행위 추적 정보(member_id, action,\n    resource, IP 등)를 담으므로 ``require_master_caller`` (#1352에서 도입)\n    를 적용해 master 권한자만 조회 가능하도록 막는다. 인증 누락은 401,\n    non-master는 403. ``audit:read`` scope strict 모델은 ``Member.scopes``\n    가 자유 문자열이라 별도 정의가 필요하므로 본 PR scope 외 follow-up.\n\nNOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.\n이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서\npagination contract 일관성을 위해 클램프를 제거하고 Query\nvalidation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가\n이 범위를 강제하면 별도 endpoint로 분리한다.",
+        "description": "감사 로그 조회.\n\n인증/권한:\n    oracle A7 시그니처(#1359)에서 본 라우트는 인증 없이 감사 로그 목록을\n    반환하고 있었다. 감사 로그는 운영 행위 추적 정보(member_id, action,\n    resource, IP 등)를 담으므로 인증 가드를 적용한다. 인증 누락은 401,\n    권한 없음은 403.\n\n    Codex P2 (#1359 fix loop, 2차): 초기 패치는 ``require_master_caller``\n    를 그대로 적용해 ``master`` role만 허용했으나,\n    ``docs/specs/member/02-design-decisions.md:188-229`` 의 모니터링 agent\n    (``audit:read`` scope만 가진 default role)가 차단되는 문제가 있었다.\n    spec은 audit 도메인 read 권한을 ``master`` role 또는 ``audit:read``\n    scope 중 하나로 정의하므로, ``require_audit_read`` (master OR\n    ``audit:read`` ∈ Member.scopes)로 교체해 spec과 일치시켰다.\n\nCodex P2 (#1359 fix loop): FastAPI는 핸들러 매개변수 선언 순서대로\ndependency를 해결한다. ``audit_logger`` (필수 service, 미주입 시 503)를\n``require_audit_read`` 보다 먼저 두면, 인증 정보가 없는 호출자에게\n503이 먼저 반환되어 \"인증 누락은 401\" 계약이 깨진다. 그러므로 인증\n가드(``caller_id``)를 항상 먼저 선언해 401/403이 503보다 우선하도록 한다.\n\nNOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.\n이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서\npagination contract 일관성을 위해 클램프를 제거하고 Query\nvalidation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가\n이 범위를 강제하면 별도 endpoint로 분리한다.",
         "operationId": "list_audit_logs_api_audit_get",
         "parameters": [
           {
@@ -1267,7 +1267,7 @@
             }
           },
           "403": {
-            "description": "Master permission required",
+            "description": "Master role or audit:read scope required",
             "content": {
               "application/problem+json": {
                 "schema": {
