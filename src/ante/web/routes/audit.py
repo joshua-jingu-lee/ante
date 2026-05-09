@@ -43,8 +43,8 @@ router = APIRouter()
     },
 )
 async def list_audit_logs(
-    audit_logger: Annotated[Any, Depends(get_audit_logger)],
     caller_id: Annotated[str, Depends(require_master_caller)],
+    audit_logger: Annotated[Any, Depends(get_audit_logger)],
     member_id: str | None = None,
     action: str | None = None,
     from_date: str | None = None,
@@ -61,6 +61,12 @@ async def list_audit_logs(
         를 적용해 master 권한자만 조회 가능하도록 막는다. 인증 누락은 401,
         non-master는 403. ``audit:read`` scope strict 모델은 ``Member.scopes``
         가 자유 문자열이라 별도 정의가 필요하므로 본 PR scope 외 follow-up.
+
+    Codex P2 (#1359 fix loop): FastAPI는 핸들러 매개변수 선언 순서대로
+    dependency를 해결한다. ``audit_logger`` (필수 service, 미주입 시 503)를
+    ``require_master_caller`` 보다 먼저 두면, 인증 정보가 없는 호출자에게
+    503이 먼저 반환되어 "인증 누락은 401" 계약이 깨진다. 그러므로 인증
+    가드(``caller_id``)를 항상 먼저 선언해 401/403이 503보다 우선하도록 한다.
 
     NOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.
     이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서

@@ -175,6 +175,25 @@ def client_no_session_service(
     return TestClient(app)
 
 
+@pytest.fixture
+def client_no_audit_logger(
+    member_service: FakeMemberService,
+    session_service: FakeSessionService,
+) -> TestClient:
+    """``audit_logger is None`` 배포 분기 시뮬레이션 (Codex P2 #1359 fix loop).
+
+    ``get_audit_logger`` dependency가 503을 반환하는 환경에서 dependency
+    선언 순서가 잘못되면 인증 누락(401) 보다 503이 먼저 반환된다. 본 fixture는
+    그 분기를 재현해 시그니처 순서가 바뀌지 않았는지 회귀로 막는다.
+    """
+    app = create_app(
+        member_service=member_service,
+        session_service=session_service,
+        # audit_logger를 의도적으로 주입하지 않음 → get_audit_logger가 503
+    )
+    return TestClient(app)
+
+
 # ── 401: 인증 자체가 없는 케이스 ──────────────────────────────────────
 
 
@@ -314,6 +333,43 @@ class TestNonMaster403:
             "403 차단 시 audit_logger.query가 호출되어선 안 된다"
         )
         assert audit_logger.count.await_count == 0
+
+
+# ── audit_logger 미주입 + 인증 dependency 순서 회귀 (Codex P2 #1359) ───
+
+
+class TestAuditLoggerMissingDependencyOrder:
+    """``audit_logger`` 미주입 환경에서 dependency 선언 순서 회귀.
+
+    FastAPI는 핸들러 매개변수 순서대로 dependency를 해결하므로,
+    ``audit_logger`` (필수 service, 미주입 시 503)를 ``require_master_caller``
+    보다 먼저 두면 인증 누락 호출에 503이 먼저 반환되어 "인증 누락은 401"
+    계약을 깨뜨린다. 본 테스트는 그 회귀를 막는다.
+    """
+
+    def test_unauth_returns_401_even_when_audit_logger_missing(
+        self, client_no_audit_logger: TestClient
+    ) -> None:
+        """audit_logger 미주입 + 인증 누락 → 503이 아니라 401."""
+        resp = client_no_audit_logger.get("/api/audit?limit=1")
+        assert resp.status_code == 401, (
+            f"audit_logger 미주입 + 인증 누락은 401이어야 함 "
+            f"(503 우선이면 dependency 순서 회귀): "
+            f"{resp.status_code}: {resp.text}"
+        )
+
+    def test_master_returns_503_when_audit_logger_missing(
+        self, client_no_audit_logger: TestClient
+    ) -> None:
+        """audit_logger 미주입 + master Bearer → 503 (인증 통과 후 503)."""
+        resp = client_no_audit_logger.get(
+            "/api/audit?limit=1",
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 503, (
+            f"인증 통과 후 audit_logger 미주입은 503이어야 함: "
+            f"{resp.status_code}: {resp.text}"
+        )
 
 
 # ── OpenAPI 응답 401/403 회귀 ──────────────────────────────────────────
