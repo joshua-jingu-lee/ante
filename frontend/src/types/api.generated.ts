@@ -1654,6 +1654,12 @@ export type components = {
             total: number;
         };
         /**
+         * ApprovalStatus
+         * @description 결재 상태.
+         * @enum {string}
+         */
+        ApprovalStatus: "pending" | "approved" | "execution_failed" | "rejected" | "on_hold" | "expired" | "cancelled";
+        /**
          * ApprovalStatusUpdate
          * @description 승인/거부 요청.
          */
@@ -3334,6 +3340,7 @@ export type AccountSuspendRequest = components['schemas']['AccountSuspendRequest
 export type ApprovalDetailResponse = components['schemas']['ApprovalDetailResponse'];
 export type ApprovalItem = components['schemas']['ApprovalItem'];
 export type ApprovalListResponse = components['schemas']['ApprovalListResponse'];
+export type ApprovalStatus = components['schemas']['ApprovalStatus'];
 export type ApprovalStatusUpdate = components['schemas']['ApprovalStatusUpdate'];
 export type ApprovalUpdateResponse = components['schemas']['ApprovalUpdateResponse'];
 export type AuditLogItem = components['schemas']['AuditLogItem'];
@@ -3917,7 +3924,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 search?: string | null;
-                status?: string | null;
+                status?: components["schemas"]["ApprovalStatus"] | null;
                 type?: string | null;
             };
             header?: never;

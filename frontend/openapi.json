@@ -903,7 +903,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ApprovalStatus"
                 },
                 {
                   "type": "null"
@@ -5387,6 +5387,20 @@
         ],
         "title": "ApprovalListResponse",
         "description": "결재 목록 응답."
+      },
+      "ApprovalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "execution_failed",
+          "rejected",
+          "on_hold",
+          "expired",
+          "cancelled"
+        ],
+        "title": "ApprovalStatus",
+        "description": "결재 상태."
       },
       "ApprovalStatusUpdate": {
         "properties": {
