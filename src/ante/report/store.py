@@ -251,7 +251,7 @@ class ReportStore:
                 "total_trades": 42,
                 "sharpe_ratio": 1.2,
                 "max_drawdown_pct": -8.5,
-                "win_rate": 0.58,
+                "win_rate": 58.0,
                 "summary": "20일 이동평균 돌파 매매 전략",
                 "rationale": "모멘텀 효과를 활용한 추세 추종",
                 "risks": "횡보장에서 잦은 손절 발생 가능",
