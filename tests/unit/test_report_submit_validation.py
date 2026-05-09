@@ -1,15 +1,18 @@
 """POST /api/reports 입력 검증 테스트 (#1353).
 
 SSOT:
-- ``docs/specs/report-store/report-store.md:130`` — ``"win_rate": 0.58`` (ratio 0~1).
+- ``docs/specs/report-store/report-store.md`` — ``"win_rate": 58.0`` (percent 0~100).
 - ``src/ante/web/schemas.py::ReportSubmitRequest``.
 
 검증 대상:
 - ``total_trades >= 0`` (음수 거부).
-- ``win_rate`` ratio 단위 0~1 (out-of-range 거부, ``None`` 허용).
+- ``win_rate`` percent 단위 0.0~100.0 (out-of-range 거부, ``None`` 허용).
 - 4개 metric (``total_return_pct``, ``sharpe_ratio``, ``max_drawdown_pct``,
   ``win_rate``)은 finite (NaN/Inf 거부).
 - ``extra="forbid"``로 미지정 키 거부.
+
+Note: 단위 통일(percent ↔ ratio)은 본 PR에서 다루지 않고 별도 follow-up
+이슈에서 처리한다 (detail_json/backtest_runs/CLI submit 등 광범위 영향).
 """
 
 from __future__ import annotations
@@ -91,17 +94,17 @@ class TestTotalTradesValidation:
 
 
 class TestWinRateValidation:
-    @pytest.mark.parametrize("value", [1.5, -0.1])
-    def test_out_of_ratio_range_rejected(
+    @pytest.mark.parametrize("value", [150.0, -0.1])
+    def test_out_of_percent_range_rejected(
         self, client: TestClient, value: float
     ) -> None:
-        """ratio 단위 (0~1) 범위 밖 값 거부."""
+        """percent 단위 (0.0~100.0) 범위 밖 값 거부."""
         res = client.post("/api/reports", json=_base_payload(win_rate=value))
         assert res.status_code == 422
 
-    @pytest.mark.parametrize("value", [0.0, 0.5, 0.58, 1.0])
+    @pytest.mark.parametrize("value", [0.0, 1.5, 50.0, 100.0])
     def test_in_range_accepted(self, client: TestClient, value: float) -> None:
-        """ratio 단위 (0~1) 범위 내 값은 정상 처리."""
+        """percent 단위 (0.0~100.0) 범위 내 값은 정상 처리."""
         res = client.post("/api/reports", json=_base_payload(win_rate=value))
         assert res.status_code == 201
 

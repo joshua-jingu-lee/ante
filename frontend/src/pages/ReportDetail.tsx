@@ -37,22 +37,6 @@ function formatPct(value: number | null | undefined, sign = false): string {
   return `${prefix}${value.toFixed(1)}%`
 }
 
-// win_rate 같은 ratio 값(0~1)을 사람이 읽는 percent 문자열로 변환한다.
-// SSOT: docs/specs/report-store/report-store.md (`"win_rate": 0.58`).
-// total_return_pct/max_drawdown_pct는 이미 percent 단위라 formatPct 직접 사용.
-//
-// 본 코드는 win_rate를 항상 ratio(0~1)로 가정한다. legacy heuristic
-// (`value <= 1.0 ? value*100 : value`)은 0.5(legacy 0.5%)와 0.5(new ratio 50%)를
-// 구분할 수 없어 본질적으로 ambiguous하므로 제거되었다. 과거 DB record에
-// 남아 있던 percent 단위 win_rate 값(예: 62.2)은 v005 마이그레이션
-// (src/ante/db/versions/v005_report_win_rate_ratio.py)이 historical percent를
-// ratio로 정규화(`win_rate > 1.0` → `win_rate / 100.0`)하므로 frontend는
-// 별도 보정 없이 단순 `value * 100` 환산으로 percent 문자열을 만든다.
-function formatRatioAsPct(value: number | null | undefined): string {
-  if (value == null) return '-'
-  return formatPct(value * 100)
-}
-
 /* ── 리포트 정보 카드 ── */
 function ReportInfoCard({ report }: { report: ReportDetailType }) {
   const status = STATUS_BADGE[report.status] || { label: report.status, variant: 'muted' }
@@ -142,7 +126,7 @@ function PerformanceCard({ report }: { report: ReportDetailType }) {
         }
       />
       <InfoRow label="총 거래 수" value={`${report.total_trades}회`} />
-      <InfoRow label="승률" value={formatRatioAsPct(report.win_rate)} />
+      <InfoRow label="승률" value={formatPct(report.win_rate)} />
       <InfoRow label="수익 팩터" value={report.metrics?.profit_factor?.toFixed(2) ?? '-'} />
       <InfoRow label="샤프 비율" value={report.sharpe_ratio?.toFixed(2) ?? '-'} />
       <InfoRow

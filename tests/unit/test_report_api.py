@@ -60,7 +60,7 @@ async def sample_report(report_store):
         total_trades=127,
         sharpe_ratio=1.72,
         max_drawdown_pct=-6.8,
-        win_rate=0.622,  # ratio (62.2%) — SSOT: docs/specs/report-store/report-store.md
+        win_rate=62.2,
         summary="모멘텀 돌파 전략 요약",
         rationale="거래량 필터 추가",
         risks="변동성 구간 MDD 증가",
@@ -74,7 +74,7 @@ async def sample_report(report_store):
                 "metrics": {
                     "sharpe_ratio": 1.72,
                     "max_drawdown": -6.8,
-                    "win_rate": 0.622,  # ratio — SSOT spec
+                    "win_rate": 62.2,
                     "profit_factor": 1.85,
                 },
                 "initial_balance": 10000000,

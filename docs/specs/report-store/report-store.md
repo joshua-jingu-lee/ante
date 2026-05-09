@@ -45,7 +45,7 @@ AI Agent가 전략 백테스트 후 리포트를 제출하면 시스템에 축�
 | total_trades | int | 총 거래 수 |
 | sharpe_ratio | float \| None | 샤프 비율 |
 | max_drawdown_pct | float \| None | 최대 낙폭 (%) |
-| win_rate | float \| None | 승률 |
+| win_rate | float \| None | 승률 (0.0~100.0 percent) |
 | summary | str | 전략 요약 |
 | rationale | str | 전략 근거 |
 | risks | str | 리스크 분석 |
@@ -127,7 +127,7 @@ AI Agent가 전략 백테스트 후 리포트를 제출하면 시스템에 축�
     "total_trades": 42,
     "sharpe_ratio": 1.2,
     "max_drawdown_pct": -8.5,
-    "win_rate": 0.58,
+    "win_rate": 58.0,
     "summary": "20일 이동평균 돌파 매매 전략",
     "rationale": "모멘텀 효과를 활용한 추세 추종",
     "risks": "횡보장에서 잦은 손절 발생 가능"

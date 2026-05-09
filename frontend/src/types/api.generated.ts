@@ -2651,16 +2651,20 @@ export type components = {
          * @description 리포트 제출 요청.
          *
          *     SSOT: ``docs/specs/report-store/report-store.md`` 리포트 제출 스키마.
-         *     ``win_rate``는 ratio 단위 (0~1, ``"win_rate": 0.58`` 예시)다.
+         *     ``win_rate``는 percent 단위 (0.0~100.0, ``"win_rate": 58.0`` 예시)다.
          *
          *     invariants (#1353):
          *     - ``total_trades >= 0`` (거래 수는 음수 불가).
-         *     - ``win_rate``는 ``[0, 1]`` ratio 단위 또는 ``None``.
+         *     - ``win_rate``는 ``[0.0, 100.0]`` percent 단위 또는 ``None``.
          *     - ``total_return_pct``/``sharpe_ratio``/``max_drawdown_pct``/``win_rate``는
          *       finite. NaN/Inf는 후속 분석/표시에서 버그 또는 잘못된 결정으로 이어지므로
          *       submit 단에서 422로 거부한다.
          *     - 미지정 키는 ``extra='forbid'``로 거부 — agent의 오타/잘못된 키가 store에
          *       유실되는 대신 빠르게 fail하도록 한다.
+         *
+         *     Note: 단위 통일(percent ↔ ratio)은 detail_json·backtest_runs·CLI submit 등
+         *     시스템 전반의 영향이 커서 본 PR에서는 input validation에만 집중하고,
+         *     ratio 통일은 별도 follow-up 이슈에서 다룬다.
          */
         ReportSubmitRequest: {
             /**
