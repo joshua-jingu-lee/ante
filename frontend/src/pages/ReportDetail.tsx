@@ -41,14 +41,14 @@ function formatPct(value: number | null | undefined, sign = false): string {
 // SSOT: docs/specs/report-store/report-store.md (`"win_rate": 0.58`).
 // total_return_pct/max_drawdown_pct는 이미 percent 단위라 formatPct 직접 사용.
 //
-// Legacy 호환: 새 schema는 win_rate를 ratio(0~1)로 정규화하지만, 과거 DB record
-// 또는 새 검증을 우회한 submit 경로에서 percent 값(예: 62.2)이 남아 있을 수 있다.
-// value <= 1.0이면 ratio로 보고 *100, 그 외(>1.0)는 이미 percent 단위로 간주해
-// 그대로 표시한다. 경계값 win_rate=1.0은 ratio(100% 승률)로 해석한다.
+// 본 코드는 win_rate를 항상 ratio(0~1)로 가정한다. legacy heuristic
+// (`value <= 1.0 ? value*100 : value`)은 0.5(legacy 0.5%)와 0.5(new ratio 50%)를
+// 구분할 수 없어 본질적으로 ambiguous하므로 제거되었다. 과거 DB record에
+// 남아 있을 수 있는 percent 단위 win_rate 값(예: 62.2)의 마이그레이션은
+// 별도 follow-up 이슈에서 처리한다.
 function formatRatioAsPct(value: number | null | undefined): string {
   if (value == null) return '-'
-  const pct = value <= 1.0 ? value * 100 : value
-  return formatPct(pct)
+  return formatPct(value * 100)
 }
 
 /* ── 리포트 정보 카드 ── */
