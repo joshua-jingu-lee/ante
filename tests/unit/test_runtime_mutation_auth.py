@@ -73,8 +73,16 @@ class FakeMemberService:
         token: str = "",
         role: str = "default",
         member_type: str = "agent",
+        scopes: list[str] | None = None,
+        status: str = "active",
     ) -> FakeMember:
-        member = FakeMember(member_id=member_id, role=role, type=member_type)
+        member = FakeMember(
+            member_id=member_id,
+            role=role,
+            type=member_type,
+            scopes=list(scopes) if scopes else [],
+            status=status,
+        )
         self._members[member_id] = member
         if token:
             self._tokens[token] = member_id
@@ -353,14 +361,92 @@ class FakeTreasury:
         return list(self._budgets.values())
 
 
+class FakeDynamicConfig:
+    """``config_service.exists / get / set / get_all`` stub (#1373).
+
+    ``test_system_config_api.FakeDynamicConfig`` 패턴을 답습. 401/403 차단 시
+    ``set`` 이 호출되지 않음을 ``set_calls`` mock spy 로 검증한다.
+    """
+
+    def __init__(self) -> None:
+        self.set_calls: list[dict] = []
+        self._configs: dict[str, dict] = {
+            "system.log_level": {"value": "INFO", "category": "system"},
+            "risk.max_mdd": {"value": 0.1, "category": "risk"},
+        }
+
+    async def exists(self, key: str) -> bool:
+        return key in self._configs
+
+    async def get(self, key: str, default: object = None) -> object:
+        if key in self._configs:
+            return self._configs[key]["value"]
+        return default
+
+    async def get_all(self) -> list[dict]:
+        return [
+            {
+                "key": key,
+                "value": item["value"],
+                "category": item["category"],
+                "updated_at": "2026-05-10T00:00:00",
+            }
+            for key, item in self._configs.items()
+        ]
+
+    async def set(
+        self,
+        key: str,
+        value: object,
+        category: str = "",
+        changed_by: str = "",
+    ) -> None:
+        self.set_calls.append(
+            {
+                "key": key,
+                "value": value,
+                "category": category,
+                "changed_by": changed_by,
+            }
+        )
+        self._configs[key] = {"value": value, "category": category}
+
+
 # ── fixtures ────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def member_service() -> FakeMemberService:
     svc = FakeMemberService()
-    svc.add_member("master-user", token="master-token", role="master")
+    # master(human, role=master) — 모든 mutation 통과.
+    svc.add_member(
+        "master-user", token="master-token", role="master", member_type="human"
+    )
+    # agent default (no scopes) — config:write 미보유 agent. 403 검증용.
     svc.add_member("agent-01", token="agent-token", role="default")
+    # human admin/default — scope 무관 통과 검증용 (#1373).
+    svc.add_member(
+        "human-admin",
+        token="human-token",
+        role="default",
+        member_type="human",
+    )
+    # agent + config:write scope — agent 정상 경로 검증용 (#1373).
+    svc.add_member(
+        "agent-config",
+        token="agent-config-token",
+        role="default",
+        member_type="agent",
+        scopes=["config:write"],
+    )
+    # inactive 멤버 — suspended/revoked 세션 fallback 차단 검증용 (#1373).
+    svc.add_member(
+        "inactive-member",
+        token="inactive-token",
+        role="default",
+        member_type="human",
+        status="suspended",
+    )
     return svc
 
 
@@ -369,6 +455,9 @@ def session_service() -> FakeSessionService:
     svc = FakeSessionService()
     svc.add_session("master-session-id", member_id="master-user")
     svc.add_session("agent-session-id", member_id="agent-01")
+    svc.add_session("human-session-id", member_id="human-admin")
+    svc.add_session("agent-config-session-id", member_id="agent-config")
+    svc.add_session("inactive-session-id", member_id="inactive-member")
     return svc
 
 
@@ -393,6 +482,11 @@ def strategy_registry() -> FakeStrategyRegistry:
 
 
 @pytest.fixture
+def dynamic_config() -> FakeDynamicConfig:
+    return FakeDynamicConfig()
+
+
+@pytest.fixture
 def _mock_strategy_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     """``StrategyLoader.load`` 모킹 — 테스트 파일 시스템 의존성 제거."""
 
@@ -413,6 +507,7 @@ def client(
     bot_manager: FakeBotManager,
     treasury: FakeTreasury,
     strategy_registry: FakeStrategyRegistry,
+    dynamic_config: FakeDynamicConfig,
 ) -> TestClient:
     app = create_app(
         member_service=member_service,
@@ -421,6 +516,7 @@ def client(
         bot_manager=bot_manager,
         treasury=treasury,
         strategy_registry=strategy_registry,
+        dynamic_config=dynamic_config,
     )
     return TestClient(app)
 
@@ -432,6 +528,7 @@ def client_no_session_service(
     bot_manager: FakeBotManager,
     treasury: FakeTreasury,
     strategy_registry: FakeStrategyRegistry,
+    dynamic_config: FakeDynamicConfig,
 ) -> TestClient:
     """``session_service is None`` 배포 분기 시뮬레이션."""
     app = create_app(
@@ -440,6 +537,7 @@ def client_no_session_service(
         bot_manager=bot_manager,
         treasury=treasury,
         strategy_registry=strategy_registry,
+        dynamic_config=dynamic_config,
     )
     return TestClient(app)
 
@@ -1432,6 +1530,8 @@ class TestOpenAPIResponses401403:
             # #1372: treasury budget mutation 인증 가드 추가.
             ("/api/treasury/bots/{bot_id}/allocate", "post"),
             ("/api/treasury/bots/{bot_id}/deallocate", "post"),
+            # #1373: dynamic config update 인증 가드 추가.
+            ("/api/config/{key}", "put"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:
@@ -1458,6 +1558,8 @@ class TestOpenAPIResponses401403:
             # #1372: treasury budget mutation 인증 가드 추가.
             ("/api/treasury/bots/{bot_id}/allocate", "post"),
             ("/api/treasury/bots/{bot_id}/deallocate", "post"),
+            # #1373: dynamic config update 인증 가드 추가.
+            ("/api/config/{key}", "put"),
         ],
     )
     def test_openapi_lists_403_response(self, path: str, method: str) -> None:
@@ -1478,6 +1580,8 @@ class TestOpenAPIResponses401403:
             "BalanceSetRequest",
             # #1372: BudgetChangeRequest 도 raw body 패턴으로 전환 후 명시 등록.
             "BudgetChangeRequest",
+            # #1373: ConfigUpdateRequest 도 raw body 패턴으로 전환 후 명시 등록.
+            "ConfigUpdateRequest",
         ],
     )
     def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
@@ -1772,3 +1876,247 @@ class TestDeleteBotAuthMatrix:
         )
         assert resp.status_code == 404, resp.text
         assert bot_manager.delete_calls == []
+
+
+# ── #1373: PUT /api/config/{key} scope-aware 인증 매트릭스 ───────────────
+
+
+_VALID_CONFIG_PAYLOAD: dict = {"value": "DEBUG"}
+_CONFIG_KEY = "system.log_level"
+_CONFIG_PATH = f"/api/config/{_CONFIG_KEY}"
+
+
+class TestUpdateConfigAuthMatrix:
+    """``PUT /api/config/{key}`` 는 scope-aware 인증 가드를 따른다 (#1373).
+
+    spec ``docs/specs/member/02-design-decisions.md:210-221`` 의
+    ``require_scope`` predicate 와 정합:
+    - master role → 통과
+    - human type → 통과 (scope 무관)
+    - agent + ``config:write`` ∈ scopes → 통과
+    - 그 외 → 403
+
+    raw body 패턴 + auth-first: 인증 가드가 body validation 보다 먼저 실행되어
+    unauth + bad-body 시 401 우선. 401/403 시 ``config_service.set`` 미호출
+    (mock spy 검증).
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_update_config_unauth_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(_CONFIG_PATH, json=_VALID_CONFIG_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+
+    def test_update_config_invalid_bearer_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _CONFIG_PATH,
+            json=_VALID_CONFIG_PAYLOAD,
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+
+    def test_update_config_invalid_session_cookie_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.put(_CONFIG_PATH, json=_VALID_CONFIG_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_update_config_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """``session_service is None`` 배포 + 쿠키만 → 401 (cookie fallback skip)."""
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.put(_CONFIG_PATH, json=_VALID_CONFIG_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_update_config_unauth_invalid_body_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). update_bot 패턴 답습."""
+        resp = client.put(_CONFIG_PATH, json=["not", "an", "object"])
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert dynamic_config.set_calls == []
+
+    def test_update_config_unauth_malformed_json_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.put(
+            _CONFIG_PATH,
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+
+    # 200 — master 인증 통과 ─────────────────────────────────────────
+
+    def test_update_config_master_bearer_succeeds(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _CONFIG_PATH,
+            json=_VALID_CONFIG_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["key"] == _CONFIG_KEY
+        assert body["new_value"] == "DEBUG"
+        assert len(dynamic_config.set_calls) == 1
+        assert dynamic_config.set_calls[-1]["changed_by"] == "master-user"
+
+    def test_update_config_master_session_cookie_succeeds(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.put(_CONFIG_PATH, json=_VALID_CONFIG_PAYLOAD)
+        assert resp.status_code == 200, resp.text
+        assert dynamic_config.set_calls[-1]["changed_by"] == "master-user"
+        client.cookies.delete("ante_session")
+
+    # 200 — human (scope 무관) 통과 ──────────────────────────────────
+
+    def test_update_config_human_bearer_succeeds(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """spec predicate: human 멤버는 scope 검증을 무조건 통과한다."""
+        resp = client.put(
+            _CONFIG_PATH,
+            json=_VALID_CONFIG_PAYLOAD,
+            headers={"Authorization": "Bearer human-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert dynamic_config.set_calls[-1]["changed_by"] == "human-admin"
+
+    # 200 — agent + config:write scope ───────────────────────────────
+
+    def test_update_config_agent_with_config_write_succeeds(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """agent + ``config:write`` ∈ scopes → 통과 (spec predicate 정합)."""
+        resp = client.put(
+            _CONFIG_PATH,
+            json=_VALID_CONFIG_PAYLOAD,
+            headers={"Authorization": "Bearer agent-config-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert dynamic_config.set_calls[-1]["changed_by"] == "agent-config"
+
+    # 403 — agent without scope ──────────────────────────────────────
+
+    def test_update_config_agent_without_config_write_returns_403(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """agent + scope 미보유 → 403 (spec predicate 정합)."""
+        resp = client.put(
+            _CONFIG_PATH,
+            json=_VALID_CONFIG_PAYLOAD,
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert dynamic_config.set_calls == []
+
+    # 403 — inactive 멤버 (suspended/revoked) ────────────────────────
+
+    def test_update_config_inactive_member_returns_403(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """suspended human 멤버 → 403 (세션 fallback 경로 차단).
+
+        ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
+        fallback 에서는 만료만 보므로, ``MemberStatus.ACTIVE`` 가 아닌 멤버는
+        명시적으로 403 으로 차단되어야 한다 (require_audit_read #1359 4차 fix
+        패턴 답습).
+        """
+        client.cookies.set("ante_session", "inactive-session-id")
+        resp = client.put(_CONFIG_PATH, json=_VALID_CONFIG_PAYLOAD)
+        assert resp.status_code == 403, resp.text
+        assert dynamic_config.set_calls == []
+        client.cookies.delete("ante_session")
+
+    # 422 — 인증 통과 + body invalid ─────────────────────────────────
+
+    def test_update_config_master_invalid_body_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """master + body 가 JSON object 가 아님 → 422."""
+        resp = client.put(
+            _CONFIG_PATH,
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    def test_update_config_master_empty_body_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _CONFIG_PATH,
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    def test_update_config_master_malformed_json_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _CONFIG_PATH,
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    def test_update_config_master_missing_value_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """master + ``value`` 누락 → 422 (Pydantic required field)."""
+        resp = client.put(
+            _CONFIG_PATH,
+            json={"category": "system"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    # 404 — master + missing key ─────────────────────────────────────
+
+    def test_update_config_master_unknown_key_returns_404(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """master 인증 통과 + 존재하지 않는 키 → 404, ``set`` 미호출."""
+        resp = client.put(
+            "/api/config/no.such.key",
+            json=_VALID_CONFIG_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert dynamic_config.set_calls == []

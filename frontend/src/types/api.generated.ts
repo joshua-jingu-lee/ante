@@ -587,7 +587,23 @@ export type paths = {
         get?: never;
         /**
          * Update Config
-         * @description 동적 설정 값 변경.
+         * @description 동적 설정 값 변경. 인증된 master/human 또는 config:write scope 보유
+         *     agent 만 호출 가능 (#1373).
+         *
+         *     ``update_bot`` (#1352) / ``create_bot`` (#1371) / ``allocate`` (#1372)
+         *     와 동일한 raw body 파싱 패턴을 적용해 인증 가드가 body validation 보다
+         *     우선 실행되도록 한다. FastAPI 가 ``body: ConfigUpdateRequest`` 를 먼저
+         *     검증하면 unauth + bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract
+         *     가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_config_write)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``ConfigUpdateRequest.model_validate`` — ValidationError → 422.
+         *     4. config 키 존재 확인 → 404.
+         *     5. ``config_service.set`` 호출 + audit 기록 (changed_by = caller_id).
          */
         put: operations["update_config_api_config__key__put"];
         post?: never;
@@ -2043,15 +2059,15 @@ export type components = {
         };
         /**
          * ConfigUpdateRequest
-         * @description 설정 값 변경 요청.
+         * @description PUT /api/config/{key} 입력 contract. 인증된 master/human 또는 config:write scope 를 보유한 agent 만 사용할 수 있다(#1373). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         ConfigUpdateRequest: {
             /**
-             * Category
+             * @description 설정 카테고리. 비우면 key 의 dot-prefix(예: ``risk.max_mdd`` → ``risk``)에서 자동 추출된다.
              * @default
              */
             category: string;
-            /** Value */
+            /** @description 변경할 설정 값. 타입은 키마다 다르다 — DynamicConfigService 가 키별 schema 검증을 담당한다. */
             value: unknown;
         };
         /**
@@ -4920,6 +4936,24 @@ export interface operations {
                     "application/json": components["schemas"]["ConfigUpdateResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master, human 멤버 또는 config:write scope 보유 agent 만 허용) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Config key not found */
             404: {
                 headers: {
@@ -4929,13 +4963,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, value 누락, type mismatch). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1373). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Config service not available */
