@@ -14,6 +14,52 @@
 `ante backtest run <strategy_path>`에서만 직접 받는다. 봇 생성은 등록된 전략 ID를
 사용한다.
 
+## 공개 명령 allowlist (인증 면제)
+
+> 정책 SSOT: [D-015 default-deny 인증 게이트](../../decisions/D-015-default-deny-auth-gate.md)
+> 게이트 책임 분리: [02-design-decisions.md — default-deny CLI 인증 게이트](02-design-decisions.md#default-deny-cli-인증-게이트)
+
+CLI는 default-deny + allowlist 정책을 적용한다. 다음 명령만 `ANTE_MEMBER_TOKEN`
+없이 실행할 수 있다. 그 외 모든 명령은 토큰이 없으면 자동으로 exit 1로 거부된다.
+
+코드 인용: `_AUTH_EXEMPT_COMMAND_PATHS` 정의는 `src/ante/cli/middleware.py:29-33`.
+매칭은 leaf 이름이 아니라 전체 커맨드 경로 tuple 기준이다(`ante feed init`처럼
+leaf 이름이 우연히 같은 명령은 면제 대상이 아니다).
+
+| 명령 | 경로 tuple | 근거 |
+|------|-----------|------|
+| `ante --version` | — (옵션, 명령 아님) | `@click.version_option`(`src/ante/cli/main.py:94`)이 본 root 그룹에서 인증 단계 진입 전에 처리한다. 메타데이터 출력. |
+| `ante init` | `("init",)` | 부트스트랩: 시스템 파일 골격, master 계정, test account를 1회 생성한다. 토큰 자체가 아직 발급되지 않은 상태. 재진입 가드(`src/ante/cli/commands/init.py:349-356` 부근의 5-state 검증, 테스트 `tests/unit/test_cli_init.py:246` "state1_all_exist_rejects")가 이미 init된 시스템에서 명령을 거부한다. |
+| `ante member reset-password --recovery-key ...` | `("member", "reset-password")` | 패스워드 분실 복구. recovery key 자체가 인증 수단이다. 서버 측에서 recovery key 해시를 검증한 뒤 새 패스워드를 적용한다. |
+| `ante member regenerate-recovery-key (--password-env\|--password-file)` | `("member", "regenerate-recovery-key")` | recovery key 재발급. 현재 패스워드 입력이 인증 수단이다(코드 invariant). |
+
+**후보에서 제거**: `ante login` — CLI는 `ANTE_MEMBER_TOKEN` 환경변수 모델이며 별도
+`login` 명령은 spec과 코드 모두에 존재하지 않는다(`grep -rn 'name="login"|@.*group.command.*login' src/ante/cli/` 결과 empty).
+allowlist 후보에서 제거한다.
+
+### 게이트-면제 메타 경로 (allowlist와 분리)
+
+다음 경로는 공개 명령 allowlist와 별개로 인증 게이트가 적용되지 않는다. 명령 단위가
+아니라 click 프레임워크 레벨에서 결정되므로 본 allowlist 표에 행을 추가할 필요가 없다.
+정책 SSOT는 [02-design-decisions.md — 게이트-면제 메타 경로](02-design-decisions.md#default-deny-cli-인증-게이트)다.
+
+| 메타 경로 | 적용 범위 | 사유 |
+|----------|----------|------|
+| `--help` | `ante --help`, `ante <cmd> --help`, `ante <cmd> <sub> --help` 등 모든 명령 단계 | root `--help`만 root 콜백 진입 전 처리되고, **nested `--help`는 부모 그룹 콜백이 먼저 실행된 뒤** 서브커맨드 단의 도움말이 출력된다(click 동작). 이 때문에 `authenticate_member(ctx)` 및 #1404 `authenticated_group` factory는 invocation에 `--help` 플래그가 있거나 `ctx.resilient_parsing == True`인 경우 인증 검사를 skip한다. 도움말은 명령 사용법 그 자체이며 인증 없이도 받을 수 있어야 Agent와 사람이 명령을 학습할 수 있다. 상세 정정 근거는 [02-design-decisions.md — `--help` 처리 시점](02-design-decisions.md#default-deny-cli-인증-게이트) 참조. |
+| `--version` | `ante --version` | `@click.version_option`이 root 콜백 진입 전 처리. 메타데이터 출력. |
+| resilient parsing | 자동완성 등 click이 `ctx.resilient_parsing=True`로 옵션을 시도 파싱하는 경로 | 부작용 없는 파싱이므로 인증 단계로 진입하지 않는다. `authenticate_member(ctx)`가 `ctx.resilient_parsing`을 확인해 즉시 return(`src/ante/cli/middleware.py:64-65`). |
+
+`--help` / `--version` / resilient parsing은 신규 명령이 추가되어도 자동으로 동일하게
+적용된다. 따라서 새 명령의 인증 여부 판단은 본 메타 경로와 무관하게 명령 자체의
+의미("인증 없이 실행되어야 하는 부트스트랩/복구인가?")로만 답한다.
+
+새 공개 명령 추가 시 다음 순서를 따른다:
+
+1. 본 allowlist 표에 행 추가 (명령, 경로 tuple, 근거)
+2. 코드의 `_AUTH_EXEMPT_COMMAND_PATHS`에 동일 tuple 등록
+3. 인증 없이 호출되어도 안전한지 도메인별 invariant(예: `ante init`의 재진입 가드,
+   `regenerate-recovery-key`의 현재 패스워드 요구) 검증
+
 ## 실행 분류 전수 표
 
 | 분류 | 의미 |
