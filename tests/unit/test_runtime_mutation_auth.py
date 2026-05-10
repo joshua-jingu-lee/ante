@@ -1,4 +1,5 @@
-"""Account/Bot/Treasury mutation route 인증 가드 테스트 (issue #1352, #1371, #1372).
+"""Account/Bot/Treasury mutation route 인증 가드 테스트
+(issue #1352, #1371, #1372, #1373, #1374, #1375).
 
 oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출자만
 사용할 수 있어야 한다.
@@ -11,6 +12,10 @@ oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출
 - ``DELETE /api/bots/{id}`` (#1371)
 - ``POST /api/treasury/bots/{id}/allocate`` (#1372)
 - ``POST /api/treasury/bots/{id}/deallocate`` (#1372)
+- ``PUT  /api/config/{key}`` (#1373, scope-aware)
+- ``POST /api/reports`` (#1374, scope-aware)
+- ``POST /api/system/halt`` (#1375)
+- ``POST /api/system/clear-halt`` (#1375)
 
 각 라우트 × 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -154,6 +159,9 @@ class FakeAccountService:
         self.update_calls: list[dict] = []
         self.suspend_calls: list[dict] = []
         self.activate_calls: list[dict] = []
+        # #1375: system kill switch suspend_all / activate_all mock spy.
+        self.suspend_all_calls: list[dict] = []
+        self.activate_all_calls: list[dict] = []
         self._accounts: dict[str, FakeAccount] = {
             "acc-target": FakeAccount(account_id="acc-target", status="active"),
             "acc-suspended": FakeAccount(
@@ -202,6 +210,46 @@ class FakeAccountService:
         if account is None:
             raise AccountNotFoundError(account_id)
         account.status = "active"
+
+    # ── #1375: system kill switch (suspend_all / activate_all) ─────────
+    #
+    # ``POST /api/system/halt`` / ``/clear-halt`` 핸들러는 list[dict] shape
+    # (#1213) 으로 결과를 받는다 — KillSwitchAccountChange SSOT 형식.
+    async def suspend_all(self, reason: str = "", suspended_by: str = "") -> list[dict]:
+        self.suspend_all_calls.append({"reason": reason, "suspended_by": suspended_by})
+        result: list[dict] = []
+        for account in self._accounts.values():
+            previous = account.status
+            changed = previous == "active"
+            if changed:
+                account.status = "suspended"
+            result.append(
+                {
+                    "account_id": account.account_id,
+                    "previous_status": previous,
+                    "status": account.status,
+                    "changed": changed,
+                }
+            )
+        return result
+
+    async def activate_all(self, activated_by: str = "") -> list[dict]:
+        self.activate_all_calls.append({"activated_by": activated_by})
+        result: list[dict] = []
+        for account in self._accounts.values():
+            previous = account.status
+            changed = previous == "suspended"
+            if changed:
+                account.status = "active"
+            result.append(
+                {
+                    "account_id": account.account_id,
+                    "previous_status": previous,
+                    "status": account.status,
+                    "changed": changed,
+                }
+            )
+        return result
 
 
 @dataclass
@@ -1568,6 +1616,9 @@ class TestOpenAPIResponses401403:
             ("/api/config/{key}", "put"),
             # #1374: report submit 인증 가드 추가.
             ("/api/reports", "post"),
+            # #1375: system kill switch 인증 가드 추가.
+            ("/api/system/halt", "post"),
+            ("/api/system/clear-halt", "post"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:
@@ -1598,6 +1649,9 @@ class TestOpenAPIResponses401403:
             ("/api/config/{key}", "put"),
             # #1374: report submit 인증 가드 추가.
             ("/api/reports", "post"),
+            # #1375: system kill switch 인증 가드 추가.
+            ("/api/system/halt", "post"),
+            ("/api/system/clear-halt", "post"),
         ],
     )
     def test_openapi_lists_403_response(self, path: str, method: str) -> None:
@@ -1622,6 +1676,10 @@ class TestOpenAPIResponses401403:
             "ConfigUpdateRequest",
             # #1374: ReportSubmitRequest 도 raw body 패턴으로 전환 후 명시 등록.
             "ReportSubmitRequest",
+            # #1375: HaltRequest / ClearHaltRequest 도 raw body 패턴으로
+            # 전환 후 명시 등록.
+            "HaltRequest",
+            "ClearHaltRequest",
         ],
     )
     def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
@@ -2418,3 +2476,362 @@ class TestSubmitReportAuthMatrix:
         )
         assert resp.status_code == 422
         assert report_store.submit_calls == []
+
+
+# ── #1375: POST /api/system/halt + /clear-halt 인증 매트릭스 ────────────
+
+
+_HALT_PATH = "/api/system/halt"
+_CLEAR_HALT_PATH = "/api/system/clear-halt"
+
+
+class TestSystemHaltAuthMatrix:
+    """``POST /api/system/halt`` 는 master-only 인증 가드를 따른다 (#1375).
+
+    oracle A7 finding: 익명 호출이 ``account_service.suspend_all`` 을 그대로
+    실행해 모든 계좌를 SUSPENDED 로 전환할 수 있었다. 본 매트릭스는
+    ``submit_report`` (#1374) / ``update_config`` (#1373) 와 동일한 raw body
+    + auth-first 패턴을 보장한다.
+
+    401/403 시 ``account_service.suspend_all`` 이 호출되지 않음을 mock spy
+    (``suspend_all_calls``) 로 검증한다. ``reason`` 은 optional 이므로 빈
+    body / 빈 JSON object 는 default ``""`` 로 200 을 받는다 (기존 동작 보존).
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_halt_unauth_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(_HALT_PATH, json={"reason": "probe"})
+        assert resp.status_code == 401, resp.text
+        assert account_service.suspend_all_calls == []
+
+    def test_halt_invalid_bearer_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _HALT_PATH,
+            json={"reason": "probe"},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert account_service.suspend_all_calls == []
+
+    def test_halt_invalid_session_cookie_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.post(_HALT_PATH, json={"reason": "probe"})
+        assert resp.status_code == 401, resp.text
+        assert account_service.suspend_all_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_halt_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """``session_service is None`` 배포 + 쿠키만 → 401 (cookie fallback skip)."""
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.post(_HALT_PATH, json={"reason": "probe"})
+        assert resp.status_code == 401, resp.text
+        assert account_service.suspend_all_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_halt_unauth_invalid_body_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). submit_report 패턴 답습."""
+        resp = client.post(_HALT_PATH, json=["not", "an", "object"])
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert account_service.suspend_all_calls == []
+
+    def test_halt_unauth_malformed_json_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.post(
+            _HALT_PATH,
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert account_service.suspend_all_calls == []
+
+    # 200 — master 인증 통과 ─────────────────────────────────────────
+
+    def test_halt_master_bearer_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _HALT_PATH,
+            json={"reason": "emergency"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "halted"
+        # changed_at Z suffix 회귀 보호 (#1360).
+        assert body["changed_at"].endswith("Z"), (
+            f"changed_at 은 Z suffix 여야 한다. got={body['changed_at']!r}"
+        )
+        assert "+00:00" not in body["changed_at"]
+        assert len(account_service.suspend_all_calls) == 1
+        # caller_id 가 suspended_by 로 전파되어야 한다 (#1375).
+        assert account_service.suspend_all_calls[-1]["suspended_by"] == "master-user"
+
+    def test_halt_master_session_cookie_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post(_HALT_PATH, json={"reason": "emergency"})
+        assert resp.status_code == 200, resp.text
+        assert account_service.suspend_all_calls[-1]["suspended_by"] == "master-user"
+        client.cookies.delete("ante_session")
+
+    def test_halt_master_empty_body_succeeds_with_default_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + 빈 body → 200 (reason optional, 기존 동작 보존)."""
+        resp = client.post(
+            _HALT_PATH,
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(account_service.suspend_all_calls) == 1
+
+    def test_halt_master_empty_object_body_succeeds_with_default_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + ``{}`` → 200 (reason 미지정 → default ``""``)."""
+        resp = client.post(
+            _HALT_PATH,
+            json={},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(account_service.suspend_all_calls) == 1
+
+    # 422 — 인증 통과 + body invalid ─────────────────────────────────
+
+    def test_halt_master_invalid_body_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + body 가 JSON object 가 아님 → 422."""
+        resp = client.post(
+            _HALT_PATH,
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_all_calls == []
+
+    def test_halt_master_malformed_json_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _HALT_PATH,
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_all_calls == []
+
+    def test_halt_master_wrong_type_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + ``reason`` 이 string 아님 → 422 (Pydantic type mismatch)."""
+        resp = client.post(
+            _HALT_PATH,
+            json={"reason": 123},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.suspend_all_calls == []
+
+    # 403 — 인증된 non-master ────────────────────────────────────────
+
+    def test_halt_non_master_bearer_returns_403(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _HALT_PATH,
+            json={"reason": "probe"},
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert account_service.suspend_all_calls == []
+
+
+class TestSystemClearHaltAuthMatrix:
+    """``POST /api/system/clear-halt`` 는 master-only 인증 가드를 따른다 (#1375).
+
+    ``halt`` 와 동일한 raw-body + auth-first 패턴. 401/403 시
+    ``account_service.activate_all`` 이 호출되지 않음을 mock spy
+    (``activate_all_calls``) 로 검증한다.
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_clear_halt_unauth_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(_CLEAR_HALT_PATH, json={"reason": "probe"})
+        assert resp.status_code == 401, resp.text
+        assert account_service.activate_all_calls == []
+
+    def test_clear_halt_invalid_bearer_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            json={"reason": "probe"},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert account_service.activate_all_calls == []
+
+    def test_clear_halt_invalid_session_cookie_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.post(_CLEAR_HALT_PATH, json={"reason": "probe"})
+        assert resp.status_code == 401, resp.text
+        assert account_service.activate_all_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_clear_halt_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        account_service: FakeAccountService,
+    ) -> None:
+        """``session_service is None`` 배포 + 쿠키만 → 401 (cookie fallback skip)."""
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.post(
+            _CLEAR_HALT_PATH, json={"reason": "probe"}
+        )
+        assert resp.status_code == 401, resp.text
+        assert account_service.activate_all_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_clear_halt_unauth_invalid_body_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). submit_report 패턴 답습."""
+        resp = client.post(_CLEAR_HALT_PATH, json=["not", "an", "object"])
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert account_service.activate_all_calls == []
+
+    def test_clear_halt_unauth_malformed_json_returns_401(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert account_service.activate_all_calls == []
+
+    # 200 — master 인증 통과 ─────────────────────────────────────────
+
+    def test_clear_halt_master_bearer_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            json={"reason": "recovered"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "halt_cleared"
+        # changed_at Z suffix 회귀 보호 (#1360).
+        assert body["changed_at"].endswith("Z"), (
+            f"changed_at 은 Z suffix 여야 한다. got={body['changed_at']!r}"
+        )
+        assert "+00:00" not in body["changed_at"]
+        assert len(account_service.activate_all_calls) == 1
+        assert account_service.activate_all_calls[-1]["activated_by"] == "master-user"
+
+    def test_clear_halt_master_session_cookie_succeeds(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post(_CLEAR_HALT_PATH, json={"reason": "recovered"})
+        assert resp.status_code == 200, resp.text
+        assert account_service.activate_all_calls[-1]["activated_by"] == "master-user"
+        client.cookies.delete("ante_session")
+
+    def test_clear_halt_master_empty_body_succeeds_with_default_reason(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        """master + 빈 body → 200 (reason optional, 기존 동작 보존)."""
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(account_service.activate_all_calls) == 1
+
+    # 422 — 인증 통과 + body invalid ─────────────────────────────────
+
+    def test_clear_halt_master_invalid_body_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert account_service.activate_all_calls == []
+
+    def test_clear_halt_master_malformed_json_returns_422(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert account_service.activate_all_calls == []
+
+    # 403 — 인증된 non-master ────────────────────────────────────────
+
+    def test_clear_halt_non_master_bearer_returns_403(
+        self, client: TestClient, account_service: FakeAccountService
+    ) -> None:
+        resp = client.post(
+            _CLEAR_HALT_PATH,
+            json={"reason": "probe"},
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert account_service.activate_all_calls == []

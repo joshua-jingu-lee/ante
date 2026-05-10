@@ -181,10 +181,11 @@ class TestHaltClearHalt:
     """
 
     def test_halt(self, client, account_service):
-        """POST /halt로 전체 거래 중지."""
+        """POST /halt로 전체 거래 중지. master 인증 필요 (#1375)."""
         resp = client.post(
             "/api/system/halt",
             json={"reason": "긴급 중지"},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -202,10 +203,11 @@ class TestHaltClearHalt:
         account_service.suspend_all.assert_called_once()
 
     def test_clear_halt(self, client, account_service):
-        """POST /clear-halt로 전역 정지 해제."""
+        """POST /clear-halt로 전역 정지 해제. master 인증 필요 (#1375)."""
         resp = client.post(
             "/api/system/clear-halt",
             json={"reason": "재개"},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -223,10 +225,11 @@ class TestHaltClearHalt:
         account_service.activate_all.assert_called_once()
 
     def test_halt_clear_halt_lifecycle(self, client, account_service):
-        """halt → clear-halt lifecycle."""
+        """halt → clear-halt lifecycle. master 인증 필요 (#1375)."""
         resp = client.post(
             "/api/system/halt",
             json={"reason": ""},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "halted"
@@ -234,18 +237,31 @@ class TestHaltClearHalt:
         resp = client.post(
             "/api/system/clear-halt",
             json={"reason": ""},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "halt_cleared"
 
     def test_legacy_activate_route_removed(self, client):
-        """legacy POST /api/system/activate는 hard remove (SSOT 정책)."""
-        resp = client.post("/api/system/activate", json={"reason": ""})
+        """legacy POST /api/system/activate는 hard remove (SSOT 정책).
+
+        legacy route 부재는 인증 여부와 무관하게 404 (FastAPI 가
+        라우팅 단계에서 결정). 401/403 회귀와 분리된 invariant 다.
+        """
+        resp = client.post(
+            "/api/system/activate",
+            json={"reason": ""},
+            headers=_MASTER_HEADERS,
+        )
         assert resp.status_code == 404
 
     def test_legacy_kill_switch_route_absent(self, client):
         """legacy POST /api/system/kill-switch는 등록되지 않음 (SSOT 정책)."""
-        resp = client.post("/api/system/kill-switch", json={"action": "halt"})
+        resp = client.post(
+            "/api/system/kill-switch",
+            json={"action": "halt"},
+            headers=_MASTER_HEADERS,
+        )
         assert resp.status_code == 404
 
 

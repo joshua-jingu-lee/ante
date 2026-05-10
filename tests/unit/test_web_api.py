@@ -1146,6 +1146,81 @@ class TestRFC7807ErrorResponse:
             f"{body_schema!r}"
         )
 
+    def test_openapi_components_includes_halt_and_clear_halt_request(self):
+        """``components.schemas.HaltRequest`` / ``ClearHaltRequest`` 가 항상
+        등록되어 있다 (#1375).
+
+        POST /api/system/halt / clear-halt 라우트도 raw body 패턴
+        (``request: Request`` + ``Depends(require_master_caller)``) 으로
+        전환되었다 (인증 가드 우선). 그 결과 ``body: HaltRequest`` /
+        ``body: ClearHaltRequest`` 인자가 시그니처에서 사라져 FastAPI 자동
+        components 등록 경로를 타지 않으며, inline schema 로 두면 frontend
+        ``openapi-typescript`` 산출물이 ``export type HaltRequest`` /
+        ``export type ClearHaltRequest`` 를 잃어
+        ``frontend/src/api/system.ts`` 의 ``haltSystem`` /
+        ``clearHaltSystem`` type import 가 깨진다.
+        ``_install_openapi_customizer`` 가 ``setdefault`` 로 fallback 등록해
+        이 회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        for schema_name in ("HaltRequest", "ClearHaltRequest"):
+            assert schema_name in schemas, (
+                f"{schema_name} 가 components.schemas 에 등록되지 않음 — "
+                "_install_openapi_customizer 동작 확인 필요 (#1375)"
+            )
+            comp = schemas[schema_name]
+            assert isinstance(comp, dict)
+            assert comp.get("type") == "object"
+            properties = comp.get("properties", {})
+            assert "reason" in properties, (
+                f"{schema_name}.properties 에 reason 누락: {sorted(properties.keys())}"
+            )
+            # ``reason`` 은 default ``""`` 를 가지므로 required 에 들어가지
+            # 않아야 한다 (Pydantic SSOT 정합).
+            required = comp.get("required", [])
+            assert "reason" not in required, (
+                f"{schema_name}.required 에 reason 이 들어가면 안 됨: {required}"
+            )
+
+    def test_post_system_halt_request_body_uses_component_ref(self):
+        """POST /api/system/halt requestBody 가 ``$ref`` 매핑을 노출 (#1375).
+
+        inline schema 로 두면 frontend codegen 이 ``export type HaltRequest``
+        를 만들지 못해 ``frontend/src/api/system.ts`` 의 ``haltSystem`` import
+        가 깨진다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        post_op = schema["paths"]["/api/system/halt"]["post"]
+        request_body = post_op.get("requestBody", {})
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/HaltRequest"}, (
+            "POST /api/system/halt requestBody schema 가 component $ref 가 아님: "
+            f"{body_schema!r}"
+        )
+
+    def test_post_system_clear_halt_request_body_uses_component_ref(self):
+        """POST /api/system/clear-halt requestBody 가 ``$ref`` 매핑을 노출
+        (#1375).
+
+        inline schema 로 두면 frontend codegen 이 ``export type
+        ClearHaltRequest`` 를 만들지 못해 ``frontend/src/api/system.ts`` 의
+        ``clearHaltSystem`` import 가 깨진다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        post_op = schema["paths"]["/api/system/clear-halt"]["post"]
+        request_body = post_op.get("requestBody", {})
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/ClearHaltRequest"}, (
+            "POST /api/system/clear-halt requestBody schema 가 component $ref "
+            f"가 아님: {body_schema!r}"
+        )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 
