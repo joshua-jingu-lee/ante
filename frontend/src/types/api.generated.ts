@@ -997,7 +997,21 @@ export type paths = {
         put?: never;
         /**
          * Submit Report
-         * @description 리포트 제출.
+         * @description 리포트 제출. 인증된 master/human 또는 ``report:write`` scope 를 보유한
+         *     agent 만 호출 가능 (#1374).
+         *
+         *     ``update_config`` (#1373) 와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
+         *     body validation 보다 우선 실행되도록 한다. FastAPI 가
+         *     ``body: ReportSubmitRequest`` 를 먼저 검증하면 unauth + bad-body 시 401 이
+         *     아닌 422 가 먼저 반환되어 contract 가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_report_write)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``ReportSubmitRequest.model_validate`` — ValidationError → 422.
+         *     4. ``report_store.submit`` 호출 + audit 기록 (submitted_by = caller_id).
          */
         post: operations["submit_report_api_reports_post"];
         delete?: never;
@@ -5890,13 +5904,31 @@ export interface operations {
                     "application/json": components["schemas"]["ReportSubmitResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master, human 멤버 또는 report:write scope 보유 agent 만 허용). spec require_scope predicate 정합. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, NaN/Inf, extra key). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1374). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Report store not available */

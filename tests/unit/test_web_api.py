@@ -449,7 +449,14 @@ class TestReportRoutes:
         assert data["type"] == "/errors/internal"
         assert data["status"] == 503
 
-    def test_submit_no_store(self, client):
+    def test_submit_unauth_returns_401(self, client):
+        """#1374: 인증 없는 호출은 401. 인증 가드가 service availability /
+        body validation 보다 먼저 실행된다.
+
+        과거(``test_submit_no_store``)에는 ``report_store`` 미주입 시 503 을
+        반환했으나, ``require_report_write`` dependency 가 라우트 시그니처
+        앞쪽에 위치해 인증 누락이 우선 401 로 차단된다.
+        """
         resp = client.post(
             "/api/reports",
             json={
@@ -458,18 +465,24 @@ class TestReportRoutes:
                 "strategy_path": "strategies/test.py",
             },
         )
-        assert resp.status_code == 503
+        assert resp.status_code == 401
         data = resp.json()
-        assert data["type"] == "/errors/internal"
+        assert data["status"] == 401
 
-    def test_submit_missing_fields(self):
+    def test_submit_missing_fields_unauth_returns_401(self):
+        """#1374: unauth + missing fields → 401 (NOT 422). auth-first 계약.
+
+        과거(``test_submit_missing_fields``)에는 422 가 우선 반환되었으나,
+        raw body 패턴 + ``require_report_write`` 가드로 인해 인증 실패 시
+        body validation 은 실행되지 않고 401 이 우선 반환된다.
+        """
         from unittest.mock import AsyncMock
 
         store = AsyncMock()
         app = create_app(report_store=store)
         c = TestClient(app)
         resp = c.post("/api/reports", json={"strategy_name": "incomplete"})
-        assert resp.status_code == 422
+        assert resp.status_code == 401
 
 
 # ── RFC 7807 에러 응답 테스트 ────────────────────────
@@ -1078,6 +1091,58 @@ class TestRFC7807ErrorResponse:
         body_schema = json_content.get("schema", {})
         assert body_schema == {"$ref": "#/components/schemas/ConfigUpdateRequest"}, (
             "PUT /api/config/{key} requestBody schema 가 component $ref 가 아님: "
+            f"{body_schema!r}"
+        )
+
+    def test_openapi_components_includes_report_submit_request(self):
+        """``components.schemas.ReportSubmitRequest`` 가 항상 등록되어 있다 (#1374).
+
+        POST /api/reports 라우트도 raw body 패턴(``request: Request`` +
+        ``Depends(require_report_write)``)으로 전환되었다(인증 가드 우선).
+        그 결과 ``body: ReportSubmitRequest`` 인자가 시그니처에서 사라져
+        FastAPI 자동 components 등록 경로를 타지 않으며, inline schema 로
+        두면 frontend ``openapi-typescript`` 산출물이 ``export type
+        ReportSubmitRequest`` 를 잃는다. ``_install_openapi_customizer`` 가
+        ``setdefault`` 로 fallback 등록해 이 회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "ReportSubmitRequest" in schemas, (
+            "ReportSubmitRequest 가 components.schemas 에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1374)"
+        )
+        report_schema = schemas["ReportSubmitRequest"]
+        assert isinstance(report_schema, dict)
+        assert report_schema.get("type") == "object"
+        required = report_schema.get("required", [])
+        for field_name in ("strategy_name", "strategy_version", "strategy_path"):
+            assert field_name in required, (
+                f"ReportSubmitRequest.required 에 {field_name} 누락: {required}"
+            )
+        # extra='forbid' 를 OpenAPI 에 반영 (#1353 invariant 노출).
+        assert report_schema.get("additionalProperties") is False, (
+            "ReportSubmitRequest.additionalProperties 는 False 여야 함: "
+            f"{report_schema.get('additionalProperties')!r}"
+        )
+
+    def test_post_reports_request_body_uses_component_ref(self):
+        """POST /api/reports requestBody 가 ``$ref`` 매핑을 노출 (#1374).
+
+        inline schema 로 두면 frontend codegen 이 ``export type
+        ReportSubmitRequest`` 를 만들지 못한다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        post_op = schema["paths"]["/api/reports"]["post"]
+        request_body = post_op.get("requestBody", {})
+        assert request_body.get("required") is True, (
+            "POST /api/reports requestBody.required 는 True 여야 함"
+        )
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/ReportSubmitRequest"}, (
+            "POST /api/reports requestBody schema 가 component $ref 가 아님: "
             f"{body_schema!r}"
         )
 

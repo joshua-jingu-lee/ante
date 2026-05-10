@@ -30,6 +30,7 @@ oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -361,6 +362,21 @@ class FakeTreasury:
         return list(self._budgets.values())
 
 
+class FakeReportStore:
+    """``report_store.submit`` stub (#1374).
+
+    401/403 차단 시 ``submit`` 이 호출되지 않음을 ``submit_calls`` mock spy
+    로 검증한다. 200 경로에서는 ``StrategyReport`` 인자를 그대로 보관해
+    ``submitted_by`` 가 caller_id 로 설정되었는지 확인한다.
+    """
+
+    def __init__(self) -> None:
+        self.submit_calls: list[Any] = []
+
+    async def submit(self, report: Any) -> None:
+        self.submit_calls.append(report)
+
+
 class FakeDynamicConfig:
     """``config_service.exists / get / set / get_all`` stub (#1373).
 
@@ -439,6 +455,14 @@ def member_service() -> FakeMemberService:
         member_type="agent",
         scopes=["config:write"],
     )
+    # agent + report:write scope — agent 정상 경로 검증용 (#1374).
+    svc.add_member(
+        "agent-report",
+        token="agent-report-token",
+        role="default",
+        member_type="agent",
+        scopes=["report:write"],
+    )
     # inactive 멤버 — suspended/revoked 세션 fallback 차단 검증용 (#1373).
     svc.add_member(
         "inactive-member",
@@ -457,6 +481,7 @@ def session_service() -> FakeSessionService:
     svc.add_session("agent-session-id", member_id="agent-01")
     svc.add_session("human-session-id", member_id="human-admin")
     svc.add_session("agent-config-session-id", member_id="agent-config")
+    svc.add_session("agent-report-session-id", member_id="agent-report")
     svc.add_session("inactive-session-id", member_id="inactive-member")
     return svc
 
@@ -487,6 +512,11 @@ def dynamic_config() -> FakeDynamicConfig:
 
 
 @pytest.fixture
+def report_store() -> FakeReportStore:
+    return FakeReportStore()
+
+
+@pytest.fixture
 def _mock_strategy_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     """``StrategyLoader.load`` 모킹 — 테스트 파일 시스템 의존성 제거."""
 
@@ -508,6 +538,7 @@ def client(
     treasury: FakeTreasury,
     strategy_registry: FakeStrategyRegistry,
     dynamic_config: FakeDynamicConfig,
+    report_store: FakeReportStore,
 ) -> TestClient:
     app = create_app(
         member_service=member_service,
@@ -517,6 +548,7 @@ def client(
         treasury=treasury,
         strategy_registry=strategy_registry,
         dynamic_config=dynamic_config,
+        report_store=report_store,
     )
     return TestClient(app)
 
@@ -529,6 +561,7 @@ def client_no_session_service(
     treasury: FakeTreasury,
     strategy_registry: FakeStrategyRegistry,
     dynamic_config: FakeDynamicConfig,
+    report_store: FakeReportStore,
 ) -> TestClient:
     """``session_service is None`` 배포 분기 시뮬레이션."""
     app = create_app(
@@ -538,6 +571,7 @@ def client_no_session_service(
         treasury=treasury,
         strategy_registry=strategy_registry,
         dynamic_config=dynamic_config,
+        report_store=report_store,
     )
     return TestClient(app)
 
@@ -1532,6 +1566,8 @@ class TestOpenAPIResponses401403:
             ("/api/treasury/bots/{bot_id}/deallocate", "post"),
             # #1373: dynamic config update 인증 가드 추가.
             ("/api/config/{key}", "put"),
+            # #1374: report submit 인증 가드 추가.
+            ("/api/reports", "post"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:
@@ -1560,6 +1596,8 @@ class TestOpenAPIResponses401403:
             ("/api/treasury/bots/{bot_id}/deallocate", "post"),
             # #1373: dynamic config update 인증 가드 추가.
             ("/api/config/{key}", "put"),
+            # #1374: report submit 인증 가드 추가.
+            ("/api/reports", "post"),
         ],
     )
     def test_openapi_lists_403_response(self, path: str, method: str) -> None:
@@ -1582,6 +1620,8 @@ class TestOpenAPIResponses401403:
             "BudgetChangeRequest",
             # #1373: ConfigUpdateRequest 도 raw body 패턴으로 전환 후 명시 등록.
             "ConfigUpdateRequest",
+            # #1374: ReportSubmitRequest 도 raw body 패턴으로 전환 후 명시 등록.
+            "ReportSubmitRequest",
         ],
     )
     def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
@@ -2120,3 +2160,261 @@ class TestUpdateConfigAuthMatrix:
         )
         assert resp.status_code == 404, resp.text
         assert dynamic_config.set_calls == []
+
+
+# ── #1374: POST /api/reports scope-aware 인증 매트릭스 ──────────────────
+
+
+_VALID_REPORT_PAYLOAD: dict = {
+    "strategy_name": "auth_matrix_probe",
+    "strategy_version": "0.1.0",
+    "strategy_path": "strategies/auth_probe.py",
+    "backtest_period": "auth matrix probe",
+    "total_return_pct": 0.0,
+    "total_trades": 0,
+    "summary": "auth matrix probe",
+    "rationale": "ensure report:write scope is enforced",
+    "detail_json": "{}",
+}
+_REPORT_PATH = "/api/reports"
+
+
+class TestSubmitReportAuthMatrix:
+    """``POST /api/reports`` 는 scope-aware 인증 가드를 따른다 (#1374).
+
+    spec ``docs/specs/member/02-design-decisions.md:210-227`` 의
+    ``require_scope`` predicate 와 정합:
+    - master role → 통과
+    - human type → 통과 (scope 무관)
+    - agent + ``report:write`` ∈ scopes → 통과 (전략 리서치 agent 의 정상 경로)
+    - 그 외 → 403
+
+    raw body 패턴 + auth-first: 인증 가드가 body validation 보다 먼저 실행되어
+    unauth + bad-body 시 401 우선. 401/403 시 ``report_store.submit`` 미호출
+    (mock spy 검증).
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_submit_report_unauth_returns_401(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        resp = client.post(_REPORT_PATH, json=_VALID_REPORT_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert report_store.submit_calls == []
+
+    def test_submit_report_invalid_bearer_returns_401(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        resp = client.post(
+            _REPORT_PATH,
+            json=_VALID_REPORT_PAYLOAD,
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert report_store.submit_calls == []
+
+    def test_submit_report_invalid_session_cookie_returns_401(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.post(_REPORT_PATH, json=_VALID_REPORT_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert report_store.submit_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_submit_report_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        report_store: FakeReportStore,
+    ) -> None:
+        """``session_service is None`` 배포 + 쿠키만 → 401 (cookie fallback skip)."""
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.post(_REPORT_PATH, json=_VALID_REPORT_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert report_store.submit_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_submit_report_unauth_invalid_body_returns_401(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). update_config 패턴 답습."""
+        resp = client.post(_REPORT_PATH, json=["not", "an", "object"])
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert report_store.submit_calls == []
+
+    def test_submit_report_unauth_malformed_json_returns_401(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.post(
+            _REPORT_PATH,
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert report_store.submit_calls == []
+
+    # 200 (실제 POST 는 201) — master 인증 통과 ──────────────────────
+
+    def test_submit_report_master_bearer_succeeds(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        resp = client.post(
+            _REPORT_PATH,
+            json=_VALID_REPORT_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["strategy"] == "auth_matrix_probe"
+        assert body["status"] == "submitted"
+        assert len(report_store.submit_calls) == 1
+        assert report_store.submit_calls[-1].submitted_by == "master-user"
+
+    def test_submit_report_master_session_cookie_succeeds(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post(_REPORT_PATH, json=_VALID_REPORT_PAYLOAD)
+        assert resp.status_code == 201, resp.text
+        assert report_store.submit_calls[-1].submitted_by == "master-user"
+        client.cookies.delete("ante_session")
+
+    # 201 — human (scope 무관) 통과 ──────────────────────────────────
+
+    def test_submit_report_human_bearer_succeeds(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """spec predicate: human 멤버는 scope 검증을 무조건 통과한다."""
+        resp = client.post(
+            _REPORT_PATH,
+            json=_VALID_REPORT_PAYLOAD,
+            headers={"Authorization": "Bearer human-token"},
+        )
+        assert resp.status_code == 201, resp.text
+        assert report_store.submit_calls[-1].submitted_by == "human-admin"
+
+    # 201 — agent + report:write scope ───────────────────────────────
+
+    def test_submit_report_agent_with_report_write_succeeds(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """agent + ``report:write`` ∈ scopes → 통과 (spec predicate 정합).
+
+        전략 리서치 agent 는 spec ``02-design-decisions.md:226-227`` 가 명시한
+        대로 ``report:write`` scope 만 보유해도 정상 제출이 가능해야 한다.
+        """
+        resp = client.post(
+            _REPORT_PATH,
+            json=_VALID_REPORT_PAYLOAD,
+            headers={"Authorization": "Bearer agent-report-token"},
+        )
+        assert resp.status_code == 201, resp.text
+        assert report_store.submit_calls[-1].submitted_by == "agent-report"
+
+    # 403 — agent without scope ──────────────────────────────────────
+
+    def test_submit_report_agent_without_report_write_returns_403(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """agent + scope 미보유 → 403 (spec predicate 정합)."""
+        resp = client.post(
+            _REPORT_PATH,
+            json=_VALID_REPORT_PAYLOAD,
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert report_store.submit_calls == []
+
+    def test_submit_report_agent_with_other_scope_returns_403(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """agent + 다른 scope (config:write) → 403.
+
+        ``report:write`` 가 아닌 scope 는 본 라우트 경로를 열지 않아야 한다.
+        """
+        resp = client.post(
+            _REPORT_PATH,
+            json=_VALID_REPORT_PAYLOAD,
+            headers={"Authorization": "Bearer agent-config-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert report_store.submit_calls == []
+
+    # 403 — inactive 멤버 (suspended/revoked) ────────────────────────
+
+    def test_submit_report_inactive_member_returns_403(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """suspended human 멤버 → 403 (세션 fallback 경로 차단).
+
+        ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
+        fallback 에서는 만료만 보므로, ``MemberStatus.ACTIVE`` 가 아닌 멤버는
+        명시적으로 403 으로 차단되어야 한다 (require_audit_read #1359 4차 fix
+        패턴 답습).
+        """
+        client.cookies.set("ante_session", "inactive-session-id")
+        resp = client.post(_REPORT_PATH, json=_VALID_REPORT_PAYLOAD)
+        assert resp.status_code == 403, resp.text
+        assert report_store.submit_calls == []
+        client.cookies.delete("ante_session")
+
+    # 422 — 인증 통과 + body invalid ─────────────────────────────────
+
+    def test_submit_report_master_invalid_body_returns_422(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """master + body 가 JSON object 가 아님 → 422."""
+        resp = client.post(
+            _REPORT_PATH,
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert report_store.submit_calls == []
+
+    def test_submit_report_master_empty_body_returns_422(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        resp = client.post(
+            _REPORT_PATH,
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert report_store.submit_calls == []
+
+    def test_submit_report_master_malformed_json_returns_422(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        resp = client.post(
+            _REPORT_PATH,
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert report_store.submit_calls == []
+
+    def test_submit_report_master_missing_required_returns_422(
+        self, client: TestClient, report_store: FakeReportStore
+    ) -> None:
+        """master + 필수 필드 누락 → 422 (Pydantic required field)."""
+        resp = client.post(
+            _REPORT_PATH,
+            json={"summary": "no required fields"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert report_store.submit_calls == []
