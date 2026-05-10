@@ -1221,6 +1221,62 @@ class TestRFC7807ErrorResponse:
             f"가 아님: {body_schema!r}"
         )
 
+    def test_openapi_components_includes_rule_update_request(self):
+        """``components.schemas.RuleUpdateRequest`` 가 항상 등록되어 있다 (#1376).
+
+        PUT /api/accounts/{account_id}/rules/{rule_type} 라우트도 raw body 패턴
+        (``request: Request`` + ``Depends(require_master_caller)``) 으로
+        전환되었다 (인증 가드 우선). 그 결과 ``body: RuleUpdateRequest`` 인자가
+        시그니처에서 사라져 FastAPI 자동 components 등록 경로를 타지 않으며,
+        inline schema 로 두면 frontend ``openapi-typescript`` 산출물이
+        ``export type RuleUpdateRequest`` 를 잃어 frontend 룰 UI 의 type
+        import 가 깨진다. ``_install_openapi_customizer`` 가 ``setdefault`` 로
+        fallback 등록해 이 회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "RuleUpdateRequest" in schemas, (
+            "RuleUpdateRequest 가 components.schemas 에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1376)"
+        )
+        comp = schemas["RuleUpdateRequest"]
+        assert isinstance(comp, dict)
+        assert comp.get("type") == "object"
+        properties = comp.get("properties", {})
+        for prop_name in ("enabled", "params"):
+            assert prop_name in properties, (
+                f"RuleUpdateRequest.properties 에 {prop_name} 누락: "
+                f"{sorted(properties.keys())}"
+            )
+        # ``enabled`` / ``params`` 는 default 가 있으므로 required 에 들어가지
+        # 않아야 한다 (Pydantic SSOT 정합 + #1374 strip 후처리).
+        required = comp.get("required", [])
+        for prop_name in ("enabled", "params"):
+            assert prop_name not in required, (
+                f"RuleUpdateRequest.required 에 {prop_name} 이 들어가면 안 됨: "
+                f"{required}"
+            )
+
+    def test_put_account_rule_request_body_uses_component_ref(self):
+        """PUT /api/accounts/{account_id}/rules/{rule_type} requestBody 가
+        ``$ref`` 매핑을 노출 (#1376).
+
+        inline schema 로 두면 frontend codegen 이
+        ``export type RuleUpdateRequest`` 를 만들지 못해 frontend 룰 UI 의
+        type import 가 깨진다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        put_op = schema["paths"]["/api/accounts/{account_id}/rules/{rule_type}"]["put"]
+        request_body = put_op.get("requestBody", {})
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/RuleUpdateRequest"}, (
+            "PUT /api/accounts/{account_id}/rules/{rule_type} requestBody "
+            f"schema 가 component $ref 가 아님: {body_schema!r}"
+        )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 

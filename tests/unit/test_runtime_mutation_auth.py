@@ -16,6 +16,7 @@ oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출
 - ``POST /api/reports`` (#1374, scope-aware)
 - ``POST /api/system/halt`` (#1375)
 - ``POST /api/system/clear-halt`` (#1375)
+- ``PUT  /api/accounts/{id}/rules/{rule_type}`` (#1376)
 
 각 라우트 × 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -1619,6 +1620,8 @@ class TestOpenAPIResponses401403:
             # #1375: system kill switch 인증 가드 추가.
             ("/api/system/halt", "post"),
             ("/api/system/clear-halt", "post"),
+            # #1376: account rule update 인증 가드 추가.
+            ("/api/accounts/{account_id}/rules/{rule_type}", "put"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:
@@ -1652,6 +1655,8 @@ class TestOpenAPIResponses401403:
             # #1375: system kill switch 인증 가드 추가.
             ("/api/system/halt", "post"),
             ("/api/system/clear-halt", "post"),
+            # #1376: account rule update 인증 가드 추가.
+            ("/api/accounts/{account_id}/rules/{rule_type}", "put"),
         ],
     )
     def test_openapi_lists_403_response(self, path: str, method: str) -> None:
@@ -1680,6 +1685,8 @@ class TestOpenAPIResponses401403:
             # 전환 후 명시 등록.
             "HaltRequest",
             "ClearHaltRequest",
+            # #1376: RuleUpdateRequest 도 raw body 패턴으로 전환 후 명시 등록.
+            "RuleUpdateRequest",
         ],
     )
     def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
@@ -2835,3 +2842,231 @@ class TestSystemClearHaltAuthMatrix:
         )
         assert resp.status_code == 403, resp.text
         assert account_service.activate_all_calls == []
+
+
+# ── #1376: PUT /api/accounts/{id}/rules/{rule_type} 인증 매트릭스 ────────
+
+
+_RULE_PATH = "/api/accounts/acc-target/rules/daily_loss_limit"
+_RULE_VALID_PAYLOAD: dict = {
+    "enabled": True,
+    "params": {"max_daily_loss_percent": 0.05},
+}
+
+
+class TestUpdateAccountRuleAuthMatrix:
+    """``PUT /api/accounts/{id}/rules/{rule_type}`` 는 master-only 인증 가드를
+    따른다 (#1376).
+
+    oracle A7 finding: 익명 호출이 ``dynamic_config.set`` 을 그대로 실행해
+    계좌 리스크 룰을 변경할 수 있었다. 본 매트릭스는 ``submit_report``
+    (#1374) / ``halt`` (#1375) 와 동일한 raw body + auth-first 패턴을 보장한다.
+
+    401/403 시 ``dynamic_config.set`` 이 호출되지 않음을 mock spy
+    (``set_calls``) 로 검증한다. ``RuleUpdateRequest`` 는 ``enabled`` /
+    ``params`` 둘 다 default 가 있으므로 빈 ``{}`` body 도 정상 200 을 받지만,
+    빈 raw body 는 422 로 거부한다 (``submit_report`` / 일관성).
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_rule_update_unauth_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(_RULE_PATH, json=_RULE_VALID_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+
+    def test_rule_update_invalid_bearer_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _RULE_PATH,
+            json=_RULE_VALID_PAYLOAD,
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+
+    def test_rule_update_invalid_session_cookie_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.put(_RULE_PATH, json=_RULE_VALID_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_rule_update_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """``session_service is None`` 배포 + 쿠키만 → 401 (cookie fallback skip)."""
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.put(_RULE_PATH, json=_RULE_VALID_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_rule_update_unauth_invalid_body_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). submit_report 패턴 답습."""
+        resp = client.put(_RULE_PATH, json=["not", "an", "object"])
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert dynamic_config.set_calls == []
+
+    def test_rule_update_unauth_malformed_json_returns_401(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.put(
+            _RULE_PATH,
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert dynamic_config.set_calls == []
+
+    # 200 — master 인증 통과 ─────────────────────────────────────────
+
+    def test_rule_update_master_bearer_succeeds(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _RULE_PATH,
+            json=_RULE_VALID_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["account_id"] == "acc-target"
+        assert body["rule_type"] == "daily_loss_limit"
+        assert body["rule"]["enabled"] is True
+        assert body["rule"]["params"]["max_daily_loss_percent"] == 0.05
+        # caller_id 가 changed_by 로 전파되어야 한다 (#1376).
+        assert len(dynamic_config.set_calls) == 1
+        call = dynamic_config.set_calls[-1]
+        assert call["key"] == "accounts.acc-target.rules"
+        assert call["category"] == "rule"
+        assert call["changed_by"] == "master-user"
+
+    def test_rule_update_master_session_cookie_succeeds(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.put(_RULE_PATH, json=_RULE_VALID_PAYLOAD)
+        assert resp.status_code == 200, resp.text
+        assert dynamic_config.set_calls[-1]["changed_by"] == "master-user"
+        client.cookies.delete("ante_session")
+
+    # 422 — 인증 통과 + body invalid ─────────────────────────────────
+
+    def test_rule_update_master_invalid_body_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """master + body 가 JSON object 가 아님 → 422."""
+        resp = client.put(
+            _RULE_PATH,
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    def test_rule_update_master_malformed_json_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _RULE_PATH,
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    def test_rule_update_master_empty_body_returns_422(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        """master + 빈 raw body → 422 (submit_report 패턴 일관성)."""
+        resp = client.put(
+            _RULE_PATH,
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert dynamic_config.set_calls == []
+
+    def test_rule_update_master_invalid_rule_config_returns_422(
+        self,
+        client: TestClient,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """master + RULE_REGISTRY validate_config 실패 → 422."""
+        resp = client.put(
+            _RULE_PATH,
+            json={"enabled": True, "params": {"max_daily_loss_percent": -1}},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        # validate_config 실패 시 dynamic_config.set 은 호출되지 않는다.
+        assert dynamic_config.set_calls == []
+
+    # 400 — 기존 계약 보존 (unknown rule type) ──────────────────────
+
+    def test_rule_update_master_unknown_rule_type_returns_400(
+        self,
+        client: TestClient,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """master + RULE_REGISTRY 미등록 rule_type → 400 (기존 계약 보존, #1376)."""
+        resp = client.put(
+            "/api/accounts/acc-target/rules/nonexistent_rule",
+            json=_RULE_VALID_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 400
+        assert "nonexistent_rule" in resp.json()["detail"]
+        # 400 차단 시 dynamic_config.set 은 호출되지 않는다.
+        assert dynamic_config.set_calls == []
+
+    # 403 — 인증된 non-master ────────────────────────────────────────
+
+    def test_rule_update_non_master_bearer_returns_403(
+        self, client: TestClient, dynamic_config: FakeDynamicConfig
+    ) -> None:
+        resp = client.put(
+            _RULE_PATH,
+            json=_RULE_VALID_PAYLOAD,
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert dynamic_config.set_calls == []
+
+    # 404 — master + 미존재 계좌 ─────────────────────────────────────
+
+    def test_rule_update_master_unknown_account_returns_404(
+        self,
+        client: TestClient,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """master + 존재하지 않는 account_id → 404."""
+        resp = client.put(
+            "/api/accounts/acc-missing/rules/daily_loss_limit",
+            json=_RULE_VALID_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404
+        assert dynamic_config.set_calls == []

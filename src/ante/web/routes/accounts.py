@@ -1050,18 +1050,97 @@ async def get_account_rules(
     return {"account_id": account_id, "rules": rules}
 
 
-@router.put("/{account_id}/rules/{rule_type}", response_model=RuleUpdateResponse)
+# PUT /api/accounts/{account_id}/rules/{rule_type} OpenAPI request body 문서
+# (#1376).
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(#1376 oracle A7 finding). FastAPI 자동 components 등록 경로를
+# 거치지 않으므로 inline schema로 두면 frontend codegen이
+# ``export type RuleUpdateRequest`` 를 만들지 못한다. 따라서 라우트
+# ``openapi_extra`` 는 ``$ref`` 매핑만 노출하고 본체 schema 는
+# ``_install_openapi_customizer`` 가 ``components.schemas`` 에 ``setdefault``
+# 등록한다 (#1351 ``ScopesUpdateRequest`` SSOT 패턴).
+#
+# 본체 schema 는 Pydantic 모델 SSOT (``RuleUpdateRequest``) 의
+# ``model_json_schema()`` 출력에서 파생한다. ``default: None`` 만 있는
+# optional 필드는 openapi-typescript 가 ``T | null`` 필수 필드로 잘못
+# 생성하는 회귀가 있어 (#1374), strip 후처리로 정리한다. ``RuleUpdateRequest``
+# 의 default 는 ``True`` / ``{}`` 이므로 영향 없지만 #1374/#1375 패턴
+# 일관성을 위해 동일 helper 를 사용한다.
+def _build_rule_update_request_schema() -> dict[str, Any]:
+    schema = RuleUpdateRequest.model_json_schema()
+    properties = schema.get("properties", {})
+    for prop in properties.values():
+        if isinstance(prop, dict) and prop.get("default") is None and "default" in prop:
+            prop.pop("default")
+    return schema
+
+
+RULE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = _build_rule_update_request_schema()
+
+
+@router.put(
+    "/{account_id}/rules/{rule_type}",
+    response_model=RuleUpdateResponse,
+    responses={
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization "
+                "header AND missing or invalid ante_session cookie). 대시보드 "
+                "사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, "
+                "에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 "
+                "하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요).",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 "
+                "누락, type mismatch, 룰 config 범위 검증 실패). 단, 인증이 "
+                "실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다 "
+                "(#1376)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/RuleUpdateRequest"},
+                },
+            },
+        },
+    },
+)
 async def update_account_rule(
     account_id: str,
     rule_type: str,
-    body: RuleUpdateRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     account_service: Annotated[Any, Depends(get_account_service)],
     config: Annotated[Any | None, Depends(get_config)],
     dynamic_config: Annotated[Any, Depends(get_dynamic_config)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 리스크 룰 개별 수정.
+    """계좌 리스크 룰 개별 수정. 인증된 master 만 호출 가능 (#1376).
 
     RULE_REGISTRY에 등록된 타입만 허용하며,
     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
@@ -1072,17 +1151,54 @@ async def update_account_rule(
     이 stored rules를 merge한 결과이며, ``ConfigChangedEvent`` reload 시
     동일 helper가 다시 호출된다. 본 GET/PUT API는 stored rules만 다룬다 —
     effective view는 후속 이슈에서 별도 엔드포인트로 노출한다 (#1296).
+
+    ``submit_report`` (#1374) / ``halt`` (#1375) 와 동일한 raw body 파싱
+    패턴을 적용해 인증 가드가 body validation 보다 우선 실행되도록 한다.
+    FastAPI 가 ``body: RuleUpdateRequest`` 를 먼저 검증하면 unauth + bad-body
+    시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다 — 본 라우트는
+    oracle A7 finding 의 핵심 시그니처 이므로 인증 가드 우선이 가장 중요하다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``RuleUpdateRequest.model_validate`` — ValidationError → 422.
+    4. RULE_REGISTRY 룰 타입 확인 — 없으면 400 (기존 계약 보존).
+    5. RULE_REGISTRY[rule_type].validate_config — 실패 시 422.
+    6. DynamicConfig 저장 + audit 기록 (changed_by / member_id = caller_id).
     """
     from ante.account.errors import AccountNotFoundError
     from ante.rule.engine import RULE_REGISTRY
 
-    # 계좌 존재 확인
+    # 1. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증.
+    try:
+        body = RuleUpdateRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    # 3. 계좌 존재 확인
     try:
         await account_service.get(account_id)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    # 룰 타입 유효성 검증
+    # 4. 룰 타입 유효성 검증 (기존 계약: unknown rule type → 400).
     if rule_type not in RULE_REGISTRY:
         raise HTTPException(
             status_code=400,
@@ -1090,7 +1206,7 @@ async def update_account_rule(
             f"가능한 값: {list(RULE_REGISTRY.keys())}",
         )
 
-    # config 파라미터 범위 검증
+    # 5. config 파라미터 범위 검증
     rule_class = RULE_REGISTRY[rule_type]
     validation_errors = rule_class.validate_config(body.params)
     if validation_errors:
@@ -1131,12 +1247,11 @@ async def update_account_rule(
         raw_rules.append(new_config)
 
     # DynamicConfig에 저장 (ConfigChangedEvent 발행됨)
-    changed_by = getattr(request.state, "member_id", "dashboard")
-    await dynamic_config.set(key, raw_rules, category="rule", changed_by=changed_by)
+    await dynamic_config.set(key, raw_rules, category="rule", changed_by=caller_id)
 
     if audit_logger:
         await audit_logger.log(
-            member_id=changed_by,
+            member_id=caller_id,
             action="account.rule.update",
             resource=f"account:{account_id}:rule:{rule_type}",
             detail=f"룰 수정: {rule_type} enabled={body.enabled}",
