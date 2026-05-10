@@ -17,11 +17,13 @@ from ante.web.app import create_app  # noqa: E402
 
 # 기존 테스트 파일의 Fake 들을 재사용한다.
 from tests.unit.test_bot_api import (  # noqa: E402
+    _MASTER_HEADERS,
     FakeAccount,
     FakeAccountService,
     FakeBotManager,
     FakeStrategyRecord,
     FakeStrategyRegistry,
+    _new_member_service,
 )
 
 
@@ -63,12 +65,17 @@ def strategy_registry() -> FakeStrategyRegistry:
 
 @pytest.fixture
 def client(bot_manager, account_service, strategy_registry) -> TestClient:
+    # POST /api/bots는 master 인증을 요구하므로(#1371), 본 회귀 테스트는
+    # default Authorization 헤더 + member_service stub을 함께 주입한다.
     app = create_app(
         bot_manager=bot_manager,
         account_service=account_service,
         strategy_registry=strategy_registry,
+        member_service=_new_member_service(),
     )
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update(_MASTER_HEADERS)
+    return client
 
 
 def _install_treasury_error_on_update(

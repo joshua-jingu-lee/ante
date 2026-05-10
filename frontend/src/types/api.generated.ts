@@ -311,10 +311,22 @@ export type paths = {
          *     인증/권한:
          *         oracle A7 시그니처(#1359)에서 본 라우트는 인증 없이 감사 로그 목록을
          *         반환하고 있었다. 감사 로그는 운영 행위 추적 정보(member_id, action,
-         *         resource, IP 등)를 담으므로 ``require_master_caller`` (#1352에서 도입)
-         *         를 적용해 master 권한자만 조회 가능하도록 막는다. 인증 누락은 401,
-         *         non-master는 403. ``audit:read`` scope strict 모델은 ``Member.scopes``
-         *         가 자유 문자열이라 별도 정의가 필요하므로 본 PR scope 외 follow-up.
+         *         resource, IP 등)를 담으므로 인증 가드를 적용한다. 인증 누락은 401,
+         *         권한 없음은 403.
+         *
+         *         Codex P2 (#1359 fix loop, 2차): 초기 패치는 ``require_master_caller``
+         *         를 그대로 적용해 ``master`` role만 허용했으나,
+         *         ``docs/specs/member/02-design-decisions.md:188-229`` 의 모니터링 agent
+         *         (``audit:read`` scope만 가진 default role)가 차단되는 문제가 있었다.
+         *         spec은 audit 도메인 read 권한을 ``master`` role 또는 ``audit:read``
+         *         scope 중 하나로 정의하므로, ``require_audit_read`` (master OR
+         *         ``audit:read`` ∈ Member.scopes)로 교체해 spec과 일치시켰다.
+         *
+         *     Codex P2 (#1359 fix loop): FastAPI는 핸들러 매개변수 선언 순서대로
+         *     dependency를 해결한다. ``audit_logger`` (필수 service, 미주입 시 503)를
+         *     ``require_audit_read`` 보다 먼저 두면, 인증 정보가 없는 호출자에게
+         *     503이 먼저 반환되어 "인증 누락은 401" 계약이 깨진다. 그러므로 인증
+         *     가드(``caller_id``)를 항상 먼저 선언해 401/403이 503보다 우선하도록 한다.
          *
          *     NOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.
          *     이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서
@@ -410,7 +422,20 @@ export type paths = {
         put?: never;
         /**
          * Create Bot
-         * @description 봇 생성.
+         * @description 봇 생성. 인증된 master만 호출 가능 (#1371).
+         *
+         *     ``update_bot`` (#1352)과 동일한 raw body 파싱 패턴을 적용해 인증 가드가
+         *     body validation보다 우선 실행되도록 한다. FastAPI가 ``body: BotCreateRequest``
+         *     를 먼저 검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어
+         *     contract가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        non-master → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``BotCreateRequest.model_validate`` — ValidationError → 422.
+         *     4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
          */
         post: operations["create_bot_api_bots_post"];
         delete?: never;
@@ -452,7 +477,11 @@ export type paths = {
         post?: never;
         /**
          * Delete Bot
-         * @description 봇 삭제.
+         * @description 봇 삭제. 인증된 master만 호출 가능 (#1371).
+         *
+         *     body가 없으므로 raw-body cold-path는 적용하지 않는다. 인증 가드가
+         *     handle_positions query 파라미터 검증보다 먼저 실행되어 unauth는 401,
+         *     non-master는 403으로 차단된다.
          *
          *     handle_positions:
          *         - keep (기본): 포지션을 유지한 채 봇만 삭제.
@@ -1764,31 +1793,28 @@ export type components = {
         };
         /**
          * BotCreateRequest
-         * @description 봇 생성 요청.
-         *
-         *     strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
-         *     strategy_name만 전달하면 최신 버전의 strategy_id로 자동 변환된다.
+         * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
          */
         BotCreateRequest: {
-            /** Account Id */
+            /** @description 사용할 계좌 ID. 미지정 시 단일 active 계좌가 자동 선택된다. */
             account_id?: string | null;
-            /** Bot Id */
+            /** @description 생성할 봇의 식별자. */
             bot_id: string;
-            /** Budget */
+            /** @description 예산 할당액 (원). 양수만 허용. */
             budget?: number | null;
             /**
-             * Interval Seconds
+             * @description 봇 step 주기 (초).
              * @default 60
              */
             interval_seconds: number;
             /**
-             * Name
+             * @description 사용자에게 표시되는 봇 이름. 비우면 bot_id를 사용한다.
              * @default
              */
             name: string;
-            /** Strategy Id */
+            /** @description 전략 ID. ``strategy_name``과 둘 중 하나는 반드시 전달해야 한다. */
             strategy_id?: string | null;
-            /** Strategy Name */
+            /** @description 전략 이름. 최신 버전의 strategy_id로 자동 변환된다. ``strategy_id``와 둘 중 하나는 반드시 전달해야 한다. */
             strategy_name?: string | null;
         };
         /**
@@ -4136,7 +4162,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Master permission required */
+            /** @description Master role or audit:read scope required */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4378,6 +4404,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master 권한 필요) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Strategy not found */
             404: {
                 headers: {
@@ -4396,7 +4440,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description strategy_id/strategy_name both missing, or budget allocation failed (Treasury error: insufficient funds, treasury not configured for account, etc.). On budget failure the newly created bot is rolled back via delete_bot(handle_positions='keep'). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, 미지정 필드, strategy_id/strategy_name 동시 누락) 또는 budget allocation 실패 (Treasury error: insufficient funds, treasury not configured for account, etc.). On budget failure the newly created bot is rolled back via delete_bot(handle_positions='keep'). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1371). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4573,6 +4617,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master 권한 필요) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Bot not found */
             404: {

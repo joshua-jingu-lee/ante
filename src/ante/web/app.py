@@ -141,6 +141,12 @@ def _install_openapi_customizer(app: FastAPI) -> None:
       빌드가 깨진다. ``BOT_UPDATE_REQUEST_SCHEMA`` /
       ``BALANCE_SET_REQUEST_SCHEMA`` 본체를 ``components.schemas``에
       ``setdefault`` 등록한다.
+    - ``BotCreateRequest`` 도 동일 이유로 등록 보장(#1371). POST /api/bots
+      가 raw body 패턴으로 전환되면서 ``body: BotCreateRequest`` 인자가
+      시그니처에서 사라졌고, inline schema로 두면 frontend codegen이
+      ``export type BotCreateRequest``를 만들지 못한다.
+      ``BOT_CREATE_REQUEST_SCHEMA`` 본체를 ``components.schemas``에
+      ``setdefault`` 등록한다.
     - ``AccountSuspendRequest`` 도 동일 이유로 등록 보장(#1352 2차 Codex
       review FAIL). POST /api/accounts/{id}/suspend 가 raw body 패턴으로
       전환되면서 ``body: AccountSuspendRequest`` 인자가 시그니처에서 사라졌고,
@@ -162,7 +168,10 @@ def _install_openapi_customizer(app: FastAPI) -> None:
     # import하므로 모듈 top-level circular import를 피하려면 같은 패턴을
     # 따른다.
     from ante.web.routes.accounts import ACCOUNT_SUSPEND_REQUEST_SCHEMA
-    from ante.web.routes.bots import BOT_UPDATE_REQUEST_SCHEMA
+    from ante.web.routes.bots import (
+        BOT_CREATE_REQUEST_SCHEMA,
+        BOT_UPDATE_REQUEST_SCHEMA,
+    )
     from ante.web.routes.members import (
         MEMBER_CREATE_REQUEST_SCHEMA,
         MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA,
@@ -184,6 +193,7 @@ def _install_openapi_customizer(app: FastAPI) -> None:
         schemas.setdefault("ErrorResponse", ErrorResponse.model_json_schema())
         schemas.setdefault("MemberCreateRequest", MEMBER_CREATE_REQUEST_SCHEMA)
         schemas.setdefault("ScopesUpdateRequest", MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA)
+        schemas.setdefault("BotCreateRequest", BOT_CREATE_REQUEST_SCHEMA)
         schemas.setdefault("BotUpdateRequest", BOT_UPDATE_REQUEST_SCHEMA)
         schemas.setdefault("BalanceSetRequest", BALANCE_SET_REQUEST_SCHEMA)
         schemas.setdefault("AccountSuspendRequest", ACCOUNT_SUSPEND_REQUEST_SCHEMA)

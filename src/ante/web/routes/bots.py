@@ -50,6 +50,70 @@ class BotCreateRequest(BaseModel):
     budget: float | None = Field(default=None, gt=0)
 
 
+# POST /api/bots OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(이슈 #1371). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema로 두면 frontend codegen이 ``export type BotCreateRequest``를
+# 만들지 못한다. 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고
+# 본체 schema는 ``_install_openapi_customizer``가 ``components.schemas``에
+# 등록한다(#1351 ``ScopesUpdateRequest`` SSOT 패턴).
+BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "BotCreateRequest",
+    "description": (
+        "POST /api/bots 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1371). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
+        "strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다."
+    ),
+    "required": ["bot_id"],
+    "properties": {
+        "bot_id": {
+            "type": "string",
+            "description": "생성할 봇의 식별자.",
+        },
+        "strategy_id": {
+            "type": ["string", "null"],
+            "description": (
+                "전략 ID. ``strategy_name``과 둘 중 하나는 반드시 전달해야 한다."
+            ),
+        },
+        "strategy_name": {
+            "type": ["string", "null"],
+            "description": (
+                "전략 이름. 최신 버전의 strategy_id로 자동 변환된다. "
+                "``strategy_id``와 둘 중 하나는 반드시 전달해야 한다."
+            ),
+        },
+        "name": {
+            "type": "string",
+            "default": "",
+            "description": "사용자에게 표시되는 봇 이름. 비우면 bot_id를 사용한다.",
+        },
+        "account_id": {
+            "type": ["string", "null"],
+            "description": (
+                "사용할 계좌 ID. 미지정 시 단일 active 계좌가 자동 선택된다."
+            ),
+        },
+        "interval_seconds": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 3600,
+            "default": 60,
+            "description": "봇 step 주기 (초).",
+        },
+        "budget": {
+            "type": ["number", "null"],
+            "exclusiveMinimum": 0,
+            "description": "예산 할당액 (원). 양수만 허용.",
+        },
+    },
+}
+
+
 @router.get(
     "",
     response_model=BotListResponse,
@@ -124,6 +188,27 @@ async def list_bots(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Strategy not found",
             "content": {
@@ -142,11 +227,13 @@ async def list_bots(
         },
         422: {
             "description": (
-                "strategy_id/strategy_name both missing, or budget allocation"
-                " failed (Treasury error: insufficient funds, treasury not"
-                " configured for account, etc.). On budget failure the newly"
-                " created bot is rolled back via delete_bot(handle_positions="
-                "'keep')."
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, "
+                "미지정 필드, strategy_id/strategy_name 동시 누락) 또는 budget "
+                "allocation 실패 (Treasury error: insufficient funds, treasury "
+                "not configured for account, etc.). On budget failure the newly "
+                "created bot is rolled back via delete_bot(handle_positions="
+                "'keep'). 단, 인증이 실패하면 body validation은 실행되지 않고 "
+                "401이 우선 반환된다(#1371)."
             ),
             "content": {
                 "application/problem+json": {
@@ -175,22 +262,68 @@ async def list_bots(
             },
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/BotCreateRequest"},
+                },
+            },
+        },
+    },
 )
 async def create_bot(
-    body: BotCreateRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any, Depends(get_strategy_registry)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 생성."""
+    """봇 생성. 인증된 master만 호출 가능 (#1371).
+
+    ``update_bot`` (#1352)과 동일한 raw body 파싱 패턴을 적용해 인증 가드가
+    body validation보다 우선 실행되도록 한다. FastAPI가 ``body: BotCreateRequest``
+    를 먼저 검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어
+    contract가 깨진다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``BotCreateRequest.model_validate`` — ValidationError → 422.
+    4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
+    """
     from pathlib import Path
 
+    from ante.account.errors import AccountNotFoundError
     from ante.account.models import AccountStatus
     from ante.bot.config import BotConfig
     from ante.bot.exceptions import BotError
     from ante.strategy.loader import StrategyLoader
+
+    # 1. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증.
+    try:
+        body = BotCreateRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
 
     # strategy_id / strategy_name 해석 ─────────────────────
     strategy_id = body.strategy_id
@@ -249,8 +382,17 @@ async def create_bot(
             else active[0]["account_id"]
         )
 
-    # 계좌 상태 검증: active가 아니면 봇 생성 거부
-    account = await account_service.get(account_id)
+    # 계좌 상태 검증: active가 아니면 봇 생성 거부.
+    # ``account_id`` 가 명시 전달됐는데 존재하지 않는 경우 account 라우트
+    # SSOT(``accounts.py``)와 동일하게 404로 변환한다(#1371). catch 없이
+    # propagate하면 500이 되어 client는 잘못된 입력 vs 시스템 오류를 구분할 수
+    # 없다.
+    try:
+        account = await account_service.get(account_id)
+    except AccountNotFoundError as e:
+        raise HTTPException(
+            status_code=404, detail=f"계좌를 찾을 수 없습니다: {account_id}"
+        ) from e
     if account.status != AccountStatus.ACTIVE:
         raise HTTPException(
             status_code=409,
@@ -332,7 +474,7 @@ async def create_bot(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="bot.create",
             resource=f"bot:{body.bot_id}",
             detail=f"strategy={strategy_id}",
@@ -561,6 +703,27 @@ async def stop_bot(
     "/{bot_id}",
     status_code=204,
     responses={
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Bot not found",
             "content": {
@@ -598,11 +761,16 @@ async def stop_bot(
 async def delete_bot(
     bot_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     handle_positions: str = "keep",
 ) -> None:
-    """봇 삭제.
+    """봇 삭제. 인증된 master만 호출 가능 (#1371).
+
+    body가 없으므로 raw-body cold-path는 적용하지 않는다. 인증 가드가
+    handle_positions query 파라미터 검증보다 먼저 실행되어 unauth는 401,
+    non-master는 403으로 차단된다.
 
     handle_positions:
         - keep (기본): 포지션을 유지한 채 봇만 삭제.
@@ -628,7 +796,7 @@ async def delete_bot(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="bot.delete",
             resource=f"bot:{bot_id}",
             detail=f"handle_positions={handle_positions}",

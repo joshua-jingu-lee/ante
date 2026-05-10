@@ -1,12 +1,14 @@
-"""Account/Bot/Treasury mutation route 인증 가드 테스트 (issue #1352).
+"""Account/Bot/Treasury mutation route 인증 가드 테스트 (issue #1352, #1371).
 
-oracle A7 시그니처에서 발견된 5개 mutation route는 인증된 master 호출자만
+oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출자만
 사용할 수 있어야 한다.
 - ``PUT  /api/accounts/{id}``
 - ``POST /api/accounts/{id}/suspend``
 - ``POST /api/accounts/{id}/activate``
 - ``PUT  /api/bots/{id}``
 - ``POST /api/treasury/balance``
+- ``POST /api/bots`` (#1371)
+- ``DELETE /api/bots/{id}`` (#1371)
 
 각 라우트 × 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -221,10 +223,12 @@ class _FakeBot:
 
 
 class FakeBotManager:
-    """``bot_manager.get_bot / update_bot`` stub."""
+    """``bot_manager.get_bot / update_bot / create_bot / delete_bot`` stub."""
 
     def __init__(self) -> None:
         self.update_calls: list[dict] = []
+        self.create_calls: list[dict] = []
+        self.delete_calls: list[dict] = []
         self._bots: dict[str, _FakeBot] = {
             "bot-target": _FakeBot("bot-target", name="Original"),
         }
@@ -243,6 +247,50 @@ class FakeBotManager:
         if "name" in kwargs and kwargs["name"] is not None:
             bot._name = kwargs["name"]
         return bot
+
+    async def create_bot(self, config, strategy_cls, **kwargs):
+        bot_id = getattr(config, "bot_id", "")
+        self.create_calls.append({"bot_id": bot_id})
+        bot = _FakeBot(bot_id, name=getattr(config, "name", "") or bot_id)
+        bot.config.account_id = getattr(config, "account_id", "acc-target")
+        bot.config.strategy_id = getattr(config, "strategy_id", "strat-1")
+        bot.config.interval_seconds = getattr(config, "interval_seconds", 60)
+        self._bots[bot_id] = bot
+        return bot
+
+    async def delete_bot(
+        self, bot_id: str, handle_positions: str = "keep", hard: bool = False
+    ):
+        self.delete_calls.append(
+            {"bot_id": bot_id, "handle_positions": handle_positions, "hard": hard}
+        )
+        self._bots.pop(bot_id, None)
+
+
+@dataclass
+class _FakeStrategyRecord:
+    strategy_id: str = "strat-1"
+    name: str = "test-strategy"
+    version: str = "1.0.0"
+    author_name: str = "tester"
+    author_id: str = "tester"
+    description: str = "test strategy"
+    filepath: str = "/tmp/strat-1.py"
+
+
+class FakeStrategyRegistry:
+    """``registry.get / get_by_name`` stub."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, _FakeStrategyRecord] = {
+            "strat-1": _FakeStrategyRecord(strategy_id="strat-1", name="test-strategy"),
+        }
+
+    async def get(self, strategy_id: str):
+        return self._records.get(strategy_id)
+
+    async def get_by_name(self, name: str):
+        return [r for r in self._records.values() if r.name == name]
 
 
 class FakeTreasury:
@@ -307,12 +355,31 @@ def treasury() -> FakeTreasury:
 
 
 @pytest.fixture
+def strategy_registry() -> FakeStrategyRegistry:
+    return FakeStrategyRegistry()
+
+
+@pytest.fixture
+def _mock_strategy_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``StrategyLoader.load`` 모킹 — 테스트 파일 시스템 의존성 제거."""
+
+    class _FakeStrategy:
+        pass
+
+    monkeypatch.setattr(
+        "ante.strategy.loader.StrategyLoader.load",
+        staticmethod(lambda path: _FakeStrategy),
+    )
+
+
+@pytest.fixture
 def client(
     member_service: FakeMemberService,
     session_service: FakeSessionService,
     account_service: FakeAccountService,
     bot_manager: FakeBotManager,
     treasury: FakeTreasury,
+    strategy_registry: FakeStrategyRegistry,
 ) -> TestClient:
     app = create_app(
         member_service=member_service,
@@ -320,6 +387,7 @@ def client(
         account_service=account_service,
         bot_manager=bot_manager,
         treasury=treasury,
+        strategy_registry=strategy_registry,
     )
     return TestClient(app)
 
@@ -330,6 +398,7 @@ def client_no_session_service(
     account_service: FakeAccountService,
     bot_manager: FakeBotManager,
     treasury: FakeTreasury,
+    strategy_registry: FakeStrategyRegistry,
 ) -> TestClient:
     """``session_service is None`` 배포 분기 시뮬레이션."""
     app = create_app(
@@ -337,6 +406,7 @@ def client_no_session_service(
         account_service=account_service,
         bot_manager=bot_manager,
         treasury=treasury,
+        strategy_registry=strategy_registry,
     )
     return TestClient(app)
 
@@ -1042,10 +1112,10 @@ class TestExtraForbid:
 
 
 class TestOpenAPIResponses401403:
-    """5개 mutation route의 OpenAPI ``responses``에 401/403 항목이 있어야 한다.
+    """mutation route의 OpenAPI ``responses``에 401/403 항목이 있어야 한다.
 
     ``frontend/openapi.json`` codegen 산출물이 401/403 분기를 인식할 수 있도록
-    contract에 명시해야 한다(#1352 risk: contract-drift).
+    contract에 명시해야 한다(#1352 / #1371 risk: contract-drift).
     """
 
     @pytest.mark.parametrize(
@@ -1056,6 +1126,9 @@ class TestOpenAPIResponses401403:
             ("/api/accounts/{account_id}/activate", "post"),
             ("/api/bots/{bot_id}", "put"),
             ("/api/treasury/balance", "post"),
+            # #1371: 봇 lifecycle (create / delete) 인증 가드 추가.
+            ("/api/bots", "post"),
+            ("/api/bots/{bot_id}", "delete"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:
@@ -1076,6 +1149,9 @@ class TestOpenAPIResponses401403:
             ("/api/accounts/{account_id}/activate", "post"),
             ("/api/bots/{bot_id}", "put"),
             ("/api/treasury/balance", "post"),
+            # #1371: 봇 lifecycle (create / delete) 인증 가드 추가.
+            ("/api/bots", "post"),
+            ("/api/bots/{bot_id}", "delete"),
         ],
     )
     def test_openapi_lists_403_response(self, path: str, method: str) -> None:
@@ -1090,13 +1166,13 @@ class TestOpenAPIResponses401403:
 
     @pytest.mark.parametrize(
         "schema_name",
-        ["BotUpdateRequest", "BalanceSetRequest"],
+        ["BotCreateRequest", "BotUpdateRequest", "BalanceSetRequest"],
     )
     def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
-        """``BotUpdateRequest`` / ``BalanceSetRequest``는 raw body 패턴 적용으로
-        FastAPI 자동 등록 경로를 거치지 않으므로, ``_install_openapi_customizer``
-        가 ``components.schemas``에 명시 등록해야 frontend codegen이
-        ``export type``을 만들 수 있다.
+        """``BotCreateRequest`` / ``BotUpdateRequest`` / ``BalanceSetRequest``는
+        raw body 패턴 적용으로 FastAPI 자동 등록 경로를 거치지 않으므로,
+        ``_install_openapi_customizer``가 ``components.schemas``에 명시 등록해야
+        frontend codegen이 ``export type``을 만들 수 있다.
         """
         app = create_app()
         schema = app.openapi()
@@ -1105,3 +1181,282 @@ class TestOpenAPIResponses401403:
             f"components.schemas에 {schema_name}가 등록되어 있지 않음: "
             f"{sorted(components.keys())[:30]}..."
         )
+
+
+# ── #1371: POST /api/bots / DELETE /api/bots/{id} 인증 매트릭스 ─────────
+
+
+_VALID_CREATE_PAYLOAD: dict = {
+    "bot_id": "bot-new",
+    "strategy_name": "test-strategy",
+    "account_id": "acc-target",
+    "interval_seconds": 60,
+}
+
+
+class TestCreateBotAuthMatrix:
+    """``POST /api/bots`` 는 ``update_bot`` (#1352) 와 동일한 raw-body 패턴 +
+    auth-first 계약을 따른다 (#1371). 인증 가드가 body 파싱보다 먼저 실행되어야
+    한다.
+
+    401/403 시 ``bot_manager.create_bot`` 이 호출되지 않음을 mock spy
+    (``create_calls``) 로 검증한다.
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_create_bot_unauth_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post("/api/bots", json=_VALID_CREATE_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.create_calls == []
+
+    def test_create_bot_invalid_bearer_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post(
+            "/api/bots",
+            json=_VALID_CREATE_PAYLOAD,
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.create_calls == []
+
+    def test_create_bot_invalid_session_cookie_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.post("/api/bots", json=_VALID_CREATE_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.create_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_create_bot_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        bot_manager: FakeBotManager,
+        _mock_strategy_loader,
+    ) -> None:
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.post("/api/bots", json=_VALID_CREATE_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.create_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_create_bot_unauth_invalid_body_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). update_bot 패턴 답습."""
+        resp = client.post(
+            "/api/bots",
+            json={"bot_id": "bot-x", "interval_seconds": "not-a-number"},
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert bot_manager.create_calls == []
+
+    def test_create_bot_unauth_malformed_json_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.post(
+            "/api/bots",
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.create_calls == []
+
+    # 200 (실제 POST는 201) — master 인증 통과 ─────────────────────────
+
+    def test_create_bot_master_bearer_succeeds(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post(
+            "/api/bots",
+            json=_VALID_CREATE_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 201, resp.text
+        assert bot_manager.create_calls[-1]["bot_id"] == "bot-new"
+
+    def test_create_bot_master_session_cookie_succeeds(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post("/api/bots", json=_VALID_CREATE_PAYLOAD)
+        assert resp.status_code == 201, resp.text
+        assert bot_manager.create_calls[-1]["bot_id"] == "bot-new"
+        client.cookies.delete("ante_session")
+
+    # 422 — 인증 통과 + body invalid → 정상 검증 경로 ─────────────────
+
+    def test_create_bot_master_invalid_body_returns_422(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post(
+            "/api/bots",
+            json={"bot_id": "bot-y", "interval_seconds": "not-a-number"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert bot_manager.create_calls == []
+
+    def test_create_bot_master_empty_body_returns_422(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post(
+            "/api/bots",
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert bot_manager.create_calls == []
+
+    # 403 — 인증된 non-master ────────────────────────────────────────
+
+    def test_create_bot_non_master_bearer_returns_403(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post(
+            "/api/bots",
+            json=_VALID_CREATE_PAYLOAD,
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert bot_manager.create_calls == []
+
+    # 404 — master + missing strategy / account ─────────────────────
+
+    def test_create_bot_master_strategy_not_found_returns_404(
+        self, client: TestClient, bot_manager: FakeBotManager, _mock_strategy_loader
+    ) -> None:
+        resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-z",
+                "strategy_name": "no-such-strategy",
+                "account_id": "acc-target",
+            },
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert bot_manager.create_calls == []
+
+    def test_create_bot_master_account_not_found_returns_404(
+        self,
+        client: TestClient,
+        bot_manager: FakeBotManager,
+        account_service: FakeAccountService,
+        _mock_strategy_loader,
+    ) -> None:
+        """master 인증 통과 + 존재하지 않는 account_id → 404 (AccountNotFoundError).
+
+        ``AccountNotFoundError``는 web layer에서 404로 변환된다 (account 라우트
+        SSOT와 동일). 봇은 생성되지 않아야 한다.
+        """
+        resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-q",
+                "strategy_name": "test-strategy",
+                "account_id": "no-such-account",
+            },
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert bot_manager.create_calls == []
+
+
+class TestDeleteBotAuthMatrix:
+    """``DELETE /api/bots/{id}`` 인증 가드 매트릭스 (#1371). body 가 없으므로
+    raw-body cold-path는 적용되지 않지만 인증 → 404 → mutation 순서를 따른다.
+
+    401/403 시 ``bot_manager.delete_bot`` 이 호출되지 않음을 mock spy
+    (``delete_calls``) 로 검증한다.
+    """
+
+    def test_delete_bot_unauth_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.delete("/api/bots/bot-target")
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.delete_calls == []
+
+    def test_delete_bot_invalid_bearer_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.delete(
+            "/api/bots/bot-target",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.delete_calls == []
+
+    def test_delete_bot_invalid_session_cookie_returns_401(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.delete("/api/bots/bot-target")
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.delete_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_delete_bot_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        bot_manager: FakeBotManager,
+    ) -> None:
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.delete("/api/bots/bot-target")
+        assert resp.status_code == 401, resp.text
+        assert bot_manager.delete_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    def test_delete_bot_master_bearer_succeeds(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.delete(
+            "/api/bots/bot-target",
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert bot_manager.delete_calls[-1]["bot_id"] == "bot-target"
+        assert bot_manager.delete_calls[-1]["handle_positions"] == "keep"
+
+    def test_delete_bot_master_session_cookie_succeeds(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.delete("/api/bots/bot-target")
+        assert resp.status_code == 204, resp.text
+        assert bot_manager.delete_calls[-1]["bot_id"] == "bot-target"
+        client.cookies.delete("ante_session")
+
+    def test_delete_bot_non_master_bearer_returns_403(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.delete(
+            "/api/bots/bot-target",
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert bot_manager.delete_calls == []
+
+    def test_delete_bot_master_missing_returns_404(
+        self, client: TestClient, bot_manager: FakeBotManager
+    ) -> None:
+        resp = client.delete(
+            "/api/bots/no-such-bot",
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert bot_manager.delete_calls == []

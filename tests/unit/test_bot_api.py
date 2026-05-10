@@ -569,8 +569,11 @@ class TestCreateBotAccountStatus:
             bot_manager=bot_manager,
             account_service=suspended_account_service,
             strategy_registry=strategy_registry,
+            member_service=_new_member_service(),
         )
-        return TestClient(app)
+        client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
+        return client
 
     def test_create_bot_suspended_account_returns_409(self, client_suspended):
         """정지된 계좌에서 봇 생성 → 409 Conflict."""
@@ -597,8 +600,10 @@ class TestCreateBotAccountStatus:
             bot_manager=bot_manager,
             account_service=account_svc,
             strategy_registry=strategy_registry,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
         resp = client.post(
             "/api/bots",
             json={
@@ -801,8 +806,11 @@ class TestDeleteBotAuditLog:
             bot_manager=bot_manager,
             account_service=default_account_service,
             audit_logger=fake_audit_logger,
+            member_service=_new_member_service(),
         )
-        return TestClient(app)
+        client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
+        return client
 
     def test_audit_log_records_keep(self, client_with_audit, bot_manager, audit_logs):
         """감사 로그에 handle_positions=keep 기록."""
@@ -1019,8 +1027,11 @@ class TestCreateBotStrategyName:
             bot_manager=bot_manager,
             account_service=default_account_service,
             strategy_registry=strategy_registry,
+            member_service=_new_member_service(),
         )
-        return TestClient(app)
+        client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
+        return client
 
     def test_create_bot_with_strategy_name(self, client_with_registry):
         """strategy_name으로 봇 생성 성공."""
@@ -1091,8 +1102,10 @@ class TestCreateBotStrategyName:
             bot_manager=bot_manager,
             account_service=empty_svc,
             strategy_registry=strategy_registry,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
         resp = client.post(
             "/api/bots",
             json={
@@ -1115,8 +1128,10 @@ class TestCreateBotStrategyName:
             bot_manager=bot_manager,
             account_service=multi_svc,
             strategy_registry=strategy_registry,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
         resp = client.post(
             "/api/bots",
             json={
