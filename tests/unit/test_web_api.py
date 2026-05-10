@@ -877,6 +877,64 @@ class TestRFC7807ErrorResponse:
             f"$ref가 아님: {body_schema!r}"
         )
 
+    def test_openapi_components_includes_password_change_request(self):
+        """``components.schemas.PasswordChangeRequest``가 항상 등록되어 있다 (#1377).
+
+        PATCH /api/members/{member_id}/password 라우트도 ``create_member`` /
+        ``update_scopes`` / ``halt`` 등과 동일한 raw body 패턴(``request:
+        Request``)으로 전환되었다(인증 가드 우선 — oracle A7 finding fix).
+        그 결과 ``body: PasswordChangeRequest`` 인자가 시그니처에서 사라져
+        FastAPI 자동 components 등록 경로를 타지 않으며, inline schema로 두면
+        frontend ``openapi-typescript`` 산출물이 ``export type
+        PasswordChangeRequest``를 잃어 비밀번호 변경 UI 빌드가 깨진다.
+        ``_install_openapi_customizer``가 ``setdefault``로 fallback 등록해 이
+        회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "PasswordChangeRequest" in schemas, (
+            "PasswordChangeRequest가 components.schemas에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1377)"
+        )
+        password_schema = schemas["PasswordChangeRequest"]
+        assert isinstance(password_schema, dict)
+        assert password_schema.get("type") == "object"
+        # 필수 필드 contract 보존 검증.
+        required = password_schema.get("required", [])
+        assert "old_password" in required, (
+            f"PasswordChangeRequest.required에 old_password 누락: {required}"
+        )
+        assert "new_password" in required, (
+            f"PasswordChangeRequest.required에 new_password 누락: {required}"
+        )
+        # ``additionalProperties: false``로 unknown 키 차단 — extra="forbid" SSOT.
+        assert password_schema.get("additionalProperties") is False, (
+            "PasswordChangeRequest.additionalProperties는 False여야 함: "
+            f"{password_schema.get('additionalProperties')!r}"
+        )
+        properties = password_schema.get("properties", {})
+        assert properties.get("old_password", {}).get("type") == "string"
+        assert properties.get("new_password", {}).get("type") == "string"
+
+    def test_patch_members_password_request_body_uses_component_ref(self):
+        """PATCH /api/members/{id}/password requestBody가 ``$ref`` 매핑을 노출 (#1377).
+
+        inline schema로 두면 frontend codegen이 ``export type
+        PasswordChangeRequest``를 만들지 못해 비밀번호 변경 UI 의 type
+        import 가 깨진다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        patch_op = schema["paths"]["/api/members/{member_id}/password"]["patch"]
+        request_body = patch_op.get("requestBody", {})
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/PasswordChangeRequest"}, (
+            "PATCH /api/members/{member_id}/password requestBody schema가 "
+            f"component $ref가 아님: {body_schema!r}"
+        )
+
     def test_openapi_components_includes_account_suspend_request(self):
         """``components.schemas.AccountSuspendRequest``가 항상 등록되어 있다.
 

@@ -16,6 +16,7 @@ from ante.web.deps import (
     get_audit_logger_optional,
     get_member_service,
     get_session_service_optional,
+    require_master_caller,
 )
 from ante.web.schemas import (
     MemberCreateResponse,
@@ -163,10 +164,57 @@ MEMBER_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
 
 
 class PasswordChangeRequest(BaseModel):
-    """비밀번호 변경 요청."""
+    """비밀번호 변경 요청.
+
+    OpenAPI ``PASSWORD_CHANGE_REQUEST_SCHEMA``는 ``additionalProperties:
+    false``를 선언한다. 런타임 모델도 ``extra="forbid"``로 동일하게 강제해
+    OpenAPI contract와 동작을 일치시킨다(#1351 패턴 답습 — Finding P2:
+    request schema contract drift 방지).
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     old_password: str
     new_password: str
+
+
+# PATCH /api/members/{member_id}/password OpenAPI request body 문서 (#1377).
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(이슈 #1377 — oracle A7 finding: 인증 없이 credential check 까지 도달).
+# FastAPI 자동 components 등록 경로를 거치지 않으므로 inline schema로 두면
+# frontend codegen이 ``export type PasswordChangeRequest`` 를 만들지 못한다.
+# 따라서 라우트 ``openapi_extra`` 는 ``$ref`` 매핑만 노출하고 본체 schema 는
+# ``_install_openapi_customizer`` 가 ``components.schemas`` 에 ``setdefault``
+# 등록한다 (#1351 ``ScopesUpdateRequest`` SSOT 패턴).
+#
+# 본체 schema 는 Pydantic 모델 SSOT (``PasswordChangeRequest``) 의
+# ``model_json_schema()`` 출력에서 파생한다. 수동 dict 정의는 invariants 를
+# 매번 재구성해야 해서 회귀 위험이 있어 폐기한다 (#1374 / #1375 패턴 답습).
+def _build_password_change_request_schema() -> dict[str, Any]:
+    """``PasswordChangeRequest`` 를 OpenAPI components schema 로 변환.
+
+    ``default: None`` 만 있는 optional 필드는 openapi-typescript 가
+    ``T | null`` 필수 필드로 잘못 생성하는 회귀가 있어 (#1374), strip 후처리로
+    정리한다. 현재 모델은 default 가 있는 필드가 없지만 패턴 일관성을 위해
+    동일 helper 로직을 사용한다.
+    """
+    schema = PasswordChangeRequest.model_json_schema()
+    properties = schema.get("properties", {})
+    for prop in properties.values():
+        if isinstance(prop, dict) and prop.get("default") is None and "default" in prop:
+            prop.pop("default")
+    schema["title"] = "PasswordChangeRequest"
+    schema["description"] = (
+        "PATCH /api/members/{member_id}/password 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1377). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다."
+    )
+    return schema
+
+
+PASSWORD_CHANGE_REQUEST_SCHEMA: dict[str, Any] = _build_password_change_request_schema()
 
 
 class ScopesUpdateRequest(BaseModel):
@@ -732,8 +780,9 @@ async def rotate_token(
     "/{member_id}/password",
     response_model=OkResponse,
     responses={
+        401: _AUTH_REQUIRED_RESPONSE,
         403: {
-            "description": "Permission denied",
+            "description": "Permission denied (master 권한 필요).",
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -742,6 +791,18 @@ async def rotate_token(
         },
         404: {
             "description": "Member not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, "
+                "type mismatch). 단, 인증이 실패하면 body validation은 실행되지 "
+                "않고 401이 우선 반환된다(#1377)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -757,16 +818,84 @@ async def rotate_token(
             },
         },
     },
+    openapi_extra={
+        # ``$ref`` 매핑을 사용해 ``components.schemas.PasswordChangeRequest``를
+        # 외부 노출한다(이슈 #1377). raw body 패턴으로 라우트 시그니처에서
+        # ``body: PasswordChangeRequest`` 인자를 제거하면서 FastAPI 자동
+        # components 등록 경로가 사라졌다. 본체 schema는
+        # ``_install_openapi_customizer``가 ``PASSWORD_CHANGE_REQUEST_SCHEMA``로
+        # ``components.schemas``에 등록한다(``app.py``).
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/PasswordChangeRequest"},
+                },
+            },
+        },
+    },
 )
 async def change_password(
     member_id: str,
-    body: PasswordChangeRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     svc: Annotated[Any, Depends(get_member_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """비밀번호 변경 (human 멤버 전용)."""
-    caller = _caller_id(request)
+    """비밀번호 변경 (human 멤버 전용). 인증된 master만 호출 가능 (#1377).
+
+    배경: oracle A7 finding (#1377) — 본 라우트는 인증 없이 credential check
+    (``svc.change_password``의 old-password 비교) 까지 도달했다. ``_caller_id``
+    만으로 audit 주체만 기록하고 인증 가드는 적용하지 않았기 때문이다. 본
+    패치는 ``require_master_caller`` 의존성을 적용하고 ``update_scopes``와
+    동일한 raw body 파싱 + auth-first 패턴을 따른다 (#1351 / #1352 SSOT).
+
+    범위 결정:
+    - master-only (보수). self-change use case (caller_id == member_id 허용)는
+      follow-up 이슈에서 별도 다룬다 (Issue #1377 Non-Goals).
+
+    인증 → raw-body → credential check 순서를 보장한다. FastAPI가
+    ``body: PasswordChangeRequest``를 먼저 검증하면 unauth + bad-body 시 401이
+    아닌 422가 먼저 반환되어 contract가 깨진다 — 본 라우트는 oracle A7
+    finding의 핵심 시그니처이므로 인증 가드 우선이 가장 중요하다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403. credential check 도달 전에 모두 차단된다.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``PasswordChangeRequest.model_validate`` — ValidationError → 422.
+    4. ``svc.change_password`` 호출. ``ValueError`` → 404,
+       ``PermissionError``/``PermissionDeniedError`` → 403.
+
+    Audit 로그의 ``member_id``는 ``caller_id``로 기록한다(SSOT). 대상 멤버는
+    ``resource=member:{member_id}``로 분리해 추적한다.
+    """
+    # 1. 인증 가드는 ``require_master_caller`` 의존성에 의해 이미 통과 상태.
+    #    (caller 빈 → 401, non-master → 403)
+
+    # 2. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 3. Pydantic 검증 — 인증 통과 후에만 실행된다.
+    try:
+        body = PasswordChangeRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    # 4. credential check (svc.change_password 내부의 old-password 비교).
     try:
         await svc.change_password(member_id, body.old_password, body.new_password)
     except ValueError as e:
@@ -776,7 +905,7 @@ async def change_password(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=caller or member_id,
+            member_id=caller_id,
             action="member.change_password",
             resource=f"member:{member_id}",
             ip=request.client.host if request.client else "",

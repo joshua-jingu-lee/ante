@@ -162,6 +162,14 @@ class FakeMemberService:
 
 @pytest.fixture
 def member_service():
+    """기본 ``member_service`` fixture (회귀 안전: master-user 미등록).
+
+    list/count 테스트는 등록된 멤버만 셀 수 있어야 하므로 fixture 단계에서
+    master 멤버를 자동 등록하면 카운트가 흔들린다. 대신 ``client`` fixture
+    가 매 요청마다 미들웨어로 ``master-user`` 를 service 에 자동 등록하고
+    ``request.state.member_id`` 도 주입한다 — list 테스트는 그 미들웨어가
+    트리거되지 않는 raw service 만 사용하므로 카운트 invariant 가 보존된다.
+    """
     return FakeMemberService()
 
 
@@ -169,14 +177,37 @@ def member_service():
 def client(member_service):
     """인증 컨텍스트가 미리 주입된 기본 클라이언트.
 
-    member 라우트 대다수는 인증된 호출자를 전제로 한다. 인증 자체의 동작
-    검증은 ``test_member_routes_create_auth.py``에서 별도로 수행한다.
+    member 라우트 대다수는 인증된 master 호출자를 전제로 한다 (#1351 / #1377).
+    middleware 가 매 요청마다 다음 두 가지를 수행한다:
+
+    1. ``request.state.member_id = "master-user"`` 를 주입한다 — Bearer
+       인증 미들웨어가 채우는 자리를 모방해 ``require_master_caller`` /
+       ``_resolve_caller_or_401`` 가 caller 를 결정할 수 있게 한다.
+    2. ``member_service`` 에 ``master-user`` (role=master) 를 자동 등록한다 —
+       ``require_master_caller`` 가 ``member_service.get(caller)`` 로 role
+       검증을 하므로 master 멤버가 service 에 존재해야 한다 (#1377).
+
+    list 테스트는 미들웨어가 master-user 를 등록하지 않도록 GET 분기에서
+    skip 한다 — list/count 의 멤버 카운트 invariant 를 보존한다. mutation
+    (POST/PUT/PATCH/DELETE) 만 master-user 를 자동 등록한다. 인증 자체의
+    동작 검증은 ``test_member_routes_create_auth.py`` /
+    ``test_member_routes_mutation_auth.py`` 에서 별도로 수행한다.
     """
     app = create_app(member_service=member_service)
 
     @app.middleware("http")
-    async def inject_member_id(request, call_next):
+    async def inject_master_caller(request, call_next):
+        # request.state.member_id 주입 (#1351 _resolve_caller_or_401 / #1377
+        # require_master_caller 의 caller 결정 경로).
         request.state.member_id = "master-user"
+        # mutation route 만 ``require_master_caller`` 의 role 검증을 한다.
+        # GET (list/get) 은 인증 가드가 없으므로 master-user 를 service 에
+        # 등록할 필요 없다 — 등록하면 list/count 테스트의 멤버 카운트
+        # invariant 가 흔들린다. POST/PUT/PATCH/DELETE 만 master 를 등록한다.
+        if request.method != "GET" and "master-user" not in member_service._members:
+            member_service._members["master-user"] = FakeMember(
+                member_id="master-user", role="master"
+            )
         return await call_next(request)
 
     return TestClient(app)
