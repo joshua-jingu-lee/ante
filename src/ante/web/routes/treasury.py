@@ -32,7 +32,13 @@ logger = logging.getLogger(__name__)
 
 
 class BudgetChangeRequest(BaseModel):
-    """예산 할당/회수 요청."""
+    """예산 할당/회수 요청.
+
+    OpenAPI ``BUDGET_CHANGE_REQUEST_SCHEMA``는 raw body 패턴(인증 가드 우선,
+    body validation 후행)으로 동작하므로 FastAPI 자동 components 등록 경로를
+    거치지 않는다. 본체 schema는 ``_install_openapi_customizer``가
+    ``components.schemas``에 명시 등록한다(#1372).
+    """
 
     amount: float
 
@@ -48,6 +54,34 @@ class BalanceSetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     balance: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+
+# POST /api/treasury/bots/{bot_id}/allocate, /deallocate OpenAPI request body 문서.
+#
+# 두 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(이슈 #1372). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema로 두면 frontend codegen이 ``export type BudgetChangeRequest``를
+# 만들지 못한다. 따라서 라우트 ``openapi_extra``는 ``$ref`` 매핑만 노출하고
+# 본체 schema는 ``_install_openapi_customizer``가 ``components.schemas``에
+# 등록한다(#1351 ``ScopesUpdateRequest`` SSOT 패턴).
+BUDGET_CHANGE_REQUEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "title": "BudgetChangeRequest",
+    "description": (
+        "POST /api/treasury/bots/{bot_id}/allocate, "
+        "POST /api/treasury/bots/{bot_id}/deallocate 입력 contract. "
+        "인증된 master 호출자만 사용할 수 있다(#1372). "
+        "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
+        "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다."
+    ),
+    "required": ["amount"],
+    "properties": {
+        "amount": {
+            "type": "number",
+            "description": "할당/회수 금액 (원).",
+        },
+    },
+}
 
 
 # POST /api/treasury/balance OpenAPI request body 문서.
@@ -266,6 +300,27 @@ async def list_transactions(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Bot not found",
             "content": {
@@ -282,6 +337,18 @@ async def list_transactions(
                 },
             },
         },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, "
+                "amount 누락). 단, 인증이 실패하면 body validation은 실행되지 "
+                "않고 401이 우선 반환된다(#1372)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -291,17 +358,62 @@ async def list_transactions(
             },
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/BudgetChangeRequest"},
+                },
+            },
+        },
+    },
 )
 async def allocate(
     bot_id: str,
-    body: BudgetChangeRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     treasury: Annotated[Any, Depends(get_treasury)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇에 예산 할당."""
+    """봇에 예산 할당. 인증된 master만 호출 가능 (#1372).
+
+    ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
+    body validation보다 우선 실행되도록 한다. FastAPI가 ``body:
+    BudgetChangeRequest``를 먼저 검증하면 unauth + bad-body 시 401이 아닌
+    422가 먼저 반환되어 contract가 깨진다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
+    4. ``treasury.allocate`` 호출 (``BotNotStoppedError`` → 409).
+    """
     from ante.treasury.exceptions import BotNotStoppedError
+
+    # 1. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증.
+    try:
+        body = BudgetChangeRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
 
     if bot_manager is not None and bot_manager.get_bot(bot_id) is None:
         raise HTTPException(
@@ -325,7 +437,7 @@ async def allocate(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="treasury.allocate",
             resource=f"bot:{bot_id}",
             detail=f"amount={body.amount:,.0f}",
@@ -352,6 +464,27 @@ async def allocate(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization header "
+                "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
+                "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
+                "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": "Permission denied (master 권한 필요)",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Bot not found",
             "content": {
@@ -368,6 +501,18 @@ async def allocate(
                 },
             },
         },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, "
+                "amount 누락). 단, 인증이 실패하면 body validation은 실행되지 "
+                "않고 401이 우선 반환된다(#1372)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -377,17 +522,60 @@ async def allocate(
             },
         },
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/BudgetChangeRequest"},
+                },
+            },
+        },
+    },
 )
 async def deallocate(
     bot_id: str,
-    body: BudgetChangeRequest,
     request: Request,
+    caller_id: Annotated[str, Depends(require_master_caller)],
     treasury: Annotated[Any, Depends(get_treasury)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 예산 회수."""
+    """봇 예산 회수. 인증된 master만 호출 가능 (#1372).
+
+    ``allocate`` / ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을
+    적용해 인증 가드가 body validation보다 우선 실행되도록 한다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+       non-master → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
+    4. ``treasury.deallocate`` 호출 (``BotNotStoppedError`` → 409).
+    """
     from ante.treasury.exceptions import BotNotStoppedError
+
+    # 1. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증.
+    try:
+        body = BudgetChangeRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
 
     if bot_manager is not None and bot_manager.get_bot(bot_id) is None:
         raise HTTPException(
@@ -408,7 +596,7 @@ async def deallocate(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="treasury.deallocate",
             resource=f"bot:{bot_id}",
             detail=f"amount={body.amount:,.0f}",

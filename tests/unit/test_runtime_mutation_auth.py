@@ -1,4 +1,4 @@
-"""Account/Bot/Treasury mutation route 인증 가드 테스트 (issue #1352, #1371).
+"""Account/Bot/Treasury mutation route 인증 가드 테스트 (issue #1352, #1371, #1372).
 
 oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출자만
 사용할 수 있어야 한다.
@@ -9,6 +9,8 @@ oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출
 - ``POST /api/treasury/balance``
 - ``POST /api/bots`` (#1371)
 - ``DELETE /api/bots/{id}`` (#1371)
+- ``POST /api/treasury/bots/{id}/allocate`` (#1372)
+- ``POST /api/treasury/bots/{id}/deallocate`` (#1372)
 
 각 라우트 × 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -293,12 +295,23 @@ class FakeStrategyRegistry:
         return [r for r in self._records.values() if r.name == name]
 
 
+@dataclass
+class _FakeBudget:
+    bot_id: str
+    allocated: float = 0.0
+    available: float = 0.0
+
+
 class FakeTreasury:
-    """``treasury.set_account_balance`` stub."""
+    """``treasury.set_account_balance / allocate / deallocate`` stub."""
 
     def __init__(self) -> None:
         self.set_balance_calls: list[float] = []
-        self._balance: float = 0.0
+        self.allocate_calls: list[dict] = []
+        self.deallocate_calls: list[dict] = []
+        self._balance: float = 10_000_000.0
+        self._unallocated: float = 10_000_000.0
+        self._budgets: dict[str, _FakeBudget] = {}
         self.account_id = "acc-target"
         self.currency = "KRW"
 
@@ -310,14 +323,34 @@ class FakeTreasury:
         self.set_balance_calls.append(balance)
         self._balance = balance
 
+    async def allocate(self, bot_id: str, amount: float) -> bool:
+        self.allocate_calls.append({"bot_id": bot_id, "amount": amount})
+        if amount <= 0 or self._unallocated < amount:
+            return False
+        budget = self._budgets.setdefault(bot_id, _FakeBudget(bot_id=bot_id))
+        budget.allocated += amount
+        budget.available += amount
+        self._unallocated -= amount
+        return True
+
+    async def deallocate(self, bot_id: str, amount: float) -> bool:
+        self.deallocate_calls.append({"bot_id": bot_id, "amount": amount})
+        budget = self._budgets.get(bot_id)
+        if budget is None or amount <= 0 or budget.available < amount:
+            return False
+        budget.allocated -= amount
+        budget.available -= amount
+        self._unallocated += amount
+        return True
+
     def get_summary(self) -> dict:
         return {"account_balance": self._balance, "total_balance": self._balance}
 
     def get_budget(self, bot_id: str):
-        return None
+        return self._budgets.get(bot_id)
 
     def list_budgets(self):
-        return []
+        return list(self._budgets.values())
 
 
 # ── fixtures ────────────────────────────────────────────────────────────
@@ -461,12 +494,35 @@ def _treasury_set_balance(
     )
 
 
+def _treasury_allocate(
+    client: TestClient, headers: dict | None = None, payload: dict | None = None
+):
+    return client.post(
+        "/api/treasury/bots/bot-target/allocate",
+        json=payload if payload is not None else {"amount": 1000.0},
+        headers=headers or {},
+    )
+
+
+def _treasury_deallocate(
+    client: TestClient, headers: dict | None = None, payload: dict | None = None
+):
+    return client.post(
+        "/api/treasury/bots/bot-target/deallocate",
+        json=payload if payload is not None else {"amount": 1000.0},
+        headers=headers or {},
+    )
+
+
 MUTATION_ROUTES = [
     ("account_update", _account_update, "account_service", "update_calls"),
     ("account_suspend", _account_suspend, "account_service", "suspend_calls"),
     ("account_activate", _account_activate, "account_service", "activate_calls"),
     ("bot_update", _bot_update, "bot_manager", "update_calls"),
     ("treasury_set_balance", _treasury_set_balance, "treasury", "set_balance_calls"),
+    # #1372: treasury budget mutation 인증 가드 추가.
+    ("treasury_allocate", _treasury_allocate, "treasury", "allocate_calls"),
+    ("treasury_deallocate", _treasury_deallocate, "treasury", "deallocate_calls"),
 ]
 
 
@@ -673,6 +729,36 @@ class TestBearerMasterSuccess:
         assert resp.status_code == 200, resp.text
         assert treasury.set_balance_calls == [50000.0]
 
+    def test_treasury_allocate_with_master_bearer_succeeds(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={"amount": 1000.0},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert treasury.allocate_calls[-1]["bot_id"] == "bot-target"
+        assert treasury.allocate_calls[-1]["amount"] == 1000.0
+
+    def test_treasury_deallocate_with_master_bearer_succeeds(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        # 먼저 예산 할당 (deallocate 가능 상태 만들기).
+        client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={"amount": 5000.0},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            json={"amount": 1000.0},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert treasury.deallocate_calls[-1]["bot_id"] == "bot-target"
+        assert treasury.deallocate_calls[-1]["amount"] == 1000.0
+
 
 class TestSessionCookieMasterSuccess:
     """master ``ante_session`` 쿠키 → 200 + ``request.state.member_id`` 갱신.
@@ -717,6 +803,37 @@ class TestSessionCookieMasterSuccess:
         resp = client.post("/api/treasury/balance", json={"balance": 100.0})
         assert resp.status_code == 200, resp.text
         assert treasury.set_balance_calls == [100.0]
+        client.cookies.delete("ante_session")
+
+    def test_treasury_allocate_with_master_session_cookie_succeeds(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={"amount": 2000.0},
+        )
+        assert resp.status_code == 200, resp.text
+        assert treasury.allocate_calls[-1]["bot_id"] == "bot-target"
+        assert treasury.allocate_calls[-1]["amount"] == 2000.0
+        client.cookies.delete("ante_session")
+
+    def test_treasury_deallocate_with_master_session_cookie_succeeds(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        # 먼저 예산 할당.
+        client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={"amount": 5000.0},
+        )
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            json={"amount": 1500.0},
+        )
+        assert resp.status_code == 200, resp.text
+        assert treasury.deallocate_calls[-1]["bot_id"] == "bot-target"
+        assert treasury.deallocate_calls[-1]["amount"] == 1500.0
         client.cookies.delete("ante_session")
 
 
@@ -792,6 +909,30 @@ class TestMasterMissingTarget404:
             headers={"Authorization": "Bearer master-token"},
         )
         assert resp.status_code == 404
+
+    def test_treasury_allocate_missing_bot_returns_404(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        """master 인증 + 존재하지 않는 봇 → 404, allocate 미호출."""
+        resp = client.post(
+            "/api/treasury/bots/no-such-bot/allocate",
+            json={"amount": 1000.0},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert treasury.allocate_calls == []
+
+    def test_treasury_deallocate_missing_bot_returns_404(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        """master 인증 + 존재하지 않는 봇 → 404, deallocate 미호출."""
+        resp = client.post(
+            "/api/treasury/bots/no-such-bot/deallocate",
+            json={"amount": 1000.0},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert treasury.deallocate_calls == []
 
 
 # ── raw body 패턴: 401 우선 ────────────────────────────────────────────
@@ -1063,6 +1204,165 @@ class TestSetBalanceAuthFirstOverBodyValidation:
         assert treasury.set_balance_calls == []
 
 
+class TestAllocateAuthFirstOverBodyValidation:
+    """``allocate`` 도 raw body 패턴 + 401 우선이어야 한다 (#1372).
+
+    Authorization 없음 + body invalid → 401 (NOT 422). master 인증 통과 후
+    invalid body 만 422 로 떨어진다.
+    """
+
+    def test_allocate_unauth_invalid_body_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={"amount": "not-a-number"},
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert treasury.allocate_calls == []
+
+    def test_allocate_unauth_malformed_json_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert treasury.allocate_calls == []
+
+    def test_allocate_invalid_bearer_invalid_body_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+        assert treasury.allocate_calls == []
+
+    def test_allocate_master_invalid_body_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json={"amount": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert treasury.allocate_calls == []
+
+    def test_allocate_master_empty_body_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert treasury.allocate_calls == []
+
+    def test_allocate_master_non_object_json_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/allocate",
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert treasury.allocate_calls == []
+
+
+class TestDeallocateAuthFirstOverBodyValidation:
+    """``deallocate`` 도 raw body 패턴 + 401 우선이어야 한다 (#1372).
+
+    ``allocate`` 와 동일 매트릭스. 401/403 시 ``treasury.deallocate`` 미호출.
+    """
+
+    def test_deallocate_unauth_invalid_body_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            json={"amount": "not-a-number"},
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert treasury.deallocate_calls == []
+
+    def test_deallocate_unauth_malformed_json_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert treasury.deallocate_calls == []
+
+    def test_deallocate_invalid_bearer_invalid_body_returns_401(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            json={},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+        assert treasury.deallocate_calls == []
+
+    def test_deallocate_master_invalid_body_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            json={"amount": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert treasury.deallocate_calls == []
+
+    def test_deallocate_master_empty_body_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert treasury.deallocate_calls == []
+
+    def test_deallocate_master_non_object_json_returns_422(
+        self, client: TestClient, treasury: FakeTreasury
+    ) -> None:
+        resp = client.post(
+            "/api/treasury/bots/bot-target/deallocate",
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert treasury.deallocate_calls == []
+
+
 # ── extra="forbid" 회귀 ────────────────────────────────────────────────
 
 
@@ -1129,6 +1429,9 @@ class TestOpenAPIResponses401403:
             # #1371: 봇 lifecycle (create / delete) 인증 가드 추가.
             ("/api/bots", "post"),
             ("/api/bots/{bot_id}", "delete"),
+            # #1372: treasury budget mutation 인증 가드 추가.
+            ("/api/treasury/bots/{bot_id}/allocate", "post"),
+            ("/api/treasury/bots/{bot_id}/deallocate", "post"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:
@@ -1152,6 +1455,9 @@ class TestOpenAPIResponses401403:
             # #1371: 봇 lifecycle (create / delete) 인증 가드 추가.
             ("/api/bots", "post"),
             ("/api/bots/{bot_id}", "delete"),
+            # #1372: treasury budget mutation 인증 가드 추가.
+            ("/api/treasury/bots/{bot_id}/allocate", "post"),
+            ("/api/treasury/bots/{bot_id}/deallocate", "post"),
         ],
     )
     def test_openapi_lists_403_response(self, path: str, method: str) -> None:
@@ -1166,7 +1472,13 @@ class TestOpenAPIResponses401403:
 
     @pytest.mark.parametrize(
         "schema_name",
-        ["BotCreateRequest", "BotUpdateRequest", "BalanceSetRequest"],
+        [
+            "BotCreateRequest",
+            "BotUpdateRequest",
+            "BalanceSetRequest",
+            # #1372: BudgetChangeRequest 도 raw body 패턴으로 전환 후 명시 등록.
+            "BudgetChangeRequest",
+        ],
     )
     def test_openapi_components_schemas_registered(self, schema_name: str) -> None:
         """``BotCreateRequest`` / ``BotUpdateRequest`` / ``BalanceSetRequest``는

@@ -952,6 +952,79 @@ class TestRFC7807ErrorResponse:
             f"누락 — JSON null body 호환 계약: {one_of!r}"
         )
 
+    def test_openapi_components_includes_budget_change_request(self):
+        """``components.schemas.BudgetChangeRequest``가 항상 등록되어 있다 (#1372).
+
+        POST /api/treasury/bots/{bot_id}/allocate, /deallocate 라우트도 raw
+        body 패턴(``request: Request`` + ``Depends(require_master_caller)``)으로
+        전환되었다(인증 가드 우선). 그 결과 ``body: BudgetChangeRequest`` 인자가
+        시그니처에서 사라져 FastAPI 자동 components 등록 경로를 타지 않으며,
+        inline schema로 두면 frontend ``openapi-typescript`` 산출물이
+        ``export type BudgetChangeRequest`` 를 잃어
+        ``frontend/src/api/treasury.ts``의 ``allocateBudget``/``deallocateBudget``
+        type import 가 깨진다. ``_install_openapi_customizer`` 가
+        ``setdefault`` 로 fallback 등록해 이 회귀를 잠근다.
+        """
+        app = create_app()
+        schema = app.openapi()
+        schemas = schema.get("components", {}).get("schemas", {})
+        assert "BudgetChangeRequest" in schemas, (
+            "BudgetChangeRequest가 components.schemas에 등록되지 않음 — "
+            "_install_openapi_customizer 동작 확인 필요 (#1372)"
+        )
+        budget_schema = schemas["BudgetChangeRequest"]
+        assert isinstance(budget_schema, dict)
+        assert budget_schema.get("type") == "object"
+        required = budget_schema.get("required", [])
+        assert "amount" in required, (
+            f"BudgetChangeRequest.required에 amount 누락: {required}"
+        )
+        properties = budget_schema.get("properties", {})
+        amount_field = properties.get("amount", {})
+        assert amount_field.get("type") == "number", (
+            f"BudgetChangeRequest.amount는 number여야 함: {amount_field!r}"
+        )
+
+    def test_post_treasury_allocate_request_body_uses_component_ref(self):
+        """POST /api/treasury/bots/{id}/allocate requestBody가 ``$ref`` 매핑을 노출.
+
+        inline schema로 두면 frontend codegen이 ``export type
+        BudgetChangeRequest`` 를 만들지 못해 ``frontend/src/api/treasury.ts``의
+        import 가 깨진다 (#1372).
+        """
+        app = create_app()
+        schema = app.openapi()
+        post_op = schema["paths"]["/api/treasury/bots/{bot_id}/allocate"]["post"]
+        request_body = post_op.get("requestBody", {})
+        assert request_body.get("required") is True, (
+            "POST /api/treasury/bots/{id}/allocate requestBody.required는 True여야 함"
+        )
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/BudgetChangeRequest"}, (
+            "POST /api/treasury/bots/{id}/allocate requestBody schema가 component "
+            f"$ref가 아님: {body_schema!r}"
+        )
+
+    def test_post_treasury_deallocate_request_body_uses_component_ref(self):
+        """POST /api/treasury/bots/{id}/deallocate requestBody가 ``$ref`` 매핑을 노출.
+
+        ``allocate`` 와 동일 contract (#1372).
+        """
+        app = create_app()
+        schema = app.openapi()
+        post_op = schema["paths"]["/api/treasury/bots/{bot_id}/deallocate"]["post"]
+        request_body = post_op.get("requestBody", {})
+        assert request_body.get("required") is True, (
+            "POST /api/treasury/bots/{id}/deallocate requestBody.required는 True여야 함"
+        )
+        json_content = request_body.get("content", {}).get("application/json", {})
+        body_schema = json_content.get("schema", {})
+        assert body_schema == {"$ref": "#/components/schemas/BudgetChangeRequest"}, (
+            "POST /api/treasury/bots/{id}/deallocate requestBody schema가 component "
+            f"$ref가 아님: {body_schema!r}"
+        )
+
     def test_frontend_openapi_json_matches_live_app_openapi(self):
         """``frontend/openapi.json``이 live ``app.openapi()``와 동기화 (C4).
 
