@@ -271,6 +271,11 @@ _REPORT_WRITE_PERMISSION_DENIED_DETAIL = (
     "수행할 수 있습니다."
 )
 
+_STRATEGY_WRITE_PERMISSION_DENIED_DETAIL = (
+    "이 작업은 master, human 멤버 또는 strategy:write scope를 보유한 agent만 "
+    "수행할 수 있습니다."
+)
+
 _MEMBER_INACTIVE_DETAIL = "멤버가 비활성 상태입니다."
 
 
@@ -666,6 +671,112 @@ async def require_report_write(
     if not is_master and not is_human and not has_report_write:
         raise HTTPException(
             status_code=403, detail=_REPORT_WRITE_PERMISSION_DENIED_DETAIL
+        )
+
+    return caller
+
+
+async def require_strategy_write(
+    request: Request,
+    member_service: Annotated[Any | None, Depends(get_member_service_optional)],
+    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
+) -> str:
+    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고 strategy
+    lifecycle write 권한을 강제하는 FastAPI dependency (#1378).
+
+    배경:
+        oracle A7 finding (#1378): ``PATCH /api/strategies/{strategy_id}/status``
+        가 인증 없이 익명 호출을 받아 등록된 전략을 ``adopted`` / ``archived``
+        로 마음대로 전환할 수 있었다. spec
+        ``docs/specs/member/02-design-decisions.md:210-227`` 의
+        ``require_scope`` predicate 와 동일한 OR 분기를 적용해 SSOT 와 정합한다.
+        spec 은 전략 리서치 agent 의 정상 scope 예시로 ``strategy:write`` 를
+        명시하고 있으므로 이 dependency 는 master / human 외에도 해당 scope 를
+        보유한 agent 에게 정상 경로를 열어둔다.
+
+    - caller_member.role == ``MemberRole.MASTER`` → 통과
+    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관, spec
+      predicate 가 ``human`` 멤버는 scope 검증을 무조건 통과시킨다)
+    - ``"strategy:write"`` ∈ caller_member.scopes → 통과 (전략 리서치 agent 의
+      정상 경로)
+    - 그 외 (agent without scope) → ``HTTPException(403)``
+
+    인증 절차는 ``require_master_caller`` / ``require_audit_read`` /
+    ``require_config_write`` / ``require_report_write`` 와 동일하다 (Bearer
+    우선, ``session_service`` 가용 시 ``ante_session`` 쿠키 fallback,
+    ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403으로 흡수).
+    비활성 멤버(``MemberStatus.ACTIVE`` 미상태)는 권한 분기 직전에 403으로
+    차단해 ``TokenAuthMiddleware`` 가 거부하지 못한 세션 쿠키 fallback 경로의
+    회귀를 잠근다(``require_audit_read`` 4차 fix 패턴 답습).
+
+    Returns:
+        caller_id (str): 인증/권한 검증을 통과한 member_id.
+
+    Raises:
+        HTTPException(401): 인증 누락/실패.
+        HTTPException(403): 인증은 통과했으나 strategy write 권한 없음 또는
+            멤버 비활성 상태.
+    """
+    from ante.member.models import MemberRole, MemberStatus, MemberType
+
+    caller = getattr(request.state, "member_id", "") or ""
+
+    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
+    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller /
+    # require_audit_read / require_config_write / require_report_write 와 동일).
+    if not caller and session_service is not None:
+        ante_session = request.cookies.get("ante_session")
+        if ante_session:
+            try:
+                session = await session_service.validate(ante_session)
+            except Exception:
+                logger.exception(
+                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
+                )
+                session = None
+            if session:
+                resolved = session.get("member_id", "") or ""
+                if resolved:
+                    caller = resolved
+                    request.state.member_id = caller
+
+    if not caller:
+        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
+
+    if member_service is None:
+        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
+
+    member = None
+    try:
+        member = await member_service.get(caller)
+    except Exception:
+        logger.exception("멤버 조회 실패 (member_id=%s)", caller)
+
+    if member is None:
+        raise HTTPException(
+            status_code=403, detail=_STRATEGY_WRITE_PERMISSION_DENIED_DETAIL
+        )
+
+    # 비활성 멤버 차단 (require_audit_read #1359 fix loop 4차 패턴 답습).
+    status = getattr(member, "status", None)
+    status_value = getattr(status, "value", status)
+    if status_value != MemberStatus.ACTIVE.value:
+        raise HTTPException(status_code=403, detail=_MEMBER_INACTIVE_DETAIL)
+
+    role = getattr(member, "role", None)
+    role_value = getattr(role, "value", role)
+    is_master = role_value == MemberRole.MASTER.value
+
+    member_type = getattr(member, "type", None)
+    member_type_value = getattr(member_type, "value", member_type)
+    is_human = member_type_value == MemberType.HUMAN.value
+
+    scopes = getattr(member, "scopes", None) or []
+    has_strategy_write = "strategy:write" in scopes
+
+    if not is_master and not is_human and not has_strategy_write:
+        raise HTTPException(
+            status_code=403, detail=_STRATEGY_WRITE_PERMISSION_DENIED_DETAIL
         )
 
     return caller

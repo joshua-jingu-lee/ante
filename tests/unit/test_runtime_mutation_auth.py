@@ -1,5 +1,5 @@
 """Account/Bot/Treasury mutation route 인증 가드 테스트
-(issue #1352, #1371, #1372, #1373, #1374, #1375).
+(issue #1352, #1371, #1372, #1373, #1374, #1375, #1378).
 
 oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출자만
 사용할 수 있어야 한다.
@@ -17,6 +17,7 @@ oracle A7 시그니처에서 발견된 mutation route는 인증된 master 호출
 - ``POST /api/system/halt`` (#1375)
 - ``POST /api/system/clear-halt`` (#1375)
 - ``PUT  /api/accounts/{id}/rules/{rule_type}`` (#1376)
+- ``PATCH /api/strategies/{id}/status`` (#1378, scope-aware)
 
 각 라우트 × 인증 시나리오:
 - Authorization 헤더 + 세션 쿠키 모두 없음 → 401
@@ -336,14 +337,28 @@ class _FakeStrategyRecord:
     author_id: str = "tester"
     description: str = "test strategy"
     filepath: str = "/tmp/strat-1.py"
+    status: Any = None
 
 
 class FakeStrategyRegistry:
-    """``registry.get / get_by_name`` stub."""
+    """``registry.get / get_by_name / update_status`` stub.
+
+    #1378: ``PATCH /api/strategies/{strategy_id}/status`` 인증 매트릭스에서
+    401/403 시 ``update_status`` 가 호출되지 않음을 ``update_status_calls``
+    mock spy 로 검증한다. 200 (실제 204) 경로에서는 ``status`` 필드가
+    실제로 갱신되었는지 확인한다.
+    """
 
     def __init__(self) -> None:
+        from ante.strategy.registry import StrategyStatus
+
+        self.update_status_calls: list[dict] = []
         self._records: dict[str, _FakeStrategyRecord] = {
-            "strat-1": _FakeStrategyRecord(strategy_id="strat-1", name="test-strategy"),
+            "strat-1": _FakeStrategyRecord(
+                strategy_id="strat-1",
+                name="test-strategy",
+                status=StrategyStatus.REGISTERED,
+            ),
         }
 
     async def get(self, strategy_id: str):
@@ -351,6 +366,34 @@ class FakeStrategyRegistry:
 
     async def get_by_name(self, name: str):
         return [r for r in self._records.values() if r.name == name]
+
+    async def update_status(self, strategy_id: str, new_status: Any) -> None:
+        from ante.strategy.exceptions import StrategyError
+        from ante.strategy.registry import StrategyStatus
+
+        self.update_status_calls.append(
+            {"strategy_id": strategy_id, "status": new_status}
+        )
+        record = self._records.get(strategy_id)
+        if record is None:
+            raise StrategyError(f"Strategy not found: {strategy_id}")
+
+        # 실제 registry 와 동일한 전환 가드 (ARCHIVED → ADOPTED 거부 검증용).
+        _allowed: dict = {
+            StrategyStatus.REGISTERED: {
+                StrategyStatus.ADOPTED,
+                StrategyStatus.ARCHIVED,
+            },
+            StrategyStatus.ADOPTED: {StrategyStatus.ARCHIVED},
+            StrategyStatus.ARCHIVED: set(),
+        }
+        allowed = _allowed.get(record.status, set())
+        if new_status not in allowed:
+            raise ValueError(
+                f"전환 불가: {record.status.value} → {new_status.value} "
+                f"(허용: {', '.join(s.value for s in sorted(allowed))})"
+            )
+        record.status = new_status
 
 
 @dataclass
@@ -512,6 +555,14 @@ def member_service() -> FakeMemberService:
         member_type="agent",
         scopes=["report:write"],
     )
+    # agent + strategy:write scope — agent 정상 경로 검증용 (#1378).
+    svc.add_member(
+        "agent-strategy",
+        token="agent-strategy-token",
+        role="default",
+        member_type="agent",
+        scopes=["strategy:write"],
+    )
     # inactive 멤버 — suspended/revoked 세션 fallback 차단 검증용 (#1373).
     svc.add_member(
         "inactive-member",
@@ -531,6 +582,7 @@ def session_service() -> FakeSessionService:
     svc.add_session("human-session-id", member_id="human-admin")
     svc.add_session("agent-config-session-id", member_id="agent-config")
     svc.add_session("agent-report-session-id", member_id="agent-report")
+    svc.add_session("agent-strategy-session-id", member_id="agent-strategy")
     svc.add_session("inactive-session-id", member_id="inactive-member")
     return svc
 
@@ -3070,3 +3122,362 @@ class TestUpdateAccountRuleAuthMatrix:
         )
         assert resp.status_code == 404
         assert dynamic_config.set_calls == []
+
+
+# ── #1378: PATCH /api/strategies/{strategy_id}/status scope-aware 인증 매트릭스 ──
+
+
+_VALID_STRATEGY_STATUS_PAYLOAD: dict = {"status": "adopted"}
+_STRATEGY_STATUS_PATH = "/api/strategies/strat-1/status"
+
+
+class TestUpdateStrategyStatusAuthMatrix:
+    """``PATCH /api/strategies/{strategy_id}/status`` 는 scope-aware 인증
+    가드를 따른다 (#1378).
+
+    oracle A7 finding: 익명 호출이 ``registry.update_status`` 를 그대로 실행해
+    등록된 전략을 ``adopted`` / ``archived`` 로 마음대로 전환할 수 있었다.
+    spec ``docs/specs/member/02-design-decisions.md:210-227`` 의
+    ``require_scope`` predicate 와 정합:
+
+    - master role → 통과
+    - human type → 통과 (scope 무관)
+    - agent + ``strategy:write`` ∈ scopes → 통과 (전략 리서치 agent 의 정상 경로)
+    - 그 외 → 403
+
+    raw body 패턴 + auth-first: 인증 가드가 body validation 보다 먼저 실행되어
+    unauth + bad-body 시 401 우선. 401/403 시 ``registry.update_status`` 미호출
+    (mock spy 검증).
+    """
+
+    # 401 — 인증 자체가 없음 ─────────────────────────────────────────
+
+    def test_update_strategy_status_unauth_returns_401(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        resp = client.patch(_STRATEGY_STATUS_PATH, json=_VALID_STRATEGY_STATUS_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_invalid_bearer_returns_401(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_invalid_session_cookie_returns_401(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        client.cookies.set("ante_session", "unknown-session-id")
+        resp = client.patch(_STRATEGY_STATUS_PATH, json=_VALID_STRATEGY_STATUS_PAYLOAD)
+        assert resp.status_code == 401, resp.text
+        assert strategy_registry.update_status_calls == []
+        client.cookies.delete("ante_session")
+
+    def test_update_strategy_status_session_service_none_no_bearer_returns_401(
+        self,
+        client_no_session_service: TestClient,
+        strategy_registry: FakeStrategyRegistry,
+    ) -> None:
+        """``session_service is None`` 배포 + 쿠키만 → 401 (cookie fallback skip)."""
+        client_no_session_service.cookies.set("ante_session", "any-session-id")
+        resp = client_no_session_service.patch(
+            _STRATEGY_STATUS_PATH, json=_VALID_STRATEGY_STATUS_PAYLOAD
+        )
+        assert resp.status_code == 401, resp.text
+        assert strategy_registry.update_status_calls == []
+        client_no_session_service.cookies.delete("ante_session")
+
+    # auth-first: bad body 라도 401 우선 ─────────────────────────────
+
+    def test_update_strategy_status_unauth_invalid_body_returns_401(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """unauth + body invalid → 401 (NOT 422). submit_report 패턴 답습."""
+        resp = client.patch(_STRATEGY_STATUS_PATH, json=["not", "an", "object"])
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_unauth_malformed_json_returns_401(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """unauth + malformed JSON → 401 (NOT 422)."""
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert strategy_registry.update_status_calls == []
+
+    # 204 — master 인증 통과 ─────────────────────────────────────────
+
+    def test_update_strategy_status_master_bearer_succeeds(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        from ante.strategy.registry import StrategyStatus
+
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert len(strategy_registry.update_status_calls) == 1
+        assert strategy_registry.update_status_calls[-1]["status"] == (
+            StrategyStatus.ADOPTED
+        )
+
+    def test_update_strategy_status_master_session_cookie_succeeds(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.patch(_STRATEGY_STATUS_PATH, json=_VALID_STRATEGY_STATUS_PAYLOAD)
+        assert resp.status_code == 204, resp.text
+        assert len(strategy_registry.update_status_calls) == 1
+        client.cookies.delete("ante_session")
+
+    # 204 — human (scope 무관) 통과 ──────────────────────────────────
+
+    def test_update_strategy_status_human_bearer_succeeds(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """spec predicate: human 멤버는 scope 검증을 무조건 통과한다."""
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer human-token"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert len(strategy_registry.update_status_calls) == 1
+
+    # 204 — agent + strategy:write scope ─────────────────────────────
+
+    def test_update_strategy_status_agent_with_strategy_write_succeeds(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """agent + ``strategy:write`` ∈ scopes → 통과 (spec predicate 정합).
+
+        전략 리서치 agent 는 spec ``02-design-decisions.md:226-227`` 가 명시한
+        대로 ``strategy:write`` scope 만 보유해도 정상 status 전환이 가능해야
+        한다.
+        """
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer agent-strategy-token"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert len(strategy_registry.update_status_calls) == 1
+
+    # 403 — agent without scope ──────────────────────────────────────
+
+    def test_update_strategy_status_agent_without_strategy_write_returns_403(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """agent + scope 미보유 → 403 (spec predicate 정합)."""
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer agent-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_agent_with_other_scope_returns_403(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """agent + 다른 scope (report:write) → 403.
+
+        ``strategy:write`` 가 아닌 scope 는 본 라우트 경로를 열지 않아야 한다.
+        """
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer agent-report-token"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert strategy_registry.update_status_calls == []
+
+    # 403 — inactive 멤버 (suspended/revoked) ────────────────────────
+
+    def test_update_strategy_status_inactive_member_returns_403(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """suspended human 멤버 → 403 (세션 fallback 경로 차단).
+
+        ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
+        fallback 에서는 만료만 보므로, ``MemberStatus.ACTIVE`` 가 아닌 멤버는
+        명시적으로 403 으로 차단되어야 한다 (require_audit_read #1359 4차 fix
+        패턴 답습).
+        """
+        client.cookies.set("ante_session", "inactive-session-id")
+        resp = client.patch(_STRATEGY_STATUS_PATH, json=_VALID_STRATEGY_STATUS_PAYLOAD)
+        assert resp.status_code == 403, resp.text
+        assert strategy_registry.update_status_calls == []
+        client.cookies.delete("ante_session")
+
+    # 422 — 인증 통과 + body invalid ─────────────────────────────────
+
+    def test_update_strategy_status_master_invalid_body_returns_422(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """master + body 가 JSON object 가 아님 → 422."""
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json=["not", "an", "object"],
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_master_empty_body_returns_422(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_master_malformed_json_returns_422(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            content=b"{not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert strategy_registry.update_status_calls == []
+
+    def test_update_strategy_status_master_missing_status_returns_422(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """master + ``status`` 누락 → 422 (Pydantic required field)."""
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json={},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert strategy_registry.update_status_calls == []
+
+    # 400 — 인증 통과 + invalid status / 전환 불가 ──────────────────
+
+    def test_update_strategy_status_master_invalid_status_returns_400(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """master + 허용 enum 외 status → 400.
+
+        Pydantic 단계는 통과하지만 ``StrategyStatus(body.status)`` 변환에서
+        ValueError 가 발생해 400 으로 떨어진다. 400 차단 시 ``update_status``
+        는 호출되지 않는다.
+        """
+        resp = client.patch(
+            _STRATEGY_STATUS_PATH,
+            json={"status": "invalid_status_value"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 400, resp.text
+        assert "유효하지 않은 status" in resp.json()["detail"]
+        assert strategy_registry.update_status_calls == []
+
+    # 404 — master + missing strategy ─────────────────────────────────
+
+    def test_update_strategy_status_master_unknown_strategy_returns_404(
+        self, client: TestClient, strategy_registry: FakeStrategyRegistry
+    ) -> None:
+        """master 인증 통과 + 존재하지 않는 strategy_id → 404.
+
+        ``update_status`` 는 호출은 되지만 ``StrategyError`` 로 404 가 반환된다.
+        """
+        resp = client.patch(
+            "/api/strategies/no-such-strategy/status",
+            json=_VALID_STRATEGY_STATUS_PAYLOAD,
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 404, resp.text
+
+
+# ── #1378: OpenAPI 회귀 보호 ───────────────────────────────────────────
+
+
+class TestUpdateStrategyStatusOpenAPI:
+    """``PATCH /api/strategies/{strategy_id}/status`` 의 OpenAPI 산출물이
+    401/403 응답과 ``StatusUpdateRequest`` component 를 모두 노출하는지
+    회귀 보호한다 (#1378).
+
+    raw body 패턴으로 전환되면서 라우트 시그니처에서 ``body:
+    StatusUpdateRequest`` 가 사라지면 FastAPI 자동 components 등록이 끊긴다.
+    ``_install_openapi_customizer`` 가 ``STATUS_UPDATE_REQUEST_SCHEMA`` 를
+    ``setdefault`` 등록하지 않으면 frontend codegen 이 깨진다 (#1374
+    ``ReportSubmitRequest`` 회귀 패턴).
+    """
+
+    def test_status_update_request_component_registered(
+        self, client: TestClient
+    ) -> None:
+        spec = client.get("/openapi.json").json()
+        components = spec.get("components", {}).get("schemas", {})
+        assert "StatusUpdateRequest" in components, (
+            "StatusUpdateRequest component 가 components.schemas 에 등록되지 않았다. "
+            "_install_openapi_customizer 의 setdefault 누락 회귀."
+        )
+        # required 보존: ``status`` 필드는 must-required 여야 한다.
+        component = components["StatusUpdateRequest"]
+        assert "status" in component.get("required", []), (
+            f"StatusUpdateRequest.status 가 required 에서 빠졌다: {component}"
+        )
+
+    def test_update_strategy_status_route_responses_include_401_403(
+        self, client: TestClient
+    ) -> None:
+        spec = client.get("/openapi.json").json()
+        responses = (
+            spec.get("paths", {})
+            .get("/api/strategies/{strategy_id}/status", {})
+            .get("patch", {})
+            .get("responses", {})
+        )
+        assert "401" in responses, responses
+        assert "403" in responses, responses
+        assert "404" in responses, responses
+        assert "422" in responses, responses
+
+    def test_update_strategy_status_request_body_uses_component_ref(
+        self, client: TestClient
+    ) -> None:
+        spec = client.get("/openapi.json").json()
+        request_body = (
+            spec.get("paths", {})
+            .get("/api/strategies/{strategy_id}/status", {})
+            .get("patch", {})
+            .get("requestBody", {})
+        )
+        ref = (
+            request_body.get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+            .get("$ref")
+        )
+        assert ref == "#/components/schemas/StatusUpdateRequest", (
+            f"requestBody schema 가 StatusUpdateRequest component 를 참조해야 한다 — "
+            f"got {ref}"
+        )

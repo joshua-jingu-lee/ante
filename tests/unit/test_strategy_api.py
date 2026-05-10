@@ -125,12 +125,59 @@ def trade_service():
     return FakeTradeService()
 
 
+# ── Member / Session fakes (#1378) ──────────────────────────────────────
+#
+# ``PATCH /api/strategies/{strategy_id}/status`` 는 ``require_strategy_write``
+# 가드를 통과해야 200/204 를 반환한다 (#1378). 기존 status 변경 테스트들이
+# 익명 호출을 가정하고 작성됐으므로, master 인증 fixture 를 client 에 주입해
+# regression 을 막는다.
+@dataclass
+class _AuthFakeMember:
+    member_id: str
+    type: str = "human"
+    role: str = "master"
+    org: str = "default"
+    name: str = ""
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = field(default_factory=list)
+
+
+class _AuthFakeMemberService:
+    def __init__(self) -> None:
+        self._members: dict[str, _AuthFakeMember] = {
+            "master-user": _AuthFakeMember(member_id="master-user"),
+        }
+        self._tokens: dict[str, str] = {"master-token": "master-user"}
+
+    async def authenticate(self, token: str) -> _AuthFakeMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("유효하지 않은 토큰")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _AuthFakeMember | None:
+        return self._members.get(member_id)
+
+
 @pytest.fixture
-def client(registry, bot_manager, trade_service):
+def member_service():
+    return _AuthFakeMemberService()
+
+
+_MASTER_AUTH_HEADERS = {"Authorization": "Bearer master-token"}
+
+
+@pytest.fixture
+def client(registry, bot_manager, trade_service, member_service):
     app = create_app(
         strategy_registry=registry,
         bot_manager=bot_manager,
         trade_service=trade_service,
+        member_service=member_service,
     )
     return TestClient(app)
 
@@ -664,7 +711,11 @@ class TestUpdateStrategyStatus:
                 status=StrategyStatus.REGISTERED,
             ),
         ]
-        resp = client.patch("/api/strategies/s1/status", json={"status": "adopted"})
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={"status": "adopted"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
         assert resp.status_code == 204
         assert registry._strategies[0].status == StrategyStatus.ADOPTED
 
@@ -678,14 +729,20 @@ class TestUpdateStrategyStatus:
                 status=StrategyStatus.ADOPTED,
             ),
         ]
-        resp = client.patch("/api/strategies/s1/status", json={"status": "archived"})
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={"status": "archived"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
         assert resp.status_code == 204
         assert registry._strategies[0].status == StrategyStatus.ARCHIVED
 
     def test_update_status_not_found(self, client):
         """존재하지 않는 전략 -> 404."""
         resp = client.patch(
-            "/api/strategies/nonexistent/status", json={"status": "adopted"}
+            "/api/strategies/nonexistent/status",
+            json={"status": "adopted"},
+            headers=_MASTER_AUTH_HEADERS,
         )
         assert resp.status_code == 404
 
@@ -699,7 +756,11 @@ class TestUpdateStrategyStatus:
                 status=StrategyStatus.ARCHIVED,
             ),
         ]
-        resp = client.patch("/api/strategies/s1/status", json={"status": "adopted"})
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={"status": "adopted"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
         assert resp.status_code == 400
         assert "전환 불가" in resp.json()["detail"]
 
@@ -714,7 +775,9 @@ class TestUpdateStrategyStatus:
             ),
         ]
         resp = client.patch(
-            "/api/strategies/s1/status", json={"status": "invalid_status"}
+            "/api/strategies/s1/status",
+            json={"status": "invalid_status"},
+            headers=_MASTER_AUTH_HEADERS,
         )
         assert resp.status_code == 400
         assert "유효하지 않은 status" in resp.json()["detail"]
