@@ -620,6 +620,8 @@ export type paths = {
          *     3. ``ConfigUpdateRequest.model_validate`` — ValidationError → 422.
          *     4. config 키 존재 확인 → 404.
          *     5. ``config_service.set`` 호출 + audit 기록 (changed_by = caller_id).
+         *        서비스 경계에서 ``validate_value`` 가 키별 invariant 를 검증하므로
+         *        ``ValueError`` 가 올라오면 422 로 변환한다 (#1379).
          */
         put: operations["update_config_api_config__key__put"];
         post?: never;
@@ -5080,7 +5082,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, value 누락, type mismatch). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1373). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, value 누락, type mismatch) 또는 키별 invariant 위반 (예: ``system.log_level`` 가 ``_VALID_LOG_LEVELS`` 멤버가 아닌 경우 — 대소문자 구분, #1379). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1373). */
             422: {
                 headers: {
                     [name: string]: unknown;
