@@ -109,13 +109,18 @@ class TestAuditMiddleware:
         assert len(middleware_calls) == 0
 
     def test_failed_request_not_logged(self, client, audit_logger):
-        """실패(4xx/5xx) 응답은 미들웨어가 기록하지 않는다."""
-        # account_service가 없으므로 503 → 기록 안 됨
+        """실패(4xx/5xx) 응답은 미들웨어가 기록하지 않는다.
+
+        ``client`` fixture 는 ``audit_logger`` 만 주입한다(member_service /
+        account_service 미주입). #1375 master 인증 가드가 우선 실행되므로
+        unauth → 401 이 떨어지지만, 4xx 도 미들웨어 기록 대상에서 제외이므로
+        invariant 는 그대로 보존된다.
+        """
         resp = client.post(
             "/api/system/halt",
             json={"reason": "test"},
         )
-        assert resp.status_code == 503
+        assert resp.status_code in (401, 503), resp.text
         middleware_calls = [
             c
             for c in audit_logger.log.call_args_list
@@ -202,7 +207,7 @@ class TestHandlerAuditLog:
         assert handler_calls[0].kwargs["member_id"] == "user-01"
 
     def test_halt_audit(self, audit_logger):
-        """halt 시 system.halt 감사 로그가 기록된다."""
+        """halt 시 system.halt 감사 로그가 기록된다. master 인증 필요 (#1375)."""
         account_service_mock = AsyncMock()
         account_service_mock.suspend_all = AsyncMock(
             return_value=[
@@ -218,12 +223,14 @@ class TestHandlerAuditLog:
         app = create_app(
             audit_logger=audit_logger,
             account_service=account_service_mock,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
 
         resp = client.post(
             "/api/system/halt",
             json={"reason": "emergency"},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -235,12 +242,14 @@ class TestHandlerAuditLog:
         assert len(handler_calls) == 1
         assert handler_calls[0].kwargs["resource"] == "system:kill_switch"
         assert handler_calls[0].kwargs["detail"] == "emergency"
+        # caller_id 가 audit member_id 로 전파되어야 한다 (#1375).
+        assert handler_calls[0].kwargs["member_id"] == "master-user"
 
     def test_clear_halt_audit(self, audit_logger):
         """clear-halt 시 system.clear_halt 감사 로그가 기록된다 (Refs #1213).
 
         SSOT: ``docs/specs/audit/audit.md``. action=``system.clear_halt``,
-        resource=``system:kill_switch`` 유지.
+        resource=``system:kill_switch`` 유지. master 인증 필요 (#1375).
         """
         account_service_mock = AsyncMock()
         account_service_mock.activate_all = AsyncMock(
@@ -257,12 +266,14 @@ class TestHandlerAuditLog:
         app = create_app(
             audit_logger=audit_logger,
             account_service=account_service_mock,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
 
         resp = client.post(
             "/api/system/clear-halt",
             json={"reason": "recovered"},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -274,6 +285,8 @@ class TestHandlerAuditLog:
         assert len(handler_calls) == 1
         # audit resource 명칭은 그대로 유지 (Refs #1213 명시적 비변경)
         assert handler_calls[0].kwargs["resource"] == "system:kill_switch"
+        # caller_id 가 audit member_id 로 전파되어야 한다 (#1375).
+        assert handler_calls[0].kwargs["member_id"] == "master-user"
         # legacy system.activate 감사 로그는 더 이상 발생하지 않는다.
         legacy_calls = [
             c
