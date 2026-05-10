@@ -283,7 +283,7 @@ class TestHandlerAuditLog:
         assert len(legacy_calls) == 0
 
     def test_config_update_audit(self, audit_logger):
-        """설정 변경 시 config.update 감사 로그가 기록된다."""
+        """설정 변경 시 config.update 감사 로그가 기록된다 (master 인증, #1373)."""
         config_mock = AsyncMock()
         config_mock.exists = AsyncMock(return_value=True)
         config_mock.get = AsyncMock(return_value=0.05)
@@ -292,8 +292,10 @@ class TestHandlerAuditLog:
         app = create_app(
             audit_logger=audit_logger,
             dynamic_config=config_mock,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
 
         resp = client.put(
             "/api/config/risk.max_mdd",
@@ -338,7 +340,7 @@ class TestHandlerAuditLog:
         assert handler_calls[0].kwargs["resource"] == "treasury"
 
     def test_dual_recording(self, audit_logger):
-        """핸들러 + 미들웨어 이중 기록이 동작한다."""
+        """핸들러 + 미들웨어 이중 기록이 동작한다 (master 인증, #1373)."""
         config_mock = AsyncMock()
         config_mock.exists = AsyncMock(return_value=True)
         config_mock.get = AsyncMock(return_value="old")
@@ -347,8 +349,10 @@ class TestHandlerAuditLog:
         app = create_app(
             audit_logger=audit_logger,
             dynamic_config=config_mock,
+            member_service=_new_member_service(),
         )
         client = TestClient(app)
+        client.headers.update(_MASTER_HEADERS)
 
         resp = client.put(
             "/api/config/test.key",

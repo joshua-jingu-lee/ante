@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,6 +12,72 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+
+# ── Member / Session fakes (#1373 update_config 인증 가드 추가) ──────────
+
+
+@dataclass
+class _FakeMember:
+    member_id: str
+    type: str = "human"
+    role: str = "master"
+    status: str = "active"
+    scopes: list[str] = field(default_factory=list)
+
+
+class _FakeMemberService:
+    """``require_config_write`` 통과를 위한 최소 stub.
+
+    ``master-token`` Bearer 또는 ``master-session-id`` 쿠키로 master 호출자를
+    인식한다. 기존 valid update / 404 케이스는 master 인증 fixture 에 묶어
+    #1373 가드와 정합시킨다.
+    """
+
+    def __init__(self) -> None:
+        self._members = {
+            "master-user": _FakeMember(member_id="master-user"),
+            "human-admin": _FakeMember(
+                member_id="human-admin", role="default", type="human"
+            ),
+            "agent-config": _FakeMember(
+                member_id="agent-config",
+                role="default",
+                type="agent",
+                scopes=["config:write"],
+            ),
+        }
+        self._tokens = {
+            "master-token": "master-user",
+            "human-token": "human-admin",
+            "agent-config-token": "agent-config",
+        }
+
+    async def authenticate(self, token: str) -> _FakeMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("invalid token")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _FakeMember | None:
+        return self._members.get(member_id)
+
+
+class _FakeSessionService:
+    def __init__(self) -> None:
+        self._sessions = {
+            "master-session-id": "master-user",
+            "human-session-id": "human-admin",
+            "agent-config-session-id": "agent-config",
+        }
+
+    async def validate(self, session_id: str) -> dict | None:
+        member_id = self._sessions.get(session_id)
+        if member_id is None:
+            return None
+        return {"member_id": member_id, "created_at": "2026-05-09 00:00:00"}
 
 
 class FakeDynamicConfig:
@@ -81,9 +148,30 @@ def dynamic_config():
 
 
 @pytest.fixture
-def client(account_service, dynamic_config):
-    app = create_app(account_service=account_service, dynamic_config=dynamic_config)
+def member_service():
+    return _FakeMemberService()
+
+
+@pytest.fixture
+def session_service():
+    return _FakeSessionService()
+
+
+@pytest.fixture
+def client(account_service, dynamic_config, member_service, session_service):
+    app = create_app(
+        account_service=account_service,
+        dynamic_config=dynamic_config,
+        member_service=member_service,
+        session_service=session_service,
+    )
     return TestClient(app)
+
+
+# ── #1373 master 인증 헤더 fixture ────────────────────────────────────────
+
+
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
 
 
 class TestHaltClearHalt:
@@ -182,7 +270,7 @@ class TestDynamicConfig:
         assert resp.json()["configs"] == []
 
     def test_update_config(self, client, dynamic_config):
-        """설정 값 변경."""
+        """설정 값 변경 (master 인증, #1373)."""
         dynamic_config._configs["risk.max_mdd"] = {
             "value": 0.1,
             "category": "risk",
@@ -190,6 +278,7 @@ class TestDynamicConfig:
         resp = client.put(
             "/api/config/risk.max_mdd",
             json={"value": 0.05},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -197,10 +286,41 @@ class TestDynamicConfig:
         assert data["old_value"] == 0.1
         assert data["new_value"] == 0.05
 
+    def test_update_config_human_succeeds(self, client, dynamic_config):
+        """human 멤버 → 200 (scope 무관, spec predicate 정합, #1373)."""
+        dynamic_config._configs["risk.max_mdd"] = {
+            "value": 0.1,
+            "category": "risk",
+        }
+        resp = client.put(
+            "/api/config/risk.max_mdd",
+            json={"value": 0.07},
+            headers={"Authorization": "Bearer human-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["new_value"] == 0.07
+
+    def test_update_config_agent_with_config_write_succeeds(
+        self, client, dynamic_config
+    ):
+        """agent + ``config:write`` ∈ scopes → 200 (#1373)."""
+        dynamic_config._configs["risk.max_mdd"] = {
+            "value": 0.1,
+            "category": "risk",
+        }
+        resp = client.put(
+            "/api/config/risk.max_mdd",
+            json={"value": 0.08},
+            headers={"Authorization": "Bearer agent-config-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["new_value"] == 0.08
+
     def test_update_nonexistent(self, client):
-        """존재하지 않는 설정 → 404."""
+        """존재하지 않는 설정 → 404 (master 인증, #1373)."""
         resp = client.put(
             "/api/config/nonexistent.key",
             json={"value": "test"},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 404
