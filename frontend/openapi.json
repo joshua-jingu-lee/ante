@@ -3130,18 +3130,8 @@
           "reports"
         ],
         "summary": "Submit Report",
-        "description": "리포트 제출.",
+        "description": "리포트 제출. 인증된 master/human 또는 ``report:write`` scope 를 보유한\nagent 만 호출 가능 (#1374).\n\n``update_config`` (#1373) 와 동일한 raw body 파싱 패턴을 적용해 인증 가드가\nbody validation 보다 우선 실행되도록 한다. FastAPI 가\n``body: ReportSubmitRequest`` 를 먼저 검증하면 unauth + bad-body 시 401 이\n아닌 422 가 먼저 반환되어 contract 가 깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_report_write)``) — caller 빈 → 401,\n   권한 없음 → 403, 비활성 멤버 → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``ReportSubmitRequest.model_validate`` — ValidationError → 422.\n4. ``report_store.submit`` 호출 + audit 기록 (submitted_by = caller_id).",
         "operationId": "submit_report_api_reports_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReportSubmitRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -3149,6 +3139,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReportSubmitResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (master, human 멤버 또는 report:write scope 보유 agent 만 허용). spec require_scope predicate 정합.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, NaN/Inf, extra key). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1374).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3162,14 +3182,14 @@
                 }
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportSubmitRequest"
               }
             }
           }
@@ -7039,119 +7059,6 @@
         "title": "ReportStatus",
         "description": "리포트 상태."
       },
-      "ReportSubmitRequest": {
-        "properties": {
-          "strategy_name": {
-            "type": "string",
-            "title": "Strategy Name"
-          },
-          "strategy_version": {
-            "type": "string",
-            "title": "Strategy Version"
-          },
-          "strategy_path": {
-            "type": "string",
-            "title": "Strategy Path"
-          },
-          "backtest_period": {
-            "type": "string",
-            "title": "Backtest Period",
-            "default": ""
-          },
-          "total_return_pct": {
-            "type": "number",
-            "title": "Total Return Pct",
-            "default": 0.0
-          },
-          "total_trades": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Trades",
-            "default": 0
-          },
-          "sharpe_ratio": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sharpe Ratio"
-          },
-          "max_drawdown_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Drawdown Pct"
-          },
-          "win_rate": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 100.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Win Rate"
-          },
-          "summary": {
-            "type": "string",
-            "title": "Summary",
-            "default": ""
-          },
-          "rationale": {
-            "type": "string",
-            "title": "Rationale",
-            "default": ""
-          },
-          "risks": {
-            "type": "string",
-            "title": "Risks",
-            "default": ""
-          },
-          "recommendations": {
-            "type": "string",
-            "title": "Recommendations",
-            "default": ""
-          },
-          "detail_json": {
-            "type": "string",
-            "title": "Detail Json",
-            "default": "{}"
-          },
-          "sections": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sections"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "strategy_name",
-          "strategy_version",
-          "strategy_path"
-        ],
-        "title": "ReportSubmitRequest",
-        "description": "리포트 제출 요청.\n\nSSOT: ``docs/specs/report-store/report-store.md`` 리포트 제출 스키마.\n``win_rate``는 percent 단위 (0.0~100.0, ``\"win_rate\": 58.0`` 예시)다.\n\ninvariants (#1353):\n- ``total_trades >= 0`` (거래 수는 음수 불가).\n- ``win_rate``는 ``[0.0, 100.0]`` percent 단위 또는 ``None``.\n- ``total_return_pct``/``sharpe_ratio``/``max_drawdown_pct``/``win_rate``는\n  finite. NaN/Inf는 후속 분석/표시에서 버그 또는 잘못된 결정으로 이어지므로\n  submit 단에서 422로 거부한다.\n- 미지정 키는 ``extra='forbid'``로 거부 — agent의 오타/잘못된 키가 store에\n  유실되는 대신 빠르게 fail하도록 한다.\n\nNote: 단위 통일(percent ↔ ratio)은 detail_json·backtest_runs·CLI submit 등\n시스템 전반의 영향이 커서 본 PR에서는 input validation에만 집중하고,\nratio 통일은 별도 follow-up 이슈에서 다룬다."
-      },
       "ReportSubmitResponse": {
         "properties": {
           "report_id": {
@@ -8533,6 +8440,119 @@
             "description": "설정 카테고리. 비우면 key 의 dot-prefix(예: ``risk.max_mdd`` → ``risk``)에서 자동 추출된다."
           }
         }
+      },
+      "ReportSubmitRequest": {
+        "additionalProperties": false,
+        "description": "리포트 제출 요청.\n\nSSOT: ``docs/specs/report-store/report-store.md`` 리포트 제출 스키마.\n``win_rate``는 percent 단위 (0.0~100.0, ``\"win_rate\": 58.0`` 예시)다.\n\ninvariants (#1353):\n- ``total_trades >= 0`` (거래 수는 음수 불가).\n- ``win_rate``는 ``[0.0, 100.0]`` percent 단위 또는 ``None``.\n- ``total_return_pct``/``sharpe_ratio``/``max_drawdown_pct``/``win_rate``는\n  finite. NaN/Inf는 후속 분석/표시에서 버그 또는 잘못된 결정으로 이어지므로\n  submit 단에서 422로 거부한다.\n- 미지정 키는 ``extra='forbid'``로 거부 — agent의 오타/잘못된 키가 store에\n  유실되는 대신 빠르게 fail하도록 한다.\n\nNote: 단위 통일(percent ↔ ratio)은 detail_json·backtest_runs·CLI submit 등\n시스템 전반의 영향이 커서 본 PR에서는 input validation에만 집중하고,\nratio 통일은 별도 follow-up 이슈에서 다룬다.",
+        "properties": {
+          "strategy_name": {
+            "title": "Strategy Name",
+            "type": "string"
+          },
+          "strategy_version": {
+            "title": "Strategy Version",
+            "type": "string"
+          },
+          "strategy_path": {
+            "title": "Strategy Path",
+            "type": "string"
+          },
+          "backtest_period": {
+            "default": "",
+            "title": "Backtest Period",
+            "type": "string"
+          },
+          "total_return_pct": {
+            "default": 0.0,
+            "title": "Total Return Pct",
+            "type": "number"
+          },
+          "total_trades": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Total Trades",
+            "type": "integer"
+          },
+          "sharpe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Ratio"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "rationale": {
+            "default": "",
+            "title": "Rationale",
+            "type": "string"
+          },
+          "risks": {
+            "default": "",
+            "title": "Risks",
+            "type": "string"
+          },
+          "recommendations": {
+            "default": "",
+            "title": "Recommendations",
+            "type": "string"
+          },
+          "detail_json": {
+            "default": "{}",
+            "title": "Detail Json",
+            "type": "string"
+          },
+          "sections": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sections"
+          }
+        },
+        "required": [
+          "strategy_name",
+          "strategy_version",
+          "strategy_path"
+        ],
+        "title": "ReportSubmitRequest",
+        "type": "object"
       }
     }
   }
