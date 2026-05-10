@@ -1,11 +1,13 @@
-"""POST/PUT /api/members/{id}/* mutation 인증 가드 테스트 (issue #1351).
+"""POST/PUT/PATCH /api/members/{id}/* mutation 인증 가드 테스트
+(issue #1351 + #1377).
 
-수정 대상 5개 mutation route는 인증된 master 호출자만 사용할 수 있어야 한다.
+수정 대상 mutation route는 인증된 master 호출자만 사용할 수 있어야 한다.
 - ``POST /api/members/{id}/suspend``
 - ``POST /api/members/{id}/reactivate``
 - ``POST /api/members/{id}/revoke``
 - ``POST /api/members/{id}/rotate-token``
 - ``PUT  /api/members/{id}/scopes``
+- ``PATCH /api/members/{id}/password`` (#1377 — oracle A7 finding)
 
 각 라우트 × 인증 시나리오:
 - Authorization 헤더 없음 + 세션 쿠키 없음 → 401
@@ -18,6 +20,8 @@
 - master + 존재하지 않는 member → 404
 
 401 응답 시 service mutation은 호출되지 않아야 한다 (early return).
+특히 ``change_password``는 unauth + invalid old_password 조합에서 401이
+credential check보다 우선되어야 한다 (#1377 oracle A7 시그니처).
 
 #1339의 ``test_member_routes_create_auth.py`` 패턴을 그대로 답습한다.
 """
@@ -74,6 +78,7 @@ class FakeMemberService:
         self.revoke_calls: list[dict[str, str]] = []
         self.rotate_calls: list[dict[str, str]] = []
         self.update_scopes_calls: list[dict[str, object]] = []
+        self.change_password_calls: list[dict[str, str]] = []
 
     def add_member(
         self,
@@ -82,9 +87,14 @@ class FakeMemberService:
         role: str = "default",
         member_type: str = "agent",
         status: str = "active",
+        password_hash: str = "",
     ) -> FakeMember:
         member = FakeMember(
-            member_id=member_id, role=role, type=member_type, status=status
+            member_id=member_id,
+            role=role,
+            type=member_type,
+            status=status,
+            password_hash=password_hash,
         )
         self._members[member_id] = member
         if token:
@@ -99,6 +109,14 @@ class FakeMemberService:
 
     async def update_last_active(self, member_id: str) -> None:
         return None
+
+    async def get(self, member_id: str) -> FakeMember | None:
+        """``require_master_caller`` 가 caller role 검증에 사용한다 (#1377).
+
+        change_password 는 web layer ``require_master_caller`` 의존성을 사용하므로
+        fake service 도 ``get`` 을 노출해야 한다 (#1352 / #1376 패턴).
+        """
+        return self._members.get(member_id)
 
     def _assert_master_or_raise(self, caller_id: str, action: str) -> None:
         caller = self._members.get(caller_id)
@@ -162,6 +180,34 @@ class FakeMemberService:
         member.scopes = list(scopes)
         return member
 
+    async def change_password(
+        self, member_id: str, old_password: str, new_password: str
+    ) -> None:
+        """비밀번호 변경 stub.
+
+        실 ``MemberService.change_password`` 의 credential check 흐름을 모방한다:
+        멤버가 없으면 ``ValueError`` (→ 404), human이 아니면 ``PermissionError``
+        (→ 403), old password 불일치면 ``PermissionError`` (→ 403).
+
+        호출 기록 (``change_password_calls``) 을 남겨, 인증 가드 (401/403) 가
+        credential check 보다 먼저 차단되었는지 확인할 수 있다.
+        """
+        self.change_password_calls.append(
+            {
+                "member_id": member_id,
+                "old_password": old_password,
+                "new_password": new_password,
+            }
+        )
+        member = self._members.get(member_id)
+        if member is None:
+            raise ValueError(f"멤버를 찾을 수 없습니다: {member_id}")
+        if member.type != "human":
+            raise PermissionError("human 멤버만 비밀번호를 변경할 수 있습니다")
+        if member.password_hash and member.password_hash != old_password:
+            raise PermissionError("현재 패스워드가 일치하지 않습니다")
+        member.password_hash = new_password
+
 
 class FakeSessionService:
     def __init__(self) -> None:
@@ -187,6 +233,14 @@ def member_service() -> FakeMemberService:
     # mutation 대상 멤버
     svc.add_member("target-active", role="default", status="active")
     svc.add_member("target-suspended", role="default", status="suspended")
+    # change_password 대상 (human + password_hash)
+    svc.add_member(
+        "target-human-active",
+        role="default",
+        member_type="human",
+        status="active",
+        password_hash="known-old-password",
+    )
     return svc
 
 
@@ -252,13 +306,44 @@ def _update_scopes(
     )
 
 
+def _change_password(
+    client: TestClient,
+    headers: dict | None = None,
+    payload: dict | None = None,
+) -> httpx.Response:
+    """PATCH /api/members/{id}/password helper (#1377).
+
+    기본 payload는 정상 호출 시 통과하는 payload (``known-old-password``).
+    인증 매트릭스에서 ``unauth_with_invalid_old_password`` 시나리오는 explicit
+    하게 invalid old password를 보내, 인증 가드가 credential check를 우회
+    차단하는지 확인한다.
+    """
+    return client.patch(
+        "/api/members/target-human-active/password",
+        json=payload
+        if payload is not None
+        else {"old_password": "known-old-password", "new_password": "new-password"},
+        headers=headers or {},
+    )
+
+
 MUTATION_ROUTES = [
     ("suspend", _suspend, "suspend_calls"),
     ("reactivate", _reactivate, "reactivate_calls"),
     ("revoke", _revoke, "revoke_calls"),
     ("rotate_token", _rotate, "rotate_calls"),
     ("update_scopes", _update_scopes, "update_scopes_calls"),
+    ("change_password", _change_password, "change_password_calls"),
 ]
+
+# ``change_password`` 는 ``require_master_caller`` 의존성을 web layer 에서
+# 사용하므로 non-master 호출은 service 도달 없이 403 으로 차단된다 (#1377).
+# 기존 5개 mutation route 는 ``_resolve_caller_or_401`` 만 사용하고 master 검증을
+# service 위임 (PermissionDeniedError → 403) 하는 차이가 있어, ``TestNonMaster403``
+# 의 `len(calls) == 1` invariant 가 다르다. ``TestNonMaster403`` parametrize 는
+# 기존 5개로 한정하고, change_password 는 ``TestChangePasswordNonMaster403`` 에서
+# 별도 검증한다.
+NON_MASTER_VIA_SERVICE_ROUTES = MUTATION_ROUTES[:-1]
 
 
 # ── 401: 인증 자체가 없는 케이스 ────────────────────────────────────────
@@ -430,6 +515,27 @@ class TestBearerMasterSuccess:
         assert resp.json()["member"]["scopes"] == ["trade:read", "trade:write"]
         assert member_service.update_scopes_calls[-1]["updated_by"] == "master-user"
 
+    def test_change_password_with_master_bearer_succeeds(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """master Bearer + 정상 payload → 200 (#1377)."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            headers={"Authorization": "Bearer master-token"},
+            json={
+                "old_password": "known-old-password",
+                "new_password": "new-strong-password",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+        # service까지 도달했는지 확인
+        assert len(member_service.change_password_calls) == 1
+        assert (
+            member_service.change_password_calls[-1]["member_id"]
+            == "target-human-active"
+        )
+
 
 class TestSessionCookieMasterSuccess:
     """master ``ante_session`` 쿠키 → 200 + ``request.state.member_id`` 갱신."""
@@ -484,17 +590,44 @@ class TestSessionCookieMasterSuccess:
         assert member_service.update_scopes_calls[-1]["updated_by"] == "master-user"
         client.cookies.delete("ante_session")
 
+    def test_change_password_with_master_session_cookie_succeeds(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """master ante_session 쿠키 → 200 (#1377)."""
+        client.cookies.set("ante_session", "master-session-id")
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            json={
+                "old_password": "known-old-password",
+                "new_password": "new-strong-password",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+        assert len(member_service.change_password_calls) == 1
+        client.cookies.delete("ante_session")
+
 
 # ── 403: 인증된 non-master ─────────────────────────────────────────────────
 
 
 class TestNonMaster403:
-    """인증된 non-master → 403 (PermissionDeniedError 매핑)."""
+    """인증된 non-master → 403 (PermissionDeniedError 매핑).
+
+    기존 5개 mutation route (suspend / reactivate / revoke / rotate_token /
+    update_scopes) 는 ``_resolve_caller_or_401`` 만 web layer 에서 적용하고,
+    master 검증은 service 가 ``PermissionDeniedError`` 를 raise 해 처리한다.
+    그래서 svc.* 가 1회 호출된 뒤 403 이 반환된다.
+
+    ``change_password`` 는 ``require_master_caller`` 의존성으로 web layer 에서
+    먼저 403 을 raise 하므로 동작이 다르다. ``TestChangePasswordNonMaster403``
+    에서 별도로 검증한다 (#1377 oracle A7 finding scope 결정).
+    """
 
     @pytest.mark.parametrize(
         "name,call,calls_attr",
-        MUTATION_ROUTES,
-        ids=[r[0] for r in MUTATION_ROUTES],
+        NON_MASTER_VIA_SERVICE_ROUTES,
+        ids=[r[0] for r in NON_MASTER_VIA_SERVICE_ROUTES],
     )
     def test_non_master_bearer_returns_403(
         self,
@@ -551,6 +684,17 @@ class TestMasterMissingMember404:
             "/api/members/no-such-member/scopes",
             headers={"Authorization": "Bearer master-token"},
             json={"scopes": ["data:read"]},
+        )
+        assert resp.status_code == 404
+
+    def test_change_password_missing_member_returns_404(
+        self, client: TestClient
+    ) -> None:
+        """master 인증 통과 + 존재하지 않는 멤버 → 404 (#1377)."""
+        resp = client.patch(
+            "/api/members/no-such-member/password",
+            headers={"Authorization": "Bearer master-token"},
+            json={"old_password": "x", "new_password": "y"},
         )
         assert resp.status_code == 404
 
@@ -673,14 +817,189 @@ class TestUpdateScopesExtraForbid:
         assert member_service.update_scopes_calls[-1]["scopes"] == ["data:read"]
 
 
+# ── change_password 전용: auth-first 401 + credential check 우회 보호 (#1377) ─
+
+
+class TestChangePasswordAuthFirstOverCredentialCheck:
+    """``change_password``는 ``update_scopes``와 동일하게 인증 가드가 body
+    validation 및 credential check 보다 먼저 실행되어야 한다 (#1377 — oracle
+    A7 finding).
+
+    핵심 시그니처: 인증 없이 ``invalid old_password``를 보내도 credential
+    check (``svc.change_password``) 까지 도달하지 않고 401로 차단되어야 한다.
+    이 시나리오는 #1377 finding 의 ``raw_signature`` 와 직접 대응한다.
+    """
+
+    def test_unauth_with_invalid_old_password_returns_401(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 없음 + invalid old password → 401 (credential check 우회 차단).
+
+        oracle A7 finding 핵심: 이전에는 svc.change_password 가 호출되어
+        ``현재 패스워드가 일치하지 않습니다`` 로 403 을 반환했다 (credential
+        check 도달). 본 패치는 인증 가드가 우선되어 401 을 반환하고
+        ``svc.change_password`` 는 호출되지 않아야 한다.
+        """
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            json={
+                "old_password": "oracle-known-wrong-password",
+                "new_password": "oracle-unused-new-password",
+            },
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 credential check 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        # mock spy: svc.change_password 가 호출되지 않았어야 한다.
+        assert member_service.change_password_calls == [], (
+            "401 차단 시 svc.change_password 는 호출되지 않아야 한다 "
+            f"(credential check 우회 보호) — 호출 기록: "
+            f"{member_service.change_password_calls}"
+        )
+
+    def test_unauth_invalid_body_returns_401(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 없음 + body invalid (필수 필드 누락) → 401 (NOT 422)."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            json={"not_old_password": "x"},
+        )
+        assert resp.status_code == 401, (
+            f"인증 가드가 body validation 보다 먼저 실행되어야 한다 — "
+            f"got {resp.status_code}: {resp.text}"
+        )
+        assert member_service.change_password_calls == []
+
+    def test_unauth_malformed_json_returns_401(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 없음 + JSON 파싱 실패 → 401 (NOT 422)."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            content=b"not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert member_service.change_password_calls == []
+
+    def test_invalid_bearer_invalid_body_returns_401(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """invalid Bearer + body invalid → 401."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            json={},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert resp.status_code == 401
+        assert member_service.change_password_calls == []
+
+    def test_master_invalid_body_returns_422(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 통과 + body 누락 → 422 (정상 검증 경로)."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            json={"not_old_password": "x"},
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422
+        assert member_service.change_password_calls == []
+
+    def test_master_non_json_body_returns_422(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 통과 + JSON 파싱 실패 → 422."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            content=b"not-json",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert member_service.change_password_calls == []
+
+    def test_master_empty_body_returns_422(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """인증 통과 + empty body → 422."""
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            content=b"",
+            headers={
+                "Authorization": "Bearer master-token",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        assert member_service.change_password_calls == []
+
+    def test_master_unknown_field_returns_422(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        """master 인증 통과 + unknown field (extra=forbid) → 422.
+
+        OpenAPI ``PASSWORD_CHANGE_REQUEST_SCHEMA``가 ``additionalProperties:
+        false``를 선언하므로 런타임 모델도 ``extra="forbid"``로 동일하게
+        강제한다 (#1351 P2 패턴 답습).
+        """
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            json={
+                "old_password": "known-old-password",
+                "new_password": "new-pw",
+                "unexpected": True,
+            },
+            headers={"Authorization": "Bearer master-token"},
+        )
+        assert resp.status_code == 422, (
+            f"미지정 필드는 OpenAPI additionalProperties:false 에 따라 422 — "
+            f"({resp.status_code}: {resp.text})"
+        )
+        assert member_service.change_password_calls == []
+
+
+class TestChangePasswordNonMaster403:
+    """인증된 non-master → 403 (master-only — #1377 scope decision).
+
+    self-change use case (caller_id == member_id) 는 follow-up 이슈에서
+    별도 다룬다 (Non-Goals).
+    """
+
+    def test_non_master_bearer_returns_403(
+        self, client: TestClient, member_service: FakeMemberService
+    ) -> None:
+        resp = client.patch(
+            "/api/members/target-human-active/password",
+            headers={"Authorization": "Bearer agent-token"},
+            json={
+                "old_password": "known-old-password",
+                "new_password": "new-pw",
+            },
+        )
+        assert resp.status_code == 403, (
+            f"non-master Bearer 가 403 이 아님 ({resp.status_code}: {resp.text})"
+        )
+        # require_master_caller 가 403 으로 차단 → svc.change_password 미호출.
+        assert member_service.change_password_calls == [], (
+            "403 차단 시 svc.change_password 는 호출되지 않아야 한다 "
+            f"(credential check 우회 보호) — 호출 기록: "
+            f"{member_service.change_password_calls}"
+        )
+
+
 # ── OpenAPI 응답에 401 추가 회귀 ─────────────────────────────────────────
 
 
 class TestOpenAPIResponses401:
-    """5개 mutation route의 OpenAPI ``responses``에 401 항목이 있어야 한다.
+    """6개 mutation route의 OpenAPI ``responses``에 401 항목이 있어야 한다.
 
     ``frontend/openapi.json`` codegen 산출물이 401 분기를 인식할 수 있도록
-    contract에 명시해야 한다(#1351 risk: contract-drift).
+    contract에 명시해야 한다(#1351 risk: contract-drift; #1377 답습).
     """
 
     @pytest.mark.parametrize(
@@ -691,6 +1010,7 @@ class TestOpenAPIResponses401:
             ("/api/members/{member_id}/revoke", "post"),
             ("/api/members/{member_id}/rotate-token", "post"),
             ("/api/members/{member_id}/scopes", "put"),
+            ("/api/members/{member_id}/password", "patch"),
         ],
     )
     def test_openapi_lists_401_response(self, path: str, method: str) -> None:

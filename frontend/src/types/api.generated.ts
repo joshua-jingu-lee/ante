@@ -838,7 +838,34 @@ export type paths = {
         head?: never;
         /**
          * Change Password
-         * @description 비밀번호 변경 (human 멤버 전용).
+         * @description 비밀번호 변경 (human 멤버 전용). 인증된 master만 호출 가능 (#1377).
+         *
+         *     배경: oracle A7 finding (#1377) — 본 라우트는 인증 없이 credential check
+         *     (``svc.change_password``의 old-password 비교) 까지 도달했다. ``_caller_id``
+         *     만으로 audit 주체만 기록하고 인증 가드는 적용하지 않았기 때문이다. 본
+         *     패치는 ``require_master_caller`` 의존성을 적용하고 ``update_scopes``와
+         *     동일한 raw body 파싱 + auth-first 패턴을 따른다 (#1351 / #1352 SSOT).
+         *
+         *     범위 결정:
+         *     - master-only (보수). self-change use case (caller_id == member_id 허용)는
+         *       follow-up 이슈에서 별도 다룬다 (Issue #1377 Non-Goals).
+         *
+         *     인증 → raw-body → credential check 순서를 보장한다. FastAPI가
+         *     ``body: PasswordChangeRequest``를 먼저 검증하면 unauth + bad-body 시 401이
+         *     아닌 422가 먼저 반환되어 contract가 깨진다 — 본 라우트는 oracle A7
+         *     finding의 핵심 시그니처이므로 인증 가드 우선이 가장 중요하다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        non-master → 403. credential check 도달 전에 모두 차단된다.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``PasswordChangeRequest.model_validate`` — ValidationError → 422.
+         *     4. ``svc.change_password`` 호출. ``ValueError`` → 404,
+         *        ``PermissionError``/``PermissionDeniedError`` → 403.
+         *
+         *     Audit 로그의 ``member_id``는 ``caller_id``로 기록한다(SSOT). 대상 멤버는
+         *     ``resource=member:{member_id}``로 분리해 추적한다.
          */
         patch: operations["change_password_api_members__member_id__password_patch"];
         trace?: never;
@@ -2619,7 +2646,7 @@ export type components = {
         };
         /**
          * PasswordChangeRequest
-         * @description 비밀번호 변경 요청.
+         * @description PATCH /api/members/{member_id}/password 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1377). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         PasswordChangeRequest: {
             /** New Password */
@@ -5442,7 +5469,16 @@ export interface operations {
                     "application/json": components["schemas"]["OkResponse"];
                 };
             };
-            /** @description Permission denied */
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master 권한 필요). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5460,13 +5496,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1377). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Member service not available */
