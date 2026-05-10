@@ -2,10 +2,16 @@
 
 GET /api/accounts/{account_id}/rules
 PUT /api/accounts/{account_id}/rules/{rule_type}
+
+#1376: PUT 라우트는 master 인증 가드(``require_master_caller``)가 적용되어
+``master-token`` Bearer 헤더 없이 호출하면 401 이 떨어진다. 기존 PUT 테스트는
+``_MASTER_HEADERS`` fixture 헤더를 부여해 라우트 contract 변경(이슈 #1376)에
+맞춘다.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -19,6 +25,61 @@ from fastapi.testclient import TestClient  # noqa: E402
 from ante.account.errors import AccountNotFoundError  # noqa: E402
 from ante.account.models import Account, AccountStatus, TradingMode  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+
+# ── Member / Session fakes (#1376 update_account_rule 인증 가드) ────────────
+
+
+@dataclass
+class _FakeMember:
+    member_id: str
+    type: str = "human"
+    role: str = "master"
+    status: str = "active"
+    scopes: list[str] = field(default_factory=list)
+
+
+class _FakeMemberService:
+    """``require_master_caller`` 통과를 위한 최소 stub (#1376).
+
+    ``master-token`` Bearer 또는 ``master-session-id`` 쿠키로 master 호출자를
+    인식한다. 기존 valid PUT / 404 / 422 케이스는 ``_MASTER_HEADERS`` fixture
+    에 묶어 #1376 가드와 정합시킨다.
+    """
+
+    def __init__(self) -> None:
+        self._members = {
+            "master-user": _FakeMember(member_id="master-user"),
+        }
+        self._tokens = {
+            "master-token": "master-user",
+        }
+
+    async def authenticate(self, token: str) -> _FakeMember:
+        member_id = self._tokens.get(token)
+        if member_id is None:
+            raise PermissionError("invalid token")
+        return self._members[member_id]
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+    async def get(self, member_id: str) -> _FakeMember | None:
+        return self._members.get(member_id)
+
+
+class _FakeSessionService:
+    def __init__(self) -> None:
+        self._sessions = {"master-session-id": "master-user"}
+
+    async def validate(self, session_id: str) -> dict | None:
+        member_id = self._sessions.get(session_id)
+        if member_id is None:
+            return None
+        return {"member_id": member_id, "created_at": "2026-05-09 00:00:00"}
+
+
+# #1376: master 인증 헤더 fixture. 모든 PUT 호출은 본 헤더를 기본으로 사용한다.
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
 
 
 class FakeAccountService:
@@ -132,17 +193,31 @@ def static_config() -> FakeConfig:
 
 
 @pytest.fixture
+def member_service() -> _FakeMemberService:
+    return _FakeMemberService()
+
+
+@pytest.fixture
+def session_service() -> _FakeSessionService:
+    return _FakeSessionService()
+
+
+@pytest.fixture
 def app(
     account_service: FakeAccountService,
     audit_logger: FakeAuditLogger,
     dynamic_config: FakeDynamicConfig,
     static_config: FakeConfig,
+    member_service: _FakeMemberService,
+    session_service: _FakeSessionService,
 ):
     return create_app(
         account_service=account_service,
         audit_logger=audit_logger,
         dynamic_config=dynamic_config,
         config=static_config,
+        member_service=member_service,
+        session_service=session_service,
     )
 
 
@@ -260,6 +335,7 @@ class TestUpdateAccountRule:
         resp = client.put(
             "/api/accounts/nonexistent/rules/daily_loss_limit",
             json={"enabled": True, "params": {}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 404
 
@@ -271,6 +347,7 @@ class TestUpdateAccountRule:
         resp = client.put(
             "/api/accounts/acct-1/rules/nonexistent_rule",
             json={"enabled": True, "params": {}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 400
         assert "nonexistent_rule" in resp.json()["detail"]
@@ -286,6 +363,7 @@ class TestUpdateAccountRule:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": 0.03}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -325,6 +403,7 @@ class TestUpdateAccountRule:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": False, "params": {"max_daily_loss_percent": 0.10}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -351,6 +430,7 @@ class TestUpdateAccountRule:
         resp = client.put(
             "/api/accounts/acct-1/rules/position_size",
             json={"enabled": True, "params": {"max_position_percent": 0.15}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -361,6 +441,8 @@ class TestUpdateAccountRule:
         assert len(rule_logs) == 1
         log = rule_logs[0]
         assert "position_size" in log["resource"]
+        # #1376: caller_id 가 audit member_id 로 사용되어야 한다.
+        assert log["member_id"] == "master-user"
 
     def test_all_rule_types_accepted(
         self,
@@ -376,6 +458,7 @@ class TestUpdateAccountRule:
             resp = client.put(
                 f"/api/accounts/acct-1/rules/{rule_type}",
                 json={"enabled": True, "params": {}},
+                headers=_MASTER_HEADERS,
             )
             assert resp.status_code == 200, f"Failed for rule_type={rule_type}"
             assert resp.json()["rule_type"] == rule_type
@@ -384,6 +467,8 @@ class TestUpdateAccountRule:
         self,
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
+        member_service: _FakeMemberService,
+        session_service: _FakeSessionService,
     ) -> None:
         """정적 Config에 있는 룰이 업데이트되면 DynamicConfig에 저장된다."""
         _add_account(account_service, "acct-1")
@@ -405,12 +490,15 @@ class TestUpdateAccountRule:
             audit_logger=audit_logger,
             dynamic_config=dynamic_config,
             config=static_config,
+            member_service=member_service,
+            session_service=session_service,
         )
         client = TestClient(app)
 
         resp = client.put(
             "/api/accounts/acct-1/rules/total_exposure_limit",
             json={"enabled": False, "params": {"max_exposure_percent": 0.30}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -433,6 +521,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": -1}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
         assert "max_daily_loss_percent" in resp.json()["detail"]
@@ -446,6 +535,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": 1.5}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
 
@@ -458,6 +548,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": 0.05}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -470,6 +561,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": 0}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -481,6 +573,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/total_exposure_limit",
             json={"enabled": True, "params": {"max_exposure_percent": -0.5}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
         assert "max_exposure_percent" in resp.json()["detail"]
@@ -493,6 +586,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/total_exposure_limit",
             json={"enabled": True, "params": {"max_exposure_amount": -1000}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
         assert "max_exposure_amount" in resp.json()["detail"]
@@ -505,6 +599,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/position_size",
             json={"enabled": True, "params": {"max_position_percent": -0.1}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
         assert "max_position_percent" in resp.json()["detail"]
@@ -520,6 +615,7 @@ class TestRuleConfigValidation:
                 "enabled": True,
                 "params": {"max_unrealized_loss_percent": -0.05},
             },
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
         assert "max_unrealized_loss_percent" in resp.json()["detail"]
@@ -532,6 +628,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/trade_frequency",
             json={"enabled": True, "params": {"max_trades_per_hour": -5}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
         assert "max_trades_per_hour" in resp.json()["detail"]
@@ -545,6 +642,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 
@@ -557,6 +655,7 @@ class TestRuleConfigValidation:
         resp = client.put(
             "/api/accounts/acct-1/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": "abc"}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 422
 
@@ -608,6 +707,7 @@ class TestAccountRulesEffectiveMergeContract:
         resp = client.put(
             "/api/accounts/acct-kis/rules/daily_loss_limit",
             json={"enabled": True, "params": {"max_daily_loss_percent": 0.05}},
+            headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
 

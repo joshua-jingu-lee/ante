@@ -177,7 +177,7 @@ export type paths = {
         get?: never;
         /**
          * Update Account Rule
-         * @description 계좌 리스크 룰 개별 수정.
+         * @description 계좌 리스크 룰 개별 수정. 인증된 master 만 호출 가능 (#1376).
          *
          *     RULE_REGISTRY에 등록된 타입만 허용하며,
          *     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
@@ -188,6 +188,22 @@ export type paths = {
          *     이 stored rules를 merge한 결과이며, ``ConfigChangedEvent`` reload 시
          *     동일 helper가 다시 호출된다. 본 GET/PUT API는 stored rules만 다룬다 —
          *     effective view는 후속 이슈에서 별도 엔드포인트로 노출한다 (#1296).
+         *
+         *     ``submit_report`` (#1374) / ``halt`` (#1375) 와 동일한 raw body 파싱
+         *     패턴을 적용해 인증 가드가 body validation 보다 우선 실행되도록 한다.
+         *     FastAPI 가 ``body: RuleUpdateRequest`` 를 먼저 검증하면 unauth + bad-body
+         *     시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다 — 본 라우트는
+         *     oracle A7 finding 의 핵심 시그니처 이므로 인증 가드 우선이 가장 중요하다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        non-master → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``RuleUpdateRequest.model_validate`` — ValidationError → 422.
+         *     4. RULE_REGISTRY 룰 타입 확인 — 없으면 400 (기존 계약 보존).
+         *     5. RULE_REGISTRY[rule_type].validate_config — 실패 시 422.
+         *     6. DynamicConfig 저장 + audit 기록 (changed_by / member_id = caller_id).
          */
         put: operations["update_account_rule_api_accounts__account_id__rules__rule_type__put"];
         post?: never;
@@ -3972,13 +3988,31 @@ export interface operations {
                     "application/json": components["schemas"]["RuleUpdateResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master 권한 필요). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, 룰 config 범위 검증 실패). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다 (#1376). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
