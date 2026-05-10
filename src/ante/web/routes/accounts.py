@@ -1190,7 +1190,17 @@ async def update_account_rule(
     try:
         body = RuleUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # ``include_context=False, include_input=False`` 로 detail 을 sanitize 한다
+        # (#1380 codex review P1). NaN/Inf 가 ``params`` 안에 들어오면 Pydantic
+        # 기본 ``e.errors()`` 는 ``ctx.error`` 에 ``ValueError`` 객체와
+        # ``input`` 에 non-finite ``float`` 를 그대로 포함시키는데, Starlette
+        # ``JSONResponse(allow_nan=False)`` 가 이를 직렬화하지 못해 의도한 422
+        # 대신 500 이 반환된다. 두 필드를 빼면 detail 은 순수 JSON-호환 dict
+        # list 가 되고, 호출자는 ``loc`` / ``msg`` 만 받게 된다.
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 3. 계좌 존재 확인
     try:

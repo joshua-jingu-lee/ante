@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
+from ante.rule.global_rules import _is_finite_numeric
 
 
 class PositionSizeRule(Rule):
@@ -15,13 +16,17 @@ class PositionSizeRule(Rule):
         errors: list[str] = []
         if "max_position_percent" in params:
             v = params["max_position_percent"]
-            if not isinstance(v, int | float) or v < 0:
+            if not _is_finite_numeric(v):
+                errors.append("max_position_percent must be a finite number")
+            elif v < 0:
                 errors.append("max_position_percent must be >= 0")
             elif v > 1:
                 errors.append("max_position_percent must be <= 1")
         if "max_position_amount" in params:
             v = params["max_position_amount"]
-            if not isinstance(v, int | float) or v < 0:
+            if not _is_finite_numeric(v):
+                errors.append("max_position_amount must be a finite number")
+            elif v < 0:
                 errors.append("max_position_amount must be >= 0")
         return errors
 
@@ -75,7 +80,9 @@ class UnrealizedLossLimitRule(Rule):
         errors: list[str] = []
         if "max_unrealized_loss_percent" in params:
             v = params["max_unrealized_loss_percent"]
-            if not isinstance(v, int | float) or v < 0:
+            if not _is_finite_numeric(v):
+                errors.append("max_unrealized_loss_percent must be a finite number")
+            elif v < 0:
                 errors.append("max_unrealized_loss_percent must be >= 0")
             elif v > 1:
                 errors.append("max_unrealized_loss_percent must be <= 1")
@@ -126,7 +133,9 @@ class TradeFrequencyRule(Rule):
         errors: list[str] = []
         if "max_trades_per_hour" in params:
             v = params["max_trades_per_hour"]
-            if not isinstance(v, int | float) or v < 0:
+            if not _is_finite_numeric(v):
+                errors.append("max_trades_per_hour must be a finite number")
+            elif v < 0:
                 errors.append("max_trades_per_hour must be >= 0")
         return errors
 

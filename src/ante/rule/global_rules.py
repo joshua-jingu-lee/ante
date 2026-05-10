@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
+
+
+def _is_finite_numeric(value: Any) -> bool:
+    """``value`` 가 finite int/float 인지 판정 (bool 명시 제외).
+
+    이중 방어 layer (#1380): RuleUpdateRequest 단에서 NaN/Inf 가 거부되지만,
+    DynamicConfig load 등 다른 경로에서 invalid value 가 들어와도 RULE_REGISTRY
+    가 fail-closed 로 막아야 한다. ``bool`` 은 numeric 흉내 방지를 위해 명시
+    제외한다 (``isinstance(True, int) == True``). 거대 ``int`` 는 ``float``
+    변환 시 ``OverflowError`` 가 발생하므로 finite 가 아니라고 판정한다 —
+    rule/engine.py:69-80 ``_is_finite_quantity`` 와 동일한 정책.
+    """
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
 
 
 class DailyLossLimitRule(Rule):
@@ -22,7 +43,9 @@ class DailyLossLimitRule(Rule):
         for key, upper in cls._PARAM_LIMITS.items():
             if key in params:
                 v = params[key]
-                if not isinstance(v, int | float) or v < 0:
+                if not _is_finite_numeric(v):
+                    errors.append(f"{key} must be a finite number")
+                elif v < 0:
                     errors.append(f"{key} must be >= 0")
                 elif v > upper:
                     errors.append(f"{key} must be <= {upper}")
@@ -90,13 +113,17 @@ class TotalExposureLimitRule(Rule):
         errors: list[str] = []
         if "max_exposure_percent" in params:
             v = params["max_exposure_percent"]
-            if not isinstance(v, int | float) or v < 0:
+            if not _is_finite_numeric(v):
+                errors.append("max_exposure_percent must be a finite number")
+            elif v < 0:
                 errors.append("max_exposure_percent must be >= 0")
             elif v > 1:
                 errors.append("max_exposure_percent must be <= 1")
         if "max_exposure_amount" in params:
             v = params["max_exposure_amount"]
-            if not isinstance(v, int | float) or v < 0:
+            if not _is_finite_numeric(v):
+                errors.append("max_exposure_amount must be a finite number")
+            elif v < 0:
                 errors.append("max_exposure_amount must be >= 0")
         return errors
 
