@@ -458,3 +458,64 @@ class TestHandleBrokerReconcile:
 
         assert result == {"bot_id": "unknown-bot", "adjustments": []}
         fake_reconciler.reconcile.assert_awaited_once()
+
+
+# ── #1379 oracle A7: IPC config.set 핸들러도 서비스 경계 ValueError 전파 ──
+
+
+class TestHandleConfigSetValidation:
+    """``_handle_config_set`` 이 ``DynamicConfigService.set`` 의 ValueError 를
+    그대로 전파하는지 검증한다(IPC 우회 차단, #1379).
+    """
+
+    async def test_invalid_log_level_propagates_value_error(self):
+        """invalid system.log_level → ValueError (IPC 단계 차단)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_config_set
+
+        async def _set(key, value, category, changed_by):  # noqa: ANN001, ANN202
+            from ante.config.dynamic import validate_value
+
+            validate_value(key, value)
+
+        fake_dynamic = MagicMock()
+        fake_dynamic.set = AsyncMock(side_effect=_set)
+
+        svc = MagicMock()
+        svc.dynamic_config = fake_dynamic
+
+        with pytest.raises(ValueError, match="system.log_level"):
+            await _handle_config_set(
+                svc,
+                {
+                    "key": "system.log_level",
+                    "value": "ORACLE_INVALID_LEVEL",
+                    "category": "system",
+                },
+                "cli-user",
+            )
+
+    async def test_valid_log_level_succeeds(self):
+        """``DEBUG`` 같은 정상 값은 통과."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.ipc.registry import _handle_config_set
+
+        fake_dynamic = MagicMock()
+        fake_dynamic.set = AsyncMock(return_value=None)
+
+        svc = MagicMock()
+        svc.dynamic_config = fake_dynamic
+
+        result = await _handle_config_set(
+            svc,
+            {
+                "key": "system.log_level",
+                "value": "DEBUG",
+                "category": "system",
+            },
+            "cli-user",
+        )
+        assert result == {"key": "system.log_level", "value": "DEBUG"}
+        fake_dynamic.set.assert_awaited_once()

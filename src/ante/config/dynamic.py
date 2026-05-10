@@ -14,6 +14,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+def validate_value(key: str, value: Any) -> None:
+    """키별 값 검증 (서비스 경계에서 호출).
+
+    `system.log_level` 처럼 enum SSOT가 정의된 키는 invalid 값을 즉시 거부한다.
+    정의되지 않은 키는 통과(generic CRUD 동작 유지).
+
+    대소문자 정책: `system.log_level` 은 대소문자 구분으로 거부한다. 즉
+    ``_VALID_LOG_LEVELS`` 멤버(전부 대문자)와 정확 일치해야 통과하고,
+    ``"debug"`` 같은 소문자 입력은 ValueError 로 거부된다 (#1379 oracle A7).
+
+    Raises:
+        ValueError: 키별 invariant 를 위반한 경우. 호출자(web/IPC/CLI)는
+            이를 422 등 도메인 응답으로 변환해야 한다.
+    """
+    if key == "system.log_level":
+        if not isinstance(value, str) or value not in _VALID_LOG_LEVELS:
+            raise ValueError(
+                "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 (대소문자 구분)."
+            )
+
+
 DYNAMIC_CONFIG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dynamic_config (
     key       TEXT PRIMARY KEY,
@@ -66,8 +91,14 @@ class DynamicConfigService:
     async def set(
         self, key: str, value: Any, category: str, changed_by: str = "system"
     ) -> None:
-        """동적 설정 값 변경 + 이력 기록 + EventBus 알림."""
+        """동적 설정 값 변경 + 이력 기록 + EventBus 알림.
+
+        키별 invariant 가 정의된 경우 ``validate_value`` 가 ValueError 를
+        발생시킨다(서비스 경계 검증, IPC/CLI 우회 차단 — #1379).
+        """
         from ante.eventbus.events import ConfigChangedEvent
+
+        validate_value(key, value)
 
         old_value = None
         if await self.exists(key):
@@ -189,11 +220,15 @@ class DynamicConfigService:
         return count
 
 
-_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-
-
 def _on_log_level_changed(event: Any) -> None:
-    """system.log_level 변경 시 루트 로거 레벨을 동적으로 갱신한다."""
+    """system.log_level 변경 시 루트 로거 레벨을 동적으로 갱신한다.
+
+    서비스 경계에서 ``validate_value`` 가 invalid 값을 차단하므로 이 callback
+    까지 invalid 값이 도달하는 일은 정상 경로에서는 발생하지 않는다(#1379).
+    그래도 startup hook 이 historical persisted bad-value 를 publish 하거나
+    구독자 순서가 바뀌는 경우를 대비해 silent-drop 을 defense-in-depth 로
+    유지한다.
+    """
     if event.key != "system.log_level":
         return
 

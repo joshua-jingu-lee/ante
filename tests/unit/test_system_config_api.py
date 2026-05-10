@@ -11,6 +11,7 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from ante.config.dynamic import validate_value  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
 
 # ── Member / Session fakes (#1373 update_config 인증 가드 추가) ──────────
@@ -112,6 +113,10 @@ class FakeDynamicConfig:
         category: str = "",
         changed_by: str = "",
     ) -> None:
+        # 실제 DynamicConfigService.set 과 동일하게 서비스 경계에서 invariant
+        # 를 검증한다 (#1379). web 라우트가 ValueError 를 422 로 매핑하는지
+        # 검증하려면 fake stub 도 같은 invariant 를 강제해야 한다.
+        validate_value(key, value)
         self._configs[key] = {"value": value, "category": category}
 
 
@@ -340,3 +345,78 @@ class TestDynamicConfig:
             headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 404
+
+    # ── #1379 oracle A7: system.log_level enum 검증 ─────────────────────
+
+    def test_config_update_invalid_log_level_returns_422(self, client, dynamic_config):
+        """invalid system.log_level 값 → 422 (master 인증, #1379).
+
+        oracle probe 가 ``ORACLE_INVALID_LEVEL`` 같은 값을 인증 토큰과 함께
+        보내도 dynamic_config 가 영구 저장되어선 안 된다. 서비스 경계에서
+        ``ValueError`` 가 발생하고 라우트가 이를 422 로 변환한다.
+        """
+        dynamic_config._configs["system.log_level"] = {
+            "value": "INFO",
+            "category": "system",
+        }
+        resp = client.put(
+            "/api/config/system.log_level",
+            json={"value": "ORACLE_INVALID_LEVEL"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        # 영구 저장은 일어나지 않아야 한다 — 기존 INFO 값이 유지.
+        assert dynamic_config._configs["system.log_level"]["value"] == "INFO"
+
+    def test_config_update_valid_log_level_succeeds(self, client, dynamic_config):
+        """``_VALID_LOG_LEVELS`` 멤버(대문자) → 200 (master 인증, #1379)."""
+        dynamic_config._configs["system.log_level"] = {
+            "value": "INFO",
+            "category": "system",
+        }
+        resp = client.put(
+            "/api/config/system.log_level",
+            json={"value": "DEBUG"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["new_value"] == "DEBUG"
+        assert dynamic_config._configs["system.log_level"]["value"] == "DEBUG"
+
+    def test_config_update_lowercase_log_level_returns_422(
+        self, client, dynamic_config
+    ):
+        """소문자 ``"debug"`` → 422 (대소문자 구분 정책, #1379).
+
+        callback ``_on_log_level_changed`` 는 ``.upper()`` 정규화를 하지만
+        web layer 는 사용자 입력을 그대로 검증하여 enum SSOT 와 정확
+        일치만 통과시킨다. 입력 의도 변경(silent normalize)을 거부.
+        """
+        dynamic_config._configs["system.log_level"] = {
+            "value": "INFO",
+            "category": "system",
+        }
+        resp = client.put(
+            "/api/config/system.log_level",
+            json={"value": "debug"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        assert dynamic_config._configs["system.log_level"]["value"] == "INFO"
+
+    def test_config_update_unknown_key_validation_skipped(self, client, dynamic_config):
+        """invariant 가 정의되지 않은 키는 generic 동작 유지 (#1379).
+
+        ``system.log_level`` 만 검증 대상이며, 다른 키는 follow-up scope.
+        기존 동작이 회귀하지 않음을 잠근다.
+        """
+        dynamic_config._configs["risk.max_mdd"] = {
+            "value": 0.1,
+            "category": "risk",
+        }
+        resp = client.put(
+            "/api/config/risk.max_mdd",
+            json={"value": "anything-still-passes"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
