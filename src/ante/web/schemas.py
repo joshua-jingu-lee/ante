@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import time as dtime
 from typing import Any
@@ -1017,11 +1018,75 @@ class RuleListResponse(BaseModel):
     rules: list[RuleItem]
 
 
+# ``RuleUpdateRequest.params`` 는 룰별로 schema 가 다른 ``dict[str, Any]`` open
+# object 다 (OpenAPI ``additionalProperties: true``). 하지만 모든 룰의 numeric
+# threshold 는 finite real number 여야 한다 — ``NaN`` / ``Inf`` 는 비교 의미가
+# 없어 fail-open 회귀나 ``json.dumps`` 직렬화 후 다운스트림 파싱 에러를 유발한다
+# (#1380 oracle A7). 본 helper 는 finite/Inf 검증을 ``params`` 트리 전체에 재귀
+# 적용하여 service 경계에서 422 로 잘라낸다. RULE_REGISTRY 단의 finite 검사는
+# 이중 방어로 따로 둔다.
+def _reject_non_finite(value: Any) -> None:
+    """``params`` 트리 안에 ``NaN`` / ``Inf`` numeric 이 있으면 ``ValueError``.
+
+    - ``bool`` → 통과 (``isinstance(True, int) == True`` 이므로 numeric 분기에서
+      가로채면 안 된다 — bool 정책은 RULE_REGISTRY ``validate_config`` 에서
+      별도로 거부한다).
+    - ``int`` / ``float`` → ``math.isnan`` / ``math.isinf`` 검사. Python ``int``
+      는 임의 정밀도라 ``10**10000`` 같은 거대 정수 ``float`` 변환에서
+      ``OverflowError`` 가 떨어질 수 있다 (``rule/engine.py:69-80``
+      ``_is_finite_quantity`` 패턴 참조). ``OverflowError`` / ``ValueError`` /
+      ``TypeError`` 는 finite-호환이 아니므로 동일하게 ``ValueError`` 로 매핑한다.
+    - ``dict`` / ``list`` / ``tuple`` → 요소 재귀.
+    - 그 외 (``str``, ``None`` 등) → 통과 (numeric 검증 대상 아님).
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        try:
+            if math.isnan(value) or math.isinf(value):
+                raise ValueError(
+                    "params 의 numeric 값은 finite 여야 합니다 (NaN/Inf 거부)."
+                )
+        except (OverflowError, TypeError) as exc:
+            raise ValueError(
+                "params 의 numeric 값은 finite 여야 합니다 (NaN/Inf 거부)."
+            ) from exc
+        return
+    if isinstance(value, dict):
+        for v in value.values():
+            _reject_non_finite(v)
+        return
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            _reject_non_finite(v)
+        return
+
+
 class RuleUpdateRequest(BaseModel):
-    """룰 설정 변경 요청."""
+    """룰 설정 변경 요청.
+
+    ``params`` 는 룰별 schema 를 갖는 open object 지만, 모든 numeric threshold
+    는 finite 여야 한다 (#1380 oracle A7). ``json.loads`` default 는 ``NaN`` /
+    ``Infinity`` / ``-Infinity`` 를 ``float('nan')`` / ``float('inf')`` 로
+    파싱하므로, raw body parser 가 통과시킨 값을 본 모델 단에서 422 로 거부한다.
+    bool 은 numeric 흉내 방지를 위해 ``_reject_non_finite`` 가 통과시키되,
+    RULE_REGISTRY ``validate_config`` 가 known numeric key 에 대해 별도로
+    거부한다.
+    """
 
     enabled: bool = True
     params: dict[str, Any] = {}
+
+    @field_validator("params")
+    @classmethod
+    def _validate_params_finite(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """``params`` 트리에서 ``NaN`` / ``Inf`` numeric 을 거부.
+
+        실패 시 ``ValueError`` 를 raise 하여 FastAPI 가 ``ValidationError`` →
+        422 로 매핑하도록 한다 (#1380).
+        """
+        _reject_non_finite(v)
+        return v
 
 
 class RuleUpdateResponse(BaseModel):

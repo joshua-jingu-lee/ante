@@ -660,6 +660,286 @@ class TestRuleConfigValidation:
         assert resp.status_code == 422
 
 
+class TestRuleConfigNonFiniteRejection:
+    """PUT /api/accounts/{id}/rules/{type} — NaN/Inf 거부 (#1380 oracle A7).
+
+    인증된 master 호출이 ``params`` 안의 ``NaN`` / ``Infinity`` /
+    ``-Infinity`` 같은 non-finite numeric threshold 를 200 으로 통과시키던
+    회귀를 차단한다. raw body 로 ``NaN`` literal 을 보내야 한다 — httpx
+    ``json=`` 은 ``allow_nan=False`` 라 numeric NaN 을 직렬화하지 못하기
+    때문이다. ``json.loads`` default 는 ``NaN`` literal 을 ``float('nan')`` 으로
+    파싱하므로, ``RuleUpdateRequest`` 의 ``field_validator`` 가 그 결과를 422
+    로 잘라내야 한다. 422 시 ``DynamicConfig.set`` / RuleEngine reload 가
+    호출되지 않아야 한다 (spy).
+    """
+
+    def test_account_rule_update_nan_threshold_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """``max_daily_loss_percent: NaN`` 은 422 로 거부되고 persist 되지 않는다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            content=b'{"enabled": true, "params": {"max_daily_loss_percent": NaN}}',
+            headers={
+                **_MASTER_HEADERS,
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        # 응답 body 가 valid JSON 으로 직렬화되어야 한다 (#1380 codex P1).
+        # ``e.errors()`` 기본 출력은 ``ctx.error`` 에 ``ValueError`` 객체와
+        # ``input`` 에 ``float('nan')`` 을 포함시킨다. RFC7807 핸들러
+        # (``ante.web.errors``) 가 ``str(exc.detail)`` 로 stringify 하더라도,
+        # sanitize 안 된 detail 에는 ``ValueError(...)`` repr 과 ``ctx`` /
+        # ``input`` key 가 그대로 노출되어 클라이언트에 내부 디버그 정보가
+        # 누설되며, future 핸들러가 ``detail`` 을 raw list 로 보내면 NaN 이
+        # ``JSONResponse(allow_nan=False)`` 를 깨뜨려 500 으로 회귀한다.
+        # 핸들러는 ``include_context=False, include_input=False`` 로 detail 을
+        # sanitize 하여 순수 ``loc`` / ``msg`` 만 노출해야 한다.
+        body = resp.json()
+        # detail 표현은 RFC7807 핸들러에 의해 string 일 수 있다 — 어느 쪽이든
+        # ``ctx`` / ``input`` / ``ValueError(`` 디버그 토큰이 노출되어서는
+        # 안 된다.
+        detail = body["detail"]
+        detail_str = detail if isinstance(detail, str) else str(detail)
+        assert "ValueError(" not in detail_str
+        assert "'ctx'" not in detail_str
+        assert "'input'" not in detail_str
+        # spy: 422 시 stored 가 비어 있어야 한다 (set 미호출).
+        assert "accounts.acct-1.rules" not in dynamic_config._store
+
+    def test_account_rule_update_positive_inf_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """``max_daily_loss_percent: Infinity`` 는 422 로 거부된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            content=(
+                b'{"enabled": true, "params": {"max_daily_loss_percent": Infinity}}'
+            ),
+            headers={
+                **_MASTER_HEADERS,
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        # 응답이 valid JSON 으로 직렬화되어야 한다 (#1380 codex P1 sanitize).
+        resp.json()
+        assert "accounts.acct-1.rules" not in dynamic_config._store
+
+    def test_account_rule_update_negative_inf_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """``max_daily_loss_percent: -Infinity`` 는 422 로 거부된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            content=(
+                b'{"enabled": true, "params": {"max_daily_loss_percent": -Infinity}}'
+            ),
+            headers={
+                **_MASTER_HEADERS,
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        # 응답이 valid JSON 으로 직렬화되어야 한다 (#1380 codex P1 sanitize).
+        resp.json()
+        assert "accounts.acct-1.rules" not in dynamic_config._store
+
+    def test_account_rule_update_nested_dict_nan_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """nested dict 안의 ``NaN`` 도 재귀적으로 거부된다.
+
+        ``params`` 는 ``dict[str, Any]`` open object 이므로, 룰별로 nested
+        struct (예: ``{"thresholds": {"warn": NaN}}``) 가 등장할 수 있다.
+        helper 가 dict values 를 재귀하여 ``NaN`` 을 잡아야 한다.
+        """
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            content=(b'{"enabled": true, "params": {"thresholds": {"warn": NaN}}}'),
+            headers={
+                **_MASTER_HEADERS,
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        # 응답이 valid JSON 으로 직렬화되어야 한다 (#1380 codex P1 sanitize).
+        resp.json()
+        assert "accounts.acct-1.rules" not in dynamic_config._store
+
+    def test_account_rule_update_list_with_nan_returns_422(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """list 요소 안의 ``NaN`` 도 재귀적으로 거부된다."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            content=(b'{"enabled": true, "params": {"steps": [0.05, NaN, 0.10]}}'),
+            headers={
+                **_MASTER_HEADERS,
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 422
+        # 응답이 valid JSON 으로 직렬화되어야 한다 (#1380 codex P1 sanitize).
+        resp.json()
+        assert "accounts.acct-1.rules" not in dynamic_config._store
+
+    def test_account_rule_update_finite_threshold_succeeds(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """finite ``max_daily_loss_percent`` happy path 회귀 보호 (#1380)."""
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": 0.05}},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
+        # finite 값은 정상 persist 되어야 한다.
+        assert "accounts.acct-1.rules" in dynamic_config._store
+
+    def test_account_rule_update_bool_param_handling(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        dynamic_config: FakeDynamicConfig,
+    ) -> None:
+        """numeric param key 에 ``bool`` 이 오면 RULE_REGISTRY 가 422 로 거부.
+
+        정책 (#1380):
+        - schema 단 ``_reject_non_finite`` 는 ``bool`` 을 통과시킨다 (numeric
+          분기에서 가로채지 않음).
+        - RULE_REGISTRY ``validate_config`` 는 known numeric key 에 대해
+          ``_is_finite_numeric`` 으로 ``bool`` 을 거부한다.
+        - 결과: ``params={"max_daily_loss_percent": True}`` 는 RULE_REGISTRY
+          단계에서 422 가 떨어진다.
+        """
+        _add_account(account_service, "acct-1")
+
+        resp = client.put(
+            "/api/accounts/acct-1/rules/daily_loss_limit",
+            json={"enabled": True, "params": {"max_daily_loss_percent": True}},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        assert "max_daily_loss_percent" in resp.json()["detail"]
+        # 422 시 persist 되지 않아야 한다.
+        assert "accounts.acct-1.rules" not in dynamic_config._store
+
+
+class TestRuleUpdateRequestSchema:
+    """``RuleUpdateRequest`` Pydantic 단위 검증 (#1380).
+
+    web 라우트 통합 테스트와 별도로, schema 자체가 ``NaN`` / ``Inf`` 를
+    ``ValidationError`` 로 거부하는지 unit-level 로 보호한다.
+    """
+
+    def test_rule_update_request_field_validator_rejects_nan(self) -> None:
+        from pydantic import ValidationError
+
+        from ante.web.schemas import RuleUpdateRequest
+
+        with pytest.raises(ValidationError):
+            RuleUpdateRequest.model_validate(
+                {
+                    "enabled": True,
+                    "params": {"max_daily_loss_percent": float("nan")},
+                }
+            )
+
+    def test_rule_update_request_field_validator_rejects_positive_inf(self) -> None:
+        from pydantic import ValidationError
+
+        from ante.web.schemas import RuleUpdateRequest
+
+        with pytest.raises(ValidationError):
+            RuleUpdateRequest.model_validate(
+                {
+                    "enabled": True,
+                    "params": {"max_daily_loss_percent": float("inf")},
+                }
+            )
+
+    def test_rule_update_request_field_validator_rejects_negative_inf(self) -> None:
+        from pydantic import ValidationError
+
+        from ante.web.schemas import RuleUpdateRequest
+
+        with pytest.raises(ValidationError):
+            RuleUpdateRequest.model_validate(
+                {
+                    "enabled": True,
+                    "params": {"max_daily_loss_percent": float("-inf")},
+                }
+            )
+
+    def test_rule_update_request_field_validator_rejects_nested_nan(self) -> None:
+        from pydantic import ValidationError
+
+        from ante.web.schemas import RuleUpdateRequest
+
+        with pytest.raises(ValidationError):
+            RuleUpdateRequest.model_validate(
+                {
+                    "enabled": True,
+                    "params": {"nested": {"deeper": [1.0, float("nan")]}},
+                }
+            )
+
+    def test_rule_update_request_field_validator_accepts_finite(self) -> None:
+        from ante.web.schemas import RuleUpdateRequest
+
+        body = RuleUpdateRequest.model_validate(
+            {
+                "enabled": True,
+                "params": {"max_daily_loss_percent": 0.05},
+            }
+        )
+        assert body.params == {"max_daily_loss_percent": 0.05}
+
+    def test_rule_update_request_field_validator_passes_bool(self) -> None:
+        """``bool`` 은 schema 단에서 통과 — RULE_REGISTRY 가 별도로 거부한다."""
+        from ante.web.schemas import RuleUpdateRequest
+
+        body = RuleUpdateRequest.model_validate(
+            {
+                "enabled": True,
+                "params": {"some_flag": True},
+            }
+        )
+        assert body.params == {"some_flag": True}
+
+
 class TestAccountRulesEffectiveMergeContract:
     """PUT API와 effective rules merge의 계약 검증 (#1296).
 
