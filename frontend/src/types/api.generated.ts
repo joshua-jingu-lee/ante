@@ -1218,7 +1218,22 @@ export type paths = {
         head?: never;
         /**
          * Update Strategy Status
-         * @description 전략 상태 변경. 보관 전환용.
+         * @description 전략 상태 변경. 보관 전환용. 인증된 master/human 또는
+         *     ``strategy:write`` scope 를 보유한 agent 만 호출 가능 (#1378).
+         *
+         *     ``submit_report`` (#1374) / ``update_config`` (#1373) 와 동일한 raw body
+         *     파싱 패턴을 적용해 인증 가드가 body validation 보다 우선 실행되도록 한다.
+         *     FastAPI 가 ``body: StatusUpdateRequest`` 를 먼저 검증하면 unauth + bad-body
+         *     시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422.
+         *     4. ``StrategyStatus`` enum 변환 — 실패 시 400.
+         *     5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 불가 → 400.
          */
         patch: operations["update_strategy_status_api_strategies__strategy_id__status_patch"];
         trace?: never;
@@ -6377,6 +6392,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master, human 멤버 또는 strategy:write scope 보유 agent 만 허용). spec require_scope predicate 정합. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Strategy not found */
             404: {
                 headers: {
@@ -6386,13 +6419,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, extra key). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1378). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import ValidationError
 
 from ante.web.deps import (
     get_bot_manager_optional,
@@ -17,6 +19,7 @@ from ante.web.deps import (
     get_strategy_registry,
     get_trade_service,
     get_trade_service_optional,
+    require_strategy_write,
 )
 from ante.web.schemas import (
     DailySummaryResponse,
@@ -35,6 +38,32 @@ router = APIRouter()
 _STRATEGY_NOT_FOUND = "전략을 찾을 수 없습니다"
 _VALID_STATUS_FILTERS = {"registered", "adopted", "archived"}
 _logger = logging.getLogger(__name__)
+
+
+# PATCH /api/strategies/{strategy_id}/status OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다(#1378). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema 로 두면 frontend codegen 이 ``export type StatusUpdateRequest``
+# 를 만들지 못한다. 따라서 라우트 ``openapi_extra`` 는 ``$ref`` 매핑만 노출하고
+# 본체 schema 는 ``_install_openapi_customizer`` 가 ``components.schemas`` 에
+# ``setdefault`` 등록한다(#1374 ``ReportSubmitRequest`` SSOT 패턴 답습).
+#
+# 본체 schema 는 Pydantic 모델 SSOT (``StatusUpdateRequest``) 의
+# ``model_json_schema()`` 출력에서 파생한다. ``default=None`` 만 strip 해
+# openapi-typescript 가 optional 필드를 ``?`` 마커로 노출하도록 보존한다 —
+# ``required`` / ``additionalProperties`` invariants 는 모두 모델 정의 그대로
+# 유지된다 (#1374 _build_report_submit_request_schema 와 동일 패턴).
+def _build_status_update_request_schema() -> dict[str, Any]:
+    schema = StatusUpdateRequest.model_json_schema()
+    properties = schema.get("properties", {})
+    for prop in properties.values():
+        if isinstance(prop, dict) and prop.get("default") is None and "default" in prop:
+            prop.pop("default")
+    return schema
+
+
+STATUS_UPDATE_REQUEST_SCHEMA: dict[str, Any] = _build_status_update_request_schema()
 
 
 def _find_bot_for_strategy(bot_manager: Any, strategy_id: str) -> dict | None:
@@ -208,6 +237,31 @@ async def list_strategies(
                 },
             },
         },
+        401: {
+            "description": (
+                "Authentication required (missing or invalid Authorization "
+                "header AND missing or invalid ante_session cookie). 대시보드 "
+                "사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, "
+                "에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 "
+                "하나라도 유효하면 통과한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        403: {
+            "description": (
+                "Permission denied (master, human 멤버 또는 strategy:write "
+                "scope 보유 agent 만 허용). spec require_scope predicate 정합."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Strategy not found",
             "content": {
@@ -216,17 +270,78 @@ async def list_strategies(
                 },
             },
         },
+        422: {
+            "description": (
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, "
+                "type mismatch, extra key). 단, 인증이 실패하면 body validation "
+                "은 실행되지 않고 401 이 우선 반환된다(#1378)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/StatusUpdateRequest"},
+                },
+            },
+        },
     },
 )
 async def update_strategy_status(
     strategy_id: str,
-    body: StatusUpdateRequest,
+    request: Request,
+    caller_id: Annotated[str, Depends(require_strategy_write)],
     registry: Annotated[Any, Depends(get_strategy_registry)],
 ) -> None:
-    """전략 상태 변경. 보관 전환용."""
+    """전략 상태 변경. 보관 전환용. 인증된 master/human 또는
+    ``strategy:write`` scope 를 보유한 agent 만 호출 가능 (#1378).
+
+    ``submit_report`` (#1374) / ``update_config`` (#1373) 와 동일한 raw body
+    파싱 패턴을 적용해 인증 가드가 body validation 보다 우선 실행되도록 한다.
+    FastAPI 가 ``body: StatusUpdateRequest`` 를 먼저 검증하면 unauth + bad-body
+    시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
+
+    핸들러 단계 순서:
+
+    1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
+    2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+    3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422.
+    4. ``StrategyStatus`` enum 변환 — 실패 시 400.
+    5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 불가 → 400.
+    """
     from ante.strategy.exceptions import StrategyError
     from ante.strategy.registry import StrategyStatus
 
+    # 1. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
+    raw = await request.body()
+    if raw == b"":
+        raise HTTPException(status_code=422, detail="요청 body가 비어 있습니다.")
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422, detail="요청 body는 JSON object여야 합니다."
+        )
+
+    # 2. Pydantic 검증.
+    try:
+        body = StatusUpdateRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    # 3. enum 변환.
     try:
         new_status = StrategyStatus(body.status)
     except ValueError:
