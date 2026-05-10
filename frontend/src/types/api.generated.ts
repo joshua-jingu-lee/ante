@@ -1388,7 +1388,20 @@ export type paths = {
         put?: never;
         /**
          * Allocate
-         * @description 봇에 예산 할당.
+         * @description 봇에 예산 할당. 인증된 master만 호출 가능 (#1372).
+         *
+         *     ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
+         *     body validation보다 우선 실행되도록 한다. FastAPI가 ``body:
+         *     BudgetChangeRequest``를 먼저 검증하면 unauth + bad-body 시 401이 아닌
+         *     422가 먼저 반환되어 contract가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        non-master → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
+         *     4. ``treasury.allocate`` 호출 (``BotNotStoppedError`` → 409).
          */
         post: operations["allocate_api_treasury_bots__bot_id__allocate_post"];
         delete?: never;
@@ -1408,7 +1421,18 @@ export type paths = {
         put?: never;
         /**
          * Deallocate
-         * @description 봇 예산 회수.
+         * @description 봇 예산 회수. 인증된 master만 호출 가능 (#1372).
+         *
+         *     ``allocate`` / ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을
+         *     적용해 인증 가드가 body validation보다 우선 실행되도록 한다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        non-master → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
+         *     4. ``treasury.deallocate`` 호출 (``BotNotStoppedError`` → 409).
          */
         post: operations["deallocate_api_treasury_bots__bot_id__deallocate_post"];
         delete?: never;
@@ -1910,10 +1934,10 @@ export type components = {
         };
         /**
          * BudgetChangeRequest
-         * @description 예산 할당/회수 요청.
+         * @description POST /api/treasury/bots/{bot_id}/allocate, POST /api/treasury/bots/{bot_id}/deallocate 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1372). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         BudgetChangeRequest: {
-            /** Amount */
+            /** @description 할당/회수 금액 (원). */
             amount: number;
         };
         /**
@@ -6674,6 +6698,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master 권한 필요) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Bot not found */
             404: {
                 headers: {
@@ -6692,13 +6734,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, amount 누락). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1372). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -6745,6 +6787,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master 권한 필요) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Bot not found */
             404: {
                 headers: {
@@ -6763,13 +6823,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, amount 누락). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1372). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
