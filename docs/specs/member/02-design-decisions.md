@@ -80,9 +80,13 @@ scope 문자열의 의미와 판정 규칙은 이 문서를 따른다.
 | 영역 | SSOT 책임 |
 |------|-----------|
 | Member | `human`/`agent`/`master` 모델, 토큰 접두어, scope vocabulary, human bypass, agent scope 제한 |
-| Web API | session cookie와 Bearer token을 HTTP 요청에서 추출하고, endpoint별 required scope를 Member 규칙으로 검사 |
-| CLI | `ANTE_MEMBER_TOKEN`을 canonical instance DB에서 검증하고, command별 required scope를 Member 규칙으로 검사 |
+| Web API | session cookie와 Bearer token을 HTTP 요청에서 추출. **default-deny gate(middleware)가 1차 차단(인증)**, dependency는 endpoint별 required scope 검증 책임. 공개 라우트는 `PUBLIC_PATHS`/`PUBLIC_PREFIXES` allowlist(SSOT: [web-api/09-public-paths.md](../web-api/09-public-paths.md))로 명시. |
+| CLI | `ANTE_MEMBER_TOKEN`을 canonical instance DB에서 검증. **default-deny group factory가 1차 차단(인증)**, `@require_scope` decorator는 command별 required scope 검증 책임. 공개 명령은 `_AUTH_EXEMPT_COMMAND_PATHS` allowlist(SSOT: [cli/03-commands.md](../cli/03-commands.md))로 명시. |
 | IPC | 별도 인증/권한 모델을 두지 않음. CLI에서 검증된 `actor`와 command payload를 서버 런타임 실행 경로로 전달 |
+
+> default-deny 정책 결정의 SSOT는 [D-015](../../decisions/D-015-default-deny-auth-gate.md)다.
+> middleware/factory는 scope를 검사하지 않으며 dependency/decorator는 인증된 principal을
+> 전제로 한다.
 
 필요 scope의 연결표는 각 표면의 계약 문서에 둘 수 있다. 예를 들어 CLI command별
 required scope는 `docs/specs/cli/03-commands.md`, HTTP endpoint별 required scope는

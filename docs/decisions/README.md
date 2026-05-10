@@ -21,9 +21,10 @@
 | [D-012](D-012.md) | 포지션 소유권 및 자금/리스크 관심사 분리 | 2026-03-12 | 포지션은 Trade, 예산은 Treasury, 리스크는 Rule Engine |
 | [D-013](D-013.md) | Stop Order 에뮬레이션 | - | Stop/Stop-Limit 주문을 시스템 내에서 에뮬레이션 |
 | [D-014](D-014.md) | 설정 API 구조 — Config API 단일화 | 2026-03-23 | 설정 화면은 기존 Config API로 일원화 |
+| [D-015](D-015-default-deny-auth-gate.md) | default-deny 인증 게이트 | 2026-05-11 | Web/CLI 모두 default-deny + allowlist (opt-out), middleware=인증·dependency=scope |
 
 ## 사용 규칙
 
-- 새 결정은 `D-015.md` 같은 새 문서로 추가한다.
+- 새 결정은 `D-016.md` 같은 새 문서로 추가한다.
 - 이 인덱스에는 새 문서 링크와 한 줄 요약만 추가한다.
 - 과거 결정을 수정할 때는 해당 `D-xxx.md` 문서를 직접 수정한다.

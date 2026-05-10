@@ -20,4 +20,5 @@
 | [06-pagination.md](06-pagination.md) | Cursor 기반 페이지네이션 |
 | [07-error-format.md](07-error-format.md) | RFC 7807 에러 응답 |
 | [08-pydantic-schemas.md](08-pydantic-schemas.md) | Pydantic 스키마 목록 |
+| [09-public-paths.md](09-public-paths.md) | default-deny 게이트 면제 공개 경로 allowlist (PUBLIC_PATHS / PUBLIC_PREFIXES) |
 | [10-cross-module-notes.md](10-cross-module-notes.md) | 타 모듈 설계 시 참고 |
