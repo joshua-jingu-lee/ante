@@ -200,3 +200,64 @@ class TestUpdateApprovalStatus:
             json={"status": "approved"},
         )
         assert resp.status_code == 404
+
+
+class TestApprovalStatusUpdateRequestBodySchema:
+    """PATCH /api/approvals/{id}/status requestBody OpenAPI schema 노출 (#1429).
+
+    PR #1428 (#1407 머지) 이후 raw-body 패턴으로 전환되며 ``body:
+    ApprovalStatusUpdate`` 인자가 시그니처에서 사라져 OpenAPI requestBody +
+    ``components.schemas.ApprovalStatusUpdate`` 가 누락됐다.
+    ``frontend/src/api/approvals.ts`` 는 여전히 ``ApprovalStatusUpdate as
+    ApiApprovalStatusUpdate`` 를 import 하므로 codegen 재생성 시 frontend
+    빌드가 깨진다. ``openapi_extra`` + ``_install_openapi_customizer`` 보강을
+    회귀 보호한다.
+    """
+
+    def test_openapi_request_body_ref_to_approval_status_update(self, client):
+        """``requestBody.required == True`` + schema ``$ref`` 매핑 노출."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        spec = (
+            openapi.get("paths", {})
+            .get("/api/approvals/{approval_id}/status", {})
+            .get("patch", {})
+        )
+        request_body = spec.get("requestBody")
+        assert request_body is not None, (
+            "PATCH /api/approvals/{approval_id}/status requestBody 가 OpenAPI "
+            "에 노출되지 않음"
+        )
+        assert request_body.get("required") is True, (
+            f"requestBody.required 가 True 가 아님: {request_body!r}"
+        )
+        ref = (
+            request_body.get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+            .get("$ref")
+        )
+        assert ref == "#/components/schemas/ApprovalStatusUpdate", (
+            f"requestBody schema $ref 가 ApprovalStatusUpdate 가 아님: {ref!r}"
+        )
+
+    def test_components_approval_status_update_status_string(self, client):
+        """``components.schemas.ApprovalStatusUpdate`` 에 ``status: string`` +
+        ``required: [status]`` 노출."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        schemas = openapi.get("components", {}).get("schemas", {})
+        component = schemas.get("ApprovalStatusUpdate")
+        assert component is not None, (
+            "components.schemas.ApprovalStatusUpdate 가 OpenAPI 에 노출되지 "
+            "않음 (frontend codegen 이 ApprovalStatusUpdate 를 발견할 수 없음)"
+        )
+        properties = component.get("properties", {})
+        assert properties.get("status", {}).get("type") == "string", (
+            f"properties.status.type 이 string 이 아님: {properties.get('status')!r}"
+        )
+        assert "status" in component.get("required", []), (
+            f"required 에 'status' 없음: {component.get('required')!r}"
+        )

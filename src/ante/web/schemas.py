@@ -341,6 +341,19 @@ class StatusUpdateRequest(BaseModel):
     status: str  # "adopted" | "archived"
 
 
+class StrategyValidateRequest(BaseModel):
+    """전략 검증 요청.
+
+    SSOT: ``docs/specs/web-api/05-resource-endpoints.md`` POST
+    ``/api/strategies/validate`` body ``{"path": "..."}``. ``path`` 타입이
+    string 이 아니면 Pydantic 이 422 로 거부한다 (#1410 — non-string
+    ``path`` 입력에서 ``Path(filepath)`` TypeError 로 500 이 반환되던 회귀를
+    runtime validation 으로 차단).
+    """
+
+    path: str
+
+
 class StrategyValidateResponse(BaseModel):
     """전략 검증 응답."""
 

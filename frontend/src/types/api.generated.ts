@@ -1357,9 +1357,11 @@ export type paths = {
          *     1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
          *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
-         *     3. ``path`` 필드 추출 — 누락 시 400.
-         *     4. 파일 존재 확인 → 404.
-         *     5. ``StrategyValidator.validate`` 호출.
+         *     3. ``StrategyValidateRequest.model_validate`` — ValidationError → 422
+         *        (#1410 — non-string ``path`` 같은 type mismatch 차단).
+         *     4. ``path`` 필드 추출 — 빈 문자열은 400.
+         *     5. 파일 존재 확인 → 404.
+         *     6. ``StrategyValidator.validate`` 호출.
          *
          *     Body: ``{"path": "/path/to/strategy.py"}``
          */
@@ -1921,6 +1923,19 @@ export type components = {
          * @enum {string}
          */
         ApprovalStatus: "pending" | "approved" | "execution_failed" | "rejected" | "on_hold" | "expired" | "cancelled";
+        /**
+         * ApprovalStatusUpdate
+         * @description 승인/거부 요청.
+         */
+        ApprovalStatusUpdate: {
+            /**
+             * Memo
+             * @default
+             */
+            memo: string;
+            /** Status */
+            status: string;
+        };
         /**
          * ApprovalUpdateResponse
          * @description 결재 상태 변경 응답.
@@ -3407,6 +3422,20 @@ export type components = {
             trades: components["schemas"]["StrategyTradeItem"][];
         };
         /**
+         * StrategyValidateRequest
+         * @description 전략 검증 요청.
+         *
+         *     SSOT: ``docs/specs/web-api/05-resource-endpoints.md`` POST
+         *     ``/api/strategies/validate`` body ``{"path": "..."}``. ``path`` 타입이
+         *     string 이 아니면 Pydantic 이 422 로 거부한다 (#1410 — non-string
+         *     ``path`` 입력에서 ``Path(filepath)`` TypeError 로 500 이 반환되던 회귀를
+         *     runtime validation 으로 차단).
+         */
+        StrategyValidateRequest: {
+            /** Path */
+            path: string;
+        };
+        /**
          * StrategyValidateResponse
          * @description 전략 검증 응답.
          */
@@ -3607,6 +3636,7 @@ export type ApprovalDetailResponse = components['schemas']['ApprovalDetailRespon
 export type ApprovalItem = components['schemas']['ApprovalItem'];
 export type ApprovalListResponse = components['schemas']['ApprovalListResponse'];
 export type ApprovalStatus = components['schemas']['ApprovalStatus'];
+export type ApprovalStatusUpdate = components['schemas']['ApprovalStatusUpdate'];
 export type ApprovalUpdateResponse = components['schemas']['ApprovalUpdateResponse'];
 export type AuditLogItem = components['schemas']['AuditLogItem'];
 export type AuditLogListResponse = components['schemas']['AuditLogListResponse'];
@@ -3684,6 +3714,7 @@ export type StrategyListResponse = components['schemas']['StrategyListResponse']
 export type StrategyPerformanceResponse = components['schemas']['StrategyPerformanceResponse'];
 export type StrategyTradeItem = components['schemas']['StrategyTradeItem'];
 export type StrategyTradesResponse = components['schemas']['StrategyTradesResponse'];
+export type StrategyValidateRequest = components['schemas']['StrategyValidateRequest'];
 export type StrategyValidateResponse = components['schemas']['StrategyValidateResponse'];
 export type TradeItem = components['schemas']['TradeItem'];
 export type TradeListResponse = components['schemas']['TradeListResponse'];
@@ -4305,7 +4336,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalStatusUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -6625,7 +6660,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyValidateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -6672,7 +6711,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다 (#1407). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, non-string ``path`` 같은 type mismatch — #1410 회귀 방지). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다 (#1407). */
             422: {
                 headers: {
                     [name: string]: unknown;

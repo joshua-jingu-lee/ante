@@ -36,6 +36,36 @@ class ApprovalStatusUpdate(BaseModel):
     memo: str = ""
 
 
+# PATCH /api/approvals/{approval_id}/status OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다 (#1407). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema 로 두면 frontend codegen 이 ``export type
+# ApprovalStatusUpdate`` 를 만들지 못해 generated client 의 requestBody 가
+# ``never`` 로 노출된다 (#1429). 따라서 라우트 ``openapi_extra`` 는
+# ``$ref`` 매핑만 노출하고 본체 schema 는 ``_install_openapi_customizer`` 가
+# ``components.schemas`` 에 ``setdefault`` 등록한다 (``StatusUpdateRequest``
+# / ``ReportSubmitRequest`` SSOT 패턴 답습).
+#
+# 본체 schema 는 Pydantic 모델 SSOT (``ApprovalStatusUpdate``) 의
+# ``model_json_schema()`` 출력에서 파생한다. ``default=None`` 만 strip 해
+# openapi-typescript 가 optional 필드를 ``?`` 마커로 노출하도록 보존한다 —
+# ``required`` / ``additionalProperties`` invariants 는 모두 모델 정의 그대로
+# 유지된다.
+def _build_approval_status_update_request_schema() -> dict[str, Any]:
+    schema = ApprovalStatusUpdate.model_json_schema()
+    properties = schema.get("properties", {})
+    for prop in properties.values():
+        if isinstance(prop, dict) and prop.get("default") is None and "default" in prop:
+            prop.pop("default")
+    return schema
+
+
+APPROVAL_STATUS_UPDATE_REQUEST_SCHEMA: dict[str, Any] = (
+    _build_approval_status_update_request_schema()
+)
+
+
 @router.get(
     "",
     response_model=ApprovalListResponse,
@@ -183,6 +213,16 @@ async def get_approval(
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/ApprovalStatusUpdate"},
                 },
             },
         },
