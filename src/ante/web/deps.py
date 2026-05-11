@@ -780,3 +780,21 @@ async def require_strategy_write(
         )
 
     return caller
+
+
+# ── 인증 dependency 정적 검증 marker (#1405) ───────────────────────────────
+#
+# ``tests/unit/test_route_auth_coverage.py`` 는 17개 currently-attached 라우트
+# (ATTACHED_ROUTE_ALLOWLIST) 가 본 모듈의 인증 dependency 중 하나에 의해
+# 보호되는지 정적으로 회귀 검증한다. 검증 helper ``_has_auth_marker`` 는
+# FastAPI Dependant 트리를 walk 하면서 각 dependency callable 의
+# ``_is_authentication_dependency`` 속성을 확인한다.
+#
+# 새 인증 dependency 를 추가할 때 본 marker 도 함께 부착해야 정적 검증이
+# 새 가드를 인식한다. 부착이 누락되면 #1405 회귀 테스트가 해당 라우트를
+# "marker 없음" 으로 보고 실패시킨다.
+require_master_caller._is_authentication_dependency = True  # type: ignore[attr-defined]
+require_audit_read._is_authentication_dependency = True  # type: ignore[attr-defined]
+require_config_write._is_authentication_dependency = True  # type: ignore[attr-defined]
+require_report_write._is_authentication_dependency = True  # type: ignore[attr-defined]
+require_strategy_write._is_authentication_dependency = True  # type: ignore[attr-defined]
