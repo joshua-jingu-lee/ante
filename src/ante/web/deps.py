@@ -279,73 +279,57 @@ _STRATEGY_WRITE_PERMISSION_DENIED_DETAIL = (
 
 _MEMBER_INACTIVE_DETAIL = "멤버가 비활성 상태입니다."
 
+# 미들웨어 invariant 위반 시 사용. ``RequireAuthMiddleware`` (#1403) 가 보호
+# 라우트에 진입 전에 ``request.state.member_id`` 를 반드시 채우므로, dep 시점에
+# caller 가 비어 있다면 client 인증 실패가 아니라 미들웨어 설치 누락/순서 오류
+# 같은 서버 내부 invariant 위반이다. 401 (인증 실패) 와 구분되도록 500 응답.
+_AUTH_MIDDLEWARE_INVARIANT_DETAIL = (
+    "auth middleware did not populate member_id (invariant violation)"
+)
+
 
 async def require_master_caller(
     request: Request,
     member_service: Annotated[Any | None, Depends(get_member_service_optional)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
 ) -> str:
-    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고 master 권한을
-    강제하는 FastAPI dependency.
+    """``request.state.member_id`` 가 master 권한을 가지는지 강제하는 FastAPI
+    dependency.
+
+    이슈 #1408: 인증 / caller resolution / ACTIVE 1차 검사는 모두 ``RequireAuth
+    Middleware`` (#1403) 가 담당한다. 본 dep 은 미들웨어가 채운 ``request.state.
+    member_id`` 를 신뢰하고 다음만 수행한다:
+
+    1. ``member_service.get(caller)`` 로 멤버를 조회.
+    2. ``MemberStatus.ACTIVE`` re-check (TOCTOU race guard — 미들웨어 통과 후
+       권한 분기 전 사이에 ``SUSPENDED`` / ``REVOKED`` 로 전환된 경우 차단).
+    3. ``MemberRole.MASTER`` 가 아니면 ``HTTPException(403)``.
 
     이슈 #1352: oracle A7 시그니처에서 발견된 5개 mutation route(account
-    update/suspend/activate, bot update, treasury set_balance)는 인증 없이
-    상태 변경을 허용하고 있었다. 이 dependency는 #1351 ``_resolve_caller_or_401``
-    패턴을 web layer 공통 가드로 끌어올리고, 추가로 caller가 ``MASTER`` role을
-    가지는지 검증한다.
-
-    절차:
-
-    1. ``TokenAuthMiddleware``가 채운 ``request.state.member_id``를 우선 사용
-       (Bearer 토큰 경로).
-    2. 비어 있으면 ``ante_session`` 쿠키 fallback. 단, ``session_service is
-       None`` 배포 분기에서는 fallback을 건너뛰고 caller 빈 상태를 유지 → 401.
-       ``session_service.validate`` 자체가 raise하면 401로 흡수한다.
-    3. caller가 빈 문자열이면 ``HTTPException(401)``을 raise.
-    4. ``member_service.get(caller)``로 멤버를 조회. 멤버가 None이거나
-       role이 ``MemberRole.MASTER``가 아니면 ``HTTPException(403)``.
-    5. 세션 쿠키 fallback에서 caller가 결정된 경우 ``request.state.member_id``
-       를 갱신해 ``AuditMiddleware``의 자동 감사 로그 주체와 일관성 유지.
+    update/suspend/activate, bot update, treasury set_balance) 의 master-only
+    가드를 제공한다.
 
     Returns:
         caller_id (str): 인증/권한 검증을 통과한 master member_id.
 
     Raises:
-        HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 master가 아님.
+        HTTPException(403): 멤버 비활성 / master 아님 / ``member_service`` 에
+            caller_id 가 없는 ghost caller 케이스.
+        HTTPException(500): 미들웨어 invariant 위반 (``request.state.member_id``
+            미설정). 정상 운영에서는 발생하지 않음.
+        HTTPException(503): ``member_service`` 미주입 (cold-path).
     """
-    from ante.member.models import MemberRole
+    from ante.member.models import MemberRole, MemberStatus
+
+    if member_service is None:
+        # ``member_service`` 미주입은 cold-path invariant. 미들웨어 통과 시점에
+        # 이미 ``member_service.get`` 으로 ACTIVE 검증을 했으므로 정상 배포에서는
+        # 도달하지 않는다. 503 으로 서비스 미가용 표현.
+        raise HTTPException(status_code=503, detail="Member service not available")
 
     caller = getattr(request.state, "member_id", "") or ""
-
-    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
-    # ante_session 쿠키 fallback (#1351 SSOT 패턴).
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                resolved = session.get("member_id", "") or ""
-                if resolved:
-                    caller = resolved
-                    # AuditMiddleware의 자동 감사 로그 주체 일관성을 위해
-                    # request.state.member_id에도 반영한다.
-                    request.state.member_id = caller
-
     if not caller:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    # ``member_service`` 미주입 분기는 본 dependency가 자체적으로 401로
-    # 떨어뜨려 cold-path invariant I1(``account_service`` 미주입에서도 409
-    # 회복)을 깨지 않는다. 정상 배포에서는 항상 주입돼 있다.
-    if member_service is None:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
+        # 미들웨어 invariant 위반 — client 인증 실패 (401) 가 아님.
+        raise HTTPException(status_code=500, detail=_AUTH_MIDDLEWARE_INVARIANT_DETAIL)
 
     member = None
     try:
@@ -353,9 +337,20 @@ async def require_master_caller(
     except Exception:
         logger.exception("멤버 조회 실패 (member_id=%s)", caller)
 
-    role = getattr(member, "role", None) if member is not None else None
+    if member is None:
+        # ghost caller (미들웨어가 채운 id 가 멤버 서비스에 없음).
+        raise HTTPException(status_code=403, detail=_MASTER_PERMISSION_DENIED_DETAIL)
+
+    # ACTIVE re-check (TOCTOU race guard). 미들웨어가 1차 검증 후 권한 분기
+    # 전에 ``SUSPENDED`` / ``REVOKED`` 로 전환된 경우 여기서 차단한다.
+    status = getattr(member, "status", None)
+    status_value = getattr(status, "value", status)
+    if status_value != MemberStatus.ACTIVE.value:
+        raise HTTPException(status_code=403, detail=_MEMBER_INACTIVE_DETAIL)
+
+    role = getattr(member, "role", None)
     role_value = getattr(role, "value", role)
-    if member is None or role_value != MemberRole.MASTER.value:
+    if role_value != MemberRole.MASTER.value:
         raise HTTPException(status_code=403, detail=_MASTER_PERMISSION_DENIED_DETAIL)
 
     return caller
@@ -401,66 +396,47 @@ def _default_denied_detail(scope: str) -> str:
 async def _resolve_caller_with_scope(
     request: Request,
     member_service: Any | None,
-    session_service: Any | None,
     scope: str,
     denied_detail: str,
 ) -> str:
-    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller 를 결정하고 주어진
-    scope 권한을 강제하는 공통 helper.
+    """``request.state.member_id`` 의 scope 권한을 강제하는 공통 helper.
 
-    기존 4개 dependency (``require_audit_read`` / ``require_config_write`` /
-    ``require_report_write`` / ``require_strategy_write``) 의 본문을 그대로
-    옮겨와 통합한다. spec ``docs/specs/member/02-design-decisions.md:210-227``
-    의 ``require_scope`` predicate 와 동일한 OR 분기:
+    이슈 #1408: 인증 / caller resolution / ACTIVE 1차 검사는 모두 ``RequireAuth
+    Middleware`` (#1403) 가 담당한다. 본 helper 는 미들웨어가 채운
+    ``request.state.member_id`` 를 신뢰하고 spec ``docs/specs/member/
+    02-design-decisions.md:210-227`` 의 ``require_scope`` predicate 만 수행한다:
 
     - caller_member.role == ``MemberRole.MASTER`` → 통과
     - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관, spec
       predicate 가 ``human`` 멤버는 scope 검증을 무조건 통과시킨다)
-    - ``scope`` ∈ caller_member.scopes → 통과 (agent의 정상 경로)
+    - ``scope`` ∈ caller_member.scopes → 통과 (agent 정상 경로)
     - 그 외 (agent without scope) → ``HTTPException(403, denied_detail)``
 
-    인증 절차 (Bearer 우선, ``session_service`` 가용 시 ``ante_session`` 쿠키
-    fallback, ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403 으로
-    흡수) 와 비활성 멤버 차단 (#1359 fix loop 4차 패턴) 은 ``require_master_caller``
-    와 일관성을 유지한다.
+    ACTIVE re-check 는 TOCTOU race guard 로 보존된다 — 미들웨어가 1차 검증한
+    뒤 권한 분기 전 사이에 ``SUSPENDED`` / ``REVOKED`` 로 전환된 멤버가 통과
+    하지 않도록 (#1359 fix loop 4차 패턴) 다시 한 번 검사한다.
 
     Returns:
-        caller_id (str): 인증/권한 검증을 통과한 member_id.
+        caller_id (str): 검증을 통과한 member_id.
 
     Raises:
-        HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 요청 scope 권한 없음 또는
-            멤버 비활성 상태.
+        HTTPException(403): 멤버 비활성 / scope 권한 없음 / ``member_service``
+            에 caller_id 가 없는 ghost caller.
+        HTTPException(500): 미들웨어 invariant 위반 (``request.state.member_id``
+            미설정).
+        HTTPException(503): ``member_service`` 미주입 (cold-path).
     """
     from ante.member.models import MemberRole, MemberStatus, MemberType
 
-    caller = getattr(request.state, "member_id", "") or ""
-
-    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
-    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller 와 동일).
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                resolved = session.get("member_id", "") or ""
-                if resolved:
-                    caller = resolved
-                    # AuditMiddleware 의 자동 감사 로그 주체 일관성을 위해
-                    # request.state.member_id 에도 반영한다.
-                    request.state.member_id = caller
-
-    if not caller:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
     if member_service is None:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
+        # ``member_service`` 미주입은 cold-path invariant. 정상 배포에서는
+        # 도달하지 않는다. 503 으로 서비스 미가용 표현.
+        raise HTTPException(status_code=503, detail="Member service not available")
+
+    caller = getattr(request.state, "member_id", "") or ""
+    if not caller:
+        # 미들웨어 invariant 위반 — client 인증 실패 (401) 가 아님.
+        raise HTTPException(status_code=500, detail=_AUTH_MIDDLEWARE_INVARIANT_DETAIL)
 
     member = None
     try:
@@ -469,13 +445,10 @@ async def _resolve_caller_with_scope(
         logger.exception("멤버 조회 실패 (member_id=%s)", caller)
 
     if member is None:
+        # ghost caller (미들웨어가 채운 id 가 멤버 서비스에 없음).
         raise HTTPException(status_code=403, detail=denied_detail)
 
-    # 비활성 멤버 차단 (require_audit_read #1359 fix loop 4차 패턴 답습).
-    # ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
-    # fallback 에서는 ``SessionService.validate`` 가 만료만 보므로, suspended/
-    # revoked 상태로 전환된 멤버가 통과할 수 있다. 권한 분기 직전에 명시적으로
-    # 차단해 두 경로 모두에서 일관된 invariant 를 유지한다.
+    # ACTIVE re-check (TOCTOU race guard).
     status = getattr(member, "status", None)
     status_value = getattr(status, "value", status)
     if status_value != MemberStatus.ACTIVE.value:
@@ -525,20 +498,20 @@ def require_scope(scope: str) -> Callable[..., Awaitable[str]]:
         on success.
 
     Raises (when invoked as a FastAPI dependency):
-        HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 ``scope`` 권한 없음 또는
-            멤버 비활성 상태.
+        HTTPException(403): ``scope`` 권한 없음, 멤버 비활성, ghost caller.
+        HTTPException(500): 미들웨어 invariant 위반 (#1408).
+        HTTPException(503): ``member_service`` 미주입 (cold-path).
+
+    인증 자체 (401) 는 ``RequireAuthMiddleware`` (#1403) 가 본 dep 진입 전에
+    처리한다.
     """
     detail = _SCOPE_DENIED_DETAIL_MAP.get(scope) or _default_denied_detail(scope)
 
     async def inner_dep(
         request: Request,
         member_service: Annotated[Any | None, Depends(get_member_service_optional)],
-        session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     ) -> str:
-        return await _resolve_caller_with_scope(
-            request, member_service, session_service, scope, detail
-        )
+        return await _resolve_caller_with_scope(request, member_service, scope, detail)
 
     inner_dep.__name__ = f"require_scope_{scope.replace(':', '_')}"
     # ``test_route_auth_coverage`` 가 본 marker 로 인증 dependency 를 식별한다
