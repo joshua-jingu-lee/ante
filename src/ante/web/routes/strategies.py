@@ -30,6 +30,7 @@ from ante.web.schemas import (
     StrategyListResponse,
     StrategyPerformanceResponse,
     StrategyTradesResponse,
+    StrategyValidateRequest,
     StrategyValidateResponse,
     WeeklySummaryResponse,
 )
@@ -65,6 +66,36 @@ def _build_status_update_request_schema() -> dict[str, Any]:
 
 
 STATUS_UPDATE_REQUEST_SCHEMA: dict[str, Any] = _build_status_update_request_schema()
+
+
+# POST /api/strategies/validate OpenAPI request body 문서.
+#
+# 라우트는 raw body 파싱 패턴(인증 가드 우선, body validation 후행)으로
+# 동작한다 (#1407). FastAPI 자동 components 등록 경로를 거치지 않으므로
+# inline schema 로 두면 frontend codegen 이 ``export type
+# StrategyValidateRequest`` 를 만들지 못해 generated client 의 requestBody
+# 가 ``never`` 로 노출된다 (#1429). 따라서 라우트 ``openapi_extra`` 는
+# ``$ref`` 매핑만 노출하고 본체 schema 는 ``_install_openapi_customizer`` 가
+# ``components.schemas`` 에 ``setdefault`` 등록한다 (``StatusUpdateRequest``
+# / ``ReportSubmitRequest`` SSOT 패턴 답습).
+#
+# 본체 schema 는 Pydantic 모델 SSOT (``StrategyValidateRequest``) 의
+# ``model_json_schema()`` 출력에서 파생한다. ``default=None`` 만 strip 해
+# openapi-typescript 가 optional 필드를 ``?`` 마커로 노출하도록 보존한다 —
+# ``required`` / ``additionalProperties`` invariants 는 모두 모델 정의 그대로
+# 유지된다.
+def _build_strategy_validate_request_schema() -> dict[str, Any]:
+    schema = StrategyValidateRequest.model_json_schema()
+    properties = schema.get("properties", {})
+    for prop in properties.values():
+        if isinstance(prop, dict) and prop.get("default") is None and "default" in prop:
+            prop.pop("default")
+    return schema
+
+
+STRATEGY_VALIDATE_REQUEST_SCHEMA: dict[str, Any] = (
+    _build_strategy_validate_request_schema()
+)
 
 
 def _find_bot_for_strategy(bot_manager: Any, strategy_id: str) -> dict | None:
@@ -121,13 +152,24 @@ def _find_bot_for_strategy(bot_manager: Any, strategy_id: str) -> dict | None:
         },
         422: {
             "description": (
-                "Body validation 실패 (JSON 파싱 실패, 빈 body). 단, 인증이 "
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, non-string "
+                "``path`` 같은 type mismatch — #1410 회귀 방지). 단, 인증이 "
                 "실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다 "
                 "(#1407)."
             ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/StrategyValidateRequest"},
                 },
             },
         },
@@ -146,9 +188,11 @@ async def validate_strategy(
     1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
        권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
-    3. ``path`` 필드 추출 — 누락 시 400.
-    4. 파일 존재 확인 → 404.
-    5. ``StrategyValidator.validate`` 호출.
+    3. ``StrategyValidateRequest.model_validate`` — ValidationError → 422
+       (#1410 — non-string ``path`` 같은 type mismatch 차단).
+    4. ``path`` 필드 추출 — 빈 문자열은 400.
+    5. 파일 존재 확인 → 404.
+    6. ``StrategyValidator.validate`` 호출.
 
     Body: ``{"path": "/path/to/strategy.py"}``
     """
@@ -168,7 +212,13 @@ async def validate_strategy(
             status_code=422, detail="요청 body는 JSON object여야 합니다."
         )
 
-    filepath = payload.get("path", "")
+    # Pydantic 검증 — non-string ``path`` 입력은 422 로 거부된다 (#1410).
+    try:
+        body = StrategyValidateRequest.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    filepath = body.path
     if not filepath:
         raise HTTPException(status_code=400, detail="path is required")
 

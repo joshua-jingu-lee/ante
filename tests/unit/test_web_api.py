@@ -295,9 +295,31 @@ class TestStrategy(Strategy):
         assert data["valid"] is False
 
     def test_validate_missing_path(self, client):
+        """``path`` 필드 누락은 Pydantic ``StrategyValidateRequest`` 가 422
+        로 거부한다 (#1410). 기존에는 ``payload.get("path","")`` → ``""`` →
+        ``if not filepath`` 분기로 400 이 반환됐으나, ``model_validate`` 도입
+        후 spec required invariant 가 422 로 일관화된다 (다른 ``model_validate``
+        라우트와 동일).
+        """
         resp = client.post(
             "/api/strategies/validate",
             json={},
+        )
+        assert resp.status_code == 422
+        data = resp.json()
+        assert data["type"] == "/errors/validation"
+        assert data["status"] == 422
+
+    def test_validate_empty_path_string(self, client):
+        """``path: ""`` 같은 빈 문자열 입력은 그대로 400 (``path is required``).
+
+        Pydantic ``model_validate`` 는 string-type 만 검증하므로 빈 문자열은
+        통과시키고, 그 뒤 핸들러의 ``if not filepath`` 분기가 400 으로 거부한다
+        — 기존 contract 메시지 보존.
+        """
+        resp = client.post(
+            "/api/strategies/validate",
+            json={"path": ""},
         )
         assert resp.status_code == 400
         data = resp.json()
@@ -313,6 +335,104 @@ class TestStrategy(Strategy):
         data = resp.json()
         assert data["type"] == "/errors/not-found"
         assert data["status"] == 404
+
+    def test_validate_non_string_path_returns_422(self, client):
+        """#1410 회귀: ``path`` 가 list / int 등 non-string 이면 422 (500 아님).
+
+        기존 핸들러는 ``payload.get("path", "")`` 후 곧바로 ``Path(filepath)``
+        를 호출해 truthy non-string 입력에서 ``TypeError`` 가 발생하고 500
+        이 반환됐다. ``StrategyValidateRequest.model_validate`` 도입으로
+        Pydantic 이 string-type invariant 를 422 로 거부한다 (#1410).
+        """
+        resp = client.post(
+            "/api/strategies/validate",
+            json={"path": ["not-a-path"]},
+        )
+        assert resp.status_code == 422, (
+            f"non-string path 입력에서 500 회귀가 발견됨: status={resp.status_code} "
+            f"body={resp.text}"
+        )
+        # RFC 7807 problem+json (#1164) — traceback 노출 금지.
+        assert resp.headers["content-type"] == "application/problem+json"
+        data = resp.json()
+        assert data["status"] == 422
+        assert "detail" in data
+        # path 가 string type 으로 검증되지 못한 사실이 detail 에 포함되어야 함.
+        assert (
+            "path" in str(data["detail"]).lower()
+            or "string" in str(data["detail"]).lower()
+        )
+
+    def test_validate_non_string_path_unauth_returns_401(self, unauth_client):
+        """auth-first invariant: unauth + bad body 는 422 가 아닌 401.
+
+        ``RequireAuthMiddleware`` (#1403) + raw-body 패턴 (#1407) 에 따라
+        body validation 보다 인증 가드가 우선 실행되어야 한다. #1410 회귀
+        테스트가 인증 매트릭스를 우회하지 않도록 회귀 보호한다.
+        """
+        resp = unauth_client.post(
+            "/api/strategies/validate",
+            json={"path": ["not-a-path"]},
+        )
+        assert resp.status_code == 401, (
+            f"unauth + bad body 가 401 이 아님 (auth-first invariant 위반): "
+            f"status={resp.status_code} body={resp.text}"
+        )
+
+
+class TestStrategyValidateRequestBodySchema:
+    """POST /api/strategies/validate requestBody OpenAPI schema 노출 (#1429).
+
+    PR #1428 (#1407 머지) 이후 raw-body 패턴으로 전환되며 ``body:
+    StrategyValidateRequest`` 인자가 시그니처에서 사라져 OpenAPI requestBody
+    가 누락됐다. ``openapi_extra`` + ``_install_openapi_customizer`` 보강을
+    회귀 보호한다.
+    """
+
+    def test_openapi_request_body_ref_to_strategy_validate_request(self, client):
+        """``requestBody.required == True`` + schema ``$ref`` 매핑 노출."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        spec = (
+            openapi.get("paths", {}).get("/api/strategies/validate", {}).get("post", {})
+        )
+        request_body = spec.get("requestBody")
+        assert request_body is not None, (
+            "POST /api/strategies/validate requestBody 가 OpenAPI 에 노출되지 않음"
+        )
+        assert request_body.get("required") is True, (
+            f"requestBody.required 가 True 가 아님: {request_body!r}"
+        )
+        ref = (
+            request_body.get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+            .get("$ref")
+        )
+        assert ref == "#/components/schemas/StrategyValidateRequest", (
+            f"requestBody schema $ref 가 StrategyValidateRequest 가 아님: {ref!r}"
+        )
+
+    def test_components_strategy_validate_request_path_string(self, client):
+        """``components.schemas.StrategyValidateRequest`` 에 ``path: string``
+        + ``required: [path]`` 노출."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        schemas = openapi.get("components", {}).get("schemas", {})
+        component = schemas.get("StrategyValidateRequest")
+        assert component is not None, (
+            "components.schemas.StrategyValidateRequest 가 OpenAPI 에 노출되지 "
+            "않음 (frontend codegen 이 requestBody 를 발견할 수 없음)"
+        )
+        properties = component.get("properties", {})
+        assert properties.get("path", {}).get("type") == "string", (
+            f"properties.path.type 이 string 이 아님: {properties.get('path')!r}"
+        )
+        assert "path" in component.get("required", []), (
+            f"required 에 'path' 없음: {component.get('required')!r}"
+        )
 
 
 # ── Data 라우트 테스트 ────────────────────────────
@@ -580,7 +700,12 @@ class TestRFC7807ErrorResponse:
         assert data["instance"] == "/api/nonexistent"
 
     def test_http_exception_returns_rfc7807(self, client):
-        resp = client.post("/api/strategies/validate", json={})
+        # ``{"path": ""}`` 빈 문자열은 ``model_validate`` 를 통과 후 핸들러의
+        # ``if not filepath`` 분기에서 400 ``path is required`` 로 거부된다
+        # (#1410 의 ``model_validate`` 도입 이후에도 400 contract 보존).
+        # ``{}`` 같은 누락 케이스는 ``model_validate`` 가 422 로 거부하므로
+        # RFC 7807 400 응답 형식 회귀 보호는 빈 문자열 path 입력으로 유도한다.
+        resp = client.post("/api/strategies/validate", json={"path": ""})
         assert resp.status_code == 400
         assert resp.headers["content-type"] == "application/problem+json"
         data = resp.json()
