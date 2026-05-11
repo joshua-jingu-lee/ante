@@ -177,37 +177,36 @@ def member_service():
 def client(member_service):
     """인증 컨텍스트가 미리 주입된 기본 클라이언트.
 
-    member 라우트 대다수는 인증된 master 호출자를 전제로 한다 (#1351 / #1377).
-    middleware 가 매 요청마다 다음 두 가지를 수행한다:
+    member 라우트 전체는 #1407 이후 인증된 master/member:* scope 호출자를 전제
+    로 한다. middleware 가 매 요청마다 다음 두 가지를 수행한다:
 
-    1. ``request.state.member_id = "master-user"`` 를 주입한다 — Bearer
-       인증 미들웨어가 채우는 자리를 모방해 ``require_master_caller`` /
-       ``_resolve_caller_or_401`` 가 caller 를 결정할 수 있게 한다.
-    2. ``member_service`` 에 ``master-user`` (role=master) 를 자동 등록한다 —
-       ``require_master_caller`` 가 ``member_service.get(caller)`` 로 role
-       검증을 하므로 master 멤버가 service 에 존재해야 한다 (#1377).
-
-    list 테스트는 미들웨어가 master-user 를 등록하지 않도록 GET 분기에서
-    skip 한다 — list/count 의 멤버 카운트 invariant 를 보존한다. mutation
-    (POST/PUT/PATCH/DELETE) 만 master-user 를 자동 등록한다. 인증 자체의
-    동작 검증은 ``test_member_routes_create_auth.py`` /
-    ``test_member_routes_mutation_auth.py`` 에서 별도로 수행한다.
+    1. ``request.state.member_id = "master-user"`` 를 주입한다 — Bearer 인증
+       미들웨어가 채우는 자리를 모방해 ``require_member_admin`` /
+       ``require_member_read`` 가 caller 를 결정할 수 있게 한다.
+    2. ``member_service.get("master-user")`` 가 role=master 인 synthetic 멤버를
+       반환하도록 패치한다 — scope dependency 가 caller 의 role 검증을 통과할
+       수 있게 한다. ``_members`` 딕셔너리는 건드리지 않으므로 list/count
+       invariant 가 보존된다.
     """
     app = create_app(member_service=member_service)
 
+    # #1407: scope dependency 가 service.get 으로 role 검증을 하므로
+    # master-user 를 synthetic 으로 응답하도록 ``get`` 을 wrap 한다.
+    # ``_members`` 는 그대로 두어 list/count 테스트의 카운트 invariant 보존.
+    _master_synthetic = FakeMember(member_id="master-user", role="master")
+    _original_get = member_service.get
+
+    async def _get_with_synthetic_master(member_id: str):
+        if member_id == "master-user":
+            return _master_synthetic
+        return await _original_get(member_id)
+
+    member_service.get = _get_with_synthetic_master
+
     @app.middleware("http")
     async def inject_master_caller(request, call_next):
-        # request.state.member_id 주입 (#1351 _resolve_caller_or_401 / #1377
-        # require_master_caller 의 caller 결정 경로).
+        # request.state.member_id 주입 (Bearer 인증 미들웨어 모방).
         request.state.member_id = "master-user"
-        # mutation route 만 ``require_master_caller`` 의 role 검증을 한다.
-        # GET (list/get) 은 인증 가드가 없으므로 master-user 를 service 에
-        # 등록할 필요 없다 — 등록하면 list/count 테스트의 멤버 카운트
-        # invariant 가 흔들린다. POST/PUT/PATCH/DELETE 만 master 를 등록한다.
-        if request.method != "GET" and "master-user" not in member_service._members:
-            member_service._members["master-user"] = FakeMember(
-                member_id="master-user", role="master"
-            )
         return await call_next(request)
 
     return TestClient(app)
@@ -412,7 +411,12 @@ class TestCallerIdPropagation:
     """request.state.member_id가 서비스 호출로 전달되는지 검증."""
 
     def test_register_passes_caller_id(self, member_service):
-        """인증된 사용자의 member_id가 registered_by로 전달."""
+        """인증된 사용자의 member_id가 registered_by로 전달.
+
+        #1407 이후 ``require_member_admin`` 의존성이 ``member_service.get(caller)``
+        로 caller 의 role 을 검증하므로 ``master-user`` (role=master) 를 service
+        에 등록해 둬야 한다.
+        """
         captured: dict[str, str] = {}
         original_register = member_service.register
 
@@ -421,6 +425,10 @@ class TestCallerIdPropagation:
             return await original_register(**kwargs)
 
         member_service.register = spy_register
+        # #1407: require_member_admin 이 master-user 의 role 을 검증한다.
+        member_service._members["master-user"] = FakeMember(
+            member_id="master-user", role="master"
+        )
 
         app = create_app(member_service=member_service)
 
@@ -438,7 +446,12 @@ class TestCallerIdPropagation:
         assert captured["registered_by"] == "master-user"
 
     def test_update_scopes_passes_caller_id(self, member_service):
-        """인증된 사용자의 member_id가 updated_by로 전달."""
+        """인증된 사용자의 member_id가 updated_by로 전달.
+
+        #1407 이후 ``require_member_admin`` 의존성이 ``member_service.get(caller)``
+        로 caller 의 role/scope 를 검증하므로 ``master-user`` (role=master) 를
+        서비스에 등록해 둬야 한다.
+        """
         captured: dict[str, str] = {}
         original_update = member_service.update_scopes
 
@@ -448,6 +461,10 @@ class TestCallerIdPropagation:
 
         member_service.update_scopes = spy_update
         member_service._members["agent-01"] = FakeMember(member_id="agent-01")
+        # #1407: require_member_admin 이 master-user 의 role 을 검증한다.
+        member_service._members["master-user"] = FakeMember(
+            member_id="master-user", role="master"
+        )
 
         app = create_app(member_service=member_service)
 
@@ -566,12 +583,21 @@ class TestErrorHandlingLogging:
         assert "status=active" in caplog.text
 
     def test_get_member_service_error_returns_503(self, client, member_service):
-        """get_member에서 예외 발생 시 503 반환."""
+        """get_member에서 예외 발생 시 503 반환.
 
-        async def raise_error(member_id):
+        #1407: ``require_member_read`` 가 caller (``master-user``) 검증을 위해
+        ``member_service.get`` 을 먼저 호출하므로, master-user 만 synthetic
+        master 를 반환하고 그 외 lookup 은 RuntimeError 를 raise 하도록 wrap
+        한다.
+        """
+        synthetic_master = FakeMember(member_id="master-user", role="master")
+
+        async def raise_error_except_master(member_id):
+            if member_id == "master-user":
+                return synthetic_master
             raise RuntimeError("DB connection lost")
 
-        member_service.get = raise_error
+        member_service.get = raise_error_except_master
         resp = client.get("/api/members/agent-01")
         assert resp.status_code == 503
         assert "조회할 수 없습니다" in resp.json()["detail"]
@@ -582,10 +608,14 @@ class TestErrorHandlingLogging:
         """get_member 예외 시 member_id가 로그에 포함."""
         import logging
 
-        async def raise_error(member_id):
+        synthetic_master = FakeMember(member_id="master-user", role="master")
+
+        async def raise_error_except_master(member_id):
+            if member_id == "master-user":
+                return synthetic_master
             raise RuntimeError("DB connection lost")
 
-        member_service.get = raise_error
+        member_service.get = raise_error_except_master
         with caplog.at_level(logging.ERROR, logger="ante.web.routes.members"):
             client.get("/api/members/agent-01")
         assert "agent-01" in caplog.text

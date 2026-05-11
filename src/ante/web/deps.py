@@ -548,17 +548,45 @@ def require_scope(scope: str) -> Callable[..., Awaitable[str]]:
     return inner_dep
 
 
-# ── Module-level scope alias (#1406) ───────────────────────────────────────
+# ── Module-level scope alias (#1406 + #1407) ───────────────────────────────
 #
 # 라우트 import 호환성과 FastAPI Depends() instance cache 보존을 위해
-# 4개 기존 dependency 를 module-level alias 로 보존한다. 라우트 안에서
+# 모든 scope dependency 를 module-level alias 로 정의한다. 라우트 안에서
 # ``Depends(require_scope("audit:read"))`` 처럼 inline 으로 호출하면 매
 # 라우트 정의마다 새 callable 이 생성되어 cache identity 가 깨지므로,
 # 신규 scope alias 도 반드시 module-level 에 한 번만 정의해야 한다.
+#
+# 기존 4개 (#1406) — detail 은 ``_SCOPE_DENIED_DETAIL_MAP`` 매핑으로 byte-exact
+# 보존된다.
 require_audit_read = require_scope("audit:read")
 require_config_write = require_scope("config:write")
 require_report_write = require_scope("report:write")
 require_strategy_write = require_scope("strategy:write")
+
+# 신규 20개 (#1407) — SSOT ``docs/specs/web-api/11-route-scope-table.md`` 결정
+# scope 컬럼에서 byte-exact 추출. detail 은 ``_default_denied_detail`` 템플릿
+# ("master, human 멤버 또는 {scope} scope ...") 을 사용한다. 라우트는 본 alias
+# 를 import 해 ``Depends(require_X_Y)`` 형태로 부착한다.
+require_account_read = require_scope("account:read")
+require_account_write = require_scope("account:write")
+require_approval_read = require_scope("approval:read")
+require_approval_admin = require_scope("approval:admin")
+require_bot_read = require_scope("bot:read")
+require_bot_admin = require_scope("bot:admin")
+require_config_read = require_scope("config:read")
+require_data_read = require_scope("data:read")
+require_data_write = require_scope("data:write")
+require_member_read = require_scope("member:read")
+require_member_admin = require_scope("member:admin")
+require_report_read = require_scope("report:read")
+require_rule_read = require_scope("rule:read")
+require_rule_admin = require_scope("rule:admin")
+require_strategy_read = require_scope("strategy:read")
+require_system_read = require_scope("system:read")
+require_system_admin = require_scope("system:admin")
+require_trade_read = require_scope("trade:read")
+require_treasury_read = require_scope("treasury:read")
+require_treasury_admin = require_scope("treasury:admin")
 
 
 # ── 인증 dependency 정적 검증 marker (#1405) ───────────────────────────────

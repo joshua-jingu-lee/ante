@@ -12,6 +12,7 @@ from ante.report.models import ReportStatus
 from ante.web.deps import (
     get_audit_logger_optional,
     get_report_store,
+    require_report_read,
     require_report_write,
 )
 from ante.web.schemas import (
@@ -251,9 +252,11 @@ async def submit_report(
 )
 async def report_view(
     report_id: str,
+    _caller_id: Annotated[str, Depends(require_report_read)],
     report_store: Annotated[Any, Depends(get_report_store)],
 ) -> dict:
-    """리포트 단건 조회."""
+    """리포트 단건 조회. 인증된 master/human 또는 ``report:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407)."""
     import json
 
     report = await report_store.get(report_id)
@@ -310,12 +313,14 @@ async def report_view(
     },
 )
 async def list_reports(
+    _caller_id: Annotated[str, Depends(require_report_read)],
     report_store: Annotated[Any, Depends(get_report_store)],
     status: ReportStatus | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> dict:
-    """리포트 목록 조회 (cursor 기반 페이지네이션)."""
+    """리포트 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+    ``report:read`` scope 를 보유한 agent 만 호출 가능 (#1407)."""
     from ante.web.pagination import paginate
 
     reports = await report_store.list_reports(status=status)

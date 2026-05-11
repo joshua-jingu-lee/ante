@@ -14,7 +14,10 @@ from ante.web.deps import (
     get_audit_logger_optional,
     get_config,
     get_dynamic_config,
-    require_master_caller,
+    require_account_read,
+    require_account_write,
+    require_rule_admin,
+    require_rule_read,
 )
 from ante.web.schemas import (
     AccountActionResponse,
@@ -292,10 +295,12 @@ def _account_to_response(account: Any) -> dict[str, Any]:
 
 @router.get("", response_model=AccountListResponse)
 async def list_accounts(
+    _caller_id: Annotated[str, Depends(require_account_read)],
     account_service: Annotated[Any, Depends(get_account_service)],
     status: str | None = None,
 ) -> dict[str, Any]:
-    """계좌 목록 조회."""
+    """계좌 목록 조회. 인증된 master/human 또는 ``account:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407)."""
     from ante.account.models import AccountStatus
 
     filter_status: AccountStatus | None = None
@@ -340,8 +345,12 @@ async def list_accounts(
         },
     },
 )
-async def create_account(request: Request) -> None:
-    """계좌 생성.
+async def create_account(
+    request: Request,
+    _caller_id: Annotated[str, Depends(require_account_write)],
+) -> None:
+    """계좌 생성. 인증된 master/human 또는 ``account:write`` scope 를 보유한
+    agent 만 호출 가능 (#1407).
 
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
@@ -373,9 +382,11 @@ async def create_account(request: Request) -> None:
 @router.get("/{account_id}", response_model=AccountDetailResponse)
 async def get_account(
     account_id: str,
+    _caller_id: Annotated[str, Depends(require_account_read)],
     account_service: Annotated[Any, Depends(get_account_service)],
 ) -> dict[str, Any]:
-    """계좌 상세 조회."""
+    """계좌 상세 조회. 인증된 master/human 또는 ``account:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407)."""
     from ante.account.errors import AccountNotFoundError
 
     try:
@@ -412,7 +423,10 @@ async def get_account(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 account:write scope "
+                "보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -483,16 +497,17 @@ async def get_account(
 async def update_account(
     account_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_account_write)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)] = None,
 ) -> dict[str, Any]:
     """계좌 수정.
 
-    인증된 master 호출자만 사용할 수 있다(이슈 #1352 — oracle A7). dependency
-    ``require_master_caller``가 인증/권한 검증을 담당하며, 401/403은 raw body
-    파싱과 cold-path 가드(invariant I1/I4)보다 먼저 평가된다 — Bearer 또는
-    ``ante_session`` 쿠키 어느 쪽으로도 caller가 결정되지 않으면 401, master가
-    아니면 403.
+    인증된 master/human 또는 ``account:write`` scope 를 보유한 agent 만 호출
+    가능 (#1407 — spec ``account:write`` 정합, #1352 master_caller 에서
+    마이그레이션). dependency ``require_account_write`` 가 인증/권한 검증을
+    담당하며, 401/403은 raw body 파싱과 cold-path 가드(invariant I1/I4)보다
+    먼저 평가된다 — Bearer 또는 ``ante_session`` 쿠키 어느 쪽으로도 caller가
+    결정되지 않으면 401, 권한 없으면 403.
 
     런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
     ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
@@ -690,7 +705,10 @@ _AUTH_REQUIRED_RESPONSE: dict[str, Any] = {
 }
 
 _PERMISSION_DENIED_RESPONSE: dict[str, Any] = {
-    "description": "Permission denied (master 권한 필요)",
+    "description": (
+        "Permission denied (master, human 멤버 또는 account:write scope "
+        "보유 agent 만 허용)"
+    ),
     "content": {
         "application/problem+json": {
             "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -716,7 +734,8 @@ ACCOUNT_SUSPEND_REQUEST_SCHEMA: dict[str, Any] = {
     "title": "AccountSuspendRequest",
     "description": (
         "POST /api/accounts/{account_id}/suspend 입력 contract. "
-        "인증된 master 호출자만 사용할 수 있다(#1352). "
+        "인증된 master/human 또는 account:write scope 를 보유한 agent 만 "
+        "사용할 수 있다(#1407, #1352 master_caller migration). "
         "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
         "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
         "빈 body도 허용되며 reason은 default 'dashboard'로 채워진다."
@@ -791,11 +810,13 @@ ACCOUNT_SUSPEND_REQUEST_SCHEMA: dict[str, Any] = {
 async def suspend_account(
     account_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_account_write)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 정지. 인증된 master만 호출 가능 (#1352).
+    """계좌 정지. 인증된 master/human 또는 ``account:write`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``account:write`` 정합, #1352
+    master_caller 에서 마이그레이션).
 
     ``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱
     패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352
@@ -805,8 +826,8 @@ async def suspend_account(
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_account_write)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
        (기존 의미 보존).
     3. JSON 파싱 실패 → 422.
@@ -899,11 +920,13 @@ async def suspend_account(
 async def activate_account(
     account_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_account_write)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 재활성화. 인증된 master만 호출 가능 (#1352)."""
+    """계좌 재활성화. 인증된 master/human 또는 ``account:write`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``account:write`` 정합, #1352
+    master_caller 에서 마이그레이션)."""
     from ante.account.errors import AccountDeletedError, AccountNotFoundError
 
     try:
@@ -947,8 +970,13 @@ async def activate_account(
         },
     },
 )
-async def delete_account(account_id: str, request: Request) -> None:
-    """계좌 소프트 딜리트.
+async def delete_account(
+    account_id: str,
+    request: Request,
+    _caller_id: Annotated[str, Depends(require_account_write)],
+) -> None:
+    """계좌 소프트 딜리트. 인증된 master/human 또는 ``account:write`` scope 를
+    보유한 agent 만 호출 가능 (#1407).
 
     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
     실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
@@ -1004,11 +1032,13 @@ def _item_to_rule_config(
 @router.get("/{account_id}/rules", response_model=RuleListResponse)
 async def get_account_rules(
     account_id: str,
+    _caller_id: Annotated[str, Depends(require_rule_read)],
     account_service: Annotated[Any, Depends(get_account_service)],
     config: Annotated[Any | None, Depends(get_config)],
     dynamic_config: Annotated[Any | None, Depends(get_dynamic_config)],
 ) -> dict[str, Any]:
-    """계좌 리스크 룰 목록 조회.
+    """계좌 리스크 룰 목록 조회. 인증된 master/human 또는 ``rule:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407).
 
     DynamicConfig를 우선 조회하고, 없으면 정적 Config에서 읽는다.
     RULE_REGISTRY에 등록된 룰 타입만 구조화하여 반환한다.
@@ -1098,7 +1128,10 @@ RULE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = _build_rule_update_request_schema()
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요).",
+            "description": (
+                "Permission denied (master, human 멤버 또는 rule:admin scope "
+                "보유 agent 만 허용)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -1134,13 +1167,15 @@ async def update_account_rule(
     account_id: str,
     rule_type: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_rule_admin)],
     account_service: Annotated[Any, Depends(get_account_service)],
     config: Annotated[Any | None, Depends(get_config)],
     dynamic_config: Annotated[Any, Depends(get_dynamic_config)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict[str, Any]:
-    """계좌 리스크 룰 개별 수정. 인증된 master 만 호출 가능 (#1376).
+    """계좌 리스크 룰 개별 수정. 인증된 master/human 또는 ``rule:admin`` scope
+    를 보유한 agent 만 호출 가능 (#1407 — spec ``rule:admin`` 정합, #1376
+    master_caller 에서 마이그레이션).
 
     RULE_REGISTRY에 등록된 타입만 허용하며,
     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
@@ -1160,8 +1195,8 @@ async def update_account_rule(
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_rule_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``RuleUpdateRequest.model_validate`` — ValidationError → 422.
     4. RULE_REGISTRY 룰 타입 확인 — 없으면 400 (기존 계약 보존).

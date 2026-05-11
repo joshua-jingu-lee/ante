@@ -612,16 +612,13 @@ class TestSessionCookieMasterSuccess:
 
 
 class TestNonMaster403:
-    """인증된 non-master → 403 (PermissionDeniedError 매핑).
+    """인증된 non-master + member:admin scope 없음 → 403 (web layer 차단).
 
-    기존 5개 mutation route (suspend / reactivate / revoke / rotate_token /
-    update_scopes) 는 ``_resolve_caller_or_401`` 만 web layer 에서 적용하고,
-    master 검증은 service 가 ``PermissionDeniedError`` 를 raise 해 처리한다.
-    그래서 svc.* 가 1회 호출된 뒤 403 이 반환된다.
+    #1407 이후 5개 mutation route (suspend / reactivate / revoke / rotate_token /
+    update_scopes) 는 ``require_member_admin`` 의존성으로 web layer 에서 먼저
+    403 을 raise 한다. 따라서 service 호출은 일어나지 않는다.
 
-    ``change_password`` 는 ``require_master_caller`` 의존성으로 web layer 에서
-    먼저 403 을 raise 하므로 동작이 다르다. ``TestChangePasswordNonMaster403``
-    에서 별도로 검증한다 (#1377 oracle A7 finding scope 결정).
+    ``change_password`` 도 ``require_member_admin`` 로 동일한 동작.
     """
 
     @pytest.mark.parametrize(
@@ -641,8 +638,8 @@ class TestNonMaster403:
         assert resp.status_code == 403, (
             f"{name}: non-master Bearer가 403이 아님 ({resp.status_code}: {resp.text})"
         )
-        # 인증 자체는 통과 → service 호출은 일어나야 한다.
-        assert len(getattr(member_service, calls_attr)) == 1
+        # #1407: web layer 가 먼저 403 → service 호출 없음.
+        assert len(getattr(member_service, calls_attr)) == 0
 
 
 # ── 404: master + missing member ──────────────────────────────────────────

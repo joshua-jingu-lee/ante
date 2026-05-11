@@ -347,17 +347,15 @@ class TestCreateMemberAuthGuard:
         client: TestClient,
         member_service: FakeMemberService,
     ) -> None:
-        """일반 멤버의 세션 쿠키 → 403 (PermissionError 매핑).
+        """일반 멤버의 세션 쿠키 + member:admin scope 없음 → 403.
 
-        세션 쿠키 인증은 통과(401 아님)하지만, ``MemberService.register``가
-        master가 아닌 caller를 거부해서 403으로 매핑되어야 한다. 토큰 경로
-        의 동등 케이스(``test_create_member_with_non_master_token_returns_403``)
-        와 동일한 결과 보장.
+        #1407 이후 ``require_member_admin`` 의존성이 web layer 에서 먼저
+        403 을 raise 하므로 ``register`` 는 호출되지 않는다. 세션 쿠키 인증
+        자체는 통과(401 아님)했음을 status code 로 확인한다.
         """
         client.cookies.set("ante_session", "agent-session-id")
         resp = client.post("/api/members", json=_payload())
         assert resp.status_code == 403, resp.text
         assert "new-agent" not in member_service._members
-        # register는 호출됐어야 한다 (caller 결정 후 진입).
-        assert len(member_service.register_calls) == 1
-        assert member_service.register_calls[0]["registered_by"] == "agent-01"
+        # #1407: web layer 가 먼저 403 → register 호출 없음.
+        assert member_service.register_calls == []

@@ -15,7 +15,8 @@ from ante.web.deps import (
     get_account_service_optional,
     get_audit_logger_optional,
     get_db_optional,
-    require_master_caller,
+    require_system_admin,
+    require_system_read,
 )
 from ante.web.schemas import (
     HealthResponse,
@@ -78,9 +79,13 @@ CLEAR_HALT_REQUEST_SCHEMA: dict[str, Any] = _build_request_schema(ClearHaltReque
 
 @router.get("/status", response_model=StatusResponse)
 async def get_system_status(
+    _caller_id: Annotated[str, Depends(require_system_read)],
     account_service: Annotated[Any | None, Depends(get_account_service_optional)],
 ) -> dict:
-    """시스템 상태 조회."""
+    """시스템 상태 조회. 인증된 master/human 또는 ``system:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407). ``/api/system/health`` (public) 와 구별 —
+    health 는 모니터링 헬스체크용이고 status 는 운영 정보(account_count 등)를
+    노출한다."""
     result: dict = {
         "status": "running",
         "version": __version__,
@@ -236,7 +241,10 @@ async def _parse_optional_request_body(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요).",
+            "description": (
+                "Permission denied (master, human 멤버 또는 system:admin "
+                "scope 보유 agent 만 허용)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -278,23 +286,22 @@ async def _parse_optional_request_body(
 )
 async def halt(
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_system_admin)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED). 인증된 master 만 호출 가능
-    (#1375).
+    """전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED). 인증된 master/human 또는
+    ``system:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
+    ``system:admin`` 정합, #1375 master_caller 에서 마이그레이션).
 
-    ``submit_report`` (#1374) 와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
-    body validation 보다 우선 실행되도록 한다. FastAPI 가
-    ``body: HaltRequest`` 를 먼저 검증하면 unauth + bad-body 시 401 이 아닌
-    422 가 먼저 반환되어 contract 가 깨진다 — 본 라우트는 oracle A7 finding
-    의 핵심 시그니처 이므로 인증 가드 우선이 가장 중요하다.
+    Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+    한다. FastAPI 가 ``body: HaltRequest`` 를 먼저 검증하면 unauth + bad-body
+    시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_system_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 빈 body 는 default 허용, 그 외 실패 시 422.
     3. ``HaltRequest.model_validate`` — ValidationError → 422.
     4. ``account_service.suspend_all`` 호출 + audit 기록
@@ -338,7 +345,10 @@ async def halt(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요).",
+            "description": (
+                "Permission denied (master, human 멤버 또는 system:admin "
+                "scope 보유 agent 만 허용)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -380,20 +390,20 @@ async def halt(
 )
 async def clear_halt(
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_system_admin)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE). 인증된 master 만 호출 가능
-    (#1375).
+    """전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE). 인증된 master/human 또는
+    ``system:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
+    ``system:admin`` 정합, #1375 master_caller 에서 마이그레이션).
 
     계좌 상태만 ACTIVE 로 복구하며 봇을 자동 재시작하지 않는다.
 
-    ``halt`` 와 동일한 raw body 파싱 + auth-first 패턴을 따른다 (#1375).
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_system_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 빈 body 는 default 허용, 그 외 실패 시 422.
     3. ``ClearHaltRequest.model_validate`` — ValidationError → 422.
     4. ``account_service.activate_all`` 호출 + audit 기록

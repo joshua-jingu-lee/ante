@@ -1,13 +1,20 @@
-"""라우트 인증 dependency 정적 회귀 검증 (#1405).
+"""라우트 인증 dependency 정적 회귀 검증 (#1405 + #1407 enforce mode).
 
 본 테스트는 두 invariant 를 정적으로 잠근다.
 
-CASE 1 — ``ATTACHED_ROUTE_ALLOWLIST`` marker 회귀:
-    현재 ``src/ante/web/routes/`` 에서 ``Depends(require_*)`` 로 인증 가드가
-    부착된 17개 mutation 라우트가, 본 PR 시점의 SSOT(11-route-scope-table.md
-    "결정 scope" 컬럼) 와 정합한 상태로 ``src/ante/web/deps.py`` 의
-    ``_is_authentication_dependency = True`` marker 가 붙은 dependency 에 의해
-    보호되고 있음을 확인한다.
+CASE 1 — enforce mode (#1407):
+    ``src/ante/web/routes/`` 의 모든 ``APIRoute`` 가 다음 둘 중 하나에 해당해야
+    한다:
+
+    - PUBLIC_PATHS / PUBLIC_PREFIXES / GATE_EXEMPT_SELF_AUTH_PATHS 일치 → 인증
+      게이트 면제 (라우트 자체에 인증 dependency 없음을 허용).
+    - 그 외 ``/api/*`` 라우트 → ``src/ante/web/deps.py`` 의
+      ``_is_authentication_dependency = True`` marker 가 부착된 dependency 에
+      의해 보호되어야 한다.
+
+    #1407 마이그레이션으로 모든 70 라우트가 SSOT
+    (``docs/specs/web-api/11-route-scope-table.md``) 결정과 일관되게 부착되었다.
+    본 테스트는 이후 새 라우트 추가 시 부착 누락을 즉시 차단한다.
 
     회귀 시 nightmare 시나리오:
         - 라우트에서 ``Depends(require_*)`` 인자가 사라져도 ``app.routes`` 에는
@@ -21,11 +28,6 @@ CASE 2 — ``PUBLIC_PATHS`` ∪ ``GATE_EXEMPT_SELF_AUTH_PATHS`` 의 ``/api/*``
     ``/api/*`` 면제 경로는 라우트가 응답을 만들어야 의미가 있다. 코드 상
     경로 오타(예: ``/api/auht/me``)나 라우트 삭제가 spec/code drift 로
     이어지면 본 sanity 가 실패해 즉시 차단한다.
-
-본 테스트는 SSOT 와 직접 비교하지 않고 (CASE 1 의 ALLOWLIST 는 #1407 마이그
-레이션 전까지 부착이 narrow 한 상태이므로) "현재 부착된 라우트가 marker 로
-이어지는지" 만 검증한다. #1407 이후 narrow allowlist 가 제거되고 모든
-``/api/*`` 라우트가 enforce 되면, 본 파일을 제거하고 통합 검증으로 교체한다.
 """
 
 from __future__ import annotations
@@ -37,42 +39,6 @@ import pytest
 
 if TYPE_CHECKING:
     from fastapi.dependencies.models import Dependant
-
-
-# ── CASE 1 SSOT ────────────────────────────────────────────────────────────
-#
-# 본 시점 (#1405) 에 ``Depends(require_*)`` 로 인증 가드가 실제 부착된
-# (method, path) 17개. 11-route-scope-table.md "결정 scope" 컬럼과 정합 확인.
-# scope 문자열은 documentation purpose (가독성) 만이며, 본 테스트는
-# marker 부착 여부만 검증한다 (#1407 이 scope 기반 마이그레이션을 담당).
-ATTACHED_ROUTE_ALLOWLIST: dict[tuple[str, str], str] = {
-    # config
-    ("PUT", "/api/config/{key:path}"): "config:write",
-    # system (master-only)
-    ("POST", "/api/system/halt"): "system:admin",
-    ("POST", "/api/system/clear-halt"): "system:admin",
-    # audit
-    ("GET", "/api/audit"): "audit:read",
-    # members (master-only)
-    ("PATCH", "/api/members/{member_id}/password"): "member:admin",
-    # strategies
-    ("PATCH", "/api/strategies/{strategy_id}/status"): "strategy:write",
-    # accounts (master-only)
-    ("PUT", "/api/accounts/{account_id}"): "account:admin",
-    ("POST", "/api/accounts/{account_id}/suspend"): "account:admin",
-    ("POST", "/api/accounts/{account_id}/activate"): "account:admin",
-    ("PUT", "/api/accounts/{account_id}/rules/{rule_type}"): "rule:admin",
-    # bots (master-only)
-    ("POST", "/api/bots"): "bot:admin",
-    ("DELETE", "/api/bots/{bot_id}"): "bot:admin",
-    ("PUT", "/api/bots/{bot_id}"): "bot:admin",
-    # reports
-    ("POST", "/api/reports"): "report:write",
-    # treasury (master-only)
-    ("POST", "/api/treasury/bots/{bot_id}/allocate"): "treasury:write",
-    ("POST", "/api/treasury/bots/{bot_id}/deallocate"): "treasury:write",
-    ("POST", "/api/treasury/balance"): "treasury:write",
-}
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -122,6 +88,24 @@ def _route_keys(route: object) -> Iterator[tuple[str, str]]:
         yield method.upper(), path
 
 
+def _is_exempt_path(
+    path: str,
+    public_paths: frozenset[str],
+    public_prefixes: tuple[str, ...],
+    gate_exempt_paths: frozenset[str],
+) -> bool:
+    """``path`` 가 PUBLIC_PATHS / PUBLIC_PREFIXES / GATE_EXEMPT_SELF_AUTH_PATHS
+    의 어느 한 카테고리에 속하면 True."""
+    if path in public_paths:
+        return True
+    if path in gate_exempt_paths:
+        return True
+    for prefix in public_prefixes:
+        if path.startswith(prefix):
+            return True
+    return False
+
+
 # ── fixtures ───────────────────────────────────────────────────────────────
 
 
@@ -141,38 +125,41 @@ def app_routes() -> list[object]:
     return [r for r in app.routes if isinstance(r, APIRoute)]
 
 
-# ── CASE 1 ─────────────────────────────────────────────────────────────────
+# ── CASE 1: enforce mode (#1407) ───────────────────────────────────────────
 
 
-def test_attached_routes_have_auth_marker(app_routes: list[object]) -> None:
-    """ALLOWLIST 의 17개 (method, path) 가 모두 marker 부착 dependency 로
-    보호되어 있다."""
-    # ``app.routes`` 에서 (method, path) → route 객체로 인덱싱.
-    index: dict[tuple[str, str], object] = {}
+def test_all_api_routes_have_auth_marker_or_exempt(app_routes: list[object]) -> None:
+    """모든 ``/api/*`` 라우트는 인증 dependency marker 부착 또는 면제 카테고리
+    (PUBLIC_PATHS / PUBLIC_PREFIXES / GATE_EXEMPT_SELF_AUTH_PATHS) 에 속해야
+    한다. #1407 enforce mode — 70 라우트 일관 부착 보장.
+    """
+    from ante.web.middleware.require_auth import (
+        GATE_EXEMPT_SELF_AUTH_PATHS,
+        PUBLIC_PATHS,
+        PUBLIC_PREFIXES,
+    )
+
+    missing_auth: list[tuple[str, str]] = []
     for route in app_routes:
-        for key in _route_keys(route):
-            index[key] = route
-
-    missing_routes: list[tuple[str, str]] = []
-    missing_marker: list[tuple[str, str]] = []
-    for key in ATTACHED_ROUTE_ALLOWLIST:
-        route = index.get(key)
-        if route is None:
-            missing_routes.append(key)
+        path = getattr(route, "path", "")
+        # /api/* 외 (정적/SPA fallback 등) 는 본 정적 검증 대상이 아님.
+        if not path.startswith("/api/"):
+            continue
+        # 면제 경로는 통과.
+        if _is_exempt_path(
+            path, PUBLIC_PATHS, PUBLIC_PREFIXES, GATE_EXEMPT_SELF_AUTH_PATHS
+        ):
             continue
         if not _has_auth_marker(route):
-            missing_marker.append(key)
+            for key in _route_keys(route):
+                missing_auth.append(key)
 
-    if missing_routes:
+    if missing_auth:
         pytest.fail(
-            "ATTACHED_ROUTE_ALLOWLIST 에 등록된 라우트가 app.routes 에서 "
-            f"발견되지 않음 (spec/code drift): {missing_routes}"
-        )
-    if missing_marker:
-        pytest.fail(
-            "ATTACHED_ROUTE_ALLOWLIST 에 등록된 라우트가 "
-            "_is_authentication_dependency marker 가 부착된 dependency 로 "
-            f"보호되지 않음 (marker 회귀): {missing_marker}"
+            "다음 /api/* 라우트가 _is_authentication_dependency marker 부착 "
+            "dependency 로 보호되지 않음 (#1407 enforce mode — SSOT "
+            "docs/specs/web-api/11-route-scope-table.md 결정에 따라 부착 필요):\n"
+            + "\n".join(f"  - {method} {path}" for method, path in sorted(missing_auth))
         )
 
 

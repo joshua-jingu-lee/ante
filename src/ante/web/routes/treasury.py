@@ -15,7 +15,8 @@ from ante.web.deps import (
     get_bot_manager_optional,
     get_treasury,
     get_treasury_manager_optional,
-    require_master_caller,
+    require_treasury_admin,
+    require_treasury_read,
 )
 from ante.web.schemas import (
     BalanceSetResponse,
@@ -138,11 +139,13 @@ BALANCE_SET_REQUEST_SCHEMA: dict[str, Any] = {
 )
 async def get_summary(
     request: Request,
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
 ) -> dict:
-    """자금 현황 요약.
+    """자금 현황 요약. 인증된 master/human 또는 ``treasury:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407).
 
     account_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.
     미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).
@@ -228,6 +231,7 @@ async def get_summary(
     },
 )
 async def list_transactions(
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     account_id: str | None = None,
     type: str | None = None,
@@ -237,7 +241,8 @@ async def list_transactions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """자금 변동 이력 조회."""
+    """자금 변동 이력 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407)."""
     db = getattr(treasury, "_db", None)
     if db is None:
         return {"items": [], "total": 0}
@@ -314,7 +319,10 @@ async def list_transactions(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 treasury:admin "
+                "scope 보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -372,22 +380,23 @@ async def list_transactions(
 async def allocate(
     bot_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_treasury_admin)],
     treasury: Annotated[Any, Depends(get_treasury)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇에 예산 할당. 인증된 master만 호출 가능 (#1372).
+    """봇에 예산 할당. 인증된 master/human 또는 ``treasury:admin`` scope 를
+    보유한 agent 만 호출 가능 (#1407 — spec ``treasury:admin`` 정합, #1372
+    master_caller 에서 마이그레이션).
 
-    ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
-    body validation보다 우선 실행되도록 한다. FastAPI가 ``body:
-    BudgetChangeRequest``를 먼저 검증하면 unauth + bad-body 시 401이 아닌
-    422가 먼저 반환되어 contract가 깨진다.
+    Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+    한다. FastAPI 가 ``body: BudgetChangeRequest`` 를 먼저 검증하면 unauth +
+    bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_treasury_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
     4. ``treasury.allocate`` 호출 (``BotNotStoppedError`` → 409).
@@ -478,7 +487,10 @@ async def allocate(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 treasury:admin "
+                "scope 보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -536,20 +548,19 @@ async def allocate(
 async def deallocate(
     bot_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_treasury_admin)],
     treasury: Annotated[Any, Depends(get_treasury)],
     bot_manager: Annotated[Any | None, Depends(get_bot_manager_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 예산 회수. 인증된 master만 호출 가능 (#1372).
-
-    ``allocate`` / ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을
-    적용해 인증 가드가 body validation보다 우선 실행되도록 한다.
+    """봇 예산 회수. 인증된 master/human 또는 ``treasury:admin`` scope 를
+    보유한 agent 만 호출 가능 (#1407 — spec ``treasury:admin`` 정합, #1372
+    master_caller 에서 마이그레이션).
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_treasury_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
     4. ``treasury.deallocate`` 호출 (``BotNotStoppedError`` → 409).
@@ -626,9 +637,11 @@ async def deallocate(
     },
 )
 async def list_budgets(
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
 ) -> dict:
-    """봇별 예산 목록 조회."""
+    """봇별 예산 목록 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407)."""
     from dataclasses import asdict
 
     budgets = treasury.list_budgets()
@@ -660,7 +673,10 @@ async def list_budgets(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 treasury:admin "
+                "scope 보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -701,22 +717,22 @@ async def list_budgets(
 )
 async def set_balance(
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_treasury_admin)],
     treasury: Annotated[Any, Depends(get_treasury)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """계좌 총 잔고 수동 설정. 인증된 master만 호출 가능 (#1352).
+    """계좌 총 잔고 수동 설정. 인증된 master/human 또는 ``treasury:admin`` scope
+    를 보유한 agent 만 호출 가능 (#1407 — spec ``treasury:admin`` 정합, #1352
+    master_caller 에서 마이그레이션).
 
-    ``create_member`` / ``update_scopes`` / ``update_bot``과 동일한 raw body
-    파싱 패턴을 적용해 인증 가드가 body validation보다 우선 실행되도록 한다
-    (#1352 — Codex Plan Review). FastAPI가 ``body: BalanceSetRequest``를 먼저
-    검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어 contract가
-    깨진다.
+    Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+    한다. FastAPI 가 ``body: BalanceSetRequest`` 를 먼저 검증하면 unauth +
+    bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_treasury_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``BalanceSetRequest.model_validate`` — ValidationError → 422.
     4. ``treasury.set_account_balance`` 호출.
@@ -794,11 +810,13 @@ def _resolve_treasury(
     },
 )
 async def get_latest_snapshot(
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
 ) -> dict:
-    """가장 최근 일별 스냅샷 조회."""
+    """가장 최근 일별 스냅샷 조회. 인증된 master/human 또는 ``treasury:read``
+    scope 를 보유한 agent 만 호출 가능 (#1407)."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
     snapshot = await target.get_latest_snapshot()
     if snapshot is not None:
@@ -843,13 +861,15 @@ async def get_latest_snapshot(
     },
 )
 async def list_snapshots(
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict:
-    """기간별 일별 스냅샷 목록."""
+    """기간별 일별 스냅샷 목록. 인증된 master/human 또는 ``treasury:read`` scope
+    를 보유한 agent 만 호출 가능 (#1407)."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
 
     if start_date is None:
@@ -885,11 +905,13 @@ async def list_snapshots(
 )
 async def get_snapshot_by_date(
     date: str,
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
 ) -> dict:
-    """특정일 스냅샷 조회."""
+    """특정일 스냅샷 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407)."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
     snapshot = await target.get_daily_snapshot(date)
     if snapshot is None:

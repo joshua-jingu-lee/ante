@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ante.web.deps import (
     get_treasury,
     get_treasury_manager_optional,
+    require_treasury_read,
 )
 from ante.web.schemas import (
     PortfolioHistoryResponse,
@@ -55,11 +56,15 @@ def _resolve_treasury(
     },
 )
 async def portfolio_value(
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
 ) -> dict:
-    """총 자산 가치 + 당일 손익 + 수익률 + 미실현 손익 (최신 스냅샷 기반)."""
+    """총 자산 가치 + 당일 손익 + 수익률 + 미실현 손익 (최신 스냅샷 기반).
+    인증된 master/human 또는 ``treasury:read`` scope 를 보유한 agent 만 호출
+    가능 (#1407 — portfolio 라우트는 ``treasury_daily_snapshots`` 를 읽으므로
+    spec ``treasury:read`` 정합)."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
     snapshot = await target.get_latest_snapshot()
     if snapshot is not None:
@@ -100,13 +105,15 @@ async def portfolio_value(
     },
 )
 async def portfolio_history(
+    _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict:
-    """기간별 자산 추이 (daily_snapshots 시계열 반환)."""
+    """기간별 자산 추이 (daily_snapshots 시계열 반환). 인증된 master/human 또는
+    ``treasury:read`` scope 를 보유한 agent 만 호출 가능 (#1407)."""
     target = _resolve_treasury(treasury, treasury_manager, account_id)
 
     if end_date is None:

@@ -19,7 +19,8 @@ from ante.web.deps import (
     get_strategy_registry_optional,
     get_trade_service_optional,
     get_treasury_optional,
-    require_master_caller,
+    require_bot_admin,
+    require_bot_read,
 )
 from ante.web.schemas import (
     BotDetailResponse,
@@ -129,13 +130,15 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
     },
 )
 async def list_bots(
+    _caller_id: Annotated[str, Depends(require_bot_read)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     account_id: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> dict:
-    """봇 목록 조회 (cursor 기반 페이지네이션)."""
+    """봇 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+    ``bot:read`` scope 를 보유한 agent 만 호출 가능 (#1407)."""
     from ante.web.pagination import paginate
 
     bots = bot_manager.list_bots()
@@ -202,7 +205,10 @@ async def list_bots(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 bot:admin "
+                "scope 보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -275,23 +281,24 @@ async def list_bots(
 )
 async def create_bot(
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_bot_admin)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any, Depends(get_strategy_registry)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 생성. 인증된 master만 호출 가능 (#1371).
+    """봇 생성. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+    만 호출 가능 (#1407 — spec ``bot:admin`` 정합, #1371 master_caller 에서
+    마이그레이션).
 
-    ``update_bot`` (#1352)과 동일한 raw body 파싱 패턴을 적용해 인증 가드가
-    body validation보다 우선 실행되도록 한다. FastAPI가 ``body: BotCreateRequest``
-    를 먼저 검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어
-    contract가 깨진다.
+    Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+    한다. FastAPI 가 ``body: BotCreateRequest`` 를 먼저 검증하면 unauth +
+    bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_bot_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``BotCreateRequest.model_validate`` — ValidationError → 422.
     4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
@@ -508,12 +515,14 @@ async def create_bot(
 )
 async def get_bot(
     bot_id: str,
+    _caller_id: Annotated[str, Depends(require_bot_read)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     treasury: Annotated[Any | None, Depends(get_treasury_optional)],
     trade_service: Annotated[Any | None, Depends(get_trade_service_optional)],
 ) -> dict:
-    """봇 상세 조회."""
+    """봇 상세 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407)."""
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
@@ -605,11 +614,13 @@ async def get_bot(
 async def start_bot(
     bot_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_bot_admin)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     account_service: Annotated[Any, Depends(get_account_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 시작."""
+    """봇 시작. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+    만 호출 가능 (#1407)."""
     from ante.bot.exceptions import BotError
 
     bot = bot_manager.get_bot(bot_id)
@@ -631,7 +642,7 @@ async def start_bot(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="bot.start",
             resource=f"bot:{bot_id}",
             ip=request.client.host if request.client else "",
@@ -673,10 +684,12 @@ async def start_bot(
 async def stop_bot(
     bot_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_bot_admin)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 중지."""
+    """봇 중지. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+    만 호출 가능 (#1407)."""
     from ante.bot.exceptions import BotError
 
     bot = bot_manager.get_bot(bot_id)
@@ -690,7 +703,7 @@ async def stop_bot(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="bot.stop",
             resource=f"bot:{bot_id}",
             ip=request.client.host if request.client else "",
@@ -717,7 +730,10 @@ async def stop_bot(
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 bot:admin "
+                "scope 보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -761,12 +777,14 @@ async def stop_bot(
 async def delete_bot(
     bot_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_bot_admin)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     handle_positions: str = "keep",
 ) -> None:
-    """봇 삭제. 인증된 master만 호출 가능 (#1371).
+    """봇 삭제. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+    만 호출 가능 (#1407 — spec ``bot:admin`` 정합, #1371 master_caller 에서
+    마이그레이션).
 
     body가 없으므로 raw-body cold-path는 적용하지 않는다. 인증 가드가
     handle_positions query 파라미터 검증보다 먼저 실행되어 unauth는 401,
@@ -889,7 +907,10 @@ BOT_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
             },
         },
         403: {
-            "description": "Permission denied (master 권한 필요)",
+            "description": (
+                "Permission denied (master, human 멤버 또는 bot:admin "
+                "scope 보유 agent 만 허용)"
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -947,22 +968,23 @@ BOT_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
 async def update_bot(
     bot_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_bot_admin)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     registry: Annotated[Any | None, Depends(get_strategy_registry_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """봇 설정 수정. 인증된 master만 호출 가능 (#1352). 중지 상태에서만 허용.
+    """봇 설정 수정. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``bot:admin`` 정합, #1352 master_caller
+    에서 마이그레이션). 중지 상태에서만 허용.
 
-    ``create_member`` / ``update_scopes``와 동일한 raw body 파싱 패턴을 적용해
-    인증 가드가 body validation보다 우선 실행되도록 한다(#1352 — Codex Plan
-    Review). FastAPI가 ``body: BotUpdateRequest``를 먼저 검증하면 unauth +
-    bad-body 시 401이 아닌 422가 먼저 반환되어 contract가 깨진다.
+    Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+    한다. FastAPI 가 ``body: BotUpdateRequest`` 를 먼저 검증하면 unauth +
+    bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403.
+    1. 인증 가드 (``Depends(require_bot_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``BotUpdateRequest.model_validate`` — ValidationError → 422.
     4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
@@ -1056,6 +1078,7 @@ async def update_bot(
 )
 async def get_bot_logs(
     bot_id: str,
+    _caller_id: Annotated[str, Depends(require_bot_read)],
     bot_manager: Annotated[Any, Depends(get_bot_manager)],
     event_history_store: Annotated[
         Any | None, Depends(get_event_history_store_optional)
@@ -1063,7 +1086,8 @@ async def get_bot_logs(
     eventbus: Annotated[Any | None, Depends(get_eventbus_optional)],
     limit: int = Query(default=50, ge=1, le=100),
 ) -> dict:
-    """봇 실행 로그 조회.
+    """봇 실행 로그 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407).
 
     BotStepCompletedEvent 이력을 반환한다.
     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,

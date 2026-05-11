@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 from ante.web.deps import (
     get_audit_logger_optional,
     get_dynamic_config,
+    require_config_read,
     require_config_write,
 )
 from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse
@@ -78,9 +79,11 @@ CONFIG_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
     },
 )
 async def list_configs(
+    _caller_id: Annotated[str, Depends(require_config_read)],
     config_service: Annotated[Any, Depends(get_dynamic_config)],
 ) -> dict:
-    """동적 설정 전체 조회."""
+    """동적 설정 전체 조회. 인증된 master/human 또는 ``config:read`` scope 를
+    보유한 agent 만 호출 가능 (#1407)."""
     configs = await config_service.get_all()
     return {"configs": configs}
 

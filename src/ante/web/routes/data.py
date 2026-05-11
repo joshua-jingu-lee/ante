@@ -10,7 +10,12 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ante.web.deps import get_audit_logger_optional, get_data_store
+from ante.web.deps import (
+    get_audit_logger_optional,
+    get_data_store,
+    require_data_read,
+    require_data_write,
+)
 from ante.web.schemas import (
     DataSchemaResponse,
     DatasetDetailResponse,
@@ -31,6 +36,7 @@ _executor = ThreadPoolExecutor(max_workers=2)
 
 @router.get("/datasets", response_model=DatasetListResponse)
 async def list_datasets(
+    _caller_id: Annotated[str, Depends(require_data_read)],
     store: Annotated[Any | None, Depends(get_data_store)],
     symbol: str | None = None,
     timeframe: str | None = None,
@@ -128,9 +134,11 @@ async def list_datasets(
 @router.get("/datasets/{dataset_id}", response_model=DatasetDetailResponse)
 async def get_dataset_detail(
     dataset_id: str,
+    _caller_id: Annotated[str, Depends(require_data_read)],
     store: Annotated[Any | None, Depends(get_data_store)],
 ) -> dict:
-    """데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기).
+    """데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기). 인증된 master/human
+    또는 ``data:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
 
     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
     """
@@ -201,11 +209,14 @@ async def get_dataset_detail(
 
 @router.get("/schema", response_model=DataSchemaResponse)
 async def get_data_schema(
+    _caller_id: Annotated[str, Depends(require_data_read)],
     data_type: Literal["ohlcv", "fundamental"] = Query(
         "ohlcv", description="데이터 유형 (ohlcv, fundamental)"
     ),
 ) -> dict:
-    """데이터 스키마 조회. data_type에 따라 해당 스키마를 반환."""
+    """데이터 스키마 조회. data_type에 따라 해당 스키마를 반환. 인증된
+    master/human 또는 ``data:read`` scope 를 보유한 agent 만 호출 가능
+    (#1407)."""
     if data_type == "fundamental":
         from ante.data.schemas import FUNDAMENTAL_SCHEMA
 
@@ -218,9 +229,11 @@ async def get_data_schema(
 
 @router.get("/storage", response_model=StorageSummaryResponse)
 async def get_storage_summary(
+    _caller_id: Annotated[str, Depends(require_data_read)],
     store: Annotated[Any | None, Depends(get_data_store)],
 ) -> dict:
-    """저장 용량 현황."""
+    """저장 용량 현황. 인증된 master/human 또는 ``data:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407)."""
     if store is None:
         return {
             "total_bytes": 0,
@@ -283,11 +296,13 @@ async def get_storage_summary(
 async def delete_dataset(
     dataset_id: str,
     request: Request,
+    caller_id: Annotated[str, Depends(require_data_write)],
     store: Annotated[Any | None, Depends(get_data_store)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
     data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
 ) -> None:
-    """데이터셋 삭제.
+    """데이터셋 삭제. 인증된 master/human 또는 ``data:write`` scope 를 보유한
+    agent 만 호출 가능 (#1407).
 
     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
     fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
@@ -315,7 +330,7 @@ async def delete_dataset(
 
     if audit_logger:
         await audit_logger.log(
-            member_id=getattr(request.state, "member_id", "anonymous"),
+            member_id=caller_id,
             action="data.delete_dataset",
             resource=f"dataset:{dataset_id}",
             ip=request.client.host if request.client else "",
@@ -324,9 +339,11 @@ async def delete_dataset(
 
 @router.get("/feed-status", response_model=FeedStatusResponse)
 async def get_feed_status(
+    _caller_id: Annotated[str, Depends(require_data_read)],
     store: Annotated[Any | None, Depends(get_data_store)],
 ) -> dict:
-    """Feed 파이프라인 상태 조회.
+    """Feed 파이프라인 상태 조회. 인증된 master/human 또는 ``data:read`` scope
+    를 보유한 agent 만 호출 가능 (#1407).
 
     Feed 초기화 여부, 소스별 체크포인트 현황, 최근 리포트 요약,
     API 키 설정 상태를 반환한다.
