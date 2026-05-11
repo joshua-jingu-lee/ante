@@ -9,10 +9,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.report.models import ReportStatus, StrategyReport  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 @pytest.fixture
@@ -36,12 +39,14 @@ async def report_store(db):
 
 @pytest.fixture
 def app(report_store):
-    return create_app(report_store=report_store)
+    return create_app(
+        report_store=report_store, member_service=make_master_member_service()
+    )
 
 
 @pytest.fixture
 def client(app):
-    return TestClient(app)
+    return make_authed_client(app)
 
 
 @pytest.fixture

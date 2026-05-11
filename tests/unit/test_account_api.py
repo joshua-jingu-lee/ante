@@ -22,6 +22,10 @@ from ante.account.errors import (  # noqa: E402
 from ante.account.models import Account, AccountStatus, TradingMode  # noqa: E402
 from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 # 인증 가드(#1352) — PUT/POST mutation route는 master 인증이 필요.
 # 본 모듈의 회귀 본질(structural 가드, mutable 검증, audit 등)은 인증 가드와
@@ -267,7 +271,7 @@ def app(account_service: FakeAccountService, audit_logger: FakeAuditLogger):
 
 @pytest.fixture
 def client(app) -> TestClient:
-    client = TestClient(app)
+    client = make_authed_client(app)
     client.headers.update(_MASTER_HEADERS)
     return client
 
@@ -437,10 +441,12 @@ class TestCreateAccount:
         ``get_account_service`` 의존성을 시그니처에서 제거한 게 회귀 차단의
         본질이며, 이 테스트가 그 invariant를 직접 단언한다.
         """
-        app = create_app()  # account_service 미주입
+        app = create_app(
+            member_service=make_master_member_service()
+        )  # account_service 미주입
         # account_service 미주입 확인
         assert getattr(app.state, "account_service", None) is None
-        with TestClient(app) as bare_client:
+        with make_authed_client(app) as bare_client:
             resp = bare_client.post(
                 "/api/accounts",
                 json={
@@ -1048,7 +1054,7 @@ class TestUpdateAccount:
         """
         app = create_app(member_service=_new_member_service())  # account_service 미주입
         assert getattr(app.state, "account_service", None) is None
-        with TestClient(app) as bare_client:
+        with make_authed_client(app) as bare_client:
             resp = bare_client.put(
                 "/api/accounts/some-id",
                 json={"credentials": {"app_key": "x"}},
@@ -1071,7 +1077,7 @@ class TestUpdateAccount:
         """
         app = create_app(member_service=_new_member_service())  # account_service 미주입
         assert getattr(app.state, "account_service", None) is None
-        with TestClient(app) as bare_client:
+        with make_authed_client(app) as bare_client:
             resp = bare_client.put(
                 "/api/accounts/some-id",
                 json={"name": "변경"},
@@ -1631,9 +1637,11 @@ class TestDeleteAccount:
         않아야 하며, account_service가 None일 때도 cold-path 409가 일관되게
         반환되어야 한다.
         """
-        app = create_app()  # account_service 미주입
+        app = create_app(
+            member_service=make_master_member_service()
+        )  # account_service 미주입
         assert getattr(app.state, "account_service", None) is None
-        with TestClient(app) as bare_client:
+        with make_authed_client(app) as bare_client:
             resp = bare_client.delete("/api/accounts/some-id")
         assert resp.status_code == 409
         detail = resp.json()["detail"]

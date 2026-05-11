@@ -2192,21 +2192,22 @@ class TestUpdateConfigAuthMatrix:
         assert resp.status_code == 403, resp.text
         assert dynamic_config.set_calls == []
 
-    # 403 — inactive 멤버 (suspended/revoked) ────────────────────────
+    # 401 — inactive 멤버 (suspended/revoked) ────────────────────────
 
-    def test_update_config_inactive_member_returns_403(
+    def test_update_config_inactive_member_returns_401(
         self, client: TestClient, dynamic_config: FakeDynamicConfig
     ) -> None:
-        """suspended human 멤버 → 403 (세션 fallback 경로 차단).
+        """suspended human 멤버 → 401 (RequireAuthMiddleware 1차 차단).
 
-        ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
-        fallback 에서는 만료만 보므로, ``MemberStatus.ACTIVE`` 가 아닌 멤버는
-        명시적으로 403 으로 차단되어야 한다 (require_audit_read #1359 4차 fix
-        패턴 답습).
+        D-015 ADR + ``docs/specs/web-api/02-design-decisions.md`` "세션 fallback
+        시 멤버 상태 검증": ACTIVE 검사는 ``RequireAuthMiddleware``(#1403)로
+        이관되었다. 비ACTIVE 세션은 미들웨어 단의 5단계 판정에서 caller
+        미결정으로 처리되어 401이 응답된다. dependency 단의 중복 ACTIVE 검사는
+        #1408 cleanup 대상이다.
         """
         client.cookies.set("ante_session", "inactive-session-id")
         resp = client.put(_CONFIG_PATH, json=_VALID_CONFIG_PAYLOAD)
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 401, resp.text
         assert dynamic_config.set_calls == []
         client.cookies.delete("ante_session")
 
@@ -2464,21 +2465,22 @@ class TestSubmitReportAuthMatrix:
         assert resp.status_code == 403, resp.text
         assert report_store.submit_calls == []
 
-    # 403 — inactive 멤버 (suspended/revoked) ────────────────────────
+    # 401 — inactive 멤버 (suspended/revoked) ────────────────────────
 
-    def test_submit_report_inactive_member_returns_403(
+    def test_submit_report_inactive_member_returns_401(
         self, client: TestClient, report_store: FakeReportStore
     ) -> None:
-        """suspended human 멤버 → 403 (세션 fallback 경로 차단).
+        """suspended human 멤버 → 401 (RequireAuthMiddleware 1차 차단).
 
-        ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
-        fallback 에서는 만료만 보므로, ``MemberStatus.ACTIVE`` 가 아닌 멤버는
-        명시적으로 403 으로 차단되어야 한다 (require_audit_read #1359 4차 fix
-        패턴 답습).
+        D-015 ADR + ``docs/specs/web-api/02-design-decisions.md`` "세션 fallback
+        시 멤버 상태 검증": ACTIVE 검사는 ``RequireAuthMiddleware``(#1403)로
+        이관되었다. 비ACTIVE 세션은 미들웨어 단의 5단계 판정에서 caller
+        미결정으로 처리되어 401이 응답된다. dependency 단의 중복 ACTIVE 검사는
+        #1408 cleanup 대상이다.
         """
         client.cookies.set("ante_session", "inactive-session-id")
         resp = client.post(_REPORT_PATH, json=_VALID_REPORT_PAYLOAD)
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 401, resp.text
         assert report_store.submit_calls == []
         client.cookies.delete("ante_session")
 
@@ -3307,21 +3309,22 @@ class TestUpdateStrategyStatusAuthMatrix:
         assert resp.status_code == 403, resp.text
         assert strategy_registry.update_status_calls == []
 
-    # 403 — inactive 멤버 (suspended/revoked) ────────────────────────
+    # 401 — inactive 멤버 (suspended/revoked) ────────────────────────
 
-    def test_update_strategy_status_inactive_member_returns_403(
+    def test_update_strategy_status_inactive_member_returns_401(
         self, client: TestClient, strategy_registry: FakeStrategyRegistry
     ) -> None:
-        """suspended human 멤버 → 403 (세션 fallback 경로 차단).
+        """suspended human 멤버 → 401 (RequireAuthMiddleware 1차 차단).
 
-        ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
-        fallback 에서는 만료만 보므로, ``MemberStatus.ACTIVE`` 가 아닌 멤버는
-        명시적으로 403 으로 차단되어야 한다 (require_audit_read #1359 4차 fix
-        패턴 답습).
+        D-015 ADR + ``docs/specs/web-api/02-design-decisions.md`` "세션 fallback
+        시 멤버 상태 검증": ACTIVE 검사는 ``RequireAuthMiddleware``(#1403)로
+        이관되었다. 비ACTIVE 세션은 미들웨어 단의 5단계 판정에서 caller
+        미결정으로 처리되어 401이 응답된다. dependency 단의 중복 ACTIVE 검사는
+        #1408 cleanup 대상이다.
         """
         client.cookies.set("ante_session", "inactive-session-id")
         resp = client.patch(_STRATEGY_STATUS_PATH, json=_VALID_STRATEGY_STATUS_PAYLOAD)
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 401, resp.text
         assert strategy_registry.update_status_calls == []
         client.cookies.delete("ante_session")
 

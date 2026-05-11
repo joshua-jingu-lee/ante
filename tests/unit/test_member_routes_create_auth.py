@@ -79,6 +79,12 @@ class FakeMemberService:
             raise PermissionError("유효하지 않은 토큰")
         return self._members[member_id]
 
+    async def get(self, member_id: str) -> FakeMember | None:
+        """``RequireAuthMiddleware`` (#1403)가 세션 fallback의 ACTIVE 검증을 위해
+        호출한다. stub은 등록된 멤버 dict에서 단순 조회한다.
+        """
+        return self._members.get(member_id)
+
     async def update_last_active(self, member_id: str) -> None:
         """TokenAuthMiddleware가 호출하는 throttled update no-op."""
         return None

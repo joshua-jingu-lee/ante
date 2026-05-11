@@ -9,10 +9,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 # 인증 가드(#1352) — POST /api/treasury/balance에 master 인증이 필요해졌다.
 _MASTER_HEADERS = {"Authorization": "Bearer master-token"}
@@ -97,7 +100,7 @@ def treasury():
 @pytest.fixture
 def client(treasury):
     app = create_app(treasury=treasury, member_service=_StubMemberService())
-    client = TestClient(app)
+    client = make_authed_client(app)
     client.headers.update(_MASTER_HEADERS)
     return client
 
@@ -191,16 +194,18 @@ class TestTreasuryFallback:
         """treasury 미설정 시 treasury_manager에서 첫 번째 인스턴스 반환."""
         fake_treasury = FakeTreasury()
         manager = FakeTreasuryManager(treasuries=[fake_treasury])
-        app = create_app(treasury_manager=manager)
-        client = TestClient(app)
+        app = create_app(
+            treasury_manager=manager, member_service=make_master_member_service()
+        )
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury/budgets")
         assert resp.status_code == 200
 
     def test_no_treasury_no_manager_returns_503(self):
         """treasury도 treasury_manager도 없으면 503."""
-        app = create_app()
-        client = TestClient(app)
+        app = create_app(member_service=make_master_member_service())
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury/budgets")
         assert resp.status_code == 503
@@ -208,8 +213,10 @@ class TestTreasuryFallback:
     def test_empty_manager_returns_503(self):
         """treasury_manager에 Treasury가 없으면 503."""
         manager = FakeTreasuryManager(treasuries=[])
-        app = create_app(treasury_manager=manager)
-        client = TestClient(app)
+        app = create_app(
+            treasury_manager=manager, member_service=make_master_member_service()
+        )
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury/budgets")
         assert resp.status_code == 503
@@ -236,8 +243,12 @@ class TestTreasuryAllAccountAggregate:
         treasury.account_id = "acc-1"
         treasury.currency = "KRW"
         manager = FakeTreasuryManager(treasuries=[treasury])
-        app = create_app(treasury=treasury, treasury_manager=manager)
-        c = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            treasury_manager=manager,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         resp = c.get("/api/treasury?account_id=acc-1")
         assert resp.status_code == 200
@@ -248,8 +259,12 @@ class TestTreasuryAllAccountAggregate:
         treasury.account_id = "acc-1"
         treasury.currency = "KRW"
         manager = FakeTreasuryManager(treasuries=[treasury])
-        app = create_app(treasury=treasury, treasury_manager=manager)
-        c = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            treasury_manager=manager,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         resp = c.get("/api/treasury?account_id=acc-unknown")
         assert resp.status_code == 404
@@ -259,8 +274,12 @@ class TestTreasuryAllAccountAggregate:
         treasury = FakeTreasury()
         treasury.account_id = "acc-1"
         manager = FakeTreasuryManager(treasuries=[treasury])
-        app = create_app(treasury=treasury, treasury_manager=manager)
-        c = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            treasury_manager=manager,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         resp = c.get("/api/treasury/snapshots/2026-03-21?account_id=acc-unknown")
         assert resp.status_code == 404

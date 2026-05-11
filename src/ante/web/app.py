@@ -45,6 +45,11 @@ def create_app(**services: Any) -> FastAPI:
         description="AI-Native Trading Engine API",
     )
 
+    # 미들웨어 add 순서 SSOT: docs/specs/web-api/02-design-decisions.md
+    # "인증 게이트 단계" + "CORS 설정" 절. Starlette LIFO 시맨틱이므로 마지막
+    # add가 가장 바깥(요청을 가장 먼저 받음). 의도된 요청 처리 순서는
+    # TokenAuth → RequireAuth → Audit → CORS → 라우트 이며, 이를 얻으려면
+    # 역순으로 add 한다.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -53,9 +58,11 @@ def create_app(**services: Any) -> FastAPI:
     )
 
     from ante.web.middleware.audit import AuditMiddleware
+    from ante.web.middleware.require_auth import RequireAuthMiddleware
     from ante.web.middleware.token_auth import TokenAuthMiddleware
 
     app.add_middleware(AuditMiddleware)
+    app.add_middleware(RequireAuthMiddleware)
     app.add_middleware(TokenAuthMiddleware)
 
     for name, service in services.items():

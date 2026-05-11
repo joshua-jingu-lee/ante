@@ -25,6 +25,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 from ante.account.errors import AccountNotFoundError  # noqa: E402
 from ante.account.models import Account, AccountStatus, TradingMode  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 # ── Member / Session fakes (#1376 update_account_rule 인증 가드) ────────────
 
@@ -223,7 +227,12 @@ def app(
 
 @pytest.fixture
 def client(app) -> TestClient:
-    return TestClient(app)
+    # 본 파일은 자체 ``_FakeMemberService`` 가 ``master-token`` 만 인식한다.
+    # ``RequireAuthMiddleware`` (#1403) default-deny 회귀를 막기 위해 client
+    # 디폴트 헤더에 master-token 을 명시 부착한다.
+    test_client = TestClient(app)
+    test_client.headers.update(_MASTER_HEADERS)
+    return test_client
 
 
 class TestGetAccountRules:
@@ -298,8 +307,9 @@ class TestGetAccountRules:
             audit_logger=audit_logger,
             dynamic_config=FakeDynamicConfig(),
             config=static_config,
+            member_service=make_master_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
 
         resp = client.get("/api/accounts/acct-1/rules")
         assert resp.status_code == 200
@@ -493,7 +503,7 @@ class TestUpdateAccountRule:
             member_service=member_service,
             session_service=session_service,
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
 
         resp = client.put(
             "/api/accounts/acct-1/rules/total_exposure_limit",

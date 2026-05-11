@@ -10,9 +10,12 @@ from ante.web.pagination import decode_cursor, encode_cursor, paginate
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 class TestPaginationUtil:
@@ -75,8 +78,10 @@ class TestReportsEndpointPagination:
             reports.append(r)
         mock_store.list_reports = AsyncMock(return_value=reports)
 
-        app = create_app(report_store=mock_store)
-        client = TestClient(app)
+        app = create_app(
+            report_store=mock_store, member_service=make_master_member_service()
+        )
+        client = make_authed_client(app)
         resp = client.get("/api/reports?limit=3")
         assert resp.status_code == 200
         data = resp.json()
@@ -93,8 +98,10 @@ class TestReportsEndpointPagination:
         r.submitted_at = "2025-01-01"
         mock_store.list_reports = AsyncMock(return_value=[r])
 
-        app = create_app(report_store=mock_store)
-        client = TestClient(app)
+        app = create_app(
+            report_store=mock_store, member_service=make_master_member_service()
+        )
+        client = make_authed_client(app)
         resp = client.get("/api/reports?limit=20")
         data = resp.json()
         assert data["next_cursor"] is None
@@ -107,8 +114,10 @@ class TestBotsEndpointPagination:
         bots = [{"bot_id": f"bot-{i}", "status": "running"} for i in range(5)]
         mock_manager.list_bots.return_value = bots
 
-        app = create_app(bot_manager=mock_manager)
-        client = TestClient(app)
+        app = create_app(
+            bot_manager=mock_manager, member_service=make_master_member_service()
+        )
+        client = make_authed_client(app)
         resp = client.get("/api/bots?limit=3")
         assert resp.status_code == 200
         data = resp.json()
@@ -117,8 +126,8 @@ class TestBotsEndpointPagination:
 
     def test_bots_service_unavailable(self):
         """봇 매니저 없으면 503."""
-        app = create_app()
-        client = TestClient(app)
+        app = create_app(member_service=make_master_member_service())
+        client = make_authed_client(app)
         resp = client.get("/api/bots")
         assert resp.status_code == 503
 
@@ -142,8 +151,10 @@ class TestTradesEndpointPagination:
             trades.append(t)
         mock_service.get_trades = AsyncMock(return_value=trades)
 
-        app = create_app(trade_service=mock_service)
-        client = TestClient(app)
+        app = create_app(
+            trade_service=mock_service, member_service=make_master_member_service()
+        )
+        client = make_authed_client(app)
         resp = client.get("/api/trades?limit=3")
         assert resp.status_code == 200
         data = resp.json()

@@ -8,6 +8,10 @@ from starlette.testclient import TestClient
 from ante.broker.base import BrokerAdapter
 from ante.broker.mock import MockBrokerAdapter
 from ante.web.app import create_app
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 class FakeTreasury:
@@ -40,13 +44,19 @@ class TestBrokerMetaInTreasury:
     @pytest.fixture
     def client_with_broker(self) -> TestClient:
         broker = MockBrokerAdapter({"exchange": "KRX"})
-        app = create_app(treasury=FakeTreasury(), broker=broker)
-        return TestClient(app)
+        app = create_app(
+            treasury=FakeTreasury(),
+            broker=broker,
+            member_service=make_master_member_service(),
+        )
+        return make_authed_client(app)
 
     @pytest.fixture
     def client_without_broker(self) -> TestClient:
-        app = create_app(treasury=FakeTreasury())
-        return TestClient(app)
+        app = create_app(
+            treasury=FakeTreasury(), member_service=make_master_member_service()
+        )
+        return make_authed_client(app)
 
     def test_broker_meta_fields_present(self, client_with_broker: TestClient) -> None:
         """브로커가 있으면 메타정보 4개 필드가 응답에 포함된다."""

@@ -10,10 +10,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.account.models import Account, TradingMode  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 @dataclass
@@ -75,8 +78,12 @@ class TestIsVirtualFromTradingMode:
             "domestic", TradingMode.VIRTUAL
         )
 
-        app = create_app(treasury=treasury, account_service=account_service)
-        client = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            account_service=account_service,
+            member_service=make_master_member_service(),
+        )
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury")
         assert resp.status_code == 200
@@ -89,8 +96,12 @@ class TestIsVirtualFromTradingMode:
         account_service = AsyncMock()
         account_service.get.return_value = _make_account("domestic", TradingMode.LIVE)
 
-        app = create_app(treasury=treasury, account_service=account_service)
-        client = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            account_service=account_service,
+            member_service=make_master_member_service(),
+        )
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury")
         assert resp.status_code == 200
@@ -106,8 +117,12 @@ class TestIsVirtualFromTradingMode:
         account_service.get.return_value = account
 
         # config에 is_paper=True가 있더라도 is_virtual=False 이어야 한다
-        app = create_app(treasury=treasury, account_service=account_service)
-        client = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            account_service=account_service,
+            member_service=make_master_member_service(),
+        )
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury")
         assert resp.status_code == 200
@@ -118,8 +133,8 @@ class TestIsVirtualFromTradingMode:
         """account_service가 없으면 is_virtual=True (안전 기본값)."""
         treasury = FakeTreasury()
 
-        app = create_app(treasury=treasury)
-        client = TestClient(app)
+        app = create_app(treasury=treasury, member_service=make_master_member_service())
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury")
         assert resp.status_code == 200
@@ -132,8 +147,12 @@ class TestIsVirtualFromTradingMode:
         account_service = AsyncMock()
         account_service.get.return_value = None
 
-        app = create_app(treasury=treasury, account_service=account_service)
-        client = TestClient(app)
+        app = create_app(
+            treasury=treasury,
+            account_service=account_service,
+            member_service=make_master_member_service(),
+        )
+        client = make_authed_client(app)
 
         resp = client.get("/api/treasury")
         assert resp.status_code == 200

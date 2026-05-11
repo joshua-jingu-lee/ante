@@ -23,9 +23,11 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+)
 
 
 @dataclass
@@ -50,10 +52,31 @@ class FakeMember:
 
 
 class FakeMemberService:
-    """list_members / count만 사용하는 최소 stub."""
+    """list_members / count만 사용하는 최소 stub.
+
+    ``RequireAuthMiddleware`` (#1403) default-deny 게이트도 함께 통과하도록
+    ``authenticate`` / ``get`` / ``update_last_active`` 도 master-test-token
+    한정으로 구현한다. ``tests.unit.conftest.MASTER_AUTH_HEADERS`` 와 짝.
+    """
 
     def __init__(self) -> None:
         self._members: dict[str, FakeMember] = {}
+        self._master = FakeMember(
+            member_id="master-test", type="human", status="active"
+        )
+
+    async def authenticate(self, token: str) -> FakeMember:
+        if token != "master-test-token":
+            raise PermissionError("invalid token")
+        return self._master
+
+    async def get(self, member_id: str) -> FakeMember | None:
+        if member_id == self._master.member_id:
+            return self._master
+        return self._members.get(member_id)
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
 
     async def list_members(
         self,
@@ -112,7 +135,7 @@ def member_service():
 @pytest.fixture
 def client(member_service):
     app = create_app(member_service=member_service)
-    return TestClient(app)
+    return make_authed_client(app)
 
 
 class TestListMembersTypeFilter:

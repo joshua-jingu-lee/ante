@@ -9,10 +9,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.data.store import ParquetStore  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 def _make_ohlcv_df(n: int = 10) -> pl.DataFrame:
@@ -60,8 +63,8 @@ def store(tmp_path):
 
 @pytest.fixture
 def client(store):
-    app = create_app(data_store=store)
-    return TestClient(app)
+    app = create_app(data_store=store, member_service=make_master_member_service())
+    return make_authed_client(app)
 
 
 class TestDatasetDetail:
@@ -131,8 +134,8 @@ class TestDatasetDetail:
 
     def test_store_unavailable(self):
         """store가 None이면 503을 반환한다."""
-        app = create_app(data_store=None)
-        c = TestClient(app)
+        app = create_app(data_store=None, member_service=make_master_member_service())
+        c = make_authed_client(app)
         resp = c.get("/api/data/datasets/005930__1d")
         assert resp.status_code == 503
 
