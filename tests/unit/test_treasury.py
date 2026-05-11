@@ -183,6 +183,32 @@ class TestAllocation:
         assert await treasury.allocate("bot1", 0) is False
         assert await treasury.allocate("bot1", -100) is False
 
+    async def test_allocate_rejects_nan(self, treasury):
+        """NaN 할당 거부. budget state 미오염 확인 (#1411).
+
+        ``NaN`` 비교 연산은 모두 False이므로 기존 ``amount <= 0`` 가드를
+        우회한다. ``math.isfinite`` 가드가 입구에서 거부해야 한다.
+        """
+        result = await treasury.allocate("bot1", float("nan"))
+        assert result is False
+        # state 오염 없음 — _unallocated/budget 둘 다 변경 X
+        assert treasury.unallocated == 10_000_000.0
+        assert treasury.get_budget("bot1") is None
+
+    async def test_allocate_rejects_positive_inf(self, treasury):
+        """+Inf 할당 거부. budget state 미오염 확인 (#1411)."""
+        result = await treasury.allocate("bot1", float("inf"))
+        assert result is False
+        assert treasury.unallocated == 10_000_000.0
+        assert treasury.get_budget("bot1") is None
+
+    async def test_allocate_rejects_negative_inf(self, treasury):
+        """-Inf 할당 거부 (#1411)."""
+        result = await treasury.allocate("bot1", -float("inf"))
+        assert result is False
+        assert treasury.unallocated == 10_000_000.0
+        assert treasury.get_budget("bot1") is None
+
     async def test_deallocate(self, treasury):
         """예산 회수."""
         await treasury.allocate("bot1", 1_000_000.0)
@@ -205,6 +231,35 @@ class TestAllocation:
         """존재하지 않는 봇 회수 실패."""
         result = await treasury.deallocate("nonexistent", 100.0)
         assert result is False
+
+    async def test_deallocate_rejects_nan(self, treasury):
+        """NaN 회수 거부. 이미 할당된 봇의 budget이 오염되지 않아야 한다 (#1411)."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        result = await treasury.deallocate("bot1", float("nan"))
+        assert result is False
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 1_000_000.0
+        assert budget.available == 1_000_000.0
+        assert treasury.unallocated == 9_000_000.0
+
+    async def test_deallocate_rejects_positive_inf(self, treasury):
+        """+Inf 회수 거부 (#1411)."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        result = await treasury.deallocate("bot1", float("inf"))
+        assert result is False
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 1_000_000.0
+
+    async def test_deallocate_rejects_negative_inf(self, treasury):
+        """-Inf 회수 거부 (#1411)."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        result = await treasury.deallocate("bot1", -float("inf"))
+        assert result is False
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.allocated == 1_000_000.0
 
     async def test_multiple_allocations(self, treasury):
         """동일 봇에 추가 할당."""

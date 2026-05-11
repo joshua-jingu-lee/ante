@@ -39,9 +39,13 @@ class BudgetChangeRequest(BaseModel):
     body validation 후행)으로 동작하므로 FastAPI 자동 components 등록 경로를
     거치지 않는다. 본체 schema는 ``_install_openapi_customizer``가
     ``components.schemas``에 명시 등록한다(#1372).
+
+    ``amount``는 finite-positive 숫자만 허용한다. ``NaN``/``±Infinity``/``0``/
+    음수는 422로 거부된다(#1411). ``extra="forbid"``는 본 변경 scope 외 —
+    frontend 호환 검증이 필요하므로 별도 이슈로 분리.
     """
 
-    amount: float
+    amount: Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
 class BalanceSetRequest(BaseModel):
@@ -79,7 +83,11 @@ BUDGET_CHANGE_REQUEST_SCHEMA: dict[str, Any] = {
     "properties": {
         "amount": {
             "type": "number",
-            "description": "할당/회수 금액 (원).",
+            "exclusiveMinimum": 0,
+            "description": (
+                "할당/회수 금액 (원). finite한 양수(> 0)만 허용된다. "
+                "NaN, Infinity, -Infinity, 0, 음수는 422로 거부된다(#1411)."
+            ),
         },
     },
 }
@@ -348,8 +356,8 @@ async def list_transactions(
         422: {
             "description": (
                 "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, "
-                "amount 누락). 단, 인증이 실패하면 body validation은 실행되지 "
-                "않고 401이 우선 반환된다(#1372)."
+                "amount 누락, amount가 NaN/±Infinity/0/음수). 단, 인증이 실패하면 "
+                "body validation은 실행되지 않고 401이 우선 반환된다(#1372, #1411)."
             ),
             "content": {
                 "application/problem+json": {
@@ -516,8 +524,8 @@ async def allocate(
         422: {
             "description": (
                 "Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, "
-                "amount 누락). 단, 인증이 실패하면 body validation은 실행되지 "
-                "않고 401이 우선 반환된다(#1372)."
+                "amount 누락, amount가 NaN/±Infinity/0/음수). 단, 인증이 실패하면 "
+                "body validation은 실행되지 않고 401이 우선 반환된다(#1372, #1411)."
             ),
             "content": {
                 "application/problem+json": {
