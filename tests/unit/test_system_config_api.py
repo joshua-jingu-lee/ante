@@ -425,3 +425,121 @@ class TestDynamicConfig:
             headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200
+
+    # ── #1412 oracle A7: numeric finite invariant (write + read) ─────────
+
+    @pytest.mark.parametrize(
+        "raw_body",
+        [
+            '{"value": NaN, "category": "risk"}',
+            '{"value": Infinity, "category": "risk"}',
+            '{"value": -Infinity, "category": "risk"}',
+        ],
+    )
+    def test_config_update_non_finite_numeric_returns_422(
+        self, client, dynamic_config, raw_body
+    ):
+        """numeric NaN/Infinity/-Infinity 는 422 로 거부된다 (#1412).
+
+        oracle probe 가 ``PUT /api/config/risk.max_mdd_pct`` body 에 NaN 을
+        보내도 dynamic_config 에 영구 저장되어선 안 된다. 서비스 경계에서
+        ``ValueError`` 가 발생하고 라우트가 422 로 변환한다.
+        """
+        dynamic_config._configs["risk.max_mdd_pct"] = {
+            "value": 0.1,
+            "category": "risk",
+        }
+        resp = client.put(
+            "/api/config/risk.max_mdd_pct",
+            content=raw_body,
+            headers={**_MASTER_HEADERS, "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+        # 영구 저장은 일어나지 않아야 한다 — 기존 0.1 값이 유지.
+        assert dynamic_config._configs["risk.max_mdd_pct"]["value"] == 0.1
+
+    def test_config_update_finite_numeric_regression(self, client, dynamic_config):
+        """정상 finite numeric 값 0.1 → 200 (회귀 보존, #1412)."""
+        dynamic_config._configs["risk.max_mdd_pct"] = {
+            "value": 0.5,
+            "category": "risk",
+        }
+        resp = client.put(
+            "/api/config/risk.max_mdd_pct",
+            json={"value": 0.1, "category": "risk"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["new_value"] == 0.1
+        assert dynamic_config._configs["risk.max_mdd_pct"]["value"] == 0.1
+
+    def test_config_update_nan_unauth_returns_401_before_body_validation(
+        self, client, dynamic_config
+    ):
+        """auth-first invariant: 인증 실패 + NaN body → 401 (#1412 + #1373).
+
+        ``RequireAuthMiddleware`` 가 인증 가드를 body validation 보다 먼저
+        실행해야 한다. NaN body 라도 401 이 먼저 반환되어야 한다.
+        """
+        dynamic_config._configs["risk.max_mdd_pct"] = {
+            "value": 0.1,
+            "category": "risk",
+        }
+        # 디폴트 master-token 헤더를 빈 헤더로 override 한다.
+        resp = client.put(
+            "/api/config/risk.max_mdd_pct",
+            content='{"value": NaN, "category": "risk"}',
+            headers={
+                "Authorization": "",
+                "Content-Type": "application/json",
+            },
+        )
+        assert resp.status_code == 401
+        # 영구 저장도 일어나지 않아야 한다.
+        assert dynamic_config._configs["risk.max_mdd_pct"]["value"] == 0.1
+
+
+# ── #1412 oracle A7: read defense (legacy NaN row 격리) ─────────────────
+
+
+class _FakeDynamicConfigWithReadDefense:
+    """legacy NaN row 시뮬레이션을 위한 stub.
+
+    실제 ``DynamicConfigService.get_all`` 의 read 경계에서 ConfigError 가
+    발생한 상황을 재현하여, web 라우트가 422 로 변환하는지 검증한다.
+    """
+
+    def __init__(self, error_message: str) -> None:
+        self._error_message = error_message
+
+    async def get_all(self) -> list[dict]:
+        from ante.config.exceptions import ConfigError
+
+        raise ConfigError(self._error_message)
+
+
+def test_list_configs_legacy_non_finite_row_returns_422(
+    account_service, member_service, session_service
+):
+    """legacy non-finite numeric row 가 있을 때 GET /api/config → 422 (#1412).
+
+    서비스 read 경계가 ``ConfigError`` 를 raise 하면 라우트는 이를 422
+    problem+json 으로 변환한다. silent 500 폭증을 방지한다.
+    """
+    fake_config = _FakeDynamicConfigWithReadDefense(
+        "Dynamic config의 numeric 값이 non-finite 입니다. "
+        "key=risk.max_mdd_pct value=nan"
+    )
+    app = create_app(
+        account_service=account_service,
+        dynamic_config=fake_config,
+        member_service=member_service,
+        session_service=session_service,
+    )
+    test_client = TestClient(app)
+    test_client.headers.update(_MASTER_HEADERS)
+
+    resp = test_client.get("/api/config")
+    assert resp.status_code == 422
+    body = resp.json()
+    assert "non-finite" in str(body)

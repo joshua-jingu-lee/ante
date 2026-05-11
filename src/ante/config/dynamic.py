@@ -1,9 +1,19 @@
-"""DynamicConfigService — 동적 설정 CRUD + 변경 알림."""
+"""DynamicConfigService — 동적 설정 CRUD + 변경 알림.
+
+Numeric invariant (#1412 oracle A7):
+- write 경계(`validate_value`)에서 numeric 값(`int`/`float`, `bool` 제외)은
+  반드시 finite 여야 한다. `NaN`/`Infinity`/`-Infinity` 는 ValueError 로 거부되며,
+  호출자(web/IPC/CLI)가 422 로 변환한다.
+- read 경계(`get`/`get_all`/`get_by_category`)에서 legacy non-finite numeric
+  row 는 `_ensure_loaded_value_finite` 가 ConfigError 로 격리한다
+  (defense-in-depth, JSON 직렬화 실패/silent corruption 방지).
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 
 from ante.config.exceptions import ConfigError
@@ -21,22 +31,61 @@ _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 def validate_value(key: str, value: Any) -> None:
     """키별 값 검증 (서비스 경계에서 호출).
 
+    Generic numeric finite 가드 (#1412 oracle A7):
+        모든 numeric 값(`int`/`float`, `bool` 제외)은 finite 여야 한다.
+        `NaN`/`Infinity`/`-Infinity` 는 ValueError 로 거부된다. 이 가드는 키와
+        무관하게 적용되어 IPC/CLI/web 모든 경로에서 동일하게 동작한다.
+        `bool` 은 Python 에서 `int` 의 서브클래스(`isinstance(True, int) == True`)
+        이므로 명시적으로 제외한다.
+
     `system.log_level` 처럼 enum SSOT가 정의된 키는 invalid 값을 즉시 거부한다.
-    정의되지 않은 키는 통과(generic CRUD 동작 유지).
+    정의되지 않은 키는 numeric finite 가드 외에는 통과(generic CRUD 동작 유지).
 
     대소문자 정책: `system.log_level` 은 대소문자 구분으로 거부한다. 즉
     ``_VALID_LOG_LEVELS`` 멤버(전부 대문자)와 정확 일치해야 통과하고,
     ``"debug"`` 같은 소문자 입력은 ValueError 로 거부된다 (#1379 oracle A7).
 
     Raises:
-        ValueError: 키별 invariant 를 위반한 경우. 호출자(web/IPC/CLI)는
-            이를 422 등 도메인 응답으로 변환해야 한다.
+        ValueError: 키별 invariant 또는 numeric finite invariant 를 위반한 경우.
+            호출자(web/IPC/CLI)는 이를 422 등 도메인 응답으로 변환해야 한다.
     """
+    # Generic numeric finite 가드 (#1412). bool 은 int 서브클래스이므로 명시 제외.
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if not math.isfinite(value):
+            raise ValueError(
+                "numeric config 값은 finite number 여야 합니다 "
+                f"(NaN/Infinity 거부). key={key} value={value!r}"
+            )
+
     if key == "system.log_level":
         if not isinstance(value, str) or value not in _VALID_LOG_LEVELS:
             raise ValueError(
                 "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 (대소문자 구분)."
             )
+
+
+def _ensure_loaded_value_finite(key: str, value: Any) -> Any:
+    """DB 에서 읽은 dynamic config 값을 격리 검사한다 (#1412 oracle A7).
+
+    legacy NaN/Infinity row 가 DB 에 남아있더라도 read 경계에서 ConfigError 로
+    격리되어 downstream consumer(JSON 직렬화, rule engine 비교 등)로 silent
+    하게 흘러가지 않도록 한다. write 경계(`validate_value`)의 finite 가드와
+    짝을 이루는 defense-in-depth.
+
+    `bool` 은 `int` 의 서브클래스이지만 `math.isfinite(True)` 는 True 이므로
+    `validate_value` 와 동일하게 명시 제외하여 의도치 않은 경로를 차단한다.
+
+    Raises:
+        ConfigError: 저장된 값이 non-finite numeric 일 때. 호출자(web GET 라우트
+            등)는 이를 422 등으로 변환할 수 있다.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if not math.isfinite(value):
+            raise ConfigError(
+                "Dynamic config의 numeric 값이 non-finite 입니다. "
+                f"key={key} value={value!r}"
+            )
+    return value
 
 
 DYNAMIC_CONFIG_SCHEMA = """
@@ -78,7 +127,11 @@ class DynamicConfigService:
     _MISSING = object()
 
     async def get(self, key: str, default: Any = _MISSING) -> Any:
-        """동적 설정 값 조회. JSON 역직렬화하여 반환."""
+        """동적 설정 값 조회. JSON 역직렬화하여 반환.
+
+        Read 경계에서 ``_ensure_loaded_value_finite`` 가 legacy non-finite
+        numeric row 를 ConfigError 로 격리한다 (#1412 oracle A7).
+        """
         row = await self._db.fetch_one(
             "SELECT value FROM dynamic_config WHERE key = ?", (key,)
         )
@@ -86,7 +139,7 @@ class DynamicConfigService:
             if default is not self._MISSING:
                 return default
             raise ConfigError(f"Dynamic config not found: {key}")
-        return json.loads(row["value"])
+        return _ensure_loaded_value_finite(key, json.loads(row["value"]))
 
     async def set(
         self, key: str, value: Any, category: str, changed_by: str = "system"
@@ -95,6 +148,11 @@ class DynamicConfigService:
 
         키별 invariant 가 정의된 경우 ``validate_value`` 가 ValueError 를
         발생시킨다(서비스 경계 검증, IPC/CLI 우회 차단 — #1379).
+
+        legacy non-finite numeric row 가 저장돼 있는 키를 정상 값으로 덮어쓰는
+        경로(self-healing)는 막지 않는다 — ``get`` 의 read defense 가
+        ``ConfigError`` 를 raise 하면 ``old_value`` 를 ``None`` 으로 두고 새 값을
+        그대로 저장한다 (#1412 oracle A7).
         """
         from ante.eventbus.events import ConfigChangedEvent
 
@@ -102,7 +160,11 @@ class DynamicConfigService:
 
         old_value = None
         if await self.exists(key):
-            old_value = await self.get(key)
+            try:
+                old_value = await self.get(key)
+            except ConfigError:
+                # legacy non-finite numeric row — self-healing 경로 허용. (#1412)
+                old_value = None
 
         json_value = json.dumps(value)
         old_json = json.dumps(old_value) if old_value is not None else None
@@ -147,14 +209,20 @@ class DynamicConfigService:
         return True
 
     async def get_all(self) -> list[dict[str, Any]]:
-        """전체 동적 설정 조회."""
+        """전체 동적 설정 조회.
+
+        Read 경계에서 ``_ensure_loaded_value_finite`` 가 legacy non-finite
+        numeric row 를 ConfigError 로 격리한다 (#1412 oracle A7).
+        """
         rows = await self._db.fetch_all(
             "SELECT key, value, category, updated_at FROM dynamic_config ORDER BY key"
         )
         return [
             {
                 "key": row["key"],
-                "value": json.loads(row["value"]),
+                "value": _ensure_loaded_value_finite(
+                    row["key"], json.loads(row["value"])
+                ),
                 "category": row["category"],
                 "updated_at": row["updated_at"],
             }
@@ -162,12 +230,21 @@ class DynamicConfigService:
         ]
 
     async def get_by_category(self, category: str) -> dict[str, Any]:
-        """카테고리별 모든 설정 조회."""
+        """카테고리별 모든 설정 조회.
+
+        Read 경계에서 ``_ensure_loaded_value_finite`` 가 legacy non-finite
+        numeric row 를 ConfigError 로 격리한다 (#1412 oracle A7).
+        """
         rows = await self._db.fetch_all(
             "SELECT key, value FROM dynamic_config WHERE category = ?",
             (category,),
         )
-        return {row["key"]: json.loads(row["value"]) for row in rows}
+        return {
+            row["key"]: _ensure_loaded_value_finite(
+                row["key"], json.loads(row["value"])
+            )
+            for row in rows
+        }
 
     async def register_default(self, key: str, value: Any, category: str) -> None:
         """기본값 등록. 이미 값이 존재하면 무시한다."""

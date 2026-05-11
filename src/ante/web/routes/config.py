@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
+from ante.config.exceptions import ConfigError
 from ante.web.deps import (
     get_audit_logger_optional,
     get_dynamic_config,
@@ -68,6 +69,18 @@ CONFIG_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
     "",
     response_model=ConfigListResponse,
     responses={
+        422: {
+            "description": (
+                "저장된 dynamic config 값이 invariant 를 위반한 경우 (예: legacy "
+                "non-finite numeric row — #1412). 서비스 read 경계가 ConfigError "
+                "로 격리한 결과를 422 problem+json 으로 변환한다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Config service not available",
             "content": {
@@ -83,8 +96,15 @@ async def list_configs(
     config_service: Annotated[Any, Depends(get_dynamic_config)],
 ) -> dict:
     """동적 설정 전체 조회. 인증된 master/human 또는 ``config:read`` scope 를
-    보유한 agent 만 호출 가능 (#1407)."""
-    configs = await config_service.get_all()
+    보유한 agent 만 호출 가능 (#1407).
+
+    저장된 값이 read invariant(예: numeric finite, #1412)를 위반하면 서비스
+    경계가 ``ConfigError`` 를 raise 하며, 라우트는 이를 422 로 변환한다.
+    """
+    try:
+        configs = await config_service.get_all()
+    except ConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
     return {"configs": configs}
 
 
@@ -210,7 +230,13 @@ async def update_config(
     if not await config_service.exists(key):
         raise HTTPException(status_code=404, detail=f"설정을 찾을 수 없습니다: {key}")
 
-    old_value = await config_service.get(key)
+    # legacy non-finite numeric row 는 read 경계에서 ConfigError 로 격리되지만
+    # (#1412), PUT 으로 정상 값을 덮어쓰는 self-healing 경로는 허용한다.
+    # ``old_value`` 는 None 으로 두고 새 값으로 set 한다.
+    try:
+        old_value = await config_service.get(key)
+    except ConfigError:
+        old_value = None
 
     # category: 요청에 없으면 key에서 추출 (예: "risk.max_mdd" -> "risk")
     category = body.category or key.split(".")[0]

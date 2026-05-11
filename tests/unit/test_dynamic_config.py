@@ -3,6 +3,7 @@
 import pytest
 
 from ante.config import ConfigError, DynamicConfigService
+from ante.config.dynamic import validate_value
 from ante.core import Database
 from ante.eventbus.events import ConfigChangedEvent
 
@@ -167,3 +168,185 @@ async def test_set_non_string_log_level_raises_value_error(service, eventbus):
 
     assert not await service.exists("system.log_level")
     assert eventbus.published == []
+
+
+# ── #1412 oracle A7: numeric finite invariant (write + read) ──────────────
+
+
+class TestValidateValueFiniteNumeric:
+    """``validate_value`` 의 generic numeric finite 가드 (#1412).
+
+    write 경계에서 NaN/Infinity/-Infinity 를 거부해야 한다. 이 가드는 키와
+    무관하게 적용되어 IPC/CLI/web 모든 경로에서 동일하게 동작한다.
+    """
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "risk.max_mdd_pct",
+            "anything.else",
+            "rule.max_daily_loss_rate",
+            "completely_unknown_key",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "value",
+        [float("nan"), float("inf"), float("-inf")],
+    )
+    def test_validate_value_rejects_non_finite_numeric(self, key, value):
+        """NaN/Infinity/-Infinity 는 모든 키에서 거부된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value(key, value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [0.1, 0, -1, 1.5, -100.0, 1e10, -1e-10],
+    )
+    def test_validate_value_accepts_finite_numeric(self, value):
+        """finite numeric 값은 통과한다 (회귀 보존)."""
+        # 임의 키로 호출해도 generic 가드가 통과.
+        validate_value("risk.max_mdd_pct", value)
+
+    def test_validate_value_bool_excluded_true(self):
+        """bool True 는 numeric 가드에서 명시 제외된다.
+
+        Python 에서 ``isinstance(True, int)`` 는 True 이지만 ``True`` 는
+        finite (1) 이므로 의도치 않게 거부되어선 안 된다.
+        """
+        validate_value("any.bool.key", True)
+
+    def test_validate_value_bool_excluded_false(self):
+        """bool False 도 numeric 가드에서 명시 제외된다."""
+        validate_value("any.bool.key", False)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["not-numeric", "NaN", "Infinity", None, [], {}, ["nested"]],
+    )
+    def test_validate_value_non_numeric_passes(self, value):
+        """numeric 이 아닌 값은 generic 가드 무영향 (회귀 보존).
+
+        invariant 가 정의되지 않은 키에서는 string/None/list/dict 모두 통과.
+        ``system.log_level`` 같은 키별 검증은 별도 분기에서 처리된다.
+        """
+        validate_value("anything", value)
+
+
+async def test_set_rejects_nan_at_service_boundary(service, eventbus):
+    """``service.set`` 가 NaN 을 ValueError 로 거부한다 (#1412)."""
+    with pytest.raises(ValueError, match="finite"):
+        await service.set("risk.max_mdd_pct", float("nan"), category="risk")
+
+    # 영속/이벤트 사이드이펙트가 발생하지 않아야 한다.
+    assert not await service.exists("risk.max_mdd_pct")
+    assert eventbus.published == []
+
+
+async def test_set_rejects_inf_at_service_boundary(service, eventbus):
+    """``service.set`` 가 Infinity 를 ValueError 로 거부한다 (#1412)."""
+    with pytest.raises(ValueError, match="finite"):
+        await service.set("risk.max_mdd_pct", float("inf"), category="risk")
+    with pytest.raises(ValueError, match="finite"):
+        await service.set("risk.max_mdd_pct", float("-inf"), category="risk")
+
+    assert not await service.exists("risk.max_mdd_pct")
+    assert eventbus.published == []
+
+
+async def test_set_accepts_finite_numeric_regression(service):
+    """정상 finite numeric 값은 그대로 저장된다 (회귀 보존, #1412)."""
+    await service.set("risk.max_mdd_pct", 0.1, category="risk")
+    assert await service.get("risk.max_mdd_pct") == 0.1
+
+
+async def _insert_legacy_value(service, key: str, raw_json: str, category: str) -> None:
+    """DB 에 직접 raw JSON row 를 삽입 (legacy NaN row 시뮬레이션).
+
+    ``service.set`` 는 finite 가드를 통과시키므로 NaN row 를 만들 수 없다.
+    legacy 시나리오를 재현하기 위해 db 를 직접 호출한다.
+    """
+    await service._db.execute(
+        """INSERT INTO dynamic_config (key, value, category, updated_at)
+           VALUES (?, ?, ?, datetime('now'))""",
+        (key, raw_json, category),
+    )
+
+
+async def test_get_raises_on_legacy_nan_row(service):
+    """legacy NaN row 가 DB 에 있으면 ``get`` 이 ConfigError 로 격리한다 (#1412).
+
+    SQLite 에 직접 ``"NaN"`` JSON 을 삽입한 뒤 ``json.loads`` 가 복원하는
+    ``float('nan')`` 가 그대로 downstream 으로 흘러가는 것을 read 경계가
+    막아야 한다.
+    """
+    await _insert_legacy_value(service, "risk.max_mdd_pct", "NaN", "risk")
+
+    with pytest.raises(ConfigError, match="non-finite"):
+        await service.get("risk.max_mdd_pct")
+
+
+async def test_get_raises_on_legacy_infinity_row(service):
+    """legacy Infinity row 도 read 경계에서 ConfigError 로 격리된다 (#1412)."""
+    await _insert_legacy_value(service, "rule.threshold", "Infinity", "rule")
+
+    with pytest.raises(ConfigError, match="non-finite"):
+        await service.get("rule.threshold")
+
+
+async def test_get_returns_finite_numeric_regression(service):
+    """정상 finite 값은 ``get`` 이 그대로 반환한다 (회귀 보존, #1412)."""
+    await service.set("risk.max_mdd_pct", 0.1, category="risk")
+    assert await service.get("risk.max_mdd_pct") == 0.1
+
+
+async def test_get_all_raises_on_legacy_nan_row(service):
+    """``get_all`` 도 legacy NaN row 에서 ConfigError (#1412)."""
+    await _insert_legacy_value(service, "risk.max_mdd_pct", "NaN", "risk")
+    await service.set("risk.other", 0.05, category="risk")
+
+    with pytest.raises(ConfigError, match="non-finite"):
+        await service.get_all()
+
+
+async def test_get_by_category_raises_on_legacy_nan_row(service):
+    """``get_by_category`` 도 legacy NaN row 에서 ConfigError (#1412)."""
+    await _insert_legacy_value(service, "risk.max_mdd_pct", "NaN", "risk")
+
+    with pytest.raises(ConfigError, match="non-finite"):
+        await service.get_by_category("risk")
+
+
+async def test_get_all_returns_finite_values_regression(service):
+    """normal seed 만 있을 때 ``get_all`` 이 정상 동작 (회귀 보존, #1412)."""
+    await service.set("risk.max_mdd_pct", 0.1, category="risk")
+    await service.set("rule.threshold", 5, category="rule")
+    await service.set("flag.enabled", True, category="flag")
+    await service.set("name.label", "hello", category="meta")
+
+    items = await service.get_all()
+    by_key = {item["key"]: item["value"] for item in items}
+    assert by_key["risk.max_mdd_pct"] == 0.1
+    assert by_key["rule.threshold"] == 5
+    assert by_key["flag.enabled"] is True
+    assert by_key["name.label"] == "hello"
+
+
+async def test_set_self_heals_over_legacy_nan_row(service, eventbus):
+    """legacy NaN row 를 정상 finite 값으로 덮어쓰는 self-healing 허용 (#1412).
+
+    Non-Goals 인 자동 cleanup 과는 별개로, 사용자가 ``set`` 으로 정상 값을
+    써넣는 정상 lifecycle 은 막히지 않아야 한다. ``get`` 의 read defense 가
+    ConfigError 를 raise 하더라도 ``set`` 은 ``old_value=None`` 으로 진행한다.
+    """
+    await _insert_legacy_value(service, "risk.max_mdd_pct", "NaN", "risk")
+
+    # ConfigError 가 새어 나오면 안 된다.
+    await service.set("risk.max_mdd_pct", 0.1, category="risk")
+
+    # 덮어쓰기 성공 — 다시 get 하면 정상 값 반환.
+    assert await service.get("risk.max_mdd_pct") == 0.1
+
+    # 이벤트 1개(정상 set) 발행.
+    assert len(eventbus.published) == 1
+    event = eventbus.published[0]
+    assert event.key == "risk.max_mdd_pct"
