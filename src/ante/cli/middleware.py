@@ -631,4 +631,4 @@ def authenticated_group(name: str | None = None, **attrs: object) -> Callable:
     동작 상세는 :class:`AuthenticatedGroup` docstring 참조.
     """
     attrs.setdefault("cls", AuthenticatedGroup)
-    return click.group(name=name, **attrs)  # type: ignore[arg-type]
+    return click.group(name=name, **attrs)  # type: ignore[call-overload]
