@@ -12,7 +12,10 @@ dependencies = [
     "aiosqlite>=0.20",
     "polars>=1.0",
     "pandas-ta>=0.4.71b0",
-    "click>=8.1",
+    # Pin click to 8.1.x; Click 8.2 deprecates Context.protected_args and changes
+    # ``Group.no_args_is_help`` exit-code semantics that LeafAwareGroup/
+    # authenticated_group rely on (#1404). Migration is tracked as a follow-up.
+    "click>=8.1,<8.2",
     "fastapi>=0.115",
     "uvicorn>=0.34",
     "websockets>=13.0",

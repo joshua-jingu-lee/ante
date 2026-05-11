@@ -49,7 +49,24 @@ class TestCheckServerRunning:
 
 @pytest.fixture()
 def runner() -> CliRunner:
-    """인증 우회 CliRunner."""
+    """인증 우회 CliRunner.
+
+    #1404: ``AuthenticatedGroup``이 leaf callback에 default-deny 인증 가드를
+    부착하므로, ``ante.cli.main.authenticate_member`` 를 patch해 master 멤버
+    stub을 ``ctx.obj["member"]`` 에 채워야 leaf까지 도달한다.
+    """
+    from ante.member.models import Member, MemberRole, MemberType
+
+    _master = Member(
+        member_id="update-test-master",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="Update Test Master",
+        status="active",
+        scopes=[],
+    )
+
     r = CliRunner()
     original_invoke = r.invoke
 
@@ -57,7 +74,8 @@ def runner() -> CliRunner:
         with patch("ante.cli.main.authenticate_member") as mock_auth:
 
             def _set_member(ctx):  # noqa: ANN001
-                ctx.obj = ctx.obj or {}
+                ctx.ensure_object(dict)
+                ctx.obj["member"] = _master
 
             mock_auth.side_effect = _set_member
             return original_invoke(cli_cmd, args, **kwargs)
