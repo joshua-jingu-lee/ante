@@ -371,9 +371,15 @@ class Treasury:
             )
 
     async def allocate(self, bot_id: str, amount: float) -> bool:
-        """봇에 예산 할당. 미할당 자금에서 차감."""
+        """봇에 예산 할당. 미할당 자금에서 차감.
+
+        ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
+        한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
+        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다
+        (#1411).
+        """
         self._check_bot_stopped(bot_id)
-        if amount <= 0 or self._unallocated < amount:
+        if not math.isfinite(amount) or amount <= 0 or self._unallocated < amount:
             return False
 
         if bot_id not in self._budgets:
@@ -396,10 +402,21 @@ class Treasury:
         return True
 
     async def deallocate(self, bot_id: str, amount: float) -> bool:
-        """봇에서 예산 회수. 가용 예산 범위 내에서만 가능."""
+        """봇에서 예산 회수. 가용 예산 범위 내에서만 가능.
+
+        ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
+        한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
+        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다
+        (#1411).
+        """
         self._check_bot_stopped(bot_id)
         budget = self._budgets.get(bot_id)
-        if not budget or amount <= 0 or budget.available < amount:
+        if (
+            not budget
+            or not math.isfinite(amount)
+            or amount <= 0
+            or budget.available < amount
+        ):
             return False
 
         budget.allocated -= amount

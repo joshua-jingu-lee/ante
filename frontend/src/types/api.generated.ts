@@ -2133,7 +2133,7 @@ export type components = {
          * @description POST /api/treasury/bots/{bot_id}/allocate, POST /api/treasury/bots/{bot_id}/deallocate 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1372). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         BudgetChangeRequest: {
-            /** @description 할당/회수 금액 (원). */
+            /** @description 할당/회수 금액 (원). finite한 양수(> 0)만 허용된다. NaN, Infinity, -Infinity, 0, 음수는 422로 거부된다(#1411). */
             amount: number;
         };
         /**
@@ -7104,7 +7104,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, amount 누락). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1372). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, amount 누락, amount가 NaN/±Infinity/0/음수). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1372, #1411). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7193,7 +7193,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, amount 누락). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1372). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, type mismatch, amount 누락, amount가 NaN/±Infinity/0/음수). 단, 인증이 실패하면 body validation은 실행되지 않고 401이 우선 반환된다(#1372, #1411). */
             422: {
                 headers: {
                     [name: string]: unknown;
