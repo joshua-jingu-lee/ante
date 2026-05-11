@@ -1,11 +1,18 @@
 """DynamicConfigService 단위 테스트."""
 
+import math
+
 import pytest
 
 from ante.config import ConfigError, DynamicConfigService
 from ante.config.dynamic import _is_value_finite, validate_value
 from ante.core import Database
 from ante.eventbus.events import ConfigChangedEvent
+
+
+def _is_nan_float(value: object) -> bool:
+    """NaN != NaN 비교 회피용 테스트 헬퍼."""
+    return isinstance(value, float) and math.isnan(value)
 
 
 class FakeEventBus:
@@ -534,3 +541,104 @@ async def test_set_accepts_nested_large_int(service):
     payload = {"big": 10**500, "items": [10**400, -(10**400), 1]}
     await service.set("foo.nested", payload, category="x")
     assert await service.get("foo.nested") == payload
+
+
+# ── #1412 P2-A 회귀: register_default 가 validate_value 통과 ───────────────
+
+
+class TestRegisterDefaultFiniteInvariant:
+    """``register_default`` 도 ``validate_value`` 를 통과해야 한다 (#1412 P2-A).
+
+    이전 구현은 startup default 경로에서 ``validate_value`` 를 우회하여
+    ``register_default("x", float("nan"), ...)`` 같은 호출이 그대로 저장됐다.
+    이후 ``get`` 의 read guard 가 ``ConfigError`` 로 깨뜨려 GET 이 500 으로
+    실패하는 회귀가 가능했다.
+    """
+
+    async def test_register_default_rejects_nan(self, service):
+        with pytest.raises(ValueError, match="finite"):
+            await service.register_default("foo.bar", float("nan"), "x")
+        # 영속 사이드이펙트가 없어야 한다.
+        assert not await service.exists("foo.bar")
+
+    async def test_register_default_rejects_positive_infinity(self, service):
+        with pytest.raises(ValueError, match="finite"):
+            await service.register_default("foo.bar", float("inf"), "x")
+        assert not await service.exists("foo.bar")
+
+    async def test_register_default_rejects_negative_infinity(self, service):
+        with pytest.raises(ValueError, match="finite"):
+            await service.register_default("foo.bar", float("-inf"), "x")
+        assert not await service.exists("foo.bar")
+
+    async def test_register_default_rejects_nested_nan_in_dict(self, service):
+        """nested dict 안의 NaN 도 거부된다 (P2-A + P2-1 결합)."""
+        with pytest.raises(ValueError, match="finite"):
+            await service.register_default("foo.bar", {"k": float("nan")}, "x")
+        assert not await service.exists("foo.bar")
+
+    async def test_register_default_accepts_finite_numeric(self, service):
+        """정상 finite 값은 그대로 등록된다 (회귀 보존)."""
+        await service.register_default("foo.bar", 0.1, "x")
+        assert await service.get("foo.bar") == 0.1
+
+    async def test_register_default_accepts_finite_numeric_does_not_raise(
+        self, service
+    ):
+        """0.1 등 finite numeric 등록이 예외 없이 통과한다 (명시적 회귀)."""
+        # raise 가 발생하지 않아야 한다.
+        await service.register_default("foo.finite", 0.1, "x")
+
+
+# ── #1412 P2-B 회귀: tuple 도 list 처럼 재귀 검사 ────────────────────────
+
+
+class TestValidateValueTupleFinite:
+    """``tuple`` 도 ``json.dumps`` 가 JSON array 로 직렬화하므로 list 와 동일
+    하게 재귀 검사돼야 한다 (#1412 P2-B).
+
+    이전 구현은 ``isinstance(value, list)`` 만 검사하고 ``tuple`` 은 fall-through
+    로 통과시켜 ``(float('nan'),)`` 같은 값이 write 경계를 우회하여 ``[NaN]``
+    으로 저장되고 read guard 에서 깨졌다.
+    """
+
+    def test_tuple_with_nan_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("x", (float("nan"),))
+
+    def test_tuple_with_inf_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("x", (float("inf"),))
+
+    def test_tuple_with_negative_inf_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("x", (float("-inf"),))
+
+    def test_tuple_of_finite_floats_passes(self):
+        """정상 finite tuple 은 통과한다 (회귀 보존)."""
+        validate_value("x", (0.1, 0.2))
+
+    def test_empty_tuple_passes(self):
+        validate_value("x", ())
+
+    def test_nested_tuple_in_dict_rejected(self):
+        """dict 값으로 들어간 tuple 안의 NaN 도 거부된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("x", {"k": (float("nan"),)})
+
+    def test_list_of_tuples_with_nan_rejected(self):
+        """list 안의 tuple 안의 NaN 도 거부된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("x", [(0.1,), (float("nan"),)])
+
+    def test_tuple_of_dicts_with_nan_rejected(self):
+        """tuple 안의 dict 안의 NaN 도 거부된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("x", ({"v": 0.1}, {"v": float("nan")}))
+
+    def test_helper_returns_violating_value_from_tuple(self):
+        """헬퍼가 tuple 내부의 violating float 자체를 반환한다."""
+        ok, bad = _is_value_finite((0.1, float("nan")))
+        assert not ok
+        # NaN != NaN 이므로 math.isnan 으로 확인.
+        assert _is_nan_float(bad)
