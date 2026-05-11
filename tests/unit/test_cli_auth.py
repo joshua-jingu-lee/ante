@@ -278,11 +278,16 @@ class TestLeafNameCollisionNotExempt:
         assert "인증" in result.output
 
     def test_resolve_command_path_for_root_init(self):
-        """LeafAwareGroup이 `ante init`에 대해 ("init",)을 저장한다."""
-        from ante.cli.main import LeafAwareGroup, cli
+        """root group이 `ante init`에 대해 ("init",)을 저장한다.
+
+        #1404 이후 root는 ``AuthenticatedGroup``이지만 ``_LeafPathMixin``을
+        통해 ``LeafAwareGroup``과 동일한 leaf path tracking을 공유한다.
+        """
+        from ante.cli.main import cli
+        from ante.cli.middleware import _LeafPathMixin
 
         ctx = click.Context(cli)
-        assert isinstance(cli, LeafAwareGroup)
+        assert isinstance(cli, _LeafPathMixin)
         path = cli._resolve_command_path(ctx, ["init"])
         assert path == ("init",)
 

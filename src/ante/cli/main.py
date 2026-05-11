@@ -7,8 +7,21 @@ from pathlib import Path
 import click
 
 from ante.cli.formatter import OutputFormatter
-from ante.cli.middleware import authenticate_member
+
+# ``authenticate_member`` is re-exported so existing tests can monkeypatch
+# ``ante.cli.main.authenticate_member`` (see ``__all__`` below for details).
+from ante.cli.middleware import (
+    AuthenticatedGroup,
+    _LeafPathMixin,
+    authenticate_member,
+)
 from ante.config.config import Config, resolve_config_dir
+
+# Re-export for backwards compatibility with tests that patch this symbol on
+# ``ante.cli.main`` (#1404: leaf auth wrapping is invoked by ``AuthenticatedGroup``
+# in middleware.py, but the public function still lives in middleware and is
+# re-exported here so existing patches keep working).
+__all__ = ["cli", "LeafAwareGroup", "authenticate_member"]
 
 try:
     from importlib.metadata import version as pkg_version
@@ -18,7 +31,7 @@ except Exception:
     __version__ = "dev"
 
 
-class LeafAwareGroup(click.Group):
+class LeafAwareGroup(_LeafPathMixin):
     """root group invoke 직전에 전체 서브커맨드 경로를 ctx.obj에 저장.
 
     Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전
@@ -35,47 +48,16 @@ class LeafAwareGroup(click.Group):
     - `ante member list` → ("member", "list")
     - `ante member reset-password` → ("member", "reset-password")
     - `ante feed init` → ("feed", "init")  (leaf 이름이 "init"이지만 면제 아님)
+
+    NOTE: 본 클래스는 default-deny 인증 게이트를 부착하지 않는다. #1404 이후
+    root group은 :class:`ante.cli.middleware.AuthenticatedGroup`을 사용한다.
     """
 
-    def invoke(self, ctx: click.Context) -> object:
-        ctx.ensure_object(dict)
-        all_args = [*ctx.protected_args, *ctx.args]
-        path = self._resolve_command_path(ctx, all_args)
-        if path:
-            ctx.obj["_leaf_command_path"] = path
-            # 하위 호환: 기존 코드가 leaf 이름만 필요로 할 수 있음
-            ctx.obj["_leaf_command"] = path[-1]
-        return super().invoke(ctx)
 
-    def _resolve_command_path(
-        self, ctx: click.Context, args: list[str]
-    ) -> tuple[str, ...]:
-        """subcommand 트리를 따라가 루트부터 leaf까지의 경로 tuple을 반환.
-
-        Options(`-x`, `--flag`, `--key=value`)는 skip하고 non-option 토큰만
-        커맨드 후보로 본다. `current.get_command(ctx, token)`이 None을
-        반환하면 경로 탐색을 종료한다. 이는 옵션 값으로 쓰인 non-option
-        토큰(예: `--format json`의 "json")이 섞여 들어와도 안전하게 동작
-        하도록 한다.
-        """
-        cmd: click.Command = self
-        path: list[str] = []
-        i = 0
-        while i < len(args) and isinstance(cmd, click.Group):
-            token = args[i]
-            if token.startswith("-"):
-                i += 1
-                continue
-            sub = cmd.get_command(ctx, token)
-            if sub is None:
-                break
-            path.append(token)
-            cmd = sub
-            i += 1
-        return tuple(path)
-
-
-@click.group(cls=LeafAwareGroup)
+@click.group(
+    cls=AuthenticatedGroup,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 @click.option(
     "--format",
     "output_format",
@@ -94,7 +76,12 @@ class LeafAwareGroup(click.Group):
 @click.version_option(version=__version__, prog_name="ante")
 @click.pass_context
 def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
-    """Ante — AI-Native Trading Engine CLI."""
+    """Ante — AI-Native Trading Engine CLI.
+
+    인증은 ``AuthenticatedGroup``이 leaf 명령 callback 호출 직전에
+    default-deny 게이트로 강제한다(#1404). root callback에서 직접
+    ``authenticate_member(ctx)``를 호출하지 않는다.
+    """
     ctx.ensure_object(dict)
     ctx.obj["format"] = output_format
     ctx.obj["formatter"] = OutputFormatter(output_format)
@@ -102,7 +89,6 @@ def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
         from pathlib import Path
 
         ctx.obj["config_dir"] = Path(config_dir)
-    authenticate_member(ctx)
 
 
 def get_formatter(ctx: click.Context) -> OutputFormatter:

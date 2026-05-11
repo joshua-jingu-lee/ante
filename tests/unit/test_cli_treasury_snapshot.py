@@ -18,9 +18,31 @@ def runner():
 
 @pytest.fixture
 def mock_auth():
-    """인증 미들웨어를 우회하는 픽스처."""
+    """인증 미들웨어를 우회하는 픽스처.
+
+    #1404: ``AuthenticatedGroup``의 leaf wrapper가 ``ante.cli.main.authenticate_member``
+    를 동적으로 lookup해 호출하므로, main 쪽 attribute를 patch해야 mock이
+    효과를 발휘한다. ``_run_authenticate``도 함께 mock하여 실제 DB 접근을
+    방지한다.
+    """
+    from ante.member.models import Member, MemberRole, MemberType
+
+    _master = Member(
+        member_id="treasury-test-master",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="Treasury Test Master",
+        status="active",
+        scopes=[],
+    )
+
+    def _set_member(ctx):  # noqa: ANN001, ANN202
+        ctx.ensure_object(dict)
+        ctx.obj["member"] = _master
+
     with (
-        patch("ante.cli.middleware.authenticate_member"),
+        patch("ante.cli.main.authenticate_member", side_effect=_set_member),
         patch("ante.cli.middleware._run_authenticate"),
     ):
         yield
