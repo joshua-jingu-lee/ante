@@ -15,8 +15,8 @@ from ante.member.models import MemberStatus, MemberType
 from ante.web.deps import (
     get_audit_logger_optional,
     get_member_service,
-    get_session_service_optional,
-    require_master_caller,
+    require_member_admin,
+    require_member_read,
 )
 from ante.web.schemas import (
     MemberCreateResponse,
@@ -32,58 +32,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _caller_id(request: Request) -> str:
-    """인증 미들웨어가 설정한 member_id를 반환. 미설정 시 빈 문자열."""
-    return getattr(request.state, "member_id", "")
-
-
-_AUTH_REQUIRED_DETAIL = (
-    "인증이 필요합니다. Authorization: Bearer <token> 헤더 또는 "
-    "유효한 ante_session 쿠키가 필요합니다."
-)
-
 _AUTH_REQUIRED_RESPONSE_DESCRIPTION = (
     "Authentication required (missing or invalid Authorization header "
     "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
     "로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 "
     "Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다."
 )
-
-
-async def _resolve_caller_or_401(
-    request: Request,
-    session_service: Any | None,
-) -> str:
-    """5개 mutation route의 공통 인증 가드 (issue #1351).
-
-    1) ``TokenAuthMiddleware``가 채운 ``request.state.member_id``를 우선 사용.
-    2) Bearer 결정에 실패하면 ``ante_session`` 쿠키 fallback. 단,
-       ``session_service is None`` 배포 분기에서는 fallback을 건너뛴다(빈
-       caller 유지 → 401).
-    3) caller가 비어 있으면 ``HTTPException(401)``을 raise한다.
-    4) 세션 쿠키 fallback에서 caller가 결정되면 ``request.state.member_id``를
-       갱신해 ``AuditMiddleware``의 자동 감사 로그 주체와 일관성을 유지한다.
-
-    ``create_member``의 인증 가드 패턴과 동일한 톤이다(#1339 SSOT).
-    """
-    caller = _caller_id(request)
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                caller = session.get("member_id", "") or ""
-                if caller:
-                    request.state.member_id = caller
-    if not caller:
-        raise HTTPException(status_code=401, detail=_AUTH_REQUIRED_DETAIL)
-    return caller
 
 
 _AUTH_REQUIRED_RESPONSE: dict[str, Any] = {
@@ -278,6 +232,7 @@ MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
     },
 )
 async def list_members(
+    _caller_id: Annotated[str, Depends(require_member_read)],
     svc: Annotated[Any, Depends(get_member_service)],
     type: MemberType | None = Query(default=None),
     org: str | None = Query(default=None),
@@ -389,63 +344,28 @@ async def list_members(
 )
 async def create_member(
     request: Request,
+    caller: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """멤버 등록. 토큰 1회 반환.
+    """멤버 등록. 토큰 1회 반환. 인증된 master/human 또는 ``member:admin`` scope
+    를 보유한 agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
 
-    인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2 — Codex
-    finding). FastAPI가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면
-    Authorization 헤더 미존재 + 필수 필드 누락 케이스에서 401이 아니라 422가
-    먼저 응답되어 "missing or invalid Authorization header는 401" 계약이 깨진다.
-    이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
-    (``update_account`` SSOT 패턴 일치).
-
-    인증 경로는 두 가지를 모두 받는다(#1339 P1 — Codex finding):
-    - **Bearer 토큰**: ``TokenAuthMiddleware``가 ``request.state.member_id``를
-      세팅한다. 에이전트 클라이언트(`MCP`, CLI 등)와 ``frontend`` axios의
-      ``Authorization`` 헤더 호출이 이 경로를 탄다.
-    - **세션 쿠키**: 대시보드는 패스워드 로그인 후 ``ante_session`` HttpOnly
-      쿠키만 가진 상태로 axios에 ``Authorization`` 헤더를 추가하지 않는다.
-      ``session_service.validate``로 세션 → ``member_id``를 복원한다.
+    인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2). FastAPI
+    가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면 Authorization
+    헤더 미존재 + 필수 필드 누락 케이스에서 401 이 아니라 422 가 먼저 응답되어
+    "missing or invalid Authorization header는 401" 계약이 깨진다. 이 이유로
+    본 라우트는 ``request: Request`` 와 ``require_member_admin`` 만 받고 raw
+    body 를 직접 파싱한다 (``update_account`` SSOT 패턴 일치).
 
     핸들러 단계 순서:
-    1. **인증 가드 (최우선)**: token 또는 세션 쿠키 어느 쪽도 caller를 결정
-       하지 못하면 401.
+    1. **인증 가드 (최우선, ``Depends(require_member_admin)``)** — caller 빈
+       → 401, 권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
     """
-    # 1. 인증 가드 (body validation보다 우선).
-    #    1-a) Bearer 토큰 (TokenAuthMiddleware가 request.state.member_id 세팅).
-    caller = _caller_id(request)
-    #    1-b) ante_session 쿠키 fallback (#1339 P1 — 대시보드 axios 호환).
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                # session_service 실패는 인증 실패로 간주한다 (logged + 401).
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                caller = session.get("member_id", "") or ""
-                if caller:
-                    # AuditMiddleware가 자동 감사 로그에 주체를 남길 수 있도록
-                    # request.state에도 반영한다 (#1339 P2 — Codex finding).
-                    request.state.member_id = caller
-    if not caller:
-        raise HTTPException(
-            status_code=401,
-            detail=(
-                "인증이 필요합니다. Authorization: Bearer <token> 헤더 또는 "
-                "유효한 ante_session 쿠키가 필요합니다."
-            ),
-        )
+    # 1. 인증 가드 — ``require_member_admin`` dependency 가 이미 통과시킴.
 
     # 2. raw body 읽기 + JSON 파싱.
     raw = await request.body()
@@ -525,9 +445,11 @@ async def create_member(
 )
 async def get_member(
     member_id: str,
+    _caller_id: Annotated[str, Depends(require_member_read)],
     svc: Annotated[Any, Depends(get_member_service)],
 ) -> dict:
-    """멤버 상세 조회."""
+    """멤버 상세 조회. 인증된 master/human 또는 ``member:read`` scope 를 보유한
+    agent 만 호출 가능 (#1407)."""
     try:
         member = await svc.get(member_id)
     except Exception:
@@ -574,12 +496,12 @@ async def get_member(
 async def suspend_member(
     member_id: str,
     request: Request,
+    caller: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """멤버 일시 정지. 인증된 master만 호출 가능 (#1351)."""
-    caller = await _resolve_caller_or_401(request, session_service)
+    """멤버 일시 정지. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합)."""
     try:
         member = await svc.suspend(member_id, suspended_by=caller)
     except ValueError as e:
@@ -632,12 +554,12 @@ async def suspend_member(
 async def reactivate_member(
     member_id: str,
     request: Request,
+    caller: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """멤버 재활성화. 인증된 master만 호출 가능 (#1351)."""
-    caller = await _resolve_caller_or_401(request, session_service)
+    """멤버 재활성화. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합)."""
     try:
         member = await svc.reactivate(member_id, reactivated_by=caller)
     except ValueError as e:
@@ -690,12 +612,12 @@ async def reactivate_member(
 async def revoke_member(
     member_id: str,
     request: Request,
+    caller: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """멤버 영구 폐기. 인증된 master만 호출 가능 (#1351)."""
-    caller = await _resolve_caller_or_401(request, session_service)
+    """멤버 영구 폐기. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합)."""
     try:
         member = await svc.revoke(member_id, revoked_by=caller)
     except ValueError as e:
@@ -748,16 +670,16 @@ async def revoke_member(
 async def rotate_token(
     member_id: str,
     request: Request,
+    caller: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """토큰 재발급. 인증된 master만 호출 가능 (#1351).
+    """토큰 재발급. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
 
     인증 없이 token rotation 응답에 접근하면 token 값 자체가 노출되므로,
     가장 먼저 차단해야 한다.
     """
-    caller = await _resolve_caller_or_401(request, session_service)
     try:
         member, token = await svc.rotate_token(member_id, rotated_by=caller)
     except ValueError as e:
@@ -782,7 +704,10 @@ async def rotate_token(
     responses={
         401: _AUTH_REQUIRED_RESPONSE,
         403: {
-            "description": "Permission denied (master 권한 필요).",
+            "description": (
+                "Permission denied (master, human 멤버 또는 member:admin "
+                "scope 보유 agent 만 허용)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -838,11 +763,13 @@ async def rotate_token(
 async def change_password(
     member_id: str,
     request: Request,
-    caller_id: Annotated[str, Depends(require_master_caller)],
+    caller_id: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """비밀번호 변경 (human 멤버 전용). 인증된 master만 호출 가능 (#1377).
+    """비밀번호 변경 (human 멤버 전용). 인증된 master/human 또는
+    ``member:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
+    ``member:admin`` 정합, #1377 master_caller 에서 마이그레이션).
 
     배경: oracle A7 finding (#1377) — 본 라우트는 인증 없이 credential check
     (``svc.change_password``의 old-password 비교) 까지 도달했다. ``_caller_id``
@@ -861,8 +788,9 @@ async def change_password(
 
     핸들러 단계 순서:
 
-    1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-       non-master → 403. credential check 도달 전에 모두 차단된다.
+    1. 인증 가드 (``Depends(require_member_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403. credential check 도달 전에 모두
+       차단된다.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``PasswordChangeRequest.model_validate`` — ValidationError → 422.
     4. ``svc.change_password`` 호출. ``ValueError`` → 404,
@@ -871,8 +799,7 @@ async def change_password(
     Audit 로그의 ``member_id``는 ``caller_id``로 기록한다(SSOT). 대상 멤버는
     ``resource=member:{member_id}``로 분리해 추적한다.
     """
-    # 1. 인증 가드는 ``require_master_caller`` 의존성에 의해 이미 통과 상태.
-    #    (caller 빈 → 401, non-master → 403)
+    # 1. 인증 가드는 ``require_member_admin`` 의존성에 의해 이미 통과 상태.
 
     # 2. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
     raw = await request.body()
@@ -979,26 +906,26 @@ async def change_password(
 async def update_scopes(
     member_id: str,
     request: Request,
+    caller: Annotated[str, Depends(require_member_admin)],
     svc: Annotated[Any, Depends(get_member_service)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
 ) -> dict:
-    """권한 범위 변경. 인증된 master만 호출 가능 (#1351).
+    """권한 범위 변경. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+    agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
 
-    ``create_member``와 동일한 raw body 파싱 패턴을 적용해 인증 가드가 body
-    validation보다 우선 실행되도록 한다(#1351 — Codex Plan Review). FastAPI가
-    ``body: ScopesUpdateRequest``를 먼저 검증하면 unauth + bad-body 시 401이
-    아닌 422가 먼저 반환되어 contract가 깨진다.
+    Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+    한다. FastAPI 가 ``body: ScopesUpdateRequest`` 를 먼저 검증하면 unauth +
+    bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
 
     핸들러 단계 순서:
-    1. 인증 가드 (최우선) — 실패 시 401.
+    1. 인증 가드 (``Depends(require_member_admin)``) — caller 빈 → 401,
+       권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``ScopesUpdateRequest.model_validate`` — ValidationError → 422.
     4. ``svc.update_scopes`` 호출. ``ValueError`` → 404,
        ``PermissionError``/``PermissionDeniedError`` → 403.
     """
-    # 1. 인증 가드 (body validation보다 우선).
-    caller = await _resolve_caller_or_401(request, session_service)
+    # 1. 인증 가드 — ``require_member_admin`` 이 이미 통과시킴.
 
     # 2. raw body 읽기 + JSON 파싱.
     raw = await request.body()

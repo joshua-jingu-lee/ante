@@ -13,13 +13,15 @@ export type paths = {
         };
         /**
          * List Accounts
-         * @description 계좌 목록 조회.
+         * @description 계좌 목록 조회. 인증된 master/human 또는 ``account:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          */
         get: operations["list_accounts_api_accounts_get"];
         put?: never;
         /**
          * Create Account
-         * @description 계좌 생성.
+         * @description 계좌 생성. 인증된 master/human 또는 ``account:write`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          *
          *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
          *     실제 계좌 생성은 서버 정지 상태에서 ``ante account create`` CLI로
@@ -55,18 +57,20 @@ export type paths = {
         };
         /**
          * Get Account
-         * @description 계좌 상세 조회.
+         * @description 계좌 상세 조회. 인증된 master/human 또는 ``account:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          */
         get: operations["get_account_api_accounts__account_id__get"];
         /**
          * Update Account
          * @description 계좌 수정.
          *
-         *     인증된 master 호출자만 사용할 수 있다(이슈 #1352 — oracle A7). dependency
-         *     ``require_master_caller``가 인증/권한 검증을 담당하며, 401/403은 raw body
-         *     파싱과 cold-path 가드(invariant I1/I4)보다 먼저 평가된다 — Bearer 또는
-         *     ``ante_session`` 쿠키 어느 쪽으로도 caller가 결정되지 않으면 401, master가
-         *     아니면 403.
+         *     인증된 master/human 또는 ``account:write`` scope 를 보유한 agent 만 호출
+         *     가능 (#1407 — spec ``account:write`` 정합, #1352 master_caller 에서
+         *     마이그레이션). dependency ``require_account_write`` 가 인증/권한 검증을
+         *     담당하며, 401/403은 raw body 파싱과 cold-path 가드(invariant I1/I4)보다
+         *     먼저 평가된다 — Bearer 또는 ``ante_session`` 쿠키 어느 쪽으로도 caller가
+         *     결정되지 않으면 401, 권한 없으면 403.
          *
          *     런타임에서는 비구조 필드(``name``, ``timezone``, ``trading_hours_start``,
          *     ``trading_hours_end``)만 변경할 수 있다. ``STRUCTURAL_FIELDS`` 중 하나라도
@@ -104,7 +108,8 @@ export type paths = {
         post?: never;
         /**
          * Delete Account
-         * @description 계좌 소프트 딜리트.
+         * @description 계좌 소프트 딜리트. 인증된 master/human 또는 ``account:write`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          *
          *     런타임 Web API에서는 cold-path 가드가 모든 요청을 즉시 409로 차단한다.
          *     실제 계좌 삭제는 서버 정지 상태에서 ``ante account delete`` CLI로
@@ -135,7 +140,9 @@ export type paths = {
         put?: never;
         /**
          * Activate Account
-         * @description 계좌 재활성화. 인증된 master만 호출 가능 (#1352).
+         * @description 계좌 재활성화. 인증된 master/human 또는 ``account:write`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``account:write`` 정합, #1352
+         *     master_caller 에서 마이그레이션).
          */
         post: operations["activate_account_api_accounts__account_id__activate_post"];
         delete?: never;
@@ -153,7 +160,8 @@ export type paths = {
         };
         /**
          * Get Account Rules
-         * @description 계좌 리스크 룰 목록 조회.
+         * @description 계좌 리스크 룰 목록 조회. 인증된 master/human 또는 ``rule:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          *
          *     DynamicConfig를 우선 조회하고, 없으면 정적 Config에서 읽는다.
          *     RULE_REGISTRY에 등록된 룰 타입만 구조화하여 반환한다.
@@ -177,7 +185,9 @@ export type paths = {
         get?: never;
         /**
          * Update Account Rule
-         * @description 계좌 리스크 룰 개별 수정. 인증된 master 만 호출 가능 (#1376).
+         * @description 계좌 리스크 룰 개별 수정. 인증된 master/human 또는 ``rule:admin`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407 — spec ``rule:admin`` 정합, #1376
+         *     master_caller 에서 마이그레이션).
          *
          *     RULE_REGISTRY에 등록된 타입만 허용하며,
          *     DynamicConfigService에 위임하여 ConfigChangedEvent를 발행한다.
@@ -197,8 +207,8 @@ export type paths = {
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_rule_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``RuleUpdateRequest.model_validate`` — ValidationError → 422.
          *     4. RULE_REGISTRY 룰 타입 확인 — 없으면 400 (기존 계약 보존).
@@ -224,7 +234,9 @@ export type paths = {
         put?: never;
         /**
          * Suspend Account
-         * @description 계좌 정지. 인증된 master만 호출 가능 (#1352).
+         * @description 계좌 정지. 인증된 master/human 또는 ``account:write`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``account:write`` 정합, #1352
+         *     master_caller 에서 마이그레이션).
          *
          *     ``update_bot`` / ``set_balance`` / ``update_scopes``와 동일한 raw body 파싱
          *     패턴을 적용해 인증 가드가 body validation보다 먼저 실행되도록 한다(#1352
@@ -234,8 +246,8 @@ export type paths = {
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_account_write)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기. 빈 body → default reason (``dashboard``)로 흘려보낸다
          *        (기존 의미 보존).
          *     3. JSON 파싱 실패 → 422.
@@ -282,7 +294,8 @@ export type paths = {
         };
         /**
          * Get Approval
-         * @description 결재 상세 조회.
+         * @description 결재 상세 조회. 인증된 master/human 또는 ``approval:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_approval_api_approvals__approval_id__get"];
         put?: never;
@@ -308,7 +321,20 @@ export type paths = {
         head?: never;
         /**
          * Update Approval Status
-         * @description 결재 승인/거부 처리.
+         * @description 결재 승인/거부 처리. 인증된 master/human 또는 ``approval:admin`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407 — spec ``approval:admin`` 정합).
+         *
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: ApprovalStatusUpdate`` 를 먼저 검증하면 unauth +
+         *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
+         *
+         *     핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_approval_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``ApprovalStatusUpdate.model_validate`` — ValidationError → 422.
+         *     4. service 호출 (``approve`` / ``reject``).
          */
         patch: operations["update_approval_status_api_approvals__approval_id__status_patch"];
         trace?: never;
@@ -432,23 +458,25 @@ export type paths = {
         };
         /**
          * List Bots
-         * @description 봇 목록 조회 (cursor 기반 페이지네이션).
+         * @description 봇 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+         *     ``bot:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_bots_api_bots_get"];
         put?: never;
         /**
          * Create Bot
-         * @description 봇 생성. 인증된 master만 호출 가능 (#1371).
+         * @description 봇 생성. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+         *     만 호출 가능 (#1407 — spec ``bot:admin`` 정합, #1371 master_caller 에서
+         *     마이그레이션).
          *
-         *     ``update_bot`` (#1352)과 동일한 raw body 파싱 패턴을 적용해 인증 가드가
-         *     body validation보다 우선 실행되도록 한다. FastAPI가 ``body: BotCreateRequest``
-         *     를 먼저 검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어
-         *     contract가 깨진다.
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: BotCreateRequest`` 를 먼저 검증하면 unauth +
+         *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_bot_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``BotCreateRequest.model_validate`` — ValidationError → 422.
          *     4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
@@ -469,22 +497,24 @@ export type paths = {
         };
         /**
          * Get Bot
-         * @description 봇 상세 조회.
+         * @description 봇 상세 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          */
         get: operations["get_bot_api_bots__bot_id__get"];
         /**
          * Update Bot
-         * @description 봇 설정 수정. 인증된 master만 호출 가능 (#1352). 중지 상태에서만 허용.
+         * @description 봇 설정 수정. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``bot:admin`` 정합, #1352 master_caller
+         *     에서 마이그레이션). 중지 상태에서만 허용.
          *
-         *     ``create_member`` / ``update_scopes``와 동일한 raw body 파싱 패턴을 적용해
-         *     인증 가드가 body validation보다 우선 실행되도록 한다(#1352 — Codex Plan
-         *     Review). FastAPI가 ``body: BotUpdateRequest``를 먼저 검증하면 unauth +
-         *     bad-body 시 401이 아닌 422가 먼저 반환되어 contract가 깨진다.
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: BotUpdateRequest`` 를 먼저 검증하면 unauth +
+         *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_bot_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``BotUpdateRequest.model_validate`` — ValidationError → 422.
          *     4. service 호출 (``BotError`` → 409, ``TreasuryError`` → 422).
@@ -493,7 +523,9 @@ export type paths = {
         post?: never;
         /**
          * Delete Bot
-         * @description 봇 삭제. 인증된 master만 호출 가능 (#1371).
+         * @description 봇 삭제. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+         *     만 호출 가능 (#1407 — spec ``bot:admin`` 정합, #1371 master_caller 에서
+         *     마이그레이션).
          *
          *     body가 없으므로 raw-body cold-path는 적용하지 않는다. 인증 가드가
          *     handle_positions query 파라미터 검증보다 먼저 실행되어 unauth는 401,
@@ -518,7 +550,8 @@ export type paths = {
         };
         /**
          * Get Bot Logs
-         * @description 봇 실행 로그 조회.
+         * @description 봇 실행 로그 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          *
          *     BotStepCompletedEvent 이력을 반환한다.
          *     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
@@ -544,7 +577,8 @@ export type paths = {
         put?: never;
         /**
          * Start Bot
-         * @description 봇 시작.
+         * @description 봇 시작. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+         *     만 호출 가능 (#1407).
          */
         post: operations["start_bot_api_bots__bot_id__start_post"];
         delete?: never;
@@ -564,7 +598,8 @@ export type paths = {
         put?: never;
         /**
          * Stop Bot
-         * @description 봇 중지.
+         * @description 봇 중지. 인증된 master/human 또는 ``bot:admin`` scope 를 보유한 agent
+         *     만 호출 가능 (#1407).
          */
         post: operations["stop_bot_api_bots__bot_id__stop_post"];
         delete?: never;
@@ -582,7 +617,8 @@ export type paths = {
         };
         /**
          * List Configs
-         * @description 동적 설정 전체 조회.
+         * @description 동적 설정 전체 조회. 인증된 master/human 또는 ``config:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_configs_api_config_get"];
         put?: never;
@@ -669,7 +705,8 @@ export type paths = {
         };
         /**
          * Get Dataset Detail
-         * @description 데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기).
+         * @description 데이터셋 상세 조회 (메타데이터 + 최근 5행 미리보기). 인증된 master/human
+         *     또는 ``data:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
          *
          *     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
          */
@@ -678,7 +715,8 @@ export type paths = {
         post?: never;
         /**
          * Delete Dataset
-         * @description 데이터셋 삭제.
+         * @description 데이터셋 삭제. 인증된 master/human 또는 ``data:write`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          *
          *     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
          *     fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
@@ -698,7 +736,8 @@ export type paths = {
         };
         /**
          * Get Feed Status
-         * @description Feed 파이프라인 상태 조회.
+         * @description Feed 파이프라인 상태 조회. 인증된 master/human 또는 ``data:read`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407).
          *
          *     Feed 초기화 여부, 소스별 체크포인트 현황, 최근 리포트 요약,
          *     API 키 설정 상태를 반환한다.
@@ -721,7 +760,9 @@ export type paths = {
         };
         /**
          * Get Data Schema
-         * @description 데이터 스키마 조회. data_type에 따라 해당 스키마를 반환.
+         * @description 데이터 스키마 조회. data_type에 따라 해당 스키마를 반환. 인증된
+         *     master/human 또는 ``data:read`` scope 를 보유한 agent 만 호출 가능
+         *     (#1407).
          */
         get: operations["get_data_schema_api_data_schema_get"];
         put?: never;
@@ -741,7 +782,8 @@ export type paths = {
         };
         /**
          * Get Storage Summary
-         * @description 저장 용량 현황.
+         * @description 저장 용량 현황. 인증된 master/human 또는 ``data:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          */
         get: operations["get_storage_summary_api_data_storage_get"];
         put?: never;
@@ -774,26 +816,19 @@ export type paths = {
         put?: never;
         /**
          * Create Member
-         * @description 멤버 등록. 토큰 1회 반환.
+         * @description 멤버 등록. 토큰 1회 반환. 인증된 master/human 또는 ``member:admin`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
          *
-         *     인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2 — Codex
-         *     finding). FastAPI가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면
-         *     Authorization 헤더 미존재 + 필수 필드 누락 케이스에서 401이 아니라 422가
-         *     먼저 응답되어 "missing or invalid Authorization header는 401" 계약이 깨진다.
-         *     이 이유로 본 라우트는 ``request: Request``만 받고 raw body를 직접 파싱한다
-         *     (``update_account`` SSOT 패턴 일치).
-         *
-         *     인증 경로는 두 가지를 모두 받는다(#1339 P1 — Codex finding):
-         *     - **Bearer 토큰**: ``TokenAuthMiddleware``가 ``request.state.member_id``를
-         *       세팅한다. 에이전트 클라이언트(`MCP`, CLI 등)와 ``frontend`` axios의
-         *       ``Authorization`` 헤더 호출이 이 경로를 탄다.
-         *     - **세션 쿠키**: 대시보드는 패스워드 로그인 후 ``ante_session`` HttpOnly
-         *       쿠키만 가진 상태로 axios에 ``Authorization`` 헤더를 추가하지 않는다.
-         *       ``session_service.validate``로 세션 → ``member_id``를 복원한다.
+         *     인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2). FastAPI
+         *     가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면 Authorization
+         *     헤더 미존재 + 필수 필드 누락 케이스에서 401 이 아니라 422 가 먼저 응답되어
+         *     "missing or invalid Authorization header는 401" 계약이 깨진다. 이 이유로
+         *     본 라우트는 ``request: Request`` 와 ``require_member_admin`` 만 받고 raw
+         *     body 를 직접 파싱한다 (``update_account`` SSOT 패턴 일치).
          *
          *     핸들러 단계 순서:
-         *     1. **인증 가드 (최우선)**: token 또는 세션 쿠키 어느 쪽도 caller를 결정
-         *        하지 못하면 401.
+         *     1. **인증 가드 (최우선, ``Depends(require_member_admin)``)** — caller 빈
+         *        → 401, 권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
          *     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
          *     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
@@ -814,7 +849,8 @@ export type paths = {
         };
         /**
          * Get Member
-         * @description 멤버 상세 조회.
+         * @description 멤버 상세 조회. 인증된 master/human 또는 ``member:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407).
          */
         get: operations["get_member_api_members__member_id__get"];
         put?: never;
@@ -840,7 +876,9 @@ export type paths = {
         head?: never;
         /**
          * Change Password
-         * @description 비밀번호 변경 (human 멤버 전용). 인증된 master만 호출 가능 (#1377).
+         * @description 비밀번호 변경 (human 멤버 전용). 인증된 master/human 또는
+         *     ``member:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
+         *     ``member:admin`` 정합, #1377 master_caller 에서 마이그레이션).
          *
          *     배경: oracle A7 finding (#1377) — 본 라우트는 인증 없이 credential check
          *     (``svc.change_password``의 old-password 비교) 까지 도달했다. ``_caller_id``
@@ -859,8 +897,9 @@ export type paths = {
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403. credential check 도달 전에 모두 차단된다.
+         *     1. 인증 가드 (``Depends(require_member_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403. credential check 도달 전에 모두
+         *        차단된다.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``PasswordChangeRequest.model_validate`` — ValidationError → 422.
          *     4. ``svc.change_password`` 호출. ``ValueError`` → 404,
@@ -883,7 +922,8 @@ export type paths = {
         put?: never;
         /**
          * Reactivate Member
-         * @description 멤버 재활성화. 인증된 master만 호출 가능 (#1351).
+         * @description 멤버 재활성화. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
          */
         post: operations["reactivate_member_api_members__member_id__reactivate_post"];
         delete?: never;
@@ -903,7 +943,8 @@ export type paths = {
         put?: never;
         /**
          * Revoke Member
-         * @description 멤버 영구 폐기. 인증된 master만 호출 가능 (#1351).
+         * @description 멤버 영구 폐기. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
          */
         post: operations["revoke_member_api_members__member_id__revoke_post"];
         delete?: never;
@@ -923,7 +964,8 @@ export type paths = {
         put?: never;
         /**
          * Rotate Token
-         * @description 토큰 재발급. 인증된 master만 호출 가능 (#1351).
+         * @description 토큰 재발급. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
          *
          *     인증 없이 token rotation 응답에 접근하면 token 값 자체가 노출되므로,
          *     가장 먼저 차단해야 한다.
@@ -945,15 +987,16 @@ export type paths = {
         get?: never;
         /**
          * Update Scopes
-         * @description 권한 범위 변경. 인증된 master만 호출 가능 (#1351).
+         * @description 권한 범위 변경. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
          *
-         *     ``create_member``와 동일한 raw body 파싱 패턴을 적용해 인증 가드가 body
-         *     validation보다 우선 실행되도록 한다(#1351 — Codex Plan Review). FastAPI가
-         *     ``body: ScopesUpdateRequest``를 먼저 검증하면 unauth + bad-body 시 401이
-         *     아닌 422가 먼저 반환되어 contract가 깨진다.
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: ScopesUpdateRequest`` 를 먼저 검증하면 unauth +
+         *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
-         *     1. 인증 가드 (최우선) — 실패 시 401.
+         *     1. 인증 가드 (``Depends(require_member_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``ScopesUpdateRequest.model_validate`` — ValidationError → 422.
          *     4. ``svc.update_scopes`` 호출. ``ValueError`` → 404,
@@ -978,7 +1021,8 @@ export type paths = {
         put?: never;
         /**
          * Suspend Member
-         * @description 멤버 일시 정지. 인증된 master만 호출 가능 (#1351).
+         * @description 멤버 일시 정지. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
          */
         post: operations["suspend_member_api_members__member_id__suspend_post"];
         delete?: never;
@@ -996,7 +1040,8 @@ export type paths = {
         };
         /**
          * Portfolio History
-         * @description 기간별 자산 추이 (daily_snapshots 시계열 반환).
+         * @description 기간별 자산 추이 (daily_snapshots 시계열 반환). 인증된 master/human 또는
+         *     ``treasury:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["portfolio_history_api_portfolio_history_get"];
         put?: never;
@@ -1017,6 +1062,9 @@ export type paths = {
         /**
          * Portfolio Value
          * @description 총 자산 가치 + 당일 손익 + 수익률 + 미실현 손익 (최신 스냅샷 기반).
+         *     인증된 master/human 또는 ``treasury:read`` scope 를 보유한 agent 만 호출
+         *     가능 (#1407 — portfolio 라우트는 ``treasury_daily_snapshots`` 를 읽으므로
+         *     spec ``treasury:read`` 정합).
          */
         get: operations["portfolio_value_api_portfolio_value_get"];
         put?: never;
@@ -1036,7 +1084,8 @@ export type paths = {
         };
         /**
          * List Reports
-         * @description 리포트 목록 조회 (cursor 기반 페이지네이션).
+         * @description 리포트 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+         *     ``report:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_reports_api_reports_get"];
         put?: never;
@@ -1074,7 +1123,8 @@ export type paths = {
         };
         /**
          * Report View
-         * @description 리포트 단건 조회.
+         * @description 리포트 단건 조회. 인증된 master/human 또는 ``report:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["report_view_api_reports__report_id__get"];
         put?: never;
@@ -1114,7 +1164,8 @@ export type paths = {
         };
         /**
          * List Strategies
-         * @description 전략 목록 조회.
+         * @description 전략 목록 조회. 인증된 master/human 또는 ``strategy:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_strategies_api_strategies_get"];
         put?: never;
@@ -1134,7 +1185,8 @@ export type paths = {
         };
         /**
          * Get Strategy
-         * @description 전략 상세 조회.
+         * @description 전략 상세 조회. 인증된 master/human 또는 ``strategy:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_strategy_api_strategies__strategy_id__get"];
         put?: never;
@@ -1154,7 +1206,8 @@ export type paths = {
         };
         /**
          * Get Strategy Daily Summary
-         * @description 전략 일별 성과 집계.
+         * @description 전략 일별 성과 집계. 인증된 master/human 또는 ``strategy:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_strategy_daily_summary_api_strategies__strategy_id__daily_summary_get"];
         put?: never;
@@ -1174,7 +1227,8 @@ export type paths = {
         };
         /**
          * Get Strategy Monthly Summary
-         * @description 전략 월별 성과 집계.
+         * @description 전략 월별 성과 집계. 인증된 master/human 또는 ``strategy:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_strategy_monthly_summary_api_strategies__strategy_id__monthly_summary_get"];
         put?: never;
@@ -1194,7 +1248,8 @@ export type paths = {
         };
         /**
          * Get Strategy Performance
-         * @description 전략 성과 지표 조회.
+         * @description 전략 성과 지표 조회. 인증된 master/human 또는 ``strategy:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_strategy_performance_api_strategies__strategy_id__performance_get"];
         put?: never;
@@ -1249,7 +1304,8 @@ export type paths = {
         };
         /**
          * Get Strategy Trades
-         * @description 전략 거래 내역 조회 (cursor 기반 페이지네이션).
+         * @description 전략 거래 내역 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+         *     ``strategy:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_strategy_trades_api_strategies__strategy_id__trades_get"];
         put?: never;
@@ -1269,7 +1325,8 @@ export type paths = {
         };
         /**
          * Get Strategy Weekly Summary
-         * @description 전략 주별 성과 집계.
+         * @description 전략 주별 성과 집계. 인증된 master/human 또는 ``strategy:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_strategy_weekly_summary_api_strategies__strategy_id__weekly_summary_get"];
         put?: never;
@@ -1291,9 +1348,20 @@ export type paths = {
         put?: never;
         /**
          * Validate Strategy
-         * @description 전략 파일 정적 검증.
+         * @description 전략 파일 정적 검증. 인증된 master/human 또는 ``strategy:write`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407 — spec ``strategy:write`` 정합).
          *
-         *     Body: {"path": "/path/to/strategy.py"}
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. 핸들러 단계 순서:
+         *
+         *     1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
+         *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
+         *     3. ``path`` 필드 추출 — 누락 시 400.
+         *     4. 파일 존재 확인 → 404.
+         *     5. ``StrategyValidator.validate`` 호출.
+         *
+         *     Body: ``{"path": "/path/to/strategy.py"}``
          */
         post: operations["validate_strategy_api_strategies_validate_post"];
         delete?: never;
@@ -1313,16 +1381,16 @@ export type paths = {
         put?: never;
         /**
          * Clear Halt
-         * @description 전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE). 인증된 master 만 호출 가능
-         *     (#1375).
+         * @description 전역 정지 해제 (모든 SUSPENDED 계좌 ACTIVE). 인증된 master/human 또는
+         *     ``system:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
+         *     ``system:admin`` 정합, #1375 master_caller 에서 마이그레이션).
          *
          *     계좌 상태만 ACTIVE 로 복구하며 봇을 자동 재시작하지 않는다.
          *
-         *     ``halt`` 와 동일한 raw body 파싱 + auth-first 패턴을 따른다 (#1375).
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_system_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 빈 body 는 default 허용, 그 외 실패 시 422.
          *     3. ``ClearHaltRequest.model_validate`` — ValidationError → 422.
          *     4. ``account_service.activate_all`` 호출 + audit 기록
@@ -1346,19 +1414,18 @@ export type paths = {
         put?: never;
         /**
          * Halt
-         * @description 전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED). 인증된 master 만 호출 가능
-         *     (#1375).
+         * @description 전체 거래 중지 (모든 ACTIVE 계좌 SUSPENDED). 인증된 master/human 또는
+         *     ``system:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
+         *     ``system:admin`` 정합, #1375 master_caller 에서 마이그레이션).
          *
-         *     ``submit_report`` (#1374) 와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
-         *     body validation 보다 우선 실행되도록 한다. FastAPI 가
-         *     ``body: HaltRequest`` 를 먼저 검증하면 unauth + bad-body 시 401 이 아닌
-         *     422 가 먼저 반환되어 contract 가 깨진다 — 본 라우트는 oracle A7 finding
-         *     의 핵심 시그니처 이므로 인증 가드 우선이 가장 중요하다.
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: HaltRequest`` 를 먼저 검증하면 unauth + bad-body
+         *     시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_system_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 빈 body 는 default 허용, 그 외 실패 시 422.
          *     3. ``HaltRequest.model_validate`` — ValidationError → 422.
          *     4. ``account_service.suspend_all`` 호출 + audit 기록
@@ -1406,7 +1473,10 @@ export type paths = {
         };
         /**
          * Get System Status
-         * @description 시스템 상태 조회.
+         * @description 시스템 상태 조회. 인증된 master/human 또는 ``system:read`` scope 를 보유한
+         *     agent 만 호출 가능 (#1407). ``/api/system/health`` (public) 와 구별 —
+         *     health 는 모니터링 헬스체크용이고 status 는 운영 정보(account_count 등)를
+         *     노출한다.
          */
         get: operations["get_system_status_api_system_status_get"];
         put?: never;
@@ -1426,7 +1496,8 @@ export type paths = {
         };
         /**
          * List Trades
-         * @description 거래 기록 목록 조회 (cursor 기반 페이지네이션).
+         * @description 거래 기록 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+         *     ``trade:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_trades_api_trades_get"];
         put?: never;
@@ -1446,7 +1517,8 @@ export type paths = {
         };
         /**
          * Get Summary
-         * @description 자금 현황 요약.
+         * @description 자금 현황 요약. 인증된 master/human 또는 ``treasury:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          *
          *     account_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.
          *     미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).
@@ -1471,18 +1543,18 @@ export type paths = {
         put?: never;
         /**
          * Set Balance
-         * @description 계좌 총 잔고 수동 설정. 인증된 master만 호출 가능 (#1352).
+         * @description 계좌 총 잔고 수동 설정. 인증된 master/human 또는 ``treasury:admin`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407 — spec ``treasury:admin`` 정합, #1352
+         *     master_caller 에서 마이그레이션).
          *
-         *     ``create_member`` / ``update_scopes`` / ``update_bot``과 동일한 raw body
-         *     파싱 패턴을 적용해 인증 가드가 body validation보다 우선 실행되도록 한다
-         *     (#1352 — Codex Plan Review). FastAPI가 ``body: BalanceSetRequest``를 먼저
-         *     검증하면 unauth + bad-body 시 401이 아닌 422가 먼저 반환되어 contract가
-         *     깨진다.
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: BalanceSetRequest`` 를 먼저 검증하면 unauth +
+         *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_treasury_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``BalanceSetRequest.model_validate`` — ValidationError → 422.
          *     4. ``treasury.set_account_balance`` 호출.
@@ -1505,17 +1577,18 @@ export type paths = {
         put?: never;
         /**
          * Allocate
-         * @description 봇에 예산 할당. 인증된 master만 호출 가능 (#1372).
+         * @description 봇에 예산 할당. 인증된 master/human 또는 ``treasury:admin`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407 — spec ``treasury:admin`` 정합, #1372
+         *     master_caller 에서 마이그레이션).
          *
-         *     ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을 적용해 인증 가드가
-         *     body validation보다 우선 실행되도록 한다. FastAPI가 ``body:
-         *     BudgetChangeRequest``를 먼저 검증하면 unauth + bad-body 시 401이 아닌
-         *     422가 먼저 반환되어 contract가 깨진다.
+         *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
+         *     한다. FastAPI 가 ``body: BudgetChangeRequest`` 를 먼저 검증하면 unauth +
+         *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_treasury_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
          *     4. ``treasury.allocate`` 호출 (``BotNotStoppedError`` → 409).
@@ -1538,15 +1611,14 @@ export type paths = {
         put?: never;
         /**
          * Deallocate
-         * @description 봇 예산 회수. 인증된 master만 호출 가능 (#1372).
-         *
-         *     ``allocate`` / ``set_balance`` (#1352)와 동일한 raw body 파싱 패턴을
-         *     적용해 인증 가드가 body validation보다 우선 실행되도록 한다.
+         * @description 봇 예산 회수. 인증된 master/human 또는 ``treasury:admin`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407 — spec ``treasury:admin`` 정합, #1372
+         *     master_caller 에서 마이그레이션).
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
-         *        non-master → 403.
+         *     1. 인증 가드 (``Depends(require_treasury_admin)``) — caller 빈 → 401,
+         *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``BudgetChangeRequest.model_validate`` — ValidationError → 422.
          *     4. ``treasury.deallocate`` 호출 (``BotNotStoppedError`` → 409).
@@ -1567,7 +1639,8 @@ export type paths = {
         };
         /**
          * List Budgets
-         * @description 봇별 예산 목록 조회.
+         * @description 봇별 예산 목록 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_budgets_api_treasury_budgets_get"];
         put?: never;
@@ -1587,7 +1660,8 @@ export type paths = {
         };
         /**
          * List Snapshots
-         * @description 기간별 일별 스냅샷 목록.
+         * @description 기간별 일별 스냅샷 목록. 인증된 master/human 또는 ``treasury:read`` scope
+         *     를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_snapshots_api_treasury_snapshots_get"];
         put?: never;
@@ -1607,7 +1681,8 @@ export type paths = {
         };
         /**
          * Get Snapshot By Date
-         * @description 특정일 스냅샷 조회.
+         * @description 특정일 스냅샷 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_snapshot_by_date_api_treasury_snapshots__date__get"];
         put?: never;
@@ -1627,7 +1702,8 @@ export type paths = {
         };
         /**
          * Get Latest Snapshot
-         * @description 가장 최근 일별 스냅샷 조회.
+         * @description 가장 최근 일별 스냅샷 조회. 인증된 master/human 또는 ``treasury:read``
+         *     scope 를 보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["get_latest_snapshot_api_treasury_snapshots_latest_get"];
         put?: never;
@@ -1647,7 +1723,8 @@ export type paths = {
         };
         /**
          * List Transactions
-         * @description 자금 변동 이력 조회.
+         * @description 자금 변동 이력 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
+         *     보유한 agent 만 호출 가능 (#1407).
          */
         get: operations["list_transactions_api_treasury_transactions_get"];
         put?: never;
@@ -1734,7 +1811,7 @@ export type components = {
         };
         /**
          * AccountSuspendRequest
-         * @description POST /api/accounts/{account_id}/suspend 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1352). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. 빈 body도 허용되며 reason은 default 'dashboard'로 채워진다.
+         * @description POST /api/accounts/{account_id}/suspend 입력 contract. 인증된 master/human 또는 account:write scope 를 보유한 agent 만 사용할 수 있다(#1407, #1352 master_caller migration). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. 빈 body도 허용되며 reason은 default 'dashboard'로 채워진다.
          */
         AccountSuspendRequest: {
             /**
@@ -1844,19 +1921,6 @@ export type components = {
          * @enum {string}
          */
         ApprovalStatus: "pending" | "approved" | "execution_failed" | "rejected" | "on_hold" | "expired" | "cancelled";
-        /**
-         * ApprovalStatusUpdate
-         * @description 승인/거부 요청.
-         */
-        ApprovalStatusUpdate: {
-            /**
-             * Memo
-             * @default
-             */
-            memo: string;
-            /** Status */
-            status: string;
-        };
         /**
          * ApprovalUpdateResponse
          * @description 결재 상태 변경 응답.
@@ -2981,6 +3045,14 @@ export type components = {
         /**
          * RuleUpdateRequest
          * @description 룰 설정 변경 요청.
+         *
+         *     ``params`` 는 룰별 schema 를 갖는 open object 지만, 모든 numeric threshold
+         *     는 finite 여야 한다 (#1380 oracle A7). ``json.loads`` default 는 ``NaN`` /
+         *     ``Infinity`` / ``-Infinity`` 를 ``float('nan')`` / ``float('inf')`` 로
+         *     파싱하므로, raw body parser 가 통과시킨 값을 본 모델 단에서 422 로 거부한다.
+         *     bool 은 numeric 흉내 방지를 위해 ``_reject_non_finite`` 가 통과시키되,
+         *     RULE_REGISTRY ``validate_config`` 가 known numeric key 에 대해 별도로
+         *     거부한다.
          */
         RuleUpdateRequest: {
             /**
@@ -3535,7 +3607,6 @@ export type ApprovalDetailResponse = components['schemas']['ApprovalDetailRespon
 export type ApprovalItem = components['schemas']['ApprovalItem'];
 export type ApprovalListResponse = components['schemas']['ApprovalListResponse'];
 export type ApprovalStatus = components['schemas']['ApprovalStatus'];
-export type ApprovalStatusUpdate = components['schemas']['ApprovalStatusUpdate'];
 export type ApprovalUpdateResponse = components['schemas']['ApprovalUpdateResponse'];
 export type AuditLogItem = components['schemas']['AuditLogItem'];
 export type AuditLogListResponse = components['schemas']['AuditLogListResponse'];
@@ -3822,7 +3893,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 account:write scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3938,7 +4009,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 account:write scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4041,7 +4112,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요). */
+            /** @description Permission denied (master, human 멤버 또는 rule:admin scope 보유 agent 만 허용). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4094,7 +4165,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 account:write scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4234,11 +4305,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ApprovalStatusUpdate"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -4258,6 +4325,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master, human 멤버 또는 approval:admin scope 보유 agent 만 허용). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Approval not found */
             404: {
                 headers: {
@@ -4267,13 +4352,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1407). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Approval service not available */
@@ -4572,7 +4657,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 bot:admin scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4710,7 +4795,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 bot:admin scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4786,7 +4871,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 bot:admin scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5495,7 +5580,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요). */
+            /** @description Permission denied (master, human 멤버 또는 member:admin scope 보유 agent 만 허용). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6540,13 +6625,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -6566,6 +6645,24 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Permission denied (master, human 멤버 또는 strategy:write scope 보유 agent 만 허용). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Strategy file not found */
             404: {
                 headers: {
@@ -6575,13 +6672,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다 (#1407). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -6617,7 +6714,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요). */
+            /** @description Permission denied (master, human 멤버 또는 system:admin scope 보유 agent 만 허용). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6677,7 +6774,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요). */
+            /** @description Permission denied (master, human 멤버 또는 system:admin scope 보유 agent 만 허용). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6870,7 +6967,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 treasury:admin scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6941,7 +7038,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 treasury:admin scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -7030,7 +7127,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master 권한 필요) */
+            /** @description Permission denied (master, human 멤버 또는 treasury:admin scope 보유 agent 만 허용) */
             403: {
                 headers: {
                     [name: string]: unknown;

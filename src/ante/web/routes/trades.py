@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
-from ante.web.deps import get_trade_service
+from ante.web.deps import get_trade_service, require_trade_read
 from ante.web.schemas import TradeListResponse
 
 router = APIRouter()
@@ -27,6 +27,7 @@ router = APIRouter()
     },
 )
 async def list_trades(
+    _caller_id: Annotated[str, Depends(require_trade_read)],
     trade_service: Annotated[Any, Depends(get_trade_service)],
     account_id: str | None = None,
     bot_id: str | None = None,
@@ -34,7 +35,8 @@ async def list_trades(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = None,
 ) -> dict:
-    """거래 기록 목록 조회 (cursor 기반 페이지네이션)."""
+    """거래 기록 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
+    ``trade:read`` scope 를 보유한 agent 만 호출 가능 (#1407)."""
     from ante.web.pagination import paginate
 
     trades = await trade_service.get_trades(

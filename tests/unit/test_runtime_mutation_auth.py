@@ -3484,3 +3484,76 @@ class TestUpdateStrategyStatusOpenAPI:
             f"requestBody schema 가 StatusUpdateRequest component 를 참조해야 한다 — "
             f"got {ref}"
         )
+
+
+# ── #1407 신규 scope 부착 smoke matrix ────────────────────────────────────
+
+
+class TestNewlyAttachedScopeRoutes401Smoke:
+    """#1407 에서 신규 부착된 라우트 표본을 대상으로 401 invariant 를 확인.
+
+    SSOT ``docs/specs/web-api/11-route-scope-table.md`` 의 48개 미부착 라우트
+    중 각 모듈에서 한두 개씩 골라, 인증 없는 호출이 401 로 차단되는지 smoke
+    한다. 전체 매트릭스 (70 라우트 × persona) 는 정적 검증
+    ``test_route_auth_coverage.py::test_all_api_routes_have_auth_marker_or_exempt``
+    가 marker 부착으로 보장하고, 본 smoke 는 marker 부착이 실제 런타임 401 응답
+    으로 이어지는지 cross-check 한다.
+    """
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("GET", "/api/accounts"),
+            ("GET", "/api/accounts/acc-target"),
+            ("GET", "/api/accounts/acc-target/rules"),
+            ("GET", "/api/approvals"),
+            ("GET", "/api/approvals/some-id"),
+            ("PATCH", "/api/approvals/some-id/status"),
+            ("GET", "/api/bots"),
+            ("GET", "/api/bots/bot-target"),
+            ("POST", "/api/bots/bot-target/start"),
+            ("POST", "/api/bots/bot-target/stop"),
+            ("GET", "/api/bots/bot-target/logs"),
+            ("GET", "/api/config"),
+            ("GET", "/api/data/datasets"),
+            ("GET", "/api/data/datasets/sym__1d"),
+            ("GET", "/api/data/schema"),
+            ("GET", "/api/data/storage"),
+            ("DELETE", "/api/data/datasets/sym__1d"),
+            ("GET", "/api/data/feed-status"),
+            ("GET", "/api/members"),
+            ("GET", "/api/members/m-1"),
+            ("POST", "/api/members/m-1/suspend"),
+            ("POST", "/api/members/m-1/reactivate"),
+            ("POST", "/api/members/m-1/revoke"),
+            ("POST", "/api/members/m-1/rotate-token"),
+            ("GET", "/api/portfolio/value"),
+            ("GET", "/api/portfolio/history"),
+            ("GET", "/api/reports"),
+            ("GET", "/api/reports/r-1"),
+            ("GET", "/api/strategies"),
+            ("POST", "/api/strategies/validate"),
+            ("GET", "/api/strategies/s-1"),
+            ("GET", "/api/strategies/s-1/performance"),
+            ("GET", "/api/strategies/s-1/daily-summary"),
+            ("GET", "/api/strategies/s-1/weekly-summary"),
+            ("GET", "/api/strategies/s-1/monthly-summary"),
+            ("GET", "/api/strategies/s-1/trades"),
+            ("GET", "/api/system/status"),
+            ("GET", "/api/trades"),
+            ("GET", "/api/treasury"),
+            ("GET", "/api/treasury/transactions"),
+            ("GET", "/api/treasury/budgets"),
+            ("GET", "/api/treasury/snapshots/latest"),
+            ("GET", "/api/treasury/snapshots"),
+            ("GET", "/api/treasury/snapshots/2026-05-01"),
+        ],
+    )
+    def test_no_auth_returns_401(
+        self, client: TestClient, method: str, path: str
+    ) -> None:
+        resp = client.request(method, path)
+        assert resp.status_code == 401, (
+            f"{method} {path}: 인증 없는 호출이 401 이 아님 "
+            f"({resp.status_code}: {resp.text})"
+        )

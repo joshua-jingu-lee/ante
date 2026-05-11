@@ -42,7 +42,13 @@ def _make_store(symbols_by_tf: dict[str, list[str]] | None = None) -> MagicMock:
 async def test_list_datasets_returns_empty_when_no_store():
     """store가 None이면 빈 응답을 반환한다."""
     result = await list_datasets(
-        store=None, symbol=None, timeframe=None, data_type="ohlcv", offset=0, limit=50
+        _caller_id="test-caller",
+        store=None,
+        symbol=None,
+        timeframe=None,
+        data_type="ohlcv",
+        offset=0,
+        limit=50,
     )
     assert result == {"items": [], "total": 0}
 
@@ -54,6 +60,7 @@ async def test_list_datasets_pagination_limits_enrichment():
     store = _make_store({"1d": syms})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -74,6 +81,7 @@ async def test_list_datasets_row_count_and_file_size_are_zero():
     store = _make_store({"1d": ["005930"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -95,6 +103,7 @@ async def test_list_datasets_date_range_included():
     store = _make_store({"1d": ["005930"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -114,6 +123,7 @@ async def test_list_datasets_fundamental_type():
     store = _make_store({"fundamental": ["005930"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe=None,
@@ -136,6 +146,7 @@ async def test_list_datasets_symbol_filter():
     store = _make_store({"1d": ["005930", "000660", "035720"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol="005930",
         timeframe="1d",
@@ -155,6 +166,7 @@ async def test_list_datasets_offset_pagination():
     store = _make_store({"1d": syms})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -175,6 +187,7 @@ async def test_list_datasets_date_range_exception_handled():
     store.get_date_range.side_effect = Exception("disk error")
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -194,6 +207,7 @@ async def test_list_datasets_no_resolve_path_called():
     store = _make_store({"1d": ["005930"]})
 
     await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -211,6 +225,7 @@ async def test_list_datasets_no_data_type_returns_all():
     store = _make_store({"1d": ["005930"], "fundamental": ["005930", "000660"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -231,6 +246,7 @@ async def test_list_datasets_data_type_ohlcv():
     store = _make_store({"1d": ["005930"], "fundamental": ["005930"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe="1d",
@@ -250,6 +266,7 @@ async def test_list_datasets_data_type_fundamental():
     store = _make_store({"1d": ["005930"], "fundamental": ["005930"]})
 
     result = await list_datasets(
+        _caller_id="test-caller",
         store=store,
         symbol=None,
         timeframe=None,
