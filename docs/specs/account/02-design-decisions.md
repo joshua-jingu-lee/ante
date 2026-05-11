@@ -140,7 +140,7 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 | 작업 | CLI | Web API | 실행 경로 |
 |---|---|---|---|
 | 계좌 목록/상세 조회 | `account list`, `account info` | `GET /api/accounts`, `GET /api/accounts/{id}` | 읽기 |
-| 인증 정보 마스킹 조회 | `account credentials` | `GET /api/accounts/{id}/credentials` | 읽기 |
+| 인증 정보 마스킹 조회 | `account credentials` | — (Web API 미제공) | 읽기 |
 | 계좌 거래 정지 | `account suspend` | `POST /api/accounts/{id}/suspend` | IPC/Web API → `AccountService.suspend()` |
 | 계좌 거래 재개 | `account activate` | `POST /api/accounts/{id}/activate` | IPC/Web API → `AccountService.activate()` |
 | 전체 거래 정지 | `system halt` | `POST /api/system/halt` | IPC/Web API → `AccountService.suspend_all()` |

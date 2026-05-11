@@ -14,7 +14,6 @@
 | POST | `/api/accounts` | 계좌 등록. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환. Body: account_id, exchange, currency, broker_type, trading_mode, credentials, broker_config, buy_commission_rate, sell_commission_rate, market_order_reserve_buffer_rate (#1333). |
 | GET | `/api/accounts/{account_id}` | 계좌 상세 조회. 응답에 `market_order_reserve_buffer_rate` (float) 포함 (#1333). |
 | PUT | `/api/accounts/{account_id}` | 계좌 수정. 런타임에는 `name`, `timezone`, `trading_hours_start`, `trading_hours_end` 같은 비구조 필드만 허용. `credentials`, `broker_config`, `buy_commission_rate`, `sell_commission_rate`, `market_order_reserve_buffer_rate`, `broker_type`, `exchange`, `currency`, `trading_mode` 포함 시 409 (#1333: 9 STRUCTURAL_FIELDS). 본문은 `Content-Type: application/json`(charset suffix 허용)만 허용하며, 그 외 media type은 415 반환. 다른 mutate 라우트의 415 게이트 도입은 본 변경 범위 밖. |
-| GET | `/api/accounts/{account_id}/credentials` | 인증 정보 마스킹 조회 |
 | POST | `/api/accounts/{account_id}/suspend` | 계좌 거래 정지. Body: reason. 이미 정지 상태이면 409 Conflict |
 | POST | `/api/accounts/{account_id}/activate` | 계좌 거래 재개. 이미 활성 상태이면 409 Conflict |
 | DELETE | `/api/accounts/{account_id}` | 계좌 삭제. cold-path 전용이므로 런타임 서버에서는 409 `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 반환 |
@@ -55,6 +54,7 @@
 | GET | `/api/strategies` | 전략 목록 (필터: status). 응답에 `cumulative_return`, `backtest_return` 포함 — 전략별 PerformanceTracker 조회 |
 | GET | `/api/strategies/{strategy_id}` | 전략 상세 조회. 응답에 `params`, `param_schema`, `rationale`, `risks` 포함 — 전략 클래스 런타임 로드 + StrategyRecord 확장 필드 |
 | POST | `/api/strategies/validate` | 전략 파일 검증. Body: `{"path": "..."}` |
+| PATCH | `/api/strategies/{strategy_id}/status` | 전략 상태 변경. Body: `{"status": "..."}`. 허용되지 않은 상태 전환은 400 반환. `require_strategy_write` scope 검증 (#1378). |
 | GET | `/api/strategies/{strategy_id}/performance` | 전략 성과 지표 |
 | GET | `/api/strategies/{strategy_id}/daily-summary` | 전략 일별 성과 집계 |
 | GET | `/api/strategies/{strategy_id}/weekly-summary` | 전략 주별 성과 집계 |

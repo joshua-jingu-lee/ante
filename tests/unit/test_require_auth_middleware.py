@@ -202,6 +202,19 @@ class TestPublicPaths:
         resp = client.get("/openapi.json")
         assert resp.status_code == 200
 
+    def test_public_path_reports_schema(self, client: TestClient) -> None:
+        """``/api/reports/schema`` PUBLIC → 인증 없이 200.
+
+        spec 09-public-paths.md L48: 리포트 제출 폼 스키마(필드명 + 예시).
+        비밀값 없음. 클라이언트가 폼 렌더링용으로 사용.
+        ``/api/data/schema``(data:read scope 필요)와 구별된다.
+
+        SSOT drift 회귀 보호: 본 케이스가 401이 되면 PUBLIC_PATHS 에서
+        ``/api/reports/schema`` 가 빠진 것이다.
+        """
+        resp = client.get("/api/reports/schema")
+        assert resp.status_code == 200
+
     def test_public_prefix_assets_passes(self, client: TestClient) -> None:
         """``/assets/*`` PUBLIC prefix → 인증 없이 200 또는 404 (자산 미존재).
 
