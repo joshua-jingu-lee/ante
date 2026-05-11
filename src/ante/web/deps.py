@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
@@ -360,54 +361,83 @@ async def require_master_caller(
     return caller
 
 
-async def require_audit_read(
-    request: Request,
-    member_service: Annotated[Any | None, Depends(get_member_service_optional)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
-) -> str:
-    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고
-    audit 도메인 read 권한을 강제하는 FastAPI dependency.
+# ── require_scope factory (#1406) ──────────────────────────────────────────
+#
+# 4개 mutation guard (audit:read / config:write / report:write / strategy:write)
+# 는 spec ``docs/specs/member/02-design-decisions.md:210-227`` 의
+# ``require_scope`` predicate 를 동일하게 구현하므로 (scope 문자열과 denied
+# detail 만 다름), 한 개의 factory 와 helper 로 통합한다. 기존 4개 라우트
+# import (``from ante.web.deps import require_audit_read`` 등) 와 외부 응답의
+# detail 문자열은 무변경으로 보존한다.
+#
+# detail 매핑 정책:
+#   - 기존 4개 scope: ``_SCOPE_DENIED_DETAIL_MAP`` 의 기존 상수를 byte-exact
+#     재사용. ``audit:read`` 는 "human 멤버 또는 audit:read scope" 처럼
+#     "master" 단어가 없는 특수 case 라서 mapping 으로만 보존한다.
+#   - 신규 scope (e.g. #1407 후속 마이그레이션): ``_default_denied_detail``
+#     템플릿(``"master, human 멤버 또는 {scope} scope ..."``)을 사용한다.
+_SCOPE_DENIED_DETAIL_MAP: dict[str, str] = {
+    "audit:read": _AUDIT_READ_PERMISSION_DENIED_DETAIL,
+    "config:write": _CONFIG_WRITE_PERMISSION_DENIED_DETAIL,
+    "report:write": _REPORT_WRITE_PERMISSION_DENIED_DETAIL,
+    "strategy:write": _STRATEGY_WRITE_PERMISSION_DENIED_DETAIL,
+}
 
-    배경 (Codex P2 #1359 fix loop 3차):
-        spec ``docs/specs/member/02-design-decisions.md:210-221`` 의
-        ``require_scope`` predicate는 ``member.type == "human"`` 이면 scope 검증을
-        무조건 통과시킨다. scope는 오직 agent 멤버를 제한하기 위한 장치이므로,
-        human admin/default 멤버도 audit 로그를 읽을 수 있어야 한다.
-        2차 패치는 master role 또는 ``audit:read`` scope만 허용해 human admin/
-        default 사용자를 403으로 차단하는 회귀가 있었다. 본 패치는 spec
-        predicate를 그대로 반영해 다음 OR 분기로 통과시킨다:
+
+def _default_denied_detail(scope: str) -> str:
+    """신규 scope 에 대한 기본 denied detail 템플릿.
+
+    spec ``docs/specs/member/02-design-decisions.md`` 의 ``require_scope``
+    predicate (master / human / scope ∈ scopes) 와 정합한 사용자 메시지를
+    생성한다. ``_SCOPE_DENIED_DETAIL_MAP`` 에 등록되지 않은 새 scope 에 대해
+    factory 가 사용한다.
+    """
+    return (
+        f"이 작업은 master, human 멤버 또는 {scope} scope를 보유한 agent만 "
+        "수행할 수 있습니다."
+    )
+
+
+async def _resolve_caller_with_scope(
+    request: Request,
+    member_service: Any | None,
+    session_service: Any | None,
+    scope: str,
+    denied_detail: str,
+) -> str:
+    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller 를 결정하고 주어진
+    scope 권한을 강제하는 공통 helper.
+
+    기존 4개 dependency (``require_audit_read`` / ``require_config_write`` /
+    ``require_report_write`` / ``require_strategy_write``) 의 본문을 그대로
+    옮겨와 통합한다. spec ``docs/specs/member/02-design-decisions.md:210-227``
+    의 ``require_scope`` predicate 와 동일한 OR 분기:
 
     - caller_member.role == ``MemberRole.MASTER`` → 통과
-    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관)
-    - ``"audit:read"`` ∈ caller_member.scopes → 통과 (agent의 정상 경로)
-    - 그 외 (agent without scope) → ``HTTPException(403)``
+    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관, spec
+      predicate 가 ``human`` 멤버는 scope 검증을 무조건 통과시킨다)
+    - ``scope`` ∈ caller_member.scopes → 통과 (agent의 정상 경로)
+    - 그 외 (agent without scope) → ``HTTPException(403, denied_detail)``
 
-    배경 (Codex P2 #1359 fix loop 4차):
-        ``TokenAuthMiddleware``는 토큰 인증 시점에 비활성 멤버
-        (``status != ACTIVE``)를 거부하지만, ``ante_session`` 쿠키 fallback에서는
-        ``SessionService.validate``가 세션 만료만 검사하므로 suspended/revoked
-        상태로 전환된 멤버가 기존 세션을 그대로 사용해 통과할 수 있었다.
-        본 패치는 권한 분기 직전에 ``MemberStatus.ACTIVE`` 검사를 추가해 두
-        인증 경로 모두에서 비활성 멤버를 차단한다.
-
-    인증 절차는 ``require_master_caller``와 동일하다 (Bearer 우선,
-    ``session_service`` 가용 시 ``ante_session`` 쿠키 fallback,
-    ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403으로 흡수).
+    인증 절차 (Bearer 우선, ``session_service`` 가용 시 ``ante_session`` 쿠키
+    fallback, ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403 으로
+    흡수) 와 비활성 멤버 차단 (#1359 fix loop 4차 패턴) 은 ``require_master_caller``
+    와 일관성을 유지한다.
 
     Returns:
         caller_id (str): 인증/권한 검증을 통과한 member_id.
 
     Raises:
         HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 audit 도메인 read 권한 없음
-            또는 멤버 비활성 상태.
+        HTTPException(403): 인증은 통과했으나 요청 scope 권한 없음 또는
+            멤버 비활성 상태.
     """
     from ante.member.models import MemberRole, MemberStatus, MemberType
 
     caller = getattr(request.state, "member_id", "") or ""
 
     # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
-    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller와 동일).
+    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller 와 동일).
     if not caller and session_service is not None:
         ante_session = request.cookies.get("ante_session")
         if ante_session:
@@ -422,6 +452,8 @@ async def require_audit_read(
                 resolved = session.get("member_id", "") or ""
                 if resolved:
                     caller = resolved
+                    # AuditMiddleware 의 자동 감사 로그 주체 일관성을 위해
+                    # request.state.member_id 에도 반영한다.
                     request.state.member_id = caller
 
     if not caller:
@@ -437,15 +469,13 @@ async def require_audit_read(
         logger.exception("멤버 조회 실패 (member_id=%s)", caller)
 
     if member is None:
-        raise HTTPException(
-            status_code=403, detail=_AUDIT_READ_PERMISSION_DENIED_DETAIL
-        )
+        raise HTTPException(status_code=403, detail=denied_detail)
 
-    # 비활성 멤버 차단 (Codex P2 #1359 fix loop 4차).
-    # ``TokenAuthMiddleware``는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
-    # fallback에서는 ``SessionService.validate``가 만료만 보므로, suspended/
+    # 비활성 멤버 차단 (require_audit_read #1359 fix loop 4차 패턴 답습).
+    # ``TokenAuthMiddleware`` 는 토큰 인증 시 비활성을 거부하지만 세션 쿠키
+    # fallback 에서는 ``SessionService.validate`` 가 만료만 보므로, suspended/
     # revoked 상태로 전환된 멤버가 통과할 수 있다. 권한 분기 직전에 명시적으로
-    # 차단해 두 경로 모두에서 일관된 invariant를 유지한다.
+    # 차단해 두 경로 모두에서 일관된 invariant 를 유지한다.
     status = getattr(member, "status", None)
     status_value = getattr(status, "value", status)
     if status_value != MemberStatus.ACTIVE.value:
@@ -460,326 +490,75 @@ async def require_audit_read(
     is_human = member_type_value == MemberType.HUMAN.value
 
     scopes = getattr(member, "scopes", None) or []
-    has_audit_read = "audit:read" in scopes
+    has_scope = scope in scopes
 
-    if not is_master and not is_human and not has_audit_read:
-        raise HTTPException(
-            status_code=403, detail=_AUDIT_READ_PERMISSION_DENIED_DETAIL
-        )
+    if not is_master and not is_human and not has_scope:
+        raise HTTPException(status_code=403, detail=denied_detail)
 
     return caller
 
 
-async def require_config_write(
-    request: Request,
-    member_service: Annotated[Any | None, Depends(get_member_service_optional)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
-) -> str:
-    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고 dynamic
-    config write 권한을 강제하는 FastAPI dependency (#1373).
+def require_scope(scope: str) -> Callable[..., Awaitable[str]]:
+    """주어진 ``scope`` 에 대한 FastAPI dependency 를 생성하는 factory.
 
-    배경:
-        oracle A7 finding (#1373): ``PUT /api/config/{key}`` 가 인증 없이 익명
-        호출을 받아 ``system.log_level`` 같은 동적 설정을 변경할 수 있었다.
-        spec ``docs/specs/member/02-design-decisions.md:210-221`` 의
-        ``require_scope`` predicate 와 동일한 OR 분기를 적용해 SSOT 와 정합한다:
+    spec ``docs/specs/member/02-design-decisions.md:210-227`` 의
+    ``require_scope`` predicate 를 한 곳에 캡슐화한다. 라우트 코드는
+    ``Depends(require_audit_read)`` 같은 module-level alias 를 그대로 사용해
+    FastAPI Dependant cache identity 를 보존한다 (라우트 안에서 매번
+    ``Depends(require_scope("..."))`` 를 호출하면 새 dependency 객체가
+    생성되어 cache 가 깨진다).
 
-    - caller_member.role == ``MemberRole.MASTER`` → 통과
-    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관, spec
-      predicate 가 ``human`` 멤버는 scope 검증을 무조건 통과시킨다)
-    - ``"config:write"`` ∈ caller_member.scopes → 통과 (agent의 정상 경로,
-      CLI ``src/ante/cli/commands/config.py`` 가 사용 중인 scope 와 동일)
-    - 그 외 (agent without scope) → ``HTTPException(403)``
+    detail 문자열은 다음 정책으로 결정한다:
 
-    인증 절차는 ``require_master_caller`` / ``require_audit_read`` 와 동일하다
-    (Bearer 우선, ``session_service`` 가용 시 ``ante_session`` 쿠키 fallback,
-    ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403으로 흡수).
-    비활성 멤버(``MemberStatus.ACTIVE`` 미상태)는 권한 분기 직전에 403으로
-    차단해 ``TokenAuthMiddleware`` 가 거부하지 못한 세션 쿠키 fallback 경로의
-    회귀를 잠근다(``require_audit_read`` 4차 fix 패턴 답습).
+    - ``scope`` 가 ``_SCOPE_DENIED_DETAIL_MAP`` 에 있으면 매핑된 기존 상수를
+      재사용 (byte-exact 보존, ``audit:read`` 특수 case 포함).
+    - 아니면 ``_default_denied_detail(scope)`` 템플릿을 사용.
+
+    반환된 dependency callable 은:
+
+    - ``__name__ == f"require_scope_{scope.replace(':', '_')}"`` (디버깅용)
+    - ``_is_authentication_dependency = True`` marker 부착 (#1405
+      ``test_route_auth_coverage`` 가 인식)
 
     Returns:
-        caller_id (str): 인증/권한 검증을 통과한 member_id.
+        Awaitable FastAPI dependency that returns the caller member_id (str)
+        on success.
 
-    Raises:
+    Raises (when invoked as a FastAPI dependency):
         HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 config write 권한 없음 또는
+        HTTPException(403): 인증은 통과했으나 ``scope`` 권한 없음 또는
             멤버 비활성 상태.
     """
-    from ante.member.models import MemberRole, MemberStatus, MemberType
+    detail = _SCOPE_DENIED_DETAIL_MAP.get(scope) or _default_denied_detail(scope)
 
-    caller = getattr(request.state, "member_id", "") or ""
-
-    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
-    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller /
-    # require_audit_read 와 동일).
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                resolved = session.get("member_id", "") or ""
-                if resolved:
-                    caller = resolved
-                    request.state.member_id = caller
-
-    if not caller:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    if member_service is None:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    member = None
-    try:
-        member = await member_service.get(caller)
-    except Exception:
-        logger.exception("멤버 조회 실패 (member_id=%s)", caller)
-
-    if member is None:
-        raise HTTPException(
-            status_code=403, detail=_CONFIG_WRITE_PERMISSION_DENIED_DETAIL
+    async def inner_dep(
+        request: Request,
+        member_service: Annotated[Any | None, Depends(get_member_service_optional)],
+        session_service: Annotated[Any | None, Depends(get_session_service_optional)],
+    ) -> str:
+        return await _resolve_caller_with_scope(
+            request, member_service, session_service, scope, detail
         )
 
-    # 비활성 멤버 차단 (require_audit_read #1359 fix loop 4차 패턴 답습).
-    status = getattr(member, "status", None)
-    status_value = getattr(status, "value", status)
-    if status_value != MemberStatus.ACTIVE.value:
-        raise HTTPException(status_code=403, detail=_MEMBER_INACTIVE_DETAIL)
-
-    role = getattr(member, "role", None)
-    role_value = getattr(role, "value", role)
-    is_master = role_value == MemberRole.MASTER.value
-
-    member_type = getattr(member, "type", None)
-    member_type_value = getattr(member_type, "value", member_type)
-    is_human = member_type_value == MemberType.HUMAN.value
-
-    scopes = getattr(member, "scopes", None) or []
-    has_config_write = "config:write" in scopes
-
-    if not is_master and not is_human and not has_config_write:
-        raise HTTPException(
-            status_code=403, detail=_CONFIG_WRITE_PERMISSION_DENIED_DETAIL
-        )
-
-    return caller
+    inner_dep.__name__ = f"require_scope_{scope.replace(':', '_')}"
+    # ``test_route_auth_coverage`` 가 본 marker 로 인증 dependency 를 식별한다
+    # (#1405). 새 scope alias 를 추가할 때 본 factory 가 자동으로 marker 를
+    # 부착해주므로 호출처에서 별도 관리할 필요는 없다.
+    inner_dep._is_authentication_dependency = True  # type: ignore[attr-defined]
+    return inner_dep
 
 
-async def require_report_write(
-    request: Request,
-    member_service: Annotated[Any | None, Depends(get_member_service_optional)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
-) -> str:
-    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고 strategy
-    report 제출 권한을 강제하는 FastAPI dependency (#1374).
-
-    배경:
-        oracle A7 finding (#1374): ``POST /api/reports`` 가 인증 없이 익명
-        호출을 받아 가짜 strategy review artifact 를 큐에 밀어 넣을 수 있었다.
-        spec ``docs/specs/member/02-design-decisions.md:210-227`` 의
-        ``require_scope`` predicate 와 동일한 OR 분기를 적용해 SSOT 와 정합한다.
-        spec 은 ``report:write`` 를 전략 리서치 agent 의 정상 scope 로 명시하고
-        있으므로 이 dependency 는 master / human 외에도 해당 scope 를 보유한
-        agent 에게 정상 경로를 열어둔다.
-
-    - caller_member.role == ``MemberRole.MASTER`` → 통과
-    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관, spec
-      predicate 가 ``human`` 멤버는 scope 검증을 무조건 통과시킨다)
-    - ``"report:write"`` ∈ caller_member.scopes → 통과 (전략 리서치 agent 의
-      정상 경로)
-    - 그 외 (agent without scope) → ``HTTPException(403)``
-
-    인증 절차는 ``require_master_caller`` / ``require_audit_read`` /
-    ``require_config_write`` 와 동일하다 (Bearer 우선, ``session_service``
-    가용 시 ``ante_session`` 쿠키 fallback, ``session_service`` 미주입/예외/
-    멤버 미존재는 모두 401/403으로 흡수). 비활성 멤버
-    (``MemberStatus.ACTIVE`` 미상태)는 권한 분기 직전에 403으로 차단해
-    ``TokenAuthMiddleware`` 가 거부하지 못한 세션 쿠키 fallback 경로의
-    회귀를 잠근다(``require_audit_read`` 4차 fix 패턴 답습).
-
-    Returns:
-        caller_id (str): 인증/권한 검증을 통과한 member_id.
-
-    Raises:
-        HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 report write 권한 없음 또는
-            멤버 비활성 상태.
-    """
-    from ante.member.models import MemberRole, MemberStatus, MemberType
-
-    caller = getattr(request.state, "member_id", "") or ""
-
-    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
-    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller /
-    # require_audit_read / require_config_write 와 동일).
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                resolved = session.get("member_id", "") or ""
-                if resolved:
-                    caller = resolved
-                    request.state.member_id = caller
-
-    if not caller:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    if member_service is None:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    member = None
-    try:
-        member = await member_service.get(caller)
-    except Exception:
-        logger.exception("멤버 조회 실패 (member_id=%s)", caller)
-
-    if member is None:
-        raise HTTPException(
-            status_code=403, detail=_REPORT_WRITE_PERMISSION_DENIED_DETAIL
-        )
-
-    # 비활성 멤버 차단 (require_audit_read #1359 fix loop 4차 패턴 답습).
-    status = getattr(member, "status", None)
-    status_value = getattr(status, "value", status)
-    if status_value != MemberStatus.ACTIVE.value:
-        raise HTTPException(status_code=403, detail=_MEMBER_INACTIVE_DETAIL)
-
-    role = getattr(member, "role", None)
-    role_value = getattr(role, "value", role)
-    is_master = role_value == MemberRole.MASTER.value
-
-    member_type = getattr(member, "type", None)
-    member_type_value = getattr(member_type, "value", member_type)
-    is_human = member_type_value == MemberType.HUMAN.value
-
-    scopes = getattr(member, "scopes", None) or []
-    has_report_write = "report:write" in scopes
-
-    if not is_master and not is_human and not has_report_write:
-        raise HTTPException(
-            status_code=403, detail=_REPORT_WRITE_PERMISSION_DENIED_DETAIL
-        )
-
-    return caller
-
-
-async def require_strategy_write(
-    request: Request,
-    member_service: Annotated[Any | None, Depends(get_member_service_optional)],
-    session_service: Annotated[Any | None, Depends(get_session_service_optional)],
-) -> str:
-    """Bearer 토큰 또는 ``ante_session`` 쿠키로 caller를 결정하고 strategy
-    lifecycle write 권한을 강제하는 FastAPI dependency (#1378).
-
-    배경:
-        oracle A7 finding (#1378): ``PATCH /api/strategies/{strategy_id}/status``
-        가 인증 없이 익명 호출을 받아 등록된 전략을 ``adopted`` / ``archived``
-        로 마음대로 전환할 수 있었다. spec
-        ``docs/specs/member/02-design-decisions.md:210-227`` 의
-        ``require_scope`` predicate 와 동일한 OR 분기를 적용해 SSOT 와 정합한다.
-        spec 은 전략 리서치 agent 의 정상 scope 예시로 ``strategy:write`` 를
-        명시하고 있으므로 이 dependency 는 master / human 외에도 해당 scope 를
-        보유한 agent 에게 정상 경로를 열어둔다.
-
-    - caller_member.role == ``MemberRole.MASTER`` → 통과
-    - caller_member.type == ``MemberType.HUMAN`` → 통과 (scope 무관, spec
-      predicate 가 ``human`` 멤버는 scope 검증을 무조건 통과시킨다)
-    - ``"strategy:write"`` ∈ caller_member.scopes → 통과 (전략 리서치 agent 의
-      정상 경로)
-    - 그 외 (agent without scope) → ``HTTPException(403)``
-
-    인증 절차는 ``require_master_caller`` / ``require_audit_read`` /
-    ``require_config_write`` / ``require_report_write`` 와 동일하다 (Bearer
-    우선, ``session_service`` 가용 시 ``ante_session`` 쿠키 fallback,
-    ``session_service`` 미주입/예외/멤버 미존재는 모두 401/403으로 흡수).
-    비활성 멤버(``MemberStatus.ACTIVE`` 미상태)는 권한 분기 직전에 403으로
-    차단해 ``TokenAuthMiddleware`` 가 거부하지 못한 세션 쿠키 fallback 경로의
-    회귀를 잠근다(``require_audit_read`` 4차 fix 패턴 답습).
-
-    Returns:
-        caller_id (str): 인증/권한 검증을 통과한 member_id.
-
-    Raises:
-        HTTPException(401): 인증 누락/실패.
-        HTTPException(403): 인증은 통과했으나 strategy write 권한 없음 또는
-            멤버 비활성 상태.
-    """
-    from ante.member.models import MemberRole, MemberStatus, MemberType
-
-    caller = getattr(request.state, "member_id", "") or ""
-
-    # Bearer 인증이 caller를 결정하지 못했고 session_service가 사용 가능하면
-    # ante_session 쿠키 fallback (#1351 SSOT 패턴, require_master_caller /
-    # require_audit_read / require_config_write / require_report_write 와 동일).
-    if not caller and session_service is not None:
-        ante_session = request.cookies.get("ante_session")
-        if ante_session:
-            try:
-                session = await session_service.validate(ante_session)
-            except Exception:
-                logger.exception(
-                    "세션 검증 실패 (session_id 일부=%s...)", ante_session[:8]
-                )
-                session = None
-            if session:
-                resolved = session.get("member_id", "") or ""
-                if resolved:
-                    caller = resolved
-                    request.state.member_id = caller
-
-    if not caller:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    if member_service is None:
-        raise HTTPException(status_code=401, detail=_MASTER_AUTH_REQUIRED_DETAIL)
-
-    member = None
-    try:
-        member = await member_service.get(caller)
-    except Exception:
-        logger.exception("멤버 조회 실패 (member_id=%s)", caller)
-
-    if member is None:
-        raise HTTPException(
-            status_code=403, detail=_STRATEGY_WRITE_PERMISSION_DENIED_DETAIL
-        )
-
-    # 비활성 멤버 차단 (require_audit_read #1359 fix loop 4차 패턴 답습).
-    status = getattr(member, "status", None)
-    status_value = getattr(status, "value", status)
-    if status_value != MemberStatus.ACTIVE.value:
-        raise HTTPException(status_code=403, detail=_MEMBER_INACTIVE_DETAIL)
-
-    role = getattr(member, "role", None)
-    role_value = getattr(role, "value", role)
-    is_master = role_value == MemberRole.MASTER.value
-
-    member_type = getattr(member, "type", None)
-    member_type_value = getattr(member_type, "value", member_type)
-    is_human = member_type_value == MemberType.HUMAN.value
-
-    scopes = getattr(member, "scopes", None) or []
-    has_strategy_write = "strategy:write" in scopes
-
-    if not is_master and not is_human and not has_strategy_write:
-        raise HTTPException(
-            status_code=403, detail=_STRATEGY_WRITE_PERMISSION_DENIED_DETAIL
-        )
-
-    return caller
+# ── Module-level scope alias (#1406) ───────────────────────────────────────
+#
+# 라우트 import 호환성과 FastAPI Depends() instance cache 보존을 위해
+# 4개 기존 dependency 를 module-level alias 로 보존한다. 라우트 안에서
+# ``Depends(require_scope("audit:read"))`` 처럼 inline 으로 호출하면 매
+# 라우트 정의마다 새 callable 이 생성되어 cache identity 가 깨지므로,
+# 신규 scope alias 도 반드시 module-level 에 한 번만 정의해야 한다.
+require_audit_read = require_scope("audit:read")
+require_config_write = require_scope("config:write")
+require_report_write = require_scope("report:write")
+require_strategy_write = require_scope("strategy:write")
 
 
 # ── 인증 dependency 정적 검증 marker (#1405) ───────────────────────────────
@@ -790,11 +569,7 @@ async def require_strategy_write(
 # FastAPI Dependant 트리를 walk 하면서 각 dependency callable 의
 # ``_is_authentication_dependency`` 속성을 확인한다.
 #
-# 새 인증 dependency 를 추가할 때 본 marker 도 함께 부착해야 정적 검증이
-# 새 가드를 인식한다. 부착이 누락되면 #1405 회귀 테스트가 해당 라우트를
-# "marker 없음" 으로 보고 실패시킨다.
+# ``require_scope`` factory 가 만든 4개 alias 는 factory 내부에서 marker 를
+# 부착하므로 별도 부착이 불필요하다. ``require_master_caller`` 는 factory
+# 외 분기이므로 본 위치에서 명시 부착한다.
 require_master_caller._is_authentication_dependency = True  # type: ignore[attr-defined]
-require_audit_read._is_authentication_dependency = True  # type: ignore[attr-defined]
-require_config_write._is_authentication_dependency = True  # type: ignore[attr-defined]
-require_report_write._is_authentication_dependency = True  # type: ignore[attr-defined]
-require_strategy_write._is_authentication_dependency = True  # type: ignore[attr-defined]
