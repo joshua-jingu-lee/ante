@@ -268,6 +268,17 @@ Web/CLI 모두 default-deny + allowlist (opt-out) 정책이다. 새 라우트/�
 2. **#1409 70-route 결정 표 갱신**: Web API 라우트는 [#1409](https://github.com/joshua-jingu-lee/ante/issues/1409)가 SSOT인 70-route 결정 표에 행을 추가한다. 신설 라우트의 분류(`public` / `system:read` / 기타 scope)를 명시한다.
 3. **검증 체크리스트**: PR 검증 단계에서 (1) 공개 라우트/명령 표와 코드 allowlist가 동기 상태인지, (2) 인증 필요 라우트가 default-deny 미들웨어 / `authenticated_group` factory로 보호되는지, (3) scope가 필요하면 `@require_scope`가 부착되었는지를 확인한다.
 
+#### 8.1.1 게이트 구현 완료 전 임시 조항 (#1403/#1404 close까지)
+
+> 잔여 P2-B (D-015 ADR / #1402 PR #1420 review 잔재).
+
+epic [#1401](https://github.com/joshua-jingu-lee/ante/issues/1401)의 [#1403](https://github.com/joshua-jingu-lee/ante/issues/1403) (Web `RequireAuthMiddleware`) / [#1404](https://github.com/joshua-jingu-lee/ante/issues/1404) (CLI `authenticated_group` factory)가 모두 close되기 전까지는, 새 mutation 라우트/명령 추가 시 자동 default-deny에 의존하지 말고 명시적 가드를 부착한다.
+
+- Web 라우트: `Depends(require_master_caller)` / `Depends(require_audit_read)` / `Depends(require_config_write)` 등 기존 dependency 중 하나를 라우트 시그니처에 명시한다.
+- CLI 명령: `@require_auth` / `@require_scope` 데코레이터를 명령 함수에 명시한다.
+
+두 이슈가 모두 close되고 게이트가 런타임 동작으로 확인되면 [#1408](https://github.com/joshua-jingu-lee/ante/issues/1408) cleanup에서 본 임시 조항을 제거하고, dependency/decorator는 scope 검증 책임만 가진다(D-015 책임 매트릭스). 그 시점부터는 미들웨어/factory가 1차 차단을 보장하므로 누락이 자동 401/exit 1로 드러난다.
+
 ## 9. AGENTS.md 경량화 원칙
 
 AGENTS.md는 모든 세션에 주입되므로 핵심 규칙만 유지한다.

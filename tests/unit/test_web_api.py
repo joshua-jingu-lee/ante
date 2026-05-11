@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
 
 import pytest
@@ -28,13 +30,72 @@ def _expected_release_version() -> str:
 EXPECTED_VERSION = _expected_release_version()
 
 
+# ``RequireAuthMiddleware`` (#1403) 도입 후 default-deny 가 모든 보호 라우트에
+# 적용된다. 본 파일의 client fixture 는 라우트의 비즈니스 로직을 검증하는
+# 용도이므로 master Bearer 인증을 디폴트로 부착한다. 인증 매트릭스 회귀는
+# ``test_runtime_mutation_auth.py`` / ``test_require_auth_middleware.py`` 가
+# 별도로 보호한다.
+@dataclass
+class _MasterMember:
+    member_id: str = "master-test"
+    type: str = "human"
+    role: str = "master"
+    org: str = "default"
+    name: str = "Test Master"
+    emoji: str = ""
+    status: str = "active"
+    scopes: list[str] = dc_field(default_factory=list)
+
+
+class _MasterOnlyMemberService:
+    """master 토큰 ``master-test-token`` 만 인증하는 최소 stub.
+
+    ``TokenAuthMiddleware`` 가 ``authenticate(token)`` 을, ``RequireAuthMiddleware``
+    가 ``get(member_id)`` 를 호출한다.
+    """
+
+    def __init__(self) -> None:
+        self._master = _MasterMember()
+
+    async def authenticate(self, token: str) -> _MasterMember:
+        if token != "master-test-token":
+            raise PermissionError("invalid token")
+        return self._master
+
+    async def get(self, member_id: str) -> _MasterMember | None:
+        if member_id == self._master.member_id:
+            return self._master
+        return None
+
+    async def update_last_active(self, member_id: str) -> None:
+        return None
+
+
+def _authed_client(app) -> TestClient:
+    """master Bearer 토큰을 디폴트 헤더로 부착한 ``TestClient``.
+
+    ``RequireAuthMiddleware`` (#1403) 도입 후 default-deny 가 적용되어 라우트
+    동작 검증 테스트는 인증된 호출이어야 한다. ``app`` 에는
+    ``_MasterOnlyMemberService`` 가 주입되어 있어야 토큰 인증이 통과한다.
+    """
+    test_client = TestClient(app)
+    test_client.headers.update({"Authorization": "Bearer master-test-token"})
+    return test_client
+
+
 @pytest.fixture
 def app():
-    return create_app()
+    return create_app(member_service=_MasterOnlyMemberService())
 
 
 @pytest.fixture
 def client(app):
+    return _authed_client(app)
+
+
+@pytest.fixture
+def unauth_client(app):
+    """인증 없는 ``TestClient`` (default-deny 회귀 / unauth 라우트 검증용)."""
     return TestClient(app)
 
 
@@ -296,8 +357,11 @@ class TestDataRoutes:
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        app = create_app(data_store=store)
-        client = TestClient(app)
+        app = create_app(
+            data_store=store,
+            member_service=_MasterOnlyMemberService(),
+        )
+        client = _authed_client(app)
 
         resp = client.get("/api/data/datasets")
         assert resp.status_code == 200
@@ -310,8 +374,11 @@ class TestDataRoutes:
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        app = create_app(data_store=store)
-        client = TestClient(app)
+        app = create_app(
+            data_store=store,
+            member_service=_MasterOnlyMemberService(),
+        )
+        client = _authed_client(app)
 
         resp = client.get("/api/data/datasets", params={"data_type": "ohlcv"})
         assert resp.status_code == 200
@@ -324,8 +391,11 @@ class TestDataRoutes:
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        app = create_app(data_store=store)
-        client = TestClient(app)
+        app = create_app(
+            data_store=store,
+            member_service=_MasterOnlyMemberService(),
+        )
+        client = _authed_client(app)
 
         resp = client.get("/api/data/datasets", params={"data_type": "fundamental"})
         assert resp.status_code == 200
@@ -337,8 +407,11 @@ class TestDataRoutes:
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        app = create_app(data_store=store)
-        client = TestClient(app)
+        app = create_app(
+            data_store=store,
+            member_service=_MasterOnlyMemberService(),
+        )
+        client = _authed_client(app)
 
         resp = client.get("/api/data/storage")
         assert resp.status_code == 200
@@ -358,8 +431,11 @@ class TestDataRoutes:
         from ante.data.store import ParquetStore
 
         store = ParquetStore(base_path=tmp_path / "data")
-        app = create_app(data_store=store)
-        client = TestClient(app)
+        app = create_app(
+            data_store=store,
+            member_service=_MasterOnlyMemberService(),
+        )
+        client = _authed_client(app)
 
         resp = client.get("/api/data/feed-status")
         assert resp.status_code == 200
@@ -417,8 +493,11 @@ class TestDataRoutes:
             )
         )
 
-        app = create_app(data_store=store)
-        client = TestClient(app)
+        app = create_app(
+            data_store=store,
+            member_service=_MasterOnlyMemberService(),
+        )
+        client = _authed_client(app)
 
         resp = client.get("/api/data/feed-status")
         assert resp.status_code == 200
@@ -449,15 +528,16 @@ class TestReportRoutes:
         assert data["type"] == "/errors/internal"
         assert data["status"] == 503
 
-    def test_submit_unauth_returns_401(self, client):
+    def test_submit_unauth_returns_401(self, unauth_client):
         """#1374: 인증 없는 호출은 401. 인증 가드가 service availability /
         body validation 보다 먼저 실행된다.
 
         과거(``test_submit_no_store``)에는 ``report_store`` 미주입 시 503 을
         반환했으나, ``require_report_write`` dependency 가 라우트 시그니처
-        앞쪽에 위치해 인증 누락이 우선 401 로 차단된다.
+        앞쪽에 위치해 인증 누락이 우선 401 로 차단된다. #1403 도입 후에는
+        ``RequireAuthMiddleware`` 가 동일 위치에서 1차 차단한다.
         """
-        resp = client.post(
+        resp = unauth_client.post(
             "/api/reports",
             json={
                 "strategy_name": "test",

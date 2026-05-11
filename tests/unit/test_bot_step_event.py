@@ -240,9 +240,12 @@ class TestBotStepCompletedEventPublish:
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 class FakeBotConfig:
@@ -329,8 +332,9 @@ class TestBotLogsAPIWithEventBus:
             bot_manager=bot_manager,
             eventbus=eventbus_with_logs,
             account_service=FakeAccountService(),
+            member_service=make_master_member_service(),
         )
-        return TestClient(app)
+        return make_authed_client(app)
 
     async def _publish_events(self, eb):
         """테스트용 이벤트 발행."""

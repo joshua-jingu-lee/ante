@@ -9,10 +9,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.member.models import MemberRole  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 # 인증 가드(#1352) — PUT /api/bots/{bot_id}에 master 인증이 필요해졌다.
 # 본 모듈의 update_bot 회귀(이름/예산/strategy 등)는 인증 가드와 무관하므로
@@ -274,7 +277,7 @@ def client(bot_manager, default_account_service):
         account_service=default_account_service,
         member_service=_new_member_service(),
     )
-    client = TestClient(app)
+    client = make_authed_client(app)
     client.headers.update(_MASTER_HEADERS)
     return client
 
@@ -288,7 +291,7 @@ def client_with_services(bot_manager, treasury, trade_service, default_account_s
         account_service=default_account_service,
         member_service=_new_member_service(),
     )
-    client = TestClient(app)
+    client = make_authed_client(app)
     client.headers.update(_MASTER_HEADERS)
     return client
 
@@ -364,8 +367,9 @@ class TestStartBotCredentialCheck:
         app = create_app(
             bot_manager=bot_manager,
             account_service=no_credentials_account_service,
+            member_service=make_master_member_service(),
         )
-        return TestClient(app)
+        return make_authed_client(app)
 
     def test_start_bot_without_credentials_returns_422(
         self, client_no_credentials, bot_manager
@@ -382,8 +386,12 @@ class TestStartBotCredentialCheck:
         svc._accounts["test"] = FakeAccount(
             "test", status="active", credentials={"app_key": ""}
         )
-        app = create_app(bot_manager=bot_manager, account_service=svc)
-        client = TestClient(app)
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=svc,
+            member_service=make_master_member_service(),
+        )
+        client = make_authed_client(app)
         bot_manager._bots["bot-1"] = FakeBot("bot-1", status="created")
         resp = client.post("/api/bots/bot-1/start")
         assert resp.status_code == 422
@@ -571,7 +579,7 @@ class TestCreateBotAccountStatus:
             strategy_registry=strategy_registry,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         return client
 
@@ -602,7 +610,7 @@ class TestCreateBotAccountStatus:
             strategy_registry=strategy_registry,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         resp = client.post(
             "/api/bots",
@@ -655,8 +663,9 @@ class TestListBotsStrategyName:
             bot_manager=bot_manager,
             account_service=default_account_service,
             strategy_registry=strategy_registry,
+            member_service=make_master_member_service(),
         )
-        return TestClient(app)
+        return make_authed_client(app)
 
     def test_strategy_name_included(self, client_with_registry, bot_manager):
         """봇 목록에 strategy_name, strategy_author_name, strategy_author_id 포함."""
@@ -708,8 +717,9 @@ class TestGetBotStrategyName:
             bot_manager=bot_manager,
             account_service=default_account_service,
             strategy_registry=strategy_registry,
+            member_service=make_master_member_service(),
         )
-        return TestClient(app)
+        return make_authed_client(app)
 
     def test_strategy_name_included(self, client_with_registry, bot_manager):
         """봇 상세 조회에 strategy_name, strategy_author_name/id 포함."""
@@ -808,7 +818,7 @@ class TestDeleteBotAuditLog:
             audit_logger=fake_audit_logger,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         return client
 
@@ -929,7 +939,7 @@ class TestUpdateBot:
             account_service=default_account_service,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
         resp = client.put("/api/bots/bot-1", json={"budget": 2000000})
@@ -963,7 +973,7 @@ class TestUpdateBotStrategy:
             account_service=default_account_service,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         return client
 
@@ -1029,7 +1039,7 @@ class TestCreateBotStrategyName:
             strategy_registry=strategy_registry,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         return client
 
@@ -1104,7 +1114,7 @@ class TestCreateBotStrategyName:
             strategy_registry=strategy_registry,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         resp = client.post(
             "/api/bots",
@@ -1130,7 +1140,7 @@ class TestCreateBotStrategyName:
             strategy_registry=strategy_registry,
             member_service=_new_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
         client.headers.update(_MASTER_HEADERS)
         resp = client.post(
             "/api/bots",

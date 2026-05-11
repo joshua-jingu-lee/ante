@@ -162,6 +162,9 @@ def session_service():
     return _FakeSessionService()
 
 
+_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
+
+
 @pytest.fixture
 def client(account_service, dynamic_config, member_service, session_service):
     app = create_app(
@@ -170,13 +173,15 @@ def client(account_service, dynamic_config, member_service, session_service):
         member_service=member_service,
         session_service=session_service,
     )
-    return TestClient(app)
+    # 본 파일의 ``_FakeMemberService`` 는 ``master-token`` 만 인식한다.
+    # ``RequireAuthMiddleware`` (#1403) default-deny 회귀를 막기 위해 client
+    # 디폴트 헤더에 master-token 을 부착한다.
+    test_client = TestClient(app)
+    test_client.headers.update(_MASTER_HEADERS)
+    return test_client
 
 
 # ── #1373 master 인증 헤더 fixture ────────────────────────────────────────
-
-
-_MASTER_HEADERS = {"Authorization": "Bearer master-token"}
 
 
 class TestHaltClearHalt:

@@ -9,10 +9,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.data.store import ParquetStore  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 def _make_ohlcv_df() -> pl.DataFrame:
@@ -60,8 +63,8 @@ def store(tmp_path):
 
 @pytest.fixture
 def client(store):
-    app = create_app(data_store=store)
-    return TestClient(app)
+    app = create_app(data_store=store, member_service=make_master_member_service())
+    return make_authed_client(app)
 
 
 class TestListDatasets:

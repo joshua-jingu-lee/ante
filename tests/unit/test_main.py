@@ -8,6 +8,10 @@ from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
 from ante.eventbus.events import OrderRequestEvent
+from tests.unit.conftest import (
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 async def test_full_initialization(tmp_path: Path) -> None:
@@ -475,8 +479,6 @@ async def test_composition_root_with_web_api(tmp_path: Path) -> None:
 
     httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")  # noqa: F841
 
-    from fastapi.testclient import TestClient
-
     from ante.web.app import create_app
 
     # 최소 인프라
@@ -540,9 +542,10 @@ async def test_composition_root_with_web_api(tmp_path: Path) -> None:
         report_store=report_store,
         data_store=parquet_store,
         account_service=account_service,
+        member_service=make_master_member_service(),
     )
 
-    client = TestClient(app)
+    client = make_authed_client(app)
 
     # 시스템 상태
     resp = client.get("/api/system/status")

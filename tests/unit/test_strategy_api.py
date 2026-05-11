@@ -9,10 +9,13 @@ import pytest
 
 httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
-from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.strategy.registry import StrategyStatus  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 
 @dataclass
@@ -179,7 +182,10 @@ def client(registry, bot_manager, trade_service, member_service):
         trade_service=trade_service,
         member_service=member_service,
     )
-    return TestClient(app)
+    test_client = make_authed_client(app)
+    # ``RequireAuthMiddleware`` (#1403) default-deny: master Bearer 디폴트 부착.
+    test_client.headers.update(_MASTER_AUTH_HEADERS)
+    return test_client
 
 
 class TestListStrategies:
@@ -256,8 +262,12 @@ class TestListStrategies:
             FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
         ]
 
-        app = create_app(strategy_registry=registry, db=fake_db)
-        c = TestClient(app)
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         resp = c.get("/api/strategies")
         assert resp.status_code == 200
@@ -292,8 +302,9 @@ class TestListStrategies:
             strategy_registry=registry,
             bot_manager=bot_manager,
             db=fake_db,
+            member_service=make_master_member_service(),
         )
-        c = TestClient(app)
+        c = make_authed_client(app)
 
         with patch(
             "ante.trade.performance.PerformanceTracker.calculate",
@@ -315,8 +326,12 @@ class TestListStrategies:
             FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
         ]
 
-        app = create_app(strategy_registry=registry, db=fake_db)
-        c = TestClient(app)
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         with patch(
             "ante.trade.performance.PerformanceTracker.calculate",
@@ -338,8 +353,12 @@ class TestListStrategies:
             FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
         ]
 
-        app = create_app(strategy_registry=registry, db=fake_db)
-        c = TestClient(app)
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         # PerformanceTracker.calculate가 호출되면 안 된다
         # (account_id를 알 수 없으므로).
@@ -561,8 +580,9 @@ class TestStrategyPerformance:
         app = create_app(
             strategy_registry=registry,
             db=fake_db,
+            member_service=make_master_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
 
         resp = client.get("/api/strategies/s1/performance?account_id=acc-test")
         assert resp.status_code == 200
@@ -590,8 +610,9 @@ class TestStrategyPerformance:
         app = create_app(
             strategy_registry=registry,
             db=fake_db,
+            member_service=make_master_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
 
         resp = client.get("/api/strategies/s1/performance?account_id=acc-test")
         assert resp.status_code == 200
@@ -607,8 +628,9 @@ class TestStrategyPerformance:
         app = create_app(
             strategy_registry=registry,
             db=fake_db,
+            member_service=make_master_member_service(),
         )
-        client = TestClient(app)
+        client = make_authed_client(app)
 
         resp = client.get("/api/strategies/nonexistent/performance")
         assert resp.status_code == 404
@@ -623,8 +645,12 @@ class TestStrategyPerformance:
             FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
         ]
 
-        app = create_app(strategy_registry=registry, db=fake_db)
-        c = TestClient(app)
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         resp = c.get("/api/strategies/s1/performance")
         assert resp.status_code == 400
@@ -655,8 +681,9 @@ class TestStrategyPerformance:
             strategy_registry=registry,
             bot_manager=bot_manager,
             db=fake_db,
+            member_service=make_master_member_service(),
         )
-        c = TestClient(app)
+        c = make_authed_client(app)
 
         with patch(
             "ante.trade.performance.PerformanceTracker.calculate",
@@ -683,8 +710,12 @@ class TestStrategyPerformance:
             FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
         ]
 
-        app = create_app(strategy_registry=registry, db=fake_db)
-        c = TestClient(app)
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
 
         with patch(
             "ante.trade.performance.PerformanceTracker.calculate",

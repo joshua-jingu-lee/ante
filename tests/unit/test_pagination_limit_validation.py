@@ -19,6 +19,10 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
+from tests.unit.conftest import (  # noqa: E402
+    make_authed_client,
+    make_master_member_service,
+)
 
 # ---------------------------------------------------------------------------
 # pagination helper invariant
@@ -53,7 +57,11 @@ def _make_bots_app() -> TestClient:
     mock_manager.list_bots.return_value = [
         {"bot_id": f"bot-{i}", "status": "running"} for i in range(3)
     ]
-    return TestClient(create_app(bot_manager=mock_manager))
+    return make_authed_client(
+        create_app(
+            bot_manager=mock_manager, member_service=make_master_member_service()
+        )
+    )
 
 
 class TestBotsLimitValidation:
@@ -95,7 +103,9 @@ def _make_reports_app() -> TestClient:
     r.status.value = "submitted"
     r.submitted_at = "2025-01-01"
     mock_store.list_reports = AsyncMock(return_value=[r])
-    return TestClient(create_app(report_store=mock_store))
+    return make_authed_client(
+        create_app(report_store=mock_store, member_service=make_master_member_service())
+    )
 
 
 class TestReportsLimitValidation:
@@ -126,7 +136,11 @@ def _make_trades_app() -> TestClient:
     t.status.value = "filled"
     t.timestamp = "2025-01-01"
     mock_service.get_trades = AsyncMock(return_value=[t])
-    return TestClient(create_app(trade_service=mock_service))
+    return make_authed_client(
+        create_app(
+            trade_service=mock_service, member_service=make_master_member_service()
+        )
+    )
 
 
 class TestTradesLimitValidation:
@@ -146,7 +160,7 @@ class TestTradesLimitValidation:
 
 def _make_data_app() -> TestClient:
     # data_store 미주입 → 빈 결과 반환 (data.py: store is None branch)
-    return TestClient(create_app())
+    return make_authed_client(create_app(member_service=make_master_member_service()))
 
 
 class TestDataLimitValidation:
@@ -188,7 +202,9 @@ class TestDataLimitValidation:
 def _make_treasury_app() -> TestClient:
     mock_treasury = MagicMock()
     mock_treasury._db = None  # service unavailable → 빈 결과
-    return TestClient(create_app(treasury=mock_treasury))
+    return make_authed_client(
+        create_app(treasury=mock_treasury, member_service=make_master_member_service())
+    )
 
 
 class TestTreasuryTxLimitValidation:
@@ -223,7 +239,7 @@ def _make_audit_app() -> tuple[TestClient, dict[str, str]]:
     mock_logger.count = AsyncMock(return_value=0)
     member_service = FakeMemberService()
     member_service.add_member("master-user", token="master-token", role="master")
-    client = TestClient(
+    client = make_authed_client(
         create_app(
             audit_logger=mock_logger,
             member_service=member_service,
