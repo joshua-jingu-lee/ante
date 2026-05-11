@@ -1,12 +1,16 @@
 """DynamicConfigService — 동적 설정 CRUD + 변경 알림.
 
 Numeric invariant (#1412 oracle A7):
-- write 경계(`validate_value`)에서 numeric 값(`int`/`float`, `bool` 제외)은
-  반드시 finite 여야 한다. `NaN`/`Infinity`/`-Infinity` 는 ValueError 로 거부되며,
-  호출자(web/IPC/CLI)가 422 로 변환한다.
+- write 경계(`validate_value`)에서 numeric `float` 값은 반드시 finite 여야 한다.
+  `NaN`/`Infinity`/`-Infinity` 는 ValueError 로 거부되며, 호출자(web/IPC/CLI)가
+  422 로 변환한다.
 - read 경계(`get`/`get_all`/`get_by_category`)에서 legacy non-finite numeric
   row 는 `_ensure_loaded_value_finite` 가 ConfigError 로 격리한다
   (defense-in-depth, JSON 직렬화 실패/silent corruption 방지).
+- 두 가드는 `_is_value_finite` 헬퍼를 통해 `dict`/`list` 컨테이너 내부까지
+  재귀적으로 검사한다. `int` 는 Python 임의 정밀도 정수가 NaN/Infinity 를
+  표현할 수 없으므로 finite 검사에서 제외한다 (`math.isfinite` 가 큰 정수에
+  대해 `OverflowError` 를 raise 하는 회귀 방지).
 """
 
 from __future__ import annotations
@@ -28,15 +32,56 @@ logger = logging.getLogger(__name__)
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
+def _is_value_finite(value: Any) -> tuple[bool, Any]:
+    """value 안의 모든 numeric `float` 를 재귀적으로 검사한다 (#1412 oracle A7).
+
+    Returns:
+        ``(ok, first_violating_value)``. ``ok`` 가 ``False`` 이면 두 번째 원소가
+        invariant 를 위반한 non-finite float 값(`NaN`/`Infinity`/`-Infinity`).
+
+    Rules:
+        - ``bool`` 은 `int` 서브클래스이지만 finite 1/0 이므로 통과.
+        - ``int`` 는 항상 finite (Python 임의 정밀도 정수가 NaN/Infinity 를
+          표현할 수 없음). ``math.isfinite`` 가 매우 큰 정수에서
+          ``OverflowError`` 를 raise 하는 회귀(P2-2)를 피하기 위해 short-circuit.
+        - ``float`` 만 ``math.isfinite`` 로 검사.
+        - ``dict`` 는 values 를, ``list`` 는 elements 를 재귀 검사.
+        - ``str``/``None``/그 외 타입은 numeric 이 아니므로 통과.
+    """
+    if isinstance(value, bool):
+        return True, None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return False, value
+        return True, None
+    if isinstance(value, int):
+        # int 는 항상 finite — math.isfinite OverflowError 회귀 방지 (#1412 P2-2).
+        return True, None
+    if isinstance(value, dict):
+        for v in value.values():
+            ok, bad = _is_value_finite(v)
+            if not ok:
+                return False, bad
+        return True, None
+    if isinstance(value, list):
+        for v in value:
+            ok, bad = _is_value_finite(v)
+            if not ok:
+                return False, bad
+        return True, None
+    # str, None, 그 외 → numeric 아님, 통과.
+    return True, None
+
+
 def validate_value(key: str, value: Any) -> None:
     """키별 값 검증 (서비스 경계에서 호출).
 
     Generic numeric finite 가드 (#1412 oracle A7):
-        모든 numeric 값(`int`/`float`, `bool` 제외)은 finite 여야 한다.
-        `NaN`/`Infinity`/`-Infinity` 는 ValueError 로 거부된다. 이 가드는 키와
-        무관하게 적용되어 IPC/CLI/web 모든 경로에서 동일하게 동작한다.
-        `bool` 은 Python 에서 `int` 의 서브클래스(`isinstance(True, int) == True`)
-        이므로 명시적으로 제외한다.
+        scalar `float` 뿐 아니라 `dict`/`list` 컨테이너 내부의 모든 `float` 도
+        재귀적으로 finite 여야 한다. `NaN`/`Infinity`/`-Infinity` 는 ValueError
+        로 거부된다. 이 가드는 키와 무관하게 적용되어 IPC/CLI/web 모든 경로에서
+        동일하게 동작한다. `bool` 과 `int` 는 finite 검사에서 제외된다(상세
+        규칙은 ``_is_value_finite`` 문서 참고).
 
     `system.log_level` 처럼 enum SSOT가 정의된 키는 invalid 값을 즉시 거부한다.
     정의되지 않은 키는 numeric finite 가드 외에는 통과(generic CRUD 동작 유지).
@@ -49,13 +94,13 @@ def validate_value(key: str, value: Any) -> None:
         ValueError: 키별 invariant 또는 numeric finite invariant 를 위반한 경우.
             호출자(web/IPC/CLI)는 이를 422 등 도메인 응답으로 변환해야 한다.
     """
-    # Generic numeric finite 가드 (#1412). bool 은 int 서브클래스이므로 명시 제외.
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not math.isfinite(value):
-            raise ValueError(
-                "numeric config 값은 finite number 여야 합니다 "
-                f"(NaN/Infinity 거부). key={key} value={value!r}"
-            )
+    # Generic numeric finite 가드 (#1412). dict/list 내부까지 재귀 검사한다.
+    ok, bad = _is_value_finite(value)
+    if not ok:
+        raise ValueError(
+            "numeric config 값은 finite number 여야 합니다 "
+            f"(NaN/Infinity 거부). key={key} bad={bad!r}"
+        )
 
     if key == "system.log_level":
         if not isinstance(value, str) or value not in _VALID_LOG_LEVELS:
@@ -70,21 +115,18 @@ def _ensure_loaded_value_finite(key: str, value: Any) -> Any:
     legacy NaN/Infinity row 가 DB 에 남아있더라도 read 경계에서 ConfigError 로
     격리되어 downstream consumer(JSON 직렬화, rule engine 비교 등)로 silent
     하게 흘러가지 않도록 한다. write 경계(`validate_value`)의 finite 가드와
-    짝을 이루는 defense-in-depth.
-
-    `bool` 은 `int` 의 서브클래스이지만 `math.isfinite(True)` 는 True 이므로
-    `validate_value` 와 동일하게 명시 제외하여 의도치 않은 경로를 차단한다.
+    짝을 이루는 defense-in-depth. ``dict``/``list`` 컨테이너 내부의 `float` 도
+    재귀적으로 검사한다(``_is_value_finite``).
 
     Raises:
         ConfigError: 저장된 값이 non-finite numeric 일 때. 호출자(web GET 라우트
             등)는 이를 422 등으로 변환할 수 있다.
     """
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not math.isfinite(value):
-            raise ConfigError(
-                "Dynamic config의 numeric 값이 non-finite 입니다. "
-                f"key={key} value={value!r}"
-            )
+    ok, bad = _is_value_finite(value)
+    if not ok:
+        raise ConfigError(
+            f"Dynamic config의 numeric 값이 non-finite 입니다. key={key} bad={bad!r}"
+        )
     return value
 
 

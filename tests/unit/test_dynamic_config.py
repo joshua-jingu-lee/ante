@@ -3,7 +3,7 @@
 import pytest
 
 from ante.config import ConfigError, DynamicConfigService
-from ante.config.dynamic import validate_value
+from ante.config.dynamic import _is_value_finite, validate_value
 from ante.core import Database
 from ante.eventbus.events import ConfigChangedEvent
 
@@ -350,3 +350,187 @@ async def test_set_self_heals_over_legacy_nan_row(service, eventbus):
     assert len(eventbus.published) == 1
     event = eventbus.published[0]
     assert event.key == "risk.max_mdd_pct"
+
+
+# ── #1412 P2-1 회귀: nested dict/list non-finite 검사 ─────────────────────
+
+
+class TestValidateValueNestedFinite:
+    """nested ``dict``/``list`` 내부 float 도 재귀적으로 finite 검사 (#1412 P2-1).
+
+    이전 구현은 top-level scalar 만 검사하여 ``{"threshold": NaN}`` 같은
+    dict 값이 통과되었다. ``_is_value_finite`` helper 가 컨테이너 내부까지
+    재귀 검사함을 보장한다.
+    """
+
+    def test_dict_with_nan_value_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.params", {"threshold": float("nan")})
+
+    def test_dict_with_inf_value_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.params", {"threshold": float("inf")})
+
+    def test_dict_with_negative_inf_value_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.params", {"threshold": float("-inf")})
+
+    def test_dict_with_mixed_values_rejects_on_first_nan(self):
+        """정상 값과 NaN 이 섞이면 NaN 으로 인해 거부된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.params", {"threshold": 0.1, "limit": float("nan")})
+
+    def test_list_with_nan_element_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.list", [0.1, float("nan"), 0.5])
+
+    def test_list_with_inf_element_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.list", [float("inf")])
+
+    def test_deeply_nested_dict_nan_rejected(self):
+        """2단계 이상 중첩된 dict 내부도 재귀 검사된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value("risk.nested", {"outer": {"inner": float("nan")}})
+
+    def test_list_of_dicts_with_nan_rejected(self):
+        """list 안의 dict 안의 NaN 도 거부된다."""
+        with pytest.raises(ValueError, match="finite"):
+            validate_value(
+                "risk.tiers",
+                [{"name": "a", "value": 0.1}, {"name": "b", "value": float("nan")}],
+            )
+
+    def test_dict_with_finite_values_passes(self):
+        """정상 nested dict 는 통과한다 (회귀 보존)."""
+        validate_value("risk.params", {"threshold": 0.1, "limit": 0.5})
+
+    def test_nested_dict_with_finite_values_passes(self):
+        validate_value("risk.params", {"outer": {"inner": 0.1, "other": 2}})
+
+    def test_list_of_finite_floats_passes(self):
+        validate_value("risk.list", [0.1, 0.2, 0.5])
+
+    def test_helper_bool_in_dict_passes(self):
+        """bool 은 dict 안에서도 finite 검사에서 제외된다."""
+        ok, _bad = _is_value_finite({"flag": True, "other_flag": False})
+        assert ok
+
+    def test_helper_string_in_container_passes(self):
+        """str/None 은 numeric 이 아니므로 통과 (회귀 보존)."""
+        ok, _bad = _is_value_finite({"name": "alpha", "missing": None, "list": ["x"]})
+        assert ok
+
+    def test_helper_returns_first_violating_value(self):
+        """헬퍼가 violating float 자체를 함께 반환한다 (오류 메시지 진단성)."""
+        bad_value = float("inf")
+        ok, bad = _is_value_finite({"a": 0.1, "b": bad_value, "c": float("nan")})
+        assert not ok
+        # dict 순회 순서상 b 가 먼저이므로 bad 는 inf.
+        assert bad == bad_value
+
+
+async def test_set_rejects_nested_nan_at_service_boundary(service, eventbus):
+    """``service.set`` 가 nested NaN dict 를 ValueError 로 거부한다 (#1412 P2-1)."""
+    with pytest.raises(ValueError, match="finite"):
+        await service.set(
+            "risk.params", {"threshold": float("nan"), "limit": 0.5}, category="risk"
+        )
+
+    # 영속/이벤트 사이드이펙트가 없어야 한다.
+    assert not await service.exists("risk.params")
+    assert eventbus.published == []
+
+
+async def test_set_rejects_nested_inf_list_at_service_boundary(service, eventbus):
+    """``service.set`` 가 list 안의 Infinity 도 거부한다 (#1412 P2-1)."""
+    with pytest.raises(ValueError, match="finite"):
+        await service.set("risk.tiers", [0.1, float("inf"), 0.5], category="risk")
+
+    assert not await service.exists("risk.tiers")
+    assert eventbus.published == []
+
+
+async def test_get_raises_on_legacy_nested_nan_row(service):
+    """legacy nested NaN dict row 가 ``get`` 에서 ConfigError 로 격리된다 (#1412 P2-1).
+
+    legacy row 가 ``{"threshold": NaN}`` 형태로 DB 에 들어있는 경우 read 경계
+    helper 가 컨테이너 내부까지 재귀 검사하여 격리해야 한다.
+    """
+    # SQLite 에 직접 nested NaN JSON 을 넣는다. json.dumps 는 NaN 을 그대로
+    # 직렬화하므로 raw 문자열을 구성한다.
+    await _insert_legacy_value(
+        service,
+        "risk.params",
+        '{"threshold": NaN, "limit": 0.5}',
+        "risk",
+    )
+
+    with pytest.raises(ConfigError, match="non-finite"):
+        await service.get("risk.params")
+
+
+async def test_get_raises_on_legacy_nested_infinity_list_row(service):
+    """legacy list 안의 Infinity row 도 read 경계에서 격리된다 (#1412 P2-1)."""
+    await _insert_legacy_value(
+        service,
+        "risk.tiers",
+        "[0.1, Infinity, 0.5]",
+        "risk",
+    )
+
+    with pytest.raises(ConfigError, match="non-finite"):
+        await service.get("risk.tiers")
+
+
+async def test_set_accepts_nested_finite_regression(service):
+    """정상 nested finite 값은 그대로 저장/조회된다 (회귀 보존, #1412 P2-1)."""
+    payload = {"threshold": 0.1, "limit": 0.5, "label": "ok", "flag": True}
+    await service.set("risk.params", payload, category="risk")
+    assert await service.get("risk.params") == payload
+
+
+# ── #1412 P2-2 회귀: 큰 정수 OverflowError 방지 ──────────────────────────
+
+
+class TestValidateValueLargeInt:
+    """``int`` 는 finite 검사에서 제외된다 (#1412 P2-2).
+
+    Python ``int`` 는 임의 정밀도이며 NaN/Infinity 를 표현할 수 없다. 이전
+    구현은 ``isinstance(value, (int, float))`` 후 ``math.isfinite(value)`` 를
+    호출해 매우 큰 정수에서 ``OverflowError`` 가 발생, finite 정수의 저장/조회가
+    500 으로 깨졌다.
+    """
+
+    def test_validate_value_large_positive_int_passes(self):
+        validate_value("foo.bar", 10**500)
+
+    def test_validate_value_large_negative_int_passes(self):
+        validate_value("foo.bar", -(10**500))
+
+    def test_validate_value_int_in_dict_passes(self):
+        validate_value("foo.bar", {"big": 10**500, "neg": -(10**400)})
+
+    def test_validate_value_int_in_list_passes(self):
+        validate_value("foo.bar", [10**500, -(10**400), 0, 1])
+
+
+async def test_set_accepts_large_int(service):
+    """``service.set`` 이 임의 정밀도 정수를 정상 저장한다 (#1412 P2-2)."""
+    big = 10**500
+    await service.set("foo.bar", big, category="x")
+    assert await service.get("foo.bar") == big
+
+
+async def test_set_accepts_large_negative_int(service):
+    """음수 큰 정수도 정상 처리된다 (#1412 P2-2)."""
+    big = -(10**500)
+    await service.set("foo.neg", big, category="x")
+    assert await service.get("foo.neg") == big
+
+
+async def test_set_accepts_nested_large_int(service):
+    """dict/list 안의 큰 정수도 통과한다 (#1412 P2-1 + P2-2)."""
+    payload = {"big": 10**500, "items": [10**400, -(10**400), 1]}
+    await service.set("foo.nested", payload, category="x")
+    assert await service.get("foo.nested") == payload
