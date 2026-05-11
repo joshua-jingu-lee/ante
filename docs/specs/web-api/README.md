@@ -22,3 +22,4 @@
 | [08-pydantic-schemas.md](08-pydantic-schemas.md) | Pydantic 스키마 목록 |
 | [09-public-paths.md](09-public-paths.md) | default-deny 게이트 면제 공개 경로 allowlist (PUBLIC_PATHS / PUBLIC_PREFIXES) |
 | [10-cross-module-notes.md](10-cross-module-notes.md) | 타 모듈 설계 시 참고 |
+| [11-route-scope-table.md](11-route-scope-table.md) | 70 라우트 scope 결정 SSOT (Epic #1401, #1407 인용 대상) |

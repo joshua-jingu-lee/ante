@@ -45,6 +45,7 @@ allowlist 항목은 다음 세 카테고리 중 하나에 속한다.
 | `/api/system/health` | public | reverse proxy / 모니터링 헬스체크. 인증 요구 시 운영 인프라가 헬스를 판정할 수 없다. 라우트 정의: `src/ante/web/routes/system.py:102`. |
 | `/api/auth/login` | public | 인증 자체를 수행하는 엔드포인트. 인증되지 않은 상태에서 시작되어야 한다. 라우트 정의: `src/ante/web/routes/auth.py:31`. |
 | `/api/auth/logout` | public | 세션 종료. 인증이 만료된 상태에서도 호출 가능해야 한다(클라이언트 측 정리 + 서버 측 best-effort). 라우트 정의: `src/ante/web/routes/auth.py:106`. |
+| `/api/reports/schema` | public | 리포트 제출 폼 스키마(필드명 + 예시). 비밀값 없음. 클라이언트가 폼 렌더링용으로 사용. `/api/data/schema`(data:read)와 구별: reports schema는 폼 메타데이터, data schema는 운영 데이터 구조. [#1409](https://github.com/joshua-jingu-lee/ante/issues/1409) 70-route 결정 표에서 결정 (자세한 근거: [11-route-scope-table.md](11-route-scope-table.md) reports 섹션). |
 | `/openapi.json` | public | OpenAPI 스키마 정적 자원. Agent와 외부 도구가 계약을 파싱한다. |
 | `/docs` | public | Swagger UI. OpenAPI 탐색기. |
 | `/redoc` | public | ReDoc. API 레퍼런스 문서. |
@@ -105,14 +106,12 @@ PUBLIC_PATHS 테이블의 `/`, `/index.html` 행은 본 분기 채택 후에도 
 
 ## 결정 보류 항목 (`unresolved`)
 
-다음 경로는 본 이슈에서 공개 여부를 결정하지 않는다. #1409 70-route 결정 표에서
-호출자 영향(모니터링, 대시보드, Agent)을 검토한 뒤 `public` 또는 `system:read` /
-`report:read` 등 scope 부착으로 확정한다. 결정 시까지는 default-deny가 적용된다.
+본 표 작성 시점(#1403)에 결정 보류했던 두 항목은 [#1409](https://github.com/joshua-jingu-lee/ante/issues/1409) 70-route 결정 표에서 모두 결정 완료되었다. 현재 보류 항목은 없다.
 
-| 경로 | 결정 보류 사유 |
-|------|---------------|
-| `/api/system/status` | 시스템 상태(uptime, kill switch 등)를 공개로 노출할지 `system:read` scope로 제한할지 호출자 영향(대시보드, 모니터링) 검토 필요. |
-| `/api/reports/schema` | 리포트 스키마 메타데이터의 공개 여부 정책 결정 필요(Agent가 인증 없이 schema를 받을 수 있어야 하는지). |
+| 경로 | 결정 | 결정 출처 |
+|------|------|----------|
+| `/api/system/status` | `system:read` scope 부착 (PUBLIC_PATHS 아님) | [11-route-scope-table.md](11-route-scope-table.md) system 섹션 — 운영 정보(account_count, last_health_check 등) 노출은 인증 토큰 보유자만. 모니터링도 system:read 토큰 사용. `/api/system/health`(public)와 구별. |
+| `/api/reports/schema` | `public` (위 PUBLIC_PATHS 표에 추가됨) | [11-route-scope-table.md](11-route-scope-table.md) reports 섹션 — 리포트 제출 폼 스키마. 비밀값 없음. |
 
 ## 후보에서 제거된 항목
 
