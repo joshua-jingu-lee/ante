@@ -17,7 +17,40 @@ from ante.update.executor import (
 
 @pytest.fixture
 def runner() -> CliRunner:
-    return CliRunner()
+    """CLI runner with default-deny 인증을 우회하는 헬퍼.
+
+    #1404: ``AuthenticatedGroup``이 leaf command callback에 default-deny
+    인증 가드를 자동 부착한다. 본 모듈의 테스트들은 ``ante update`` 자체의
+    동작을 검증하므로 인증을 mock으로 우회한다 — ``ante.cli.main.authenticate_member``
+    를 patch하여 ``ctx.obj["member"]``에 master stub을 채운다.
+    """
+    r = CliRunner()
+    original_invoke = r.invoke
+
+    from ante.member.models import Member, MemberRole, MemberType
+
+    _master = Member(
+        member_id="update-test-master",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="Update Test Master",
+        status="active",
+        scopes=[],
+    )
+
+    def _invoke_with_auth(cli_cmd, args=None, **kwargs):  # noqa: ANN001, ANN202
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+            def _set_member(ctx):  # noqa: ANN001
+                ctx.ensure_object(dict)
+                ctx.obj["member"] = _master
+
+            mock_auth.side_effect = _set_member
+            return original_invoke(cli_cmd, args, **kwargs)
+
+    r.invoke = _invoke_with_auth
+    return r
 
 
 # ---------------------------------------------------------------------------

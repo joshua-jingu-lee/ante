@@ -13,7 +13,39 @@ from ante.cli.commands.update import _MIN_FREE_MB, check_disk_space
 
 @pytest.fixture
 def runner() -> CliRunner:
-    return CliRunner()
+    """CLI runner with default-deny 인증 우회.
+
+    #1404: ``AuthenticatedGroup`` leaf wrapper가 토큰을 강제하므로
+    ``ante.cli.main.authenticate_member``를 mock하여 ``ctx.obj["member"]``
+    에 master stub을 주입한다.
+    """
+    from ante.member.models import Member, MemberRole, MemberType
+
+    _master = Member(
+        member_id="disk-test-master",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="Disk Test Master",
+        status="active",
+        scopes=[],
+    )
+
+    r = CliRunner()
+    original_invoke = r.invoke
+
+    def _invoke_with_auth(cli_cmd, args=None, **kwargs):  # noqa: ANN001, ANN202
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+            def _set_member(ctx):  # noqa: ANN001
+                ctx.ensure_object(dict)
+                ctx.obj["member"] = _master
+
+            mock_auth.side_effect = _set_member
+            return original_invoke(cli_cmd, args, **kwargs)
+
+    r.invoke = _invoke_with_auth
+    return r
 
 
 class TestCheckDiskSpace:
