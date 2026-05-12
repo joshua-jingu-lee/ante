@@ -249,3 +249,83 @@ class TestHappyPath:
         body = json.loads(result.output)
         assert body["status"] == "ok"
         assert body["data"]["strategy"] == "cli_probe"
+
+
+# ── non-object JSON shape (codex r1 P3) ─────────────────────
+
+
+class TestNonObjectJsonReturnsValidationError:
+    """codex r1 P3: 파일이 JSON object가 아니면 구조화된 REPORT_VALIDATION_ERROR로 거부.
+
+    이전 구현은 ``report_data.pop(...)``/``report_data.get(...)`` 호출이
+    ``AttributeError``/``TypeError``로 raise되어 의도한 구조화 응답을 우회했다.
+    """
+
+    def test_json_array_rejected(self, runner, tmp_path) -> None:
+        """JSON 배열은 dict가 아니므로 거부."""
+        p = tmp_path / "report.json"
+        p.write_text("[1, 2, 3]")
+        db_path = str(tmp_path / "test.db")
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "report", "submit", str(p), "--db-path", db_path],
+        )
+        assert result.exit_code == 1, result.output
+        body = json.loads(result.output)
+        assert body["status"] == "error"
+        assert body["code"] == "REPORT_VALIDATION_ERROR"
+        assert "JSON object" in body["message"] or "object" in body["message"]
+
+    def test_json_string_rejected(self, runner, tmp_path) -> None:
+        """JSON string은 dict가 아니므로 거부."""
+        p = tmp_path / "report.json"
+        p.write_text('"just a string"')
+        db_path = str(tmp_path / "test.db")
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "report", "submit", str(p), "--db-path", db_path],
+        )
+        assert result.exit_code == 1, result.output
+        body = json.loads(result.output)
+        assert body["status"] == "error"
+        assert body["code"] == "REPORT_VALIDATION_ERROR"
+
+    def test_json_number_rejected(self, runner, tmp_path) -> None:
+        """JSON number는 dict가 아니므로 거부."""
+        p = tmp_path / "report.json"
+        p.write_text("42")
+        db_path = str(tmp_path / "test.db")
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "report", "submit", str(p), "--db-path", db_path],
+        )
+        assert result.exit_code == 1, result.output
+        body = json.loads(result.output)
+        assert body["code"] == "REPORT_VALIDATION_ERROR"
+
+    def test_json_null_rejected(self, runner, tmp_path) -> None:
+        """JSON null은 dict가 아니므로 거부."""
+        p = tmp_path / "report.json"
+        p.write_text("null")
+        db_path = str(tmp_path / "test.db")
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "report", "submit", str(p), "--db-path", db_path],
+        )
+        assert result.exit_code == 1, result.output
+        body = json.loads(result.output)
+        assert body["code"] == "REPORT_VALIDATION_ERROR"
+
+    def test_malformed_json_rejected(self, runner, tmp_path) -> None:
+        """파싱 불가능한 JSON 텍스트도 REPORT_VALIDATION_ERROR로 거부."""
+        p = tmp_path / "report.json"
+        p.write_text("{not valid json,,")
+        db_path = str(tmp_path / "test.db")
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "report", "submit", str(p), "--db-path", db_path],
+        )
+        assert result.exit_code == 1, result.output
+        body = json.loads(result.output)
+        assert body["code"] == "REPORT_VALIDATION_ERROR"
+        assert "Invalid JSON" in body["message"]

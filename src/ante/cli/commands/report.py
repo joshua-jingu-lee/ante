@@ -52,7 +52,25 @@ def submit(
     resolved_db_path = db_path or get_db_path(ctx)
 
     with open(json_path) as f:
-        report_data = json.load(f)
+        try:
+            raw_data = json.load(f)
+        except json.JSONDecodeError as exc:
+            fmt.error(f"Invalid JSON: {exc}", code="REPORT_VALIDATION_ERROR")
+            raise SystemExit(1) from exc
+
+    # ── #1415 codex r1 P3: non-object JSON 거부 ─────────────────────────
+    # 파일이 JSON object가 아닌 array/string/number/bool/null이면 아래
+    # ``report_data.pop(...)``/``report_data.get(...)`` 호출이 ``TypeError``/
+    # ``AttributeError``로 raise되어 의도한 ``REPORT_VALIDATION_ERROR`` 구조화
+    # 응답을 우회한다. 명시적으로 dict 검증 후 구조화된 exit 1을 반환한다.
+    if not isinstance(raw_data, dict):
+        fmt.error(
+            f"Report file must be a JSON object, got {type(raw_data).__name__}",
+            code="REPORT_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+
+    report_data: dict = dict(raw_data)
 
     # --run 옵션으로 백테스트 run 참조 추가
     if run_id:
