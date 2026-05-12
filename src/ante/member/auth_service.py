@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from ante.member.auth import get_token_type, hash_token, verify_password
-from ante.member.models import Member, MemberStatus, MemberType
+from ante.member.models import Member, MemberRole, MemberStatus, MemberType
 from ante.member.token_manager import TokenManager
 
 if TYPE_CHECKING:
@@ -16,6 +16,15 @@ if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+# auth principal role SSOT 동치 캐시 (#1466 — split #1417/B).
+#
+# ``MemberRole`` enum 이 허용 role 의 SSOT 이지만, 호출 경로마다 ``{r.value
+# for r in MemberRole}`` 를 재계산하면 drift 가능성이 커지므로 모듈 수준에서
+# 한 번만 캐시한다. ``MemberRole`` 가 갱신되면 본 frozenset 도 자동으로 동기화
+# 되어야 하며, ``test_member_auth_invalid_role`` 의 동치성 회귀 테스트가 이를
+# 잠근다.
+_VALID_MEMBER_ROLES: frozenset[str] = frozenset(r.value for r in MemberRole)
 
 
 class AuthService:
@@ -83,6 +92,12 @@ class AuthService:
                 member.token_expires_at,
             )
 
+        # legacy invalid-role 차단 (#1466 — split #1417/B). #1465 가 write
+        # path 를 막은 뒤에도 이미 DB 에 남은 invalid-role row 가 token 인증
+        # 경로로 principal 이 되면 안 된다. status/type/expiry 검증을 모두
+        # 통과한 뒤 마지막 게이트로 호출한다.
+        await self._assert_member_role_known(member)
+
         return member
 
     async def authenticate_password(self, member_id: str, password: str) -> Member:
@@ -110,7 +125,33 @@ class AuthService:
             msg = "인증 실패"
             raise PermissionError(msg)
 
+        # legacy invalid-role 차단 (#1466 — split #1417/B). 패스워드 매치
+        # 직후, return 직전에 token 경로와 동일한 게이트를 적용한다.
+        await self._assert_member_role_known(member)
+
         return member
+
+    async def _assert_member_role_known(self, member: Member) -> None:
+        """``member.role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다.
+
+        legacy invalid-role member/token 차단 (#1466 — split #1417/B).
+
+        write path (#1465 — split #1417/A) 가 ``MemberService.register`` 와
+        Web API ingress 에서 enum membership 을 422/ValueError 로 막은 뒤에도,
+        그 이전에 DB 에 남은 ``role="oracle_invalid_role"`` 같은 row 는 그대로
+        남는다 (cleanup 은 #1468 비목표). 본 게이트는 그런 row 가 auth
+        principal 로 사용되는 것을 차단한다.
+
+        검증 실패 시 ``MemberAuthFailedEvent`` + 알림을 발행해 운영자가 cleanup
+        대상을 알 수 있게 하고, ``PermissionError`` 를 raise 한다. token 경로와
+        password 경로 모두 동일한 게이트를 공유한다 (multi-consumer 일관).
+        """
+        if member.role not in _VALID_MEMBER_ROLES:
+            await self._publish_auth_failed(
+                member.member_id, f"unknown role: {member.role!r}"
+            )
+            msg = f"auth principal invalid role: {member.role!r}"
+            raise PermissionError(msg)
 
     async def _publish_auth_failed(self, member_id: str, reason: str) -> None:
         """인증 실패 이벤트 + 알림 발행."""
