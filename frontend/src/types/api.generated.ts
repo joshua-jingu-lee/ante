@@ -1101,6 +1101,9 @@ export type paths = {
          * Portfolio History
          * @description 기간별 자산 추이 (daily_snapshots 시계열 반환). 인증된 master/human 또는
          *     ``treasury:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
+         *
+         *     ``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.
+         *     파싱 실패 또는 캘린더 invalid (``2026-13-32``)는 422로 거부된다 (#1440).
          */
         get: operations["portfolio_history_api_portfolio_history_get"];
         put?: never;
@@ -1723,6 +1726,9 @@ export type paths = {
          * List Snapshots
          * @description 기간별 일별 스냅샷 목록. 인증된 master/human 또는 ``treasury:read`` scope
          *     를 보유한 agent 만 호출 가능 (#1407).
+         *
+         *     ``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.
+         *     파싱 실패 또는 캘린더 invalid는 422로 거부된다 (#1440).
          */
         get: operations["list_snapshots_api_treasury_snapshots_get"];
         put?: never;
@@ -1744,6 +1750,11 @@ export type paths = {
          * Get Snapshot By Date
          * @description 특정일 스냅샷 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
          *     보유한 agent 만 호출 가능 (#1407).
+         *
+         *     ``date`` path param은 ISO ``YYYY-MM-DD``만 허용한다. FastAPI ``Path``의
+         *     정규식 패턴이 형식을 일차 차단(422), handler 진입 시 캘린더 유효성을
+         *     다시 검증한다 (e.g. ``2026-13-32``는 정규식은 통과하지만 캘린더 invalid
+         *     → 422). 두 단계 모두 ``HTTPException(422)``으로 변환된다 (#1440).
          */
         get: operations["get_snapshot_by_date_api_treasury_snapshots__date__get"];
         put?: never;
@@ -1786,6 +1797,12 @@ export type paths = {
          * List Transactions
          * @description 자금 변동 이력 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
          *     보유한 agent 만 호출 가능 (#1407).
+         *
+         *     ``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.
+         *     파싱 실패 또는 캘린더 invalid는 422로 거부된다. 내부적으로 SQLite
+         *     ``datetime('now')`` 저장 포맷(``YYYY-MM-DD HH:MM:SS``)에 맞춰
+         *     ``start_date``는 ``00:00:00``, ``end_date``는 ``23:59:59``로 확장된 뒤
+         *     SQL 텍스트 비교에 사용된다 (#1440).
          */
         get: operations["list_transactions_api_treasury_transactions_get"];
         put?: never;
@@ -2609,7 +2626,7 @@ export type components = {
              */
             role: string;
             /**
-             * @description 권한 범위 목록.
+             * @description 권한 범위 목록. 각 원소는 SCOPE_VOCABULARY (#1439, SSOT: ``src/ante/member/scopes.py``) 에 등록된 문자열이어야 한다. 미등록 문자열은 422 로 거부된다.
              * @default []
              */
             scopes: string[];
@@ -3170,7 +3187,7 @@ export type components = {
          * @description PUT /api/members/{member_id}/scopes 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1351). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         ScopesUpdateRequest: {
-            /** @description 변경할 권한 범위 목록. */
+            /** @description 변경할 권한 범위 목록. 각 원소는 SCOPE_VOCABULARY (#1439, SSOT: ``src/ante/member/scopes.py``) 에 등록된 문자열이어야 한다. 미등록 문자열은 422 로 거부된다. */
             scopes: string[];
         };
         /**
@@ -6092,13 +6109,13 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioHistoryResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -7342,13 +7359,13 @@ export interface operations {
                     "application/json": components["schemas"]["SnapshotListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -7369,6 +7386,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description ISO date-only (``YYYY-MM-DD``). 정규식은 형식만 막고, 캘린더 유효성(존재하지 않는 ``2026-13-32`` 등)은 handler 진입 시 ``validate_iso_date_only``가 다시 검증한다 (defense-in-depth, #1440). */
                 date: string;
             };
             cookie?: never;
@@ -7393,13 +7411,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``date`` path param (ISO ``YYYY-MM-DD`` required). malformed/캘린더 invalid path는 404가 아닌 422로 거부된다 (#1440). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -7479,13 +7497,13 @@ export interface operations {
                     "application/json": components["schemas"]["TransactionListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */

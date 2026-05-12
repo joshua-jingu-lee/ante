@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ante.web.deps import (
@@ -26,6 +26,10 @@ from ante.web.schemas import (
     SnapshotResponse,
     TransactionListResponse,
     TreasurySummaryResponse,
+)
+from ante.web.utils.date_params import (
+    validate_iso_date_only,
+    validate_iso_date_param_for_sql_datetime,
 )
 
 router = APIRouter()
@@ -228,6 +232,19 @@ async def get_summary(
     "/transactions",
     response_model=TransactionListResponse,
     responses={
+        422: {
+            "description": (
+                "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required)."
+                " ``treasury_transactions.created_at``은 SQLite ``datetime('now')``"
+                " 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만"
+                " 비교한다 (#1440)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -250,7 +267,21 @@ async def list_transactions(
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     """자금 변동 이력 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
-    보유한 agent 만 호출 가능 (#1407)."""
+    보유한 agent 만 호출 가능 (#1407).
+
+    ``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.
+    파싱 실패 또는 캘린더 invalid는 422로 거부된다. 내부적으로 SQLite
+    ``datetime('now')`` 저장 포맷(``YYYY-MM-DD HH:MM:SS``)에 맞춰
+    ``start_date``는 ``00:00:00``, ``end_date``는 ``23:59:59``로 확장된 뒤
+    SQL 텍스트 비교에 사용된다 (#1440).
+    """
+    start_bound = validate_iso_date_param_for_sql_datetime(
+        start_date, "start_date", end_of_day=False
+    )
+    end_bound = validate_iso_date_param_for_sql_datetime(
+        end_date, "end_date", end_of_day=True
+    )
+
     db = getattr(treasury, "_db", None)
     if db is None:
         return {"items": [], "total": 0}
@@ -267,12 +298,12 @@ async def list_transactions(
     if bot_id:
         where_clauses.append("bot_id = ?")
         params.append(bot_id)
-    if start_date:
+    if start_bound:
         where_clauses.append("created_at >= ?")
-        params.append(start_date)
-    if end_date:
+        params.append(start_bound)
+    if end_bound:
         where_clauses.append("created_at <= ?")
-        params.append(end_date + " 23:59:59")
+        params.append(end_bound)
 
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -858,6 +889,18 @@ async def get_latest_snapshot(
     "/snapshots",
     response_model=SnapshotListResponse,
     responses={
+        422: {
+            "description": (
+                "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). "
+                "``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 "
+                "저장되므로 임의 문자열을 허용하지 않는다 (#1440)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -877,7 +920,14 @@ async def list_snapshots(
     end_date: str | None = None,
 ) -> dict:
     """기간별 일별 스냅샷 목록. 인증된 master/human 또는 ``treasury:read`` scope
-    를 보유한 agent 만 호출 가능 (#1407)."""
+    를 보유한 agent 만 호출 가능 (#1407).
+
+    ``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.
+    파싱 실패 또는 캘린더 invalid는 422로 거부된다 (#1440).
+    """
+    start_date = validate_iso_date_only(start_date, "start_date")
+    end_date = validate_iso_date_only(end_date, "end_date")
+
     target = _resolve_treasury(treasury, treasury_manager, account_id)
 
     if start_date is None:
@@ -901,6 +951,17 @@ async def list_snapshots(
                 },
             },
         },
+        422: {
+            "description": (
+                "Invalid ``date`` path param (ISO ``YYYY-MM-DD`` required). "
+                "malformed/캘린더 invalid path는 404가 아닌 422로 거부된다 (#1440)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -912,14 +973,32 @@ async def list_snapshots(
     },
 )
 async def get_snapshot_by_date(
-    date: str,
+    date: Annotated[
+        str,
+        Path(
+            pattern=r"^\d{4}-\d{2}-\d{2}$",
+            description=(
+                "ISO date-only (``YYYY-MM-DD``). 정규식은 형식만 막고, 캘린더 "
+                "유효성(존재하지 않는 ``2026-13-32`` 등)은 handler 진입 시 "
+                "``validate_iso_date_only``가 다시 검증한다 (defense-in-depth, "
+                "#1440)."
+            ),
+        ),
+    ],
     _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     treasury_manager: Annotated[Any | None, Depends(get_treasury_manager_optional)],
     account_id: str | None = None,
 ) -> dict:
     """특정일 스냅샷 조회. 인증된 master/human 또는 ``treasury:read`` scope 를
-    보유한 agent 만 호출 가능 (#1407)."""
+    보유한 agent 만 호출 가능 (#1407).
+
+    ``date`` path param은 ISO ``YYYY-MM-DD``만 허용한다. FastAPI ``Path``의
+    정규식 패턴이 형식을 일차 차단(422), handler 진입 시 캘린더 유효성을
+    다시 검증한다 (e.g. ``2026-13-32``는 정규식은 통과하지만 캘린더 invalid
+    → 422). 두 단계 모두 ``HTTPException(422)``으로 변환된다 (#1440).
+    """
+    date = validate_iso_date_only(date, "date") or date
     target = _resolve_treasury(treasury, treasury_manager, account_id)
     snapshot = await target.get_daily_snapshot(date)
     if snapshot is None:

@@ -94,14 +94,14 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/treasury` | 자금 현황 요약 (필터: account_id) |
-| GET | `/api/treasury/transactions` | 자금 변동 이력 (필터: account_id, type, bot_id, limit, offset) |
+| GET | `/api/treasury/transactions` | 자금 변동 이력 (필터: account_id, type, bot_id, start_date, end_date, limit, offset). `start_date`/`end_date`는 ISO `YYYY-MM-DD` (date-only)만 허용. invalid date는 422. `treasury_transactions.created_at`은 SQLite `datetime('now')` 포맷(`YYYY-MM-DD HH:MM:SS`)으로 저장되어, `start_date`는 `... 00:00:00`, `end_date`는 `... 23:59:59`로 확장되어 SQL 텍스트 비교에 사용된다 (#1440) |
 | GET | `/api/treasury/budgets` | 봇별 예산 목록 |
 | POST | `/api/treasury/bots/{bot_id}/allocate` | 봇에 예산 할당. Body: amount |
 | POST | `/api/treasury/bots/{bot_id}/deallocate` | 봇 예산 회수. Body: amount |
 | POST | `/api/treasury/balance` | 계좌 총 잔고 수동 설정. Body: balance |
 | GET | `/api/treasury/snapshots/latest` | 가장 최근 일별 스냅샷 조회 (필터: account_id). 자금 관리 T-1 데이터 소스 |
-| GET | `/api/treasury/snapshots` | 기간별 일별 스냅샷 목록 (필터: account_id, start_date, end_date). 자금 관리 T-2 차트 데이터 소스 |
-| GET | `/api/treasury/snapshots/{date}` | 특정일 스냅샷 조회 (필터: account_id) |
+| GET | `/api/treasury/snapshots` | 기간별 일별 스냅샷 목록 (필터: account_id, start_date, end_date). `start_date`/`end_date`는 ISO `YYYY-MM-DD` (date-only)만 허용. invalid date는 422 (#1440). 자금 관리 T-2 차트 데이터 소스 |
+| GET | `/api/treasury/snapshots/{date}` | 특정일 스냅샷 조회 (필터: account_id). `{date}` path는 ISO `YYYY-MM-DD`만 허용. malformed/캘린더 invalid path는 422 (404 아님, #1440) |
 
 > 스냅샷 스펙: [treasury.md — 일별 자산 스냅샷](../treasury/treasury.md#일별-자산-스냅샷-daily-asset-snapshot)
 
@@ -112,7 +112,7 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/portfolio/value` | 총 자산 가치 + 당일 손익 + 당일 수익률 + 미실현 손익 (필터: account_id). 최신 스냅샷 기반 |
-| GET | `/api/portfolio/history` | 기간별 자산 추이 (필터: account_id, start_date, end_date). `treasury_daily_snapshots` 시계열 반환 |
+| GET | `/api/portfolio/history` | 기간별 자산 추이 (필터: account_id, start_date, end_date). `start_date`/`end_date`는 ISO `YYYY-MM-DD` (date-only)만 허용. invalid date는 422 (#1440). `treasury_daily_snapshots` 시계열 반환 |
 
 > `/api/portfolio/value` 응답에는 스냅샷의 `total_asset`, `daily_pnl`, `daily_return`, `unrealized_pnl` 등이 포함된다.
 > `/api/portfolio/history`는 프론트엔드가 기간 버튼(1주/1개월/3개월/전체)에 따라 `start_date`/`end_date`를 계산하여 요청한다. 기간 수익률은 프론트엔드에서 `daily_return`의 기하평균으로 산출.
