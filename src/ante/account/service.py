@@ -24,6 +24,7 @@ from ante.account.errors import (
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.scoping import require_account_id, validate_new_account_id
+from ante.account.timezone import validate_iana_timezone
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -230,6 +231,13 @@ class AccountService:
         # docs/specs/account/14-account-id-contract.md 참조.
         validate_new_account_id(account.account_id)
 
+        # IANA timezone defense-in-depth (#1473 split #1419/A).
+        # HTTP ingress (AccountCreateRequest) 와 동일 의미론으로 ``""`` 는
+        # default 보존을 위해 통과, non-empty 만 검증한다. 비-HTTP caller
+        # (CLI/IPC) 로부터의 invalid timezone persist 를 차단한다.
+        if account.timezone:
+            validate_iana_timezone(account.timezone)
+
         return await self._persist_account(account)
 
     async def _create_seed_account(self, account: Account) -> Account:
@@ -275,6 +283,13 @@ class AccountService:
         # pair 일치해도 형식 검증은 그대로
         # (BROKER_PRESETS가 잘못 변경되더라도 가드).
         require_account_id(account.account_id, context="bootstrap_seed")
+
+        # IANA timezone defense-in-depth (#1473 split #1419/A).
+        # seed 경로도 public ``create()`` 와 동일 의미론으로 ``""`` 통과 +
+        # non-empty 검증을 적용한다. BROKER_PRESETS 가 잘못된 timezone 으로
+        # 변경되는 경우의 가드.
+        if account.timezone:
+            validate_iana_timezone(account.timezone)
 
         return await self._persist_account(account)
 
@@ -480,6 +495,14 @@ class AccountService:
         unrecognized = set(fields.keys()) - updatable - self.IMMUTABLE_FIELDS
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
+
+        # IANA timezone defense-in-depth (#1473 split #1419/A).
+        # HTTP ingress (AccountUpdateRequest) 와 동일 의미론으로 ``None`` 만
+        # 통과, ``""`` 포함 non-None 은 검증한다. 비-HTTP caller (CLI/IPC)
+        # 로부터의 invalid timezone persist 를 차단한다.
+        timezone_update = fields.get("timezone")
+        if timezone_update is not None:
+            validate_iana_timezone(timezone_update)
         broker_invalidating = {
             "credentials",
             "broker_config",
