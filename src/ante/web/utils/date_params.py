@@ -25,10 +25,19 @@ contract drift가 있었다.
 datetime (``2026-05-13T12:00:00+00:00``) 텍스트 비교에 맞춘 별도 helper를
 이미 가지며, 본 PR scope에서는 그 helper를 건드리지 않는다 (#1437 r1
 finding 보존).
+
+Codex r1 finding (#1440): ``datetime.strptime(value, "%Y-%m-%d")``는
+``2026-5-1``이나 ``2026-05-1`` 같은 non-zero-padded month/day 입력도
+정상 파싱한 뒤 ``strftime("%Y-%m-%d")``에서 ``2026-05-01``로 재정규화하여
+silently 통과시킨다. spec와 path regex(``^\\d{4}-\\d{2}-\\d{2}$``)는 strict
+10자 ``YYYY-MM-DD``만 허용하므로 query helper도 같은 strictness가 필요하다.
+파싱 전에 정규식 검사를 추가해 non-zero-padded / 비표준 길이를 명시적으로
+거부한다.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -38,28 +47,49 @@ __all__ = [
     "validate_iso_date_param_for_sql_datetime",
 ]
 
+# r1 fix (#1440): strict ``YYYY-MM-DD`` (zero-padded 10자) 정규식.
+# ``datetime.strptime`` 이전 1차 차단으로 non-zero-padded (``2026-5-1``,
+# ``2026-05-1``, ``2026-5-01``), short year (``26-05-01``), wrong delimiter
+# (``2026/05/01``), trailing whitespace (``2026-05-01 ``) 등을 모두 거부한다.
+# path 라우트의 ``Path(pattern=...)``와 동일한 strictness를 query helper도
+# 갖도록 보장한다.
+_ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 def _parse_iso_date_only(value: str, field: str) -> str:
     """``value``를 ``YYYY-MM-DD`` 캘린더 유효 date로 검증.
 
-    ``datetime.strptime(..., "%Y-%m-%d")``는 비표준 포맷(``20260510``,
-    ``2026-W19-1``)을 거부하고, 존재하지 않는 캘린더 날짜(``2026-13-32``,
-    ``2026-02-30``)도 거부한다.
+    검증은 2단계:
+
+    1. 정규식 ``^\\d{4}-\\d{2}-\\d{2}$`` — strict 10자 zero-padded만 허용.
+       non-zero-padded month/day, short year, wrong delimiter, trailing
+       whitespace 등을 1차 차단한다.
+    2. ``datetime.strptime(..., "%Y-%m-%d")`` — 정규식을 통과한 입력 중
+       존재하지 않는 캘린더 날짜(``2026-13-32``, ``2026-02-30``)를 거부.
 
     Returns:
-        검증된 ``YYYY-MM-DD`` 문자열 (``strftime("%Y-%m-%d")``로 재정규화).
+        검증된 ``YYYY-MM-DD`` 문자열 (input value 그대로 — 정규식 통과
+        시점에 이미 strict 포맷이므로 ``strftime`` 재정규화 불필요).
 
     Raises:
-        HTTPException(422): 파싱 실패 또는 캘린더 invalid.
+        HTTPException(422): 정규식 mismatch 또는 캘린더 invalid.
     """
+    if not _ISO_DATE_PATTERN.fullmatch(value):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"invalid {field}: must be YYYY-MM-DD "
+                f"(10 chars, zero-padded) ({value!r})"
+            ),
+        )
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%d")
+        datetime.strptime(value, "%Y-%m-%d")
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
-            detail=(f"invalid {field}: must be YYYY-MM-DD ({value!r}): {exc}"),
+            detail=(f"invalid {field}: calendar invalid ({value!r}): {exc}"),
         ) from exc
-    return parsed.strftime("%Y-%m-%d")
+    return value
 
 
 def validate_iso_date_only(value: str | None, field: str) -> str | None:

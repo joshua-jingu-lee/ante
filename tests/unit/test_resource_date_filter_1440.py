@@ -473,3 +473,160 @@ class TestDateParamHelper:
                 "2026-02-30", "start_date", end_of_day=False
             )
         assert exc.value.status_code == 422
+
+
+# ──────────────────────────────────────────────────────────────────────
+# r1 fix: strict zero-padded ``YYYY-MM-DD`` (10 chars)
+# ──────────────────────────────────────────────────────────────────────
+#
+# Codex r1 finding (#1440): ``datetime.strptime(value, "%Y-%m-%d")``는
+# ``2026-5-1``이나 ``2026-05-1`` 같은 non-zero-padded month/day 입력을
+# 정상 파싱한 뒤 ``strftime("%Y-%m-%d")``에서 ``2026-05-01``로 재정규화하여
+# silently 통과시켰다. spec과 path regex(``^\d{4}-\d{2}-\d{2}$``)는 strict
+# 10자 zero-padded만 허용하므로 query helper도 같은 strictness가 필요하다.
+# 이하 테스트는 정규식 1차 차단이 다양한 mal-padded / non-ISO 입력을
+# 422로 거부함을 회귀로 보장한다.
+
+# 정규식 mismatch (zero-padding / 길이 / 구분자) 케이스 모음.
+_NON_PADDED_DATES = [
+    "2026-5-1",  # both month/day non-padded
+    "2026-05-1",  # day non-padded
+    "2026-5-01",  # month non-padded
+    "26-05-01",  # short year (2자리)
+    "2026/05/01",  # wrong delimiter
+    "2026-05-01 ",  # trailing whitespace (length 11)
+    " 2026-05-01",  # leading whitespace (length 11)
+    "2026-05-01T",  # ISO datetime separator (length 11)
+]
+
+
+class TestDateParamHelperZeroPadding:
+    """``_ISO_DATE_PATTERN``: strict ``YYYY-MM-DD`` (10자, zero-padded)
+    이외 입력을 모두 422로 거부하는지 단위 검증."""
+
+    @pytest.mark.parametrize("value", _NON_PADDED_DATES)
+    def test_validate_iso_date_only_rejects_non_padded(self, value: str) -> None:
+        from fastapi import HTTPException
+
+        from ante.web.utils.date_params import validate_iso_date_only
+
+        with pytest.raises(HTTPException) as exc:
+            validate_iso_date_only(value, "start_date")
+        assert exc.value.status_code == 422, (
+            f"validate_iso_date_only({value!r}) should be 422 but "
+            f"got status_code={exc.value.status_code}"
+        )
+        # r1 fix: 에러 메시지에 'zero-padded' 명시를 회귀로 보장.
+        assert "zero-padded" in str(exc.value.detail), (
+            f"error detail should mention 'zero-padded'. detail={exc.value.detail!r}"
+        )
+
+    @pytest.mark.parametrize("value", _NON_PADDED_DATES)
+    def test_sql_datetime_helper_rejects_non_padded(self, value: str) -> None:
+        from fastapi import HTTPException
+
+        from ante.web.utils.date_params import (
+            validate_iso_date_param_for_sql_datetime,
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            validate_iso_date_param_for_sql_datetime(
+                value, "start_date", end_of_day=False
+            )
+        assert exc.value.status_code == 422
+        assert "zero-padded" in str(exc.value.detail)
+
+    def test_valid_padded_date_still_passes(self) -> None:
+        """``2026-05-01`` valid 회귀 — 정규식이 정상 입력은 통과시켜야 한다."""
+        from ante.web.utils.date_params import (
+            validate_iso_date_only,
+            validate_iso_date_param_for_sql_datetime,
+        )
+
+        assert validate_iso_date_only("2026-05-01", "date") == "2026-05-01"
+        assert (
+            validate_iso_date_param_for_sql_datetime(
+                "2026-05-01", "start_date", end_of_day=False
+            )
+            == "2026-05-01 00:00:00"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# r1 fix: 4 endpoint × non-zero-padded → 422 (E2E)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestPortfolioHistoryNonPaddedDate:
+    """``GET /api/portfolio/history``는 non-zero-padded date를 422로 거부."""
+
+    @pytest.mark.parametrize("field", ["start_date", "end_date"])
+    @pytest.mark.parametrize("value", _NON_PADDED_DATES)
+    def test_non_padded_returns_422(
+        self, client, treasury, field: str, value: str
+    ) -> None:
+        resp = client.get("/api/portfolio/history", params={field: value})
+        assert resp.status_code == 422, (
+            f"portfolio history {field}={value!r} → {resp.status_code} ({resp.text})"
+        )
+        treasury.get_snapshots.assert_not_awaited()
+
+
+class TestTreasurySnapshotsNonPaddedDate:
+    """``GET /api/treasury/snapshots``는 non-zero-padded date를 422로 거부."""
+
+    @pytest.mark.parametrize("field", ["start_date", "end_date"])
+    @pytest.mark.parametrize("value", _NON_PADDED_DATES)
+    def test_non_padded_returns_422(
+        self, client, treasury, field: str, value: str
+    ) -> None:
+        resp = client.get("/api/treasury/snapshots", params={field: value})
+        assert resp.status_code == 422, (
+            f"treasury snapshots {field}={value!r} → {resp.status_code} ({resp.text})"
+        )
+        treasury.get_snapshots.assert_not_awaited()
+
+
+class TestTreasurySnapshotByDateNonPaddedPath:
+    """``GET /api/treasury/snapshots/{date}``는 non-zero-padded path를 422로 거부.
+
+    path 라우트는 ``Path(pattern=r"^\\d{4}-\\d{2}-\\d{2}$")``에서 1차 차단되며,
+    handler defense의 ``validate_iso_date_only``도 동일한 정규식을 가진다.
+    request URL에 공백/슬래시는 percent-encoded되거나 separate path segment로
+    해석되므로, 여기서는 path-safe non-padded 케이스만 검증한다.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        ["2026-5-1", "2026-05-1", "2026-5-01", "26-05-01"],
+    )
+    def test_non_padded_path_returns_422(self, client, treasury, value: str) -> None:
+        resp = client.get(f"/api/treasury/snapshots/{value}")
+        assert resp.status_code == 422, (
+            f"snapshots/{value} → {resp.status_code} ({resp.text})"
+        )
+        treasury.get_daily_snapshot.assert_not_awaited()
+
+
+class TestTreasuryTransactionsNonPaddedDate:
+    """``GET /api/treasury/transactions``는 non-zero-padded date를 422로 거부.
+
+    422 거부 시 SQL이 단 한 번도 호출되지 않아야 한다 (defense-in-depth).
+    """
+
+    @pytest.mark.parametrize("field", ["start_date", "end_date"])
+    @pytest.mark.parametrize("value", _NON_PADDED_DATES)
+    def test_non_padded_returns_422(
+        self, client, spy_db: _SpyDB, field: str, value: str
+    ) -> None:
+        resp = client.get(
+            "/api/treasury/transactions",
+            params={field: value},
+        )
+        assert resp.status_code == 422, (
+            f"treasury transactions {field}={value!r} → "
+            f"{resp.status_code} ({resp.text})"
+        )
+        assert spy_db.calls == [], (
+            f"422 거부 시 SQL이 호출되어선 안 된다. 실제 호출: {spy_db.calls}"
+        )
