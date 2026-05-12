@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,13 +13,50 @@ from ante.web.schemas import AuditLogListResponse
 router = APIRouter()
 
 
+def _normalize_iso_datetime(value: str) -> str:
+    """ISO datetime을 ``AuditLogger`` storage format으로 정규화.
+
+    ``AuditLogger.log``는 ``datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")``
+    형식(Z 없는 naive UTC)으로 ``created_at``을 저장한다. ``query``/``count``
+    는 SQL 텍스트 비교(``created_at >= ?``, ``created_at <= ?``)를 사용하므로,
+    입력 str을 **동일한 storage format**으로 맞추지 않으면 inclusive boundary
+    가 깨진다.
+
+    Codex P2 (#1414 fix loop r2):
+        ``from_date=2026-05-10T00:00:00Z``를 검증만 통과시켜 그대로
+        ``AuditLogger.query``에 넘기면 SQL은 ``created_at >=
+        '2026-05-10T00:00:00Z'``가 되고, 저장값은 ``'2026-05-10T00:00:00'``
+        (Z 없음). ASCII ``Z`` > digit이므로 ``'2026-05-10T00:00:00'`` <
+        ``'2026-05-10T00:00:00Z'``로 평가되어, 정확히 같은 시각의 row가
+        inclusive lower bound에서 누락되는 silent regression이 발생한다.
+
+    변환 규칙:
+        - ``Z`` suffix → 제거(UTC 가정 보존)
+        - ``+HH:MM`` / ``-HH:MM`` offset → UTC로 환산 후 ``tzinfo`` 제거
+        - timezone 없는 naive datetime → 그대로 반환(UTC 가정)
+
+    Raises:
+        ``ValueError``: ISO datetime 파싱 실패 시 (caller가 422로 변환).
+    """
+    # ``Z`` → ``+00:00``으로 변환해야 ``fromisoformat``이 timezone-aware로 인식.
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if dt.tzinfo is not None:
+        # UTC로 변환 후 timezone-aware → naive로 평탄화(storage format 일치).
+        dt = dt.astimezone(UTC).replace(tzinfo=None)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _validate_iso_date(value: str | None, field: str) -> str | None:
     """``value``가 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime인지 검증.
 
-    검증 통과 시 원본 str을 그대로 반환한다. ``AuditLogger.query/count``는
-    10자리 date-only ``to_date``를 받으면 SQL에서 ``T23:59:59``로 자동 확장
-    하여 자정 이후 데이터를 누락하지 않도록 한다. 따라서 핸들러는 입력 str
-    을 **변환 없이** 그대로 전달해야 한다.
+    검증 통과 시:
+        - date-only(``YYYY-MM-DD``, 10자리)는 **변환 없이** 그대로 반환한다.
+          ``AuditLogger.query/count``는 10자리 ``to_date``를 받으면 SQL에서
+          ``T23:59:59``로 자동 확장하여 자정 이후 데이터 누락을 막는다.
+        - datetime은 ``_normalize_iso_datetime``으로 storage format
+          (``%Y-%m-%dT%H:%M:%S``, naive UTC)으로 정규화하여 반환한다.
+          ``Z``/offset suffix를 보존한 채 SQL 텍스트 비교에 넘기면 inclusive
+          boundary가 어긋난다(Codex r2 finding 참고).
 
     파싱 실패 시 422로 거부한다 (FastAPI/Pydantic 422 응답과 동일 형식).
 
@@ -30,7 +67,12 @@ def _validate_iso_date(value: str | None, field: str) -> str | None:
     ``AuditLogger.query``의 ``len(to_date) == 10`` 분기가 작동하지 않게 되었다.
     결과적으로 ``to_date=2026-05-10`` 호출이 자정 이전 데이터만 반환하는
     **silent semantic regression**이 발생했다. 본 헬퍼는 그 회귀를 해소하기
-    위해 입력 str을 보존한다.
+    위해 date-only 입력 str을 보존한다.
+
+    Codex P2 (#1414 fix loop r2): r1 구현은 datetime 입력도 보존했으나,
+    ``Z``/offset suffix를 그대로 SQL 텍스트 비교(``created_at >= ?``)에 넘기면
+    storage format(Z 없는 naive UTC)과 어긋나 inclusive boundary가 깨졌다.
+    datetime 입력은 storage format으로 정규화하여 누락을 막는다.
     """
     if value is None:
         return None
@@ -40,10 +82,9 @@ def _validate_iso_date(value: str | None, field: str) -> str | None:
         return value
     except ValueError:
         pass
-    # ISO datetime 시도 (timezone 'Z' suffix 호환)
+    # ISO datetime 시도 (Z/offset 허용) — storage format으로 정규화
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return value
+        return _normalize_iso_datetime(value)
     except ValueError:
         pass
     raise HTTPException(
@@ -164,6 +205,12 @@ async def list_audit_logs(
     변환되어 ``AuditLogger`` 내부의 ``len(to_date) == 10`` 자동 확장 분기가
     작동하지 않게 되어 자정 이후 데이터를 누락하는 silent semantic
     regression이 발생했다. 본 구현은 str을 보존해 그 회귀를 해소한다.
+
+    Codex P2 (#1414 fix loop r2): datetime 입력(``2026-05-10T00:00:00Z`` 등)
+    을 r1처럼 그대로 보존하면 SQL 텍스트 비교에서 storage format(Z 없는
+    naive UTC)과 어긋나 inclusive boundary가 깨진다. ``Z``/offset 입력을
+    storage format으로 정규화하도록 헬퍼를 보강했다. date-only는 자동 확장
+    경로를 위해 변환 없이 그대로 보존된다.
     """
     # caller_id는 ``require_audit_read``가 ``request.state.member_id``에
     # 이미 반영하고 ``AuditMiddleware``가 자동 감사 로그 주체로 사용한다.

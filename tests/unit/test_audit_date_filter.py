@@ -5,15 +5,21 @@ oracle A7 시그니처에서 발견된 contract drift: ``from_date``/``to_date``
 핸들러 안에서 ``_validate_iso_date`` 헬퍼로 ISO 8601 파싱 가능성만 검증
 하고, 파싱 실패 시 422로 거부한다.
 
-핵심 invariants (Implementation Plan + Codex r1 finding):
+핵심 invariants (Implementation Plan + Codex r1/r2 findings):
 - 인증 누락 + 잘못된 날짜 → 401 (auth-first 우선순위, dependency 순서 회귀 방지).
 - 인증된 master + 잘못된 날짜 → 422 (``AuditLogger.query`` 미호출).
-- 인증된 master + 정상 ISO 8601 datetime → 200, **원본 str 그대로 전달**.
 - 인증된 master + 정상 date-only (``YYYY-MM-DD``) → 200, **원본 str(10자리)
   그대로 전달** → ``AuditLogger.query`` 내부의 ``T23:59:59`` 자동 확장 분기
   보존. Codex r1 finding: 1차 구현은 Pydantic datetime → ``isoformat()``으로
   변환했고, date-only가 ``"2026-05-10T00:00:00"`` (19자리)로 바뀌어 자정
   이후 데이터를 누락하는 silent semantic regression이 발생했다.
+- 인증된 master + 정상 ISO 8601 datetime (``Z``/offset/naive) → 200, storage
+  format(``%Y-%m-%dT%H:%M:%S``, naive UTC)으로 **정규화** 후 전달. Codex r2
+  finding: ``AuditLogger``는 ``datetime.now(UTC).strftime(...)``로 Z 없는
+  naive 포맷을 저장한다. ``Z``/offset 보존 시 SQL 텍스트 비교
+  (``created_at >= '2026-05-10T00:00:00Z'`` vs storage
+  ``'2026-05-10T00:00:00'``)에서 ASCII ``Z`` > digit이므로 정확히 같은 시각의
+  row가 inclusive lower bound에서 누락되는 silent regression이 발생한다.
 - OpenAPI ``parameters[from_date]``/``parameters[to_date]``는 ``string``
   스키마로 노출되며 description에 ISO 8601 형식을 명시한다.
 
@@ -204,26 +210,89 @@ class TestInvalidDate422:
 
 
 class TestValidIsoDate200:
-    """정상 ISO 8601 입력은 200으로 통과하며 원본 str이 그대로 ``AuditLogger``
-    에 전달되어야 한다 (Codex r1 finding: silent semantic regression 방지)."""
+    """정상 ISO 8601 입력은 200으로 통과하며 ``AuditLogger``로 올바른 형식이
+    전달되어야 한다.
 
-    def test_iso_datetime_returns_200(
+    - date-only(``YYYY-MM-DD``): **원본 str(10자리)** 그대로 전달 → 자동
+      확장 분기 보존(Codex r1 finding).
+    - ISO datetime(``Z``/offset/naive): **storage format
+      (``%Y-%m-%dT%H:%M:%S``, naive UTC)으로 정규화** 후 전달 → inclusive
+      boundary 보존(Codex r2 finding).
+    """
+
+    def test_z_suffix_normalized_to_storage_format(
         self, client: TestClient, audit_logger: AsyncMock
     ) -> None:
-        """ISO 8601 datetime (``2026-05-10T00:00:00Z``) → 200."""
+        """``Z`` suffix는 storage format(Z 제거)으로 정규화되어 전달된다.
+
+        Codex r2 finding 핵심 회귀:
+            ``AuditLogger.log``는
+            ``datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")``로 Z 없는
+            naive 포맷을 저장한다. ``Z``를 그대로 SQL 비교에 넘기면
+            ``'2026-05-10T00:00:00Z' > '2026-05-10T00:00:00'``(ASCII Z > digit)
+            로 평가되어 정확히 같은 시각의 row가 inclusive lower bound에서
+            누락된다. 본 테스트는 ``Z`` suffix가 storage format으로 정규화되어
+            ``AuditLogger.query``에 도달하는지 확인한다.
+        """
         resp = client.get(
             "/api/audit?from_date=2026-05-10T00:00:00Z",
             headers=_MASTER_HEADERS,
         )
         assert resp.status_code == 200, (
-            f"정상 ISO datetime이 200이 아님 ({resp.status_code}: {resp.text})"
+            f"Z suffix datetime이 200이 아님 ({resp.status_code}: {resp.text})"
         )
         assert audit_logger.query.await_count == 1
-        # ``AuditLogger.query`` 시그니처는 str을 유지한다 — 핸들러는 입력
-        # str을 변환 없이 그대로 전달해야 한다.
         call_kwargs = audit_logger.query.await_args.kwargs
-        assert call_kwargs["from_date"] == "2026-05-10T00:00:00Z", (
-            f"ISO datetime str가 변환 없이 그대로 전달되어야 함: "
+        assert call_kwargs["from_date"] == "2026-05-10T00:00:00", (
+            f"Z suffix가 storage format(Z 제거)으로 정규화되어야 함: "
+            f"{call_kwargs['from_date']!r}"
+        )
+        # count에도 동일하게 정규화되어 전달되는지 확인
+        count_kwargs = audit_logger.count.await_args.kwargs
+        assert count_kwargs["from_date"] == "2026-05-10T00:00:00", (
+            f"count에도 Z 제거 정규화 적용되어야 함: {count_kwargs['from_date']!r}"
+        )
+
+    def test_offset_normalized_to_utc(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """``+HH:MM`` offset이 UTC로 변환되고 timezone-naive로 평탄화된다.
+
+        ``2026-05-10T12:00:00+09:00`` (KST 정오) → UTC 03:00:00 → storage
+        format ``2026-05-10T03:00:00``.
+        """
+        # URL-encoded ``+09:00`` → ``%2B09%3A00``
+        resp = client.get(
+            "/api/audit?from_date=2026-05-10T12:00:00%2B09:00",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"offset datetime이 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        assert audit_logger.query.await_count == 1
+        call_kwargs = audit_logger.query.await_args.kwargs
+        assert call_kwargs["from_date"] == "2026-05-10T03:00:00", (
+            f"+09:00 offset이 UTC naive로 변환되어야 함 (12:00 KST → 03:00 UTC): "
+            f"{call_kwargs['from_date']!r}"
+        )
+
+    def test_naive_datetime_preserved(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """timezone 없는 naive datetime은 UTC로 가정하고 그대로 storage format
+        으로 통과한다(이미 19자리 ``%Y-%m-%dT%H:%M:%S``).
+        """
+        resp = client.get(
+            "/api/audit?from_date=2026-05-10T12:34:56",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"naive datetime이 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        assert audit_logger.query.await_count == 1
+        call_kwargs = audit_logger.query.await_args.kwargs
+        assert call_kwargs["from_date"] == "2026-05-10T12:34:56", (
+            f"naive datetime이 storage format 그대로 전달되어야 함: "
             f"{call_kwargs['from_date']!r}"
         )
 
@@ -262,6 +331,10 @@ class TestValidIsoDate200:
             우회시켰다. 결과적으로 SQL ``created_at <= '2026-05-10T00:00:00'``
             로 좁혀져 자정 이후 데이터를 모두 누락. 본 테스트는 입력 str이
             10자리 그대로 ``AuditLogger.query``에 도달하는지 확인한다.
+
+        Codex r2 finding 보강: date-only 입력에 한해 정규화를 적용하지 않는다.
+        ``len(value) == 10`` 분기 진입을 보존하기 위해 ``_validate_iso_date``는
+        ``date.fromisoformat`` 통과 시 원본을 즉시 반환한다.
         """
         resp = client.get(
             "/api/audit?to_date=2026-05-10",
@@ -287,10 +360,16 @@ class TestValidIsoDate200:
             f"count에도 date-only str 그대로 전달되어야 함: {count_kwargs['to_date']!r}"
         )
 
-    def test_iso_datetime_to_date_preserved(
+    def test_iso_datetime_to_date_normalized(
         self, client: TestClient, audit_logger: AsyncMock
     ) -> None:
-        """ISO datetime ``to_date``도 원본 str 그대로 전달."""
+        """ISO datetime ``to_date``(``Z`` suffix)도 storage format으로 정규화.
+
+        Codex r2 finding 적용: ``Z`` 보존 시 inclusive upper bound도 SQL 텍스트
+        비교에서 어긋난다(저장값보다 항상 크게 평가되어 자정 시각의 row 자체는
+        포함되긴 하나, 동일 시각 비교 일관성이 깨짐). 정규화로 일관된 boundary
+        를 보장한다.
+        """
         resp = client.get(
             "/api/audit?to_date=2026-05-10T12:34:56Z",
             headers=_MASTER_HEADERS,
@@ -299,8 +378,8 @@ class TestValidIsoDate200:
             f"ISO datetime to_date가 200이 아님 ({resp.status_code}: {resp.text})"
         )
         call_kwargs = audit_logger.query.await_args.kwargs
-        assert call_kwargs["to_date"] == "2026-05-10T12:34:56Z", (
-            f"ISO datetime to_date str가 변환 없이 그대로 전달되어야 함: "
+        assert call_kwargs["to_date"] == "2026-05-10T12:34:56", (
+            f"ISO datetime to_date(Z)가 storage format으로 정규화되어야 함: "
             f"{call_kwargs['to_date']!r}"
         )
 
