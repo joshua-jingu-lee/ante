@@ -8,7 +8,7 @@ import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ante.account.scoping import require_account_id
 from ante.treasury.models import BotBudget
@@ -20,6 +20,33 @@ if TYPE_CHECKING:
     from ante.trade.position import PositionHistory
 
 logger = logging.getLogger(__name__)
+
+# Treasury transaction type vocabulary (code SSOT).
+#
+# 5-value vocabulary, drift-checked against:
+#   - docs/specs/treasury/06-database-schema.md transaction_type 주석
+#   - frontend/src/types/treasury.ts TransactionType union
+#
+# 의미:
+#   - allocate            : 봇에 예산 할당 (Treasury.allocate)
+#   - deallocate          : 봇에서 예산 회수 (Treasury.deallocate)
+#   - release             : 봇 삭제 시 할당 예산 전액 환수 (Treasury.release_budget)
+#   - fill                : 주문 체결로 인한 자금 이동 기록 (_on_order_filled)
+#   - bot_stopped_release : 봇 중지 시 잔여 예약 자금 환수 (_on_bot_stopped)
+#
+# 새 값 추가 시 spec/frontend 동시 갱신과 drift regression 테스트
+# (tests/unit/test_treasury_transaction_vocabulary.py) 통과가 필요하다.
+TransactionType = Literal[
+    "allocate",
+    "deallocate",
+    "release",
+    "fill",
+    "bot_stopped_release",
+]
+
+TRANSACTION_TYPE_VOCABULARY: frozenset[str] = frozenset(
+    {"allocate", "deallocate", "release", "fill", "bot_stopped_release"}
+)
 
 TREASURY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_budgets (
@@ -1689,11 +1716,19 @@ class Treasury:
     async def _log_transaction(
         self,
         bot_id: str,
-        tx_type: str,
+        tx_type: TransactionType,
         amount: float,
         description: str = "",
     ) -> None:
-        """자금 거래 이력 기록."""
+        """자금 거래 이력 기록.
+
+        ``tx_type``는 ``TRANSACTION_TYPE_VOCABULARY``에 속한 값만 허용한다
+        (Literal 타입 힌트로 future drift를 차단). 새 값이 필요하면 spec
+        (``docs/specs/treasury/06-database-schema.md``), frontend
+        (``frontend/src/types/treasury.ts``), drift regression 테스트
+        (``tests/unit/test_treasury_transaction_vocabulary.py``)를 동시에
+        갱신해야 한다.
+        """
         await self._db.execute(
             """INSERT INTO treasury_transactions
                (bot_id, account_id, transaction_type, amount, description)
