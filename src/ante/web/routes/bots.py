@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -33,6 +34,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
+
+# bot logs API (#1437) — r2는 ``EventHistoryStore``에 SQL JSON1
+# ``payload_filter``를 추가해 ``bot_id``를 SQL 단계에서 필터링하므로
+# in-memory fetch hard cap이 필요 없다. r1의 ``_BOT_LOGS_FETCH_HARD_CAP``
+# (=10000)은 다른 봇의 로그가 cap을 채워서 특정 봇 로그를 누락시킬 수
+# 있는 silent failure였다(Codex P2 #2). r2에서 제거됨.
+#
+# in-memory ``EventBus.get_history`` fallback도 동일 문제(다른 봇 로그가
+# cap을 채워 특정 봇 로그를 누락)가 있어 r3에서 추가 cap을 제거한다.
+# Ring buffer는 ``EventBus._history_size`` (기본 1000)로 이미 자연 제한
+# 되므로, 그 값을 그대로 ``limit``으로 넘겨 ring buffer 전체를 가져온다.
 
 
 class BotCreateRequest(BaseModel):
@@ -1128,11 +1140,109 @@ async def update_bot(
     return {"bot": bot.get_info()}
 
 
+def _validate_iso_date_param(
+    value: str | None,
+    field: str,
+    *,
+    end_of_day: bool = False,
+) -> datetime | None:
+    """``value``가 ISO 8601 date 또는 datetime인지 검증하고 UTC-aware
+    ``datetime``으로 정규화.
+
+    bot logs 페이지네이션(#1437 r1)은 ``EventHistoryStore``의 SQL
+    ``timestamp >= ? AND timestamp <= ?`` 텍스트 비교로 동작한다. 저장 측은
+    :class:`Event.timestamp` (``datetime.now(UTC)`` — tz-aware UTC) 의
+    ``isoformat()`` 결과를 그대로 저장하므로 storage 문자열은
+    ``"2026-05-13T12:00:00+00:00"`` 같이 ``+00:00`` suffix를 가진다.
+    ``EventHistoryStore.query``는 SQL 파라미터로 ``since.isoformat()`` /
+    ``until.isoformat()``을 사용하므로, 입력 datetime을 UTC-aware로 유지하면
+    양쪽 모두 ``+00:00`` suffix가 붙어 ASCII 텍스트 비교가 실제 UTC 시간
+    관계와 일치한다 (suffix 정합).
+
+    Codex P2 (#1437 r1):
+        r0 구현은 입력 문자열을 그대로 보존(``2026-01-01T09:00:00+09:00`` →
+        ``"2026-01-01T09:00:00+09:00"``)한 채 in-memory ``timestamp >= ?``
+        문자열 비교에 사용했다. 저장된 timestamp는
+        ``"2026-01-01T00:30:00+00:00"`` 같은 ISO 문자열이므로, ``+09:00``
+        offset이 그대로 SQL 텍스트 비교에 들어가면 ASCII ``+`` (0x2B) < digit
+        (0x30..0x39) 규칙과 zone offset이 섞여 실제 UTC 시간 관계와 어긋난다.
+        본 헬퍼는 입력을 UTC(``+00:00``)로 환산해 storage suffix와 일치시킨다.
+
+    허용 형식:
+        - ``YYYY-MM-DD`` (date-only) — ``end_of_day=True``면
+          ``YYYY-MM-DDT23:59:59+00:00``로 확장, 그 외엔
+          ``YYYY-MM-DDT00:00:00+00:00``.
+        - ``YYYY-MM-DDTHH:MM:SS[.ffffff][Z]`` / ``+HH:MM`` offset — UTC로
+          환산.
+        - timezone 없는 naive datetime — UTC로 가정.
+
+    파싱 실패 시 ``HTTPException(422)``로 거부한다 (#1414 audit 패턴 답습).
+
+    Args:
+        value: 입력 ISO 문자열 또는 ``None``.
+        field: 에러 메시지용 필드명 (``start_date`` / ``end_date``).
+        end_of_day: ``True``면 date-only 입력을 ``T23:59:59``로 확장 (inclusive
+            upper bound 의미 보존).
+
+    Returns:
+        UTC tz-aware ``datetime`` 또는 ``None``.
+    """
+    if value is None:
+        return None
+    # ISO date 시도 — Python 3.13은 ``20260510``, ``2026-W19-1`` 같은 비표준
+    # 포맷도 수락하므로, ``.isoformat()``로 항상 ``YYYY-MM-DD`` 표준 형식으로
+    # 정규화한 뒤 UTC tz-aware datetime으로 확장.
+    try:
+        d = date.fromisoformat(value)
+    except ValueError:
+        d = None
+    if d is not None:
+        if end_of_day:
+            # microseconds=999_999까지 확장 — storage timestamp는
+            # ``datetime.now(UTC)``로 microseconds까지 가질 수 있다. ASCII
+            # 텍스트 비교에서 ``T23:59:59`` < ``T23:59:59.xxxxxx`` < ``T23:59:59+00:00``
+            # (``.`` < ``+``) 이므로, ``T23:59:59+00:00``로만 확장하면
+            # microseconds 있는 storage row가 inclusive upper bound에서
+            # 누락된다. ``T23:59:59.999999`` (microseconds 최대)로 확장해
+            # 같은 날짜 모든 microseconds row를 포함시킨다.
+            return datetime(d.year, d.month, d.day, 23, 59, 59, 999_999, tzinfo=UTC)
+        return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=UTC)
+    # ISO datetime 시도 (Z/offset 허용) — UTC tz-aware로 정규화.
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        dt = None
+    if dt is not None:
+        if dt.tzinfo is None:
+            # tz 없는 naive 입력은 UTC로 간주(저장 측 가정 일치).
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Invalid ISO 8601 date for {field}: {value!r}. "
+            "허용 형식: ``YYYY-MM-DD`` 또는 ``YYYY-MM-DDTHH:MM:SS[Z]``."
+        ),
+    )
+
+
 @router.get(
     "/{bot_id}/logs",
     responses={
         404: {
             "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        422: {
+            "description": (
+                "Invalid date filter (ISO 8601 required). ``start_date``/"
+                "``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 "
+                "datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -1158,6 +1268,26 @@ async def get_bot_logs(
     ],
     eventbus: Annotated[Any | None, Depends(get_eventbus_optional)],
     limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    start_date: Annotated[
+        str | None,
+        Query(
+            description=(
+                "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime "
+                "(``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound."
+            ),
+        ),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Query(
+            description=(
+                "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime "
+                "(``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. "
+                "date-only는 ``T23:59:59``로 확장된다."
+            ),
+        ),
+    ] = None,
 ) -> dict:
     """봇 실행 로그 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
     agent 만 호출 가능 (#1407).
@@ -1165,42 +1295,131 @@ async def get_bot_logs(
     BotStepCompletedEvent 이력을 반환한다.
     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
     없으면 EventBus 인메모리 히스토리에서 조회한다.
+
+    응답 형식 (#1437): ``{"bot_id", "logs": [...], "total"}``.
+    - ``total``은 bot_id + date range 필터 적용 후의 총 개수 (페이지네이션 전).
+    - ``logs``는 ``offset..offset+limit`` 범위의 페이지 데이터.
+
+    Query 파라미터 (#1437):
+        - ``limit``: 페이지 크기 (기본 50, 1..100).
+        - ``offset``: 페이지 시작 인덱스 (기본 0, ge=0).
+        - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 핸들러는
+          입력을 UTC-naive ``datetime``으로 정규화한 뒤 ``EventHistoryStore``
+          SQL filter(``timestamp >= ? AND timestamp <= ?``)에 전달한다.
+
+    Codex P2 (#1437 fix loop r2):
+        r1 구현은 두 가지 silent failure가 남아있었다.
+
+        (1) ``EventHistoryStore.query`` 시그니처 — r1은 ``until``을 ``limit``
+            앞 위치 인자로 추가해 기존 caller ``store.query(type, since, 50)``
+            의 세 번째 위치 인자 ``50``이 ``limit`` 대신 ``until``로
+            잘못 바인딩되는 위험이 있었다. r2는 ``until``/``offset``/
+            ``payload_filter``를 keyword-only로 옮겨 위치 인자 호환성을
+            복원한다.
+
+        (2) hard cap ``_BOT_LOGS_FETCH_HARD_CAP=10000`` — r1은 ``bot_id`` 가
+            payload JSON 안이라 SQL 직접 필터가 어렵다는 이유로 매칭 가능
+            범위(event_type + since/until)를 한번에 10000건 fetch한 뒤
+            in-memory ``bot_id`` 필터를 적용했다. 다른 봇의 로그가 cap을
+            먼저 채우면 특정 봇의 로그가 결과에서 누락될 수 있다(여러 봇이
+            병렬로 step을 찍는 환경에서 silent under-count). r2는
+            ``EventHistoryStore``에 SQL JSON1 ``payload_filter``를 추가해
+            ``bot_id``를 SQL 단계에서 필터링한다 — cap이 필요 없고
+            ``total``/``logs``가 cap에 무관하게 정확하다.
+
+        (3) ``start_date``/``end_date`` 의 timezone 정합 (r1에서 해결, r2에서
+            그대로 유지): ``_validate_iso_date_param``으로 입력을 UTC tz-aware
+            ``datetime``으로 정규화한 뒤 ``EventHistoryStore``의 SQL 텍스트
+            비교에 그대로 사용한다. event timestamp는 dataclass field default
+            ``datetime.now(UTC)``로 tz-aware UTC이며, ``isoformat()`` 결과의
+            ``+00:00`` suffix가 양쪽에 일관되게 붙어 ASCII 비교가 실제 UTC
+            시간 관계와 일치한다.
     """
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
-    logs: list[dict] = []
+    # ISO 8601 검증 + UTC tz-aware 정규화 (timezone 정렬 일관화).
+    # end_date는 ``end_of_day=True``로 date-only를 ``T23:59:59.999999``로 확장.
+    start_validated = _validate_iso_date_param(start_date, "start_date")
+    end_validated = _validate_iso_date_param(end_date, "end_date", end_of_day=True)
 
     if event_history_store is not None:
+        # r2: ``bot_id``를 SQL JSON1 ``payload_filter``로 끌어올려 SQL 단계
+        # 필터링. ``total``은 ``count(...)``가 페이지네이션과 무관한 정확
+        # 매칭 row 수를 반환. hard cap 불필요.
+        payload_filter = {"bot_id": bot_id}
         rows = await event_history_store.query(
             event_type="BotStepCompletedEvent",
+            since=start_validated,
             limit=limit,
+            until=end_validated,
+            offset=offset,
+            payload_filter=payload_filter,
         )
-        for row in rows:
-            payload = row.get("payload", {})
-            if payload.get("bot_id") == bot_id:
-                logs.append(
-                    {
-                        "event_id": row.get("event_id", ""),
-                        "timestamp": row.get("timestamp", ""),
-                        "result": payload.get("result", ""),
-                        "message": payload.get("message", ""),
-                    }
-                )
-    elif eventbus is not None:
+        total = await event_history_store.count(
+            event_type="BotStepCompletedEvent",
+            since=start_validated,
+            until=end_validated,
+            payload_filter=payload_filter,
+        )
+        logs = [
+            {
+                "event_id": row.get("event_id", ""),
+                "timestamp": row.get("timestamp", ""),
+                "result": row.get("payload", {}).get("result", ""),
+                "message": row.get("payload", {}).get("message", ""),
+            }
+            for row in rows
+        ]
+        return {"bot_id": bot_id, "logs": logs, "total": total}
+
+    if eventbus is not None:
         from ante.eventbus.events import BotStepCompletedEvent
 
-        history = eventbus.get_history(event_type=BotStepCompletedEvent, limit=limit)
+        # in-memory ring buffer ``get_history``는 ``since``/``until``/
+        # ``offset``/``payload_filter`` 시그니처가 없으므로(Non-Goal — bus
+        # interface 변경은 본 패치 범위 외) 핸들러에서 ``bot_id``/날짜/
+        # 페이지 필터를 in-memory로 적용한다.
+        #
+        # ``limit``은 ring buffer 전체 사이즈(``EventBus._history_size``)로
+        # 잡아 ring buffer를 통째로 가져온다. 작은 cap(예: 10000)을 쓰면
+        # history_size가 더 큰 환경에서 다른 봇 로그가 cap을 채워 특정
+        # 봇 로그가 누락되는 silent failure가 발생한다(Codex P3 r2).
+        # ring buffer 자체가 ``_history_size``로 capped이므로 추가 cap은
+        # 불필요하다.
+        history_cap = getattr(eventbus, "_history_size", 1000)
+        history = eventbus.get_history(
+            event_type=BotStepCompletedEvent,
+            limit=history_cap,
+        )
+        filtered: list[dict] = []
         for evt in history:
-            if evt.bot_id == bot_id:
-                logs.append(
-                    {
-                        "event_id": str(evt.event_id),
-                        "timestamp": evt.timestamp.isoformat(),
-                        "result": evt.result,
-                        "message": evt.message,
-                    }
-                )
+            if evt.bot_id != bot_id:
+                continue
+            evt_ts = evt.timestamp
+            # event.timestamp는 ``datetime.now(UTC)`` (tz-aware UTC) default.
+            # start_validated/end_validated가 UTC tz-aware이므로 tz 정합 비교.
+            # 혹시 외부에서 naive datetime을 넣은 경우 UTC로 간주.
+            if evt_ts.tzinfo is None:
+                evt_ts = evt_ts.replace(tzinfo=UTC)
+            else:
+                evt_ts = evt_ts.astimezone(UTC)
+            if start_validated is not None and evt_ts < start_validated:
+                continue
+            if end_validated is not None and evt_ts > end_validated:
+                continue
+            filtered.append(
+                {
+                    "event_id": str(evt.event_id),
+                    "timestamp": evt.timestamp.isoformat(),
+                    "result": evt.result,
+                    "message": evt.message,
+                }
+            )
 
-    return {"bot_id": bot_id, "logs": logs}
+        total = len(filtered)
+        paginated = filtered[offset : offset + limit]
+        return {"bot_id": bot_id, "logs": paginated, "total": total}
+
+    return {"bot_id": bot_id, "logs": [], "total": 0}

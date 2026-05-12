@@ -573,6 +573,54 @@ export type paths = {
          *     BotStepCompletedEvent 이력을 반환한다.
          *     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
          *     없으면 EventBus 인메모리 히스토리에서 조회한다.
+         *
+         *     응답 형식 (#1437): ``{"bot_id", "logs": [...], "total"}``.
+         *     - ``total``은 bot_id + date range 필터 적용 후의 총 개수 (페이지네이션 전).
+         *     - ``logs``는 ``offset..offset+limit`` 범위의 페이지 데이터.
+         *
+         *     Query 파라미터 (#1437):
+         *         - ``limit``: 페이지 크기 (기본 50, 1..100).
+         *         - ``offset``: 페이지 시작 인덱스 (기본 0, ge=0).
+         *         - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 핸들러는
+         *           입력을 UTC-naive ``datetime``으로 정규화한 뒤 ``EventHistoryStore``
+         *           SQL filter(``timestamp >= ? AND timestamp <= ?``)에 전달한다.
+         *
+         *     Codex P2 (#1437 fix loop r1):
+         *         r0 구현은 두 가지 silent regression이 있었다.
+         *
+         *         (1) ``store.query(limit=limit)`` + in-memory 페이지 슬라이스 — store가
+         *             처음부터 ``LIMIT limit``만 fetch하기 때문에 ``offset=10&limit=10``
+         *             요청 시 2페이지가 비거나 짧고, ``total`` 카운트가 처음 limit
+         *             범위로만 제한된다. 본 r1 구현은 store에 ``offset``/``until``과
+         *             ``count`` 시그니처를 확장하고, ``bot_id`` 가 payload JSON 안에
+         *             있어 SQL 직접 필터가 어렵다는 한계를 인정해, **매칭 가능 범위를
+         *             모두 가져온 뒤 in-memory에서 ``bot_id`` 필터 → ``total`` → 페이지
+         *             슬라이스** 흐름으로 변경한다. ``EventHistoryStore.query``에 추가된
+         *             ``offset`` 파라미터는 ``bot_id`` 필터 미적용 호출자(미래 dashboard
+         *             total badge 등)가 효율적인 페이지네이션을 할 수 있도록 보강해두지만,
+         *             본 핸들러는 ``bot_id`` 정확성 우선으로 사용하지 않는다.
+         *             매칭 row 수가 과도하게 커지지 않도록 hard cap
+         *             ``_BOT_LOGS_FETCH_HARD_CAP``을 둔다(retention 30일 가정 하 충분).
+         *
+         *         (2) ``start_date``/``end_date`` 를 입력 그대로(``+09:00`` 등 offset
+         *             suffix 포함) in-memory ``timestamp >= start_date`` 문자열 비교에
+         *             사용 — storage timestamp는 UTC-naive ISO 문자열이라 ASCII 정렬
+         *             규칙으로 실제 UTC 시간과 어긋난다 (#1414 audit r2와 동일 패턴).
+         *             본 r1 구현은 ``_validate_iso_date_param``으로 입력을 UTC-naive
+         *             ``datetime``으로 정규화하고, ``EventHistoryStore``의 SQL 텍스트
+         *             비교에 그대로 사용한다. event timestamp는 dataclass field default
+         *             ``datetime.now(timezone.utc)``로 tz-aware UTC이지만,
+         *             ``isoformat()`` 결과를 SQL 텍스트로 비교하므로 ``+00:00`` suffix가
+         *             있을 수 있다. inclusive boundary는 ``>=``/``<=`` 비교라서
+         *             ``T00:00:00`` < ``T00:00:00+00:00`` < ``T23:59:59+00:00`` <
+         *             ``T23:59:59Z`` (ASCII) 관계가 성립하므로, ``date.fromisoformat``
+         *             확장 datetime(``T00:00:00`` / ``T23:59:59``)이 안전한 하한/상한이
+         *             된다.
+         *
+         *     Note: ``bot_id`` 가 payload JSON 안에 있어 SQL 직접 필터가 어렵다는
+         *         한계로, 매칭 row 수가 hard cap을 초과하는 환경에선 ``total`` 이 cap에
+         *         clamp된다. SQL JSON1로 ``bot_id`` 를 SQL 필터로 끌어올리는 최적화는
+         *         본 패치 범위(Non-Goal). 별도 이슈로 분리한다.
          */
         get: operations["get_bot_logs_api_bots__bot_id__logs_get"];
         put?: never;
@@ -4981,7 +5029,12 @@ export interface operations {
     get_bot_logs_api_bots__bot_id__logs_get: {
         parameters: {
             query?: {
+                /** @description ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. date-only는 ``T23:59:59``로 확장된다. */
+                end_date?: string | null;
                 limit?: number;
+                offset?: number;
+                /** @description ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound. */
+                start_date?: string | null;
             };
             header?: never;
             path: {
@@ -5011,13 +5064,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid date filter (ISO 8601 required). ``start_date``/``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Event history store not available */
