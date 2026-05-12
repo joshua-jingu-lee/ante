@@ -619,6 +619,9 @@ export type paths = {
          * List Configs
          * @description 동적 설정 전체 조회. 인증된 master/human 또는 ``config:read`` scope 를
          *     보유한 agent 만 호출 가능 (#1407).
+         *
+         *     저장된 값이 read invariant(예: numeric finite, #1412)를 위반하면 서비스
+         *     경계가 ``ConfigError`` 를 raise 하며, 라우트는 이를 422 로 변환한다.
          */
         get: operations["list_configs_api_config_get"];
         put?: never;
@@ -4411,10 +4414,12 @@ export interface operations {
         parameters: {
             query?: {
                 action?: string | null;
+                /** @description ISO 8601 datetime (inclusive lower bound) */
                 from_date?: string | null;
                 limit?: number;
                 member_id?: string | null;
                 offset?: number;
+                /** @description ISO 8601 datetime (inclusive upper bound) */
                 to_date?: string | null;
             };
             header?: never;
@@ -4450,13 +4455,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid date filter (ISO 8601 required). ``from_date``/``to_date``는 ISO 8601 datetime 또는 date(``YYYY-MM-DD``)만 허용한다. 파싱 불가능한 임의 문자열(예: ``not-a-date``)은FastAPI/Pydantic이 422로 거부한다(#1414). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Audit logger not available */
@@ -5138,6 +5143,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigListResponse"];
+                };
+            };
+            /** @description 저장된 dynamic config 값이 invariant 를 위반한 경우 (예: legacy non-finite numeric row — #1412). 서비스 read 경계가 ConfigError 로 격리한 결과를 422 problem+json 으로 변환한다. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Config service not available */

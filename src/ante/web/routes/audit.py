@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -32,6 +33,19 @@ router = APIRouter()
                 },
             },
         },
+        422: {
+            "description": (
+                "Invalid date filter (ISO 8601 required). ``from_date``/"
+                "``to_date``는 ISO 8601 datetime 또는 date(``YYYY-MM-DD``)"
+                "만 허용한다. 파싱 불가능한 임의 문자열(예: ``not-a-date``)은"
+                "FastAPI/Pydantic이 422로 거부한다(#1414)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Audit logger not available",
             "content": {
@@ -47,8 +61,14 @@ async def list_audit_logs(
     audit_logger: Annotated[Any, Depends(get_audit_logger)],
     member_id: str | None = None,
     action: str | None = None,
-    from_date: str | None = None,
-    to_date: str | None = None,
+    from_date: Annotated[
+        datetime | None,
+        Query(description="ISO 8601 datetime (inclusive lower bound)"),
+    ] = None,
+    to_date: Annotated[
+        datetime | None,
+        Query(description="ISO 8601 datetime (inclusive upper bound)"),
+    ] = None,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
@@ -87,18 +107,26 @@ async def list_audit_logs(
     # 두 조건 OR 모델이므로 이 정책이 안전하다). 변수 사용 표시를 위한 명시적
     # reference.
     _ = caller_id
+    # #1414: ``from_date``/``to_date``는 FastAPI/Pydantic이 ISO 8601로 파싱
+    # 완료한 ``datetime`` 객체이거나 ``None``이다. 임의 문자열은 422로 미리
+    # 거부되어 본 핸들러 진입 자체가 불가능하다. ``AuditLogger.query/count``
+    # 시그니처는 ``str | None``을 유지하므로 ``isoformat()``으로 변환해 전달
+    # 한다(SQL ``created_at`` 컬럼 비교 동작 보존, str + ISO 8601 정렬 가능
+    # 형식).
+    from_date_str = from_date.isoformat() if from_date is not None else None
+    to_date_str = to_date.isoformat() if to_date is not None else None
     logs = await audit_logger.query(
         member_id=member_id,
         action=action,
-        from_date=from_date,
-        to_date=to_date,
+        from_date=from_date_str,
+        to_date=to_date_str,
         limit=limit,
         offset=offset,
     )
     total = await audit_logger.count(
         member_id=member_id,
         action=action,
-        from_date=from_date,
-        to_date=to_date,
+        from_date=from_date_str,
+        to_date=to_date_str,
     )
     return {"logs": logs, "total": total}

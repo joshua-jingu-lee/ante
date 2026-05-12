@@ -1236,14 +1236,17 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "format": "date-time"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "ISO 8601 datetime (inclusive lower bound)",
               "title": "From Date"
-            }
+            },
+            "description": "ISO 8601 datetime (inclusive lower bound)"
           },
           {
             "name": "to_date",
@@ -1252,14 +1255,17 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "format": "date-time"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "ISO 8601 datetime (inclusive upper bound)",
               "title": "To Date"
-            }
+            },
+            "description": "ISO 8601 datetime (inclusive upper bound)"
           },
           {
             "name": "limit",
@@ -1316,8 +1322,8 @@
               }
             }
           },
-          "503": {
-            "description": "Audit logger not available",
+          "422": {
+            "description": "Invalid date filter (ISO 8601 required). ``from_date``/``to_date``는 ISO 8601 datetime 또는 date(``YYYY-MM-DD``)만 허용한다. 파싱 불가능한 임의 문자열(예: ``not-a-date``)은FastAPI/Pydantic이 422로 거부한다(#1414).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1326,12 +1332,12 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "503": {
+            "description": "Audit logger not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
