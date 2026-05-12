@@ -7,7 +7,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ante.web.deps import (
     get_account_service,
@@ -38,9 +38,17 @@ _BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
 class BotCreateRequest(BaseModel):
     """봇 생성 요청.
 
-    strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
+    strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다 (#1436).
     strategy_name만 전달하면 최신 버전의 strategy_id로 자동 변환된다.
+    둘 다 전달되면 strategy_id를 우선 사용한다.
+
+    ``model_config = ConfigDict(extra="forbid")``로 미지정 필드는 422로 거부된다
+    (#1436). 과거 ``bot_type`` 같은 legacy 키는 무시(silent drop)되었으나
+    스펙과 코드 truth(``manager.py:124-125``)가 일치하지 않아 호출자가
+    잘못된 payload를 보내도 감지되지 않았다.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     bot_id: str
     strategy_id: str | None = None
@@ -49,6 +57,20 @@ class BotCreateRequest(BaseModel):
     account_id: str | None = None
     interval_seconds: int = Field(default=60, ge=10, le=3600)
     budget: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _require_strategy_identifier(self) -> BotCreateRequest:
+        """strategy_id 또는 strategy_name 중 하나 이상 필수 (#1436).
+
+        둘 다 None이면 ValidationError로 422 거부. 둘 다 전달돼도 허용하며,
+        handler는 strategy_id를 우선 사용한다(``create_bot`` L339-348).
+        """
+        if self.strategy_id is None and self.strategy_name is None:
+            raise ValueError(
+                "strategy_id 또는 strategy_name 중 하나가 필요합니다 "
+                "(둘 다 전달 시 strategy_id 우선)"
+            )
+        return self
 
 
 # POST /api/bots OpenAPI request body 문서.
@@ -67,9 +89,31 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "인증된 master 호출자만 사용할 수 있다(#1371). "
         "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
         "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
-        "strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다."
+        "Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy "
+        "``bot_type``)는 422로 거부된다. "
+        "strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 "
+        "(model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. "
+        "OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated "
+        "TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 "
+        "한다 (codex r1 FAIL). anyOf branches 는 ``type``/``properties`` 까지 "
+        "명시하여 openapi-typescript 가 ``unknown`` 으로 붕괴되지 않고 "
+        "``{strategy_id: string} | {strategy_name: string}`` 으로 narrow 되도록 "
+        "한다 (codex r2 FAIL)."
     ),
+    "additionalProperties": False,
     "required": ["bot_id"],
+    "anyOf": [
+        {
+            "type": "object",
+            "required": ["strategy_id"],
+            "properties": {"strategy_id": {"type": "string"}},
+        },
+        {
+            "type": "object",
+            "required": ["strategy_name"],
+            "properties": {"strategy_name": {"type": "string"}},
+        },
+    ],
     "properties": {
         "bot_id": {
             "type": "string",
@@ -333,7 +377,22 @@ async def create_bot(
     try:
         body = BotCreateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # ``include_context=False, include_input=False`` 로 detail 을 sanitize
+        # 한다 (codex r3 FAIL #1436). ``_require_strategy_identifier``
+        # model_validator 가 raise 하는 ``ValueError`` 는 Pydantic
+        # ``e.errors()`` 의 ``ctx.error`` 필드에 ``ValueError`` 객체로
+        # 노출된다. ``HTTPException(detail=e.errors())`` 를 그대로 사용하면
+        # ``http_exception_handler`` 가 ``str(exc.detail)`` 로 Python repr 을
+        # 그대로 노출(``ValueError('...')``)하여 호출자가 구조적으로 파싱할
+        # 수 없는 깨진 응답이 된다. ``budget`` 같은 finite-positive 필드에
+        # NaN/Inf 가 들어오면 ``input`` 에도 non-finite ``float`` 가 담겨
+        # ``JSONResponse(allow_nan=False)`` 가 직렬화에 실패해 422 대신 500 이
+        # 반환될 수 있는 잠재 위험도 함께 sanitize 한다 (#1380 accounts.py
+        # RuleUpdateRequest 선례와 동일 패턴).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # strategy_id / strategy_name 해석 ─────────────────────
     strategy_id = body.strategy_id
@@ -1017,7 +1076,15 @@ async def update_bot(
     try:
         body = BotUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # detail sanitize — POST /api/bots 와 동일 정책 (codex r3 FAIL #1436).
+        # ``budget`` finite-positive 필드에 NaN/Inf 가 들어오면 ``input`` 에
+        # non-finite ``float`` 가 담겨 ``JSONResponse(allow_nan=False)`` 가
+        # 직렬화에 실패해 422 대신 500 이 반환될 수 있다 (#1435 BotUpdateRequest
+        # finite invariant). ``include_input=False`` 로 sanitize 한다.
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 3. 봇 존재 확인.
     bot = bot_manager.get_bot(bot_id)
