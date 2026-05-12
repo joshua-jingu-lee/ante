@@ -112,9 +112,9 @@ class TestApprovalRequestIPC:
             "status": "ok",
             "result": {
                 "id": "apr-abc",
-                "type": "strategy_deploy",
+                "type": "strategy_adopt",
                 "status": "pending",
-                "title": "전략 배포",
+                "title": "전략 채택",
             },
         }
 
@@ -125,9 +125,9 @@ class TestApprovalRequestIPC:
                     "approval",
                     "request",
                     "--type",
-                    "strategy_deploy",
+                    "strategy_adopt",
                     "--title",
-                    "전략 배포",
+                    "전략 채택",
                 ],
             )
 
@@ -137,8 +137,8 @@ class TestApprovalRequestIPC:
         call_args = mock_client.send.call_args
         assert call_args[0][0] == "approval.request"
         sent = call_args[0][1]
-        assert sent["type"] == "strategy_deploy"
-        assert sent["title"] == "전략 배포"
+        assert sent["type"] == "strategy_adopt"
+        assert sent["title"] == "전략 채택"
 
 
 class TestApprovalApproveIPC:
@@ -486,7 +486,7 @@ class TestServerNotRunningErrors:
                     "approval",
                     "request",
                     "--type",
-                    "test",
+                    "strategy_adopt",
                     "--title",
                     "timeout test",
                 ],

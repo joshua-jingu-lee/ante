@@ -38,6 +38,10 @@ def request(
     expires_in: str,
 ) -> None:
     """결재 요청 생성."""
+    # ApprovalType SSOT 검증 — heavy ``ante.approval`` 패키지를 피하기 위해
+    # ``ante.approval.models`` 만 직접 import 한다 (#1469).
+    from ante.approval.models import ApprovalType
+
     fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
 
@@ -46,6 +50,14 @@ def request(
     except json.JSONDecodeError as e:
         fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
         raise SystemExit(1) from e
+
+    valid_types = {t.value for t in ApprovalType}
+    if approval_type not in valid_types:
+        fmt.error(
+            f"invalid approval type: {approval_type!r}",
+            code="APPROVAL_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
 
     expires_at = _parse_expires_in(expires_in) if expires_in else ""
 
