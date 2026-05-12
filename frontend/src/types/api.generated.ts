@@ -2208,15 +2208,15 @@ export type components = {
             budget?: number | null;
             /** @description 봇 step 주기 (초). */
             interval_seconds?: number | null;
-            /** @description 재시작 최대 시도 횟수. */
+            /** @description 재시작 최대 시도 횟수. spec 범위 1~10 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456). */
             max_restart_attempts?: number | null;
-            /** @description step당 최대 signal 수. */
+            /** @description step당 최대 signal 수. spec 범위 1~200 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456). */
             max_signals_per_step?: number | null;
             /** @description 사용자에게 표시되는 봇 이름. */
             name?: string | null;
-            /** @description 재시작 쿨다운(초). */
+            /** @description 재시작 쿨다운(초). spec 범위 10~600 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456). */
             restart_cooldown_seconds?: number | null;
-            /** @description step 타임아웃(초). */
+            /** @description step 타임아웃(초). spec 범위 5~120 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456). */
             step_timeout_seconds?: number | null;
             /** @description 변경할 전략 이름. 최신 버전의 strategy_id로 자동 변환된다. */
             strategy_name?: string | null;

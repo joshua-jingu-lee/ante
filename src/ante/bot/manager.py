@@ -43,6 +43,17 @@ CREATE INDEX IF NOT EXISTS idx_bots_account_id ON bots(account_id);
 """
 
 
+async def _cooldown_sleep(seconds: float) -> None:
+    """BotManager 재시작/리셋 cooldown 전용 sleep.
+
+    Bot._run_loop 등 다른 sleep 경로에 영향을 주지 않고 monkeypatch 할 수
+    있도록 분리한 helper. 운영 환경에서는 ``asyncio.sleep`` 과 동일하게
+    동작하지만, 테스트에서는 이 심볼만 패치하여 cooldown 만 0초로 압축한다.
+    """
+
+    await asyncio.sleep(seconds)
+
+
 class BotManager:
     """봇들의 생명주기를 중앙 관리."""
 
@@ -776,7 +787,7 @@ class BotManager:
             return
 
         try:
-            await asyncio.sleep(bot.config.restart_cooldown_seconds)
+            await _cooldown_sleep(bot.config.restart_cooldown_seconds)
         except asyncio.CancelledError:
             raise
 
@@ -815,7 +826,7 @@ class BotManager:
     async def _reset_restart_count_after(self, bot_id: str, seconds: float) -> None:
         """일정 시간 정상 실행 후 재시작 카운터 초기화."""
         try:
-            await asyncio.sleep(seconds)
+            await _cooldown_sleep(seconds)
         except asyncio.CancelledError:
             raise
 

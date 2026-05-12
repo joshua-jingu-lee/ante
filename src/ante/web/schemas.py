@@ -304,6 +304,13 @@ class BotUpdateRequest(BaseModel):
     OpenAPI ``BOT_UPDATE_REQUEST_SCHEMA``는 ``additionalProperties: false``를
     선언한다. 런타임 모델도 ``extra="forbid"``로 동일하게 강제해 OpenAPI
     contract와 동작을 일치시킨다(#1352 — Codex Plan Review).
+
+    runtime control 4개 필드 (``max_restart_attempts``,
+    ``restart_cooldown_seconds``, ``step_timeout_seconds``,
+    ``max_signals_per_step``) 는 ``docs/dashboard/user-stories/bots.md``
+    B-5 line 197-200 spec 범위 안에서만 허용된다 (#1456). 범위 밖 값은
+    ``ValidationError`` 로 거부되어 PUT 핸들러에서 422 가 반환된다.
+    ``BotConfig`` 단의 ``validate_runtime_controls`` 와 정합한다.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -313,10 +320,10 @@ class BotUpdateRequest(BaseModel):
     interval_seconds: int | None = Field(default=None, ge=10, le=3600)
     budget: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     auto_restart: bool | None = None
-    max_restart_attempts: int | None = None
-    restart_cooldown_seconds: int | None = None
-    step_timeout_seconds: int | None = None
-    max_signals_per_step: int | None = None
+    max_restart_attempts: int | None = Field(default=None, ge=1, le=10)
+    restart_cooldown_seconds: int | None = Field(default=None, ge=10, le=600)
+    step_timeout_seconds: int | None = Field(default=None, ge=5, le=120)
+    max_signals_per_step: int | None = Field(default=None, ge=1, le=200)
 
 
 class BotListResponse(BaseModel):

@@ -67,16 +67,24 @@ def ctx():
 
 
 def _make_bot(strategy_cls, eventbus, ctx, *, step_timeout=0.01, max_signals=5):
-    """테스트용 Bot 생성."""
+    """테스트용 Bot 생성.
+
+    BotConfig 는 spec 범위(``step_timeout_seconds`` 5~120, #1456) 안의
+    값으로 만든 뒤 인스턴스 attribute 를 짧게 swap 한다 — invariant
+    validation 은 spec 통과값으로 통과시키고, 실제 ``asyncio.wait_for``
+    timeout 비교만 짧게 만들어 테스트 속도를 확보한다. ``interval_seconds``
+    도 동일 패턴.
+    """
     config = BotConfig(
         bot_id="bot1",
         strategy_id="test_stg",
         account_id="test",
         interval_seconds=60,
-        step_timeout_seconds=step_timeout,
+        step_timeout_seconds=5,
         max_signals_per_step=max_signals,
     )
     config.interval_seconds = 0.01
+    config.step_timeout_seconds = step_timeout
     bot = Bot(
         config=config,
         strategy_cls=strategy_cls,

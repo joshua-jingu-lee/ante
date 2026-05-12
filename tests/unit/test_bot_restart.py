@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ante.bot import manager as bot_manager_module
 from ante.bot.config import BotConfig, BotStatus
 from ante.bot.manager import BotManager
 from ante.core import Database
@@ -33,6 +34,30 @@ async def manager(eventbus, db):
     mgr = BotManager(eventbus=eventbus, db=db)
     await mgr.initialize()
     return mgr
+
+
+@pytest.fixture
+def _fast_restart_cooldown(monkeypatch):
+    """``BotManager`` 내부 cooldown / reset_after sleep 만 0 으로 압축.
+
+    #1456 이전에는 테스트 헬퍼가 ``restart_cooldown_seconds=0`` 으로
+    BotConfig 를 만들어 sleep 시간을 0초로 압축했다. 1456 에서 spec 범위
+    (10~600초) 외 값을 ``ValueError`` 로 막으면서 sleep 회피 책임이 테스트
+    인프라로 옮겨졌다.
+
+    ``manager._cooldown_sleep`` 만 0초 sleep 으로 교체한다. 이 helper 는
+    ``_restart_after_cooldown`` 과 ``_reset_restart_count_after`` 두 곳에서만
+    사용하므로 ``Bot._run_loop`` 의 ``asyncio.sleep(interval_seconds)`` 등
+    다른 sleep 경로에는 영향이 없다. (#1456 codex review P2)
+    """
+
+    async def _no_sleep(seconds):  # noqa: ARG001 — 의도적 매개변수 무시
+        # cooldown 자체를 즉시 종료. task scheduling 대기는 테스트 본문의
+        # ``await asyncio.sleep(0.05)`` 가 담당한다.
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(bot_manager_module, "_cooldown_sleep", _no_sleep)
+    return _no_sleep
 
 
 def _make_strategy_cls():
@@ -76,12 +101,18 @@ class TestBotConfigRestartPolicy:
 
 
 class TestBotAutoRestart:
-    async def test_restart_on_error(self, manager, eventbus):
-        """BotErrorEvent 수신 시 재시작 예약."""
+    async def test_restart_on_error(self, manager, eventbus, _fast_restart_cooldown):
+        """BotErrorEvent 수신 시 재시작 예약.
+
+        #1456 이전에는 ``restart_cooldown_seconds=0`` 으로 sleep 시간을
+        압축했지만, spec 범위(10~600) 외 값은 ``BotConfig`` 단에서
+        ``ValueError`` 가 된다. spec 통과값 10 을 쓰면서 sleep 자체는
+        ``_fast_restart_cooldown`` fixture 가 0 으로 교체한다.
+        """
         config = BotConfig(
             bot_id="b1",
             strategy_id="s1",
-            restart_cooldown_seconds=0,
+            restart_cooldown_seconds=10,
             max_restart_attempts=3,
             account_id="acc-test",
         )
@@ -96,9 +127,9 @@ class TestBotAutoRestart:
         await eventbus.publish(
             BotErrorEvent(bot_id="b1", error_message="test", account_id="acc-test")
         )
-        await asyncio.sleep(0.05)  # cooldown=0 + task 실행 대기
+        await asyncio.sleep(0.05)  # monkeypatched sleep + task 스케줄 대기
 
-        # 재시작 성공 확인 (카운터는 reset_after=0이므로 이미 리셋될 수 있음)
+        # 재시작 성공 확인 (sleep 0초 → 즉시 reset_restart_count 도 0초로 수렴)
         assert bot.status == BotStatus.RUNNING
 
     async def test_no_restart_when_disabled(self, manager, eventbus):
@@ -117,13 +148,13 @@ class TestBotAutoRestart:
         assert bot.status == BotStatus.ERROR
         assert manager.get_restart_count("b1") == 0
 
-    async def test_restart_exhausted(self, manager, eventbus):
+    async def test_restart_exhausted(self, manager, eventbus, _fast_restart_cooldown):
         """max_restart_attempts 초과 시 BotRestartExhaustedEvent."""
         config = BotConfig(
             bot_id="b1",
             strategy_id="s1",
             max_restart_attempts=2,
-            restart_cooldown_seconds=0,
+            restart_cooldown_seconds=10,
             account_id="acc-test",
         )
         bot = await manager.create_bot(config, _make_strategy_cls(), ctx=MagicMock())
@@ -145,13 +176,15 @@ class TestBotAutoRestart:
         assert exhausted[0].account_id == "acc-test"
         assert exhausted[0].restart_attempts == 2
 
-    async def test_restart_count_increments(self, manager, eventbus):
+    async def test_restart_count_increments(
+        self, manager, eventbus, _fast_restart_cooldown
+    ):
         """재시작마다 카운트 증가."""
         config = BotConfig(
             bot_id="b1",
             strategy_id="s1",
             max_restart_attempts=5,
-            restart_cooldown_seconds=0,
+            restart_cooldown_seconds=10,
             account_id="acc-test",
         )
         ctx = MagicMock()
@@ -167,7 +200,7 @@ class TestBotAutoRestart:
             BotErrorEvent(bot_id="b1", error_message="e1", account_id="acc-test")
         )
         await asyncio.sleep(0.05)
-        # cooldown=0 → reset_after=0, 카운터 즉시 리셋 가능
+        # _fast_restart_cooldown 으로 sleep 0초 → reset_after 도 0초 분기 즉시 리셋
         assert bot.status == BotStatus.RUNNING
 
         # 두 번째 에러 → 재시작
@@ -190,13 +223,15 @@ class TestBotAutoRestart:
 
 
 class TestRestartCounterReset:
-    async def test_counter_resets_after_stable_period(self, manager, eventbus):
+    async def test_counter_resets_after_stable_period(
+        self, manager, eventbus, _fast_restart_cooldown
+    ):
         """정상 실행 유지 시 카운터 리셋."""
         config = BotConfig(
             bot_id="b1",
             strategy_id="s1",
             max_restart_attempts=3,
-            restart_cooldown_seconds=0,
+            restart_cooldown_seconds=10,
             account_id="acc-test",
         )
         ctx = MagicMock()
@@ -213,17 +248,19 @@ class TestRestartCounterReset:
         )
         await asyncio.sleep(0.05)
 
-        # reset_after = 0 * 3 = 0초이므로 재시작 성공 직후 카운터가 즉시 리셋됨
+        # _fast_restart_cooldown → reset_after 도 0초 분기 → 재시작 후 카운터 리셋
         assert bot.status == BotStatus.RUNNING
         assert manager.get_restart_count("b1") == 0
 
-    async def test_counter_not_reset_if_bot_stopped(self, manager, eventbus):
+    async def test_counter_not_reset_if_bot_stopped(
+        self, manager, eventbus, _fast_restart_cooldown
+    ):
         """봇이 중지된 경우 카운터 리셋하지 않음."""
         config = BotConfig(
             bot_id="b1",
             strategy_id="s1",
             max_restart_attempts=3,
-            restart_cooldown_seconds=0,
+            restart_cooldown_seconds=10,
             account_id="acc-test",
         )
         ctx = MagicMock()
