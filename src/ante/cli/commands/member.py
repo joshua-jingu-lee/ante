@@ -21,6 +21,7 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.member.errors import PermissionDeniedError
+from ante.member.scopes import InvalidScopeError
 
 # CLI 핸들러에서 master guard 위반을 사용자 친화 메시지로 종료하기 위한 메시지.
 # ``MemberService._assert_master``가 raise하는 ``PermissionDeniedError``는 Python
@@ -288,6 +289,13 @@ def member_register(
         result, token = _run(_run_register())
     except PermissionDeniedError:
         fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
+    except InvalidScopeError as e:
+        # SCOPE_VOCABULARY (#1439) 위반은 ``ValueError`` 서브클래스이지만
+        # CLI direct path 회귀를 위해 비-0 exit code 로 명시 종료한다.
+        # 다음 분기의 ``except (ValueError, ...)`` 가 먼저 매칭되면 ``return``
+        # 으로 빠져 exit code 0 이 되므로 별도 분기로 둔다.
+        fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
