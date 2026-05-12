@@ -177,11 +177,27 @@ async def _resolve_session_caller(request: Request) -> str | None:
         return None
 
     # MemberStatus.ACTIVE 검사. enum/str 양쪽 안전 처리.
-    from ante.member.models import MemberStatus
+    from ante.member.models import MemberRole, MemberStatus
 
     status = getattr(member, "status", None)
     status_value = getattr(status, "value", status)
     if status_value != MemberStatus.ACTIVE.value:
+        return None
+
+    # legacy invalid-role 차단 (#1466 — split #1417/B). Bearer 경로는
+    # ``AuthService._assert_member_role_known`` 이 이미 ``MemberRole`` enum
+    # SSOT 를 강제하므로 caller 부착 시점에 invalid-role 이 새 들어올 수
+    # 없다. 세션 fallback 도 같은 invariant 를 공유해야 하므로 여기서 다시
+    # 검증한다 (multi-consumer 일관). 위반 시 caller 미부착 → 호출자 401.
+    role = getattr(member, "role", None)
+    role_value = getattr(role, "value", role)
+    valid_roles = {r.value for r in MemberRole}
+    if role_value not in valid_roles:
+        logger.warning(
+            "세션 fallback 거부: invalid role (member_id=%s, role=%r)",
+            member_id,
+            role_value,
+        )
         return None
 
     return member_id

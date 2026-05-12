@@ -202,6 +202,20 @@ async def me(
     if not member:
         raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다")
 
+    # legacy invalid-role 차단 (#1466 — split #1417/B). ``/api/auth/me`` 는
+    # gate-exempt-self-auth 라우트이므로 RequireAuth 의 세션 fallback 게이트
+    # 를 거치지 않는다. Bearer 경로는 TokenAuthMiddleware 가 이미
+    # ``AuthService._assert_member_role_known`` 으로 차단하지만, 세션 쿠키
+    # 경로는 본 라우트가 직접 멤버를 조회하므로 같은 invariant 를 여기서도
+    # 강제한다 (multi-consumer 일관).
+    from ante.member.models import MemberRole
+
+    role = getattr(member, "role", None)
+    role_value = getattr(role, "value", role)
+    valid_roles = {r.value for r in MemberRole}
+    if role_value not in valid_roles:
+        raise HTTPException(status_code=401, detail="인증 실패")
+
     await member_service.update_last_active(member.member_id)
 
     return MeResponse(
