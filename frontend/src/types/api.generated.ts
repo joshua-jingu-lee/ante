@@ -334,6 +334,8 @@ export type paths = {
          *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``ApprovalStatusUpdate.model_validate`` — ValidationError → 422.
+         *        ``status`` 는 ``Literal["approved", "rejected"]`` SSOT 이므로 invalid
+         *        값은 schema 단계에서 422 로 차단된다 (#1434).
          *     4. service 호출 (``approve`` / ``reject``).
          */
         patch: operations["update_approval_status_api_approvals__approval_id__status_patch"];
@@ -384,6 +386,12 @@ export type paths = {
          *     변환되어 ``AuditLogger`` 내부의 ``len(to_date) == 10`` 자동 확장 분기가
          *     작동하지 않게 되어 자정 이후 데이터를 누락하는 silent semantic
          *     regression이 발생했다. 본 구현은 str을 보존해 그 회귀를 해소한다.
+         *
+         *     Codex P2 (#1414 fix loop r2): datetime 입력(``2026-05-10T00:00:00Z`` 등)
+         *     을 r1처럼 그대로 보존하면 SQL 텍스트 비교에서 storage format(Z 없는
+         *     naive UTC)과 어긋나 inclusive boundary가 깨진다. ``Z``/offset 입력을
+         *     storage format으로 정규화하도록 헬퍼를 보강했다. date-only는 자동 확장
+         *     경로를 위해 변환 없이 그대로 보존된다.
          */
         get: operations["list_audit_logs_api_audit_get"];
         put?: never;
@@ -1938,6 +1946,11 @@ export type components = {
         /**
          * ApprovalStatusUpdate
          * @description 승인/거부 요청.
+         *
+         *     ``status`` 는 ``approved`` / ``rejected`` 만 허용되며, Pydantic
+         *     ``Literal`` SSOT 로 enum 을 OpenAPI 에 노출한다 (#1434). schema 단계에서
+         *     invalid 값이 차단되므로 handler 내 invalid status 400 분기는 reachable
+         *     하지 않다 — Pydantic 이 422 로 사전 차단한다.
          */
         ApprovalStatusUpdate: {
             /**
@@ -1945,8 +1958,11 @@ export type components = {
              * @default
              */
             memo: string;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "approved" | "rejected";
         };
         /**
          * ApprovalUpdateResponse
@@ -4361,15 +4377,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApprovalUpdateResponse"];
-                };
-            };
-            /** @description Invalid status value */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Authentication required (missing or invalid Authorization header AND missing or invalid ante_session cookie). 대시보드 사용자는 로그인 후 ante_session 쿠키만 가지고 호출하며, 에이전트 클라이언트는 Bearer 토큰만 가지고 호출한다. 둘 중 하나라도 유효하면 통과한다. */

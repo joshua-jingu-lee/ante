@@ -186,12 +186,35 @@ class TestUpdateApprovalStatus:
         assert data["approval"]["reject_reason"] == "리스크 과다"
 
     async def test_invalid_status(self, client, sample_approval):
-        """잘못된 상태값 → 400."""
+        """잘못된 상태값 → 422 (#1434).
+
+        ``ApprovalStatusUpdate.status`` 가 ``Literal["approved", "rejected"]``
+        SSOT 로 강화되어 Pydantic 이 schema 단계에서 invalid 값을 422 로
+        사전 차단한다. 기존 handler 400 분기는 제거됐다.
+        """
         resp = client.patch(
             f"/api/approvals/{sample_approval.id}/status",
             json={"status": "invalid"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
+
+    async def test_lifecycle_status_rejected_by_schema(self, client, sample_approval):
+        """lifecycle status (``pending`` 등) 는 PATCH 로 변경 불가 → 422 (#1434).
+
+        ``ApprovalStatus`` enum 에는 ``pending`` / ``cancelled`` /
+        ``execution_failed`` 등이 존재하지만 PATCH 로는 ``approved`` /
+        ``rejected`` 만 허용한다. Pydantic Literal SSOT 가 schema 단계에서
+        차단함을 회귀 보호한다.
+        """
+        for forbidden in ("pending", "cancelled", "expired", "on_hold"):
+            resp = client.patch(
+                f"/api/approvals/{sample_approval.id}/status",
+                json={"status": forbidden},
+            )
+            assert resp.status_code == 422, (
+                f"status={forbidden!r} 가 schema 단계에서 422 로 차단되지 않음 "
+                f"(actual: {resp.status_code})"
+            )
 
     def test_nonexistent_approval(self, client):
         """존재하지 않는 결재 → 404."""
@@ -260,4 +283,23 @@ class TestApprovalStatusUpdateRequestBodySchema:
         )
         assert "status" in component.get("required", []), (
             f"required 에 'status' 없음: {component.get('required')!r}"
+        )
+
+    def test_components_approval_status_update_status_enum(self, client):
+        """``components.schemas.ApprovalStatusUpdate.properties.status.enum``
+        에 ``["approved", "rejected"]`` 노출 (#1434).
+
+        ``Literal["approved", "rejected"]`` SSOT 가 OpenAPI enum 으로 노출되어
+        frontend / SDK 가 타입 단계에서 invalid 값을 차단한다.
+        """
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        openapi = resp.json()
+        schemas = openapi.get("components", {}).get("schemas", {})
+        component = schemas.get("ApprovalStatusUpdate", {})
+        status_schema = component.get("properties", {}).get("status", {})
+        enum_values = status_schema.get("enum")
+        assert enum_values == ["approved", "rejected"], (
+            "ApprovalStatusUpdate.status.enum 이 "
+            f"['approved', 'rejected'] 가 아님: {enum_values!r}"
         )

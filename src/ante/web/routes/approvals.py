@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ValidationError
@@ -30,9 +30,15 @@ router = APIRouter()
 
 
 class ApprovalStatusUpdate(BaseModel):
-    """승인/거부 요청."""
+    """승인/거부 요청.
 
-    status: str  # "approved" | "rejected"
+    ``status`` 는 ``approved`` / ``rejected`` 만 허용되며, Pydantic
+    ``Literal`` SSOT 로 enum 을 OpenAPI 에 노출한다 (#1434). schema 단계에서
+    invalid 값이 차단되므로 handler 내 invalid status 400 분기는 reachable
+    하지 않다 — Pydantic 이 422 로 사전 차단한다.
+    """
+
+    status: Literal["approved", "rejected"]
     memo: str = ""
 
 
@@ -155,14 +161,6 @@ async def get_approval(
     "/{approval_id}/status",
     response_model=ApprovalUpdateResponse,
     responses={
-        400: {
-            "description": "Invalid status value",
-            "content": {
-                "application/problem+json": {
-                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
-                },
-            },
-        },
         401: {
             "description": (
                 "Authentication required (missing or invalid Authorization "
@@ -248,6 +246,8 @@ async def update_approval_status(
        권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
     3. ``ApprovalStatusUpdate.model_validate`` — ValidationError → 422.
+       ``status`` 는 ``Literal["approved", "rejected"]`` SSOT 이므로 invalid
+       값은 schema 단계에서 422 로 차단된다 (#1434).
     4. service 호출 (``approve`` / ``reject``).
     """
     # 1. raw body 읽기 + JSON 파싱 — 인증 통과 후에만 실행된다.
@@ -271,19 +271,17 @@ async def update_approval_status(
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=e.errors()) from None
 
+    # ``body.status`` 는 ``Literal["approved", "rejected"]`` 로 좁혀지므로
+    # Pydantic 이 사전 422 로 invalid 값을 차단한다 (#1434). 따라서
+    # invalid status 400 분기는 reachable 하지 않다.
     try:
         if body.status == "approved":
             approval = await approval_service.approve(
                 id=approval_id, resolved_by=caller_id
             )
-        elif body.status == "rejected":
+        else:
             approval = await approval_service.reject(
                 id=approval_id, resolved_by=caller_id, reject_reason=body.memo
-            )
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="status는 'approved' 또는 'rejected'만 허용됩니다",
             )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
