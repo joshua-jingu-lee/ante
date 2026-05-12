@@ -30,12 +30,24 @@ export interface MemberDetailView extends MemberView {
   suspended_at?: string
 }
 
+/**
+ * POST /api/members 요청 body 의 ``role`` 은 ``MemberRole`` enum SSOT
+ * (``master`` / ``admin`` / ``default``) 만 허용한다 (#1465 — split #1417/A).
+ *
+ * display-only ``owner`` 는 ``HumanRole`` 에서 view 측 sentinel 로 남겨두지만
+ * ``MemberCreateInput.role`` 에서는 배제해야 한다 — generated
+ * ``MemberCreateRequest.role`` enum 이 좁혀지면서 ``owner`` 를 payload 로
+ * 전송하면 422 가 되므로 컴파일 시점에 차단한다. ``HumanRole`` 전체 분리는
+ * #1467 에서 다룬다.
+ */
+export type MemberCreateRole = Exclude<HumanRole, 'owner'> | 'default'
+
 export interface MemberCreateInput {
   member_id: string
   member_type: MemberType
   name: string
   org: string
-  role?: HumanRole | 'default'
+  role?: MemberCreateRole
   scopes: string[]
 }
 
