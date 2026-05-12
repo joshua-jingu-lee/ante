@@ -94,7 +94,7 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/treasury` | 자금 현황 요약 (필터: account_id) |
-| GET | `/api/treasury/transactions` | 자금 변동 이력 (필터: account_id, type, bot_id, start_date, end_date, limit, offset). `start_date`/`end_date`는 ISO `YYYY-MM-DD` (date-only)만 허용. invalid date는 422. `treasury_transactions.created_at`은 SQLite `datetime('now')` 포맷(`YYYY-MM-DD HH:MM:SS`)으로 저장되어, `start_date`는 `... 00:00:00`, `end_date`는 `... 23:59:59`로 확장되어 SQL 텍스트 비교에 사용된다 (#1440) |
+| GET | `/api/treasury/transactions` | 자금 변동 이력 (필터: account_id, type, bot_id, start_date, end_date, limit, offset). `type ∈ {allocate, deallocate, release, fill, bot_stopped_release}` (#1476) — vocabulary 외 값은 `Literal` 좁힘으로 422 거부 (#1477). `start_date`/`end_date`는 ISO `YYYY-MM-DD` (date-only)만 허용. invalid date는 422. `treasury_transactions.created_at`은 SQLite `datetime('now')` 포맷(`YYYY-MM-DD HH:MM:SS`)으로 저장되어, `start_date`는 `... 00:00:00`, `end_date`는 `... 23:59:59`로 확장되어 SQL 텍스트 비교에 사용된다 (#1440) |
 | GET | `/api/treasury/budgets` | 봇별 예산 목록 |
 | POST | `/api/treasury/bots/{bot_id}/allocate` | 봇에 예산 할당. Body: amount |
 | POST | `/api/treasury/bots/{bot_id}/deallocate` | 봇 예산 회수. Body: amount |

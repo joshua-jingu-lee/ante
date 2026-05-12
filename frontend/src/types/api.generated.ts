@@ -1808,6 +1808,11 @@ export type paths = {
          *     ``datetime('now')`` 저장 포맷(``YYYY-MM-DD HH:MM:SS``)에 맞춰
          *     ``start_date``는 ``00:00:00``, ``end_date``는 ``23:59:59``로 확장된 뒤
          *     SQL 텍스트 비교에 사용된다 (#1440).
+         *
+         *     ``type`` query는 ``TRANSACTION_TYPE_VOCABULARY`` (#1476)를 SSOT로 하는
+         *     ``Literal``로 좁혀, vocabulary 외 값을 FastAPI 단계에서 422로 거부한다
+         *     (#1477). invalid 값이 200 + empty result로 통과하던 oracle A7 host probe
+         *     회귀(fingerprint ``a4f6744a44f5``)를 차단한다.
          */
         get: operations["list_transactions_api_treasury_transactions_get"];
         put?: never;
@@ -7515,7 +7520,8 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 start_date?: string | null;
-                type?: string | null;
+                /** @description Treasury transaction type 필터. 정규 vocabulary ``allocate``, ``deallocate``, ``release``, ``fill``, ``bot_stopped_release`` (#1476) 외 값은 422로 거부된다 (#1477). 미지정 시 모든 type을 반환한다. */
+                type?: ("allocate" | "deallocate" | "release" | "fill" | "bot_stopped_release") | null;
             };
             header?: never;
             path?: never;
@@ -7532,7 +7538,7 @@ export interface operations {
                     "application/json": components["schemas"]["TransactionListResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). ``type`` query는 정규 vocabulary ``{allocate, deallocate, release, fill, bot_stopped_release}`` (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477). */
             422: {
                 headers: {
                     [name: string]: unknown;
