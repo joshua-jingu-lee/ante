@@ -345,7 +345,11 @@ async def list_strategies(
     status_code=204,
     responses={
         400: {
-            "description": "허용되지 않은 상태 전환",
+            "description": (
+                "허용되지 않은 상태 전환 (예: ``archived`` → ``adopted``). "
+                "registry transition rule 위반은 400, body validation 실패는 "
+                "422 (#1441)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -387,8 +391,11 @@ async def list_strategies(
         },
         422: {
             "description": (
-                "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, "
-                "type mismatch, extra key). 단, 인증이 실패하면 body validation "
+                "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 "
+                "누락, type mismatch, extra key, status 값이 transition target "
+                "이 아님). ``status`` 는 ``Literal['adopted','archived']`` 로 "
+                "좁혀져 ``registered`` 같은 GET filter 전용 값도 PATCH 시 "
+                "422 로 거부된다 (#1441). 단, 인증이 실패하면 body validation "
                 "은 실행되지 않고 401 이 우선 반환된다(#1378)."
             ),
             "content": {
@@ -428,9 +435,14 @@ async def update_strategy_status(
     1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
        권한 없음 → 403, 비활성 멤버 → 403.
     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
-    3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422.
-    4. ``StrategyStatus`` enum 변환 — 실패 시 400.
-    5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 불가 → 400.
+    3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422
+       (#1441 — ``extra='forbid'`` + ``Literal['adopted','archived']`` 이
+       임의 필드 / 임의 status 값 / ``registered`` transition 시도 / type
+       mismatch 를 422 로 거부).
+    4. ``StrategyStatus`` enum 변환 — Pydantic Literal 이 enum value 와 1:1
+       매칭되므로 항상 성공한다 (defense 분기 없음, #1441).
+    5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 rule
+       위반 (예: archived → adopted) → 400.
     """
     from ante.strategy.exceptions import StrategyError
     from ante.strategy.registry import StrategyStatus
@@ -450,27 +462,26 @@ async def update_strategy_status(
             status_code=422, detail="요청 body는 JSON object여야 합니다."
         )
 
-    # 2. Pydantic 검증.
+    # 2. Pydantic 검증 — ``extra='forbid'`` + ``Literal['adopted','archived']``
+    #    이 임의 필드 / invalid status / ``registered`` (transition target 아님)
+    #    / type mismatch 를 422 로 거부한다 (#1441).
     try:
         body = StatusUpdateRequest.model_validate(payload)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=e.errors()) from None
 
-    # 3. enum 변환.
-    try:
-        new_status = StrategyStatus(body.status)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"유효하지 않은 status 값: {body.status} "
-            f"(허용: {', '.join(s.value for s in StrategyStatus)})",
-        )
+    # 3. enum 변환 — Pydantic Literal value 가 ``StrategyStatus`` enum value
+    #    와 1:1 매칭이라 항상 성공한다 (#1441 — 기존 try/except ValueError
+    #    분기는 Pydantic 단에서 차단되므로 dead-code 였음).
+    new_status = StrategyStatus(body.status)
 
     try:
         await registry.update_status(strategy_id, new_status)
     except StrategyError:
         raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
     except ValueError as e:
+        # transition rule 위반 (archived → adopted 등) 은 registry layer 에서
+        # ValueError 로 시그널링된다 — 400 으로 매핑.
         raise HTTPException(status_code=400, detail=str(e))
 
 

@@ -796,7 +796,7 @@ class TestUpdateStrategyStatus:
         assert "전환 불가" in resp.json()["detail"]
 
     def test_update_status_invalid_value(self, client, registry):
-        """유효하지 않은 status 값 -> 400."""
+        """유효하지 않은 status 값 -> 422 (#1441 — Pydantic Literal 차단)."""
         registry._strategies = [
             FakeStrategyRecord(
                 strategy_id="s1",
@@ -810,8 +810,100 @@ class TestUpdateStrategyStatus:
             json={"status": "invalid_status"},
             headers=_MASTER_AUTH_HEADERS,
         )
-        assert resp.status_code == 400
-        assert "유효하지 않은 status" in resp.json()["detail"]
+        # Pydantic Literal validation 으로 422 로 거부된다 (#1441 — 기존
+        # 400 분기는 dead-code 였음).
+        assert resp.status_code == 422
+
+    def test_update_status_extra_key_rejected(self, client, registry):
+        """status 외 임의 필드는 422 로 거부 (#1441 — ``extra='forbid'``)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={"status": "archived", "unexpected": True},
+            headers=_MASTER_AUTH_HEADERS,
+        )
+        assert resp.status_code == 422
+        # transition 이 실행되지 않았음을 확인 (extra key 차단으로 handler
+        # 진입 자체가 차단).
+        assert registry._strategies[0].status == StrategyStatus.REGISTERED
+
+    def test_update_status_extra_key_reason_rejected(self, client, registry):
+        """status + 추가 ``reason`` 필드도 422 (#1441 — closed object)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.ADOPTED,
+            ),
+        ]
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={"status": "archived", "reason": "test"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
+        assert resp.status_code == 422
+        assert registry._strategies[0].status == StrategyStatus.ADOPTED
+
+    def test_update_status_registered_rejected_as_transition(self, client, registry):
+        """``registered`` 는 GET filter 전용 — PATCH 시 422 (#1441)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={"status": "registered"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
+        # transition target 이 아니므로 Pydantic Literal 단에서 422.
+        assert resp.status_code == 422
+
+    def test_update_status_missing_field(self, client, registry):
+        """``status`` 누락 -> 422 (#1441 — required 필드)."""
+        registry._strategies = [
+            FakeStrategyRecord(
+                strategy_id="s1",
+                name="s1",
+                version="1",
+                status=StrategyStatus.REGISTERED,
+            ),
+        ]
+        resp = client.patch(
+            "/api/strategies/s1/status",
+            json={},
+            headers=_MASTER_AUTH_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    def test_update_status_nonexistent_with_valid_body(self, client):
+        """정상 body (``adopted``) 전달해도 strategy 없으면 404 회귀 (#1441)."""
+        resp = client.patch(
+            "/api/strategies/nonexistent/status",
+            json={"status": "adopted"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
+        assert resp.status_code == 404
+
+    def test_update_status_nonexistent_archived_body(self, client):
+        """정상 body (``archived``) 전달해도 strategy 없으면 404 회귀 (#1441)."""
+        resp = client.patch(
+            "/api/strategies/nonexistent/status",
+            json={"status": "archived"},
+            headers=_MASTER_AUTH_HEADERS,
+        )
+        assert resp.status_code == 404
 
 
 class TestListStrategiesStatusFilter:

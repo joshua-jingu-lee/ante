@@ -2732,7 +2732,7 @@
           "strategies"
         ],
         "summary": "Update Strategy Status",
-        "description": "전략 상태 변경. 보관 전환용. 인증된 master/human 또는\n``strategy:write`` scope 를 보유한 agent 만 호출 가능 (#1378).\n\n``submit_report`` (#1374) / ``update_config`` (#1373) 와 동일한 raw body\n파싱 패턴을 적용해 인증 가드가 body validation 보다 우선 실행되도록 한다.\nFastAPI 가 ``body: StatusUpdateRequest`` 를 먼저 검증하면 unauth + bad-body\n시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,\n   권한 없음 → 403, 비활성 멤버 → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422.\n4. ``StrategyStatus`` enum 변환 — 실패 시 400.\n5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 불가 → 400.",
+        "description": "전략 상태 변경. 보관 전환용. 인증된 master/human 또는\n``strategy:write`` scope 를 보유한 agent 만 호출 가능 (#1378).\n\n``submit_report`` (#1374) / ``update_config`` (#1373) 와 동일한 raw body\n파싱 패턴을 적용해 인증 가드가 body validation 보다 우선 실행되도록 한다.\nFastAPI 가 ``body: StatusUpdateRequest`` 를 먼저 검증하면 unauth + bad-body\n시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,\n   권한 없음 → 403, 비활성 멤버 → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422\n   (#1441 — ``extra='forbid'`` + ``Literal['adopted','archived']`` 이\n   임의 필드 / 임의 status 값 / ``registered`` transition 시도 / type\n   mismatch 를 422 로 거부).\n4. ``StrategyStatus`` enum 변환 — Pydantic Literal 이 enum value 와 1:1\n   매칭되므로 항상 성공한다 (defense 분기 없음, #1441).\n5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 rule\n   위반 (예: archived → adopted) → 400.",
         "operationId": "update_strategy_status_api_strategies__strategy_id__status_patch",
         "parameters": [
           {
@@ -2750,7 +2750,7 @@
             "description": "Successful Response"
           },
           "400": {
-            "description": "허용되지 않은 상태 전환",
+            "description": "허용되지 않은 상태 전환 (예: ``archived`` → ``adopted``). registry transition rule 위반은 400, body validation 실패는 422 (#1441).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2790,7 +2790,7 @@
             }
           },
           "422": {
-            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, extra key). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1378).",
+            "description": "Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, extra key, status 값이 transition target 이 아님). ``status`` 는 ``Literal['adopted','archived']`` 로 좁혀져 ``registered`` 같은 GET filter 전용 값도 PATCH 시 422 로 거부된다 (#1441). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1378).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8735,9 +8735,14 @@
         "type": "object"
       },
       "StatusUpdateRequest": {
-        "description": "전략 상태 변경 요청.",
+        "additionalProperties": false,
+        "description": "전략 상태 변경 요청.\n\nSSOT: ``docs/specs/web-api/05-resource-endpoints.md`` PATCH\n``/api/strategies/{strategy_id}/status``. ``status`` 는 transition 가능한\n상태만 허용한다 — ``registered`` 는 등록 시점 초기값이므로 PATCH 의\ntarget 이 아니다 (GET filter 의 ``_VALID_STATUS_FILTERS`` 와는 별도).\n\ninvariants (#1441):\n- ``model_config = ConfigDict(extra=\"forbid\")`` — 정의되지 않은 필드는\n  Pydantic 단에서 422 로 거부 (handler 도달 차단). OpenAPI 에서는\n  ``additionalProperties: false`` 로 노출되어 generated TS client 가\n  closed object type 으로 좁힌다.\n- ``status: Literal[\"adopted\", \"archived\"]`` — transition target 만\n  enum 으로 노출. ``registered`` / 임의 문자열 / type mismatch 는 422.\n  handler 의 enum 변환 분기는 defense-in-depth 로 ``StrategyStatus``\n  registry transition rule (예: archived → adopted 차단) 만 다룬다.",
         "properties": {
           "status": {
+            "enum": [
+              "adopted",
+              "archived"
+            ],
             "title": "Status",
             "type": "string"
           }

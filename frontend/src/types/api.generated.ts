@@ -1350,9 +1350,14 @@ export type paths = {
          *     1. 인증 가드 (``Depends(require_strategy_write)``) — caller 빈 → 401,
          *        권한 없음 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
-         *     3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422.
-         *     4. ``StrategyStatus`` enum 변환 — 실패 시 400.
-         *     5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 불가 → 400.
+         *     3. ``StatusUpdateRequest.model_validate`` — ValidationError → 422
+         *        (#1441 — ``extra='forbid'`` + ``Literal['adopted','archived']`` 이
+         *        임의 필드 / 임의 status 값 / ``registered`` transition 시도 / type
+         *        mismatch 를 422 로 거부).
+         *     4. ``StrategyStatus`` enum 변환 — Pydantic Literal 이 enum value 와 1:1
+         *        매칭되므로 항상 성공한다 (defense 분기 없음, #1441).
+         *     5. ``registry.update_status`` 호출 — 누락 strategy → 404, 전환 rule
+         *        위반 (예: archived → adopted) → 400.
          */
         patch: operations["update_strategy_status_api_strategies__strategy_id__status_patch"];
         trace?: never;
@@ -3263,10 +3268,28 @@ export type components = {
         /**
          * StatusUpdateRequest
          * @description 전략 상태 변경 요청.
+         *
+         *     SSOT: ``docs/specs/web-api/05-resource-endpoints.md`` PATCH
+         *     ``/api/strategies/{strategy_id}/status``. ``status`` 는 transition 가능한
+         *     상태만 허용한다 — ``registered`` 는 등록 시점 초기값이므로 PATCH 의
+         *     target 이 아니다 (GET filter 의 ``_VALID_STATUS_FILTERS`` 와는 별도).
+         *
+         *     invariants (#1441):
+         *     - ``model_config = ConfigDict(extra="forbid")`` — 정의되지 않은 필드는
+         *       Pydantic 단에서 422 로 거부 (handler 도달 차단). OpenAPI 에서는
+         *       ``additionalProperties: false`` 로 노출되어 generated TS client 가
+         *       closed object type 으로 좁힌다.
+         *     - ``status: Literal["adopted", "archived"]`` — transition target 만
+         *       enum 으로 노출. ``registered`` / 임의 문자열 / type mismatch 는 422.
+         *       handler 의 enum 변환 분기는 defense-in-depth 로 ``StrategyStatus``
+         *       registry transition rule (예: archived → adopted 차단) 만 다룬다.
          */
         StatusUpdateRequest: {
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "adopted" | "archived";
         };
         /**
          * StorageSummaryResponse
@@ -6600,7 +6623,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 허용되지 않은 상태 전환 */
+            /** @description 허용되지 않은 상태 전환 (예: ``archived`` → ``adopted``). registry transition rule 위반은 400, body validation 실패는 422 (#1441). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6636,7 +6659,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, extra key). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1378). */
+            /** @description Body validation 실패 (JSON 파싱 실패, 빈 body, 필수 필드 누락, type mismatch, extra key, status 값이 transition target 이 아님). ``status`` 는 ``Literal['adopted','archived']`` 로 좁혀져 ``registered`` 같은 GET filter 전용 값도 PATCH 시 422 로 거부된다 (#1441). 단, 인증이 실패하면 body validation 은 실행되지 않고 401 이 우선 반환된다(#1378). */
             422: {
                 headers: {
                     [name: string]: unknown;
