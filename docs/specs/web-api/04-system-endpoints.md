@@ -12,10 +12,10 @@
 |--------|------|------|
 | GET | `/api/system/status` | 시스템 상태 (status, version) |
 | GET | `/api/system/health` | 헬스체크. 응답 스키마는 아래 [헬스체크 상세](#헬스체크-상세-get-apisystemhealth) 참조 |
-| POST | `/api/system/halt` | 시스템 전역 정지. 모든 ACTIVE 계좌를 SUSPENDED로 전환. 파라미터: reason. 응답 shape은 아래 [Kill Switch 응답 SSOT](#kill-switch-응답-ssot-post-apisystemhalt--post-apisystemclear-halt) 참조 |
-| POST | `/api/system/clear-halt` | 시스템 전역 정지 해제. 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. 계좌 상태만 복구하며 봇을 자동 재시작하지 않는다. 응답 shape은 아래 [Kill Switch 응답 SSOT](#kill-switch-응답-ssot-post-apisystemhalt--post-apisystemclear-halt) 참조 |
+| POST | `/api/system/halt` | 시스템 전역 정지. 모든 ACTIVE 계좌를 SUSPENDED로 전환. Body: `{"reason"?: string}` (전체 optional). **schema (#1442):** Pydantic `extra='forbid'` + OpenAPI `additionalProperties: false` — `account_id` 등 정의되지 않은 키는 422 로 거부된다 (silent drop 금지). 응답 shape은 아래 [Kill Switch 응답 SSOT](#kill-switch-응답-ssot-post-apisystemhalt--post-apisystemclear-halt) 참조 |
+| POST | `/api/system/clear-halt` | 시스템 전역 정지 해제. 모든 SUSPENDED 계좌를 ACTIVE로 복구한다. 계좌 상태만 복구하며 봇을 자동 재시작하지 않는다. Body: `{"reason"?: string}` (전체 optional). **schema (#1442):** Pydantic `extra='forbid'` + OpenAPI `additionalProperties: false` — `account_id` 등 정의되지 않은 키는 422 로 거부된다. 응답 shape은 아래 [Kill Switch 응답 SSOT](#kill-switch-응답-ssot-post-apisystemhalt--post-apisystemclear-halt) 참조 |
 
-> 단일 계좌 단위 정지/재개는 Account 모듈 엔드포인트(`POST /api/accounts/{id}/suspend` / `POST /api/accounts/{id}/activate`)를 사용한다. `/api/system/halt` / `/api/system/clear-halt`는 전역 편의 명령이며, 단일 계좌 파라미터를 받지 않는다.
+> 단일 계좌 단위 정지/재개는 Account 모듈 엔드포인트(`POST /api/accounts/{id}/suspend` / `POST /api/accounts/{id}/activate`)를 사용한다. `/api/system/halt` / `/api/system/clear-halt`는 **전역 kill switch** 이며 단일 계좌 파라미터를 받지 않는다 — body 에 `account_id` 를 포함시키면 422 로 거부된다 (#1442). account-scoped halt body 신규 도입은 별도 이슈에서 spec 갱신 후 다룬다.
 
 ## Kill Switch 응답 SSOT (`POST /api/system/halt` / `POST /api/system/clear-halt`)
 

@@ -274,6 +274,112 @@ class TestHaltClearHalt:
         )
         assert resp.status_code == 404
 
+    # ── #1442 HaltRequest / ClearHaltRequest extra='forbid' 회귀 ──────
+    #
+    # ``/api/system/halt`` 와 ``/api/system/clear-halt`` 는 전역 kill switch
+    # 이므로 ``account_id`` 등 임의 키를 body 에 받아 silent drop 하면 호출자
+    # 의도(예: 단일 계좌 정지)와 실제 동작(전역 정지)이 어긋난다. Pydantic
+    # ``model_config = ConfigDict(extra='forbid')`` 로 422 거부를 강제하고,
+    # 차단 시 ``suspend_all`` / ``activate_all`` 이 호출되지 않음을 검증한다.
+
+    def test_halt_rejects_account_id_extra_key(self, client, account_service):
+        """``account_id`` 포함 body → 422 + service no-call (#1442).
+
+        전역 kill switch 에 account-scoped body 를 흘려보내면 호출자 의도가
+        전역 동작과 어긋난다. ``extra='forbid'`` 로 명시적 거부한다.
+        """
+        resp = client.post(
+            "/api/system/halt",
+            json={"account_id": "domestic", "reason": "y"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        account_service.suspend_all.assert_not_called()
+
+    def test_clear_halt_rejects_account_id_extra_key(self, client, account_service):
+        """``account_id`` 포함 body → 422 + service no-call (#1442)."""
+        resp = client.post(
+            "/api/system/clear-halt",
+            json={"account_id": "domestic"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        account_service.activate_all.assert_not_called()
+
+    def test_halt_rejects_arbitrary_extra_key(self, client, account_service):
+        """임의 키 (``unexpected``) 포함 body → 422 (#1442 — closed object)."""
+        resp = client.post(
+            "/api/system/halt",
+            json={"unexpected": 1},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        account_service.suspend_all.assert_not_called()
+
+    def test_clear_halt_rejects_arbitrary_extra_key(self, client, account_service):
+        """임의 키 포함 body → 422 (#1442 — closed object)."""
+        resp = client.post(
+            "/api/system/clear-halt",
+            json={"unexpected": 1},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 422
+        account_service.activate_all.assert_not_called()
+
+    def test_halt_valid_reason_regression(self, client, account_service):
+        """정상 body (``{"reason": "valid"}``) → 200 회귀 (#1442)."""
+        resp = client.post(
+            "/api/system/halt",
+            json={"reason": "valid"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "halted"
+        account_service.suspend_all.assert_called_once()
+
+    def test_halt_empty_body_regression(self, client, account_service):
+        """빈 body (``{}``) → 200 회귀 (#1442 — ``reason`` default ``""``)."""
+        resp = client.post(
+            "/api/system/halt",
+            json={},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "halted"
+        account_service.suspend_all.assert_called_once()
+
+    def test_clear_halt_valid_reason_regression(self, client, account_service):
+        """정상 body (``{"reason": "reset"}``) → 200 회귀 (#1442)."""
+        resp = client.post(
+            "/api/system/clear-halt",
+            json={"reason": "reset"},
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "halt_cleared"
+        account_service.activate_all.assert_called_once()
+
+    def test_halt_request_openapi_additional_properties_false(self, client):
+        """OpenAPI ``HaltRequest.additionalProperties == False`` (#1442).
+
+        ``_install_openapi_customizer`` 가 ``components.schemas`` 에 등록한
+        ``HaltRequest`` schema 가 ``extra='forbid'`` 를 노출해야 frontend
+        generated client 가 closed object type 으로 좁혀진다.
+        """
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        schema = resp.json()
+        halt_schema = schema["components"]["schemas"]["HaltRequest"]
+        assert halt_schema.get("additionalProperties") is False
+
+    def test_clear_halt_request_openapi_additional_properties_false(self, client):
+        """OpenAPI ``ClearHaltRequest.additionalProperties == False`` (#1442)."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        schema = resp.json()
+        clear_schema = schema["components"]["schemas"]["ClearHaltRequest"]
+        assert clear_schema.get("additionalProperties") is False
+
 
 class TestDynamicConfig:
     def test_list_configs(self, client, dynamic_config):
