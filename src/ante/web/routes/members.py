@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from ante.member.errors import PermissionDeniedError
-from ante.member.models import MemberStatus, MemberType
+from ante.member.models import MemberRole, MemberStatus, MemberType
 from ante.member.scopes import SCOPE_VOCABULARY, InvalidScopeError
 from ante.web.deps import (
     get_audit_logger_optional,
@@ -73,13 +73,18 @@ def _validate_scopes_vocabulary(value: list[str]) -> list[str]:
 
 
 class MemberCreateRequest(BaseModel):
-    """멤버 등록 요청."""
+    """멤버 등록 요청.
+
+    ``role`` 은 ``MemberRole`` enum SSOT(``master`` / ``admin`` / ``default``)
+    로 강제한다 (#1465 — split #1417/A). 알 수 없는 role 문자열은 Pydantic
+    이 자동으로 422 로 거부하므로 service / token 생성 전에 차단된다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     member_id: str
     member_type: str  # "human" | "agent"
-    role: str = "default"
+    role: MemberRole = MemberRole.DEFAULT
     org: str = "default"
     name: str = ""
     scopes: list[str] = []
@@ -118,8 +123,14 @@ MEMBER_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         },
         "role": {
             "type": "string",
+            "enum": ["master", "admin", "default"],
             "default": "default",
-            "description": "역할 (default / master).",
+            "description": (
+                "멤버 역할. ``MemberRole`` enum SSOT 에 따라 ``master`` / "
+                "``admin`` / ``default`` 중 하나여야 한다 (#1465, SSOT: "
+                "``src/ante/member/models.py``). 알 수 없는 문자열은 422 로 "
+                "거부된다."
+            ),
         },
         "org": {
             "type": "string",

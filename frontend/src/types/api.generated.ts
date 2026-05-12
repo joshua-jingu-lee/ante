@@ -2637,10 +2637,11 @@ export type components = {
              */
             org: string;
             /**
-             * @description 역할 (default / master).
+             * @description 멤버 역할. ``MemberRole`` enum SSOT 에 따라 ``master`` / ``admin`` / ``default`` 중 하나여야 한다 (#1465, SSOT: ``src/ante/member/models.py``). 알 수 없는 문자열은 422 로 거부된다.
              * @default default
+             * @enum {string}
              */
-            role: string;
+            role: "master" | "admin" | "default";
             /**
              * @description 권한 범위 목록. 각 원소는 SCOPE_VOCABULARY (#1439, SSOT: ``src/ante/member/scopes.py``) 에 등록된 문자열이어야 한다. 미등록 문자열은 422 로 거부된다.
              * @default []
