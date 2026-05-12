@@ -12,6 +12,20 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
+# CLI preflight copy of StrategyStatus values.
+#
+# 실제 SSOT는 `src/ante/strategy/registry.py:66-71`의 `StrategyStatus` enum이다.
+# 본 frozenset은 #1463(`ante.strategy.__init__` heavy import 분리)까지의 임시
+# preflight 복사본이며, registry/DB 진입 전에 `--status` 입력을 거부하기 위한
+# 가벼운 차단막으로만 쓴다. enum과의 drift는 동치성 회귀 테스트
+# (`tests/unit/test_cli_strategy_list_invalid_status.py::
+# test_preflight_set_matches_enum_ssot`)로 차단한다.
+# #1463이 끝나면 본 frozenset은 제거하고 `StrategyStatus`를 모듈 최상단에서
+# 직접 import해 사용한다.
+VALID_STRATEGY_STATUSES: frozenset[str] = frozenset(
+    {"registered", "adopted", "archived"}
+)
+
 
 @click.group()
 def strategy() -> None:
@@ -191,6 +205,18 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
     """등록된 전략 목록 조회."""
     fmt = get_formatter(ctx)
 
+    # Preflight: invalid --status는 registry/DB 진입 전에 차단한다.
+    # `VALID_STRATEGY_STATUSES`는 `StrategyStatus` SSOT의 #1463까지의 임시 복사본
+    # (drift는 enum 동치성 회귀 테스트로 차단). 이로써 일반적인 입력 오타가
+    # `StrategyStatus(status)` ValueError → Python traceback으로 새지 않고
+    # flat JSON error로 종료된다.
+    if status is not None and status not in VALID_STRATEGY_STATUSES:
+        fmt.error(
+            f"잘못된 status 값: {status!r}. 허용값: {sorted(VALID_STRATEGY_STATUSES)}",
+            code="STRATEGY_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+
     async def _list() -> list[dict]:
         from ante.strategy.registry import StrategyStatus
 
@@ -214,7 +240,16 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         finally:
             await db.close()
 
-    rows = _run(_list())
+    # account.py:683-687 패턴: click.ClickException은 그대로 전파해 click의
+    # 표준 출력 경로를 보존하고, 나머지 일반 Exception은 STRATEGY_ERROR로
+    # 분류해 구조화된 에러로 종료한다(traceback 노출 차단).
+    try:
+        rows = _run(_list())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        fmt.error(str(e), code="STRATEGY_ERROR")
+        raise SystemExit(1) from e
 
     if not rows:
         fmt.output({"message": "등록된 전략 없음", "strategies": []})
