@@ -7,7 +7,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ante.web.deps import (
     get_account_service,
@@ -38,9 +38,17 @@ _BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
 class BotCreateRequest(BaseModel):
     """봇 생성 요청.
 
-    strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
+    strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다 (#1436).
     strategy_name만 전달하면 최신 버전의 strategy_id로 자동 변환된다.
+    둘 다 전달되면 strategy_id를 우선 사용한다.
+
+    ``model_config = ConfigDict(extra="forbid")``로 미지정 필드는 422로 거부된다
+    (#1436). 과거 ``bot_type`` 같은 legacy 키는 무시(silent drop)되었으나
+    스펙과 코드 truth(``manager.py:124-125``)가 일치하지 않아 호출자가
+    잘못된 payload를 보내도 감지되지 않았다.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     bot_id: str
     strategy_id: str | None = None
@@ -49,6 +57,20 @@ class BotCreateRequest(BaseModel):
     account_id: str | None = None
     interval_seconds: int = Field(default=60, ge=10, le=3600)
     budget: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _require_strategy_identifier(self) -> BotCreateRequest:
+        """strategy_id 또는 strategy_name 중 하나 이상 필수 (#1436).
+
+        둘 다 None이면 ValidationError로 422 거부. 둘 다 전달돼도 허용하며,
+        handler는 strategy_id를 우선 사용한다(``create_bot`` L339-348).
+        """
+        if self.strategy_id is None and self.strategy_name is None:
+            raise ValueError(
+                "strategy_id 또는 strategy_name 중 하나가 필요합니다 "
+                "(둘 다 전달 시 strategy_id 우선)"
+            )
+        return self
 
 
 # POST /api/bots OpenAPI request body 문서.
@@ -67,8 +89,12 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "인증된 master 호출자만 사용할 수 있다(#1371). "
         "Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, "
         "둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. "
-        "strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다."
+        "Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy "
+        "``bot_type``)는 422로 거부된다. "
+        "strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 "
+        "(model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다."
     ),
+    "additionalProperties": False,
     "required": ["bot_id"],
     "properties": {
         "bot_id": {

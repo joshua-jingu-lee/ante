@@ -2041,7 +2041,7 @@ export type components = {
         };
         /**
          * BotCreateRequest
-         * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 한다.
+         * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy ``bot_type``)는 422로 거부된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 (model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다.
          */
         BotCreateRequest: {
             /** @description 사용할 계좌 ID. 미지정 시 단일 active 계좌가 자동 선택된다. */
