@@ -6,7 +6,11 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from ante.report.models import ReportStatus, StrategyReport
+from ante.report.models import (
+    ReportStatus,
+    StrategyReport,
+    validate_strategy_report_metrics,
+)
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -55,7 +59,18 @@ class ReportStore:
         logger.info("ReportStore 초기화 완료")
 
     async def submit(self, report: StrategyReport) -> str:
-        """리포트 제출."""
+        """리포트 제출.
+
+        save boundary guard (#1415 codex r3): metric invariant 위반 시 ``ValueError``.
+        read path (``_row_to_report``)는 legacy invalid row 호환을 위해 우회한다.
+        """
+        validate_strategy_report_metrics(
+            report.total_trades,
+            report.win_rate,
+            report.total_return_pct,
+            report.sharpe_ratio,
+            report.max_drawdown_pct,
+        )
         await self._db.execute(
             """INSERT INTO reports
                (report_id, strategy_name, strategy_version,
@@ -100,7 +115,17 @@ class ReportStore:
 
         동일 strategy_name의 기존 DRAFT가 있으면 덮어쓰고,
         없으면 새로 삽입한다.
+
+        save boundary guard (#1415 codex r3): metric invariant 위반 시 ``ValueError``.
+        read path (``_row_to_report``)는 legacy invalid row 호환을 위해 우회한다.
         """
+        validate_strategy_report_metrics(
+            report.total_trades,
+            report.win_rate,
+            report.total_return_pct,
+            report.sharpe_ratio,
+            report.max_drawdown_pct,
+        )
         existing = await self._db.fetch_one(
             "SELECT report_id FROM reports WHERE strategy_name = ? AND status = ?",
             (report.strategy_name, ReportStatus.DRAFT.value),
