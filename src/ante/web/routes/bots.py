@@ -35,14 +35,15 @@ router = APIRouter()
 
 _BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
 
-# bot logs API (#1437)는 ``bot_id`` 가 payload JSON 안이라 SQL 직접 필터가
-# 어렵다. 정확한 ``total`` / pagination을 위해 매칭 가능 범위(event_type +
-# since/until)를 한번에 fetch한 뒤 in-memory에서 ``bot_id`` 를 필터링한다.
-# retention 30일 (``EventHistoryStore.cleanup`` 기본값) × 봇당 step 빈도를
-# 고려해 cap을 두며, cap 초과 시 ``total`` 이 clamp될 수 있음을 핸들러
-# docstring에 명시한다. JSON1로 SQL 직접 필터를 끌어올리는 최적화는 별도
-# 이슈로 분리한다.
-_BOT_LOGS_FETCH_HARD_CAP = 10000
+# bot logs API (#1437) — r2는 ``EventHistoryStore``에 SQL JSON1
+# ``payload_filter``를 추가해 ``bot_id``를 SQL 단계에서 필터링하므로
+# in-memory fetch hard cap이 필요 없다. r1의 ``_BOT_LOGS_FETCH_HARD_CAP``
+# (=10000)은 다른 봇의 로그가 cap을 채워서 특정 봇 로그를 누락시킬 수
+# 있는 silent failure였다(Codex P2 #2). r2에서 제거됨.
+#
+# in-memory ``EventBus.get_history`` fallback은 ring buffer(``_history_size``,
+# 기본 1000)로 자연 제한되므로 별도 cap 없이도 안전하다.
+_BOT_LOGS_INMEMORY_FETCH_LIMIT = 10000
 
 
 class BotCreateRequest(BaseModel):
@@ -1305,85 +1306,86 @@ async def get_bot_logs(
           입력을 UTC-naive ``datetime``으로 정규화한 뒤 ``EventHistoryStore``
           SQL filter(``timestamp >= ? AND timestamp <= ?``)에 전달한다.
 
-    Codex P2 (#1437 fix loop r1):
-        r0 구현은 두 가지 silent regression이 있었다.
+    Codex P2 (#1437 fix loop r2):
+        r1 구현은 두 가지 silent failure가 남아있었다.
 
-        (1) ``store.query(limit=limit)`` + in-memory 페이지 슬라이스 — store가
-            처음부터 ``LIMIT limit``만 fetch하기 때문에 ``offset=10&limit=10``
-            요청 시 2페이지가 비거나 짧고, ``total`` 카운트가 처음 limit
-            범위로만 제한된다. 본 r1 구현은 store에 ``offset``/``until``과
-            ``count`` 시그니처를 확장하고, ``bot_id`` 가 payload JSON 안에
-            있어 SQL 직접 필터가 어렵다는 한계를 인정해, **매칭 가능 범위를
-            모두 가져온 뒤 in-memory에서 ``bot_id`` 필터 → ``total`` → 페이지
-            슬라이스** 흐름으로 변경한다. ``EventHistoryStore.query``에 추가된
-            ``offset`` 파라미터는 ``bot_id`` 필터 미적용 호출자(미래 dashboard
-            total badge 등)가 효율적인 페이지네이션을 할 수 있도록 보강해두지만,
-            본 핸들러는 ``bot_id`` 정확성 우선으로 사용하지 않는다.
-            매칭 row 수가 과도하게 커지지 않도록 hard cap
-            ``_BOT_LOGS_FETCH_HARD_CAP``을 둔다(retention 30일 가정 하 충분).
+        (1) ``EventHistoryStore.query`` 시그니처 — r1은 ``until``을 ``limit``
+            앞 위치 인자로 추가해 기존 caller ``store.query(type, since, 50)``
+            의 세 번째 위치 인자 ``50``이 ``limit`` 대신 ``until``로
+            잘못 바인딩되는 위험이 있었다. r2는 ``until``/``offset``/
+            ``payload_filter``를 keyword-only로 옮겨 위치 인자 호환성을
+            복원한다.
 
-        (2) ``start_date``/``end_date`` 를 입력 그대로(``+09:00`` 등 offset
-            suffix 포함) in-memory ``timestamp >= start_date`` 문자열 비교에
-            사용 — storage timestamp는 UTC-naive ISO 문자열이라 ASCII 정렬
-            규칙으로 실제 UTC 시간과 어긋난다 (#1414 audit r2와 동일 패턴).
-            본 r1 구현은 ``_validate_iso_date_param``으로 입력을 UTC-naive
-            ``datetime``으로 정규화하고, ``EventHistoryStore``의 SQL 텍스트
+        (2) hard cap ``_BOT_LOGS_FETCH_HARD_CAP=10000`` — r1은 ``bot_id`` 가
+            payload JSON 안이라 SQL 직접 필터가 어렵다는 이유로 매칭 가능
+            범위(event_type + since/until)를 한번에 10000건 fetch한 뒤
+            in-memory ``bot_id`` 필터를 적용했다. 다른 봇의 로그가 cap을
+            먼저 채우면 특정 봇의 로그가 결과에서 누락될 수 있다(여러 봇이
+            병렬로 step을 찍는 환경에서 silent under-count). r2는
+            ``EventHistoryStore``에 SQL JSON1 ``payload_filter``를 추가해
+            ``bot_id``를 SQL 단계에서 필터링한다 — cap이 필요 없고
+            ``total``/``logs``가 cap에 무관하게 정확하다.
+
+        (3) ``start_date``/``end_date`` 의 timezone 정합 (r1에서 해결, r2에서
+            그대로 유지): ``_validate_iso_date_param``으로 입력을 UTC tz-aware
+            ``datetime``으로 정규화한 뒤 ``EventHistoryStore``의 SQL 텍스트
             비교에 그대로 사용한다. event timestamp는 dataclass field default
-            ``datetime.now(timezone.utc)``로 tz-aware UTC이지만,
-            ``isoformat()`` 결과를 SQL 텍스트로 비교하므로 ``+00:00`` suffix가
-            있을 수 있다. inclusive boundary는 ``>=``/``<=`` 비교라서
-            ``T00:00:00`` < ``T00:00:00+00:00`` < ``T23:59:59+00:00`` <
-            ``T23:59:59Z`` (ASCII) 관계가 성립하므로, ``date.fromisoformat``
-            확장 datetime(``T00:00:00`` / ``T23:59:59``)이 안전한 하한/상한이
-            된다.
-
-    Note: ``bot_id`` 가 payload JSON 안에 있어 SQL 직접 필터가 어렵다는
-        한계로, 매칭 row 수가 hard cap을 초과하는 환경에선 ``total`` 이 cap에
-        clamp된다. SQL JSON1로 ``bot_id`` 를 SQL 필터로 끌어올리는 최적화는
-        본 패치 범위(Non-Goal). 별도 이슈로 분리한다.
+            ``datetime.now(UTC)``로 tz-aware UTC이며, ``isoformat()`` 결과의
+            ``+00:00`` suffix가 양쪽에 일관되게 붙어 ASCII 비교가 실제 UTC
+            시간 관계와 일치한다.
     """
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
-    # ISO 8601 검증 + UTC-naive 정규화 (timezone 정렬 일관화).
-    # end_date는 ``end_of_day=True``로 date-only를 ``T23:59:59``로 확장.
+    # ISO 8601 검증 + UTC tz-aware 정규화 (timezone 정렬 일관화).
+    # end_date는 ``end_of_day=True``로 date-only를 ``T23:59:59.999999``로 확장.
     start_validated = _validate_iso_date_param(start_date, "start_date")
     end_validated = _validate_iso_date_param(end_date, "end_date", end_of_day=True)
 
-    all_logs: list[dict] = []
-
     if event_history_store is not None:
-        # bot_id가 payload JSON 안이라 SQL 직접 필터 불가 → 매칭 가능 범위
-        # 모두 fetch 후 in-memory bot_id 필터로 total/페이지 계산.
+        # r2: ``bot_id``를 SQL JSON1 ``payload_filter``로 끌어올려 SQL 단계
+        # 필터링. ``total``은 ``count(...)``가 페이지네이션과 무관한 정확
+        # 매칭 row 수를 반환. hard cap 불필요.
+        payload_filter = {"bot_id": bot_id}
         rows = await event_history_store.query(
             event_type="BotStepCompletedEvent",
             since=start_validated,
+            limit=limit,
             until=end_validated,
-            limit=_BOT_LOGS_FETCH_HARD_CAP,
-            offset=0,
+            offset=offset,
+            payload_filter=payload_filter,
         )
-        for row in rows:
-            payload = row.get("payload", {})
-            if payload.get("bot_id") == bot_id:
-                all_logs.append(
-                    {
-                        "event_id": row.get("event_id", ""),
-                        "timestamp": row.get("timestamp", ""),
-                        "result": payload.get("result", ""),
-                        "message": payload.get("message", ""),
-                    }
-                )
-    elif eventbus is not None:
+        total = await event_history_store.count(
+            event_type="BotStepCompletedEvent",
+            since=start_validated,
+            until=end_validated,
+            payload_filter=payload_filter,
+        )
+        logs = [
+            {
+                "event_id": row.get("event_id", ""),
+                "timestamp": row.get("timestamp", ""),
+                "result": row.get("payload", {}).get("result", ""),
+                "message": row.get("payload", {}).get("message", ""),
+            }
+            for row in rows
+        ]
+        return {"bot_id": bot_id, "logs": logs, "total": total}
+
+    if eventbus is not None:
         from ante.eventbus.events import BotStepCompletedEvent
 
-        # in-memory ring buffer 기반 ``get_history``는 store와 달리
-        # ``since``/``until``/``offset`` 시그니처가 없으므로(Non-Goal,
-        # 작업 범위 외), 큰 hard cap으로 fetch 후 in-memory 필터.
+        # in-memory ring buffer ``get_history``는 ``since``/``until``/
+        # ``offset``/``payload_filter`` 시그니처가 없으므로(Non-Goal — bus
+        # interface 변경은 본 패치 범위 외), ring buffer는 자체 사이즈
+        # 제한이 있어 cap 없이 안전. 핸들러에서 ``bot_id``/날짜/페이지
+        # 필터를 in-memory로 적용한다.
         history = eventbus.get_history(
             event_type=BotStepCompletedEvent,
-            limit=_BOT_LOGS_FETCH_HARD_CAP,
+            limit=_BOT_LOGS_INMEMORY_FETCH_LIMIT,
         )
+        filtered: list[dict] = []
         for evt in history:
             if evt.bot_id != bot_id:
                 continue
@@ -1399,7 +1401,7 @@ async def get_bot_logs(
                 continue
             if end_validated is not None and evt_ts > end_validated:
                 continue
-            all_logs.append(
+            filtered.append(
                 {
                     "event_id": str(evt.event_id),
                     "timestamp": evt.timestamp.isoformat(),
@@ -1408,7 +1410,8 @@ async def get_bot_logs(
                 }
             )
 
-    total = len(all_logs)
-    paginated = all_logs[offset : offset + limit]
+        total = len(filtered)
+        paginated = filtered[offset : offset + limit]
+        return {"bot_id": bot_id, "logs": paginated, "total": total}
 
-    return {"bot_id": bot_id, "logs": paginated, "total": total}
+    return {"bot_id": bot_id, "logs": [], "total": 0}

@@ -832,3 +832,191 @@ class TestBotLogsTimezoneNormalization1437R1:
         assert r2.status_code == 200
         assert r1.json()["total"] == r2.json()["total"]
         assert r1.json()["total"] == 3
+
+
+class TestBotLogsSqlPayloadFilter1437R2:
+    """#1437 fix loop r2 회귀 — Codex P2 (hard cap silent miss + 위치 인자
+    오바인딩).
+
+    r1은 두 가지 silent failure가 남아있었다:
+
+    (1) ``EventHistoryStore.query`` 시그니처가 ``until``을 ``limit`` 앞 위치
+        인자로 추가해 ``query(type, since, 50)`` 같은 세 번째 위치 인자
+        ``50`` 이 ``limit`` 대신 ``until``로 잘못 바인딩되었다.
+    (2) ``_BOT_LOGS_FETCH_HARD_CAP=10000``으로 매칭 가능 범위를 한번에
+        fetch한 뒤 in-memory ``bot_id`` 필터를 적용하므로, 다른 봇의 로그가
+        cap을 먼저 채우면 특정 봇의 로그가 결과에서 누락될 수 있었다
+        (여러 봇이 병렬로 step을 찍는 환경에서 silent under-count).
+
+    r2는 (1) ``until``/``offset``/``payload_filter``를 keyword-only로
+    옮기고, (2) ``EventHistoryStore``에 SQL JSON1 ``payload_filter``를
+    추가해 ``bot_id``를 SQL 단계에서 필터링한다 → hard cap 제거.
+
+    본 클래스는 다른 봇의 대량 로그(>= 기존 cap의 일부)가 있어도 특정
+    봇의 로그가 정확하게 반환되는지를 web 레이어에서 검증한다.
+    """
+
+    @pytest.fixture
+    def bot_manager(self):
+        mgr = FakeBotManager()
+        mgr._bots["target-bot"] = FakeBot("target-bot")
+        return mgr
+
+    @pytest.fixture
+    def event_history_store(self):
+        """target-bot 로그 5건 + 다른 봇 로그 200건 (target 로그가 fetch
+        순서상 가장 오래된 시점에 위치하도록 배치).
+
+        ``ORDER BY id DESC``로 fetch하면 다른 봇 200건이 먼저 나오고
+        target-bot 5건이 뒤에 위치한다. r1의 fetch hard cap (작게
+        시뮬레이션) 이라면 다른 봇 로그가 cap을 채워 target 로그가
+        누락되지만, r2는 SQL JSON1 ``payload_filter``로 SQL 단계 필터링
+        하므로 cap 무관하게 정확.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from ante.core import Database
+        from ante.eventbus.history import EventHistoryStore
+
+        async def _setup():
+            import tempfile
+
+            tmpdir = tempfile.mkdtemp(prefix="ante-test-")
+            db = Database(f"{tmpdir}/event.db")
+            await db.connect()
+            store = EventHistoryStore(db=db)
+            await store.initialize()
+            base = datetime(2026, 5, 10, 0, 0, 0, tzinfo=UTC)
+            # target-bot 5건 (가장 먼저 기록 → 가장 작은 id).
+            for i in range(5):
+                ts = base + timedelta(seconds=i)
+                await store.record(
+                    BotStepCompletedEvent(
+                        bot_id="target-bot",
+                        account_id="test",
+                        result="success",
+                        message=f"target-{i}",
+                        timestamp=ts,
+                    )
+                )
+            # 다른 봇 200건 (target보다 뒤 → 더 큰 id, ORDER BY id DESC에서
+            # 먼저 fetch됨). r1의 cap=10000보다는 적지만 cap-relative
+            # 회귀 유닛 테스트로 충분.
+            for i in range(200):
+                ts = base + timedelta(minutes=1, seconds=i)
+                await store.record(
+                    BotStepCompletedEvent(
+                        bot_id=f"other-{i}",
+                        account_id="test",
+                        result="success",
+                        message=f"other-step-{i}",
+                        timestamp=ts,
+                    )
+                )
+            return store, db
+
+        store, db = asyncio.get_event_loop().run_until_complete(_setup())
+        yield store
+        asyncio.get_event_loop().run_until_complete(db.close())
+
+    @pytest.fixture
+    def client(self, bot_manager, event_history_store):
+        app = create_app(
+            bot_manager=bot_manager,
+            event_history_store=event_history_store,
+            account_service=FakeAccountService(),
+            member_service=make_master_member_service(),
+        )
+        return make_authed_client(app)
+
+    def test_target_logs_returned_despite_other_bot_volume(self, client):
+        """다른 봇 로그가 다수 있어도 target-bot 로그 5건 모두 반환.
+
+        r2: SQL JSON1 ``payload_filter``로 ``bot_id='target-bot'``을 SQL
+        단계 필터링 → ``total=5``, 페이지 ``logs``에 5건 모두.
+        """
+        resp = client.get("/api/bots/target-bot/logs?limit=100")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["logs"]) == 5
+        # message는 ORDER BY id DESC라 target-4 → target-0 순.
+        messages = [log["message"] for log in data["logs"]]
+        assert messages == ["target-4", "target-3", "target-2", "target-1", "target-0"]
+
+    def test_target_logs_total_accurate_under_small_limit(self, client):
+        """``limit=2`` 페이지로 잘라도 ``total=5`` 정확히 보존.
+
+        r1 회귀 시나리오: in-memory pagination + hard cap → ``total`` 이
+        다른 봇 로그로 cap에 묶일 위험. r2: SQL ``COUNT(*)`` + JSON1
+        payload_filter로 정확.
+        """
+        resp = client.get("/api/bots/target-bot/logs?limit=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["logs"]) == 2
+
+    def test_target_logs_offset_pagination_isolated_from_other_bots(self, client):
+        """``offset=2&limit=2`` → target 5건 중 2..3 번째만 (다른 봇 로그
+        영향 없음).
+
+        SQL OFFSET이 payload_filter 이후에 적용되므로 다른 봇 로그가
+        offset 카운트에 끼어들지 않는다.
+        """
+        resp = client.get("/api/bots/target-bot/logs?offset=2&limit=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["logs"]) == 2
+        messages = [log["message"] for log in data["logs"]]
+        # ORDER BY id DESC: target-4,3,2,1,0 → offset=2: target-2, target-1.
+        assert messages == ["target-2", "target-1"]
+
+
+class TestEventHistoryStoreSignatureCompat1437R2:
+    """#1437 r2 — ``EventHistoryStore.query`` 시그니처 회귀.
+
+    r1은 ``until``을 ``limit`` 앞 위치 인자로 추가해 기존 caller
+    ``store.query(event_type, since, 50)`` 의 세 번째 위치 인자 ``50``이
+    ``limit`` 대신 ``until``로 잘못 바인딩되는 silent failure가 있었다.
+    r2는 ``until``/``offset``/``payload_filter``를 keyword-only로 옮기고
+    ``limit``을 세 번째 위치 인자 자리에 유지한다.
+    """
+
+    def test_query_three_positional_args_binds_third_to_limit(self):
+        """``store.query(event_type, since, 50)`` 형태로 호출 시 세 번째
+        위치 인자 ``50``이 ``limit``으로 안전하게 바인딩된다.
+
+        r1 회귀: ``50``이 ``until``로 바인딩되어 datetime 비교가 깨졌다.
+        r2 fix: ``until`` keyword-only.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from ante.core import Database
+        from ante.eventbus.events import OrderRequestEvent
+        from ante.eventbus.history import EventHistoryStore
+
+        async def _check():
+            import tempfile
+
+            tmpdir = tempfile.mkdtemp(prefix="ante-test-")
+            db = Database(f"{tmpdir}/event.db")
+            await db.connect()
+            store = EventHistoryStore(db=db)
+            await store.initialize()
+            base = datetime(2026, 5, 10, 0, 0, 0, tzinfo=UTC)
+            for i in range(7):
+                ts = base + timedelta(seconds=i)
+                await store.record(
+                    OrderRequestEvent(symbol=str(i), account_id="acc", timestamp=ts)
+                )
+            # 세 번째 위치 인자가 limit이어야 한다.
+            rows = await store.query("OrderRequestEvent", None, 3)
+            await db.close()
+            return rows
+
+        rows = asyncio.get_event_loop().run_until_complete(_check())
+        # 3건 반환, 모두 OrderRequestEvent.
+        assert len(rows) == 3
+        assert all(r["event_type"] == "OrderRequestEvent" for r in rows)
