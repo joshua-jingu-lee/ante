@@ -34,10 +34,11 @@ export const MEMBER_STATUS_LABELS: Record<string, string> = {
   revoked: '폐기',
 }
 
-/** 자금 변동 유형 라벨 */
+/** 자금 변동 유형 라벨 (#1476: 5-value vocabulary와 일관) */
 export const TRANSACTION_TYPE_LABELS: Record<string, string> = {
   allocate: '할당',
   deallocate: '회수',
+  release: '회수(봇 삭제)',
   fill: '체결',
   bot_stopped_release: '예약해제',
 }
@@ -46,6 +47,7 @@ export const TRANSACTION_TYPE_LABELS: Record<string, string> = {
 export const TRANSACTION_TYPE_VARIANT: Record<string, string> = {
   allocate: 'positive',
   deallocate: 'warning',
+  release: 'warning',
   fill: 'primary',
   bot_stopped_release: 'default',
 }
