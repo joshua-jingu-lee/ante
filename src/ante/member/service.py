@@ -17,6 +17,7 @@ from ante.member.auth import (
 from ante.member.auth_service import AuthService
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
 from ante.member.recovery_key_manager import RecoveryKeyManager
+from ante.member.scopes import InvalidScopeError, is_valid_scope
 from ante.member.token_manager import TokenManager, _token_expires_at
 
 __all__ = ["MemberService", "ANIMAL_EMOJI_POOL", "MEMBER_SCHEMA", "_token_expires_at"]
@@ -342,10 +343,22 @@ class MemberService:
         scopes: list[str] | None = None,
         registered_by: str = "",
     ) -> tuple[Member, str]:
-        """멤버 등록 + 토큰 반환."""
+        """멤버 등록 + 토큰 반환.
+
+        ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
+        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. Web API
+        ingress 는 Pydantic field validator 로 동일 invariant 를 검증하지만
+        CLI direct path 와 내부 caller 가 본 메소드를 직접 호출할 수 있으므로
+        service 계층에서 한 번 더 방어한다(defense-in-depth).
+        """
         if registered_by:
             await self._assert_master(registered_by, "register")
         self._assert_type_role(member_type, role)
+
+        # vocabulary 검증은 type/role 검증 이후, DB I/O 이전에 수행한다.
+        # CLI direct path 회귀 (#1439).
+        scopes = scopes or []
+        self._assert_scopes_vocabulary(scopes)
 
         existing = await self.get(member_id)
         if existing:
@@ -360,7 +373,6 @@ class MemberService:
 
         token, t_hash, expires_at = self._token_manager.create_token(member_type)
         now = _now()
-        scopes = scopes or []
 
         member = Member(
             member_id=member_id,
@@ -640,8 +652,15 @@ class MemberService:
         ``updated_by``는 master 권한 caller여야 한다(#1351). 이전에는
         ``if updated_by:`` 가드 때문에 빈 caller가 master 검증을 우회했으나,
         본 가드를 제거해 빈 caller도 거부한다.
+
+        ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
+        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. Web API
+        ingress 가 Pydantic field validator 로 422 차단하지만 CLI 직접 호출과
+        내부 caller 를 위해 service 계층에서 한 번 더 방어한다.
         """
         await self._assert_master(updated_by, "update_scopes")
+        # vocabulary 검증은 master 검증 직후, 멤버 조회 / DB write 이전에 수행한다.
+        self._assert_scopes_vocabulary(scopes)
         member = await self._get_or_raise(member_id)
         self._assert_active(member, "update_scopes")
 
@@ -682,6 +701,21 @@ class MemberService:
             msg = f"존재하지 않는 멤버: {member_id}"
             raise ValueError(msg)
         return member
+
+    @staticmethod
+    def _assert_scopes_vocabulary(scopes: list[str]) -> None:
+        """``scopes`` 의 각 원소가 ``SCOPE_VOCABULARY`` 에 포함되는지 검증한다.
+
+        위반 시 첫 invalid scope 를 인자로 ``InvalidScopeError`` 를 raise 한다.
+        ``InvalidScopeError`` 는 ``ValueError`` 서브클래스이므로 기존
+        ``except ValueError`` 핸들러도 동일하게 처리된다(#1439).
+
+        빈 리스트는 통과시킨다. ``None`` 은 caller(``register`` /
+        ``update_scopes``) 에서 빈 리스트로 정규화한 뒤 본 헬퍼를 호출한다.
+        """
+        for scope in scopes:
+            if not is_valid_scope(scope):
+                raise InvalidScopeError(scope)
 
     @staticmethod
     def _assert_type_role(member_type: str, role: str) -> None:

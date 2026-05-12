@@ -8,10 +8,11 @@ from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from ante.member.errors import PermissionDeniedError
 from ante.member.models import MemberStatus, MemberType
+from ante.member.scopes import SCOPE_VOCABULARY, InvalidScopeError
 from ante.web.deps import (
     get_audit_logger_optional,
     get_member_service,
@@ -50,6 +51,27 @@ _AUTH_REQUIRED_RESPONSE: dict[str, Any] = {
 }
 
 
+def _validate_scopes_vocabulary(value: list[str]) -> list[str]:
+    """scopes 필드 element 가 ``SCOPE_VOCABULARY`` 에 등록되어 있는지 검증한다.
+
+    SSOT 는 ``src/ante/member/scopes.py`` (#1439 — Codex Plan Review r1 결정).
+    invalid 시 ``ValueError`` 를 raise 하여 Pydantic 이 422 로 자동 변환하게
+    한다. ``MemberCreateRequest.scopes`` 와 ``ScopesUpdateRequest.scopes`` 양쪽에
+    동일 invariant 를 강제한다.
+
+    인증 가드 이후에 실행되어야 한다 (#1339 / #1351 — auth-first 순서). 본
+    validator 는 Pydantic ``model_validate`` 단계에서 실행되며, 라우트는 raw
+    body 파싱 패턴으로 인증 가드를 먼저 통과시킨 뒤 ``model_validate`` 를
+    호출하므로 unauth + invalid scope 케이스에서도 401 이 먼저 반환되어
+    contract 가 보존된다.
+    """
+    for scope in value:
+        if scope not in SCOPE_VOCABULARY:
+            msg = f"unsupported scope: {scope!r}"
+            raise ValueError(msg)
+    return value
+
+
 class MemberCreateRequest(BaseModel):
     """멤버 등록 요청."""
 
@@ -61,6 +83,8 @@ class MemberCreateRequest(BaseModel):
     org: str = "default"
     name: str = ""
     scopes: list[str] = []
+
+    _validate_scopes = field_validator("scopes")(_validate_scopes_vocabulary)
 
 
 # POST /api/members OpenAPI request body 문서.
@@ -111,7 +135,11 @@ MEMBER_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string"},
             "default": [],
-            "description": "권한 범위 목록.",
+            "description": (
+                "권한 범위 목록. 각 원소는 SCOPE_VOCABULARY (#1439, SSOT: "
+                "``src/ante/member/scopes.py``) 에 등록된 문자열이어야 한다. "
+                "미등록 문자열은 422 로 거부된다."
+            ),
         },
     },
 }
@@ -178,11 +206,16 @@ class ScopesUpdateRequest(BaseModel):
     false``를 선언한다. 런타임 모델도 ``extra="forbid"``로 동일하게 강제해
     OpenAPI contract와 동작을 일치시킨다(#1351 2차 Codex review FAIL — Finding
     P2: ScopesUpdateRequest contract drift). ``MemberCreateRequest`` SSOT.
+
+    ``scopes`` 각 원소는 ``SCOPE_VOCABULARY`` (``src/ante/member/scopes.py``)
+    에 등록되어야 한다(#1439). 위반 시 Pydantic 이 자동으로 422 를 반환한다.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     scopes: list[str]
+
+    _validate_scopes = field_validator("scopes")(_validate_scopes_vocabulary)
 
 
 # PUT /api/members/{member_id}/scopes OpenAPI request body 문서.
@@ -211,7 +244,11 @@ MEMBER_SCOPES_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
         "scopes": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "변경할 권한 범위 목록.",
+            "description": (
+                "변경할 권한 범위 목록. 각 원소는 SCOPE_VOCABULARY (#1439, "
+                "SSOT: ``src/ante/member/scopes.py``) 에 등록된 문자열이어야 "
+                "한다. 미등록 문자열은 422 로 거부된다."
+            ),
         },
     },
 }
@@ -404,6 +441,12 @@ async def create_member(
             scopes=body.scopes,
             registered_by=caller,
         )
+    except InvalidScopeError as e:
+        # ingress(Pydantic field_validator) 가 통상 차단하지만 service 가
+        # 별도 경로에서 raise 한 경우 422 로 매핑한다 (#1439 — Codex Plan
+        # Review r1 defense-in-depth). ``ValueError`` 분기보다 먼저 catch
+        # 해야 동일 super class 매칭에서 400 으로 가려지지 않는다.
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except (PermissionError, PermissionDeniedError) as e:
@@ -951,6 +994,12 @@ async def update_scopes(
     # 4. service 호출.
     try:
         member = await svc.update_scopes(member_id, body.scopes, updated_by=caller)
+    except InvalidScopeError as e:
+        # ingress(Pydantic field_validator) 가 통상 차단하지만 service 가
+        # 별도 경로에서 raise 한 경우 422 로 매핑한다 (#1439). 매트릭스에서
+        # ``ValueError`` 분기보다 먼저 catch 해야 ``InvalidScopeError`` 가
+        # ``ValueError`` 의 서브클래스인 점이 404 로 새지 않는다.
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (PermissionError, PermissionDeniedError) as e:

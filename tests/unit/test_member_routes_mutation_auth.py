@@ -506,13 +506,16 @@ class TestBearerMasterSuccess:
     def test_update_scopes_with_master_bearer_succeeds(
         self, client: TestClient, member_service: FakeMemberService
     ) -> None:
+        # ``trade:write`` 는 SCOPE_VOCABULARY (#1439) 에 없는 invalid scope 이므로
+        # ``trade:read`` + ``audit:read`` 같은 valid 조합으로 master 인증 성공
+        # path 만 잠근다 (인증 통과 + 정상 service 호출 → 200).
         resp = client.put(
             "/api/members/target-active/scopes",
             headers={"Authorization": "Bearer master-token"},
-            json={"scopes": ["trade:read", "trade:write"]},
+            json={"scopes": ["trade:read", "audit:read"]},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["member"]["scopes"] == ["trade:read", "trade:write"]
+        assert resp.json()["member"]["scopes"] == ["trade:read", "audit:read"]
         assert member_service.update_scopes_calls[-1]["updated_by"] == "master-user"
 
     def test_change_password_with_master_bearer_succeeds(

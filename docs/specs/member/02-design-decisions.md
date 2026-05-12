@@ -195,6 +195,14 @@ master(human)는 scope 제한 없이 모든 작업을 수행할 수 있다. scop
 
 > `signal` 도메인은 봇별 signal key(`sk_`) 인증으로 동작하며, member scope 체계 밖이다.
 
+**Scope vocabulary 코드 SSOT**: 위 매트릭스의 "—"가 아닌 모든 cell 은
+`src/ante/member/scopes.py` 의 `SCOPE_VOCABULARY: frozenset[str]` 에 등록되어
+있다(#1439). Web API ingress(Pydantic field validator), `MemberService.register`
+/ `update_scopes` (defense-in-depth), CLI 입력 모두 이 vocabulary 에 대해
+검증되며, 등록되지 않은 scope 문자열은 입력 시점에 거부된다. spec doc
+매트릭스와 `SCOPE_VOCABULARY` 의 drift 는 `tests/unit/test_member_scope_drift.py`
+가 정적으로 검증한다.
+
 ### Member command runtime boundary
 
 `member list/info`는 오프라인 조회가 가능하다. 등록, 정지, 재활성화, 폐기,

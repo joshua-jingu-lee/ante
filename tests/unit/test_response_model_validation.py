@@ -1068,18 +1068,24 @@ class TestMemberResponseModels:
         assert model.ok is True
 
     def test_member_scopes_response(self):
-        """PUT /api/members/{member_id}/scopes."""
+        """PUT /api/members/{member_id}/scopes.
+
+        본 테스트는 response model 직렬화만 검증한다. scopes 값은
+        SCOPE_VOCABULARY (#1439, ``src/ante/member/scopes.py``) 에 포함된
+        valid 조합을 사용한다. 이전 fixture 의 ``trade:write`` 는 spec
+        매트릭스에 없는 invalid scope.
+        """
         data = {
             "member": {
                 "member_id": "agent-1",
                 "name": "에이전트",
                 "type": "agent",
                 "role": "agent",
-                "scopes": ["trade:read", "trade:write"],
+                "scopes": ["trade:read", "audit:read"],
             }
         }
         model = MemberScopesResponse.model_validate(data)
-        assert model.member.scopes == ["trade:read", "trade:write"]
+        assert model.member.scopes == ["trade:read", "audit:read"]
 
 
 # ── 감사 로그 라우트 응답 모델 ──────────────────────────

@@ -397,14 +397,19 @@ class TestChangePassword:
 
 class TestScopesUpdate:
     def test_update_scopes(self, client, member_service):
-        """권한 범위 변경."""
+        """권한 범위 변경.
+
+        ``trade:write`` 는 spec 매트릭스(``docs/specs/member/02-design-decisions.md``)
+        와 ``SCOPE_VOCABULARY`` (#1439) 에 없는 invalid scope 이므로
+        ``trade:read`` + ``audit:read`` 같은 valid 조합으로 회귀를 잠근다.
+        """
         member_service._members["agent-01"] = FakeMember(member_id="agent-01")
         resp = client.put(
             "/api/members/agent-01/scopes",
-            json={"scopes": ["trade:read", "trade:write"]},
+            json={"scopes": ["trade:read", "audit:read"]},
         )
         assert resp.status_code == 200
-        assert resp.json()["member"]["scopes"] == ["trade:read", "trade:write"]
+        assert resp.json()["member"]["scopes"] == ["trade:read", "audit:read"]
 
 
 class TestCallerIdPropagation:
