@@ -3382,24 +3382,24 @@ class TestUpdateStrategyStatusAuthMatrix:
         assert resp.status_code == 422
         assert strategy_registry.update_status_calls == []
 
-    # 400 — 인증 통과 + invalid status / 전환 불가 ──────────────────
+    # 422 — 인증 통과 + invalid status (#1441 — Pydantic Literal 차단) ────
 
-    def test_update_strategy_status_master_invalid_status_returns_400(
+    def test_update_strategy_status_master_invalid_status_returns_422(
         self, client: TestClient, strategy_registry: FakeStrategyRegistry
     ) -> None:
-        """master + 허용 enum 외 status → 400.
+        """master + 허용 enum 외 status → 422 (#1441).
 
-        Pydantic 단계는 통과하지만 ``StrategyStatus(body.status)`` 변환에서
-        ValueError 가 발생해 400 으로 떨어진다. 400 차단 시 ``update_status``
-        는 호출되지 않는다.
+        ``StatusUpdateRequest.status`` 가 ``Literal['adopted','archived']``
+        로 좁혀져 Pydantic 단계에서 422 로 거부된다 (기존 handler 의 400
+        분기는 dead-code 가 되어 제거됨). 422 차단 시 ``update_status`` 는
+        호출되지 않는다.
         """
         resp = client.patch(
             _STRATEGY_STATUS_PATH,
             json={"status": "invalid_status_value"},
             headers={"Authorization": "Bearer master-token"},
         )
-        assert resp.status_code == 400, resp.text
-        assert "유효하지 않은 status" in resp.json()["detail"]
+        assert resp.status_code == 422, resp.text
         assert strategy_registry.update_status_calls == []
 
     # 404 — master + missing strategy ─────────────────────────────────
@@ -3447,6 +3447,36 @@ class TestUpdateStrategyStatusOpenAPI:
         component = components["StatusUpdateRequest"]
         assert "status" in component.get("required", []), (
             f"StatusUpdateRequest.status 가 required 에서 빠졌다: {component}"
+        )
+
+    def test_status_update_request_status_enum_literal(
+        self, client: TestClient
+    ) -> None:
+        """``status`` 는 ``Literal['adopted','archived']`` 로 노출되어야 한다
+        (#1441). ``registered`` 는 GET filter 전용이라 transition target 이
+        아니므로 enum 에 포함되어선 안 된다.
+        """
+        spec = client.get("/openapi.json").json()
+        components = spec.get("components", {}).get("schemas", {})
+        component = components["StatusUpdateRequest"]
+        status_prop = component.get("properties", {}).get("status", {})
+        assert status_prop.get("enum") == ["adopted", "archived"], (
+            f"StatusUpdateRequest.status enum 이 transition target 으로 좁혀지지 "
+            f"않았다: {status_prop}"
+        )
+
+    def test_status_update_request_additional_properties_false(
+        self, client: TestClient
+    ) -> None:
+        """``extra='forbid'`` 가 OpenAPI 에서 ``additionalProperties: false`` 로
+        노출되어야 한다 (#1441 — generated TS client closed object type).
+        """
+        spec = client.get("/openapi.json").json()
+        components = spec.get("components", {}).get("schemas", {})
+        component = components["StatusUpdateRequest"]
+        assert component.get("additionalProperties") is False, (
+            f"StatusUpdateRequest.additionalProperties 가 False 가 아니다 — "
+            f"extra='forbid' 가 OpenAPI 로 전파되지 않았다: {component}"
         )
 
     def test_update_strategy_status_route_responses_include_401_403(

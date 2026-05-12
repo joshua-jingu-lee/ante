@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import time as dtime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -336,9 +336,26 @@ class BotDetailResponse(BaseModel):
 
 
 class StatusUpdateRequest(BaseModel):
-    """전략 상태 변경 요청."""
+    """전략 상태 변경 요청.
 
-    status: str  # "adopted" | "archived"
+    SSOT: ``docs/specs/web-api/05-resource-endpoints.md`` PATCH
+    ``/api/strategies/{strategy_id}/status``. ``status`` 는 transition 가능한
+    상태만 허용한다 — ``registered`` 는 등록 시점 초기값이므로 PATCH 의
+    target 이 아니다 (GET filter 의 ``_VALID_STATUS_FILTERS`` 와는 별도).
+
+    invariants (#1441):
+    - ``model_config = ConfigDict(extra="forbid")`` — 정의되지 않은 필드는
+      Pydantic 단에서 422 로 거부 (handler 도달 차단). OpenAPI 에서는
+      ``additionalProperties: false`` 로 노출되어 generated TS client 가
+      closed object type 으로 좁힌다.
+    - ``status: Literal["adopted", "archived"]`` — transition target 만
+      enum 으로 노출. ``registered`` / 임의 문자열 / type mismatch 는 422.
+      handler 의 enum 변환 분기는 defense-in-depth 로 ``StrategyStatus``
+      registry transition rule (예: archived → adopted 차단) 만 다룬다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["adopted", "archived"]
 
 
 class StrategyValidateRequest(BaseModel):

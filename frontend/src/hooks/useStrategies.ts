@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary, getStrategyTradesPaginated, updateStrategyStatus } from '../api/strategies'
+import { getStrategies, getStrategyDetail, getStrategyPerformance, getStrategyTrades, getStrategyDailySummary, getStrategyWeeklySummary, getStrategyMonthlySummary, getStrategyTradesPaginated, updateStrategyStatus, type StrategyStatusTransition } from '../api/strategies'
 import { showToast } from '../components/common/Toast'
 
 export function useStrategies(params?: { search?: string }) {
@@ -72,7 +72,7 @@ export function useStrategyStatusTransition() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
+    mutationFn: ({ id, status }: { id: string; status: StrategyStatusTransition }) =>
       updateStrategyStatus(id, status),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['strategies'] })

@@ -192,10 +192,15 @@ export async function getStrategyMonthlySummary(id: string): Promise<MonthlySumm
   return res.data.items.map(toMonthlySummary)
 }
 
+export type StrategyStatusTransition = ApiStatusUpdateRequest['status']
+
 export async function updateStrategyStatus(
   id: string,
-  status: string,
+  status: StrategyStatusTransition,
 ): Promise<void> {
+  // generated type narrowing (#1441): `status` 는 `'adopted' | 'archived'`
+  // 로 좁혀져 transition target 만 허용한다 — `registered` 등 GET filter
+  // 전용 값은 컴파일 시점에 차단된다.
   const payload: ApiStatusUpdateRequest = { status }
   await client.patch<ApiStrategyDetailResponse>(`/api/strategies/${id}/status`, payload)
 }

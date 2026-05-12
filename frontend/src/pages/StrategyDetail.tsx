@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useStrategyDetail, useStrategyPerformance, useStrategyTrades, useStrategyDailySummary, useStrategyWeeklySummary, useStrategyMonthlySummary, useStrategyStatusTransition } from '../hooks/useStrategies'
+import type { StrategyStatusTransition } from '../api/strategies'
 import PerformancePanel from '../components/strategies/PerformancePanel'
 import PeriodPerformance from '../components/strategies/PeriodPerformance'
 import EquityCurveChart from '../components/charts/EquityCurveChart'
@@ -60,7 +61,7 @@ export default function StrategyDetail() {
   const budgetAllocated = strategy.budget_allocated
   const unrealizedPnl = strategy.unrealized_pnl
 
-  const handleStatusTransition = (newStatus: string) => {
+  const handleStatusTransition = (newStatus: StrategyStatusTransition) => {
     statusTransition.mutate({ id, status: newStatus })
   }
 
@@ -266,7 +267,13 @@ function formatShortDateTime(dateStr: string | undefined | null): string {
   return `${mm}-${dd} ${hh}:${min}`
 }
 
-/** 전략 상태별 액션 버튼 */
+/** 전략 상태별 액션 버튼.
+ *
+ * `onTransition` 은 generated API contract (#1441) 에 따라 transition target
+ * (`'adopted' | 'archived'`) 만 받는다. `'active' | 'inactive'` 같은
+ * deprecated 값은 컴파일 시점에 차단된다 — `StatusUpdateRequest.status`
+ * Literal narrowing (#1441) 의 자연스러운 연쇄.
+ */
 function StatusActionButtons({
   status,
   hasRunningBot,
@@ -276,24 +283,29 @@ function StatusActionButtons({
   status: StrategyStatus
   hasRunningBot: boolean
   isPending: boolean
-  onTransition: (newStatus: string) => void
+  onTransition: (newStatus: StrategyStatusTransition) => void
 }) {
   if (status === 'archived') return null
 
   if (status === 'active') {
+    // dead-branch: 도메인 StrategyStatus 에는 `'active'` 가 남아 있으나
+    // backend enum (`registered | adopted | archived`) 에 정합하지 않는다.
+    // PATCH transition 으로 보낼 수 있는 값은 `'adopted' | 'archived'` 뿐이라
+    // 비활성화 버튼을 보관 처리로 fallback 한다. status state machine 정리
+    // 자체는 본 변경 범위 밖 (#1441 Non-Goals).
     const disabled = hasRunningBot || isPending
     return (
       <div className="relative">
         <button
           disabled={disabled}
-          onClick={() => onTransition('inactive')}
+          onClick={() => onTransition('archived')}
           className={`px-3 py-1.5 rounded-lg border text-[12px] font-medium ${
             disabled
               ? 'border-border text-text-muted cursor-not-allowed opacity-50'
               : 'border-warning text-warning cursor-pointer hover:bg-warning-bg'
           }`}
         >
-          비활성화
+          보관
         </button>
         {hasRunningBot && (
           <HintTooltip text="실행 중인 봇을 먼저 중지하세요" />

@@ -51,10 +51,10 @@
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/strategies` | 전략 목록 (필터: status). 응답에 `cumulative_return`, `backtest_return` 포함 — 전략별 PerformanceTracker 조회 |
+| GET | `/api/strategies` | 전략 목록. Query filter `status` 허용 값: `registered \| adopted \| archived` — `_VALID_STATUS_FILTERS` SSOT. 미허용 값은 400. 응답에 `cumulative_return`, `backtest_return` 포함 — 전략별 PerformanceTracker 조회. |
 | GET | `/api/strategies/{strategy_id}` | 전략 상세 조회. 응답에 `params`, `param_schema`, `rationale`, `risks` 포함 — 전략 클래스 런타임 로드 + StrategyRecord 확장 필드 |
 | POST | `/api/strategies/validate` | 전략 파일 검증. Body: `{"path": "..."}` |
-| PATCH | `/api/strategies/{strategy_id}/status` | 전략 상태 변경. Body: `{"status": "..."}`. 허용되지 않은 상태 전환은 400 반환. `require_strategy_write` scope 검증 (#1378). |
+| PATCH | `/api/strategies/{strategy_id}/status` | 전략 상태 변경 (transition 전용). Body: `{"status": "adopted" \| "archived"}`. **schema (#1441):** Pydantic `extra='forbid'` + `Literal['adopted','archived']` + OpenAPI `additionalProperties: false`. transition target 만 허용하므로 GET filter 전용 값 `registered` 는 PATCH 시 422 로 거부된다 (등록 시점 초기값이므로 전환 대상이 아님). body validation 실패 (extra key, invalid status, type mismatch, 누락)는 422, transition rule 위반 (예: archived → adopted)은 400. `require_strategy_write` scope 검증 (#1378). |
 | GET | `/api/strategies/{strategy_id}/performance` | 전략 성과 지표 |
 | GET | `/api/strategies/{strategy_id}/daily-summary` | 전략 일별 성과 집계 |
 | GET | `/api/strategies/{strategy_id}/weekly-summary` | 전략 주별 성과 집계 |
