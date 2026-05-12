@@ -165,6 +165,48 @@ class TestDeleteDataset:
         assert body["items"] == []
         assert body["total"] == 0
 
+    def test_delete_invalid_data_type_rejected(self, client):
+        """enum 외 data_type 값은 422 (#1438).
+
+        과거에는 unknown 값이 ohlcv 경로로 fallback 되어 404 가 반환되었다.
+        Literal narrowing 이후 ingress 에서 거부되어야 한다.
+        """
+        resp = client.delete(
+            "/api/data/datasets/005930__1d",
+            params={"data_type": "oracle_invalid_type"},
+        )
+        assert resp.status_code == 422
+
+    def test_delete_empty_data_type_rejected(self, client):
+        """빈 문자열 data_type 은 422 (#1438)."""
+        resp = client.delete(
+            "/api/data/datasets/005930__1d",
+            params={"data_type": ""},
+        )
+        assert resp.status_code == 422
+
+    async def test_delete_default_data_type_ohlcv(self, client, store):
+        """data_type 미지정 시 기본 ohlcv 회귀 (#1438)."""
+        store.write("005930", "1d", _make_ohlcv_df())
+        resp = client.delete("/api/data/datasets/005930__1d")
+        assert resp.status_code == 204
+
+    def test_delete_ohlcv_explicit_data_type(self, client):
+        """data_type=ohlcv 명시 시 기존 404 회귀 (#1438)."""
+        resp = client.delete(
+            "/api/data/datasets/999999__1d",
+            params={"data_type": "ohlcv"},
+        )
+        assert resp.status_code == 404
+
+    def test_delete_fundamental_explicit_data_type(self, client):
+        """data_type=fundamental 명시 시 기존 404 회귀 (#1438)."""
+        resp = client.delete(
+            "/api/data/datasets/999999__fundamental",
+            params={"data_type": "fundamental"},
+        )
+        assert resp.status_code == 404
+
 
 class TestFundamentalDatasets:
     """fundamental 데이터 유형 API 테스트."""

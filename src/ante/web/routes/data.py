@@ -299,7 +299,9 @@ async def delete_dataset(
     caller_id: Annotated[str, Depends(require_data_write)],
     store: Annotated[Any | None, Depends(get_data_store)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-    data_type: str = Query("ohlcv", description="데이터 유형 (ohlcv, fundamental)"),
+    data_type: Literal["ohlcv", "fundamental"] = Query(
+        "ohlcv", description="데이터 유형 (ohlcv, fundamental)"
+    ),
 ) -> None:
     """데이터셋 삭제. 인증된 master/human 또는 ``data:write`` scope 를 보유한
     agent 만 호출 가능 (#1407).
