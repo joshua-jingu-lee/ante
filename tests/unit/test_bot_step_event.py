@@ -1020,3 +1020,98 @@ class TestEventHistoryStoreSignatureCompat1437R2:
         # 3건 반환, 모두 OrderRequestEvent.
         assert len(rows) == 3
         assert all(r["event_type"] == "OrderRequestEvent" for r in rows)
+
+
+class TestBotLogsInMemoryFallbackOtherBotPollution1437R3:
+    """#1437 r3 — in-memory fallback hard cap 제거 회귀.
+
+    r2는 EventHistoryStore (SQL) 경로의 cap을 제거했으나, SQLite store가
+    없는 ``EventBus`` only 환경에서는 별도 cap (``_BOT_LOGS_INMEMORY_FETCH_LIMIT
+    = 10000``) 이 남아 있었다. ``EventBus.history_size`` 가 10000 보다 큰
+    환경에서는 다른 봇 로그가 cap을 모두 차지해 특정 봇 로그가 누락되는
+    silent failure가 있었다(Codex P3 r2).
+
+    r3 fix: ring buffer 전체(``EventBus._history_size``)를 ``limit``으로
+    넘겨 ring buffer 통째로 조회한다. ring buffer 자체가 ``_history_size``
+    로 자연 capped 되므로 추가 cap은 불필요하다.
+    """
+
+    @pytest.fixture
+    def bot_manager(self):
+        mgr = FakeBotManager()
+        mgr._bots["target-bot"] = FakeBot("target-bot")
+        return mgr
+
+    @pytest.fixture
+    def eventbus_with_large_history(self):
+        """``history_size`` 가 매우 큰 EventBus.
+
+        target-bot 5건이 가장 먼저 발행되고, 그 뒤에 다른 봇 11000건이
+        발행된다. r2 cap=10000 이었다면 ring buffer reverse 후 ``[-10000:]``
+        슬라이스 시 target-bot 5건이 cap 밖으로 밀려나 누락된다.
+        r3 fix 후에는 ``_history_size`` 만큼 가져오므로 target-bot 5건이
+        보존된다.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        eb = EventBus(history_size=20000)
+        # target-bot 5건 (가장 먼저 발행 → ring buffer 앞쪽).
+        base = datetime(2026, 5, 10, 0, 0, 0, tzinfo=UTC)
+        for i in range(5):
+            ts = base + timedelta(seconds=i)
+            asyncio.get_event_loop().run_until_complete(
+                eb.publish(
+                    BotStepCompletedEvent(
+                        bot_id="target-bot",
+                        account_id="test",
+                        result="success",
+                        message=f"target-{i}",
+                        timestamp=ts,
+                    )
+                )
+            )
+        # 다른 봇 11000건 (target보다 뒤 → ring buffer 뒤쪽, ``[-10000:]``
+        # 으로 자르면 target-bot 5건이 잘려 나간다).
+        for i in range(11000):
+            ts = base + timedelta(minutes=1, seconds=i)
+            asyncio.get_event_loop().run_until_complete(
+                eb.publish(
+                    BotStepCompletedEvent(
+                        bot_id=f"other-{i}",
+                        account_id="test",
+                        result="success",
+                        message=f"other-step-{i}",
+                        timestamp=ts,
+                    )
+                )
+            )
+        return eb
+
+    @pytest.fixture
+    def client(self, bot_manager, eventbus_with_large_history):
+        app = create_app(
+            bot_manager=bot_manager,
+            eventbus=eventbus_with_large_history,
+            account_service=FakeAccountService(),
+            member_service=make_master_member_service(),
+        )
+        return make_authed_client(app)
+
+    def test_target_logs_returned_when_history_size_exceeds_old_cap(self, client):
+        """``history_size=20000`` 이고 다른 봇 로그 11000건이 끼어도
+        target-bot 로그 5건 모두 반환.
+
+        r2 cap=10000 회귀: 다른 봇 11000건 중 뒤쪽 10000건만 fetch되어
+        target-bot 5건이 모두 누락 → ``total=0``, ``logs=[]``.
+        r3 fix: ``_history_size=20000`` 만큼 fetch → target-bot 5건 보존.
+        """
+        resp = client.get("/api/bots/target-bot/logs?limit=100")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["logs"]) == 5
+        messages = [log["message"] for log in data["logs"]]
+        # get_history는 reversed(events[-limit:]) → 최신순.
+        # target-bot은 가장 먼저 발행 → ring buffer 앞쪽 → reverse 후 끝.
+        # 다른 봇 11000건이 먼저 나오고 target-bot 5건이 뒤에 오는 순.
+        assert set(messages) == {f"target-{i}" for i in range(5)}

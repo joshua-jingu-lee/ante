@@ -41,9 +41,10 @@ _BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
 # (=10000)은 다른 봇의 로그가 cap을 채워서 특정 봇 로그를 누락시킬 수
 # 있는 silent failure였다(Codex P2 #2). r2에서 제거됨.
 #
-# in-memory ``EventBus.get_history`` fallback은 ring buffer(``_history_size``,
-# 기본 1000)로 자연 제한되므로 별도 cap 없이도 안전하다.
-_BOT_LOGS_INMEMORY_FETCH_LIMIT = 10000
+# in-memory ``EventBus.get_history`` fallback도 동일 문제(다른 봇 로그가
+# cap을 채워 특정 봇 로그를 누락)가 있어 r3에서 추가 cap을 제거한다.
+# Ring buffer는 ``EventBus._history_size`` (기본 1000)로 이미 자연 제한
+# 되므로, 그 값을 그대로 ``limit``으로 넘겨 ring buffer 전체를 가져온다.
 
 
 class BotCreateRequest(BaseModel):
@@ -1378,12 +1379,19 @@ async def get_bot_logs(
 
         # in-memory ring buffer ``get_history``는 ``since``/``until``/
         # ``offset``/``payload_filter`` 시그니처가 없으므로(Non-Goal — bus
-        # interface 변경은 본 패치 범위 외), ring buffer는 자체 사이즈
-        # 제한이 있어 cap 없이 안전. 핸들러에서 ``bot_id``/날짜/페이지
-        # 필터를 in-memory로 적용한다.
+        # interface 변경은 본 패치 범위 외) 핸들러에서 ``bot_id``/날짜/
+        # 페이지 필터를 in-memory로 적용한다.
+        #
+        # ``limit``은 ring buffer 전체 사이즈(``EventBus._history_size``)로
+        # 잡아 ring buffer를 통째로 가져온다. 작은 cap(예: 10000)을 쓰면
+        # history_size가 더 큰 환경에서 다른 봇 로그가 cap을 채워 특정
+        # 봇 로그가 누락되는 silent failure가 발생한다(Codex P3 r2).
+        # ring buffer 자체가 ``_history_size``로 capped이므로 추가 cap은
+        # 불필요하다.
+        history_cap = getattr(eventbus, "_history_size", 1000)
         history = eventbus.get_history(
             event_type=BotStepCompletedEvent,
-            limit=_BOT_LOGS_INMEMORY_FETCH_LIMIT,
+            limit=history_cap,
         )
         filtered: list[dict] = []
         for evt in history:
