@@ -13,6 +13,7 @@ from ante.approval.auto_approve import AutoApproveEvaluator
 from ante.approval.models import (
     ApprovalRequest,
     ApprovalStatus,
+    ApprovalType,
     ApprovalValidationError,
     ValidationResult,
 )
@@ -123,6 +124,12 @@ class ApprovalService:
         """
         now = datetime.now(UTC).isoformat()
         params = params or {}
+
+        # ApprovalType SSOT 검증 — defense-in-depth (IPC handler 가 직접 호출,
+        # #1469). ``_validate_params`` 보다 먼저 실행되어야 한다.
+        if type not in {t.value for t in ApprovalType}:
+            msg = f"invalid approval type: {type!r}"
+            raise ValueError(msg)
 
         if type in _ACCOUNT_SCOPED_APPROVAL_TYPES:
             require_account_id(
