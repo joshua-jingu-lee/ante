@@ -7,7 +7,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ante import __version__
 from ante.web.deps import (
@@ -30,13 +30,30 @@ router = APIRouter()
 
 
 class HaltRequest(BaseModel):
-    """거래 중지 요청."""
+    """거래 중지 요청.
+
+    Refs #1442: ``extra='forbid'`` 로 ``account_id`` 등 임의 키를 422 로
+    거부한다. ``/api/system/halt`` 는 전역 kill switch 이므로 account-scoped
+    요청은 silent drop 이 아닌 명시적 거부가 옳다. 단일 계좌 정지는
+    ``POST /api/accounts/{id}/suspend`` 로 수행하며, account-scoped halt
+    body 신규 도입은 별도 이슈에서 다룬다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     reason: str = ""
 
 
 class ClearHaltRequest(BaseModel):
-    """전역 정지 해제 요청."""
+    """전역 정지 해제 요청.
+
+    Refs #1442: ``extra='forbid'`` 로 ``account_id`` 등 임의 키를 422 로
+    거부한다. ``/api/system/clear-halt`` 는 전역 kill switch 이므로
+    account-scoped 요청은 silent drop 이 아닌 명시적 거부가 옳다. 단일 계좌
+    재개는 ``POST /api/accounts/{id}/activate`` 로 수행한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     reason: str = ""
 
@@ -254,9 +271,10 @@ async def _parse_optional_request_body(
         422: {
             "description": (
                 "Body validation 실패 (malformed JSON, non-object JSON, type "
-                'mismatch). 빈 body 는 기본 ``reason=""`` 로 허용된다 (기존 '
+                "mismatch, ``extra='forbid'`` 위반 — ``account_id`` 등 정의되지 "
+                '않은 키 포함). 빈 body 는 기본 ``reason=""`` 로 허용된다 (기존 '
                 "동작 보존). 단, 인증이 실패하면 body validation 은 실행되지 "
-                "않고 401 이 우선 반환된다 (#1375)."
+                "않고 401 이 우선 반환된다 (#1375, #1442)."
             ),
             "content": {
                 "application/problem+json": {
@@ -358,9 +376,10 @@ async def halt(
         422: {
             "description": (
                 "Body validation 실패 (malformed JSON, non-object JSON, type "
-                'mismatch). 빈 body 는 기본 ``reason=""`` 로 허용된다 (기존 '
+                "mismatch, ``extra='forbid'`` 위반 — ``account_id`` 등 정의되지 "
+                '않은 키 포함). 빈 body 는 기본 ``reason=""`` 로 허용된다 (기존 '
                 "동작 보존). 단, 인증이 실패하면 body validation 은 실행되지 "
-                "않고 401 이 우선 반환된다 (#1375)."
+                "않고 401 이 우선 반환된다 (#1375, #1442)."
             ),
             "content": {
                 "application/problem+json": {
