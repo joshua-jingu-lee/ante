@@ -14,6 +14,20 @@
     3. ``strategy_id`` 단독, ``strategy_name`` 단독, 둘 다 전달 모두 정상 처리.
        둘 다 전달 시 handler가 ``strategy_id``를 우선 사용한다.
     4. OpenAPI 스키마는 ``additionalProperties: False``로 노출된다.
+    5. (codex r3 FAIL) ``_require_strategy_identifier`` model_validator 가
+       raise 하는 ``ValueError`` 는 ``e.errors()`` 의 ``ctx.error`` 에
+       ``ValueError`` 객체로 노출되는데, ``HTTPException(detail=e.errors())``
+       그대로 사용 시 ``str(detail)`` 경로에서 ``ValueError('...')`` Python
+       repr 이 응답 body 에 새어 나간다. handler 는
+       ``e.errors(include_context=False, include_input=False)`` 로
+       sanitize 해야 한다.
+
+Non-Goals:
+    - generated TS ``BotCreateRequest`` union narrowing (OpenAPI ``anyOf +
+      required`` 조합의 표현 한계로 첫 union arm 이 strategy 없이 valid
+      로 인식되는 SDK 거동) 는 별도 follow-up 이슈로 다룬다. 본 PR 범위에서
+      는 런타임 422 와 ``additionalProperties: false`` / ``anyOf`` 스키마
+      contract 노출까지만 보장한다.
 """
 
 from __future__ import annotations
@@ -361,3 +375,78 @@ class TestBotCreateRequestSchema:
             BotCreateRequest.model_validate(
                 {"bot_id": "x", "strategy_id": "s1", "bot_type": "paper"}
             )
+
+
+class TestBotCreateValidationErrorSerialization:
+    """codex r3 FAIL 회귀 — ``ValidationError`` detail 이 JSON 직렬화 안전한
+    형태로 노출되는지 보장한다.
+
+    배경:
+        - ``BotCreateRequest._require_strategy_identifier`` model_validator
+          가 ``raise ValueError(...)`` 하면 Pydantic ``e.errors()`` 가
+          ``ctx.error`` 필드에 ``ValueError`` 객체를 그대로 노출한다.
+        - ``HTTPException(detail=e.errors())`` 를 그대로 사용하면 FastAPI/
+          Starlette 가 detail 을 stringify 할 때 ``ValueError('...')`` 형태의
+          Python repr 이 응답 body 에 포함되어 호출자가 구조적으로 파싱할
+          수 없는 깨진 detail 이 된다. ``input`` 에 NaN/Inf 가 들어오면
+          ``allow_nan=False`` JSONResponse 가 직렬화에 실패해 500 으로
+          잘못 표면화될 수 있는 risk 도 있다.
+        - Fix: handler 에서 ``e.errors(include_context=False,
+          include_input=False)`` 사용으로 ctx/input 을 sanitize 한다
+          (#1380 ``accounts.py`` ``RuleUpdateRequest`` 선례와 동일 패턴).
+    """
+
+    def test_missing_strategy_returns_422_without_valueerror_repr(self, client) -> None:
+        """``{bot_id: x}`` 만 전달 — model_validator 가 ``ValueError`` 를
+        raise 한다. 응답은 422 이고 detail 에 ``ValueError(`` 같은 Python
+        repr 이 노출되지 않아야 한다 (codex r3 FAIL 회귀)."""
+        resp = client.post(
+            "/api/bots",
+            json={"bot_id": "bot-x", "account_id": "test"},
+        )
+        # 1. 500 이 아닌 422 (가장 핵심: detail 직렬화 실패로 인한 500 회귀 방지).
+        assert resp.status_code == 422, (
+            f"detail 직렬화 실패로 500 이 반환됨 — codex r3 FAIL 회귀. "
+            f"status={resp.status_code} body={resp.text!r}"
+        )
+        # 2. content-type 은 application/problem+json (RFC 7807).
+        assert resp.headers.get("content-type", "").startswith(
+            "application/problem+json"
+        ), f"content-type 깨짐 — {resp.headers.get('content-type')!r}"
+        # 3. body 가 JSON 정상 파싱 가능.
+        body = resp.json()
+        # 4. detail 에 Pydantic ctx.error 의 ``ValueError(...)`` Python repr
+        #    이 노출되어서는 안 된다. ``include_context=False`` 가 적용되면
+        #    ``ctx`` 키 자체가 제거되어 ``ValueError(`` substring 도 사라진다.
+        detail_blob = str(body.get("detail", ""))
+        assert "ValueError(" not in detail_blob, (
+            f"detail 에 ValueError(...) Python repr 노출 — codex r3 FAIL "
+            f"회귀. detail={detail_blob!r}"
+        )
+        # 5. detail 에 strategy 요구 메시지가 포함되어 호출자가 원인을 알 수 있어야 함.
+        assert "strategy_id" in detail_blob and "strategy_name" in detail_blob, (
+            f"detail 에서 strategy 메시지 사라짐 — {detail_blob!r}"
+        )
+
+    def test_extra_field_returns_422_with_clean_detail(self, client) -> None:
+        """``extra='forbid'`` 케이스에서도 detail 이 깨끗하게 직렬화된다.
+        (이 케이스는 ctx 가 None 이라 기본 동작도 안전하지만,
+        ``include_context=False`` 적용 후에도 회귀 없이 동작함을 검증.)"""
+        resp = client.post(
+            "/api/bots",
+            json={
+                "bot_id": "bot-x",
+                "strategy_id": "s1",
+                "account_id": "test",
+                "bot_type": "paper",  # extra='forbid' 거부
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        detail_blob = str(body.get("detail", ""))
+        # ``extra='forbid'`` 에러 메시지 또는 키 이름이 detail 에 포함되어야 함.
+        assert "bot_type" in detail_blob or "extra" in detail_blob.lower(), (
+            f"detail 에 거부 사유가 없음 — {detail_blob!r}"
+        )
+        # ValueError repr leak 없음.
+        assert "ValueError(" not in detail_blob

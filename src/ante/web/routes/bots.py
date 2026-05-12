@@ -377,7 +377,22 @@ async def create_bot(
     try:
         body = BotCreateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # ``include_context=False, include_input=False`` 로 detail 을 sanitize
+        # 한다 (codex r3 FAIL #1436). ``_require_strategy_identifier``
+        # model_validator 가 raise 하는 ``ValueError`` 는 Pydantic
+        # ``e.errors()`` 의 ``ctx.error`` 필드에 ``ValueError`` 객체로
+        # 노출된다. ``HTTPException(detail=e.errors())`` 를 그대로 사용하면
+        # ``http_exception_handler`` 가 ``str(exc.detail)`` 로 Python repr 을
+        # 그대로 노출(``ValueError('...')``)하여 호출자가 구조적으로 파싱할
+        # 수 없는 깨진 응답이 된다. ``budget`` 같은 finite-positive 필드에
+        # NaN/Inf 가 들어오면 ``input`` 에도 non-finite ``float`` 가 담겨
+        # ``JSONResponse(allow_nan=False)`` 가 직렬화에 실패해 422 대신 500 이
+        # 반환될 수 있는 잠재 위험도 함께 sanitize 한다 (#1380 accounts.py
+        # RuleUpdateRequest 선례와 동일 패턴).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # strategy_id / strategy_name 해석 ─────────────────────
     strategy_id = body.strategy_id
@@ -1061,7 +1076,15 @@ async def update_bot(
     try:
         body = BotUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # detail sanitize — POST /api/bots 와 동일 정책 (codex r3 FAIL #1436).
+        # ``budget`` finite-positive 필드에 NaN/Inf 가 들어오면 ``input`` 에
+        # non-finite ``float`` 가 담겨 ``JSONResponse(allow_nan=False)`` 가
+        # 직렬화에 실패해 422 대신 500 이 반환될 수 있다 (#1435 BotUpdateRequest
+        # finite invariant). ``include_input=False`` 로 sanitize 한다.
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 3. 봇 존재 확인.
     bot = bot_manager.get_bot(bot_id)
