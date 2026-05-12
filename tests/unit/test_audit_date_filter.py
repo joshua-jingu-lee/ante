@@ -399,6 +399,81 @@ class TestValidIsoDate200:
         assert call_kwargs["from_date"] == "2026-03-12"
         assert call_kwargs["to_date"] == "2026-03-19"
 
+    def test_compact_iso_date_normalized(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """비표준 compact ISO date(``20260510``)는 표준 ``YYYY-MM-DD``로 정규화.
+
+        Codex r3 finding 핵심 회귀:
+            Python 3.13의 ``date.fromisoformat()``은 ``20260510`` (no dashes)
+            같은 비표준 ISO date도 수락한다. r2 구현은 검증 통과 시 원본 str
+            (``20260510``, 8자리)을 그대로 반환했으므로 ``AuditLogger.query``의
+            ``len(to_date) == 10`` 자동 확장 분기가 작동하지 않고, SQL
+            ``created_at >= '20260510'`` 텍스트 비교가 ``YYYY-MM-DDT...``
+            저장값과 어긋나는 silent regression을 만든다. 본 테스트는 r3
+            정규화 (``date.isoformat()`` 호출)가 ``2026-05-10`` (10자리 표준
+            형식)으로 변환하여 그 전제를 복원하는지 확인한다.
+        """
+        resp = client.get(
+            "/api/audit?from_date=20260510",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"compact ISO date가 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        assert audit_logger.query.await_count == 1
+        call_kwargs = audit_logger.query.await_args.kwargs
+        assert call_kwargs["from_date"] == "2026-05-10", (
+            f"compact ISO date가 ``YYYY-MM-DD`` 표준 형식으로 정규화되어야 함: "
+            f"{call_kwargs['from_date']!r}"
+        )
+        # count에도 동일 정규화
+        count_kwargs = audit_logger.count.await_args.kwargs
+        assert count_kwargs["from_date"] == "2026-05-10", (
+            f"count에도 compact ISO date 정규화 적용되어야 함: "
+            f"{count_kwargs['from_date']!r}"
+        )
+
+    def test_iso_week_date_normalized(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """ISO week date(``2026-W19-1``)도 표준 ``YYYY-MM-DD``로 정규화.
+
+        Codex r3 finding 보강:
+            Python 3.13은 ``2026-W19-1`` (ISO week date, 10자리이긴 하나 비표준
+            포맷)도 ``date.fromisoformat``로 파싱한다. ``AuditLogger.query``의
+            10자리 길이 분기는 통과하더라도 ``W`` 문자가 SQL 텍스트 비교
+            (``YYYY-MM-DDT...``)와 어긋나는 회귀를 만들 수 있다. 본 테스트는
+            정규화 후 결과가 10자리 ``YYYY-MM-DD`` 형식(``-`` 두 개 포함)임을
+            확인한다.
+        """
+        # ``2026-W19-1`` → ISO week 19 of 2026, Monday → 2026-05-04
+        resp = client.get(
+            "/api/audit?from_date=2026-W19-1",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"ISO week date가 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        assert audit_logger.query.await_count == 1
+        call_kwargs = audit_logger.query.await_args.kwargs
+        from_date_value = call_kwargs["from_date"]
+        # 길이 / dash 개수 invariant 검증 — AuditLogger.query의 ``len == 10``
+        # 분기와 ``YYYY-MM-DDT...`` 텍스트 비교 전제 보존.
+        assert len(from_date_value) == 10, (
+            f"정규화된 from_date 길이가 10이어야 함 (자동 확장 분기 진입 가능): "
+            f"len={len(from_date_value)}, value={from_date_value!r}"
+        )
+        assert from_date_value.count("-") == 2, (
+            f"정규화된 from_date에 ``-`` 두 개가 있어야 표준 ``YYYY-MM-DD``: "
+            f"{from_date_value!r}"
+        )
+        # isocalendar 기준 명시 — ISO week 19 of 2026의 Monday는 2026-05-04
+        assert from_date_value == "2026-05-04", (
+            f"2026-W19-1 → 2026-05-04 (ISO week 19 Monday)로 정규화되어야 함: "
+            f"{from_date_value!r}"
+        )
+
 
 # ── 401: auth-first invariant (Issue #1414 본문) ────────────────────
 

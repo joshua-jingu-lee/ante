@@ -50,7 +50,8 @@ def _validate_iso_date(value: str | None, field: str) -> str | None:
     """``value``가 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime인지 검증.
 
     검증 통과 시:
-        - date-only(``YYYY-MM-DD``, 10자리)는 **변환 없이** 그대로 반환한다.
+        - date-only는 ``date.fromisoformat`` 파싱 후 ``.isoformat()`` 호출로
+          **항상 ``YYYY-MM-DD`` 표준 형식(10자리)으로 정규화**하여 반환한다.
           ``AuditLogger.query/count``는 10자리 ``to_date``를 받으면 SQL에서
           ``T23:59:59``로 자동 확장하여 자정 이후 데이터 누락을 막는다.
         - datetime은 ``_normalize_iso_datetime``으로 storage format
@@ -73,13 +74,24 @@ def _validate_iso_date(value: str | None, field: str) -> str | None:
     ``Z``/offset suffix를 그대로 SQL 텍스트 비교(``created_at >= ?``)에 넘기면
     storage format(Z 없는 naive UTC)과 어긋나 inclusive boundary가 깨졌다.
     datetime 입력은 storage format으로 정규화하여 누락을 막는다.
+
+    Codex P2 (#1414 fix loop r3): Python 3.13의 ``date.fromisoformat()``이
+    ``20260510`` (no dashes), ``2026-W19-1`` (ISO week date) 같은 비표준 ISO
+    date도 허용한다. r2 구현은 검증 통과 시 원본 str을 그대로 반환했으므로,
+    ``20260510``(8자리)이나 ``2026-W19-1``(10자리이긴 하나 비표준 포맷)이
+    ``AuditLogger.query``의 ``len(to_date) == 10`` 자동 확장 분기와
+    ``YYYY-MM-DDT...`` 텍스트 비교 전제를 깨뜨릴 수 있었다. 본 r3 구현은
+    ``date.fromisoformat`` 파싱 후 ``.isoformat()``을 호출해 항상 ``YYYY-MM-DD``
+    표준 형식으로 정규화하여 그 전제를 보장한다.
     """
     if value is None:
         return None
-    # 10자리 YYYY-MM-DD 시도 (AuditLogger.query의 자동 확장 경로 보존)
+    # ISO date 시도 — Python 3.13은 ``20260510``, ``2026-W19-1`` 같은 비표준
+    # 포맷도 수락하므로, ``.isoformat()``으로 항상 ``YYYY-MM-DD`` 표준 형식
+    # (10자리)으로 정규화한다 (AuditLogger.query의 자동 확장 경로 보존).
     try:
-        date.fromisoformat(value)
-        return value
+        parsed = date.fromisoformat(value)
+        return parsed.isoformat()
     except ValueError:
         pass
     # ISO datetime 시도 (Z/offset 허용) — storage format으로 정규화
