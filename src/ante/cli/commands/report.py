@@ -6,9 +6,11 @@ import asyncio
 import json
 
 import click
+from pydantic import ValidationError
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.web.schemas import ReportSubmitRequest
 
 
 @click.group()
@@ -56,6 +58,29 @@ def submit(
     if run_id:
         report_data["backtest_run_id"] = run_id
 
+    # ── #1415: Web API와 동일한 ReportSubmitRequest 검증 ────────────────
+    # SSOT: ``src/ante/web/schemas.py::ReportSubmitRequest``.
+    #
+    # CLI 입력은 Web API와 같은 invariant를 통과해야 한다:
+    # - ``total_trades >= 0``, ``win_rate ∈ [0.0, 100.0]``, metric finite
+    # - ``extra='forbid'`` — 미지정 키는 오타로 간주하여 거부
+    #
+    # CLI 전용 extras 처리:
+    # - ``submitted_by``는 모델 외부 필드 (CLI에서 분리 후 StrategyReport에 주입)
+    # - ``backtest_run_id``는 모델 외부 (run_id 참조용, store 컬럼 아님)
+    # - ``detail_json``이 dict로 들어오면 직렬화 (모델은 str 요구)
+    submitted_by = report_data.pop("submitted_by", "agent")
+    report_data.pop("backtest_run_id", None)  # --run 옵션 결과는 모델 검증 대상 아님
+    raw_detail = report_data.get("detail_json")
+    if isinstance(raw_detail, dict):
+        report_data["detail_json"] = json.dumps(raw_detail)
+
+    try:
+        validated = ReportSubmitRequest.model_validate(report_data)
+    except ValidationError as exc:
+        fmt.error(str(exc), code="REPORT_VALIDATION_ERROR")
+        raise SystemExit(1) from exc
+
     async def _submit() -> dict:
         from ante.core.database import Database
 
@@ -76,7 +101,7 @@ def submit(
             store = ReportStore(db)
             await store.initialize()
 
-            # StrategyReport 생성
+            # StrategyReport 생성 (validated 필드 기준)
             from datetime import UTC, datetime
             from uuid import uuid4
 
@@ -84,23 +109,23 @@ def submit(
 
             report_obj = StrategyReport(
                 report_id=str(uuid4()),
-                strategy_name=report_data["strategy_name"],
-                strategy_version=report_data["strategy_version"],
-                strategy_path=report_data.get("strategy_path", ""),
+                strategy_name=validated.strategy_name,
+                strategy_version=validated.strategy_version,
+                strategy_path=validated.strategy_path,
                 status=ReportStatus.SUBMITTED,
                 submitted_at=datetime.now(tz=UTC),
-                submitted_by=report_data.get("submitted_by", "agent"),
-                backtest_period=report_data.get("backtest_period", ""),
-                total_return_pct=float(report_data.get("total_return_pct", 0)),
-                total_trades=int(report_data.get("total_trades", 0)),
-                sharpe_ratio=report_data.get("sharpe_ratio"),
-                max_drawdown_pct=report_data.get("max_drawdown_pct"),
-                win_rate=report_data.get("win_rate"),
-                summary=report_data.get("summary", ""),
-                rationale=report_data.get("rationale", ""),
-                risks=report_data.get("risks", ""),
-                recommendations=report_data.get("recommendations", ""),
-                detail_json=json.dumps(report_data.get("detail_json", {})),
+                submitted_by=submitted_by,
+                backtest_period=validated.backtest_period,
+                total_return_pct=validated.total_return_pct,
+                total_trades=validated.total_trades,
+                sharpe_ratio=validated.sharpe_ratio,
+                max_drawdown_pct=validated.max_drawdown_pct,
+                win_rate=validated.win_rate,
+                summary=validated.summary,
+                rationale=validated.rationale,
+                risks=validated.risks,
+                recommendations=validated.recommendations,
+                detail_json=validated.detail_json,
             )
 
             report_id = await store.submit(report_obj)
