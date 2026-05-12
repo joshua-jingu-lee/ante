@@ -1091,7 +1091,7 @@
           "approvals"
         ],
         "summary": "Update Approval Status",
-        "description": "결재 승인/거부 처리. 인증된 master/human 또는 ``approval:admin`` scope\n를 보유한 agent 만 호출 가능 (#1407 — spec ``approval:admin`` 정합).\n\nRaw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록\n한다. FastAPI 가 ``body: ApprovalStatusUpdate`` 를 먼저 검증하면 unauth +\nbad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_approval_admin)``) — caller 빈 → 401,\n   권한 없음 → 403, 비활성 멤버 → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``ApprovalStatusUpdate.model_validate`` — ValidationError → 422.\n4. service 호출 (``approve`` / ``reject``).",
+        "description": "결재 승인/거부 처리. 인증된 master/human 또는 ``approval:admin`` scope\n를 보유한 agent 만 호출 가능 (#1407 — spec ``approval:admin`` 정합).\n\nRaw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록\n한다. FastAPI 가 ``body: ApprovalStatusUpdate`` 를 먼저 검증하면 unauth +\nbad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.\n\n핸들러 단계 순서:\n\n1. 인증 가드 (``Depends(require_approval_admin)``) — caller 빈 → 401,\n   권한 없음 → 403, 비활성 멤버 → 403.\n2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.\n3. ``ApprovalStatusUpdate.model_validate`` — ValidationError → 422.\n   ``status`` 는 ``Literal[\"approved\", \"rejected\"]`` SSOT 이므로 invalid\n   값은 schema 단계에서 422 로 차단된다 (#1434).\n4. service 호출 (``approve`` / ``reject``).",
         "operationId": "update_approval_status_api_approvals__approval_id__status_patch",
         "parameters": [
           {
@@ -1111,16 +1111,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApprovalUpdateResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid status value",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1194,7 +1184,7 @@
           "audit"
         ],
         "summary": "List Audit Logs",
-        "description": "감사 로그 조회.\n\n인증/권한:\n    oracle A7 시그니처(#1359)에서 본 라우트는 인증 없이 감사 로그 목록을\n    반환하고 있었다. 감사 로그는 운영 행위 추적 정보(member_id, action,\n    resource, IP 등)를 담으므로 인증 가드를 적용한다. 인증 누락은 401,\n    권한 없음은 403.\n\n    Codex P2 (#1359 fix loop, 2차): 초기 패치는 ``require_master_caller``\n    를 그대로 적용해 ``master`` role만 허용했으나,\n    ``docs/specs/member/02-design-decisions.md:188-229`` 의 모니터링 agent\n    (``audit:read`` scope만 가진 default role)가 차단되는 문제가 있었다.\n    spec은 audit 도메인 read 권한을 ``master`` role 또는 ``audit:read``\n    scope 중 하나로 정의하므로, ``require_audit_read`` (master OR\n    ``audit:read`` ∈ Member.scopes)로 교체해 spec과 일치시켰다.\n\nCodex P2 (#1359 fix loop): FastAPI는 핸들러 매개변수 선언 순서대로\ndependency를 해결한다. ``audit_logger`` (필수 service, 미주입 시 503)를\n``require_audit_read`` 보다 먼저 두면, 인증 정보가 없는 호출자에게\n503이 먼저 반환되어 \"인증 누락은 401\" 계약이 깨진다. 그러므로 인증\n가드(``caller_id``)를 항상 먼저 선언해 401/403이 503보다 우선하도록 한다.\n\nNOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.\n이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서\npagination contract 일관성을 위해 클램프를 제거하고 Query\nvalidation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가\n이 범위를 강제하면 별도 endpoint로 분리한다.\n\nCodex P2 (#1414 fix loop r1): ``from_date``/``to_date``는 ``str | None``\n타입으로 받아 ``_validate_iso_date`` 헬퍼로 ISO 8601 파싱 가능성만 검증\n하고, 원본 str을 그대로 ``AuditLogger.query/count``에 전달한다. 이전\n구현은 ``Annotated[datetime | None, ...]``로 좁혀 Pydantic이 자동 변환\n하도록 했으나, date-only 입력이 ``\"2026-05-10T00:00:00\"`` (19자리)로\n변환되어 ``AuditLogger`` 내부의 ``len(to_date) == 10`` 자동 확장 분기가\n작동하지 않게 되어 자정 이후 데이터를 누락하는 silent semantic\nregression이 발생했다. 본 구현은 str을 보존해 그 회귀를 해소한다.",
+        "description": "감사 로그 조회.\n\n인증/권한:\n    oracle A7 시그니처(#1359)에서 본 라우트는 인증 없이 감사 로그 목록을\n    반환하고 있었다. 감사 로그는 운영 행위 추적 정보(member_id, action,\n    resource, IP 등)를 담으므로 인증 가드를 적용한다. 인증 누락은 401,\n    권한 없음은 403.\n\n    Codex P2 (#1359 fix loop, 2차): 초기 패치는 ``require_master_caller``\n    를 그대로 적용해 ``master`` role만 허용했으나,\n    ``docs/specs/member/02-design-decisions.md:188-229`` 의 모니터링 agent\n    (``audit:read`` scope만 가진 default role)가 차단되는 문제가 있었다.\n    spec은 audit 도메인 read 권한을 ``master`` role 또는 ``audit:read``\n    scope 중 하나로 정의하므로, ``require_audit_read`` (master OR\n    ``audit:read`` ∈ Member.scopes)로 교체해 spec과 일치시켰다.\n\nCodex P2 (#1359 fix loop): FastAPI는 핸들러 매개변수 선언 순서대로\ndependency를 해결한다. ``audit_logger`` (필수 service, 미주입 시 503)를\n``require_audit_read`` 보다 먼저 두면, 인증 정보가 없는 호출자에게\n503이 먼저 반환되어 \"인증 누락은 401\" 계약이 깨진다. 그러므로 인증\n가드(``caller_id``)를 항상 먼저 선언해 401/403이 503보다 우선하도록 한다.\n\nNOTE: ``limit``은 다른 list endpoint와 일관된 ``le=100``으로 검증한다.\n이전 구현은 ``min(limit, 200)``로 자동 클램프했으나, #1356에서\npagination contract 일관성을 위해 클램프를 제거하고 Query\nvalidation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가\n이 범위를 강제하면 별도 endpoint로 분리한다.\n\nCodex P2 (#1414 fix loop r1): ``from_date``/``to_date``는 ``str | None``\n타입으로 받아 ``_validate_iso_date`` 헬퍼로 ISO 8601 파싱 가능성만 검증\n하고, 원본 str을 그대로 ``AuditLogger.query/count``에 전달한다. 이전\n구현은 ``Annotated[datetime | None, ...]``로 좁혀 Pydantic이 자동 변환\n하도록 했으나, date-only 입력이 ``\"2026-05-10T00:00:00\"`` (19자리)로\n변환되어 ``AuditLogger`` 내부의 ``len(to_date) == 10`` 자동 확장 분기가\n작동하지 않게 되어 자정 이후 데이터를 누락하는 silent semantic\nregression이 발생했다. 본 구현은 str을 보존해 그 회귀를 해소한다.\n\nCodex P2 (#1414 fix loop r2): datetime 입력(``2026-05-10T00:00:00Z`` 등)\n을 r1처럼 그대로 보존하면 SQL 텍스트 비교에서 storage format(Z 없는\nnaive UTC)과 어긋나 inclusive boundary가 깨진다. ``Z``/offset 입력을\nstorage format으로 정규화하도록 헬퍼를 보강했다. date-only는 자동 확장\n경로를 위해 변환 없이 그대로 보존된다.",
         "operationId": "list_audit_logs_api_audit_get",
         "parameters": [
           {
@@ -8694,9 +8684,13 @@
         "type": "object"
       },
       "ApprovalStatusUpdate": {
-        "description": "승인/거부 요청.",
+        "description": "승인/거부 요청.\n\n``status`` 는 ``approved`` / ``rejected`` 만 허용되며, Pydantic\n``Literal`` SSOT 로 enum 을 OpenAPI 에 노출한다 (#1434). schema 단계에서\ninvalid 값이 차단되므로 handler 내 invalid status 400 분기는 reachable\n하지 않다 — Pydantic 이 422 로 사전 차단한다.",
         "properties": {
           "status": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
             "title": "Status",
             "type": "string"
           },
