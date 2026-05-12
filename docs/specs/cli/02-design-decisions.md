@@ -100,6 +100,7 @@ JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "
 | `MEMBER_PASSWORD_FILE_NOT_FOUND` | `--password-file`/`--new-password-file`이 가리키는 파일이 존재하지 않음 | `member reset-password`, `member regenerate-recovery-key` |
 | `MEMBER_PASSWORD_ENV_NOT_SET` | `--password-env`/`--new-password-env`이 참조한 환경변수가 설정되지 않음 | `member reset-password`, `member regenerate-recovery-key` |
 | `BOT_MISSING_REQUIRED_ACCOUNT` | `--account` 생략 시 active 계좌가 0개 또는 2개 이상 | `bot create` |
+| `STRATEGY_VALIDATION_ERROR` | strategy 명령 인자(예: `--status`) 값이 SSOT enum에 없음 | `strategy list` |
 | `UPDATE_SERVER_RUNNING` | `ante update --force` 없이 서버가 실행 중 | `update` |
 | `APPROVAL_VALIDATION_ERROR` | `approval request --type` 값이 SSOT enum에 없음 | `approval request` |
 
