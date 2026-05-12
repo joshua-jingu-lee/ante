@@ -45,31 +45,19 @@ def _fast_restart_cooldown(monkeypatch):
     (10~600초) 외 값을 ``ValueError`` 로 막으면서 sleep 회피 책임이 테스트
     인프라로 옮겨졌다.
 
-    ``manager.py`` 내부 cooldown / reset_after sleep 두 군데만 wrapping
-    한다. 테스트 자체의 ``await asyncio.sleep(0.05)`` (task scheduling
-    대기) 는 그대로 두기 위해 ``asyncio.sleep`` 자체가 아니라 ``manager``
-    내부 sleep wrapper 로 limit 한다.
-
-    구현 방식: ``BotManager._restart_after_cooldown`` 과
-    ``_reset_restart_count_after`` 가 호출하는 ``asyncio.sleep`` 의 인자
-    크기를 보고 1초 이상이면 0 으로 축소, 그 외(0~1초)는 그대로. 큰
-    cooldown 만 압축하고 작은 즉시 sleep 은 영향 없다.
-
-    Note: ``bot_manager_module.asyncio.sleep`` 을 monkeypatch 하면
-    ``asyncio.sleep`` 글로벌이 swap 된다. fixture scope 안에서만 적용되며,
-    ``await asyncio.sleep(0.05)`` 처럼 작은 값은 wrapper 가 그대로 통과
-    시키므로 부작용 없다.
+    ``manager._cooldown_sleep`` 만 0초 sleep 으로 교체한다. 이 helper 는
+    ``_restart_after_cooldown`` 과 ``_reset_restart_count_after`` 두 곳에서만
+    사용하므로 ``Bot._run_loop`` 의 ``asyncio.sleep(interval_seconds)`` 등
+    다른 sleep 경로에는 영향이 없다. (#1456 codex review P2)
     """
 
-    _real_sleep = asyncio.sleep
+    async def _no_sleep(seconds):  # noqa: ARG001 — 의도적 매개변수 무시
+        # cooldown 자체를 즉시 종료. task scheduling 대기는 테스트 본문의
+        # ``await asyncio.sleep(0.05)`` 가 담당한다.
+        await asyncio.sleep(0)
 
-    async def _maybe_short(seconds, *args, **kwargs):
-        # 1초 이상의 sleep 만 0 으로 압축. 그 외(테스트의 0.05 등)는 그대로.
-        target = 0 if isinstance(seconds, (int, float)) and seconds >= 1 else seconds
-        await _real_sleep(target, *args, **kwargs)
-
-    monkeypatch.setattr(bot_manager_module.asyncio, "sleep", _maybe_short)
-    return _maybe_short
+    monkeypatch.setattr(bot_manager_module, "_cooldown_sleep", _no_sleep)
+    return _no_sleep
 
 
 def _make_strategy_cls():
