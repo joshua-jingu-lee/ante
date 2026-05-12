@@ -48,7 +48,7 @@ class BotCreateRequest(BaseModel):
     name: str = ""
     account_id: str | None = None
     interval_seconds: int = Field(default=60, ge=10, le=3600)
-    budget: float | None = Field(default=None, gt=0)
+    budget: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 # POST /api/bots OpenAPI request body 문서.
@@ -109,7 +109,10 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "budget": {
             "type": ["number", "null"],
             "exclusiveMinimum": 0,
-            "description": "예산 할당액 (원). 양수만 허용.",
+            "description": (
+                "예산 할당액 (원). 양수 finite number만 허용 "
+                "(Infinity/NaN은 422로 거부, #1435)."
+            ),
         },
     },
 }
@@ -863,7 +866,10 @@ BOT_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
         "budget": {
             "type": ["number", "null"],
             "exclusiveMinimum": 0,
-            "description": "예산 할당액 (원). 양수만 허용.",
+            "description": (
+                "예산 할당액 (원). 양수 finite number만 허용 "
+                "(Infinity/NaN은 422로 거부, #1435)."
+            ),
         },
         "auto_restart": {
             "type": ["boolean", "null"],

@@ -8340,7 +8340,7 @@
               "null"
             ],
             "exclusiveMinimum": 0,
-            "description": "예산 할당액 (원). 양수만 허용."
+            "description": "예산 할당액 (원). 양수 finite number만 허용 (Infinity/NaN은 422로 거부, #1435)."
           }
         }
       },
@@ -8379,7 +8379,7 @@
               "null"
             ],
             "exclusiveMinimum": 0,
-            "description": "예산 할당액 (원). 양수만 허용."
+            "description": "예산 할당액 (원). 양수 finite number만 허용 (Infinity/NaN은 422로 거부, #1435)."
           },
           "auto_restart": {
             "type": [
