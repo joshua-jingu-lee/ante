@@ -375,6 +375,15 @@ export type paths = {
          *     pagination contract 일관성을 위해 클램프를 제거하고 Query
          *     validation으로 대체했다 (101..200 범위 요청은 새로 422). 다른 caller가
          *     이 범위를 강제하면 별도 endpoint로 분리한다.
+         *
+         *     Codex P2 (#1414 fix loop r1): ``from_date``/``to_date``는 ``str | None``
+         *     타입으로 받아 ``_validate_iso_date`` 헬퍼로 ISO 8601 파싱 가능성만 검증
+         *     하고, 원본 str을 그대로 ``AuditLogger.query/count``에 전달한다. 이전
+         *     구현은 ``Annotated[datetime | None, ...]``로 좁혀 Pydantic이 자동 변환
+         *     하도록 했으나, date-only 입력이 ``"2026-05-10T00:00:00"`` (19자리)로
+         *     변환되어 ``AuditLogger`` 내부의 ``len(to_date) == 10`` 자동 확장 분기가
+         *     작동하지 않게 되어 자정 이후 데이터를 누락하는 silent semantic
+         *     regression이 발생했다. 본 구현은 str을 보존해 그 회귀를 해소한다.
          */
         get: operations["list_audit_logs_api_audit_get"];
         put?: never;
@@ -4414,12 +4423,12 @@ export interface operations {
         parameters: {
             query?: {
                 action?: string | null;
-                /** @description ISO 8601 datetime (inclusive lower bound) */
+                /** @description ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound. */
                 from_date?: string | null;
                 limit?: number;
                 member_id?: string | null;
                 offset?: number;
-                /** @description ISO 8601 datetime (inclusive upper bound) */
+                /** @description ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. date-only는 ``AuditLogger`` 내부에서 ``T23:59:59``로 확장된다. */
                 to_date?: string | null;
             };
             header?: never;
@@ -4455,7 +4464,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Invalid date filter (ISO 8601 required). ``from_date``/``to_date``는 ISO 8601 datetime 또는 date(``YYYY-MM-DD``)만 허용한다. 파싱 불가능한 임의 문자열(예: ``not-a-date``)은FastAPI/Pydantic이 422로 거부한다(#1414). */
+            /** @description Invalid date filter (ISO 8601 required). ``from_date``/``to_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다. 파싱 불가능한임의 문자열(예: ``not-a-date``)은 핸들러가 422로 거부한다(#1414). date-only 입력은 ``AuditLogger.query``의 자동 확장(SQL ``<= 'YYYY-MM-DDT23:59:59'``) 동작을 보존하기 위해 변환 없이 그대로 전달된다. */
             422: {
                 headers: {
                     [name: string]: unknown;

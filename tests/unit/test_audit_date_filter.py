@@ -2,21 +2,26 @@
 
 oracle A7 시그니처에서 발견된 contract drift: ``from_date``/``to_date``가
 임의 문자열(예: ``oracle-not-a-date``)을 200으로 수락하고 있었다. 본 PR은
-파라미터 타입을 ``Annotated[datetime | None, Query(...)]``로 좁혀
-FastAPI/Pydantic이 ISO 8601 파싱에 실패하면 422로 거부하도록 한다.
+핸들러 안에서 ``_validate_iso_date`` 헬퍼로 ISO 8601 파싱 가능성만 검증
+하고, 파싱 실패 시 422로 거부한다.
 
-핵심 invariants (Implementation Plan):
+핵심 invariants (Implementation Plan + Codex r1 finding):
 - 인증 누락 + 잘못된 날짜 → 401 (auth-first 우선순위, dependency 순서 회귀 방지).
 - 인증된 master + 잘못된 날짜 → 422 (``AuditLogger.query`` 미호출).
-- 인증된 master + 정상 ISO 8601 datetime → 200 (회귀 보존).
-- 인증된 master + 정상 date-only (``YYYY-MM-DD``) → 200 (FastAPI/Pydantic
-  이 ISO 8601 date 파싱 허용).
-- OpenAPI ``parameters[from_date]``/``parameters[to_date]``는
-  ``format: date-time`` 스키마로 노출되어야 한다 (contract-drift fix 검증).
+- 인증된 master + 정상 ISO 8601 datetime → 200, **원본 str 그대로 전달**.
+- 인증된 master + 정상 date-only (``YYYY-MM-DD``) → 200, **원본 str(10자리)
+  그대로 전달** → ``AuditLogger.query`` 내부의 ``T23:59:59`` 자동 확장 분기
+  보존. Codex r1 finding: 1차 구현은 Pydantic datetime → ``isoformat()``으로
+  변환했고, date-only가 ``"2026-05-10T00:00:00"`` (19자리)로 바뀌어 자정
+  이후 데이터를 누락하는 silent semantic regression이 발생했다.
+- OpenAPI ``parameters[from_date]``/``parameters[to_date]``는 ``string``
+  스키마로 노출되며 description에 ISO 8601 형식을 명시한다.
 
 SSOT: ``docs/specs/web-api/05-resource-endpoints.md`` (audit 라우트는
 "필터: member_id, action, from_date, to_date, limit, offset" — free-form
 허용 명시 없음 → ISO 8601 강제는 spec 위반이 아니다).
+``docs/specs/audit/audit.md`` Web API 예시는 ``from_date=2026-03-12&to_date=
+2026-03-19`` (date-only) — 본 회귀 테스트는 그 caller 패턴을 보호한다.
 """
 
 from __future__ import annotations
@@ -195,11 +200,12 @@ class TestInvalidDate422:
         assert audit_logger.count.await_count == 0
 
 
-# ── 200: 정상 ISO 8601 회귀 보존 ────────────────────────────────────
+# ── 200: 정상 ISO 8601 + str 보존 회귀 ────────────────────────────────
 
 
 class TestValidIsoDate200:
-    """정상 ISO 8601 입력은 200으로 통과해야 한다 (회귀)."""
+    """정상 ISO 8601 입력은 200으로 통과하며 원본 str이 그대로 ``AuditLogger``
+    에 전달되어야 한다 (Codex r1 finding: silent semantic regression 방지)."""
 
     def test_iso_datetime_returns_200(
         self, client: TestClient, audit_logger: AsyncMock
@@ -213,20 +219,21 @@ class TestValidIsoDate200:
             f"정상 ISO datetime이 200이 아님 ({resp.status_code}: {resp.text})"
         )
         assert audit_logger.query.await_count == 1
-        # ``AuditLogger.query`` 시그니처는 str을 유지한다 — 핸들러는
-        # ``datetime.isoformat()``으로 변환해 전달해야 한다.
+        # ``AuditLogger.query`` 시그니처는 str을 유지한다 — 핸들러는 입력
+        # str을 변환 없이 그대로 전달해야 한다.
         call_kwargs = audit_logger.query.await_args.kwargs
-        assert isinstance(call_kwargs["from_date"], str), (
-            f"from_date가 str로 전달되어야 함: {type(call_kwargs['from_date'])}"
+        assert call_kwargs["from_date"] == "2026-05-10T00:00:00Z", (
+            f"ISO datetime str가 변환 없이 그대로 전달되어야 함: "
+            f"{call_kwargs['from_date']!r}"
         )
-        assert "2026-05-10" in call_kwargs["from_date"]
 
     def test_date_only_returns_200(
         self, client: TestClient, audit_logger: AsyncMock
     ) -> None:
-        """date-only (``2026-05-10``) → 200 (FastAPI/Pydantic은 date를 datetime
-        으로 자동 변환). 기존 ``frontend/src/api/`` caller가 date-only를 보내는
-        경우 회귀 보존."""
+        """date-only (``2026-05-10``) → 200. 10자리 str 그대로 전달되어
+        ``AuditLogger.query`` 내부의 ``T23:59:59`` 자동 확장 분기를 보존한다.
+        Codex r1 finding 핵심 회귀.
+        """
         resp = client.get(
             "/api/audit?from_date=2026-05-10",
             headers=_MASTER_HEADERS,
@@ -235,6 +242,83 @@ class TestValidIsoDate200:
             f"date-only가 200이 아님 ({resp.status_code}: {resp.text})"
         )
         assert audit_logger.query.await_count == 1
+        call_kwargs = audit_logger.query.await_args.kwargs
+        assert call_kwargs["from_date"] == "2026-05-10", (
+            f"date-only str(10자리)가 변환 없이 그대로 전달되어야 함: "
+            f"{call_kwargs['from_date']!r}"
+        )
+
+    def test_date_only_to_date_extended_to_end_of_day(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """date-only ``to_date``(10자리)가 ``AuditLogger``에 그대로 전달되어
+        자정 이후 데이터 누락을 방지한다.
+
+        Codex r1 finding 핵심 회귀:
+            1차 구현은 Pydantic이 ``2026-05-10`` → ``datetime(2026,5,10,0,0,0)``
+            으로 변환한 뒤 핸들러가 ``isoformat()`` → ``"2026-05-10T00:00:00"``
+            (19자리)로 바꿔 ``AuditLogger.query``의
+            ``if len(to_date) == 10: to_date + "T23:59:59"`` 자동 확장 분기를
+            우회시켰다. 결과적으로 SQL ``created_at <= '2026-05-10T00:00:00'``
+            로 좁혀져 자정 이후 데이터를 모두 누락. 본 테스트는 입력 str이
+            10자리 그대로 ``AuditLogger.query``에 도달하는지 확인한다.
+        """
+        resp = client.get(
+            "/api/audit?to_date=2026-05-10",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"date-only to_date가 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        assert audit_logger.query.await_count == 1
+        call_kwargs = audit_logger.query.await_args.kwargs
+        # 10자리 그대로 — AuditLogger 내부에서 자동 확장 분기 진입 가능
+        assert call_kwargs["to_date"] == "2026-05-10", (
+            f"date-only to_date가 10자리 그대로 전달되어야 함 (자동 확장 보존): "
+            f"{call_kwargs['to_date']!r}"
+        )
+        assert len(call_kwargs["to_date"]) == 10, (
+            f"to_date 길이가 10이어야 AuditLogger.query 분기 진입 가능: "
+            f"len={len(call_kwargs['to_date'])}, value={call_kwargs['to_date']!r}"
+        )
+        # count도 동일하게 전달되는지 확인
+        count_kwargs = audit_logger.count.await_args.kwargs
+        assert count_kwargs["to_date"] == "2026-05-10", (
+            f"count에도 date-only str 그대로 전달되어야 함: {count_kwargs['to_date']!r}"
+        )
+
+    def test_iso_datetime_to_date_preserved(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """ISO datetime ``to_date``도 원본 str 그대로 전달."""
+        resp = client.get(
+            "/api/audit?to_date=2026-05-10T12:34:56Z",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"ISO datetime to_date가 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        call_kwargs = audit_logger.query.await_args.kwargs
+        assert call_kwargs["to_date"] == "2026-05-10T12:34:56Z", (
+            f"ISO datetime to_date str가 변환 없이 그대로 전달되어야 함: "
+            f"{call_kwargs['to_date']!r}"
+        )
+
+    def test_both_dates_passed_as_str(
+        self, client: TestClient, audit_logger: AsyncMock
+    ) -> None:
+        """``from_date``+``to_date`` 둘 다 date-only로 보낼 때 양쪽 모두 원본
+        str 보존."""
+        resp = client.get(
+            "/api/audit?from_date=2026-03-12&to_date=2026-03-19",
+            headers=_MASTER_HEADERS,
+        )
+        assert resp.status_code == 200, (
+            f"date-only 양쪽 전송이 200이 아님 ({resp.status_code}: {resp.text})"
+        )
+        call_kwargs = audit_logger.query.await_args.kwargs
+        assert call_kwargs["from_date"] == "2026-03-12"
+        assert call_kwargs["to_date"] == "2026-03-19"
 
 
 # ── 401: auth-first invariant (Issue #1414 본문) ────────────────────
@@ -247,6 +331,10 @@ class TestAuthFirstWithInvalidDate:
     (require_audit_read)가 ``from_date``/``to_date`` Query parsing 보다 먼저
     실행된다. 인증 정보가 없으면 401이 먼저 반환되어 "auth-first" invariant
     가 유지된다. 본 테스트는 그 회귀를 막는다.
+
+    NOTE (#1414 r1): 422 검증을 핸들러 본문(헬퍼 호출)로 옮기면 Query
+    parsing 단계는 항상 통과하므로, 잘못된 날짜로 호출해도 핸들러 진입
+    전에 401이 발생하는지가 더더욱 중요하다.
     """
 
     def test_unauth_with_invalid_date_returns_401(
@@ -264,79 +352,93 @@ class TestAuthFirstWithInvalidDate:
 # ── OpenAPI 스키마 회귀 (contract-drift fix 검증) ──────────────────
 
 
-class TestOpenAPIDateFormat:
-    """``/openapi.json``의 ``from_date``/``to_date`` 스키마가 ``date-time``
-    포맷으로 노출되어야 한다.
+class TestOpenAPIDateContract:
+    """``/openapi.json``의 ``from_date``/``to_date`` 스키마 + 422 응답 분기
+    회귀.
 
-    issue #1414 직전에는 두 파라미터가 free-form ``string``이었다. 본 PR
-    이후에는 FastAPI가 ``Annotated[datetime | None, Query(...)]``를
-    ``{"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}``
-    로 노출해야 한다. ``frontend/openapi.json`` codegen 산출물이
-    contract 변경을 인식할 수 있도록 명시적으로 검증한다.
+    issue #1414 r1: 1차 구현은 ``Annotated[datetime | None, Query(...)]``로
+    좁혀 OpenAPI에 ``format: date-time``으로 노출했으나, 그 자동 변환이 SQL
+    의 자동 확장 분기를 깨뜨려 회귀로 판정됐다. r2 구현은 타입을
+    ``str | None``으로 복원하고 description에 ISO 8601 명시. 따라서 OpenAPI
+    schema는 ``string`` 또는 anyOf ``string``/null이며, description에
+    ISO 8601 키워드가 포함되어야 한다. 422 분기는 그대로 유지.
     """
 
     @staticmethod
-    def _audit_query_params() -> dict[str, dict]:
-        """``GET /api/audit`` 의 query parameter 스키마를 name → schema 매핑으로."""
+    def _audit_get_operation() -> dict:
         app = create_app()
         schema = app.openapi()
-        operation = schema["paths"]["/api/audit"]["get"]
+        return schema["paths"]["/api/audit"]["get"]
+
+    @staticmethod
+    def _audit_query_params() -> dict[str, dict]:
+        """``GET /api/audit`` query parameter 객체를 name → param 매핑으로."""
+        operation = TestOpenAPIDateContract._audit_get_operation()
         return {
-            param["name"]: param["schema"]
+            param["name"]: param
             for param in operation.get("parameters", [])
             if param.get("in") == "query"
         }
 
-    def test_from_date_param_has_date_time_format(self) -> None:
+    def test_from_date_param_is_string_type(self) -> None:
         params = self._audit_query_params()
         assert "from_date" in params, (
             f"GET /api/audit에 from_date param이 없음: {sorted(params.keys())}"
         )
-        from_date_schema = params["from_date"]
-        # anyOf 분기 또는 직접 format을 검사한다.
-        formats = self._collect_formats(from_date_schema)
-        assert "date-time" in formats, (
-            f"from_date 스키마에 date-time format이 없음 "
-            f"(contract-drift fix 미반영): {from_date_schema}"
+        types = self._collect_types(params["from_date"]["schema"])
+        assert "string" in types, (
+            f"from_date 스키마에 string type이 없음: {params['from_date']['schema']}"
         )
 
-    def test_to_date_param_has_date_time_format(self) -> None:
+    def test_to_date_param_is_string_type(self) -> None:
         params = self._audit_query_params()
         assert "to_date" in params, (
             f"GET /api/audit에 to_date param이 없음: {sorted(params.keys())}"
         )
-        to_date_schema = params["to_date"]
-        formats = self._collect_formats(to_date_schema)
-        assert "date-time" in formats, (
-            f"to_date 스키마에 date-time format이 없음 "
-            f"(contract-drift fix 미반영): {to_date_schema}"
+        types = self._collect_types(params["to_date"]["schema"])
+        assert "string" in types, (
+            f"to_date 스키마에 string type이 없음: {params['to_date']['schema']}"
+        )
+
+    def test_from_date_description_mentions_iso_8601(self) -> None:
+        """contract drift 방지: description에 ISO 8601 명시 — frontend
+        codegen 산출물이 free-form string으로 노출되지 않도록 한다."""
+        params = self._audit_query_params()
+        description = params["from_date"].get("description", "") or ""
+        assert "ISO 8601" in description, (
+            f"from_date description에 'ISO 8601' 명시가 없음: {description!r}"
+        )
+
+    def test_to_date_description_mentions_iso_8601(self) -> None:
+        params = self._audit_query_params()
+        description = params["to_date"].get("description", "") or ""
+        assert "ISO 8601" in description, (
+            f"to_date description에 'ISO 8601' 명시가 없음: {description!r}"
         )
 
     def test_openapi_lists_422_response(self) -> None:
         """``GET /api/audit`` ``responses``에 422 항목이 있어야 한다.
 
         ``frontend/openapi.json`` codegen 산출물이 422 분기를 인식할 수 있도록
-        contract에 명시한다.
+        contract에 명시한다. 핸들러가 직접 raise한 422도 OpenAPI에 노출된다.
         """
-        app = create_app()
-        schema = app.openapi()
-        operation = schema["paths"]["/api/audit"]["get"]
+        operation = self._audit_get_operation()
         responses = operation.get("responses", {})
         assert "422" in responses, (
             f"GET /api/audit 응답에 422 항목이 없음: {sorted(responses.keys())}"
         )
 
     @staticmethod
-    def _collect_formats(schema: dict) -> set[str]:
-        """``schema`` 트리에서 모든 ``format`` 값을 모아 반환한다.
+    def _collect_types(schema: dict) -> set[str]:
+        """``schema`` 트리에서 모든 ``type`` 값을 모아 반환한다.
 
-        FastAPI는 ``datetime | None``을 ``anyOf: [{type, format}, {null}]``로
+        FastAPI는 ``str | None``을 ``anyOf: [{type: string}, {type: null}]``로
         펼치므로 anyOf branch까지 탐색해야 한다.
         """
-        formats: set[str] = set()
-        if "format" in schema:
-            formats.add(schema["format"])
+        types: set[str] = set()
+        if "type" in schema:
+            types.add(schema["type"])
         for branch in schema.get("anyOf", []) or []:
-            if isinstance(branch, dict) and "format" in branch:
-                formats.add(branch["format"])
-        return formats
+            if isinstance(branch, dict) and "type" in branch:
+                types.add(branch["type"])
+        return types
