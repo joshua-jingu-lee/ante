@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _BOT_NOT_FOUND = "BOT_NOT_FOUND: 봇을 찾을 수 없습니다"
+
+# bot logs API (#1437)는 ``bot_id`` 가 payload JSON 안이라 SQL 직접 필터가
+# 어렵다. 정확한 ``total`` / pagination을 위해 매칭 가능 범위(event_type +
+# since/until)를 한번에 fetch한 뒤 in-memory에서 ``bot_id`` 를 필터링한다.
+# retention 30일 (``EventHistoryStore.cleanup`` 기본값) × 봇당 step 빈도를
+# 고려해 cap을 두며, cap 초과 시 ``total`` 이 clamp될 수 있음을 핸들러
+# docstring에 명시한다. JSON1로 SQL 직접 필터를 끌어올리는 최적화는 별도
+# 이슈로 분리한다.
+_BOT_LOGS_FETCH_HARD_CAP = 10000
 
 
 class BotCreateRequest(BaseModel):
@@ -1129,43 +1138,83 @@ async def update_bot(
     return {"bot": bot.get_info()}
 
 
-def _validate_iso_date_param(value: str | None, field: str) -> str | None:
-    """``value``가 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime인지 검증.
+def _validate_iso_date_param(
+    value: str | None,
+    field: str,
+    *,
+    end_of_day: bool = False,
+) -> datetime | None:
+    """``value``가 ISO 8601 date 또는 datetime인지 검증하고 UTC-aware
+    ``datetime``으로 정규화.
 
-    bot logs in-memory filter는 timestamp 문자열 lexicographic 비교
-    (``timestamp >= start_date``)로 동작한다. 따라서 검증만 수행하고 입력
-    str을 그대로 돌려준다.
+    bot logs 페이지네이션(#1437 r1)은 ``EventHistoryStore``의 SQL
+    ``timestamp >= ? AND timestamp <= ?`` 텍스트 비교로 동작한다. 저장 측은
+    :class:`Event.timestamp` (``datetime.now(UTC)`` — tz-aware UTC) 의
+    ``isoformat()`` 결과를 그대로 저장하므로 storage 문자열은
+    ``"2026-05-13T12:00:00+00:00"`` 같이 ``+00:00`` suffix를 가진다.
+    ``EventHistoryStore.query``는 SQL 파라미터로 ``since.isoformat()`` /
+    ``until.isoformat()``을 사용하므로, 입력 datetime을 UTC-aware로 유지하면
+    양쪽 모두 ``+00:00`` suffix가 붙어 ASCII 텍스트 비교가 실제 UTC 시간
+    관계와 일치한다 (suffix 정합).
+
+    Codex P2 (#1437 r1):
+        r0 구현은 입력 문자열을 그대로 보존(``2026-01-01T09:00:00+09:00`` →
+        ``"2026-01-01T09:00:00+09:00"``)한 채 in-memory ``timestamp >= ?``
+        문자열 비교에 사용했다. 저장된 timestamp는
+        ``"2026-01-01T00:30:00+00:00"`` 같은 ISO 문자열이므로, ``+09:00``
+        offset이 그대로 SQL 텍스트 비교에 들어가면 ASCII ``+`` (0x2B) < digit
+        (0x30..0x39) 규칙과 zone offset이 섞여 실제 UTC 시간 관계와 어긋난다.
+        본 헬퍼는 입력을 UTC(``+00:00``)로 환산해 storage suffix와 일치시킨다.
 
     허용 형식:
-        - ``YYYY-MM-DD`` (date-only)
-        - ``YYYY-MM-DDTHH:MM:SS[Z]`` / ``YYYY-MM-DDTHH:MM:SS+HH:MM`` 등 ISO datetime
+        - ``YYYY-MM-DD`` (date-only) — ``end_of_day=True``면
+          ``YYYY-MM-DDT23:59:59+00:00``로 확장, 그 외엔
+          ``YYYY-MM-DDT00:00:00+00:00``.
+        - ``YYYY-MM-DDTHH:MM:SS[.ffffff][Z]`` / ``+HH:MM`` offset — UTC로
+          환산.
+        - timezone 없는 naive datetime — UTC로 가정.
 
     파싱 실패 시 ``HTTPException(422)``로 거부한다 (#1414 audit 패턴 답습).
 
-    Note:
-        ``audit._validate_iso_date``는 ``AuditLogger`` SQL 텍스트 비교용
-        storage format으로 정규화하지만, bot logs는 in-memory ISO timestamp
-        ``str`` 비교만 수행하므로 정규화는 불필요하다. ``YYYY-MM-DD``는
-        lexicographic 비교에서 ``YYYY-MM-DDTHH:MM:SS``보다 작으므로
-        date-only ``start_date`` 입력은 자연스럽게 ``<= timestamp`` 의 lower
-        bound 역할을 한다. ``end_date`` 의 inclusive 의미를 보존하기 위해
-        date-only 입력은 ``YYYY-MM-DDT23:59:59``로 확장한다.
+    Args:
+        value: 입력 ISO 문자열 또는 ``None``.
+        field: 에러 메시지용 필드명 (``start_date`` / ``end_date``).
+        end_of_day: ``True``면 date-only 입력을 ``T23:59:59``로 확장 (inclusive
+            upper bound 의미 보존).
+
+    Returns:
+        UTC tz-aware ``datetime`` 또는 ``None``.
     """
     if value is None:
         return None
-    # ISO date 시도 → 그대로 보존 (Python 3.13은 ``20260510``, ``2026-W19-1``
-    # 같은 비표준 포맷도 허용하므로 ``.isoformat()``으로 표준 ``YYYY-MM-DD``
-    # 정규화).
+    # ISO date 시도 — Python 3.13은 ``20260510``, ``2026-W19-1`` 같은 비표준
+    # 포맷도 수락하므로, ``.isoformat()``로 항상 ``YYYY-MM-DD`` 표준 형식으로
+    # 정규화한 뒤 UTC tz-aware datetime으로 확장.
     try:
-        return date.fromisoformat(value).isoformat()
+        d = date.fromisoformat(value)
     except ValueError:
-        pass
-    # ISO datetime 시도 (Z/offset 허용) — 검증만 하고 원본 보존
+        d = None
+    if d is not None:
+        if end_of_day:
+            # microseconds=999_999까지 확장 — storage timestamp는
+            # ``datetime.now(UTC)``로 microseconds까지 가질 수 있다. ASCII
+            # 텍스트 비교에서 ``T23:59:59`` < ``T23:59:59.xxxxxx`` < ``T23:59:59+00:00``
+            # (``.`` < ``+``) 이므로, ``T23:59:59+00:00``로만 확장하면
+            # microseconds 있는 storage row가 inclusive upper bound에서
+            # 누락된다. ``T23:59:59.999999`` (microseconds 최대)로 확장해
+            # 같은 날짜 모든 microseconds row를 포함시킨다.
+            return datetime(d.year, d.month, d.day, 23, 59, 59, 999_999, tzinfo=UTC)
+        return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=UTC)
+    # ISO datetime 시도 (Z/offset 허용) — UTC tz-aware로 정규화.
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return value
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        pass
+        dt = None
+    if dt is not None:
+        if dt.tzinfo is None:
+            # tz 없는 naive 입력은 UTC로 간주(저장 측 가정 일치).
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
     raise HTTPException(
         status_code=422,
         detail=(
@@ -1252,31 +1301,67 @@ async def get_bot_logs(
     Query 파라미터 (#1437):
         - ``limit``: 페이지 크기 (기본 50, 1..100).
         - ``offset``: 페이지 시작 인덱스 (기본 0, ge=0).
-        - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 필터링은
-          in-memory timestamp 문자열 비교로 동작한다.
+        - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 핸들러는
+          입력을 UTC-naive ``datetime``으로 정규화한 뒤 ``EventHistoryStore``
+          SQL filter(``timestamp >= ? AND timestamp <= ?``)에 전달한다.
 
-    Note: ``event_history_store.query`` 시그니처는 변경하지 않는다
-    (Non-Goal). 따라서 store 쿼리는 ``limit`` 만 전달하고, bot_id +
-    date range 필터링과 페이지네이션은 in-memory에서 수행한다. count 효율
-    최적화는 별도 이슈로 분리한다.
+    Codex P2 (#1437 fix loop r1):
+        r0 구현은 두 가지 silent regression이 있었다.
+
+        (1) ``store.query(limit=limit)`` + in-memory 페이지 슬라이스 — store가
+            처음부터 ``LIMIT limit``만 fetch하기 때문에 ``offset=10&limit=10``
+            요청 시 2페이지가 비거나 짧고, ``total`` 카운트가 처음 limit
+            범위로만 제한된다. 본 r1 구현은 store에 ``offset``/``until``과
+            ``count`` 시그니처를 확장하고, ``bot_id`` 가 payload JSON 안에
+            있어 SQL 직접 필터가 어렵다는 한계를 인정해, **매칭 가능 범위를
+            모두 가져온 뒤 in-memory에서 ``bot_id`` 필터 → ``total`` → 페이지
+            슬라이스** 흐름으로 변경한다. ``EventHistoryStore.query``에 추가된
+            ``offset`` 파라미터는 ``bot_id`` 필터 미적용 호출자(미래 dashboard
+            total badge 등)가 효율적인 페이지네이션을 할 수 있도록 보강해두지만,
+            본 핸들러는 ``bot_id`` 정확성 우선으로 사용하지 않는다.
+            매칭 row 수가 과도하게 커지지 않도록 hard cap
+            ``_BOT_LOGS_FETCH_HARD_CAP``을 둔다(retention 30일 가정 하 충분).
+
+        (2) ``start_date``/``end_date`` 를 입력 그대로(``+09:00`` 등 offset
+            suffix 포함) in-memory ``timestamp >= start_date`` 문자열 비교에
+            사용 — storage timestamp는 UTC-naive ISO 문자열이라 ASCII 정렬
+            규칙으로 실제 UTC 시간과 어긋난다 (#1414 audit r2와 동일 패턴).
+            본 r1 구현은 ``_validate_iso_date_param``으로 입력을 UTC-naive
+            ``datetime``으로 정규화하고, ``EventHistoryStore``의 SQL 텍스트
+            비교에 그대로 사용한다. event timestamp는 dataclass field default
+            ``datetime.now(timezone.utc)``로 tz-aware UTC이지만,
+            ``isoformat()`` 결과를 SQL 텍스트로 비교하므로 ``+00:00`` suffix가
+            있을 수 있다. inclusive boundary는 ``>=``/``<=`` 비교라서
+            ``T00:00:00`` < ``T00:00:00+00:00`` < ``T23:59:59+00:00`` <
+            ``T23:59:59Z`` (ASCII) 관계가 성립하므로, ``date.fromisoformat``
+            확장 datetime(``T00:00:00`` / ``T23:59:59``)이 안전한 하한/상한이
+            된다.
+
+    Note: ``bot_id`` 가 payload JSON 안에 있어 SQL 직접 필터가 어렵다는
+        한계로, 매칭 row 수가 hard cap을 초과하는 환경에선 ``total`` 이 cap에
+        clamp된다. SQL JSON1로 ``bot_id`` 를 SQL 필터로 끌어올리는 최적화는
+        본 패치 범위(Non-Goal). 별도 이슈로 분리한다.
     """
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
-    # ISO 8601 검증 + date-only end_date의 inclusive boundary 확장.
+    # ISO 8601 검증 + UTC-naive 정규화 (timezone 정렬 일관화).
+    # end_date는 ``end_of_day=True``로 date-only를 ``T23:59:59``로 확장.
     start_validated = _validate_iso_date_param(start_date, "start_date")
-    end_validated = _validate_iso_date_param(end_date, "end_date")
-    # end_date가 10자리(date-only)면 자정 끝까지 포함하도록 확장.
-    if end_validated is not None and len(end_validated) == 10:
-        end_validated = f"{end_validated}T23:59:59"
+    end_validated = _validate_iso_date_param(end_date, "end_date", end_of_day=True)
 
     all_logs: list[dict] = []
 
     if event_history_store is not None:
+        # bot_id가 payload JSON 안이라 SQL 직접 필터 불가 → 매칭 가능 범위
+        # 모두 fetch 후 in-memory bot_id 필터로 total/페이지 계산.
         rows = await event_history_store.query(
             event_type="BotStepCompletedEvent",
-            limit=limit,
+            since=start_validated,
+            until=end_validated,
+            limit=_BOT_LOGS_FETCH_HARD_CAP,
+            offset=0,
         )
         for row in rows:
             payload = row.get("payload", {})
@@ -1292,30 +1377,38 @@ async def get_bot_logs(
     elif eventbus is not None:
         from ante.eventbus.events import BotStepCompletedEvent
 
-        history = eventbus.get_history(event_type=BotStepCompletedEvent, limit=limit)
+        # in-memory ring buffer 기반 ``get_history``는 store와 달리
+        # ``since``/``until``/``offset`` 시그니처가 없으므로(Non-Goal,
+        # 작업 범위 외), 큰 hard cap으로 fetch 후 in-memory 필터.
+        history = eventbus.get_history(
+            event_type=BotStepCompletedEvent,
+            limit=_BOT_LOGS_FETCH_HARD_CAP,
+        )
         for evt in history:
-            if evt.bot_id == bot_id:
-                all_logs.append(
-                    {
-                        "event_id": str(evt.event_id),
-                        "timestamp": evt.timestamp.isoformat(),
-                        "result": evt.result,
-                        "message": evt.message,
-                    }
-                )
+            if evt.bot_id != bot_id:
+                continue
+            evt_ts = evt.timestamp
+            # event.timestamp는 ``datetime.now(UTC)`` (tz-aware UTC) default.
+            # start_validated/end_validated가 UTC tz-aware이므로 tz 정합 비교.
+            # 혹시 외부에서 naive datetime을 넣은 경우 UTC로 간주.
+            if evt_ts.tzinfo is None:
+                evt_ts = evt_ts.replace(tzinfo=UTC)
+            else:
+                evt_ts = evt_ts.astimezone(UTC)
+            if start_validated is not None and evt_ts < start_validated:
+                continue
+            if end_validated is not None and evt_ts > end_validated:
+                continue
+            all_logs.append(
+                {
+                    "event_id": str(evt.event_id),
+                    "timestamp": evt.timestamp.isoformat(),
+                    "result": evt.result,
+                    "message": evt.message,
+                }
+            )
 
-    # date range filter (in-memory timestamp string 비교).
-    if start_validated is not None or end_validated is not None:
-        filtered = [
-            log
-            for log in all_logs
-            if (start_validated is None or log["timestamp"] >= start_validated)
-            and (end_validated is None or log["timestamp"] <= end_validated)
-        ]
-    else:
-        filtered = all_logs
-
-    total = len(filtered)
-    paginated = filtered[offset : offset + limit]
+    total = len(all_logs)
+    paginated = all_logs[offset : offset + limit]
 
     return {"bot_id": bot_id, "logs": paginated, "total": total}

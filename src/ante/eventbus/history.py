@@ -77,9 +77,25 @@ class EventHistoryStore:
         self,
         event_type: str | None = None,
         since: datetime | None = None,
+        until: datetime | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """이벤트 로그 조회."""
+        """이벤트 로그 조회.
+
+        Args:
+            event_type: 이벤트 타입 이름(정확 일치).
+            since: ``timestamp >= since`` (inclusive lower bound).
+            until: ``timestamp <= until`` (inclusive upper bound).
+            limit: SQL ``LIMIT`` — 반환 최대 건수.
+            offset: SQL ``OFFSET`` — pagination skip 수.
+
+        Note (#1437):
+            ``until``과 ``offset`` 파라미터는 web bot logs endpoint의 정확한
+            페이지네이션을 위해 추가되었다. payload 내부 필드(``bot_id`` 등)에
+            대한 SQL filter는 지원하지 않으며, 그 종류의 필터는 호출자가
+            in-memory에서 처리한다.
+        """
         sql = "SELECT * FROM event_log WHERE 1=1"
         params: list[str] = []
 
@@ -89,9 +105,13 @@ class EventHistoryStore:
         if since:
             sql += " AND timestamp >= ?"
             params.append(since.isoformat())
+        if until:
+            sql += " AND timestamp <= ?"
+            params.append(until.isoformat())
 
-        sql += " ORDER BY id DESC LIMIT ?"
+        sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
         params.append(str(limit))
+        params.append(str(offset))
 
         rows = await self._db.fetch_all(sql, tuple(params))
         result = []
@@ -100,6 +120,37 @@ class EventHistoryStore:
             entry["payload"] = json.loads(entry["payload"])
             result.append(entry)
         return result
+
+    async def count(
+        self,
+        event_type: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int:
+        """이벤트 로그 매칭 건수 (페이지네이션 전 total).
+
+        ``query``와 동일한 SQL filter(``event_type``/``since``/``until``)
+        만 지원한다. payload 내부 필드 매칭(예: ``bot_id``) total은 호출자가
+        in-memory에서 계산한다 (#1437).
+
+        Returns:
+            매칭 row 수. 필터가 모두 ``None``이면 전체 ``event_log`` row 수.
+        """
+        sql = "SELECT COUNT(*) AS cnt FROM event_log WHERE 1=1"
+        params: list[str] = []
+
+        if event_type:
+            sql += " AND event_type = ?"
+            params.append(event_type)
+        if since:
+            sql += " AND timestamp >= ?"
+            params.append(since.isoformat())
+        if until:
+            sql += " AND timestamp <= ?"
+            params.append(until.isoformat())
+
+        row = await self._db.fetch_one(sql, tuple(params))
+        return int(row["cnt"]) if row else 0
 
     async def cleanup(self, retention_days: int = 30) -> int:
         """보존 기간 초과 이벤트 삭제."""

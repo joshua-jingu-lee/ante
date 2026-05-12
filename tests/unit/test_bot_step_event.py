@@ -565,3 +565,270 @@ class TestBotLogsContractDrift1437:
         """``offset=-1`` → FastAPI ``ge=0`` 검증으로 422."""
         resp = client.get("/api/bots/bot1/logs?offset=-1")
         assert resp.status_code == 422
+
+
+class TestBotLogsPagination1437R1:
+    """#1437 fix loop r1 회귀 — Codex P2 (페이지네이션 전 limit 조회 broken).
+
+    r0 구현은 ``store.query(limit=limit)`` 호출로 store에서 ``LIMIT limit``
+    만 fetch한 뒤 in-memory에서 ``[offset:offset+limit]`` 슬라이스했다. 따라서
+    ``offset=10&limit=10`` 같은 2페이지 요청 시 store가 10개만 가져오고 그 중
+    10번째 이후를 슬라이스하므로 결과가 비거나 짧고, ``total`` 역시 처음 limit
+    범위로만 카운트되었다.
+
+    r1은 EventHistoryStore 경로에서 ``_BOT_LOGS_FETCH_HARD_CAP``(=10000)으로
+    매칭 가능 범위 전체를 fetch한 뒤 in-memory에서 ``bot_id`` 필터 + total +
+    페이지 슬라이스를 계산한다. 본 클래스는 30개 로그 mock으로 2페이지가
+    정상 동작하고 ``total`` 이 limit 범위 외도 포함하는지 검증한다.
+    """
+
+    @pytest.fixture
+    def bot_manager(self):
+        mgr = FakeBotManager()
+        mgr._bots["bot1"] = FakeBot("bot1")
+        return mgr
+
+    @pytest.fixture
+    def event_history_store(self):
+        """30개 BotStepCompletedEvent 로그를 영속 저장한 fake store.
+
+        실제 ``EventHistoryStore``를 ``Database`` (file-backed SQLite)와 함께
+        쓰면 페이지네이션 + filter SQL 동작도 함께 검증할 수 있다.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from ante.core import Database
+        from ante.eventbus.history import EventHistoryStore
+
+        async def _setup():
+            import tempfile
+
+            tmpdir = tempfile.mkdtemp(prefix="ante-test-")
+            db = Database(f"{tmpdir}/event.db")
+            await db.connect()
+            store = EventHistoryStore(db=db)
+            await store.initialize()
+            base = datetime(2026, 5, 10, 0, 0, 0, tzinfo=UTC)
+            for i in range(30):
+                ts = base + timedelta(minutes=i)
+                await store.record(
+                    BotStepCompletedEvent(
+                        bot_id="bot1",
+                        account_id="test",
+                        result="success",
+                        message=f"step-{i}",
+                        timestamp=ts,
+                    )
+                )
+            return store, db
+
+        store, db = asyncio.get_event_loop().run_until_complete(_setup())
+        yield store
+        asyncio.get_event_loop().run_until_complete(db.close())
+
+    @pytest.fixture
+    def client(self, bot_manager, event_history_store):
+        app = create_app(
+            bot_manager=bot_manager,
+            event_history_store=event_history_store,
+            account_service=FakeAccountService(),
+            member_service=make_master_member_service(),
+        )
+        return make_authed_client(app)
+
+    def test_offset_10_limit_10_returns_second_page(self, client):
+        """``offset=10&limit=10`` → 30 중 2페이지(11..20번째) 정상 반환.
+
+        r0 회귀: store가 10개만 fetch 후 [10:20] 슬라이스 → 빈 페이지.
+        r1 fix: store에서 매칭 가능 범위 전체 fetch → [10:20] 슬라이스로 10개.
+        """
+        resp = client.get("/api/bots/bot1/logs?offset=10&limit=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 30
+        assert len(data["logs"]) == 10
+
+    def test_total_covers_full_match_set(self, client):
+        """``total`` 이 limit 범위 외 row까지 포함한 전체 매칭 개수.
+
+        r0 회귀: ``len(filtered)``가 store fetch limit으로 잘렸음. r1 fix:
+        매칭 가능 범위 전체 fetch 후 in-memory bot_id 필터 카운트.
+        """
+        # limit이 작아도 total은 전체 30.
+        resp = client.get("/api/bots/bot1/logs?limit=5")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 30
+        assert len(data["logs"]) == 5
+
+    def test_third_page_offset_20_limit_10(self, client):
+        """``offset=20&limit=10`` → 30 중 3페이지(21..30번째) 정상."""
+        resp = client.get("/api/bots/bot1/logs?offset=20&limit=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 30
+        assert len(data["logs"]) == 10
+
+    def test_offset_past_total_returns_empty_with_total_preserved(self, client):
+        """``offset=100`` (total 초과) → 빈 페이지 + total=30 보존."""
+        resp = client.get("/api/bots/bot1/logs?offset=100")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 30
+        assert data["logs"] == []
+
+
+class TestBotLogsTimezoneNormalization1437R1:
+    """#1437 fix loop r1 회귀 — Codex P2 (Timezone 정규화 누락).
+
+    r0 구현은 ``start_date``/``end_date`` 입력 문자열을 그대로 보존하고
+    in-memory ``timestamp >= start_date`` 사전식 비교에 사용했다. 저장된
+    storage timestamp는 UTC ISO 문자열인데, 입력이 ``+09:00`` 같은 zone
+    offset suffix를 포함하면 ASCII 정렬 규칙으로 실제 UTC 시간 관계와
+    어긋난다.
+
+    예: 입력 ``2026-05-10T09:00:00+09:00`` (UTC ``00:00``) → storage
+    ``2026-05-10T00:30:00+00:00`` (UTC ``00:30``) 는 ``>=`` 입력보다 30분
+    뒤이지만, ASCII 비교에서 ``"2026-05-10T00:30:00+00:00"`` <
+    ``"2026-05-10T09:00:00+09:00"`` (``0`` < ``9``) 로 평가되어 누락.
+
+    r1 fix: ``_validate_iso_date_param``이 입력을 UTC tz-aware datetime으로
+    정규화한 뒤 ``EventHistoryStore``에 SQL filter로 넘기므로, storage suffix
+    (``+00:00``) 와 일치하고 datetime 비교 시맨틱이 보존된다.
+    """
+
+    @pytest.fixture
+    def bot_manager(self):
+        mgr = FakeBotManager()
+        mgr._bots["bot1"] = FakeBot("bot1")
+        return mgr
+
+    @pytest.fixture
+    def event_history_store(self):
+        """timezone 검증용 로그 fixture.
+
+        bot1 로그를 다음 UTC 시각에 저장:
+          - 2026-05-09T15:00:00Z (전날, 한국시간 2026-05-10 00:00 KST)
+          - 2026-05-09T23:30:00Z (전날 자정 30분 전, 한국시간 2026-05-10 08:30 KST)
+          - 2026-05-10T00:30:00Z (다음날 새벽 30분, 한국시간 2026-05-10 09:30 KST)
+          - 2026-05-10T05:00:00Z (한국시간 2026-05-10 14:00 KST)
+          - 2026-05-10T23:30:00Z (한국시간 2026-05-11 08:30 KST)
+        """
+        from datetime import UTC, datetime
+
+        from ante.core import Database
+        from ante.eventbus.history import EventHistoryStore
+
+        async def _setup():
+            import tempfile
+
+            tmpdir = tempfile.mkdtemp(prefix="ante-test-")
+            db = Database(f"{tmpdir}/event.db")
+            await db.connect()
+            store = EventHistoryStore(db=db)
+            await store.initialize()
+            for hh, mm in [(15, 0), (23, 30)]:
+                await store.record(
+                    BotStepCompletedEvent(
+                        bot_id="bot1",
+                        account_id="test",
+                        result="success",
+                        message=f"05-09T{hh:02d}:{mm:02d}",
+                        timestamp=datetime(2026, 5, 9, hh, mm, 0, tzinfo=UTC),
+                    )
+                )
+            for hh, mm in [(0, 30), (5, 0), (23, 30)]:
+                await store.record(
+                    BotStepCompletedEvent(
+                        bot_id="bot1",
+                        account_id="test",
+                        result="success",
+                        message=f"05-10T{hh:02d}:{mm:02d}",
+                        timestamp=datetime(2026, 5, 10, hh, mm, 0, tzinfo=UTC),
+                    )
+                )
+            return store, db
+
+        store, db = asyncio.get_event_loop().run_until_complete(_setup())
+        yield store
+        asyncio.get_event_loop().run_until_complete(db.close())
+
+    @pytest.fixture
+    def client(self, bot_manager, event_history_store):
+        app = create_app(
+            bot_manager=bot_manager,
+            event_history_store=event_history_store,
+            account_service=FakeAccountService(),
+            member_service=make_master_member_service(),
+        )
+        return make_authed_client(app)
+
+    def test_start_date_with_positive_offset_normalizes_to_utc(self, client):
+        """``start_date=2026-05-10T09:00:00+09:00`` (= UTC 2026-05-10T00:00)
+        입력 시 UTC ``00:30`` 로그가 정상 포함된다.
+
+        r0 회귀: 입력 문자열 그대로 ``timestamp >= "2026-05-10T09:00:00+09:00"``
+        사전식 비교 → ``"2026-05-10T00:30:00+00:00"`` < (input) → 누락. r1:
+        UTC tz-aware로 정규화 → datetime 비교에서 storage 00:30 > input 00:00
+        → 포함.
+        """
+        # URL에서 ``+`` 는 space 인코딩이므로 ``%2B`` 로 escape.
+        resp = client.get("/api/bots/bot1/logs?start_date=2026-05-10T09:00:00%2B09:00")
+        assert resp.status_code == 200
+        data = resp.json()
+        # UTC 2026-05-10 00:00 이상: 00:30, 05:00, 23:30 → 3개.
+        messages = sorted(log["message"] for log in data["logs"])
+        assert data["total"] == 3
+        assert messages == [
+            "05-10T00:30",
+            "05-10T05:00",
+            "05-10T23:30",
+        ]
+
+    def test_end_date_with_negative_offset_normalizes_to_utc(self, client):
+        """``end_date=2026-05-10T00:00:00-05:00`` (= UTC 2026-05-10T05:00).
+        같은 시각의 storage 로그가 inclusive upper bound로 포함된다.
+        """
+        # ``-05:00``은 URL에서 그대로 사용 가능 (RFC 3986 unreserved).
+        resp = client.get("/api/bots/bot1/logs?end_date=2026-05-10T00:00:00-05:00")
+        assert resp.status_code == 200
+        data = resp.json()
+        # UTC 2026-05-10 05:00 이하: 05-09 15:00/23:30 + 05-10 00:30/05:00 → 4개.
+        messages = sorted(log["message"] for log in data["logs"])
+        assert data["total"] == 4
+        assert messages == [
+            "05-09T15:00",
+            "05-09T23:30",
+            "05-10T00:30",
+            "05-10T05:00",
+        ]
+
+    def test_date_only_start_normalizes_to_utc_midnight(self, client):
+        """``start_date=2026-05-10`` (date-only) → UTC ``T00:00:00`` 정규화.
+
+        UTC 2026-05-10 00:00 이상 logs (00:30, 05:00, 23:30) → 3개.
+        """
+        resp = client.get("/api/bots/bot1/logs?start_date=2026-05-10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+
+    def test_date_only_end_extends_to_end_of_day_utc(self, client):
+        """``end_date=2026-05-10`` (date-only) → UTC ``T23:59:59.999999`` 확장.
+
+        UTC 2026-05-10 23:59:59.999999 이하 logs (00:30, 05:00, 23:30) 포함 +
+        05-09 15:00, 23:30 도 포함(과거) → 총 5개.
+        """
+        resp = client.get("/api/bots/bot1/logs?end_date=2026-05-10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+
+    def test_z_suffix_equivalent_to_plus_zero(self, client):
+        """``Z`` suffix와 ``+00:00`` offset이 동일 결과를 낸다."""
+        r1 = client.get("/api/bots/bot1/logs?start_date=2026-05-10T00:00:00Z")
+        r2 = client.get("/api/bots/bot1/logs?start_date=2026-05-10T00:00:00%2B00:00")
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+        assert r1.json()["total"] == r2.json()["total"]
+        assert r1.json()["total"] == 3
