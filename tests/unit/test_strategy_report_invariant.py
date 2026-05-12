@@ -339,3 +339,160 @@ class TestRowToReportRegression:
         assert fetched.report_id == "rpt-legacy-invalid"
         assert fetched.total_trades == -5
         assert fetched.win_rate == 150.0
+
+
+# ── ReportStore 저장 경계 가드 회귀 (codex r3) ──────────────
+
+
+class TestReportStoreSaveBoundaryGuard:
+    """``ReportStore.submit`` / ``upsert_draft`` 가 invariant 위반을 차단해야 한다.
+
+    codex r3 P2: ``validate_strategy_report_metrics`` 는 ``StrategyReport`` 를 직접
+    저장하는 경로 (CLI, Web API submit, draft 자동 생성 등) 에 모두 부착해야 한다.
+    그렇지 않으면 잘못된 입력 (예: 백테스트 결과의 NaN sharpe, 음수 trades, 100 초과
+    win_rate) 이 ``submit``/``upsert_draft`` 를 거쳐 DB에 기록될 수 있다.
+
+    read path (``_row_to_report``) 는 codex r1 P2 회귀를 보존하기 위해 가드를 두지
+    않는다 — 위 ``TestRowToReportRegression`` 참조.
+    """
+
+    @pytest.fixture
+    async def db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        await database.connect()
+        yield database
+        await database.close()
+
+    @pytest.fixture
+    async def store(self, db):
+        s = ReportStore(db)
+        await s.initialize()
+        return s
+
+    def _make(self, **overrides) -> StrategyReport:
+        base = {
+            "report_id": "rpt-guard",
+            "strategy_name": "guard_probe",
+            "strategy_version": "1.0.0",
+            "strategy_path": "strategies/guard.py",
+            "status": ReportStatus.SUBMITTED,
+            "submitted_at": datetime.now(tz=UTC),
+            "total_return_pct": 0.0,
+            "total_trades": 0,
+            "sharpe_ratio": None,
+            "max_drawdown_pct": None,
+            "win_rate": None,
+        }
+        base.update(overrides)
+        return StrategyReport(**base)
+
+    async def test_submit_rejects_negative_trades(self, store) -> None:
+        with pytest.raises(ValueError, match="total_trades"):
+            await store.submit(self._make(total_trades=-1))
+        # DB 에 기록되지 않아야 한다.
+        assert await store.get("rpt-guard") is None
+
+    async def test_submit_rejects_win_rate_above_100(self, store) -> None:
+        with pytest.raises(ValueError, match="win_rate"):
+            await store.submit(self._make(win_rate=150.0))
+        assert await store.get("rpt-guard") is None
+
+    async def test_submit_rejects_negative_win_rate(self, store) -> None:
+        with pytest.raises(ValueError, match="win_rate"):
+            await store.submit(self._make(win_rate=-0.5))
+        assert await store.get("rpt-guard") is None
+
+    @pytest.mark.parametrize(
+        "field",
+        ["total_return_pct", "sharpe_ratio", "max_drawdown_pct"],
+    )
+    async def test_submit_rejects_nan_metric(self, store, field: str) -> None:
+        with pytest.raises(ValueError, match=f"{field}.*finite"):
+            await store.submit(self._make(**{field: float("nan")}))
+        assert await store.get("rpt-guard") is None
+
+    @pytest.mark.parametrize(
+        "field",
+        ["total_return_pct", "sharpe_ratio", "max_drawdown_pct"],
+    )
+    async def test_submit_rejects_inf_metric(self, store, field: str) -> None:
+        with pytest.raises(ValueError, match=f"{field}.*finite"):
+            await store.submit(self._make(**{field: float("inf")}))
+        assert await store.get("rpt-guard") is None
+
+    async def test_submit_valid_metrics_succeeds(self, store) -> None:
+        """invariant 통과 시 정상 저장 (회귀 보존)."""
+        report = self._make(
+            report_id="rpt-guard-ok",
+            total_trades=42,
+            win_rate=58.0,
+            total_return_pct=15.3,
+            sharpe_ratio=1.2,
+            max_drawdown_pct=-8.5,
+        )
+        rid = await store.submit(report)
+        assert rid == "rpt-guard-ok"
+
+        fetched = await store.get("rpt-guard-ok")
+        assert fetched is not None
+        assert fetched.total_trades == 42
+        assert fetched.win_rate == pytest.approx(58.0)
+
+    async def test_upsert_draft_rejects_negative_trades(self, store) -> None:
+        """``upsert_draft`` 도 진입부 가드를 거친다 (신규 분기)."""
+        with pytest.raises(ValueError, match="total_trades"):
+            await store.upsert_draft(
+                self._make(
+                    report_id="rpt-draft-bad",
+                    status=ReportStatus.DRAFT,
+                    total_trades=-3,
+                )
+            )
+        # 신규 분기에서 거부 → DB에 row 없음
+        rows = await store.list_reports(strategy_name="guard_probe")
+        assert rows == []
+
+    async def test_upsert_draft_rejects_invalid_on_update_branch(self, store) -> None:
+        """기존 DRAFT 갱신 분기에서도 invariant 위반 시 raise (update 경로 회귀)."""
+        # 먼저 정상 DRAFT 저장
+        await store.upsert_draft(
+            self._make(
+                report_id="rpt-draft-update",
+                status=ReportStatus.DRAFT,
+                total_trades=1,
+            )
+        )
+        # 이후 동일 strategy_name으로 invalid 값 upsert → update 분기 진입
+        with pytest.raises(ValueError, match="win_rate"):
+            await store.upsert_draft(
+                self._make(
+                    report_id="rpt-draft-update-2",
+                    status=ReportStatus.DRAFT,
+                    win_rate=200.0,
+                )
+            )
+        # 기존 DRAFT는 그대로 유지 (rollback이 아니라, write 자체가 발생하지 않음)
+        drafts = await store.list_reports(
+            strategy_name="guard_probe",
+            status=ReportStatus.DRAFT,
+        )
+        assert len(drafts) == 1
+        assert drafts[0].total_trades == 1
+
+    async def test_upsert_draft_valid_succeeds(self, store) -> None:
+        """invariant 통과 시 ``upsert_draft`` 정상 동작 (회귀 보존)."""
+        rid = await store.upsert_draft(
+            self._make(
+                report_id="rpt-draft-ok",
+                status=ReportStatus.DRAFT,
+                total_trades=10,
+                win_rate=55.0,
+                total_return_pct=5.0,
+                sharpe_ratio=0.9,
+                max_drawdown_pct=-3.2,
+            )
+        )
+        assert rid == "rpt-draft-ok"
+        fetched = await store.get("rpt-draft-ok")
+        assert fetched is not None
+        assert fetched.total_trades == 10
