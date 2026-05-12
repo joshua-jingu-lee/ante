@@ -377,7 +377,7 @@ class TestApprovalNotifications:
     ):
         """결재 요청 생성 시 NotificationEvent 발행 (버튼 포함)."""
         request = await service.create(
-            type="strategy_deploy",
+            type="strategy_adopt",
             requester="agent-1",
             title="전략 배포 요청",
         )
@@ -396,7 +396,7 @@ class TestApprovalNotifications:
     ):
         """결재 승인 시 NotificationEvent 발행."""
         request = await service.create(
-            type="strategy_deploy",
+            type="strategy_adopt",
             requester="agent-1",
             title="전략 배포 요청",
         )
