@@ -8472,28 +8472,36 @@
               "integer",
               "null"
             ],
-            "description": "재시작 최대 시도 횟수."
+            "minimum": 1,
+            "maximum": 10,
+            "description": "재시작 최대 시도 횟수. spec 범위 1~10 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
           },
           "restart_cooldown_seconds": {
             "type": [
               "integer",
               "null"
             ],
-            "description": "재시작 쿨다운(초)."
+            "minimum": 10,
+            "maximum": 600,
+            "description": "재시작 쿨다운(초). spec 범위 10~600 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
           },
           "step_timeout_seconds": {
             "type": [
               "integer",
               "null"
             ],
-            "description": "step 타임아웃(초)."
+            "minimum": 5,
+            "maximum": 120,
+            "description": "step 타임아웃(초). spec 범위 5~120 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
           },
           "max_signals_per_step": {
             "type": [
               "integer",
               "null"
             ],
-            "description": "step당 최대 signal 수."
+            "minimum": 1,
+            "maximum": 200,
+            "description": "step당 최대 signal 수. spec 범위 1~200 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
           }
         }
       },

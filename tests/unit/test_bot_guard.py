@@ -51,14 +51,26 @@ def _make_bot(
     max_signals: int = 50,
     interval: int = 10,
 ) -> Bot:
+    """테스트용 Bot 생성.
+
+    BotConfig 는 spec 범위 (#1456: ``step_timeout_seconds`` 5~120,
+    ``max_signals_per_step`` 1~200) 안의 값으로 만든 뒤 ``step_timeout``
+    이 spec 범위 밖이면 인스턴스 attribute 를 swap 해서 runtime 비교
+    임계값만 mutate 한다 — invariant validation 은 spec 통과값으로
+    통과시키고, 실제 ``asyncio.wait_for`` timeout 비교는 caller 가 준 짧은
+    값으로 강제한다.
+    """
     config = BotConfig(
         bot_id="bot-test",
         strategy_id="stg-test",
         account_id="acc-test",
         interval_seconds=interval,
-        step_timeout_seconds=step_timeout,
+        step_timeout_seconds=max(step_timeout, 5),
         max_signals_per_step=max_signals,
     )
+    if step_timeout < 5:
+        # 검증 통과 후 짧은 값으로 swap 하여 테스트의 timeout 분기 강제.
+        config.step_timeout_seconds = step_timeout
     ctx = MagicMock()
     ctx.get_positions.return_value = {}
     ctx.get_balance.return_value = {"available": 1000000.0}

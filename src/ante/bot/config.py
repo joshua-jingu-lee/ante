@@ -23,6 +23,19 @@ class BotStatus(StrEnum):
 MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 3600
 
+# Runtime control 범위 (#1456 — ``docs/dashboard/user-stories/bots.md`` B-5
+# line 197-200 SSOT, ``docs/specs/web-api/05-resource-endpoints.md`` PUT
+# ``/api/bots/{bot_id}`` body contract). 범위 밖 값은 PUT 단계에서 422,
+# ``BotConfig`` 직접 생성 단계에서 ``ValueError`` 로 거부된다.
+MIN_MAX_RESTART_ATTEMPTS = 1
+MAX_MAX_RESTART_ATTEMPTS = 10
+MIN_RESTART_COOLDOWN_SECONDS = 10
+MAX_RESTART_COOLDOWN_SECONDS = 600
+MIN_STEP_TIMEOUT_SECONDS = 5
+MAX_STEP_TIMEOUT_SECONDS = 120
+MIN_MAX_SIGNALS_PER_STEP = 1
+MAX_MAX_SIGNALS_PER_STEP = 200
+
 
 @dataclass
 class BotConfig:
@@ -30,6 +43,13 @@ class BotConfig:
 
     ``account_id`` 는 봇 생성 진입점에서 검증된다 (#1217 → #1241 SPLIT-2).
     fallback (`""`, ``None``, ``"default"``) 또는 형식 위반 값은 거부된다.
+
+    runtime control 4개 필드 (``max_restart_attempts``,
+    ``restart_cooldown_seconds``, ``step_timeout_seconds``,
+    ``max_signals_per_step``) 는 ``docs/dashboard/user-stories/bots.md`` B-5
+    line 197-200 spec 범위 내에서만 허용된다 (#1456). 범위 밖 값은
+    ``ValueError`` 로 거부되어 ``update_bot`` (manager.py:340) 의 재구성
+    경로에서도 동일하게 차단된다.
     """
 
     bot_id: str
@@ -48,6 +68,12 @@ class BotConfig:
         # ``InvalidAccountIdError`` 가 raise 되어 호출자에 전달된다.
         self.account_id = require_account_id(self.account_id, context="BotConfig")
         validate_interval(self.interval_seconds)
+        validate_runtime_controls(
+            max_restart_attempts=self.max_restart_attempts,
+            restart_cooldown_seconds=self.restart_cooldown_seconds,
+            step_timeout_seconds=self.step_timeout_seconds,
+            max_signals_per_step=self.max_signals_per_step,
+        )
 
 
 def validate_interval(interval: int) -> None:
@@ -57,4 +83,59 @@ def validate_interval(interval: int) -> None:
             f"실행 간격은 {MIN_INTERVAL_SECONDS}초 이상 "
             f"{MAX_INTERVAL_SECONDS}초 이하여야 합니다. "
             f"(입력값: {interval}초)"
+        )
+
+
+def validate_runtime_controls(
+    *,
+    max_restart_attempts: int,
+    restart_cooldown_seconds: int,
+    step_timeout_seconds: int,
+    max_signals_per_step: int,
+) -> None:
+    """Runtime control 4개 필드 범위 검증. 범위 밖이면 ``ValueError`` (#1456).
+
+    SSOT: ``docs/dashboard/user-stories/bots.md`` B-5 line 197-200.
+
+    메시지 포맷은 ``validate_interval`` 과 동일한 ``<필드 이름>은 <min>...
+    <max> ... 이하여야 합니다. (입력값: <value>)`` 구조를 따른다. PUT
+    핸들러는 ``BotUpdateRequest`` Pydantic 검증으로 422 를 먼저 반환하므로,
+    이 함수는 ``BotConfig`` 직접 생성 경로 (``update_bot`` 재구성,
+    bootstrap, IPC registry 등) 의 invariant 만 담당한다.
+    """
+    if (
+        max_restart_attempts < MIN_MAX_RESTART_ATTEMPTS
+        or max_restart_attempts > MAX_MAX_RESTART_ATTEMPTS
+    ):
+        raise ValueError(
+            f"max_restart_attempts는 {MIN_MAX_RESTART_ATTEMPTS} 이상 "
+            f"{MAX_MAX_RESTART_ATTEMPTS} 이하여야 합니다. "
+            f"(입력값: {max_restart_attempts})"
+        )
+    if (
+        restart_cooldown_seconds < MIN_RESTART_COOLDOWN_SECONDS
+        or restart_cooldown_seconds > MAX_RESTART_COOLDOWN_SECONDS
+    ):
+        raise ValueError(
+            f"restart_cooldown_seconds는 {MIN_RESTART_COOLDOWN_SECONDS}초 이상 "
+            f"{MAX_RESTART_COOLDOWN_SECONDS}초 이하여야 합니다. "
+            f"(입력값: {restart_cooldown_seconds}초)"
+        )
+    if (
+        step_timeout_seconds < MIN_STEP_TIMEOUT_SECONDS
+        or step_timeout_seconds > MAX_STEP_TIMEOUT_SECONDS
+    ):
+        raise ValueError(
+            f"step_timeout_seconds는 {MIN_STEP_TIMEOUT_SECONDS}초 이상 "
+            f"{MAX_STEP_TIMEOUT_SECONDS}초 이하여야 합니다. "
+            f"(입력값: {step_timeout_seconds}초)"
+        )
+    if (
+        max_signals_per_step < MIN_MAX_SIGNALS_PER_STEP
+        or max_signals_per_step > MAX_MAX_SIGNALS_PER_STEP
+    ):
+        raise ValueError(
+            f"max_signals_per_step는 {MIN_MAX_SIGNALS_PER_STEP} 이상 "
+            f"{MAX_MAX_SIGNALS_PER_STEP} 이하여야 합니다. "
+            f"(입력값: {max_signals_per_step})"
         )
