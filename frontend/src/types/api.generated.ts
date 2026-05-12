@@ -3930,7 +3930,7 @@ export interface operations {
                      */
                     sell_commission_rate?: number;
                     /**
-                     * @description 거래소 현지 시간대 (IANA).
+                     * @description 거래소 현지 시간대 (IANA timezone, must be a valid Python ``ZoneInfo`` key). AccountCreateRequest 는 cold-path payload 이므로 빈 문자열은 BrokerPreset fallback sentinel 로 허용된다 (#1473).
                      * @default Asia/Seoul
                      */
                     timezone?: string;
@@ -4010,7 +4010,7 @@ export interface operations {
                 "application/json": {
                     /** @description 사용자에게 표시되는 이름. */
                     name?: string;
-                    /** @description 거래소 현지 시간대 (IANA). */
+                    /** @description 거래소 현지 시간대 (IANA timezone, must be a valid Python ``ZoneInfo`` key). update 경로는 broker preset fallback 이 없으므로 빈 문자열도 422 로 거부된다 (#1473). */
                     timezone?: string;
                     /** @description 거래 종료 시각 (현지 시간, strict HH:MM 24시간 형식). 초/마이크로초 포함, 빈 문자열, invalid 시간은 422로 거부된다 (#1334). */
                     trading_hours_end?: string;
