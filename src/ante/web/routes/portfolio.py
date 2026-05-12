@@ -17,6 +17,7 @@ from ante.web.schemas import (
     PortfolioHistoryResponse,
     PortfolioValueResponse,
 )
+from ante.web.utils.date_params import validate_iso_date_only
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,18 @@ async def portfolio_value(
     "/history",
     response_model=PortfolioHistoryResponse,
     responses={
+        422: {
+            "description": (
+                "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). "
+                "``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 "
+                "저장되므로 임의 문자열을 허용하지 않는다 (#1440)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -113,7 +126,14 @@ async def portfolio_history(
     end_date: str | None = None,
 ) -> dict:
     """기간별 자산 추이 (daily_snapshots 시계열 반환). 인증된 master/human 또는
-    ``treasury:read`` scope 를 보유한 agent 만 호출 가능 (#1407)."""
+    ``treasury:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
+
+    ``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.
+    파싱 실패 또는 캘린더 invalid (``2026-13-32``)는 422로 거부된다 (#1440).
+    """
+    start_date = validate_iso_date_only(start_date, "start_date")
+    end_date = validate_iso_date_only(end_date, "end_date")
+
     target = _resolve_treasury(treasury, treasury_manager, account_id)
 
     if end_date is None:
