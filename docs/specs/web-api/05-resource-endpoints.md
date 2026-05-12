@@ -78,7 +78,7 @@
 | GET | `/api/data/datasets/{dataset_id}` | 데이터셋 상세 조회. 메타데이터(symbol, timeframe, 기간, 행 수) + 데이터 미리보기(최근 5행). dataset_id = `{symbol}__{timeframe}`. ParquetStore.read(limit=5) 활용 |
 | GET | `/api/data/schema` | 데이터 스키마 (필터: data_type) |
 | GET | `/api/data/storage` | 저장 용량 현황 |
-| DELETE | `/api/data/datasets/{dataset_id}` | 데이터셋 삭제 (필터: data_type) |
+| DELETE | `/api/data/datasets/{dataset_id}` | 데이터셋 삭제. `data_type` query는 `ohlcv \| fundamental` enum (기본 `ohlcv`), enum 외 값은 422 |
 | GET | `/api/data/feed-status` | Feed 파이프라인 상태 조회 |
 
 ## 결재 관리 (`/api/approvals`)

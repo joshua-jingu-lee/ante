@@ -585,42 +585,33 @@ export type paths = {
          *           입력을 UTC-naive ``datetime``으로 정규화한 뒤 ``EventHistoryStore``
          *           SQL filter(``timestamp >= ? AND timestamp <= ?``)에 전달한다.
          *
-         *     Codex P2 (#1437 fix loop r1):
-         *         r0 구현은 두 가지 silent regression이 있었다.
+         *     Codex P2 (#1437 fix loop r2):
+         *         r1 구현은 두 가지 silent failure가 남아있었다.
          *
-         *         (1) ``store.query(limit=limit)`` + in-memory 페이지 슬라이스 — store가
-         *             처음부터 ``LIMIT limit``만 fetch하기 때문에 ``offset=10&limit=10``
-         *             요청 시 2페이지가 비거나 짧고, ``total`` 카운트가 처음 limit
-         *             범위로만 제한된다. 본 r1 구현은 store에 ``offset``/``until``과
-         *             ``count`` 시그니처를 확장하고, ``bot_id`` 가 payload JSON 안에
-         *             있어 SQL 직접 필터가 어렵다는 한계를 인정해, **매칭 가능 범위를
-         *             모두 가져온 뒤 in-memory에서 ``bot_id`` 필터 → ``total`` → 페이지
-         *             슬라이스** 흐름으로 변경한다. ``EventHistoryStore.query``에 추가된
-         *             ``offset`` 파라미터는 ``bot_id`` 필터 미적용 호출자(미래 dashboard
-         *             total badge 등)가 효율적인 페이지네이션을 할 수 있도록 보강해두지만,
-         *             본 핸들러는 ``bot_id`` 정확성 우선으로 사용하지 않는다.
-         *             매칭 row 수가 과도하게 커지지 않도록 hard cap
-         *             ``_BOT_LOGS_FETCH_HARD_CAP``을 둔다(retention 30일 가정 하 충분).
+         *         (1) ``EventHistoryStore.query`` 시그니처 — r1은 ``until``을 ``limit``
+         *             앞 위치 인자로 추가해 기존 caller ``store.query(type, since, 50)``
+         *             의 세 번째 위치 인자 ``50``이 ``limit`` 대신 ``until``로
+         *             잘못 바인딩되는 위험이 있었다. r2는 ``until``/``offset``/
+         *             ``payload_filter``를 keyword-only로 옮겨 위치 인자 호환성을
+         *             복원한다.
          *
-         *         (2) ``start_date``/``end_date`` 를 입력 그대로(``+09:00`` 등 offset
-         *             suffix 포함) in-memory ``timestamp >= start_date`` 문자열 비교에
-         *             사용 — storage timestamp는 UTC-naive ISO 문자열이라 ASCII 정렬
-         *             규칙으로 실제 UTC 시간과 어긋난다 (#1414 audit r2와 동일 패턴).
-         *             본 r1 구현은 ``_validate_iso_date_param``으로 입력을 UTC-naive
-         *             ``datetime``으로 정규화하고, ``EventHistoryStore``의 SQL 텍스트
+         *         (2) hard cap ``_BOT_LOGS_FETCH_HARD_CAP=10000`` — r1은 ``bot_id`` 가
+         *             payload JSON 안이라 SQL 직접 필터가 어렵다는 이유로 매칭 가능
+         *             범위(event_type + since/until)를 한번에 10000건 fetch한 뒤
+         *             in-memory ``bot_id`` 필터를 적용했다. 다른 봇의 로그가 cap을
+         *             먼저 채우면 특정 봇의 로그가 결과에서 누락될 수 있다(여러 봇이
+         *             병렬로 step을 찍는 환경에서 silent under-count). r2는
+         *             ``EventHistoryStore``에 SQL JSON1 ``payload_filter``를 추가해
+         *             ``bot_id``를 SQL 단계에서 필터링한다 — cap이 필요 없고
+         *             ``total``/``logs``가 cap에 무관하게 정확하다.
+         *
+         *         (3) ``start_date``/``end_date`` 의 timezone 정합 (r1에서 해결, r2에서
+         *             그대로 유지): ``_validate_iso_date_param``으로 입력을 UTC tz-aware
+         *             ``datetime``으로 정규화한 뒤 ``EventHistoryStore``의 SQL 텍스트
          *             비교에 그대로 사용한다. event timestamp는 dataclass field default
-         *             ``datetime.now(timezone.utc)``로 tz-aware UTC이지만,
-         *             ``isoformat()`` 결과를 SQL 텍스트로 비교하므로 ``+00:00`` suffix가
-         *             있을 수 있다. inclusive boundary는 ``>=``/``<=`` 비교라서
-         *             ``T00:00:00`` < ``T00:00:00+00:00`` < ``T23:59:59+00:00`` <
-         *             ``T23:59:59Z`` (ASCII) 관계가 성립하므로, ``date.fromisoformat``
-         *             확장 datetime(``T00:00:00`` / ``T23:59:59``)이 안전한 하한/상한이
-         *             된다.
-         *
-         *     Note: ``bot_id`` 가 payload JSON 안에 있어 SQL 직접 필터가 어렵다는
-         *         한계로, 매칭 row 수가 hard cap을 초과하는 환경에선 ``total`` 이 cap에
-         *         clamp된다. SQL JSON1로 ``bot_id`` 를 SQL 필터로 끌어올리는 최적화는
-         *         본 패치 범위(Non-Goal). 별도 이슈로 분리한다.
+         *             ``datetime.now(UTC)``로 tz-aware UTC이며, ``isoformat()`` 결과의
+         *             ``+00:00`` suffix가 양쪽에 일관되게 붙어 ASCII 비교가 실제 UTC
+         *             시간 관계와 일치한다.
          */
         get: operations["get_bot_logs_api_bots__bot_id__logs_get"];
         put?: never;
@@ -5380,7 +5371,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description 데이터 유형 (ohlcv, fundamental) */
-                data_type?: string;
+                data_type?: "ohlcv" | "fundamental";
             };
             header?: never;
             path: {
