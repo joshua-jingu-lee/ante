@@ -95,13 +95,24 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "(model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. "
         "OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated "
         "TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 "
-        "한다 (codex r1 FAIL)."
+        "한다 (codex r1 FAIL). anyOf branches 는 ``type``/``properties`` 까지 "
+        "명시하여 openapi-typescript 가 ``unknown`` 으로 붕괴되지 않고 "
+        "``{strategy_id: string} | {strategy_name: string}`` 으로 narrow 되도록 "
+        "한다 (codex r2 FAIL)."
     ),
     "additionalProperties": False,
     "required": ["bot_id"],
     "anyOf": [
-        {"required": ["strategy_id"]},
-        {"required": ["strategy_name"]},
+        {
+            "type": "object",
+            "required": ["strategy_id"],
+            "properties": {"strategy_id": {"type": "string"}},
+        },
+        {
+            "type": "object",
+            "required": ["strategy_name"],
+            "properties": {"strategy_name": {"type": "string"}},
+        },
     ],
     "properties": {
         "bot_id": {

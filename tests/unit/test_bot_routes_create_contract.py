@@ -215,12 +215,17 @@ class TestBotCreateRequestSchema:
         assert BotCreateRequest.model_config.get("extra") == "forbid"
 
     def test_schema_has_any_of_strategy_identifier(self) -> None:
-        """codex r1 FAIL 회귀 — OpenAPI ``anyOf`` 로 strategy_id/strategy_name
+        """codex r1/r2 FAIL 회귀 — OpenAPI ``anyOf`` 로 strategy_id/strategy_name
         둘 중 하나 필수 조건이 표현되어야 한다.
 
         ``required: [bot_id]`` 만 노출된 상태로는 generated TS/SDK 가
         ``{bot_id: ...}`` payload 를 valid 로 인식하여 contract drift 가
-        다시 발생한다.
+        다시 발생한다. (r1)
+
+        anyOf branches 는 ``type: object`` 와 ``properties`` 까지 명시되어야
+        openapi-typescript 가 ``unknown`` 으로 붕괴되지 않고
+        ``{strategy_id: string} | {strategy_name: string}`` 으로 narrow 된다.
+        (r2)
         """
         any_of = BOT_CREATE_REQUEST_SCHEMA.get("anyOf")
         assert isinstance(any_of, list) and len(any_of) == 2, (
@@ -234,10 +239,54 @@ class TestBotCreateRequestSchema:
             f"anyOf must require strategy_name in one branch; got {required_sets!r}"
         )
 
+    def test_schema_any_of_branches_have_type_and_properties(self) -> None:
+        """codex r2 FAIL 회귀 — anyOf 각 branch 는 ``type: object`` 와
+        ``properties`` (해당 strategy 필드 schema) 를 명시해야 한다.
+
+        빈 ``required`` 만 있는 branch 는 openapi-typescript 가 ``unknown``
+        으로 표현하여 ``BotCreateRequest = unknown`` 으로 붕괴된다 — SDK
+        차단 효과가 사라진다.
+        """
+        any_of = BOT_CREATE_REQUEST_SCHEMA["anyOf"]
+        # strategy_id branch
+        sid_branch = next(b for b in any_of if "strategy_id" in b.get("required", []))
+        assert sid_branch.get("type") == "object", (
+            f"strategy_id branch must declare type=object; got {sid_branch!r}"
+        )
+        sid_props = sid_branch.get("properties")
+        assert isinstance(sid_props, dict) and "strategy_id" in sid_props, (
+            f"strategy_id branch must include properties.strategy_id; "
+            f"got {sid_branch!r}"
+        )
+        assert sid_props["strategy_id"].get("type") == "string", (
+            f"strategy_id branch property must be typed as string; "
+            f"got {sid_props['strategy_id']!r}"
+        )
+        # strategy_name branch
+        sname_branch = next(
+            b for b in any_of if "strategy_name" in b.get("required", [])
+        )
+        assert sname_branch.get("type") == "object", (
+            f"strategy_name branch must declare type=object; got {sname_branch!r}"
+        )
+        sname_props = sname_branch.get("properties")
+        assert isinstance(sname_props, dict) and "strategy_name" in sname_props, (
+            f"strategy_name branch must include properties.strategy_name; "
+            f"got {sname_branch!r}"
+        )
+        assert sname_props["strategy_name"].get("type") == "string", (
+            f"strategy_name branch property must be typed as string; "
+            f"got {sname_props['strategy_name']!r}"
+        )
+
     def test_openapi_components_schema_exposes_any_of(self, client) -> None:
         """frontend codegen 입력인 ``/openapi.json`` 에서 ``anyOf`` 가 그대로
         노출되어 generated TS 타입이 strategy_id/strategy_name 중 하나를
-        필수로 표현해야 한다."""
+        필수로 표현해야 한다.
+
+        codex r2: 각 branch 의 ``type``/``properties`` 까지 노출되어야
+        openapi-typescript 가 narrow 한 union 으로 생성한다.
+        """
         resp = client.get("/openapi.json")
         assert resp.status_code == 200
         spec = resp.json()
@@ -255,6 +304,27 @@ class TestBotCreateRequestSchema:
             f"anyOf branches must require strategy_id and strategy_name "
             f"separately; got {required_sets!r}"
         )
+        # codex r2: type/properties 까지 노출 검증
+        for branch in any_of:
+            assert branch.get("type") == "object", (
+                f"openapi.json anyOf branch must declare type=object; got {branch!r}"
+            )
+            props = branch.get("properties")
+            required = branch.get("required", [])
+            assert isinstance(props, dict) and props, (
+                f"openapi.json anyOf branch must declare non-empty properties; "
+                f"got {branch!r}"
+            )
+            # 해당 branch 의 required 필드가 properties 안에 string 타입으로 있어야 함
+            for field in required:
+                assert field in props, (
+                    f"openapi.json anyOf branch required field {field!r} "
+                    f"must be present in properties; got {branch!r}"
+                )
+                assert props[field].get("type") == "string", (
+                    f"openapi.json anyOf branch property {field!r} must be "
+                    f"typed as string; got {props[field]!r}"
+                )
 
     def test_pydantic_model_validator_rejects_missing_strategy(self) -> None:
         """모델 단위에서도 strategy 필수 — handler 우회 호출자도 차단된다."""

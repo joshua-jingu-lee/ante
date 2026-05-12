@@ -2041,7 +2041,7 @@ export type components = {
         };
         /**
          * BotCreateRequest
-         * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy ``bot_type``)는 422로 거부된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 (model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 한다 (codex r1 FAIL).
+         * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy ``bot_type``)는 422로 거부된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 (model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 한다 (codex r1 FAIL). anyOf branches 는 ``type``/``properties`` 까지 명시하여 openapi-typescript 가 ``unknown`` 으로 붕괴되지 않고 ``{strategy_id: string} | {strategy_name: string}`` 으로 narrow 되도록 한다 (codex r2 FAIL).
          */
         BotCreateRequest: {
             /** @description 사용할 계좌 ID. 미지정 시 단일 active 계좌가 자동 선택된다. */
@@ -2064,7 +2064,11 @@ export type components = {
             strategy_id?: string | null;
             /** @description 전략 이름. 최신 버전의 strategy_id로 자동 변환된다. ``strategy_id``와 둘 중 하나는 반드시 전달해야 한다. */
             strategy_name?: string | null;
-        } | unknown | unknown;
+        } | {
+            strategy_id: string;
+        } | {
+            strategy_name: string;
+        };
         /**
          * BotDetailResponse
          * @description 봇 상세/생성/시작/중지 응답.
