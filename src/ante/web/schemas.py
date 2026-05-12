@@ -311,7 +311,7 @@ class BotUpdateRequest(BaseModel):
     name: str | None = None
     strategy_name: str | None = None
     interval_seconds: int | None = Field(default=None, ge=10, le=3600)
-    budget: float | None = Field(default=None, gt=0)
+    budget: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     auto_restart: bool | None = None
     max_restart_attempts: int | None = None
     restart_cooldown_seconds: int | None = None

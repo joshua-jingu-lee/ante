@@ -33,11 +33,11 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/bots` | 봇 목록 (cursor 페이지네이션, 필터: account_id, limit, cursor). 응답에 `strategy_name` 포함 — StrategyRegistry 조인 |
-| POST | `/api/bots` | 봇 생성. Body: bot_id, strategy_id, name, bot_type, interval_seconds, budget?. 계좌 정지 상태이면 409 Conflict. **budget 처리 (#1335):** budget 포함 시 봇 생성 후 Treasury 배정을 시도한다. 배정이 `TreasuryError`(insufficient funds, treasury not configured for account 등)로 실패하면 422를 반환하고 신규 봇은 `delete_bot(handle_positions="keep")`로 best-effort 롤백된다. 롤백 자체가 실패하면 500과 함께 `budget allocation failed: ... rollback also failed; bot {bot_id} may be in partial state. Check bot status and treasury manually.` detail이 노출된다. 비-`TreasuryError`는 422로 매핑하지 않고 propagate한다 (bot create + budget 배정은 atomic transaction이 아닌 best-effort 롤백 정책). |
+| POST | `/api/bots` | 봇 생성. Body: bot_id, strategy_id, name, bot_type, interval_seconds, budget?. `budget`은 finite positive number (Infinity/NaN은 422로 거부, #1435). 계좌 정지 상태이면 409 Conflict. **budget 처리 (#1335):** budget 포함 시 봇 생성 후 Treasury 배정을 시도한다. 배정이 `TreasuryError`(insufficient funds, treasury not configured for account 등)로 실패하면 422를 반환하고 신규 봇은 `delete_bot(handle_positions="keep")`로 best-effort 롤백된다. 롤백 자체가 실패하면 500과 함께 `budget allocation failed: ... rollback also failed; bot {bot_id} may be in partial state. Check bot status and treasury manually.` detail이 노출된다. 비-`TreasuryError`는 422로 매핑하지 않고 propagate한다 (bot create + budget 배정은 atomic transaction이 아닌 best-effort 롤백 정책). |
 | GET | `/api/bots/{bot_id}` | 봇 상세 조회 (전략/예산/포지션 포함) |
 | POST | `/api/bots/{bot_id}/start` | 봇 시작 |
 | POST | `/api/bots/{bot_id}/stop` | 봇 중지 |
-| PUT | `/api/bots/{bot_id}` | 봇 설정 수정. 중지 상태에서만 가능. Body: name?, interval_seconds?, budget?, auto_restart?, max_restart_attempts?, restart_cooldown_seconds?, step_timeout_seconds?, max_signals_per_step?. BotConfig 재생성 패턴 적용. budget 변경 시 Treasury 연동. 응답: `{bot: {...}}` |
+| PUT | `/api/bots/{bot_id}` | 봇 설정 수정. 중지 상태에서만 가능. Body: name?, interval_seconds?, budget?, auto_restart?, max_restart_attempts?, restart_cooldown_seconds?, step_timeout_seconds?, max_signals_per_step?. `budget`은 finite positive number (Infinity/NaN은 422로 거부, #1435). BotConfig 재생성 패턴 적용. budget 변경 시 Treasury 연동. 응답: `{bot: {...}}` |
 | DELETE | `/api/bots/{bot_id}` | 봇 삭제. Query: handle_positions (`keep`\|`liquidate`, 기본 `keep`). `liquidate` 시 보유 종목 시장가 매도 후 삭제 |
 | GET | `/api/bots/{bot_id}/logs` | 봇 실행 로그 조회. `event_log` 테이블에서 해당 봇의 이벤트를 필터링. 필터: limit(기본 10, 최대 100), offset, start_date, end_date. 대상 이벤트: `BotStepCompletedEvent`, `BotStartedEvent`, `BotStoppedEvent`, `BotErrorEvent`. 응답: `{logs: [{timestamp, result, message}], total}` |
 

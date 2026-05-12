@@ -2048,7 +2048,7 @@ export type components = {
             account_id?: string | null;
             /** @description 생성할 봇의 식별자. */
             bot_id: string;
-            /** @description 예산 할당액 (원). 양수만 허용. */
+            /** @description 예산 할당액 (원). 양수 finite number만 허용 (Infinity/NaN은 422로 거부, #1435). */
             budget?: number | null;
             /**
              * @description 봇 step 주기 (초).
@@ -2139,7 +2139,7 @@ export type components = {
         BotUpdateRequest: {
             /** @description 봇 자동 재시작 여부. */
             auto_restart?: boolean | null;
-            /** @description 예산 할당액 (원). 양수만 허용. */
+            /** @description 예산 할당액 (원). 양수 finite number만 허용 (Infinity/NaN은 422로 거부, #1435). */
             budget?: number | null;
             /** @description 봇 step 주기 (초). */
             interval_seconds?: number | null;
