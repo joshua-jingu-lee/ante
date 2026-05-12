@@ -4529,7 +4529,7 @@
           "bots"
         ],
         "summary": "Get Bot Logs",
-        "description": "봇 실행 로그 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한\nagent 만 호출 가능 (#1407).\n\nBotStepCompletedEvent 이력을 반환한다.\nevent_history_store(SQLite)가 있으면 영속 로그를 조회하고,\n없으면 EventBus 인메모리 히스토리에서 조회한다.",
+        "description": "봇 실행 로그 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한\nagent 만 호출 가능 (#1407).\n\nBotStepCompletedEvent 이력을 반환한다.\nevent_history_store(SQLite)가 있으면 영속 로그를 조회하고,\n없으면 EventBus 인메모리 히스토리에서 조회한다.\n\n응답 형식 (#1437): ``{\"bot_id\", \"logs\": [...], \"total\"}``.\n- ``total``은 bot_id + date range 필터 적용 후의 총 개수 (페이지네이션 전).\n- ``logs``는 ``offset..offset+limit`` 범위의 페이지 데이터.\n\nQuery 파라미터 (#1437):\n    - ``limit``: 페이지 크기 (기본 50, 1..100).\n    - ``offset``: 페이지 시작 인덱스 (기본 0, ge=0).\n    - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 필터링은\n      in-memory timestamp 문자열 비교로 동작한다.\n\nNote: ``event_history_store.query`` 시그니처는 변경하지 않는다\n(Non-Goal). 따라서 store 쿼리는 ``limit`` 만 전달하고, bot_id +\ndate range 필터링과 페이지네이션은 in-memory에서 수행한다. count 효율\n최적화는 별도 이슈로 분리한다.",
         "operationId": "get_bot_logs_api_bots__bot_id__logs_get",
         "parameters": [
           {
@@ -4552,6 +4552,53 @@
               "default": 50,
               "title": "Limit"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound.",
+              "title": "Start Date"
+            },
+            "description": "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound."
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. date-only는 ``T23:59:59``로 확장된다.",
+              "title": "End Date"
+            },
+            "description": "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. date-only는 ``T23:59:59``로 확장된다."
           }
         ],
         "responses": {
@@ -4577,8 +4624,8 @@
               }
             }
           },
-          "503": {
-            "description": "Event history store not available",
+          "422": {
+            "description": "Invalid date filter (ISO 8601 required). ``start_date``/``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4587,12 +4634,12 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "503": {
+            "description": "Event history store not available",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

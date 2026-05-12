@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -1128,11 +1129,69 @@ async def update_bot(
     return {"bot": bot.get_info()}
 
 
+def _validate_iso_date_param(value: str | None, field: str) -> str | None:
+    """``value``가 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime인지 검증.
+
+    bot logs in-memory filter는 timestamp 문자열 lexicographic 비교
+    (``timestamp >= start_date``)로 동작한다. 따라서 검증만 수행하고 입력
+    str을 그대로 돌려준다.
+
+    허용 형식:
+        - ``YYYY-MM-DD`` (date-only)
+        - ``YYYY-MM-DDTHH:MM:SS[Z]`` / ``YYYY-MM-DDTHH:MM:SS+HH:MM`` 등 ISO datetime
+
+    파싱 실패 시 ``HTTPException(422)``로 거부한다 (#1414 audit 패턴 답습).
+
+    Note:
+        ``audit._validate_iso_date``는 ``AuditLogger`` SQL 텍스트 비교용
+        storage format으로 정규화하지만, bot logs는 in-memory ISO timestamp
+        ``str`` 비교만 수행하므로 정규화는 불필요하다. ``YYYY-MM-DD``는
+        lexicographic 비교에서 ``YYYY-MM-DDTHH:MM:SS``보다 작으므로
+        date-only ``start_date`` 입력은 자연스럽게 ``<= timestamp`` 의 lower
+        bound 역할을 한다. ``end_date`` 의 inclusive 의미를 보존하기 위해
+        date-only 입력은 ``YYYY-MM-DDT23:59:59``로 확장한다.
+    """
+    if value is None:
+        return None
+    # ISO date 시도 → 그대로 보존 (Python 3.13은 ``20260510``, ``2026-W19-1``
+    # 같은 비표준 포맷도 허용하므로 ``.isoformat()``으로 표준 ``YYYY-MM-DD``
+    # 정규화).
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        pass
+    # ISO datetime 시도 (Z/offset 허용) — 검증만 하고 원본 보존
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return value
+    except ValueError:
+        pass
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Invalid ISO 8601 date for {field}: {value!r}. "
+            "허용 형식: ``YYYY-MM-DD`` 또는 ``YYYY-MM-DDTHH:MM:SS[Z]``."
+        ),
+    )
+
+
 @router.get(
     "/{bot_id}/logs",
     responses={
         404: {
             "description": "Bot not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        422: {
+            "description": (
+                "Invalid date filter (ISO 8601 required). ``start_date``/"
+                "``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 "
+                "datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -1158,6 +1217,26 @@ async def get_bot_logs(
     ],
     eventbus: Annotated[Any | None, Depends(get_eventbus_optional)],
     limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    start_date: Annotated[
+        str | None,
+        Query(
+            description=(
+                "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime "
+                "(``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound."
+            ),
+        ),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Query(
+            description=(
+                "ISO 8601 date (``YYYY-MM-DD``) 또는 datetime "
+                "(``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. "
+                "date-only는 ``T23:59:59``로 확장된다."
+            ),
+        ),
+    ] = None,
 ) -> dict:
     """봇 실행 로그 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
     agent 만 호출 가능 (#1407).
@@ -1165,12 +1244,34 @@ async def get_bot_logs(
     BotStepCompletedEvent 이력을 반환한다.
     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
     없으면 EventBus 인메모리 히스토리에서 조회한다.
+
+    응답 형식 (#1437): ``{"bot_id", "logs": [...], "total"}``.
+    - ``total``은 bot_id + date range 필터 적용 후의 총 개수 (페이지네이션 전).
+    - ``logs``는 ``offset..offset+limit`` 범위의 페이지 데이터.
+
+    Query 파라미터 (#1437):
+        - ``limit``: 페이지 크기 (기본 50, 1..100).
+        - ``offset``: 페이지 시작 인덱스 (기본 0, ge=0).
+        - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 필터링은
+          in-memory timestamp 문자열 비교로 동작한다.
+
+    Note: ``event_history_store.query`` 시그니처는 변경하지 않는다
+    (Non-Goal). 따라서 store 쿼리는 ``limit`` 만 전달하고, bot_id +
+    date range 필터링과 페이지네이션은 in-memory에서 수행한다. count 효율
+    최적화는 별도 이슈로 분리한다.
     """
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
-    logs: list[dict] = []
+    # ISO 8601 검증 + date-only end_date의 inclusive boundary 확장.
+    start_validated = _validate_iso_date_param(start_date, "start_date")
+    end_validated = _validate_iso_date_param(end_date, "end_date")
+    # end_date가 10자리(date-only)면 자정 끝까지 포함하도록 확장.
+    if end_validated is not None and len(end_validated) == 10:
+        end_validated = f"{end_validated}T23:59:59"
+
+    all_logs: list[dict] = []
 
     if event_history_store is not None:
         rows = await event_history_store.query(
@@ -1180,7 +1281,7 @@ async def get_bot_logs(
         for row in rows:
             payload = row.get("payload", {})
             if payload.get("bot_id") == bot_id:
-                logs.append(
+                all_logs.append(
                     {
                         "event_id": row.get("event_id", ""),
                         "timestamp": row.get("timestamp", ""),
@@ -1194,7 +1295,7 @@ async def get_bot_logs(
         history = eventbus.get_history(event_type=BotStepCompletedEvent, limit=limit)
         for evt in history:
             if evt.bot_id == bot_id:
-                logs.append(
+                all_logs.append(
                     {
                         "event_id": str(evt.event_id),
                         "timestamp": evt.timestamp.isoformat(),
@@ -1203,4 +1304,18 @@ async def get_bot_logs(
                     }
                 )
 
-    return {"bot_id": bot_id, "logs": logs}
+    # date range filter (in-memory timestamp string 비교).
+    if start_validated is not None or end_validated is not None:
+        filtered = [
+            log
+            for log in all_logs
+            if (start_validated is None or log["timestamp"] >= start_validated)
+            and (end_validated is None or log["timestamp"] <= end_validated)
+        ]
+    else:
+        filtered = all_logs
+
+    total = len(filtered)
+    paginated = filtered[offset : offset + limit]
+
+    return {"bot_id": bot_id, "logs": paginated, "total": total}

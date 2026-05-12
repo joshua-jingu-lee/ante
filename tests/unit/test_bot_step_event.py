@@ -404,9 +404,164 @@ class TestBotLogsAPIWithEventBus:
         data = resp.json()
         assert "bot_id" in data
         assert "logs" in data
+        # #1437: total 키 추가
+        assert "total" in data
+        assert data["total"] == len(data["logs"])
 
         for log in data["logs"]:
             assert "event_id" in log
             assert "timestamp" in log
             assert "result" in log
             assert "message" in log
+
+
+class TestBotLogsContractDrift1437:
+    """#1437 회귀 테스트 — total + offset/start_date/end_date 추가.
+
+    spec ``docs/specs/web-api/05-resource-endpoints.md:42``는 응답에
+    ``{logs, total}``과 query params ``limit/offset/start_date/end_date``를
+    명시한다. 이전 구현은 ``{bot_id, logs}`` + ``limit`` only로 드리프트했다.
+    """
+
+    @pytest.fixture
+    def eventbus_with_logs(self):
+        return EventBus()
+
+    @pytest.fixture
+    def bot_manager(self):
+        mgr = FakeBotManager()
+        mgr._bots["bot1"] = FakeBot("bot1")
+        return mgr
+
+    @pytest.fixture
+    def client(self, bot_manager, eventbus_with_logs):
+        app = create_app(
+            bot_manager=bot_manager,
+            eventbus=eventbus_with_logs,
+            account_service=FakeAccountService(),
+            member_service=make_master_member_service(),
+        )
+        return make_authed_client(app)
+
+    async def _publish_n_events(self, eb, n):
+        """bot1 대상 BotStepCompletedEvent를 n개 발행."""
+        for i in range(n):
+            await eb.publish(
+                BotStepCompletedEvent(
+                    bot_id="bot1",
+                    account_id="test",
+                    result="success",
+                    message=f"step-{i}",
+                )
+            )
+
+    def test_response_has_total_key(self, client, eventbus_with_logs):
+        """기존 호출 ``GET /api/bots/bot1/logs``에 ``total`` 키 존재 (회귀 방지)."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 3)
+        )
+        resp = client.get("/api/bots/bot1/logs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total" in data
+        assert data["total"] == 3
+        assert len(data["logs"]) == 3
+
+    def test_offset_pagination(self, client, eventbus_with_logs):
+        """``offset=1`` → fetched 4개 중 1..3 (총 3개) + total=4.
+
+        Note: ``event_history_store.query`` / ``eventbus.get_history``의
+        signature를 변경하지 않는 한 (Non-Goal #1437), ``limit``은 store
+        조회량 상한 역할도 겸한다. ``offset``은 그 이후 in-memory 슬라이스다.
+        실제 페이지네이션은 store 시그니처 확장 이슈에서 정리한다.
+        """
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 4)
+        )
+        # limit=10 (>= 4) → store에서 4개 모두 fetch, offset=1로 3개 반환.
+        resp = client.get("/api/bots/bot1/logs?offset=1&limit=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 4
+        assert len(data["logs"]) == 3
+
+    def test_offset_beyond_total_returns_empty_logs(self, client, eventbus_with_logs):
+        """``offset``이 ``total`` 초과 시 빈 페이지 + total 보존."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 2)
+        )
+        resp = client.get("/api/bots/bot1/logs?offset=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["logs"] == []
+
+    def test_start_date_filters_by_iso_date(self, client, eventbus_with_logs):
+        """``start_date=2099-01-01`` → 미래 lower bound로 모든 이벤트 제외."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 3)
+        )
+        resp = client.get("/api/bots/bot1/logs?start_date=2099-01-01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["logs"] == []
+
+    def test_end_date_filters_by_iso_date(self, client, eventbus_with_logs):
+        """``end_date=1970-01-01`` → 과거 upper bound로 모든 이벤트 제외."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 3)
+        )
+        resp = client.get("/api/bots/bot1/logs?end_date=1970-01-01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["logs"] == []
+
+    def test_start_date_includes_recent_events(self, client, eventbus_with_logs):
+        """``start_date=1970-01-01`` → 모든 이벤트 포함."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 3)
+        )
+        resp = client.get("/api/bots/bot1/logs?start_date=1970-01-01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+
+    def test_end_date_inclusive_date_only_extends_to_end_of_day(
+        self, client, eventbus_with_logs
+    ):
+        """``end_date=2099-12-31`` (date-only) → ``T23:59:59`` 확장으로
+        같은 날짜 모든 이벤트 포함 (audit #1414 패턴 답습)."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 3)
+        )
+        resp = client.get("/api/bots/bot1/logs?end_date=2099-12-31")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+
+    def test_invalid_start_date_returns_422(self, client):
+        """``start_date=invalid`` → 422."""
+        resp = client.get("/api/bots/bot1/logs?start_date=invalid")
+        assert resp.status_code == 422
+
+    def test_invalid_end_date_returns_422(self, client):
+        """``end_date=not-a-date`` → 422."""
+        resp = client.get("/api/bots/bot1/logs?end_date=not-a-date")
+        assert resp.status_code == 422
+
+    def test_start_date_iso_datetime_with_z_accepted(self, client, eventbus_with_logs):
+        """``start_date=2099-01-01T00:00:00Z`` (ISO datetime + Z) 허용."""
+        asyncio.get_event_loop().run_until_complete(
+            self._publish_n_events(eventbus_with_logs, 1)
+        )
+        resp = client.get("/api/bots/bot1/logs?start_date=2099-01-01T00:00:00Z")
+        assert resp.status_code == 200
+        # 미래 시각 lower bound → 결과 없음
+        assert resp.json()["total"] == 0
+
+    def test_negative_offset_returns_422(self, client):
+        """``offset=-1`` → FastAPI ``ge=0`` 검증으로 422."""
+        resp = client.get("/api/bots/bot1/logs?offset=-1")
+        assert resp.status_code == 422

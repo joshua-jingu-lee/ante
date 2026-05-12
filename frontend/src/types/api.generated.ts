@@ -573,6 +573,21 @@ export type paths = {
          *     BotStepCompletedEvent 이력을 반환한다.
          *     event_history_store(SQLite)가 있으면 영속 로그를 조회하고,
          *     없으면 EventBus 인메모리 히스토리에서 조회한다.
+         *
+         *     응답 형식 (#1437): ``{"bot_id", "logs": [...], "total"}``.
+         *     - ``total``은 bot_id + date range 필터 적용 후의 총 개수 (페이지네이션 전).
+         *     - ``logs``는 ``offset..offset+limit`` 범위의 페이지 데이터.
+         *
+         *     Query 파라미터 (#1437):
+         *         - ``limit``: 페이지 크기 (기본 50, 1..100).
+         *         - ``offset``: 페이지 시작 인덱스 (기본 0, ge=0).
+         *         - ``start_date``/``end_date``: ISO 8601 date 또는 datetime. 필터링은
+         *           in-memory timestamp 문자열 비교로 동작한다.
+         *
+         *     Note: ``event_history_store.query`` 시그니처는 변경하지 않는다
+         *     (Non-Goal). 따라서 store 쿼리는 ``limit`` 만 전달하고, bot_id +
+         *     date range 필터링과 페이지네이션은 in-memory에서 수행한다. count 효율
+         *     최적화는 별도 이슈로 분리한다.
          */
         get: operations["get_bot_logs_api_bots__bot_id__logs_get"];
         put?: never;
@@ -4981,7 +4996,12 @@ export interface operations {
     get_bot_logs_api_bots__bot_id__logs_get: {
         parameters: {
             query?: {
+                /** @description ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive upper bound. date-only는 ``T23:59:59``로 확장된다. */
+                end_date?: string | null;
                 limit?: number;
+                offset?: number;
+                /** @description ISO 8601 date (``YYYY-MM-DD``) 또는 datetime (``YYYY-MM-DDTHH:MM:SS[Z]``). inclusive lower bound. */
+                start_date?: string | null;
             };
             header?: never;
             path: {
@@ -5011,13 +5031,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid date filter (ISO 8601 required). ``start_date``/``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Event history store not available */
