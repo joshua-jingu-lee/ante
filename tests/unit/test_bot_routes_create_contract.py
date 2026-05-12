@@ -214,6 +214,48 @@ class TestBotCreateRequestSchema:
         """SSOT 정합 — Pydantic 모델 자체가 extra='forbid'."""
         assert BotCreateRequest.model_config.get("extra") == "forbid"
 
+    def test_schema_has_any_of_strategy_identifier(self) -> None:
+        """codex r1 FAIL 회귀 — OpenAPI ``anyOf`` 로 strategy_id/strategy_name
+        둘 중 하나 필수 조건이 표현되어야 한다.
+
+        ``required: [bot_id]`` 만 노출된 상태로는 generated TS/SDK 가
+        ``{bot_id: ...}`` payload 를 valid 로 인식하여 contract drift 가
+        다시 발생한다.
+        """
+        any_of = BOT_CREATE_REQUEST_SCHEMA.get("anyOf")
+        assert isinstance(any_of, list) and len(any_of) == 2, (
+            f"anyOf must list two branches; got {any_of!r}"
+        )
+        required_sets = {tuple(sorted(branch.get("required", []))) for branch in any_of}
+        assert ("strategy_id",) in required_sets, (
+            f"anyOf must require strategy_id in one branch; got {required_sets!r}"
+        )
+        assert ("strategy_name",) in required_sets, (
+            f"anyOf must require strategy_name in one branch; got {required_sets!r}"
+        )
+
+    def test_openapi_components_schema_exposes_any_of(self, client) -> None:
+        """frontend codegen 입력인 ``/openapi.json`` 에서 ``anyOf`` 가 그대로
+        노출되어 generated TS 타입이 strategy_id/strategy_name 중 하나를
+        필수로 표현해야 한다."""
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        spec = resp.json()
+        schema = spec.get("components", {}).get("schemas", {}).get("BotCreateRequest")
+        assert schema is not None, (
+            "BotCreateRequest must be registered in components.schemas"
+        )
+        any_of = schema.get("anyOf")
+        assert isinstance(any_of, list) and len(any_of) == 2, (
+            f"components.schemas.BotCreateRequest.anyOf must list two branches; "
+            f"got {any_of!r}"
+        )
+        required_sets = {tuple(sorted(branch.get("required", []))) for branch in any_of}
+        assert {("strategy_id",), ("strategy_name",)} == required_sets, (
+            f"anyOf branches must require strategy_id and strategy_name "
+            f"separately; got {required_sets!r}"
+        )
+
     def test_pydantic_model_validator_rejects_missing_strategy(self) -> None:
         """모델 단위에서도 strategy 필수 — handler 우회 호출자도 차단된다."""
         from pydantic import ValidationError

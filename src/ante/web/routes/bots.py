@@ -92,10 +92,17 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy "
         "``bot_type``)는 422로 거부된다. "
         "strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 "
-        "(model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다."
+        "(model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. "
+        "OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated "
+        "TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 "
+        "한다 (codex r1 FAIL)."
     ),
     "additionalProperties": False,
     "required": ["bot_id"],
+    "anyOf": [
+        {"required": ["strategy_id"]},
+        {"required": ["strategy_name"]},
+    ],
     "properties": {
         "bot_id": {
             "type": "string",
