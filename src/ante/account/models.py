@@ -39,6 +39,14 @@ class Account:
     exchange: str
     currency: str
     timezone: str = "Asia/Seoul"
+    # legacy DB row 가 invalid IANA timezone 으로 저장돼 있을 때 ``True`` 로
+    # 표시하는 marker. ``_row_to_account`` 는 stored value 를 절대 덮어쓰지
+    # 않고 그대로 보존하면서 marker 만 세팅하므로, 후속 ``AccountService.update``
+    # 의 전체 row UPDATE 가 silent data rewrite 를 일으키지 않는다.
+    # 운영자는 ``ante account repair-timezone`` (cold-path) 명령으로 valid
+    # 값으로 복구한다. ``__post_init__`` hard validation 은 호환을 위해
+    # 적용하지 않는다 (#1474).
+    timezone_invalid: bool = False
     trading_hours_start: str = "09:00"
     trading_hours_end: str = "15:30"
 

@@ -124,6 +124,39 @@ STRUCTURAL_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _load_persisted_timezone(stored_tz: str, account_id: str) -> tuple[str, bool]:
+    """저장된 timezone 값을 tolerant load 하고 ``timezone_invalid`` marker 반환.
+
+    Read-path (``_row_to_account``) 에서 호출된다. 저장된 ``stored_tz`` 가
+    유효한 IANA timezone key 이면 ``(stored_tz, False)`` 를 그대로 반환한다.
+    invalid 이면 **fallback 으로 덮어쓰지 않고** stored value 를 그대로
+    반환하면서 marker 를 ``True`` 로 세팅한다. 이는 후속
+    ``AccountService.update`` 의 전체 row UPDATE 가 stored invalid 값을
+    silent 하게 default 로 rewrite 하는 회귀를 막기 위한 것이다 (#1474).
+
+    invalid 일 때 ``ACCOUNT_INVALID_TIMEZONE_LEGACY`` 검색 가능 코드를
+    포함한 structured warning 을 한 번 남기고, 운영자에게 cold-path repair
+    명령을 안내한다. 본 헬퍼는 발견 시점마다 warning 을 남기며,
+    ``AccountService.initialize`` 는 별도로 누적 account_ids 요약을 한 줄
+    더 기록한다.
+    """
+    try:
+        validate_iana_timezone(stored_tz)
+    except ValueError as e:
+        logger.warning(
+            "ACCOUNT_INVALID_TIMEZONE_LEGACY: invalid timezone in stored "
+            "account row (legacy migration 필요): account_id=%s stored=%r — %s. "
+            "Repair: `ante account repair-timezone %s <new_iana_timezone>` "
+            "(cold-path).",
+            account_id,
+            stored_tz,
+            e,
+            account_id,
+        )
+        return stored_tz, True
+    return stored_tz, False
+
+
 class AccountService:
     """계좌 CRUD, 상태 관리, 브로커 인스턴스 생성."""
 
@@ -185,10 +218,23 @@ class AccountService:
             "SELECT * FROM accounts WHERE status != ?",
             (AccountStatus.DELETED,),
         )
+        invalid_timezone_account_ids: list[str] = []
         for row in rows:
             account = _row_to_account(row)
+            if account.timezone_invalid:
+                invalid_timezone_account_ids.append(account.account_id)
             self._accounts[account.account_id] = account
         logger.info("AccountService 초기화 완료: %d개 계좌 로드", len(self._accounts))
+        # legacy invalid timezone row 누적 요약 (#1474). load loop 가 끝난 뒤
+        # 한 줄로만 남겨 운영자가 ``rg ACCOUNT_INVALID_TIMEZONE_LEGACY summary``
+        # 같은 grep 으로 회수할 수 있게 한다. count 가 0 일 때는 noise 회피를
+        # 위해 출력하지 않는다.
+        if invalid_timezone_account_ids:
+            logger.warning(
+                "ACCOUNT_INVALID_TIMEZONE_LEGACY summary: count=%d, account_ids=%s",
+                len(invalid_timezone_account_ids),
+                sorted(invalid_timezone_account_ids),
+            )
 
     # ── CRUD ──────────────────────────────────────────
 
@@ -510,10 +556,18 @@ class AccountService:
             "sell_commission_rate",
         }
         invalidate_broker = bool(set(fields.keys()) & broker_invalidating)
+        # ``timezone`` 키가 fields 에 **명시적으로** 들어왔을 때만 marker 를
+        # 리셋한다. 다른 필드만 수정되는 경우에는 stored marker (그리고
+        # stored invalid timezone 자체) 를 그대로 보존해야 silent data
+        # rewrite 가 일어나지 않는다 (#1474). ``timezone_update is None``
+        # (key 자체가 없는 경우) 은 정상 시나리오로 marker 보존.
+        timezone_explicit_update = "timezone" in fields and timezone_update is not None
         for key, value in fields.items():
             if key not in updatable:
                 continue
             setattr(account, key, value)
+        if timezone_explicit_update:
+            account.timezone_invalid = False
 
         now = datetime.now(UTC)
         account.updated_at = now
@@ -551,6 +605,41 @@ class AccountService:
             await self._reconnect_broker(account_id)
         logger.info("계좌 수정: %s", account_id)
         return account
+
+    async def repair_timezone(self, account_id: str, new_timezone: str) -> Account:
+        """legacy invalid IANA timezone row 를 valid 값으로 복구 (**cold-path**).
+
+        ``_row_to_account`` 의 tolerant load 는 stored invalid timezone 을
+        보존하면서 ``Account.timezone_invalid=True`` marker 를 노출한다.
+        본 메서드는 운영자가 ``ante account repair-timezone`` (cold-path
+        CLI) 으로 명시 입력한 valid IANA timezone 으로 DB 와 캐시를
+        갱신하는 단일 진입점이다.
+
+        cold-path 의미론: 서버 runtime 중에는
+        ``AccountStructuralChangeRequiresStoppedServerError`` 로 즉시
+        차단된다. ``update()`` 자체는 timezone 을 updatable field 로
+        허용하므로 cold-path 보장이 본 메서드 책임이다. ingress 검증과
+        DB/캐시 UPDATE 는 ``update(timezone=...)`` 에 위임하여 single
+        SSOT 를 유지한다 (별도 DB UPDATE 중복 금지).
+
+        Raises:
+            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
+                호출됨.
+            ValueError: ``new_timezone`` 이 invalid IANA key
+                (``validate_iana_timezone`` 위임).
+            AccountNotFoundError, AccountDeletedException: ``update()`` 와
+                동일.
+        """
+        # cold-path guard: server runtime 중에는 직접 DB 수정을 차단.
+        # AccountService.update 는 timezone 을 updatable 로 허용하므로 본
+        # 메서드 책임으로 cold-path 의미론을 보장한다 (#1474).
+        if self._runtime_started:
+            raise AccountStructuralChangeRequiresStoppedServerError(
+                "account.repair_timezone is a cold-path operation; "
+                "stop the server before invoking this command."
+            )
+        # ingress 검증과 DB/캐시 UPDATE 는 update() 위임 (중복 구현 금지).
+        return await self.update(account_id, timezone=new_timezone)
 
     async def _reconnect_broker(self, account_id: str) -> None:
         """새 브로커 어댑터를 생성·연결한 뒤에만 캐시를 교체한다.
@@ -970,12 +1059,19 @@ def _row_to_account(row: dict[str, Any]) -> Account:
     buffer_raw = row.get("market_order_reserve_buffer_rate", "0")
     buffer_value = Decimal("0") if buffer_raw is None else Decimal(str(buffer_raw))
 
+    # legacy DB row 의 invalid IANA timezone 을 tolerant load 한다 (#1474).
+    # stored value 는 그대로 보존하고 marker 만 세팅한다. fallback 으로
+    # 덮어쓰면 후속 ``AccountService.update`` 의 전체 row UPDATE 가 silent
+    # data rewrite 를 일으킨다.
+    tz_value, tz_invalid = _load_persisted_timezone(row["timezone"], row["account_id"])
+
     return Account(
         account_id=row["account_id"],
         name=row["name"],
         exchange=row["exchange"],
         currency=row["currency"],
-        timezone=row["timezone"],
+        timezone=tz_value,
+        timezone_invalid=tz_invalid,
         trading_hours_start=row["trading_hours_start"],
         trading_hours_end=row["trading_hours_end"],
         trading_mode=TradingMode(row["trading_mode"]),
