@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import click
 
+from ante.account.models import AccountStatus
 from ante.cli.cold_path import (
     ACCOUNT_COLD_PATH_BLOCKED_CODE,
     assert_no_active_runtime,
@@ -30,6 +31,12 @@ from ante.cli.cold_path import (
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+
+# `AccountStatus` enum이 `--status` 필터의 SSOT다. `account list`는 DB 진입 전
+# preflight에서 invalid 값을 차단해야 하며 (#1462), 이를 위해 함수 내부 import
+# 대신 모듈 상단 import을 사용한다. `ante.account.models`은 dataclass + StrEnum
+# 만 노출하는 light 모듈이라 `tests/unit/test_cli_dependency_isolation.py`가
+# 회귀를 차단한다.
 
 if TYPE_CHECKING:
     from ante.account.models import Account
@@ -593,7 +600,18 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     """계좌 목록 조회."""
     fmt = get_formatter(ctx)
 
-    from ante.account.models import AccountStatus
+    # Preflight: invalid `--status`는 `_create_account_service()` (DB 접속) 전에
+    # 차단한다. `AccountStatus` enum이 SSOT이며 (#1462) inline 비교한다.
+    # strategy.py:204-210 패턴과 동형이다.
+    if status_filter is not None and status_filter not in {
+        s.value for s in AccountStatus
+    }:
+        fmt.error(
+            f"잘못된 status 값: {status_filter!r}. "
+            f"허용값: {sorted(s.value for s in AccountStatus)}",
+            code="ACCOUNT_INVALID_STATUS",
+        )
+        raise SystemExit(1)
 
     async def _do_list() -> list[dict]:
         svc, db = await _create_account_service()
