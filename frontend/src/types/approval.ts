@@ -17,6 +17,18 @@ export type ApprovalType =
   | 'bot_create'
   | 'bot_stop'
   | 'rule_change'
+  | 'strategy_retire'
+  | 'bot_assign_strategy'
+  | 'bot_change_strategy'
+  | 'bot_resume'
+  | 'bot_delete'
+
+/**
+ * UI 표시용 ApprovalType.
+ * adapter가 백엔드의 알 수 없는 type 값을 'unknown'으로 매핑하면
+ * UI는 별도의 fallback 렌더링 경로를 거친다.
+ */
+export type ApprovalDisplayType = ApprovalType | 'unknown'
 
 export interface ApprovalReview {
   reviewer: string
@@ -34,7 +46,7 @@ export interface ApprovalHistoryEntry {
 
 export interface Approval {
   id: string
-  type: ApprovalType
+  type: ApprovalDisplayType
   title: string
   requester: string
   requested_at: string

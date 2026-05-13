@@ -9,6 +9,7 @@ import type {
 import type {
   Approval,
   ApprovalDetail,
+  ApprovalDisplayType,
   ApprovalHistoryEntry,
   ApprovalListView,
   ApprovalReview,
@@ -41,7 +42,7 @@ function toApprovalStatus(value: string): ApprovalStatus {
   return 'pending'
 }
 
-function toApprovalType(value: string): ApprovalType {
+function toApprovalType(value: string): ApprovalDisplayType {
   if (
     value === 'strategy_report'
     || value === 'budget_allocate'
@@ -52,10 +53,15 @@ function toApprovalType(value: string): ApprovalType {
     || value === 'bot_create'
     || value === 'bot_stop'
     || value === 'rule_change'
+    || value === 'strategy_retire'
+    || value === 'bot_assign_strategy'
+    || value === 'bot_change_strategy'
+    || value === 'bot_resume'
+    || value === 'bot_delete'
   ) {
     return value
   }
-  return 'strategy_report'
+  return 'unknown'
 }
 
 function toReviewResult(value: unknown): ApprovalReview['result'] {
