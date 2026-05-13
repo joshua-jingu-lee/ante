@@ -311,6 +311,90 @@ class TestTradingHoursRule:
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
+    # ── Invalid timezone (#1475) ─────────────────
+
+    def test_invalid_timezone_rejects_with_explicit_reason(
+        self, rule, base_context, caplog
+    ):
+        """invalid IANA timezone(legacy/외부) 시 uncaught 예외 대신 명시적 REJECT.
+
+        #1475: ``ZoneInfoNotFoundError`` 가 던져지면 룰 평가가 중단되어 주문
+        파이프라인이 일반 rejection_reason 경로로 응답하지 못한다. fail-closed
+        로 ``RuleResult.REJECT`` 와 ``reason=invalid_timezone`` 메타데이터를
+        반환해야 한다.
+        """
+        # current_time 을 주입하지 않아야 ZoneInfo() 경로가 실행된다.
+        base_context.metadata.pop("current_time", None)
+        base_context.timezone = "Not/AReal_Zone"
+
+        with caplog.at_level("WARNING", logger="ante.rule.global_rules"):
+            result = rule.evaluate(base_context)
+
+        assert result.result == RuleResult.REJECT
+        assert result.action == RuleAction.NOTIFY
+        assert "invalid" in result.message.lower()
+        assert "Not/AReal_Zone" in result.message
+        assert result.metadata["reason"] == "invalid_timezone"
+        assert result.metadata["timezone"] == "Not/AReal_Zone"
+        # audit/log 에 invalid timezone 사용 사실 기록
+        assert any(
+            "invalid IANA timezone" in record.message
+            and "Not/AReal_Zone" in record.message
+            for record in caplog.records
+        )
+
+    def test_invalid_timezone_empty_string_falls_back_to_config(self, base_context):
+        """``context.timezone`` 이 빈 문자열이면 config(``Asia/Seoul``) 로 fallback.
+
+        기존 동작 회귀: ``timezone_str = context.timezone or config.get(...)``
+        분기 보존을 확인한다.
+        """
+        rule = TradingHoursRule(
+            "hours",
+            {"name": "Trading Hours", "allowed_hours": "09:00-15:30"},
+        )
+        base_context.metadata.pop("current_time", None)
+        base_context.timezone = ""
+        # ZoneInfo("Asia/Seoul") 는 stdlib 가 정상적으로 인스턴스화하므로
+        # 평가는 invalid_timezone REJECT 가 아니어야 한다 (PASS 또는 시간
+        # 경계 REJECT — 본 테스트는 invalid_timezone metadata 부재만 확인).
+        result = rule.evaluate(base_context)
+        assert result.metadata.get("reason") != "invalid_timezone"
+
+    def test_invalid_timezone_path_separator_rejected(self, rule, base_context):
+        """절대 경로/path-like 값은 ``ValueError`` 로 거부되어 REJECT.
+
+        ``zoneinfo`` 는 절대 경로(``/etc/passwd`` 등) 를 ``ValueError`` 로
+        거부한다. ``ZoneInfoNotFoundError`` 와 동일하게 fail-closed 처리해야
+        한다.
+        """
+        base_context.metadata.pop("current_time", None)
+        base_context.timezone = "/etc/passwd"
+
+        result = rule.evaluate(base_context)
+
+        assert result.result == RuleResult.REJECT
+        assert result.metadata["reason"] == "invalid_timezone"
+        assert result.metadata["timezone"] == "/etc/passwd"
+
+    def test_valid_timezone_runtime_path_unchanged(self, rule, base_context):
+        """valid IANA timezone 은 ``ZoneInfo`` 경로를 거쳐 정상 평가된다.
+
+        #1475 회귀 가드: invalid-timezone fail-closed 가 valid 경로에 영향을
+        주지 않아야 한다. ``current_time`` 주입 없이 실제 ``datetime.now(tz)``
+        경로를 통과시키고, ``invalid_timezone`` 사유 없이 PASS 또는 일반
+        시간외 REJECT 가 반환되는지 확인한다.
+        """
+        base_context.metadata.pop("current_time", None)
+        base_context.timezone = "Asia/Seoul"
+
+        result = rule.evaluate(base_context)
+
+        # 결과(PASS/REJECT)는 실행 시각에 의존하지만, invalid_timezone 으로
+        # 표시되어서는 안 된다.
+        assert result.metadata.get("reason") != "invalid_timezone"
+        assert "invalid account timezone" not in result.message.lower()
+
 
 # ── PositionSizeRule ─────────────────────────────
 

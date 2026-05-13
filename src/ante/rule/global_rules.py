@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
+
+logger = logging.getLogger(__name__)
 
 
 def _is_finite_numeric(value: Any) -> bool:
@@ -213,7 +216,7 @@ class TradingHoursRule(Rule):
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         from datetime import datetime, time
-        from zoneinfo import ZoneInfo
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
         # context 필드가 기본값이 아니면 context 우선, 그렇지 않으면 config fallback
         _default_start, _default_end = "09:00", "15:30"
@@ -241,7 +244,40 @@ class TradingHoursRule(Rule):
         # 테스트 주입 또는 실제 시각
         now = context.metadata.get("current_time")
         if now is None:
-            tz = ZoneInfo(timezone_str)
+            # Invalid timezone 방어 (#1475):
+            # legacy DB row(#1474 미수복) 또는 외부 입력 경로에서 invalid IANA
+            # timezone 이 RuleContext 에 들어올 수 있다. ZoneInfo() 가
+            # ZoneInfoNotFoundError / ValueError 로 실패할 때 uncaught
+            # exception 으로 주문 평가가 중단되는 대신, 명시적 REJECT 로
+            # fail-closed 처리하여 caller (RuleEngine / order pipeline) 가
+            # 일반 rejection_reason 경로로 사용자에게 알릴 수 있게 한다.
+            # #1473 의 ``validate_iana_timezone`` 과 동일한 의미론으로
+            # ZoneInfoNotFoundError 와 ValueError 를 동일하게 거부한다.
+            try:
+                tz = ZoneInfo(timezone_str)
+            except (ZoneInfoNotFoundError, ValueError):
+                logger.warning(
+                    "TradingHoursRule: invalid IANA timezone %r "
+                    "(account=%s, bot=%s) — order rejected",
+                    timezone_str,
+                    context.account_id,
+                    context.bot_id,
+                )
+                return RuleEvaluation(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    result=RuleResult.REJECT,
+                    action=RuleAction.NOTIFY,
+                    message=(
+                        f"Invalid account timezone {timezone_str!r}: "
+                        f"trading hours cannot be evaluated. "
+                        f"Update the account timezone to a valid IANA key."
+                    ),
+                    metadata={
+                        "reason": "invalid_timezone",
+                        "timezone": timezone_str,
+                    },
+                )
             now = datetime.now(tz)
 
         current_time = now.time() if isinstance(now, datetime) else now
