@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ante.bot.bot import Bot
-from ante.bot.config import BotConfig, BotStatus
+from ante.bot.config import BotConfig, BotStatus, validate_runtime_controls
 from ante.bot.exceptions import BotError, BotNotFoundError
 
 if TYPE_CHECKING:
@@ -202,6 +202,20 @@ class BotManager:
         ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성한다.
         source_path가 주어지면 전략 파일을 스냅샷으로 복사하여 보호한다.
         """
+        # #1459 (split #1413/B): defense-in-depth — runtime control 4개
+        # 필드를 service boundary 에서 재검증한다. ``BotConfig.__post_init__``
+        # 가 이미 호출되지만, 외부 caller 가 ``dataclasses.replace`` 또는
+        # attribute mutation 으로 invariant 를 우회한 객체를 전달할 수 있다.
+        # Web API 외 service caller (CLI, IPC registry, bootstrap, internal
+        # 호출) 까지 동일한 invariant 를 유지하기 위한 두 번째 방어선.
+        # SSOT: ``docs/dashboard/user-stories/bots.md`` B-5 line 197-200.
+        validate_runtime_controls(
+            max_restart_attempts=config.max_restart_attempts,
+            restart_cooldown_seconds=config.restart_cooldown_seconds,
+            step_timeout_seconds=config.step_timeout_seconds,
+            max_signals_per_step=config.max_signals_per_step,
+        )
+
         if config.bot_id in self._bots:
             raise BotError(f"Bot already exists: {config.bot_id}")
 
