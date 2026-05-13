@@ -116,7 +116,7 @@
                   "timezone": {
                     "type": "string",
                     "default": "Asia/Seoul",
-                    "description": "거래소 현지 시간대 (IANA)."
+                    "description": "거래소 현지 시간대 (IANA timezone, must be a valid Python ``ZoneInfo`` key). AccountCreateRequest 는 cold-path payload 이므로 빈 문자열은 BrokerPreset fallback sentinel 로 허용된다 (#1473)."
                   },
                   "trading_hours_start": {
                     "type": "string",
@@ -347,7 +347,7 @@
                   },
                   "timezone": {
                     "type": "string",
-                    "description": "거래소 현지 시간대 (IANA)."
+                    "description": "거래소 현지 시간대 (IANA timezone, must be a valid Python ``ZoneInfo`` key). update 경로는 broker preset fallback 이 없으므로 빈 문자열도 422 로 거부된다 (#1473)."
                   },
                   "trading_hours_start": {
                     "type": "string",
@@ -4727,7 +4727,7 @@
           "treasury"
         ],
         "summary": "List Transactions",
-        "description": "자금 변동 이력 조회. 인증된 master/human 또는 ``treasury:read`` scope 를\n보유한 agent 만 호출 가능 (#1407).\n\n``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.\n파싱 실패 또는 캘린더 invalid는 422로 거부된다. 내부적으로 SQLite\n``datetime('now')`` 저장 포맷(``YYYY-MM-DD HH:MM:SS``)에 맞춰\n``start_date``는 ``00:00:00``, ``end_date``는 ``23:59:59``로 확장된 뒤\nSQL 텍스트 비교에 사용된다 (#1440).",
+        "description": "자금 변동 이력 조회. 인증된 master/human 또는 ``treasury:read`` scope 를\n보유한 agent 만 호출 가능 (#1407).\n\n``start_date``/``end_date``는 ISO ``YYYY-MM-DD`` (date-only)만 허용한다.\n파싱 실패 또는 캘린더 invalid는 422로 거부된다. 내부적으로 SQLite\n``datetime('now')`` 저장 포맷(``YYYY-MM-DD HH:MM:SS``)에 맞춰\n``start_date``는 ``00:00:00``, ``end_date``는 ``23:59:59``로 확장된 뒤\nSQL 텍스트 비교에 사용된다 (#1440).\n\n``type`` query는 ``TRANSACTION_TYPE_VOCABULARY`` (#1476)를 SSOT로 하는\n``Literal``로 좁혀, vocabulary 외 값을 FastAPI 단계에서 422로 거부한다\n(#1477). invalid 값이 200 + empty result로 통과하던 oracle A7 host probe\n회귀(fingerprint ``a4f6744a44f5``)를 차단한다.",
         "operationId": "list_transactions_api_treasury_transactions_get",
         "parameters": [
           {
@@ -4753,14 +4753,23 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "allocate",
+                    "deallocate",
+                    "release",
+                    "fill",
+                    "bot_stopped_release"
+                  ],
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "Treasury transaction type 필터. 정규 vocabulary ``allocate``, ``deallocate``, ``release``, ``fill``, ``bot_stopped_release`` (#1476) 외 값은 422로 거부된다 (#1477). 미지정 시 모든 type을 반환한다.",
               "title": "Type"
-            }
+            },
+            "description": "Treasury transaction type 필터. 정규 vocabulary ``allocate``, ``deallocate``, ``release``, ``fill``, ``bot_stopped_release`` (#1476) 외 값은 422로 거부된다 (#1477). 미지정 시 모든 type을 반환한다."
           },
           {
             "name": "bot_id",
@@ -4846,7 +4855,7 @@
             }
           },
           "422": {
-            "description": "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440).",
+            "description": "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). ``type`` query는 정규 vocabulary ``{allocate, deallocate, release, fill, bot_stopped_release}`` (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477).",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -54,7 +54,25 @@ export interface BotBudgetView {
 
 export type BotBudget = BotBudgetView
 
-export type TransactionType = 'allocate' | 'deallocate' | 'fill' | 'bot_stopped_release'
+/**
+ * Treasury transaction type vocabulary (frontend SSOT).
+ *
+ * 5-value vocabulary, drift-checked against:
+ *   - 코드 SSOT: src/ante/treasury/treasury.py::TRANSACTION_TYPE_VOCABULARY
+ *   - 스펙 SSOT: docs/specs/treasury/06-database-schema.md
+ *
+ * - 'allocate'             : 봇에 예산 할당
+ * - 'deallocate'           : 봇에서 예산 회수
+ * - 'release'              : 봇 삭제 시 할당 예산 전액 환수
+ * - 'fill'                 : 주문 체결로 인한 자금 이동
+ * - 'bot_stopped_release'  : 봇 중지 시 잔여 예약 자금 환수
+ */
+export type TransactionType =
+  | 'allocate'
+  | 'deallocate'
+  | 'release'
+  | 'fill'
+  | 'bot_stopped_release'
 
 export interface TreasuryTransactionView {
   id: number

@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ante import __version__
+from ante.account.timezone import validate_iana_timezone
 
 # Account `trading_hours_start`/`trading_hours_end`의 strict HH:MM 24시간 형식.
 # SSOT: docs/specs/account/03-data-model.md (HH:MM), docs/specs/account/10-web-api.md.
@@ -109,6 +110,21 @@ class AccountCreateRequest(BaseModel):
             ) from exc
         return v
 
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone_create(cls, v: str) -> str:
+        """IANA timezone key 검증 (create 경로).
+
+        ``""`` 는 ``trading_hours_*`` 와 동일하게 default 의미 보존을 위해
+        통과시킨다 — CLI/seed 경로에서 BrokerPreset fallback 이 ``""`` 를
+        preset value 로 채우기 때문이다. non-empty 값은
+        :func:`ante.account.timezone.validate_iana_timezone` 으로 검증한다
+        (#1473 split #1419/A).
+        """
+        if v == "":
+            return v
+        return validate_iana_timezone(v)
+
 
 class AccountUpdateRequest(BaseModel):
     """계좌 수정 요청.
@@ -157,6 +173,21 @@ class AccountUpdateRequest(BaseModel):
                 f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
             ) from exc
         return v
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone_update(cls, v: str | None) -> str | None:
+        """IANA timezone key 검증 (update 경로).
+
+        ``None`` 은 통과(필드 미제공). 그 외(``""`` 포함)는
+        :func:`ante.account.timezone.validate_iana_timezone` 으로 검증 — update
+        경로는 broker preset fallback 이 없으므로 ``""`` 도 invalid 다
+        (``trading_hours_*`` update validator 패턴 일치, #1473 split #1419/A).
+        실패 시 ``ValueError`` 로 422 Unprocessable Entity 를 유도한다.
+        """
+        if v is None:
+            return v
+        return validate_iana_timezone(v)
 
 
 class AccountSuspendRequest(BaseModel):

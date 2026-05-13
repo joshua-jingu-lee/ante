@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ante.treasury.treasury import TRANSACTION_TYPE_VOCABULARY
 from ante.web.deps import (
     get_audit_logger_optional,
     get_bot_manager_optional,
@@ -34,6 +35,34 @@ from ante.web.utils.date_params import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# GET /api/treasury/transactions ``type`` query SSOT (#1477).
+#
+# 코드 SSOT는 ``ante.treasury.treasury.TRANSACTION_TYPE_VOCABULARY`` (5-value
+# frozenset, #1476). FastAPI/Pydantic ``Literal``은 정적 리터럴 튜플을 요구하므로
+# 별도 alias로 선언하되, 모듈 로드 시 vocabulary와 일치하지 않으면 즉시
+# ``RuntimeError``를 raise해 contract drift를 차단한다. 새 vocabulary 값을
+# 추가하면 양쪽을 함께 갱신해야 import 자체가 실패한다.
+TransactionTypeQuery = Literal[
+    "allocate",
+    "deallocate",
+    "release",
+    "fill",
+    "bot_stopped_release",
+]
+
+_TRANSACTION_TYPE_QUERY_VALUES: frozenset[str] = frozenset(
+    {"allocate", "deallocate", "release", "fill", "bot_stopped_release"}
+)
+
+if _TRANSACTION_TYPE_QUERY_VALUES != TRANSACTION_TYPE_VOCABULARY:
+    raise RuntimeError(
+        "TransactionTypeQuery literal이 TRANSACTION_TYPE_VOCABULARY와 일치하지 "
+        "않는다 — 둘을 함께 갱신하라. "
+        f"literal={sorted(_TRANSACTION_TYPE_QUERY_VALUES)}, "
+        f"vocabulary={sorted(TRANSACTION_TYPE_VOCABULARY)}"
+    )
 
 
 class BudgetChangeRequest(BaseModel):
@@ -237,7 +266,9 @@ async def get_summary(
                 "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required)."
                 " ``treasury_transactions.created_at``은 SQLite ``datetime('now')``"
                 " 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만"
-                " 비교한다 (#1440)."
+                " 비교한다 (#1440). ``type`` query는 정규 vocabulary"
+                " ``{allocate, deallocate, release, fill, bot_stopped_release}``"
+                " (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477)."
             ),
             "content": {
                 "application/problem+json": {
@@ -259,7 +290,18 @@ async def list_transactions(
     _caller_id: Annotated[str, Depends(require_treasury_read)],
     treasury: Annotated[Any, Depends(get_treasury)],
     account_id: str | None = None,
-    type: str | None = None,
+    type: Annotated[
+        TransactionTypeQuery | None,
+        Query(
+            alias="type",
+            description=(
+                "Treasury transaction type 필터. 정규 vocabulary"
+                " ``allocate``, ``deallocate``, ``release``, ``fill``,"
+                " ``bot_stopped_release`` (#1476) 외 값은 422로 거부된다 (#1477)."
+                " 미지정 시 모든 type을 반환한다."
+            ),
+        ),
+    ] = None,
     bot_id: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
@@ -274,6 +316,11 @@ async def list_transactions(
     ``datetime('now')`` 저장 포맷(``YYYY-MM-DD HH:MM:SS``)에 맞춰
     ``start_date``는 ``00:00:00``, ``end_date``는 ``23:59:59``로 확장된 뒤
     SQL 텍스트 비교에 사용된다 (#1440).
+
+    ``type`` query는 ``TRANSACTION_TYPE_VOCABULARY`` (#1476)를 SSOT로 하는
+    ``Literal``로 좁혀, vocabulary 외 값을 FastAPI 단계에서 422로 거부한다
+    (#1477). invalid 값이 200 + empty result로 통과하던 oracle A7 host probe
+    회귀(fingerprint ``a4f6744a44f5``)를 차단한다.
     """
     start_bound = validate_iso_date_param_for_sql_datetime(
         start_date, "start_date", end_of_day=False

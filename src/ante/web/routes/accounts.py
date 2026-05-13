@@ -106,7 +106,11 @@ ACCOUNT_MUTABLE_UPDATE_REQUEST_SCHEMA: dict[str, Any] = {
         },
         "timezone": {
             "type": "string",
-            "description": "거래소 현지 시간대 (IANA).",
+            "description": (
+                "거래소 현지 시간대 (IANA timezone, must be a valid Python "
+                "``ZoneInfo`` key). update 경로는 broker preset fallback 이 "
+                "없으므로 빈 문자열도 422 로 거부된다 (#1473)."
+            ),
         },
         "trading_hours_start": {
             "type": "string",
@@ -181,7 +185,12 @@ ACCOUNT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         "timezone": {
             "type": "string",
             "default": "Asia/Seoul",
-            "description": "거래소 현지 시간대 (IANA).",
+            "description": (
+                "거래소 현지 시간대 (IANA timezone, must be a valid Python "
+                "``ZoneInfo`` key). AccountCreateRequest 는 cold-path payload "
+                "이므로 빈 문자열은 BrokerPreset fallback sentinel 로 허용된다 "
+                "(#1473)."
+            ),
         },
         "trading_hours_start": {
             "type": "string",

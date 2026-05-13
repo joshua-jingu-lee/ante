@@ -22,7 +22,15 @@ CREATE TABLE treasury_transactions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     bot_id           TEXT,
     account_id       TEXT NOT NULL,                       -- 소속 계좌 ID, fallback default 없음
-    transaction_type TEXT NOT NULL,  -- 'allocate', 'deallocate', 'reserve', 'release', 'fill'
+    -- transaction_type vocabulary (5-value, SSOT):
+    --   'allocate'             : 봇에 예산 할당
+    --   'deallocate'           : 봇에서 예산 회수
+    --   'release'              : 봇 삭제 시 할당 예산 전액 환수
+    --   'fill'                 : 주문 체결로 인한 자금 이동
+    --   'bot_stopped_release'  : 봇 중지 시 잔여 예약 자금 환수
+    -- 코드 SSOT: src/ante/treasury/treasury.py::TRANSACTION_TYPE_VOCABULARY
+    -- 프런트엔드 SSOT: frontend/src/types/treasury.ts::TransactionType
+    transaction_type TEXT NOT NULL,
     amount           REAL NOT NULL,
     description      TEXT DEFAULT '',
     created_at       TEXT DEFAULT (datetime('now'))
