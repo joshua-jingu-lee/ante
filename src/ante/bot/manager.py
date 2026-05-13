@@ -130,6 +130,24 @@ class BotManager:
             " FROM bots WHERE status != 'deleted'"
         )
 
+        # ``BotConfig`` 기본값 (#1457 legacy fallback SSOT). config_json 에
+        # runtime control 필드가 없는 legacy row 는 dataclass default 로
+        # 복원되어야 한다.
+        bot_config_defaults = BotConfig.__dataclass_fields__
+        default_auto_restart = bot_config_defaults["auto_restart"].default
+        default_max_restart_attempts = bot_config_defaults[
+            "max_restart_attempts"
+        ].default
+        default_restart_cooldown_seconds = bot_config_defaults[
+            "restart_cooldown_seconds"
+        ].default
+        default_step_timeout_seconds = bot_config_defaults[
+            "step_timeout_seconds"
+        ].default
+        default_max_signals_per_step = bot_config_defaults[
+            "max_signals_per_step"
+        ].default
+
         for row in rows:
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
             # bot_type, exchange 키는 무시 (BotConfig에서 제거됨)
@@ -143,6 +161,22 @@ class BotManager:
                     name=row["name"] or config_data.get("name", row["bot_id"]),
                     account_id=account_id,
                     interval_seconds=config_data.get("interval_seconds", 60),
+                    # Refs #1457: runtime control 4개 필드 + auto_restart 라운드
+                    # 트립 복원. legacy row 는 config_data.get(...) fallback 으로
+                    # dataclass default 가 사용된다.
+                    auto_restart=config_data.get("auto_restart", default_auto_restart),
+                    max_restart_attempts=config_data.get(
+                        "max_restart_attempts", default_max_restart_attempts
+                    ),
+                    restart_cooldown_seconds=config_data.get(
+                        "restart_cooldown_seconds", default_restart_cooldown_seconds
+                    ),
+                    step_timeout_seconds=config_data.get(
+                        "step_timeout_seconds", default_step_timeout_seconds
+                    ),
+                    max_signals_per_step=config_data.get(
+                        "max_signals_per_step", default_max_signals_per_step
+                    ),
                 )
             except InvalidAccountIdError as e:
                 # SPLIT-1 패턴: invalid account_id row 는 skip + warning.
@@ -152,6 +186,20 @@ class BotManager:
                     " (legacy migration 필요): bot_id=%s account_id=%r — %s",
                     row.get("bot_id"),
                     account_id,
+                    e,
+                )
+                continue
+            except ValueError as e:
+                # Refs #1457 (Epic #1413 split-C): persisted runtime control /
+                # interval 이 #1456 invariant 범위를 벗어난 legacy row 는
+                # skip + warning 으로 격리한다. ``BotConfig.__post_init__`` 의
+                # ``validate_runtime_controls`` / ``validate_interval`` 이
+                # ``ValueError`` 를 raise 하므로 전체 load 가 실패하지
+                # 않도록 가지치기한다.
+                logger.warning(
+                    "BotManager.load_from_db: invalid runtime control row skip"
+                    " (legacy migration 필요): bot_id=%s — %s",
+                    row.get("bot_id"),
                     e,
                 )
                 continue
@@ -969,13 +1017,26 @@ class BotManager:
         )
 
     async def _save_bot_config(self, config: BotConfig) -> None:
-        """봇 설정 DB 저장."""
+        """봇 설정 DB 저장.
+
+        Refs #1457 (Epic #1413 split-C): runtime control 4개 필드와
+        ``auto_restart`` 를 ``config_json`` 에 함께 직렬화해
+        ``load_from_db`` 라운드트립에서 기본값으로 복귀하지 않도록 한다.
+        SSOT: ``docs/dashboard/user-stories/bots.md`` B-5 line 197-200,
+        ``docs/specs/web-api/05-resource-endpoints.md`` PUT
+        ``/api/bots/{bot_id}`` body contract.
+        """
         config_dict = {
             "bot_id": config.bot_id,
             "name": config.name,
             "strategy_id": config.strategy_id,
             "account_id": config.account_id,
             "interval_seconds": config.interval_seconds,
+            "auto_restart": config.auto_restart,
+            "max_restart_attempts": config.max_restart_attempts,
+            "restart_cooldown_seconds": config.restart_cooldown_seconds,
+            "step_timeout_seconds": config.step_timeout_seconds,
+            "max_signals_per_step": config.max_signals_per_step,
         }
         await self._db.execute(
             """INSERT INTO bots
