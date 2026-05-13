@@ -464,7 +464,20 @@ class Bot:
                 )
 
     def get_info(self) -> dict[str, Any]:
-        """봇 상태 정보 반환."""
+        """봇 상태 정보 반환.
+
+        runtime control 필드(``auto_restart``, ``max_restart_attempts``,
+        ``restart_cooldown_seconds``, ``step_timeout_seconds``,
+        ``max_signals_per_step``)는 ``config`` nested object 로 노출한다
+        (#1458 split #1413/E). SSOT 는
+        ``docs/dashboard/user-stories/bots.md`` B-3 line 106-111 의
+        ``bot.config.*`` 접근 패턴. ``interval_seconds`` 도 동일 카드에서
+        ``bot.config.interval_seconds`` 로 표시되므로 ``config`` 안에
+        한 번 더 노출한다 (top-level ``interval_seconds`` 는 기존 호환을
+        위해 유지). 이 nested 노출이 빠지면 대시보드 편집 모달이
+        ``bot.config?.* ?? <default>`` fallback 으로 떨어져 valid 한
+        기존 runtime control 값을 default 로 덮어쓰게 된다.
+        """
         return {
             "bot_id": self.bot_id,
             "name": self.config.name,
@@ -478,4 +491,12 @@ class Bot:
             "started_at": (self.started_at.isoformat() if self.started_at else None),
             "stopped_at": (self.stopped_at.isoformat() if self.stopped_at else None),
             "error_message": self.error_message,
+            "config": {
+                "interval_seconds": self.config.interval_seconds,
+                "auto_restart": self.config.auto_restart,
+                "max_restart_attempts": self.config.max_restart_attempts,
+                "restart_cooldown_seconds": self.config.restart_cooldown_seconds,
+                "step_timeout_seconds": self.config.step_timeout_seconds,
+                "max_signals_per_step": self.config.max_signals_per_step,
+            },
         }

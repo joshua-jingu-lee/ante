@@ -305,11 +305,44 @@ class MeResponse(BaseModel):
 # ── 봇 ──────────────────────────────────────────────
 
 
+class BotConfigSummary(BaseModel):
+    """봇 runtime control 요약 (GET ``/api/bots/{bot_id}`` 응답 필드, #1458).
+
+    SSOT: ``docs/dashboard/user-stories/bots.md`` B-3 line 106-111 ``bot.config.*``
+    카드 + B-5 line 194-200 편집 모달 prefill key. 5개 필드 + ``interval_seconds``
+    를 묶어 GET 응답에서 한 번에 노출하면 대시보드 편집 모달이
+    ``bot.config?.<key> ?? <default>`` fallback 으로 떨어지지 않고 실제
+    저장값으로 prefill 된다 (#1413 split E).
+
+    필드별 spec 범위는 ``BotConfig`` ``validate_runtime_controls`` 와 정합
+    (`docs/dashboard/user-stories/bots.md` B-5 line 197-200):
+    - ``max_restart_attempts``: 1~10
+    - ``restart_cooldown_seconds``: 10~600
+    - ``step_timeout_seconds``: 5~120
+    - ``max_signals_per_step``: 1~200
+
+    range constraint 는 GET 응답이 아닌 PUT/POST 입력 모델에서 422 로 강제하므로
+    본 read-side schema 는 type 만 명시한다 (회귀 시 SSOT 범위는 그대로 유지).
+    """
+
+    interval_seconds: int
+    auto_restart: bool
+    max_restart_attempts: int
+    restart_cooldown_seconds: int
+    step_timeout_seconds: int
+    max_signals_per_step: int
+
+
 class BotInfo(BaseModel):
     """봇 정보 (read 응답).
 
     write 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가
     검증되므로 read 응답 schema에는 default를 유지한다.
+
+    ``config`` 는 GET ``/api/bots/{bot_id}`` 응답에서 runtime control 5개 필드
+    + ``interval_seconds`` 를 묶어 노출한다 (#1458 split #1413/E). 대시보드
+    편집 모달이 default 값으로 덮어쓰는 회귀를 차단한다. list 응답
+    (``GET /api/bots``) 도 동일 구조로 ``config`` 를 포함한다.
     """
 
     bot_id: str
@@ -324,6 +357,7 @@ class BotInfo(BaseModel):
     started_at: str | None = None
     stopped_at: str | None = None
     error_message: str | None = None
+    config: BotConfigSummary | None = None
 
     # 봇 상세 조회 시 추가되는 동적 필드 (strategy, budget, positions 등)
     model_config = ConfigDict(extra="allow")

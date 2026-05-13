@@ -2106,6 +2106,40 @@ export type components = {
             updated_at: string;
         };
         /**
+         * BotConfigSummary
+         * @description 봇 runtime control 요약 (GET ``/api/bots/{bot_id}`` 응답 필드, #1458).
+         *
+         *     SSOT: ``docs/dashboard/user-stories/bots.md`` B-3 line 106-111 ``bot.config.*``
+         *     카드 + B-5 line 194-200 편집 모달 prefill key. 5개 필드 + ``interval_seconds``
+         *     를 묶어 GET 응답에서 한 번에 노출하면 대시보드 편집 모달이
+         *     ``bot.config?.<key> ?? <default>`` fallback 으로 떨어지지 않고 실제
+         *     저장값으로 prefill 된다 (#1413 split E).
+         *
+         *     필드별 spec 범위는 ``BotConfig`` ``validate_runtime_controls`` 와 정합
+         *     (`docs/dashboard/user-stories/bots.md` B-5 line 197-200):
+         *     - ``max_restart_attempts``: 1~10
+         *     - ``restart_cooldown_seconds``: 10~600
+         *     - ``step_timeout_seconds``: 5~120
+         *     - ``max_signals_per_step``: 1~200
+         *
+         *     range constraint 는 GET 응답이 아닌 PUT/POST 입력 모델에서 422 로 강제하므로
+         *     본 read-side schema 는 type 만 명시한다 (회귀 시 SSOT 범위는 그대로 유지).
+         */
+        BotConfigSummary: {
+            /** Auto Restart */
+            auto_restart: boolean;
+            /** Interval Seconds */
+            interval_seconds: number;
+            /** Max Restart Attempts */
+            max_restart_attempts: number;
+            /** Max Signals Per Step */
+            max_signals_per_step: number;
+            /** Restart Cooldown Seconds */
+            restart_cooldown_seconds: number;
+            /** Step Timeout Seconds */
+            step_timeout_seconds: number;
+        };
+        /**
          * BotCreateRequest
          * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy ``bot_type``)는 422로 거부된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 (model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 한다 (codex r1 FAIL). anyOf branches 는 ``type``/``properties`` 까지 명시하여 openapi-typescript 가 ``unknown`` 으로 붕괴되지 않고 ``{strategy_id: string} | {strategy_name: string}`` 으로 narrow 되도록 한다 (codex r2 FAIL).
          */
@@ -2148,6 +2182,11 @@ export type components = {
          *
          *     write 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가
          *     검증되므로 read 응답 schema에는 default를 유지한다.
+         *
+         *     ``config`` 는 GET ``/api/bots/{bot_id}`` 응답에서 runtime control 5개 필드
+         *     + ``interval_seconds`` 를 묶어 노출한다 (#1458 split #1413/E). 대시보드
+         *     편집 모달이 default 값으로 덮어쓰는 회귀를 차단한다. list 응답
+         *     (``GET /api/bots``) 도 동일 구조로 ``config`` 를 포함한다.
          */
         BotInfo: {
             /**
@@ -2157,6 +2196,7 @@ export type components = {
             account_id: string;
             /** Bot Id */
             bot_id: string;
+            config?: components["schemas"]["BotConfigSummary"] | null;
             /** Error Message */
             error_message?: string | null;
             /**
@@ -3770,6 +3810,7 @@ export type AuditLogItem = components['schemas']['AuditLogItem'];
 export type AuditLogListResponse = components['schemas']['AuditLogListResponse'];
 export type BalanceSetRequest = components['schemas']['BalanceSetRequest'];
 export type BalanceSetResponse = components['schemas']['BalanceSetResponse'];
+export type BotConfigSummary = components['schemas']['BotConfigSummary'];
 export type BotCreateRequest = components['schemas']['BotCreateRequest'];
 export type BotDetailResponse = components['schemas']['BotDetailResponse'];
 export type BotInfo = components['schemas']['BotInfo'];

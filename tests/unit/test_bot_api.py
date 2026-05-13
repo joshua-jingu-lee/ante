@@ -81,12 +81,24 @@ class FakeBot:
         status: str = "created",
         strategy_id: str = "s1",
         account_id: str = "test",
+        # runtime control (#1458 split #1413/E) — BotConfig dataclass default
+        # 와 동일한 spec range 안 default 값.
+        auto_restart: bool = True,
+        max_restart_attempts: int = 3,
+        restart_cooldown_seconds: int = 60,
+        step_timeout_seconds: int = 30,
+        max_signals_per_step: int = 50,
     ) -> None:
         self.bot_id = bot_id
         self._status = status
         self._strategy_id = strategy_id
         self._name = bot_id
         self._interval_seconds = 60
+        self._auto_restart = auto_restart
+        self._max_restart_attempts = max_restart_attempts
+        self._restart_cooldown_seconds = restart_cooldown_seconds
+        self._step_timeout_seconds = step_timeout_seconds
+        self._max_signals_per_step = max_signals_per_step
         self.config = FakeBotConfig(
             bot_id, account_id=account_id, strategy_id=strategy_id
         )
@@ -96,6 +108,9 @@ class FakeBot:
         return self._status
 
     def get_info(self) -> dict:
+        # ``config`` 는 GET /api/bots/{bot_id} 응답에서 runtime control 5개 +
+        # interval_seconds 를 묶어 노출한다 (#1458 split #1413/E). 실제 Bot
+        # 구현과 동일 구조.
         return {
             "bot_id": self.bot_id,
             "name": self._name,
@@ -109,6 +124,14 @@ class FakeBot:
             "started_at": None,
             "stopped_at": None,
             "error_message": None,
+            "config": {
+                "interval_seconds": self._interval_seconds,
+                "auto_restart": self._auto_restart,
+                "max_restart_attempts": self._max_restart_attempts,
+                "restart_cooldown_seconds": self._restart_cooldown_seconds,
+                "step_timeout_seconds": self._step_timeout_seconds,
+                "max_signals_per_step": self._max_signals_per_step,
+            },
         }
 
 
@@ -179,6 +202,20 @@ class FakeBotManager:
         if "strategy_id" in updates:
             bot._strategy_id = updates["strategy_id"]
             bot.config.strategy_id = updates["strategy_id"]
+        # runtime control (#1458 split #1413/E) — 실제 BotManager.update_bot 는
+        # BotConfig 재구성 패턴으로 같은 필드를 갱신한다. roundtrip 회귀
+        # 테스트(valid 값 PUT → GET 보존, 다른 필드만 PUT → 기존 값 보존) 를
+        # 지원하기 위해 stub 도 동일 동작을 시뮬레이션한다.
+        if "auto_restart" in updates:
+            bot._auto_restart = updates["auto_restart"]
+        if "max_restart_attempts" in updates:
+            bot._max_restart_attempts = updates["max_restart_attempts"]
+        if "restart_cooldown_seconds" in updates:
+            bot._restart_cooldown_seconds = updates["restart_cooldown_seconds"]
+        if "step_timeout_seconds" in updates:
+            bot._step_timeout_seconds = updates["step_timeout_seconds"]
+        if "max_signals_per_step" in updates:
+            bot._max_signals_per_step = updates["max_signals_per_step"]
         return bot
 
 
@@ -324,6 +361,110 @@ class TestGetBot:
         """존재하지 않는 봇 → 404."""
         resp = client.get("/api/bots/nonexistent")
         assert resp.status_code == 404
+
+    def test_get_includes_runtime_control_config(self, client, bot_manager):
+        """GET /api/bots/{bot_id} 응답에 runtime control 5개 + interval 이
+        ``config`` nested object 로 포함된다 (#1458 split #1413/E).
+
+        SSOT: ``docs/dashboard/user-stories/bots.md`` B-3 ``bot.config.*`` 카드.
+        대시보드 편집 모달은 ``bot.config?.<key> ?? <default>`` fallback 으로
+        prefill 되는데, 이 필드가 빠지면 default 값(예: ``?? 3``) 으로
+        덮어쓰여 valid 한 기존 설정이 손실된다.
+        """
+        bot_manager._bots["bot-1"] = FakeBot(
+            "bot-1",
+            auto_restart=False,
+            max_restart_attempts=8,
+            restart_cooldown_seconds=300,
+            step_timeout_seconds=90,
+            max_signals_per_step=150,
+        )
+        resp = client.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        body = resp.json()["bot"]
+        assert "config" in body, "config nested object missing from GET response"
+        cfg = body["config"]
+        # SSOT 필드 5개 + interval_seconds 모두 노출.
+        assert cfg["auto_restart"] is False
+        assert cfg["max_restart_attempts"] == 8
+        assert cfg["restart_cooldown_seconds"] == 300
+        assert cfg["step_timeout_seconds"] == 90
+        assert cfg["max_signals_per_step"] == 150
+        assert cfg["interval_seconds"] == 60
+
+    def test_get_returns_runtime_control_defaults(self, client, bot_manager):
+        """FakeBot default 값으로 생성된 봇은 BotConfig dataclass default
+        (#1458 SSOT) 와 같은 spec range 안 default 를 GET 응답에 반영한다.
+        """
+        bot_manager._bots["bot-1"] = FakeBot("bot-1")
+        resp = client.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        cfg = resp.json()["bot"]["config"]
+        assert cfg["auto_restart"] is True
+        assert cfg["max_restart_attempts"] == 3
+        assert cfg["restart_cooldown_seconds"] == 60
+        assert cfg["step_timeout_seconds"] == 30
+        assert cfg["max_signals_per_step"] == 50
+
+
+class TestBotDetailRuntimeControlRoundtrip:
+    """GET/PUT roundtrip 회귀 (#1458 split #1413/E pass condition).
+
+    - valid runtime controls PUT → GET detail → 동일 값 반영
+    - GET detail → 다른 필드(name 등) 만 수정 PUT → runtime control 보존
+    """
+
+    def test_put_runtime_controls_then_get_returns_same_values(
+        self, client, bot_manager
+    ):
+        """valid runtime control 4개 + auto_restart 를 PUT 한 뒤 GET 하면
+        같은 값이 반환된다 (default 로 덮이지 않는다)."""
+        bot_manager._bots["bot-1"] = FakeBot("bot-1", status="stopped")
+        # PUT — spec range 안의 다른 값으로 변경.
+        put_payload = {
+            "auto_restart": False,
+            "max_restart_attempts": 5,
+            "restart_cooldown_seconds": 200,
+            "step_timeout_seconds": 90,
+            "max_signals_per_step": 120,
+        }
+        put_resp = client.put("/api/bots/bot-1", json=put_payload)
+        assert put_resp.status_code == 200, put_resp.text
+        # GET — PUT 으로 반영된 값이 그대로 노출된다.
+        get_resp = client.get("/api/bots/bot-1")
+        assert get_resp.status_code == 200
+        cfg = get_resp.json()["bot"]["config"]
+        assert cfg["auto_restart"] is False
+        assert cfg["max_restart_attempts"] == 5
+        assert cfg["restart_cooldown_seconds"] == 200
+        assert cfg["step_timeout_seconds"] == 90
+        assert cfg["max_signals_per_step"] == 120
+
+    def test_put_other_field_only_preserves_runtime_controls(self, client, bot_manager):
+        """이름만 변경 PUT → runtime control 5개는 GET 응답에 그대로 보존."""
+        bot_manager._bots["bot-1"] = FakeBot(
+            "bot-1",
+            status="stopped",
+            auto_restart=False,
+            max_restart_attempts=7,
+            restart_cooldown_seconds=180,
+            step_timeout_seconds=60,
+            max_signals_per_step=100,
+        )
+        # 다른 필드(name) 만 변경.
+        put_resp = client.put("/api/bots/bot-1", json={"name": "renamed-bot"})
+        assert put_resp.status_code == 200, put_resp.text
+        get_resp = client.get("/api/bots/bot-1")
+        assert get_resp.status_code == 200
+        body = get_resp.json()["bot"]
+        assert body["name"] == "renamed-bot"
+        cfg = body["config"]
+        # 기존 runtime control 값 전부 보존.
+        assert cfg["auto_restart"] is False
+        assert cfg["max_restart_attempts"] == 7
+        assert cfg["restart_cooldown_seconds"] == 180
+        assert cfg["step_timeout_seconds"] == 60
+        assert cfg["max_signals_per_step"] == 100
 
 
 class TestStartStopBot:

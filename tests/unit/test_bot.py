@@ -590,6 +590,66 @@ class TestBot:
         assert info["exchange"] == "KRX"
         assert info["currency"] == "KRW"
 
+    def test_get_info_includes_config_runtime_controls(self, eventbus, ctx):
+        """get_info()에 runtime control 5개 + interval이 ``config`` nested로
+        포함된다 (#1458 split #1413/E).
+
+        SSOT: ``docs/dashboard/user-stories/bots.md`` B-3 ``bot.config.*`` 카드.
+        BotConfig 의 spec range 안의 valid 한 값이 그대로 반영되어, 대시보드
+        편집 모달이 default 값(``?? 3`` 등)으로 덮어쓰는 회귀를 차단한다.
+        """
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            interval_seconds=30,
+            account_id="acc-test",
+            auto_restart=False,
+            max_restart_attempts=7,
+            restart_cooldown_seconds=120,
+            step_timeout_seconds=45,
+            max_signals_per_step=80,
+        )
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        assert "config" in info, "config nested object missing from get_info()"
+        cfg = info["config"]
+        # 모든 key 가 존재 + valid 한 값 그대로 반영된다 (default 로 덮이지
+        # 않는다).
+        assert cfg["interval_seconds"] == 30
+        assert cfg["auto_restart"] is False
+        assert cfg["max_restart_attempts"] == 7
+        assert cfg["restart_cooldown_seconds"] == 120
+        assert cfg["step_timeout_seconds"] == 45
+        assert cfg["max_signals_per_step"] == 80
+        # 기존 top-level 호환 — interval_seconds 는 양쪽에 노출된다 (이전 read
+        # 응답을 사용하는 호출자 호환 보존).
+        assert info["interval_seconds"] == 30
+
+    def test_get_info_config_uses_defaults_when_unspecified(self, eventbus, ctx):
+        """get_info()의 ``config`` 는 BotConfig dataclass default 도 그대로
+        노출한다 (#1458 split #1413/E). spec range 안의 default value:
+        auto_restart=True, max_restart_attempts=3, restart_cooldown_seconds=60,
+        step_timeout_seconds=30, max_signals_per_step=50.
+        """
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        cfg = bot.get_info()["config"]
+        assert cfg["auto_restart"] is True
+        assert cfg["max_restart_attempts"] == 3
+        assert cfg["restart_cooldown_seconds"] == 60
+        assert cfg["step_timeout_seconds"] == 30
+        assert cfg["max_signals_per_step"] == 50
+
 
 # ── BotManager ───────────────────────────────────
 
