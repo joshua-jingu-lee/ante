@@ -5836,6 +5836,46 @@
         "title": "BalanceSetResponse",
         "description": "잔고 설정 응답."
       },
+      "BotConfigOut": {
+        "properties": {
+          "interval_seconds": {
+            "type": "integer",
+            "title": "Interval Seconds"
+          },
+          "auto_restart": {
+            "type": "boolean",
+            "title": "Auto Restart"
+          },
+          "max_restart_attempts": {
+            "type": "integer",
+            "title": "Max Restart Attempts"
+          },
+          "restart_cooldown_seconds": {
+            "type": "integer",
+            "title": "Restart Cooldown Seconds"
+          },
+          "step_timeout_seconds": {
+            "type": "integer",
+            "title": "Step Timeout Seconds"
+          },
+          "max_signals_per_step": {
+            "type": "integer",
+            "title": "Max Signals Per Step"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "interval_seconds",
+          "auto_restart",
+          "max_restart_attempts",
+          "restart_cooldown_seconds",
+          "step_timeout_seconds",
+          "max_signals_per_step"
+        ],
+        "title": "BotConfigOut",
+        "description": "봇 runtime control 6 필드 nested 응답 (#1458).\n\n``GET /api/bots/{bot_id}`` 응답에 nested 객체 ``config`` 로 직렬화되어\n대시보드 BotDetail edit modal prefill 의 SSOT 가 된다.\n``docs/dashboard/user-stories/bots.md`` B-3/B-5 line 197-200 의 6 필드\n(``interval_seconds``, ``auto_restart``, ``max_restart_attempts``,\n``restart_cooldown_seconds``, ``step_timeout_seconds``,\n``max_signals_per_step``) 만 노출하며 다른 키는 ``extra=\"forbid\"`` 로\n차단한다 (강한 schema 계약)."
+      },
       "BotDetailResponse": {
         "properties": {
           "bot": {
@@ -5945,6 +5985,16 @@
               }
             ],
             "title": "Error Message"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotConfigOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": true,
@@ -5953,7 +6003,7 @@
           "bot_id"
         ],
         "title": "BotInfo",
-        "description": "봇 정보 (read 응답).\n\nwrite 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가\n검증되므로 read 응답 schema에는 default를 유지한다."
+        "description": "봇 정보 (read 응답).\n\nwrite 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가\n검증되므로 read 응답 schema에는 default를 유지한다.\n\n``config`` (`BotConfigOut`) 는 #1458 에서 추가된 runtime control 6 필드\nnested 객체다. backward compatibility 를 위해 top-level ``interval_seconds``\n는 유지하되, 다른 runtime control 필드는 top-level 에 노출하지 않는다\n(계약 중복 방지)."
       },
       "BotListResponse": {
         "properties": {
