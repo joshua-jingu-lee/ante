@@ -7,6 +7,8 @@
 - 누락 / 둘 다 지정 / env 부재·공란 / file 부재·공란 실패 케이스
 - ``member regenerate-recovery-key --password-env`` / ``--password-file`` 성공
 - 위 동일 실패 케이스
+- ``member list-invalid-roles`` 두 카테고리 분리 JSON/table 출력, no-row exit 0,
+  ``token_hash`` 비노출 회귀 (#1468)
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from click.testing import CliRunner
 
 from ante.cli.main import cli
-from ante.member.models import Member, MemberRole, MemberType
+from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from ante.member.service import InvalidRoleScan
 
 
 def _make_master() -> Member:
@@ -751,3 +754,215 @@ class TestNonMasterCliPermissionDenied:
         data = json.loads(result.output)
         assert "master" in data["message"]
         assert "Traceback" not in result.output
+
+
+# ── member list-invalid-roles (#1468) ─────────────────
+
+
+def _make_invalid_role_member(
+    member_id: str,
+    *,
+    role: str = "oracle_invalid_role",
+    status: str = "active",
+    token_hash: str = "redacted-token-hash-must-not-leak",
+    token_expires_at: str = "2026-07-01 00:00:00",
+    created_at: str = "2026-04-01 00:00:00",
+    member_type: str = "agent",
+    name: str = "",
+) -> Member:
+    """invalid-role legacy Member 픽스처."""
+    return Member(
+        member_id=member_id,
+        type=member_type,
+        role=role,
+        org="default",
+        name=name or member_id,
+        status=status,
+        scopes=[],
+        token_hash=token_hash,
+        token_expires_at=token_expires_at,
+        created_at=created_at,
+    )
+
+
+def _patch_create_service_with_scan(scan: InvalidRoleScan):  # noqa: ANN202
+    """``_create_service`` 가 invalid-role scan 만 mock 된 service 를 반환한다."""
+    service = MagicMock()
+    service.find_invalid_role_members = AsyncMock(return_value=scan)
+    db = MagicMock()
+    db.close = AsyncMock(return_value=None)
+    return patch(
+        "ante.cli.commands.member._create_service",
+        new_callable=AsyncMock,
+        return_value=(service, db),
+    ), service
+
+
+class TestMemberListInvalidRolesNoRows:
+    """invalid-role row 가 0건일 때 CLI 동작."""
+
+    def test_cli_list_invalid_roles_no_rows_exit_zero(self) -> None:
+        """invalid row 없음 → exit 0, JSON 에 count 모두 0 + summary 노출."""
+        ctx, service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        service.find_invalid_role_members.assert_awaited_once()
+        data = json.loads(result.output)
+        assert data["actionable_count"] == 0
+        assert data["legacy_revoked_count"] == 0
+        assert data["actionable"] == []
+        assert data["legacy_revoked"] == []
+        # summary 키들도 0건일 때 그대로 노출된다.
+        assert data["recommended_action"] == "review_then_revoke"
+        assert data["valid_roles"] == [
+            MemberRole.MASTER.value,
+            MemberRole.ADMIN.value,
+            MemberRole.DEFAULT.value,
+        ]
+
+
+class TestMemberListInvalidRolesJsonSchema:
+    """invalid row 가 있을 때 JSON 스키마 정확성 + token_hash 비노출."""
+
+    def test_cli_list_invalid_roles_command_outputs_json(self) -> None:
+        """JSON 출력이 본문 v2 스키마와 일치하고 token_hash 가 누설되지 않는다."""
+        actionable = _make_invalid_role_member(
+            "agent-bad-1",
+            role="oracle_invalid_role",
+            status="active",
+            token_hash="HASH-MUST-NOT-LEAK-1",
+        )
+        legacy = _make_invalid_role_member(
+            "agent-bad-revoked",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",  # revoke 후 token_hash 빈 문자열.
+            token_expires_at="",
+        )
+        ctx, service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[legacy])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        service.find_invalid_role_members.assert_awaited_once()
+
+        data = json.loads(result.output)
+
+        # top-level summary
+        assert data["recommended_action"] == "review_then_revoke"
+        assert data["valid_roles"] == ["master", "admin", "default"]
+        assert data["actionable_count"] == 1
+        assert data["legacy_revoked_count"] == 1
+
+        # actionable row
+        a = data["actionable"][0]
+        assert a["member_id"] == "agent-bad-1"
+        assert a["role"] == "oracle_invalid_role"
+        assert a["type"] == "agent"
+        assert a["name"] == "agent-bad-1"
+        assert a["status"] == "active"
+        assert a["created_at"] == "2026-04-01 00:00:00"
+        assert a["has_token"] is True
+        assert a["token_expires_at"] == "2026-07-01 00:00:00"
+        assert a["revoke_command"] == "ante member revoke agent-bad-1"
+
+        # legacy revoked row
+        legacy_row = data["legacy_revoked"][0]
+        assert legacy_row["member_id"] == "agent-bad-revoked"
+        assert legacy_row["status"] == "revoked"
+        # token_hash 빈 문자열 → has_token False, token_expires_at == null
+        assert legacy_row["has_token"] is False
+        assert legacy_row["token_expires_at"] is None
+
+        # 보안: 어떤 row 에도 token_hash 키가 없어야 한다.
+        for row in data["actionable"] + data["legacy_revoked"]:
+            assert "token_hash" not in row, (
+                f"token_hash 가 출력에 포함되어서는 안 된다: {row}"
+            )
+        # raw token hash 문자열도 출력에 등장하지 않는다.
+        assert "HASH-MUST-NOT-LEAK-1" not in result.output
+
+
+class TestMemberListInvalidRolesTable:
+    """text(table) 모드에서 두 섹션이 모두 표시된다."""
+
+    def test_cli_list_invalid_roles_command_outputs_table(self) -> None:
+        """text 모드 — actionable + legacy_revoked 두 섹션 표시."""
+        actionable = _make_invalid_role_member(
+            "agent-bad-active", role="oracle_invalid_role", status="active"
+        )
+        legacy = _make_invalid_role_member(
+            "agent-bad-revoked",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",
+            token_expires_at="",
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[legacy])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "text", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        # 두 섹션 헤더가 모두 노출되어야 한다.
+        assert "[actionable]" in result.output
+        assert "[legacy_revoked]" in result.output
+        # 각 row 의 member_id 도 표시된다.
+        assert "agent-bad-active" in result.output
+        assert "agent-bad-revoked" in result.output
+        # summary 도 표시.
+        assert "review_then_revoke" in result.output
+        # text 모드여도 token_hash 는 누출되지 않는다.
+        assert "token_hash" not in result.output
+
+
+class TestMemberListInvalidRolesTokenHashRegression:
+    """``token_hash`` 가 모든 출력 모드에서 노출되지 않는다 (#1468 secret-exposure)."""
+
+    def test_cli_list_invalid_roles_does_not_expose_token_hash(self) -> None:
+        """JSON 모드 + text 모드 모두에서 token_hash 비노출 회귀."""
+        sensitive_hash = "TOP-SECRET-HASH-VALUE-DO-NOT-LEAK"
+        actionable = _make_invalid_role_member(
+            "agent-bad",
+            role="oracle_invalid_role",
+            status=MemberStatus.ACTIVE.value,
+            token_hash=sensitive_hash,
+        )
+        # JSON 모드
+        ctx_json, _svc_json = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx_json:
+            result_json = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+        assert result_json.exit_code == 0, result_json.output
+        assert sensitive_hash not in result_json.output
+        data = json.loads(result_json.output)
+        for row in data["actionable"] + data["legacy_revoked"]:
+            assert "token_hash" not in row
+
+        # text 모드
+        ctx_text, _svc_text = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx_text:
+            result_text = _invoke_cli(
+                ["--format", "text", "member", "list-invalid-roles"],
+            )
+        assert result_text.exit_code == 0, result_text.output
+        assert sensitive_hash not in result_text.output
+        assert "token_hash" not in result_text.output

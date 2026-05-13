@@ -129,6 +129,7 @@ allowlist 후보에서 제거한다.
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
+| `ante member list-invalid-roles` | `offline` | DB 직접 조회 (runtime IPC 우회; `service.initialize` 수반) |
 | `ante member register --id <member_id> --type human|agent ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member set-emoji/suspend/reactivate/rotate-token ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member revoke <member_id> --yes` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
@@ -537,6 +538,7 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 ante member register --id <member_id> --type human|agent [--org <org>] [--name <name>] [--scopes <csv>]  # 멤버 등록
 ante member list [--type human|agent] [--org <org>] [--status active|suspended|revoked]  # 멤버 목록
 ante member info <member_id>                            # 멤버 상세
+ante member list-invalid-roles [--format json]          # MemberRole enum 외 role 을 가진 legacy row 식별 (운영 cleanup; runbook 07 참조)
 ante member suspend <member_id>                         # 멤버 일시 정지
 ante member reactivate <member_id>                      # 멤버 재활성화
 ante member revoke <member_id> --yes                    # 멤버 권한 영구 해제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
@@ -546,11 +548,21 @@ ante member reset-password --recovery-key <key> (--new-password-env ENV_NAME | -
 ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file PATH)  # 복구 키 재발급
 ```
 
-`member list/info`는 오프라인 조회가 가능하다. 그 외 member 상태·토큰·패스워드·복구키
-변경 커맨드는 서버 실행 중 IPC로 서버에 위임한다. 서버는 MemberService 실행 후
-필요한 세션 무효화, 토큰 무효화, 감사 로그, member/security 알림을 같은 런타임
-경로에서 처리한다. 같은 `config_dir`의 서버가 정지된 상태에서는 bootstrap/recovery
-및 비상 revoke를 위해 직접 MemberService를 생성하는 maintenance fallback을 허용한다.
+`member list/info`와 `member list-invalid-roles`는 오프라인 조회가 가능하다. 단,
+`member list-invalid-roles`는 `MemberService.initialize()`로 schema migration DDL을
+수반하므로 "read-only"가 아니다(runtime IPC는 우회한다). 그 외 member 상태·토큰·
+패스워드·복구키 변경 커맨드는 서버 실행 중 IPC로 서버에 위임한다. 서버는
+MemberService 실행 후 필요한 세션 무효화, 토큰 무효화, 감사 로그, member/security
+알림을 같은 런타임 경로에서 처리한다. 같은 `config_dir`의 서버가 정지된 상태에서는
+bootstrap/recovery 및 비상 revoke를 위해 직접 MemberService를 생성하는
+maintenance fallback을 허용한다.
+
+`member list-invalid-roles`는 `MemberRole` enum SSOT(`master`/`admin`/`default`)에
+없는 `role` 값을 가진 legacy row를 두 카테고리(`actionable` / `legacy_revoked`)로
+분리해 보여준다. 운영자는 `actionable` row를 `ante member revoke <member_id> --yes`로
+cleanup한다. `token_hash`는 모든 출력 모드에서 표시되지 않으며, 토큰 존재 여부는
+`has_token: bool`로만 노출된다. 자세한 절차는
+[runbook 07](../../runbooks/07-member-invalid-role-cleanup.md)에 정의되어 있다.
 
 ### `ante instrument` — 종목 관리
 

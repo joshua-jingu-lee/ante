@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -21,7 +22,10 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.member.errors import PermissionDeniedError
+from ante.member.models import MemberRole
 from ante.member.scopes import InvalidScopeError
+
+logger = logging.getLogger(__name__)
 
 # CLI 핸들러에서 master guard 위반을 사용자 친화 메시지로 종료하기 위한 메시지.
 # ``MemberService._assert_master``가 raise하는 ``PermissionDeniedError``는 Python
@@ -233,6 +237,113 @@ def member_info(ctx: click.Context, member_id: str) -> None:
         click.echo(f"  권한      : {', '.join(result['scopes']) or '-'}")
         click.echo(f"  생성일    : {result['created_at']}")
         click.echo(f"  생성자    : {result['created_by']}")
+
+
+def _invalid_role_row_dict(m) -> dict:  # noqa: ANN001
+    """``Member`` row 를 CLI 출력용 dict 로 변환.
+
+    ``token_hash`` 는 보안상 절대 노출하지 않는다 (#1468 secret-exposure). 토큰
+    존재 여부는 ``has_token: bool`` 로만 표현하고 만료시각은 그대로 표시한다.
+    ``valid_roles`` 는 row-level 이 아니라 top-level scan summary 에만 노출한다.
+    """
+    has_token = bool(m.token_hash)
+    return {
+        "member_id": m.member_id,
+        "role": m.role,
+        "type": m.type,
+        "name": m.name,
+        "status": m.status,
+        "created_at": m.created_at,
+        "has_token": has_token,
+        "token_expires_at": m.token_expires_at or None,
+        "revoke_command": f"ante member revoke {m.member_id}",
+    }
+
+
+@member.command("list-invalid-roles")
+@click.option(
+    "--db-path",
+    default=None,
+    help="DB 파일 경로 (생략 시 canonical config 의 db.path 사용)",
+)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("member:read")
+def member_list_invalid_roles(
+    ctx: click.Context,
+    db_path: str | None,  # noqa: ARG001 — reserved for future explicit DB targeting
+) -> None:
+    """``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468).
+
+    ``actionable`` 카테고리는 ``status != revoked`` 인 invalid-role row 이며,
+    운영자가 ``ante member revoke <member_id>`` 로 cleanup 해야 한다.
+    ``legacy_revoked`` 는 이미 revoke 된 historical row 다.
+
+    분류는 ``offline`` 이지만 ``MemberService.initialize()`` 가 schema migration
+    DDL 을 수반한다 — 따라서 "read-only" 가 아니다. ``ante member list`` /
+    ``info`` 와 동일한 ``_create_service()`` 패턴을 사용하며 runtime IPC 는
+    우회한다.
+
+    ``token_hash`` 는 모든 출력 모드에서 노출되지 않는다 (보안 SSOT).
+    """
+    fmt = get_formatter(ctx)
+    valid_roles = [member.value for member in MemberRole]
+
+    async def _run_scan() -> tuple[list[dict], list[dict]]:
+        service, db = await _create_service()
+        try:
+            scan = await service.find_invalid_role_members()
+            actionable = [_invalid_role_row_dict(m) for m in scan.actionable]
+            legacy = [_invalid_role_row_dict(m) for m in scan.legacy_revoked]
+            return actionable, legacy
+        finally:
+            await db.close()
+
+    actionable_rows, legacy_rows = _run(_run_scan())
+
+    # structured log: 운영자가 invocation 시점마다 count 흐름을 추적한다.
+    logger.info(
+        "MEMBER_INVALID_ROLE_FOUND actionable=%d legacy_revoked=%d",
+        len(actionable_rows),
+        len(legacy_rows),
+    )
+
+    payload = {
+        "recommended_action": "review_then_revoke",
+        "valid_roles": valid_roles,
+        "actionable_count": len(actionable_rows),
+        "legacy_revoked_count": len(legacy_rows),
+        "actionable": actionable_rows,
+        "legacy_revoked": legacy_rows,
+    }
+
+    if fmt.is_json:
+        fmt.output(payload)
+        return
+
+    # text 모드 — 두 섹션 분리.
+    click.echo(f"  recommended_action : {payload['recommended_action']}")
+    click.echo(f"  valid_roles        : {', '.join(valid_roles)}")
+    click.echo(f"  actionable         : {payload['actionable_count']}건")
+    click.echo(f"  legacy_revoked     : {payload['legacy_revoked_count']}건")
+
+    def _emit_section(title: str, rows: list[dict]) -> None:
+        click.echo("")
+        click.echo(f"[{title}]")
+        if not rows:
+            click.echo("  (none)")
+            return
+        for row in rows:
+            click.echo(
+                f"  {row['member_id']:20s} role={row['role']:20s} "
+                f"status={row['status']:10s} "
+                f"created_at={row['created_at']:20s} "
+                f"has_token={row['has_token']!s}"
+            )
+
+    _emit_section("actionable", actionable_rows)
+    _emit_section("legacy_revoked", legacy_rows)
 
 
 @member.command("register")
