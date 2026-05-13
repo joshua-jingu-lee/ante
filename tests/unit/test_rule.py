@@ -311,6 +311,79 @@ class TestTradingHoursRule:
         result = rule.evaluate(base_context)
         assert result.result == RuleResult.PASS
 
+    # ── #1475: invalid timezone graceful handling ─────
+
+    def test_trading_hours_invalid_timezone_returns_reject_evaluation(
+        self, rule, base_context
+    ):
+        """#1475: legacy invalid IANA timezone(`Mars/Olympus`)이 runtime 경로에
+        도달하면 ``RuleResult.REJECT`` 로 graceful 처리되어 uncaught exception이
+        발생하지 않는다. ``current_time`` 미주입으로 ZoneInfo 경로를 강제한다.
+        """
+        base_context.bot_id = "bot-1"
+        base_context.account_id = "acc-1"
+        base_context.timezone = "Mars/Olympus"
+        # current_time을 주입하지 않아 ZoneInfo(timezone_str) 호출 경로를 강제.
+        assert "current_time" not in base_context.metadata
+
+        result = rule.evaluate(base_context)
+
+        assert result.result == RuleResult.REJECT
+        assert result.action == RuleAction.LOG
+        assert "Mars/Olympus" in result.message
+        assert "acc-1" in result.message
+        assert "bot-1" in result.message
+        assert "repair-timezone" in result.message
+        assert result.metadata["invalid_timezone"] == "Mars/Olympus"
+        assert result.metadata["account_id"] == "acc-1"
+        assert result.metadata["bot_id"] == "bot-1"
+        assert result.metadata["reject_code"] == "TRADING_HOURS_INVALID_TIMEZONE"
+
+    def test_trading_hours_valueerror_timezone_returns_reject_evaluation(
+        self, rule, base_context
+    ):
+        """#1475: ``ZoneInfo`` 가 ``ValueError`` 를 raise하는 path-escape 형식
+        입력(`../etc/passwd`)도 동일한 reject 동작으로 graceful 처리된다.
+        """
+        base_context.bot_id = "bot-2"
+        base_context.account_id = "acc-2"
+        # ZoneInfo는 `..` 가 포함된 key에 대해 ValueError를 raise한다.
+        base_context.timezone = "../etc/passwd"
+        assert "current_time" not in base_context.metadata
+
+        result = rule.evaluate(base_context)
+
+        assert result.result == RuleResult.REJECT
+        assert result.action == RuleAction.LOG
+        assert "../etc/passwd" in result.message
+        assert "acc-2" in result.message
+        assert "bot-2" in result.message
+        assert "repair-timezone" in result.message
+        assert result.metadata["invalid_timezone"] == "../etc/passwd"
+        assert result.metadata["account_id"] == "acc-2"
+        assert result.metadata["bot_id"] == "bot-2"
+        assert result.metadata["reject_code"] == "TRADING_HOURS_INVALID_TIMEZONE"
+
+    def test_trading_hours_valid_timezone_unchanged(self, rule, base_context):
+        """#1475: 기존 valid 패턴(Asia/Seoul + current_time 주입) 회귀 미파괴."""
+        base_context.timezone = "Asia/Seoul"
+        base_context.metadata["current_time"] = time(10, 0)
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.PASS
+
+    def test_trading_hours_evaluate_does_not_raise_for_unknown_tz(
+        self, rule, base_context
+    ):
+        """#1475: invalid timezone에 대해 ``TradingHoursRule.evaluate``는
+        절대 uncaught exception을 던지지 않는다.
+        """
+        base_context.bot_id = "bot-3"
+        base_context.account_id = "acc-3"
+        base_context.timezone = "Pluto/Charon"
+        # 예외가 raise되면 pytest가 실패로 잡는다.
+        result = rule.evaluate(base_context)
+        assert result.result == RuleResult.REJECT
+
 
 # ── PositionSizeRule ─────────────────────────────
 
@@ -709,6 +782,63 @@ class TestRuleEngineEventBus:
 
         assert len(received) == 1
         assert "Trading not allowed" in received[0].reason
+
+    async def test_invalid_timezone_propagates_to_order_rejected_event(
+        self, engine, eventbus, mock_account_service
+    ):
+        """#1475: legacy invalid timezone(`Mars/Olympus`)이 Account에서 그대로
+        주입돼 ``TradingHoursRule.evaluate`` 에 도달하면, RuleEngine은 generic
+        fallback("OrderRequest preflight error (see logs)")이 아니라 명시적인
+        TradingHoursRule reject reason(timezone/account_id/bot_id/repair 명령
+        포함)을 ``OrderRejectedEvent.reason`` 으로 propagate해야 한다.
+        engine.py:1036-1061 경로 회귀.
+        """
+        engine.clear_rules()
+        engine.add_account_rule(
+            TradingHoursRule(
+                "hours",
+                {"allowed_hours": "09:00-15:30"},
+            )
+        )
+
+        # AccountService.get이 invalid timezone을 가진 Account를 반환하도록 한다
+        # (#1474 tolerant load로 legacy DB row가 그대로 보존된 케이스).
+        legacy_account = Account(
+            account_id="domestic",
+            name="국내주식",
+            exchange="KRX",
+            currency="KRW",
+            broker_type="test",
+            status=AccountStatus.ACTIVE,
+            timezone="Mars/Olympus",
+            timezone_invalid=True,
+        )
+        mock_account_service.get = AsyncMock(return_value=legacy_account)
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await eventbus.publish(order)
+
+        assert len(rejected) == 1
+        reason = rejected[0].reason
+        # generic fallback이 아닌 명시 reason이어야 함
+        assert "OrderRequest preflight error" not in reason
+        # 명시 reason 핵심 토큰
+        assert "Mars/Olympus" in reason
+        assert "domestic" in reason
+        assert "bot1" in reason
+        assert "repair-timezone" in reason
 
     async def test_event_filtering_different_account(self, engine, eventbus):
         """다른 account_id의 OrderRequestEvent는 무시한다."""
