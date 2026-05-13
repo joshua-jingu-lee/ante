@@ -609,6 +609,131 @@ class ApprovalService:
         logger.info("검토 의견 추가: %s by %s (%s)", id, reviewer, result)
         return request
 
+    async def list_invalid_type_approvals(self) -> list[ApprovalRequest]:
+        """``ApprovalType`` SSOT 에 없는 ``type`` 값을 가진 모든 결재 row를 반환한다.
+
+        Refs #1418 → #1472 SPLIT-D: ``ante approval audit-types`` 운영 도구의
+        백엔드. 운영자가 legacy invalid pending row 를 식별하기 위한 read-only
+        조회. 정렬은 ``created_at`` 오름차순으로, 오래된 row 부터 먼저
+        나오도록 한다. resolved row (approved/rejected/cancelled/expired/
+        execution_failed) 도 포함한다 — audit 목적이므로 종결 여부와 무관.
+
+        type 컬럼이 단순 TEXT 이므로 NOT IN 절에 valid 값을 placeholder로
+        나열한다. ``_VALID_APPROVAL_TYPES`` 는 frozenset 이지만 SQL 파라미터
+        순서가 정해져야 하므로 ``ApprovalType`` enum 순서를 따른다.
+        """
+        valid_values = [t.value for t in ApprovalType]
+        placeholders = ",".join("?" for _ in valid_values)
+        query = (
+            "SELECT * FROM approvals "  # noqa: S608
+            f"WHERE type NOT IN ({placeholders}) "
+            "ORDER BY created_at ASC"
+        )
+        rows = await self._db.fetch_all(query, tuple(valid_values))
+        return [self._row_to_request(row) for row in rows]
+
+    async def force_cancel_invalid_type(
+        self,
+        id: str,
+        actor: str,
+        reason: str = "",
+    ) -> ApprovalRequest:
+        """invalid approval type row 를 운영자 권한으로 cancel 처리한다.
+
+        Refs #1418 → #1472 SPLIT-D: ``ante approval cancel-invalid`` 운영 도구의
+        백엔드. 사용 시나리오:
+
+        - DB 에 #1469 (write-path 검증) 적용 이전에 저장된 legacy invalid
+          approval type row 가 남아 있다.
+        - 일반 ``cancel()`` 은 ``request.requester`` 본인만 호출 가능하지만
+          (#1186), 운영자가 다른 agent 가 생성한 invalid row 를 정리해야
+          한다.
+        - ``approve()`` 는 #1470 에서 invalid type 을 ``ValueError`` 로 차단
+          하므로 정상 lifecycle 로 종결할 방법이 없다.
+
+        이 메서드는 admin 운영 표면이며, 다음 invariant 를 보존한다:
+
+        - ``type not in _VALID_APPROVAL_TYPES`` 인 row 만 처리한다. valid type
+          은 ``ValueError`` 로 거부한다 (운영 도구가 정상 row 를 강제 종결
+          시킬 수 없도록).
+        - 이미 종결된 row (resolved_at 이 비어있지 않음) 는 ``ValueError`` 로
+          거부한다 — audit trail 보존.
+        - history 에 ``force_cancelled`` action 을 기록한다. 일반 ``cancel()``
+          의 ``cancelled`` 와 구별되어 사후 audit 가 가능하다.
+        - status 를 :attr:`ApprovalStatus.CANCELLED` 로 전이하고
+          ``ApprovalResolvedEvent`` 와 결재 처리 완료 notification 을 발행한다.
+        """
+        request = await self.get(id)
+        if not request:
+            msg = f"결재 요청을 찾을 수 없음: {id}"
+            raise ValueError(msg)
+
+        if request.type in _VALID_APPROVAL_TYPES:
+            msg = (
+                "force_cancel_invalid_type 은 invalid type row 전용이다 "
+                f"(현재 type: {request.type!r})"
+            )
+            raise ValueError(msg)
+
+        if request.resolved_at:
+            msg = (
+                "이미 종결된 결재 row 는 force-cancel 할 수 없다 "
+                f"(현재 status: {request.status}, resolved_at: {request.resolved_at})"
+            )
+            raise ValueError(msg)
+
+        now = datetime.now(UTC).isoformat()
+        detail = reason or "legacy invalid approval type cleanup"
+        request.history.append(
+            {
+                "action": "force_cancelled",
+                "actor": actor,
+                "at": now,
+                "detail": detail,
+            }
+        )
+
+        await self._db.execute(
+            """UPDATE approvals
+               SET status = ?, resolved_at = ?, resolved_by = ?,
+                   history = ?
+               WHERE id = ?""",
+            (
+                ApprovalStatus.CANCELLED,
+                now,
+                actor,
+                json.dumps(request.history, ensure_ascii=False),
+                id,
+            ),
+        )
+
+        request.status = ApprovalStatus.CANCELLED
+        request.resolved_at = now
+        request.resolved_by = actor
+
+        logger.warning(
+            "invalid approval type force-cancel: %s (type=%s) by %s",
+            id,
+            request.type,
+            actor,
+        )
+
+        from ante.eventbus.events import ApprovalResolvedEvent
+
+        await self._eventbus.publish(
+            ApprovalResolvedEvent(
+                approval_id=id,
+                approval_type=request.type,
+                resolution=ApprovalStatus.CANCELLED,
+                resolved_by=actor,
+            )
+        )
+        await self._publish_resolved_notification(
+            id, request.type, ApprovalStatus.CANCELLED, actor
+        )
+
+        return request
+
     async def expire_stale(self) -> int:
         """만료 기한이 지난 pending 요청 일괄 expired 처리."""
         now = datetime.now(UTC).isoformat()

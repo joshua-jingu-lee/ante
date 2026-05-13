@@ -72,3 +72,21 @@ ante approval reopen <id> \
 ante approval approve <id>
 ante approval reject <id> --reason "현 시점 리스크 과다"
 ```
+
+### `ante approval audit-types` / `ante approval cancel-invalid`
+
+운영자가 `ApprovalType` SSOT(enum)에 없는 legacy invalid type approval row를 식별하고 정리하기
+위한 admin 도구다. `#1469`(write-path 검증) 이전에 저장된 invalid pending row가 DB에 남아 있을
+경우, `approve`/`cancel` 경로로는 종결할 수 없다(#1470 가드가 approve를, requester 제약이 일반
+cancel을 차단한다). 본 명령들은 `approval:admin` scope를 요구한다.
+
+```
+# invalid type row 식별 (read-only)
+ante approval audit-types [--format json] [--db-path <경로>]
+
+# invalid type row 강제 cancel (status → cancelled, history 에 force_cancelled 기록)
+ante approval cancel-invalid --id <approval_id> [--reason "legacy cleanup"] [--format json]
+```
+
+상세 절차는 [runbooks/07-legacy-invalid-approval-cleanup.md](../../runbooks/07-legacy-invalid-approval-cleanup.md)
+를 참조한다.

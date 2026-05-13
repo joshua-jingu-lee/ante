@@ -465,6 +465,8 @@ ante approval cancel <approval_id>          # 승인 요청 취소
 ante approval approve <approval_id>         # 승인 요청 승인
 ante approval reject <approval_id>          # 승인 요청 거부
 ante approval reopen <approval_id> [--data <json>]  # 거절된 요청 재상신 (params/body 수정 가능)
+ante approval audit-types                   # ApprovalType SSOT 에 없는 invalid type row 식별 (admin)
+ante approval cancel-invalid --id <approval_id> [--reason <text>]  # legacy invalid type row 강제 cancel (admin)
 ```
 
 ### `ante init` — 시스템 초기 설정

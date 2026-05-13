@@ -390,6 +390,136 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
         raise SystemExit(1) from e
 
 
+@approval.command("audit-types")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("approval:admin")
+def audit_types(ctx: click.Context, db_path: str | None) -> None:
+    """``ApprovalType`` SSOT 에 없는 invalid type row 를 식별한다 (#1472).
+
+    legacy invalid approval type pending row 가 DB 에 남아있을 때 운영자가
+    먼저 식별하기 위한 read-only 운영 도구다. 결과는 table/json 두 모드 모두
+    지원한다.
+    """
+    from ante.cli.main import get_db_path
+
+    fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
+
+    async def _audit() -> list[dict]:
+        from ante.approval import ApprovalService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        db = Database(resolved_db_path)
+        await db.connect()
+        eventbus = EventBus()
+        service = ApprovalService(db=db, eventbus=eventbus)
+        await service.initialize()
+
+        requests = await service.list_invalid_type_approvals()
+        await db.close()
+        return [
+            {
+                "id": r.id,
+                "type": r.type,
+                "status": r.status,
+                "requester": r.requester,
+                "title": r.title,
+                "created_at": r.created_at,
+                "resolved_at": r.resolved_at,
+            }
+            for r in requests
+        ]
+
+    try:
+        rows = asyncio.run(_audit())
+        fmt.table(
+            rows,
+            [
+                "id",
+                "type",
+                "status",
+                "requester",
+                "title",
+                "created_at",
+                "resolved_at",
+            ],
+        )
+    except Exception as e:
+        fmt.error(str(e), code="APPROVAL_ERROR")
+        raise SystemExit(1) from e
+
+
+@approval.command("cancel-invalid")
+@click.option("--id", "approval_id", required=True, help="cancel 할 invalid row ID")
+@click.option(
+    "--reason",
+    default="",
+    help="cancel 사유 (audit history 에 기록). 미지정 시 기본 메시지 사용.",
+)
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("approval:admin")
+def cancel_invalid(
+    ctx: click.Context,
+    approval_id: str,
+    reason: str,
+    db_path: str | None,
+) -> None:
+    """invalid approval type row 를 운영자 권한으로 cancel 처리한다 (#1472).
+
+    일반 ``ante approval cancel`` 은 요청자 본인만 호출 가능하므로 다른
+    agent 가 생성한 legacy invalid row 를 정리할 수 없다. 본 명령은
+    admin scope 를 요구하며, ``ApprovalType`` SSOT 에 없는 row 만 강제
+    cancel 한다. 이미 종결된 row 는 거부된다.
+    """
+    from ante.cli.main import get_db_path
+
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
+
+    async def _cancel_invalid() -> dict:
+        from ante.approval import ApprovalService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        db = Database(resolved_db_path)
+        await db.connect()
+        eventbus = EventBus()
+        service = ApprovalService(db=db, eventbus=eventbus)
+        await service.initialize()
+
+        req = await service.force_cancel_invalid_type(
+            id=approval_id,
+            actor=actor,
+            reason=reason,
+        )
+        await db.close()
+        return {
+            "id": req.id,
+            "type": req.type,
+            "status": req.status,
+            "resolved_at": req.resolved_at,
+            "resolved_by": req.resolved_by,
+        }
+
+    try:
+        result = asyncio.run(_cancel_invalid())
+        fmt.success(
+            f"invalid approval type cancelled: {result.get('id', approval_id)}",
+            result,
+        )
+    except Exception as e:
+        fmt.error(str(e), code="APPROVAL_ERROR")
+        raise SystemExit(1) from e
+
+
 async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
     """ID 전체 또는 prefix로 결재 요청 검색."""
     req = await service.get(id)

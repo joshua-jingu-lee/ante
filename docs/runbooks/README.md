@@ -16,6 +16,7 @@
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/머지 게이트, 저장소 설정 |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (release PR, 버전 관리, PyPI/Docker 배포) |
+| [07-legacy-invalid-approval-cleanup.md](07-legacy-invalid-approval-cleanup.md) | legacy invalid `ApprovalType` row 식별 + cleanup 절차 (`ante approval audit-types` / `cancel-invalid`) |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)
 
