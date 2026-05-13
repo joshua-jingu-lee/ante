@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 from pathlib import Path
 
 import click
@@ -239,15 +240,27 @@ def member_info(ctx: click.Context, member_id: str) -> None:
         click.echo(f"  생성자    : {result['created_by']}")
 
 
-def _invalid_role_row_dict(m) -> dict:  # noqa: ANN001
+def _invalid_role_row_dict(m, *, actionable: bool) -> dict:  # noqa: ANN001
     """``Member`` row 를 CLI 출력용 dict 로 변환.
 
     ``token_hash`` 는 보안상 절대 노출하지 않는다 (#1468 secret-exposure). 토큰
     존재 여부는 ``has_token: bool`` 로만 표현하고 만료시각은 그대로 표시한다.
     ``valid_roles`` 는 row-level 이 아니라 top-level scan summary 에만 노출한다.
+
+    ``revoke_command`` 는 **actionable row 에서만** 노출한다. legacy_revoked row
+    는 이미 ``status=revoked`` 상태이며 ``MemberService.revoke`` 가
+    ``active``/``suspended`` 만 허용하므로 재실행 시 실패한다. 따라서 noop 명령을
+    payload 에 싣지 않고 키 자체를 누락해 "추가 조치 불요" 임을 명시한다
+    (#1468 Codex review attempt 2, P2-B).
+
+    actionable row 의 ``revoke_command`` 는 ``shlex.quote`` 로 ``member_id`` 를
+    셸 안전하게 인용하고, ``--`` separator 로 옵션/포지셔널 경계를 명시한다 — 빈
+    문자열·공백·셸 메타문자·``-``-prefix 가 포함된 ``member_id`` 가 운영자 셸에서
+    인자 splitting 이나 옵션 파싱으로 오해석되는 위험을 차단한다 (#1468 Codex
+    review attempt 2, P2-A).
     """
     has_token = bool(m.token_hash)
-    return {
+    row: dict = {
         "member_id": m.member_id,
         "role": m.role,
         "type": m.type,
@@ -256,11 +269,17 @@ def _invalid_role_row_dict(m) -> dict:  # noqa: ANN001
         "created_at": m.created_at,
         "has_token": has_token,
         "token_expires_at": m.token_expires_at or None,
+    }
+    if actionable:
         # ``member revoke`` 는 ``--yes`` 누락 시 ``CLI_CONFIRMATION_REQUIRED`` 로
         # 실패하므로 (`member_revoke` 본문 참조), JSON payload 의 권장 명령은
-        # ``--yes`` 를 포함해 즉시 실행 가능하게 출력한다.
-        "revoke_command": f"ante member revoke {m.member_id} --yes",
-    }
+        # ``--yes`` 를 포함해 즉시 실행 가능하게 출력한다. ``member_id`` 는
+        # 셸 안전을 위해 ``shlex.quote`` 로 인용하고, 옵션/포지셔널 경계는
+        # ``--`` separator 로 명시한다.
+        row["revoke_command"] = (
+            f"ante member revoke --yes -- {shlex.quote(m.member_id)}"
+        )
+    return row
 
 
 @member.command("list-invalid-roles")
@@ -278,7 +297,7 @@ def member_list_invalid_roles(
     가 아니며, 필요하면 별도 이슈로 분리한다.
 
     ``actionable`` 카테고리는 ``status != revoked`` 인 invalid-role row 이며,
-    운영자가 ``ante member revoke <member_id> --yes`` 로 cleanup 해야 한다.
+    운영자가 ``ante member revoke --yes -- <member_id>`` 로 cleanup 해야 한다.
     ``legacy_revoked`` 는 이미 revoke 된 historical row 다.
 
     분류는 ``offline`` 이지만 ``MemberService.initialize()`` 가 schema migration
@@ -295,8 +314,12 @@ def member_list_invalid_roles(
         service, db = await _create_service()
         try:
             scan = await service.find_invalid_role_members()
-            actionable = [_invalid_role_row_dict(m) for m in scan.actionable]
-            legacy = [_invalid_role_row_dict(m) for m in scan.legacy_revoked]
+            actionable = [
+                _invalid_role_row_dict(m, actionable=True) for m in scan.actionable
+            ]
+            legacy = [
+                _invalid_role_row_dict(m, actionable=False) for m in scan.legacy_revoked
+            ]
             return actionable, legacy
         finally:
             await db.close()

@@ -50,7 +50,7 @@ JSON 출력 스키마:
       "created_at": "2026-04-01 00:00:00",
       "has_token": true,
       "token_expires_at": "2026-07-01 00:00:00",
-      "revoke_command": "ante member revoke agent-bad --yes"
+      "revoke_command": "ante member revoke --yes -- agent-bad"
     }
   ],
   "legacy_revoked": []
@@ -58,7 +58,13 @@ JSON 출력 스키마:
 ```
 
 - `actionable`: `role` 이 invalid 이고 `status != revoked` 인 row. 운영자 cleanup 대상.
-- `legacy_revoked`: 이미 revoke 된 invalid-role row. 추가 조치 불필요(audit 추적용).
+  `revoke_command` 는 즉시 실행 가능한 형태(`--yes` 포함, `member_id` 는
+  `shlex.quote` 로 셸 안전 인용, 옵션/포지셔널 경계는 `--` separator 로 명시)로
+  노출된다.
+- `legacy_revoked`: 이미 revoke 된 invalid-role row. **추가 조치 불필요**
+  (audit 추적용). `MemberService.revoke` 가 `active`/`suspended` 만 허용하므로
+  재실행 시 실패하며, 따라서 legacy_revoked row 의 JSON dict 에는
+  `revoke_command` 키 자체가 **포함되지 않는다**.
 - `has_token` / `token_expires_at` 만 노출되고, `token_hash` 자체는 **모든 출력
   모드에서 절대 표시되지 않는다**.
 
@@ -72,11 +78,16 @@ JSON 출력 스키마:
 - legacy migration 잔여물(예: `oracle_invalid_role` 같이 명시적으로 invalid 임을
   드러내는 값) 이면 다음 단계로 진행한다.
 
-### 3. Revoke — `ante member revoke <member_id> --yes`
+### 3. Revoke — `ante member revoke --yes -- <member_id>`
 
 ```bash
-ante member revoke <member_id> --yes
+ante member revoke --yes -- <member_id>
 ```
+
+`--` separator 는 옵션과 포지셔널 인자의 경계를 명시한다. `member_id` 에
+공백·셸 메타문자·`-`-prefix 가 들어 있어도 인자 splitting / 옵션 파싱으로
+오해석되지 않게 보장한다. JSON payload 의 `revoke_command` 는 동일한 형태로
+`shlex.quote` 처리된 `member_id` 를 포함해 복사·실행만으로 안전하게 동작한다.
 
 이 명령은 다음을 수행한다 (`MemberService.revoke`):
 

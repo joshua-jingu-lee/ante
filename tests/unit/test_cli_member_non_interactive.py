@@ -877,7 +877,9 @@ class TestMemberListInvalidRolesJsonSchema:
         # ``member revoke`` 가 ``--yes`` 누락 시 ``CLI_CONFIRMATION_REQUIRED`` 로
         # 실패하므로 (#1468 Codex review attempt 1, P2-B), JSON payload 의
         # ``revoke_command`` 는 ``--yes`` 를 포함해 즉시 실행 가능해야 한다.
-        assert a["revoke_command"] == "ante member revoke agent-bad-1 --yes"
+        # 또한 attempt 2 P2-A: ``member_id`` 를 ``shlex.quote`` 로 셸 안전 인용
+        # 하고, 옵션/포지셔널 경계는 ``--`` separator 로 명시한다.
+        assert a["revoke_command"] == "ante member revoke --yes -- agent-bad-1"
 
         # legacy revoked row
         legacy_row = data["legacy_revoked"][0]
@@ -886,6 +888,10 @@ class TestMemberListInvalidRolesJsonSchema:
         # token_hash 빈 문자열 → has_token False, token_expires_at == null
         assert legacy_row["has_token"] is False
         assert legacy_row["token_expires_at"] is None
+        # attempt 2 P2-B: legacy_revoked row 는 이미 revoked 상태이므로
+        # ``MemberService.revoke`` 가 active/suspended 만 허용해 noop 가 된다.
+        # 키 자체를 누락해 "추가 조치 불요" 임을 명시한다.
+        assert "revoke_command" not in legacy_row
 
         # 보안: 어떤 row 에도 token_hash 키가 없어야 한다.
         for row in data["actionable"] + data["legacy_revoked"]:
@@ -896,12 +902,16 @@ class TestMemberListInvalidRolesJsonSchema:
         assert "HASH-MUST-NOT-LEAK-1" not in result.output
 
     def test_cli_list_invalid_roles_revoke_command_includes_yes_flag(self) -> None:
-        """``revoke_command`` 출력이 ``--yes`` 를 포함한다 (#1468 P2-B 회귀).
+        """actionable row 의 ``revoke_command`` 가 ``--yes`` 를 포함한다 (#1468 회귀).
 
         ``ante member revoke`` 는 ``--yes`` 누락 시 prompt 없이
         ``CLI_CONFIRMATION_REQUIRED`` 로 실패하므로, JSON payload 가 권장 명령으로
         ``--yes`` 없는 형태를 출력하면 운영자가 그대로 복붙해도 실패한다.
         본 명령은 즉시 실행 가능한 형태여야 한다.
+
+        attempt 2 P2-B 후속: legacy_revoked row 는 ``revoke_command`` 키 자체가
+        포함되지 않으므로 (이미 revoked → MemberService.revoke 가 noop 으로 실패),
+        본 어서션은 ``actionable`` 카테고리에만 적용한다.
         """
         actionable = _make_invalid_role_member(
             "agent-must-have-yes", role="oracle_invalid_role", status="active"
@@ -923,13 +933,92 @@ class TestMemberListInvalidRolesJsonSchema:
 
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        # actionable 과 legacy_revoked 두 카테고리 모두 ``--yes`` 를 포함해야 한다.
-        for row in data["actionable"] + data["legacy_revoked"]:
+        # actionable 카테고리만 ``revoke_command`` 를 갖고, 형식은
+        # ``ante member revoke --yes -- <quoted member_id>`` 다.
+        for row in data["actionable"]:
             cmd = row["revoke_command"]
-            assert cmd.endswith(" --yes"), (
-                f"revoke_command 는 ``--yes`` 로 끝나야 한다: {cmd!r}"
+            assert "--yes" in cmd, (
+                f"revoke_command 는 ``--yes`` 를 포함해야 한다: {cmd!r}"
             )
-            assert cmd == f"ante member revoke {row['member_id']} --yes"
+            # `member_id` 가 셸 메타문자를 포함하지 않는 단순 토큰일 때
+            # ``shlex.quote`` 는 따옴표 없이 그대로 반환한다.
+            assert cmd == f"ante member revoke --yes -- {row['member_id']}"
+        # legacy_revoked row 에는 키 자체가 없다 (P2-B).
+        for row in data["legacy_revoked"]:
+            assert "revoke_command" not in row, (
+                f"legacy_revoked row 는 revoke_command 키를 가지면 안 된다: {row!r}"
+            )
+
+    def test_cli_list_invalid_roles_revoke_command_shell_safe_quotes_member_id(
+        self,
+    ) -> None:
+        """공백/메타문자가 든 ``member_id`` 는 ``shlex.quote`` 로 안전 인용된다.
+
+        attempt 2 P2-A: ``member_id`` 는 service/API 에서 형식 제한이 없는
+        문자열이라 공백/셸 메타문자/`-`-prefix 가 들어갈 수 있다. 운영자가 payload
+        를 복사 실행할 때 인자 splitting / 옵션 파싱 / 셸 substitution 위험이
+        없도록 actionable row 의 ``revoke_command`` 는 반드시 ``shlex.quote`` 결과
+        를 포함해야 한다.
+        """
+        import shlex as _shlex
+
+        unsafe_id = "agent bad id"  # 공백 포함 → quote 후 따옴표 감싸짐.
+        actionable = _make_invalid_role_member(
+            unsafe_id, role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        quoted = _shlex.quote(unsafe_id)
+        # quote 결과는 단순 토큰이 아니라 따옴표로 감싼 형태여야 한다.
+        assert quoted != unsafe_id, (
+            "테스트 가정: 공백이 든 id 는 shlex.quote 가 따옴표로 감싼다"
+        )
+        assert cmd == f"ante member revoke --yes -- {quoted}"
+        # 원본 공백 id 가 그대로 끼지 않았음을 확인한다 (인용된 형태만 노출).
+        assert f"-- {unsafe_id}" not in cmd
+
+    def test_cli_list_invalid_roles_legacy_revoked_omits_revoke_command(self) -> None:
+        """legacy_revoked row 의 JSON dict 에 ``revoke_command`` 키가 없다.
+
+        attempt 2 P2-B: legacy_revoked row 는 이미 ``status=revoked`` 다.
+        ``MemberService.revoke`` 가 active/suspended 만 허용하므로 재실행 시
+        실패한다. payload 에 noop 명령을 싣지 않고 키 자체를 누락해 "추가 조치
+        불요" 임을 명시한다.
+        """
+        legacy_only = _make_invalid_role_member(
+            "legacy-revoked-1",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",
+            token_expires_at="",
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[], legacy_revoked=[legacy_only])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["legacy_revoked_count"] == 1
+        legacy_row = data["legacy_revoked"][0]
+        assert legacy_row["member_id"] == "legacy-revoked-1"
+        assert legacy_row["status"] == "revoked"
+        # 핵심 회귀: revoke_command 키가 없어야 한다 (None 도 아님).
+        assert "revoke_command" not in legacy_row, (
+            f"legacy_revoked row 의 dict 키 목록: {list(legacy_row.keys())}"
+        )
 
 
 class TestMemberListInvalidRolesTable:
