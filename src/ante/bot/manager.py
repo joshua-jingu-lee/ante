@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 from pathlib import Path
@@ -41,6 +42,64 @@ CREATE TABLE IF NOT EXISTS bots (
 );
 CREATE INDEX IF NOT EXISTS idx_bots_account_id ON bots(account_id);
 """
+
+# Refs #1457: ``BotConfig`` 직렬화 / 복원 라운드트립 대상 필드.
+# ``interval_seconds`` 는 기존부터 직렬화되던 필드이고, 나머지 5개는 #1456 으로
+# ``BotConfig`` 에 도입된 runtime control. 모두 ``BotConfig`` dataclass field
+# default 가 SSOT 다 (하드코딩 금지).
+_PERSISTED_BOT_CONFIG_FIELDS: tuple[str, ...] = (
+    "interval_seconds",
+    "auto_restart",
+    "max_restart_attempts",
+    "restart_cooldown_seconds",
+    "step_timeout_seconds",
+    "max_signals_per_step",
+)
+
+
+def _runtime_control_default(name: str) -> Any:
+    """``BotConfig`` dataclass field default 를 조회한다 (Refs #1457).
+
+    SSOT 는 :class:`BotConfig` 의 dataclass field default. manager 가 default
+    를 독립적으로 재정의하지 않도록 항상 ``dataclasses.fields`` 를 통해
+    조회한다. default 가 정의되지 않은 필드는 ``KeyError`` 로 즉시 실패시켜
+    SSOT 불일치를 가시화한다.
+    """
+
+    for field in dataclasses.fields(BotConfig):
+        if field.name != name:
+            continue
+        if field.default is not dataclasses.MISSING:
+            return field.default
+        if field.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+            return field.default_factory()  # type: ignore[misc]
+        raise KeyError(
+            f"BotConfig field {name!r} has no default — manager 가 default 를 "
+            "독립적으로 정의할 수 없다 (SSOT: BotConfig dataclass)"
+        )
+    raise KeyError(f"BotConfig has no field {name!r}")
+
+
+def _pick_persisted_runtime_control(config_data: dict[str, Any], name: str) -> Any:
+    """``config_json`` payload 에서 runtime control 값을 안전하게 꺼낸다.
+
+    Refs #1457:
+
+    - key 가 없으면 :func:`_runtime_control_default` 로 dataclass default 복원
+      (missing legacy row 호환).
+    - key 가 있지만 값이 ``None`` 이면 ``ValueError`` 로 거부 — explicit null
+      은 데이터 손상으로 간주하고 ``load_from_db`` 의 새 ``except ValueError``
+      가 row 자체를 skip + warning 처리한다.
+
+    ``auto_restart`` (bool) 와 숫자 필드 모두 동일 경로로 처리한다.
+    """
+
+    if name not in config_data:
+        return _runtime_control_default(name)
+    value = config_data[name]
+    if value is None:
+        raise ValueError(f"invalid persisted runtime control: {name} is null")
+    return value
 
 
 async def _cooldown_sleep(seconds: float) -> None:
@@ -131,18 +190,44 @@ class BotManager:
         )
 
         for row in rows:
+            # NOTE(Refs #1457): ``json.loads`` 는 try 블록 밖에서 실행한다.
+            # ``JSONDecodeError`` 는 ``ValueError`` 의 서브클래스이므로 try 안에
+            # 들어가면 새로 도입한 ``except ValueError`` 가 이를 silent 하게
+            # 흡수해 다른 종류의 corruption 까지 묻혀버린다. JSON 파싱 실패는
+            # 별도 이슈로 다루어야 하므로 의도적으로 try 범위에 포함하지 않는다.
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
             # bot_type, exchange 키는 무시 (BotConfig에서 제거됨)
             config_data.pop("bot_type", None)
             config_data.pop("exchange", None)
             account_id = row.get("account_id") or ""
             try:
+                # Refs #1457: ``interval_seconds`` 와 4 runtime control +
+                # ``auto_restart`` 를 helper 로 복원한다. helper 는 missing key
+                # 일 때 ``BotConfig`` dataclass default 로 fallback 하고,
+                # explicit null 일 때 ``ValueError`` 를 raise 한다.
                 config = BotConfig(
                     bot_id=row["bot_id"],
                     strategy_id=row["strategy_id"],
                     name=row["name"] or config_data.get("name", row["bot_id"]),
                     account_id=account_id,
-                    interval_seconds=config_data.get("interval_seconds", 60),
+                    interval_seconds=_pick_persisted_runtime_control(
+                        config_data, "interval_seconds"
+                    ),
+                    auto_restart=_pick_persisted_runtime_control(
+                        config_data, "auto_restart"
+                    ),
+                    max_restart_attempts=_pick_persisted_runtime_control(
+                        config_data, "max_restart_attempts"
+                    ),
+                    restart_cooldown_seconds=_pick_persisted_runtime_control(
+                        config_data, "restart_cooldown_seconds"
+                    ),
+                    step_timeout_seconds=_pick_persisted_runtime_control(
+                        config_data, "step_timeout_seconds"
+                    ),
+                    max_signals_per_step=_pick_persisted_runtime_control(
+                        config_data, "max_signals_per_step"
+                    ),
                 )
             except InvalidAccountIdError as e:
                 # SPLIT-1 패턴: invalid account_id row 는 skip + warning.
@@ -152,6 +237,22 @@ class BotManager:
                     " (legacy migration 필요): bot_id=%s account_id=%r — %s",
                     row.get("bot_id"),
                     account_id,
+                    e,
+                )
+                continue
+            except ValueError as e:
+                # Refs #1457: invalid runtime control / invalid interval_seconds
+                # / explicit null persisted row 는 raise 없이 skip + warning.
+                # ``BotConfig.__post_init__`` (validate_interval /
+                # validate_runtime_controls) 와 ``_pick_persisted_runtime_control``
+                # 의 explicit-null guard 가 ``ValueError`` 를 raise 한다.
+                # try 범위는 ``BotConfig(...)`` 호출로만 좁혀져 있으므로
+                # 다른 라이브러리 호출의 ValueError 가 흡수될 위험이 없다.
+                logger.warning(
+                    "BotManager.load_from_db: invalid bot config row skip"
+                    " (legacy migration 필요): bot_id=%s config=%r — %s",
+                    row.get("bot_id"),
+                    config_data,
                     e,
                 )
                 continue
@@ -969,13 +1070,24 @@ class BotManager:
         )
 
     async def _save_bot_config(self, config: BotConfig) -> None:
-        """봇 설정 DB 저장."""
+        """봇 설정 DB 저장.
+
+        Refs #1457: ``interval_seconds`` 외에 runtime control 4개 필드와
+        ``auto_restart`` 도 함께 직렬화한다. 누락 시 ``load_from_db`` 에서
+        dataclass default 로 복원되어 사용자가 PUT 으로 변경한 값이 silent
+        하게 default 로 되돌아가는 회귀(#1413)가 발생한다.
+        """
         config_dict = {
             "bot_id": config.bot_id,
             "name": config.name,
             "strategy_id": config.strategy_id,
             "account_id": config.account_id,
             "interval_seconds": config.interval_seconds,
+            "auto_restart": config.auto_restart,
+            "max_restart_attempts": config.max_restart_attempts,
+            "restart_cooldown_seconds": config.restart_cooldown_seconds,
+            "step_timeout_seconds": config.step_timeout_seconds,
+            "max_signals_per_step": config.max_signals_per_step,
         }
         await self._db.execute(
             """INSERT INTO bots
