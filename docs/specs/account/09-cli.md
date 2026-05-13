@@ -65,6 +65,13 @@ ante account set-credentials <account_id> \
   --credential-env app_secret=KIS_APP_SECRET \
   --credential account_no=5012XXXX-01
 
+# legacy invalid timezone row 복구 (cold-path 전용 — #1474)
+# GET /api/accounts 응답에 timezone_invalid: true 로 보고된 row 를 명시적으로
+# valid IANA timezone 으로 rewrite 한다. 서비스는 invalid row 도 load 는
+# 성공시키며 fallback (Asia/Seoul) 으로 대체하지만, 원본 row 는 본 명령으로만
+# 교정된다 (silent rewrite 금지).
+ante account repair-timezone --account-id <account_id> --timezone Asia/Seoul
+
 # 시스템 전역 Kill Switch
 ante system halt                    # 전체 거래 정지 (모든 ACTIVE 계좌를 SUSPENDED로 전환)
 ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님)
@@ -82,6 +89,7 @@ ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계
 | `ante account create --broker-type ... --account-id ... --name ... --trading-mode ... [--credential ...]` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
 | `ante account delete <account_id> --yes` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
 | `ante account set-credentials <account_id> [--credential ...]` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 |
+| `ante account repair-timezone --account-id <id> --timezone <iana>` | cold-path 전용 | 서버 실행 중이면 DB 수정 전 거부 (#1474) |
 
 cold-path 전용 명령은 active Ante runtime guard로 서버 실행 여부를 먼저 확인한다.
 1.0 정책상 동일 OS user/home server 기준으로 active runtime은 항상 단일이며,
@@ -131,5 +139,35 @@ $ ante account credentials domestic
   APP SECRET    : ************
   계좌번호      : 5012****-01
 ```
+
+### Legacy invalid timezone row 복구 절차 (#1474)
+
+#1473 (split #1419/A) 이전에 `PUT /api/accounts/{id}` 를 통해 invalid IANA
+timezone (예: `Mars/Olympus`) 으로 저장된 row 가 존재할 수 있다. 이런 row
+는 다음과 같이 식별/복구한다:
+
+1. **식별**: `GET /api/accounts` 응답의 각 항목에 `timezone_invalid: true` 가
+   포함되어 있으면 해당 row 의 DB `timezone` 컬럼이 invalid 다. CLI `ante
+   account list` / `ante account info <id>` 는 `timezone_invalid` 를 직접
+   노출하지 않지만 서비스 로그에 `WARNING ante.account.service: 계좌 '<id>' 의
+   DB timezone '<value>' 이 invalid IANA key 입니다. fallback 'Asia/Seoul'
+   로 대체합니다` 가 남는다.
+
+2. **서비스 정지**: `ante system stop` 으로 active runtime 을 종료한다.
+   `repair-timezone` 은 cold-path 전용이므로 runtime 이 살아 있으면
+   `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER` 로 차단된다.
+
+3. **복구**: `ante account repair-timezone --account-id <id> --timezone <valid_iana>`
+   로 명시적으로 새 valid IANA timezone (예: `Asia/Seoul`, `US/Eastern`) 을
+   지정한다. invalid 값은 사전에 거부된다 (`ACCOUNT_INVALID_TIMEZONE`).
+
+4. **검증**: `ante system start` 후 `GET /api/accounts/<id>` 응답이
+   `timezone_invalid: false` 로 돌아오고 서비스 startup 로그에 invalid timezone
+   warning 이 사라졌는지 확인한다.
+
+`repair-timezone` 은 `ante account update` 와 분리된 별도 진입점이다 —
+`timezone_invalid` 플래그는 update 의 mutable 필드에 포함되지 않으며, 진단
+플래그를 외부 update 입력으로 변경하지 않기 위해 의도적으로 분리되어 있다.
+DELETED 계좌는 복구 대상이 아니다 (`ACCOUNT_ALREADY_DELETED`).
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조

@@ -943,6 +943,112 @@ def account_set_credentials(
         raise SystemExit(1) from e
 
 
+# ── repair-timezone ──────────────────────────────────────
+
+
+@account.command("repair-timezone")
+@click.option(
+    "--account-id",
+    "account_id_opt",
+    required=False,
+    default=None,
+    help="복구 대상 계좌 식별자",
+)
+@click.option(
+    "--timezone",
+    "timezone_opt",
+    required=False,
+    default=None,
+    help="새 valid IANA timezone (예: Asia/Seoul, US/Eastern)",
+)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("account:write")
+def account_repair_timezone(
+    ctx: click.Context,
+    account_id_opt: str | None,
+    timezone_opt: str | None,
+) -> None:
+    """legacy invalid timezone row 를 valid IANA 값으로 교정한다 (cold-path 전용).
+
+    #1473 이전에 저장되어 ``GET /api/accounts`` 응답에 ``timezone_invalid: true`` 로
+    보고된 row 를 복구하는 운영 명령. service 는 ``_row_to_account`` 단계에서
+    invalid timezone 을 fallback (``Asia/Seoul``) 으로 대체해 load 자체는
+    성공시키지만, 원본 DB row 는 그대로 invalid 다 — 본 명령으로만 명시적으로
+    rewrite 한다 (silent rewrite 금지).
+
+    필수 옵션: ``--account-id``, ``--timezone``.
+
+    실패 코드:
+
+    - ``CLI_MISSING_REQUIRED_INPUT``: 옵션 누락.
+    - ``ACCOUNT_INVALID_TIMEZONE``: ``--timezone`` 이 invalid IANA key.
+    - ``ACCOUNT_NOT_FOUND``: 계좌 없음.
+    - ``ACCOUNT_ALREADY_DELETED``: DELETED 계좌 (복구 불가).
+
+    SSOT: docs/specs/account/09-cli.md (repair-timezone 절).
+    """
+    fmt = get_formatter(ctx)
+
+    # cold-path: active runtime 차단
+    _assert_no_active_runtime(fmt)
+
+    required_inputs: dict[str, str | None] = {
+        "--account-id": account_id_opt,
+        "--timezone": timezone_opt,
+    }
+    missing = [k for k, v in required_inputs.items() if v is None or v == ""]
+    if missing:
+        _exit_with_error(
+            fmt,
+            "CLI_MISSING_REQUIRED_INPUT",
+            f"필수 옵션 누락: {missing}",
+        )
+
+    assert account_id_opt is not None
+    assert timezone_opt is not None
+
+    from ante.account.errors import (
+        AccountDeletedError,
+        AccountNotFoundError,
+    )
+
+    async def _do_repair() -> Account:
+        svc, db = await _create_account_service()
+        try:
+            return await svc.repair_timezone(account_id_opt, timezone_opt)
+        finally:
+            await db.close()
+
+    try:
+        repaired = _run(_do_repair())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
+    except AccountDeletedError as e:
+        fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
+        raise SystemExit(1) from e
+    except ValueError as e:
+        # validate_iana_timezone 의 invalid IANA 메시지를 그대로 노출.
+        fmt.error(str(e), code="ACCOUNT_INVALID_TIMEZONE")
+        raise SystemExit(1) from e
+    except click.ClickException:
+        raise
+    except Exception as e:
+        fmt.error(str(e))
+        raise SystemExit(1) from e
+
+    fmt.success(
+        f'계좌 "{repaired.account_id}" timezone 복구 완료 ({repaired.timezone})',
+        data={
+            "account_id": repaired.account_id,
+            "timezone": repaired.timezone,
+            "timezone_invalid": repaired.timezone_invalid,
+        },
+    )
+
+
 # ── 유틸리티 ──────────────────────────────────────
 
 

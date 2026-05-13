@@ -299,6 +299,9 @@ def _account_to_response(account: Any) -> dict[str, Any]:
         ),
         "created_at": (account.created_at.isoformat() if account.created_at else ""),
         "updated_at": (account.updated_at.isoformat() if account.updated_at else ""),
+        # legacy invalid timezone tolerant load 진단 플래그 (#1474). 정상 row
+        # 는 ``False`` 이며, fallback 으로 대체된 row 만 ``True`` 다.
+        "timezone_invalid": bool(getattr(account, "timezone_invalid", False)),
     }
 
 

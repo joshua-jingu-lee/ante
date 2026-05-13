@@ -24,7 +24,11 @@ from ante.account.errors import (
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.scoping import require_account_id, validate_new_account_id
-from ante.account.timezone import validate_iana_timezone
+from ante.account.timezone import (
+    DEFAULT_FALLBACK_TIMEZONE,
+    is_valid_iana_timezone,
+    validate_iana_timezone,
+)
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -912,6 +916,95 @@ class AccountService:
         )
         return broker
 
+    # ── Legacy timezone repair (#1474) ────────────────────
+
+    async def repair_timezone(self, account_id: str, timezone: str) -> Account:
+        """legacy invalid timezone row 를 명시적으로 valid IANA 값으로 교정한다.
+
+        #1473 (split #1419/A) 이전에 저장되어 ``_row_to_account`` 가
+        :data:`ante.account.timezone.DEFAULT_FALLBACK_TIMEZONE` 으로 대체하고
+        ``timezone_invalid=True`` 로 표시한 row 를 운영자가 ``ante account
+        repair-timezone`` 으로 교정할 때 호출한다.
+
+        이 경로는 ``update()`` 와 의도적으로 분리한다:
+
+        - ``timezone_invalid`` 플래그는 ``update()`` 의 mutable 필드가 아니다 —
+          진단 전용이므로 외부 PUT/CLI update 입력으로 받지 않는다.
+        - ``update()`` 는 cold-path / runtime 양쪽에서 호출 가능하지만
+          ``repair_timezone()`` 은 운영 복구 명령이므로 cold-path 전용으로
+          제한해 audit 가능한 별도 진입점을 둔다.
+
+        구현:
+
+        1. 런타임 cold-path 가드 (invariant S2).
+        2. ``validate_iana_timezone`` 로 새 값 검증 — invalid 면 ``ValueError``.
+        3. ``get()`` 으로 row 존재 확인 — DELETED 는 거부 (operator must
+           use 별도 경로). 정상/SUSPENDED 는 허용.
+        4. DB row ``timezone`` 컬럼 UPDATE + cache 의 ``Account.timezone`` +
+           ``timezone_invalid=False`` 동기화 + ``updated_at`` 갱신.
+        5. broker 어댑터 재연결 trigger 는 하지 않는다 — timezone 은
+           ``broker_invalidating`` 4개 필드에 포함되지 않는다 (``service.update()``
+           정합).
+
+        Args:
+            account_id: 교정 대상 계좌.
+            timezone: 새 valid IANA timezone (예: ``"Asia/Seoul"``,
+                ``"US/Eastern"``).
+
+        Returns:
+            교정된 :class:`Account` (``timezone_invalid=False``).
+
+        Raises:
+            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중.
+            ValueError: ``timezone`` 이 invalid IANA key.
+            AccountNotFoundError: 계좌를 찾을 수 없음.
+            AccountDeletedException: DELETED 계좌는 repair 불가.
+        """
+        # 1. 런타임 cold-path 가드 (invariant S2).
+        if self._runtime_started:
+            raise AccountStructuralChangeRequiresStoppedServerError(
+                "timezone repair 는 cold-path 전용입니다. "
+                "서버를 정지한 뒤 ante account repair-timezone 으로 수행하세요."
+            )
+
+        # 2. 새 timezone 검증.
+        validate_iana_timezone(timezone)
+
+        # 3. row 존재 확인 (메모리 cache + DB DELETED fallback).
+        account = await self.get(account_id)
+        if account.status == AccountStatus.DELETED:
+            raise AccountDeletedException(
+                f"삭제된 계좌 '{account_id}'의 timezone 은 복구할 수 없습니다."
+            )
+
+        previous_timezone = account.timezone
+        previous_invalid = account.timezone_invalid
+
+        # 4. DB + cache 동기화.
+        now = datetime.now(UTC)
+        account.timezone = timezone
+        account.timezone_invalid = False
+        account.updated_at = now
+
+        await self._db.execute(
+            "UPDATE accounts SET timezone=?, updated_at=? WHERE account_id=?",
+            (timezone, now.isoformat(), account_id),
+        )
+
+        # cache 갱신 — ``get()`` 이 DELETED fallback 경로로 DB 에서 재구성한
+        # 경우 cache 에 들어 있지 않을 수 있다(현재 ACTIVE/SUSPENDED 경로에서는
+        # cache hit 이지만, future-proof 를 위해 명시적으로 setdefault).
+        self._accounts[account_id] = account
+
+        logger.info(
+            "계좌 timezone 복구: %s (%r → %r, previously_invalid=%s)",
+            account_id,
+            previous_timezone,
+            timezone,
+            previous_invalid,
+        )
+        return account
+
     # ── 기본 테스트 계좌 ──────────────────────────────────
 
     async def create_default_test_account(self) -> Account:
@@ -949,7 +1042,22 @@ class AccountService:
 
 
 def _row_to_account(row: dict[str, Any]) -> Account:
-    """DB 행을 Account 객체로 변환."""
+    """DB 행을 Account 객체로 변환.
+
+    Tolerant timezone load (#1474):
+
+    legacy DB row 가 invalid IANA timezone (예: ``Mars/Olympus``) 으로 저장된
+    경우 ``_row_to_account`` 는 row load 를 fail 시키지 않는다. 대신
+    fallback timezone (:data:`DEFAULT_FALLBACK_TIMEZONE` = ``Asia/Seoul``) 으로
+    대체하고 ``Account.timezone_invalid=True`` 플래그를 세팅한다. 원본 DB
+    row 의 ``timezone`` 컬럼은 그대로 invalid 상태로 남아 있으며, 운영자는
+    ``ante account repair-timezone`` 으로 명시적으로 교정해야 한다 — silent
+    rewrite 는 하지 않는다 (이슈 #1474 non-goals).
+
+    이 분기는 ``initialize()`` / ``get()`` / ``list()`` 가 #1473 의 service-layer
+    timezone 검증 도입 전에 저장된 legacy invalid row 때문에 crash 하지
+    않도록 보장한다 (이슈 #1419/B).
+    """
     credentials_raw = row.get("credentials", "{}")
     if isinstance(credentials_raw, str):
         credentials = decrypt_credentials(credentials_raw)
@@ -970,12 +1078,35 @@ def _row_to_account(row: dict[str, Any]) -> Account:
     buffer_raw = row.get("market_order_reserve_buffer_rate", "0")
     buffer_value = Decimal("0") if buffer_raw is None else Decimal(str(buffer_raw))
 
+    # Tolerant timezone load (#1474).
+    # row 의 timezone 이 invalid 면 fallback + flag 세팅. ``""`` (cold-path
+    # default sentinel) 은 ``ZoneInfo`` 가 ValueError 로 거부하지만, DB 컬럼
+    # default 가 ``Asia/Seoul`` 이고 ``service.create()`` 도 빈 문자열을
+    # persist 하지 않으므로(BrokerPreset fallback 적용) 정상 경로에서는
+    # ``""`` 가 DB 에 들어가지 않는다. legacy 환경에서 ``""`` 가 발견되면
+    # 동일하게 fallback + flag 로 처리한다.
+    raw_timezone = row["timezone"]
+    if is_valid_iana_timezone(raw_timezone):
+        loaded_timezone = raw_timezone
+        timezone_invalid = False
+    else:
+        logger.warning(
+            "계좌 '%s' 의 DB timezone %r 이 invalid IANA key 입니다. "
+            "fallback %r 로 대체합니다 — 'ante account repair-timezone' 으로 "
+            "복구하세요 (#1474).",
+            row.get("account_id"),
+            raw_timezone,
+            DEFAULT_FALLBACK_TIMEZONE,
+        )
+        loaded_timezone = DEFAULT_FALLBACK_TIMEZONE
+        timezone_invalid = True
+
     return Account(
         account_id=row["account_id"],
         name=row["name"],
         exchange=row["exchange"],
         currency=row["currency"],
-        timezone=row["timezone"],
+        timezone=loaded_timezone,
         trading_hours_start=row["trading_hours_start"],
         trading_hours_end=row["trading_hours_end"],
         trading_mode=TradingMode(row["trading_mode"]),
@@ -992,4 +1123,5 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         updated_at=datetime.fromisoformat(row["updated_at"])
         if row.get("updated_at")
         else None,
+        timezone_invalid=timezone_invalid,
     )

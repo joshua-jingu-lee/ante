@@ -60,6 +60,29 @@ Web API는 서버 프로세스 내부에서 실행되므로 계좌 구조 변경
 
 Account API의 `trading_hours_start`/`trading_hours_end`는 strict `HH:MM` 24시간 형식이다 (regex `^([01]\d|2[0-3]):[0-5]\d$`, OpenAPI `pattern`으로도 노출). 초/마이크로초 포함(`09:30:00`), invalid 시간(`99:99`), 그리고 `PUT`의 빈 문자열(`""`)은 422 Unprocessable Entity로 거부된다. `POST /api/accounts`의 `AccountCreateRequest`는 `""`를 default 의미(생략 동치)로 허용하여 CLI/seed 경로의 BrokerPreset fallback과 정합을 유지하지만, 런타임 `POST` 자체는 항상 409 cold-path로 차단된다 — 실제 검증 효과는 `PUT` 경로와 schema 소비자(CLI 등)에서 발생한다 (#1334).
 
+### Legacy invalid timezone tolerant load (#1474)
+
+#1473 (split #1419/A) 이전에 `PUT /api/accounts/:id` 가 invalid IANA timezone
+(예: `Mars/Olympus`) 을 저장하던 시기의 DB row 호환을 위해 `_row_to_account`
+는 tolerant load 를 적용한다.
+
+- invalid IANA timezone 으로 저장된 row 는 `GET /api/accounts` /
+  `GET /api/accounts/:id` 가 **fail 없이 200** 으로 응답한다.
+- 응답 `account.timezone` 은 fallback `Asia/Seoul` 로 대체되고
+  `account.timezone_invalid: true` 진단 플래그가 함께 노출된다.
+- 정상 row 는 `account.timezone_invalid: false` 이며 fallback 대체가 일어나지
+  않는다. 신규 row 는 `_validate_timezone_create` / `_validate_timezone_update`
+  가 ingress 에서 invalid 를 거부하므로 `timezone_invalid: true` 로 들어갈
+  경로가 없다.
+- 원본 DB row 의 `timezone` 컬럼은 그대로 invalid 상태로 남는다 — 서비스가
+  silent rewrite 하지 않는다. 운영자는 `ante account repair-timezone
+  --account-id <id> --timezone <valid_iana>` 로 명시적으로 교정해야 한다
+  ([09-cli.md](09-cli.md) Legacy invalid timezone row 복구 절차 참조).
+- `timezone_invalid` 는 진단 전용 응답 필드다. `PUT /api/accounts/:id` 의
+  update mutable 입력에 포함되지 않으며 (`additionalProperties: false`
+  schema 의 unknown key 로 422 거부), `AccountUpdateRequest` 의 다른 필드와
+  분리된 별도 cold-path 진입점 (`repair_timezone`) 으로만 변경된다.
+
 ### 기존 엔드포인트 계좌 필터
 
 멀티 계좌 환경에서 모든 거래·잔고·봇 관련 API 응답에 계좌 컨텍스트를 포함한다.

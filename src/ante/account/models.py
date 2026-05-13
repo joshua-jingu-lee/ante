@@ -65,6 +65,22 @@ class Account:
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    # --- 진단 플래그 (#1474) ---
+    # DB row 의 ``timezone`` 컬럼이 invalid IANA 값으로 저장되어 있어
+    # ``_row_to_account`` 가 fallback timezone (:data:`DEFAULT_FALLBACK_TIMEZONE`)
+    # 으로 대체한 경우 ``True`` 다. ``False`` 가 default 이며, 정상 row 와
+    # in-memory 신규 생성에는 영향이 없다.
+    #
+    # 의미론: ``True`` 일 때 ``timezone`` 필드는 fallback 값이고, 원본 DB row
+    # 는 그대로 invalid 상태로 남아 있다. 운영자는 ``ante account repair-timezone``
+    # 으로 명시적으로 row 값을 valid 로 교정해야 플래그가 재로드 시 다시
+    # ``False`` 가 된다 (silent rewrite 금지).
+    #
+    # ``IMMUTABLE_FIELDS`` / ``STRUCTURAL_FIELDS`` / ``MUTABLE_FIELDS`` 어느
+    # 분류에도 포함되지 않으며 PUT/CLI update 입력으로 받지 않는다 — 진단 전용
+    # 필드라 외부에서 직접 변경하지 않는다.
+    timezone_invalid: bool = False
+
 
 @dataclass(frozen=True)
 class BrokerPreset:

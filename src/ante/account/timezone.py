@@ -19,6 +19,16 @@ caller 책임:
   ``ValueError`` 그대로 propagate 하여 비-HTTP caller(CLI/IPC) 에서도 동일
   거부 의미론을 갖는다.
 
+Tolerant load (#1474):
+
+- :func:`is_valid_iana_timezone` 은 invalid 여부를 raise 없이 bool 로 판정한다.
+  ``_row_to_account`` 가 legacy DB row 의 invalid timezone(예: ``Mars/Olympus``)
+  을 만났을 때 warning log 를 남기고 fallback timezone 으로 대체할 때 사용한다.
+- caller(:class:`ante.account.service.AccountService`) 는 invalid 감지 시
+  fallback (``DEFAULT_FALLBACK_TIMEZONE`` = ``Asia/Seoul``) 으로 대체하고
+  ``Account.timezone_invalid=True`` 플래그를 세팅한다. row 자체는 그대로
+  남겨두어 ``ante account repair-timezone`` 으로 명시적으로 복구해야 한다.
+
 Non-goals:
 
 - :class:`ante.account.models.Account` ``__post_init__`` hard 검증은 적용하지
@@ -30,6 +40,15 @@ Non-goals:
 from __future__ import annotations
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+# Tolerant load fallback timezone (#1474).
+#
+# legacy DB row 가 invalid IANA timezone 으로 저장되어 있을 때 ``_row_to_account``
+# 가 사용한다. ``Asia/Seoul`` 은 ``Account.timezone`` 의 dataclass default 와
+# ``BROKER_PRESETS["test"].timezone`` 의 default 와 동일하므로 fallback 으로
+# 대체했을 때 다른 모듈(TradingHoursRule 등)에서 발생하는 second-order failure
+# 를 최소화한다.
+DEFAULT_FALLBACK_TIMEZONE = "Asia/Seoul"
 
 
 def validate_iana_timezone(value: str) -> str:
@@ -62,4 +81,33 @@ def validate_iana_timezone(value: str) -> str:
     return value
 
 
-__all__ = ["validate_iana_timezone"]
+def is_valid_iana_timezone(value: str) -> bool:
+    """``value`` 가 유효한 IANA timezone key 인지 raise 없이 bool 로 판정한다.
+
+    :func:`validate_iana_timezone` 와 동일한 :class:`zoneinfo.ZoneInfo` 위임을
+    사용하지만 예외를 swallow 한다. ``_row_to_account`` 가 legacy DB row 의
+    invalid timezone 을 만났을 때 warning log + fallback 대체 분기를 평가하기
+    위해 사용된다 (#1474).
+
+    빈 문자열 / 절대 경로 등 :exc:`ValueError` 도 invalid 로 본다 — 즉
+    "ZoneInfo 가 받아들이는 값" 과 동치다.
+
+    Args:
+        value: 판정할 timezone 문자열.
+
+    Returns:
+        ``ZoneInfo(value)`` 가 예외 없이 성공하면 ``True``, 그렇지 않으면
+        ``False``.
+    """
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        return False
+    return True
+
+
+__all__ = [
+    "DEFAULT_FALLBACK_TIMEZONE",
+    "is_valid_iana_timezone",
+    "validate_iana_timezone",
+]

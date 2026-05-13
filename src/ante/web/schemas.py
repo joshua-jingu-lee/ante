@@ -52,6 +52,11 @@ class AccountResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    # legacy invalid timezone row tolerant load 진단 플래그 (#1474).
+    # ``True`` 일 때 ``timezone`` 필드는 fallback (``Asia/Seoul``) 으로 대체된
+    # 값이며, DB row 의 원본 timezone 컬럼은 여전히 invalid 상태다. 운영자는
+    # ``ante account repair-timezone`` 으로 명시적으로 교정해야 한다.
+    timezone_invalid: bool = False
 
 
 class AccountListResponse(BaseModel):
