@@ -508,3 +508,98 @@ class TestUpdateBotBudgetRollback:
             "rollback skipped" in record.message and record.levelno == logging.WARNING
             for record in caplog.records
         )
+
+    async def test_update_bot_concurrent_requests_serialized_by_lock(
+        self, eventbus, db, ctx
+    ) -> None:
+        """Refs #1460 (attempt 3): per-bot asyncio.Lock 로 update_bot 직렬화.
+
+        시나리오:
+        1. 같은 봇에 대해 update_bot(A) 와 update_bot(B) 를 ``asyncio.gather``
+           로 동시 호출한다.
+        2. A 는 budget 처리에서 ``await asyncio.sleep(0.05)`` 후 raise — A 가
+           먼저 진입했다면 lock 을 0.05 초 이상 잡고 있는다.
+        3. B 는 정상 성공 (treasury.update_budget no-op).
+        4. lock 으로 인해 두 요청은 직렬화된다. 어느 쪽이 먼저 들어와도 다른
+           쪽의 ``new_config`` 가 동시에 ``bot.config`` 에 노출되어 섞이는 일은
+           없다. A 가 raise 한 변경은 rollback 으로 사라지고, B 의 변경만
+           최종 상태에 남는다 (또는 B 가 먼저 끝나고 A 가 뒤이어 진입한
+           경우엔 A 는 raise 로 변경 없음).
+        5. 핵심 보증: 어느 직렬 순서든 ``bot.config.name == "bot-B"`` (B 의
+           변경) 이고, A 의 변경 (``interval_seconds == 3000``) 은 절대로 남지
+           않는다.
+        """
+
+        manager = BotManager(eventbus=eventbus, db=db, treasury_manager=None)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(
+            manager, ctx, account_id="acc-test", interval_seconds=60
+        )
+        bot = manager.get_bot(bot_id)
+        assert bot is not None
+
+        # A 는 update_budget 안에서 sleep + raise. B 는 같은 treasury 객체를
+        # 쓰면 안 되므로(둘 다 raise 되어 버림) 두 요청의 budget 처리 분기를
+        # 다르게 만들기 위해 A 만 budget 을 지정한다. B 는 budget=None 으로
+        # treasury 경로를 타지 않고 runtime control 변경만 수행한다.
+        class _SleepThenRaiseTreasury:
+            def __init__(self) -> None:
+                self.update_budget_calls: list[tuple[str, float]] = []
+
+            async def update_budget(
+                self, called_bot_id: str, target_amount: float
+            ) -> None:
+                self.update_budget_calls.append((called_bot_id, target_amount))
+                # lock 을 충분히 길게 잡고 있도록 대기 후 raise — 동시 호출된
+                # B 가 끼어들 시간을 확보한다.
+                await asyncio.sleep(0.05)
+                raise RuntimeError("A budget boom")
+
+        sleep_treasury = _SleepThenRaiseTreasury()
+        tm = _RaisingTreasuryManager("acc-test", sleep_treasury)  # type: ignore[arg-type]
+        manager._treasury_manager = tm  # type: ignore[assignment]
+
+        # A: interval=3000 + budget 실패 → rollback 으로 변경 소실.
+        # B: name="bot-B" + budget=None → 정상 성공.
+        async def call_a():
+            try:
+                await manager.update_bot(
+                    bot_id, interval_seconds=3000, budget=100_000.0
+                )
+            except RuntimeError:
+                # 기대된 raise — 결과를 무시하고 직렬화 결과만 본다.
+                return "A-raised"
+            return "A-ok"
+
+        async def call_b():
+            await manager.update_bot(bot_id, name="bot-B")
+            return "B-ok"
+
+        results = await asyncio.gather(call_a(), call_b())
+
+        # A 는 항상 raise, B 는 항상 성공.
+        assert results[0] == "A-raised"
+        assert results[1] == "B-ok"
+
+        # 직렬화 결과 보증:
+        # - A 의 interval_seconds=3000 변경은 어느 직렬 순서에서도 최종
+        #   상태에 절대 남지 않는다 (A 가 raise → rollback 으로 소실).
+        # - B 의 name="bot-B" 변경은 항상 최종 상태에 남는다.
+        # - A 가 먼저 직렬화 → B 가 뒤이어 진입한 경우: A rollback 후
+        #   interval_seconds=60, 그 다음 B 가 name="bot-B" 만 변경. 최종
+        #   ``bot.config.interval_seconds == 60`` and ``bot.config.name ==
+        #   "bot-B"``.
+        # - B 가 먼저 직렬화 → A 가 뒤이어 진입한 경우: B 가 name="bot-B"
+        #   로 변경. 그 다음 A 가 interval_seconds=3000 로 변경 시도 후 raise
+        #   → rollback. rollback 의 old_config 는 이 시점 ``bot.config`` (B
+        #   가 만든 config) 이므로 name="bot-B" 가 보존된 채 A 변경만 사라짐.
+        #   최종 ``bot.config.interval_seconds == 60`` and ``bot.config.name
+        #   == "bot-B"``.
+        assert bot.config.interval_seconds == 60
+        assert bot.config.name == "bot-B"
+
+        # DB 도 동일하게 직렬화 결과를 반영해야 한다.
+        assert await _read_db_interval(db, bot_id) == 60
+
+        # treasury.update_budget 은 정확히 1회 (A 의 호출 1회) 만 일어났다.
+        assert sleep_treasury.update_budget_calls == [(bot_id, 100_000.0)]
