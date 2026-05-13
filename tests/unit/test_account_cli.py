@@ -1240,3 +1240,101 @@ class TestAccountSetCredentialsContract:
             "app_secret": "FILE_SECRET",
             "account_no": "5012XXXX-01",
         }
+
+
+# ── account repair-timezone 테스트 (#1474) ──────────
+
+
+class TestAccountRepairTimezone:
+    """``ante account repair-timezone`` (cold-path) 회귀 테스트."""
+
+    def test_account_repair_timezone_cold_path_success(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """cold-path 에서 valid 입력 → exit 0 + structured success (#1474)."""
+        from decimal import Decimal
+
+        from ante.account.models import Account, AccountStatus, TradingMode
+
+        repaired = Account(
+            account_id="legacy-tz",
+            name="레거시",
+            exchange="TEST",
+            currency="KRW",
+            timezone="Asia/Tokyo",
+            timezone_invalid=False,
+            broker_type="test",
+            status=AccountStatus.ACTIVE,
+            trading_mode=TradingMode.VIRTUAL,
+            credentials={"app_key": "k", "app_secret": "s"},
+            buy_commission_rate=Decimal("0"),
+            sell_commission_rate=Decimal("0"),
+        )
+        mock_account_service.repair_timezone.return_value = repaired
+
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "account",
+                "repair-timezone",
+                "legacy-tz",
+                "Asia/Tokyo",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["status"] == "ok"
+        assert data["data"]["code"] == "ACCOUNT_REPAIR_TIMEZONE_OK"
+        assert data["data"]["account_id"] == "legacy-tz"
+        assert data["data"]["timezone"] == "Asia/Tokyo"
+        assert data["data"]["timezone_invalid"] is False
+        mock_account_service.repair_timezone.assert_called_once_with(
+            "legacy-tz", "Asia/Tokyo"
+        )
+
+    def test_account_repair_timezone_invalid_input_rejected(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """invalid IANA 입력 → exit 1 + ``ACCOUNT_INVALID_TIMEZONE`` (#1474)."""
+        mock_account_service.repair_timezone.side_effect = ValueError(
+            "invalid IANA timezone: 'Mars/Olympus'"
+        )
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "account",
+                "repair-timezone",
+                "legacy-tz",
+                "Mars/Olympus",
+            ]
+        )
+        assert result.exit_code == 1
+        data = json.loads(result.output.strip())
+        assert data["status"] == "error"
+        assert data["code"] == "ACCOUNT_INVALID_TIMEZONE"
+        assert "Mars/Olympus" in data["message"]
+
+    def test_account_repair_timezone_active_runtime_blocked(
+        self, active_runtime
+    ) -> None:
+        """active runtime 시 cold-path guard 가 ``_create_account_service`` 호출 이전에
+        차단한다 (#1474). ``account create``/``account delete`` 와 동형 패턴.
+        """
+        mock_create = AsyncMock()
+        with patch(
+            "ante.cli.commands.account._create_account_service",
+            new=mock_create,
+        ):
+            result = _invoke(
+                [
+                    "account",
+                    "repair-timezone",
+                    "legacy-tz",
+                    "Asia/Tokyo",
+                ]
+            )
+        assert result.exit_code == 1
+        assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in result.output
+        mock_create.assert_not_called()

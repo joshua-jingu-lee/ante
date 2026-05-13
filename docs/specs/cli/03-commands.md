@@ -85,6 +85,7 @@ allowlist 후보에서 제거한다.
 | `ante account create --broker-type <type> --account-id <id> --name <name> --trading-mode virtual\|live ...` | `cold-path` | 서버 실행 중 차단 |
 | `ante account set-credentials <account_id> ...` | `cold-path` | 서버 실행 중 차단 |
 | `ante account delete <account_id> --yes` | `cold-path` | 서버 실행 중 차단 |
+| `ante account repair-timezone <account_id> <new_timezone>` | `cold-path` | 서버 실행 중 차단 |
 | `ante account suspend <account_id> --reason <reason>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
@@ -174,6 +175,7 @@ ante account set-credentials <account_id> \
 ante account suspend <account_id> --reason <사유>  # 계좌 거래 정지
 ante account activate <account_id>            # 계좌 거래 재개
 ante account delete <account_id> --yes        # 계좌 삭제 (cold-path 전용, 연결된 봇이 없을 때만)
+ante account repair-timezone <account_id> <new_timezone>  # legacy invalid IANA timezone 행 복구 (cold-path 전용)
 ```
 
 `account create/delete/set-credentials`는 계좌 topology 또는 브로커 초기화 입력을 바꾸므로

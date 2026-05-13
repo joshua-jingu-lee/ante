@@ -1205,3 +1205,289 @@ async def test_create_default_test_account_uses_preset_buffer(service) -> None:
     """
     acct = await service.create_default_test_account()
     assert acct.market_order_reserve_buffer_rate == Decimal("0")
+
+
+# ── legacy invalid timezone tolerant load + repair (#1474) ──────────
+
+
+async def _seed_invalid_timezone_row(
+    db,
+    *,
+    account_id: str = "legacy-tz",
+    timezone: str = "Mars/Olympus",
+    name: str = "레거시",
+    status: str = "active",
+) -> None:
+    """invalid IANA timezone 으로 DB row 를 직접 삽입하는 helper.
+
+    ``AccountService.create`` 는 ingress 검증 (#1473) 으로 invalid 입력을
+    거부하므로, legacy 환경 재현을 위해 raw SQL 로 row 를 심는다. crypto
+    credentials 인코딩은 service.create 가 사용하는 ``encrypt_credentials``
+    를 재사용해 같은 직렬화 계약을 유지한다 (#1474).
+    """
+    from datetime import UTC, datetime
+
+    from ante.account.crypto import encrypt_credentials
+
+    now = datetime.now(UTC).isoformat()
+    await db.execute(
+        """INSERT INTO accounts
+           (account_id, name, exchange, currency, timezone,
+            trading_hours_start, trading_hours_end, trading_mode,
+            broker_type, credentials, broker_config,
+            buy_commission_rate, sell_commission_rate,
+            market_order_reserve_buffer_rate,
+            status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            account_id,
+            name,
+            "TEST",
+            "KRW",
+            timezone,
+            "09:00",
+            "15:30",
+            "virtual",
+            "test",
+            encrypt_credentials({"app_key": "k", "app_secret": "s"}),
+            "{}",
+            0.0,
+            0.0,
+            0.0,
+            status,
+            now,
+            now,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_invalid_timezone_preserves_stored_value_with_marker(
+    db, eventbus, caplog
+) -> None:
+    """legacy invalid timezone row 가 stored value 보존 + marker 로 노출된다 (#1474).
+
+    initialize 가 crash 없이 완료되고, 로드된 Account 의 ``timezone`` 은
+    stored ``"Mars/Olympus"`` 그대로 보존된다 — fallback ``"Asia/Seoul"``
+    로 덮어쓰면 후속 ``update()`` 의 전체 row UPDATE 가 silent data
+    rewrite 를 일으키므로 절대 안 된다.
+    """
+    import logging
+
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(db, account_id="legacy-tz")
+
+    with caplog.at_level(logging.WARNING, logger="ante.account.service"):
+        svc2 = AccountService(db, eventbus)
+        await svc2.initialize()
+
+    acct = await svc2.get("legacy-tz")
+    assert acct.timezone == "Mars/Olympus"
+    assert acct.timezone_invalid is True
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("ACCOUNT_INVALID_TIMEZONE_LEGACY" in m for m in messages)
+    assert any("legacy-tz" in m for m in messages)
+    assert any("ante account repair-timezone" in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_initialize_summary_for_mixed_rows(db, eventbus, caplog) -> None:
+    """invalid 와 valid 행이 섞여도 모두 load 되고 summary 한 줄이 남는다 (#1474)."""
+    import logging
+
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await svc.create(_make_account("good-1"))
+    await svc.create(_make_account("good-2"))
+    await _seed_invalid_timezone_row(db, account_id="bad-a", timezone="Mars/Olympus")
+    await _seed_invalid_timezone_row(db, account_id="bad-b", timezone="Foo/Bar")
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="ante.account.service"):
+        svc2 = AccountService(db, eventbus)
+        await svc2.initialize()
+
+    # 모든 4 계좌 load
+    assert len(await svc2.list()) == 4
+
+    summary_lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "ACCOUNT_INVALID_TIMEZONE_LEGACY summary" in r.getMessage()
+    ]
+    assert len(summary_lines) == 1
+    summary = summary_lines[0]
+    assert "count=2" in summary
+    assert "bad-a" in summary
+    assert "bad-b" in summary
+
+
+@pytest.mark.asyncio
+async def test_get_non_cached_invalid_row_preserves_marker(db, eventbus) -> None:
+    """cache miss 경로(``get`` DB fetch) 에서도 marker 가 유지된다 (#1474).
+
+    invalid row 를 ACTIVE 상태로 심고 service 인스턴스를 새로 만든 뒤
+    캐시에 없는 별도의 DELETED row 를 ``get`` 으로 조회하면 DB fetch
+    경로(``_row_to_account``) 에서도 stored value + marker 가 그대로
+    노출돼야 한다.
+    """
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    # DELETED 상태 invalid row — initialize 가 캐시에 올리지 않으므로 get()
+    # 호출 시 반드시 DB fetch 경로를 탄다.
+    await _seed_invalid_timezone_row(
+        db, account_id="deleted-tz", timezone="Mars/Olympus", status="deleted"
+    )
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+    assert "deleted-tz" not in svc2._accounts  # cache miss 보장
+
+    acct = await svc2.get("deleted-tz")
+    assert acct.timezone == "Mars/Olympus"
+    assert acct.timezone_invalid is True
+    assert acct.status == AccountStatus.DELETED
+
+
+@pytest.mark.asyncio
+async def test_list_status_deleted_invalid_row_preserves_marker(db, eventbus) -> None:
+    """``list(status=DELETED)`` (DB 직접 조회) 경로도 marker 를 보존한다 (#1474)."""
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(
+        db, account_id="deleted-tz", timezone="Mars/Olympus", status="deleted"
+    )
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+    deleted = await svc2.list(status=AccountStatus.DELETED)
+    assert len(deleted) == 1
+    assert deleted[0].account_id == "deleted-tz"
+    assert deleted[0].timezone == "Mars/Olympus"
+    assert deleted[0].timezone_invalid is True
+
+
+@pytest.mark.asyncio
+async def test_update_unrelated_field_preserves_invalid_timezone(db, eventbus) -> None:
+    """invalid row 의 무관 필드(name) update 시 DB stored timezone 이 보존된다 (#1474).
+
+    silent data rewrite 회귀 회피: 전체 row UPDATE 가 stored
+    ``Mars/Olympus`` 를 default 로 덮어쓰면 안 된다.
+    """
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(db, account_id="legacy-tz")
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+
+    updated = await svc2.update("legacy-tz", name="새 이름")
+    assert updated.name == "새 이름"
+    assert updated.timezone == "Mars/Olympus"
+    assert updated.timezone_invalid is True
+
+    # DB stored value 가 그대로인지 raw 조회로 확인 — 전체 row UPDATE 가
+    # ``account.timezone`` (stored) 을 그대로 다시 썼는지 검증.
+    row = await db.fetch_one(
+        "SELECT timezone FROM accounts WHERE account_id = ?",
+        ("legacy-tz",),
+    )
+    assert row["timezone"] == "Mars/Olympus"
+
+    # 새 service 인스턴스로 다시 로드해도 marker 가 살아 있어야 한다.
+    svc3 = AccountService(db, eventbus)
+    await svc3.initialize()
+    reloaded = await svc3.get("legacy-tz")
+    assert reloaded.timezone == "Mars/Olympus"
+    assert reloaded.timezone_invalid is True
+
+
+@pytest.mark.asyncio
+async def test_update_timezone_explicit_resets_marker(db, eventbus) -> None:
+    """timezone 을 명시적으로 update 하면 marker 가 False 로 리셋된다 (#1474)."""
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(db, account_id="legacy-tz")
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+
+    updated = await svc2.update("legacy-tz", timezone="Asia/Tokyo")
+    assert updated.timezone == "Asia/Tokyo"
+    assert updated.timezone_invalid is False
+
+    row = await db.fetch_one(
+        "SELECT timezone FROM accounts WHERE account_id = ?",
+        ("legacy-tz",),
+    )
+    assert row["timezone"] == "Asia/Tokyo"
+
+
+@pytest.mark.asyncio
+async def test_repair_timezone_delegates_to_update(db, eventbus) -> None:
+    """``repair_timezone`` 이 ``update(timezone=...)`` 과 동등한 결과를 낸다 (#1474)."""
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(db, account_id="legacy-tz")
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+
+    repaired = await svc2.repair_timezone("legacy-tz", "America/New_York")
+    assert repaired.timezone == "America/New_York"
+    assert repaired.timezone_invalid is False
+
+    row = await db.fetch_one(
+        "SELECT timezone FROM accounts WHERE account_id = ?",
+        ("legacy-tz",),
+    )
+    assert row["timezone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+async def test_repair_timezone_invalid_input_rejected(db, eventbus) -> None:
+    """invalid IANA 입력은 ``ValueError`` 로 거부된다 (#1474 — #1473 ingress 재사용)."""
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(db, account_id="legacy-tz")
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+
+    with pytest.raises(ValueError, match="invalid IANA timezone"):
+        await svc2.repair_timezone("legacy-tz", "Mars/Olympus")
+
+    # DB 의 stored 값이 그대로 보존됐는지 확인.
+    row = await db.fetch_one(
+        "SELECT timezone FROM accounts WHERE account_id = ?",
+        ("legacy-tz",),
+    )
+    assert row["timezone"] == "Mars/Olympus"
+
+
+@pytest.mark.asyncio
+async def test_repair_timezone_runtime_started_blocked(db, eventbus) -> None:
+    """runtime 시작 후에는 cold-path guard 가 즉시 차단한다 (#1474)."""
+    from ante.account.errors import (
+        AccountStructuralChangeRequiresStoppedServerError,
+    )
+
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await _seed_invalid_timezone_row(db, account_id="legacy-tz")
+
+    svc2 = AccountService(db, eventbus)
+    await svc2.initialize()
+    svc2.mark_runtime_started()
+
+    with pytest.raises(AccountStructuralChangeRequiresStoppedServerError):
+        await svc2.repair_timezone("legacy-tz", "Asia/Tokyo")
+
+    # DB 가 변경되지 않았는지 검증.
+    row = await db.fetch_one(
+        "SELECT timezone FROM accounts WHERE account_id = ?",
+        ("legacy-tz",),
+    )
+    assert row["timezone"] == "Mars/Olympus"

@@ -961,6 +961,96 @@ def account_set_credentials(
         raise SystemExit(1) from e
 
 
+# ── repair-timezone ──────────────────────────────────────
+
+
+@account.command("repair-timezone")
+@click.argument("account_id")
+@click.argument("new_timezone")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("account:write")
+def account_repair_timezone(
+    ctx: click.Context, account_id: str, new_timezone: str
+) -> None:
+    """legacy invalid IANA timezone 계좌를 복구한다 (cold-path 전용, #1474).
+
+    ``_row_to_account`` 가 stored invalid timezone 을 보존하면서
+    ``Account.timezone_invalid`` marker 를 노출한 row 를 운영자가 명시한
+    valid IANA timezone 으로 갱신한다. 내부적으로
+    ``AccountService.repair_timezone`` → ``update(timezone=...)`` 으로
+    위임하며, cold-path 의미론 (서버 정지 필요) 은 본 CLI 와 service
+    boundary 양쪽에서 차단한다.
+
+    실패 코드:
+
+    - ``ACCOUNT_RUNTIME_ACTIVE`` 또는
+      ``ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER``: 서버 실행 중
+      차단 (cold-path).
+    - ``ACCOUNT_INVALID_TIMEZONE``: ``new_timezone`` 이 IANA 등록 누락.
+    - ``ACCOUNT_NOT_FOUND``: ``account_id`` 가 존재하지 않음.
+    """
+    fmt = get_formatter(ctx)
+
+    # cold-path: active runtime이 있으면 진입 직후 차단한다.
+    # ``_create_account_service`` 자체가 호출되지 않아야 한다.
+    _assert_no_active_runtime(fmt)
+
+    from ante.account.errors import (
+        AccountDeletedError,
+        AccountNotFoundError,
+        AccountStructuralChangeRequiresStoppedServerError,
+    )
+
+    async def _do_repair() -> Account:
+        svc, db = await _create_account_service()
+        try:
+            return await svc.repair_timezone(account_id, new_timezone)
+        finally:
+            await db.close()
+
+    try:
+        repaired = _run(_do_repair())
+    except ValueError as e:
+        # validate_iana_timezone 위임 실패. invalid IANA key 만 본 경로로
+        # 들어온다 (account_id 형식 검증은 ``update`` 가 별도 코드로 raise
+        # 하지 않으므로 ValueError 만 invalid timezone 으로 매핑한다).
+        _exit_with_error(
+            fmt,
+            "ACCOUNT_INVALID_TIMEZONE",
+            f"invalid IANA timezone: {new_timezone!r} — {e}",
+        )
+    except AccountStructuralChangeRequiresStoppedServerError as e:
+        # service-layer defense-in-depth (CLI guard 우회 시).
+        fmt.error(
+            str(e),
+            code="ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER",
+        )
+        raise SystemExit(1) from e
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
+    except AccountDeletedError as e:
+        fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
+        raise SystemExit(1) from e
+    except click.ClickException:
+        raise
+    except Exception as e:
+        fmt.error(str(e))
+        raise SystemExit(1) from e
+
+    fmt.success(
+        f'계좌 "{repaired.account_id}" timezone 복구 완료 ({repaired.timezone})',
+        data={
+            "code": "ACCOUNT_REPAIR_TIMEZONE_OK",
+            "account_id": repaired.account_id,
+            "timezone": repaired.timezone,
+            "timezone_invalid": repaired.timezone_invalid,
+        },
+    )
+
+
 # ── 유틸리티 ──────────────────────────────────────
 
 
