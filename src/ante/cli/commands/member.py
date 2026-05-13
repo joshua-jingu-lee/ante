@@ -445,6 +445,110 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     fmt.success(f"멤버 폐기 완료: {member_id}", result)
 
 
+@member.command("audit-roles")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("member:read")
+def member_audit_roles(ctx: click.Context) -> None:
+    """legacy invalid-role member row 를 식별해 보고한다 (#1468).
+
+    ``MemberRole`` enum SSOT 에 없는 ``role`` 값을 가진 row 를 list 로 출력한다.
+    출력은 read-only 이며 DB 를 수정하지 않는다. text 모드에서는 표 형식,
+    JSON 모드에서는 ``{"invalid_members": [...]}`` 구조로 직렬화한다.
+
+    정상 role row 는 결과에서 제외된다. invalid row 가 없으면 빈 list 와 함께
+    안내 메시지를 출력한다.
+    """
+    fmt = get_formatter(ctx)
+
+    async def _run_audit() -> list[dict]:
+        service, db = await _create_service()
+        try:
+            members = await service.audit_invalid_roles()
+            return [
+                {
+                    "member_id": m.member_id,
+                    "type": m.type,
+                    "role": m.role,
+                    "org": m.org,
+                    "name": m.name,
+                    "status": m.status,
+                    "created_at": m.created_at,
+                    "created_by": m.created_by,
+                }
+                for m in members
+            ]
+        finally:
+            await db.close()
+
+    result = _run(_run_audit())
+    if fmt.is_json:
+        fmt.output({"invalid_members": result})
+        return
+
+    if not result:
+        click.echo("invalid-role member 가 없습니다.")
+        return
+
+    click.echo(f"invalid-role member {len(result)}건 식별됨:")
+    for m in result:
+        click.echo(
+            f"  {m['member_id']:20s} type={m['type']:6s} role={m['role']!r:30s}"
+            f" status={m['status']:10s} created_at={m['created_at']}"
+        )
+
+
+@member.command("repair-role")
+@click.option("--member-id", "member_id", required=True, help="교정할 member_id")
+@click.option(
+    "--role",
+    "new_role",
+    required=True,
+    type=click.Choice(["admin", "default"]),
+    help="새 role (master 로 변경 불가)",
+)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("member:admin")
+def member_repair_role(ctx: click.Context, member_id: str, new_role: str) -> None:
+    """invalid-role row 를 valid role 로 교정한다 (#1468).
+
+    master 만 호출 가능. ``--role`` 은 ``MemberRole`` enum 멤버여야 하며,
+    ``master`` 로의 변경은 거부된다 (cleanup 의도 위반 — 권한 상승 방지).
+    이미 valid role 인 row 를 본 명령으로 재교정하는 것도 거부된다.
+
+    성공 시 ``MemberRoleRepairedEvent`` 가 발행되어 audit/log 추적이 가능하다.
+    """
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+
+    async def _run_repair() -> dict:
+        service, db = await _create_service()
+        try:
+            m = await service.repair_role(member_id, new_role, repaired_by=actor)
+            return {
+                "member_id": m.member_id,
+                "role": m.role,
+                "type": m.type,
+                "status": m.status,
+            }
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_run_repair())
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
+    except (ValueError, PermissionError) as e:
+        fmt.error(str(e))
+        raise SystemExit(1) from None
+
+    fmt.success(f"invalid-role 교정 완료: {member_id} → {result['role']}", result)
+
+
 @member.command("rotate-token")
 @click.argument("member_id")
 @click.pass_context

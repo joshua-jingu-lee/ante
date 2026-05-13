@@ -82,6 +82,30 @@ ante member revoke strategy-dev-01 --yes [--format json]
 # ⚠️ 이 작업은 되돌릴 수 없습니다. --yes 누락 시 CLI_CONFIRMATION_REQUIRED로 실패합니다.
 ```
 
+### `ante member audit-roles`
+
+`MemberRole` enum SSOT 에 없는 ``role`` 값을 가진 row 를 식별해 출력한다.
+read-only 이며 DB 를 수정하지 않는다. cleanup 결정은 운영자/감사 절차에
+위임한다. 정상 role row 는 결과에 포함되지 않는다.
+
+```
+ante member audit-roles [--format json]
+# text: invalid-role member {N}건 식별됨: ...
+# json: {"invalid_members": [...]}
+```
+
+### `ante member repair-role --member-id <id> --role admin|default`
+
+`audit-roles` 가 식별한 invalid-role row 의 ``role`` 을 ``MemberRole`` enum
+멤버로 교정한다. master 만 호출할 수 있다. ``--role`` 은 ``master`` 로
+지정할 수 없다 (cleanup 의도 위반 — 권한 상승 방지). 이미 valid role 인 row 를
+재교정하는 호출도 거부한다 (정상 role row 영향 없음 회귀). 성공 시
+``MemberRoleRepairedEvent`` 가 발행되어 audit/log 추적이 가능하다.
+
+```
+ante member repair-role --member-id agent-leak-1 --role default [--format json]
+```
+
 ### `ante member rotate-token <member_id>`
 
 ```

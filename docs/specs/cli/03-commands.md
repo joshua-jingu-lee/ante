@@ -128,9 +128,11 @@ allowlist 후보에서 제거한다.
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
+| `ante member audit-roles` | `offline` | invalid-role row 식별 (read-only, #1468) |
 | `ante member register --id <member_id> --type human|agent ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member set-emoji/suspend/reactivate/rotate-token ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member revoke <member_id> --yes` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member repair-role --member-id <id> --role admin\|default` | `runtime IPC` | invalid-role row 교정 (master only, #1468) |
 | `ante member reset-password --recovery-key <key> (--new-password-env <ENV>\|--new-password-file <PATH>)` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member regenerate-recovery-key (--password-env <ENV>\|--password-file <PATH>)` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | 동일 member mutation, 서버 정지 상태 | `bootstrap/maintenance` | recovery/비상 운영 fallback |
@@ -535,6 +537,8 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 ante member register --id <member_id> --type human|agent [--org <org>] [--name <name>] [--scopes <csv>]  # 멤버 등록
 ante member list [--type human|agent] [--org <org>] [--status active|suspended|revoked]  # 멤버 목록
 ante member info <member_id>                            # 멤버 상세
+ante member audit-roles                                  # invalid-role row 식별 (read-only, #1468)
+ante member repair-role --member-id <id> --role admin|default  # invalid-role row 교정 (master only, #1468)
 ante member suspend <member_id>                         # 멤버 일시 정지
 ante member reactivate <member_id>                      # 멤버 재활성화
 ante member revoke <member_id> --yes                    # 멤버 권한 영구 해제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)

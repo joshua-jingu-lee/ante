@@ -609,6 +609,101 @@ class MemberService:
         member.revoked_at = now
         return member
 
+    # ── invalid-role cleanup (#1468 — split #1417/D) ───
+
+    async def audit_invalid_roles(self) -> list[Member]:
+        """``MemberRole`` enum SSOT 에 없는 ``role`` row 를 식별해 반환한다.
+
+        #1465 (write path) 와 #1466 (auth read-path) 가 막힌 뒤에도, 그 이전에
+        DB 에 남은 ``role="oracle_invalid_role"`` 같은 row 는 그대로 존재할 수
+        있다. 본 메서드는 운영자가 cleanup 대상 row 를 식별할 수 있도록 enum
+        membership 검증을 적용한 list 를 반환한다.
+
+        검증은 read-only 이며 부작용이 없다. 정상 role row 는 결과에 포함되지
+        않는다 (정상 role 영향 없음 회귀 SSOT).
+        """
+        valid = {member.value for member in MemberRole}
+        rows = await self._db.fetch_all(
+            "SELECT * FROM members ORDER BY created_at DESC"
+        )
+        invalid: list[Member] = []
+        for row in rows:
+            if row["role"] not in valid:
+                invalid.append(_row_to_member(row))
+        return invalid
+
+    async def repair_role(
+        self,
+        member_id: str,
+        new_role: str,
+        repaired_by: str = "",
+    ) -> Member:
+        """invalid-role row 를 master-only 권한으로 valid role 로 교정한다.
+
+        invariants (#1468):
+
+        - caller 는 master 여야 한다 (``_assert_master``). 비-master 는
+          ``PermissionDeniedError`` 로 거부된다.
+        - ``new_role`` 은 ``MemberRole`` enum 멤버여야 한다 (``_assert_role_enum``).
+          enum 위반은 ``ValueError`` 로 거부된다.
+        - ``new_role`` 이 ``MemberRole.MASTER`` 인 cleanup 은 거부된다. master
+          승격은 cleanup 의 의도가 아니며, 우발적인 권한 상승을 막기 위해
+          ``ValueError`` 로 거부한다. (``ante init`` master 부트스트랩만 master
+          를 생성한다.)
+        - 대상 row 의 현재 ``role`` 은 enum SSOT 에 없어야 한다. 이미 valid 한
+          row 를 본 메서드로 재교정하는 것은 의도된 cleanup 범위를 벗어나므로
+          ``ValueError`` 로 거부한다 (정상 role row 영향 없음 회귀).
+        - type-role 불변식 (``_assert_type_role``) 도 동일하게 적용된다. agent
+          를 master/admin 으로 cleanup 하지 못한다.
+
+        성공 시 ``MemberRoleRepairedEvent`` 를 발행해 audit/log 추적이 가능하게
+        한다.
+        """
+        await self._assert_master(repaired_by, "repair_role")
+        self._assert_role_enum(new_role)
+        if new_role == MemberRole.MASTER:
+            msg = "repair_role 로 master 역할로 변경할 수 없습니다"
+            raise ValueError(msg)
+
+        member = await self._get_or_raise(member_id)
+
+        valid = {role.value for role in MemberRole}
+        if member.role in valid:
+            msg = (
+                f"이미 valid role 입니다: {member.role!r}."
+                " repair_role 은 invalid-role row 만 교정합니다."
+            )
+            raise ValueError(msg)
+
+        self._assert_type_role(member.type, new_role)
+
+        old_role = member.role
+        await self._db.execute(
+            "UPDATE members SET role = ? WHERE member_id = ?",
+            (new_role, member_id),
+        )
+
+        from ante.eventbus.events import MemberRoleRepairedEvent
+
+        await self._eventbus.publish(
+            MemberRoleRepairedEvent(
+                member_id=member_id,
+                old_role=old_role,
+                new_role=new_role,
+                repaired_by=repaired_by,
+            )
+        )
+
+        logger.info(
+            "invalid-role 교정: %s (%s → %s, by %s)",
+            member_id,
+            old_role,
+            new_role,
+            repaired_by,
+        )
+        member.role = new_role
+        return member
+
     # ── 토큰 관리 (TokenManager 위임) ──────────────────
 
     async def rotate_token(

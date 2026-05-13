@@ -512,6 +512,22 @@ class MemberAuthFailedEvent(Event):
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class MemberRoleRepairedEvent(Event):
+    """MemberService → EventBus: legacy invalid-role member 의 role 을 valid 로 교정.
+
+    #1468 (split #1417/D) cleanup. ``ante member repair-role`` CLI 및 동일
+    서비스 메서드가 master 권한으로 ``MemberRole`` enum 멤버가 아닌 row 의
+    role 을 enum 멤버로 교정할 때 발행한다. ``MemberRegisteredEvent`` /
+    ``MemberRevokedEvent`` 와 동등하게 audit/log 추적에 사용된다.
+    """
+
+    member_id: str = ""
+    old_role: str = ""
+    new_role: str = ""
+    repaired_by: str = ""
+
+
 # ── 일일 리포트 (DailyReport) ──────────────────────
 
 

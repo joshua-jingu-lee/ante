@@ -22,3 +22,4 @@
 | [07-eventbus-integration.md](07-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [08-module-impact.md](08-module-impact.md) | 기존 모듈 영향 |
 | [09-notification-events.md](09-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
+| [10-invalid-role-cleanup.md](10-invalid-role-cleanup.md) | invalid-role row 식별/교정 운영 절차 (#1468) |
