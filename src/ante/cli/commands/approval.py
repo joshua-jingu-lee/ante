@@ -11,6 +11,41 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
+# CLI preflight copy of ApprovalStatus / ApprovalType values.
+#
+# 실제 SSOT는 `src/ante/approval/models.py:9-33`의 `ApprovalStatus`/`ApprovalType`
+# enum이다. 본 frozenset은 list 명령에서 heavy `ante.approval` 패키지 import
+# 전에 `--status`/`--type` 입력을 거부하기 위한 가벼운 차단막이며, enum과의
+# drift는 동치성 회귀 테스트
+# (`tests/unit/test_cli_approval_list_invalid_filter.py::
+# test_preflight_sets_match_enum_ssot`)로 차단한다.
+# #1461 strategy list preflight 패턴(#1462에서 일괄 정렬)을 따른다.
+VALID_APPROVAL_STATUSES: frozenset[str] = frozenset(
+    {
+        "pending",
+        "approved",
+        "execution_failed",
+        "rejected",
+        "on_hold",
+        "expired",
+        "cancelled",
+    }
+)
+VALID_APPROVAL_TYPES: frozenset[str] = frozenset(
+    {
+        "strategy_adopt",
+        "strategy_retire",
+        "bot_create",
+        "bot_assign_strategy",
+        "bot_change_strategy",
+        "bot_stop",
+        "bot_resume",
+        "bot_delete",
+        "budget_change",
+        "rule_change",
+    }
+)
+
 
 @click.group()
 def approval() -> None:
@@ -103,9 +138,30 @@ def approval_list(
     db_path: str | None,
 ) -> None:
     """결재 목록 조회."""
+    fmt = get_formatter(ctx)
+
+    # Preflight: invalid --status / --type는 heavy `ante.approval` 패키지 / DB
+    # 진입 전에 차단한다. SSOT는 `ApprovalStatus`/`ApprovalType` enum이며,
+    # `VALID_APPROVAL_STATUSES`/`VALID_APPROVAL_TYPES`는 가벼운 복사본이다
+    # (drift는 enum 동치성 회귀 테스트로 차단). 이로써 입력 오타가 service
+    # 내부에서 traceback으로 새지 않고 flat JSON error로 종료된다.
+    # (#1461 strategy list 패턴 정렬 — #1462)
+    if status is not None and status not in VALID_APPROVAL_STATUSES:
+        fmt.error(
+            f"잘못된 status 값: {status!r}. 허용값: {sorted(VALID_APPROVAL_STATUSES)}",
+            code="APPROVAL_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+    if approval_type is not None and approval_type not in VALID_APPROVAL_TYPES:
+        fmt.error(
+            f"잘못된 type 값: {approval_type!r}. "
+            f"허용값: {sorted(VALID_APPROVAL_TYPES)}",
+            code="APPROVAL_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+
     from ante.cli.main import get_db_path
 
-    fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
     async def _list() -> list[dict]:
@@ -133,9 +189,13 @@ def approval_list(
             for r in requests
         ]
 
+    # click.ClickException은 click의 표준 출력 경로를 보존하기 위해 그대로
+    # 전파하고, 그 외 일반 Exception은 APPROVAL_ERROR로 분류한다.
     try:
         rows = asyncio.run(_list())
         fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e

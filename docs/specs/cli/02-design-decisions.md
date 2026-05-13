@@ -102,7 +102,9 @@ JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "
 | `BOT_MISSING_REQUIRED_ACCOUNT` | `--account` 생략 시 active 계좌가 0개 또는 2개 이상 | `bot create` |
 | `STRATEGY_VALIDATION_ERROR` | strategy 명령 인자(예: `--status`) 값이 SSOT enum에 없음 | `strategy list` |
 | `UPDATE_SERVER_RUNNING` | `ante update --force` 없이 서버가 실행 중 | `update` |
-| `APPROVAL_VALIDATION_ERROR` | `approval request --type` 값이 SSOT enum에 없음 | `approval request` |
+| `APPROVAL_VALIDATION_ERROR` | approval 명령 인자(`--type`, `--status`) 값이 SSOT enum에 없음 | `approval request`, `approval list` |
+| `ACCOUNT_VALIDATION_ERROR` | account 명령 인자(예: `--status`) 값이 SSOT enum에 없음 | `account list` |
+| `REPORT_VALIDATION_ERROR` | report 명령 인자(예: `--status`) 값이 SSOT enum에 없음 | `report list` |
 
 `--broker-config`는 1.0 범위에서 free-form pass-through(아래 silent ignore trade-off
 참조)이므로 본 이슈에서는 `UNKNOWN_BROKER_CONFIG_KEY`를 정의하지 않는다.

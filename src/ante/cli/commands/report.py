@@ -12,6 +12,19 @@ from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.web.schemas import ReportSubmitRequest
 
+# CLI preflight copy of ReportStatus values.
+#
+# 실제 SSOT는 `src/ante/report/models.py:11-19`의 `ReportStatus` enum이다.
+# 본 frozenset은 list 명령에서 heavy `ante.report` 패키지 import 전에
+# `--status` 입력을 거부하기 위한 가벼운 차단막이며, enum과의 drift는 동치성
+# 회귀 테스트
+# (`tests/unit/test_cli_report_list_invalid_status.py::
+# test_preflight_set_matches_enum_ssot`)로 차단한다.
+# #1461 strategy list preflight 패턴(#1462에서 일괄 정렬)을 따른다.
+VALID_REPORT_STATUSES: frozenset[str] = frozenset(
+    {"draft", "submitted", "reviewed", "adopted", "rejected", "archived"}
+)
+
 
 @click.group()
 def report() -> None:
@@ -172,10 +185,23 @@ def submit(
 @require_scope("report:read")
 def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> None:
     """리포트 목록 조회."""
+    fmt = get_formatter(ctx)
+
+    # Preflight: invalid --status는 heavy `ante.report` 패키지 / DB 진입 전에
+    # 차단한다. SSOT는 `ReportStatus` enum이며, `VALID_REPORT_STATUSES`는
+    # 가벼운 복사본이다(drift는 enum 동치성 회귀 테스트로 차단). 이로써 입력
+    # 오타가 `ReportStatus(status)` ValueError → Python traceback으로 새지
+    # 않고 flat JSON error로 종료된다. (#1461 strategy list 패턴 정렬 — #1462)
+    if status is not None and status not in VALID_REPORT_STATUSES:
+        fmt.error(
+            f"잘못된 status 값: {status!r}. 허용값: {sorted(VALID_REPORT_STATUSES)}",
+            code="REPORT_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+
     from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
-    fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
     async def _list() -> list[dict]:
@@ -198,9 +224,13 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
             for r in reports
         ]
 
+    # click.ClickException은 click의 표준 출력 경로를 보존하기 위해 그대로
+    # 전파하고, 그 외 일반 Exception은 REPORT_ERROR로 분류한다.
     try:
         rows = asyncio.run(_list())
         fmt.table(rows, ["report_id", "strategy", "status", "submitted_at"])
+    except click.ClickException:
+        raise
     except Exception as e:
         fmt.error(str(e), code="REPORT_ERROR")
         raise SystemExit(1) from e

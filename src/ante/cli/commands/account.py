@@ -40,6 +40,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# CLI preflight copy of AccountStatus values.
+#
+# 실제 SSOT는 `src/ante/account/models.py:12-17`의 `AccountStatus` enum이다.
+# 본 frozenset은 `account.models` heavy import 전에 `--status` 입력을 거부하기
+# 위한 가벼운 차단막이며, enum과의 drift는 동치성 회귀 테스트
+# (`tests/unit/test_cli_account_list_invalid_status.py::
+# test_preflight_set_matches_enum_ssot`)로 차단한다.
+# #1461 strategy list preflight 패턴(#1462에서 일괄 정렬)을 따른다.
+VALID_ACCOUNT_STATUSES: frozenset[str] = frozenset({"active", "suspended", "deleted"})
+
+
 @click.group()
 def account() -> None:
     """계좌 생성·조회·관리."""
@@ -593,9 +604,22 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     """계좌 목록 조회."""
     fmt = get_formatter(ctx)
 
-    from ante.account.models import AccountStatus
+    # Preflight: invalid --status는 account service / DB 진입 전에 차단한다.
+    # `VALID_ACCOUNT_STATUSES`는 `AccountStatus` SSOT의 가벼운 복사본이며,
+    # drift는 enum 동치성 회귀 테스트로 차단한다. 이로써 입력 오타가
+    # `AccountStatus(status_filter)` ValueError → Python traceback으로 새지 않고
+    # flat JSON error로 종료된다. (#1461 strategy list 패턴 정렬 — #1462)
+    if status_filter is not None and status_filter not in VALID_ACCOUNT_STATUSES:
+        fmt.error(
+            f"잘못된 status 값: {status_filter!r}. "
+            f"허용값: {sorted(VALID_ACCOUNT_STATUSES)}",
+            code="ACCOUNT_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
 
     async def _do_list() -> list[dict]:
+        from ante.account.models import AccountStatus
+
         svc, db = await _create_account_service()
         try:
             status = AccountStatus(status_filter) if status_filter else None
@@ -604,10 +628,15 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
         finally:
             await db.close()
 
+    # account.py:683-687 패턴: click.ClickException은 그대로 전파해 click의
+    # 표준 출력 경로를 보존하고, 나머지 일반 Exception은 ACCOUNT_ERROR로
+    # 분류해 구조화된 에러로 종료한다(traceback 노출 차단).
     try:
         rows = _run(_do_list())
+    except click.ClickException:
+        raise
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code="ACCOUNT_ERROR")
         raise SystemExit(1) from e
 
     if not rows:
