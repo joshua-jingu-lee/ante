@@ -362,18 +362,47 @@ class BotManager:
         # ``TreasuryNotConfiguredError`` 를 raise 하여 라우트 계층이 422 로
         # 매핑할 수 있도록 한다. ``new_budget is None`` 인 단순 update
         # 경로는 기존과 동일하게 무영향(no-op)이다.
+        #
+        # Refs #1460 (split #1413/D): budget 변경이 실패해도 같은 요청에
+        # 포함된 runtime control / 기타 config 변경이 memory/DB 어느 쪽에도
+        # partial 하게 commit 되지 않도록 atomic rollback 을 수행한다.
+        # 위에서 이미 ``bot.config`` (in-memory) 와 ``bots.config_json`` (DB)
+        # 을 새 값으로 갱신했으므로, budget 단계의 어떤 예외라도 발생하면
+        # 두 저장소 모두 ``old_config`` 로 복원한 뒤 예외를 그대로 전파한다.
         if new_budget is not None:
             from ante.treasury.exceptions import TreasuryNotConfiguredError
 
-            if self._treasury_manager is None:
-                raise TreasuryNotConfiguredError("treasury manager not configured")
             try:
-                treasury = self._treasury_manager.get(new_config.account_id)
-            except KeyError as ke:
-                raise TreasuryNotConfiguredError(
-                    f"treasury not configured for account {new_config.account_id}"
-                ) from ke
-            await treasury.update_budget(bot_id, new_budget)
+                if self._treasury_manager is None:
+                    raise TreasuryNotConfiguredError("treasury manager not configured")
+                try:
+                    treasury = self._treasury_manager.get(new_config.account_id)
+                except KeyError as ke:
+                    raise TreasuryNotConfiguredError(
+                        f"treasury not configured for account {new_config.account_id}"
+                    ) from ke
+                await treasury.update_budget(bot_id, new_budget)
+            except Exception:
+                # budget 실패 → in-memory + DB 양쪽을 old_config 로 원자적 롤백.
+                # 대상 예외: TreasuryNotConfiguredError, InsufficientFundsError,
+                # BotNotStoppedError, ValueError (budget < 0) 등 ``Exception``
+                # 하위 전부. ``CancelledError`` / ``KeyboardInterrupt`` 등
+                # ``BaseException`` 직속 신호는 잡지 않고 그대로 전파한다 —
+                # 이 경우 SQLite write 가 cancel 컨텍스트에서 재진입하지 않도록
+                # 한다 (drift 위험 < hang 위험 trade-off).
+                # ``_save_bot_config`` 자체의 실패는 더 큰 장애이므로 rollback
+                # 단계에서 예외가 발생해도 원래 예외 컨텍스트를 유지한 채
+                # 전파하도록 별도 try 로 감싼다.
+                bot.config = old_config
+                try:
+                    await self._save_bot_config(old_config)
+                except Exception as rollback_err:
+                    logger.error(
+                        "update_bot rollback 중 config 복원 실패: bot=%s — %s",
+                        bot_id,
+                        rollback_err,
+                    )
+                raise
 
         logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
         return bot
