@@ -844,3 +844,154 @@ class TestBotConfigDBRoundtrip:
             "blank-acc" in m and "invalid bot config row skip" in m
             for m in warn_messages
         )
+
+
+# ── create_bot service boundary defense-in-depth (#1459) ─────────
+
+
+class TestCreateBotServiceBoundary:
+    """``BotManager.create_bot`` 진입부 3종 guard 회귀 (#1459).
+
+    ``BotConfig.__post_init__`` 의 invariant 를 service boundary 에서 mirror.
+    attribute mutation 으로 invariant 를 우회한 객체가 들어와도
+    ``require_account_id`` → ``validate_interval`` → ``validate_runtime_controls``
+    순으로 차단된다. Bot 인스턴스 생성과 DB 저장(``_save_bot_config``) 모두
+    수행되어서는 안 된다.
+    """
+
+    @staticmethod
+    def _install_save_counter(manager, monkeypatch):
+        """``_save_bot_config`` 호출 횟수를 추적하는 counter 를 설치한다.
+
+        Returns counter dict; ``counter["count"]`` 로 호출 횟수 확인.
+        Guard 가 정상 동작하면 ``_save_bot_config`` 는 한 번도 호출되지 않는다
+        (의미상 ``assert_not_called()``).
+        """
+        counter = {"count": 0}
+        original_save = manager._save_bot_config
+
+        async def counting_save(config):
+            counter["count"] += 1
+            return await original_save(config)
+
+        monkeypatch.setattr(manager, "_save_bot_config", counting_save)
+        return counter
+
+    async def test_create_bot_normal_config_succeeds(self, manager, ctx, monkeypatch):
+        """정상 BotConfig 는 guard 를 통과해 create_bot 이 성공한다 (happy path)."""
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-ok", strategy_id="s1", account_id="acc-test")
+        bot = await manager.create_bot(config, SimpleStrategy, ctx)
+
+        assert bot.bot_id == "bot-ok"
+        assert manager.get_bot("bot-ok") is bot
+        # 정상 경로는 _save_bot_config 가 호출된다.
+        assert counter["count"] == 1
+
+    async def test_create_bot_mutated_max_restart_attempts_rejected(
+        self, manager, ctx, monkeypatch
+    ):
+        """mutation 으로 ``max_restart_attempts`` invariant 를 우회해도 service
+        boundary 에서 ValueError 로 거부된다.
+        """
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-mra", strategy_id="s1", account_id="acc-test")
+        # __post_init__ 통과 후 mutation 으로 invariant 위반.
+        config.max_restart_attempts = 0
+
+        with pytest.raises(ValueError, match="max_restart_attempts"):
+            await manager.create_bot(config, SimpleStrategy, ctx)
+
+        assert counter["count"] == 0
+        assert manager.get_bot("bot-mra") is None
+
+    async def test_create_bot_mutated_restart_cooldown_seconds_rejected(
+        self, manager, ctx, monkeypatch
+    ):
+        """``restart_cooldown_seconds`` mutation → ValueError."""
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-rcs", strategy_id="s1", account_id="acc-test")
+        config.restart_cooldown_seconds = 0
+
+        with pytest.raises(ValueError, match="restart_cooldown_seconds"):
+            await manager.create_bot(config, SimpleStrategy, ctx)
+
+        assert counter["count"] == 0
+        assert manager.get_bot("bot-rcs") is None
+
+    async def test_create_bot_mutated_step_timeout_seconds_rejected(
+        self, manager, ctx, monkeypatch
+    ):
+        """``step_timeout_seconds`` mutation → ValueError."""
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-sts", strategy_id="s1", account_id="acc-test")
+        config.step_timeout_seconds = 0
+
+        with pytest.raises(ValueError, match="step_timeout_seconds"):
+            await manager.create_bot(config, SimpleStrategy, ctx)
+
+        assert counter["count"] == 0
+        assert manager.get_bot("bot-sts") is None
+
+    async def test_create_bot_mutated_max_signals_per_step_rejected(
+        self, manager, ctx, monkeypatch
+    ):
+        """``max_signals_per_step`` mutation → ValueError."""
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-msp", strategy_id="s1", account_id="acc-test")
+        config.max_signals_per_step = 0
+
+        with pytest.raises(ValueError, match="max_signals_per_step"):
+            await manager.create_bot(config, SimpleStrategy, ctx)
+
+        assert counter["count"] == 0
+        assert manager.get_bot("bot-msp") is None
+
+    async def test_create_bot_mutated_interval_seconds_rejected(
+        self, manager, ctx, monkeypatch
+    ):
+        """``interval_seconds`` mutation → ValueError. 메시지 contract 보존."""
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-int", strategy_id="s1", account_id="acc-test")
+        config.interval_seconds = -1
+
+        with pytest.raises(ValueError) as excinfo:
+            await manager.create_bot(config, SimpleStrategy, ctx)
+
+        # 메시지에 interval 관련 표식이 들어가야 한다 (validate_interval SSOT).
+        message = str(excinfo.value)
+        assert "실행 간격" in message or "interval_seconds" in message
+
+        assert counter["count"] == 0
+        assert manager.get_bot("bot-int") is None
+
+    async def test_create_bot_mutated_account_id_rejected(
+        self, manager, ctx, monkeypatch
+    ):
+        """``account_id`` mutation → ``InvalidAccountIdError`` (ValueError 미상속).
+
+        ``InvalidAccountIdError`` 는 ``AccountError(Exception)`` 의 subclass 이며
+        ``ValueError`` 를 상속하지 않는다. 즉 호출자는 별도 분기로 다뤄야 한다.
+        """
+        from ante.account.errors import AccountError, InvalidAccountIdError
+
+        counter = self._install_save_counter(manager, monkeypatch)
+
+        config = BotConfig(bot_id="bot-acc", strategy_id="s1", account_id="acc-test")
+        config.account_id = ""
+
+        with pytest.raises(InvalidAccountIdError) as excinfo:
+            await manager.create_bot(config, SimpleStrategy, ctx)
+
+        # ValueError 와 분리된 계층임을 명시적으로 회귀 보호.
+        assert isinstance(excinfo.value, AccountError)
+        assert not isinstance(excinfo.value, ValueError)
+
+        assert counter["count"] == 0
+        assert manager.get_bot("bot-acc") is None

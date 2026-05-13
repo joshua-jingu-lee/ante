@@ -9,8 +9,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ante.account.scoping import require_account_id
 from ante.bot.bot import Bot
-from ante.bot.config import BotConfig, BotStatus
+from ante.bot.config import (
+    BotConfig,
+    BotStatus,
+    validate_interval,
+    validate_runtime_controls,
+)
 from ante.bot.exceptions import BotError, BotNotFoundError
 
 if TYPE_CHECKING:
@@ -320,6 +326,21 @@ class BotManager:
         ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성한다.
         source_path가 주어지면 전략 파일을 스냅샷으로 복사하여 보호한다.
         """
+        # Defense-in-depth: BotConfig.__post_init__의 invariant를 service boundary에서
+        # mirror. attribute mutation으로 invariant를 우회한 객체가 들어와도 여기서
+        # 차단한다 (#1459). 호출 순서는 BotConfig.__post_init__과 동일하게
+        # account_id → interval → runtime controls.
+        config.account_id = require_account_id(
+            config.account_id, context="BotManager.create_bot"
+        )
+        validate_interval(config.interval_seconds)
+        validate_runtime_controls(
+            max_restart_attempts=config.max_restart_attempts,
+            restart_cooldown_seconds=config.restart_cooldown_seconds,
+            step_timeout_seconds=config.step_timeout_seconds,
+            max_signals_per_step=config.max_signals_per_step,
+        )
+
         if config.bot_id in self._bots:
             raise BotError(f"Bot already exists: {config.bot_id}")
 
