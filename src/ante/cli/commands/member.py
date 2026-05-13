@@ -256,28 +256,29 @@ def _invalid_role_row_dict(m) -> dict:  # noqa: ANN001
         "created_at": m.created_at,
         "has_token": has_token,
         "token_expires_at": m.token_expires_at or None,
-        "revoke_command": f"ante member revoke {m.member_id}",
+        # ``member revoke`` 는 ``--yes`` 누락 시 ``CLI_CONFIRMATION_REQUIRED`` 로
+        # 실패하므로 (`member_revoke` 본문 참조), JSON payload 의 권장 명령은
+        # ``--yes`` 를 포함해 즉시 실행 가능하게 출력한다.
+        "revoke_command": f"ante member revoke {m.member_id} --yes",
     }
 
 
 @member.command("list-invalid-roles")
-@click.option(
-    "--db-path",
-    default=None,
-    help="DB 파일 경로 (생략 시 canonical config 의 db.path 사용)",
-)
 @format_option
 @click.pass_context
 @require_auth
 @require_scope("member:read")
 def member_list_invalid_roles(
     ctx: click.Context,
-    db_path: str | None,  # noqa: ARG001 — reserved for future explicit DB targeting
 ) -> None:
     """``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468).
 
+    본 명령은 canonical config 의 ``db.path`` (``get_db_path()``) 단일 DB 에
+    대해서만 invalid-role row 를 식별한다. 다른 DB 파일 대상 점검은 본 PR scope
+    가 아니며, 필요하면 별도 이슈로 분리한다.
+
     ``actionable`` 카테고리는 ``status != revoked`` 인 invalid-role row 이며,
-    운영자가 ``ante member revoke <member_id>`` 로 cleanup 해야 한다.
+    운영자가 ``ante member revoke <member_id> --yes`` 로 cleanup 해야 한다.
     ``legacy_revoked`` 는 이미 revoke 된 historical row 다.
 
     분류는 ``offline`` 이지만 ``MemberService.initialize()`` 가 schema migration

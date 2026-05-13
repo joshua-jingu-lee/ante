@@ -50,7 +50,7 @@ JSON 출력 스키마:
       "created_at": "2026-04-01 00:00:00",
       "has_token": true,
       "token_expires_at": "2026-07-01 00:00:00",
-      "revoke_command": "ante member revoke agent-bad"
+      "revoke_command": "ante member revoke agent-bad --yes"
     }
   ],
   "legacy_revoked": []

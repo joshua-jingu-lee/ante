@@ -874,7 +874,10 @@ class TestMemberListInvalidRolesJsonSchema:
         assert a["created_at"] == "2026-04-01 00:00:00"
         assert a["has_token"] is True
         assert a["token_expires_at"] == "2026-07-01 00:00:00"
-        assert a["revoke_command"] == "ante member revoke agent-bad-1"
+        # ``member revoke`` 가 ``--yes`` 누락 시 ``CLI_CONFIRMATION_REQUIRED`` 로
+        # 실패하므로 (#1468 Codex review attempt 1, P2-B), JSON payload 의
+        # ``revoke_command`` 는 ``--yes`` 를 포함해 즉시 실행 가능해야 한다.
+        assert a["revoke_command"] == "ante member revoke agent-bad-1 --yes"
 
         # legacy revoked row
         legacy_row = data["legacy_revoked"][0]
@@ -891,6 +894,42 @@ class TestMemberListInvalidRolesJsonSchema:
             )
         # raw token hash 문자열도 출력에 등장하지 않는다.
         assert "HASH-MUST-NOT-LEAK-1" not in result.output
+
+    def test_cli_list_invalid_roles_revoke_command_includes_yes_flag(self) -> None:
+        """``revoke_command`` 출력이 ``--yes`` 를 포함한다 (#1468 P2-B 회귀).
+
+        ``ante member revoke`` 는 ``--yes`` 누락 시 prompt 없이
+        ``CLI_CONFIRMATION_REQUIRED`` 로 실패하므로, JSON payload 가 권장 명령으로
+        ``--yes`` 없는 형태를 출력하면 운영자가 그대로 복붙해도 실패한다.
+        본 명령은 즉시 실행 가능한 형태여야 한다.
+        """
+        actionable = _make_invalid_role_member(
+            "agent-must-have-yes", role="oracle_invalid_role", status="active"
+        )
+        legacy = _make_invalid_role_member(
+            "legacy-also-yes",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",
+            token_expires_at="",
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[legacy])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        # actionable 과 legacy_revoked 두 카테고리 모두 ``--yes`` 를 포함해야 한다.
+        for row in data["actionable"] + data["legacy_revoked"]:
+            cmd = row["revoke_command"]
+            assert cmd.endswith(" --yes"), (
+                f"revoke_command 는 ``--yes`` 로 끝나야 한다: {cmd!r}"
+            )
+            assert cmd == f"ante member revoke {row['member_id']} --yes"
 
 
 class TestMemberListInvalidRolesTable:
