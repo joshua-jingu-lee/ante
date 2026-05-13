@@ -509,6 +509,102 @@ class TestUpdateBotBudgetRollback:
             for record in caplog.records
         )
 
+    async def test_update_bot_skips_db_rollback_on_delete_recreate_race(
+        self, eventbus, db, ctx, monkeypatch, caplog
+    ) -> None:
+        """Refs #1460 (attempt 3): delete/recreate race 시 rollback DB save 스킵.
+
+        update_bot 의 per-bot lock 은 같은 update_bot 끼리만 직렬화한다. 따라서
+        ``treasury.update_budget`` await 동안 같은 ``bot_id`` 에 대해
+        ``delete_bot`` (hard) 이 끼어들어 manager 의 ``_bots`` 맵에서 봇을
+        제거하거나, ``delete_bot`` → ``create_bot`` 으로 다른 ``Bot`` 인스턴스로
+        대체될 수 있다. 이런 상황에서 rollback 의
+        ``_save_bot_config(old_config)`` 가 그대로 실행되면:
+
+        - 삭제된 row 를 다시 INSERT 하여 좀비 봇이 부활한다.
+        - 새 봇의 row 를 우리의 옛 설정으로 덮어쓰는 오염이 발생한다.
+
+        시나리오:
+        1. ``update_bot(A)`` 가 진입하여 new_config 를 DB commit.
+        2. ``treasury.update_budget`` 의 side_effect 안에서 manager 의 ``_bots``
+           맵에서 ``bot_id`` 를 ``del`` 해 race 를 모사 후 raise.
+        3. rollback 진입 — ``bot.config is new_config`` 는 True 라서 memory
+           rollback (``bot.config = old_config``) 은 적용된다.
+        4. 그러나 ``self._bots.get(bot_id) is bot`` 가 False 이므로 DB rollback
+           save 는 스킵.
+        5. 결과: ``_save_bot_config`` 는 정확히 1회 (new_config commit) 만 호출.
+           원래 budget 예외 propagate. memory rollback 은 적용. "delete/recreate
+           race" warning 흔적이 남는다.
+        """
+
+        manager = BotManager(eventbus=eventbus, db=db, treasury_manager=None)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(
+            manager, ctx, account_id="acc-test", interval_seconds=60
+        )
+        bot = manager.get_bot(bot_id)
+        assert bot is not None
+        old_config = bot.config
+
+        # _save_bot_config 호출 횟수 추적.
+        original_save = manager._save_bot_config
+        save_call_count = {"n": 0}
+
+        async def counting_save(config):
+            save_call_count["n"] += 1
+            return await original_save(config)
+
+        monkeypatch.setattr(manager, "_save_bot_config", counting_save)
+
+        # race 시뮬레이션: treasury.update_budget 안에서 manager._bots 에서
+        # bot_id 를 제거 (hard delete 의 마지막 라인 시뮬레이션) 후 raise.
+        class _BoomError(RuntimeError):
+            pass
+
+        class _DeleteRaceTreasury:
+            def __init__(self, mgr: BotManager, target_bot_id: str) -> None:
+                self._mgr = mgr
+                self._target_bot_id = target_bot_id
+                self.update_budget_calls: list[tuple[str, float]] = []
+
+            async def update_budget(
+                self, called_bot_id: str, target_amount: float
+            ) -> None:
+                self.update_budget_calls.append((called_bot_id, target_amount))
+                # delete_bot (hard) 가 끼어든 상황 모사: manager 메모리 맵에서
+                # bot_id 를 제거. bot.config 는 그대로 두어 ``bot.config is
+                # new_config`` 분기를 타게 한다.
+                del self._mgr._bots[self._target_bot_id]
+                raise _BoomError("delete-race-boom")
+
+        race_treasury = _DeleteRaceTreasury(manager, bot_id)
+        tm = _RaisingTreasuryManager("acc-test", race_treasury)  # type: ignore[arg-type]
+        manager._treasury_manager = tm  # type: ignore[assignment]
+
+        with caplog.at_level(logging.WARNING, logger="ante.bot.manager"):
+            with pytest.raises(_BoomError):
+                await manager.update_bot(bot_id, interval_seconds=120, budget=100_000.0)
+
+        # update_budget 진입 보증.
+        assert race_treasury.update_budget_calls == [(bot_id, 100_000.0)]
+
+        # 핵심 보증: _save_bot_config 가 정확히 1회만 호출됨 (new_config commit
+        # 만 수행, rollback save 는 instance check 가드로 스킵). 가드가 빠지면
+        # call_count == 2 가 된다.
+        assert save_call_count["n"] == 1
+
+        # memory rollback 은 적용되어야 한다 (bot 객체는 caller 가 잡고 있을 수
+        # 있으니 in-memory 일관성은 유지).
+        assert bot.config is old_config
+        assert bot.config.interval_seconds == 60
+
+        # delete/recreate race warning 흔적 확인.
+        assert any(
+            "delete/recreate race" in record.message
+            and record.levelno == logging.WARNING
+            for record in caplog.records
+        )
+
     async def test_update_bot_concurrent_requests_serialized_by_lock(
         self, eventbus, db, ctx
     ) -> None:

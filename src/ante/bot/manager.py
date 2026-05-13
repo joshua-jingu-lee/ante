@@ -534,18 +534,44 @@ class BotManager:
                     # 수 있으므로 memory/DB rollback 모두 스킵한다.
                     if bot.config is new_config:
                         bot.config = old_config
-                        try:
-                            await self._save_bot_config(old_config)
-                        except Exception:
-                            # nested rollback failure: 원래 budget 예외를
-                            # 덮지 않도록 rollback 실패는 ``logger.exception``
-                            # 으로 남기고 bare raise 로 원래 예외를 propagate
-                            # 한다. memory 는 이미 rollback 된 상태이므로
-                            # in-memory 일관성은 유지된다.
-                            logger.exception(
-                                "update_bot rollback DB save failed for "
-                                "bot_id=%s; memory was rolled back but DB "
-                                "may diverge.",
+                        # Refs #1460 (attempt 3): DB rollback save 직전에
+                        # manager 의 ``_bots`` 메모리 맵에 이 ``bot_id`` 가
+                        # 여전히 우리가 잡고 있는 같은 ``bot`` 인스턴스로 등록되어
+                        # 있는지 한 번 더 확인한다. ``update_bot`` 의 per-bot
+                        # lock 은 ``update_bot`` 들 사이에서만 직렬화하므로,
+                        # ``treasury.update_budget`` await 동안 같은 ``bot_id``
+                        # 에 대해 ``delete_bot`` (hard delete 포함) 이나
+                        # ``delete_bot`` → ``create_bot`` (재생성) 이 끼어들면:
+                        # - hard delete 후라면 ``_save_bot_config(old_config)`` 가
+                        #   삭제된 row 를 다시 INSERT 하여 좀비 row 가 부활한다.
+                        # - delete+create 후라면 새 봇의 row 를 우리의 옛 설정으로
+                        #   덮어써 데이터 오염이 발생한다.
+                        # 따라서 메모리 맵의 ``bot_id`` 가 더 이상 우리 ``bot``
+                        # 인스턴스를 가리키지 않으면 DB rollback save 는 스킵한다.
+                        # 광범위한 동시성 모델 (delete/create + 같은 lock 공유)
+                        # 변경은 별도 이슈로 다룬다. memory rollback (단순 대입)
+                        # 은 위에서 이미 수행했으므로 caller 가 들고 있는 ``bot``
+                        # 객체의 in-memory 일관성은 유지된다.
+                        if self._bots.get(bot_id) is bot:
+                            try:
+                                await self._save_bot_config(old_config)
+                            except Exception:
+                                # nested rollback failure: 원래 budget 예외를
+                                # 덮지 않도록 rollback 실패는 ``logger.exception``
+                                # 으로 남기고 bare raise 로 원래 예외를 propagate
+                                # 한다. memory 는 이미 rollback 된 상태이므로
+                                # in-memory 일관성은 유지된다.
+                                logger.exception(
+                                    "update_bot rollback DB save failed for "
+                                    "bot_id=%s; memory was rolled back but DB "
+                                    "may diverge.",
+                                    bot_id,
+                                )
+                        else:
+                            logger.warning(
+                                "update_bot rollback DB save skipped for "
+                                "bot_id=%s: bot instance no longer in manager "
+                                "(delete/recreate race).",
                                 bot_id,
                             )
                     else:
