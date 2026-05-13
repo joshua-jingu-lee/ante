@@ -30,6 +30,8 @@
 | `get` | id | ApprovalRequest \| None | 단건 조회 |
 | `list` | status, type, search, limit, offset | list[ApprovalRequest] | 필터 조회. `search`: title/requester LIKE 키워드 검색 |
 | `expire_stale` | — | int | 만료 기한이 지난 요청 일괄 expired 처리. 처리 건수 반환 |
+| `list_invalid_type_requests` | status (optional) | list[ApprovalRequest] | `ApprovalType` enum SSOT 외 `type` 을 가진 legacy row 조회 (#1472 SPLIT-D). 정상 type row 는 결과에서 자동 제외 |
+| `cancel_invalid_type_request` | id, resolved_by, suppress_notification=True, detail | ApprovalRequest | administrative cancellation. 정상 type row 와 종결 상태 row 는 거부. history 에 `cancelled_invalid_type` 액션 기록 (#1472 SPLIT-D) |
 
 ### 전결 평가
 
@@ -160,3 +162,52 @@ except Exception as e:
 - `reject()` → 거절 처리
 - `hold()` → 보류 전환
 - `cancel()` → 철회
+
+### Administrative cancellation (#1472 SPLIT-D)
+
+`_VALID_APPROVAL_TYPES` SSOT (`frozenset(t.value for t in ApprovalType)`) 외의
+`type` 값을 가진 legacy row 는 일반 `cancel()` 의 requester ownership rule
+(`request.requester != requester` 거부) 로 정리할 수 없다. invalid row 의
+`requester` 는 신뢰할 수 없거나 더 이상 존재하지 않을 수 있기 때문이다.
+
+이런 row 만을 위한 administrative 경로로 `list_invalid_type_requests()` 와
+`cancel_invalid_type_request()` 가 추가되었다.
+
+**식별** — `list_invalid_type_requests(status=None)`
+- `_VALID_APPROVAL_TYPES` 에 없는 `type` 의 row 만 반환한다 (`NOT IN`).
+- 정상 type row 는 enum SSOT 의 모든 멤버를 자동으로 제외하므로 신규
+  `ApprovalType` 멤버 추가 시 별도 코드 변경 없이 결과에서 빠진다.
+- `status` 인자로 추가 필터링이 가능하다 (예: `pending`).
+
+**Cleanup** — `cancel_invalid_type_request(id, *, resolved_by, suppress_notification=True, detail)`
+- `request.type` 이 `_VALID_APPROVAL_TYPES` 안에 있으면 `ValueError` 로 거부
+  한다. 정상 type row 가 administrative 경로로 처리되는 사고를 invariant
+  로서 차단한다.
+- 처리 가능 상태는 `pending`, `on_hold`, `execution_failed` 한정 (일반
+  `cancel()` 과 동일한 status flow edge `pending|on_hold|execution_failed →
+  cancelled` 를 재사용한다). 종결 상태(approved/rejected/cancelled/expired)
+  는 `ValueError` 로 거부한다.
+- status 는 `cancelled` 로, `resolved_by`/`resolved_at` 은 호출자가 전달한
+  `resolved_by` 값(IPC `actor`) 로 기록된다.
+- history 에 `cancelled_invalid_type` 액션이 append 되어 후속 audit 추적
+  경로를 제공한다.
+- `suppress_notification=True` (기본) 일 때는 `ApprovalResolvedEvent` /
+  `NotificationEvent` 를 발행하지 않는다. legacy cleanup 알림이 운영자/
+  Agent 에게 노이즈로 전달되는 것을 막기 위한 것이다. `False` 로 호출
+  하면 일반 `cancel()` 과 동일하게 event/notification 경로를 탄다.
+
+**Authorization boundary** — administrative mutation 이므로 호출 경계
+(`approval.cancel_invalid` IPC) 는 `approval:admin` scope 를 필수로 한다.
+일반 `cancel()` 이 `approval:write` 로도 통과하는 것과 구분된다. 인증된
+member id 는 IPC `actor` 로 전달되어 service `resolved_by` 와 AuditLogger
+`member_id` 양쪽에 동일 값으로 기록된다.
+
+**Audit trail** — IPC 핸들러(`_handle_approval_cancel_invalid`) 는 성공
+후 `audit_logger.log(member_id=actor, action="approval.cancel_invalid",
+resource=f"approval:{id}", detail=request.type)` 를 호출한다.
+`ServiceRegistry.audit_logger` 가 `None` (테스트/legacy 환경) 이면 audit
+호출은 skip 되며, service `history` append 가 fallback 추적 경로다.
+
+**Status flow** — 신규 edge 가 도입되지 않는다. 기존
+`pending|on_hold|execution_failed → cancelled` edge 를 재사용한다
+([06-status-flow.md](06-status-flow.md) 참고).

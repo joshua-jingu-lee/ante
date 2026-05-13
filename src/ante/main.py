@@ -1559,6 +1559,7 @@ async def _init_ipc(s: Services) -> None:
         reconciler=reconciler,
         eventbus=s.eventbus,
         strategy_registry=s.strategy_registry,
+        audit_logger=s.audit_logger,
     )
 
     command_registry = CommandRegistry()

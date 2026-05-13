@@ -254,6 +254,35 @@ async def _handle_approval_cancel(
     return {"id": request.id, "status": str(request.status)}
 
 
+async def _handle_approval_cancel_invalid(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """Administrative cancellation of a legacy invalid-type approval.
+
+    Refs #1418 → #1472 SPLIT-D. CLI ``approval:admin`` scope 를 보유한 운영자가
+    ``ante approval cancel-invalid <id>`` 로 호출한다. 성공 후 ``audit_logger``
+    가 주입된 환경(production)에서는 ``audit_log`` 테이블에 기록을 남긴다.
+    테스트/legacy 환경에서 ``audit_logger`` 가 ``None`` 이면 audit 호출을 건너
+    뛰며, 서비스의 ``history`` append 가 fallback 추적 경로다.
+    """
+    approval_id = args["approval_id"]
+    request = await svc.approval.cancel_invalid_type_request(
+        approval_id,
+        resolved_by=actor,
+    )
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="approval.cancel_invalid",
+            resource=f"approval:{approval_id}",
+            detail=request.type,
+        )
+
+    return {"id": request.id, "status": str(request.status), "type": request.type}
+
+
 async def _handle_approval_reopen(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -340,17 +369,19 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """18개 런타임 커맨드 핸들러를 일괄 등록.
+    """19개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(15개) 또는 read-only(3개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(16개) 또는 read-only(3개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
 
     `account.delete`는 1.0 IPC 계약에서 제외되었다 (#1139). cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
+
+    Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` (mutating) 추가.
     """
-    # ── mutating (15개): 서버 상태/DB를 변경 ──────────
+    # ── mutating (16개): 서버 상태/DB를 변경 ──────────
     registry.register("system.halt", _handle_system_halt, is_mutating=True)
     registry.register("system.clear_halt", _handle_system_clear_halt, is_mutating=True)
     registry.register("account.suspend", _handle_account_suspend, is_mutating=True)
@@ -366,6 +397,11 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     registry.register("approval.approve", _handle_approval_approve, is_mutating=True)
     registry.register("approval.reject", _handle_approval_reject, is_mutating=True)
     registry.register("approval.cancel", _handle_approval_cancel, is_mutating=True)
+    registry.register(
+        "approval.cancel_invalid",
+        _handle_approval_cancel_invalid,
+        is_mutating=True,
+    )
     registry.register("approval.reopen", _handle_approval_reopen, is_mutating=True)
     # broker.reconcile은 reconciler.reconcile()이 correct_position/이벤트
     # publish를 수행하므로 일괄 mutating으로 분류한다. CLI ``--fix=False``

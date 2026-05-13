@@ -127,6 +127,8 @@ allowlist 후보에서 제거한다.
 | `ante config history <key>` | `offline` | dynamic config history 조회 |
 | `ante approval request/approve/reject/cancel/reopen ...` | `runtime IPC` | 서버 ApprovalService + Notification/EventBus |
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
+| `ante approval audit-types [--status ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
+| `ante approval cancel-invalid <id>` | `runtime IPC` | scope `approval:admin`. legacy invalid-type row administrative cleanup (#1472) |
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
 | `ante member list-invalid-roles` | `offline` | DB 직접 조회 (runtime IPC 우회; `service.initialize` 수반) |
@@ -468,6 +470,8 @@ ante approval cancel <approval_id>          # 승인 요청 취소
 ante approval approve <approval_id>         # 승인 요청 승인
 ante approval reject <approval_id>          # 승인 요청 거부
 ante approval reopen <approval_id> [--data <json>]  # 거절된 요청 재상신 (params/body 수정 가능)
+ante approval audit-types [--status <상태>]   # legacy invalid-type row 식별 (#1472, scope approval:read)
+ante approval cancel-invalid <approval_id>    # legacy invalid-type row administrative cleanup (#1472, scope approval:admin)
 ```
 
 ### `ante init` — 시스템 초기 설정

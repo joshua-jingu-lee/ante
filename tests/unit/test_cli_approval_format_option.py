@@ -12,7 +12,9 @@ import pytest
 from ante.cli.commands.approval import (
     approval_list,
     approve,
+    audit_types,
     cancel,
+    cancel_invalid,
     info,
     reject,
     reopen,
@@ -29,6 +31,8 @@ _SUBCOMMANDS = [
     ("cancel", cancel),
     ("approve", approve),
     ("reject", reject),
+    ("audit-types", audit_types),
+    ("cancel-invalid", cancel_invalid),
 ]
 
 

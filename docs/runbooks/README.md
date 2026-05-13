@@ -17,6 +17,7 @@
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (release PR, 버전 관리, PyPI/Docker 배포) |
 | [07-member-invalid-role-cleanup.md](07-member-invalid-role-cleanup.md) | `MemberRole` enum 외 role 을 가진 legacy member row 의 식별 → 검토 → revoke 운영 절차 (#1417/#1465/#1466/#1468) |
+| [08-legacy-invalid-approval-cleanup.md](08-legacy-invalid-approval-cleanup.md) | `ApprovalType` enum 외 `type` 을 가진 legacy approval row 의 식별 → 검토 → administrative cancel 운영 절차 (#1418/#1469/#1470/#1472) |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)
 
