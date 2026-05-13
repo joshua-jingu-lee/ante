@@ -42,14 +42,17 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 18개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 19개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
+
+    Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` 추가 (16번째
+    mutating).
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 18
+    assert len(registry.commands) == 19
 
     expected = {
         "system.halt",
@@ -65,6 +68,7 @@ def test_register_all_handlers() -> None:
         "approval.approve",
         "approval.reject",
         "approval.cancel",
+        "approval.cancel_invalid",
         "approval.reopen",
         "broker.status",
         "broker.balance",
@@ -79,7 +83,7 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 18개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다."""
+    """등록된 19개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다."""
     registry = CommandRegistry()
     register_all_handlers(registry)
 
@@ -97,12 +101,13 @@ def test_register_all_handlers_taxonomy() -> None:
         "approval.approve",
         "approval.reject",
         "approval.cancel",
+        "approval.cancel_invalid",
         "approval.reopen",
         "broker.reconcile",
     }
     read_only = {"broker.status", "broker.balance", "broker.positions"}
 
-    assert len(mutating) == 15
+    assert len(mutating) == 16
     assert len(read_only) == 3
     assert mutating | read_only == set(registry.commands)
 

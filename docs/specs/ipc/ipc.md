@@ -123,6 +123,7 @@ cold-path 삭제는 항상 keep 의미다.
 | `ante approval approve` | `approval.approve` | `ApprovalService.approve()` | `NotificationEvent` 알림 + executor 실행 |
 | `ante approval reject` | `approval.reject` | `ApprovalService.reject()` | `NotificationEvent` 알림 |
 | `ante approval cancel` | `approval.cancel` | `ApprovalService.cancel()` | `NotificationEvent` 알림 |
+| `ante approval cancel-invalid` | `approval.cancel_invalid` | `ApprovalService.cancel_invalid_type_request()` | scope `approval:admin`. legacy invalid-type row 의 administrative cleanup. 성공 후 `AuditLogger.log(action="approval.cancel_invalid", resource="approval:<id>")` 호출 (#1472) |
 | `ante approval reopen` | `approval.reopen` | `ApprovalService.reopen()` | `NotificationEvent` 알림 |
 
 #### Broker
@@ -219,7 +220,7 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 18개가
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 19개가
 SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
@@ -237,6 +238,7 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `approval.approve` | mutating | `ApprovalService.approve()` 호출 |
 | `approval.reject` | mutating | `ApprovalService.reject()` 호출 |
 | `approval.cancel` | mutating | `ApprovalService.cancel()` 호출 |
+| `approval.cancel_invalid` | mutating | `ApprovalService.cancel_invalid_type_request()` 호출 + AuditLogger 기록 (#1472) |
 | `approval.reopen` | mutating | `ApprovalService.reopen()` 호출 |
 | `broker.reconcile` | mutating | `PositionReconciler.reconcile()`이 보정/이벤트 경로를 수행 |
 | `broker.status` | read-only | `BrokerAdapter.health_check()` live 조회 |
@@ -397,7 +399,15 @@ class ServiceRegistry:
     approval: ApprovalService
     reconciler: PositionReconciler
     eventbus: EventBus
+    strategy_registry: StrategyRegistry | None = None
+    audit_logger: AuditLogger | None = None  # #1472: approval.cancel_invalid audit
 ```
+
+`audit_logger` 는 administrative mutation IPC (`approval.cancel_invalid`) 가
+정상 환경에서 `audit_log` 테이블에 기록을 남기기 위한 optional 필드다.
+테스트/legacy 환경에서는 `None` 이 허용되며, 핸들러는
+`getattr(svc, "audit_logger", None)` 패턴으로 안전하게 분기한다 — `None` 일
+때는 service 의 `history` append 가 fallback 추적 경로다.
 
 ## 에러 처리
 

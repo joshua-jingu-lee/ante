@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-05 (KST)
+> 마지막 생성 시점: 2026-05-14 (KST)
 
 ## 최상위 구조
 
@@ -48,7 +48,8 @@ src/ante/
 │   │   ├── safe_logger.py            # AnteLogger, install_safe_logger() (makeRecord 예약 키 정규화)
 │   │   └── setup.py                  # setup_logging() stdout + JSONL 파일 핸들러 구성
 │   ├── __init__.py
-│   └── registry.py
+│   ├── registry.py
+│   └── time.py
 ├── config/
 │   ├── config.py                     # ConfigService — 설정 로딩 (system.toml + secrets.env)
 │   ├── defaults.py                   # 기본 설정값
@@ -80,7 +81,8 @@ src/ante/
 │   ├── auth_service.py
 │   ├── errors.py
 │   ├── recovery_key_manager.py
-│   └── token_manager.py
+│   ├── token_manager.py
+│   └── scopes.py
 ├── bot/
 │   ├── bot.py                        # Bot — 봇 실행 루프, 전략 실행, 이벤트 발행
 │   ├── config.py                     # BotConfig — 봇 설정 (exchange, 자금 한도 등)
@@ -112,7 +114,8 @@ src/ante/
 │   ├── global_rules.py               # 전역 룰 정의
 │   ├── strategy_rules.py             # 전략별 룰 정의
 │   ├── __init__.py
-│   └── manager.py
+│   ├── manager.py
+│   └── defaults.py
 ├── treasury/
 │   ├── models.py                     # TreasuryAllocation — 자금 할당 모델
 │   ├── treasury.py                   # Treasury — 자금 배분 및 한도 관리
@@ -239,9 +242,13 @@ src/ante/
 │   ├── middleware/
 │   │   ├── __init__.py
 │   │   ├── audit.py
-│   │   └── token_auth.py
+│   │   ├── token_auth.py
+│   │   └── require_auth.py
 │   ├── __init__.py
-│   └── deps.py
+│   ├── deps.py
+│   └── utils/
+│       ├── __init__.py
+│       └── date_params.py
 ├── cli/
 │   ├── main.py                       # CLI 루트 그룹 (ante 커맨드)
 │   ├── middleware.py                 # 인증 미들웨어 (require_auth, require_scope)
@@ -279,7 +286,8 @@ src/ante/
 │   ├── models.py
 │   ├── presets.py
 │   ├── scoping.py
-│   └── service.py
+│   ├── service.py
+│   └── timezone.py
 ├── db/
 │   ├── versions/
 │   │   ├── __init__.py
@@ -410,7 +418,8 @@ tests/
 │   │   └── test_dart_collector.py
 │   ├── cli/
 │   │   ├── __init__.py
-│   │   └── test_version.py
+│   │   ├── test_version.py
+│   │   └── test_authenticated_group.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -516,7 +525,76 @@ tests/
 │   ├── test_update_snapshot.py
 │   ├── test_update_startup_check.py
 │   ├── test_web_account_filter.py
-│   └── test_check_import_path.py
+│   ├── test_check_import_path.py
+│   ├── conftest.py
+│   ├── test_account_routes_trading_hours.py
+│   ├── test_account_schema_trading_hours.py
+│   ├── test_account_timezone_validation.py
+│   ├── test_app_middleware_order.py
+│   ├── test_approval_invalid_type.py
+│   ├── test_approval_invalid_type_approve.py
+│   ├── test_approval_invalid_type_cleanup.py
+│   ├── test_approval_routes_filter_validation.py
+│   ├── test_audit_date_filter.py
+│   ├── test_audit_routes_auth.py
+│   ├── test_bot_manager_modify_subscription.py
+│   ├── test_bot_manager_stop_subscription.py
+│   ├── test_bot_manager_update_bot_atomicity.py
+│   ├── test_bot_manager_update_budget.py
+│   ├── test_bot_on_order_update_stop_events.py
+│   ├── test_bot_publish_actions_modify.py
+│   ├── test_bot_routes_budget_finite.py
+│   ├── test_bot_routes_create_budget_error.py
+│   ├── test_bot_routes_create_contract.py
+│   ├── test_bot_runtime_controls_validation.py
+│   ├── test_cli_approval_invalid_type_cleanup.py
+│   ├── test_cli_approval_list_filters.py
+│   ├── test_cli_dependency_isolation.py
+│   ├── test_cli_report_list_filters.py
+│   ├── test_cli_report_submit_invariant.py
+│   ├── test_cli_strategy_list_invalid_status.py
+│   ├── test_data_schema_validation.py
+│   ├── test_format_utc.py
+│   ├── test_gateway_cancel_failed.py
+│   ├── test_gateway_modify.py
+│   ├── test_ipc_approval_cancel_invalid.py
+│   ├── test_kis_error_codes_igw00022.py
+│   ├── test_kis_handle_response_business_error.py
+│   ├── test_member_auth_invalid_role.py
+│   ├── test_member_create_invalid_role.py
+│   ├── test_member_routes_create_auth.py
+│   ├── test_member_routes_filter_validation.py
+│   ├── test_member_routes_mutation_auth.py
+│   ├── test_member_scope_drift.py
+│   ├── test_member_scope_vocabulary.py
+│   ├── test_member_service.py
+│   ├── test_member_service_master_guard.py
+│   ├── test_pagination_limit_validation.py
+│   ├── test_public_paths_spec_match.py
+│   ├── test_report_routes_status_filter.py
+│   ├── test_report_submit_validation.py
+│   ├── test_require_audit_read.py
+│   ├── test_require_auth_middleware.py
+│   ├── test_require_master_caller.py
+│   ├── test_require_scope_factory.py
+│   ├── test_resource_date_filter_1440.py
+│   ├── test_route_auth_coverage.py
+│   ├── test_rule_defaults.py
+│   ├── test_rule_engine_modify.py
+│   ├── test_runtime_mutation_auth.py
+│   ├── test_signal_channel_modify.py
+│   ├── test_signal_channel_stop_events.py
+│   ├── test_stop_order_events_account_id.py
+│   ├── test_stop_order_manager_account_propagation.py
+│   ├── test_strategy_report_invariant.py
+│   ├── test_system_kill_switch_timestamp.py
+│   ├── test_treasury_buy_stop_no_reserve.py
+│   ├── test_treasury_routes_balance.py
+│   ├── test_treasury_routes_budget_change.py
+│   ├── test_treasury_set_balance_invariant.py
+│   ├── test_treasury_transaction_vocabulary.py
+│   ├── test_treasury_transactions_type_filter.py
+│   └── test_virtual_provider_stop_guard.py
 └── __init__.py
 ```
 
@@ -623,7 +701,8 @@ docs/
 │   ├── D-011.md
 │   ├── D-012.md
 │   ├── D-013.md
-│   └── D-014.md
+│   ├── D-014.md
+│   └── D-015-default-deny-auth-gate.md
 ├── references/                       # 외부 참조 문서
 │   └── dashboard/
 │       ├── dart-openapi.md
@@ -637,7 +716,9 @@ docs/
 │   ├── 04-ci-cd.md                   # CI/CD와 리뷰 게이트
 │   ├── 05-testing.md
 │   ├── 06-release.md                 # 릴리스 정책
-│   └── README.md
+│   ├── README.md
+│   ├── 07-member-invalid-role-cleanup.md
+│   └── 08-legacy-invalid-approval-cleanup.md
 ├── specs/                            # 모듈별 세부 설계
 │   ├── README.md
 │   ├── account/
@@ -861,7 +942,9 @@ docs/
 │   │   ├── 07-error-format.md
 │   │   ├── 08-pydantic-schemas.md
 │   │   ├── 10-cross-module-notes.md
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── 09-public-paths.md
+│   │   └── 11-route-scope-table.md
 │   └── logging/
 │       ├── 01-overview.md
 │       ├── 02-design-decisions.md

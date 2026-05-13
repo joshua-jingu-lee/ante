@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ante.account.service import AccountService
     from ante.approval.service import ApprovalService
+    from ante.audit.logger import AuditLogger
     from ante.bot.manager import BotManager
     from ante.config.dynamic import DynamicConfigService
     from ante.eventbus import EventBus
@@ -22,7 +23,13 @@ if TYPE_CHECKING:
 
 @dataclass
 class ServiceRegistry:
-    """IPC 핸들러가 참조하는 서비스 레지스트리."""
+    """IPC 핸들러가 참조하는 서비스 레지스트리.
+
+    Refs #1418 → #1472 SPLIT-D: ``audit_logger`` 필드는 administrative
+    mutation IPC (``approval.cancel_invalid``) 가 정상 환경에서 audit_log 테이블에
+    기록을 남기기 위해 추가되었다. 테스트/legacy 환경에서는 ``None`` 이 허용되며,
+    핸들러는 ``getattr(svc, "audit_logger", None)`` 패턴으로 안전하게 처리한다.
+    """
 
     account: AccountService | Any
     bot_manager: BotManager | Any
@@ -32,3 +39,4 @@ class ServiceRegistry:
     reconciler: PositionReconciler | Any
     eventbus: EventBus | Any
     strategy_registry: StrategyRegistry | Any = field(default=None)
+    audit_logger: AuditLogger | Any = field(default=None)

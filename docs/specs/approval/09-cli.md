@@ -72,3 +72,38 @@ ante approval reopen <id> \
 ante approval approve <id>
 ante approval reject <id> --reason "현 시점 리스크 과다"
 ```
+
+### `ante approval audit-types` (#1472 SPLIT-D)
+
+`ApprovalType` enum SSOT 외 `type` 값을 가진 legacy invalid row 를 식별한다.
+운영자 cleanup 의 사전 식별 단계로 사용된다. 분류는 `offline` (DB 직접 조회)
+이며 scope `approval:read` 가 필요하다. 정상 type row 는 결과에서 자동으로
+제외된다.
+
+```
+ante approval audit-types \
+  [--status pending|approved|rejected|cancelled|on_hold|expired|execution_failed] \
+  [--db-path <path>] \
+  [--format json]
+```
+
+출력 컬럼: id, type, status, requester, created_at, expires_at.
+
+cleanup runbook 사용 예시는 [docs/runbooks/08-legacy-invalid-approval-cleanup.md](../../../docs/runbooks/08-legacy-invalid-approval-cleanup.md) 참고.
+
+### `ante approval cancel-invalid <id>` (#1472 SPLIT-D)
+
+`audit-types` 로 식별된 legacy invalid-type row 의 administrative cleanup.
+일반 `ante approval cancel` 의 requester ownership rule 을 우회하므로
+`approval:admin` scope 가 필수다. 분류는 `runtime IPC` 로, 서버가 가동
+중이어야 한다 (cold-path fallback 없음). 정상 type row 는 service 가드에서
+거부된다.
+
+```
+ante approval cancel-invalid <id> \
+  [--format json]
+```
+
+성공 시 service `history` 에 `cancelled_invalid_type` 액션이 append 되고,
+서버에 `AuditLogger` 가 주입된 환경(production)에서는 `audit_log` 테이블에
+`action="approval.cancel_invalid"` 기록이 남는다.

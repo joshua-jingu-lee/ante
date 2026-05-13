@@ -730,6 +730,139 @@ class ApprovalService:
         row = await self._db.fetch_one(query, tuple(params))
         return row["cnt"] if row else 0
 
+    # Refs #1418 → #1472 SPLIT-D: legacy invalid-type approval cleanup.
+    # ``list_invalid_type_requests`` 와 ``cancel_invalid_type_request`` 는
+    # ``_VALID_APPROVAL_TYPES`` SSOT 에 없는 ``type`` 값을 가진 legacy row 만
+    # 다룬다. 정상 type row 는 두 메서드 모두에서 절대 처리되지 않는다.
+    async def list_invalid_type_requests(
+        self,
+        *,
+        status: str | None = None,
+    ) -> list[ApprovalRequest]:
+        """``_VALID_APPROVAL_TYPES`` 외의 ``type`` 을 가진 legacy row 만 반환.
+
+        ``status`` 미지정 시 모든 상태를 포함한다. 정상 type row 는 enum SSOT
+        의 모든 멤버를 ``NOT IN`` 으로 제외해 결과에서 자동으로 빠진다.
+
+        Refs #1418 → #1472 SPLIT-D.
+        """
+        valid_types = sorted(_VALID_APPROVAL_TYPES)
+        placeholders = ", ".join(["?"] * len(valid_types))
+        conditions: list[str] = [f"type NOT IN ({placeholders})"]
+        params: list[object] = list(valid_types)
+
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where = " AND ".join(conditions)
+        query = (
+            f"SELECT * FROM approvals WHERE {where} "  # noqa: S608
+            "ORDER BY created_at DESC"
+        )
+
+        rows = await self._db.fetch_all(query, tuple(params))
+        return [self._row_to_request(row) for row in rows]
+
+    async def cancel_invalid_type_request(
+        self,
+        id: str,
+        *,
+        resolved_by: str,
+        suppress_notification: bool = True,
+        detail: str = "legacy invalid type cleanup",
+    ) -> ApprovalRequest:
+        """administrative cancellation of a legacy invalid-type approval.
+
+        일반 ``cancel()`` 의 requester ownership rule 을 우회해 admin 운영자가
+        cleanup 할 수 있게 한다. 정상 type row 와 종결 상태 row 는 거부한다.
+
+        - ``type`` 이 ``_VALID_APPROVAL_TYPES`` 에 있으면 ``ValueError`` raise.
+        - 처리 가능 상태는 ``pending``, ``on_hold``, ``execution_failed`` 한정.
+        - history 에 ``cancelled_invalid_type`` 액션을 append 하고,
+          ``status=cancelled``, ``resolved_by``/``resolved_at`` 을 기록한다.
+        - ``suppress_notification=True`` (기본) 시 ``ApprovalResolvedEvent`` /
+          notification 발행을 생략한다. False 면 일반 ``cancel()`` 과 동일한
+          event/notification 경로를 탄다.
+
+        Refs #1418 → #1472 SPLIT-D.
+        """
+        request = await self.get(id)
+        if not request:
+            msg = f"결재 요청을 찾을 수 없음: {id}"
+            raise ValueError(msg)
+
+        if request.type in _VALID_APPROVAL_TYPES:
+            msg = (
+                f"not an invalid-type request: id={id!r} type={request.type!r}"
+                " — use 'ante approval cancel' instead"
+            )
+            raise ValueError(msg)
+
+        cancellable = (
+            ApprovalStatus.PENDING,
+            ApprovalStatus.ON_HOLD,
+            ApprovalStatus.EXECUTION_FAILED,
+        )
+        if request.status not in cancellable:
+            msg = (
+                "pending/on_hold/execution_failed 상태에서만 cancel-invalid 가능"
+                f" (현재: {request.status})"
+            )
+            raise ValueError(msg)
+
+        now = datetime.now(UTC).isoformat()
+        request.history.append(
+            {
+                "action": "cancelled_invalid_type",
+                "actor": resolved_by,
+                "at": now,
+                "detail": detail,
+            }
+        )
+
+        await self._db.execute(
+            """UPDATE approvals
+               SET status = ?, resolved_at = ?, resolved_by = ?,
+                   history = ?
+               WHERE id = ?""",
+            (
+                ApprovalStatus.CANCELLED,
+                now,
+                resolved_by,
+                json.dumps(request.history, ensure_ascii=False),
+                id,
+            ),
+        )
+
+        request.status = ApprovalStatus.CANCELLED
+        request.resolved_at = now
+        request.resolved_by = resolved_by
+
+        logger.info(
+            "invalid-type 결재 cleanup: %s (type=%s) by %s",
+            id,
+            request.type,
+            resolved_by,
+        )
+
+        if not suppress_notification:
+            from ante.eventbus.events import ApprovalResolvedEvent
+
+            await self._eventbus.publish(
+                ApprovalResolvedEvent(
+                    approval_id=id,
+                    approval_type=request.type,
+                    resolution=ApprovalStatus.CANCELLED,
+                    resolved_by=resolved_by,
+                )
+            )
+            await self._publish_resolved_notification(
+                id, request.type, ApprovalStatus.CANCELLED, resolved_by
+            )
+
+        return request
+
     async def _validate_params(
         self,
         type: str,

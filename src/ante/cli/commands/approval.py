@@ -334,6 +334,122 @@ def reopen(
         raise SystemExit(1) from e
 
 
+@approval.command("audit-types")
+@click.option("--status", default=None, help="상태 필터 (예: pending)")
+@click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("approval:read")
+def audit_types(
+    ctx: click.Context,
+    status: str | None,
+    db_path: str | None,
+) -> None:
+    """``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별 (#1472).
+
+    분류는 ``offline`` (DB 직접 조회) 이며 ``approval list`` 와 동일하게
+    ``ApprovalService.initialize()`` 가 수반된다. 정상 type row 는 enum SSOT
+    의 모든 멤버를 ``NOT IN`` 으로 제외하므로 결과에서 자동으로 빠진다.
+
+    출력 컬럼: id, type, status, requester, created_at, expires_at.
+    """
+    from ante.cli.main import get_db_path
+
+    fmt = get_formatter(ctx)
+    resolved_db_path = db_path or get_db_path(ctx)
+
+    # status 는 enum 외의 invalid 값을 허용해야 하는가? 일반 운영자가 자유 입력
+    # 으로 잘못된 status 필터를 지정하면 즉시 에러로 알리는 것이 안전하다.
+    # ``approval list`` 와 같은 preflight 패턴을 사용한다.
+    if status is not None and status not in {s.value for s in ApprovalStatus}:
+        fmt.error(
+            f"잘못된 status 값: {status!r}. "
+            f"허용값: {sorted(s.value for s in ApprovalStatus)}",
+            code="APPROVAL_INVALID_STATUS",
+        )
+        raise SystemExit(1)
+
+    async def _list() -> list[dict]:
+        from ante.approval import ApprovalService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        db = Database(resolved_db_path)
+        await db.connect()
+        eventbus = EventBus()
+        service = ApprovalService(db=db, eventbus=eventbus)
+        await service.initialize()
+        try:
+            requests = await service.list_invalid_type_requests(status=status)
+        finally:
+            await db.close()
+        return [
+            {
+                "id": r.id,
+                "type": r.type,
+                "status": r.status,
+                "requester": r.requester,
+                "created_at": r.created_at,
+                "expires_at": r.expires_at,
+            }
+            for r in requests
+        ]
+
+    try:
+        rows = asyncio.run(_list())
+        fmt.table(
+            rows,
+            ["id", "type", "status", "requester", "created_at", "expires_at"],
+        )
+    except Exception as e:
+        fmt.error(str(e), code="APPROVAL_ERROR")
+        raise SystemExit(1) from e
+
+
+@approval.command("cancel-invalid")
+@click.argument("id")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("approval:admin")
+def cancel_invalid(ctx: click.Context, id: str) -> None:
+    """legacy invalid-type approval row 의 administrative cancellation (#1472).
+
+    일반 ``ante approval cancel`` 의 requester ownership rule 을 우회한다 —
+    invalid-type row 의 requester 는 신뢰할 수 없거나 사라졌을 수 있다. 이
+    명령은 ``approval:admin`` scope 가 필수이며, 정상 type row 는 서비스 가드
+    에서 거부된다.
+
+    분류는 ``runtime IPC`` 이므로 서버 가동 중에만 동작하며, 서버 정지 시에는
+    ``ante system start`` 후 다시 실행한다. cold-path fallback 은 제공하지
+    않는다 (Non-goal).
+    """
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+
+    async def _cancel() -> dict:
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        return await ipc_send(
+            "approval.cancel_invalid",
+            {"approval_id": id},
+            actor=actor,
+        )
+
+    try:
+        result = asyncio.run(_cancel())
+        fmt.success(
+            f"invalid-type 결재 cleanup: {result.get('id', id)}",
+            result,
+        )
+    except click.ClickException:
+        raise
+    except Exception as e:
+        fmt.error(str(e), code="APPROVAL_ERROR")
+        raise SystemExit(1) from e
+
+
 @approval.command("cancel")
 @click.argument("id")
 @format_option
