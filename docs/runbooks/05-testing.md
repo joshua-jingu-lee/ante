@@ -84,6 +84,22 @@ async def test_order_request_to_fill():
 - subprocess 격리 실행 검증
 - 작은 샘플 Parquet 데이터로 테스트
 
+### 3.4 CLI dependency-isolation smoke test
+
+- `tests/unit/test_cli_dependency_isolation.py`는 `ante.cli.commands.*` import 시
+  `pandas`, `pandas_ta`, `numba`, `numpy`, `polars`, `sklearn`, `talib` 같은
+  분석/수치 heavy 의존성이 eager-load되지 않는지 검증한다.
+- 같은 pytest 프로세스에서 `sys.modules` 캐시 영향을 받지 않도록 **fresh
+  interpreter subprocess**를 띄워 격리된 환경에서 import한다.
+- 회귀 차단 시나리오:
+  - CLI dispatch 경로(예: `ante.cli.commands.strategy`)에 `import pandas`를
+    추가하면 smoke test가 실패한다.
+  - `ante.strategy.__init__` 같은 transitive import 체인에 heavy 모듈이
+    top-level로 들어와도 실패한다.
+- 새 CLI 명령 모듈을 추가했다면 `CLI_COMMAND_MODULES` 튜플에 모듈명을 추가한다.
+- 헬퍼 `_run_isolated_import`는 메타-테스트
+  `test_isolation_helper_detects_planted_heavy_import`로 자체 회귀를 검증한다.
+
 ## 4. Fixture 전략
 
 ```python
