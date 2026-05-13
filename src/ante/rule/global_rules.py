@@ -213,7 +213,7 @@ class TradingHoursRule(Rule):
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
         from datetime import datetime, time
-        from zoneinfo import ZoneInfo
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
         # context 필드가 기본값이 아니면 context 우선, 그렇지 않으면 config fallback
         _default_start, _default_end = "09:00", "15:30"
@@ -241,7 +241,35 @@ class TradingHoursRule(Rule):
         # 테스트 주입 또는 실제 시각
         now = context.metadata.get("current_time")
         if now is None:
-            tz = ZoneInfo(timezone_str)
+            # #1475: legacy invalid IANA timezone (e.g. `_load_persisted_timezone`
+            # tolerant load) 가 runtime 경로에 도달하면 ``ZoneInfo``는
+            # ``ZoneInfoNotFoundError`` 또는 (path-escape 형식 등에서) ``ValueError``
+            # 를 raise한다. 이를 RuleEngine까지 전파시키지 않고 명시적인 reject로
+            # graceful하게 처리한다. 일반 ``Exception`` catch는 silent fault swallow
+            # 위험이 있으므로 두 예외만 좁게 잡는다. ``time.fromisoformat`` 실패는
+            # 거래시간 형식 문제이며 별도 처리 대상이라 감싸지 않는다.
+            try:
+                tz = ZoneInfo(timezone_str)
+            except (ZoneInfoNotFoundError, ValueError):
+                return RuleEvaluation(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    result=RuleResult.REJECT,
+                    action=RuleAction.LOG,
+                    message=(
+                        f"Trading rejected for bot {context.bot_id!r} "
+                        f"(account {context.account_id!r}): "
+                        f"invalid account timezone {timezone_str!r}. "
+                        f"Repair via `ante account repair-timezone "
+                        f"{context.account_id} <new_iana_timezone>` (cold-path)."
+                    ),
+                    metadata={
+                        "invalid_timezone": timezone_str,
+                        "account_id": context.account_id,
+                        "bot_id": context.bot_id,
+                        "reject_code": "TRADING_HOURS_INVALID_TIMEZONE",
+                    },
+                )
             now = datetime.now(tz)
 
         current_time = now.time() if isinstance(now, datetime) else now
