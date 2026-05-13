@@ -11,20 +11,12 @@ import click
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.strategy.registry import StrategyStatus
 
-# CLI preflight copy of StrategyStatus values.
-#
-# 실제 SSOT는 `src/ante/strategy/registry.py:66-71`의 `StrategyStatus` enum이다.
-# 본 frozenset은 #1463(`ante.strategy.__init__` heavy import 분리)까지의 임시
-# preflight 복사본이며, registry/DB 진입 전에 `--status` 입력을 거부하기 위한
-# 가벼운 차단막으로만 쓴다. enum과의 drift는 동치성 회귀 테스트
-# (`tests/unit/test_cli_strategy_list_invalid_status.py::
-# test_preflight_set_matches_enum_ssot`)로 차단한다.
-# #1463이 끝나면 본 frozenset은 제거하고 `StrategyStatus`를 모듈 최상단에서
-# 직접 import해 사용한다.
-VALID_STRATEGY_STATUSES: frozenset[str] = frozenset(
-    {"registered", "adopted", "archived"}
-)
+# `StrategyStatus` enum이 단일 SSOT이며 (#1463에서 임시 frozenset 복사본 제거),
+# `ante.strategy.__init__`의 lazy ``__getattr__`` 정리로 본 import가 heavy
+# 분석 의존성을 끌지 않는다. CLI dispatch path가 light한지는
+# ``tests/unit/test_cli_dependency_isolation.py``가 fresh subprocess로 차단한다.
 
 
 @click.group()
@@ -206,20 +198,18 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
     fmt = get_formatter(ctx)
 
     # Preflight: invalid --status는 registry/DB 진입 전에 차단한다.
-    # `VALID_STRATEGY_STATUSES`는 `StrategyStatus` SSOT의 #1463까지의 임시 복사본
-    # (drift는 enum 동치성 회귀 테스트로 차단). 이로써 일반적인 입력 오타가
-    # `StrategyStatus(status)` ValueError → Python traceback으로 새지 않고
-    # flat JSON error로 종료된다.
-    if status is not None and status not in VALID_STRATEGY_STATUSES:
+    # `StrategyStatus` enum이 SSOT이며 직접 비교한다 (#1463 임시 frozenset 제거).
+    # 이로써 일반적인 입력 오타가 `StrategyStatus(status)` ValueError →
+    # Python traceback으로 새지 않고 flat JSON error로 종료된다.
+    valid_statuses = {s.value for s in StrategyStatus}
+    if status is not None and status not in valid_statuses:
         fmt.error(
-            f"잘못된 status 값: {status!r}. 허용값: {sorted(VALID_STRATEGY_STATUSES)}",
+            f"잘못된 status 값: {status!r}. 허용값: {sorted(valid_statuses)}",
             code="STRATEGY_VALIDATION_ERROR",
         )
         raise SystemExit(1)
 
     async def _list() -> list[dict]:
-        from ante.strategy.registry import StrategyStatus
-
         registry, db = await _create_registry()
         try:
             filter_status = StrategyStatus(status) if status else None

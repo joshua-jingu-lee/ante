@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import ante.strategy as strategy_pkg
 from ante.core import Database
 from ante.strategy import (
     DataProvider,
@@ -922,3 +923,32 @@ class TestStrategy(Strategy):
 """
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert result.valid
+
+
+# ── ante.strategy lazy attribute access 회귀 (#1463) ──────────────────
+
+
+def test_strategy_package_lazy_indicator_calculator() -> None:
+    """`from ante.strategy import IndicatorCalculator`가 lazy로 정상 동작한다.
+
+    `ante.strategy.__init__`의 PEP 562 ``__getattr__`` 패턴이 외부 호출자에게
+    backward-compatible한 import surface를 제공하는지 확인한다 (#1463).
+    같은 객체를 두 번 가져와도 ``ante.strategy.indicators.IndicatorCalculator``
+    와 동일해야 한다.
+    """
+    from ante.strategy import IndicatorCalculator as Lazy1
+    from ante.strategy import IndicatorCalculator as Lazy2
+    from ante.strategy.indicators import IndicatorCalculator as Direct
+
+    assert Lazy1 is Direct
+    assert Lazy1 is Lazy2
+    # 패키지 attribute 접근 경로도 동일 객체.
+    assert strategy_pkg.IndicatorCalculator is Direct
+
+
+def test_strategy_package_unknown_attribute_raises() -> None:
+    """`__getattr__`은 알 수 없는 attribute에 대해 ``AttributeError``를 던진다."""
+    import pytest as _pytest
+
+    with _pytest.raises(AttributeError, match="no attribute 'NotARealSymbol'"):
+        _ = strategy_pkg.NotARealSymbol  # type: ignore[attr-defined]
