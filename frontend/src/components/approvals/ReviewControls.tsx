@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { useUpdateApprovalStatus } from '../../hooks/useApprovals'
 import Modal from '../common/Modal'
 import StatusBadge from '../common/StatusBadge'
-import type { ApprovalReview, ApprovalType } from '../../types/approval'
+import type { ApprovalDisplayType, ApprovalReview } from '../../types/approval'
 
-const APPROVE_ACTION_TEXT: Record<ApprovalType, string> = {
+const APPROVE_ACTION_TEXT: Record<ApprovalDisplayType, string> = {
   strategy_adopt: '전략이 채택 상태로 전환됩니다.',
   strategy_report: '전략 리포트가 채택됩니다.',
   budget_change: 'Treasury에서 예산이 즉시 재배분됩니다.',
@@ -14,6 +14,12 @@ const APPROVE_ACTION_TEXT: Record<ApprovalType, string> = {
   live_switch: '봇이 모의투자에서 실전투자로 전환됩니다.',
   risk_alert: '위험 알림이 처리 완료됩니다.',
   rule_change: 'RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.',
+  strategy_retire: '전략이 ARCHIVED 상태로 전환됩니다.',
+  bot_assign_strategy: '봇에 채택된 전략이 배정됩니다.',
+  bot_change_strategy: '중지 상태의 봇에 다른 전략이 교체됩니다.',
+  bot_resume: '중지/에러 상태의 봇이 재시작됩니다.',
+  bot_delete: '중지 상태의 봇이 완전히 제거됩니다.',
+  unknown: '알 수 없는 유형 — 운영자가 직접 검토 후 처리하세요.',
 }
 
 interface ReviewControlsProps {
@@ -21,7 +27,7 @@ interface ReviewControlsProps {
   isPending: boolean
   title: string
   reviews?: ApprovalReview[]
-  type?: ApprovalType
+  type?: ApprovalDisplayType
   params?: Record<string, unknown>
 }
 
@@ -31,8 +37,9 @@ function formatCurrency(value: unknown): string {
   return `${num.toLocaleString()}원`
 }
 
-function ApproveModalSummary({ type, params }: { type?: ApprovalType; params?: Record<string, unknown> }) {
+function ApproveModalSummary({ type, params }: { type?: ApprovalDisplayType; params?: Record<string, unknown> }) {
   if (!type || !params) return null
+  if (type === 'unknown') return null
 
   if (type === 'bot_create') {
     const tradeMode = String(params.trade_mode ?? '')
