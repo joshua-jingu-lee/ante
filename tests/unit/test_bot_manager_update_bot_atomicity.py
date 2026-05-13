@@ -605,6 +605,100 @@ class TestUpdateBotBudgetRollback:
             for record in caplog.records
         )
 
+    async def test_update_bot_skips_rollback_on_inplace_mutation(
+        self, eventbus, db, ctx, monkeypatch, caplog
+    ) -> None:
+        """Refs #1460 (attempt 4): in-place mutation race 시 rollback 스킵.
+
+        ``update_bot`` 은 per-bot ``asyncio.Lock`` 으로 같은 ``update_bot`` 호출
+        들을 직렬화한다. 그러나 같은 lock 을 쓰지 않는 다른 mutator
+        (``change_strategy`` / ``assign_strategy``) 는 ``treasury.update_budget``
+        await 동안 ``bot.config`` 를 in-place mutation (예:
+        ``bot.config.strategy_id = "new"``) 할 수 있다. identity 가드
+        (``bot.config is new_config``) 는 그대로 True 라서 rollback 이 그 변경을
+        덮어쓸 위험이 있다.
+
+        시나리오:
+        1. ``update_bot(A)`` 가 진입하여 new_config(A) 를 ``bot.config`` 에 대입 +
+           DB commit.
+        2. ``treasury.update_budget`` 의 side_effect 안에서 ``bot.config`` 를
+           **in-place mutation** (``bot.config.strategy_id = "concurrent-..."``)
+           한 직후 raise.
+        3. rollback 진입 — ``bot.config is new_config`` 는 True (같은 객체) 지만
+           ``bot.config == new_config`` 가 False (필드가 바뀌었음) → rollback
+           스킵.
+        4. ``_save_bot_config`` 는 정확히 1회 (A 의 new_config commit) 만 호출.
+        5. ``bot.config.strategy_id`` 가 in-place mutation 값으로 유지된다.
+        6. "rollback skipped: bot.config mutated in-place" warning 흔적이 남는다.
+        7. 원래 budget 예외 propagate.
+        """
+
+        manager = BotManager(eventbus=eventbus, db=db, treasury_manager=None)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(
+            manager, ctx, account_id="acc-test", interval_seconds=60
+        )
+        bot = manager.get_bot(bot_id)
+        assert bot is not None
+
+        # _save_bot_config 호출 횟수 추적.
+        original_save = manager._save_bot_config
+        save_call_count = {"n": 0}
+
+        async def counting_save(config):
+            save_call_count["n"] += 1
+            return await original_save(config)
+
+        monkeypatch.setattr(manager, "_save_bot_config", counting_save)
+
+        # race 시뮬레이션: treasury.update_budget 안에서 bot.config 를 in-place
+        # mutation (다른 mutator 가 같은 lock 을 쓰지 않고 변경한 상황 모사)
+        # 후 raise.
+        class _BoomError(RuntimeError):
+            pass
+
+        class _InPlaceMutationTreasury:
+            def __init__(self, bot_ref, mutated_strategy_id: str) -> None:
+                self._bot_ref = bot_ref
+                self._mutated_strategy_id = mutated_strategy_id
+                self.update_budget_calls: list[tuple[str, float]] = []
+
+            async def update_budget(
+                self, called_bot_id: str, target_amount: float
+            ) -> None:
+                self.update_budget_calls.append((called_bot_id, target_amount))
+                # 다른 mutator (예: change_strategy) 가 같은 lock 을 쓰지
+                # 않은 채로 in-place mutation 한 상황을 모사.
+                self._bot_ref.config.strategy_id = self._mutated_strategy_id
+                raise _BoomError("boom-after-inplace-mutation")
+
+        mutation_treasury = _InPlaceMutationTreasury(bot, "concurrent-strategy-change")
+        tm = _RaisingTreasuryManager("acc-test", mutation_treasury)  # type: ignore[arg-type]
+        manager._treasury_manager = tm  # type: ignore[assignment]
+
+        with caplog.at_level(logging.WARNING, logger="ante.bot.manager"):
+            with pytest.raises(_BoomError):
+                await manager.update_bot(bot_id, interval_seconds=120, budget=100_000.0)
+
+        # update_budget 진입 보증.
+        assert mutation_treasury.update_budget_calls == [(bot_id, 100_000.0)]
+
+        # 핵심 보증: _save_bot_config 가 정확히 1회만 호출됨 (new_config commit
+        # 만 수행, rollback save 는 eq 가드로 스킵). eq 가드가 빠지면
+        # call_count == 2 가 되어야 한다.
+        assert save_call_count["n"] == 1
+
+        # in-place mutation 값이 그대로 유지된다 (rollback 으로 덮어쓰지 않음).
+        assert bot.config.strategy_id == "concurrent-strategy-change"
+
+        # in-place mutation warning 흔적 확인.
+        assert any(
+            "rollback skipped" in record.message
+            and "mutated in-place" in record.message
+            and record.levelno == logging.WARNING
+            for record in caplog.records
+        )
+
     async def test_update_bot_concurrent_requests_serialized_by_lock(
         self, eventbus, db, ctx
     ) -> None:
