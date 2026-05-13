@@ -240,7 +240,56 @@ def member_info(ctx: click.Context, member_id: str) -> None:
         click.echo(f"  생성자    : {result['created_by']}")
 
 
-def _invalid_role_row_dict(m, *, actionable: bool) -> dict:  # noqa: ANN001
+def _explicit_config_dir(ctx: click.Context) -> str | None:
+    """루트 ``--config-dir`` 옵션이 명시적으로 지정된 경우 그 값(str)을 돌려준다.
+
+    Ante CLI 의 루트 그룹(:func:`ante.cli.main.cli`)은 ``--config-dir`` 이 명시
+    되거나 ``ANTE_CONFIG_DIR`` 환경변수가 set 되었을 때에만
+    ``ctx.obj["config_dir"]`` 를 ``Path`` 로 채운다. 미지정이면 키 자체가 누락된다.
+    본 헬퍼는 그 raw override 값을 문자열 형태로 그대로 반환하며, override 가
+    없으면 ``None`` 을 돌려 default config_dir 를 의미하게 한다.
+
+    이 값은 ``revoke_command`` 생성 시 운영자가 입력한 ``--config-dir`` 을 그대로
+    payload 에 보존하기 위해 사용된다 (#1468 Codex review attempt 3, P2):
+    운영자가 ``ante --config-dir /custom member list-invalid-roles`` 로 다른
+    인스턴스를 스캔했을 때, payload 의 ``revoke_command`` 에 ``--config-dir`` 이
+    빠지면 default config_dir 의 DB 에 실행되어 엉뚱한 인스턴스를 건드릴 위험이
+    있다. 항상 ``ctx`` 의 override 를 같은 자리에 다시 채워 인스턴스 일관성을
+    보장한다.
+    """
+    obj = getattr(ctx, "obj", None)
+    if not isinstance(obj, dict):
+        return None
+    raw = obj.get("config_dir")
+    if raw is None:
+        return None
+    return str(raw)
+
+
+def _build_revoke_command(member_id: str, *, config_dir: str | None) -> str:
+    """``ante member revoke`` payload 명령 문자열을 생성한다.
+
+    - ``config_dir`` 이 주어지면 ``ante --config-dir <quoted>`` 를 앞에 붙여
+      동일 인스턴스(DB) 대상으로 명령이 실행되도록 보존한다 (#1468 attempt 3 P2).
+    - ``--yes`` 는 ``member revoke`` 비대화형 게이트를 통과하기 위해 항상 포함한다
+      (#1468 attempt 1 P2-B).
+    - ``--`` separator 와 ``shlex.quote`` 로 ``member_id`` 를 셸 안전 인용해
+      빈 문자열·공백·셸 메타문자·``-``-prefix 가 포함된 id 도 인자 splitting /
+      옵션 파싱으로 오해석되지 않도록 한다 (#1468 attempt 2 P2-A).
+    """
+    parts = ["ante"]
+    if config_dir is not None:
+        parts.append(f"--config-dir {shlex.quote(config_dir)}")
+    parts.append(f"member revoke --yes -- {shlex.quote(member_id)}")
+    return " ".join(parts)
+
+
+def _invalid_role_row_dict(
+    m,  # noqa: ANN001
+    *,
+    actionable: bool,
+    config_dir: str | None = None,
+) -> dict:
     """``Member`` row 를 CLI 출력용 dict 로 변환.
 
     ``token_hash`` 는 보안상 절대 노출하지 않는다 (#1468 secret-exposure). 토큰
@@ -258,6 +307,12 @@ def _invalid_role_row_dict(m, *, actionable: bool) -> dict:  # noqa: ANN001
     문자열·공백·셸 메타문자·``-``-prefix 가 포함된 ``member_id`` 가 운영자 셸에서
     인자 splitting 이나 옵션 파싱으로 오해석되는 위험을 차단한다 (#1468 Codex
     review attempt 2, P2-A).
+
+    ``config_dir`` 이 주어지면(루트 ``--config-dir`` 이 명시된 경우) 그 값을
+    ``revoke_command`` 앞에 ``--config-dir <quoted>`` 로 보존해, 운영자가 payload
+    를 그대로 복사 실행해도 같은 인스턴스(DB) 대상으로 동작하도록 보장한다
+    (#1468 attempt 3 P2 — config-dir 보존). default config_dir 일 때는 인자 자체
+    를 생략해 기존 표준 호출 형태를 유지한다.
     """
     has_token = bool(m.token_hash)
     row: dict = {
@@ -271,13 +326,8 @@ def _invalid_role_row_dict(m, *, actionable: bool) -> dict:  # noqa: ANN001
         "token_expires_at": m.token_expires_at or None,
     }
     if actionable:
-        # ``member revoke`` 는 ``--yes`` 누락 시 ``CLI_CONFIRMATION_REQUIRED`` 로
-        # 실패하므로 (`member_revoke` 본문 참조), JSON payload 의 권장 명령은
-        # ``--yes`` 를 포함해 즉시 실행 가능하게 출력한다. ``member_id`` 는
-        # 셸 안전을 위해 ``shlex.quote`` 로 인용하고, 옵션/포지셔널 경계는
-        # ``--`` separator 로 명시한다.
-        row["revoke_command"] = (
-            f"ante member revoke --yes -- {shlex.quote(m.member_id)}"
+        row["revoke_command"] = _build_revoke_command(
+            m.member_id, config_dir=config_dir
         )
     return row
 
@@ -309,16 +359,26 @@ def member_list_invalid_roles(
     """
     fmt = get_formatter(ctx)
     valid_roles = [member.value for member in MemberRole]
+    # 루트 ``--config-dir`` 이 명시되어 있으면 payload 의 revoke_command 에
+    # 동일 값을 보존한다 (#1468 attempt 3 P2). default 이면 None 이 돌아오고
+    # ``--config-dir`` 인자는 생략된다.
+    config_dir_override = _explicit_config_dir(ctx)
 
     async def _run_scan() -> tuple[list[dict], list[dict]]:
         service, db = await _create_service()
         try:
             scan = await service.find_invalid_role_members()
             actionable = [
-                _invalid_role_row_dict(m, actionable=True) for m in scan.actionable
+                _invalid_role_row_dict(
+                    m, actionable=True, config_dir=config_dir_override
+                )
+                for m in scan.actionable
             ]
             legacy = [
-                _invalid_role_row_dict(m, actionable=False) for m in scan.legacy_revoked
+                _invalid_role_row_dict(
+                    m, actionable=False, config_dir=config_dir_override
+                )
+                for m in scan.legacy_revoked
             ]
             return actionable, legacy
         finally:

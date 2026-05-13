@@ -60,7 +60,11 @@ JSON 출력 스키마:
 - `actionable`: `role` 이 invalid 이고 `status != revoked` 인 row. 운영자 cleanup 대상.
   `revoke_command` 는 즉시 실행 가능한 형태(`--yes` 포함, `member_id` 는
   `shlex.quote` 로 셸 안전 인용, 옵션/포지셔널 경계는 `--` separator 로 명시)로
-  노출된다.
+  노출된다. 또한 `ante list-invalid-roles` 호출에 `--config-dir <path>` 가
+  지정되었다면 동일한 값을 `ante --config-dir <quoted-path> member revoke ...`
+  형태로 **그대로 보존**해 운영자가 payload 를 복사·실행해도 같은 인스턴스(DB)
+  대상으로 동작하도록 보장한다. default config_dir 일 때는 `--config-dir` 인자가
+  생략된다.
 - `legacy_revoked`: 이미 revoke 된 invalid-role row. **추가 조치 불필요**
   (audit 추적용). `MemberService.revoke` 가 `active`/`suspended` 만 허용하므로
   재실행 시 실패하며, 따라서 legacy_revoked row 의 JSON dict 에는
@@ -88,6 +92,14 @@ ante member revoke --yes -- <member_id>
 공백·셸 메타문자·`-`-prefix 가 들어 있어도 인자 splitting / 옵션 파싱으로
 오해석되지 않게 보장한다. JSON payload 의 `revoke_command` 는 동일한 형태로
 `shlex.quote` 처리된 `member_id` 를 포함해 복사·실행만으로 안전하게 동작한다.
+
+**다중 인스턴스 운용 시**: `ante --config-dir /path/to/other-instance member
+list-invalid-roles` 로 default 가 아닌 인스턴스를 점검했다면, payload 의
+`revoke_command` 도 동일한 `--config-dir` 값을 포함한 형태(`ante --config-dir
+/path/to/other-instance member revoke --yes -- <member_id>`)로 자동 생성된다.
+즉 payload 를 그대로 복사 실행하면 항상 **같은 인스턴스(DB)** 가 대상이 된다 —
+운영자가 수동으로 `--config-dir` 을 다시 붙일 필요가 없고, default DB 에 잘못
+실행될 위험도 없다.
 
 이 명령은 다음을 수행한다 (`MemberService.revoke`):
 

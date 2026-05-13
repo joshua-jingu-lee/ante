@@ -986,6 +986,125 @@ class TestMemberListInvalidRolesJsonSchema:
         # 원본 공백 id 가 그대로 끼지 않았음을 확인한다 (인용된 형태만 노출).
         assert f"-- {unsafe_id}" not in cmd
 
+    def test_cli_list_invalid_roles_revoke_command_preserves_config_dir(
+        self,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """루트 ``--config-dir`` 가 ``revoke_command`` 에 보존 (#1468 attempt 3).
+
+        ``ante --config-dir /path member list-invalid-roles`` 로 다른 인스턴스를
+        스캔할 때, payload 의 ``revoke_command`` 가 ``--config-dir`` 을 누락하면
+        운영자가 그대로 복사 실행했을 때 default config_dir DB 에 실행되어
+        엉뚱한 인스턴스를 건드린다. 본 회귀 테스트는 actionable row 의
+        ``revoke_command`` 가 동일한 ``--config-dir`` 을 ``shlex.quote`` 인용된
+        형태로 보존하는지 검증한다.
+        """
+        import shlex as _shlex
+
+        custom_dir = tmp_path / "ante-custom"
+        custom_dir.mkdir()
+        actionable = _make_invalid_role_member(
+            "agent-other-instance", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "--config-dir",
+                    str(custom_dir),
+                    "member",
+                    "list-invalid-roles",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        quoted_dir = _shlex.quote(str(custom_dir))
+        # ``--config-dir`` 인자가 ``ante`` 와 ``member`` 사이에 들어가며,
+        # 경로는 ``shlex.quote`` 인용된 형태로 그대로 보존된다.
+        assert cmd == (
+            f"ante --config-dir {quoted_dir} "
+            f"member revoke --yes -- agent-other-instance"
+        )
+        # 회귀: ``--yes`` / ``--`` separator / quoted member_id 도 같이 유지된다.
+        assert "--yes" in cmd
+        assert " -- " in cmd
+
+    def test_cli_list_invalid_roles_revoke_command_quotes_config_dir_with_spaces(
+        self,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """``--config-dir`` 경로에 공백이 있어도 ``shlex.quote`` 로 안전 인용된다.
+
+        macOS 의 ``~/Library/Application Support/...`` 같은 공백 포함 경로에서
+        운영자가 payload 를 복사 실행할 때 인자 splitting 으로 ``--config-dir``
+        값이 첫 토큰만 잡히는 사고를 막는다 (#1468 attempt 3 P2 회귀).
+        """
+        import shlex as _shlex
+
+        spaced_dir = tmp_path / "ante config with space"
+        spaced_dir.mkdir()
+        actionable = _make_invalid_role_member(
+            "agent-space-dir", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "--config-dir",
+                    str(spaced_dir),
+                    "member",
+                    "list-invalid-roles",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        quoted_dir = _shlex.quote(str(spaced_dir))
+        # quote 가 따옴표로 감싼 형태여야 한다 (단순 토큰이 아님).
+        assert quoted_dir != str(spaced_dir)
+        assert cmd == (
+            f"ante --config-dir {quoted_dir} member revoke --yes -- agent-space-dir"
+        )
+
+    def test_cli_list_invalid_roles_revoke_command_omits_config_dir_when_default(
+        self,
+    ) -> None:
+        """``--config-dir`` 미지정 시 ``revoke_command`` 에 인자가 들어가지 않는다.
+
+        default config_dir 케이스에서 기존 호출 형태(``ante member revoke ...``)
+        를 유지해 운영자 워크플로우/문서를 깨지 않게 한다. 본 회귀 테스트는
+        existing test_cli_list_invalid_roles_command_outputs_json 과 함께 default
+        형태가 보존됨을 명시적으로 확인한다.
+        """
+        actionable = _make_invalid_role_member(
+            "agent-default-instance", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        # default 일 때는 ``--config-dir`` 인자가 아예 없는 표준 형태.
+        assert cmd == "ante member revoke --yes -- agent-default-instance"
+        assert "--config-dir" not in cmd
+
     def test_cli_list_invalid_roles_legacy_revoked_omits_revoke_command(self) -> None:
         """legacy_revoked row 의 JSON dict 에 ``revoke_command`` 키가 없다.
 
