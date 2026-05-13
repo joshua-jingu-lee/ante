@@ -26,6 +26,12 @@ from pathlib import Path
 
 import pytest
 
+# 추가 패키지 import 회귀 케이스 (#1463 — `ante.strategy.__init__` lazy 분리).
+# plain ``import ante.strategy``는 light해야 하며, ``IndicatorCalculator`` 같은
+# heavy 심볼은 PEP 562 ``__getattr__``로 lazy 노출된다. 본 케이스는 CLI 명령
+# 모듈과 별개로 패키지 자체의 import surface를 회귀 차단한다.
+STRATEGY_PACKAGE_MODULES: tuple[str, ...] = ("ante.strategy",)
+
 # CLI 명령 모듈 (src/ante/cli/commands/ 하위)
 # `_password`처럼 언더스코어로 시작하는 private helper는 제외한다.
 CLI_COMMAND_MODULES: tuple[str, ...] = (
@@ -144,6 +150,23 @@ def test_cli_command_module_does_not_eager_import_heavy_deps(command: str) -> No
     assert loaded == [], (
         f"{target} import 시 heavy 분석 의존성이 적재되었습니다: {loaded}. "
         "CLI dispatch path는 lazy import를 유지해야 합니다 (see #1461/#1463)."
+    )
+
+
+@pytest.mark.parametrize("package", STRATEGY_PACKAGE_MODULES)
+def test_strategy_package_does_not_eager_import_heavy_deps(package: str) -> None:
+    """``ante.strategy`` 패키지 import 시 heavy 분석 의존성이 적재되지 않는다.
+
+    회귀 시나리오: ``ante.strategy.__init__``에서 ``from ante.strategy.indicators
+    import IndicatorCalculator``를 다시 top-level로 끌어오면 본 테스트가 즉시
+    실패한다. PEP 562 ``__getattr__`` lazy 패턴을 유지해야 한다 (#1463).
+    """
+    payload = _run_isolated_import(package)
+    loaded = payload["loaded"]
+    assert loaded == [], (
+        f"{package} import 시 heavy 분석 의존성이 적재되었습니다: {loaded}. "
+        "`ante.strategy.__init__`은 PEP 562 `__getattr__`로 `IndicatorCalculator`만 "
+        "lazy 노출해야 합니다 (see #1463)."
     )
 
 

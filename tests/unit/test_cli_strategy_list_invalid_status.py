@@ -16,7 +16,6 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from ante.cli.commands.strategy import VALID_STRATEGY_STATUSES
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 from ante.strategy.registry import StrategyRecord, StrategyStatus
@@ -268,10 +267,3 @@ class TestStrategyListInvalidStatus:
             assert "intentional click usage error" in result.output
             # JSON shape이 아니어야 한다(formatter를 거치지 않았다는 회귀).
             assert '"code": "STRATEGY_ERROR"' not in result.output
-
-    def test_preflight_set_matches_enum_ssot(self):
-        """CLI preflight copy가 `StrategyStatus` SSOT와 동치인지 회귀.
-
-        #1463(heavy import 분리)으로 preflight copy가 제거되기 전까지 drift를 차단한다.
-        """
-        assert VALID_STRATEGY_STATUSES == {s.value for s in StrategyStatus}
