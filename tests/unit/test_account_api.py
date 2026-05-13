@@ -105,6 +105,9 @@ class FakeAccountService:
         # 테스트가 다음 get_broker 호출에서 실패하는 어댑터를 받도록 하고
         # 싶을 때 계좌 ID를 넣는다.
         self._fail_connect_for: set[str] = set()
+        # invalid body 시 ``activate``가 호출되지 않았음을 단언하기 위한
+        # 카운터 (#1510 — body contract drift fix).
+        self.activate_calls: int = 0
 
     async def create(self, account: Account) -> Account:
         if account.account_id in self._accounts:
@@ -208,6 +211,7 @@ class FakeAccountService:
         self._accounts[account_id].status = AccountStatus.SUSPENDED
 
     async def activate(self, account_id: str, activated_by: str) -> None:
+        self.activate_calls += 1
         if account_id not in self._accounts:
             raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
         account = self._accounts[account_id]
@@ -1593,6 +1597,197 @@ class TestActivateAccount:
 
         resp = client.post("/api/accounts/test-account/activate")
         assert resp.status_code == 409
+
+    # ------------------------------------------------------------------
+    # #1510 — POST /api/accounts/{id}/activate body contract drift fix.
+    #
+    # ``suspend_account``와 동일한 너그러운 no-body 패턴을 적용한다:
+    #   - 빈 body / JSON ``null`` / ``{}``: 200, service 호출
+    #   - 비-object JSON / malformed JSON / extra key dict: 422
+    #   - invalid body 시 service / audit 미발생 (auth-first 가드)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _activate_audit_logs(audit_logger: FakeAuditLogger) -> list[dict[str, Any]]:
+        return [log for log in audit_logger.logs if log["action"] == "account.activate"]
+
+    def test_activate_rejects_extra_body(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """``{"unexpected": "body"}`` 같은 extra key dict는 422 (#1510)."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post(
+            "/api/accounts/test-account/activate",
+            json={"unexpected": "body"},
+        )
+        assert resp.status_code == 422
+        # side-effect 미발생.
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
+        # detail은 ``http_exception_handler``를 거치며 ``str(e.errors())``로
+        # 직렬화된다 (``suspend_account``와 동일 경로). 핵심 정보가 detail
+        # 문자열에 그대로 포함되는지만 확인한다.
+        detail = resp.json()["detail"]
+        assert isinstance(detail, str)
+        assert "extra_forbidden" in detail
+        assert "unexpected" in detail
+
+    def test_activate_rejects_multiple_extra_keys(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """extra key가 2개 이상이면 422, 두 key 모두 detail에 보고된다."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post(
+            "/api/accounts/test-account/activate",
+            json={"a": 1, "b": 2},
+        )
+        assert resp.status_code == 422
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
+        # str(e.errors()) 직렬화 안에 두 extra key가 모두 보고되어야 한다.
+        detail = resp.json()["detail"]
+        assert isinstance(detail, str)
+        assert "extra_forbidden" in detail
+        assert "'a'" in detail and "'b'" in detail
+
+    def test_activate_rejects_non_object_body(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """JSON array 같은 비-object body는 422."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post("/api/accounts/test-account/activate", json=["x"])
+        assert resp.status_code == 422
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
+
+    def test_activate_rejects_string_body(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """JSON string 같은 비-object body도 422."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post("/api/accounts/test-account/activate", json="abc")
+        assert resp.status_code == 422
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
+
+    def test_activate_rejects_invalid_json(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """malformed JSON body는 422."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post(
+            "/api/accounts/test-account/activate",
+            content=b"{not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
+
+    def test_activate_accepts_json_null(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """JSON ``null`` body는 빈 body와 동일하게 200 (``suspend``와 정합)."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post("/api/accounts/test-account/activate", json=None)
+        assert resp.status_code == 200
+        assert account_service.activate_calls == 1
+        assert len(self._activate_audit_logs(audit_logger)) == 1
+        assert resp.json()["account"]["status"] == "active"
+
+    def test_activate_accepts_empty_object(
+        self,
+        client: TestClient,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """``{}`` body는 200 + service 호출 1회."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        resp = client.post("/api/accounts/test-account/activate", json={})
+        assert resp.status_code == 200
+        assert account_service.activate_calls == 1
+        assert len(self._activate_audit_logs(audit_logger)) == 1
+        assert resp.json()["account"]["status"] == "active"
+
+    def test_activate_extra_body_with_no_token_returns_401(
+        self,
+        app,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """auth-first: no token + extra body는 422가 아닌 401, service 미호출."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        with TestClient(app) as no_auth_client:
+            resp = no_auth_client.post(
+                "/api/accounts/test-account/activate",
+                json={"x": 1},
+            )
+        assert resp.status_code == 401
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
+
+    def test_activate_malformed_json_with_no_token_returns_401(
+        self,
+        app,
+        account_service: FakeAccountService,
+        audit_logger: FakeAuditLogger,
+    ) -> None:
+        """auth-first: no token + malformed JSON도 422가 아닌 401."""
+        account = _make_account()
+        account.status = AccountStatus.SUSPENDED
+        account_service._accounts[account.account_id] = account
+
+        with TestClient(app) as no_auth_client:
+            resp = no_auth_client.post(
+                "/api/accounts/test-account/activate",
+                content=b"{not-json",
+                headers={"Content-Type": "application/json"},
+            )
+        assert resp.status_code == 401
+        assert account_service.activate_calls == 0
+        assert self._activate_audit_logs(audit_logger) == []
 
 
 class TestDeleteAccount:

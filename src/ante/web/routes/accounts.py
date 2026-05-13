@@ -7,7 +7,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ante.web.deps import (
     get_account_service,
@@ -902,6 +902,36 @@ async def suspend_account(
     }
 
 
+# POST /api/accounts/{account_id}/activate body 정책 (#1510, v3).
+#
+# ``activate``는 ``suspend``와 동일한 너그러운 no-body 패턴을 따른다:
+#
+# | 입력                              | 동작                                |
+# |-----------------------------------|-------------------------------------|
+# | 빈 body                           | 200, service 호출                   |
+# | JSON ``null``                     | 200, service 호출                   |
+# | ``{}``                            | 200, service 호출                   |
+# | 비-object JSON (``["x"]``, …)    | 422                                 |
+# | invalid JSON                      | 422                                 |
+# | extra key dict (``{"x": 1}``)    | 422 (``extra_forbidden``)           |
+#
+# ``_ActivateNoBody``는 field가 하나도 없는 BaseModel + ``extra="forbid"``로
+# 정의해 ``{}``는 통과시키되 임의의 extra key를 거부한다. ``e.errors()``를
+# detail에 그대로 전달해 ``suspend_account``의 detail 직렬화와 호환된다.
+#
+# OpenAPI route 데코레이터는 변경하지 않는다 — 현재 ``activate``는 requestBody
+# schema를 export하지 않으며(``frontend/src/types/api.generated.ts``의
+# ``requestBody?: never``), generated artifacts 무영향이라는 v3 결단을 따른다.
+class _ActivateNoBody(BaseModel):
+    """``POST /api/accounts/{id}/activate`` mini forbid body 모델.
+
+    필드를 정의하지 않고 ``extra="forbid"``만 적용한다. 빈 dict ``{}``는 통과,
+    extra key 1개 이상이면 ``ValidationError``가 발생한다 (#1510).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
 @router.post(
     "/{account_id}/activate",
     response_model=AccountActionResponse,
@@ -935,8 +965,35 @@ async def activate_account(
 ) -> dict[str, Any]:
     """계좌 재활성화. 인증된 master/human 또는 ``account:write`` scope 를 보유한
     agent 만 호출 가능 (#1407 — spec ``account:write`` 정합, #1352
-    master_caller 에서 마이그레이션)."""
+    master_caller 에서 마이그레이션).
+
+    ``suspend_account``와 동일한 raw body 파싱 패턴(빈 body / null / ``{}``는
+    통과, 비-object / malformed JSON / extra key dict는 422)을 적용한다
+    (#1510). 인증 가드는 dependency level이므로 body validation보다 먼저
+    실행되며, invalid body 시에는 service / audit 호출이 발생하지 않는다.
+    """
     from ante.account.errors import AccountDeletedError, AccountNotFoundError
+
+    # 1. raw body 읽기 + JSON 파싱 (인증은 dependency에서 이미 통과한 상태).
+    raw = await request.body()
+    if raw != b"":
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(
+                status_code=422, detail="요청 body의 JSON 파싱에 실패했습니다."
+            ) from None
+        # JSON ``null``은 빈 body와 동일하게 통과 (``suspend``와 정합).
+        if payload is not None:
+            if not isinstance(payload, dict):
+                raise HTTPException(
+                    status_code=422, detail="요청 body는 JSON object여야 합니다."
+                )
+            # extra=forbid 검증 — 빈 dict ``{}``는 통과, extra key dict는 422.
+            try:
+                _ActivateNoBody.model_validate(payload)
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=e.errors()) from None
 
     try:
         await account_service.activate(account_id, activated_by=caller_id)
