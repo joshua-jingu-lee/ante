@@ -363,12 +363,21 @@ class TestApprovalNotifications:
 
     @pytest.fixture
     async def service(self, eventbus, tmp_path):
+        from ante.approval.models import ApprovalType
         from ante.approval.service import ApprovalService
         from ante.core.database import Database
 
         db = Database(str(tmp_path / "test.db"))
         await db.connect()
-        svc = ApprovalService(db=db, eventbus=eventbus)
+
+        # Refs #1418 → #1470 SPLIT-B: executor 미등록 valid type 의 approve 는
+        # 더 이상 silent success 가 아니므로, "approved" notification 회귀를
+        # 유지하려면 no-op executor 가 필요하다.
+        async def _noop_executor(params: dict) -> None:
+            return None
+
+        executors = {t.value: _noop_executor for t in ApprovalType}
+        svc = ApprovalService(db=db, eventbus=eventbus, executors=executors)
         await svc.initialize()
         return svc
 

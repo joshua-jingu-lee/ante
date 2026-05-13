@@ -41,7 +41,22 @@ async def eventbus():
 
 @pytest.fixture
 async def service(db, eventbus):
-    svc = ApprovalService(db=db, eventbus=eventbus)
+    """기본 ApprovalService.
+
+    Refs #1418 → #1470 SPLIT-B: executor 미등록 valid type 의 approve 가
+    silent success 가 아닌 ``EXECUTION_FAILED`` 로 마감되도록 강화되었기
+    때문에, 기존 lifecycle 회귀 테스트들이 의도한 ``approved`` 종료 상태를
+    유지하려면 valid type 별로 no-op executor 가 등록되어 있어야 한다.
+    본 픽스처는 ``ApprovalType`` 의 모든 멤버에 대해 no-op executor 를
+    등록한다 (silent no-op 회귀 가드 본 이슈의 검증은 새 테스트 모듈
+    ``test_approval_invalid_type_approve.py`` 에서 다룬다).
+    """
+
+    async def _noop_executor(params: dict) -> None:
+        return None
+
+    executors = {t.value: _noop_executor for t in ApprovalType}
+    svc = ApprovalService(db=db, eventbus=eventbus, executors=executors)
     await svc.initialize()
     return svc
 
@@ -548,12 +563,15 @@ class TestHistory:
         result = await service.approve(req.id)
 
         actions = [h["action"] for h in result.history]
+        # Refs #1470: service 픽스처에 no-op executor 가 등록되어 approve
+        # 직후 ``executed`` history 가 자동 추가된다.
         assert actions == [
             "created",
             "review_added",
             "held",
             "resumed",
             "approved",
+            "executed",
         ]
 
     async def test_history_persisted(self, service):
@@ -568,9 +586,11 @@ class TestHistory:
 
         fetched = await service.get(req.id)
         assert fetched is not None
-        assert len(fetched.history) == 2
+        # Refs #1470: ``executed`` history 가 approve 직후 추가된다.
+        assert len(fetched.history) == 3
         assert fetched.history[0]["action"] == "created"
         assert fetched.history[1]["action"] == "approved"
+        assert fetched.history[2]["action"] == "executed"
 
 
 # ── 만료 처리 (US-6) ────────────────────────────────
@@ -1487,7 +1507,15 @@ class TestReopen:
 
         assert approved.status == "approved"
         actions = [h["action"] for h in approved.history]
-        assert actions == ["created", "rejected", "reopened", "approved"]
+        # Refs #1470: service 픽스처에 no-op executor 가 등록되어 approve
+        # 직후 ``executed`` history 가 자동 추가된다.
+        assert actions == [
+            "created",
+            "rejected",
+            "reopened",
+            "approved",
+            "executed",
+        ]
 
 
 # ── suppress_notification (#516) ───────────────────
