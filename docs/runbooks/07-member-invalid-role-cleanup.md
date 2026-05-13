@@ -101,6 +101,13 @@ list-invalid-roles` 로 default 가 아닌 인스턴스를 점검했다면, payl
 운영자가 수동으로 `--config-dir` 을 다시 붙일 필요가 없고, default DB 에 잘못
 실행될 위험도 없다.
 
+payload 의 `revoke_command` 에 들어가는 `--config-dir` 값은 **절대 경로로
+정규화**되어 있다 (`Path.expanduser().resolve()` 적용). 따라서 운영자가
+`ante --config-dir custom member list-invalid-roles` 처럼 상대 경로나
+`~/...` 형태로 호출했더라도, payload 를 다른 CWD 에서 복사 실행했을 때 그 CWD
+아래의 `custom` 디렉토리를 가리키는 사고가 발생하지 않는다 — payload 는 항상
+처음 스캔한 인스턴스의 절대 경로를 가리킨다.
+
 이 명령은 다음을 수행한다 (`MemberService.revoke`):
 
 - `members.status = 'revoked'`

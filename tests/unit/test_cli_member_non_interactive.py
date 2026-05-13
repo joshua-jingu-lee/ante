@@ -1024,9 +1024,13 @@ class TestMemberListInvalidRolesJsonSchema:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         cmd = data["actionable"][0]["revoke_command"]
-        quoted_dir = _shlex.quote(str(custom_dir))
+        # attempt 4 P2: payload 는 ``expanduser().resolve()`` 로 정규화된
+        # 절대 경로를 싣는다. tmp_path 는 이미 절대 경로지만 macOS 등에서는
+        # ``/var/...`` → ``/private/var/...`` symlink 해소가 발생할 수 있으므로
+        # ``resolve()`` 결과를 기준으로 비교한다.
+        quoted_dir = _shlex.quote(str(custom_dir.resolve()))
         # ``--config-dir`` 인자가 ``ante`` 와 ``member`` 사이에 들어가며,
-        # 경로는 ``shlex.quote`` 인용된 형태로 그대로 보존된다.
+        # 경로는 절대 경로 + ``shlex.quote`` 인용된 형태로 보존된다.
         assert cmd == (
             f"ante --config-dir {quoted_dir} "
             f"member revoke --yes -- agent-other-instance"
@@ -1070,9 +1074,11 @@ class TestMemberListInvalidRolesJsonSchema:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         cmd = data["actionable"][0]["revoke_command"]
-        quoted_dir = _shlex.quote(str(spaced_dir))
+        # attempt 4 P2: ``resolve()`` 후 절대 경로 기준으로 quote 비교한다.
+        resolved_spaced = spaced_dir.resolve()
+        quoted_dir = _shlex.quote(str(resolved_spaced))
         # quote 가 따옴표로 감싼 형태여야 한다 (단순 토큰이 아님).
-        assert quoted_dir != str(spaced_dir)
+        assert quoted_dir != str(resolved_spaced)
         assert cmd == (
             f"ante --config-dir {quoted_dir} member revoke --yes -- agent-space-dir"
         )
@@ -1104,6 +1110,88 @@ class TestMemberListInvalidRolesJsonSchema:
         # default 일 때는 ``--config-dir`` 인자가 아예 없는 표준 형태.
         assert cmd == "ante member revoke --yes -- agent-default-instance"
         assert "--config-dir" not in cmd
+
+    def test_cli_list_invalid_roles_revoke_command_normalizes_relative_config_dir(
+        self,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """상대 ``--config-dir`` 도 payload 에서는 **절대 경로** 로 정규화된다.
+
+        attempt 4 P2: 운영자가 ``ante --config-dir custom member
+        list-invalid-roles`` 처럼 상대 경로로 호출한 경우, payload 의
+        ``revoke_command`` 가 raw ``custom`` 을 그대로 들고 있으면 그 payload 를
+        다른 CWD 에서 복사 실행했을 때 새로운 CWD 아래의 ``custom`` 디렉토리를
+        가리켜 다른 인스턴스 DB 에 실행될 위험이 있다. ``_explicit_config_dir``
+        가 ``Path.expanduser().resolve()`` 로 절대 경로화하므로 payload 는
+        실행 위치에 관계없이 처음 스캔한 인스턴스를 가리킨다.
+
+        ``tmp_path`` 안에 상대 디렉토리를 만들고 CliRunner 의 isolated_filesystem
+        으로 그 부모를 CWD 로 잡은 뒤, ``--config-dir custom`` 으로 호출한다.
+        payload 에는 ``str((cwd / "custom").resolve())`` 가 들어가야 한다.
+        """
+        import os
+        import shlex as _shlex
+        from pathlib import Path as _Path
+
+        # tmp_path 내에 상대 경로로 접근할 디렉토리를 미리 만든다.
+        # isolated_filesystem 이 잡는 CWD 아래에 동일 이름이 존재해야
+        # ``--config-dir custom`` (상대) 해석이 의미를 갖는다.
+        relative_name = "custom"
+        actionable = _make_invalid_role_member(
+            "agent-relative-cfg", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+
+        runner = CliRunner()
+        with ctx, runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
+            # 상대 경로 ``custom`` 이 가리킬 절대 위치.
+            absolute_target = (_Path(cwd) / relative_name).resolve()
+            absolute_target.mkdir(parents=True, exist_ok=True)
+            assert not os.path.isabs(relative_name)  # 가정: 상대 경로
+            with patch(
+                "ante.cli.main.authenticate_member", side_effect=_mock_authenticate
+            ):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "--config-dir",
+                        relative_name,
+                        "member",
+                        "list-invalid-roles",
+                    ],
+                    obj={"member": _make_master()},
+                    env={"ANTE_MEMBER_TOKEN": ""},
+                    catch_exceptions=False,
+                )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        # 핵심 회귀: payload 의 ``--config-dir`` 값은 **절대 경로** 다.
+        # raw ``custom`` 이 그대로 들어가면 다른 CWD 실행 시 인스턴스가 바뀐다.
+        assert f"--config-dir {relative_name} " not in cmd, (
+            "attempt 4 회귀: payload 에 raw 상대 경로가 그대로 들어가면 안 된다: "
+            f"{cmd!r}"
+        )
+        # 정규화된 절대 경로(``shlex.quote``)가 들어가야 한다.
+        quoted_abs = _shlex.quote(str(absolute_target))
+        assert cmd == (
+            f"ante --config-dir {quoted_abs} member revoke --yes -- agent-relative-cfg"
+        )
+        # 추가 invariant: payload 의 ``--config-dir`` 토큰 다음 값은 절대 경로
+        # (``/`` 로 시작) 여야 한다.
+        cfg_token_value_start = cmd.index("--config-dir ") + len("--config-dir ")
+        # quote 가 따옴표로 감쌌으면 첫 char 는 따옴표일 수도 있으므로
+        # 따옴표/슬래시 둘 중 하나로 시작해야 한다.
+        first_char = cmd[cfg_token_value_start]
+        assert first_char in ("/", "'", '"'), (
+            "payload 의 --config-dir 값은 절대 경로(또는 quoted 절대 경로)여야 한다:"
+            f" {cmd!r}"
+        )
 
     def test_cli_list_invalid_roles_legacy_revoked_omits_revoke_command(self) -> None:
         """legacy_revoked row 의 JSON dict 에 ``revoke_command`` 키가 없다.
