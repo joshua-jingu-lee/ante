@@ -7,6 +7,8 @@
 - 누락 / 둘 다 지정 / env 부재·공란 / file 부재·공란 실패 케이스
 - ``member regenerate-recovery-key --password-env`` / ``--password-file`` 성공
 - 위 동일 실패 케이스
+- ``member list-invalid-roles`` 두 카테고리 분리 JSON/table 출력, no-row exit 0,
+  ``token_hash`` 비노출 회귀 (#1468)
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from click.testing import CliRunner
 
 from ante.cli.main import cli
-from ante.member.models import Member, MemberRole, MemberType
+from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from ante.member.service import InvalidRoleScan
 
 
 def _make_master() -> Member:
@@ -751,3 +754,550 @@ class TestNonMasterCliPermissionDenied:
         data = json.loads(result.output)
         assert "master" in data["message"]
         assert "Traceback" not in result.output
+
+
+# ── member list-invalid-roles (#1468) ─────────────────
+
+
+def _make_invalid_role_member(
+    member_id: str,
+    *,
+    role: str = "oracle_invalid_role",
+    status: str = "active",
+    token_hash: str = "redacted-token-hash-must-not-leak",
+    token_expires_at: str = "2026-07-01 00:00:00",
+    created_at: str = "2026-04-01 00:00:00",
+    member_type: str = "agent",
+    name: str = "",
+) -> Member:
+    """invalid-role legacy Member 픽스처."""
+    return Member(
+        member_id=member_id,
+        type=member_type,
+        role=role,
+        org="default",
+        name=name or member_id,
+        status=status,
+        scopes=[],
+        token_hash=token_hash,
+        token_expires_at=token_expires_at,
+        created_at=created_at,
+    )
+
+
+def _patch_create_service_with_scan(scan: InvalidRoleScan):  # noqa: ANN202
+    """``_create_service`` 가 invalid-role scan 만 mock 된 service 를 반환한다."""
+    service = MagicMock()
+    service.find_invalid_role_members = AsyncMock(return_value=scan)
+    db = MagicMock()
+    db.close = AsyncMock(return_value=None)
+    return patch(
+        "ante.cli.commands.member._create_service",
+        new_callable=AsyncMock,
+        return_value=(service, db),
+    ), service
+
+
+class TestMemberListInvalidRolesNoRows:
+    """invalid-role row 가 0건일 때 CLI 동작."""
+
+    def test_cli_list_invalid_roles_no_rows_exit_zero(self) -> None:
+        """invalid row 없음 → exit 0, JSON 에 count 모두 0 + summary 노출."""
+        ctx, service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        service.find_invalid_role_members.assert_awaited_once()
+        data = json.loads(result.output)
+        assert data["actionable_count"] == 0
+        assert data["legacy_revoked_count"] == 0
+        assert data["actionable"] == []
+        assert data["legacy_revoked"] == []
+        # summary 키들도 0건일 때 그대로 노출된다.
+        assert data["recommended_action"] == "review_then_revoke"
+        assert data["valid_roles"] == [
+            MemberRole.MASTER.value,
+            MemberRole.ADMIN.value,
+            MemberRole.DEFAULT.value,
+        ]
+
+
+class TestMemberListInvalidRolesJsonSchema:
+    """invalid row 가 있을 때 JSON 스키마 정확성 + token_hash 비노출."""
+
+    def test_cli_list_invalid_roles_command_outputs_json(self) -> None:
+        """JSON 출력이 본문 v2 스키마와 일치하고 token_hash 가 누설되지 않는다."""
+        actionable = _make_invalid_role_member(
+            "agent-bad-1",
+            role="oracle_invalid_role",
+            status="active",
+            token_hash="HASH-MUST-NOT-LEAK-1",
+        )
+        legacy = _make_invalid_role_member(
+            "agent-bad-revoked",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",  # revoke 후 token_hash 빈 문자열.
+            token_expires_at="",
+        )
+        ctx, service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[legacy])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        service.find_invalid_role_members.assert_awaited_once()
+
+        data = json.loads(result.output)
+
+        # top-level summary
+        assert data["recommended_action"] == "review_then_revoke"
+        assert data["valid_roles"] == ["master", "admin", "default"]
+        assert data["actionable_count"] == 1
+        assert data["legacy_revoked_count"] == 1
+
+        # actionable row
+        a = data["actionable"][0]
+        assert a["member_id"] == "agent-bad-1"
+        assert a["role"] == "oracle_invalid_role"
+        assert a["type"] == "agent"
+        assert a["name"] == "agent-bad-1"
+        assert a["status"] == "active"
+        assert a["created_at"] == "2026-04-01 00:00:00"
+        assert a["has_token"] is True
+        assert a["token_expires_at"] == "2026-07-01 00:00:00"
+        # ``member revoke`` 가 ``--yes`` 누락 시 ``CLI_CONFIRMATION_REQUIRED`` 로
+        # 실패하므로 (#1468 Codex review attempt 1, P2-B), JSON payload 의
+        # ``revoke_command`` 는 ``--yes`` 를 포함해 즉시 실행 가능해야 한다.
+        # 또한 attempt 2 P2-A: ``member_id`` 를 ``shlex.quote`` 로 셸 안전 인용
+        # 하고, 옵션/포지셔널 경계는 ``--`` separator 로 명시한다.
+        assert a["revoke_command"] == "ante member revoke --yes -- agent-bad-1"
+
+        # legacy revoked row
+        legacy_row = data["legacy_revoked"][0]
+        assert legacy_row["member_id"] == "agent-bad-revoked"
+        assert legacy_row["status"] == "revoked"
+        # token_hash 빈 문자열 → has_token False, token_expires_at == null
+        assert legacy_row["has_token"] is False
+        assert legacy_row["token_expires_at"] is None
+        # attempt 2 P2-B: legacy_revoked row 는 이미 revoked 상태이므로
+        # ``MemberService.revoke`` 가 active/suspended 만 허용해 noop 가 된다.
+        # 키 자체를 누락해 "추가 조치 불요" 임을 명시한다.
+        assert "revoke_command" not in legacy_row
+
+        # 보안: 어떤 row 에도 token_hash 키가 없어야 한다.
+        for row in data["actionable"] + data["legacy_revoked"]:
+            assert "token_hash" not in row, (
+                f"token_hash 가 출력에 포함되어서는 안 된다: {row}"
+            )
+        # raw token hash 문자열도 출력에 등장하지 않는다.
+        assert "HASH-MUST-NOT-LEAK-1" not in result.output
+
+    def test_cli_list_invalid_roles_revoke_command_includes_yes_flag(self) -> None:
+        """actionable row 의 ``revoke_command`` 가 ``--yes`` 를 포함한다 (#1468 회귀).
+
+        ``ante member revoke`` 는 ``--yes`` 누락 시 prompt 없이
+        ``CLI_CONFIRMATION_REQUIRED`` 로 실패하므로, JSON payload 가 권장 명령으로
+        ``--yes`` 없는 형태를 출력하면 운영자가 그대로 복붙해도 실패한다.
+        본 명령은 즉시 실행 가능한 형태여야 한다.
+
+        attempt 2 P2-B 후속: legacy_revoked row 는 ``revoke_command`` 키 자체가
+        포함되지 않으므로 (이미 revoked → MemberService.revoke 가 noop 으로 실패),
+        본 어서션은 ``actionable`` 카테고리에만 적용한다.
+        """
+        actionable = _make_invalid_role_member(
+            "agent-must-have-yes", role="oracle_invalid_role", status="active"
+        )
+        legacy = _make_invalid_role_member(
+            "legacy-also-yes",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",
+            token_expires_at="",
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[legacy])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        # actionable 카테고리만 ``revoke_command`` 를 갖고, 형식은
+        # ``ante member revoke --yes -- <quoted member_id>`` 다.
+        for row in data["actionable"]:
+            cmd = row["revoke_command"]
+            assert "--yes" in cmd, (
+                f"revoke_command 는 ``--yes`` 를 포함해야 한다: {cmd!r}"
+            )
+            # `member_id` 가 셸 메타문자를 포함하지 않는 단순 토큰일 때
+            # ``shlex.quote`` 는 따옴표 없이 그대로 반환한다.
+            assert cmd == f"ante member revoke --yes -- {row['member_id']}"
+        # legacy_revoked row 에는 키 자체가 없다 (P2-B).
+        for row in data["legacy_revoked"]:
+            assert "revoke_command" not in row, (
+                f"legacy_revoked row 는 revoke_command 키를 가지면 안 된다: {row!r}"
+            )
+
+    def test_cli_list_invalid_roles_revoke_command_shell_safe_quotes_member_id(
+        self,
+    ) -> None:
+        """공백/메타문자가 든 ``member_id`` 는 ``shlex.quote`` 로 안전 인용된다.
+
+        attempt 2 P2-A: ``member_id`` 는 service/API 에서 형식 제한이 없는
+        문자열이라 공백/셸 메타문자/`-`-prefix 가 들어갈 수 있다. 운영자가 payload
+        를 복사 실행할 때 인자 splitting / 옵션 파싱 / 셸 substitution 위험이
+        없도록 actionable row 의 ``revoke_command`` 는 반드시 ``shlex.quote`` 결과
+        를 포함해야 한다.
+        """
+        import shlex as _shlex
+
+        unsafe_id = "agent bad id"  # 공백 포함 → quote 후 따옴표 감싸짐.
+        actionable = _make_invalid_role_member(
+            unsafe_id, role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        quoted = _shlex.quote(unsafe_id)
+        # quote 결과는 단순 토큰이 아니라 따옴표로 감싼 형태여야 한다.
+        assert quoted != unsafe_id, (
+            "테스트 가정: 공백이 든 id 는 shlex.quote 가 따옴표로 감싼다"
+        )
+        assert cmd == f"ante member revoke --yes -- {quoted}"
+        # 원본 공백 id 가 그대로 끼지 않았음을 확인한다 (인용된 형태만 노출).
+        assert f"-- {unsafe_id}" not in cmd
+
+    def test_cli_list_invalid_roles_revoke_command_preserves_config_dir(
+        self,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """루트 ``--config-dir`` 가 ``revoke_command`` 에 보존 (#1468 attempt 3).
+
+        ``ante --config-dir /path member list-invalid-roles`` 로 다른 인스턴스를
+        스캔할 때, payload 의 ``revoke_command`` 가 ``--config-dir`` 을 누락하면
+        운영자가 그대로 복사 실행했을 때 default config_dir DB 에 실행되어
+        엉뚱한 인스턴스를 건드린다. 본 회귀 테스트는 actionable row 의
+        ``revoke_command`` 가 동일한 ``--config-dir`` 을 ``shlex.quote`` 인용된
+        형태로 보존하는지 검증한다.
+        """
+        import shlex as _shlex
+
+        custom_dir = tmp_path / "ante-custom"
+        custom_dir.mkdir()
+        actionable = _make_invalid_role_member(
+            "agent-other-instance", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "--config-dir",
+                    str(custom_dir),
+                    "member",
+                    "list-invalid-roles",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        # attempt 4 P2: payload 는 ``expanduser().resolve()`` 로 정규화된
+        # 절대 경로를 싣는다. tmp_path 는 이미 절대 경로지만 macOS 등에서는
+        # ``/var/...`` → ``/private/var/...`` symlink 해소가 발생할 수 있으므로
+        # ``resolve()`` 결과를 기준으로 비교한다.
+        quoted_dir = _shlex.quote(str(custom_dir.resolve()))
+        # ``--config-dir`` 인자가 ``ante`` 와 ``member`` 사이에 들어가며,
+        # 경로는 절대 경로 + ``shlex.quote`` 인용된 형태로 보존된다.
+        assert cmd == (
+            f"ante --config-dir {quoted_dir} "
+            f"member revoke --yes -- agent-other-instance"
+        )
+        # 회귀: ``--yes`` / ``--`` separator / quoted member_id 도 같이 유지된다.
+        assert "--yes" in cmd
+        assert " -- " in cmd
+
+    def test_cli_list_invalid_roles_revoke_command_quotes_config_dir_with_spaces(
+        self,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """``--config-dir`` 경로에 공백이 있어도 ``shlex.quote`` 로 안전 인용된다.
+
+        macOS 의 ``~/Library/Application Support/...`` 같은 공백 포함 경로에서
+        운영자가 payload 를 복사 실행할 때 인자 splitting 으로 ``--config-dir``
+        값이 첫 토큰만 잡히는 사고를 막는다 (#1468 attempt 3 P2 회귀).
+        """
+        import shlex as _shlex
+
+        spaced_dir = tmp_path / "ante config with space"
+        spaced_dir.mkdir()
+        actionable = _make_invalid_role_member(
+            "agent-space-dir", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "--config-dir",
+                    str(spaced_dir),
+                    "member",
+                    "list-invalid-roles",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        # attempt 4 P2: ``resolve()`` 후 절대 경로 기준으로 quote 비교한다.
+        resolved_spaced = spaced_dir.resolve()
+        quoted_dir = _shlex.quote(str(resolved_spaced))
+        # quote 가 따옴표로 감싼 형태여야 한다 (단순 토큰이 아님).
+        assert quoted_dir != str(resolved_spaced)
+        assert cmd == (
+            f"ante --config-dir {quoted_dir} member revoke --yes -- agent-space-dir"
+        )
+
+    def test_cli_list_invalid_roles_revoke_command_omits_config_dir_when_default(
+        self,
+    ) -> None:
+        """``--config-dir`` 미지정 시 ``revoke_command`` 에 인자가 들어가지 않는다.
+
+        default config_dir 케이스에서 기존 호출 형태(``ante member revoke ...``)
+        를 유지해 운영자 워크플로우/문서를 깨지 않게 한다. 본 회귀 테스트는
+        existing test_cli_list_invalid_roles_command_outputs_json 과 함께 default
+        형태가 보존됨을 명시적으로 확인한다.
+        """
+        actionable = _make_invalid_role_member(
+            "agent-default-instance", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        # default 일 때는 ``--config-dir`` 인자가 아예 없는 표준 형태.
+        assert cmd == "ante member revoke --yes -- agent-default-instance"
+        assert "--config-dir" not in cmd
+
+    def test_cli_list_invalid_roles_revoke_command_normalizes_relative_config_dir(
+        self,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """상대 ``--config-dir`` 도 payload 에서는 **절대 경로** 로 정규화된다.
+
+        attempt 4 P2: 운영자가 ``ante --config-dir custom member
+        list-invalid-roles`` 처럼 상대 경로로 호출한 경우, payload 의
+        ``revoke_command`` 가 raw ``custom`` 을 그대로 들고 있으면 그 payload 를
+        다른 CWD 에서 복사 실행했을 때 새로운 CWD 아래의 ``custom`` 디렉토리를
+        가리켜 다른 인스턴스 DB 에 실행될 위험이 있다. ``_explicit_config_dir``
+        가 ``Path.expanduser().resolve()`` 로 절대 경로화하므로 payload 는
+        실행 위치에 관계없이 처음 스캔한 인스턴스를 가리킨다.
+
+        ``tmp_path`` 안에 상대 디렉토리를 만들고 CliRunner 의 isolated_filesystem
+        으로 그 부모를 CWD 로 잡은 뒤, ``--config-dir custom`` 으로 호출한다.
+        payload 에는 ``str((cwd / "custom").resolve())`` 가 들어가야 한다.
+        """
+        import os
+        import shlex as _shlex
+        from pathlib import Path as _Path
+
+        # tmp_path 내에 상대 경로로 접근할 디렉토리를 미리 만든다.
+        # isolated_filesystem 이 잡는 CWD 아래에 동일 이름이 존재해야
+        # ``--config-dir custom`` (상대) 해석이 의미를 갖는다.
+        relative_name = "custom"
+        actionable = _make_invalid_role_member(
+            "agent-relative-cfg", role="oracle_invalid_role", status="active"
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+
+        runner = CliRunner()
+        with ctx, runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
+            # 상대 경로 ``custom`` 이 가리킬 절대 위치.
+            absolute_target = (_Path(cwd) / relative_name).resolve()
+            absolute_target.mkdir(parents=True, exist_ok=True)
+            assert not os.path.isabs(relative_name)  # 가정: 상대 경로
+            with patch(
+                "ante.cli.main.authenticate_member", side_effect=_mock_authenticate
+            ):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "--config-dir",
+                        relative_name,
+                        "member",
+                        "list-invalid-roles",
+                    ],
+                    obj={"member": _make_master()},
+                    env={"ANTE_MEMBER_TOKEN": ""},
+                    catch_exceptions=False,
+                )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        cmd = data["actionable"][0]["revoke_command"]
+        # 핵심 회귀: payload 의 ``--config-dir`` 값은 **절대 경로** 다.
+        # raw ``custom`` 이 그대로 들어가면 다른 CWD 실행 시 인스턴스가 바뀐다.
+        assert f"--config-dir {relative_name} " not in cmd, (
+            "attempt 4 회귀: payload 에 raw 상대 경로가 그대로 들어가면 안 된다: "
+            f"{cmd!r}"
+        )
+        # 정규화된 절대 경로(``shlex.quote``)가 들어가야 한다.
+        quoted_abs = _shlex.quote(str(absolute_target))
+        assert cmd == (
+            f"ante --config-dir {quoted_abs} member revoke --yes -- agent-relative-cfg"
+        )
+        # 추가 invariant: payload 의 ``--config-dir`` 토큰 다음 값은 절대 경로
+        # (``/`` 로 시작) 여야 한다.
+        cfg_token_value_start = cmd.index("--config-dir ") + len("--config-dir ")
+        # quote 가 따옴표로 감쌌으면 첫 char 는 따옴표일 수도 있으므로
+        # 따옴표/슬래시 둘 중 하나로 시작해야 한다.
+        first_char = cmd[cfg_token_value_start]
+        assert first_char in ("/", "'", '"'), (
+            "payload 의 --config-dir 값은 절대 경로(또는 quoted 절대 경로)여야 한다:"
+            f" {cmd!r}"
+        )
+
+    def test_cli_list_invalid_roles_legacy_revoked_omits_revoke_command(self) -> None:
+        """legacy_revoked row 의 JSON dict 에 ``revoke_command`` 키가 없다.
+
+        attempt 2 P2-B: legacy_revoked row 는 이미 ``status=revoked`` 다.
+        ``MemberService.revoke`` 가 active/suspended 만 허용하므로 재실행 시
+        실패한다. payload 에 noop 명령을 싣지 않고 키 자체를 누락해 "추가 조치
+        불요" 임을 명시한다.
+        """
+        legacy_only = _make_invalid_role_member(
+            "legacy-revoked-1",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",
+            token_expires_at="",
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[], legacy_revoked=[legacy_only])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["legacy_revoked_count"] == 1
+        legacy_row = data["legacy_revoked"][0]
+        assert legacy_row["member_id"] == "legacy-revoked-1"
+        assert legacy_row["status"] == "revoked"
+        # 핵심 회귀: revoke_command 키가 없어야 한다 (None 도 아님).
+        assert "revoke_command" not in legacy_row, (
+            f"legacy_revoked row 의 dict 키 목록: {list(legacy_row.keys())}"
+        )
+
+
+class TestMemberListInvalidRolesTable:
+    """text(table) 모드에서 두 섹션이 모두 표시된다."""
+
+    def test_cli_list_invalid_roles_command_outputs_table(self) -> None:
+        """text 모드 — actionable + legacy_revoked 두 섹션 표시."""
+        actionable = _make_invalid_role_member(
+            "agent-bad-active", role="oracle_invalid_role", status="active"
+        )
+        legacy = _make_invalid_role_member(
+            "agent-bad-revoked",
+            role="oracle_invalid_role",
+            status="revoked",
+            token_hash="",
+            token_expires_at="",
+        )
+        ctx, _service = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[legacy])
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "text", "member", "list-invalid-roles"],
+            )
+
+        assert result.exit_code == 0, result.output
+        # 두 섹션 헤더가 모두 노출되어야 한다.
+        assert "[actionable]" in result.output
+        assert "[legacy_revoked]" in result.output
+        # 각 row 의 member_id 도 표시된다.
+        assert "agent-bad-active" in result.output
+        assert "agent-bad-revoked" in result.output
+        # summary 도 표시.
+        assert "review_then_revoke" in result.output
+        # text 모드여도 token_hash 는 누출되지 않는다.
+        assert "token_hash" not in result.output
+
+
+class TestMemberListInvalidRolesTokenHashRegression:
+    """``token_hash`` 가 모든 출력 모드에서 노출되지 않는다 (#1468 secret-exposure)."""
+
+    def test_cli_list_invalid_roles_does_not_expose_token_hash(self) -> None:
+        """JSON 모드 + text 모드 모두에서 token_hash 비노출 회귀."""
+        sensitive_hash = "TOP-SECRET-HASH-VALUE-DO-NOT-LEAK"
+        actionable = _make_invalid_role_member(
+            "agent-bad",
+            role="oracle_invalid_role",
+            status=MemberStatus.ACTIVE.value,
+            token_hash=sensitive_hash,
+        )
+        # JSON 모드
+        ctx_json, _svc_json = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx_json:
+            result_json = _invoke_cli(
+                ["--format", "json", "member", "list-invalid-roles"],
+            )
+        assert result_json.exit_code == 0, result_json.output
+        assert sensitive_hash not in result_json.output
+        data = json.loads(result_json.output)
+        for row in data["actionable"] + data["legacy_revoked"]:
+            assert "token_hash" not in row
+
+        # text 모드
+        ctx_text, _svc_text = _patch_create_service_with_scan(
+            InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
+        )
+        with ctx_text:
+            result_text = _invoke_cli(
+                ["--format", "text", "member", "list-invalid-roles"],
+            )
+        assert result_text.exit_code == 0, result_text.output
+        assert sensitive_hash not in result_text.output
+        assert "token_hash" not in result_text.output

@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import secrets
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -20,7 +21,33 @@ from ante.member.recovery_key_manager import RecoveryKeyManager
 from ante.member.scopes import InvalidScopeError, is_valid_scope
 from ante.member.token_manager import TokenManager, _token_expires_at
 
-__all__ = ["MemberService", "ANIMAL_EMOJI_POOL", "MEMBER_SCHEMA", "_token_expires_at"]
+__all__ = [
+    "MemberService",
+    "InvalidRoleScan",
+    "ANIMAL_EMOJI_POOL",
+    "MEMBER_SCHEMA",
+    "_token_expires_at",
+]
+
+
+@dataclass
+class InvalidRoleScan:
+    """``MemberService.find_invalid_role_members`` 결과 컨테이너 (#1468).
+
+    ``MemberRole`` enum SSOT 에 없는 ``role`` 을 가진 member row 를 두 카테고리로
+    분리한다. 운영자는 ``actionable`` 만 ``ante member revoke`` 로 cleanup 하고,
+    ``legacy_revoked`` 는 이미 revoke 된 historical row 라 추가 조치가 필요 없다.
+
+    Attributes:
+        actionable: ``role`` invalid AND ``status != revoked`` 인 row 들. 운영자가
+            ``ante member revoke <member_id>`` 로 revoke 해야 할 대상.
+        legacy_revoked: ``role`` invalid AND ``status == revoked`` 인 row 들. 이미
+            revoke 처리된 흔적이며, 운영자가 동일 row 를 반복 처리하지 않게 분리.
+    """
+
+    actionable: list[Member] = field(default_factory=list)
+    legacy_revoked: list[Member] = field(default_factory=list)
+
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -512,6 +539,42 @@ class MemberService:
             tuple(params),
         )
         return row["cnt"] if row else 0
+
+    async def find_invalid_role_members(self) -> InvalidRoleScan:
+        """``MemberRole`` enum SSOT 에 없는 ``role`` 을 가진 member row 를 식별한다.
+
+        #1465(write path 차단), #1466(auth read-path guard)으로 invalid-role row
+        는 더 이상 새로 생성되지 않지만, 이전에 생성된 legacy row 는 DB 에 남아
+        있을 수 있다. 본 메소드는 그런 row 를 운영자가 cleanup 할 수 있도록 두
+        카테고리로 분리해 반환한다.
+
+        반환된 ``Member`` 객체는 ``token_hash`` 등 민감 필드도 포함하지만
+        CLI 출력 계층에서 마스킹/생략한다 (본 메소드는 service-layer SSOT 이므로
+        column projection 을 의도적으로 하지 않는다 — caller 가 보안 결정을 진다).
+
+        정렬: ``created_at ASC, member_id ASC`` (legacy row 정렬 안정성).
+
+        Returns:
+            ``InvalidRoleScan(actionable=[...], legacy_revoked=[...])``. 두 리스트는
+            중복되지 않으며, ``status`` 분기로 정확히 한 쪽에만 속한다.
+        """
+        valid = tuple(member.value for member in MemberRole)
+        placeholders = ",".join("?" for _ in valid)
+        rows = await self._db.fetch_all(
+            "SELECT * FROM members "  # noqa: S608
+            f"WHERE role NOT IN ({placeholders}) "
+            "ORDER BY created_at ASC, member_id ASC",
+            valid,
+        )
+        actionable: list[Member] = []
+        legacy_revoked: list[Member] = []
+        for row in rows:
+            member = _row_to_member(row)
+            if member.status == MemberStatus.REVOKED:
+                legacy_revoked.append(member)
+            else:
+                actionable.append(member)
+        return InvalidRoleScan(actionable=actionable, legacy_revoked=legacy_revoked)
 
     # ── 상태 변경 ──────────────────────────────────────
 

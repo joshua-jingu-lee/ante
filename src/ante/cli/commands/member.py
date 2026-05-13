@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import shlex
 from pathlib import Path
 
 import click
@@ -21,7 +23,10 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.member.errors import PermissionDeniedError
+from ante.member.models import MemberRole
 from ante.member.scopes import InvalidScopeError
+
+logger = logging.getLogger(__name__)
 
 # CLI 핸들러에서 master guard 위반을 사용자 친화 메시지로 종료하기 위한 메시지.
 # ``MemberService._assert_master``가 raise하는 ``PermissionDeniedError``는 Python
@@ -233,6 +238,212 @@ def member_info(ctx: click.Context, member_id: str) -> None:
         click.echo(f"  권한      : {', '.join(result['scopes']) or '-'}")
         click.echo(f"  생성일    : {result['created_at']}")
         click.echo(f"  생성자    : {result['created_by']}")
+
+
+def _explicit_config_dir(ctx: click.Context) -> str | None:
+    """루트 ``--config-dir`` 옵션이 명시적으로 지정된 경우 그 값(str)을 돌려준다.
+
+    Ante CLI 의 루트 그룹(:func:`ante.cli.main.cli`)은 ``--config-dir`` 이 명시
+    되거나 ``ANTE_CONFIG_DIR`` 환경변수가 set 되었을 때에만
+    ``ctx.obj["config_dir"]`` 를 ``Path`` 로 채운다. 미지정이면 키 자체가 누락된다.
+    본 헬퍼는 그 override 값을 **절대 경로**(``expanduser().resolve()``)로 정규화
+    해서 반환하며, override 가 없으면 ``None`` 을 돌려 default config_dir 를
+    의미하게 한다.
+
+    이 값은 ``revoke_command`` 생성 시 운영자가 입력한 ``--config-dir`` 을
+    payload 에 보존하기 위해 사용된다 (#1468 Codex review attempt 3, P2):
+    운영자가 ``ante --config-dir /custom member list-invalid-roles`` 로 다른
+    인스턴스를 스캔했을 때, payload 의 ``revoke_command`` 에 ``--config-dir`` 이
+    빠지면 default config_dir 의 DB 에 실행되어 엉뚱한 인스턴스를 건드릴 위험이
+    있다. 항상 ``ctx`` 의 override 를 같은 자리에 다시 채워 인스턴스 일관성을
+    보장한다.
+
+    추가로 attempt 4 P2 회귀: 운영자가 ``ante --config-dir custom member
+    list-invalid-roles`` 처럼 **상대 경로**로 호출한 경우, raw 값을 그대로
+    payload 에 실으면 운영자가 payload(``revoke_command``)를 다른 CWD 에서
+    복사 실행했을 때 그 CWD 아래의 ``custom`` DB 를 가리키게 되어 다시 다른
+    인스턴스가 될 수 있다. 이를 막기 위해 본 헬퍼는 ``Path.expanduser()``
+    (``~/...`` 확장) + ``Path.resolve()`` (절대 경로화 + symlink 해소) 로
+    경로를 고정해, 어느 CWD 에서 실행되더라도 처음 스캔한 인스턴스와 동일한
+    config_dir 를 가리키도록 보장한다.
+    """
+    obj = getattr(ctx, "obj", None)
+    if not isinstance(obj, dict):
+        return None
+    raw = obj.get("config_dir")
+    if raw is None:
+        return None
+    # 절대 경로로 정규화 — payload 를 다른 CWD 에서 실행해도 같은 인스턴스를
+    # 가리키도록 한다 (#1468 Codex review attempt 4, P2).
+    return str(Path(raw).expanduser().resolve())
+
+
+def _build_revoke_command(member_id: str, *, config_dir: str | None) -> str:
+    """``ante member revoke`` payload 명령 문자열을 생성한다.
+
+    - ``config_dir`` 이 주어지면 ``ante --config-dir <quoted>`` 를 앞에 붙여
+      동일 인스턴스(DB) 대상으로 명령이 실행되도록 보존한다 (#1468 attempt 3 P2).
+    - ``--yes`` 는 ``member revoke`` 비대화형 게이트를 통과하기 위해 항상 포함한다
+      (#1468 attempt 1 P2-B).
+    - ``--`` separator 와 ``shlex.quote`` 로 ``member_id`` 를 셸 안전 인용해
+      빈 문자열·공백·셸 메타문자·``-``-prefix 가 포함된 id 도 인자 splitting /
+      옵션 파싱으로 오해석되지 않도록 한다 (#1468 attempt 2 P2-A).
+    """
+    parts = ["ante"]
+    if config_dir is not None:
+        parts.append(f"--config-dir {shlex.quote(config_dir)}")
+    parts.append(f"member revoke --yes -- {shlex.quote(member_id)}")
+    return " ".join(parts)
+
+
+def _invalid_role_row_dict(
+    m,  # noqa: ANN001
+    *,
+    actionable: bool,
+    config_dir: str | None = None,
+) -> dict:
+    """``Member`` row 를 CLI 출력용 dict 로 변환.
+
+    ``token_hash`` 는 보안상 절대 노출하지 않는다 (#1468 secret-exposure). 토큰
+    존재 여부는 ``has_token: bool`` 로만 표현하고 만료시각은 그대로 표시한다.
+    ``valid_roles`` 는 row-level 이 아니라 top-level scan summary 에만 노출한다.
+
+    ``revoke_command`` 는 **actionable row 에서만** 노출한다. legacy_revoked row
+    는 이미 ``status=revoked`` 상태이며 ``MemberService.revoke`` 가
+    ``active``/``suspended`` 만 허용하므로 재실행 시 실패한다. 따라서 noop 명령을
+    payload 에 싣지 않고 키 자체를 누락해 "추가 조치 불요" 임을 명시한다
+    (#1468 Codex review attempt 2, P2-B).
+
+    actionable row 의 ``revoke_command`` 는 ``shlex.quote`` 로 ``member_id`` 를
+    셸 안전하게 인용하고, ``--`` separator 로 옵션/포지셔널 경계를 명시한다 — 빈
+    문자열·공백·셸 메타문자·``-``-prefix 가 포함된 ``member_id`` 가 운영자 셸에서
+    인자 splitting 이나 옵션 파싱으로 오해석되는 위험을 차단한다 (#1468 Codex
+    review attempt 2, P2-A).
+
+    ``config_dir`` 이 주어지면(루트 ``--config-dir`` 이 명시된 경우) 그 값을
+    ``revoke_command`` 앞에 ``--config-dir <quoted>`` 로 보존해, 운영자가 payload
+    를 그대로 복사 실행해도 같은 인스턴스(DB) 대상으로 동작하도록 보장한다
+    (#1468 attempt 3 P2 — config-dir 보존). default config_dir 일 때는 인자 자체
+    를 생략해 기존 표준 호출 형태를 유지한다. 값은
+    :func:`_explicit_config_dir` 에서 ``expanduser().resolve()`` 로 **절대 경로
+    화** 되어 들어오므로, 운영자가 상대 경로/``~`` 확장 형태로 호출했더라도
+    payload 는 다른 CWD 에서 실행해도 같은 인스턴스를 가리킨다 (#1468 attempt 4
+    P2).
+    """
+    has_token = bool(m.token_hash)
+    row: dict = {
+        "member_id": m.member_id,
+        "role": m.role,
+        "type": m.type,
+        "name": m.name,
+        "status": m.status,
+        "created_at": m.created_at,
+        "has_token": has_token,
+        "token_expires_at": m.token_expires_at or None,
+    }
+    if actionable:
+        row["revoke_command"] = _build_revoke_command(
+            m.member_id, config_dir=config_dir
+        )
+    return row
+
+
+@member.command("list-invalid-roles")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("member:read")
+def member_list_invalid_roles(
+    ctx: click.Context,
+) -> None:
+    """``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468).
+
+    본 명령은 canonical config 의 ``db.path`` (``get_db_path()``) 단일 DB 에
+    대해서만 invalid-role row 를 식별한다. 다른 DB 파일 대상 점검은 본 PR scope
+    가 아니며, 필요하면 별도 이슈로 분리한다.
+
+    ``actionable`` 카테고리는 ``status != revoked`` 인 invalid-role row 이며,
+    운영자가 ``ante member revoke --yes -- <member_id>`` 로 cleanup 해야 한다.
+    ``legacy_revoked`` 는 이미 revoke 된 historical row 다.
+
+    분류는 ``offline`` 이지만 ``MemberService.initialize()`` 가 schema migration
+    DDL 을 수반한다 — 따라서 "read-only" 가 아니다. ``ante member list`` /
+    ``info`` 와 동일한 ``_create_service()`` 패턴을 사용하며 runtime IPC 는
+    우회한다.
+
+    ``token_hash`` 는 모든 출력 모드에서 노출되지 않는다 (보안 SSOT).
+    """
+    fmt = get_formatter(ctx)
+    valid_roles = [member.value for member in MemberRole]
+    # 루트 ``--config-dir`` 이 명시되어 있으면 payload 의 revoke_command 에
+    # 동일 값을 보존한다 (#1468 attempt 3 P2). default 이면 None 이 돌아오고
+    # ``--config-dir`` 인자는 생략된다.
+    config_dir_override = _explicit_config_dir(ctx)
+
+    async def _run_scan() -> tuple[list[dict], list[dict]]:
+        service, db = await _create_service()
+        try:
+            scan = await service.find_invalid_role_members()
+            actionable = [
+                _invalid_role_row_dict(
+                    m, actionable=True, config_dir=config_dir_override
+                )
+                for m in scan.actionable
+            ]
+            legacy = [
+                _invalid_role_row_dict(
+                    m, actionable=False, config_dir=config_dir_override
+                )
+                for m in scan.legacy_revoked
+            ]
+            return actionable, legacy
+        finally:
+            await db.close()
+
+    actionable_rows, legacy_rows = _run(_run_scan())
+
+    # structured log: 운영자가 invocation 시점마다 count 흐름을 추적한다.
+    logger.info(
+        "MEMBER_INVALID_ROLE_FOUND actionable=%d legacy_revoked=%d",
+        len(actionable_rows),
+        len(legacy_rows),
+    )
+
+    payload = {
+        "recommended_action": "review_then_revoke",
+        "valid_roles": valid_roles,
+        "actionable_count": len(actionable_rows),
+        "legacy_revoked_count": len(legacy_rows),
+        "actionable": actionable_rows,
+        "legacy_revoked": legacy_rows,
+    }
+
+    if fmt.is_json:
+        fmt.output(payload)
+        return
+
+    # text 모드 — 두 섹션 분리.
+    click.echo(f"  recommended_action : {payload['recommended_action']}")
+    click.echo(f"  valid_roles        : {', '.join(valid_roles)}")
+    click.echo(f"  actionable         : {payload['actionable_count']}건")
+    click.echo(f"  legacy_revoked     : {payload['legacy_revoked_count']}건")
+
+    def _emit_section(title: str, rows: list[dict]) -> None:
+        click.echo("")
+        click.echo(f"[{title}]")
+        if not rows:
+            click.echo("  (none)")
+            return
+        for row in rows:
+            click.echo(
+                f"  {row['member_id']:20s} role={row['role']:20s} "
+                f"status={row['status']:10s} "
+                f"created_at={row['created_at']:20s} "
+                f"has_token={row['has_token']!s}"
+            )
+
+    _emit_section("actionable", actionable_rows)
+    _emit_section("legacy_revoked", legacy_rows)
 
 
 @member.command("register")
