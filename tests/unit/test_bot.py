@@ -590,6 +590,94 @@ class TestBot:
         assert info["exchange"] == "KRX"
         assert info["currency"] == "KRW"
 
+    def test_get_info_returns_runtime_controls_in_config(self, eventbus, ctx):
+        """#1458: get_info()["config"]가 runtime control 6필드를 nested로 노출."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            interval_seconds=10,
+            account_id="acc-test",
+            auto_restart=True,
+            max_restart_attempts=5,
+            restart_cooldown_seconds=120,
+            step_timeout_seconds=45,
+            max_signals_per_step=100,
+        )
+        bot = Bot(
+            config=config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        assert "config" in info
+        nested = info["config"]
+        assert nested == {
+            "interval_seconds": 10,
+            "auto_restart": True,
+            "max_restart_attempts": 5,
+            "restart_cooldown_seconds": 120,
+            "step_timeout_seconds": 45,
+            "max_signals_per_step": 100,
+        }
+
+    def test_get_info_config_reflects_updated_runtime_controls(
+        self, eventbus, ctx, simple_config
+    ):
+        """#1458: BotConfig 필드 변경 후 get_info()가 새 값을 반영."""
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        # BotConfig dataclass 의 mutable 필드를 직접 갱신
+        bot.config.auto_restart = False
+        bot.config.max_restart_attempts = 7
+        bot.config.restart_cooldown_seconds = 200
+        bot.config.step_timeout_seconds = 90
+        bot.config.max_signals_per_step = 150
+
+        info = bot.get_info()
+        assert info["config"]["auto_restart"] is False
+        assert info["config"]["max_restart_attempts"] == 7
+        assert info["config"]["restart_cooldown_seconds"] == 200
+        assert info["config"]["step_timeout_seconds"] == 90
+        assert info["config"]["max_signals_per_step"] == 150
+
+    def test_get_info_keeps_flat_interval_seconds(self, eventbus, ctx, simple_config):
+        """#1458: backward compat — top-level interval_seconds 유지."""
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        assert info["interval_seconds"] == simple_config.interval_seconds
+        # config nested 값과 동일해야 함
+        assert info["config"]["interval_seconds"] == info["interval_seconds"]
+
+    def test_get_info_no_top_level_runtime_controls(self, eventbus, ctx, simple_config):
+        """#1458: 계약 중복 방지 — top-level에는 flat 5필드를 추가하지 않는다."""
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=SimpleStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        info = bot.get_info()
+        for key in (
+            "auto_restart",
+            "max_restart_attempts",
+            "restart_cooldown_seconds",
+            "step_timeout_seconds",
+            "max_signals_per_step",
+        ):
+            assert key not in info, (
+                f"top-level에 {key}가 추가됨 — config nested에만 노출해야 함"
+            )
+
 
 # ── BotManager ───────────────────────────────────
 

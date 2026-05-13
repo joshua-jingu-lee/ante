@@ -81,12 +81,27 @@ class FakeBot:
         status: str = "created",
         strategy_id: str = "s1",
         account_id: str = "test",
+        *,
+        # #1458: runtime control 6 필드 nested config 노출
+        auto_restart: bool = True,
+        max_restart_attempts: int = 3,
+        restart_cooldown_seconds: int = 60,
+        step_timeout_seconds: int = 30,
+        max_signals_per_step: int = 50,
+        # 테스트용: BotConfigOut.extra="forbid" 검증을 위한 unknown key 주입
+        extra_config_keys: dict | None = None,
     ) -> None:
         self.bot_id = bot_id
         self._status = status
         self._strategy_id = strategy_id
         self._name = bot_id
         self._interval_seconds = 60
+        self._auto_restart = auto_restart
+        self._max_restart_attempts = max_restart_attempts
+        self._restart_cooldown_seconds = restart_cooldown_seconds
+        self._step_timeout_seconds = step_timeout_seconds
+        self._max_signals_per_step = max_signals_per_step
+        self._extra_config_keys = extra_config_keys or {}
         self.config = FakeBotConfig(
             bot_id, account_id=account_id, strategy_id=strategy_id
         )
@@ -96,6 +111,16 @@ class FakeBot:
         return self._status
 
     def get_info(self) -> dict:
+        config_payload: dict = {
+            "interval_seconds": self._interval_seconds,
+            "auto_restart": self._auto_restart,
+            "max_restart_attempts": self._max_restart_attempts,
+            "restart_cooldown_seconds": self._restart_cooldown_seconds,
+            "step_timeout_seconds": self._step_timeout_seconds,
+            "max_signals_per_step": self._max_signals_per_step,
+        }
+        # #1458: BotConfigOut.extra="forbid" 검증용 unknown key 주입 옵션
+        config_payload.update(self._extra_config_keys)
         return {
             "bot_id": self.bot_id,
             "name": self._name,
@@ -109,6 +134,7 @@ class FakeBot:
             "started_at": None,
             "stopped_at": None,
             "error_message": None,
+            "config": config_payload,
         }
 
 
@@ -324,6 +350,74 @@ class TestGetBot:
         """존재하지 않는 봇 → 404."""
         resp = client.get("/api/bots/nonexistent")
         assert resp.status_code == 404
+
+    def test_get_bot_returns_config_with_runtime_controls(self, client, bot_manager):
+        """#1458: GET /api/bots/{bot_id} 응답 bot.config 가 6 필드를 모두 노출."""
+        bot_manager._bots["bot-1"] = FakeBot(
+            "bot-1",
+            auto_restart=False,
+            max_restart_attempts=7,
+            restart_cooldown_seconds=200,
+            step_timeout_seconds=90,
+            max_signals_per_step=120,
+        )
+        resp = client.get("/api/bots/bot-1")
+        assert resp.status_code == 200
+        bot = resp.json()["bot"]
+        assert bot["config"] == {
+            "interval_seconds": 60,
+            "auto_restart": False,
+            "max_restart_attempts": 7,
+            "restart_cooldown_seconds": 200,
+            "step_timeout_seconds": 90,
+            "max_signals_per_step": 120,
+        }
+
+    def test_get_bot_config_is_strict_schema(
+        self, bot_manager, default_account_service
+    ):
+        """#1458: BotConfigOut(extra="forbid") — config nested 의 unknown key 는 거부.
+
+        FakeBot 이 ``config`` payload 에 정의되지 않은 ``unknown_field`` 를
+        주입하면 FastAPI 응답 직렬화 시점에 ``BotConfigOut`` 검증이 실패하여
+        ResponseValidationError 가 발생해야 한다. ``raise_server_exceptions=
+        False`` TestClient 로 raw 500 응답을 확인하고, 별도 TestClient 에서는
+        ``pytest.raises`` 로 ResponseValidationError 의 ``extra_forbidden``
+        에러를 직접 잡아 strict 계약의 SSOT 가 nested ``config`` 에 있음을
+        명시한다.
+        """
+        from fastapi.exceptions import ResponseValidationError
+        from fastapi.testclient import TestClient
+
+        bot_manager._bots["bot-1"] = FakeBot(
+            "bot-1",
+            extra_config_keys={"unknown_field": 999},
+        )
+        app = create_app(
+            bot_manager=bot_manager,
+            account_service=default_account_service,
+            member_service=_new_member_service(),
+        )
+        # 1) raise_server_exceptions=False — raw 500 응답을 확인
+        strict_client = TestClient(app, raise_server_exceptions=False)
+        strict_client.headers.update(_MASTER_HEADERS)
+        resp = strict_client.get("/api/bots/bot-1")
+        assert resp.status_code == 500, (
+            f"BotConfigOut strict schema 가 unknown key 를 통과시켰음. "
+            f"status={resp.status_code}, body={resp.text[:300]}"
+        )
+
+        # 2) ResponseValidationError 본체에서 extra_forbidden 위치 확인
+        raising_client = TestClient(app)
+        raising_client.headers.update(_MASTER_HEADERS)
+        with pytest.raises(ResponseValidationError) as exc_info:
+            raising_client.get("/api/bots/bot-1")
+        errors = exc_info.value.errors()
+        assert any(
+            err.get("type") == "extra_forbidden"
+            and "unknown_field" in tuple(err.get("loc", ()))
+            for err in errors
+        ), f"extra_forbidden on unknown_field not found: {errors}"
 
 
 class TestStartStopBot:

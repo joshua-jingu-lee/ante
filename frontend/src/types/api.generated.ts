@@ -2106,6 +2106,32 @@ export type components = {
             updated_at: string;
         };
         /**
+         * BotConfigOut
+         * @description 봇 runtime control 6 필드 nested 응답 (#1458).
+         *
+         *     ``GET /api/bots/{bot_id}`` 응답에 nested 객체 ``config`` 로 직렬화되어
+         *     대시보드 BotDetail edit modal prefill 의 SSOT 가 된다.
+         *     ``docs/dashboard/user-stories/bots.md`` B-3/B-5 line 197-200 의 6 필드
+         *     (``interval_seconds``, ``auto_restart``, ``max_restart_attempts``,
+         *     ``restart_cooldown_seconds``, ``step_timeout_seconds``,
+         *     ``max_signals_per_step``) 만 노출하며 다른 키는 ``extra="forbid"`` 로
+         *     차단한다 (강한 schema 계약).
+         */
+        BotConfigOut: {
+            /** Auto Restart */
+            auto_restart: boolean;
+            /** Interval Seconds */
+            interval_seconds: number;
+            /** Max Restart Attempts */
+            max_restart_attempts: number;
+            /** Max Signals Per Step */
+            max_signals_per_step: number;
+            /** Restart Cooldown Seconds */
+            restart_cooldown_seconds: number;
+            /** Step Timeout Seconds */
+            step_timeout_seconds: number;
+        };
+        /**
          * BotCreateRequest
          * @description POST /api/bots 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1371). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다. Pydantic ``extra='forbid'`` (#1436) — 정의되지 않은 필드(예: legacy ``bot_type``)는 422로 거부된다. strategy_id 또는 strategy_name 중 하나를 필수로 전달해야 하며 (model_validator로 강제, #1436), 둘 다 전달 시 strategy_id를 우선 사용한다. OpenAPI ``anyOf`` 로 strategy 식별자 필수 조건을 명시하여 generated TS/SDK 가 ``{bot_id: ...}`` 만 담긴 payload 를 valid 로 인식하지 못하도록 한다 (codex r1 FAIL). anyOf branches 는 ``type``/``properties`` 까지 명시하여 openapi-typescript 가 ``unknown`` 으로 붕괴되지 않고 ``{strategy_id: string} | {strategy_name: string}`` 으로 narrow 되도록 한다 (codex r2 FAIL).
          */
@@ -2148,6 +2174,11 @@ export type components = {
          *
          *     write 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가
          *     검증되므로 read 응답 schema에는 default를 유지한다.
+         *
+         *     ``config`` (`BotConfigOut`) 는 #1458 에서 추가된 runtime control 6 필드
+         *     nested 객체다. backward compatibility 를 위해 top-level ``interval_seconds``
+         *     는 유지하되, 다른 runtime control 필드는 top-level 에 노출하지 않는다
+         *     (계약 중복 방지).
          */
         BotInfo: {
             /**
@@ -2157,6 +2188,7 @@ export type components = {
             account_id: string;
             /** Bot Id */
             bot_id: string;
+            config?: components["schemas"]["BotConfigOut"] | null;
             /** Error Message */
             error_message?: string | null;
             /**
@@ -3770,6 +3802,7 @@ export type AuditLogItem = components['schemas']['AuditLogItem'];
 export type AuditLogListResponse = components['schemas']['AuditLogListResponse'];
 export type BalanceSetRequest = components['schemas']['BalanceSetRequest'];
 export type BalanceSetResponse = components['schemas']['BalanceSetResponse'];
+export type BotConfigOut = components['schemas']['BotConfigOut'];
 export type BotCreateRequest = components['schemas']['BotCreateRequest'];
 export type BotDetailResponse = components['schemas']['BotDetailResponse'];
 export type BotInfo = components['schemas']['BotInfo'];

@@ -305,11 +305,38 @@ class MeResponse(BaseModel):
 # ── 봇 ──────────────────────────────────────────────
 
 
+class BotConfigOut(BaseModel):
+    """봇 runtime control 6 필드 nested 응답 (#1458).
+
+    ``GET /api/bots/{bot_id}`` 응답에 nested 객체 ``config`` 로 직렬화되어
+    대시보드 BotDetail edit modal prefill 의 SSOT 가 된다.
+    ``docs/dashboard/user-stories/bots.md`` B-3/B-5 line 197-200 의 6 필드
+    (``interval_seconds``, ``auto_restart``, ``max_restart_attempts``,
+    ``restart_cooldown_seconds``, ``step_timeout_seconds``,
+    ``max_signals_per_step``) 만 노출하며 다른 키는 ``extra="forbid"`` 로
+    차단한다 (강한 schema 계약).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_seconds: int
+    auto_restart: bool
+    max_restart_attempts: int
+    restart_cooldown_seconds: int
+    step_timeout_seconds: int
+    max_signals_per_step: int
+
+
 class BotInfo(BaseModel):
     """봇 정보 (read 응답).
 
     write 경로(``BotConfig``, ``ApprovalService.create``)에서 account_id가
     검증되므로 read 응답 schema에는 default를 유지한다.
+
+    ``config`` (`BotConfigOut`) 는 #1458 에서 추가된 runtime control 6 필드
+    nested 객체다. backward compatibility 를 위해 top-level ``interval_seconds``
+    는 유지하되, 다른 runtime control 필드는 top-level 에 노출하지 않는다
+    (계약 중복 방지).
     """
 
     bot_id: str
@@ -324,6 +351,7 @@ class BotInfo(BaseModel):
     started_at: str | None = None
     stopped_at: str | None = None
     error_message: str | None = None
+    config: BotConfigOut | None = None
 
     # 봇 상세 조회 시 추가되는 동적 필드 (strategy, budget, positions 등)
     model_config = ConfigDict(extra="allow")
