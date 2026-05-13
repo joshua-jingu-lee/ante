@@ -160,7 +160,13 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 
 @config.command("history")
 @click.argument("key")
-@click.option("--limit", "-n", default=20, help="조회 건수 (기본 20)")
+@click.option(
+    "--limit",
+    "-n",
+    default=20,
+    type=click.IntRange(min=1),
+    help="조회 건수 (기본 20)",
+)
 @format_option
 @click.pass_context
 @require_auth

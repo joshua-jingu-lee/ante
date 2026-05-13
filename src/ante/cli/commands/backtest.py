@@ -163,7 +163,7 @@ async def _save_backtest_run(
 
 @backtest.command()
 @click.argument("strategy_name")
-@click.option("--limit", default=20, type=int, help="조회 건수")
+@click.option("--limit", default=20, type=click.IntRange(min=1), help="조회 건수")
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
