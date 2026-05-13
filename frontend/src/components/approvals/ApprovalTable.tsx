@@ -1,20 +1,12 @@
 import { Link } from 'react-router-dom'
 import StatusBadge from '../common/StatusBadge'
 import { formatDateTime } from '../../utils/formatters'
-import type { Approval, ApprovalStatus, ApprovalType } from '../../types/approval'
-import { APPROVAL_STATUS_LABELS } from '../../utils/constants'
-
-const TYPE_LABEL: Record<ApprovalType, string> = {
-  strategy_adopt: '전략 채택',
-  strategy_report: '전략 리포트',
-  budget_change: '예산 변경',
-  budget_allocate: '예산 할당',
-  bot_create: '봇 생성',
-  bot_stop: '봇 중지',
-  live_switch: '실전 전환',
-  risk_alert: '위험 알림',
-  rule_change: '규칙 변경',
-}
+import type { Approval, ApprovalStatus } from '../../types/approval'
+import {
+  APPROVAL_STATUS_LABELS,
+  approvalTypeLabel,
+  approvalTypeVariant,
+} from '../../utils/constants'
 
 const STATUS_VARIANT: Record<ApprovalStatus, string> = {
   pending: 'warning',
@@ -48,7 +40,16 @@ export default function ApprovalTable({ items }: { items: Approval[] }) {
                   className="hover:bg-surface-hover"
                 >
                   <td className="px-3 py-3 border-b border-border text-[13px]">
-                    <StatusBadge variant="muted">{TYPE_LABEL[item.type] || item.type}</StatusBadge>
+                    {/*
+                      #1471: unknown type 은 ``approvalTypeVariant`` 에서
+                      ``negative`` variant 로 표시되어 operator 가 legacy
+                      invalid row / contract drift 를 즉시 식별할 수 있다.
+                      silent fallback (예: 과거의 ``strategy_report``) 으로
+                      잘못 라벨링하지 않는다.
+                    */}
+                    <StatusBadge variant={approvalTypeVariant(item.type)}>
+                      {approvalTypeLabel(item.type)}
+                    </StatusBadge>
                   </td>
                   <td className="px-3 py-3 border-b border-border text-[13px]">
                     <Link to={`/approvals/${item.id}`} className="text-primary no-underline hover:underline">

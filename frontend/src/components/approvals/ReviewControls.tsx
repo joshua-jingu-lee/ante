@@ -2,26 +2,15 @@ import { useState } from 'react'
 import { useUpdateApprovalStatus } from '../../hooks/useApprovals'
 import Modal from '../common/Modal'
 import StatusBadge from '../common/StatusBadge'
-import type { ApprovalReview, ApprovalType } from '../../types/approval'
-
-const APPROVE_ACTION_TEXT: Record<ApprovalType, string> = {
-  strategy_adopt: '전략이 채택 상태로 전환됩니다.',
-  strategy_report: '전략 리포트가 채택됩니다.',
-  budget_change: 'Treasury에서 예산이 즉시 재배분됩니다.',
-  budget_allocate: 'Treasury에서 예산이 할당됩니다.',
-  bot_create: 'BotManager에서 봇이 즉시 생성됩니다.',
-  bot_stop: '해당 봇의 거래가 즉시 중지됩니다.',
-  live_switch: '봇이 모의투자에서 실전투자로 전환됩니다.',
-  risk_alert: '위험 알림이 처리 완료됩니다.',
-  rule_change: 'RuleEngine에서 해당 봇의 규칙이 즉시 갱신됩니다.',
-}
+import type { ApprovalReview, ApprovalTypeRef } from '../../types/approval'
+import { APPROVE_ACTION_TEXT } from '../../utils/constants'
 
 interface ReviewControlsProps {
   approvalId: string
   isPending: boolean
   title: string
   reviews?: ApprovalReview[]
-  type?: ApprovalType
+  type?: ApprovalTypeRef
   params?: Record<string, unknown>
 }
 
@@ -31,10 +20,10 @@ function formatCurrency(value: unknown): string {
   return `${num.toLocaleString()}원`
 }
 
-function ApproveModalSummary({ type, params }: { type?: ApprovalType; params?: Record<string, unknown> }) {
-  if (!type || !params) return null
+function ApproveModalSummary({ type, params }: { type?: ApprovalTypeRef; params?: Record<string, unknown> }) {
+  if (!type || type.kind !== 'known' || !params) return null
 
-  if (type === 'bot_create') {
+  if (type.value === 'bot_create') {
     const tradeMode = String(params.trade_mode ?? '')
     const isMock = tradeMode === 'mock' || tradeMode === '모의투자'
     return (
@@ -48,7 +37,7 @@ function ApproveModalSummary({ type, params }: { type?: ApprovalType; params?: R
     )
   }
 
-  if (type === 'budget_change') {
+  if (type.value === 'budget_change') {
     const current = Number(params.current_budget ?? 0)
     const requested = Number(params.requested_budget ?? 0)
     const diff = requested - current
@@ -110,14 +99,24 @@ export default function ReviewControls({ approvalId, isPending, title, reviews, 
           <strong className="text-text">{title}</strong>을 승인하시겠습니까?
         </div>
         <ApproveModalSummary type={type} params={params} />
-        {type && (
+        {type && type.kind === 'known' && (
           <div className="bg-info/10 text-info p-3 rounded text-[12px] mb-4">
-            {'\uD83D\uDCA1'} 승인 시 <strong>{APPROVE_ACTION_TEXT[type]}</strong>
+            {'💡'} 승인 시 <strong>{APPROVE_ACTION_TEXT[type.value]}</strong>
+          </div>
+        )}
+        {type && type.kind === 'unknown' && (
+          /*
+            #1471: unknown 유형은 backend SSOT 에 없는 type. #1470 lifecycle
+            guard 에 의해 approve 자체가 실패하지만, operator 가 모달 진입
+            시점에 식별할 수 있도록 명시 경고를 노출한다. silent fallback 금지.
+          */
+          <div className="bg-negative/10 text-negative p-3 rounded text-[12px] mb-4">
+            {'⚠'} 알 수 없는 결재 유형 <strong>{`unknown:${type.raw}`}</strong> — backend SSOT 에 없는 type 이므로 승인 시도가 거부될 수 있습니다 (legacy invalid row 또는 contract drift).
           </div>
         )}
         {hasWarnings && (
           <div className="bg-warning/10 text-warning p-3 rounded text-[12px] mb-4">
-            {'\u26A0'} 검토 의견에 <strong>warn</strong> 또는 <strong>fail</strong> 결과가 포함되어 있습니다. 검증 내용을 확인하세요.
+            {'⚠'} 검토 의견에 <strong>warn</strong> 또는 <strong>fail</strong> 결과가 포함되어 있습니다. 검증 내용을 확인하세요.
           </div>
         )}
         <div className="mb-4">

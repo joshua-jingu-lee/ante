@@ -5,25 +5,17 @@ import MarkdownBody from '../components/approvals/MarkdownBody'
 import StatusBadge from '../components/common/StatusBadge'
 import { PageSkeleton } from '../components/common/Skeleton'
 import { formatDateTime } from '../utils/formatters'
-import { APPROVAL_STATUS_LABELS } from '../utils/constants'
-import type { Approval, ApprovalStatus, ApprovalType, ApprovalReview, ApprovalHistoryEntry } from '../types/approval'
+import {
+  APPROVAL_STATUS_LABELS,
+  approvalTypeLabel,
+  approvalTypeVariant,
+} from '../utils/constants'
+import type { Approval, ApprovalStatus, ApprovalReview, ApprovalHistoryEntry } from '../types/approval'
 
 const STATUS_VARIANT: Record<ApprovalStatus, string> = {
   pending: 'warning',
   approved: 'positive',
   rejected: 'negative',
-}
-
-const TYPE_LABEL: Record<ApprovalType, string> = {
-  strategy_adopt: '전략 채택',
-  strategy_report: '전략 리포트',
-  budget_change: '예산 변경',
-  budget_allocate: '예산 할당',
-  bot_create: '봇 생성',
-  bot_stop: '봇 중지',
-  live_switch: '실전 전환',
-  risk_alert: '위험 알림',
-  rule_change: '규칙 변경',
 }
 
 const REVIEW_RESULT_VARIANT: Record<string, string> = {
@@ -45,7 +37,10 @@ function getActorColor(actor: string, action?: string): string {
 
 /* ── 결재 정보 카드 ── */
 function ApprovalInfoCard({ approval }: { approval: Approval }) {
-  const typeLabel = TYPE_LABEL[approval.type] || approval.type
+  // #1471: unknown type 은 ``approvalTypeLabel`` 이 ``unknown:{raw}`` 로 반환하고
+  // ``approvalTypeVariant`` 는 ``negative`` 를 반환해 operator 가 즉시 식별할 수 있다.
+  const typeLabel = approvalTypeLabel(approval.type)
+  const typeVariant = approvalTypeVariant(approval.type)
   return (
     <div className="bg-surface border border-border rounded-lg p-5">
       <h3 className="text-[15px] font-semibold mb-4">결재 정보</h3>
@@ -53,7 +48,9 @@ function ApprovalInfoCard({ approval }: { approval: Approval }) {
         <InfoRow label="요청자" value={
           <span className="text-primary">{approval.requester}</span>
         } />
-        <InfoRow label="유형" value={typeLabel} />
+        <InfoRow label="유형" value={
+          <StatusBadge variant={typeVariant}>{typeLabel}</StatusBadge>
+        } />
         <InfoRow label="상태" value={
           <StatusBadge variant={STATUS_VARIANT[approval.status] as 'warning'}>
             {APPROVAL_STATUS_LABELS[approval.status]}

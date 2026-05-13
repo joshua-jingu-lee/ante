@@ -1,4 +1,5 @@
-import type { ApprovalStatus, ApprovalType } from '../../types/approval'
+import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from '../../types/approval'
+import { APPROVAL_TYPE_LABELS } from '../../utils/constants'
 
 const STATUS_OPTIONS: { key: ApprovalStatus | 'all'; label: string }[] = [
   { key: 'all', label: '전체' },
@@ -7,17 +8,15 @@ const STATUS_OPTIONS: { key: ApprovalStatus | 'all'; label: string }[] = [
   { key: 'rejected', label: '거부' },
 ]
 
+/**
+ * Filter 옵션은 backend SSOT (``ApprovalType`` enum) 와 정확히 일치시킨다
+ * (#1471 — split #1418/C). unknown type 은 filter 옵션에 포함하지 않는다 —
+ * 필터는 known SSOT type 만 노출하고, unknown row 는 ``'all'`` 선택 시 명시
+ * 라벨로 표시된다 (``approvalTypeLabel`` / ``ApprovalTable``).
+ */
 const TYPE_OPTIONS: { key: ApprovalType | 'all'; label: string }[] = [
   { key: 'all', label: '전체 유형' },
-  { key: 'strategy_adopt', label: '전략 채택' },
-  { key: 'strategy_report', label: '전략 리포트' },
-  { key: 'budget_change', label: '예산 변경' },
-  { key: 'budget_allocate', label: '예산 할당' },
-  { key: 'bot_create', label: '봇 생성' },
-  { key: 'bot_stop', label: '봇 중지' },
-  { key: 'live_switch', label: '실전 전환' },
-  { key: 'risk_alert', label: '위험 알림' },
-  { key: 'rule_change', label: '규칙 변경' },
+  ...APPROVAL_TYPES.map((value) => ({ key: value, label: APPROVAL_TYPE_LABELS[value] })),
 ]
 
 interface ApprovalFiltersProps {

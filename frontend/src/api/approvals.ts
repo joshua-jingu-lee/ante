@@ -6,14 +6,16 @@ import type {
   ApprovalStatusUpdate as ApiApprovalStatusUpdate,
   ApprovalUpdateResponse as ApiApprovalUpdateResponse,
 } from '../types/api.generated'
-import type {
-  Approval,
-  ApprovalDetail,
-  ApprovalHistoryEntry,
-  ApprovalListView,
-  ApprovalReview,
-  ApprovalStatus,
-  ApprovalType,
+import {
+  isApprovalType,
+  type Approval,
+  type ApprovalDetail,
+  type ApprovalHistoryEntry,
+  type ApprovalListView,
+  type ApprovalReview,
+  type ApprovalStatus,
+  type ApprovalType,
+  type ApprovalTypeRef,
 } from '../types/approval'
 
 interface ApprovalsParams {
@@ -41,21 +43,25 @@ function toApprovalStatus(value: string): ApprovalStatus {
   return 'pending'
 }
 
-function toApprovalType(value: string): ApprovalType {
-  if (
-    value === 'strategy_report'
-    || value === 'budget_allocate'
-    || value === 'live_switch'
-    || value === 'risk_alert'
-    || value === 'strategy_adopt'
-    || value === 'budget_change'
-    || value === 'bot_create'
-    || value === 'bot_stop'
-    || value === 'rule_change'
-  ) {
-    return value
+/**
+ * raw API ``type`` 문자열을 UI 모델 ``ApprovalTypeRef`` 로 변환한다 (#1471 —
+ * split #1418/C).
+ *
+ * backend SSOT 인 ``ApprovalType`` enum (``src/ante/approval/models.py``) 에
+ * 없는 값은 silent fallback 으로 known type 로 변환되지 않는다. 대신
+ * ``kind: 'unknown'`` branch 로 분기해 raw 문자열을 그대로 보존하고,
+ * operator 가 인지할 수 있도록 ``console.warn`` 으로 알린다. legacy invalid
+ * row 또는 contract drift 진단 경로다.
+ */
+function toApprovalTypeRef(value: string): ApprovalTypeRef {
+  if (isApprovalType(value)) {
+    return { kind: 'known', value }
   }
-  return 'strategy_report'
+  // legacy invalid row 또는 contract drift 진단용. silent fallback 금지.
+  console.warn(
+    `[approvals] unknown approval type "${value}" — backend SSOT (ApprovalType) 에 없는 값입니다. legacy invalid row 또는 contract drift 가능성.`,
+  )
+  return { kind: 'unknown', raw: value }
 }
 
 function toReviewResult(value: unknown): ApprovalReview['result'] {
@@ -86,7 +92,7 @@ function toApprovalHistoryEntry(value: unknown): ApprovalHistoryEntry {
 function toApproval(raw: ApiApprovalItem): Approval {
   return {
     id: raw.id,
-    type: toApprovalType(raw.type),
+    type: toApprovalTypeRef(raw.type),
     title: raw.title,
     requester: raw.requester,
     requested_at: toString(raw.created_at),
