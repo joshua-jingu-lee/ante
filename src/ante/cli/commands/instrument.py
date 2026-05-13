@@ -192,7 +192,7 @@ def sync(
 
 @instrument.command()
 @click.argument("keyword")
-@click.option("--limit", default=20, help="최대 결과 수")
+@click.option("--limit", default=20, type=click.IntRange(min=1), help="최대 결과 수")
 @click.option("--listed-only", is_flag=True, help="상장 종목만 검색")
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
