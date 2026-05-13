@@ -144,6 +144,23 @@ class BotManager:
         self._restart_counts: dict[str, int] = {}
         self._restart_tasks: dict[str, asyncio.Task[None]] = {}
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
+        # Refs #1460: 같은 ``bot_id`` 에 대한 ``update_bot`` 동시 호출을
+        # 직렬화하기 위한 per-bot asyncio.Lock 저장소. lazy init helper
+        # ``_get_update_lock`` 으로만 노출하여 외부에서 직접 dict 를 만지지
+        # 않도록 한다.
+        self._bot_update_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_update_lock(self, bot_id: str) -> asyncio.Lock:
+        """``update_bot`` 직렬화용 per-bot lock 을 lazy 로 발급한다 (Refs #1460).
+
+        같은 ``bot_id`` 에 대한 ``update_bot`` 호출이 동시에 들어왔을 때
+        runtime control 재생성 → ``_save_bot_config`` → ``treasury.update_budget``
+        시퀀스를 직렬화하여 race 로 인한 atomicity 손상을 막는다. 처음
+        조회되는 ``bot_id`` 에 대해서만 ``asyncio.Lock`` 인스턴스를 생성하고
+        이후 같은 키에는 재사용한다.
+        """
+
+        return self._bot_update_locks.setdefault(bot_id, asyncio.Lock())
 
     async def initialize(self) -> None:
         """스키마 생성 + EventBus 구독 + 잔존 스냅샷 정리."""
@@ -417,67 +434,201 @@ class BotManager:
         Raises:
             BotError: 봇이 중지 상태가 아닌 경우.
         """
-        bot = self._get_bot(bot_id)
-        allowed_statuses = {BotStatus.CREATED, BotStatus.STOPPED, BotStatus.ERROR}
-        if bot.status not in allowed_statuses:
-            raise BotError(
-                f"봇 설정은 중지 상태에서만 수정할 수 있습니다: {bot_id} "
-                f"(현재: {bot.status})"
-            )
+        # Refs #1460: 같은 bot_id 에 대한 update_bot 동시 호출을 직렬화한다.
+        # lock 획득 전에는 ``bot.config`` 가 다른 update_bot 에 의해 임의로
+        # 교체될 수 있으므로 존재 확인과 상태 검증, ``old_config`` 캡처,
+        # ``new_config`` 재생성, save, budget 처리, rollback 모두 lock 안에서
+        # 수행한다. 기존 rollback 의 conditional skip 가드는 lock 이 race 를
+        # 차단하더라도 안전망으로 그대로 유지한다.
+        async with self._get_update_lock(bot_id):
+            # bot 존재/상태 검증을 lock 안에서 (재)수행. lock 획득 전 다른
+            # 코루틴이 봇을 삭제했을 수도 있다.
+            bot = self._get_bot(bot_id)
+            allowed_statuses = {
+                BotStatus.CREATED,
+                BotStatus.STOPPED,
+                BotStatus.ERROR,
+            }
+            if bot.status not in allowed_statuses:
+                raise BotError(
+                    f"봇 설정은 중지 상태에서만 수정할 수 있습니다: {bot_id} "
+                    f"(현재: {bot.status})"
+                )
 
-        # budget은 BotConfig 필드가 아니므로 별도 처리
-        new_budget = kwargs.pop("budget", None)
+            # budget은 BotConfig 필드가 아니므로 별도 처리
+            new_budget = kwargs.pop("budget", None)
 
-        # None이 아닌 값만 필터
-        updates = {k: v for k, v in kwargs.items() if v is not None}
+            # None이 아닌 값만 필터
+            updates = {k: v for k, v in kwargs.items() if v is not None}
 
-        if not updates and new_budget is None:
+            if not updates and new_budget is None:
+                return bot
+
+            # BotConfig 재생성
+            old_config = bot.config
+            config_fields = {
+                "bot_id": old_config.bot_id,
+                "strategy_id": old_config.strategy_id,
+                "name": old_config.name,
+                "account_id": old_config.account_id,
+                "interval_seconds": old_config.interval_seconds,
+                "auto_restart": old_config.auto_restart,
+                "max_restart_attempts": old_config.max_restart_attempts,
+                "restart_cooldown_seconds": old_config.restart_cooldown_seconds,
+                "step_timeout_seconds": old_config.step_timeout_seconds,
+                "max_signals_per_step": old_config.max_signals_per_step,
+            }
+            config_fields.update(updates)
+            new_config = BotConfig(**config_fields)  # type: ignore[arg-type]
+            bot.config = new_config
+
+            # Refs #1460 (attempt 4): rollback eq 가드용 commit-time snapshot.
+            # ``bot.config`` 와 ``new_config`` 는 같은 객체이므로 같은 lock 을
+            # 쓰지 않는 다른 mutator (예: ``change_strategy``) 가
+            # ``bot.config.<field> = ...`` in-place mutation 을 하면 ``new_config``
+            # 의 필드도 함께 바뀌어 ``bot.config == new_config`` 는 자명하게
+            # True 가 된다. 따라서 commit 시점의 필드값을 별도 객체로 떠두고
+            # rollback 가드에서 그 snapshot 과 ``bot.config`` 를 비교한다.
+            # ``dataclasses.replace`` 는 shallow copy 라서 raise 가능성이 거의
+            # 없는 단순 작업이다 (``BotConfig.__post_init__`` 의 검증은 동일
+            # 필드 값으로 재호출되므로 통과한다).
+            committed_snapshot = dataclasses.replace(new_config)
+
+            # DB 갱신
+            await self._save_bot_config(new_config)
+
+            # budget 변경 시 Treasury 연동.
+            # Refs #1335: 과거에는 ``new_budget is not None`` 인 경로에서도
+            # ``TreasuryManager`` 부재 / account 미등록을 silent 하게 흘려보내
+            # 호출자(POST /api/bots) 가 budget 배정 실패를 감지하지 못했다.
+            # 이제 budget 배정 의도가 있는 경우(``new_budget is not None``)에는
+            # ``TreasuryNotConfiguredError`` 를 raise 하여 라우트 계층이 422 로
+            # 매핑할 수 있도록 한다. ``new_budget is None`` 인 단순 update
+            # 경로는 기존과 동일하게 무영향(no-op)이다.
+            #
+            # Refs #1460: budget 처리 실패 시 update_bot 전체가 atomic 하도록
+            # runtime control 변경(memory + DB) 을 ``old_config`` 로 rollback
+            # 한다. TreasuryManager 미주입, account 미등록, treasury.update_budget
+            # 내부 예외, asyncio.CancelledError(요청 취소) 모두 동일하게 rollback
+            # 경로를 탄다. ``treasury.update_budget`` 내부 allocate/deallocate
+            # side effect(예산 부분 commit) 까지는 atomic 보장하지 않는다.
+            if new_budget is not None:
+                try:
+                    from ante.treasury.exceptions import TreasuryNotConfiguredError
+
+                    if self._treasury_manager is None:
+                        raise TreasuryNotConfiguredError(
+                            "treasury manager not configured"
+                        )
+                    try:
+                        treasury = self._treasury_manager.get(new_config.account_id)
+                    except KeyError as ke:
+                        raise TreasuryNotConfiguredError(
+                            f"treasury not configured for account "
+                            f"{new_config.account_id}"
+                        ) from ke
+                    await treasury.update_budget(bot_id, new_budget)
+                except (Exception, asyncio.CancelledError):
+                    # Atomicity: budget 실패 시 runtime control 변경을 memory
+                    # + DB 둘 다 ``old_config`` 로 rollback. memory rollback
+                    # 은 단순 대입이라 raise 가능성이 없으므로 먼저 수행하여
+                    # DB rollback 실패와 무관하게 최소한 메모리 상태는
+                    # 일관되게 만든다.
+                    #
+                    # Atomicity scope (Refs #1460): 본 rollback 은 같은
+                    # ``update_bot`` 호출 내부의 budget 실패 시 ``BotConfig``
+                    # memory/DB 를 원자적으로 되돌린다. 다른 mutator
+                    # (``change_strategy`` / ``assign_strategy`` / ``delete_bot``
+                    # / ``create_bot``) 와의 직렬화는 본 이슈 범위 밖이며,
+                    # 별도 BotManager 동시성 모델 이슈에서 다룬다. 본 가드는
+                    # 다중 safety net 으로 구성된다:
+                    # - per-bot Lock: 같은 ``update_bot`` 호출들의 직렬화.
+                    # - identity check (``bot.config is new_config``): 다른
+                    #   ``update_bot`` 이 끼어들어 ``bot.config`` 를 다른 객체로
+                    #   교체했으면 skip.
+                    # - instance check (``self._bots.get(bot_id) is bot``):
+                    #   ``delete_bot`` (hard) / ``delete_bot`` → ``create_bot``
+                    #   race 시 DB rollback save 를 skip.
+                    # - eq check (``bot.config == committed_snapshot``): 같은
+                    #   lock 을 쓰지 않는 다른 mutator 가 ``bot.config`` 를
+                    #   in-place mutation (예: ``bot.config.strategy_id = "x"``)
+                    #   한 경우, identity 가드는 그대로 True 라서 rollback 이
+                    #   그 변경을 덮어쓸 수 있다. ``bot.config`` 와
+                    #   ``new_config`` 는 같은 객체이므로 ``new_config`` 와의
+                    #   eq 는 자명하게 True 가 되어 in-place 변경을 감지할 수
+                    #   없다. commit 직후에 떠둔 별도 snapshot 객체와의
+                    #   dataclass eq 로 모든 필드가 동등할 때만 rollback 한다.
+                    if bot.config is new_config and bot.config == committed_snapshot:
+                        bot.config = old_config
+                        # Refs #1460 (attempt 3): DB rollback save 직전에
+                        # manager 의 ``_bots`` 메모리 맵에 이 ``bot_id`` 가
+                        # 여전히 우리가 잡고 있는 같은 ``bot`` 인스턴스로 등록되어
+                        # 있는지 한 번 더 확인한다. ``update_bot`` 의 per-bot
+                        # lock 은 ``update_bot`` 들 사이에서만 직렬화하므로,
+                        # ``treasury.update_budget`` await 동안 같은 ``bot_id``
+                        # 에 대해 ``delete_bot`` (hard delete 포함) 이나
+                        # ``delete_bot`` → ``create_bot`` (재생성) 이 끼어들면:
+                        # - hard delete 후라면 ``_save_bot_config(old_config)`` 가
+                        #   삭제된 row 를 다시 INSERT 하여 좀비 row 가 부활한다.
+                        # - delete+create 후라면 새 봇의 row 를 우리의 옛 설정으로
+                        #   덮어써 데이터 오염이 발생한다.
+                        # 따라서 메모리 맵의 ``bot_id`` 가 더 이상 우리 ``bot``
+                        # 인스턴스를 가리키지 않으면 DB rollback save 는 스킵한다.
+                        # 광범위한 동시성 모델 (delete/create + 같은 lock 공유)
+                        # 변경은 별도 이슈로 다룬다. memory rollback (단순 대입)
+                        # 은 위에서 이미 수행했으므로 caller 가 들고 있는 ``bot``
+                        # 객체의 in-memory 일관성은 유지된다.
+                        if self._bots.get(bot_id) is bot:
+                            try:
+                                await self._save_bot_config(old_config)
+                            except Exception:
+                                # nested rollback failure: 원래 budget 예외를
+                                # 덮지 않도록 rollback 실패는 ``logger.exception``
+                                # 으로 남기고 bare raise 로 원래 예외를 propagate
+                                # 한다. memory 는 이미 rollback 된 상태이므로
+                                # in-memory 일관성은 유지된다.
+                                logger.exception(
+                                    "update_bot rollback DB save failed for "
+                                    "bot_id=%s; memory was rolled back but DB "
+                                    "may diverge.",
+                                    bot_id,
+                                )
+                        else:
+                            logger.warning(
+                                "update_bot rollback DB save skipped for "
+                                "bot_id=%s: bot instance no longer in manager "
+                                "(delete/recreate race).",
+                                bot_id,
+                            )
+                    elif bot.config is not new_config:
+                        # ``bot.config`` 가 외부에 의해 다른 객체로 교체된
+                        # 비정상 경로. 이 요청의 old_config 로 rollback 하면
+                        # 그 변경을 덮어쓰므로 memory/DB rollback 모두 스킵
+                        # 하고 원래 budget 예외만 propagate. lock 도입 후
+                        # 정상 경로에서는 발생하지 않는 안전망.
+                        logger.warning(
+                            "update_bot rollback skipped for bot_id=%s: "
+                            "concurrent update detected (bot.config is not "
+                            "this request's new_config).",
+                            bot_id,
+                        )
+                    else:
+                        # identity 는 같지만 eq 는 다른 경로 (attempt 4):
+                        # ``treasury.update_budget`` await 동안 같은 lock 을
+                        # 쓰지 않는 다른 mutator 가 ``bot.config`` 를 in-place
+                        # mutation 한 케이스 (예: ``change_strategy`` /
+                        # ``assign_strategy`` 가 ``bot.config.strategy_id =
+                        # "new"``). 이 요청의 ``old_config`` 로 되돌리면 그
+                        # 변경을 덮어쓰므로 memory/DB rollback 모두 스킵.
+                        logger.warning(
+                            "rollback skipped: bot.config mutated in-place "
+                            "after commit (bot_id=%s).",
+                            bot_id,
+                        )
+                    raise
+
+            logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
             return bot
-
-        # BotConfig 재생성
-        old_config = bot.config
-        config_fields = {
-            "bot_id": old_config.bot_id,
-            "strategy_id": old_config.strategy_id,
-            "name": old_config.name,
-            "account_id": old_config.account_id,
-            "interval_seconds": old_config.interval_seconds,
-            "auto_restart": old_config.auto_restart,
-            "max_restart_attempts": old_config.max_restart_attempts,
-            "restart_cooldown_seconds": old_config.restart_cooldown_seconds,
-            "step_timeout_seconds": old_config.step_timeout_seconds,
-            "max_signals_per_step": old_config.max_signals_per_step,
-        }
-        config_fields.update(updates)
-        new_config = BotConfig(**config_fields)  # type: ignore[arg-type]
-        bot.config = new_config
-
-        # DB 갱신
-        await self._save_bot_config(new_config)
-
-        # budget 변경 시 Treasury 연동.
-        # Refs #1335: 과거에는 ``new_budget is not None`` 인 경로에서도
-        # ``TreasuryManager`` 부재 / account 미등록을 silent 하게 흘려보내
-        # 호출자(POST /api/bots) 가 budget 배정 실패를 감지하지 못했다.
-        # 이제 budget 배정 의도가 있는 경우(``new_budget is not None``)에는
-        # ``TreasuryNotConfiguredError`` 를 raise 하여 라우트 계층이 422 로
-        # 매핑할 수 있도록 한다. ``new_budget is None`` 인 단순 update
-        # 경로는 기존과 동일하게 무영향(no-op)이다.
-        if new_budget is not None:
-            from ante.treasury.exceptions import TreasuryNotConfiguredError
-
-            if self._treasury_manager is None:
-                raise TreasuryNotConfiguredError("treasury manager not configured")
-            try:
-                treasury = self._treasury_manager.get(new_config.account_id)
-            except KeyError as ke:
-                raise TreasuryNotConfiguredError(
-                    f"treasury not configured for account {new_config.account_id}"
-                ) from ke
-            await treasury.update_budget(bot_id, new_budget)
-
-        logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
-        return bot
 
     async def assign_strategy(self, bot_id: str, strategy_id: str) -> None:
         """봇에 전략 배정.
