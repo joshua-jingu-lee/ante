@@ -37,6 +37,15 @@ _ACCOUNT_SCOPED_APPROVAL_TYPES: frozenset[str] = frozenset(
 )
 
 
+# Refs #1418 → #1470 SPLIT-B: ApprovalType enum SSOT.
+# ``ApprovalType`` 의 모든 값을 frozenset 으로 보관한다. enum 멤버십 검증을
+# ``create()`` (#1469), ``approve()`` (#1470), ``_execute_approved()``
+# (#1470 defense-in-depth) 세 진입점에서 공유한다. 동치성: ``set(t.value for
+# t in ApprovalType)`` 와 항상 동일하므로 신규 ApprovalType 멤버 추가 시
+# 자동으로 반영된다.
+_VALID_APPROVAL_TYPES: frozenset[str] = frozenset(t.value for t in ApprovalType)
+
+
 def _extract_account_id(type: str, params: dict | None) -> str | None:
     """account-scoped approval payload 에서 account_id 를 꺼낸다.
 
@@ -127,7 +136,7 @@ class ApprovalService:
 
         # ApprovalType SSOT 검증 — defense-in-depth (IPC handler 가 직접 호출,
         # #1469). ``_validate_params`` 보다 먼저 실행되어야 한다.
-        if type not in {t.value for t in ApprovalType}:
+        if type not in _VALID_APPROVAL_TYPES:
             msg = f"invalid approval type: {type!r}"
             raise ValueError(msg)
 
@@ -199,6 +208,15 @@ class ApprovalService:
         request = await self.get(id)
         if not request:
             msg = f"결재 요청을 찾을 수 없음: {id}"
+            raise ValueError(msg)
+
+        # Refs #1418 → #1470 SPLIT-B: legacy invalid approval type pending row
+        # 가 DB 에 남아있을 수 있다 (#1469 write-path 가드 이전 데이터). status
+        # transition 전에 enum 멤버십을 검증해 PENDING → APPROVED 전이를 차단한다.
+        # 차단된 경우 history/event/notification 발행이 모두 없으므로 silent
+        # success 가 발생하지 않는다.
+        if request.type not in _VALID_APPROVAL_TYPES:
+            msg = f"invalid approval type: {request.type!r}"
             raise ValueError(msg)
 
         approvable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
@@ -826,10 +844,25 @@ class ApprovalService:
         """승인된 요청의 executor를 실행하고 결과를 반영한다.
 
         create()의 전결 실행과 approve()의 자동 실행에서 공유된다.
+
+        Refs #1418 → #1470 SPLIT-B:
+        - 진입부에서 ``request.type`` 의 enum 멤버십을 다시 검증한다
+          (defense-in-depth). ``approve()`` 와 ``create()`` 에서 이미 검증
+          했지만 ``create()`` 의 auto-approval 경로는 ``approve()`` 가드를
+          거치지 않으므로 여기서 한 번 더 차단한다. invalid → ``ValueError``.
+        - executor 가 등록되지 않은 경우 (enum 은 valid 한데 dispatch
+          대상 없음): status 를 ``EXECUTION_FAILED`` 로 설정하고
+          ``no_executor`` history 를 남긴다. 이로써 silent success 가
+          차단되고 후속 ``ApprovalResolvedEvent`` 의 ``resolution`` 이
+          ``execution_failed`` 로 전달된다.
         """
+        if request.type not in _VALID_APPROVAL_TYPES:
+            msg = f"invalid approval type: {request.type!r}"
+            raise ValueError(msg)
+
+        now = datetime.now(UTC).isoformat()
         executor = self._executors.get(request.type)
         if executor:
-            now = datetime.now(UTC).isoformat()
             try:
                 await executor(request.params)
                 request.history.append(
@@ -859,6 +892,33 @@ class ApprovalService:
                     ),
                 )
                 logger.exception("결재 실행 실패: %s (%s)", request.id, request.type)
+        else:
+            # enum 은 valid 하지만 dispatch executor 가 없는 경우. 이전에는
+            # silent 하게 ``ApprovalResolvedEvent`` 만 발행되어 호출자가
+            # 성공 처리한 것으로 오인했다. 명시적으로 EXECUTION_FAILED 로
+            # 마무리하고 history 에 ``no_executor`` 를 남긴다.
+            request.status = ApprovalStatus.EXECUTION_FAILED
+            request.history.append(
+                {
+                    "action": "no_executor",
+                    "actor": actor,
+                    "at": now,
+                    "detail": (f"no executor registered for type {request.type!r}"),
+                }
+            )
+            await self._db.execute(
+                """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
+                (
+                    ApprovalStatus.EXECUTION_FAILED,
+                    json.dumps(request.history, ensure_ascii=False),
+                    request.id,
+                ),
+            )
+            logger.warning(
+                "결재 실행 불가 (executor 미등록): %s (%s)",
+                request.id,
+                request.type,
+            )
 
         from ante.eventbus.events import ApprovalResolvedEvent
 
