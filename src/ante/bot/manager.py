@@ -488,17 +488,38 @@ class BotManager:
                 # 둘 다 ``old_config`` 로 rollback. memory rollback 은 단순
                 # 대입이라 raise 가능성이 없으므로 먼저 수행하여 DB rollback
                 # 실패와 무관하게 최소한 메모리 상태는 일관되게 만든다.
-                bot.config = old_config
-                try:
-                    await self._save_bot_config(old_config)
-                except Exception:
-                    # nested rollback failure: 원래 budget 예외를 덮지 않도록
-                    # rollback 실패는 ``logger.exception`` 으로 남기고 bare
-                    # raise 로 원래 예외를 propagate 한다. memory 는 이미
-                    # rollback 된 상태이므로 in-memory 일관성은 유지된다.
-                    logger.exception(
-                        "update_bot rollback DB save failed for bot_id=%s; "
-                        "memory was rolled back but DB may diverge.",
+                #
+                # Concurrent update race 회피: ``treasury.update_budget`` await
+                # 동안 같은 봇에 대한 다른 ``update_bot`` 호출이 끼어들어
+                # ``bot.config`` 를 또 다른 ``new_config`` 로 교체했을 수 있다.
+                # 그 경우 이 요청의 ``old_config`` 로 무조건 rollback 하면 다른
+                # update 의 성공 변경(예: name) 을 덮어쓴다. identity 비교
+                # (``bot.config is new_config``) 로 자기 자신의 변경분만 rollback
+                # 하고, 다른 update 가 끼어든 경우엔 rollback 을 스킵한다.
+                if bot.config is new_config:
+                    bot.config = old_config
+                    try:
+                        await self._save_bot_config(old_config)
+                    except Exception:
+                        # nested rollback failure: 원래 budget 예외를 덮지
+                        # 않도록 rollback 실패는 ``logger.exception`` 으로 남기고
+                        # bare raise 로 원래 예외를 propagate 한다. memory 는
+                        # 이미 rollback 된 상태이므로 in-memory 일관성은
+                        # 유지된다.
+                        logger.exception(
+                            "update_bot rollback DB save failed for bot_id=%s; "
+                            "memory was rolled back but DB may diverge.",
+                            bot_id,
+                        )
+                else:
+                    # 다른 update_bot 이 await 중 끼어들어 bot.config 를 교체한
+                    # 경우. 이 요청의 old_config 로 rollback 하면 그 update 의
+                    # 성공 변경을 덮어쓰므로 memory/DB rollback 모두 스킵하고
+                    # 원래 budget 예외만 propagate 한다.
+                    logger.warning(
+                        "update_bot rollback skipped for bot_id=%s: concurrent "
+                        "update detected (bot.config is not this request's "
+                        "new_config).",
                         bot_id,
                     )
                 raise

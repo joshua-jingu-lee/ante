@@ -412,3 +412,99 @@ class TestUpdateBotBudgetRollback:
 
         assert bot.config.interval_seconds == 180
         assert await _read_db_interval(db, bot_id) == 180
+
+    async def test_update_bot_budget_failure_skips_rollback_on_concurrent_update(
+        self, eventbus, db, ctx, monkeypatch, caplog
+    ) -> None:
+        """Refs #1460: concurrent update race 시 rollback 스킵.
+
+        시나리오:
+        1. update_bot(A) 가 진입하여 new_config(A) 를 만들고 ``bot.config`` 에
+           대입 + DB commit 까지 성공.
+        2. ``treasury.update_budget`` await 진입.
+        3. 같은 봇에 대해 update_bot(B) 가 끼어들어 ``bot.config`` 를
+           third_config(B) 로 교체 (성공 가정).
+        4. ``treasury.update_budget`` 이 raise → A 의 rollback 경로 진입.
+        5. ``bot.config is new_config(A)`` 가 False (지금은 third_config(B)) →
+           rollback 스킵, DB save 도 추가로 호출되지 않음.
+        6. 원래 budget 예외만 propagate, ``bot.config`` 는 third_config(B) 유지.
+        7. ``_save_bot_config`` 는 A 의 new_config commit 1회만 수행한다 (즉
+           ``call_count == 1``) — rollback 의 두 번째 save 가 일어나지 않음을
+           보증.
+        """
+
+        # _save_bot_config call count 추적: monkeypatch 로 wrapping.
+        manager = BotManager(eventbus=eventbus, db=db, treasury_manager=None)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(
+            manager, ctx, account_id="acc-test", interval_seconds=60
+        )
+        bot = manager.get_bot(bot_id)
+        assert bot is not None
+
+        # 같은 bot_id 에 대한 다른 update 가 만들어낸 ``third_config`` 시뮬레이션.
+        third_config = BotConfig(
+            bot_id="bot1",
+            strategy_id="s1",
+            account_id="acc-test",
+            interval_seconds=240,
+            name="concurrent-renamed",
+        )
+
+        # _save_bot_config 호출 횟수 추적.
+        original_save = manager._save_bot_config
+        save_call_count = {"n": 0}
+
+        async def counting_save(config):
+            save_call_count["n"] += 1
+            return await original_save(config)
+
+        monkeypatch.setattr(manager, "_save_bot_config", counting_save)
+
+        # race 시뮬레이션: treasury.update_budget 안에서 bot.config 를
+        # third_config 로 교체한 직후 raise.
+        class _BoomError(RuntimeError):
+            pass
+
+        class _RaceSimulatingTreasury:
+            def __init__(self, bot_ref, replacement: BotConfig) -> None:
+                self._bot_ref = bot_ref
+                self._replacement = replacement
+                self.update_budget_calls: list[tuple[str, float]] = []
+
+            async def update_budget(
+                self, called_bot_id: str, target_amount: float
+            ) -> None:
+                self.update_budget_calls.append((called_bot_id, target_amount))
+                # await 중 끼어든 다른 update_bot 이 bot.config 를 교체한 상황을
+                # 모사 (실제 코드 경로에선 다른 task 가 했을 일이지만, 단위
+                # 테스트에선 side_effect 안에서 직접 변조).
+                self._bot_ref.config = self._replacement
+                raise _BoomError("boom-after-race")
+
+        race_treasury = _RaceSimulatingTreasury(bot, third_config)
+        tm = _RaisingTreasuryManager("acc-test", race_treasury)  # type: ignore[arg-type]
+        manager._treasury_manager = tm  # type: ignore[assignment]
+
+        with caplog.at_level(logging.WARNING, logger="ante.bot.manager"):
+            with pytest.raises(_BoomError):
+                await manager.update_bot(bot_id, interval_seconds=120, budget=100_000.0)
+
+        # update_budget 은 진입했어야 한다.
+        assert race_treasury.update_budget_calls == [(bot_id, 100_000.0)]
+
+        # 핵심 보증: _save_bot_config 가 정확히 1회만 호출됨 (new_config commit
+        # 만 수행, rollback save 는 스킵). 만약 conditional rollback 이 빠지면
+        # call_count == 2 가 되어야 한다.
+        assert save_call_count["n"] == 1
+
+        # bot.config 는 third_config(B) 그대로 유지되어야 한다 (덮어쓰지 않음).
+        assert bot.config is third_config
+        assert bot.config.name == "concurrent-renamed"
+        assert bot.config.interval_seconds == 240
+
+        # "rollback skipped" warning 흔적 확인.
+        assert any(
+            "rollback skipped" in record.message and record.levelno == logging.WARNING
+            for record in caplog.records
+        )
