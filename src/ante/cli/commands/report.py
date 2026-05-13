@@ -10,7 +10,14 @@ from pydantic import ValidationError
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.report.models import ReportStatus
 from ante.web.schemas import ReportSubmitRequest
+
+# `ReportStatus` enum이 `--status` 필터의 SSOT다. `report list`는 DB 진입 전
+# preflight에서 invalid 값을 차단해야 하며 (#1462), 이를 위해 함수 내부 import
+# 대신 모듈 상단 import을 사용한다. `ante.report.models`는 dataclass + StrEnum
+# + math 만 노출하는 light 모듈이라 `tests/unit/test_cli_dependency_isolation.py`
+# 가 회귀를 차단한다.
 
 
 @click.group()
@@ -165,7 +172,10 @@ def submit(
 
 
 @report.command("list")
-@click.option("--status", help="상태 필터 (pending/adopted/rejected)")
+@click.option(
+    "--status",
+    help="상태 필터 (draft/submitted/reviewed/adopted/rejected/archived)",
+)
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
@@ -178,9 +188,19 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
+    # Preflight: invalid `--status`는 `Database` 생성 전에 차단한다.
+    # `ReportStatus` enum이 SSOT이며 (#1462) inline 비교한다.
+    # strategy.py:204-210 패턴과 동형이다.
+    if status is not None and status not in {s.value for s in ReportStatus}:
+        fmt.error(
+            f"잘못된 status 값: {status!r}. "
+            f"허용값: {sorted(s.value for s in ReportStatus)}",
+            code="REPORT_INVALID_STATUS",
+        )
+        raise SystemExit(1)
+
     async def _list() -> list[dict]:
         from ante.core.database import Database
-        from ante.report.models import ReportStatus
 
         db = Database(resolved_db_path)
         await db.connect()

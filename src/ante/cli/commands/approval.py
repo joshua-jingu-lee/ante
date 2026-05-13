@@ -7,9 +7,16 @@ import json
 
 import click
 
+from ante.approval.models import ApprovalStatus, ApprovalType
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+
+# `ApprovalStatus`/`ApprovalType` enum이 `--status`/`--type` 필터의 SSOT다.
+# `approval list`는 DB 진입 전 preflight에서 invalid 값을 차단해야 하며 (#1462),
+# 이를 위해 함수 내부 import 대신 모듈 상단 import을 사용한다.
+# `ante.approval.models`은 dataclass + StrEnum 만 노출하는 light 모듈이라
+# `tests/unit/test_cli_dependency_isolation.py`가 회귀를 차단한다.
 
 
 @click.group()
@@ -38,9 +45,8 @@ def request(
     expires_in: str,
 ) -> None:
     """결재 요청 생성."""
-    # ApprovalType SSOT 검증 — heavy ``ante.approval`` 패키지를 피하기 위해
-    # ``ante.approval.models`` 만 직접 import 한다 (#1469).
-    from ante.approval.models import ApprovalType
+    # ApprovalType SSOT 검증. `ante.approval.models`는 모듈 상단에서 import한다
+    # (#1462; #1469 lazy 패턴은 dependency-isolation smoke가 회귀 차단).
 
     fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
@@ -107,6 +113,27 @@ def approval_list(
 
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
+
+    # Preflight: invalid `--status`/`--type`는 `Database` 생성 전에 차단한다.
+    # `ApprovalStatus`/`ApprovalType` enum이 SSOT이며 (#1462) inline 비교한다.
+    # strategy.py:204-210 패턴과 동형이다.
+    if status is not None and status not in {s.value for s in ApprovalStatus}:
+        fmt.error(
+            f"잘못된 status 값: {status!r}. "
+            f"허용값: {sorted(s.value for s in ApprovalStatus)}",
+            code="APPROVAL_INVALID_STATUS",
+        )
+        raise SystemExit(1)
+
+    if approval_type is not None and approval_type not in {
+        t.value for t in ApprovalType
+    }:
+        fmt.error(
+            f"잘못된 type 값: {approval_type!r}. "
+            f"허용값: {sorted(t.value for t in ApprovalType)}",
+            code="APPROVAL_INVALID_TYPE",
+        )
+        raise SystemExit(1)
 
     async def _list() -> list[dict]:
         from ante.approval import ApprovalService

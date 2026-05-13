@@ -166,6 +166,55 @@ class TestAccountList:
         result = _invoke(["account", "list", "--status", "suspended"])
         assert result.exit_code == 0
 
+    def test_account_list_invalid_status_rejected_before_db(self) -> None:
+        """invalid `--status`는 `_create_account_service` 호출 전 차단된다 (#1462).
+
+        AccountStatus enum (SSOT)에 없는 status 값이 들어오면 preflight가
+        `ACCOUNT_INVALID_STATUS` 구조화 에러로 종료시키며, DB 접속을 위한
+        `_create_account_service`는 호출되지 않아야 한다.
+        """
+        mock_create = AsyncMock()
+        with patch(
+            "ante.cli.commands.account._create_account_service",
+            new=mock_create,
+        ):
+            result = _invoke(
+                [
+                    "--format",
+                    "json",
+                    "account",
+                    "list",
+                    "--status",
+                    "oracle_invalid_status",
+                ]
+            )
+        assert result.exit_code == 1
+        data = json.loads(result.output.strip())
+        assert data["status"] == "error"
+        assert data["code"] == "ACCOUNT_INVALID_STATUS"
+        assert "oracle_invalid_status" in data["message"]
+        assert "Traceback" not in result.output
+        mock_create.assert_not_called()
+
+    def test_account_list_valid_status_still_works(
+        self, mock_account_service: AsyncMock
+    ) -> None:
+        """valid `--status` 입력은 회귀 없이 정상 동작한다 (#1462).
+
+        ACTIVE / SUSPENDED / DELETED 세 가지 valid 값 모두 preflight를 통과하고
+        AccountService.list가 enum 값으로 호출된다.
+        """
+        from ante.account.models import AccountStatus
+
+        mock_account_service.list.return_value = []
+        for valid in ("active", "suspended", "deleted"):
+            mock_account_service.list.reset_mock()
+            result = _invoke(["account", "list", "--status", valid])
+            assert result.exit_code == 0, result.output
+            mock_account_service.list.assert_called_once_with(
+                status=AccountStatus(valid),
+            )
+
 
 # ── account info 테스트 ──────────────────────────────
 
