@@ -463,18 +463,45 @@ class BotManager:
         # ``TreasuryNotConfiguredError`` 를 raise 하여 라우트 계층이 422 로
         # 매핑할 수 있도록 한다. ``new_budget is None`` 인 단순 update
         # 경로는 기존과 동일하게 무영향(no-op)이다.
+        #
+        # Refs #1460: budget 처리 실패 시 update_bot 전체가 atomic 하도록
+        # runtime control 변경(memory + DB) 을 ``old_config`` 로 rollback
+        # 한다. TreasuryManager 미주입, account 미등록, treasury.update_budget
+        # 내부 예외, asyncio.CancelledError(요청 취소) 모두 동일하게 rollback
+        # 경로를 탄다. ``treasury.update_budget`` 내부 allocate/deallocate
+        # side effect(예산 부분 commit) 까지는 atomic 보장하지 않는다.
         if new_budget is not None:
-            from ante.treasury.exceptions import TreasuryNotConfiguredError
-
-            if self._treasury_manager is None:
-                raise TreasuryNotConfiguredError("treasury manager not configured")
             try:
-                treasury = self._treasury_manager.get(new_config.account_id)
-            except KeyError as ke:
-                raise TreasuryNotConfiguredError(
-                    f"treasury not configured for account {new_config.account_id}"
-                ) from ke
-            await treasury.update_budget(bot_id, new_budget)
+                from ante.treasury.exceptions import TreasuryNotConfiguredError
+
+                if self._treasury_manager is None:
+                    raise TreasuryNotConfiguredError("treasury manager not configured")
+                try:
+                    treasury = self._treasury_manager.get(new_config.account_id)
+                except KeyError as ke:
+                    raise TreasuryNotConfiguredError(
+                        f"treasury not configured for account {new_config.account_id}"
+                    ) from ke
+                await treasury.update_budget(bot_id, new_budget)
+            except (Exception, asyncio.CancelledError):
+                # Atomicity: budget 실패 시 runtime control 변경을 memory + DB
+                # 둘 다 ``old_config`` 로 rollback. memory rollback 은 단순
+                # 대입이라 raise 가능성이 없으므로 먼저 수행하여 DB rollback
+                # 실패와 무관하게 최소한 메모리 상태는 일관되게 만든다.
+                bot.config = old_config
+                try:
+                    await self._save_bot_config(old_config)
+                except Exception:
+                    # nested rollback failure: 원래 budget 예외를 덮지 않도록
+                    # rollback 실패는 ``logger.exception`` 으로 남기고 bare
+                    # raise 로 원래 예외를 propagate 한다. memory 는 이미
+                    # rollback 된 상태이므로 in-memory 일관성은 유지된다.
+                    logger.exception(
+                        "update_bot rollback DB save failed for bot_id=%s; "
+                        "memory was rolled back but DB may diverge.",
+                        bot_id,
+                    )
+                raise
 
         logger.info("봇 설정 수정: %s (변경: %s)", bot_id, list(updates.keys()))
         return bot
