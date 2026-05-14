@@ -443,3 +443,55 @@ class TestNormalCommandUnaffected:
         assert result.exit_code == 0, result.output
         # Click 의 ``Show this message and exit.`` 같은 help 본문이 포함된다.
         assert "Show this" in result.stdout or "--help" in result.stdout, result.stdout
+
+
+# ── BadArgumentUsage subclass 명시 회귀 ─────────────────────────────────────
+
+
+class TestBadArgumentUsageExplicit:
+    """``UsageError`` 부모 catch 가 ``BadArgumentUsage`` subclass 에도 적용됨을
+    명시적으로 보장하는 회귀.
+
+    배경:
+        실제 ante CLI 표면에서 ``BadArgumentUsage`` 를 직접 raise 하는 경로는
+        흔치 않지만, ``UsageError`` 계층 (``MissingParameter``, ``BadParameter``,
+        ``NoSuchOption``, ``BadArgumentUsage``, ``BadOptionUsage``) 중 어느
+        subclass 가 발화되더라도 동일한 JSON envelope 가 나와야 한다는 것은
+        :meth:`AuthenticatedGroup.main` override 의 핵심 invariant 다.
+
+        synthetic CLI 에서 ``BadArgumentUsage`` 를 직접 raise 해, 부모 catch 의
+        subclass 커버리지를 명시 회귀로 못박는다.
+    """
+
+    def test_bad_argument_usage_emits_json_envelope(self, runner: CliRunner) -> None:
+        """``BadArgumentUsage`` 명시 raise → JSON envelope + exit 1."""
+
+        @click.group(cls=AuthenticatedGroup)
+        @click.option(
+            "--format",
+            "output_format",
+            type=click.Choice(["text", "json"]),
+            default="text",
+        )
+        def synthetic_cli(output_format: str) -> None:  # noqa: ARG001
+            pass
+
+        @synthetic_cli.command()
+        @click.argument("value")
+        def echo(value: str) -> None:
+            if value == "trigger":
+                raise click.exceptions.BadArgumentUsage(
+                    "explicit BadArgumentUsage trigger"
+                )
+            click.echo(value)
+
+        result = runner.invoke(synthetic_cli, ["--format", "json", "echo", "trigger"])
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "CLI_USAGE_ERROR", payload
+        assert "explicit BadArgumentUsage trigger" in str(payload["message"]), payload
