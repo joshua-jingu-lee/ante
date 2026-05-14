@@ -134,7 +134,7 @@ class TestSnapshotDefault:
         with ctx_patch:
             result = _invoke(runner, ["snapshot", "--account", "domestic"], mock_auth)
 
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "스냅샷이 없습니다" in result.output
 
 
@@ -163,7 +163,7 @@ class TestSnapshotDate:
                 mock_auth,
             )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "2026-01-01" in result.output
         assert "스냅샷이 없습니다" in result.output
 
@@ -310,6 +310,44 @@ class TestSnapshotJson:
         data = json.loads(result.output)
         assert isinstance(data, list)
         assert len(data) == 2
+
+    def test_json_not_found(self, runner, mock_auth):
+        import json
+
+        from ante.member.models import Member, MemberType
+
+        mock_member = Member(
+            member_id="test-user",
+            name="테스트",
+            type=MemberType.HUMAN,
+            role="master",
+        )
+        ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
+        with ctx_patch:
+            result = runner.invoke(
+                treasury,
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--date",
+                    "2026-01-01",
+                    "--format",
+                    "json",
+                ],
+                obj={
+                    "format": "json",
+                    "formatter": OutputFormatter("json"),
+                    "member": mock_member,
+                },
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["status"] == "error"
+        assert payload["code"] == "snapshot_not_found"
+        assert "2026-01-01" in payload["message"]
 
 
 class TestSnapshotValidation:

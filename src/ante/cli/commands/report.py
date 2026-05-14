@@ -343,8 +343,8 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
     result = asyncio.run(_view())
 
     if not result:
-        fmt.error(f"리포트를 찾을 수 없습니다: {report_id}")
-        return
+        fmt.error(f"리포트를 찾을 수 없습니다: {report_id}", code="report_not_found")
+        raise SystemExit(1)
 
     if fmt.is_json:
         fmt.output(result)

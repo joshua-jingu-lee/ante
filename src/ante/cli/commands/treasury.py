@@ -227,8 +227,8 @@ def snapshot(
 
     if result is None:
         target = date_str or datetime.now(UTC).strftime("%Y-%m-%d")
-        fmt.error(f"{target} 날짜의 스냅샷이 없습니다.")
-        return
+        fmt.error(f"{target} 날짜의 스냅샷이 없습니다.", code="snapshot_not_found")
+        raise SystemExit(1)
 
     if fmt.is_json:
         fmt.output(result)
