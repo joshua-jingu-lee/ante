@@ -473,7 +473,12 @@ class TestTradeListFormatOption:
 
 
 class TestTradeInfoFormatOption:
-    """ante trade info {id} --format json."""
+    """ante trade info {id} --format json.
+
+    #1515: missing-resource는 JSON error envelope과 함께 exit code 1을 반환한다.
+    이 테스트는 --format json 옵션의 서브커맨드 뒤 배치 동작을 검증하면서,
+    동시에 missing case가 nonzero exit를 내는지도 확인한다.
+    """
 
     def test_format_after_subcommand(self, runner: CliRunner) -> None:
         mock_db = AsyncMock()
@@ -488,10 +493,11 @@ class TestTradeInfoFormatOption:
             result = runner.invoke(
                 cli, ["trade", "info", "trade-123", "--format", "json"]
             )
-            assert result.exit_code == 0
-            # Not found case produces JSON error
+            # #1515: missing trade는 exit 1 + JSON error envelope.
+            assert result.exit_code == 1
             data = json.loads(result.output)
             assert "message" in data
+            assert data["status"] == "error"
 
 
 # ── account set-credentials 비대화형 테스트 ────────────────

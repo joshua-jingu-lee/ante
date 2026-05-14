@@ -137,7 +137,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
 
     if not result:
         fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
-        return
+        ctx.exit(1)
 
     if fmt.is_json:
         fmt.output(result)
@@ -367,7 +367,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
 
     if result.get("signal_key") is None:
         fmt.error(f"시그널 키가 없습니다: {bot_id}")
-        return
+        ctx.exit(1)
 
     if result.get("rotated"):
         fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)

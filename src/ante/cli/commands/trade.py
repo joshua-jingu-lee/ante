@@ -139,7 +139,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
 
     if not result:
         fmt.error(f"거래를 찾을 수 없습니다: {trade_id}")
-        return
+        ctx.exit(1)
 
     if fmt.is_json:
         fmt.output(result)
