@@ -235,10 +235,15 @@ class TestStrategyListInvalidStatus:
             assert "Traceback" not in result.output
 
     def test_click_exception_propagates_without_formatter(self, runner):
-        """`_list()` 내부에서 `click.ClickException`이 발생하면 그대로 전파된다.
+        """`_list()` 내부에서 `click.ClickException`이 발생하면 strategy formatter를
+        거치지 않고 root main override 의 ``CLI_USAGE_ERROR`` envelope 로 종료한다.
 
-        formatter를 거치면 click의 표준 출력 경로(`UsageError`/`ClickException.show`)
-        가 깨지므로, `except click.ClickException: raise` 분기로 보존되어야 한다.
+        invariant: ``strategy list`` 내부의 ``except click.ClickException: raise``
+        분기가 보존되어 strategy 도메인 formatter (``STRATEGY_*`` code) 가 거치지
+        않는다. JSON 모드에서는 root ``AuthenticatedGroup.main`` override 가
+        catch 해 :class:`OutputFormatter` 의 ``CLI_USAGE_ERROR`` envelope 로 변환
+        (#1539, 스펙 ``docs/specs/cli/02-design-decisions.md:78-81``: 필수 입력
+        누락은 exit 1 + 구조화 에러 envelope).
         """
         db = _mock_db()
         registry = MagicMock()
@@ -262,8 +267,10 @@ class TestStrategyListInvalidStatus:
                     "adopted",
                 ],
             )
-            # click.UsageError → exit_code 2, formatter JSON 미경유.
-            assert result.exit_code == 2
+            # spec 정정: JSON 모드 UsageError → exit 1 + envelope (#1539).
+            assert result.exit_code == 1
             assert "intentional click usage error" in result.output
-            # JSON shape이 아니어야 한다(formatter를 거치지 않았다는 회귀).
+            # invariant: strategy 도메인 formatter (STRATEGY_ERROR) 를 거치지 않고
+            # root main override 의 CLI_USAGE_ERROR envelope 로 종료한다.
             assert '"code": "STRATEGY_ERROR"' not in result.output
+            assert '"code": "CLI_USAGE_ERROR"' in result.output

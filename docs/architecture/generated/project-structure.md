@@ -425,7 +425,8 @@ tests/
 │   │   ├── test_authenticated_group.py
 │   │   ├── test_auth_format_json.py
 │   │   ├── test_bot_create_exit_code.py
-│   │   └── test_broker_missing_account.py
+│   │   ├── test_broker_missing_account.py
+│   │   └── test_usage_error_json.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
