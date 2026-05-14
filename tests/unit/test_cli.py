@@ -232,11 +232,52 @@ class TestStrategyCommands:
         assert data["status"] == "ok"
 
     def test_validate_invalid(self, runner, invalid_strategy_file):
+        # #1541: validation failure must exit 1 (single source of truth, not 0).
         result = runner.invoke(
             cli, ["strategy", "validate", str(invalid_strategy_file)]
         )
-        assert result.exit_code == 0  # validation failure is not a CLI error
-        assert "Error" in result.output or "failed" in result.output.lower()
+        assert result.exit_code == 1
+        # text 모드에서는 stderr에 "Error: Validation failed: ..."가 들어간다.
+        # CliRunner는 기본적으로 stderr를 stdout과 합치므로 result.output로 점검한다.
+        combined = result.output
+        assert "Validation failed" in combined
+
+    def test_validate_invalid_json_single_envelope(self, runner, invalid_strategy_file):
+        """#1541: JSON 모드 invalid 입력은 단일 envelope + exit 1로 종료한다."""
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "strategy",
+                "validate",
+                str(invalid_strategy_file),
+            ],
+        )
+        assert result.exit_code == 1
+        # 단일 JSON 문서로 파싱 가능해야 한다 (두 개의 문서 출력 금지).
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert data["code"] == "STRATEGY_VALIDATION_FAILED"
+        assert "Validation failed" in data["message"]
+        assert data["data"]["valid"] is False
+        assert isinstance(data["data"]["errors"], list)
+        assert isinstance(data["data"]["warnings"], list)
+
+    def test_validate_invalid_text_stderr(self, runner, invalid_strategy_file):
+        """#1541: text 모드 invalid 입력은 stderr에 에러+상세 라인을 내보낸다."""
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "text",
+                "strategy",
+                "validate",
+                str(invalid_strategy_file),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Error: Validation failed" in result.output
 
     def test_validate_nonexistent(self, runner):
         result = runner.invoke(cli, ["strategy", "validate", "/nonexistent.py"])
