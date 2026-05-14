@@ -342,7 +342,8 @@ class TestTradeCommands:
             mock_db_cls.return_value = mock_db
 
             result = runner.invoke(cli, ["trade", "info", "fake-id"])
-            assert result.exit_code == 0
+            # #1515: missing-resource는 ctx.exit(1)로 non-zero exit
+            assert result.exit_code == 1
             assert "찾을 수 없습니다" in result.output
 
 
