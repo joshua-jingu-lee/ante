@@ -83,7 +83,8 @@ class TestConfigGet:
             mock_svc.return_value = (mock_config, mock_dynamic, mock_db)
 
             result = runner.invoke(cli, ["config", "get", "nonexistent.key"])
-            assert result.exit_code == 0
+            # #1515: missing-resource는 ctx.exit(1)로 non-zero exit
+            assert result.exit_code == 1
             assert "찾을 수 없습니다" in result.output
 
     def test_get_all_json(self, runner):

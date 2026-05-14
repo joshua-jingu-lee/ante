@@ -215,7 +215,8 @@ class TestBotCommands:
             mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
 
             result = runner.invoke(cli, ["bot", "info", "nonexistent"])
-            assert result.exit_code == 0
+            # #1515: missing-resource는 ctx.exit(1)로 non-zero exit
+            assert result.exit_code == 1
             assert "찾을 수 없습니다" in result.output
 
     def test_bot_info_found(self, runner):
