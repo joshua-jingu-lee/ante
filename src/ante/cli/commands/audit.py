@@ -6,6 +6,7 @@ import asyncio
 
 import click
 
+from ante.cli._validators import validate_iso_date
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -22,8 +23,18 @@ def _run(coro):  # noqa: ANN001, ANN202
 @audit.command("list")
 @click.option("--member", "member_id", default=None, help="멤버 ID 필터")
 @click.option("--action", default=None, help="액션 필터 (prefix 매칭)")
-@click.option("--from-date", default=None, help="시작 날짜 (YYYY-MM-DD)")
-@click.option("--to-date", default=None, help="종료 날짜 (YYYY-MM-DD)")
+@click.option(
+    "--from-date",
+    default=None,
+    callback=validate_iso_date,
+    help="시작 날짜 (YYYY-MM-DD)",
+)
+@click.option(
+    "--to-date",
+    default=None,
+    callback=validate_iso_date,
+    help="종료 날짜 (YYYY-MM-DD)",
+)
 @click.option("--limit", default=20, type=click.IntRange(1, 200), help="조회 건수")
 @click.option("--offset", default=0, type=click.IntRange(min=0), help="오프셋")
 @click.pass_context
