@@ -204,8 +204,11 @@ def snapshot(
 
     # 옵션 검증: --date 와 --from/--to 는 동시 사용 불가
     if date_str and (from_date or to_date):
-        fmt.error("--date와 --from/--to 옵션은 동시에 사용할 수 없습니다.")
-        return
+        fmt.error(
+            "--date와 --from/--to 옵션은 동시에 사용할 수 없습니다.",
+            code="CLI_OPTION_CONFLICT",
+        )
+        raise SystemExit(1)
 
     async def _run_snapshot() -> dict | list[dict] | None:
         t, db = await _create_treasury(account_id)

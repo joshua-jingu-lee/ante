@@ -353,8 +353,8 @@ class TestSnapshotJson:
 class TestSnapshotValidation:
     """옵션 조합 검증."""
 
-    def test_date_and_from_conflict(self, runner, mock_auth):
-        """--date와 --from을 동시에 사용하면 에러."""
+    def test_date_and_from_conflict_text(self, runner, mock_auth):
+        """--date와 --from을 동시에 사용하면 text 모드에서 exit 1."""
         ctx_patch, _ = _make_mock_treasury()
         with ctx_patch:
             result = _invoke(
@@ -371,8 +371,83 @@ class TestSnapshotValidation:
                 mock_auth,
             )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 1
+        # text 모드: stderr로 Error 출력, stdout에는 메시지 없음
         assert "동시에 사용할 수 없습니다" in result.output
+
+    def test_date_and_from_conflict_json(self, runner, mock_auth):
+        """--date와 --from을 동시에 사용하면 JSON envelope + exit 1."""
+        import json
+
+        from ante.member.models import Member, MemberType
+
+        mock_member = Member(
+            member_id="test-user",
+            name="테스트",
+            type=MemberType.HUMAN,
+            role="master",
+        )
+
+        ctx_patch, _ = _make_mock_treasury()
+        with ctx_patch:
+            result = runner.invoke(
+                treasury,
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--date",
+                    "2026-03-21",
+                    "--from",
+                    "2026-03-20",
+                ],
+                obj={
+                    "format": "json",
+                    "formatter": OutputFormatter("json"),
+                    "member": mock_member,
+                },
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["status"] == "error"
+        assert payload["code"] == "CLI_OPTION_CONFLICT"
+        assert "동시에 사용할 수 없습니다" in payload["message"]
+
+    def test_date_and_to_conflict(self, runner, mock_auth):
+        """--date와 --to를 동시에 사용해도 동일하게 차단된다(정상 회귀)."""
+        ctx_patch, _ = _make_mock_treasury()
+        with ctx_patch:
+            result = _invoke(
+                runner,
+                [
+                    "snapshot",
+                    "--account",
+                    "domestic",
+                    "--date",
+                    "2026-03-21",
+                    "--to",
+                    "2026-03-22",
+                ],
+                mock_auth,
+            )
+
+        assert result.exit_code == 1
+        assert "동시에 사용할 수 없습니다" in result.output
+
+    def test_single_date_option_ok(self, runner, mock_auth):
+        """단일 옵션(--date)은 정상 동작(정상 회귀)."""
+        ctx_patch, _ = _make_mock_treasury(get_daily_return=SAMPLE_SNAPSHOT)
+        with ctx_patch:
+            result = _invoke(
+                runner,
+                ["snapshot", "--account", "domestic", "--date", "2026-03-21"],
+                mock_auth,
+            )
+
+        assert result.exit_code == 0
+        assert "동시에 사용할 수 없습니다" not in result.output
 
 
 class TestSnapshotAccount:
