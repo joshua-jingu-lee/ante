@@ -219,8 +219,20 @@ class TestReportViewCLI:
         with patch("asyncio.run") as mock_run:
             mock_run.return_value = None
             result = runner.invoke(cli, ["report", "view", "nonexistent"])
-            assert result.exit_code == 0
+            assert result.exit_code == 1
             assert "찾을 수 없습니다" in result.output
+
+    def test_view_not_found_json(self, runner):
+        with patch("asyncio.run") as mock_run:
+            mock_run.return_value = None
+            result = runner.invoke(
+                cli, ["--format", "json", "report", "view", "nonexistent"]
+            )
+            assert result.exit_code == 1
+            payload = json.loads(result.output)
+            assert payload["status"] == "error"
+            assert payload["code"] == "report_not_found"
+            assert "찾을 수 없습니다" in payload["message"]
 
     def test_view_json_format(self, runner):
         with patch("asyncio.run") as mock_run:
