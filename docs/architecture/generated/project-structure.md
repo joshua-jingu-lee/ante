@@ -421,7 +421,8 @@ tests/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
 │   │   ├── test_authenticated_group.py
-│   │   └── test_auth_format_json.py
+│   │   ├── test_auth_format_json.py
+│   │   └── test_bot_create_exit_code.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py

@@ -236,7 +236,7 @@ def bot_create(
             param_dict[key] = value
         except click.BadParameter as e:
             fmt.error(str(e))
-            return
+            raise SystemExit(1) from e
 
     # 계좌 미지정 시 비대화형 resolver — 단일 active 계좌면 자동 선택,
     # 그 외(0개/2개 이상)에는 BOT_MISSING_REQUIRED_ACCOUNT로 실패한다.
@@ -273,7 +273,7 @@ def bot_create(
         raise
     except Exception as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
 
