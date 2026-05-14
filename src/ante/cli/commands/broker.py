@@ -37,11 +37,22 @@ async def _get_broker(account_id: str | None = None):  # noqa: ANN202
     """AccountService를 통해 브로커 어댑터를 획득한다.
 
     account_id가 None이면 기존 Config 기반 폴백을 사용한다.
+
+    ``account_id`` 분기에서 ``account_service.get_broker`` 또는
+    ``adapter.connect`` 가 raise 하면, 호출자에 ``db`` 핸들이 전달되지 않으므로
+    여기서 ``db.close()`` 를 보장해야 한다. close 를 누락하면 aiosqlite
+    백그라운드 스레드가 살아 있어 ``asyncio.run`` 종료 후에도 프로세스가
+    수 초간 hang 한다 (#1535). lifecycle 보장 — 정상 경로의 close 는
+    호출자(``_run_balance`` 등)가 계속 책임진다.
     """
     if account_id:
         account_service, db = await _create_account_service()
-        adapter = await account_service.get_broker(account_id)
-        await adapter.connect()
+        try:
+            adapter = await account_service.get_broker(account_id)
+            await adapter.connect()
+        except Exception:
+            await db.close()
+            raise
         return adapter, db
 
     # 폴백: 기존 Config 기반 브로커 생성
@@ -178,7 +189,7 @@ def balance(ctx: click.Context, account_id: str) -> None:
             result = _run(_run_balance())
         except Exception as e:
             fmt.error(str(e))
-            return
+            raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output(result)
@@ -229,7 +240,7 @@ def positions(ctx: click.Context, account_id: str) -> None:
             result = {"positions": pos_list}
         except Exception as e:
             fmt.error(str(e))
-            return
+            raise SystemExit(1) from e
 
     pos_list = result.get("positions", [])
 
