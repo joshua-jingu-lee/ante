@@ -57,6 +57,19 @@ def request(
         fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
         raise SystemExit(1) from e
 
+    # ``--params`` 는 service ``params.get()`` 호출의 SSOT 입력이므로 JSON
+    # object (dict) 만 허용한다. string/list/number/bool/null 같은 non-dict
+    # JSON value 가 통과하면 service 단에서 ``AttributeError`` traceback 이
+    # 노출된다 (#1519). 같은 함수 line 57-58 / 62-66 패턴과 동형.
+    # service/IPC defense-in-depth 는 본 PR Non-Goals (follow-up).
+    if not isinstance(params, dict):
+        params_type = type(params).__name__
+        fmt.error(
+            f"--params는 JSON object여야 합니다 (현재 타입: {params_type})",
+            code="APPROVAL_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+
     valid_types = {t.value for t in ApprovalType}
     if approval_type not in valid_types:
         fmt.error(
@@ -328,6 +341,20 @@ def reopen(
         except json.JSONDecodeError as e:
             fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
             raise SystemExit(1) from e
+        # ``--params`` 는 service ``params.get()`` 의 SSOT 입력이므로 JSON
+        # object 만 허용한다 (#1519; ``request`` 사이트와 동형).
+        # ``--params`` 옵션 미지정 (``params_json is None``) 시에는 이 분기에
+        # 진입하지 않아 ``params=None`` sentinel 이 보존되어 IPC payload 에
+        # ``params`` 키가 빠지고 기존 값 유지 invariant 가 지켜진다.
+        # ``--params null`` 명시적 입력은 ``json.loads`` → ``None`` 으로
+        # 이 가드에서 거부된다.
+        if not isinstance(params, dict):
+            params_type = type(params).__name__
+            fmt.error(
+                f"--params는 JSON object여야 합니다 (현재 타입: {params_type})",
+                code="APPROVAL_VALIDATION_ERROR",
+            )
+            raise SystemExit(1)
 
     async def _reopen() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
