@@ -416,7 +416,8 @@ tests/
 │   │   ├── test_scheduler.py         # 날짜 범위 생성
 │   │   ├── test_validate.py          # 4계층 데이터 검증
 │   │   ├── __init__.py
-│   │   └── test_dart_collector.py
+│   │   ├── test_dart_collector.py
+│   │   └── test_cli_backfill_date_validation.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
