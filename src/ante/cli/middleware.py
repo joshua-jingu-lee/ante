@@ -450,6 +450,123 @@ class AuthenticatedGroup(_LeafPathMixin):
         _attach_auth_guard_recursive(cmd)
         super().add_command(cmd, name)
 
+    def main(  # type: ignore[override]
+        self,
+        args: list[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        **extra: object,
+    ) -> object:
+        """``BaseCommand.main`` 오버라이드 — JSON 모드 parsing-stage 에러 envelope 변환.
+
+        Click 8.x의 ``BaseCommand.main()`` 은 ``parse_args``/``invoke`` 를 try/except
+        로 감싸 :class:`click.UsageError` (subclass: ``MissingParameter``,
+        ``BadParameter``, ``BadArgumentUsage``, ``NoSuchOption``) 를 catch 하면
+        ``e.show()`` 로 stderr 에 ``Usage: ... Error: ...`` 텍스트를 출력하고
+        ``sys.exit(e.exit_code)`` (보통 2) 한다. 이는 ``--format json`` 모드의
+        구조화 에러 계약 (스펙 ``docs/specs/cli/02-design-decisions.md:78-81``,
+        ``{status, code, message}`` envelope + exit 1) 과 어긋난다 (#1539).
+
+        본 오버라이드는 ``--format`` raw 토큰을 sniff 해 json 모드일 때만 click
+        의 ``standalone_mode=False`` 로 호출하고 ``UsageError`` 를 직접 catch 해
+        :meth:`OutputFormatter.error` 로 envelope 출력 + ``sys.exit(1)`` 한다.
+
+        텍스트 모드 (`--format text` 기본) 에서는 click 기본 동작
+        (``Usage: ... Error: ...`` stderr + exit 2) 을 그대로 유지한다.
+
+        gate-exempt 경로 (``--help`` / ``--version`` / completion) 는 click 이
+        ``BaseCommand.main`` 내부에서 자체 ``ctx.exit()`` 처리하므로 본 try/except
+        블록에는 진입하지 않는다.
+        """
+        output_format = self._sniff_output_format(args)
+        if output_format != "json":
+            return super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=standalone_mode,
+                **extra,
+            )
+
+        # JSON 모드: UsageError 를 직접 catch 해 envelope 출력 + exit 1.
+        # super().main(standalone_mode=False) 는 click ``ClickException`` /
+        # ``Abort`` 를 re-raise 하고, 정상/``Exit`` 케이스는 값을 반환한다
+        # (click core.py:1083-1120).
+        try:
+            rv = super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                **extra,
+            )
+        except click.UsageError as e:
+            from ante.cli.formatter import OutputFormatter
+
+            fmt = OutputFormatter("json")
+            # Click 의 ``UsageError.format_message()`` 는 메시지 본문만 반환
+            # (예: ``Missing argument 'VALUE'.``). ``CLI_USAGE_ERROR`` 코드는
+            # 스펙 ``02-design-decisions.md:84-87`` 의 ``CLI_*`` prefix 명명 규칙을
+            # 따른다 (코드 내부 상수, 스펙 정식 등재 없음).
+            fmt.error(e.format_message(), code="CLI_USAGE_ERROR")
+            import sys as _sys
+
+            _sys.exit(1)
+        except click.exceptions.Abort:
+            # ``standalone_mode=True`` 호출자 호환을 위해 click 기본 Abort 동작
+            # (``Aborted!`` stderr + exit 1) 을 그대로 보존한다.
+            if standalone_mode:
+                click.echo("Aborted!", err=True)
+                import sys as _sys
+
+                _sys.exit(1)
+            raise
+
+        # standalone_mode=True 호출자 호환: click 기본은 정상 ``ctx.exit(rv)``
+        # 또는 ``Exit`` 예외 시 ``sys.exit(rv)`` 를 호출한다 (core.py:1092,
+        # 1109-1110). 우리는 standalone_mode=False 로 호출했으므로 click 이
+        # sys.exit 를 부르지 않고 값을 반환한다. 호출 일관성을 위해 standalone
+        # 모드에서 우리도 명시적으로 sys.exit 를 호출한다.
+        if standalone_mode:
+            import sys as _sys
+
+            _sys.exit(rv if isinstance(rv, int) else 0)
+        return rv
+
+    @staticmethod
+    def _sniff_output_format(args: list[str] | None) -> str:
+        """raw args 토큰열에서 ``--format`` 값을 추출 (click parse 이전).
+
+        서브커맨드 ``--format`` 이 root ``--format`` 을 오버라이드하는 패턴
+        (:func:`ante.cli.formatter.format_option`) 을 따라 args 의 **마지막**
+        ``--format`` 값을 우선한다.
+
+        예::
+
+            ante --format json bot list --format text  → "text"
+            ante --format text some cmd --format json  → "json"
+            ante bot list                              → "text" (기본값)
+
+        ``--format=value`` (등호 형태) 와 ``--format value`` (공백 형태) 모두
+        지원한다.
+        """
+        import sys as _sys
+
+        tokens = list(args) if args is not None else _sys.argv[1:]
+        result = "text"
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok == "--format" and i + 1 < len(tokens):
+                result = tokens[i + 1]
+                i += 2
+                continue
+            if tok.startswith("--format="):
+                result = tok.split("=", 1)[1]
+            i += 1
+        return result
+
 
 # click이 callback에 도달하기 전에 ``ctx.exit()`` 시키는 메타 옵션 토큰.
 # ``_has_meta_help_before_dashdash``가 사용한다.
