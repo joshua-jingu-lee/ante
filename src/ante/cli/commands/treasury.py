@@ -6,7 +6,7 @@ import asyncio
 
 import click
 
-from ante.cli._validators import validate_iso_date
+from ante.cli._validators import validate_iso_date, validate_positive_finite_amount
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
@@ -85,7 +85,7 @@ def status(ctx: click.Context, account_id: str) -> None:
 
 @treasury.command()
 @click.argument("bot_id")
-@click.argument("amount", type=float)
+@click.argument("amount", type=float, callback=validate_positive_finite_amount)
 @click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
@@ -110,7 +110,7 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
         raise
     except Exception as e:
         fmt.error(str(e))
-        return
+        ctx.exit(1)
 
     if result.get("success"):
         fmt.success(
@@ -121,11 +121,12 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
         fmt.error(
             f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)"
         )
+        ctx.exit(1)
 
 
 @treasury.command()
 @click.argument("bot_id")
-@click.argument("amount", type=float)
+@click.argument("amount", type=float, callback=validate_positive_finite_amount)
 @click.option("--account", "account_id", required=True, help="계좌 ID")
 @click.pass_context
 @require_auth
@@ -150,7 +151,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
         raise
     except Exception as e:
         fmt.error(str(e))
-        return
+        ctx.exit(1)
 
     if result.get("success"):
         fmt.success(
@@ -159,6 +160,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
         )
     else:
         fmt.error(f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)")
+        ctx.exit(1)
 
 
 @treasury.command()
