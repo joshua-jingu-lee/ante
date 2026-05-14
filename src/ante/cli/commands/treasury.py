@@ -6,6 +6,7 @@ import asyncio
 
 import click
 
+from ante.cli._validators import validate_iso_date
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
@@ -161,9 +162,27 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
 
 
 @treasury.command()
-@click.option("--date", "date_str", default=None, help="특정 날짜 조회 (YYYY-MM-DD)")
-@click.option("--from", "from_date", default=None, help="기간 조회 시작일 (YYYY-MM-DD)")
-@click.option("--to", "to_date", default=None, help="기간 조회 종료일 (YYYY-MM-DD)")
+@click.option(
+    "--date",
+    "date_str",
+    default=None,
+    callback=validate_iso_date,
+    help="특정 날짜 조회 (YYYY-MM-DD)",
+)
+@click.option(
+    "--from",
+    "from_date",
+    default=None,
+    callback=validate_iso_date,
+    help="기간 조회 시작일 (YYYY-MM-DD)",
+)
+@click.option(
+    "--to",
+    "to_date",
+    default=None,
+    callback=validate_iso_date,
+    help="기간 조회 종료일 (YYYY-MM-DD)",
+)
 @click.option("--account", "account_id", required=True, help="계좌 ID")
 @format_option
 @click.pass_context
