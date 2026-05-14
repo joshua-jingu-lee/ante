@@ -65,7 +65,22 @@ def request(
         )
         raise SystemExit(1)
 
-    expires_at = _parse_expires_in(expires_in) if expires_in else ""
+    if expires_in:
+        try:
+            expires_at = _parse_expires_in(expires_in)
+        except (ValueError, OverflowError) as e:
+            # ``_parse_expires_in`` 은 invalid format 시 ``ValueError`` 를,
+            # 너무 큰 숫자 + h/d 입력 시 ``timedelta`` 에서 ``OverflowError``
+            # 를 raise 한다. 둘 다 ingress validation 실패이므로 동일하게
+            # ``APPROVAL_VALIDATION_ERROR`` 구조화 에러로 종료시켜 Python
+            # traceback 노출을 차단한다 (#1518; line 57-58 / 92-94 패턴과 동형).
+            fmt.error(
+                f"잘못된 expires-in: {e}",
+                code="APPROVAL_VALIDATION_ERROR",
+            )
+            raise SystemExit(1) from e
+    else:
+        expires_at = ""
 
     async def _create() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
