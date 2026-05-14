@@ -220,6 +220,18 @@ def run_backfill(
     if not _ensure_initialized(cfg, fmt, data_path):
         raise SystemExit(1)
 
+    if since is not None:
+        from datetime import date
+
+        try:
+            date.fromisoformat(since)
+        except ValueError:
+            fmt.error(
+                f"잘못된 --since 날짜 형식: '{since}' (YYYY-MM-DD 형식 필요)",
+                code="invalid_date",
+            )
+            raise SystemExit(1)
+
     config = cfg.load_config()
 
     # CLI 옵션으로 schedule 오버라이드
