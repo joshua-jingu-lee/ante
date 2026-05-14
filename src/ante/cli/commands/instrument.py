@@ -271,6 +271,12 @@ def instrument_import(
     ext = path.suffix.lower()
     resolved_db_path = db_path or get_db_path(ctx)
 
+    # 파일 형식 확인 (try 블록 밖에서 분기 — ctx.exit(1)이 같은 try의
+    # except Exception에 잡혀 swallow되는 것을 방지)
+    if ext not in (".csv", ".json"):
+        fmt.error(f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)")
+        ctx.exit(1)
+
     # 파일 읽기
     try:
         if ext == ".csv":
@@ -279,28 +285,26 @@ def instrument_import(
             with open(path, newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 records = list(reader)
-        elif ext == ".json":
+        else:  # ".json"
             with open(path, encoding="utf-8") as f:
                 records = json.load(f)
-                if not isinstance(records, list):
-                    fmt.error("JSON 파일은 배열 형태여야 합니다.")
-                    return
-        else:
-            fmt.error(f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)")
-            return
     except Exception as e:
         fmt.error(f"파일 읽기 실패: {e}")
-        return
+        ctx.exit(1)
+
+    if ext == ".json" and not isinstance(records, list):
+        fmt.error("JSON 파일은 배열 형태여야 합니다.")
+        ctx.exit(1)
 
     if not records:
         fmt.error("파일에 데이터가 없습니다.")
-        return
+        ctx.exit(1)
 
     # 필수 컬럼 확인
     first = records[0]
     if "symbol" not in first or "exchange" not in first:
         fmt.error("필수 컬럼 누락: symbol, exchange가 필요합니다.")
-        return
+        ctx.exit(1)
 
     instruments = [
         Instrument(
