@@ -74,7 +74,10 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None
 
     if key not in API_KEYS:
         supported = ", ".join(API_KEYS)
-        click.echo(f"지원하지 않는 키입니다: {key}\n지원 키: {supported}", err=True)
+        fmt.error(
+            f"지원하지 않는 키입니다: {key}\n지원 키: {supported}",
+            code="unsupported_key",
+        )
         raise SystemExit(1)
 
     cfg = FeedConfig(data_path)
