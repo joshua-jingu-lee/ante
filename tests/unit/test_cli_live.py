@@ -444,7 +444,8 @@ class TestTreasuryCommands:
                 cli,
                 ["treasury", "allocate", "bot-1", "999999999", "--account", "acc-1"],
             )
-            assert result.exit_code == 0
+            # #1517: IPC success=False는 ctx.exit(1)로 non-zero exit
+            assert result.exit_code == 1
             assert "실패" in result.output
 
     def test_treasury_deallocate_success(self, runner):
