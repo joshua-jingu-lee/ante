@@ -1,4 +1,4 @@
-"""CLI date 옵션 strict ISO(``YYYY-MM-DD``) 검증 매트릭스 (#1513).
+"""CLI date 옵션 strict ISO(``YYYY-MM-DD``) 검증 매트릭스 (#1513, #1514).
 
 이슈 #1513: 5개 CLI date 옵션 — `audit list --from-date`, `audit list --to-date`,
 `treasury snapshot --date`, `treasury snapshot --from`, `treasury snapshot --to`
@@ -8,10 +8,17 @@ drift를 닫는다. Web API helper(`src/ante/web/utils/date_params.py:29-50`)와
 ``datetime.strptime`` calendar parse)을 CLI Click callback으로 적용한 결과를
 검증한다.
 
+이슈 #1514: `trade list --from/--to`가 `datetime.fromisoformat` ``ValueError``
+전파로 Python traceback + exit 1을 노출하던 ingress drift를 닫는다. #1513의
+``validate_iso_date`` callback을 재사용해 click ``BadParameter`` 표준 경로로
+text stderr + exit 2 + **traceback 미노출**을 보장한다. trade list 케이스는
+기존 매트릭스에 통합하고, traceback 미포함 invariant는 별도 단정으로 명시한다.
+
 스펙 / 분류:
 - `audit list`와 `treasury snapshot`은 `docs/specs/cli/03-commands.md`의 `offline`
   분류이며 IPC route가 없다 (`src/ante/ipc/registry.py`
   `register_all_handlers()` 19개 handler 중 audit/snapshot route 부재).
+- `trade list` 역시 offline CLI (IPC registry 부재 — #1512에서 19 handler 확인).
   따라서 IPC integration 검증은 N/A이며 본 테스트는 CLI Click ingress 경로만
   검증한다.
 
@@ -22,7 +29,7 @@ Non-Goals (follow-up 후보):
 - service-runtime gap(`AuditLogger.query`, `Treasury.get_daily_snapshot`은
   invalid str을 그대로 SQL로 전달) — CLI ingress에서 차단되는 이상 위험이
   실현되지 않으므로 본 PR scope 밖.
-- 다른 CLI date 옵션(`trade list --from/--to`, `backtest run --start/--end`,
+- 다른 CLI date 옵션(`backtest run --start/--end`,
   `report performance --start/--end`, `feed run --since/--until/--date`).
 
 Codex Plan Review v2 권고:
@@ -113,9 +120,10 @@ def _assert_date_rejected(result, *, hint_keywords: tuple[str, ...] = ()) -> Non
 
 # ── 옵션 매트릭스 ────────────────────────────────────────────────
 # audit `--from-date`, `--to-date` + treasury `--date`, `--from`, `--to`
-# 5개 옵션을 (명령, 옵션-args 빌더, hint) 튜플로 표현.
+# + trade `--from`, `--to` 7개 옵션을 (명령, 옵션-args 빌더, hint) 튜플로 표현.
 
-# `treasury snapshot`은 `--account` required, `audit list`는 추가 args 불필요.
+# `treasury snapshot`은 `--account` required, `audit list`/`trade list`는
+# 추가 args 불필요.
 _AUDIT_FROM_DATE = (
     "audit-from-date",
     lambda v: ["audit", "list", "--from-date", v],
@@ -136,6 +144,14 @@ _TREASURY_TO = (
     "treasury-to",
     lambda v: ["treasury", "snapshot", "--to", v, "--account", "test"],
 )
+_TRADE_FROM = (
+    "trade-from",
+    lambda v: ["trade", "list", "--from", v],
+)
+_TRADE_TO = (
+    "trade-to",
+    lambda v: ["trade", "list", "--to", v],
+)
 
 ALL_OPTIONS = [
     _AUDIT_FROM_DATE,
@@ -143,6 +159,8 @@ ALL_OPTIONS = [
     _TREASURY_DATE,
     _TREASURY_FROM,
     _TREASURY_TO,
+    _TRADE_FROM,
+    _TRADE_TO,
 ]
 
 
@@ -357,3 +375,92 @@ class TestFormatJsonInvalidDate:
             ],
         )
         _assert_date_rejected(result, hint_keywords=("not-a-date", "date"))
+
+    def test_trade_list_format_json_invalid_from(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "trade", "list", "--from", "not-a-date"],
+        )
+        _assert_date_rejected(result, hint_keywords=("not-a-date", "from"))
+
+    def test_trade_list_format_json_invalid_to(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "trade", "list", "--to", "not-a-date"],
+        )
+        _assert_date_rejected(result, hint_keywords=("not-a-date", "to"))
+
+
+# ── #1514 핵심 invariant: trade list invalid date에서 traceback 미노출 ────
+
+
+class TestTradeListNoTraceback:
+    """#1514: `trade list --from not-a-date`가 Python traceback을 노출하지
+    않아야 한다.
+
+    이전에는 `trade.py`에서 ``datetime.fromisoformat(from_date)``가
+    ``try/except`` 없이 호출되어 invalid str 입력 시 ``ValueError``가 전파되며
+    Python traceback + exit 1이 stderr로 노출됐다. ``validate_iso_date``
+    callback이 click ``BadParameter`` 경로로 처리하면 click 표준 text stderr +
+    exit 2만 출력되고 traceback은 노출되지 않는다.
+
+    본 invariant는 `_assert_date_rejected`의 keyword 매칭과 별개로 출력에
+    ``Traceback`` 문자열이 존재하지 않음을 명시적으로 단정한다.
+    """
+
+    @pytest.mark.parametrize(
+        "option_flag,option_id",
+        [("--from", "trade-from"), ("--to", "trade-to")],
+    )
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "not-a-date",
+            "2026-5-1",  # non-zero-padded
+            "2026-02-30",  # invalid calendar
+            "2026/05/13",  # wrong delimiter
+        ],
+    )
+    def test_invalid_value_does_not_emit_traceback(
+        self,
+        option_flag: str,
+        option_id: str,
+        value: str,
+        runner: CliRunner,
+    ) -> None:
+        result = runner.invoke(cli, ["trade", "list", option_flag, value])
+        assert result.exit_code != 0, (
+            f"exit_code expected != 0, got {result.exit_code}; "
+            f"output={result.output!r}, stderr={getattr(result, 'stderr', '')!r}"
+        )
+        combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+        assert "Traceback" not in combined, (
+            f"trade list {option_flag} {value!r} should not emit Python "
+            f"traceback; got output={result.output!r}, "
+            f"stderr={getattr(result, 'stderr', '')!r}"
+        )
+
+    @pytest.mark.parametrize("option_flag", ["--from", "--to"])
+    def test_invalid_format_json_does_not_emit_traceback(
+        self, option_flag: str, runner: CliRunner
+    ) -> None:
+        """`--format json` 모드에서도 traceback이 노출되지 않아야 한다.
+
+        #1514 oracle probe(`expected_exit=nonzero_json_error`, `traceback=True`,
+        `stdout_json=None`)가 가리키던 핵심 결함. JSON envelope 표준화는
+        Non-Goals이지만 "traceback 미노출"은 본 PR이 닫는 invariant다.
+        """
+        result = runner.invoke(
+            cli,
+            ["--format", "json", "trade", "list", option_flag, "not-a-date"],
+        )
+        assert result.exit_code != 0, (
+            f"exit_code expected != 0, got {result.exit_code}; "
+            f"output={result.output!r}, stderr={getattr(result, 'stderr', '')!r}"
+        )
+        combined = (result.output or "") + (getattr(result, "stderr", "") or "")
+        assert "Traceback" not in combined, (
+            f"trade list --format json {option_flag} 'not-a-date' should not "
+            f"emit Python traceback; got output={result.output!r}, "
+            f"stderr={getattr(result, 'stderr', '')!r}"
+        )

@@ -7,6 +7,7 @@ from datetime import datetime
 
 import click
 
+from ante.cli._validators import validate_iso_date
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
@@ -42,8 +43,20 @@ async def _create_trade_service():  # noqa: ANN202
 
 @trade.command("list")
 @click.option("--bot", "bot_id", default=None, help="봇 ID 필터")
-@click.option("--from", "from_date", default=None, help="시작일 (YYYY-MM-DD)")
-@click.option("--to", "to_date", default=None, help="종료일 (YYYY-MM-DD)")
+@click.option(
+    "--from",
+    "from_date",
+    default=None,
+    callback=validate_iso_date,
+    help="시작일 (YYYY-MM-DD)",
+)
+@click.option(
+    "--to",
+    "to_date",
+    default=None,
+    callback=validate_iso_date,
+    help="종료일 (YYYY-MM-DD)",
+)
 @click.option("--limit", default=50, type=click.IntRange(min=1), help="최대 조회 수")
 @format_option
 @click.pass_context
