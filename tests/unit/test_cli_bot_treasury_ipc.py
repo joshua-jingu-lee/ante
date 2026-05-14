@@ -424,7 +424,12 @@ class TestTreasuryAllocateIpc:
     )
     @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_allocate_failure(self, mock_ipc_cls, mock_socket) -> None:
-        """할당 실패 시(success=False) 에러 메시지를 출력한다."""
+        """할당 실패 시(success=False) 에러 메시지 + exit 1 (#1517).
+
+        #1515/#1517에서 IPC 실패(success=False) 경로를 ``fmt.error(...); return``
+        (exit 0) → ``fmt.error(...); ctx.exit(1)`` (exit 1)로 정합화했다. 이전의
+        ``exit_code == 0`` 단정은 stale — exit 1을 단정한다.
+        """
         mock_client = AsyncMock()
         mock_client.send.return_value = {
             "id": "req-1",
@@ -448,7 +453,7 @@ class TestTreasuryAllocateIpc:
             ]
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "예산 할당 실패" in result.output
 
 
@@ -500,7 +505,12 @@ class TestTreasuryDeallocateIpc:
     )
     @patch("ante.cli.commands.ipc_helpers.IPCClient")
     def test_treasury_deallocate_failure(self, mock_ipc_cls, mock_socket) -> None:
-        """회수 실패 시(success=False) 에러 메시지를 출력한다."""
+        """회수 실패 시(success=False) 에러 메시지 + exit 1 (#1517).
+
+        #1515/#1517에서 IPC 실패(success=False) 경로를 ``fmt.error(...); return``
+        (exit 0) → ``fmt.error(...); ctx.exit(1)`` (exit 1)로 정합화했다. 이전의
+        ``exit_code == 0`` 단정은 stale — exit 1을 단정한다.
+        """
         mock_client = AsyncMock()
         mock_client.send.return_value = {
             "id": "req-1",
@@ -524,7 +534,7 @@ class TestTreasuryDeallocateIpc:
             ]
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "예산 회수 실패" in result.output
 
 

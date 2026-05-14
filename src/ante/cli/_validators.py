@@ -13,6 +13,7 @@ exit 0으로 처리하여 빈 결과/없는 snapshot이 실제 데이터 부재�
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime
 
@@ -77,4 +78,54 @@ def validate_iso_date(
     return value
 
 
-__all__ = ["validate_iso_date"]
+def validate_positive_finite_amount(
+    ctx: click.Context | None,
+    param: click.Parameter | None,
+    value: float | None,
+) -> float | None:
+    """Click callback: 양수 finite float 검증 (NaN/Infinity/0/음수 거부).
+
+    오라클 A7 finding(#1517): ``treasury allocate``/``deallocate``의 ``amount``
+    인자가 ``type=float``만 갖춰 Python ``float('nan')``/``float('inf')``/0/
+    음수도 그대로 통과시키고 IPC layer까지 비정상 numeric을 전파하던 ingress
+    drift를 닫는다. 본 callback이 그 drift를 닫는다.
+
+    검증은 두 단계:
+
+    1. ``math.isnan(value) or math.isinf(value)`` — NaN/±Infinity 거부.
+    2. ``value <= 0`` — 0과 음수 거부.
+
+    ``None`` 입력은 그대로 ``None``을 반환한다 (옵션 미지정 분기 보존).
+    invalid 입력은 ``click.BadParameter``로 raise되어 click 표준 경로에서
+    text stderr + exit 2로 변환된다. ``--format json`` 모드에서도 click 표준
+    경로를 따르므로 stderr는 text다 (JSON envelope 표준화는 Non-Goals).
+
+    Args:
+        ctx: Click 컨텍스트 (``click.argument(callback=...)`` 인자).
+        param: Click 파라미터 메타데이터 (``click.argument(callback=...)`` 인자).
+        value: 사용자가 입력한 float, 또는 ``None``.
+
+    Returns:
+        검증된 float을 그대로 반환, 또는 ``None`` (입력이 ``None``일 때).
+
+    Raises:
+        click.BadParameter: NaN/±Infinity 또는 0/음수.
+    """
+    if value is None:
+        return None
+    if math.isnan(value) or math.isinf(value):
+        raise click.BadParameter(
+            f"{value!r}은(는) finite number여야 합니다 (NaN/Infinity 거부).",
+            ctx=ctx,
+            param=param,
+        )
+    if value <= 0:
+        raise click.BadParameter(
+            f"{value!r}은(는) 양수여야 합니다.",
+            ctx=ctx,
+            param=param,
+        )
+    return value
+
+
+__all__ = ["validate_iso_date", "validate_positive_finite_amount"]
