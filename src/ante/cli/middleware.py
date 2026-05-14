@@ -84,7 +84,7 @@ def authenticate_member(ctx: click.Context) -> None:
         ctx.obj["member"] = member
         logger.debug("CLI 인증 성공: %s", member.member_id)
     except PermissionError as e:
-        click.echo(f"인증 실패: {e}", err=True)
+        _emit_auth_error(ctx, "auth_failed", f"인증 실패: {e}")
         raise SystemExit(1) from e
 
 
@@ -177,9 +177,10 @@ def require_auth(fn: Callable) -> Callable:
         ctx = click.get_current_context()
         member = ctx.obj.get("member")
         if member is None:
-            click.echo(
+            _emit_auth_error(
+                ctx,
+                "auth_required",
                 "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
-                err=True,
             )
             raise SystemExit(1)
         return fn(*args, **kwargs)
@@ -204,9 +205,10 @@ def require_scope(*scopes: str) -> Callable:
             ctx = click.get_current_context()
             member: Member | None = ctx.obj.get("member")
             if member is None:
-                click.echo(
+                _emit_auth_error(
+                    ctx,
+                    "auth_required",
                     "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
-                    err=True,
                 )
                 raise SystemExit(1)
 
@@ -217,9 +219,10 @@ def require_scope(*scopes: str) -> Callable:
             # Agent는 scope 검증
             missing = [s for s in scopes if s not in member.scopes]
             if missing:
-                click.echo(
+                _emit_auth_error(
+                    ctx,
+                    "permission_denied",
                     f"권한이 부족합니다. 필요 권한: {', '.join(missing)}",
-                    err=True,
                 )
                 raise SystemExit(1)
 
@@ -432,9 +435,10 @@ class AuthenticatedGroup(_LeafPathMixin):
 
         member = ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
         if member is None:
-            click.echo(
+            _emit_auth_error(
+                ctx,
+                "auth_required",
                 "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
-                err=True,
             )
             raise SystemExit(1)
 
@@ -502,6 +506,11 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
     - ``config_dir`` (str → ``pathlib.Path``): ``--config-dir`` /
       ``ANTE_CONFIG_DIR``. ``authenticate_member`` → ``get_db_path`` →
       ``get_config_dir`` 가 ``ctx.obj["config_dir"]`` 를 우선 참조한다.
+    - ``output_format`` (str → ``OutputFormatter``): ``--format``. (#1533)
+      인증/권한 실패 경로가 JSON 모드에서 구조화 에러를 stdout으로
+      출력하려면 ``ctx.obj["formatter"]`` 가 인증 게이트 발화 시점에도
+      존재해야 한다. root callback이 같은 키를 다시 채우더라도 의미는
+      동일하다.
     """
     if not isinstance(ctx.obj, dict):
         return
@@ -514,6 +523,36 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
         ctx.obj["config_dir"] = (
             raw_config_dir if isinstance(raw_config_dir, Path) else Path(raw_config_dir)
         )
+
+    # output_format (--format) 사전 미러링. root callback이 실행되기 전에
+    # ``_emit_auth_error`` 가 ``ctx.obj["formatter"]`` 를 사용할 수 있어야 한다.
+    if "formatter" not in ctx.obj:
+        from ante.cli.formatter import OutputFormatter
+
+        raw_format = params.get("output_format") or "text"
+        ctx.obj["format"] = raw_format
+        ctx.obj["formatter"] = OutputFormatter(raw_format)
+
+
+def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
+    """인증/권한 실패 메시지를 출력 모드에 맞게 발화한다 (#1533).
+
+    - JSON 모드 (``ctx.obj["formatter"]`` 의 ``is_json``): ``OutputFormatter.error``
+      를 통해 ``{"status":"error","code":<code>,"message":<message>}`` JSON을
+      stdout으로 출력. 자동화 호출자(ante-oracle host probe 등)가 JSON 파서로
+      직접 소비할 수 있게 한다.
+    - 텍스트 모드 또는 ``formatter`` 미설정 fallback: 기존 동작 그대로 한국어
+      메시지를 ``click.echo(..., err=True)`` 로 stderr 에 출력.
+
+    본 헬퍼는 출력만 책임지며 종료는 호출자가 ``raise SystemExit(1)`` 로
+    수행한다 (필요 시 ``raise SystemExit(1) from e`` 형태로 cause 보존).
+    """
+    obj = getattr(ctx, "obj", None)
+    formatter = obj.get("formatter") if isinstance(obj, dict) else None
+    if formatter is not None and getattr(formatter, "is_json", False):
+        formatter.error(message, code=code)
+    else:
+        click.echo(message, err=True)
 
 
 def _attach_auth_guard_recursive(cmd: click.Command) -> None:
@@ -600,9 +639,10 @@ def _wrap_callback_with_auth(callback: Callable) -> Callable:
         if not has_auth_decorator:
             member = ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
             if member is None:
-                click.echo(
+                _emit_auth_error(
+                    ctx,
+                    "auth_required",
                     "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
-                    err=True,
                 )
                 raise SystemExit(1)
 

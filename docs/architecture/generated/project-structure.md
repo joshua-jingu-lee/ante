@@ -278,7 +278,8 @@ src/ante/
 │   │   ├── ipc_helpers.py
 │   │   └── update.py
 │   ├── __init__.py
-│   └── cold_path.py
+│   ├── cold_path.py
+│   └── _validators.py
 ├── account/
 │   ├── __init__.py
 │   ├── crypto.py
@@ -419,7 +420,8 @@ tests/
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
-│   │   └── test_authenticated_group.py
+│   │   ├── test_authenticated_group.py
+│   │   └── test_auth_format_json.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -594,7 +596,14 @@ tests/
 │   ├── test_treasury_set_balance_invariant.py
 │   ├── test_treasury_transaction_vocabulary.py
 │   ├── test_treasury_transactions_type_filter.py
-│   └── test_virtual_provider_stop_guard.py
+│   ├── test_virtual_provider_stop_guard.py
+│   ├── test_cli_approval_expires_in.py
+│   ├── test_cli_approval_params_shape.py
+│   ├── test_cli_date_validation.py
+│   ├── test_cli_instrument_import_exit.py
+│   ├── test_cli_missing_resource_exit.py
+│   ├── test_cli_pagination_validation.py
+│   └── test_cli_treasury_amount_validation.py
 └── __init__.py
 ```
 
