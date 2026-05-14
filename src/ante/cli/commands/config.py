@@ -72,10 +72,11 @@ async def _resolve_all(static_config, db) -> list[dict]:  # noqa: ANN001
 
 
 def _render_single(result: dict, fmt) -> None:  # noqa: ANN001
-    """단일 설정 결과 출력."""
-    if result["source"] == "not_found":
-        fmt.error(f"설정을 찾을 수 없습니다: {result['key']}")
-        return
+    """단일 설정 결과 출력 (missing은 caller에서 처리).
+
+    note: missing-resource (`source == "not_found"`) 분기는 caller(`config_get`)가
+    `ctx.exit(1)`로 처리한다. helper는 pure rendering만 담당한다 (#1515).
+    """
     if fmt.is_json:
         fmt.output(result)
     else:
@@ -118,6 +119,9 @@ def config_get(ctx: click.Context, key: str | None) -> None:
     result = _run(_run_get())
 
     if isinstance(result, dict):
+        if result["source"] == "not_found":
+            fmt.error(f"설정을 찾을 수 없습니다: {result['key']}")
+            ctx.exit(1)
         _render_single(result, fmt)
     else:
         _render_list(result, fmt)
