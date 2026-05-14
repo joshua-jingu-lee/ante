@@ -13,9 +13,27 @@
 출력함을 회귀 보장한다. 텍스트 모드의 한국어 메시지는 그대로 stderr로
 유지된다(기존 회귀 보호).
 
+Coverage map:
+    - ``_authenticate_member`` 의 ``PermissionError`` (``auth_failed``) →
+      :class:`TestInvalidTokenJsonFormat`
+    - ``_enforce_invoke_auth_gate`` 의 missing-token (``auth_required``) →
+      :class:`TestInvokeAuthGateJsonFormat`
+    - ``_wrap_callback_with_auth`` 의 fallback emit 경로 (invoke gate가 발화하지
+      않는 plain ``click.Group`` root 환경에서만 발화) →
+      :class:`TestWrapCallbackAuthFallbackJsonFormat` (mini-CLI 시뮬레이션)
+    - ``require_auth`` 데코레이터의 emit 경로 (member is None) →
+      :class:`TestRequireAuthDecoratorJsonFormat` (mini-CLI 시뮬레이션)
+    - ``require_scope`` 의 missing-scope (``permission_denied``) →
+      :class:`TestPermissionDeniedJsonFormat`
+    - ``_emit_auth_error`` 자체의 formatter-missing/text/json 분기 →
+      :class:`TestEmitAuthErrorFallback`
+    - ``_mirror_root_globals_to_obj`` 의 ``output_format`` 미러링 →
+      :class:`TestMirrorOutputFormat`
+
 SSOT 참조:
     - ``src/ante/cli/middleware.py`` (``_emit_auth_error``,
-      ``_mirror_root_globals_to_obj`` 의 ``output_format`` 미러링)
+      ``_mirror_root_globals_to_obj`` 의 ``output_format`` 미러링,
+      ``_wrap_callback_with_auth`` 의 fallback emit, ``require_auth`` 데코레이터)
     - ``src/ante/cli/formatter.py`` (``OutputFormatter.error`` 스키마)
 """
 
@@ -356,3 +374,187 @@ class TestMirrorOutputFormat:
         # 기존 formatter 가 그대로 유지된다.
         assert ctx.obj["formatter"] is existing
         assert ctx.obj["format"] == "json"
+
+
+# ── _wrap_callback_with_auth fallback emit (plain click.Group root) ─────────
+
+
+class TestWrapCallbackAuthFallbackJsonFormat:
+    """``_wrap_callback_with_auth`` 의 fallback emit 경로 회귀 보호.
+
+    프로덕션 ``cli`` 는 root 가 :class:`AuthenticatedGroup` 이므로 ``invoke``
+    단계에서 ``_enforce_invoke_auth_gate`` 가 먼저 발화하고
+    ``ctx.obj["_auth_gate_invoked"] = True`` marker 를 남긴다. 결과적으로
+    callback 단계 wrapper 는 marker 를 보고 조기 반환하며, fallback emit
+    경로 (``middleware.py`` line 642 부근) 는 정상 호출 경로에서 도달하지
+    않는다.
+
+    그러나 이중 방어(secondary guard) 정책상, root 가 일반 ``click.Group``
+    이거나 invoke 단계 가드가 어떤 이유로든 발화하지 못한 경우에도 callback
+    단계 wrapper 가 동일한 default-deny 메시지를 발화해야 한다.
+
+    본 테스트는 root 를 plain ``click.Group`` 으로 구성해 invoke 단계 가드를
+    의도적으로 우회하고, leaf callback 에만 ``_wrap_callback_with_auth`` 를
+    수동 적용한 mini-CLI 로 그 fallback 경로를 검증한다.
+    """
+
+    @staticmethod
+    def _build_mini_cli(fmt: str) -> click.Group:
+        """plain ``click.Group`` root + wrapped leaf 로 구성된 mini-CLI 빌드.
+
+        ``fmt`` 가 ``"json"`` 이면 ``ctx.obj["formatter"]`` 에 JSON formatter 를
+        주입해, fallback emit 이 JSON stdout 으로 흐르도록 한다. ``"text"`` 면
+        text formatter 를 주입해 기존 stderr 텍스트 회귀를 검증한다.
+
+        ``ctx.obj["member"] = None`` 도 함께 주입해 wrapper 가 default-deny 를
+        발화하도록 한다.
+        """
+        from ante.cli.formatter import OutputFormatter
+        from ante.cli.middleware import _wrap_callback_with_auth
+
+        @click.group()
+        @click.pass_context
+        def root(ctx: click.Context) -> None:
+            ctx.ensure_object(dict)
+            ctx.obj["formatter"] = OutputFormatter(fmt)
+            ctx.obj["format"] = fmt
+            ctx.obj["member"] = None
+            # 의도적으로 ``_auth_gate_invoked`` marker 를 남기지 않는다.
+
+        @root.command(name="leaf")
+        @click.pass_context
+        def leaf(ctx: click.Context) -> None:
+            click.echo("leaf reached")
+
+        # leaf callback 에 직접 wrapper 부착 (AuthenticatedGroup.add_command 동작
+        # 모사). wrapper 가 invoke gate marker 없이 fallback emit 경로로 진입
+        # 하는지 검증한다.
+        leaf.callback = _wrap_callback_with_auth(leaf.callback)
+        return root
+
+    def test_wrap_callback_fallback_emits_json_error(
+        self, runner: CliRunner, clean_env: None
+    ) -> None:
+        """plain ``click.Group`` root + JSON formatter → stdout JSON, exit 1."""
+        mini_cli = self._build_mini_cli("json")
+
+        result = runner.invoke(mini_cli, ["leaf"])
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        # JSON 은 stdout 으로 흘러야 한다.
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "auth_required", payload
+        assert "인증이 필요합니다" in str(payload["message"]), payload
+        # leaf callback 본체("leaf reached") 는 절대 호출되지 않아야 한다.
+        assert "leaf reached" not in result.stdout, result.stdout
+        # stderr 에 한국어 텍스트가 동시에 새지 않아야 한다.
+        assert "인증이 필요합니다" not in result.stderr, result.stderr
+
+    def test_wrap_callback_fallback_text_mode_keeps_stderr_message(
+        self, runner: CliRunner, clean_env: None
+    ) -> None:
+        """plain ``click.Group`` root + text formatter → stderr 한국어, exit 1."""
+        mini_cli = self._build_mini_cli("text")
+
+        result = runner.invoke(mini_cli, ["leaf"])
+
+        assert result.exit_code == 1, result.stderr
+        # text 모드에서는 stdout 으로 JSON 이 새지 않아야 한다.
+        assert result.stdout.strip() == "", (
+            f"text 모드인데 stdout 이 비어 있지 않음: {result.stdout!r}"
+        )
+        assert "인증이 필요합니다" in result.stderr, result.stderr
+        # leaf callback 본체는 호출되지 않아야 한다.
+        assert "leaf reached" not in result.stdout, result.stdout
+
+
+# ── require_auth 데코레이터 emit (mini-CLI 시뮬레이션) ───────────────────────
+
+
+class TestRequireAuthDecoratorJsonFormat:
+    """``require_auth`` 데코레이터의 emit 경로 회귀 보호.
+
+    프로덕션 cli 에서는 invoke 단계 가드가 먼저 발화하므로
+    ``require_auth.<locals>.wrapper`` 의 ``_emit_auth_error`` 호출 (``middleware.py``
+    line 180 부근) 이 통합 경로에서는 도달하지 않는다.
+
+    그러나 ``require_auth`` 는 leaf callback 에 직접 부착되는 데코레이터로,
+    invoke gate 가 없는 임의의 ``click.Group`` 컨텍스트에서도 단독으로 동작해야
+    한다. 본 테스트는 plain ``click.Group`` root + ``require_auth`` 데코레이터만
+    부착한 mini-CLI 로 그 emit 경로를 검증한다.
+
+    ``_wrap_callback_with_auth`` 는 ``require_auth`` 가 이미 부착된 callback 의
+    sentinel marker (``_require_auth_applied``) 를 보고 None 검사를 위임하므로,
+    여기서는 wrapper 를 부착하지 않고 데코레이터 자체의 emit 만 격리해
+    검증한다.
+    """
+
+    @staticmethod
+    def _build_mini_cli(fmt: str) -> click.Group:
+        """``require_auth`` 데코레이터만 부착된 mini-CLI 빌드.
+
+        plain ``click.Group`` root 의 callback 에서 ``ctx.obj["member"] = None``,
+        ``ctx.obj["formatter"]`` 을 주입한다. leaf callback 에 ``@require_auth``
+        를 부착하면 데코레이터 wrapper 가 None 검사를 수행하고 ``_emit_auth_error``
+        를 호출한다.
+        """
+        from ante.cli.formatter import OutputFormatter
+        from ante.cli.middleware import require_auth
+
+        @click.group()
+        @click.pass_context
+        def root(ctx: click.Context) -> None:
+            ctx.ensure_object(dict)
+            ctx.obj["formatter"] = OutputFormatter(fmt)
+            ctx.obj["format"] = fmt
+            ctx.obj["member"] = None
+
+        @root.command(name="leaf")
+        @click.pass_context
+        @require_auth
+        def leaf(ctx: click.Context) -> None:
+            click.echo("leaf reached")
+
+        return root
+
+    def test_require_auth_decorator_emits_json_error(
+        self, runner: CliRunner, clean_env: None
+    ) -> None:
+        """``@require_auth`` + JSON formatter → stdout JSON error, exit 1."""
+        mini_cli = self._build_mini_cli("json")
+
+        result = runner.invoke(mini_cli, ["leaf"])
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "auth_required", payload
+        assert "인증이 필요합니다" in str(payload["message"]), payload
+        # leaf callback 본체는 호출되지 않아야 한다.
+        assert "leaf reached" not in result.stdout, result.stdout
+        # stderr 에 한국어 텍스트가 동시에 새지 않아야 한다.
+        assert "인증이 필요합니다" not in result.stderr, result.stderr
+
+    def test_require_auth_decorator_text_mode_keeps_stderr_message(
+        self, runner: CliRunner, clean_env: None
+    ) -> None:
+        """``@require_auth`` + text formatter → stderr 한국어 메시지, exit 1."""
+        mini_cli = self._build_mini_cli("text")
+
+        result = runner.invoke(mini_cli, ["leaf"])
+
+        assert result.exit_code == 1, result.stderr
+        # text 모드: stdout 으로 JSON 이 새지 않아야 한다.
+        assert result.stdout.strip() == "", (
+            f"text 모드인데 stdout 이 비어 있지 않음: {result.stdout!r}"
+        )
+        assert "인증이 필요합니다" in result.stderr, result.stderr
+        # leaf callback 본체는 호출되지 않아야 한다.
+        assert "leaf reached" not in result.stdout, result.stdout
