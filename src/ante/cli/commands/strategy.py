@@ -61,14 +61,32 @@ def validate(ctx: click.Context, path: str) -> None:
     if result.valid:
         fmt.success(f"Strategy validation passed: {path}", data)
     else:
-        fmt.error(f"Validation failed: {path}")
-        if not fmt.is_json:
+        if fmt.is_json:
+            import json as _json
+
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "error",
+                        "code": "STRATEGY_VALIDATION_FAILED",
+                        "message": f"Validation failed: {path}",
+                        "data": data,
+                    },
+                    indent=2,
+                    default=str,
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            fmt.error(
+                f"Validation failed: {path}",
+                code="STRATEGY_VALIDATION_FAILED",
+            )
             for err in result.errors:
                 click.echo(f"  - {err}", err=True)
             for warn in result.warnings:
                 click.echo(f"  [warn] {warn}", err=True)
-        else:
-            fmt.output(data)
+        raise SystemExit(1)
 
 
 @strategy.command("submit")
