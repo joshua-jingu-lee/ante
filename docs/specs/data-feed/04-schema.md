@@ -24,6 +24,10 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 > data.go.kr 수집 시 `srtnCd`(symbol), `itmsNm`(name), `mrktCtg`(market)를 함께 받아오므로 추가 호출 없이 갱신.
 > 수집 결과를 정규화하여 최신 종목 메타데이터 상태를 유지한다.
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> `exchange`(canonical 5종)와 `market`(`KOSPI`/`KOSDAQ`/`KONEX`, KRX 내부 시장구분)은 별개 차원이며
+> 값을 섞지 않는다. 표면별 enforcement 정렬은 #1578에서 다룬다.
+
 ### 파일 규격
 
 | 항목 | 규칙 |

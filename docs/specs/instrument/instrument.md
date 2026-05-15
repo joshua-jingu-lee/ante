@@ -33,6 +33,10 @@ Instrument 모듈은 **종목 마스터 데이터를 중앙 관리하는 모듈*
 
 모든 symbol 관련 필드/파라미터에 `exchange: str = "KRX"` 기본값을 사용하여 하위 호환성을 보장한다.
 
+> canonical exchange 허용값·검증 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> Instrument는 canonical-only(`*` 거부) 표면이며, instrument CLI `list`/`sync`/`import`의
+> non-canonical 신규 입력 거부 enforcement는 #1577에서 정렬한다(현재 코드/스펙 drift).
+
 ## Instrument 모델
 
 ```python

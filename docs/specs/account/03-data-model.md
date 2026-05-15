@@ -101,6 +101,11 @@ class Account:
 
 거래 모드나 브로커를 변경해야 하는 경우, 새 계좌를 생성하여 전환한다. `update()` 호출 시 불변 필드가 포함되면 `AccountImmutableFieldError`를 발생시킨다.
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> `exchange`는 identity 필드이며 account는 canonical-only(`*` 거부) 표면이다. Web 런타임
+> `POST`/`PUT /api/accounts`는 cold-path 가드가 입력 무관 즉시 409(invariant I1, 422 아님),
+> 1.0 preset은 `KRX`,`TEST`만 제공한다(canonical-known 5종과 별개). 표면별 정렬은 #1578에서 다룬다.
+
 ### BrokerPreset
 
 브로커별 프리셋을 내부에 정의하여, 계좌 생성 시 거래소·브로커 선택만으로 나머지 필드를 자동 채운다. 사용자가 명시적으로 지정하지 않은 필드는 프리셋 기본값이 적용된다.
