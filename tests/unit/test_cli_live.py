@@ -475,6 +475,30 @@ class TestTreasuryCommands:
 
 
 class TestRuleCommands:
+    @staticmethod
+    def _patch_account_service(*, exists: bool):
+        """`rule list`가 내부에서 생성하는 AccountService를 mock한다.
+
+        `exists=True`면 `get`이 정상 반환(실재 account),
+        `exists=False`면 `AccountNotFoundError`를 raise(미존재 account, #1559).
+        """
+        from ante.account.errors import AccountNotFoundError
+
+        mock_service = AsyncMock()
+        mock_service.initialize = AsyncMock()
+        if exists:
+            mock_service.get = AsyncMock(return_value=MagicMock())
+        else:
+            mock_service.get = AsyncMock(
+                side_effect=AccountNotFoundError(
+                    "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+                )
+            )
+        return patch(
+            "ante.account.service.AccountService",
+            return_value=mock_service,
+        )
+
     def test_rule_list_empty(self, runner):
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
             mock_engine = MagicMock()
@@ -484,7 +508,10 @@ class TestRuleCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_engine, mock_db)
 
-            with patch("ante.cli.commands.rule._load_rules_from_config"):
+            with (
+                patch("ante.cli.commands.rule._load_rules_from_config"),
+                self._patch_account_service(exists=True),
+            ):
                 result = runner.invoke(cli, ["rule", "list", "--account", "acc-1"])
                 assert result.exit_code == 0
 
@@ -504,7 +531,10 @@ class TestRuleCommands:
             mock_db.close = AsyncMock()
             mock_svc.return_value = (mock_engine, mock_db)
 
-            with patch("ante.cli.commands.rule._load_rules_from_config"):
+            with (
+                patch("ante.cli.commands.rule._load_rules_from_config"),
+                self._patch_account_service(exists=True),
+            ):
                 result = runner.invoke(
                     cli,
                     [
@@ -520,6 +550,86 @@ class TestRuleCommands:
                 data = json.loads(result.output)
                 assert len(data["rules"]) == 1
                 assert data["rules"][0]["rule_id"] == "daily_loss"
+
+    def test_rule_list_missing_account_json_exit_1(self, runner):
+        """미존재 account: JSON envelope + ACCOUNT_NOT_FOUND + exit 1 (#1559)."""
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with (
+                patch("ante.cli.commands.rule._load_rules_from_config"),
+                self._patch_account_service(exists=False),
+            ):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "rule",
+                        "list",
+                        "--account",
+                        "oracle-missing-account",
+                    ],
+                )
+                assert result.exit_code == 1
+                data = json.loads(result.output)
+                assert data["status"] == "error"
+                assert data["code"] == "ACCOUNT_NOT_FOUND"
+                assert "찾을 수 없습니다" in data["message"]
+                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
+                mock_db.close.assert_awaited()
+
+    def test_rule_list_missing_account_text_exit_1(self, runner):
+        """미존재 account: text 출력도 exit 1로 종료 (#1559)."""
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with (
+                patch("ante.cli.commands.rule._load_rules_from_config"),
+                self._patch_account_service(exists=False),
+            ):
+                result = runner.invoke(
+                    cli,
+                    ["rule", "list", "--account", "oracle-missing-account"],
+                )
+                assert result.exit_code == 1
+                assert "찾을 수 없습니다" in result.output
+
+    def test_rule_list_real_account_zero_rules_exit_0(self, runner):
+        """regression guard: 실재 account + 0 rules는 정상 계약 유지 (#1559).
+
+        exit 0 + {"message":"등록된 룰이 없습니다.","rules":[]} 그대로.
+        """
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with (
+                patch("ante.cli.commands.rule._load_rules_from_config"),
+                self._patch_account_service(exists=True),
+            ):
+                result = runner.invoke(
+                    cli,
+                    ["--format", "json", "rule", "list", "--account", "acc-1"],
+                )
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["message"] == "등록된 룰이 없습니다."
+                assert data["rules"] == []
 
     def test_rule_info_not_found(self, runner):
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:

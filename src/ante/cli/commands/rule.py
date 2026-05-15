@@ -7,6 +7,7 @@ import logging
 
 import click
 
+from ante.account.errors import AccountNotFoundError
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -106,6 +107,18 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
     async def _run_list() -> list[dict]:
         engine, db = await _create_rule_engine(account_id)
         try:
+            # rule 수집과 독립적으로 account 존재를 검증한다.
+            # 미존재 account는 "실재 account의 0 rules"와 구분되어야 하며
+            # (#1559) AccountNotFoundError로 분기해 exit 1로 종료한다.
+            # 이미 열린 db 핸들을 재사용하고 db.close()는 아래 finally가
+            # 단독 소유한다(lifecycle 불변).
+            from ante.account.service import AccountService
+            from ante.eventbus.bus import EventBus
+
+            account_service = AccountService(db=db, eventbus=EventBus())
+            await account_service.initialize()
+            await account_service.get(account_id)
+
             try:
                 _load_rules_from_config(engine)
             except Exception as e:
@@ -125,9 +138,15 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
         finally:
             await db.close()
 
-    result = _run(_run_list())
+    try:
+        result = _run(_run_list())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
 
     if not result:
+        # 실재 account의 0 rules는 정상 계약: exit 0 + 빈 목록 응답을
+        # 그대로 유지한다. 미존재 account만 위에서 exit 1로 분기된다(#1559).
         fmt.output({"message": "등록된 룰이 없습니다.", "rules": []})
         return
 
