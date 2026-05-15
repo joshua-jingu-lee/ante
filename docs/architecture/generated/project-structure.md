@@ -608,7 +608,9 @@ tests/
 │   ├── test_cli_instrument_import_exit.py
 │   ├── test_cli_missing_resource_exit.py
 │   ├── test_cli_pagination_validation.py
-│   └── test_cli_treasury_amount_validation.py
+│   ├── test_cli_treasury_amount_validation.py
+│   ├── test_cli_member_master_only.py
+│   └── test_member_admin_master_only.py
 └── __init__.py
 ```
 

@@ -189,6 +189,72 @@ def require_auth(fn: Callable) -> Callable:
     return wrapper
 
 
+def require_master(fn: Callable) -> Callable:
+    """master-only 데코레이터 (HUMAN type + master role만 통과).
+
+    @click.pass_context 아래에 배치한다.
+    ``ctx.obj["member"]``가 ``None`` 이면 ``auth_required`` 로 종료.
+    member.type != ``MemberType.HUMAN`` 또는 member.role != ``MemberRole.MASTER``
+    이면 ``permission_denied`` 로 종료.
+
+    SSOT: ``docs/specs/web-api/11-route-scope-table.md`` (#1542) 결정에 따라
+    member admin mutation 은 master-only 계약. CLI 표면 가드도 Web API
+    ``require_master_caller`` 와 동일한 invariant 를 적용한다 (#1543 — #1511
+    oracle drift 수렴).
+
+    멱등(idempotent) — 이미 같은 가드가 부착된 함수에 재적용되어도 한 번만
+    감싸지도록 ``_require_auth_applied`` sentinel marker 로 dedupe 한다
+    (``require_auth`` / ``require_scope`` 와 동일 패턴). #1404
+    ``authenticated_group`` factory 가 leaf command callback 을 자동 wrapping
+    할 때, 명령 자체에 이미 부착된 본 가드의 내부 검증과 중복 호출되는 것을
+    방지한다.
+
+    Note:
+        ``member:admin`` scope vocabulary 는 #1542 결정으로 reserved 상태로
+        유지된다 (``src/ante/member/scopes.py`` SSOT). 본 데코레이터는 scope
+        보유 여부를 검사하지 않으며, master 가 아니면 무조건 거부한다.
+    """
+    if getattr(fn, "_require_auth_applied", False):
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args: object, **kwargs: object) -> object:
+        from ante.member.models import MemberRole, MemberType
+
+        ctx = click.get_current_context()
+        member: Member | None = (
+            ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
+        )
+        if member is None:
+            _emit_auth_error(
+                ctx,
+                "auth_required",
+                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+            )
+            raise SystemExit(1)
+
+        # MemberType.HUMAN + role == MASTER 만 통과. Web API
+        # ``require_master_caller`` 와 동일한 invariant.
+        member_type_value = getattr(member.type, "value", member.type)
+        member_role_value = getattr(member.role, "value", member.role)
+        if (
+            member_type_value != MemberType.HUMAN.value
+            or member_role_value != MemberRole.MASTER.value
+        ):
+            _emit_auth_error(
+                ctx,
+                "permission_denied",
+                "이 작업은 master 권한이 필요합니다.",
+            )
+            raise SystemExit(1)
+
+        return fn(*args, **kwargs)
+
+    wrapper._require_auth_applied = True  # type: ignore[attr-defined]
+    wrapper._require_master_applied = True  # type: ignore[attr-defined]
+    return wrapper
+
+
 def require_scope(*scopes: str) -> Callable:
     """권한 검증 데코레이터.
 

@@ -177,11 +177,12 @@ def member_service():
 def client(member_service):
     """인증 컨텍스트가 미리 주입된 기본 클라이언트.
 
-    member 라우트 전체는 #1407 이후 인증된 master/member:* scope 호출자를 전제
-    로 한다. middleware 가 매 요청마다 다음 두 가지를 수행한다:
+    member 라우트 전체는 #1543 이후 인증된 master 호출자 (mutation) 또는
+    ``member:read`` scope 보유 호출자 (read) 를 전제로 한다. middleware 가 매
+    요청마다 다음 두 가지를 수행한다:
 
     1. ``request.state.member_id = "master-user"`` 를 주입한다 — Bearer 인증
-       미들웨어가 채우는 자리를 모방해 ``require_member_admin`` /
+       미들웨어가 채우는 자리를 모방해 ``require_master_caller`` /
        ``require_member_read`` 가 caller 를 결정할 수 있게 한다.
     2. ``member_service.get("master-user")`` 가 role=master 인 synthetic 멤버를
        반환하도록 패치한다 — scope dependency 가 caller 의 role 검증을 통과할
@@ -418,9 +419,10 @@ class TestCallerIdPropagation:
     def test_register_passes_caller_id(self, member_service):
         """인증된 사용자의 member_id가 registered_by로 전달.
 
-        #1407 이후 ``require_member_admin`` 의존성이 ``member_service.get(caller)``
+        #1543 이후 ``require_master_caller`` 의존성이 ``member_service.get(caller)``
         로 caller 의 role 을 검증하므로 ``master-user`` (role=master) 를 service
-        에 등록해 둬야 한다.
+        에 등록해 둬야 한다 (#1407 ``require_member_admin`` → #1543 master-only
+        재정렬).
         """
         captured: dict[str, str] = {}
         original_register = member_service.register
@@ -430,7 +432,7 @@ class TestCallerIdPropagation:
             return await original_register(**kwargs)
 
         member_service.register = spy_register
-        # #1407: require_member_admin 이 master-user 의 role 을 검증한다.
+        # #1543: require_master_caller 가 master-user 의 role 을 검증한다.
         member_service._members["master-user"] = FakeMember(
             member_id="master-user", role="master"
         )
@@ -453,9 +455,10 @@ class TestCallerIdPropagation:
     def test_update_scopes_passes_caller_id(self, member_service):
         """인증된 사용자의 member_id가 updated_by로 전달.
 
-        #1407 이후 ``require_member_admin`` 의존성이 ``member_service.get(caller)``
-        로 caller 의 role/scope 를 검증하므로 ``master-user`` (role=master) 를
-        서비스에 등록해 둬야 한다.
+        #1543 이후 ``require_master_caller`` 의존성이 ``member_service.get(caller)``
+        로 caller 의 role 을 검증하므로 ``master-user`` (role=master) 를
+        서비스에 등록해 둬야 한다 (#1407 ``require_member_admin`` → #1543
+        master-only 재정렬).
         """
         captured: dict[str, str] = {}
         original_update = member_service.update_scopes
@@ -466,7 +469,7 @@ class TestCallerIdPropagation:
 
         member_service.update_scopes = spy_update
         member_service._members["agent-01"] = FakeMember(member_id="agent-01")
-        # #1407: require_member_admin 이 master-user 의 role 을 검증한다.
+        # #1543: require_master_caller 가 master-user 의 role 을 검증한다.
         member_service._members["master-user"] = FakeMember(
             member_id="master-user", role="master"
         )

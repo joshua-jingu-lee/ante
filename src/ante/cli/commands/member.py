@@ -21,7 +21,12 @@ import click
 
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
-from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.cli.middleware import (
+    get_member_id,
+    require_auth,
+    require_master,
+    require_scope,
+)
 from ante.member.errors import PermissionDeniedError
 from ante.member.models import MemberRole
 from ante.member.scopes import InvalidScopeError
@@ -461,7 +466,7 @@ def member_list_invalid_roles(
 @format_option
 @click.pass_context
 @require_auth
-@require_scope("member:admin")
+@require_master
 def member_register(
     ctx: click.Context,
     member_id: str,
@@ -525,7 +530,7 @@ def member_register(
 @click.argument("emoji")
 @click.pass_context
 @require_auth
-@require_scope("member:admin")
+@require_master
 def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     """멤버 이모지 설정/변경."""
     fmt = get_formatter(ctx)
@@ -552,7 +557,7 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
 @click.argument("member_id")
 @click.pass_context
 @require_auth
-@require_scope("member:admin")
+@require_master
 def member_suspend(ctx: click.Context, member_id: str) -> None:
     """멤버 일시 정지."""
     fmt = get_formatter(ctx)
@@ -582,7 +587,7 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
 @click.argument("member_id")
 @click.pass_context
 @require_auth
-@require_scope("member:admin")
+@require_master
 def member_reactivate(ctx: click.Context, member_id: str) -> None:
     """멤버 재활성화."""
     fmt = get_formatter(ctx)
@@ -619,7 +624,7 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
 )
 @click.pass_context
 @require_auth
-@require_scope("member:admin")
+@require_master
 def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     """멤버 영구 폐기.
 
@@ -660,7 +665,7 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
 @click.argument("member_id")
 @click.pass_context
 @require_auth
-@require_scope("member:admin")
+@require_master
 def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     """토큰 재발급 (기존 토큰 즉시 무효화)."""
     fmt = get_formatter(ctx)
