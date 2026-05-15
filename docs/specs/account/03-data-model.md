@@ -108,6 +108,10 @@ class Account:
 > `PUT`의 mutable-only 필드(`name`/`timezone`/`trading_hours`, `accounts.py:57-61`의
 > `MUTABLE_FIELDS`)는 런타임 허용이며 409가 아니다. 1.0 preset은 `KRX`,`TEST`만 제공한다
 > (canonical-known 5종과 별개). 표면별 정렬은 #1578에서 다룬다.
+> 참고: 이 문서의 `exchange` 설명/표에 남아 있는 `{KRX, NYSE, NASDAQ, TEST}` 나열은
+> canonical-known 5종(`{KRX, NYSE, NASDAQ, AMEX, TEST}`) 대비 **`AMEX` 누락 drift**다.
+> 이 이슈(#1575)는 normative 값 집합을 재작성하지 않으며, account schema/서비스 검증의
+> canonical 정렬(`AMEX` 포함 여부 포함)은 #1578에서 수행한다.
 
 ### BrokerPreset
 
