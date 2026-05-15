@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -475,13 +476,30 @@ class TestTreasuryCommands:
 
 
 class TestRuleCommands:
+    @staticmethod
+    def _make_mock_db(*, account_exists: bool):
+        """`rule list`가 재사용하는 db 핸들을 mock한다.
+
+        `rule list`는 AccountService 전체를 materialize/복호화하지 않고
+        이미 열린 db 핸들로 lightweight 단건 존재 쿼리만 수행한다(#1559).
+        `account_exists=True`면 accounts 존재 SELECT가 row를 반환(실재
+        account), `False`면 None을 반환(미존재 account → exit 1).
+
+        credentials 복호화 경로(`_row_to_account`/decrypt)를 전혀 타지
+        않으므로, 다른 계좌의 credentials 복호화 실패가 rule list를 깨뜨릴
+        수 없음을 함께 잠근다(회귀 가드).
+        """
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={"1": 1} if account_exists else None)
+        return mock_db
+
     def test_rule_list_empty(self, runner):
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
             mock_engine = MagicMock()
             mock_engine._global_rules = []
             mock_engine._strategy_rules = {}
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
+            mock_db = self._make_mock_db(account_exists=True)
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
@@ -500,8 +518,7 @@ class TestRuleCommands:
             mock_engine = MagicMock()
             mock_engine._global_rules = [mock_rule]
             mock_engine._strategy_rules = {}
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
+            mock_db = self._make_mock_db(account_exists=True)
             mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
@@ -520,6 +537,212 @@ class TestRuleCommands:
                 data = json.loads(result.output)
                 assert len(data["rules"]) == 1
                 assert data["rules"][0]["rule_id"] == "daily_loss"
+
+    def test_rule_list_missing_account_json_exit_1(self, runner):
+        """미존재 account: JSON envelope + ACCOUNT_NOT_FOUND + exit 1 (#1559)."""
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = self._make_mock_db(account_exists=False)
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "rule",
+                        "list",
+                        "--account",
+                        "oracle-missing-account",
+                    ],
+                )
+                assert result.exit_code == 1
+                data = json.loads(result.output)
+                assert data["status"] == "error"
+                assert data["code"] == "ACCOUNT_NOT_FOUND"
+                assert "찾을 수 없습니다" in data["message"]
+                # 미존재 account: 메시지는 AccountService.get과 동일 문자열을
+                # 그대로 보존한다(동일 envelope/message, #1559).
+                assert (
+                    "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+                    == data["message"]
+                )
+                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
+                mock_db.close.assert_awaited()
+
+    def test_rule_list_missing_account_text_exit_1(self, runner):
+        """미존재 account: text 출력도 exit 1로 종료 (#1559)."""
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = self._make_mock_db(account_exists=False)
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["rule", "list", "--account", "oracle-missing-account"],
+                )
+                assert result.exit_code == 1
+                assert "찾을 수 없습니다" in result.output
+
+    def test_rule_list_real_account_zero_rules_exit_0(self, runner):
+        """regression guard: 실재 account + 0 rules는 정상 계약 유지 (#1559).
+
+        exit 0 + {"message":"등록된 룰이 없습니다.","rules":[]} 그대로.
+        """
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = self._make_mock_db(account_exists=True)
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["--format", "json", "rule", "list", "--account", "acc-1"],
+                )
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["message"] == "등록된 룰이 없습니다."
+                assert data["rules"] == []
+
+    def test_rule_list_real_account_no_credentials_decrypt(self, runner):
+        """회귀 가드: 실재 account 조회가 다른 계좌 credentials 복호화에
+        의존하지 않는다 (#1559).
+
+        Codex 브랜치 리뷰 P2: AccountService.initialize()는 모든 non-deleted
+        account를 materialize하며 credentials를 복호화하므로, 무관한 계좌의
+        복호화 실패가 rule list를 깨뜨릴 수 있었다. lightweight 단건 존재
+        쿼리로 교체 후 이 경로가 _row_to_account/decrypt를 전혀 타지 않고
+        AccountService.initialize조차 호출하지 않음을 잠근다.
+        """
+        with (
+            patch("ante.cli.commands.rule._create_rule_engine") as mock_svc,
+            patch("ante.account.service.AccountService") as mock_account_cls,
+            patch("ante.account.service._row_to_account") as mock_row_to_account,
+        ):
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = self._make_mock_db(account_exists=True)
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["--format", "json", "rule", "list", "--account", "acc-1"],
+                )
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                assert data["message"] == "등록된 룰이 없습니다."
+                # AccountService 자체를 생성/초기화하지 않으므로 전체
+                # materialize/복호화 경로(_row_to_account)가 호출되지 않는다.
+                mock_account_cls.assert_not_called()
+                mock_row_to_account.assert_not_called()
+                # 존재 확인은 lightweight 단건 SELECT 1로만 수행한다.
+                mock_db.fetch_one.assert_awaited_once_with(
+                    "SELECT 1 FROM accounts WHERE account_id = ?",
+                    ("acc-1",),
+                )
+
+    def test_rule_list_missing_accounts_table_json_exit_1(self, runner):
+        """accounts 테이블 부재 DB: JSON envelope + ACCOUNT_NOT_FOUND + exit 1.
+
+        Codex 브랜치 리뷰 attempt 2 P2: lightweight 존재 SELECT가 accounts
+        테이블이 없는 부분 초기화/legacy DB에서 ``sqlite3.OperationalError:
+        no such table: accounts`` 를 호출자까지 전파하면 신규
+        ACCOUNT_NOT_FOUND envelope/exit 1 계약을 우회한다. 정의상 테이블
+        부재 ⟹ account 미존재이므로 동일 계약으로 정규화됨을 잠근다
+        (OperationalError 비누설 가드, #1559).
+        """
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db.fetch_one = AsyncMock(
+                side_effect=sqlite3.OperationalError("no such table: accounts")
+            )
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "rule",
+                        "list",
+                        "--account",
+                        "any-account",
+                    ],
+                )
+                assert result.exit_code == 1
+                data = json.loads(result.output)
+                assert data["status"] == "error"
+                assert data["code"] == "ACCOUNT_NOT_FOUND"
+                # 테이블 부재도 미존재 account와 동일 message로 정규화한다.
+                assert data["message"] == "계좌 'any-account'를 찾을 수 없습니다."
+                # raw OperationalError 텍스트가 누설되지 않는다.
+                assert "no such table" not in result.output
+                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
+                mock_db.close.assert_awaited()
+
+    def test_rule_list_missing_accounts_table_text_exit_1(self, runner):
+        """accounts 테이블 부재 DB: text 출력도 exit 1로 종료 (#1559)."""
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db.fetch_one = AsyncMock(
+                side_effect=sqlite3.OperationalError("no such table: accounts")
+            )
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["rule", "list", "--account", "any-account"],
+                )
+                assert result.exit_code == 1
+                assert "찾을 수 없습니다" in result.output
+                assert "no such table" not in result.output
+
+    def test_rule_list_other_operational_error_not_swallowed(self, runner):
+        """과흡수 방지: "no such table" 이외의 OperationalError는 그대로
+        전파한다(malformed db 등). ACCOUNT_NOT_FOUND로 위장하지 않는다.
+        """
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db.fetch_one = AsyncMock(
+                side_effect=sqlite3.OperationalError("database disk image is malformed")
+            )
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["rule", "list", "--account", "acc-1"],
+                )
+                # ACCOUNT_NOT_FOUND로 정규화되지 않고 그대로 전파된다.
+                assert result.exit_code != 0
+                assert isinstance(result.exception, sqlite3.OperationalError)
+                assert "ACCOUNT_NOT_FOUND" not in (result.output or "")
+                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
+                mock_db.close.assert_awaited()
 
     def test_rule_info_not_found(self, runner):
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
