@@ -388,7 +388,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
     """봇 보유 포지션 조회."""
     fmt = get_formatter(ctx)
 
-    async def _run_positions() -> list[dict]:
+    async def _run_positions() -> list[dict] | None:
         from ante.cli.main import get_db_path
         from ante.core.database import Database
         from ante.trade.performance import PerformanceTracker
@@ -399,6 +399,15 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
         db = Database(get_db_path())
         await db.connect()
         try:
+            # 미존재 bot 을 "실재 bot 의 0 포지션" 과 구분하기 위해 포지션 조회
+            # 전에 bot 존재를 먼저 확인한다. 미존재면 sentinel ``None`` 을
+            # 반환하고, 실재 bot 이면 (0개 포함) list 를 반환한다 (#1558).
+            bot_row = await db.fetch_one(
+                "SELECT 1 FROM bots WHERE bot_id = ?", (bot_id,)
+            )
+            if bot_row is None:
+                return None
+
             position_history = PositionHistory(db)
             await position_history.initialize()
             recorder = TradeRecorder(db, position_history)
@@ -421,7 +430,14 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
 
     result = _run(_run_positions())
 
+    if result is None:
+        # 미존재 bot: 형제 명령(`bot info`/`bot remove`)과 동일하게
+        # code 없는 에러 메시지 + exit 1 (#1558).
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        ctx.exit(1)
+
     if not result:
+        # 실재 bot, 0 포지션: 기존 계약(exit 0 + "보유 포지션 없음") 유지.
         fmt.output({"message": "보유 포지션 없음", "positions": []})
         return
 
