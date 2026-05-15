@@ -407,10 +407,19 @@ class TestStatusAndReconcileFollowupScope:
         async def _fake_create_service():  # noqa: ANN202
             return mock_account_service, mock_db
 
+        # ``broker reconcile`` (without ``--fix``) 은 ``_ipc_broker_command`` 가 아니라
+        # ``_run_ipc_reconcile`` 안의 local import ``from ante.cli.commands.ipc_helpers
+        # import ipc_send`` 로 ``ipc_send`` 를 직접 호출한다. local import 는 호출
+        # 시점에 ``ante.cli.commands.ipc_helpers`` 모듈 속성을 resolve 하므로, 그 모듈의
+        # ``ipc_send`` 를 패치해야 reconcile 경로가 결정적으로
+        # ``except click.ClickException`` → 오프라인 폴백 → ``AccountNotFoundError``
+        # → exit 1 을 탄다 (#1556).
         with (
             patch(
-                "ante.cli.commands.broker._ipc_broker_command",
-                _build_ipc_unavailable_mock(),
+                "ante.cli.commands.ipc_helpers.ipc_send",
+                AsyncMock(
+                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                ),
             ),
             patch(
                 "ante.cli.commands.broker._create_account_service",
