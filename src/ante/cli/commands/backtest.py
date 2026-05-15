@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.main import get_formatter
 
 if TYPE_CHECKING:
@@ -24,7 +25,13 @@ def backtest() -> None:
 @click.option("--start", required=True, help="시작일 (YYYY-MM-DD)")
 @click.option("--end", required=True, help="종료일 (YYYY-MM-DD)")
 @click.option("--symbols", help="종목 코드 (콤마 구분)")
-@click.option("--balance", default=10_000_000, type=float, help="초기 자금")
+@click.option(
+    "--balance",
+    default=10_000_000,
+    type=float,
+    callback=validate_positive_finite_amount,
+    help="초기 자금",
+)
 @click.option("--timeframe", default="1d", help="타임프레임")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")

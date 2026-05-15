@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
@@ -125,3 +126,119 @@ class TestBacktestDateValidation:
         )
         assert result.exit_code == 1
         assert "날짜 형식" in result.output
+
+
+class TestBacktestBalanceValidation:
+    """backtest run --balance non-finite/non-positive 거부 (이슈 #1565)."""
+
+    @pytest.mark.parametrize("bad_balance", ["nan", "inf", "-inf", "-1", "0"])
+    def test_non_finite_or_non_positive_balance_rejected(self, tmp_path, bad_balance):
+        """nan/inf/음수/0 balance는 backtest 실행 전 non-zero exit으로 거부."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        with patch("ante.backtest.service.BacktestService") as mock_service:
+            result = runner.invoke(
+                cli,
+                [
+                    "backtest",
+                    "run",
+                    str(strategy),
+                    "--start",
+                    "2026-01-01",
+                    "--end",
+                    "2026-01-01",
+                    "--balance",
+                    bad_balance,
+                ],
+            )
+
+        # click.BadParameter → click 표준 경로 (exit 2, backtest 미실행)
+        assert result.exit_code != 0
+        mock_service.assert_not_called()
+
+    def test_nan_balance_rejected_in_json_mode(self, tmp_path):
+        """--format json 모드에서도 --balance nan은 non-zero exit (이슈 재현).
+
+        click 표준 경로이므로 stderr는 text다 (JSON envelope 표준화는
+        validator의 명시적 Non-Goal — 별도 이슈).
+        """
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        with patch("ante.backtest.service.BacktestService") as mock_service:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "backtest",
+                    "run",
+                    str(strategy),
+                    "--start",
+                    "2026-01-01",
+                    "--end",
+                    "2026-01-01",
+                    "--balance",
+                    "nan",
+                ],
+            )
+
+        assert result.exit_code != 0
+        mock_service.assert_not_called()
+
+    def test_valid_balance_passes_validation(self, tmp_path):
+        """유효한 양수 finite balance는 검증 통과 (기존 backtest 실행 경로 진입)."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        with patch("ante.backtest.service.BacktestService") as mock_service:
+            mock_service.side_effect = RuntimeError("stop after validation")
+            result = runner.invoke(
+                cli,
+                [
+                    "backtest",
+                    "run",
+                    str(strategy),
+                    "--start",
+                    "2026-01-01",
+                    "--end",
+                    "2026-01-01",
+                    "--balance",
+                    "5000000",
+                ],
+            )
+
+        # balance 검증을 통과해야만 BacktestService가 호출됨 (이후 mock이 차단)
+        mock_service.assert_called_once()
+        assert "양수" not in result.output
+        assert "finite" not in result.output
+
+    def test_default_balance_passes_validation(self, tmp_path):
+        """--balance 미지정(default 10_000_000)은 검증 통과 (기존 동작 유지)."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        with patch("ante.backtest.service.BacktestService") as mock_service:
+            mock_service.side_effect = RuntimeError("stop after validation")
+            result = runner.invoke(
+                cli,
+                [
+                    "backtest",
+                    "run",
+                    str(strategy),
+                    "--start",
+                    "2026-01-01",
+                    "--end",
+                    "2026-01-01",
+                ],
+            )
+
+        # default balance도 callback 통과 → BacktestService 진입
+        mock_service.assert_called_once()
+        assert "양수" not in result.output
+        assert "finite" not in result.output
