@@ -6,6 +6,7 @@ import asyncio
 
 import click
 
+from ante.account.errors import AccountNotFoundError
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -131,6 +132,8 @@ def status(ctx: click.Context, account_id: str) -> None:
                 finally:
                     if db:
                         await db.close()
+            except AccountNotFoundError:
+                raise
             except Exception as e:
                 return {
                     "connected": False,
@@ -138,7 +141,11 @@ def status(ctx: click.Context, account_id: str) -> None:
                     "error": str(e),
                 }
 
-        result = _run(_run_status())
+        try:
+            result = _run(_run_status())
+        except AccountNotFoundError as e:
+            fmt.error(str(e), code="account_not_found")
+            raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output(result)
@@ -291,7 +298,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
             raise
         except Exception as e:
             fmt.error(str(e))
-            return
+            raise SystemExit(1) from e
     else:
         # 읽기 전용: IPC 우선, 폴백으로 오프라인 방식
         try:
@@ -361,8 +368,13 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
             try:
                 result = _run(_run_reconcile())
             except Exception as e:
-                fmt.error(str(e))
-                return
+                fmt.error(
+                    str(e),
+                    code="account_not_found"
+                    if isinstance(e, AccountNotFoundError)
+                    else "",
+                )
+                raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output(result)
