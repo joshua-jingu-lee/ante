@@ -10,6 +10,8 @@ from typing import Literal
 
 import polars as pl
 
+from ante.core.exchange import CANONICAL_EXCHANGES
+
 logger = logging.getLogger(__name__)
 
 # write_parquet compression 타입
@@ -22,8 +24,11 @@ _TIME_COLUMN: dict[str, str] = {
     "tick": "timestamp",
 }
 
-# 알려진 거래소 이름 — 마이그레이션 시 이미 exchange 디렉토리인지 판별용
-_KNOWN_EXCHANGES: frozenset[str] = frozenset({"KRX", "NYSE", "NASDAQ", "AMEX", "TEST"})
+# 알려진 거래소 이름 — 마이그레이션 시 이미 exchange 디렉토리인지 판별용.
+# 코드 레벨 SSOT(`ante.core.exchange.CANONICAL_EXCHANGES`)에 위임한다.
+# 값(canonical 5종 frozenset)·`migrate_parquet_paths()` 동작은 위임
+# 전과 완전히 동일하다(#1576 narrow-scope: zero-change).
+_KNOWN_EXCHANGES: frozenset[str] = CANONICAL_EXCHANGES
 
 # KRX 심볼 형식: 6자리 숫자
 _KRX_SYMBOL_PATTERN: re.Pattern[str] = re.compile(r"^\d{6}$")
