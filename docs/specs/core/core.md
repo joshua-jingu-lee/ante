@@ -140,16 +140,24 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 검증은 **표면별로 분리**된다. 같은 vocabulary라도 어느 경계에서 어떤 에러 계약으로 거부되는지는
 표면마다 다르다.
 
+**범위 불변식**: 본 절은 exchange-vocabulary 유효성 계약(canonical 5종 비거부 / `*` 규칙 /
+legacy read 호환 / 에러 계층 409·422·non-zero / 축 A·B)을 정의한다. surface별 source 지원·
+preset wiring·enforcement·구현 동작·정렬은 #1577/#1578에 위임되며 본 절에서 완전 명세하지
+않는다. #1577/#1578 구현자는 본 절의 vocabulary 계약을 상위 기준으로 삼고 surface 동작을 그
+아래에서 정렬한다. 따라서 아래 표의 각 행은 vocabulary 계약과 에러 계층까지만 계약화하며,
+surface 운영/소스/핸들러 디테일은 후속 이슈 정렬 사안으로 표기한다.
+
 | 표면 | canonical | `*` | non-canonical 신규 입력 거부 계약 | 비고 |
 |------|-----------|-----|-----------------------------------|------|
-| Instrument CLI `list`/`sync`/`import` | 허용 | 거부 | non-zero exit + 구조화 error payload (`{status:"error", code, message}`) | #1577 enforcement. **주 신규 입력 표면** (oracle `ORACLE_INVALID_EXCHANGE` 출처) |
-| Account CLI preset (`account create` 등) | canonical 5종은 invalid-exchange로 거부되지 않음 (축 A); 1.0 preset 자동 구성은 `KRX`/`TEST` preset만 (축 B) | 거부 | non-zero exit | 축 A: `*`/non-canonical은 거부. 축 B: 1.0 preset 경로는 `KRX`(`kis-domestic`)/`TEST`(`test`) preset만 자동 구성하며, preset 미제공 canonical 값(`NYSE/NASDAQ/AMEX`)은 **preset/broker 가용성 제약**이지 invalid-exchange 거부가 아니다(별개 차원) |
+| Instrument CLI `list`/`import` | 허용 | 거부 | non-zero exit + 구조화 error payload (`{status:"error", code, message}`) | #1577 enforcement. **주 신규 입력 표면** (oracle `ORACLE_INVALID_EXCHANGE` 출처) |
+| Instrument CLI `sync` | 허용 (vocabulary 측면은 동일: canonical 5종만 유효, non-canonical 거부) | 거부 | non-zero exit + 구조화 error payload | **source-bound 표면.** `sync`는 KIS API(KRX 도메인)에서만 마스터를 가져와 전달 `exchange`를 저장 라벨로 쓴다(`src/ante/cli/commands/instrument.py`의 `sync`→`KISAdapter.get_instruments`, `docs/specs/instrument/` source 계약). 따라서 canonical이지만 source 미지원 exchange(`NYSE/NASDAQ/AMEX` 등 비-KRX)에 대한 sync 동작·에러 계약은 **source-supported-exchange 정렬 사안으로 #1577에 위임**(backtest `--exchange`처럼 spec-vs-implementation gap). 본 SSOT는 "sync는 source-bound이며 source 미지원 canonical 값 처리 계약은 #1577" 까지만 명시하고 완전 명세하지 않는다 |
+| Account CLI preset (`account create` 등) | canonical 5종은 invalid-exchange로 거부되지 않음 (축 A); preset 미제공 canonical 값은 축 B 제약 | 거부 | non-zero exit | 축 A: `*`/non-canonical은 거부. 축 B: canonical이지만 1.0 preset 미제공 값(`NYSE/NASDAQ/AMEX`)은 **preset/broker 가용성 제약**이지 invalid-exchange 거부가 아니다(별개 차원). 구체적 preset wiring(어떤 preset이 어떤 exchange를 자동 구성하는가)은 축 B canonical-known 표·축 B 정의를 상위 기준으로 삼아 **#1578에서 정렬**한다 — 본 행은 vocabulary 계약(축 A 비거부 / `*`·non-canonical 거부)만 명시한다 |
 | AccountService (생성/검증) | canonical 5종 허용 (축 A: non-canonical만 서비스 검증 에러) | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`). canonical 5종은 서비스 exchange 검증에서 거부되지 않는다. 1.0 account preset이 `NYSE/NASDAQ/AMEX`를 미제공하는 것은 **축 B(preset/broker 가용성) 제약**이며 "invalid exchange 거부"가 아니다(별개 차원) |
-| Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 가드가 입력 무관 즉시 409** (invariant I1; `src/ante/web/routes/accounts.py`의 `create_account` 핸들러가 진입 즉시 409 raise) | **422 아님.** `exchange` 포함 모든 입력이 런타임에 차단됨 (계좌 생성은 cold-path 전용) |
-| Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural 가드가 409** (invariant I1/I4; `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS`에 `exchange` 포함) | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도가 cold-path 409로 차단됨 |
-| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용.** `src/ante/web/routes/accounts.py`의 `MUTABLE_FIELDS` 4종은 정상 런타임 업데이트다. #1578 구현자는 이 경로를 cold-path 409로 막지 않는다 |
+| Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 차단 계층은 409** (계좌 생성은 cold-path 전용, `exchange` 포함 입력 무관) | **422 아님.** 진입 가드의 구체 동작·핸들러는 #1578에서 정렬한다 — 본 행은 "cold-path → 409, 스키마 층 422 아님"의 에러 계층만 명시한다 |
+| Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural/identity 변경 차단 계층은 409** | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도는 cold-path 계층(409)에서 차단된다. structural 필드 집합·가드 구현은 #1578에서 정렬한다 |
+| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용 계층.** mutable-only 업데이트는 정상 런타임 경로이며 cold-path 409로 차단되지 않는다. mutable 필드 집합의 구현 정렬은 #1578에 위임한다 |
 | Account Web OpenAPI/schema 레벨 | — | — | 빈 문자열/형식 오류는 **422** | cold-path 문서(스키마 검증) 전용. 런타임 차단(409)과 다른 층 |
-| DataStore path API — `write`/`append`/신규 경로 생성 | 허용 | 거부 | 신규 경로 생성 시 non-canonical·`*` 거부(스펙상 예외 처리) | feed/data CLI 옵션이 아니라 DataStore 메서드 인자 표면. `*`는 경로로 해석 불가 |
+| DataStore path API — `write`/`append`/신규 경로 생성 | 허용 | 거부 | 신규 경로 생성 시 non-canonical·`*` 거부 | feed/data CLI 옵션이 아니라 DataStore 메서드 인자 표면. `*`는 경로로 해석 불가. 거부의 구현 동작(예외 처리 방식 등)은 #1578에서 정렬하며, 본 행은 "신규 경로 생성 시 non-canonical·`*` 거부"의 vocabulary 계약만 명시한다 |
 | DataStore path API — `read`(기존 경로, legacy out-of-vocab 포함) | 허용 | (입력 검증 미적용) | **거부하지 않음.** 신규 입력 검증을 기존 경로 read 인자에 적용하지 않는다 | "Legacy out-of-vocabulary 호환 정책" 절 우선. 이미 저장된 legacy 경로(예: `.../ohlcv/1d/LSE/...`)는 그대로 읽힌다 |
 | `StrategyMeta.exchange` | 허용 | **허용** | validator 에러 | **`*` 유일 허용 표면** (`docs/specs/strategy/03-09-strategy-validator.md`) |
 | Backtest `--exchange` override | (목표: canonical만) | (목표: 거부) | **현재 CLI/`src/ante/backtest/`에 미구현 — spec-vs-implementation gap** | #1578 정렬 대상(옵션 신설 포함). 기존 표면처럼 서술하지 않는다 |
@@ -161,8 +169,10 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
   신규 입력 검증을 적용하지 않으므로 `*` 거부 판정 대상이 아니다 — `*`는 저장된 legacy
   경로가 될 수 없고, 기존 경로 read 호환은 "Legacy out-of-vocabulary 호환 정책"이 규율한다.
 - 시나리오 2(`ORACLE_INVALID_EXCHANGE`가 신규 입력에서 거부되어야 하는가): Instrument CLI
-  `list`/`sync`/`import` 행에 따라 non-canonical 신규 입력은 non-zero exit + 구조화 error
-  payload로 거부되어야 한다(enforcement는 #1577).
+  `list`/`import`(및 vocabulary 측면에서 동일한 `sync`) 행에 따라 non-canonical 신규 입력은
+  non-zero exit + 구조화 error payload로 거부되어야 한다(enforcement는 #1577). `sync`의
+  source 미지원 canonical 값(`NYSE/NASDAQ/AMEX` 등 비-KRX) 처리 계약은 source-bound 표면
+  사안으로 #1577에 위임된다 — 본 SSOT 단독으로는 vocabulary 거부(non-canonical)만 판정한다.
 - 시나리오 3(`KOSPI`는 exchange인가): "exchange vs market vs source vs broker_type" 절에 따라
   `KOSPI`는 exchange가 아니라 KRX 내부 market/category다.
 
