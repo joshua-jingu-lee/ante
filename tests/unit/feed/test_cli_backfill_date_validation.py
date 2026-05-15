@@ -233,6 +233,81 @@ class TestBackfillSinceValidation:
             assert result.exit_code == 0
             mock_orch.run_backfill.assert_awaited_once()
 
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            "20260510",  # basic ISO (no separators)
+            "2026-W19-1",  # ISO week date (Codex P2 케이스)
+            "2026-1-1",  # non-zero-padded
+        ],
+    )
+    def test_iso_variant_since_rejected_strict(
+        self, runner: CliRunner, initialized_data_path: str, bad_value: str
+    ) -> None:
+        """ISO 변형(basic/week/non-padded) --since는 strict 거부 (#1562 회귀).
+
+        date.fromisoformat()만 쓰던 이전 구현이라면 통과했을 입력을 잠근다.
+        """
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--since",
+                    bad_value,
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            assert "Traceback" not in (result.stderr or "")
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            assert bad_value in data["message"]
+            mock_orch.run_backfill.assert_not_awaited()
+
+    def test_invalid_calendar_since_rejected(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """형태는 맞지만 캘린더상 invalid(2026-13-01) --since는 거부."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--since",
+                    "2026-13-01",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            mock_orch.run_backfill.assert_not_awaited()
+
 
 class TestBackfillUntilValidation:
     """`--until` 옵션 ISO date 검증 (이슈 #1562)."""
@@ -361,6 +436,47 @@ class TestBackfillUntilValidation:
             assert result.exit_code == 0
             mock_orch.run_backfill.assert_awaited_once()
 
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            "20260510",  # basic ISO (no separators)
+            "2026-W19-1",  # ISO week date (Codex P2 케이스)
+            "2026-1-1",  # non-zero-padded
+        ],
+    )
+    def test_iso_variant_until_rejected_strict(
+        self, runner: CliRunner, initialized_data_path: str, bad_value: str
+    ) -> None:
+        """ISO 변형(basic/week/non-padded) --until은 strict 거부 (#1562 회귀)."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--until",
+                    bad_value,
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            assert "Traceback" not in (result.stderr or "")
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            assert bad_value in data["message"]
+            mock_orch.run_backfill.assert_not_awaited()
+
 
 class TestDailyDateValidation:
     """`run daily --date` 옵션 ISO date 검증 (이슈 #1562)."""
@@ -454,6 +570,82 @@ class TestDailyDateValidation:
 
             assert result.exit_code == 0
             mock_orch.run_daily.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            "20260510",  # basic ISO (no separators)
+            "2026-W19-1",  # ISO week date — Codex P2 지적 케이스
+            "2026-1-1",  # non-zero-padded
+        ],
+    )
+    def test_iso_variant_date_rejected_strict(
+        self, runner: CliRunner, initialized_data_path: str, bad_value: str
+    ) -> None:
+        """ISO 변형(basic/week/non-padded) --date는 strict 거부 (#1562 회귀).
+
+        date.fromisoformat()만 쓰던 이전 구현이라면 `2026-W19-1` 등이
+        통과해 원문이 그대로 하위 수집(basDt)으로 전달됐다.
+        """
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "daily",
+                    "--data-path",
+                    initialized_data_path,
+                    "--date",
+                    bad_value,
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            assert "Traceback" not in (result.stderr or "")
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            assert bad_value in data["message"]
+            mock_orch.run_daily.assert_not_awaited()
+
+    def test_invalid_calendar_date_rejected(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """형태는 맞지만 캘린더상 invalid(2026-13-01) --date는 거부."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "daily",
+                    "--data-path",
+                    initialized_data_path,
+                    "--date",
+                    "2026-13-01",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            mock_orch.run_daily.assert_not_awaited()
 
     def test_no_date_option_regression(
         self, runner: CliRunner, initialized_data_path: str

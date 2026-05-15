@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 from typing import TYPE_CHECKING
 
 import click
@@ -15,6 +16,39 @@ if TYPE_CHECKING:
     from ante.feed.report.generator import ReportGenerator
 
 logger = logging.getLogger(__name__)
+
+# zero-padded YYYY-MM-DD만 허용. date.fromisoformat()은 3.11+/3.13에서
+# basic ISO(20260510)·ISO week date(2026-W19-1) 등 변형도 수락하므로
+# 형태를 정규식으로 먼저 고정한 뒤 캘린더 유효성만 검증한다.
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _validate_iso_date(value: str, option: str, fmt: object) -> None:
+    """``value``가 엄격한 ``YYYY-MM-DD``인지 검증한다.
+
+    형식이 어긋나거나 캘린더상 유효하지 않으면 ``CLI_INVALID_DATE``
+    구조화 에러를 출력하고 ``SystemExit(1)``로 종료한다. 3개 날짜
+    옵션(``--since`` / ``--until`` / ``--date``)이 공유한다.
+    """
+    from datetime import date
+
+    if _ISO_DATE_RE.fullmatch(value) is None:
+        fmt.error(  # type: ignore[attr-defined]
+            f"잘못된 {option} 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)",
+            code="CLI_INVALID_DATE",
+        )
+        raise SystemExit(1)
+
+    try:
+        # regex로 형태를 고정했으므로 캘린더 유효성(예: 2026-13-01)만 확인.
+        date.fromisoformat(value)
+    except ValueError:
+        fmt.error(  # type: ignore[attr-defined]
+            f"잘못된 {option} 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)",
+            code="CLI_INVALID_DATE",
+        )
+        raise SystemExit(1)
+
 
 _DEFAULT_DATA_PATH = "data/"
 _DATA_PATH_HELP = "데이터 저장소 경로"
@@ -224,28 +258,10 @@ def run_backfill(
         raise SystemExit(1)
 
     if since is not None:
-        from datetime import date
-
-        try:
-            date.fromisoformat(since)
-        except ValueError:
-            fmt.error(
-                f"잘못된 --since 날짜 형식: '{since}' (YYYY-MM-DD 형식 필요)",
-                code="CLI_INVALID_DATE",
-            )
-            raise SystemExit(1)
+        _validate_iso_date(since, "--since", fmt)
 
     if until is not None:
-        from datetime import date
-
-        try:
-            date.fromisoformat(until)
-        except ValueError:
-            fmt.error(
-                f"잘못된 --until 날짜 형식: '{until}' (YYYY-MM-DD 형식 필요)",
-                code="CLI_INVALID_DATE",
-            )
-            raise SystemExit(1)
+        _validate_iso_date(until, "--until", fmt)
 
     config = cfg.load_config()
 
@@ -294,16 +310,7 @@ def run_daily(
         raise SystemExit(1)
 
     if target_date is not None:
-        from datetime import date
-
-        try:
-            date.fromisoformat(target_date)
-        except ValueError:
-            fmt.error(
-                f"잘못된 --date 날짜 형식: '{target_date}' (YYYY-MM-DD 형식 필요)",
-                code="CLI_INVALID_DATE",
-            )
-            raise SystemExit(1)
+        _validate_iso_date(target_date, "--date", fmt)
 
     config = cfg.load_config()
 
