@@ -462,6 +462,208 @@ class TestStrategyPerformance:
             data = json.loads(result.output)
             assert data["strategy_name"] == "momentum"
 
+    @staticmethod
+    def _patch_perf_internals(
+        *,
+        records,
+        account_row,
+        fetch_one_side_effect=None,
+        metrics=None,
+    ):
+        """`_perf()` 내부 함수 지역 import 대상을 patch하는 컨텍스트 묶음.
+
+        실제 ``_perf`` 코루틴을 실행해 account 존재 검증 분기를 직접 탄다.
+        """
+        db = MagicMock()
+        db.connect = AsyncMock()
+        db.close = AsyncMock()
+        if fetch_one_side_effect is not None:
+            db.fetch_one = AsyncMock(side_effect=fetch_one_side_effect)
+        else:
+            db.fetch_one = AsyncMock(return_value=account_row)
+
+        registry = MagicMock()
+        registry.get_by_name = AsyncMock(return_value=records)
+
+        tracker = MagicMock()
+        tracker.calculate = AsyncMock(
+            return_value=metrics if metrics is not None else _SAMPLE_METRICS
+        )
+
+        return (
+            patch("ante.core.database.Database", return_value=db),
+            patch("ante.cli.main.get_db_path", return_value=":memory:"),
+            patch(
+                "ante.strategy.registry.StrategyRegistry",
+                return_value=registry,
+            ),
+            patch(
+                "ante.trade.performance.PerformanceTracker",
+                return_value=tracker,
+            ),
+            db,
+            tracker,
+        )
+
+    def test_performance_missing_account_json(self, runner):
+        """strategy 존재 + 미존재 account → exit 1 + ACCOUNT_NOT_FOUND (#1563)."""
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row=None,
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "oracle-missing-account",
+                ],
+            )
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert data["code"] == "ACCOUNT_NOT_FOUND"
+        assert "oracle-missing-account" in data["message"]
+        # account 미존재이므로 metric 계산까지 가지 않는다.
+        tracker.calculate.assert_not_called()
+
+    def test_performance_missing_account_text(self, runner):
+        """미존재 account → text 모드 단건 에러 출력 + exit 1 (#1563)."""
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row=None,
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "oracle-missing-account",
+                ],
+            )
+        assert result.exit_code == 1
+        assert "계좌 'oracle-missing-account'를 찾을 수 없습니다." in result.output
+        tracker.calculate.assert_not_called()
+
+    def test_performance_real_account_regression(self, runner):
+        """regression guard: 실재 account → exit 0 + metrics 유지 (#1563)."""
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row={"1": 1},
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["strategy_name"] == "momentum"
+        assert data["metrics"]["total_trades"] == 10
+        tracker.calculate.assert_awaited_once()
+
+    def test_performance_strategy_not_found_regression(self, runner):
+        """regression guard: strategy 미존재 → 기존 "전략을 찾을 수 없습니다" 유지.
+
+        account 검증은 strategy records 확인 이후이므로, records가 없으면
+        account 검증 분기에 도달하지 않고 기존 strategy-not-found 메시지를
+        그대로 출력한다 (#1563 분기 순서 불변).
+        """
+        p_db, p_path, p_reg, p_track, db, _tracker = self._patch_perf_internals(
+            records=[],
+            account_row=None,
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "strategy",
+                    "performance",
+                    "nonexistent",
+                    "--account-id",
+                    "oracle-missing-account",
+                ],
+            )
+        assert result.exit_code == 1
+        assert "전략을 찾을 수 없습니다" in result.output
+        # strategy 미존재이므로 account 존재 쿼리에 도달하지 않는다.
+        db.fetch_one.assert_not_called()
+
+    def test_performance_missing_account_no_accounts_table(self, runner):
+        """accounts 테이블 부재 → missing-account로 정규화, OperationalError 비누설.
+
+        부분 초기화/legacy DB에서 ``no such table: accounts``가 호출자까지
+        전파되면 ACCOUNT_NOT_FOUND 계약을 우회한다. 동일 분기로 정규화 (#1563).
+        """
+        import sqlite3
+
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row=None,
+            fetch_one_side_effect=sqlite3.OperationalError("no such table: accounts"),
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "oracle-missing-account",
+                ],
+            )
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "ACCOUNT_NOT_FOUND"
+        assert "no such table" not in result.output
+        tracker.calculate.assert_not_called()
+
+    def test_performance_other_operational_error_propagates(self, runner):
+        """malformed db 등 다른 OperationalError는 삼키지 않고 비정상 종료 (#1563)."""
+        import sqlite3
+
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row=None,
+            fetch_one_side_effect=sqlite3.OperationalError(
+                "database disk image is malformed"
+            ),
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+        # ACCOUNT_NOT_FOUND로 정규화되지 않고 예외가 전파된다.
+        assert result.exit_code != 0
+        assert "ACCOUNT_NOT_FOUND" not in result.output
+        tracker.calculate.assert_not_called()
+
 
 class TestStrategySubmit:
     """ante strategy submit 커맨드 테스트."""

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any
@@ -616,6 +617,39 @@ async def get_strategy_performance(
                 "?account_id=<id> 쿼리 파라미터를 지정하거나, "
                 "해당 전략에 연결된 봇이 있어야 합니다."
             ),
+        )
+
+    # resolved_account_id 확정 후, performance 계산 전에 account 존재를
+    # 검증한다. PerformanceTracker.calculate 는 다수 소비자가 쓰는 저수준
+    # metric 계산이므로 검증을 넣지 않고(multi-consumer 불변), ingress
+    # 라우트에서만 검증한다. 쿼리/봇 fallback 어느 경로로 결정됐든 동일한
+    # resolved_account_id 를 lightweight 단건 존재 쿼리로 확인한다. 쿼리
+    # 의미는 AccountService.get(account_id 단건, status 필터 없음)과
+    # 일치하며, credentials 복호화를 트리거하지 않아 무관한 계좌의 복호화
+    # 실패가 정상 사용을 깨뜨리지 않는다 (#1559 일관).
+    #
+    # ``accounts`` 테이블은 ``AccountService.initialize()`` 에서만 생성되며,
+    # 부분 초기화/legacy DB 에서는 테이블 자체가 없어
+    # ``sqlite3.OperationalError: no such table: accounts`` 가 전파될 수
+    # 있다. 정의상 accounts 테이블 부재는 해당 account 미존재와 동치이므로
+    # 동일한 404 로 정규화한다. 단, malformed db 같은 다른
+    # ``OperationalError`` 까지 삼키지 않도록 "no such table" 메시지일
+    # 때로만 좁힌다 (#1558/#1559 에서 검증된 패턴).
+    try:
+        account_row = await db.fetch_one(
+            "SELECT 1 FROM accounts WHERE account_id = ?",
+            (resolved_account_id,),
+        )
+        account_exists = account_row is not None
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            account_exists = False
+        else:
+            raise
+    if not account_exists:
+        raise HTTPException(
+            status_code=404,
+            detail=f"계좌를 찾을 수 없습니다: {resolved_account_id}",
         )
 
     from ante.trade.performance import PerformanceTracker
