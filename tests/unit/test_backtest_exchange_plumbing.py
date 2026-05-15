@@ -15,6 +15,7 @@ CLI 검증과 분리 — service/provider가 exchange를 무시해도 CLI 테스
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,10 +23,11 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+from ante.backtest import runner
 from ante.backtest.config import BacktestConfig
 from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.executor import BacktestExecutor
-from ante.backtest.result import BacktestResult
+from ante.backtest.result import BacktestResult, BacktestTrade
 from ante.backtest.service import BacktestService
 from ante.strategy.base import Signal, Strategy, StrategyMeta
 
@@ -357,3 +359,161 @@ class TestServicePassesExchangeToExecutor:
             }
         )
         assert kwargs["exchange"] == "KRX"
+
+
+class TestResultToDictSerializesExchange:
+    """BacktestResult.to_dict() → trades[i]["exchange"] (직렬화 hop 회귀).
+
+    CLI JSON / subprocess / report draft 세 소비자가 모두 result.to_dict()를
+    무가공 전달하므로, 이 단일 지점에서 exchange가 직렬화되어야 override가
+    구조화 출력 체결 행에 보인다 (Codex branch review [P2] + meta-review).
+    """
+
+    @pytest.mark.asyncio
+    async def test_explicit_exchange_appears_in_to_dict_trades(self):
+        executor = _make_executor("NYSE")
+
+        result = await executor.run()
+
+        out = result.to_dict()
+        assert out["trades"], "1건의 거래가 직렬화되어야 한다"
+        assert all(t["exchange"] == "NYSE" for t in out["trades"])
+
+    @pytest.mark.asyncio
+    async def test_default_exchange_appears_in_to_dict_trades_krx(self):
+        executor = _make_executor(None)
+
+        result = await executor.run()
+
+        out = result.to_dict()
+        assert out["trades"]
+        assert all(t["exchange"] == "KRX" for t in out["trades"])
+
+    def test_to_dict_trade_keeps_exchange_label_verbatim(self):
+        """비-canonical 라벨도 to_dict가 그대로 직렬화 (재검증 없음)."""
+        result = BacktestResult(
+            strategy_name="S",
+            strategy_version="1",
+            start_date="2026-01-01",
+            end_date="2026-01-02",
+            initial_balance=1.0,
+            final_balance=1.0,
+            total_return=0.0,
+            trades=[
+                BacktestTrade(
+                    timestamp=datetime(2026, 1, 1),
+                    symbol="AAPL",
+                    side="buy",
+                    quantity=1.0,
+                    price=100.0,
+                    commission=0.0,
+                    slippage=0.0,
+                    reason="r",
+                    exchange="NASDAQ",
+                )
+            ],
+        )
+
+        out = result.to_dict()
+
+        assert out["trades"][0]["exchange"] == "NASDAQ"
+
+
+class TestRunnerForwardsToDictUnmodified:
+    """runner.run_backtest()는 service 결과의 to_dict()를 무가공 반환.
+
+    subprocess 실제 기동은 무거우므로, runner가 result.to_dict()를
+    그대로 전달함을 가벼운 단위로 갈음한다 (to_dict 출력 단언은 in-process
+    TestResultToDictSerializesExchange가 필수로 커버).
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_backtest_returns_service_result_to_dict_with_exchange(
+        self,
+    ):
+        result = BacktestResult(
+            strategy_name="S",
+            strategy_version="1",
+            start_date="2026-01-01",
+            end_date="2026-01-02",
+            initial_balance=1.0,
+            final_balance=1.0,
+            total_return=0.0,
+            trades=[
+                BacktestTrade(
+                    timestamp=datetime(2026, 1, 1),
+                    symbol="AAPL",
+                    side="buy",
+                    quantity=1.0,
+                    price=100.0,
+                    commission=0.0,
+                    slippage=0.0,
+                    reason="r",
+                    exchange="NYSE",
+                )
+            ],
+        )
+
+        service_instance = MagicMock()
+
+        async def _fake_run(config):
+            return result
+
+        service_instance.run = _fake_run
+
+        with patch(
+            "ante.backtest.service.BacktestService",
+            return_value=service_instance,
+        ):
+            out = await runner.run_backtest(
+                {
+                    "strategy_path": "s.py",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-01-02",
+                    "exchange": "NYSE",
+                }
+            )
+
+        assert out == result.to_dict()
+        assert out["trades"][0]["exchange"] == "NYSE"
+
+
+class TestTradeSerializationCompletenessInvariant:
+    """직렬화 누락 invariant: BacktestTrade의 public 필드 ⊆ to_dict trade 키.
+
+    향후 BacktestTrade에 필드를 추가하면서 to_dict() 컴프리헨션 갱신을
+    누락하면 이 테스트가 자동으로 감지한다 (이번 exchange 누락 재발 방지).
+    """
+
+    def test_all_trade_dataclass_fields_present_in_to_dict_trade(self):
+        result = BacktestResult(
+            strategy_name="S",
+            strategy_version="1",
+            start_date="2026-01-01",
+            end_date="2026-01-02",
+            initial_balance=1.0,
+            final_balance=1.0,
+            total_return=0.0,
+            trades=[
+                BacktestTrade(
+                    timestamp=datetime(2026, 1, 1),
+                    symbol="AAPL",
+                    side="buy",
+                    quantity=1.0,
+                    price=100.0,
+                    commission=0.0,
+                    slippage=0.0,
+                    reason="r",
+                    exchange="NYSE",
+                )
+            ],
+        )
+
+        trade_dict = result.to_dict()["trades"][0]
+        field_names = {f.name for f in dataclasses.fields(BacktestTrade)}
+
+        missing = field_names - set(trade_dict.keys())
+        assert not missing, (
+            f"BacktestTrade 필드가 to_dict() trade 직렬화에서 누락됨: {missing}. "
+            "result.py to_dict()의 trade 컴프리헨션에 추가하라."
+        )
