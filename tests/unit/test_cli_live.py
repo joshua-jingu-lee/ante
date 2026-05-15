@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -649,6 +650,99 @@ class TestRuleCommands:
                     "SELECT 1 FROM accounts WHERE account_id = ?",
                     ("acc-1",),
                 )
+
+    def test_rule_list_missing_accounts_table_json_exit_1(self, runner):
+        """accounts 테이블 부재 DB: JSON envelope + ACCOUNT_NOT_FOUND + exit 1.
+
+        Codex 브랜치 리뷰 attempt 2 P2: lightweight 존재 SELECT가 accounts
+        테이블이 없는 부분 초기화/legacy DB에서 ``sqlite3.OperationalError:
+        no such table: accounts`` 를 호출자까지 전파하면 신규
+        ACCOUNT_NOT_FOUND envelope/exit 1 계약을 우회한다. 정의상 테이블
+        부재 ⟹ account 미존재이므로 동일 계약으로 정규화됨을 잠근다
+        (OperationalError 비누설 가드, #1559).
+        """
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db.fetch_one = AsyncMock(
+                side_effect=sqlite3.OperationalError("no such table: accounts")
+            )
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    [
+                        "--format",
+                        "json",
+                        "rule",
+                        "list",
+                        "--account",
+                        "any-account",
+                    ],
+                )
+                assert result.exit_code == 1
+                data = json.loads(result.output)
+                assert data["status"] == "error"
+                assert data["code"] == "ACCOUNT_NOT_FOUND"
+                # 테이블 부재도 미존재 account와 동일 message로 정규화한다.
+                assert data["message"] == "계좌 'any-account'를 찾을 수 없습니다."
+                # raw OperationalError 텍스트가 누설되지 않는다.
+                assert "no such table" not in result.output
+                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
+                mock_db.close.assert_awaited()
+
+    def test_rule_list_missing_accounts_table_text_exit_1(self, runner):
+        """accounts 테이블 부재 DB: text 출력도 exit 1로 종료 (#1559)."""
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db.fetch_one = AsyncMock(
+                side_effect=sqlite3.OperationalError("no such table: accounts")
+            )
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["rule", "list", "--account", "any-account"],
+                )
+                assert result.exit_code == 1
+                assert "찾을 수 없습니다" in result.output
+                assert "no such table" not in result.output
+
+    def test_rule_list_other_operational_error_not_swallowed(self, runner):
+        """과흡수 방지: "no such table" 이외의 OperationalError는 그대로
+        전파한다(malformed db 등). ACCOUNT_NOT_FOUND로 위장하지 않는다.
+        """
+        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
+            mock_engine = MagicMock()
+            mock_engine._global_rules = []
+            mock_engine._strategy_rules = {}
+            mock_db = AsyncMock()
+            mock_db.close = AsyncMock()
+            mock_db.fetch_one = AsyncMock(
+                side_effect=sqlite3.OperationalError("database disk image is malformed")
+            )
+            mock_svc.return_value = (mock_engine, mock_db)
+
+            with patch("ante.cli.commands.rule._load_rules_from_config"):
+                result = runner.invoke(
+                    cli,
+                    ["rule", "list", "--account", "acc-1"],
+                )
+                # ACCOUNT_NOT_FOUND로 정규화되지 않고 그대로 전파된다.
+                assert result.exit_code != 0
+                assert isinstance(result.exception, sqlite3.OperationalError)
+                assert "ACCOUNT_NOT_FOUND" not in (result.output or "")
+                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
+                mock_db.close.assert_awaited()
 
     def test_rule_info_not_found(self, runner):
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:

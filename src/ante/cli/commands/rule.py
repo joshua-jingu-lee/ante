@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 
 import click
 
@@ -120,10 +121,29 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
             # 미존재 시 동일한 AccountNotFoundError 메시지로 분기한다 — 동일
             # ACCOUNT_NOT_FOUND envelope/message 보존. db.close()는 아래
             # finally가 단독 소유한다(lifecycle 불변).
-            account_row = await db.fetch_one(
-                "SELECT 1 FROM accounts WHERE account_id = ?",
-                (account_id,),
-            )
+            #
+            # ``accounts`` 테이블은 ``AccountService.initialize()`` 의
+            # ``_CREATE_TABLE_SQL`` 에서만 생성된다. 이 경로는 raw
+            # ``Database`` 핸들만 쓰고 ``AccountService`` 를 초기화하지
+            # 않으므로, 부분 초기화/legacy DB(예: ``ante init`` 직후)에서는
+            # 테이블 자체가 없어 ``sqlite3.OperationalError: no such table:
+            # accounts`` 가 호출자까지 전파되어 ACCOUNT_NOT_FOUND 계약을
+            # 우회할 수 있다(#1559). 정의상 accounts 테이블 부재는 해당
+            # account 미존재와 동치이므로 동일한 AccountNotFoundError 로
+            # 정규화한다. 단, malformed db 같은 다른 ``OperationalError``
+            # 까지 삼키지 않도록 "no such table" 메시지일 때로만 좁힌다
+            # (#1558 에서 검증된 패턴).
+            try:
+                account_row = await db.fetch_one(
+                    "SELECT 1 FROM accounts WHERE account_id = ?",
+                    (account_id,),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e).lower():
+                    raise AccountNotFoundError(
+                        f"계좌 '{account_id}'를 찾을 수 없습니다."
+                    ) from e
+                raise
             if account_row is None:
                 raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
 
