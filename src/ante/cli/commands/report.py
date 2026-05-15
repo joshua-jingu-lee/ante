@@ -8,6 +8,7 @@ import json
 import click
 from pydantic import ValidationError
 
+from ante.cli._validators import validate_iso_date
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.report.models import ReportStatus
@@ -234,8 +235,18 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
     help="집계 기간 (daily 또는 monthly)",
 )
 @click.option("--bot-id", default=None, help="봇 ID 필터")
-@click.option("--start", default=None, help="시작일 (YYYY-MM-DD, daily 전용)")
-@click.option("--end", default=None, help="종료일 (YYYY-MM-DD, daily 전용)")
+@click.option(
+    "--start",
+    default=None,
+    callback=validate_iso_date,
+    help="시작일 (YYYY-MM-DD, daily 전용)",
+)
+@click.option(
+    "--end",
+    default=None,
+    callback=validate_iso_date,
+    help="종료일 (YYYY-MM-DD, daily 전용)",
+)
 @click.option("--year", default=None, type=int, help="연도 필터 (monthly 전용)")
 @click.pass_context
 @require_auth

@@ -152,6 +152,16 @@ _TRADE_TO = (
     "trade-to",
     lambda v: ["trade", "list", "--to", v],
 )
+# `report performance --start/--end`는 daily 전용 date 옵션 (#1564).
+# `--period daily` 명시로 monthly 분기를 배제하고 date filter 경로만 탄다.
+_REPORT_PERF_START = (
+    "report-perf-start",
+    lambda v: ["report", "performance", "--period", "daily", "--start", v],
+)
+_REPORT_PERF_END = (
+    "report-perf-end",
+    lambda v: ["report", "performance", "--period", "daily", "--end", v],
+)
 
 ALL_OPTIONS = [
     _AUDIT_FROM_DATE,
@@ -161,6 +171,8 @@ ALL_OPTIONS = [
     _TREASURY_TO,
     _TRADE_FROM,
     _TRADE_TO,
+    _REPORT_PERF_START,
+    _REPORT_PERF_END,
 ]
 
 
@@ -389,6 +401,72 @@ class TestFormatJsonInvalidDate:
             ["--format", "json", "trade", "list", "--to", "not-a-date"],
         )
         _assert_date_rejected(result, hint_keywords=("not-a-date", "to"))
+
+    def test_report_performance_format_json_invalid_start(
+        self, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "report",
+                "performance",
+                "--period",
+                "daily",
+                "--start",
+                "not-a-date",
+            ],
+        )
+        _assert_date_rejected(result, hint_keywords=("not-a-date", "start"))
+
+    def test_report_performance_format_json_invalid_end(
+        self, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "report",
+                "performance",
+                "--period",
+                "daily",
+                "--end",
+                "not-a-date",
+            ],
+        )
+        _assert_date_rejected(result, hint_keywords=("not-a-date", "end"))
+
+    def test_report_performance_format_json_invalid_start_and_end(
+        self, runner: CliRunner
+    ) -> None:
+        """이슈 #1564 재현 조합: invalid `--start`/`--end` 동시 지정.
+
+        `ante --format json report performance --period daily
+        --start oracle-not-a-date --end also-not-a-date`가 returncode 0 +
+        빈 집계 성공으로 종료되던 ingress drift를 잠근다. callback이 가장
+        먼저 평가되는 `--start`에서 click.BadParameter를 raise하므로 exit
+        != 0이 보장된다.
+        """
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "report",
+                "performance",
+                "--period",
+                "daily",
+                "--start",
+                "oracle-not-a-date",
+                "--end",
+                "also-not-a-date",
+            ],
+        )
+        _assert_date_rejected(
+            result, hint_keywords=("oracle-not-a-date", "also-not-a-date")
+        )
 
 
 # ── #1514 핵심 invariant: trade list invalid date에서 traceback 미노출 ────
