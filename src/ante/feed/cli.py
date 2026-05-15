@@ -231,7 +231,19 @@ def run_backfill(
         except ValueError:
             fmt.error(
                 f"잘못된 --since 날짜 형식: '{since}' (YYYY-MM-DD 형식 필요)",
-                code="invalid_date",
+                code="CLI_INVALID_DATE",
+            )
+            raise SystemExit(1)
+
+    if until is not None:
+        from datetime import date
+
+        try:
+            date.fromisoformat(until)
+        except ValueError:
+            fmt.error(
+                f"잘못된 --until 날짜 형식: '{until}' (YYYY-MM-DD 형식 필요)",
+                code="CLI_INVALID_DATE",
             )
             raise SystemExit(1)
 
@@ -280,6 +292,18 @@ def run_daily(
 
     if not _ensure_initialized(cfg, fmt, data_path):
         raise SystemExit(1)
+
+    if target_date is not None:
+        from datetime import date
+
+        try:
+            date.fromisoformat(target_date)
+        except ValueError:
+            fmt.error(
+                f"잘못된 --date 날짜 형식: '{target_date}' (YYYY-MM-DD 형식 필요)",
+                code="CLI_INVALID_DATE",
+            )
+            raise SystemExit(1)
 
     config = cfg.load_config()
 

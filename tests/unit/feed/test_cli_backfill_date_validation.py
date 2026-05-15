@@ -1,7 +1,9 @@
-"""ante feed run backfill --since CLI 검증 테스트.
+"""ante feed run backfill/daily 날짜 옵션 CLI 검증 테스트.
 
 이슈 #1536: invalid ISO date 입력 시 CLI 경계에서 거부하고
-traceback이 stderr에 노출되지 않아야 한다.
+traceback이 stderr에 노출되지 않아야 한다 (`--since`).
+이슈 #1562: #1536 follow-up — `run backfill --until`/`run daily --date`도
+동일하게 CLI 경계에서 거부하고, 3개 옵션 모두 `CLI_INVALID_DATE` 단일 코드로 통일.
 """
 
 from __future__ import annotations
@@ -29,6 +31,21 @@ _MOCK_MASTER = Member(
 
 _EMPTY_RESULT = CollectionResult(
     mode="backfill",
+    started_at="2026-03-18T00:00:00Z",
+    finished_at="2026-03-18T00:00:01Z",
+    duration_seconds=1.0,
+    symbols_total=0,
+    symbols_success=0,
+    symbols_failed=0,
+    rows_written=0,
+    data_types=[],
+    failures=[],
+    warnings=[],
+    config_errors=[],
+)
+
+_EMPTY_DAILY_RESULT = CollectionResult(
+    mode="daily",
     started_at="2026-03-18T00:00:00Z",
     finished_at="2026-03-18T00:00:01Z",
     duration_seconds=1.0,
@@ -127,7 +144,7 @@ class TestBackfillSinceValidation:
             # stdout에 구조화된 JSON 에러
             data = json.loads(result.stdout)
             assert data["status"] == "error"
-            assert data["code"] == "invalid_date"
+            assert data["code"] == "CLI_INVALID_DATE"
             assert "not-a-date" in data["message"]
             # orchestrator는 호출되지 않아야 한다
             mock_orch.run_backfill.assert_not_awaited()
@@ -215,3 +232,249 @@ class TestBackfillSinceValidation:
 
             assert result.exit_code == 0
             mock_orch.run_backfill.assert_awaited_once()
+
+
+class TestBackfillUntilValidation:
+    """`--until` 옵션 ISO date 검증 (이슈 #1562)."""
+
+    def test_invalid_until_json_mode_returns_structured_error(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """JSON 모드에서 invalid --until은 status=error JSON, exit 1, traceback 없음."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--until",
+                    "oracle-not-a-date",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            assert "Traceback" not in (result.stderr or "")
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            assert "oracle-not-a-date" in data["message"]
+            mock_orch.run_backfill.assert_not_awaited()
+
+    def test_invalid_until_text_mode_writes_error_to_stderr(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """text 모드에서 invalid --until은 stderr Error, exit 1, traceback 없음."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--until",
+                    "oracle-not-a-date",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            stderr = result.stderr or ""
+            assert "Traceback" not in stderr
+            assert "Error:" in stderr
+            assert "잘못된 --until 날짜 형식" in stderr
+            assert "oracle-not-a-date" in stderr
+            mock_orch.run_backfill.assert_not_awaited()
+
+    def test_reproduction_since_valid_until_invalid_exits_1(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """이슈 재현 조합: --since 유효 + --until invalid → exit 1, orch 미호출."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--since",
+                    "2099-01-01",
+                    "--until",
+                    "oracle-not-a-date",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            assert "oracle-not-a-date" in data["message"]
+            mock_orch.run_backfill.assert_not_awaited()
+
+    def test_valid_iso_until_passes_through_to_orchestrator(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """정상 ISO date(--until 2099-01-01)는 검증 통과해 orchestrator로 전달된다."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "feed",
+                    "run",
+                    "backfill",
+                    "--data-path",
+                    initialized_data_path,
+                    "--until",
+                    "2099-01-01",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 0
+            mock_orch.run_backfill.assert_awaited_once()
+
+
+class TestDailyDateValidation:
+    """`run daily --date` 옵션 ISO date 검증 (이슈 #1562)."""
+
+    def test_invalid_date_json_mode_returns_structured_error(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """JSON 모드에서 invalid --date는 status=error JSON, exit 1, traceback 없음."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "feed",
+                    "run",
+                    "daily",
+                    "--data-path",
+                    initialized_data_path,
+                    "--date",
+                    "oracle-not-a-date",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            assert "Traceback" not in (result.stderr or "")
+            data = json.loads(result.stdout)
+            assert data["status"] == "error"
+            assert data["code"] == "CLI_INVALID_DATE"
+            assert "oracle-not-a-date" in data["message"]
+            mock_orch.run_daily.assert_not_awaited()
+
+    def test_invalid_date_text_mode_writes_error_to_stderr(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """text 모드에서 invalid --date는 stderr Error, exit 1, traceback 없음."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "feed",
+                    "run",
+                    "daily",
+                    "--data-path",
+                    initialized_data_path,
+                    "--date",
+                    "oracle-not-a-date",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 1
+            stderr = result.stderr or ""
+            assert "Traceback" not in stderr
+            assert "Error:" in stderr
+            assert "잘못된 --date 날짜 형식" in stderr
+            assert "oracle-not-a-date" in stderr
+            mock_orch.run_daily.assert_not_awaited()
+
+    def test_valid_iso_date_passes_through_to_orchestrator(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """정상 ISO date(--date 2025-01-01)는 검증 통과해 orchestrator로 전달된다."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "feed",
+                    "run",
+                    "daily",
+                    "--data-path",
+                    initialized_data_path,
+                    "--date",
+                    "2025-01-01",
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 0
+            mock_orch.run_daily.assert_awaited_once()
+
+    def test_no_date_option_regression(
+        self, runner: CliRunner, initialized_data_path: str
+    ) -> None:
+        """--date 미지정 시 기존 동작 유지 (검증 분기 우회)."""
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_orch = AsyncMock()
+            mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
+            mock_build.return_value = mock_orch
+
+            result = runner.invoke(
+                cli,
+                [
+                    "feed",
+                    "run",
+                    "daily",
+                    "--data-path",
+                    initialized_data_path,
+                ],
+                catch_exceptions=False,
+            )
+
+            assert result.exit_code == 0
+            mock_orch.run_daily.assert_awaited_once()
