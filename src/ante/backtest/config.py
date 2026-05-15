@@ -12,6 +12,7 @@ class BacktestConfig:
     strategy_path: str = ""
     symbols: list[str] = field(default_factory=list)
     timeframe: str = "1d"
+    exchange: str = "KRX"
     start_date: str = ""
     end_date: str = ""
     initial_balance: float = 10_000_000.0

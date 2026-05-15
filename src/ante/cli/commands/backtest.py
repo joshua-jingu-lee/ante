@@ -33,6 +33,7 @@ def backtest() -> None:
     help="초기 자금",
 )
 @click.option("--timeframe", default="1d", help="타임프레임")
+@click.option("--exchange", default="KRX", help="거래소 (기본: KRX)")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
@@ -46,6 +47,7 @@ def run(
     symbols: str | None,
     balance: float,
     timeframe: str,
+    exchange: str,
     data_path: str,
     db_path: str | None,
 ) -> None:
@@ -54,6 +56,7 @@ def run(
 
     from ante.backtest.service import BacktestService
     from ante.cli.main import get_db_path
+    from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
@@ -73,6 +76,15 @@ def run(
         )
         raise SystemExit(1)
 
+    # 거래소 검증 (CLI 경계 단일 지점 — canonical만 허용, `*`/non-canonical 거부)
+    if not is_canonical(exchange):
+        fmt.error(
+            f"유효하지 않은 거래소: {exchange!r}. "
+            f"허용 값: {', '.join(sorted(CANONICAL_EXCHANGES))}",
+            code="BACKTEST_INVALID_EXCHANGE",
+        )
+        raise SystemExit(1)
+
     config = {
         "strategy_path": strategy_path,
         "start_date": start,
@@ -80,6 +92,7 @@ def run(
         "symbols": symbols.split(",") if symbols else [],
         "initial_balance": balance,
         "timeframe": timeframe,
+        "exchange": exchange,
         "data_path": data_path,
     }
 

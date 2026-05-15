@@ -56,6 +56,7 @@ class BacktestService:
             store=store,
             start_date=validated.start_date,
             end_date=validated.end_date,
+            exchange=validated.exchange,
         )
 
         for symbol in validated.symbols:
@@ -139,6 +140,7 @@ class BacktestService:
             strategy_path=config["strategy_path"],
             symbols=config.get("symbols", []),
             timeframe=config.get("timeframe", "1d"),
+            exchange=config.get("exchange", "KRX"),
             start_date=config.get("start_date", ""),
             end_date=config.get("end_date", ""),
             initial_balance=config.get("initial_balance", 10_000_000.0),
