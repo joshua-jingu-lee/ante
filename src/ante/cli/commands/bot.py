@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from pathlib import Path
 
 import click
@@ -402,9 +403,22 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
             # 미존재 bot 을 "실재 bot 의 0 포지션" 과 구분하기 위해 포지션 조회
             # 전에 bot 존재를 먼저 확인한다. 미존재면 sentinel ``None`` 을
             # 반환하고, 실재 bot 이면 (0개 포함) list 를 반환한다 (#1558).
-            bot_row = await db.fetch_one(
-                "SELECT 1 FROM bots WHERE bot_id = ?", (bot_id,)
-            )
+            #
+            # ``bots`` 테이블은 ``BotManager.initialize()`` 에서만 생성되는데,
+            # 이 경로는 raw ``Database`` 만 쓰고 ``BotManager`` 를 초기화하지
+            # 않는다(예: ``ante init`` 직후). 테이블 자체가 없으면 정의상
+            # 해당 bot_id 는 존재할 수 없으므로 미존재 bot 과 동일하게
+            # 정규화한다(=sentinel ``None``). 단, malformed db 같은 다른
+            # ``OperationalError`` 까지 삼키지 않도록 "no such table" 메시지
+            # 일 때로만 좁힌다 (#1558).
+            try:
+                bot_row = await db.fetch_one(
+                    "SELECT 1 FROM bots WHERE bot_id = ?", (bot_id,)
+                )
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e).lower():
+                    return None
+                raise
             if bot_row is None:
                 return None
 

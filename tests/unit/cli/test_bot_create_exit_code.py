@@ -43,6 +43,19 @@ Coverage map (#1558):
       "positions":[]}`` 유지 (regression guard).
     - 실재 bot, 포지션 >=1: exit 0 + ``{"positions":[...]}`` 유지.
 
+``ante bot positions`` no-bots-table 정규화 회귀 (#1558, Codex P2):
+    ``_run_positions`` 가 bot 존재 선조회를 추가하면서, ``bots`` 테이블이
+    아직 생성되지 않은 DB(``BotManager.initialize()`` 미실행, 예: ``ante
+    init`` 직후)에서 ``sqlite3.OperationalError: no such table: bots`` 가
+    호출자까지 누설되는 신규 회귀가 생겼다. ``bots`` 테이블 부재 ⟹ 해당
+    bot_id 는 정의상 존재할 수 없으므로 미존재 bot 과 동일하게
+    ``봇을 찾을 수 없습니다`` + exit 1 로 정규화됨을 회귀 보장한다.
+
+Coverage map (#1558, Codex P2):
+    - bots 테이블이 없는 DB ``bot positions <any-id>``
+      - JSON 모드: stdout error envelope + exit 1 (OperationalError 누설 X).
+      - text 모드: stderr ``Error: 봇을 찾을 수 없습니다: ...`` + exit 1.
+
 SSOT 참조:
     - ``src/ante/cli/commands/bot.py`` (``bot_create``, ``_parse_param``,
       ``bot_positions``, canonical missing-bot 패턴은 ``bot_info``)
@@ -305,6 +318,26 @@ def _seed_db(db_path: Path, *, with_position: bool) -> None:
         conn.close()
 
 
+def _seed_db_without_bots_table(db_path: Path) -> None:
+    """``bots`` 테이블 DDL 만 생략한 변형 시드 (#1558, Codex P2).
+
+    ``_run_positions`` 는 raw ``Database`` 만 쓰고 ``BotManager.
+    initialize()`` 를 호출하지 않으므로, ``ante init`` 직후처럼 ``bots``
+    테이블이 아직 없는 상태가 실제로 발생한다. 그 상태를 재현하기 위해
+    DB 파일은 만들되 ``BOT_SCHEMA`` 적용만 건너뛴다. (``POSITION_SCHEMA``
+    는 선조회가 ``bots`` 에서 먼저 실패하므로 유무가 결과에 무관하지만,
+    "DB 파일은 존재한다" 는 사실관계를 명확히 하기 위해 적용한다.)
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(POSITION_SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 def seeded_db_path(tmp_path: Path) -> Iterator[Path]:
     """시드된 DB 경로를 ``get_db_path`` 에 주입하는 fixture.
@@ -430,3 +463,55 @@ class TestBotPositionsRealBotContractUnchanged:
         assert isinstance(positions, list) and len(positions) == 1, payload
         assert positions[0]["symbol"] == "005930", payload
         assert positions[0]["quantity"] == 10.0, payload
+
+
+class TestBotPositionsNoBotsTableNormalized:
+    """``bots`` 테이블 부재 DB 도 미존재 bot 으로 정규화된다 (#1558, Codex P2).
+
+    bot 존재 선조회가 ``sqlite3.OperationalError: no such table: bots`` 를
+    호출자까지 누설하지 않고, 형제 명령과 동일한 ``봇을 찾을 수 없습니다``
+    + exit 1 계약으로 흡수됨을 잠근다. 수정 전에는 OperationalError 가
+    누설되어 click 가 exit 1 (uncaught) 로 끝나거나 traceback 이 새어
+    ``봇을 찾을 수 없습니다`` 메시지 계약이 깨졌다.
+    """
+
+    def test_no_bots_table_json_mode_emits_envelope_and_exits_1(
+        self, runner: CliRunner, seeded_db_path: Path
+    ) -> None:
+        """JSON 모드: stdout error envelope + exit 1 (OperationalError 누설 X)."""
+        _seed_db_without_bots_table(seeded_db_path)
+
+        result = _invoke_positions(
+            runner, seeded_db_path, bot_id=_MISSING_BOT_ID, fmt="json"
+        )
+
+        assert result.exit_code == 1, (
+            f"expected exit 1 when bots table missing, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        # OperationalError 가 traceback 으로 새지 않아야 한다.
+        assert "OperationalError" not in result.stdout, result.stdout
+        assert "OperationalError" not in result.stderr, result.stderr
+        assert "no such table" not in result.stdout, result.stdout
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "", payload
+        assert _BOT_NOT_FOUND_MESSAGE in str(payload["message"]), payload
+
+    def test_no_bots_table_text_mode_emits_stderr_and_exits_1(
+        self, runner: CliRunner, seeded_db_path: Path
+    ) -> None:
+        """text 모드: stderr ``Error: 봇을 찾을 수 없습니다: ...`` + exit 1."""
+        _seed_db_without_bots_table(seeded_db_path)
+
+        result = _invoke_positions(
+            runner, seeded_db_path, bot_id=_MISSING_BOT_ID, fmt="text"
+        )
+
+        assert result.exit_code == 1, (
+            f"expected exit 1 when bots table missing, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert "OperationalError" not in result.stdout, result.stdout
+        assert "OperationalError" not in result.stderr, result.stderr
+        assert f"Error: {_BOT_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
