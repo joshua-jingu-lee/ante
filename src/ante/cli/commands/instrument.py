@@ -360,7 +360,13 @@ def instrument_import(
     # 이 검증을 통과하므로 exit 0이 회귀 보존된다.
     for idx, r in enumerate(records):
         row_exchange = r.get("exchange", "")
-        if not is_canonical(row_exchange):
+        # JSON import 행은 비문자열 exchange(list/dict/number/None 등)를
+        # 가질 수 있다. is_canonical()의 frozenset membership은 unhashable
+        # 값에 TypeError를 던지므로, 호출 전 isinstance(str) 가드로 차단해
+        # 비-canonical과 동일한 구조화 invalid-exchange 경로로 보낸다
+        # (CSV는 항상 str, CLI --exchange는 click이 str 보장 — import
+        # 행 경로만 해당).
+        if not isinstance(row_exchange, str) or not is_canonical(row_exchange):
             row_symbol = r.get("symbol", "")
             fmt.error(
                 f"유효하지 않은 거래소: {row_exchange!r} "

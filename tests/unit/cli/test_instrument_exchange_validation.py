@@ -350,6 +350,103 @@ class TestImportInvalidExchangeRow:
         assert payload["status"] == "error"
         assert payload["code"] == "INSTRUMENT_INVALID_EXCHANGE"
 
+    @pytest.mark.parametrize("bad_exchange", [[], {}, 123, None, True])
+    def test_non_string_exchange_structured_exit_not_traceback(
+        self, runner: CliRunner, tmp_path, bad_exchange
+    ) -> None:
+        """비문자열 exchange(list/dict/number/None/bool)도 traceback이 아닌
+        구조화 ``INSTRUMENT_INVALID_EXCHANGE`` exit 1로 종료한다.
+
+        Codex branch review [P2]: ``is_canonical()``의 frozenset
+        membership이 unhashable 값(``[]``/``{}``)에 ``TypeError`` 를
+        던져 traceback으로 끝나던 회귀를 닫는다.
+        """
+        json_file = tmp_path / "nonstr.json"
+        json_file.write_text(json.dumps([{"symbol": "X", "exchange": bad_exchange}]))
+
+        # text 모드: exit 1, traceback/Exception 없이 구조화 메시지.
+        result = runner.invoke(
+            cli,
+            ["instrument", "import", str(json_file)],
+        )
+        assert result.exit_code == 1, result.stderr
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            result.exception
+        )
+        assert "Traceback" not in result.stderr
+        assert "TypeError" not in result.stderr
+        assert "유효하지 않은 거래소" in result.stderr
+
+        # JSON 모드: 구조화 payload, code == INSTRUMENT_INVALID_EXCHANGE.
+        result_json = runner.invoke(
+            cli,
+            ["--format", "json", "instrument", "import", str(json_file)],
+        )
+        assert result_json.exit_code == 1, result_json.stdout
+        assert result_json.exception is None or isinstance(
+            result_json.exception, SystemExit
+        ), result_json.exception
+        payload = json.loads(result_json.stdout)
+        assert payload["status"] == "error"
+        assert payload["code"] == "INSTRUMENT_INVALID_EXCHANGE"
+
+        # dry-run도 동일 경로 (oracle probe 시그니처).
+        result_dry = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "instrument",
+                "import",
+                str(json_file),
+                "--dry-run",
+            ],
+        )
+        assert result_dry.exit_code == 1, result_dry.stdout
+        assert result_dry.exception is None or isinstance(
+            result_dry.exception, SystemExit
+        ), result_dry.exception
+        payload_dry = json.loads(result_dry.stdout)
+        assert payload_dry["code"] == "INSTRUMENT_INVALID_EXCHANGE"
+
+    def test_missing_exchange_in_later_row_rejected(
+        self, runner: CliRunner, tmp_path
+    ) -> None:
+        """첫 행 valid + 후속 행 ``exchange`` 누락 → 동일 invalid 경로.
+
+        첫 행에 ``exchange`` 가 있어 필수컬럼 검증(``records[0]`` 기준)을
+        통과한 뒤, 누락 행의 ``r.get("exchange", "")`` → ``""`` 가
+        비-canonical로 거부됨을 확인한다 (필수컬럼 검증과 비충돌).
+        """
+        json_file = tmp_path / "missing.json"
+        json_file.write_text(
+            json.dumps(
+                [
+                    {"symbol": "005930", "exchange": "KRX"},
+                    {"symbol": "X"},
+                ]
+            )
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "instrument",
+                "import",
+                str(json_file),
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == 1, result.stdout
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            result.exception
+        )
+        payload = json.loads(result.stdout)
+        assert payload["code"] == "INSTRUMENT_INVALID_EXCHANGE"
+
     def test_invalid_row_among_valid_rows_rejected(
         self, runner: CliRunner, tmp_path
     ) -> None:
