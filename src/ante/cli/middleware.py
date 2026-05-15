@@ -202,19 +202,25 @@ def require_master(fn: Callable) -> Callable:
     ``require_master_caller`` 와 동일한 invariant 를 적용한다 (#1543 — #1511
     oracle drift 수렴).
 
-    멱등(idempotent) — 이미 같은 가드가 부착된 함수에 재적용되어도 한 번만
-    감싸지도록 ``_require_auth_applied`` sentinel marker 로 dedupe 한다
-    (``require_auth`` / ``require_scope`` 와 동일 패턴). #1404
-    ``authenticated_group`` factory 가 leaf command callback 을 자동 wrapping
-    할 때, 명령 자체에 이미 부착된 본 가드의 내부 검증과 중복 호출되는 것을
-    방지한다.
+    멱등(idempotent) — 이미 ``require_master`` 가 부착된 함수에 재적용되어도
+    한 번만 감싸지도록 자체 ``_require_master_applied`` sentinel marker 로
+    dedupe 한다. ``_require_auth_applied`` 를 dedupe key 로 쓰면, callback 에
+    ``@require_auth`` 가 먼저 적용되어 있을 때 ``@require_master`` 가 자체 wrap
+    을 건너뛰어 master 검증이 발화하지 않는 idempotent 버그가 생기므로 자체
+    marker 를 분리한다 (#1543 — Codex 브랜치 리뷰 finding 1).
+
+    동시에 ``_require_auth_applied`` marker 도 함께 set 한다. 본 가드는 자체
+    적으로 ``member is None`` 인증 검증을 포함하므로, ``authenticated_group``
+    factory 가 leaf command callback 을 ``require_auth`` 로 자동 wrap 할 때
+    중복 wrap 을 방지하기 위함이다 (``require_auth`` / ``require_scope`` 와
+    동일한 보호 패턴). #1404
 
     Note:
         ``member:admin`` scope vocabulary 는 #1542 결정으로 reserved 상태로
         유지된다 (``src/ante/member/scopes.py`` SSOT). 본 데코레이터는 scope
         보유 여부를 검사하지 않으며, master 가 아니면 무조건 거부한다.
     """
-    if getattr(fn, "_require_auth_applied", False):
+    if getattr(fn, "_require_master_applied", False):
         return fn
 
     @functools.wraps(fn)

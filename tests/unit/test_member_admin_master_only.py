@@ -15,6 +15,18 @@ admin mutation 7 web routes / 6 CLI commands 는 표면 가드에서 master-only
 #1511 oracle drift 의 핵심 시그니처: 이전에는 ``member:admin`` agent 가
 표면 가드를 통과해 ``MemberService._assert_master`` 가 런타임에서 거부했다.
 본 패치 이후엔 표면 가드에서 즉시 차단되어 service 호출이 일어나지 않는다.
+
+Case count (pytest collect 기준): **41 cases** =
+  - 7 web routes × 5 personas (master / member:admin agent / non-master
+    human / non-master agent / unauth) = 35 (parametrize 확장)
+  - + 6 standalone (TestAuthBeforeBodyValidation: create-invalid-body /
+    create-malformed-json / update_scopes-invalid-body /
+    change_password-invalid-body / change_password-invalid-credential /
+    member:admin-agent-invalid-body) = 6
+  - 합계 41
+이전 보고서에 53 cases 로 잘못 기재되었던 것을 #1543 Codex 브랜치 리뷰
+finding 2 에 따라 41 로 정정한다 (matrix 자체는 변경 없음 — 산수 오류 정정).
+CLI 측 회귀는 별도 ``test_cli_member_master_only.py`` (24 cases) 에서 다룬다.
 """
 
 from __future__ import annotations
