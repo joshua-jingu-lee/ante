@@ -110,14 +110,22 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
             # rule 수집과 독립적으로 account 존재를 검증한다.
             # 미존재 account는 "실재 account의 0 rules"와 구분되어야 하며
             # (#1559) AccountNotFoundError로 분기해 exit 1로 종료한다.
-            # 이미 열린 db 핸들을 재사용하고 db.close()는 아래 finally가
-            # 단독 소유한다(lifecycle 불변).
-            from ante.account.service import AccountService
-            from ante.eventbus.bus import EventBus
-
-            account_service = AccountService(db=db, eventbus=EventBus())
-            await account_service.initialize()
-            await account_service.get(account_id)
+            #
+            # AccountService.initialize()는 모든 non-deleted account row를
+            # materialize하며 credentials를 복호화하므로, 조회 대상과 무관한
+            # 다른 계좌의 credentials 복호화 실패가 rule list를 깨뜨릴 수
+            # 있다(정상 사용 회귀). 따라서 credentials 복호화 없이 이미 열린
+            # db 핸들로 lightweight 단건 존재 쿼리만 수행한다. 쿼리 의미는
+            # AccountService.get(account_id 단건, status 필터 없음)과 일치하며
+            # 미존재 시 동일한 AccountNotFoundError 메시지로 분기한다 — 동일
+            # ACCOUNT_NOT_FOUND envelope/message 보존. db.close()는 아래
+            # finally가 단독 소유한다(lifecycle 불변).
+            account_row = await db.fetch_one(
+                "SELECT 1 FROM accounts WHERE account_id = ?",
+                (account_id,),
+            )
+            if account_row is None:
+                raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
 
             try:
                 _load_rules_from_config(engine)
