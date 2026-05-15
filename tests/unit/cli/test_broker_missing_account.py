@@ -29,7 +29,7 @@
     - status / reconcile missing-account exit code: #1535 에서 follow-up scope
       으로 남겼던 결함을 follow-up(#1556) 이 닫는다. ``status``/``reconcile``
       (without ``--fix``) × {json,text} 가 missing account 에서 exit 1 +
-      ``{"status":"error","code":"account_not_found",...}`` envelope 로 종료
+      ``{"status":"error","code":"ACCOUNT_NOT_FOUND",...}`` envelope 로 종료
       하고, ``status`` 의 **유효 계좌 disconnected/unhealthy 는 exit 0 +
       ``{connected:false, healthy:false}`` envelope** 를 유지함(contract-drift
       회귀 가드)을 ``TestStatusAndReconcileFollowupScope`` 에서 검증한다.
@@ -349,7 +349,7 @@ class TestStatusAndReconcileFollowupScope:
 
     - ``status`` 는 ``_get_broker`` 가 ``AccountNotFoundError`` 를 raise 하면
       내부 ``except AccountNotFoundError: raise`` 로 전파하고 호출부가
-      ``fmt.error(..., code="account_not_found")`` + ``SystemExit(1)`` 으로
+      ``fmt.error(..., code="ACCOUNT_NOT_FOUND")`` + ``SystemExit(1)`` 으로
       종료한다. **유효 계좌의 disconnect/unhealthy 는 기존 계약(exit 0 +
       ``{connected:false, healthy:false}`` envelope)을 그대로 유지**한다
       (contract-drift 회귀 방지).
@@ -441,7 +441,7 @@ class TestStatusAndReconcileFollowupScope:
     def test_status_missing_account_json_mode_emits_envelope_and_exits_1(
         self, runner: CliRunner
     ) -> None:
-        """status JSON 모드: missing account 는 ``account_not_found`` envelope
+        """status JSON 모드: missing account 는 ``ACCOUNT_NOT_FOUND`` envelope
         + exit 1 (#1556)."""
         result = self._invoke_status(runner, fmt="json")
 
@@ -451,7 +451,7 @@ class TestStatusAndReconcileFollowupScope:
         )
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        assert payload["code"] == "account_not_found", payload
+        assert payload["code"] == "ACCOUNT_NOT_FOUND", payload
         assert _NOT_FOUND_MESSAGE in str(payload["message"]), payload
         assert _NOT_FOUND_MESSAGE not in result.stderr, result.stderr
 
@@ -481,7 +481,7 @@ class TestStatusAndReconcileFollowupScope:
         )
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        assert payload["code"] == "account_not_found", payload
+        assert payload["code"] == "ACCOUNT_NOT_FOUND", payload
         assert _NOT_FOUND_MESSAGE in str(payload["message"]), payload
         assert _NOT_FOUND_MESSAGE not in result.stderr, result.stderr
 

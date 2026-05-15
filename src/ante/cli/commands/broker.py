@@ -144,7 +144,7 @@ def status(ctx: click.Context, account_id: str) -> None:
         try:
             result = _run(_run_status())
         except AccountNotFoundError as e:
-            fmt.error(str(e), code="account_not_found")
+            fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
 
     if fmt.is_json:
@@ -370,7 +370,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
             except Exception as e:
                 fmt.error(
                     str(e),
-                    code="account_not_found"
+                    code="ACCOUNT_NOT_FOUND"
                     if isinstance(e, AccountNotFoundError)
                     else "",
                 )
