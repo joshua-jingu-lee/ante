@@ -34,7 +34,8 @@ canonical-known vs 1.0 account-supported 구분, exchange vs market/source/broke
   - Strategy: `{KRX, NYSE, NASDAQ, AMEX, TEST, *}`
     (`src/ante/strategy/validator.py:9` `VALID_EXCHANGES`).
   - Account: `{KRX, NYSE, NASDAQ, TEST}` (`docs/specs/account/03-data-model.md:34`),
-    1.0 preset은 `KRX`,`TEST`만 (`:132`,`:140`).
+    1.0 preset은 `KRX`,`TEST`만 (`docs/specs/account/03-data-model.md`의
+    `BROKER_PRESETS` `test`/`kis-domestic` 항목).
   - DataStore: `{KRX, NYSE, NASDAQ, AMEX, TEST}`를 path migration 판별에 사용
     (`src/ante/data/store.py:26` `_KNOWN_EXCHANGES`).
 - SSOT가 없으면 oracle A7 host probe가 표면마다 invalid exchange 누락을 사후에

@@ -86,8 +86,11 @@ CanonicalExchange = {KRX, NYSE, NASDAQ, AMEX, TEST}
 - `*`는 **실제 exchange가 아니다.** `StrategyMeta.exchange` 전용 wildcard로, "OHLCV만 있으면
   어떤 시장에서도 동작하는 범용 전략"을 의미한다.
 - `*`가 허용되는 표면은 **`StrategyMeta.exchange` 단 하나**다.
-- account / instrument / data write·read path / backtest `--exchange` override 등 다른 모든
-  경계에서 `*`는 거부된다(실제 거래소 식별자가 아니므로).
+- account / instrument / DataStore write·append·경로 해석(신규 경로 생성) / backtest
+  `--exchange` override 등 다른 모든 신규 입력·경로 식별 경계에서 `*`는 거부된다(실제
+  거래소 식별자·경로가 아니므로). 기존 경로 read 호환은 `*` 거부가 아니라 "Legacy
+  out-of-vocabulary 호환 정책"이 규율한다(`*`는 저장된 legacy 경로가 될 수 없으므로
+  read에 신규 입력 검증을 적용하지 않는다).
 
 ### Canonical-known vs 1.0 runtime/account-supported
 
@@ -95,8 +98,8 @@ canonical-known(=검증 vocabulary)과 1.0 시점 account preset이 실제 제�
 
 | exchange | canonical-known | 1.0 account preset 제공 | 비고 |
 |----------|-----------------|-------------------------|------|
-| `KRX` | O | O | `kis-domestic` preset (`docs/specs/account/03-data-model.md:140`) |
-| `TEST` | O | O | `test` preset (`docs/specs/account/03-data-model.md:132`) |
+| `KRX` | O | O | `kis-domestic` preset (`docs/specs/account/03-data-model.md`의 `BROKER_PRESETS` `kis-domestic` 항목, `exchange="KRX"`) |
+| `TEST` | O | O | `test` preset (`docs/specs/account/03-data-model.md`의 `BROKER_PRESETS` `test` 항목, `exchange="TEST"`) |
 | `NYSE` | O | X | canonical-known이나 1.0 account preset 미제공 |
 | `NASDAQ` | O | X | canonical-known이나 1.0 account preset 미제공 |
 | `AMEX` | O | X | canonical-known이나 1.0 account preset 미제공 |
@@ -128,17 +131,21 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 | Instrument CLI `list`/`sync`/`import` | 허용 | 거부 | non-zero exit + 구조화 error payload (`{status:"error", code, message}`) | #1577 enforcement. **주 신규 입력 표면** (oracle `ORACLE_INVALID_EXCHANGE` 출처) |
 | Account CLI preset (`account add` 등) | preset에 정의된 exchange만 | 거부 | non-zero exit | preset 기반. preset 밖 값은 입력 불가 |
 | AccountService (생성/검증) | runtime-supported만 | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`) |
-| Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 가드가 입력 무관 즉시 409** (invariant I1; `accounts.py:139,154,364`) | **422 아님.** `exchange` 포함 모든 입력이 런타임에 차단됨 (계좌 생성은 cold-path 전용) |
-| Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural 가드가 409** (invariant I1/I4; `accounts.py:57-61`의 `STRUCTURAL_FIELDS`) | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도가 cold-path 409로 차단됨 |
-| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용.** `MUTABLE_FIELDS` 4종(`accounts.py:57-61`)은 정상 런타임 업데이트다. #1578 구현자는 이 경로를 cold-path 409로 막지 않는다 |
+| Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 가드가 입력 무관 즉시 409** (invariant I1; `src/ante/web/routes/accounts.py`의 `create_account` 핸들러가 진입 즉시 409 raise) | **422 아님.** `exchange` 포함 모든 입력이 런타임에 차단됨 (계좌 생성은 cold-path 전용) |
+| Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural 가드가 409** (invariant I1/I4; `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS`에 `exchange` 포함) | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도가 cold-path 409로 차단됨 |
+| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용.** `src/ante/web/routes/accounts.py`의 `MUTABLE_FIELDS` 4종은 정상 런타임 업데이트다. #1578 구현자는 이 경로를 cold-path 409로 막지 않는다 |
 | Account Web OpenAPI/schema 레벨 | — | — | 빈 문자열/형식 오류는 **422** | cold-path 문서(스키마 검증) 전용. 런타임 차단(409)과 다른 층 |
-| DataStore path API 메서드 표면 (`read`/`write`/`append` 등) | 허용 | 거부 | 신규 write/read path 생성 시 거부(스펙상 예외 처리) | feed/data CLI 옵션이 아니라 DataStore 메서드 인자 표면 |
+| DataStore path API — `write`/`append`/신규 경로 생성 | 허용 | 거부 | 신규 경로 생성 시 non-canonical·`*` 거부(스펙상 예외 처리) | feed/data CLI 옵션이 아니라 DataStore 메서드 인자 표면. `*`는 경로로 해석 불가 |
+| DataStore path API — `read`(기존 경로, legacy out-of-vocab 포함) | 허용 | (입력 검증 미적용) | **거부하지 않음.** 신규 입력 검증을 기존 경로 read 인자에 적용하지 않는다 | "Legacy out-of-vocabulary 호환 정책" 절 우선. 이미 저장된 legacy 경로(예: `.../ohlcv/1d/LSE/...`)는 그대로 읽힌다 |
 | `StrategyMeta.exchange` | 허용 | **허용** | validator 에러 | **`*` 유일 허용 표면** (`docs/specs/strategy/03-09-strategy-validator.md`) |
 | Backtest `--exchange` override | (목표: canonical만) | (목표: 거부) | **현재 CLI/`src/ante/backtest/`에 미구현 — spec-vs-implementation gap** | #1578 정렬 대상(옵션 신설 포함). 기존 표면처럼 서술하지 않는다 |
 
 판정 보조 노트:
 - 시나리오 1(스펙만으로 `*` 허용 여부 판단): 위 표에서 `*` 허용은 `StrategyMeta.exchange`
-  단 하나, `Instrument.exchange`/`Account.exchange`/`DataStore exchange`는 모두 `*` 거부다.
+  단 하나다. `Instrument.exchange`/`Account.exchange`/DataStore `write`·`append`·신규 경로
+  생성은 모두 `*` 거부다(`*`는 실제 거래소 식별자·경로가 아니므로). DataStore `read`는
+  신규 입력 검증을 적용하지 않으므로 `*` 거부 판정 대상이 아니다 — `*`는 저장된 legacy
+  경로가 될 수 없고, 기존 경로 read 호환은 "Legacy out-of-vocabulary 호환 정책"이 규율한다.
 - 시나리오 2(`ORACLE_INVALID_EXCHANGE`가 신규 입력에서 거부되어야 하는가): Instrument CLI
   `list`/`sync`/`import` 행에 따라 non-canonical 신규 입력은 non-zero exit + 구조화 error
   payload로 거부되어야 한다(enforcement는 #1577).
@@ -153,6 +160,10 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
   결정이 내려지기 전까지 기존 데이터는 그대로 읽힌다.
 - 즉 "out-of-vocab 값이 거부된다"는 새 데이터를 *쓰거나 입력으로 받을 때*만 적용되며, 이미
   저장된 데이터의 읽기 호환성은 깨지 않는다.
+- 이 정책은 위 매트릭스의 **DataStore `read`(기존 경로, legacy 포함)** 행에 우선한다:
+  DataStore에서 non-canonical·`*` 거부는 `write`/`append`/신규 경로 생성에만 적용되고,
+  기존 경로(예: `.../ohlcv/1d/LSE/...`) read 인자에는 신규 입력 검증을 적용하지 않는다.
+  `*`는 저장된 legacy 경로가 될 수 없으므로 경로 해석·write에서의 `*` 거부와도 충돌하지 않는다.
 
 ### 소비자 목록 + 후속 이슈 매핑
 
