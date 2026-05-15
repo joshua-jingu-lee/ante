@@ -11,18 +11,18 @@ canonical-known vs 1.0 account-supported 구분, exchange vs market/source/broke
 `## Canonical Exchange Vocabulary` 절에 둔다. 본 ADR은 결정·근거·소비자 영향만
 기록하고 계약 디테일을 중복 기재하지 않는다.
 
-핵심:
+핵심 (결정 요약 — 계약 본문은 core.md `## Canonical Exchange Vocabulary`):
 
-- `CanonicalExchange = {KRX, NYSE, NASDAQ, AMEX, TEST}` (대문자 고정 집합).
-- `*`는 실제 exchange가 아니라 `StrategyMeta.exchange` 전용 wildcard이며, 그 외
-  모든 경계(account/instrument/data write·read path/backtest override)에서 거부된다.
-- `KOSPI`/`KOSDAQ`/`KONEX`는 `exchange`가 아니라 KRX 내부 market/category이고,
-  `source`(`data_go_kr`,`dart`,`yahoo`)·`broker_type`(`kis-domestic`,`test`)은
-  exchange와 별개 차원이다.
-- canonical-known(검증 vocabulary 5종)과 1.0 account preset 제공(`KRX`,`TEST`만)은
-  구분한다.
-- 검증은 *신규 입력 경계*에만 적용한다. 기존 영속 row / 기존 Parquet path의
-  out-of-vocab 값은 read에서 거부·자동 삭제·자동 마이그레이션하지 않는다.
+- canonical set·`StrategyMeta.exchange` 전용 wildcard·exchange vs market/source/
+  broker_type 경계·canonical-known vs 1.0 account preset 구분·per-surface 거부
+  계약·legacy 호환을 **단일 계약으로 확정**하고, 그 본문은 D-016이 아니라
+  [core.md `## Canonical Exchange Vocabulary`](../specs/core/core.md#canonical-exchange-vocabulary)
+  절에 둔다. 본 ADR은 계약 디테일(거부 경계·표면별 계약·필드명)을 독립 서술하지
+  않으며, 모든 디테일은 해당 절을 단일 참조점으로 가리킨다.
+- 검증 범위의 결정: 검증은 **신규 입력·경로 식별 경계에만** 적용하고, 기존
+  영속 데이터의 `read` 호환은 깨지 않는다(legacy 무손상 — 에픽 #1561 비목표).
+  `read`가 어떻게 규율되는지의 계약 본문은 core.md의 "Legacy out-of-vocabulary
+  호환 정책" 절이 SSOT다(`read`에 신규 입력 검증 미적용).
 
 **근거**:
 
