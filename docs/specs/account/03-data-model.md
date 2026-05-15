@@ -103,8 +103,11 @@ class Account:
 
 > canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
 > `exchange`는 identity 필드이며 account는 canonical-only(`*` 거부) 표면이다. Web 런타임
-> `POST`/`PUT /api/accounts`는 cold-path 가드가 입력 무관 즉시 409(invariant I1, 422 아님),
-> 1.0 preset은 `KRX`,`TEST`만 제공한다(canonical-known 5종과 별개). 표면별 정렬은 #1578에서 다룬다.
+> `POST /api/accounts`(계좌 생성)와 `PUT /api/accounts/{account_id}`의 structural/identity
+> 필드 변경(`exchange` 등)은 cold-path 가드가 입력 무관 409(invariant I1, 422 아님)다.
+> `PUT`의 mutable-only 필드(`name`/`timezone`/`trading_hours`, `accounts.py:57-61`의
+> `MUTABLE_FIELDS`)는 런타임 허용이며 409가 아니다. 1.0 preset은 `KRX`,`TEST`만 제공한다
+> (canonical-known 5종과 별개). 표면별 정렬은 #1578에서 다룬다.
 
 ### BrokerPreset
 
