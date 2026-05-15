@@ -728,6 +728,145 @@ class TestStrategyPerformance:
         kwargs = mock_calc.await_args.kwargs
         assert kwargs["account_id"] == "acc-explicit"
 
+    def test_performance_missing_account(self, registry):
+        """strategy 존재 + 미존재 account → 404 + 계좌 not-found detail (#1563).
+
+        SELECT 1 FROM accounts WHERE account_id=? 가 row None → 404.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        fake_db = AsyncMock()
+        fake_db.fetch_one = AsyncMock(return_value=None)
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+        ) as mock_calc:
+            resp = c.get(
+                "/api/strategies/s1/performance?account_id=oracle-missing-account"
+            )
+
+        assert resp.status_code == 404
+        detail = resp.json()["detail"]
+        assert "계좌를 찾을 수 없습니다" in detail
+        assert "oracle-missing-account" in detail
+        # account 미존재이므로 metric 계산까지 가지 않는다.
+        mock_calc.assert_not_awaited()
+
+    def test_performance_real_account_regression(self, registry):
+        """regression guard: 실재 account → 200 + metrics 유지 (#1563)."""
+        from unittest.mock import AsyncMock, patch
+
+        from ante.trade.models import PerformanceMetrics
+
+        fake_db = AsyncMock()
+        fake_db.fetch_one = AsyncMock(return_value={"1": 1})
+        fake_metrics = PerformanceMetrics(total_trades=0)
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+            return_value=fake_metrics,
+        ) as mock_calc:
+            resp = c.get("/api/strategies/s1/performance?account_id=acc-real")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_trades"] == 0
+        mock_calc.assert_awaited_once()
+        assert mock_calc.await_args.kwargs["account_id"] == "acc-real"
+
+    def test_performance_missing_account_no_accounts_table(self, registry):
+        """accounts 테이블 부재 → 404 정규화, OperationalError 비누설 (#1563).
+
+        부분 초기화/legacy DB에서 ``no such table: accounts``가 전파되면
+        404 계약을 우회한다. 동일 404로 정규화하고 메시지를 누설하지 않는다.
+        """
+        import sqlite3
+        from unittest.mock import AsyncMock, patch
+
+        fake_db = AsyncMock()
+        fake_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("no such table: accounts")
+        )
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = make_authed_client(app)
+
+        with patch(
+            "ante.trade.performance.PerformanceTracker.calculate",
+            new_callable=AsyncMock,
+        ) as mock_calc:
+            resp = c.get(
+                "/api/strategies/s1/performance?account_id=oracle-missing-account"
+            )
+
+        assert resp.status_code == 404
+        detail = resp.json()["detail"]
+        assert "계좌를 찾을 수 없습니다" in detail
+        assert "no such table" not in detail
+        mock_calc.assert_not_awaited()
+
+    def test_performance_other_operational_error_propagates(self, registry):
+        """malformed db 등 다른 OperationalError는 삼키지 않고 전파 (#1563)."""
+        import sqlite3
+        from unittest.mock import AsyncMock
+
+        from fastapi.testclient import TestClient
+
+        from tests.unit.conftest import MASTER_AUTH_HEADERS
+
+        fake_db = AsyncMock()
+        fake_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("database disk image is malformed")
+        )
+
+        registry._strategies = [
+            FakeStrategyRecord(strategy_id="s1", name="s1", version="1"),
+        ]
+
+        app = create_app(
+            strategy_registry=registry,
+            db=fake_db,
+            member_service=make_master_member_service(),
+        )
+        c = TestClient(app, raise_server_exceptions=False)
+        c.headers.update(MASTER_AUTH_HEADERS)
+
+        resp = c.get("/api/strategies/s1/performance?account_id=acc-test")
+        # 404로 정규화되지 않고 서버 에러로 전파된다.
+        assert resp.status_code == 500
+
 
 class TestUpdateStrategyStatus:
     """PATCH /api/strategies/{id}/status 테스트."""
