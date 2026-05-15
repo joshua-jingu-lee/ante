@@ -3962,10 +3962,10 @@ export interface operations {
                     /** @description 거래 통화 (ISO 4217). */
                     currency: string;
                     /**
-                     * @description 대상 거래소 코드.
+                     * @description 대상 거래소 코드 (canonical exchange vocabulary).
                      * @enum {string}
                      */
-                    exchange: "KRX" | "NYSE" | "NASDAQ" | "TEST";
+                    exchange: "AMEX" | "KRX" | "NASDAQ" | "NYSE" | "TEST";
                     /** @description 시장가 매수 reserve buffer 비율 (cold-path 전용, #1333). omit 시 BrokerPreset 기본값을 사용한다 (예: kis-domestic=0.005, test=0). */
                     market_order_reserve_buffer_rate?: number;
                     /** @description 사용자에게 표시되는 이름. */

@@ -13,6 +13,7 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from ante.core.exchange import CANONICAL_EXCHANGES  # noqa: E402
 from ante.web.app import create_app  # noqa: E402
 
 
@@ -1974,13 +1975,13 @@ class TestPostAccountRequestBodySchema:
             properties.get("trading_mode")
         )
 
-        # exchange enum
-        assert properties.get("exchange", {}).get("enum") == [
-            "KRX",
-            "NYSE",
-            "NASDAQ",
-            "TEST",
-        ], properties.get("exchange")
+        # exchange enum — ante.core.exchange SSOT와 정합(canonical 5종, AMEX
+        # 포함). 결정적 알파벳 순. SSOT를 import해 향후 drift를 봉합한다
+        # (#1583): sorted(CANONICAL_EXCHANGES) == ["AMEX","KRX","NASDAQ",
+        # "NYSE","TEST"].
+        assert properties.get("exchange", {}).get("enum") == sorted(
+            CANONICAL_EXCHANGES
+        ), properties.get("exchange")
 
         # trading_mode enum (보조)
         assert properties.get("trading_mode", {}).get("enum") == [
