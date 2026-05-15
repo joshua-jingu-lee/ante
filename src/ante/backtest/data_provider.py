@@ -31,10 +31,12 @@ class BacktestDataProvider(DataProvider):
         store: ParquetStore,
         start_date: str,
         end_date: str,
+        exchange: str = "KRX",
     ) -> None:
         self._store = store
         self._start = start_date
         self._end = end_date
+        self._exchange = exchange
         self._cache: dict[str, pl.DataFrame] = {}
         self._current_idx: int = 0
         self._loaded_datasets: list[DatasetInfo] = []
@@ -59,10 +61,16 @@ class BacktestDataProvider(DataProvider):
     def load(self, symbol: str, timeframe: str) -> int:
         """데이터를 캐시에 로드. 로드된 행 수 반환."""
         key = f"{symbol}:{timeframe}"
-        df = self._store.read(symbol, timeframe, start=self._start, end=self._end)
+        df = self._store.read(
+            symbol,
+            timeframe,
+            start=self._start,
+            end=self._end,
+            exchange=self._exchange,
+        )
         self._cache[key] = df
 
-        data_dir = self._store.resolve_path(symbol, timeframe)
+        data_dir = self._store.resolve_path(symbol, timeframe, exchange=self._exchange)
         file_count = len(list(data_dir.glob("*.parquet"))) if data_dir.exists() else 0
         info = DatasetInfo(
             symbol=symbol,

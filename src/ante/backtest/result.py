@@ -70,6 +70,7 @@ class BacktestResult:
                     "commission": t.commission,
                     "slippage": t.slippage,
                     "reason": t.reason,
+                    "exchange": t.exchange,
                 }
                 for t in self.trades
             ],

@@ -30,6 +30,7 @@ class BacktestExecutor:
         buy_commission_rate: float = 0.00015,
         sell_commission_rate: float = 0.00195,
         slippage_rate: float = 0.001,
+        exchange: str = "KRX",
     ) -> None:
         self._strategy_cls = strategy_cls
         self._data = data_provider
@@ -37,6 +38,7 @@ class BacktestExecutor:
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
         self._slippage_rate = slippage_rate
+        self._exchange = exchange
 
         self._balance = initial_balance
         self._positions: dict[str, dict[str, float]] = {}
@@ -154,6 +156,7 @@ class BacktestExecutor:
                 commission=commission,
                 slippage=abs(exec_price - price) * signal.quantity,
                 reason=signal.reason,
+                exchange=self._exchange,
             )
         )
 
