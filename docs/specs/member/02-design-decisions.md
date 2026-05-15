@@ -185,7 +185,7 @@ master(human)는 scope 제한 없이 모든 작업을 수행할 수 있다. scop
 | `bot` | 봇 상태 조회 | — | 봇 생성/삭제, 시그널키 발급/갱신 | — |
 | `trade` | 거래 내역 조회 | — | — | — |
 | `treasury` | 자금 현황 조회 | — | 예산 설정/자금 투입 | — |
-| `member` | 멤버 목록/상세 조회 | — | 멤버 등록/정지/폐기/토큰 관리 | — |
+| `member` | 멤버 목록/상세 조회 | — | 멤버 등록/정지/폐기/토큰 관리 (reserved — 1.0 미사용) | — |
 | `system` | 시스템 상태 조회 | — | 시스템 상태 변경 | — |
 | `rule` | 룰 조회 | — | 룰 활성화/비활성화 | — |
 | `broker` | 브로커 상태/잔고/대사 조회 | — | — | — |
@@ -202,6 +202,24 @@ master(human)는 scope 제한 없이 모든 작업을 수행할 수 있다. scop
 검증되며, 등록되지 않은 scope 문자열은 입력 시점에 거부된다. spec doc
 매트릭스와 `SCOPE_VOCABULARY` 의 drift 는 `tests/unit/test_member_scope_drift.py`
 가 정적으로 검증한다.
+
+**`member:admin` scope의 reserved 정책 (1.0)**: `member:admin` scope는
+vocabulary에 정의되어 있으나 1.0 계약에서는 **reserved (현재 미사용)**다.
+agent에게 위임하지 않으며, 향후 agent 위임 정책(target 제한, self-escalation
+금지, token rotation 제한, master/human 보호 규칙)을 별도 이슈에서 설계한 뒤
+활성화한다. vocabulary 자체는 후속 활성화 시 호환을 위해 유지한다.
+
+**Member admin mutation 권한 모델 (1.0 — master-only)**: member admin
+mutation(`register`, `suspend`, `reactivate`, `revoke`, `rotate-token`,
+`update_scopes`, `password`)은 1.0 계약에서 **master-only**다. 모든 호출
+경로(Web API, CLI, IPC)에서 service layer `MemberService._assert_master`가
+master 외 호출자를 `PermissionError`로 거부하며, 표면 계약(Web API endpoint,
+CLI command, route-scope table)도 이 invariant에 정합한다. `member:admin`
+agent token으로의 접근은 1.0에서 허용되지 않는다.
+
+> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
+> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
 
 ### Member command runtime boundary
 

@@ -21,6 +21,30 @@ CLI가 MemberService를 직접 생성하는 maintenance fallback을 허용한다
 account cold-path처럼 서버 topology를 바꾸지는 않지만 인증 상태를 바꾸므로, 서버
 실행 중 직접 DB 수정은 금지한다.
 
+## 권한 모델 (1.0 — master-only)
+
+`member register`, `member suspend`, `member reactivate`, `member revoke`,
+`member rotate-token`, `member update-scopes`(향후), `member set-password` 같은
+member admin mutation CLI 명령은 **master-only**다. 권한 모델 SSOT는
+[02-design-decisions.md — Member admin mutation 권한 모델](02-design-decisions.md#권한-범위-scope)이며,
+서비스 진입 시점에 `MemberService._assert_master`가 호출자 principal을 검사하고
+master가 아니면 `PermissionError`를 발생시킨다.
+
+`ANTE_MEMBER_TOKEN`이 agent token(`ante_ak_*`)이거나 master 외 human 토큰이면
+명령은 service layer에서 거부되어 exit 1로 종료한다. CLI 표면 가드가 사전에 거부할 수도
+있으나, service layer 거부는 1.0 계약의 invariant다. agent 위임이 필요해지면
+별도 정책 이슈에서 reserved scope `member:admin`을 활성화한 뒤 표면을 정렬한다.
+
+`member list`, `member info`, `member list-invalid-roles`는 조회 명령이므로 본
+master-only 정책의 적용 대상이 아니다. `member reset-password`와
+`member regenerate-recovery-key`는 인증 수단이 recovery key 또는 현재 패스워드
+자체이므로 별도 공개 명령 allowlist 경로를 따른다
+([cli/03-commands.md — 공개 명령 allowlist](../cli/03-commands.md#공개-명령-allowlist--인증-면제) 참조).
+
+> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
+> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
+
 ### `ante member list`
 
 ```
@@ -39,7 +63,8 @@ ante member info strategy-dev-01 [--format json]
 
 ### `ante member register`
 
-master만 실행 가능.
+**권한: master-only**. agent token 또는 master 외 human 토큰이면 service layer
+`_assert_master`에서 거부되어 exit 1로 종료한다.
 
 ```
 ante member register \
@@ -65,11 +90,15 @@ ante member set-emoji strategy-dev-01 🦊 [--format json]
 
 ### `ante member suspend <member_id>`
 
+**권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
+
 ```
 ante member suspend strategy-dev-01 [--format json]
 ```
 
 ### `ante member reactivate <member_id>`
+
+**권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
 
 ```
 ante member reactivate strategy-dev-01 [--format json]
@@ -77,12 +106,16 @@ ante member reactivate strategy-dev-01 [--format json]
 
 ### `ante member revoke <member_id> --yes`
 
+**권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
+
 ```
 ante member revoke strategy-dev-01 --yes [--format json]
 # ⚠️ 이 작업은 되돌릴 수 없습니다. --yes 누락 시 CLI_CONFIRMATION_REQUIRED로 실패합니다.
 ```
 
 ### `ante member rotate-token <member_id>`
+
+**권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
 
 ```
 ante member rotate-token strategy-dev-01 [--format json]

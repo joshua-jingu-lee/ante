@@ -538,19 +538,29 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 > master 계정 생성은 `ante init`에 통합되었다. 별도 `ante member bootstrap` 명령은 제거됨(재설계 2026-04).
 
+권한 모델 SSOT는 [02-design-decisions.md — Member admin mutation 권한 모델](02-design-decisions.md#인증-미들웨어)와
+[../member/02-design-decisions.md — Member admin mutation 권한 모델](../member/02-design-decisions.md#권한-범위-scope)이다.
+member admin mutation은 1.0 계약에서 **master-only**이며, agent token으로 호출하면
+service layer `MemberService._assert_master`에서 거부되어 exit 1로 종료한다.
+`member:admin` scope는 vocabulary에 정의되어 있으나 reserved (1.0 미사용)다.
+
 ```bash
-ante member register --id <member_id> --type human|agent [--org <org>] [--name <name>] [--scopes <csv>]  # 멤버 등록
-ante member list [--type human|agent] [--org <org>] [--status active|suspended|revoked]  # 멤버 목록
-ante member info <member_id>                            # 멤버 상세
+ante member register --id <member_id> --type human|agent [--org <org>] [--name <name>] [--scopes <csv>]  # 멤버 등록 (master-only)
+ante member list [--type human|agent] [--org <org>] [--status active|suspended|revoked]  # 멤버 목록 (scope: member:read)
+ante member info <member_id>                            # 멤버 상세 (scope: member:read)
 ante member list-invalid-roles [--format json]          # MemberRole enum 외 role 을 가진 legacy row 식별 (운영 cleanup; runbook 07 참조)
-ante member suspend <member_id>                         # 멤버 일시 정지
-ante member reactivate <member_id>                      # 멤버 재활성화
-ante member revoke <member_id> --yes                    # 멤버 권한 영구 해제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
-ante member rotate-token <member_id>                    # 인증 토큰 갱신
-ante member set-emoji <member_id> <emoji>               # 멤버 이모지 설정
-ante member reset-password --recovery-key <key> (--new-password-env ENV_NAME | --new-password-file PATH)  # 비밀번호 초기화
-ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file PATH)  # 복구 키 재발급
+ante member suspend <member_id>                         # 멤버 일시 정지 (master-only)
+ante member reactivate <member_id>                      # 멤버 재활성화 (master-only)
+ante member revoke <member_id> --yes                    # 멤버 권한 영구 해제 (master-only, --yes 누락 시 CLI_CONFIRMATION_REQUIRED)
+ante member rotate-token <member_id>                    # 인증 토큰 갱신 (master-only)
+ante member set-emoji <member_id> <emoji>               # 멤버 이모지 설정 (master-only)
+ante member reset-password --recovery-key <key> (--new-password-env ENV_NAME | --new-password-file PATH)  # 비밀번호 초기화 (공개 명령 allowlist — recovery key가 인증 수단)
+ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file PATH)  # 복구 키 재발급 (공개 명령 allowlist — 현재 패스워드가 인증 수단)
 ```
+
+> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
+> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
 
 `member list/info`와 `member list-invalid-roles`는 오프라인 조회가 가능하다. 단,
 `member list-invalid-roles`는 `MemberService.initialize()`로 schema migration DDL을
