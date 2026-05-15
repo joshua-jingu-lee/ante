@@ -133,6 +133,22 @@ def _param_display_name(param: click.Parameter) -> str:
     return f"`{param.name}`"
 
 
+def _is_master_only(cmd: click.BaseCommand) -> bool:
+    """커맨드의 콜백 체인에서 ``_require_master_applied`` 마커를 찾는다.
+
+    ``ante.cli.middleware.require_master`` 가 부착하는 sentinel marker. master
+    HUMAN 만 통과하는 명령(member admin mutation 등, #1543) 은 scope 가 비어
+    있지만 인증이 필요하므로, ``_required_scopes`` 와 별도로 식별해 문서에
+    명시한다.
+    """
+    cb = cmd.callback
+    while cb:
+        if getattr(cb, "_require_master_applied", False):
+            return True
+        cb = getattr(cb, "__wrapped__", None)
+    return False
+
+
 def _get_required_scopes(cmd: click.BaseCommand) -> tuple[str, ...]:
     """커맨드의 콜백 체인에서 _required_scopes를 추출한다."""
     cb = cmd.callback
@@ -143,22 +159,32 @@ def _get_required_scopes(cmd: click.BaseCommand) -> tuple[str, ...]:
     return ()
 
 
-def _format_scope_cell(scopes: tuple[str, ...]) -> str:
-    """scope 목록을 마크다운 셀 텍스트로 포맷팅한다."""
+def _format_scope_cell(scopes: tuple[str, ...], *, master_only: bool = False) -> str:
+    """scope 목록을 마크다운 셀 텍스트로 포맷팅한다.
+
+    master-only 명령(#1543 — ``@require_master``) 은 scope 가 비어 있어도
+    ``master-only`` 로 표시한다. ``\u2014`` (인증 불필요) 와 혼동되지 않도록 한다.
+    """
+    if master_only:
+        return "master-only"
     if not scopes:
         return "\u2014"
     return ", ".join(f"`{s}`" for s in scopes)
 
 
-def _format_token_cell(scopes: tuple[str, ...]) -> str:
+def _format_token_cell(scopes: tuple[str, ...], *, master_only: bool = False) -> str:
     """토큰 요구 사항을 마크다운 셀 텍스트로 포맷팅한다."""
+    if master_only:
+        return "H(master)"
     if not scopes:
         return "\u2014"
     return "H\u00b7A"
 
 
-def _format_token_detail(scopes: tuple[str, ...]) -> str:
+def _format_token_detail(scopes: tuple[str, ...], *, master_only: bool = False) -> str:
     """커맨드 상세 섹션용 토큰 정보를 포맷팅한다."""
+    if master_only:
+        return "\U0001f511 Human master 전용 (#1543)"
     if not scopes:
         return "인증 불필요"
     return "\U0001f511 Human(무제한) / Agent(scope 필요)"
@@ -261,8 +287,9 @@ def _write_summary_table(
             help_text = cmd.help.strip().split("\n")[0]
 
         scopes = _get_required_scopes(cmd)
-        scope_cell = _format_scope_cell(scopes)
-        token_cell = _format_token_cell(scopes)
+        master_only = _is_master_only(cmd)
+        scope_cell = _format_scope_cell(scopes, master_only=master_only)
+        token_cell = _format_token_cell(scopes, master_only=master_only)
 
         out.write(
             f"| `ante {full_name}` | {help_text} | {scope_cell} | {token_cell} |\n"
@@ -272,6 +299,7 @@ def _write_summary_table(
     out.write(
         "> **H**: Human 토큰 (scope 무제한) · "
         "**A**: Agent 토큰 (해당 scope 필요) · "
+        "**H(master)**: Human master 전용 (#1543) · "
         "**\u2014**: 인증 불필요\n\n"
     )
     out.write("---\n\n")
@@ -295,8 +323,9 @@ def _write_command_detail(
 
     # scope·토큰 정보
     scopes = _get_required_scopes(cmd)
-    scope_text = _format_scope_cell(scopes)
-    token_text = _format_token_detail(scopes)
+    master_only = _is_master_only(cmd)
+    scope_text = _format_scope_cell(scopes, master_only=master_only)
+    token_text = _format_token_detail(scopes, master_only=master_only)
     out.write(f"- **필요 scope**: {scope_text}\n")
     out.write(f"- **토큰**: {token_text}\n\n")
 

@@ -615,13 +615,15 @@ class TestSessionCookieMasterSuccess:
 
 
 class TestNonMaster403:
-    """인증된 non-master + member:admin scope 없음 → 403 (web layer 차단).
+    """인증된 non-master → 403 (web layer 차단, master-only 표면 가드).
 
-    #1407 이후 5개 mutation route (suspend / reactivate / revoke / rotate_token /
-    update_scopes) 는 ``require_member_admin`` 의존성으로 web layer 에서 먼저
-    403 을 raise 한다. 따라서 service 호출은 일어나지 않는다.
+    #1543 이후 6개 mutation route (suspend / reactivate / revoke / rotate_token /
+    update_scopes / change_password) 는 ``require_master_caller`` 의존성으로 web
+    layer 에서 먼저 403 을 raise 한다. 따라서 service 호출은 일어나지 않는다.
 
-    ``change_password`` 도 ``require_member_admin`` 로 동일한 동작.
+    ``member:admin`` scope 를 보유한 agent 도 표면 가드에서 거부된다 (#1542
+    spec 결정 — master-only 계약). 별도 ``TestMemberAdminScopeAgent403`` 에서
+    명시적으로 회귀를 잠근다.
     """
 
     @pytest.mark.parametrize(

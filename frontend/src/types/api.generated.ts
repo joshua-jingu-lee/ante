@@ -143,6 +143,11 @@ export type paths = {
          * @description 계좌 재활성화. 인증된 master/human 또는 ``account:write`` scope 를 보유한
          *     agent 만 호출 가능 (#1407 — spec ``account:write`` 정합, #1352
          *     master_caller 에서 마이그레이션).
+         *
+         *     ``suspend_account``와 동일한 raw body 파싱 패턴(빈 body / null / ``{}``는
+         *     통과, 비-object / malformed JSON / extra key dict는 422)을 적용한다
+         *     (#1510). 인증 가드는 dependency level이므로 body validation보다 먼저
+         *     실행되며, invalid body 시에는 service / audit 호출이 발생하지 않는다.
          */
         post: operations["activate_account_api_accounts__account_id__activate_post"];
         delete?: never;
@@ -875,19 +880,21 @@ export type paths = {
         put?: never;
         /**
          * Create Member
-         * @description 멤버 등록. 토큰 1회 반환. 인증된 master/human 또는 ``member:admin`` scope
-         *     를 보유한 agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
+         * @description 멤버 등록. 토큰 1회 반환. 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT
+         *     ``docs/specs/web-api/11-route-scope-table.md``). ``member:admin`` scope 를
+         *     보유한 agent 도 표면 가드에서 거부된다 (#1511 oracle drift 수렴).
          *
          *     인증 가드는 body validation보다 **반드시 먼저** 실행된다(#1339 P2). FastAPI
          *     가 ``body: MemberCreateRequest`` 파라미터를 먼저 파싱하면 Authorization
          *     헤더 미존재 + 필수 필드 누락 케이스에서 401 이 아니라 422 가 먼저 응답되어
          *     "missing or invalid Authorization header는 401" 계약이 깨진다. 이 이유로
-         *     본 라우트는 ``request: Request`` 와 ``require_member_admin`` 만 받고 raw
+         *     본 라우트는 ``request: Request`` 와 ``require_master_caller`` 만 받고 raw
          *     body 를 직접 파싱한다 (``update_account`` SSOT 패턴 일치).
          *
          *     핸들러 단계 순서:
-         *     1. **인증 가드 (최우선, ``Depends(require_member_admin)``)** — caller 빈
-         *        → 401, 권한 없음 → 403, 비활성 멤버 → 403.
+         *     1. **인증 가드 (최우선, ``Depends(require_master_caller)``)** — caller 빈
+         *        → 401, master 아님 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽고 JSON 파싱 — 실패 시 422.
          *     3. ``MemberCreateRequest.model_validate`` — ValidationError → 422.
          *     4. ``svc.register`` 호출. ``PermissionError`` → 403, ``ValueError`` → 400.
@@ -935,9 +942,10 @@ export type paths = {
         head?: never;
         /**
          * Change Password
-         * @description 비밀번호 변경 (human 멤버 전용). 인증된 master/human 또는
-         *     ``member:admin`` scope 를 보유한 agent 만 호출 가능 (#1407 — spec
-         *     ``member:admin`` 정합, #1377 master_caller 에서 마이그레이션).
+         * @description 비밀번호 변경 (human 멤버 전용). 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT, #1377 master_caller 에서
+         *     마이그레이션 후 #1407 ``member:admin`` 표면 가드 회귀 → #1543 master-only
+         *     재정렬).
          *
          *     배경: oracle A7 finding (#1377) — 본 라우트는 인증 없이 credential check
          *     (``svc.change_password``의 old-password 비교) 까지 도달했다. ``_caller_id``
@@ -956,8 +964,8 @@ export type paths = {
          *
          *     핸들러 단계 순서:
          *
-         *     1. 인증 가드 (``Depends(require_member_admin)``) — caller 빈 → 401,
-         *        권한 없음 → 403, 비활성 멤버 → 403. credential check 도달 전에 모두
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        master 아님 → 403, 비활성 멤버 → 403. credential check 도달 전에 모두
          *        차단된다.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``PasswordChangeRequest.model_validate`` — ValidationError → 422.
@@ -981,8 +989,8 @@ export type paths = {
         put?: never;
         /**
          * Reactivate Member
-         * @description 멤버 재활성화. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
-         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
+         * @description 멤버 재활성화. 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT).
          */
         post: operations["reactivate_member_api_members__member_id__reactivate_post"];
         delete?: never;
@@ -1002,8 +1010,8 @@ export type paths = {
         put?: never;
         /**
          * Revoke Member
-         * @description 멤버 영구 폐기. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
-         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
+         * @description 멤버 영구 폐기. 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT).
          */
         post: operations["revoke_member_api_members__member_id__revoke_post"];
         delete?: never;
@@ -1023,8 +1031,8 @@ export type paths = {
         put?: never;
         /**
          * Rotate Token
-         * @description 토큰 재발급. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
-         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
+         * @description 토큰 재발급. 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT).
          *
          *     인증 없이 token rotation 응답에 접근하면 token 값 자체가 노출되므로,
          *     가장 먼저 차단해야 한다.
@@ -1046,16 +1054,16 @@ export type paths = {
         get?: never;
         /**
          * Update Scopes
-         * @description 권한 범위 변경. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
-         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
+         * @description 권한 범위 변경. 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT).
          *
          *     Raw body 파싱 패턴으로 인증 가드가 body validation 보다 우선 실행되도록
          *     한다. FastAPI 가 ``body: ScopesUpdateRequest`` 를 먼저 검증하면 unauth +
          *     bad-body 시 401 이 아닌 422 가 먼저 반환되어 contract 가 깨진다.
          *
          *     핸들러 단계 순서:
-         *     1. 인증 가드 (``Depends(require_member_admin)``) — caller 빈 → 401,
-         *        권한 없음 → 403, 비활성 멤버 → 403.
+         *     1. 인증 가드 (``Depends(require_master_caller)``) — caller 빈 → 401,
+         *        master 아님 → 403, 비활성 멤버 → 403.
          *     2. raw bytes 읽기 + JSON 파싱 — 실패 시 422.
          *     3. ``ScopesUpdateRequest.model_validate`` — ValidationError → 422.
          *     4. ``svc.update_scopes`` 호출. ``ValueError`` → 404,
@@ -1080,8 +1088,8 @@ export type paths = {
         put?: never;
         /**
          * Suspend Member
-         * @description 멤버 일시 정지. 인증된 master/human 또는 ``member:admin`` scope 를 보유한
-         *     agent 만 호출 가능 (#1407 — spec ``member:admin`` 정합).
+         * @description 멤버 일시 정지. 인증된 master 만 호출 가능
+         *     (#1543 — spec ``master-only`` 정합, #1542 SSOT).
          */
         post: operations["suspend_member_api_members__member_id__suspend_post"];
         delete?: never;
@@ -2653,7 +2661,7 @@ export type components = {
         };
         /**
          * MemberCreateRequest
-         * @description POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
+         * @description POST /api/members 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1339, #1543). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         MemberCreateRequest: {
             /** @description 고유 식별자. */
@@ -2884,7 +2892,7 @@ export type components = {
         };
         /**
          * PasswordChangeRequest
-         * @description PATCH /api/members/{member_id}/password 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1377). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
+         * @description PATCH /api/members/{member_id}/password 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1377, #1543). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         PasswordChangeRequest: {
             /** New Password */
@@ -3238,7 +3246,7 @@ export type components = {
         };
         /**
          * ScopesUpdateRequest
-         * @description PUT /api/members/{member_id}/scopes 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1351). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
+         * @description PUT /api/members/{member_id}/scopes 입력 contract. 인증된 master 호출자만 사용할 수 있다(#1351, #1543). Bearer 토큰 또는 유효한 ante_session 쿠키 중 하나라도 있어야 하며, 둘 다 없거나 둘 다 invalid면 body validation 전에 401로 차단된다.
          */
         ScopesUpdateRequest: {
             /** @description 변경할 권한 범위 목록. 각 원소는 SCOPE_VOCABULARY (#1439, SSOT: ``src/ante/member/scopes.py``) 에 등록된 문자열이어야 한다. 미등록 문자열은 422 로 거부된다. */
@@ -5783,7 +5791,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied (master, human 멤버 또는 member:admin scope 보유 agent 만 허용). */
+            /** @description Permission denied (master 만 허용 — #1543, #1542 SSOT). ``member:admin`` scope 를 보유한 agent 도 거부된다. */
             403: {
                 headers: {
                     [name: string]: unknown;

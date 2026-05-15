@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-14
+> 마지막 갱신: 2026-05-15
 
 ## 목차
 
@@ -196,12 +196,12 @@ ante [OPTIONS] <command>
 | `ante member list` | 멤버 목록 조회. | `member:read` | H·A |
 | `ante member info` | 멤버 상세 정보 조회. | `member:read` | H·A |
 | `ante member list-invalid-roles` | ``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468). | `member:read` | H·A |
-| `ante member register` | 멤버 등록 (토큰 발급). | `member:admin` | H·A |
-| `ante member set-emoji` | 멤버 이모지 설정/변경. | `member:admin` | H·A |
-| `ante member suspend` | 멤버 일시 정지. | `member:admin` | H·A |
-| `ante member reactivate` | 멤버 재활성화. | `member:admin` | H·A |
-| `ante member revoke` | 멤버 영구 폐기. | `member:admin` | H·A |
-| `ante member rotate-token` | 토큰 재발급 (기존 토큰 즉시 무효화). | `member:admin` | H·A |
+| `ante member register` | 멤버 등록 (토큰 발급). | master-only | H(master) |
+| `ante member set-emoji` | 멤버 이모지 설정/변경. | master-only | H(master) |
+| `ante member suspend` | 멤버 일시 정지. | master-only | H(master) |
+| `ante member reactivate` | 멤버 재활성화. | master-only | H(master) |
+| `ante member revoke` | 멤버 영구 폐기. | master-only | H(master) |
+| `ante member rotate-token` | 토큰 재발급 (기존 토큰 즉시 무효화). | master-only | H(master) |
 | `ante member reset-password` | Recovery Key로 패스워드 리셋 (인증 불필요). | — | — |
 | `ante member regenerate-recovery-key` | Recovery Key 재발급 (인증 불필요). | — | — |
 | `ante rule list` | 룰 목록 조회. | `rule:read` | H·A |
@@ -229,7 +229,7 @@ ante [OPTIONS] <command>
 | `ante feed status` | 수집 상태를 조회한다. | `data:read` | H·A |
 | `ante feed inject` | 외부 CSV 파일에서 과거 데이터를 수동 주입한다. | `data:write` | H·A |
 
-> **H**: Human 토큰 (scope 무제한) · **A**: Agent 토큰 (해당 scope 필요) · **—**: 인증 불필요
+> **H**: Human 토큰 (scope 무제한) · **A**: Agent 토큰 (해당 scope 필요) · **H(master)**: Human master 전용 (#1543) · **—**: 인증 불필요
 
 ---
 
@@ -505,7 +505,7 @@ ante audit list [OPTIONS]
 | `--from-date` | - | TEXT | — | 시작 날짜 (YYYY-MM-DD) |
 | `--to-date` | - | TEXT | — | 종료 날짜 (YYYY-MM-DD) |
 | `--limit` | - | INT (1~200) | 20 | 조회 건수 |
-| `--offset` | - | INTEGER | 0 | 오프셋 |
+| `--offset` | - | INT (0~) | 0 | 오프셋 |
 
 
 ---
@@ -1079,7 +1079,7 @@ ante config history <KEY> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--limit`, `-n` | - | INTEGER | 20 | 조회 건수 (기본 20) |
+| `--limit`, `-n` | - | INT (1~) | 20 | 조회 건수 (기본 20) |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1328,7 +1328,7 @@ ante backtest history <STRATEGY_NAME> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--limit` | - | INTEGER | 20 | 조회 건수 |
+| `--limit` | - | INT (1~) | 20 | 조회 건수 |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
@@ -1503,7 +1503,7 @@ ante instrument search <KEYWORD> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--limit` | - | INTEGER | 20 | 최대 결과 수 |
+| `--limit` | - | INT (1~) | 20 | 최대 결과 수 |
 | `--listed-only` | - | BOOLEAN | false | 상장 종목만 검색 |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
@@ -1613,8 +1613,8 @@ ante member list-invalid-roles [OPTIONS]
 
 멤버 등록 (토큰 발급).
 
-- **필요 scope**: `member:admin`
-- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
 ante member register [OPTIONS]
@@ -1636,8 +1636,8 @@ ante member register [OPTIONS]
 
 멤버 이모지 설정/변경.
 
-- **필요 scope**: `member:admin`
-- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
 ante member set-emoji <MEMBER_ID> <EMOJI>
@@ -1655,8 +1655,8 @@ ante member set-emoji <MEMBER_ID> <EMOJI>
 
 멤버 일시 정지.
 
-- **필요 scope**: `member:admin`
-- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
 ante member suspend <MEMBER_ID>
@@ -1673,8 +1673,8 @@ ante member suspend <MEMBER_ID>
 
 멤버 재활성화.
 
-- **필요 scope**: `member:admin`
-- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
 ante member reactivate <MEMBER_ID>
@@ -1693,8 +1693,8 @@ ante member reactivate <MEMBER_ID>
 
 ``--yes`` 누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
 
-- **필요 scope**: `member:admin`
-- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
 ante member revoke <MEMBER_ID> [OPTIONS]
@@ -1717,8 +1717,8 @@ ante member revoke <MEMBER_ID> [OPTIONS]
 
 토큰 재발급 (기존 토큰 즉시 무효화).
 
-- **필요 scope**: `member:admin`
-- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
 ante member rotate-token <MEMBER_ID>
@@ -1961,7 +1961,7 @@ ante trade list [OPTIONS]
 | `--bot` | - | TEXT | — | 봇 ID 필터 |
 | `--from` | - | TEXT | — | 시작일 (YYYY-MM-DD) |
 | `--to` | - | TEXT | — | 종료일 (YYYY-MM-DD) |
-| `--limit` | - | INTEGER | 50 | 최대 조회 수 |
+| `--limit` | - | INT (1~) | 50 | 최대 조회 수 |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 

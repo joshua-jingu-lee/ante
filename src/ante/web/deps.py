@@ -550,7 +550,18 @@ require_config_read = require_scope("config:read")
 require_data_read = require_scope("data:read")
 require_data_write = require_scope("data:write")
 require_member_read = require_scope("member:read")
-require_member_admin = require_scope("member:admin")
+# ``require_member_admin`` 은 #1407 에서 ``require_scope("member:admin")`` 으로
+# 도입되었으나, #1511 oracle drift 분석 결과 member admin mutation 은 master-only
+# 계약임이 #1542 에서 spec SSOT (``docs/specs/web-api/11-route-scope-table.md``)
+# 로 확정되었다. ``MemberService._assert_master`` 가 런타임에서 거부하므로 표면
+# 가드만 ``member:admin`` agent 를 허용하는 것은 contract drift 였다.
+#
+# #1543: 표면 가드도 master-only 로 정렬한다. backward-compat 을 위해 symbol 은
+# 보존하되 의미를 ``require_master_caller`` 로 재할당한다 — 외부 import (라우트,
+# 테스트) 는 그대로 동작하지만 실제 권한 검증은 master-only 로 강제된다.
+# ``member:admin`` scope vocabulary 는 #1542 결정에 따라 reserved 상태로 유지된다
+# (``src/ante/member/scopes.py`` SSOT, 제거 금지).
+require_member_admin = require_master_caller
 require_report_read = require_scope("report:read")
 require_rule_read = require_scope("rule:read")
 require_rule_admin = require_scope("rule:admin")

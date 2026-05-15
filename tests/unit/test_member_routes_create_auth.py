@@ -347,11 +347,12 @@ class TestCreateMemberAuthGuard:
         client: TestClient,
         member_service: FakeMemberService,
     ) -> None:
-        """일반 멤버의 세션 쿠키 + member:admin scope 없음 → 403.
+        """일반 멤버 (non-master) 의 세션 쿠키 → 403.
 
-        #1407 이후 ``require_member_admin`` 의존성이 web layer 에서 먼저
+        #1543 이후 ``require_master_caller`` 의존성이 web layer 에서 먼저
         403 을 raise 하므로 ``register`` 는 호출되지 않는다. 세션 쿠키 인증
-        자체는 통과(401 아님)했음을 status code 로 확인한다.
+        자체는 통과(401 아님)했음을 status code 로 확인한다. ``member:admin``
+        scope 보유 agent 도 동일하게 거부된다 (#1542 master-only 계약).
         """
         client.cookies.set("ante_session", "agent-session-id")
         resp = client.post("/api/members", json=_payload())
