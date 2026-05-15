@@ -8,6 +8,21 @@ import click
 
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
+
+# 비-canonical exchange 공통 거부 (list/sync/import 3 ingress).
+_INVALID_EXCHANGE_CODE = "INSTRUMENT_INVALID_EXCHANGE"
+# canonical이나 현재 sync source(KIS domestic/KRX)가 미지원 (sync 전용, 축 B).
+_SYNC_SOURCE_UNSUPPORTED_CODE = "INSTRUMENT_SYNC_SOURCE_UNSUPPORTED"
+# KIS sync source(KISDomesticAdapter=domestic-stock/KOSPI/KOSDAQ master)가
+# 지원하는 canonical exchange. KRX 도메인 전용 계약 근거 (broker/kis.py
+# ``KISAdapter = KISDomesticAdapter``). 나머지 canonical은 source 미지원.
+_SYNC_SUPPORTED_EXCHANGES: frozenset[str] = frozenset({"KRX"})
+
+
+def _allowed_exchanges_hint() -> str:
+    """에러 메시지용 canonical 허용값 — 정렬 고정 (error-code SSOT)."""
+    return ", ".join(sorted(CANONICAL_EXCHANGES))
 
 
 @click.group()
@@ -39,6 +54,15 @@ def instrument_list(
 
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
+
+    # Axis 1 — ingress 옵션 검증: exchange 사용 전 canonical 검증.
+    # `*` 도 비-canonical이라 거부됨 (StrategyMeta 전용 wildcard).
+    if not is_canonical(exchange):
+        fmt.error(
+            f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}",
+            code=_INVALID_EXCHANGE_CODE,
+        )
+        ctx.exit(1)
 
     async def _run() -> list[dict]:
         db = Database(resolved_db_path)
@@ -103,6 +127,30 @@ def sync(
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
     resolved_config_dir = get_config_dir(ctx)
+
+    # Axis 1 — ingress 옵션 검증: 비-canonical exchange 거부 (KISAdapter
+    # 호출 전). `*` 도 비-canonical이라 거부됨.
+    if not is_canonical(exchange):
+        fmt.error(
+            f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}",
+            code=_INVALID_EXCHANGE_CODE,
+        )
+        ctx.exit(1)
+
+    # Axis 3 — sync source-binding (축 B): canonical 검증 통과 후,
+    # 현재 sync source(KIS domestic/KRX)가 미지원하는 canonical
+    # exchange (= CANONICAL_EXCHANGES - {"KRX"}, 즉 NYSE/NASDAQ/AMEX/TEST)
+    # 이면 invalid과 구분되는 별도 에러로 거부한다. canonical을 invalid로
+    # 거부하지 않는다 (축 A/B 불변식).
+    if exchange not in _SYNC_SUPPORTED_EXCHANGES:
+        supported = ", ".join(sorted(_SYNC_SUPPORTED_EXCHANGES))
+        fmt.error(
+            f"거래소 {exchange!r}는 canonical이나 현재 sync source"
+            f"(KIS domestic/KRX)가 미지원합니다 — invalid exchange 아님. "
+            f"sync 지원 거래소: {supported}",
+            code=_SYNC_SOURCE_UNSUPPORTED_CODE,
+        )
+        ctx.exit(1)
 
     async def _run() -> dict:
         config = Config.load(config_dir=resolved_config_dir)
@@ -305,6 +353,22 @@ def instrument_import(
     if "symbol" not in first or "exchange" not in first:
         fmt.error("필수 컬럼 누락: symbol, exchange가 필요합니다.")
         ctx.exit(1)
+
+    # Axis 2 — import 행별 검증: dry-run preview/실저장 전, 각 행
+    # exchange를 canonical 검증한다. 하나라도 비-canonical이면 해당 행
+    # (symbol/exchange) 식별 포함 에러로 거부한다. 유효 입력의 --dry-run은
+    # 이 검증을 통과하므로 exit 0이 회귀 보존된다.
+    for idx, r in enumerate(records):
+        row_exchange = r.get("exchange", "")
+        if not is_canonical(row_exchange):
+            row_symbol = r.get("symbol", "")
+            fmt.error(
+                f"유효하지 않은 거래소: {row_exchange!r} "
+                f"(행 {idx + 1}, symbol={row_symbol!r}). "
+                f"허용 값: {_allowed_exchanges_hint()}",
+                code=_INVALID_EXCHANGE_CODE,
+            )
+            ctx.exit(1)
 
     instruments = [
         Instrument(
