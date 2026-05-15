@@ -15,6 +15,26 @@
   잔존하지만 oracle probe signature에 미포함되어 본 PR Non-Goals (follow-up 후보).
 - ``Formatter.error()`` 자체는 미변경 — ``strategy validate`` 등 ``fmt.error`` 후
   추가 errors/warnings를 계속 출력하는 호출자 회귀 회피.
+
+``ante signal connect`` 연결 실패 exit code 회귀 (#1560):
+``signal connect``의 ``_run_connect``(``src/ante/cli/commands/signal.py``)에는
+연결 실패 가드 4개가 모두 ``_err(...)``(stderr 출력) 후 ``return``으로 끝나
+process exit code가 0으로 남던 결함이 있었다(oracle A7 probe:
+invalid key가 ``Invalid signal key``를 stderr로 내면서 returncode 0).
+
+자동화 호출자는 process exit code를 1차 신호로 사용하므로 연결 실패는
+non-zero exit이어야 한다. 4개 가드(invalid key / bot not found / bot not
+running / 시그널 미수용)는 모두 동일 invariant("signal connect 연결 실패
+→ exit 1")를 공유하므로 한쪽만 고치면 실패 사유별 exit code가 갈린다
+(#1557 narrow-scope 선례: 동일 결함 분기 일괄 정렬, half-fix 회피).
+4개 가드 전부 ``raise SystemExit(1)``로 정렬되며, ``_err`` stderr 메시지·
+문구는 그대로 유지(streaming 명령 — JSON envelope 비대상)되고, 정상 경로
+(``_err("Connected ...")`` 안내 후 ``channel.run()`` 정상 반환 → exit 0)는
+불변임을 ``TestSignalConnect*`` 에서 회귀 보장한다.
+
+``signal_connect``는 ``asyncio.run(_run_connect(key))``만 호출하므로
+``SystemExit(1)``이 ``finally: await db.close()`` 실행 후 asyncio.run
+경계를 통해 process exit code 1로 전파됨을 CliRunner exit_code로 확인한다.
 """
 
 from __future__ import annotations
@@ -429,3 +449,162 @@ class TestMemberInfoMissingExit:
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = json.loads(result.stdout)
         assert payload["member_id"] == "m-1"
+
+
+# ── signal connect 연결 실패 exit code (#1560) ────────────
+
+
+def _invoke_signal_connect(
+    runner: CliRunner,
+    *,
+    bot_id: str | None,
+    bot: object | None,
+    channel_runs: bool = False,
+) -> object:
+    """``signal connect``의 의존성을 mock한 뒤 invoke한다.
+
+    ``_run_connect``는 함수 로컬 import로 ``Database``/``SignalKeyManager``/
+    ``BotManager``/``SignalChannel``/``get_db_path``를 resolve하므로 각 원본
+    모듈 속성을 패치하면 결정적으로 가드 분기를 탄다.
+
+    Args:
+        bot_id: ``SignalKeyManager.validate_key`` 반환값. ``None``이면
+            invalid-key 가드.
+        bot: ``BotManager.get_bot`` 반환값. ``None``이면 bot-not-found 가드.
+            객체면 status/strategy 속성으로 나머지 가드를 제어한다.
+        channel_runs: ``True``면 ``SignalChannel.run``을 정상 반환 mock으로
+            교체해 정상 경로(exit 0)를 검증한다.
+    """
+    mock_db = MagicMock()
+    mock_db.connect = AsyncMock()
+    mock_db.close = AsyncMock()
+
+    mock_skm = MagicMock()
+    mock_skm.initialize = AsyncMock()
+    mock_skm.validate_key = AsyncMock(return_value=bot_id)
+
+    mock_manager = MagicMock()
+    mock_manager.initialize = AsyncMock()
+    mock_manager.get_bot = MagicMock(return_value=bot)
+
+    mock_channel = MagicMock()
+    mock_channel.run = AsyncMock(return_value=None)
+
+    with (
+        patch("ante.core.database.Database", return_value=mock_db),
+        patch(
+            "ante.bot.signal_key.SignalKeyManager",
+            return_value=mock_skm,
+        ),
+        patch(
+            "ante.bot.manager.BotManager",
+            return_value=mock_manager,
+        ),
+        patch(
+            "ante.bot.signal_channel.SignalChannel",
+            return_value=mock_channel,
+        ),
+    ):
+        return runner.invoke(cli, ["signal", "connect", "--key", "sk_probe"])
+
+
+def _running_bot(*, accepts_external_signals: bool) -> MagicMock:
+    """RUNNING 상태 + 지정한 시그널 수용 여부를 가진 bot mock."""
+    from ante.bot.config import BotStatus
+
+    bot = MagicMock()
+    bot.status = BotStatus.RUNNING
+    bot.strategy = MagicMock()
+    bot.strategy.meta = MagicMock()
+    bot.strategy.meta.accepts_external_signals = accepts_external_signals
+    bot._ctx = MagicMock()
+    return bot
+
+
+class TestSignalConnectInvalidKeyExit:
+    """``signal connect --key <invalid>`` 은 exit 1 + stderr (#1560 결함 재현).
+
+    결함 시점에는 ``Invalid signal key``를 stderr로 내면서 returncode 0이었다.
+    """
+
+    def test_invalid_key_exits_nonzero(self, runner: CliRunner) -> None:
+        result = _invoke_signal_connect(runner, bot_id=None, bot=None)
+
+        assert result.exit_code == 1, (
+            f"expected exit 1 for invalid key, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert "Invalid signal key" in result.stderr, result.stderr
+
+
+class TestSignalConnectBotNotFoundExit:
+    """키는 유효하나 봇이 없으면 exit 1 + stderr ``Bot not found:`` (#1560)."""
+
+    def test_bot_not_found_exits_nonzero(self, runner: CliRunner) -> None:
+        result = _invoke_signal_connect(runner, bot_id="bot-1", bot=None)
+
+        assert result.exit_code == 1, (
+            f"expected exit 1 for missing bot, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert "Bot not found: bot-1" in result.stderr, result.stderr
+
+
+class TestSignalConnectBotNotRunningExit:
+    """봇이 RUNNING이 아니면 exit 1 + stderr ``Bot is not running:`` (#1560)."""
+
+    def test_bot_not_running_exits_nonzero(self, runner: CliRunner) -> None:
+        from ante.bot.config import BotStatus
+
+        bot = MagicMock()
+        bot.status = BotStatus.STOPPED
+
+        result = _invoke_signal_connect(runner, bot_id="bot-1", bot=bot)
+
+        assert result.exit_code == 1, (
+            f"expected exit 1 for non-running bot, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert "Bot is not running: bot-1" in result.stderr, result.stderr
+
+
+class TestSignalConnectRejectsExternalSignalsExit:
+    """전략이 외부 시그널을 수용하지 않으면 exit 1 + stderr (#1560)."""
+
+    def test_not_accepting_signals_exits_nonzero(self, runner: CliRunner) -> None:
+        bot = _running_bot(accepts_external_signals=False)
+
+        result = _invoke_signal_connect(runner, bot_id="bot-1", bot=bot)
+
+        assert result.exit_code == 1, (
+            f"expected exit 1 for signal-rejecting bot, "
+            f"got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert "Bot bot-1 does not accept external signals" in result.stderr, (
+            result.stderr
+        )
+
+
+class TestSignalConnectSuccessPathKeepsExit0:
+    """contract-drift 가드: 정상 연결·종료는 기존 계약(exit 0) 유지 (#1560).
+
+    4개 실패 가드를 ``raise SystemExit(1)``로 정렬하되, 정상 경로
+    (``_err("Connected ...")`` 안내 후 ``channel.run()`` 정상 반환)는
+    blanket "signal connect → exit 1"로 번지지 않고 exit 0을 유지해야 한다.
+    """
+
+    def test_channel_run_returns_keeps_exit_0(self, runner: CliRunner) -> None:
+        bot = _running_bot(accepts_external_signals=True)
+
+        result = _invoke_signal_connect(
+            runner, bot_id="bot-1", bot=bot, channel_runs=True
+        )
+
+        assert result.exit_code == 0, (
+            f"expected exit 0 for normal channel close, "
+            f"got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        # 안내용 _err은 실패가 아니므로 그대로 stderr로 나간다.
+        assert "Connected to bot bot-1" in result.stderr, result.stderr

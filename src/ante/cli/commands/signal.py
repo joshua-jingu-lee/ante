@@ -45,7 +45,7 @@ async def _run_connect(key: str) -> None:
         bot_id = await skm.validate_key(key)
         if not bot_id:
             _err("Invalid signal key")
-            return
+            raise SystemExit(1)
 
         # 2. 봇 존재 및 상태 확인
         eventbus = EventBus()
@@ -55,16 +55,16 @@ async def _run_connect(key: str) -> None:
         bot = manager.get_bot(bot_id)
         if not bot:
             _err(f"Bot not found: {bot_id}")
-            return
+            raise SystemExit(1)
 
         if bot.status != BotStatus.RUNNING:
             _err(f"Bot is not running: {bot_id} (status: {bot.status.value})")
-            return
+            raise SystemExit(1)
 
         # 3. accepts_external_signals 확인
         if not bot.strategy or not bot.strategy.meta.accepts_external_signals:
             _err(f"Bot {bot_id} does not accept external signals")
-            return
+            raise SystemExit(1)
 
         # 4. 채널 수립
         _err(f"Connected to bot {bot_id}")
