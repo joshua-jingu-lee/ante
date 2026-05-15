@@ -72,12 +72,75 @@ _MOCK_MASTER = Member(
 # ── 공유 fixture/헬퍼 (per-surface 테스트 패턴 재사용) ──────────────
 
 
+@pytest.fixture(autouse=True)
+def _isolated_cli_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """모든 CLI invoke를 tmp_path 기반 config-dir/db-path 로 격리.
+
+    Codex branch review [P2]: ``runner`` fixture 가 인증만 mock 하면
+    canonical ``instrument list``/``sync``/``import`` (및 config/db 에 닿는
+    모든 CLI invoke)가 기본 ``get_config_dir()``(``~/.config/ante`` 또는
+    repo ``config/``)·``config/db/ante.db`` 를 사용한다. CI ``pytest -n
+    auto`` 다중 워커가 동일 SQLite db 를 공유해 lock/dirty tree flaky 가
+    되고, dev 환경에 broker 설정이 있으면 ``sync --exchange KRX`` 가 실제
+    KIS 어댑터까지 도달할 수 있다(이슈 Non-Goal "실 broker/API 호출 금지"
+    위반).
+
+    격리 방식은 per-surface 테스트
+    (``tests/unit/cli/test_instrument_exchange_validation.py`` 의
+    ``TestSyncKrxSourcePasses`` 가 ``--db-path str(tmp_path / ...)`` 를
+    전달해 tmp db + broker 미설정 config-dir 로 KIS 어댑터 미도달을 의도한
+    것)와 **동일한 격리**를 ``ante.cli.main`` 의 경로 resolver patch 로
+    모든 invoke 에 일괄 적용한 것이다(명시 옵션 누락 없음):
+
+      * ``get_config_dir`` → tmp config-dir (broker 설정 부재 →
+        ``sync KRX`` 는 "브로커 설정이 없습니다" 경로, 어댑터 호출 전 단계).
+      * ``get_db_path`` → tmp SQLite (워커별 ``tmp_path`` 격리, 공유 db 0).
+      * ``get_data_path`` → tmp data dir (``data/`` cwd 상대 경로 격리).
+
+    instrument/backtest 커맨드는 함수 내부에서
+    ``from ante.cli.main import get_db_path`` 등을 import 하므로
+    ``ante.cli.main`` 심볼 patch 가 그대로 전파된다(명시 옵션 미전달 시
+    ``resolved_* = opt or get_*(ctx)`` 폴백이 tmp 로 고정).
+
+    추가 안전망으로 ``ante.broker.kis.KISAdapter`` 를 stub 으로 교체해
+    (격리가 어떤 경로로든 우회되어도) 실 네트워크/broker 호출이 0 임을
+    이중 보장한다(canonical-sync 는 어댑터 도달 전 단계 단언이라 stub 으로
+    충분 — 테스트 의미 불변).
+    """
+    cfg_dir = tmp_path / "cli_config"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "cli_db" / "ante.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "cli_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("ante.cli.main.get_config_dir", lambda ctx=None: cfg_dir)
+    monkeypatch.setattr("ante.cli.main.get_db_path", lambda ctx=None: str(db_path))
+    monkeypatch.setattr("ante.cli.main.get_data_path", lambda ctx=None: str(data_dir))
+
+    class _StubKISAdapter:
+        """실 KIS 호출 차단용 stub (canonical-sync 어댑터 도달 전 단계 단언)."""
+
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise RuntimeError(
+                "KIS 어댑터는 contract 테스트에서 호출되지 않아야 한다 "
+                "(broker 미설정 격리로 어댑터 도달 전 차단)."
+            )
+
+    monkeypatch.setattr("ante.broker.kis.KISAdapter", _StubKISAdapter)
+    yield
+
+
 @pytest.fixture()
 def runner() -> CliRunner:
     """인증을 mock으로 우회한 CliRunner.
 
     ``tests/unit/cli/test_instrument_exchange_validation.py`` /
     ``test_cli_backtest_exchange_validation.py`` 패턴 재사용.
+
+    config-dir/db-path/data-path 격리는 autouse ``_isolated_cli_paths``
+    fixture 가 모든 invoke 에 일괄 적용한다(per-surface 의 명시
+    ``--db-path`` 패턴과 동등 효과, 누락 없음).
     """
     r = CliRunner(mix_stderr=False)
     original_invoke = r.invoke
