@@ -108,6 +108,20 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 "1.0에서 실제 계좌를 만들 수 있는가"와 별개 차원이다. `NYSE/NASDAQ/AMEX`는 canonical vocabulary
 이지만 1.0 account preset은 `KRX`,`TEST`만 제공한다.
 
+이 둘은 **별개의 두 축**이다:
+- **축 A — exchange-vocabulary 유효성**: 신규 입력 값이 canonical 5종(`{KRX, NYSE, NASDAQ, AMEX, TEST}`)
+  안인지로 판정한다. canonical 5종은 어떤 표면에서도 "invalid exchange"로 거부되지 않는다.
+  오직 non-canonical(예: `ORACLE_INVALID_EXCHANGE`)만 invalid-exchange 거부 대상이다.
+- **축 B — 1.0 운영/preset 가용성**: 1.0 account preset은 `KRX`,`TEST`만 제공한다. canonical
+  이지만 1.0 preset이 없는 값(`NYSE/NASDAQ/AMEX`)을 특정 경로(예: preset 기반 `account create`)로
+  계좌 생성할 수 있는지는 preset/broker-config 제약이며, 이는 invalid-exchange 거부가 **아니다**
+  (별개 에러/제약 차원).
+
+**불변식**: 어떤 표면도 canonical 5종 값을 "invalid exchange"로 거부하지 않는다. 표면별
+제약(1.0 preset 미제공, cold-path 409, read legacy 호환 등)은 exchange-vocabulary 유효성(축 A)과
+구분되는 별개 축이다. (#1578 구현자는 이 불변식으로 자가검증한다: canonical 입력 `exchange="NYSE"`가
+서비스 검증 에러가 되면 축 A 위반이다.)
+
 ### exchange vs market vs source vs broker_type
 
 `exchange`는 아래 차원들과 **별개**이며 서로 값을 섞지 않는다.
@@ -129,8 +143,8 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 | 표면 | canonical | `*` | non-canonical 신규 입력 거부 계약 | 비고 |
 |------|-----------|-----|-----------------------------------|------|
 | Instrument CLI `list`/`sync`/`import` | 허용 | 거부 | non-zero exit + 구조화 error payload (`{status:"error", code, message}`) | #1577 enforcement. **주 신규 입력 표면** (oracle `ORACLE_INVALID_EXCHANGE` 출처) |
-| Account CLI preset (`account create` 등) | preset에 정의된 exchange만 | 거부 | non-zero exit | preset 기반. preset 밖 값은 입력 불가 |
-| AccountService (생성/검증) | runtime-supported만 | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`) |
+| Account CLI preset (`account create` 등) | canonical 5종은 invalid-exchange로 거부되지 않음 (축 A); 1.0 preset 자동 구성은 `KRX`/`TEST` preset만 (축 B) | 거부 | non-zero exit | 축 A: `*`/non-canonical은 거부. 축 B: 1.0 preset 경로는 `KRX`(`kis-domestic`)/`TEST`(`test`) preset만 자동 구성하며, preset 미제공 canonical 값(`NYSE/NASDAQ/AMEX`)은 **preset/broker 가용성 제약**이지 invalid-exchange 거부가 아니다(별개 차원) |
+| AccountService (생성/검증) | canonical 5종 허용 (축 A: non-canonical만 서비스 검증 에러) | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`). canonical 5종은 서비스 exchange 검증에서 거부되지 않는다. 1.0 account preset이 `NYSE/NASDAQ/AMEX`를 미제공하는 것은 **축 B(preset/broker 가용성) 제약**이며 "invalid exchange 거부"가 아니다(별개 차원) |
 | Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 가드가 입력 무관 즉시 409** (invariant I1; `src/ante/web/routes/accounts.py`의 `create_account` 핸들러가 진입 즉시 409 raise) | **422 아님.** `exchange` 포함 모든 입력이 런타임에 차단됨 (계좌 생성은 cold-path 전용) |
 | Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural 가드가 409** (invariant I1/I4; `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS`에 `exchange` 포함) | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도가 cold-path 409로 차단됨 |
 | Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용.** `src/ante/web/routes/accounts.py`의 `MUTABLE_FIELDS` 4종은 정상 런타임 업데이트다. #1578 구현자는 이 경로를 cold-path 409로 막지 않는다 |
