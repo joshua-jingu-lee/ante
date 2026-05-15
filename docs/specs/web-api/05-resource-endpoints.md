@@ -123,19 +123,35 @@ Web API는 서버 프로세스 내부에서 실행되므로 member 변경은 항
 상태·토큰·패스워드·복구키 변경은 MemberService 호출 후 세션 무효화, 감사 로그,
 member/security 알림을 같은 프로세스에서 처리한다.
 
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/members` | 멤버 목록 (필터: type, org, status, limit, offset) |
-| POST | `/api/members` | 멤버 등록 (토큰 1회 반환) |
-| GET | `/api/members/{member_id}` | 멤버 상세 조회 |
-| POST | `/api/members/{member_id}/suspend` | 멤버 일시 정지 |
-| POST | `/api/members/{member_id}/reactivate` | 멤버 재활성화 |
-| POST | `/api/members/{member_id}/revoke` | 멤버 영구 폐기 |
-| POST | `/api/members/{member_id}/rotate-token` | 토큰 재발급 |
-| PATCH | `/api/members/{member_id}/password` | 비밀번호 변경 (human 멤버 전용) |
-| PUT | `/api/members/{member_id}/scopes` | 권한 범위 변경 |
+| Method | Path | 설명 | 권한 (1.0) |
+|--------|------|------|-----------|
+| GET | `/api/members` | 멤버 목록 (필터: type, org, status, limit, offset) | `member:read` |
+| POST | `/api/members` | 멤버 등록 (토큰 1회 반환) | **master-only** |
+| GET | `/api/members/{member_id}` | 멤버 상세 조회 | `member:read` |
+| POST | `/api/members/{member_id}/suspend` | 멤버 일시 정지 | **master-only** |
+| POST | `/api/members/{member_id}/reactivate` | 멤버 재활성화 | **master-only** |
+| POST | `/api/members/{member_id}/revoke` | 멤버 영구 폐기 | **master-only** |
+| POST | `/api/members/{member_id}/rotate-token` | 토큰 재발급 | **master-only** |
+| PATCH | `/api/members/{member_id}/password` | 비밀번호 변경 (human 멤버 전용) | **master-only** |
+| PUT | `/api/members/{member_id}/scopes` | 권한 범위 변경 | **master-only** |
 
-`POST /api/members`는 master 권한 인증된 호출자만 사용할 수 있다. `Authorization: Bearer <token>` 헤더가 없거나 invalid token이면 `401 Unauthorized`로 거부되며 새 멤버나 토큰이 생성되지 않는다. 인증된 non-master 호출자는 `MemberService.register`의 `_assert_master`에서 발생한 `PermissionError` 매핑으로 `403 Forbidden`을 반환한다. 다른 멤버 mutation API(`suspend`, `reactivate`, `revoke`, `rotate-token`, `password`, `scopes`)의 인증 강제는 별도 후속 이슈에서 일괄 정리한다.
+Member admin mutation(`POST /api/members`, `POST /api/members/{id}/suspend`,
+`/reactivate`, `/revoke`, `/rotate-token`, `PATCH /api/members/{id}/password`,
+`PUT /api/members/{id}/scopes`)은 1.0 계약에서 **master-only**다. 권한 모델
+SSOT는 [../member/02-design-decisions.md — Member admin mutation 권한 모델](../member/02-design-decisions.md#권한-범위-scope)이며,
+service layer 진입 시점에 `MemberService._assert_master`가 master 외 호출자를
+`PermissionError`로 거부하고 표면(Web API)이 `403 Forbidden`으로 매핑한다.
+
+`Authorization: Bearer <token>` 헤더가 없거나 invalid token이면 `401 Unauthorized`로
+거부되며 mutation 자체가 일어나지 않는다. agent token(`ante_ak_*`)으로 인증된
+non-master 호출자는 service layer `_assert_master`에서 거부되어 `403 Forbidden`이
+반환된다. `member:admin` scope는 vocabulary에 정의되어 있으나 1.0에서는
+**reserved (현재 미사용)**이며, agent에게 위임하지 않는다.
+
+> 후속 implementation 정렬: #1543 (Web API 표면 가드 master-only로 일치 — 현재
+> `require_scope("member:admin")` 대신 master-only dependency 적용),
+> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
+> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
 
 ## 설정 관리 (`/api/config`)
 

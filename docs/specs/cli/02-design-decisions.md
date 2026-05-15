@@ -174,6 +174,30 @@ CLI는 해당 규칙을 command 실행 전에 적용하는 표면이다.
 
 매칭은 leaf 이름이 아니라 **전체 커맨드 경로** 기준이다. `ante feed init`처럼 leaf 이름이 우연히 `init`인 다른 서브커맨드는 면제 대상이 아니다 (`@require_auth` + `@require_scope`로 인증 필요). 구현은 `LeafAwareGroup`(src/ante/cli/main.py)이 루트 그룹 진입 직후 전체 경로 tuple을 `ctx.obj["_leaf_command_path"]`에 저장하고, `authenticate_member`가 이 tuple과 `_AUTH_EXEMPT_COMMAND_PATHS`(src/ante/cli/middleware.py:29-33)를 비교한다.
 
+**Member admin mutation 권한 모델 (1.0 — master-only)**:
+
+`ante member register`, `ante member suspend`, `ante member reactivate`,
+`ante member revoke`, `ante member rotate-token`, `ante member set-password`(향후),
+`ante member set-emoji` 외 권한 변경 명령 등 member admin mutation CLI 명령은
+1.0 계약에서 **master-only**다. 권한 모델 SSOT는
+[../member/02-design-decisions.md — Member admin mutation 권한 모델](../member/02-design-decisions.md#권한-범위-scope)이며,
+서비스 진입 시점에 `MemberService._assert_master`가 호출자 principal을 검사하고
+master가 아니면 `PermissionError`를 발생시킨다.
+
+`ANTE_MEMBER_TOKEN`이 agent token(`ante_ak_*`)이면 service layer에서 거부되어
+exit 1로 종료한다. CLI 표면 가드(`@require_scope`)는 `member:admin` scope를
+대상으로 하지 않으며, `member:admin` scope는 vocabulary에 정의되어 있으나
+1.0에서는 **reserved (현재 미사용)**이다. agent 위임이 필요해지면 별도 정책
+이슈에서 reserved scope를 활성화한 뒤 표면을 정렬한다.
+
+`ante member reset-password`와 `ante member regenerate-recovery-key`는 인증
+수단이 recovery key 또는 현재 패스워드 자체이므로 위 master-only 정책과 별도로
+공개 명령 allowlist 경로([03-commands.md — 공개 명령 allowlist](03-commands.md#공개-명령-allowlist--인증-면제))를 따른다.
+
+> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
+> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
+
 ### default-deny CLI 인증 게이트
 
 > 정책 SSOT: [D-015 default-deny 인증 게이트](../../decisions/D-015-default-deny-auth-gate.md)

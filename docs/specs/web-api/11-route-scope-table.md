@@ -20,9 +20,10 @@
 | `public` | [09-public-paths.md](09-public-paths.md) PUBLIC_PATHS allowlist. 인증 게이트 면제. 라우트도 caller-agnostic. |
 | `gate-exempt-self-auth` | 미들웨어 게이트만 면제. 라우트가 자체적으로 세션/토큰을 검증하고 본인 정보만 응답. |
 | `<domain>:<action>` | `require_scope("<domain>:<action>")` dependency 부착. spec scope vocabulary 정합. |
+| `master-only` | master 호출자만 허용. service layer `MemberService._assert_master`가 1.0 계약 invariant. agent token / non-master human token이면 `403 Forbidden`. 표면 dependency 정렬은 #1543. (#1511 oracle drift, #1542 결정 방향 B) |
 
 `authenticated-only` 카테고리는 본 표에서 사용하지 않는다. 모든 라우트에 대해
-명시적 `public` / `gate-exempt-self-auth` / `<scope>` 결정을 둔다.
+명시적 `public` / `gate-exempt-self-auth` / `<scope>` / `master-only` 결정을 둔다.
 
 ## 표의 컬럼
 
@@ -54,9 +55,12 @@ accounts(9) + approvals(3) + audit(1) + auth(3) + bots(8) + config(2) + data(6)
 **70 라우트 분해**:
 - **17개**: 이미 dependency 부착 완료 (현재 head 기준 코드 부착됨).
 - **48개**: scope 미부착 — 후속 #1407에서 `require_scope("<scope>")` 부착 대상.
+  단, member admin mutation 7종(아래)은 #1542 결정으로 #1407 대상에서 분리되어
+  `master-only` 카테고리로 이동했고, 표면 가드 정렬은 #1543이 담당한다.
 - **5개**: 면제 라우트 — `public` 4개(`/api/system/health`, `/api/auth/login`, `/api/auth/logout`, `/api/reports/schema`) + `gate-exempt-self-auth` 1개(`/api/auth/me`). 본 표에서 결정 + [09-public-paths.md](09-public-paths.md) PUBLIC_PATHS allowlist로 처리 (`/api/reports/schema`는 본 이슈에서 09에 추가됨; 나머지 4개는 #1403 머지로 이미 처리됨).
 
-후속 #1407 작업 대상은 **미부착 48개 scope 라우트만**이며, 5개 면제 라우트는 #1407 변환 대상이 아니다.
+후속 #1407 작업 대상은 **미부착 scope 라우트만**이며, 5개 면제 라우트와 7개
+master-only 라우트(#1543 정렬 대상)는 #1407 변환 대상이 아니다.
 
 ## accounts (`/api/accounts`, 9 라우트)
 
@@ -130,14 +134,14 @@ accounts(9) + approvals(3) + audit(1) + auth(3) + bots(8) + config(2) + data(6)
 | Module | Method | Path | 현재 부착 dependency | 결정 카테고리 | Scope | 근거 | 후속 이슈 |
 |--------|--------|------|---------------------|--------------|-------|------|----------|
 | members | GET | `/api/members` | (none) | `<scope>` | `member:read` | spec `member:read` 정합 (멤버 목록). | #1407 |
-| members | POST | `/api/members` | (none) | `<scope>` | `member:admin` | spec `member:admin` 정합 (멤버 등록). MemberService 내부 `_assert_master`로 현재 master만 허용 — #1407에서 `require_scope("member:admin")`로 표면 정합. | #1407 |
+| members | POST | `/api/members` | (none) | `master-only` | — | **master-only** (멤버 등록). MemberService `_assert_master`가 1.0 계약 invariant. `member:admin` scope는 reserved (1.0 미사용). 표면 가드 정렬은 #1543. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
 | members | GET | `/api/members/{member_id}` | (none) | `<scope>` | `member:read` | spec `member:read` 정합. | #1407 |
-| members | POST | `/api/members/{member_id}/suspend` | (none) | `<scope>` | `member:admin` | spec `member:admin` 정합 (멤버 정지). | #1407 |
-| members | POST | `/api/members/{member_id}/reactivate` | (none) | `<scope>` | `member:admin` | spec `member:admin` 정합 (멤버 재활성화). | #1407 |
-| members | POST | `/api/members/{member_id}/revoke` | (none) | `<scope>` | `member:admin` | spec `member:admin` 정합 (멤버 영구 폐기). | #1407 |
-| members | POST | `/api/members/{member_id}/rotate-token` | (none) | `<scope>` | `member:admin` | spec `member:admin` 정합 (토큰 재발급). | #1407 |
-| members | PATCH | `/api/members/{member_id}/password` | `require_master_caller` | `<scope>` | `member:admin` | spec `member:admin` 정합 (패스워드 변경). 현재 master_caller → #1407 마이그레이션. | #1407 |
-| members | PUT | `/api/members/{member_id}/scopes` | (none) | `<scope>` | `member:admin` | spec `member:admin` 정합 (권한 범위 변경). | #1407 |
+| members | POST | `/api/members/{member_id}/suspend` | (none) | `master-only` | — | **master-only** (멤버 정지). `_assert_master` 강제. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
+| members | POST | `/api/members/{member_id}/reactivate` | (none) | `master-only` | — | **master-only** (멤버 재활성화). `_assert_master` 강제. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
+| members | POST | `/api/members/{member_id}/revoke` | (none) | `master-only` | — | **master-only** (멤버 영구 폐기). `_assert_master` 강제. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
+| members | POST | `/api/members/{member_id}/rotate-token` | (none) | `master-only` | — | **master-only** (토큰 재발급). `_assert_master` 강제. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
+| members | PATCH | `/api/members/{member_id}/password` | `require_master_caller` | `master-only` | — | **master-only** (패스워드 변경). 현재 `require_master_caller` 부착됨 → #1543에서 master-only dependency 정합. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
+| members | PUT | `/api/members/{member_id}/scopes` | (none) | `master-only` | — | **master-only** (권한 범위 변경). `_assert_master` 강제. (#1511 oracle drift, #1542 결정 방향 B) | #1543 |
 
 ## portfolio (`/api/portfolio`, 2 라우트)
 
@@ -204,14 +208,14 @@ accounts(9) + approvals(3) + audit(1) + auth(3) + bots(8) + config(2) + data(6)
 도메인별 read/write/admin/run 표에 이미 정의되어 있다.
 **신규 scope vocabulary 도입은 없다.**
 
-사용 scope 목록 (15종):
+사용 scope 목록 (1.0 기준):
 - `account:read`, `account:write`
 - `approval:read`, `approval:admin`
 - `audit:read`
 - `bot:read`, `bot:admin`
 - `config:read`, `config:write`
 - `data:read`, `data:write`
-- `member:read`, `member:admin`
+- `member:read` (mutation은 `master-only` 카테고리 사용 — 아래 메모 참조)
 - `report:read`, `report:write`
 - `rule:read`, `rule:admin`
 - `strategy:read`, `strategy:write`
@@ -220,6 +224,13 @@ accounts(9) + approvals(3) + audit(1) + auth(3) + bots(8) + config(2) + data(6)
 - `treasury:read`, `treasury:admin`
 
 (`portfolio` 도메인은 신설하지 않고 `treasury:read`에 묶었다. portfolio 라우트가 `treasury_daily_snapshots` 데이터를 직접 읽는 view 성격이기 때문이다.)
+
+> `member:admin` scope는 vocabulary([../member/02-design-decisions.md](../member/02-design-decisions.md))에
+> 정의되어 있으나 1.0 계약에서는 **reserved (현재 미사용)**다. member admin
+> mutation 7종(`POST /api/members`, `/suspend`, `/reactivate`, `/revoke`,
+> `/rotate-token`, `PATCH .../password`, `PUT .../scopes`)은 본 표에서
+> `master-only` 카테고리로 결정되며, agent에게 위임하지 않는다.
+> (#1511 oracle drift, #1542 결정 방향 B)
 
 ## 경계 케이스 결정
 
@@ -231,12 +242,19 @@ accounts(9) + approvals(3) + audit(1) + auth(3) + bots(8) + config(2) + data(6)
 | `GET /api/reports/schema` | `public` | 리포트 제출 폼 스키마. 비밀값 없음. 클라이언트가 폼 렌더링용으로 사용. `/api/data/schema`(data:read)와 다른 정책 — data 도메인은 trading-sensitive. |
 | `GET /api/auth/me` | `gate-exempt-self-auth` | 미들웨어 게이트는 면제하되 라우트가 자체 세션/토큰 검증해 본인 정보만 응답. dashboard 초기 로딩 호환. |
 
-## 후속 작업 (#1407)
+## 후속 작업 (#1407 / #1543)
 
-#1407 코드 마이그레이션 대상은 **scope 라우트 48개 + master_caller 마이그레이션 13개**다. 면제 라우트 5개(public 4 + gate-exempt-self-auth 1)는 #1407 대상이 **아니며**, [09-public-paths.md](09-public-paths.md) PUBLIC_PATHS allowlist로 처리한다 (4개는 #1403 머지로 이미 처리, `/api/reports/schema`는 본 이슈에서 09에 추가됨).
+#1407 코드 마이그레이션 대상은 **scope 라우트 48개 + master_caller 마이그레이션
+13개**였다. 면제 라우트 5개(public 4 + gate-exempt-self-auth 1)는 #1407 대상이
+**아니며**, [09-public-paths.md](09-public-paths.md) PUBLIC_PATHS allowlist로 처리한다
+(4개는 #1403 머지로 이미 처리, `/api/reports/schema`는 본 이슈에서 09에 추가됨).
 
-- 미부착 **48개 scope 라우트**에 `require_scope("<scope>")` 부착.
-- 이미 부착된 13개 `require_master_caller` 라우트를 `require_scope("<scope>")`로 마이그레이션:
+#1542 결정 방향 B에 따라 member admin mutation 7종은 본 표에서 `master-only`
+카테고리로 분리되었으며, 표면 가드 정렬은 #1543이 담당한다 (#1407 scope dependency
+대상에서 제외).
+
+- 미부착 **scope 라우트**에 `require_scope("<scope>")` 부착.
+- 이미 부착된 `require_master_caller` 라우트를 `require_scope("<scope>")`로 마이그레이션:
   - `PUT /api/accounts/{id}` → `account:write`
   - `POST /api/accounts/{id}/suspend` → `account:write`
   - `POST /api/accounts/{id}/activate` → `account:write`
@@ -244,14 +262,34 @@ accounts(9) + approvals(3) + audit(1) + auth(3) + bots(8) + config(2) + data(6)
   - `POST /api/bots` → `bot:admin`
   - `DELETE /api/bots/{id}` → `bot:admin`
   - `PUT /api/bots/{id}` → `bot:admin`
-  - `PATCH /api/members/{id}/password` → `member:admin`
   - `POST /api/system/halt` → `system:admin`
   - `POST /api/system/clear-halt` → `system:admin`
   - `POST /api/treasury/bots/{id}/allocate` → `treasury:admin`
   - `POST /api/treasury/bots/{id}/deallocate` → `treasury:admin`
   - `POST /api/treasury/balance` → `treasury:admin`
+- `PATCH /api/members/{id}/password`는 현재 `require_master_caller`로 부착되어
+  있으며, #1543에서 master-only dependency로 정합한다(scope vocabulary 매핑이
+  아닌 master-only 정렬). #1542 결정 방향 B로 본 라우트는 `member:admin` scope
+  대상에서 제외됨.
 - `GET /api/reports/schema`를 [09-public-paths.md](09-public-paths.md) PUBLIC_PATHS allowlist에 추가.
 - 이미 부착된 4개 (`audit:read`, `config:write`, `report:write`, `strategy:write`)는 표 결정과 일치 — 변경 없음.
+
+### #1543 master-only 정렬 대상 (member admin mutation 7종)
+
+#1542 결정에 따라 다음 라우트는 표면 dependency를 master-only로 정렬한다.
+
+- `POST /api/members`
+- `POST /api/members/{id}/suspend`
+- `POST /api/members/{id}/reactivate`
+- `POST /api/members/{id}/revoke`
+- `POST /api/members/{id}/rotate-token`
+- `PATCH /api/members/{id}/password`
+- `PUT /api/members/{id}/scopes`
+
+`member:admin` scope는 reserved (1.0 미사용)로 vocabulary에서 유지하되, agent
+token에 부여되어도 service layer `_assert_master`에서 거부된다. 정렬 코드 변경,
+`frontend/openapi.json` / `frontend/src/types/api.generated.ts` 재생성, oracle host
+probe 기대값 정렬은 #1543 / #1544 후속 이슈에서 처리한다.
 
 ## Spec-Code Drift 처리
 
