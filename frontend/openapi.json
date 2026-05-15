@@ -102,12 +102,13 @@
                   "exchange": {
                     "type": "string",
                     "enum": [
+                      "AMEX",
                       "KRX",
-                      "NYSE",
                       "NASDAQ",
+                      "NYSE",
                       "TEST"
                     ],
-                    "description": "대상 거래소 코드."
+                    "description": "대상 거래소 코드 (canonical exchange vocabulary)."
                   },
                   "currency": {
                     "type": "string",

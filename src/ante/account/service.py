@@ -19,12 +19,14 @@ from ante.account.errors import (
     BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
+    InvalidExchangeError,
     MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
+from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -362,6 +364,10 @@ class AccountService:
         Raises:
             AccountAlreadyExistsError: 동일 account_id가 메모리/DELETED DB
                 상태로 이미 존재.
+            InvalidExchangeError: exchange가 canonical vocabulary
+                (``ante.core.exchange.CANONICAL_EXCHANGES`` 5종)에 없음
+                (`*`/non-canonical). create + bootstrap seed 공유 chokepoint;
+                ``update()`` 는 exchange immutable 가드로 별도 불요.
             InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
@@ -378,6 +384,16 @@ class AccountService:
         if deleted:
             raise AccountAlreadyExistsError(
                 f"계좌 '{account.account_id}'가 이미 존재합니다 (삭제 상태)."
+            )
+
+        # exchange canonical 검증 — ante.core.exchange SSOT (core.md 축 A).
+        # canonical 5종만 허용; `*`(StrategyMeta 전용 wildcard)/non-canonical
+        # 거부. create()/_create_seed_account() 공유 단일 chokepoint이며,
+        # update()는 exchange immutable 가드라 별도 검증 불요.
+        if not is_canonical(account.exchange):
+            raise InvalidExchangeError(
+                f"유효하지 않은 exchange: '{account.exchange}'. "
+                f"가능한 값: {sorted(CANONICAL_EXCHANGES)}"
             )
 
         # broker_type 유효성 검증 (프리셋에 정의된 것만 허용)

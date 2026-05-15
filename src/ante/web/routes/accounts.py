@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ante.core.exchange import CANONICAL_EXCHANGES
 from ante.web.deps import (
     get_account_service,
     get_audit_logger_optional,
@@ -175,8 +176,11 @@ ACCOUNT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
         },
         "exchange": {
             "type": "string",
-            "enum": ["KRX", "NYSE", "NASDAQ", "TEST"],
-            "description": "대상 거래소 코드.",
+            # ante.core.exchange SSOT 동적 참조 — canonical 5종(AMEX 포함)과
+            # 영구 정합(drift 봉합). 결정적 알파벳 순으로 직렬화한다
+            # (#1583: ["AMEX", "KRX", "NASDAQ", "NYSE", "TEST"]).
+            "enum": sorted(CANONICAL_EXCHANGES),
+            "description": "대상 거래소 코드 (canonical exchange vocabulary).",
         },
         "currency": {
             "type": "string",

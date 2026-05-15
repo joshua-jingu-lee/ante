@@ -12,12 +12,14 @@ from ante.account.errors import (
     BrokerReconnectFailedError,
     InvalidAccountIdError,
     InvalidBrokerTypeError,
+    InvalidExchangeError,
     MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.account.presets import BROKER_PRESETS
 from ante.account.service import AccountService
 from ante.core.database import Database
+from ante.core.exchange import CANONICAL_EXCHANGES
 from ante.eventbus.bus import EventBus
 
 
@@ -118,6 +120,50 @@ async def test_create_invalid_broker_type_raises(service):
 
     with pytest.raises(InvalidBrokerTypeError):
         await service.create(account)
+
+
+# ── exchange canonical 검증 (ante.core.exchange SSOT, core.md 축 A) ──
+
+
+@pytest.mark.asyncio
+async def test_create_invalid_exchange_raises(service):
+    """canonical vocabulary 밖 exchange는 InvalidExchangeError로 거부.
+
+    broker_type 검증과 같은 _persist_account chokepoint에서 차단된다
+    (#1583). 메시지에 허용 canonical 값 목록을 노출한다.
+    """
+    account = _make_account(exchange="LSE")
+
+    with pytest.raises(InvalidExchangeError, match="유효하지 않은 exchange"):
+        await service.create(account)
+
+
+@pytest.mark.asyncio
+async def test_create_wildcard_exchange_raises(service):
+    """`*`(StrategyMeta 전용 wildcard)는 account 표면에서 거부 (core.md 축 A)."""
+    account = _make_account(exchange="*")
+
+    with pytest.raises(InvalidExchangeError):
+        await service.create(account)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exchange", sorted(CANONICAL_EXCHANGES))
+async def test_create_canonical_exchange_passes_service_gate(service, exchange):
+    """canonical 5종은 _persist_account exchange 게이트를 통과 (축 A).
+
+    service layer 직접 생성으로 exchange 게이트만 검증한다 — preset/
+    credential 결합(축 B)이 테스트 의미를 왜곡하지 않도록 모든 케이스가
+    test preset을 충족하는 broker_type="test" + test credentials를 쓴다
+    (NYSE/NASDAQ/AMEX는 exchange 게이트 통과만 확인). canonical 5종은
+    어떤 경우에도 invalid exchange로 거부되지 않는다.
+    """
+    account = _make_account(account_id=f"acct-{exchange.lower()}", exchange=exchange)
+
+    result = await service.create(account)
+
+    assert result.exchange == exchange
+    assert result.status == AccountStatus.ACTIVE
 
 
 # ── credentials 필수 키 검증 ──────────────────────────

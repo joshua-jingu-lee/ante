@@ -25,6 +25,22 @@ class InvalidBrokerTypeError(AccountError):
     pass
 
 
+class InvalidExchangeError(AccountError):
+    """canonical vocabulary에 없는 exchange (`*`/non-canonical).
+
+    account 입력 경계는 ``ante.core.exchange`` SSOT의 canonical 5종만
+    허용한다(core.md ``## Canonical Exchange Vocabulary`` 축 A). `*` 는
+    ``StrategyMeta.exchange`` 전용 wildcard이므로 account 표면에서는 거부된다.
+
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"VALIDATION_ERROR"``를 노출하도록 한다(``InvalidAccountIdError`` 와
+    동일한 account 검증 에러 SSOT). Web API 라우트는 RFC 7807 422로 매핑된다.
+    """
+
+    code: str = "VALIDATION_ERROR"
+
+
 class MissingCredentialsError(AccountError):
     """필수 credentials 키 누락."""
 
