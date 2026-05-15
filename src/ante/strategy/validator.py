@@ -6,7 +6,12 @@ import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 
-VALID_EXCHANGES: set[str] = {"KRX", "NYSE", "NASDAQ", "AMEX", "TEST", "*"}
+from ante.core.exchange import STRATEGY_EXCHANGES
+
+# 코드 레벨 SSOT(`ante.core.exchange.STRATEGY_EXCHANGES` = canonical 5종 ∪
+# {`*`})에 위임한다. 이름·타입(`set[str]`)·값·검증 결과·에러 메시지는
+# 위임 전과 완전히 동일하게 보존한다(#1576 narrow-scope: zero-change).
+VALID_EXCHANGES: set[str] = set(STRATEGY_EXCHANGES)
 
 
 @dataclass
