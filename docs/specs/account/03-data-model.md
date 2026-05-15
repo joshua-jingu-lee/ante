@@ -101,6 +101,18 @@ class Account:
 
 거래 모드나 브로커를 변경해야 하는 경우, 새 계좌를 생성하여 전환한다. `update()` 호출 시 불변 필드가 포함되면 `AccountImmutableFieldError`를 발생시킨다.
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> `exchange`는 identity 필드이며 account는 canonical-only(`*` 거부) 표면이다. Web 런타임
+> `POST /api/accounts`(계좌 생성)와 `PUT /api/accounts/{account_id}`의 structural/identity
+> 필드 변경(`exchange` 등)은 cold-path 가드가 입력 무관 409(invariant I1, 422 아님)다.
+> `PUT`의 mutable-only 필드(`name`/`timezone`/`trading_hours_start`/`trading_hours_end`,
+> `src/ante/web/routes/accounts.py`의 `MUTABLE_FIELDS`)는 런타임 허용이며 409가 아니다. 1.0 preset은 `KRX`,`TEST`만 제공한다
+> (canonical-known 5종과 별개). 표면별 정렬은 #1578에서 다룬다.
+> 참고: 이 문서의 `exchange` 설명/표에 남아 있는 `{KRX, NYSE, NASDAQ, TEST}` 나열은
+> canonical-known 5종(`{KRX, NYSE, NASDAQ, AMEX, TEST}`) 대비 **`AMEX` 누락 drift**다.
+> 이 이슈(#1575)는 normative 값 집합을 재작성하지 않으며, account schema/서비스 검증의
+> canonical 정렬(`AMEX` 포함 여부 포함)은 #1578에서 수행한다.
+
 ### BrokerPreset
 
 브로커별 프리셋을 내부에 정의하여, 계좌 생성 시 거래소·브로커 선택만으로 나머지 필드를 자동 채운다. 사용자가 명시적으로 지정하지 않은 필드는 프리셋 기본값이 적용된다.

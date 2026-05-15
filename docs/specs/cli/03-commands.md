@@ -587,6 +587,11 @@ ante instrument search <query> [--limit N] [--listed-only] [--db-path <경로>] 
 ante instrument import <filepath> [--dry-run] [--db-path <경로>]  # CSV/JSON 종목 데이터 주입
 ```
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> instrument는 canonical-only(`*` 거부) 주 신규 입력 표면이다. `list`/`sync`/`import`의
+> non-canonical `--exchange` / import payload는 non-zero exit + 구조화 error payload로 거부되어야
+> 한다(`ORACLE_INVALID_EXCHANGE` 출처). enforcement 정렬은 #1577에서 다룬다(현재 코드/스펙 drift).
+
 ### `ante notification` — 알림 관리
 
 `notification_history` 테이블 제거 후 public leaf command는 없다. 텔레그램 채팅방 자체가

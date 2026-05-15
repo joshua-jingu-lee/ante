@@ -234,6 +234,12 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 
 **기존 데이터 마이그레이션**: exchange 미명시 기존 데이터(OHLCV 경로에 exchange 디렉토리가 없는 경우)는 `KRX/` 하위로 자동 이동한다. 마이그레이션은 시스템 시작 또는 `ante update`의 post-update migration에서 자동 감지·실행한다. 별도 public `ante data migrate` 명령은 CLI SSOT에 포함하지 않는다.
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> DataStore path API에서 non-canonical·`*` 거부는 `write`/`append`/신규 경로 생성에만 적용되는
+> 것이 목표다. 기존 영속 Parquet path(legacy out-of-vocab 포함)의 `read`는 거부·자동 삭제하지
+> 않는다(Legacy 호환 정책이 매트릭스 read 행에 우선). 표면별 enforcement 정렬은 #1578에서
+> 다룬다(현재 코드/스펙 drift).
+
 소스: `src/ante/data/store.py`
 
 ### 데이터 보존 정책

@@ -28,6 +28,9 @@
 8. **exchange 유효성 검증** — `meta.exchange` 값이 유효한 거래소 코드인지 검증 (에러). 유효 값: `VALID_EXCHANGES = {"KRX", "NYSE", "NASDAQ", "AMEX", "TEST", "*"}`
 9. **symbols와 exchange 일관성 경고** — `symbols`가 명시된 경우, 심볼 형식이 exchange와 맞는지 경고 표시. 예: KRX 전략에 `"AAPL"`은 KRX 종목코드 형식이 아님 (경고)
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> `VALID_EXCHANGES`는 canonical 5종 + `*`(StrategyMeta 전용 wildcard)다. 표면별 거부 계약·코드 SSOT 정렬은 #1576/#1578에서 다룬다(현재 코드/스펙 drift).
+
 **설계 근거**:
 
 1. **AST 기반 (실행 없이 분석)**

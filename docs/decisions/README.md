@@ -22,6 +22,7 @@
 | [D-013](D-013.md) | Stop Order 에뮬레이션 | - | Stop/Stop-Limit 주문을 시스템 내에서 에뮬레이션 |
 | [D-014](D-014.md) | 설정 API 구조 — Config API 단일화 | 2026-03-23 | 설정 화면은 기존 Config API로 일원화 |
 | [D-015](D-015-default-deny-auth-gate.md) | default-deny 인증 게이트 | 2026-05-11 | Web/CLI 모두 default-deny + allowlist (opt-out), middleware=인증·dependency=scope |
+| [D-016](D-016-canonical-exchange-vocabulary.md) | canonical exchange vocabulary | 2026-05-15 | Ante 전역 canonical exchange 집합·wildcard·legacy 호환 계약 SSOT |
 
 ## 사용 규칙
 

@@ -18,3 +18,7 @@ ante backtest run strategies/universal_ma.py \
 ```
 
 `exchange="*"` 전략은 `--exchange` 옵션으로 백테스트할 시장을 자유롭게 지정할 수 있다.
+
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> backtest `--exchange` override의 목표 계약은 canonical-only·`*` 거부이나, 현재 CLI/`src/ante/backtest/`에
+> 미구현된 spec-vs-implementation gap이다. 옵션 신설 포함 정렬은 #1578에서 다룬다.

@@ -33,6 +33,9 @@
 
 `exchange="*"`는 OHLCV 데이터만 있으면 어떤 시장에서든 동작하는 범용 전략에 사용한다. 예: 이동평균 크로스 전략, RSI 기반 전략 등.
 
+> canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
+> `StrategyMeta.exchange`는 `*`가 허용되는 **유일한** 표면이다. 표면별 enforcement 정렬은 #1578에서 다룬다.
+
 봇 배정 시 전략의 `exchange`와 계좌의 `exchange` 호환성을 검증한다. 호환되지 않으면 `IncompatibleExchangeError`를 발생시킨다.
 
 **호환성 검증 매트릭스**:
