@@ -129,7 +129,7 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 | 표면 | canonical | `*` | non-canonical 신규 입력 거부 계약 | 비고 |
 |------|-----------|-----|-----------------------------------|------|
 | Instrument CLI `list`/`sync`/`import` | 허용 | 거부 | non-zero exit + 구조화 error payload (`{status:"error", code, message}`) | #1577 enforcement. **주 신규 입력 표면** (oracle `ORACLE_INVALID_EXCHANGE` 출처) |
-| Account CLI preset (`account add` 등) | preset에 정의된 exchange만 | 거부 | non-zero exit | preset 기반. preset 밖 값은 입력 불가 |
+| Account CLI preset (`account create` 등) | preset에 정의된 exchange만 | 거부 | non-zero exit | preset 기반. preset 밖 값은 입력 불가 |
 | AccountService (생성/검증) | runtime-supported만 | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`) |
 | Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 가드가 입력 무관 즉시 409** (invariant I1; `src/ante/web/routes/accounts.py`의 `create_account` 핸들러가 진입 즉시 409 raise) | **422 아님.** `exchange` 포함 모든 입력이 런타임에 차단됨 (계좌 생성은 cold-path 전용) |
 | Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural 가드가 409** (invariant I1/I4; `src/ante/web/routes/accounts.py`의 `STRUCTURAL_FIELDS`에 `exchange` 포함) | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도가 cold-path 409로 차단됨 |
