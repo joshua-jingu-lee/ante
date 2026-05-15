@@ -130,7 +130,7 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 | AccountService (생성/검증) | runtime-supported만 | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`) |
 | Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 가드가 입력 무관 즉시 409** (invariant I1; `accounts.py:139,154,364`) | **422 아님.** `exchange` 포함 모든 입력이 런타임에 차단됨 (계좌 생성은 cold-path 전용) |
 | Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural 가드가 409** (invariant I1/I4; `accounts.py:57-61`의 `STRUCTURAL_FIELDS`) | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도가 cold-path 409로 차단됨 |
-| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용.** `MUTABLE_FIELDS` 4종(`accounts.py:57-61`)은 정상 런타임 업데이트다. #1578 구현자는 이 경로를 cold-path 409로 막지 않는다 |
+| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용.** `MUTABLE_FIELDS` 4종(`accounts.py:57-61`)은 정상 런타임 업데이트다. #1578 구현자는 이 경로를 cold-path 409로 막지 않는다 |
 | Account Web OpenAPI/schema 레벨 | — | — | 빈 문자열/형식 오류는 **422** | cold-path 문서(스키마 검증) 전용. 런타임 차단(409)과 다른 층 |
 | DataStore path API 메서드 표면 (`read`/`write`/`append` 등) | 허용 | 거부 | 신규 write/read path 생성 시 거부(스펙상 예외 처리) | feed/data CLI 옵션이 아니라 DataStore 메서드 인자 표면 |
 | `StrategyMeta.exchange` | 허용 | **허용** | validator 에러 | **`*` 유일 허용 표면** (`docs/specs/strategy/03-09-strategy-validator.md`) |
