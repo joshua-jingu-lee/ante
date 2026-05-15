@@ -515,7 +515,7 @@ def member_register(
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output({**result, "token": token})
@@ -548,7 +548,7 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
         result = _run(_run_set_emoji())
     except ValueError as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
 
@@ -578,7 +578,7 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     fmt.success(f"멤버 정지 완료: {member_id}", result)
 
@@ -608,7 +608,7 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     fmt.success(f"멤버 재활성화 완료: {member_id}", result)
 
@@ -656,7 +656,7 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     fmt.success(f"멤버 폐기 완료: {member_id}", result)
 
@@ -686,7 +686,7 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output({**result, "token": token})
@@ -750,7 +750,7 @@ def member_reset_password(
         _run(_run_reset())
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     fmt.success("패스워드가 변경되었습니다.")
 
@@ -807,7 +807,7 @@ def member_regenerate_recovery_key(
         new_key = _run(_run_regen())
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output({"recovery_key": new_key})

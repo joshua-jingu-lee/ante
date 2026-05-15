@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
@@ -1301,3 +1302,260 @@ class TestMemberListInvalidRolesTokenHashRegression:
         assert result_text.exit_code == 0, result_text.output
         assert sensitive_hash not in result_text.output
         assert "token_hash" not in result_text.output
+
+
+# ── 오류 명령 exit code 정렬 회귀 (#1557) ──────────────
+
+
+def _patch_service_method_raises(
+    method_name: str,
+    exc: Exception,
+):  # noqa: ANN202
+    """``MemberService.<method_name>`` 이 ``exc`` 를 raise 하도록 mock 한
+    ``_create_service`` 패치 컨텍스트와 (service, mocked_method) 를 돌려준다.
+
+    register 의 중복 ID(``ValueError``), set-emoji / suspend / reactivate /
+    revoke / rotate-token 의 존재하지 않는 member_id(``ValueError``),
+    reset-password 의 invalid recovery key(``PermissionError``),
+    regenerate-recovery-key 의 invalid password(``PermissionError``) 를
+    공통 픽스처로 표현한다.
+
+    reset-password / regenerate-recovery-key 는 핸들러가 먼저
+    ``service.list_members`` 로 master 를 찾으므로 그 경로도 충족시킨다.
+    """
+    service = MagicMock()
+    service.list_members = AsyncMock(return_value=[_make_master()])
+    mocked = AsyncMock(side_effect=exc)
+    setattr(service, method_name, mocked)
+    db = MagicMock()
+    db.close = AsyncMock(return_value=None)
+    return (
+        patch(
+            "ante.cli.commands.member._create_service",
+            new_callable=AsyncMock,
+            return_value=(service, db),
+        ),
+        service,
+        mocked,
+    )
+
+
+class TestMemberErrorCommandsExitNonZero:
+    """오류 명령 8개가 JSON error envelope 출력 + exit 1 로 종료한다 (#1557).
+
+    수정 전: ``except (ValueError[, PermissionError]) as e: fmt.error(str(e));
+    return`` 분기가 ``status=error`` envelope 를 출력하면서도 process exit
+    code 0 으로 종료해 자동화 호출자가 실패를 감지하지 못했다. fix 적용 전에는
+    아래 케이스들이 FAIL(exit 0) 하고, 적용 후 PASS(exit 1) 한다.
+
+    ``code`` 인자는 본 이슈 scope 밖(exit code only)이므로 envelope 의
+    ``code`` 는 빈 문자열 그대로다 — 검증은 ``status``/``message``/exit code 만
+    한다.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "service_method", "exc", "args"),
+        [
+            pytest.param(
+                "register",
+                "register",
+                ValueError("이미 존재하는 member_id: agent-dup"),
+                [
+                    "member",
+                    "register",
+                    "--id",
+                    "agent-dup",
+                    "--type",
+                    "agent",
+                ],
+                id="register-duplicate-id",
+            ),
+            pytest.param(
+                "set-emoji",
+                "update_emoji",
+                ValueError("존재하지 않는 멤버: ghost-1"),
+                ["member", "set-emoji", "ghost-1", "🚀"],
+                id="set-emoji-missing-member",
+            ),
+            pytest.param(
+                "suspend",
+                "suspend",
+                ValueError("존재하지 않는 멤버: ghost-1"),
+                ["member", "suspend", "ghost-1"],
+                id="suspend-missing-member",
+            ),
+            pytest.param(
+                "reactivate",
+                "reactivate",
+                ValueError("존재하지 않는 멤버: ghost-1"),
+                ["member", "reactivate", "ghost-1"],
+                id="reactivate-missing-member",
+            ),
+            pytest.param(
+                "revoke",
+                "revoke",
+                ValueError("존재하지 않는 멤버: ghost-1"),
+                ["member", "revoke", "ghost-1", "--yes"],
+                id="revoke-missing-member",
+            ),
+            pytest.param(
+                "rotate-token",
+                "rotate_token",
+                ValueError("존재하지 않는 멤버: ghost-1"),
+                ["member", "rotate-token", "ghost-1"],
+                id="rotate-token-missing-member",
+            ),
+        ],
+    )
+    def test_command_error_exits_one_with_envelope(
+        self,
+        command: str,
+        service_method: str,
+        exc: Exception,
+        args: list[str],
+    ) -> None:
+        """존재하지 않는 member_id / 중복 ID → exit 1 + JSON error envelope."""
+        ctx, _service, mocked = _patch_service_method_raises(service_method, exc)
+        with ctx:
+            result = _invoke_cli(["--format", "json", *args])
+
+        assert result.exit_code == 1, (
+            f"{command}: error 시 exit 1 이어야 한다\n{result.output}"
+        )
+        mocked.assert_awaited_once()
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert data["message"] == str(exc)
+
+    def test_reset_password_invalid_recovery_key_exits_one(
+        self,
+        monkeypatch,  # noqa: ANN001
+    ) -> None:
+        """reset-password: invalid recovery key(PermissionError) → exit 1 +
+        error envelope."""
+        monkeypatch.setenv("ANTE_NEW_PASSWORD_1557", "new-pwd-1557")
+        exc = PermissionError("유효하지 않은 recovery key")
+        ctx, _service, mocked = _patch_service_method_raises("reset_password", exc)
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "member",
+                    "reset-password",
+                    "--recovery-key",
+                    "ANTE-RK-INVALID",
+                    "--new-password-env",
+                    "ANTE_NEW_PASSWORD_1557",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        mocked.assert_awaited_once()
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert data["message"] == "유효하지 않은 recovery key"
+
+    def test_regenerate_recovery_key_invalid_password_exits_one(
+        self,
+        monkeypatch,  # noqa: ANN001
+    ) -> None:
+        """regenerate-recovery-key: invalid password(PermissionError) → exit 1
+        + error envelope."""
+        monkeypatch.setenv("ANTE_PASSWORD_1557", "wrong-pwd-1557")
+        exc = PermissionError("현재 패스워드가 일치하지 않습니다")
+        ctx, _service, mocked = _patch_service_method_raises(
+            "regenerate_recovery_key", exc
+        )
+        with ctx:
+            result = _invoke_cli(
+                [
+                    "--format",
+                    "json",
+                    "member",
+                    "regenerate-recovery-key",
+                    "--password-env",
+                    "ANTE_PASSWORD_1557",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        mocked.assert_awaited_once()
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert data["message"] == "현재 패스워드가 일치하지 않습니다"
+
+    @pytest.mark.parametrize(
+        ("service_method", "exc", "args"),
+        [
+            pytest.param(
+                "suspend",
+                ValueError("존재하지 않는 멤버: ghost-text"),
+                ["member", "suspend", "ghost-text"],
+                id="suspend-text-mode",
+            ),
+            pytest.param(
+                "register",
+                ValueError("이미 존재하는 member_id: dup-text"),
+                [
+                    "member",
+                    "register",
+                    "--id",
+                    "dup-text",
+                    "--type",
+                    "agent",
+                ],
+                id="register-text-mode",
+            ),
+        ],
+    )
+    def test_command_error_exits_one_in_text_mode(
+        self,
+        service_method: str,
+        exc: Exception,
+        args: list[str],
+    ) -> None:
+        """text 모드에서도 오류 명령은 exit 1 로 종료한다 (대표 케이스)."""
+        ctx, _service, mocked = _patch_service_method_raises(service_method, exc)
+        with ctx:
+            result = _invoke_cli(["--format", "text", *args])
+
+        assert result.exit_code == 1, result.output
+        mocked.assert_awaited_once()
+        assert str(exc) in result.output
+
+    def test_suspend_success_path_still_exits_zero(self) -> None:
+        """회귀 가드: 정상 성공 경로는 exit 0 + fmt.success envelope 를 유지한다.
+
+        exit code 정렬은 오직 오류 분기에만 적용된다. 유효 입력의 성공 응답이
+        실수로 exit 1 이 되지 않음을 명시적으로 잠근다.
+        """
+        active_member = Member(
+            member_id="agent-ok",
+            type=MemberType.AGENT,
+            role=MemberRole.DEFAULT,
+            org="default",
+            name="Agent OK",
+            status="suspended",
+            scopes=[],
+        )
+        service = MagicMock()
+        service.list_members = AsyncMock(return_value=[_make_master()])
+        service.suspend = AsyncMock(return_value=active_member)
+        db = MagicMock()
+        db.close = AsyncMock(return_value=None)
+        ctx = patch(
+            "ante.cli.commands.member._create_service",
+            new_callable=AsyncMock,
+            return_value=(service, db),
+        )
+        with ctx:
+            result = _invoke_cli(
+                ["--format", "json", "member", "suspend", "agent-ok"],
+            )
+
+        assert result.exit_code == 0, result.output
+        service.suspend.assert_awaited_once()
+        data = json.loads(result.output)
+        assert data["status"] == "ok"
+        assert data["data"]["member_id"] == "agent-ok"
