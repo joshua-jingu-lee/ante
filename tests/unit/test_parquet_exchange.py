@@ -217,6 +217,85 @@ class TestReadWriteWithExchange:
         assert result["valid"] == 1
 
 
+class TestCanonicalExchangeEnforcement:
+    """write/append 신규 경로 생성이 canonical exchange만 허용하는지 검증.
+
+    read/legacy 조회 표면은 core.md Legacy out-of-vocabulary read 면제에
+    따라 검증을 추가하지 않는다(회귀로 고정).
+    """
+
+    def test_write_rejects_non_canonical(self, tmp_store: ParquetStore) -> None:
+        """비-canonical exchange write는 ValueError로 거부된다."""
+        df = _make_ohlcv_df()
+        with pytest.raises(ValueError, match="유효하지 않은 exchange"):
+            tmp_store.write("BARC", "1d", df, exchange="LSE")
+
+    def test_write_rejects_wildcard(self, tmp_store: ParquetStore) -> None:
+        """`*` wildcard는 data 표면에서 비-canonical로 거부된다."""
+        df = _make_ohlcv_df()
+        with pytest.raises(ValueError, match="유효하지 않은 exchange"):
+            tmp_store.write("005930", "1d", df, exchange="*")
+
+    def test_write_rejects_non_string(self, tmp_store: ParquetStore) -> None:
+        """비문자열 exchange는 traceback이 아닌 구조화된 ValueError로 거부된다."""
+        df = _make_ohlcv_df()
+        with pytest.raises(ValueError, match="유효하지 않은 exchange"):
+            tmp_store.write("005930", "1d", df, exchange=[])  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="유효하지 않은 exchange"):
+            tmp_store.write("005930", "1d", df, exchange=123)  # type: ignore[arg-type]
+
+    def test_append_rejects_non_canonical(self, tmp_store: ParquetStore) -> None:
+        """append는 write로 위임되므로 비-canonical exchange를 거부한다."""
+        from datetime import datetime
+
+        rows = [
+            {
+                "timestamp": datetime(2026, 1, 1, 9, 0, tzinfo=UTC),
+                "symbol": "BARC",
+                "open": 50000.0,
+                "high": 51000.0,
+                "low": 49000.0,
+                "close": 50500.0,
+                "volume": 1000000,
+                "amount": 50000000000,
+                "source": "test",
+            }
+        ]
+        with pytest.raises(ValueError, match="유효하지 않은 exchange"):
+            tmp_store.append("BARC", "1m", rows, exchange="LSE")
+
+    def test_read_tolerates_legacy_out_of_vocab(
+        self, tmp_store: ParquetStore, tmp_path: Path
+    ) -> None:
+        """핵심 회귀: write LSE는 거부되지만 pre-existing legacy LSE read는 무손상.
+
+        core.md Legacy out-of-vocabulary read 면제 — read/_resolve_path에
+        검증이 누출되면 이 테스트가 깨진다.
+        """
+        # write 경로로는 LSE를 만들 수 없으므로 legacy 디렉토리를 수동 생성
+        legacy_dir = tmp_path / "ohlcv" / "1d" / "LSE" / "BARC"
+        legacy_dir.mkdir(parents=True)
+        df = _make_ohlcv_df(symbol="BARC")
+        df.write_parquet(str(legacy_dir / "2026-01.parquet"))
+
+        # write LSE는 거부됨을 재확인 (enforcement 유지)
+        with pytest.raises(ValueError, match="유효하지 않은 exchange"):
+            tmp_store.write("BARC", "1d", df, exchange="LSE")
+
+        # 그러나 pre-existing legacy LSE read는 정상 동작·데이터 반환
+        result = tmp_store.read("BARC", "1d", exchange="LSE")
+        assert len(result) == 3
+        assert result["symbol"].to_list() == ["BARC"] * 3
+
+    def test_write_canonical_still_works(self, tmp_store: ParquetStore) -> None:
+        """canonical 5종(KRX/NYSE/NASDAQ/AMEX/TEST) write 회귀 green."""
+        for exchange in ("KRX", "NYSE", "NASDAQ", "AMEX", "TEST"):
+            df = _make_ohlcv_df(symbol="005930")
+            tmp_store.write("005930", "1d", df, exchange=exchange)
+            result = tmp_store.read("005930", "1d", exchange=exchange)
+            assert len(result) == 3, f"{exchange} write/read 회귀 실패"
+
+
 class TestMigrateParquetPaths:
     """기존 경로 → exchange 포함 경로 마이그레이션 검증."""
 

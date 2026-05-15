@@ -10,7 +10,7 @@ from typing import Literal
 
 import polars as pl
 
-from ante.core.exchange import CANONICAL_EXCHANGES
+from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,22 @@ class ParquetStore:
         data_type: str = "ohlcv",
         exchange: str = "KRX",
     ) -> None:
-        """데이터를 Parquet에 기록. 월별 파티셔닝, 중복 제거(merge)."""
+        """데이터를 Parquet에 기록. 월별 파티셔닝, 중복 제거(merge).
+
+        신규 write/append/경로 생성은 canonical exchange만 허용한다
+        (core.md ``## Canonical Exchange Vocabulary``). `append()`는
+        `self.write(...)`로 위임하므로 이 guard가 append도 함께 커버한다.
+        read/`_resolve_path`/`migrate_parquet_paths` 등 기존·legacy 조회
+        표면에는 검증을 추가하지 않는다(Legacy out-of-vocabulary read 면제).
+        """
+        # 비문자열은 frozenset membership에서 unhashable TypeError를
+        # 유발할 수 있으므로 isinstance 선검사 후 거부(#1577 교훈).
+        if not isinstance(exchange, str) or not is_canonical(exchange):
+            raise ValueError(
+                f"유효하지 않은 exchange: '{exchange}'. "
+                f"허용 값: {sorted(CANONICAL_EXCHANGES)}"
+            )
+
         if data.is_empty():
             return
 
@@ -293,6 +308,8 @@ class ParquetStore:
     ) -> None:
         """버퍼 데이터를 기존 Parquet에 추가."""
         df = pl.DataFrame(rows)
+        # exchange canonical 검증은 write()로 위임되어 자동 커버된다
+        # (별도 guard 불요 — 단일 chokepoint 유지).
         self.write(symbol, timeframe, df, data_type=data_type, exchange=exchange)
 
     def list_symbols(
