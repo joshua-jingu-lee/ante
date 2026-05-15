@@ -7,10 +7,15 @@ CLI 검증과 분리 — service/provider가 exchange를 무시해도 CLI 테스
 - `BacktestService.run()`: `BacktestDataProvider`를 `exchange=<config.exchange>`로 생성.
 - `BacktestDataProvider.load()`: store.read() **및** store.resolve_path() 양쪽에
   동일 exchange 전달 (resolve_path 메타 hop 회귀 고정).
+- `BacktestExecutor`: `exchange=` ctor 인자를 받아 `_execute_signal`이 만든
+  `BacktestTrade.exchange`에 그대로 라벨링 (executor→trade hop 회귀 고정).
+- `BacktestService.run()`: `BacktestExecutor`를 `exchange=<config.exchange>`로
+  생성 (service→executor hop 회귀 고정).
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -19,8 +24,10 @@ import pytest
 
 from ante.backtest.config import BacktestConfig
 from ante.backtest.data_provider import BacktestDataProvider
+from ante.backtest.executor import BacktestExecutor
 from ante.backtest.result import BacktestResult
 from ante.backtest.service import BacktestService
+from ante.strategy.base import Signal, Strategy, StrategyMeta
 
 
 class TestValidateConfigExchangeDefault:
@@ -206,3 +213,147 @@ class TestDataProviderForwardsExchangeToStore:
         assert read_kwargs["exchange"] == "KRX"
         _, resolve_kwargs = store.resolve_path.call_args
         assert resolve_kwargs["exchange"] == "KRX"
+
+
+class _SingleBuyStrategy(Strategy):
+    """첫 스텝에 buy 1건만 내는 최소 전략 (executor hop fixture)."""
+
+    meta = StrategyMeta(name="single_buy", version="1", description="t")
+
+    def __init__(self, ctx):  # noqa: D107
+        super().__init__(ctx)
+        self._fired = False
+
+    async def on_step(self, context) -> list[Signal]:  # noqa: D102
+        if self._fired:
+            return []
+        self._fired = True
+        return [Signal(symbol="TEST", side="buy", quantity=1.0, reason="r")]
+
+
+class _FakeDataProvider:
+    """2스텝짜리 인메모리 data_provider (실제 store/API 호출 없음)."""
+
+    def __init__(self) -> None:
+        self._idx = 0
+        self._ts = [datetime(2026, 1, 1), datetime(2026, 1, 2)]
+        self.start = "2026-01-01"
+        self.end = "2026-01-02"
+        self.loaded_datasets: list = []
+
+    def get_total_steps(self) -> int:
+        return len(self._ts)
+
+    def advance(self) -> bool:
+        self._idx += 1
+        return self._idx < len(self._ts)
+
+    def get_current_timestamp(self):
+        if self._idx >= len(self._ts):
+            return None
+        return self._ts[self._idx]
+
+    async def get_current_price(self, symbol: str) -> float:
+        return 100.0
+
+
+def _make_executor(exchange: str | None) -> BacktestExecutor:
+    kwargs = {"exchange": exchange} if exchange is not None else {}
+    return BacktestExecutor(
+        strategy_cls=_SingleBuyStrategy,
+        data_provider=_FakeDataProvider(),
+        initial_balance=1_000_000.0,
+        **kwargs,
+    )
+
+
+class TestExecutorLabelsTradeWithExchange:
+    """BacktestExecutor(exchange=) → BacktestTrade.exchange (executor→trade hop)."""
+
+    @pytest.mark.asyncio
+    async def test_explicit_exchange_labels_result_trades(self):
+        executor = _make_executor("NYSE")
+
+        result = await executor.run()
+
+        assert result.trades, "1건의 거래가 체결되어야 한다"
+        assert all(t.exchange == "NYSE" for t in result.trades)
+
+    @pytest.mark.asyncio
+    async def test_default_exchange_labels_result_trades_krx(self):
+        executor = _make_executor(None)
+
+        result = await executor.run()
+
+        assert result.trades
+        assert all(t.exchange == "KRX" for t in result.trades)
+
+
+class TestServicePassesExchangeToExecutor:
+    """BacktestService.run() → BacktestExecutor(exchange=...) ctor 전달.
+
+    end-to-end에 가깝게: `_validate_config(exchange=...)`가 만든
+    `validated.exchange`가 executor 생성 인자로 흐르는지 고정.
+    """
+
+    async def _run_capture_executor_kwargs(self, config: dict) -> dict:
+        provider_instance = MagicMock()
+        provider_instance.loaded_datasets = []
+        executor_instance = MagicMock()
+
+        async def _fake_run(progress_callback=None):
+            return BacktestResult(
+                strategy_name="S",
+                strategy_version="1",
+                start_date="2026-01-01",
+                end_date="2026-01-02",
+                initial_balance=1.0,
+                final_balance=1.0,
+                total_return=0.0,
+            )
+
+        executor_instance.run = _fake_run
+
+        with (
+            patch("ante.backtest.service.StrategyLoader") as mock_loader,
+            patch("ante.backtest.service.ParquetStore"),
+            patch(
+                "ante.backtest.service.BacktestDataProvider",
+                return_value=provider_instance,
+            ),
+            patch(
+                "ante.backtest.service.BacktestExecutor",
+                return_value=executor_instance,
+            ) as mock_executor_cls,
+        ):
+            mock_loader.load.return_value = MagicMock()
+            svc = BacktestService()
+            await svc.run(config)
+
+        _, kwargs = mock_executor_cls.call_args
+        return kwargs
+
+    @pytest.mark.asyncio
+    async def test_run_constructs_executor_with_config_exchange(self):
+        kwargs = await self._run_capture_executor_kwargs(
+            {
+                "strategy_path": "s.py",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+                "symbols": [],
+                "exchange": "NYSE",
+            }
+        )
+        assert kwargs["exchange"] == "NYSE"
+
+    @pytest.mark.asyncio
+    async def test_run_defaults_executor_exchange_to_krx(self):
+        kwargs = await self._run_capture_executor_kwargs(
+            {
+                "strategy_path": "s.py",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+                "symbols": [],
+            }
+        )
+        assert kwargs["exchange"] == "KRX"

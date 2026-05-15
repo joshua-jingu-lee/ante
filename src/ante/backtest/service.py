@@ -69,6 +69,7 @@ class BacktestService:
             buy_commission_rate=validated.buy_commission_rate,
             sell_commission_rate=validated.sell_commission_rate,
             slippage_rate=validated.slippage_rate,
+            exchange=validated.exchange,
         )
 
         result = await executor.run(progress_callback=progress_callback)
