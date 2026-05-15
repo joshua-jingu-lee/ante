@@ -26,9 +26,13 @@
     - subprocess hang 회귀 1건: ``-m ante --format json broker balance --account
       missing`` 이 timeout 없이 종료하고 stdout 에 JSON envelope 를 남기는지를
       mock 환경에서 검증. CI 시간 영향을 최소화하기 위해 timeout=5 로 짧게 잡는다.
-    - status / reconcile 잔존 결함 1건: 이 두 명령의 missing-account 처리는
-      별도 follow-up scope 이며 본 PR 의 _get_broker fix 만으로는 exit code 계약
-      이 변경되지 않음을 docstring + skip 으로 명시한다.
+    - status / reconcile missing-account exit code: #1535 에서 follow-up scope
+      으로 남겼던 결함을 follow-up(#1556) 이 닫는다. ``status``/``reconcile``
+      (without ``--fix``) × {json,text} 가 missing account 에서 exit 1 +
+      ``{"status":"error","code":"ACCOUNT_NOT_FOUND",...}`` envelope 로 종료
+      하고, ``status`` 의 **유효 계좌 disconnected/unhealthy 는 exit 0 +
+      ``{connected:false, healthy:false}`` envelope** 를 유지함(contract-drift
+      회귀 가드)을 ``TestStatusAndReconcileFollowupScope`` 에서 검증한다.
 
 SSOT 참조:
     - ``src/ante/cli/commands/broker.py`` (``_get_broker``, ``balance``,
@@ -333,45 +337,222 @@ class TestBrokerPositionsMissingAccount:
         assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
 
 
-# ── status / reconcile 잔존 결함 — follow-up scope 명시 ─────────────────────
+# ── status / reconcile missing-account exit code 회귀 (#1556) ───────────────
 
 
 class TestStatusAndReconcileFollowupScope:
-    """status/reconcile 의 missing-account 처리는 본 PR scope 밖임을 문서화.
+    """status/reconcile 의 missing-account exit code 정렬 follow-up(#1556) 완료.
 
-    - ``status`` 는 내부 try/except 가 ``_get_broker`` 예외를 swallow 해 항상
-      ``{"connected": False, "healthy": False, "error": <msg>}`` payload + exit 0
-      을 반환하도록 의도되어 있다. 본 PR 의 ``_get_broker`` lifecycle 수정은
-      그 동작을 변경하지 않는다 — except 분기가 그대로 ``await db.close()`` 책임
-      을 가져가지 않지만, 본 PR fix 가 ``_get_broker`` 내부에서 close 를 보장
-      하므로 hang 자체는 사라진다.
-    - ``reconcile`` (without ``--fix``) 은 fmt.error + return 패턴이 그대로
-      남아 exit 0 으로 종료한다. exit code 정렬은 별도 follow-up 이슈에서
-      처리한다.
+    #1535 가 ``balance``/``positions`` 의 missing-account exit code 와
+    ``_get_broker`` lifecycle 만 닫고, ``status``/``reconcile`` 는 별도
+    follow-up scope 로 남겼던 결함을 본 follow-up(#1556) 이 닫는다.
 
-    본 placeholder 는 두 동작이 의도된 follow-up scope 라는 invariant 를
-    skip 으로 명시해 contributor 가 동일 패턴을 본 PR 에 끼워넣지 않도록 한다.
+    - ``status`` 는 ``_get_broker`` 가 ``AccountNotFoundError`` 를 raise 하면
+      내부 ``except AccountNotFoundError: raise`` 로 전파하고 호출부가
+      ``fmt.error(..., code="ACCOUNT_NOT_FOUND")`` + ``SystemExit(1)`` 으로
+      종료한다. **유효 계좌의 disconnect/unhealthy 는 기존 계약(exit 0 +
+      ``{connected:false, healthy:false}`` envelope)을 그대로 유지**한다
+      (contract-drift 회귀 방지).
+    - ``reconcile`` (without ``--fix``) 의 오프라인 폴백 경로는
+      missing-account 에서 exit 1 + ``{"status":"error",...}`` envelope 로
+      종료한다. ``reconcile --fix`` 경로는 본 이슈 Non-Goal 이므로 다루지
+      않는다.
     """
 
-    @pytest.mark.skip(
-        reason=(
-            "status/reconcile 의 missing-account exit code 정렬은 별도 follow-up "
-            "scope. #1535 본 PR 은 _get_broker lifecycle + balance/positions exit "
-            "code 만 다룬다."
-        )
-    )
-    def test_status_missing_account_exit_code_is_followup(self) -> None:
-        """status 의 missing-account exit code 계약은 별도 이슈에서 다룬다."""
+    def _invoke_status(
+        self,
+        runner: CliRunner,
+        *,
+        fmt: str,
+    ) -> object:
+        """공통 invoke: IPC 미가용 + AccountService missing 상태를 mock 한 뒤
+        ``broker status`` 를 호출한다."""
+        mock_db, mock_account_service = _patch_account_service_not_found()
 
-    @pytest.mark.skip(
-        reason=(
-            "reconcile 의 missing-account exit code 정렬은 별도 follow-up scope. "
-            "#1535 본 PR 은 _get_broker lifecycle + balance/positions exit code "
-            "만 다룬다."
+        async def _fake_create_service():  # noqa: ANN202
+            return mock_account_service, mock_db
+
+        with (
+            patch(
+                "ante.cli.commands.broker._ipc_broker_command",
+                _build_ipc_unavailable_mock(),
+            ),
+            patch(
+                "ante.cli.commands.broker._create_account_service",
+                side_effect=_fake_create_service,
+            ),
+        ):
+            return runner.invoke(
+                cli,
+                [
+                    "--format",
+                    fmt,
+                    "broker",
+                    "status",
+                    "--account",
+                    _MISSING_ACCOUNT_ID,
+                ],
+            )
+
+    def _invoke_reconcile(
+        self,
+        runner: CliRunner,
+        *,
+        fmt: str,
+    ) -> object:
+        """공통 invoke: IPC 미가용 + AccountService missing 상태를 mock 한 뒤
+        ``broker reconcile`` (without ``--fix``) 을 호출한다."""
+        mock_db, mock_account_service = _patch_account_service_not_found()
+
+        async def _fake_create_service():  # noqa: ANN202
+            return mock_account_service, mock_db
+
+        # ``broker reconcile`` (without ``--fix``) 은 ``_ipc_broker_command`` 가 아니라
+        # ``_run_ipc_reconcile`` 안의 local import ``from ante.cli.commands.ipc_helpers
+        # import ipc_send`` 로 ``ipc_send`` 를 직접 호출한다. local import 는 호출
+        # 시점에 ``ante.cli.commands.ipc_helpers`` 모듈 속성을 resolve 하므로, 그 모듈의
+        # ``ipc_send`` 를 패치해야 reconcile 경로가 결정적으로
+        # ``except click.ClickException`` → 오프라인 폴백 → ``AccountNotFoundError``
+        # → exit 1 을 탄다 (#1556).
+        with (
+            patch(
+                "ante.cli.commands.ipc_helpers.ipc_send",
+                AsyncMock(
+                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                ),
+            ),
+            patch(
+                "ante.cli.commands.broker._create_account_service",
+                side_effect=_fake_create_service,
+            ),
+        ):
+            return runner.invoke(
+                cli,
+                [
+                    "--format",
+                    fmt,
+                    "broker",
+                    "reconcile",
+                    "--account",
+                    _MISSING_ACCOUNT_ID,
+                ],
+            )
+
+    def test_status_missing_account_json_mode_emits_envelope_and_exits_1(
+        self, runner: CliRunner
+    ) -> None:
+        """status JSON 모드: missing account 는 ``ACCOUNT_NOT_FOUND`` envelope
+        + exit 1 (#1556)."""
+        result = self._invoke_status(runner, fmt="json")
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-    )
-    def test_reconcile_missing_account_exit_code_is_followup(self) -> None:
-        """reconcile 의 missing-account exit code 계약은 별도 이슈에서 다룬다."""
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "ACCOUNT_NOT_FOUND", payload
+        assert _NOT_FOUND_MESSAGE in str(payload["message"]), payload
+        assert _NOT_FOUND_MESSAGE not in result.stderr, result.stderr
+
+    def test_status_missing_account_text_mode_emits_stderr_and_exits_1(
+        self, runner: CliRunner
+    ) -> None:
+        """status text 모드: stderr ``Error: ...`` + exit 1 (#1556)."""
+        result = self._invoke_status(runner, fmt="text")
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert result.stdout.strip() == "", result.stdout
+        assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+
+    def test_reconcile_missing_account_json_mode_emits_envelope_and_exits_1(
+        self, runner: CliRunner
+    ) -> None:
+        """reconcile (without --fix) JSON 모드: missing account 는 error
+        envelope + exit 1 (#1556)."""
+        result = self._invoke_reconcile(runner, fmt="json")
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "ACCOUNT_NOT_FOUND", payload
+        assert _NOT_FOUND_MESSAGE in str(payload["message"]), payload
+        assert _NOT_FOUND_MESSAGE not in result.stderr, result.stderr
+
+    def test_reconcile_missing_account_text_mode_emits_stderr_and_exits_1(
+        self, runner: CliRunner
+    ) -> None:
+        """reconcile (without --fix) text 모드: stderr ``Error: ...`` + exit 1
+        (#1556)."""
+        result = self._invoke_reconcile(runner, fmt="text")
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        assert result.stdout.strip() == "", result.stdout
+        assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+
+    def test_status_valid_account_disconnected_keeps_exit_0_envelope(
+        self, runner: CliRunner
+    ) -> None:
+        """contract-drift 회귀 방지: **유효 계좌**가 disconnect/unhealthy 인
+        경우는 기존 계약대로 exit 0 + ``{connected:false, healthy:false}``
+        envelope 를 유지해야 한다. ``AccountNotFoundError`` 만 exit 1 로
+        분기되므로, generic 연결 실패는 swallow 되는 것이 정상이다 (#1556)."""
+        mock_db = MagicMock()
+        mock_db.close = AsyncMock()
+        mock_adapter = MagicMock()
+        # 유효 계좌이나 연결/헬스 체크 실패 (예: 자격증명/네트워크 오류).
+        mock_adapter.connect = AsyncMock(
+            side_effect=RuntimeError("broker connection refused")
+        )
+        mock_account_service = MagicMock()
+        mock_account_service.get_broker = AsyncMock(return_value=mock_adapter)
+
+        async def _fake_create_service():  # noqa: ANN202
+            return mock_account_service, mock_db
+
+        with (
+            patch(
+                "ante.cli.commands.broker._ipc_broker_command",
+                _build_ipc_unavailable_mock(),
+            ),
+            patch(
+                "ante.cli.commands.broker._create_account_service",
+                side_effect=_fake_create_service,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "status",
+                    "--account",
+                    "oracle-valid-account",
+                ],
+            )
+
+        assert result.exit_code == 0, (
+            f"expected exit 0 (valid-account disconnected contract), "
+            f"got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        # status 정상 계약은 ``fmt.output`` 으로 indent=2 멀티라인 JSON 을
+        # 출력하므로(에러 envelope 의 한 줄 형식이 아님), stdout 전체를 파싱한다.
+        payload = json.loads(result.stdout)
+        assert isinstance(payload, dict), payload
+        assert payload["connected"] is False, payload
+        assert payload["healthy"] is False, payload
+        assert "broker connection refused" in str(payload["error"]), payload
 
 
 # ── subprocess hang 회귀 (실제 프로세스 종료 확인) ──────────────────────────
