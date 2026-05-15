@@ -507,7 +507,7 @@ class TestStrategyPerformance:
 
     def test_performance_missing_account_json(self, runner):
         """strategy 존재 + 미존재 account → exit 1 + ACCOUNT_NOT_FOUND (#1563)."""
-        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
             records=[_SAMPLE_RECORD],
             account_row=None,
         )
@@ -534,7 +534,7 @@ class TestStrategyPerformance:
 
     def test_performance_missing_account_text(self, runner):
         """미존재 account → text 모드 단건 에러 출력 + exit 1 (#1563)."""
-        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
             records=[_SAMPLE_RECORD],
             account_row=None,
         )
@@ -555,7 +555,7 @@ class TestStrategyPerformance:
 
     def test_performance_real_account_regression(self, runner):
         """regression guard: 실재 account → exit 0 + metrics 유지 (#1563)."""
-        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
             records=[_SAMPLE_RECORD],
             account_row={"1": 1},
         )
@@ -585,7 +585,7 @@ class TestStrategyPerformance:
         account 검증 분기에 도달하지 않고 기존 strategy-not-found 메시지를
         그대로 출력한다 (#1563 분기 순서 불변).
         """
-        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+        p_db, p_path, p_reg, p_track, db, _tracker = self._patch_perf_internals(
             records=[],
             account_row=None,
         )
@@ -613,7 +613,7 @@ class TestStrategyPerformance:
         """
         import sqlite3
 
-        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
             records=[_SAMPLE_RECORD],
             account_row=None,
             fetch_one_side_effect=sqlite3.OperationalError("no such table: accounts"),
@@ -641,7 +641,7 @@ class TestStrategyPerformance:
         """malformed db 등 다른 OperationalError는 삼키지 않고 비정상 종료 (#1563)."""
         import sqlite3
 
-        p_db, p_path, p_reg, p_track, db, tracker = self._patch_perf_internals(
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
             records=[_SAMPLE_RECORD],
             account_row=None,
             fetch_one_side_effect=sqlite3.OperationalError(
