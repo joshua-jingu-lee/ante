@@ -232,11 +232,21 @@ CanonicalTimeframe = [1m, 5m, 15m, 1h, 1d]
 
 ### KRX symbol shape
 
-- 신규 입력 KRX `symbol`의 경계는 **6자리 ASCII digit**이다: `^[0-9]{6}$`.
-- 비-KRX symbol format(예: 미국 ticker `AAPL`)은 1.0 비목표다. 1.0 시점 신규 입력
-  symbol 검증 vocabulary는 KRX 6자리 숫자 형태로 한정한다.
+- KRX symbol shape(`^[0-9]{6}$`)는 **resolved exchange == `KRX`인 신규 입력
+  경계에만** 적용된다. 즉 신규 입력 symbol이 KRX exchange에 귀속될 때만 6자리
+  ASCII digit(`^[0-9]{6}$`) 형태 계약을 적용한다.
+- 비-KRX exchange(`NYSE`/`NASDAQ`/`AMEX`/`TEST` 등 D-016 canonical exchange)의
+  symbol format은 **1.0 비목표이며 본 SSOT가 제약하지 않는다** — 예:
+  `exchange=NYSE`의 `AAPL`은 본 계약의 symbol-shape 사유로 거부되지 않는다.
+  (resolved exchange가 KRX가 아니면 symbol shape 검증을 적용하지 않는다.)
+- 1.0은 KRX-exchange symbol shape만 계약화한다. 다른 exchange의 symbol
+  vocabulary 도입은 별도 후속(1.0 비목표)이며 본 절의 범위가 아니다.
+- D-016 관계: `exchange` 자체의 canonical vocabulary는
+  [`## Canonical Exchange Vocabulary`](#canonical-exchange-vocabulary)(D-016)가
+  SSOT이고, 본 절은 그 중 **exchange == KRX인 경우의 symbol shape**만 계약한다
+  (exchange vocabulary는 D-016, KRX symbol shape는 본 절·exchange=KRX 한정).
 - 코드 레벨 SSOT(`_KRX_SYMBOL_PATTERN`/`_KRX_NUMERIC_SYMBOL_PATTERN` 등 산재 regex
-  정렬)는 #1613의 범위다. 본 절은 신규 입력 형태 계약만 고정한다.
+  정렬)는 #1613의 범위다. 본 절은 (exchange=KRX 한정) 신규 입력 형태 계약만 고정한다.
 
 ### symbol/timeframe 축 구분
 
@@ -276,7 +286,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | Backtest programmatic API | `{1m,5m,15m,1h,1d}` | 검증 에러 | enforcement·에러 계층은 **#1604 정렬 사안** |
 | `data validate` CLI | `{1m,5m,15m,1h,1d}` | non-zero exit + 구조화 error payload | enforcement·에러코드는 **#1605 정렬 사안** |
 | `feed inject` | `{1m,5m,15m,1h,1d}` | 거부 (구조화 error) | enforcement·에러 계층은 **#1606 정렬 사안** |
-| Instrument import KRX symbol | KRX `^[0-9]{6}$` (축 E 신규 입력) | non-zero exit + 구조화 error payload | symbol shape enforcement는 **#1611 정렬 사안** |
+| Instrument import KRX symbol | **exchange=KRX일 때** `^[0-9]{6}$` (축 E 신규 입력); 비-KRX exchange(`NYSE`/`NASDAQ`/`AMEX`/`TEST`)는 symbol-shape 미적용(1.0 비목표) | non-zero exit + 구조화 error payload (exchange=KRX 행에 한함) | symbol shape enforcement는 **#1611 정렬 사안**. ingress = `src/ante/cli/commands/instrument.py` import handler |
 | Data API `timeframe` filter (`GET /api/data/datasets`) | `{1m,5m,15m,1h,1d}` | **400 (기구현)** | `timeframe`은 #1594에서 vocabulary 외 값 **400 거부 기구현**. `symbol`은 별개 — invalid `symbol` vocabulary 거부는 **#1594 아님**, exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) **정렬 사안**이며 현재 invalid `symbol`은 **200 empty 유지**(web-api/05 `GET /api/data/datasets` 계약과 정합) |
 | Live DataCollector write·경로 생성 | **OHLCV `{1m,5m,15m,1h}`만** (`1d`는 write-ownership상 DataFeed 소유라 제외, `tick`은 별도 data_type라 제외) | enforcement 미구현 (현재 spec-vs-impl gap) | ingress enforcement는 **#1614 정렬 사안** (Depends on #1613). 본 행은 "Collector write vocabulary는 OHLCV `{1m,5m,15m,1h}`로 한정(축 D상 `1d`·축 C상 `tick` 제외)" 경계만 명시 |
 
@@ -318,7 +328,9 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | Backtest programmatic API timeframe enforcement | (#1604 범위) | #1604 |
 | `data validate` CLI timeframe enforcement | `src/ante/cli/commands/data.py:27,35` `TIMEFRAMES` 순서 의존 iteration | #1605 |
 | `feed inject` timeframe enforcement | (#1606 범위) | #1606 |
-| Instrument import KRX symbol shape enforcement | `src/ante/data/store.py:34` `_KRX_SYMBOL_PATTERN`(`^\d{6}$`) + `:74` `migrate_parquet_paths` legacy 판별, `src/ante/rule/engine.py:55` `_KRX_NUMERIC_SYMBOL_PATTERN`(`^[0-9]{6}$`) OrderRequestEvent preflight (#1299) | #1611 |
+| Instrument import KRX symbol shape enforcement (primary 소비자 — exchange=KRX 행 symbol 검증 경계) | `src/ante/cli/commands/instrument.py` import handler (`instrument_import`, import row 검증 루프 — 현재 `is_canonical(exchange)`로 exchange만 검증하고 KRX symbol shape는 미검증; #1611이 exchange=KRX 행에 symbol shape 검증 추가 대상) | #1611 |
+| legacy parquet path migration KRX 판별 (축 E legacy 판별 — 신규 입력 검증과 별개 축) | `src/ante/data/store.py:34` `_KRX_SYMBOL_PATTERN`(`^\d{6}$`) + `:74` `migrate_parquet_paths` | **축 E legacy 판별 — #1611 enforcement 대상 아님** (store.py legacy 호환 무손상 보존, "Legacy out-of-vocabulary 호환 정책" 규율) |
+| RuleEngine OrderRequestEvent KRX numeric preflight (#1299 기존 동작) | `src/ante/rule/engine.py:55` `_KRX_NUMERIC_SYMBOL_PATTERN`(`^[0-9]{6}$`) OrderRequestEvent preflight | **#1299 기존 동작 — 본 SSOT 도입으로 동작 불변, #1611 아님** |
 | Data API `timeframe` filter (기구현 400) | `src/ante/web/routes/data.py:65,85` #1594 timeframe 400 filter (기구현) | #1594 |
 | Data API `symbol` filter 잔여 vocabulary 거부 (현재 200 empty 유지 — 독립 행) | `src/ante/web/routes/data.py` datasets `symbol` query (현재 invalid `symbol`은 200 empty, **#1594 아님**, web-api/05 계약과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외 — 독립 행) | `src/ante/data/collector.py:61-150` `DataCollector.start/add_data/_collect_loop/_flush` live write | **#1614** (Depends on #1613) |

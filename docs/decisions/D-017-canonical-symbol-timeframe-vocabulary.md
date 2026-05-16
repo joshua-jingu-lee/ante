@@ -14,7 +14,9 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
 핵심 (결정 요약 — 계약 본문은 core.md `## Canonical Symbol/Timeframe Vocabulary`):
 
 - canonical OHLCV bar timeframe set `[1m, 5m, 15m, 1h, 1d]`(고정 순서·exact-literal·
-  no-alias·no-normalization), KRX symbol shape(`^[0-9]{6}$`), symbol/timeframe 축
+  no-alias·no-normalization), KRX symbol shape(`^[0-9]{6}$`, **resolved exchange ==
+  KRX인 신규 입력 경계 한정** — 비-KRX exchange symbol format은 본 SSOT 무제약·1.0
+  비목표; exchange vocabulary 자체는 D-016 규율), symbol/timeframe 축
   구분(A OHLCV bar timeframe / B subminute 파티셔닝 / C `tick`·`fundamental`
   data_type / D write-ownership / E 신규 입력 vs legacy path 판별 / F fundamental
   cadence), per-surface 거부 계약·legacy 호환을 **단일 계약으로 확정**하고, 그 본문은
@@ -86,7 +88,9 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
 | Backtest programmatic API timeframe enforcement | non-canonical → 검증 에러 | #1604 |
 | `data validate` CLI timeframe enforcement | non-canonical → non-zero exit + 구조화 error payload | #1605 |
 | `feed inject` timeframe enforcement | non-canonical → 거부 | #1606 |
-| Instrument import KRX symbol shape enforcement | non-`^[0-9]{6}$` → non-zero exit + 구조화 error payload | #1611 |
+| Instrument import KRX symbol shape enforcement (primary — `cli/commands/instrument.py` import handler, 현재 exchange만 검증) | exchange=KRX 행 non-`^[0-9]{6}$` → non-zero exit + 구조화 error payload | #1611 |
+| legacy parquet path migration KRX 판별 (축 E legacy — 신규 입력 검증과 별개 축) | `store.py` `_KRX_SYMBOL_PATTERN`/`migrate_parquet_paths` legacy 호환 무손상 보존 | **#1611 enforcement 대상 아님** (축 E legacy) |
+| RuleEngine OrderRequestEvent KRX numeric preflight | `rule/engine.py` `_KRX_NUMERIC_SYMBOL_PATTERN` #1299 기존 동작 — 본 SSOT 도입으로 동작 불변 | **#1299** (불변, #1611 아님) |
 | Data API `timeframe` filter (기구현 400) | vocabulary 외 timeframe 400 거부 기구현 | #1594 |
 | Data API `symbol` filter 잔여 vocabulary 거부 (현재 200 empty 유지) | invalid `symbol`은 현재 200 empty (web-api/05 계약과 정합, **#1594 아님**) — exchange-aware symbol SSOT 후속 정렬 | **#1613 코드 SSOT 체인** |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외) | 누락 소비자 ingress enforcement 추적 폐쇄 | **#1614** (Depends on #1613) |
