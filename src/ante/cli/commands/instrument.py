@@ -9,9 +9,14 @@ import click
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
+from ante.core.market_data_vocab import is_krx_symbol
 
 # 비-canonical exchange 공통 거부 (list/sync/import 3 ingress).
 _INVALID_EXCHANGE_CODE = "INSTRUMENT_INVALID_EXCHANGE"
+# exchange == KRX 행의 비6자리 symbol 거부 (import row 경계 한정,
+# core.md ``### KRX symbol shape``). market_data_vocab.is_krx_symbol
+# SSOT 위임 — instrument.py에 private KRX regex를 두지 않는다.
+_INVALID_KRX_SYMBOL_CODE = "INSTRUMENT_INVALID_SYMBOL"
 # canonical이나 현재 sync source(KIS domestic/KRX)가 미지원 (sync 전용, 축 B).
 _SYNC_SOURCE_UNSUPPORTED_CODE = "INSTRUMENT_SYNC_SOURCE_UNSUPPORTED"
 # KIS sync source(KISDomesticAdapter=domestic-stock/KOSPI/KOSDAQ master)가
@@ -375,6 +380,25 @@ def instrument_import(
                 code=_INVALID_EXCHANGE_CODE,
             )
             ctx.exit(1)
+
+        # exchange == KRX 행은 symbol이 6자리 ASCII digit이어야 한다
+        # (core.md ``### KRX symbol shape`` — exchange == KRX 신규 입력
+        # 경계 한정). 비-KRX canonical(NYSE/NASDAQ/AMEX/TEST)은
+        # symbol-shape 검증 미적용 (1.0 비목표). is_krx_symbol은
+        # 비문자열 symbol(JSON list/dict/number/None 등)도 isinstance
+        # 가드로 False → KRX 행이면 동일 INVALID_SYMBOL 경로로 거부.
+        # 이 검증은 instruments build/dry-run preview/실저장 이전이므로
+        # --dry-run·실 import 양쪽에서 동일하게 차단된다.
+        if isinstance(row_exchange, str) and row_exchange == "KRX":
+            row_symbol = r.get("symbol", "")
+            if not is_krx_symbol(row_symbol):
+                fmt.error(
+                    f"유효하지 않은 종목 코드: {row_symbol!r} "
+                    f"(행 {idx + 1}, exchange={row_exchange!r}, "
+                    f"KRX 6자리 숫자).",
+                    code=_INVALID_KRX_SYMBOL_CODE,
+                )
+                ctx.exit(1)
 
     instruments = [
         Instrument(
