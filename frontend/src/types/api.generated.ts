@@ -3140,10 +3140,7 @@ export type components = {
          *     ratio 통일은 별도 follow-up 이슈에서 다룬다.
          */
         ReportSubmitRequest: {
-            /**
-             * Backtest Period
-             * @default
-             */
+            /** Backtest Period */
             backtest_period: string;
             /**
              * Detail Json
@@ -3152,10 +3149,7 @@ export type components = {
             detail_json: string;
             /** Max Drawdown Pct */
             max_drawdown_pct?: number | null;
-            /**
-             * Rationale
-             * @default
-             */
+            /** Rationale */
             rationale: string;
             /**
              * Recommendations
@@ -3179,20 +3173,11 @@ export type components = {
             strategy_path: string;
             /** Strategy Version */
             strategy_version: string;
-            /**
-             * Summary
-             * @default
-             */
+            /** Summary */
             summary: string;
-            /**
-             * Total Return Pct
-             * @default 0
-             */
+            /** Total Return Pct */
             total_return_pct: number;
-            /**
-             * Total Trades
-             * @default 0
-             */
+            /** Total Trades */
             total_trades: number;
             /** Win Rate */
             win_rate?: number | null;

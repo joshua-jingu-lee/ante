@@ -730,14 +730,14 @@ class ReportSubmitRequest(BaseModel):
     strategy_name: str
     strategy_version: str
     strategy_path: str
-    backtest_period: str = ""
-    total_return_pct: float = Field(default=0.0, allow_inf_nan=False)
-    total_trades: int = Field(default=0, ge=0)
+    backtest_period: str
+    total_return_pct: float = Field(allow_inf_nan=False)
+    total_trades: int = Field(ge=0)
     sharpe_ratio: float | None = Field(default=None, allow_inf_nan=False)
     max_drawdown_pct: float | None = Field(default=None, allow_inf_nan=False)
     win_rate: float | None = Field(default=None, ge=0.0, le=100.0, allow_inf_nan=False)
-    summary: str = ""
-    rationale: str = ""
+    summary: str
+    rationale: str
     risks: str = ""
     recommendations: str = ""
     detail_json: str = "{}"
