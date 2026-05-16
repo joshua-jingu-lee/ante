@@ -92,6 +92,7 @@ JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "
 |-----------|------|----------|
 | `CLI_MISSING_REQUIRED_INPUT` | 필수 옵션·인자 누락 (도메인 명확 시 도메인 prefix specialize) | 모든 명령 |
 | `CLI_CONFIRMATION_REQUIRED` | 위험 명령에 `--yes`/`--force` 누락 | `account delete`, `bot remove`, `member revoke`, `update` |
+| `CLI_OPTION_CONFLICT` | 상호 배타적인 옵션을 동시 사용 (period별 전용 옵션을 다른 period와 함께 사용 등) | `report performance`, `treasury snapshot` |
 | `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` | `BrokerPreset.required_credentials`에 정의된 credential key 누락 | `account create`, `account set-credentials` |
 | `ACCOUNT_UNKNOWN_CREDENTIAL_KEY` | broker preset의 `required_credentials`에 정의되지 않은 credential key 제공 | `account create`, `account set-credentials` |
 | `ACCOUNT_DUPLICATE_CREDENTIAL_KEY` | 같은 credential key를 `--credential`/`--credential-env`/`--credential-file` 중 둘 이상 채널로 중복 제공 | `account create`, `account set-credentials` |
