@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from ante.data.schemas import TIMEFRAMES
 from ante.web.deps import (
     get_audit_logger_optional,
     get_data_store,
@@ -34,12 +35,36 @@ DATA_TYPES = ["ohlcv", "fundamental"]
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
-@router.get("/datasets", response_model=DatasetListResponse)
+@router.get(
+    "/datasets",
+    response_model=DatasetListResponse,
+    responses={
+        400: {
+            "description": (
+                "허용되지 않은 ``timeframe`` 값. ``timeframe`` 은 canonical "
+                "vocabulary (``1m``, ``5m``, ``15m``, ``1h``, ``1d``) 중 하나여야 "
+                "하며, 그 외 값은 400으로 거부된다 (#1594). 타입은 ``string`` "
+                "이지만 위 vocabulary 외 값은 런타임에서 검증된다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+)
 async def list_datasets(
     _caller_id: Annotated[str, Depends(require_data_read)],
     store: Annotated[Any | None, Depends(get_data_store)],
     symbol: str | None = None,
-    timeframe: str | None = None,
+    timeframe: str | None = Query(
+        None,
+        description=(
+            "OHLCV timeframe 필터 (canonical vocabulary: 1m, 5m, 15m, 1h, 1d). "
+            "미지정 시 전체 timeframe 반환. 위 vocabulary 외 값은 400으로 거부된다."
+        ),
+    ),
     data_type: Literal["ohlcv", "fundamental"] | None = Query(
         None, description="데이터 유형 (ohlcv, fundamental, 미지정 시 전체)"
     ),
@@ -57,6 +82,16 @@ async def list_datasets(
     Returns:
         {items: [...], total: int}
     """
+    # timeframe 필터는 TIMEFRAMES vocabulary 외 값을 400으로 거부한다 (#1594).
+    # store 유무와 무관하게 API 경계에서 거부해야 하므로 store-None 가드보다 앞.
+    # (symbol vocabulary 거부는 exchange-aware symbol SSOT 후속 — 본 PR 범위 외)
+    if timeframe is not None and timeframe not in TIMEFRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"허용되지 않은 timeframe 값: {timeframe} "
+            f"(허용: {', '.join(TIMEFRAMES)})",
+        )
+
     if store is None:
         return {"items": [], "total": 0}
 
@@ -83,8 +118,6 @@ async def list_datasets(
 
         # ohlcv 수집 (data_type이 None 또는 "ohlcv"일 때)
         if data_type is None or data_type == "ohlcv":
-            from ante.data.schemas import TIMEFRAMES
-
             tf_list = [timeframe] if timeframe else TIMEFRAMES
             for tf in tf_list:
                 syms = store.list_symbols(tf)

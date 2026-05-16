@@ -5406,6 +5406,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 symbol?: string | null;
+                /** @description OHLCV timeframe 필터 (canonical vocabulary: 1m, 5m, 15m, 1h, 1d). 미지정 시 전체 timeframe 반환. 위 vocabulary 외 값은 400으로 거부된다. */
                 timeframe?: string | null;
             };
             header?: never;
@@ -5421,6 +5422,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DatasetListResponse"];
+                };
+            };
+            /** @description 허용되지 않은 ``timeframe`` 값. ``timeframe`` 은 canonical vocabulary (``1m``, ``5m``, ``15m``, ``1h``, ``1d``) 중 하나여야 하며, 그 외 값은 400으로 거부된다 (#1594). 타입은 ``string`` 이지만 위 vocabulary 외 값은 런타임에서 검증된다. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
