@@ -201,6 +201,141 @@ surface 운영/소스/핸들러 디테일은 후속 이슈 정렬 사안으로 �
 | 회귀 테스트 고정 | #1579 |
 | 에픽 | #1561 |
 
+## Canonical Symbol/Timeframe Vocabulary
+
+> 이 절은 Ante 전역에서 OHLCV bar `timeframe`과 신규 입력 `symbol`이 의미하는
+> **canonical vocabulary와 적용 범위의 계약 SSOT**다.
+> 결정 배경·근거·소비자 영향은 ADR [D-017](../../decisions/D-017-canonical-symbol-timeframe-vocabulary.md)에 정리되어 있으며,
+> 본 절이 normative 계약 본문이다. ADR은 본 절을 링크하고 계약 본문을 중복 기재하지 않는다.
+
+OHLCV bar `timeframe`과 KRX `symbol`은 data / web-api / cli / strategy / backtest가
+공유하는 식별 차원이다. 1.0 시점에 각 표면이 인라인 SSOT 표기(`ante.data.schemas.TIMEFRAMES`)나
+분산된 normative 서술을 갖고 있어 단일 계약이 부재했고, 본 절이 그 계약을 확정한다.
+**런타임 enforcement·코드 동작 변경은 본 절의 범위가 아니다**(코드 레벨 SSOT는 #1613,
+표면별 enforcement는 #1603/#1604/#1605/#1606/#1611/#1594/#1614로 위임). 본 절은 "무엇이
+canonical이고 어느 경계에서 어떻게 거부되어야 하는지"의 계약만 정의한다.
+
+### Canonical timeframe set
+
+```
+CanonicalTimeframe = [1m, 5m, 15m, 1h, 1d]
+```
+
+- canonical OHLCV bar timeframe 값은 **고정 집합·고정 순서**다. 위 5종이 신규 입력 검증
+  vocabulary 전체이며, 표기 순서(`1m → 5m → 15m → 1h → 1d`)는 순서 의존 소비자(예:
+  `src/ante/cli/commands/data.py`의 iteration)를 위해 계약상 고정한다.
+- 값은 위 리터럴과 **정확히 일치**해야 한다(exact-literal). alias(예: `1min`, `D`,
+  `daily`)·대소문자 정규화·사용자 정의 timeframe set은 1.0 비목표다. 입력 정규화(no-alias·
+  no-normalization)도 적용하지 않는다.
+- 코드 레벨 SSOT(상수 단일화 — `TIMEFRAMES`/`_OHLCV_TIMEFRAMES` 등 산재 상수 정렬)는
+  #1613의 범위다. 본 절은 값 집합·순서 자체의 계약만 고정한다.
+
+### KRX symbol shape
+
+- KRX symbol shape(`^[0-9]{6}$`)는 **resolved exchange == `KRX`인 신규 입력
+  경계에만** 적용된다. 즉 신규 입력 symbol이 KRX exchange에 귀속될 때만 6자리
+  ASCII digit(`^[0-9]{6}$`) 형태 계약을 적용한다.
+- 비-KRX exchange(`NYSE`/`NASDAQ`/`AMEX`/`TEST` 등 D-016 canonical exchange)의
+  symbol format은 **1.0 비목표이며 본 SSOT가 제약하지 않는다** — 예:
+  `exchange=NYSE`의 `AAPL`은 본 계약의 symbol-shape 사유로 거부되지 않는다.
+  (resolved exchange가 KRX가 아니면 symbol shape 검증을 적용하지 않는다.)
+- 1.0은 KRX-exchange symbol shape만 계약화한다. 다른 exchange의 symbol
+  vocabulary 도입은 별도 후속(1.0 비목표)이며 본 절의 범위가 아니다.
+- D-016 관계: `exchange` 자체의 canonical vocabulary는
+  [`## Canonical Exchange Vocabulary`](#canonical-exchange-vocabulary)(D-016)가
+  SSOT이고, 본 절은 그 중 **exchange == KRX인 경우의 symbol shape**만 계약한다
+  (exchange vocabulary는 D-016, KRX symbol shape는 본 절·exchange=KRX 한정).
+- 코드 레벨 SSOT(`_KRX_SYMBOL_PATTERN`/`_KRX_NUMERIC_SYMBOL_PATTERN` 등 산재 regex
+  정렬)는 #1613의 범위다. 본 절은 (exchange=KRX 한정) 신규 입력 형태 계약만 고정한다.
+
+### symbol/timeframe 축 구분
+
+`timeframe`·`symbol` 리터럴이 등장하는 위치는 아래 **여섯 축**으로 분리되며 서로
+규율 SSOT가 다르다. 본 절(축 A의 OHLCV bar timeframe canonical set, 축 E의 KRX
+symbol shape 신규 입력 형태)만 SSOT로 소유한다. 나머지 축은 각자의 스펙이 규율하며
+본 계약이 값을 재정의하지 않는다.
+
+| 축 | 대상 | 의미 | 규율 SSOT | 본 계약과의 관계 |
+|----|------|------|-----------|------------------|
+| **A** | OHLCV bar timeframe (`1m`/`5m`/`15m`/`1h`/`1d`) | 신규 입력 timeframe vocabulary | **본 절(`### Canonical timeframe set`)** | 본 계약 SSOT |
+| **B** | subminute 파티셔닝 해상도 (`10s`/`30s`) | Parquet 일별 파티셔닝 단위 | `docs/specs/data-feed/04-schema.md` | 별개 축. timeframe vocabulary가 아니라 저장 파티셔닝 해상도. 본 계약 밖 |
+| **C** | `tick` / `fundamental` data_type | OHLCV가 아닌 데이터 유형 | `docs/specs/data-pipeline/01·02·03` | 별개 축. timeframe이 아니라 data_type. 본 계약 밖 |
+| **D** | write-ownership (`<1d`+`tick`=Collector / `1d`+`fundamental`=DataFeed) | 파티션 쓰기 소유자 | `docs/specs/data-pipeline/02-write-ownership.md` | 별개 축. 어느 모듈이 쓰는가의 소유권 분배이며 입력 vocabulary 계약이 아니다 |
+| **E** | 신규 입력 strict ASCII 검증 vs legacy parquet path migration 판별 | 신규 입력 경계 vs 기존 경로 호환 | 신규 입력=본 절(`### KRX symbol shape`), legacy path migration 판별=`src/ante/data/store.py`(`\d` 보존) | 신규 입력 형태만 본 계약 SSOT. legacy 경로 판별 regex는 별개 축(아래 "Legacy 호환 정책") |
+| **F** | fundamental cadence/periodicity (`quarterly`/`annual`) | 재무 데이터 주기 | (현재 `dataset.timeframe` 필드에 overload — 정리는 후보 D deferral) | **별개 축. 본 canonical OHLCV-timeframe 계약에 포함하지 않는다.** 현재 `dataset.timeframe` 필드(`docs/dashboard/user-stories/backtest-data.md:79`·`docs/dashboard/mockups/backtest-data-fundamental.html:127`, fundamental parquet `quarterly.parquet`/`annual.parquet`)에 overload된 cross-surface 불일치는 #1612가 만든 것이 아니다. 본 절은 "fundamental cadence는 OHLCV bar timeframe과 별개 축이며 그 필드 의미 정리는 후보 D" 까지만 명문화하고 값 정의·필드 재설계는 하지 않는다 |
+
+(D-016 `### exchange vs market vs source vs broker_type` 절과 동형 구조: 같은 리터럴이라도
+어느 축의 값인지에 따라 규율 SSOT가 다르며 값을 섞지 않는다.)
+
+### Per-surface 허용/거부 + 검증·에러 계약 매트릭스
+
+검증은 **표면별로 분리**된다. 같은 vocabulary라도 어느 경계에서 어떤 에러 계약으로
+거부되는지는 표면마다 다르다.
+
+**범위 불변식**: 본 절은 OHLCV bar timeframe·KRX symbol vocabulary 유효성 계약
+(canonical set·고정 순서·exact-literal / KRX 6자리 / legacy read 호환)을 정의한다.
+surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이슈에 위임되며 본 절에서
+완전 명세하지 않는다. 후속 이슈 구현자는 본 절의 vocabulary 계약을 상위 기준으로
+삼고 surface 동작을 그 아래에서 정렬한다. 따라서 아래 표의 각 행은 vocabulary 계약과
+거부 경계까지만 계약화하며, surface 운영/핸들러 디테일은 후속 이슈 정렬 사안으로
+표기한다.
+
+| 표면 | OHLCV timeframe 허용 | non-canonical 거부 계약 | 비고 |
+|------|----------------------|--------------------------|------|
+| Backtest run CLI | `{1m,5m,15m,1h,1d}` | non-zero exit + 구조화 error payload | enforcement·에러코드는 **#1603 정렬 사안**. 본 행은 vocabulary 계약만 명시 |
+| Backtest programmatic API | `{1m,5m,15m,1h,1d}` | 검증 에러 | enforcement·에러 계층은 **#1604 정렬 사안** |
+| `data validate` CLI | `{1m,5m,15m,1h,1d}` | non-zero exit + 구조화 error payload | enforcement·에러코드는 **#1605 정렬 사안** |
+| `feed inject` | `{1m,5m,15m,1h,1d}` | 거부 (구조화 error) | enforcement·에러 계층은 **#1606 정렬 사안** |
+| Instrument import KRX symbol | **exchange=KRX일 때** `^[0-9]{6}$` (축 E 신규 입력); 비-KRX exchange(`NYSE`/`NASDAQ`/`AMEX`/`TEST`)는 symbol-shape 미적용(1.0 비목표) | non-zero exit + 구조화 error payload (exchange=KRX 행에 한함) | symbol shape enforcement는 **#1611 정렬 사안**. ingress = `src/ante/cli/commands/instrument.py` import handler |
+| Data API `timeframe` filter (`GET /api/data/datasets`) | `{1m,5m,15m,1h,1d}` | **400 (기구현)** | `timeframe`은 #1594에서 vocabulary 외 값 **400 거부 기구현**. `symbol`은 별개 축 — datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 **exact-match 필터로만** 처리한다(매칭 데이터 미존재 시 **200 empty**, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset을 반환 — 아래 "Legacy out-of-vocabulary 호환 정책"과 정합). `symbol` vocabulary 거부 자체는 **#1594 아님**, exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) **정렬 사안**(web-api/05 `GET /api/data/datasets` 계약과 정합) |
+| Live DataCollector write·경로 생성 | **OHLCV `{1m,5m,15m,1h}`만** (`1d`는 write-ownership상 DataFeed 소유라 제외, `tick`은 별도 data_type라 제외) | enforcement 미구현 (현재 spec-vs-impl gap) | ingress enforcement는 **#1614 정렬 사안** (Depends on #1613). 본 행은 "Collector write vocabulary는 OHLCV `{1m,5m,15m,1h}`로 한정(축 D상 `1d`·축 C상 `tick` 제외)" 경계만 명시 |
+
+판정 보조 노트:
+- 시나리오 1(OHLCV timeframe canonical 여부): 위 `### Canonical timeframe set`의
+  `{1m,5m,15m,1h,1d}` 5종만 canonical이며, alias·정규화 없이 exact-literal 일치만
+  허용된다.
+- 시나리오 2(`10s`/`30s`가 canonical timeframe인가): "symbol/timeframe 축 구분"
+  표 축 B에 따라 `10s`/`30s`는 timeframe vocabulary가 아니라 subminute 파티셔닝
+  해상도(`data-feed/04-schema.md` 규율)다.
+- 시나리오 3(`quarterly`/`annual`이 canonical timeframe인가): 축 F에 따라 fundamental
+  cadence는 OHLCV bar timeframe과 별개 축이며, 본 canonical 계약에 포함하지 않는다
+  (`dataset.timeframe` 필드 overload 정리는 후보 D deferral).
+- 시나리오 4(Collector가 `1d`를 쓰는가): 축 D(write-ownership, `data-pipeline/02`
+  규율)에 따라 `1d`는 DataFeed 소유이며 Collector write vocabulary는 OHLCV
+  `{1m,5m,15m,1h}`로 한정된다(#1614).
+
+### Legacy out-of-vocabulary 호환 정책
+
+- 검증은 **신규 입력 경계에만** 적용한다.
+- 기존 영속 Parquet path / SQLite row의 out-of-vocab timeframe·symbol 값은 read에서
+  거부하지 않는다. **자동 삭제·자동 마이그레이션하지 않는다**. 별도 마이그레이션
+  결정이 내려지기 전까지 기존 데이터는 그대로 읽힌다.
+- 즉 "out-of-vocab 값이 거부된다"는 새 데이터를 *쓰거나 입력으로 받을 때*만 적용되며,
+  이미 저장된 데이터의 읽기 호환성은 깨지 않는다.
+- 신규 입력 strict ASCII 검증(축 E)과 legacy parquet path migration 판별은 **별개 축**이다.
+  `src/ante/data/store.py`의 path migration 판별 regex(`\d`)는 기존 경로를 식별하기
+  위한 것이며, 신규 입력 검증(`^[0-9]{6}$`)으로 대체·강화되지 않는다(legacy 무손상 보존).
+
+### 소비자 목록 + 후속 이슈 매핑
+
+본 절은 계약 정의 + 영향 스펙 최소 포인터까지다. 실제 동작 정렬은 후속 이슈로 위임한다.
+
+| 소비자 / 작업 | 위치 (코드 변경 없음, 본 이슈 범위 밖) | 후속 이슈 |
+|---------------|----------------------------------------|-----------|
+| 코드 레벨 SSOT 도입(`ante.core.market_data_vocab` 신설, `TIMEFRAMES`/KRX regex 소비자 위임) | `src/ante/data/schemas.py:56` `TIMEFRAMES`, `src/ante/data/__init__.py:22,41` re-export + `__all__` | #1613 |
+| `DEFAULT_RETENTION` timeframe dict keys (보존 정책 dict 키 — 독립 소비자 행) | `src/ante/data/retention.py:13` `_OHLCV_TIMEFRAMES`, `:37` `DEFAULT_RETENTION` timeframe dict keys | #1613 (코드 SSOT). 보존 기간 값 자체는 retention 정책 고유 (`data-pipeline/03` 보존 정책 표) |
+| Backtest run CLI timeframe enforcement | (#1603 범위) | #1603 |
+| Backtest programmatic API timeframe enforcement | (#1604 범위) | #1604 |
+| `data validate` CLI timeframe enforcement | `src/ante/cli/commands/data.py:27,35` `TIMEFRAMES` 순서 의존 iteration | #1605 |
+| `feed inject` timeframe enforcement | (#1606 범위) | #1606 |
+| Instrument import KRX symbol shape enforcement (primary 소비자 — exchange=KRX 행 symbol 검증 경계) | `src/ante/cli/commands/instrument.py` import handler (`instrument_import`, import row 검증 루프 — 현재 `is_canonical(exchange)`로 exchange만 검증하고 KRX symbol shape는 미검증; #1611이 exchange=KRX 행에 symbol shape 검증 추가 대상) | #1611 |
+| legacy parquet path migration KRX 판별 (축 E legacy 판별 — 신규 입력 검증과 별개 축) | `src/ante/data/store.py:34` `_KRX_SYMBOL_PATTERN`(`^\d{6}$`) + `:74` `migrate_parquet_paths` | **축 E legacy 판별 — #1611 enforcement 대상 아님** (store.py legacy 호환 무손상 보존, "Legacy out-of-vocabulary 호환 정책" 규율) |
+| RuleEngine OrderRequestEvent KRX numeric preflight (#1299 기존 동작) | `src/ante/rule/engine.py:55` `_KRX_NUMERIC_SYMBOL_PATTERN`(`^[0-9]{6}$`) OrderRequestEvent preflight | **#1299 기존 동작 — 본 SSOT 도입으로 동작 불변, #1611 아님** |
+| Data API `timeframe` filter (기구현 400) | `src/ante/web/routes/data.py:65,85` #1594 timeframe 400 filter (기구현) | #1594 |
+| Data API `symbol` filter (exact-match·미거부 — 독립 행) | `src/ante/web/routes/data.py` datasets `symbol` query (datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 시 200 empty, legacy out-of-vocab symbol dir이 저장돼 있으면 그 dataset 반환; **#1594 아님**, web-api/05 계약·Legacy 호환 정책과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
+| **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외 — 독립 행) | `src/ante/data/collector.py:61-150` `DataCollector.start/add_data/_collect_loop/_flush` live write | **#1614** (Depends on #1613) |
+| fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | `docs/dashboard/user-stories/backtest-data.md`, `docs/dashboard/mockups/backtest-data-fundamental.html` (본 이슈 무편집) | **후보 D** (deferral, 사람 등록 surface) |
+
 ## Logging 연계
 
 시스템 로그 인프라는 별도 모듈 스펙 [logging/README.md](../logging/README.md)로 분리되어 있다. Core는 시스템 초기화 순서상 로깅 설정(`setup_logging`)을 Database 이전 단계에서 수행한다.

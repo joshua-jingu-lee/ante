@@ -6,6 +6,10 @@
 
 ### Phase 1 — 국내 백테스트 기반 확보
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> 아래 표의 `API가 제공하는 모든 타임프레임`은 data.go.kr **source 가용성(source-capability)**
+> 축이며 OHLCV bar timeframe vocabulary(축 A) 계약과 별개 차원이다(값 재정의 아님).
+
 | 데이터 | 소스 | 비고 |
 |--------|------|------|
 | OHLCV + 거래대금 | data.go.kr | 주 소스 (일봉, API가 제공하는 모든 타임프레임) |

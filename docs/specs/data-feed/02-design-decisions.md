@@ -18,6 +18,11 @@ natural key(`timestamp` 또는 `date`) 기준으로 중복을 제거하고 정�
 
 DataFeed가 소유하는 데이터 영역:
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> 본 절의 `1d`·`1d 미만`·`분봉`/`일봉`·`timeframes = ["1d"]` 서술은 core.md 축 구분 표의
+> **축 D(쓰기 소유권 분배, `data-pipeline/02-write-ownership.md`가 규율)** 서술이며 OHLCV bar
+> timeframe vocabulary(축 A)를 재정의하지 않는다.
+
 | 데이터 | 쓰기 방식 | 근거 |
 |--------|----------|------|
 | OHLCV 일봉 (`1d`) | merge/dedup | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |

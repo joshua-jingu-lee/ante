@@ -7,6 +7,11 @@
 같은 Parquet 파티션에 복수 모듈이 동시에 쓰면 데이터 유실 위험이 있다.
 타임프레임·데이터 유형별로 **쓰기 소유권을 단일 모듈에 고정**하여 충돌을 원천 차단한다.
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> 본 절의 write-ownership(Collector `<1d`+`tick` / DataFeed `1d`+`fundamental`)은 core.md 축 구분
+> 표의 **축 D(쓰기 소유권 분배)**이며 OHLCV bar timeframe vocabulary(축 A)와 별개 축이다. 본 절이
+> 축 D의 규율 SSOT다(값 재정의 아님).
+
 | 데이터 | 쓰기 소유자 | 쓰기 모드 | 근거 |
 |--------|-----------|----------|------|
 | OHLCV 일봉 (`1d`) | DataFeed | merge/dedup | data.go.kr에서 완전한 일봉을 수집, 더 높은 신뢰도 |

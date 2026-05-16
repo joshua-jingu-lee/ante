@@ -72,9 +72,12 @@
 
 ## 데이터 (`/api/data`)
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> `timeframe` vocabulary(`1m, 5m, 15m, 1h, 1d`) 계약 본문은 core.md 절이 SSOT이며 코드 상수 단일화는 #1613에 위임된다. **`timeframe` filter 표면별 enforcement 정렬은 #1594에서 다룬다(`timeframe` 한정).** datasets API는 `symbol`을 **별도 vocabulary 거부하지 않고 exact-match 필터로만** 처리한다 — 매칭 데이터 미존재 시 200 empty, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset을 반환한다(core.md `## Canonical Symbol/Timeframe Vocabulary` `Legacy out-of-vocabulary 호환 정책`과 정합). `symbol` vocabulary 거부 자체는 #1594가 아니라 exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) 정렬 사안이다(아래 `GET /api/data/datasets` 행과 정합).
+
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/api/data/datasets` | 보유 데이터셋 목록 (필터: symbol, timeframe, data_type, offset, limit). `timeframe`은 `TIMEFRAMES` vocabulary(`1m, 5m, 15m, 1h, 1d`, SSOT: `ante.data.schemas.TIMEFRAMES`)만 허용 — vocabulary 외 값은 400 거부 (#1594). `data_type`은 `ohlcv \| fundamental` enum, 외 값은 422. `symbol` vocabulary 거부는 exchange-aware symbol SSOT 후속(후보 0)에 위임 — 현재 invalid `symbol`은 200 empty 유지 |
+| GET | `/api/data/datasets` | 보유 데이터셋 목록 (필터: symbol, timeframe, data_type, offset, limit). `timeframe`은 OHLCV bar vocabulary(`1m, 5m, 15m, 1h, 1d`, 계약 SSOT: core.md `## Canonical Symbol/Timeframe Vocabulary` (코드 상수 위임 #1613))만 허용 — vocabulary 외 값은 400 거부 (#1594). `data_type`은 `ohlcv \| fundamental` enum, 외 값은 422. `symbol`은 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 매칭 데이터 미존재 시 200 empty, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset 반환(core.md Legacy out-of-vocabulary 호환 정책과 정합). `symbol` vocabulary 거부 자체는 exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인)에 위임 |
 | GET | `/api/data/datasets/{dataset_id}` | 데이터셋 상세 조회. 메타데이터(symbol, timeframe, 기간, 행 수) + 데이터 미리보기(최근 5행). dataset_id = `{symbol}__{timeframe}`. ParquetStore.read(limit=5) 활용 |
 | GET | `/api/data/schema` | 데이터 스키마 (필터: data_type) |
 | GET | `/api/data/storage` | 저장 용량 현황 |
