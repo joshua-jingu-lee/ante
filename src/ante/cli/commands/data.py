@@ -127,9 +127,39 @@ def validate(
 ) -> None:
     """Parquet 파일 무결성 검증."""
 
+    from ante.core.market_data_vocab import (
+        CANONICAL_TIMEFRAMES,
+        is_krx_symbol,
+        is_valid_timeframe,
+    )
     from ante.data.store import ParquetStore
 
     fmt = get_formatter(ctx)
+
+    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, #1613 SSOT helper 위임).
+    # precedence: ① timeframe → ② KRX symbol shape. ParquetStore 생성·
+    # store.list_symbols·store.validate·`if not symbols:` exit-0 이전이어야
+    # invalid 입력이 "검증할 데이터 없음" fake-success(#1591 oracle 증상)로
+    # 처리되지 않는다. `data validate`는 --exchange 옵션 없는 KRX-domain
+    # local store 대상이라 symbol에 is_krx_symbol을 직접 적용한다
+    # (core.md `### KRX symbol shape` 정합 — 비-KRX 경로 부재).
+    # `--symbol` 미지정(symbol is None)은 기존 전체 validate 동작을
+    # 유지하며 거부하지 않는다.
+    if not is_valid_timeframe(timeframe):
+        fmt.error(
+            f"유효하지 않은 타임프레임: {timeframe!r}. "
+            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
+            code="DATA_VALIDATE_INVALID_TIMEFRAME",
+        )
+        raise SystemExit(1)
+
+    if symbol is not None and not is_krx_symbol(symbol):
+        fmt.error(
+            f"유효하지 않은 종목 코드: {symbol!r} (KRX 6자리 숫자)",
+            code="DATA_VALIDATE_INVALID_SYMBOL",
+        )
+        raise SystemExit(1)
+
     store = ParquetStore(base_path=data_path)
 
     if symbol:
