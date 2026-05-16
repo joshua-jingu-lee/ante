@@ -29,6 +29,7 @@ from ante.web.schemas import (
     TreasurySummaryResponse,
 )
 from ante.web.utils.date_params import (
+    reject_inverted_date_range,
     validate_iso_date_only,
     validate_iso_date_param_for_sql_datetime,
 )
@@ -266,7 +267,8 @@ async def get_summary(
                 "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required)."
                 " ``treasury_transactions.created_at``은 SQLite ``datetime('now')``"
                 " 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만"
-                " 비교한다 (#1440). ``type`` query는 정규 vocabulary"
+                " 비교한다 (#1440). ``start_date > end_date`` (inverted range)도"
+                " 422로 거부한다 (#1595). ``type`` query는 정규 vocabulary"
                 " ``{allocate, deallocate, release, fill, bot_stopped_release}``"
                 " (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477)."
             ),
@@ -328,6 +330,9 @@ async def list_transactions(
     end_bound = validate_iso_date_param_for_sql_datetime(
         end_date, "end_date", end_of_day=True
     )
+    # boundary str lexicographic 정합: start ``YYYY-MM-DD 00:00:00`` ≤ end
+    # ``YYYY-MM-DD 23:59:59`` 이므로 동일 날짜는 통과, 역전만 422 거부 (#1595).
+    reject_inverted_date_range(start_bound, end_bound)
 
     db = getattr(treasury, "_db", None)
     if db is None:
@@ -940,7 +945,9 @@ async def get_latest_snapshot(
             "description": (
                 "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). "
                 "``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 "
-                "저장되므로 임의 문자열을 허용하지 않는다 (#1440)."
+                "저장되므로 임의 문자열을 허용하지 않는다 (#1440). "
+                "``start_date > end_date`` (inverted range)도 422로 거부한다 "
+                "(#1595)."
             ),
             "content": {
                 "application/problem+json": {
@@ -974,6 +981,8 @@ async def list_snapshots(
     """
     start_date = validate_iso_date_only(start_date, "start_date")
     end_date = validate_iso_date_only(end_date, "end_date")
+    # default 적용 이전: 미지정(None)은 통과, start>end (inverted) 만 거부 (#1595).
+    reject_inverted_date_range(start_date, end_date)
 
     target = _resolve_treasury(treasury, treasury_manager, account_id)
 

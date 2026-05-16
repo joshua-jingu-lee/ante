@@ -28,6 +28,7 @@ from ante.web.schemas import (
     BotListResponse,
     BotUpdateRequest,
 )
+from ante.web.utils.date_params import reject_inverted_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -1261,7 +1262,9 @@ def _validate_iso_date_param(
             "description": (
                 "Invalid date filter (ISO 8601 required). ``start_date``/"
                 "``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 "
-                "datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다."
+                "datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다. UTC 정규화 "
+                "후 ``start_date > end_date`` (inverted range)도 422로 거부한다 "
+                "(#1595)."
             ),
             "content": {
                 "application/problem+json": {
@@ -1363,6 +1366,10 @@ async def get_bot_logs(
     # end_date는 ``end_of_day=True``로 date-only를 ``T23:59:59.999999``로 확장.
     start_validated = _validate_iso_date_param(start_date, "start_date")
     end_validated = _validate_iso_date_param(end_date, "end_date", end_of_day=True)
+    # 둘 다 UTC-aware datetime으로 정규화된 뒤 비교 → cross-offset 입력도
+    # aware/naive TypeError 없이 실제 UTC 순서로 inverted range만 422 거부.
+    # end_date는 ``end_of_day=True``로 ``T23:59:59``라 동일 날짜는 통과 (#1595).
+    reject_inverted_date_range(start_validated, end_validated)
 
     if event_history_store is not None:
         # r2: ``bot_id``를 SQL JSON1 ``payload_filter``로 끌어올려 SQL 단계

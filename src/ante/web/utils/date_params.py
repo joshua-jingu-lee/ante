@@ -7,7 +7,7 @@ date-only 입력만 받는다. 그러나 본 PR 이전에는 임의 문자열
 (``oracle-not-a-date``)도 200으로 통과하여 정상 데이터셋과 구분되지 않는
 contract drift가 있었다.
 
-본 모듈은 두 종류의 헬퍼를 제공한다:
+본 모듈은 세 종류의 헬퍼를 제공한다:
 
 * :func:`validate_iso_date_only` — 입력을 ``YYYY-MM-DD`` 표준 형식으로 검증
   하고 그대로 돌려준다. 캘린더상 존재하지 않는 날짜(``2026-13-32``)도 거부.
@@ -19,6 +19,17 @@ contract drift가 있었다.
   boundary 문자열로 확장한다. ``treasury_transactions.created_at`` 컬럼은
   SQLite ``datetime('now')`` 기본값을 쓰므로 SQL 텍스트 비교가 정확한
   inclusive bound를 가지려면 boundary 확장이 필수다.
+
+* :func:`reject_inverted_date_range` — 정규화된 start/end 값이 모두 not
+  ``None``이고 ``start > end`` (불가능한 기간)이면 ``HTTPException(422)``로
+  거부한다 (#1595, oracle A7). portfolio history / treasury transactions /
+  treasury snapshots / bot logs 4개 read API가 inverted range를 400/422가
+  아니라 200 empty로 silently 흡수하던 contract drift를 차단한다. start/end가
+  각 endpoint 내에서 동일 타입(ISO ``YYYY-MM-DD`` str, SQLite boundary str,
+  UTC-aware ``datetime``)이고 모두 ``>`` 비교가 시간 순서와 일치하므로 generic
+  comparator 1개로 4곳을 모두 커버한다. 한쪽/양쪽이 ``None``(미지정)이면
+  통과시켜 caller의 default 분기를 보존한다 — 검증 호출은 default 적용 **전**에
+  배치해야 한다.
 
 본 헬퍼는 ``ante.web.routes.bots._validate_iso_date_param``과 의도적으로
 분리되어 있다. bot logs 페이지네이션은 ``EventHistoryStore``의 ISO 8601
@@ -39,10 +50,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Protocol
 
 from fastapi import HTTPException
 
 __all__ = [
+    "reject_inverted_date_range",
     "validate_iso_date_only",
     "validate_iso_date_param_for_sql_datetime",
 ]
@@ -152,3 +165,66 @@ def validate_iso_date_param_for_sql_datetime(
     normalized = _parse_iso_date_only(value, field)
     suffix = " 23:59:59" if end_of_day else " 00:00:00"
     return normalized + suffix
+
+
+class _Orderable(Protocol):
+    """``>`` 비교가 가능한 값의 최소 구조 (generic comparator 제약).
+
+    4개 endpoint가 정규화하는 타입은 ISO ``YYYY-MM-DD`` str, SQLite boundary
+    str(``YYYY-MM-DD HH:MM:SS``), UTC-aware :class:`datetime` 셋이며 모두 같은
+    타입끼리의 ``>`` 비교가 실제 시간 순서와 일치한다. 본 Protocol은 그
+    공통 계약(``__gt__``)만 노출한다.
+    """
+
+    def __gt__(self, other: object, /) -> bool: ...
+
+
+def reject_inverted_date_range[T: _Orderable](
+    start: T | None,
+    end: T | None,
+    *,
+    start_field: str = "start_date",
+    end_field: str = "end_date",
+) -> None:
+    """정규화된 ``start``/``end``가 inverted range면 ``HTTPException(422)``.
+
+    4개 read API(portfolio history, treasury transactions, treasury
+    snapshots, bot logs)는 FastAPI query 레벨에서 날짜 *형식*만 검증하고
+    ``start_date > end_date`` 순서는 검증하지 않아, 불가능한 기간을 400/422가
+    아니라 200 empty result로 silently 흡수했다 (#1595, oracle A7). 본 헬퍼는
+    그 date-order invariant의 SSOT다.
+
+    비교는 generic ``>`` 단 한 번이다. 각 endpoint가 start/end를 동일 타입으로
+    정규화하고(ISO ``YYYY-MM-DD`` str / SQLite boundary str / UTC-aware
+    :class:`datetime`) 그 타입의 ``>``가 실제 시간 순서와 일치하므로 (str은
+    lexicographic, datetime은 native) 추가 파싱 없이 정확하다. 따라서
+    호출부는 검증된/정규화된 값을 넘겨야 한다 (raw 입력 아님). bot logs처럼
+    tz-aware datetime을 넘기는 경우 UTC-aware로 정규화된 뒤 비교되므로
+    cross-offset 입력도 aware/naive ``TypeError`` 없이 실제 UTC 순서로
+    판정된다.
+
+    한쪽 또는 양쪽이 ``None``(사용자 미지정)이면 통과시킨다. 따라서 호출은
+    각 endpoint의 default 적용 **이전**에 배치해야 미지정 케이스가 거부되지
+    않고 기존 default 동작이 보존된다.
+
+    Args:
+        start: 정규화된 start 값 또는 ``None``.
+        end: 정규화된 end 값 또는 ``None``.
+        start_field: 에러 메시지에 사용할 start 필드명.
+        end_field: 에러 메시지에 사용할 end 필드명.
+
+    Raises:
+        HTTPException(422): ``start``/``end``가 모두 not ``None``이고
+            ``start > end`` (inverted range)일 때. detail에 두 필드명과 두
+            값을 포함한다.
+    """
+    if start is None or end is None:
+        return
+    if start > end:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"invalid date range: {start_field} ({start!r}) must not be "
+                f"after {end_field} ({end!r})"
+            ),
+        )
