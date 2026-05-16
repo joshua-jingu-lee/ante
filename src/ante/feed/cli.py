@@ -600,12 +600,41 @@ def feed_inject(
     """외부 CSV 파일에서 과거 데이터를 수동 주입한다."""
     from pathlib import Path as _Path
 
+    from ante.core.market_data_vocab import (
+        CANONICAL_TIMEFRAMES,
+        is_krx_symbol,
+        is_valid_timeframe,
+    )
     from ante.data.normalizer import DataNormalizer
     from ante.data.store import ParquetStore
     from ante.feed.injector import FeedInjector
 
     fmt = get_formatter(ctx)
     filepath = _Path(path)
+
+    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, #1613 SSOT helper 위임).
+    # precedence: ① timeframe → ② KRX symbol shape. ParquetStore 생성·
+    # FeedInjector·injector.inject_csv·내부 store.write 이전이어야 invalid
+    # 입력이 비표준 parquet dataset을 생성하지 않는다(#1592 oracle 증상).
+    # ParquetStore.__init__은 디렉터리를 만들지 않고 store.write()만 mkdir
+    # 하므로 formatter 후·store 생성 전 배치하면 parquet 미생성을 보장한다.
+    # `feed inject`는 --exchange 옵션 없는 KRX-domain이라 symbol에
+    # is_krx_symbol을 직접 적용한다 (core.md `### KRX symbol shape` 정합 —
+    # 비-KRX 경로 부재). `--symbol`은 required이므로 None 케이스가 없다.
+    if not is_valid_timeframe(timeframe):
+        fmt.error(
+            f"유효하지 않은 타임프레임: {timeframe!r}. "
+            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
+            code="FEED_INJECT_INVALID_TIMEFRAME",
+        )
+        raise SystemExit(1)
+
+    if not is_krx_symbol(symbol):
+        fmt.error(
+            f"유효하지 않은 종목 코드: {symbol!r} (KRX 6자리 숫자)",
+            code="FEED_INJECT_INVALID_SYMBOL",
+        )
+        raise SystemExit(1)
 
     store = ParquetStore(base_path=_Path(data_path))
     normalizer = DataNormalizer()
