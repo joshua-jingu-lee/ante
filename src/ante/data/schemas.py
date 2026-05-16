@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import polars as pl
 
+from ante.core.market_data_vocab import CANONICAL_TIMEFRAMES
+
 # 모든 시세 데이터의 공통 스키마 (OHLCV)
 OHLCV_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "timestamp": pl.Datetime("ns"),
@@ -52,8 +54,11 @@ FUNDAMENTAL_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
 
 FUNDAMENTAL_COLUMNS: list[str] = list(FUNDAMENTAL_SCHEMA.keys())
 
-# 지원되는 타임프레임
-TIMEFRAMES: list[str] = ["1m", "5m", "15m", "1h", "1d"]
+# 지원되는 타임프레임 — 코드 레벨 SSOT(`ante.core.market_data_vocab`)에
+# 위임한다. 타입(`list`)·순서는 위임 전과 동일하다 — 순서 의존 소비자
+# (`src/ante/cli/commands/data.py` iteration)를 위해 계약상 고정 순서를
+# 보존한다(#1613 narrow-scope: behavior-preserving).
+TIMEFRAMES: list[str] = list(CANONICAL_TIMEFRAMES)
 
 
 def validate_ohlcv(df: pl.DataFrame) -> bool:

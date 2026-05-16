@@ -5,12 +5,16 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from ante.core.market_data_vocab import TIMEFRAME_SET
 from ante.data.store import ParquetStore
 
 logger = logging.getLogger(__name__)
 
-# OHLCV 타임프레임 집합 — retention key가 여기 속하면 data_type="ohlcv"
-_OHLCV_TIMEFRAMES: frozenset[str] = frozenset({"1m", "5m", "15m", "1h", "1d"})
+# OHLCV 타임프레임 집합 — retention key가 여기 속하면 data_type="ohlcv".
+# 코드 레벨 SSOT(`ante.core.market_data_vocab.TIMEFRAME_SET`)에 위임한다.
+# 값(canonical 5종 frozenset)·`_resolve_data_type()` 동작은 위임 전과
+# 완전히 동일하다(#1613 narrow-scope: behavior-preserving).
+_OHLCV_TIMEFRAMES: frozenset[str] = TIMEFRAME_SET
 
 
 def _resolve_data_type(key: str) -> tuple[str, str]:
