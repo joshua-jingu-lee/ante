@@ -60,10 +60,14 @@
 > Phase 1에서 제공되지 않는 필드는 null 허용.
 > PER/PBR/EPS/BPS는 data.go.kr(시가총액, 상장주식수) + DART(순이익, 자본총계)로 **직접 계산**.
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> 아래 `TIMEFRAMES: list[str]`의 OHLCV bar timeframe vocabulary(`1m, 5m, 15m, 1h, 1d`) 계약 본문은
+> core.md 절이 SSOT이며, 이 코드 상수는 #1613(코드 레벨 SSOT 단일화)에서 파생 정렬된다.
+
 **편의 상수 및 검증 함수**:
 - `OHLCV_COLUMNS: list[str]` — `OHLCV_SCHEMA`의 키 목록
 - `FUNDAMENTAL_COLUMNS: list[str]` — `FUNDAMENTAL_SCHEMA`의 키 목록
-- `TIMEFRAMES: list[str]` — 지원 타임프레임 (`["1m", "5m", "15m", "1h", "1d"]`)
+- `TIMEFRAMES: list[str]` — 지원 타임프레임 (`["1m", "5m", "15m", "1h", "1d"]`, 계약 SSOT: core.md canonical timeframe set, 코드 상수 단일화는 #1613 파생)
 - `validate_ohlcv(df) -> bool` — OHLCV DataFrame의 필수 필드(`timestamp`, `symbol`, OHLC, `volume`, `source`) 존재 여부 검증
 - `validate_fundamental(df) -> bool` — FUNDAMENTAL DataFrame의 필수 필드(`date`, `symbol`, `source`) 존재 여부 검증
 
@@ -245,6 +249,14 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 ### 데이터 보존 정책
 
 오래된 데이터를 삭제하여 용량을 관리한다.
+
+> 아래 보존 정책 표의 OHLCV timeframe 키(`1m`/`5m`/`15m`/`1h`/`1d`)는 [core.md
+> `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary)
+> canonical OHLCV timeframe set에서 **파생**되며(보존 기간 값만 retention 정책 고유,
+> 코드 상수 단일화는 #1613 파생), `fundamental` 행은 timeframe이 아니라 **data_type
+> (축 C) retention 키**다. 따라서 표 헤더 `Timeframe`은 OHLCV bar timeframe 한정
+> 명칭이며 이 표의 키는 OHLCV timeframe + `fundamental` data_type 혼합 retention
+> 키다. 보존 기간 수치·행·코드 범위·#1614·후보 D는 본 pointer로 변경되지 않는다.
 
 **1.0 기본 보존 기간**:
 

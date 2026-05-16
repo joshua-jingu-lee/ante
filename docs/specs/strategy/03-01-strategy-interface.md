@@ -8,6 +8,10 @@
 
 #### StrategyMeta 핵심 필드
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> 아래 `timeframe` 필드의 OHLCV bar vocabulary(`1m, 5m, 15m, 1h, 1d`) 계약 본문은 core.md
+> 절이 SSOT이며(축 A), 코드 상수 단일화·표면별 enforcement는 #1613 및 후속 이슈에 위임된다.
+
 | 필드 | 타입 | 기본값 | 설명 |
 |------|------|--------|------|
 | `name` | `str` | (필수) | 전략 고유 이름 (예: `"momentum_breakout"`) |

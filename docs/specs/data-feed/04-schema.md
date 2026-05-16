@@ -30,6 +30,10 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 
 ### 파일 규격
 
+> canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
+> 아래 파티셔닝 행의 `10s/30s`는 core.md 축 구분 표의 **축 B(subminute 파티셔닝 해상도)**이며
+> OHLCV bar timeframe vocabulary(축 A)가 아니다. 본 절이 축 B의 규율 SSOT다(값 재정의 아님).
+
 | 항목 | 규칙 |
 |------|------|
 | 형식 | Parquet (snappy 압축) |
