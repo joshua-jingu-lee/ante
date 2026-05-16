@@ -386,8 +386,14 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     try:
         result = _run(_run_signal_key())
     except Exception as e:
+        # bot 존재확인 중 non-"no such table" ``OperationalError``
+        # (malformed/locked DB 등)가 재던져지면 여기로 떨어진다. JSON error를
+        # 출력하면서도 exit 0 으로 끝나면 자동화 호출자가 실패를 감지하지
+        # 못하므로, 형제 ``bot remove`` (raise SystemExit(1) from e)와 동일하게
+        # non-zero exit 로 종료한다 (#1596). 메시지 톤은 기존 bot_signal_key
+        # 그대로 유지한다 (code 미부착 — Non-Goal: 신규 에러코드 신설 금지).
         fmt.error(str(e))
-        return
+        raise SystemExit(1) from e
 
     if result.get("missing"):
         # 미존재 bot: 형제 명령(`bot info`/`bot remove`/`bot positions`)과

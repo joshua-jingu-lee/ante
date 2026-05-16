@@ -667,7 +667,84 @@ class TestBotSignalKeyMissingBotExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "봇을 찾을 수 없습니다" not in payload["message"]
+        # non-"no such table" OperationalError 는 non-zero exit (#1596).
+        assert result.exit_code != 0, result.output
         mock_skm.rotate.assert_not_awaited()
+
+    def test_db_error_exits_nonzero_json(self, runner: CliRunner) -> None:
+        """bot 존재확인 중 non-"no such table" ``OperationalError`` (locked/
+        malformed DB) 발생 시 → JSON error + **exit code != 0** (#1596).
+
+        finding 회귀 고정: 결함 시점에는 ``except Exception`` 핸들러가
+        ``fmt.error(str(e)); return`` 으로 끝나 JSON error 를 내고도 process
+        exit code 가 0 으로 남아 자동화 호출자가 실패를 감지하지 못했다.
+        형제 ``bot remove`` (raise SystemExit(1) from e)와 동일하게 non-zero
+        exit 으로 정렬한다. 미존재 bot 거부 경로(exit 1 "봇을 찾을 수
+        없습니다", code 없음)는 별도 invariant 로 그대로 유지된다.
+        """
+        import sqlite3
+
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("database is locked")
+        )
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "bot", "signal-key", "some-bot", "--rotate"],
+            )
+
+        # 핵심 회귀 assert: DB 오류는 non-zero exit 으로 끝나야 한다.
+        assert result.exit_code != 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        # locked DB 는 미존재 bot 으로 둔갑하지 않는다 (거부 메시지 아님).
+        assert "봇을 찾을 수 없습니다" not in payload["message"]
+        # orphan credential 미발급: rotate/get_key 미호출 (가드 이전 실패).
+        mock_skm.rotate.assert_not_awaited()
+        mock_skm.get_key.assert_not_awaited()
+
+    def test_db_error_exits_nonzero_text(self, runner: CliRunner) -> None:
+        """text 모드에서도 DB 오류 → stderr ``Error:`` + exit code != 0."""
+        import sqlite3
+
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("database is locked")
+        )
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(cli, ["bot", "signal-key", "some-bot"])
+
+        assert result.exit_code != 0, result.output
+        assert "Error:" in result.stderr
+        assert "봇을 찾을 수 없습니다" not in result.stderr
+        mock_skm.get_key.assert_not_awaited()
 
 
 # ── member info ──────────────────────────────────────────
