@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from ante.data.schemas import TIMEFRAMES
 from ante.web.deps import (
     get_audit_logger_optional,
     get_data_store,
@@ -60,6 +61,15 @@ async def list_datasets(
     if store is None:
         return {"items": [], "total": 0}
 
+    # timeframe 필터는 TIMEFRAMES vocabulary 외 값을 400으로 거부한다 (#1594).
+    # (symbol vocabulary 거부는 exchange-aware symbol SSOT 후속 — 본 PR 범위 외)
+    if timeframe is not None and timeframe not in TIMEFRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"허용되지 않은 timeframe 값: {timeframe} "
+            f"(허용: {', '.join(TIMEFRAMES)})",
+        )
+
     loop = asyncio.get_event_loop()
 
     def _collect_datasets() -> list[dict[str, Any]]:
@@ -83,8 +93,6 @@ async def list_datasets(
 
         # ohlcv 수집 (data_type이 None 또는 "ohlcv"일 때)
         if data_type is None or data_type == "ohlcv":
-            from ante.data.schemas import TIMEFRAMES
-
             tf_list = [timeframe] if timeframe else TIMEFRAMES
             for tf in tf_list:
                 syms = store.list_symbols(tf)

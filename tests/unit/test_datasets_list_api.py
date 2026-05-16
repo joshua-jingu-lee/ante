@@ -11,7 +11,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
+from ante.data.schemas import TIMEFRAMES
 from ante.web.routes.data import list_datasets
 
 # --- 헬퍼 ---
@@ -278,3 +280,169 @@ async def test_list_datasets_data_type_fundamental():
     types = {item["data_type"] for item in result["items"]}
     assert types == {"fundamental"}
     assert result["total"] == 1
+
+
+# --- timeframe vocabulary 검증 (#1594) ---
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_invalid_timeframe_rejected_400():
+    """oracle 류 invalid timeframe은 200 empty가 아니라 400으로 거부된다.
+
+    수정 전 RED: store.list_symbols(invalid_tf) -> [] -> 200 empty.
+    수정 후 GREEN: API 경계에서 400 거부.
+    """
+    store = _make_store({"1d": ["005930"]})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_datasets(
+            _caller_id="test-caller",
+            store=store,
+            symbol=None,
+            timeframe="oracle-invalid-timeframe",
+            data_type="ohlcv",
+            offset=0,
+            limit=50,
+        )
+
+    assert exc_info.value.status_code == 400
+    detail = exc_info.value.detail
+    assert "oracle-invalid-timeframe" in detail
+    # 허용 목록(TIMEFRAMES 전체)이 detail에 포함되어야 한다
+    for tf in TIMEFRAMES:
+        assert tf in detail
+    # invalid timeframe이면 store 조회 자체가 일어나지 않아야 한다
+    store.list_symbols.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_invalid_timeframe_short_token_rejected_400():
+    """짧은 토큰('invalid')도 동일하게 400으로 거부된다."""
+    store = _make_store({"1d": ["005930"]})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_datasets(
+            _caller_id="test-caller",
+            store=store,
+            symbol=None,
+            timeframe="invalid",
+            data_type="ohlcv",
+            offset=0,
+            limit=50,
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tf", ["1m", "5m", "15m", "1h", "1d"])
+async def test_list_datasets_valid_timeframe_ok_regression(tf):
+    """TIMEFRAMES vocabulary 내 모든 값은 200(정상 조회)로 회귀 보장."""
+    store = _make_store({tf: ["005930"]})
+
+    result = await list_datasets(
+        _caller_id="test-caller",
+        store=store,
+        symbol=None,
+        timeframe=tf,
+        data_type="ohlcv",
+        offset=0,
+        limit=50,
+    )
+
+    assert result["total"] == 1
+    assert result["items"][0]["timeframe"] == tf
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_no_timeframe_returns_all_regression():
+    """timeframe 미지정은 기존대로 TIMEFRAMES 전체 조회 (검증 통과)."""
+    store = _make_store({"1d": ["005930"], "1h": ["000660"]})
+
+    result = await list_datasets(
+        _caller_id="test-caller",
+        store=store,
+        symbol=None,
+        timeframe=None,
+        data_type="ohlcv",
+        offset=0,
+        limit=50,
+    )
+
+    assert result["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_fundamental_invalid_timeframe_still_rejected():
+    """data_type=fundamental 이어도 invalid timeframe 파라미터는 400 거부.
+
+    검증은 API 경계(데이터 유형 분기 이전)에서 일어나므로
+    fundamental 조회라도 invalid timeframe은 거부된다.
+    """
+    store = _make_store({"fundamental": ["005930"]})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_datasets(
+            _caller_id="test-caller",
+            store=store,
+            symbol=None,
+            timeframe="oracle-invalid-timeframe",
+            data_type="fundamental",
+            offset=0,
+            limit=50,
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+# --- 범위 고정 회귀: symbol·data_type 은 본 PR 범위 외 (HTTP 경계) ---
+
+
+@pytest.fixture
+def _http_client():
+    """FastAPI Request 레이어가 필요한 회귀(422 Literal, symbol 200 empty)용."""
+    pytest.importorskip("httpx", reason="httpx required for web API tests")
+
+    import tempfile
+    from pathlib import Path
+
+    from ante.data.store import ParquetStore
+    from ante.web.app import create_app
+    from tests.unit.conftest import make_authed_client, make_master_member_service
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = ParquetStore(base_path=Path(tmp) / "data")
+        app = create_app(data_store=store, member_service=make_master_member_service())
+        yield make_authed_client(app)
+
+
+def test_list_datasets_invalid_symbol_still_200_empty_scope_lock(_http_client):
+    """범위 고정: invalid symbol은 본 PR에서 200 empty 유지 (후속 후보 0).
+
+    symbol vocabulary 거부는 exchange-aware symbol SSOT 후속 작업이며,
+    본 PR(#1594)은 timeframe만 거부한다. invalid symbol이 400/422로
+    바뀌면 범위 침범이므로 이 회귀가 막는다.
+    """
+    resp = _http_client.get("/api/data/datasets", params={"symbol": "ABCDEF"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"items": [], "total": 0}
+
+
+def test_list_datasets_bogus_data_type_still_422_regression(_http_client):
+    """data_type enum 외 값은 기존 Literal 동작대로 422 (미변경 회귀)."""
+    resp = _http_client.get("/api/data/datasets", params={"data_type": "bogus"})
+    assert resp.status_code == 422
+
+
+def test_list_datasets_invalid_timeframe_http_400(_http_client):
+    """HTTP 경계에서도 invalid timeframe은 400 + detail(허용 목록)."""
+    resp = _http_client.get(
+        "/api/data/datasets",
+        params={"data_type": "ohlcv", "timeframe": "oracle-invalid-timeframe"},
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "oracle-invalid-timeframe" in detail
+    for tf in TIMEFRAMES:
+        assert tf in detail
