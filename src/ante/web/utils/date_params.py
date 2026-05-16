@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from fastapi import HTTPException
 
@@ -174,9 +174,17 @@ class _Orderable(Protocol):
     str(``YYYY-MM-DD HH:MM:SS``), UTC-aware :class:`datetime` 셋이며 모두 같은
     타입끼리의 ``>`` 비교가 실제 시간 순서와 일치한다. 본 Protocol은 그
     공통 계약(``__gt__``)만 노출한다.
+
+    ``other`` 인자는 :class:`typing.Any`로 둔다. typeshed의
+    ``str.__gt__(self, value: str, /)``/``datetime.__gt__(self, value:
+    datetime, /)``는 ``object``를 받지 않으므로, ``other: object``로 두면
+    str/datetime이 본 Protocol을 구조적으로 만족하지 못해 mypy가 호출부
+    (portfolio/treasury/bots)를 ``expected "None"``으로 거부한다 (#1595
+    Codex r1). ``Any``는 모든 시그니처를 구조적으로 수용하므로 런타임
+    동작을 바꾸지 않고 mypy ``src/`` 전체를 통과시킨다.
     """
 
-    def __gt__(self, other: object, /) -> bool: ...
+    def __gt__(self, other: Any, /) -> bool: ...
 
 
 def reject_inverted_date_range[T: _Orderable](
