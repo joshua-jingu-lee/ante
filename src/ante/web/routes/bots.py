@@ -28,6 +28,7 @@ from ante.web.schemas import (
     BotListResponse,
     BotUpdateRequest,
 )
+from ante.web.utils.account_params import reject_invalid_account_id
 from ante.web.utils.date_params import reject_inverted_date_range
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,21 @@ BOT_CREATE_REQUEST_SCHEMA: dict[str, Any] = {
     "",
     response_model=BotListResponse,
     responses={
+        422: {
+            "description": (
+                "Invalid ``account_id`` query. 제공된 runtime-invalid 값"
+                ' (``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)은'
+                " 필터링 이전에 422로 거부된다 — ``if account_id`` truthy 분기가"
+                ' provided-``""``/invalid를 빈 목록/전체 반환으로 흡수하던'
+                " contract-drift를 차단한다. ``account_id`` 미지정(``None``)은"
+                " 전체 봇 반환으로 통과한다 (#1218 보존, #1624)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Bot manager not available",
             "content": {
@@ -198,11 +214,21 @@ async def list_bots(
     cursor: str | None = None,
 ) -> dict:
     """봇 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
-    ``bot:read`` scope 를 보유한 agent 만 호출 가능 (#1407)."""
+    ``bot:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
+
+    제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+    필터링 **이전**에 422로 거부한다 (#1624). 기존 ``if account_id`` truthy
+    분기는 provided-``""``를 omitted처럼 흡수(전체 반환)하고 ``"default"``/
+    패턴위반은 빈 목록으로 흡수하던 contract-drift였다. 이제 ingress 가드 +
+    ``account_id is not None`` 명시 필터로 교체해 ``None``(미지정)만 전체
+    반환 분기로 통과시킨다 (#1218 보존). valid-pattern but absent
+    (``acc-9999``)는 가드를 통과해 기존 200 empty(매칭 0건)를 유지한다."""
     from ante.web.pagination import paginate
 
+    reject_invalid_account_id(account_id)
+
     bots = bot_manager.list_bots()
-    if account_id:
+    if account_id is not None:
         bots = [
             b
             for b in bots

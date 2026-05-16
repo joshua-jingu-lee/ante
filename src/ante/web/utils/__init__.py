@@ -8,12 +8,14 @@
 서비스 레이어 검증 강화는 별도 이슈로 분리한다.
 """
 
+from ante.web.utils.account_params import reject_invalid_account_id
 from ante.web.utils.date_params import (
     validate_iso_date_only,
     validate_iso_date_param_for_sql_datetime,
 )
 
 __all__ = [
+    "reject_invalid_account_id",
     "validate_iso_date_only",
     "validate_iso_date_param_for_sql_datetime",
 ]

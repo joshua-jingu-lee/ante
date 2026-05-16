@@ -482,6 +482,14 @@ export type paths = {
          * List Bots
          * @description 봇 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
          *     ``bot:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
+         *
+         *     제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+         *     필터링 **이전**에 422로 거부한다 (#1624). 기존 ``if account_id`` truthy
+         *     분기는 provided-``""``를 omitted처럼 흡수(전체 반환)하고 ``"default"``/
+         *     패턴위반은 빈 목록으로 흡수하던 contract-drift였다. 이제 ingress 가드 +
+         *     ``account_id is not None`` 명시 필터로 교체해 ``None``(미지정)만 전체
+         *     반환 분기로 통과시킨다 (#1218 보존). valid-pattern but absent
+         *     (``acc-9999``)는 가드를 통과해 기존 200 empty(매칭 0건)를 유지한다.
          */
         get: operations["list_bots_api_bots_get"];
         put?: never;
@@ -1320,6 +1328,13 @@ export type paths = {
          * Get Strategy Performance
          * @description 전략 성과 지표 조회. 인증된 master/human 또는 ``strategy:read`` scope 를
          *     보유한 agent 만 호출 가능 (#1407).
+         *
+         *     제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+         *     account 해석/lookup **이전**에 422로 거부한다 (#1624). ``account_id``
+         *     미지정(``None``)은 가드를 통과해 봇 추출 fallback → (추출 불가 시) 400으로
+         *     이어진다 — #1218이 정렬한 omitted query 정책을 보존한다. valid-pattern
+         *     but absent(``acc-9999``)는 가드를 통과해 기존 단건 존재 검증 404로
+         *     이어진다 (invalid-format ↔ genuine not-found 분리).
          */
         get: operations["get_strategy_performance_api_strategies__strategy_id__performance_get"];
         put?: never;
@@ -1575,6 +1590,14 @@ export type paths = {
          * List Trades
          * @description 거래 기록 목록 조회 (cursor 기반 페이지네이션). 인증된 master/human 또는
          *     ``trade:read`` scope 를 보유한 agent 만 호출 가능 (#1407).
+         *
+         *     제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+         *     service 위임 **이전**에 422로 거부한다 (#1624). 가드가 없으면
+         *     ``TradeService.get_trades`` downstream의 ``require_account_id``가
+         *     ``InvalidAccountIdError``를 raise하고, Web generic exception handler가
+         *     이를 500 `An unexpected error occurred.`로 흘려 invalid-input ↔
+         *     server-failure 구분이 깨진다. ``account_id`` 미지정(``None``)은
+         *     전체 필터로 통과한다 (#1218 보존).
          */
         get: operations["list_trades_api_trades_get"];
         put?: never;
@@ -1599,6 +1622,10 @@ export type paths = {
          *
          *     account_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.
          *     미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).
+         *
+         *     제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+         *     lookup 이전에 422로 거부한다 (#1624). ``account_id`` 미지정(``None``)은
+         *     기본 Treasury 분기로 통과한다 (#1218 보존).
          */
         get: operations["get_summary_api_treasury_get"];
         put?: never;
@@ -1821,6 +1848,11 @@ export type paths = {
          *     ``Literal``로 좁혀, vocabulary 외 값을 FastAPI 단계에서 422로 거부한다
          *     (#1477). invalid 값이 200 + empty result로 통과하던 oracle A7 host probe
          *     회귀(fingerprint ``a4f6744a44f5``)를 차단한다.
+         *
+         *     제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+         *     SQL WHERE 구성 **이전**에 422로 거부한다 (#1624) — invalid 값이 200 +
+         *     empty result로 흡수되던 contract-drift를 차단한다. ``account_id``
+         *     미지정(``None``)은 전체 필터로 통과한다 (#1218 보존).
          */
         get: operations["list_transactions_api_treasury_transactions_get"];
         put?: never;
@@ -4794,13 +4826,13 @@ export interface operations {
                     "application/json": components["schemas"]["BotListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``account_id`` query. 제공된 runtime-invalid 값 (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)은 필터링 이전에 422로 거부된다 — ``if account_id`` truthy 분기가 provided-``""``/invalid를 빈 목록/전체 반환으로 흡수하던 contract-drift를 차단한다. ``account_id`` 미지정(``None``)은 전체 봇 반환으로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Bot manager not available */
@@ -6200,7 +6232,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioHistoryResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). 제공된 runtime-invalid ``account_id`` (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)도 lookup 이전에 422로 거부된다. ``account_id`` 미지정은 all-account 집계 분기로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6240,13 +6272,13 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioValueResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``account_id`` query. 제공된 runtime-invalid 값 (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)은 lookup 이전에 422로 거부된다. ``account_id`` 미지정은 all-account 집계 분기로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -6640,6 +6672,15 @@ export interface operations {
                     "application/json": components["schemas"]["StrategyPerformanceResponse"];
                 };
             };
+            /** @description account_id를 결정할 수 없음 (``account_id`` 미지정 + 전략에 연결된 봇 없음). #1218 query 정책 — fallback 없이 명시 실패. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Strategy not found */
             404: {
                 headers: {
@@ -6649,13 +6690,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``account_id`` query. 제공된 runtime-invalid 값 (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)은 account 해석/lookup 이전에 422로 거부된다. ``account_id`` 미지정(``None``)은 봇 추출 fallback으로 통과하며, 추출 불가 시 400이다 (#1218 omitted 정책 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Strategy registry or database not available */
@@ -7092,13 +7133,13 @@ export interface operations {
                     "application/json": components["schemas"]["TradeListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``account_id`` query. 제공된 runtime-invalid 값 (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)은 service 위임 이전에 422로 거부된다 — downstream ``InvalidAccountIdError``가 generic 500으로 escape하던 경로를 차단한다. ``account_id`` 미지정은 전체 필터로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Trade service not available */
@@ -7141,13 +7182,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``account_id`` query. 제공된 runtime-invalid 값 (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)은 lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본 Treasury 요약으로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -7450,7 +7491,7 @@ export interface operations {
                     "application/json": components["schemas"]["SnapshotListResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). 제공된 runtime-invalid ``account_id`` (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)도 lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본 Treasury 분기로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7502,7 +7543,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Invalid ``date`` path param (ISO ``YYYY-MM-DD`` required). malformed/캘린더 invalid path는 404가 아닌 422로 거부된다 (#1440). */
+            /** @description Invalid ``date`` path param (ISO ``YYYY-MM-DD`` required). malformed/캘린더 invalid path는 404가 아닌 422로 거부된다 (#1440). 제공된 runtime-invalid ``account_id`` query (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)도 lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본 Treasury 분기로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7542,13 +7583,13 @@ export interface operations {
                     "application/json": components["schemas"]["SnapshotResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid ``account_id`` query. 제공된 runtime-invalid 값 (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)은 lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본 Treasury 분기로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Treasury not available */
@@ -7589,7 +7630,7 @@ export interface operations {
                     "application/json": components["schemas"]["TransactionListResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). ``type`` query는 정규 vocabulary ``{allocate, deallocate, release, fill, bot_stopped_release}`` (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). ``type`` query는 정규 vocabulary ``{allocate, deallocate, release, fill, bot_stopped_release}`` (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477). 제공된 runtime-invalid ``account_id`` (``""``/``"default"``/``^[a-zA-Z0-9\-]{3,30}$`` 불일치)도 SQL WHERE 구성 이전에 422로 거부된다. ``account_id`` 미지정은 전체 필터로 통과한다 (#1218 보존, #1624). */
             422: {
                 headers: {
                     [name: string]: unknown;
