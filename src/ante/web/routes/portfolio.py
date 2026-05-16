@@ -17,6 +17,7 @@ from ante.web.schemas import (
     PortfolioHistoryResponse,
     PortfolioValueResponse,
 )
+from ante.web.utils.account_params import reject_invalid_account_id
 from ante.web.utils.date_params import (
     reject_inverted_date_range,
     validate_iso_date_only,
@@ -32,7 +33,13 @@ def _resolve_treasury(
     treasury_manager: Any | None,
     account_id: str | None,
 ) -> Any:
-    """account_id가 주어지면 해당 계좌의 Treasury를 반환한다."""
+    """account_id가 주어지면 해당 계좌의 Treasury를 반환한다.
+
+    제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+    lookup 이전에 422로 거부한다 (#1624, Account ID 계약 read-API ingress).
+    ``account_id is None`` (미지정)은 통과 — #1218 단일-treasury 분기 보존.
+    """
+    reject_invalid_account_id(account_id)
     if account_id and treasury_manager is not None:
         try:
             return treasury_manager.get(account_id)
@@ -49,6 +56,19 @@ def _resolve_treasury(
     response_model=PortfolioValueResponse,
     response_model_exclude_none=True,
     responses={
+        422: {
+            "description": (
+                "Invalid ``account_id`` query. 제공된 runtime-invalid 값"
+                ' (``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)은'
+                " lookup 이전에 422로 거부된다. ``account_id`` 미지정은"
+                " all-account 집계 분기로 통과한다 (#1218 보존, #1624)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -104,7 +124,10 @@ async def portfolio_value(
                 "``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 "
                 "저장되므로 임의 문자열을 허용하지 않는다 (#1440). "
                 "``start_date > end_date`` (inverted range)도 422로 거부한다 "
-                "(#1595)."
+                "(#1595). 제공된 runtime-invalid ``account_id`` "
+                '(``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)도 '
+                "lookup 이전에 422로 거부된다. ``account_id`` 미지정은 "
+                "all-account 집계 분기로 통과한다 (#1218 보존, #1624)."
             ),
             "content": {
                 "application/problem+json": {

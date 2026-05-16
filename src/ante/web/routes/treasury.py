@@ -28,6 +28,7 @@ from ante.web.schemas import (
     TransactionListResponse,
     TreasurySummaryResponse,
 )
+from ante.web.utils.account_params import reject_invalid_account_id
 from ante.web.utils.date_params import (
     reject_inverted_date_range,
     validate_iso_date_only,
@@ -169,6 +170,19 @@ BALANCE_SET_REQUEST_SCHEMA: dict[str, Any] = {
                 },
             },
         },
+        422: {
+            "description": (
+                "Invalid ``account_id`` query. 제공된 runtime-invalid 값"
+                ' (``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)은'
+                " lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본"
+                " Treasury 요약으로 통과한다 (#1218 보존, #1624)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -191,7 +205,12 @@ async def get_summary(
 
     account_id 지정 시 해당 계좌의 Treasury 요약을 반환한다.
     미지정 시 기본 Treasury 요약을 반환한다 (하위 호환).
+
+    제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+    lookup 이전에 422로 거부한다 (#1624). ``account_id`` 미지정(``None``)은
+    기본 Treasury 분기로 통과한다 (#1218 보존).
     """
+    reject_invalid_account_id(account_id)
     target_treasury = treasury
     if account_id and treasury_manager is not None:
         try:
@@ -271,6 +290,10 @@ async def get_summary(
                 " 422로 거부한다 (#1595). ``type`` query는 정규 vocabulary"
                 " ``{allocate, deallocate, release, fill, bot_stopped_release}``"
                 " (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477)."
+                " 제공된 runtime-invalid ``account_id``"
+                ' (``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)도'
+                " SQL WHERE 구성 이전에 422로 거부된다. ``account_id`` 미지정은"
+                " 전체 필터로 통과한다 (#1218 보존, #1624)."
             ),
             "content": {
                 "application/problem+json": {
@@ -323,7 +346,13 @@ async def list_transactions(
     ``Literal``로 좁혀, vocabulary 외 값을 FastAPI 단계에서 422로 거부한다
     (#1477). invalid 값이 200 + empty result로 통과하던 oracle A7 host probe
     회귀(fingerprint ``a4f6744a44f5``)를 차단한다.
+
+    제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+    SQL WHERE 구성 **이전**에 422로 거부한다 (#1624) — invalid 값이 200 +
+    empty result로 흡수되던 contract-drift를 차단한다. ``account_id``
+    미지정(``None``)은 전체 필터로 통과한다 (#1218 보존).
     """
+    reject_invalid_account_id(account_id)
     start_bound = validate_iso_date_param_for_sql_datetime(
         start_date, "start_date", end_of_day=False
     )
@@ -874,7 +903,15 @@ def _resolve_treasury(
     treasury_manager: Any | None,
     account_id: str | None,
 ) -> Any:
-    """account_id가 주어지면 해당 계좌의 Treasury를 반환한다."""
+    """account_id가 주어지면 해당 계좌의 Treasury를 반환한다.
+
+    제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+    lookup 이전에 422로 거부한다 (#1624). 이 1지점 가드가 공유 호출자
+    ``get_latest_snapshot``(#7) / ``list_snapshots``(#6) /
+    ``get_snapshot_by_date``(#8)를 모두 커버한다. ``account_id``
+    미지정(``None``)은 기본 Treasury 분기로 통과한다 (#1218 보존).
+    """
+    reject_invalid_account_id(account_id)
     if account_id and treasury_manager is not None:
         try:
             return treasury_manager.get(account_id)
@@ -890,6 +927,19 @@ def _resolve_treasury(
     "/snapshots/latest",
     response_model=SnapshotResponse,
     responses={
+        422: {
+            "description": (
+                "Invalid ``account_id`` query. 제공된 runtime-invalid 값"
+                ' (``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)은'
+                " lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본"
+                " Treasury 분기로 통과한다 (#1218 보존, #1624)."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         503: {
             "description": "Treasury not available",
             "content": {
@@ -947,7 +997,10 @@ async def get_latest_snapshot(
                 "``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 "
                 "저장되므로 임의 문자열을 허용하지 않는다 (#1440). "
                 "``start_date > end_date`` (inverted range)도 422로 거부한다 "
-                "(#1595)."
+                "(#1595). 제공된 runtime-invalid ``account_id`` "
+                '(``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)도 '
+                "lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본 "
+                "Treasury 분기로 통과한다 (#1218 보존, #1624)."
             ),
             "content": {
                 "application/problem+json": {
@@ -1010,7 +1063,11 @@ async def list_snapshots(
         422: {
             "description": (
                 "Invalid ``date`` path param (ISO ``YYYY-MM-DD`` required). "
-                "malformed/캘린더 invalid path는 404가 아닌 422로 거부된다 (#1440)."
+                "malformed/캘린더 invalid path는 404가 아닌 422로 거부된다 (#1440). "
+                "제공된 runtime-invalid ``account_id`` query "
+                '(``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)도 '
+                "lookup 이전에 422로 거부된다. ``account_id`` 미지정은 기본 "
+                "Treasury 분기로 통과한다 (#1218 보존, #1624)."
             ),
             "content": {
                 "application/problem+json": {

@@ -35,6 +35,7 @@ from ante.web.schemas import (
     StrategyValidateResponse,
     WeeklySummaryResponse,
 )
+from ante.web.utils.account_params import reject_invalid_account_id
 
 router = APIRouter()
 
@@ -569,8 +570,33 @@ async def get_strategy(
     "/{strategy_id}/performance",
     response_model=StrategyPerformanceResponse,
     responses={
+        400: {
+            "description": (
+                "account_id를 결정할 수 없음 (``account_id`` 미지정 + 전략에 "
+                "연결된 봇 없음). #1218 query 정책 — fallback 없이 명시 실패."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
         404: {
             "description": "Strategy not found",
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+        422: {
+            "description": (
+                "Invalid ``account_id`` query. 제공된 runtime-invalid 값"
+                ' (``""``/``"default"``/``^[a-zA-Z0-9\\-]{3,30}$`` 불일치)은'
+                " account 해석/lookup 이전에 422로 거부된다. ``account_id``"
+                " 미지정(``None``)은 봇 추출 fallback으로 통과하며, 추출 불가 시"
+                " 400이다 (#1218 omitted 정책 보존, #1624)."
+            ),
             "content": {
                 "application/problem+json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"},
@@ -597,10 +623,19 @@ async def get_strategy_performance(
     account_id: str | None = None,
 ) -> dict:
     """전략 성과 지표 조회. 인증된 master/human 또는 ``strategy:read`` scope 를
-    보유한 agent 만 호출 가능 (#1407)."""
+    보유한 agent 만 호출 가능 (#1407).
+
+    제공된 runtime-invalid ``account_id`` (``""``/``"default"``/패턴 위반)는
+    account 해석/lookup **이전**에 422로 거부한다 (#1624). ``account_id``
+    미지정(``None``)은 가드를 통과해 봇 추출 fallback → (추출 불가 시) 400으로
+    이어진다 — #1218이 정렬한 omitted query 정책을 보존한다. valid-pattern
+    but absent(``acc-9999``)는 가드를 통과해 기존 단건 존재 검증 404로
+    이어진다 (invalid-format ↔ genuine not-found 분리)."""
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
+
+    reject_invalid_account_id(account_id)
 
     # account_id 결정: 쿼리 파라미터 우선, 없으면 봇에서 추출.
     # 둘 다 실패하면 `"default"` fallback 없이 400으로 명시 실패한다 (#1218 query 정책).
