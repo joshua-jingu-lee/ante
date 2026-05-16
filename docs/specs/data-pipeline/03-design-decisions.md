@@ -8,6 +8,12 @@
 
 모든 시세 데이터의 공통 스키마 상수:
 
+> 아래 스키마 표의 `symbol` 서술(`종목 코드 (6자리)` 등)은 **Phase1 KRX 데이터 형태**이며,
+> 신규 입력 `symbol` 검증 계약 SSOT는 [core.md `## Canonical Symbol/Timeframe Vocabulary`
+> `### KRX symbol shape`](../core/core.md#canonical-symboltimeframe-vocabulary)(resolved
+> exchange == KRX 한정)이다. 비-KRX exchange의 symbol format은 1.0 비목표이며 본 SSOT가
+> 제약하지 않는다. 본 스키마 표는 저장 형태 서술이며 신규 입력 검증 계약을 재정의하지 않는다.
+
 **OHLCV_SCHEMA**
 
 | 필드 | 타입 | 설명 |

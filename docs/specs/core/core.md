@@ -287,7 +287,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | `data validate` CLI | `{1m,5m,15m,1h,1d}` | non-zero exit + 구조화 error payload | enforcement·에러코드는 **#1605 정렬 사안** |
 | `feed inject` | `{1m,5m,15m,1h,1d}` | 거부 (구조화 error) | enforcement·에러 계층은 **#1606 정렬 사안** |
 | Instrument import KRX symbol | **exchange=KRX일 때** `^[0-9]{6}$` (축 E 신규 입력); 비-KRX exchange(`NYSE`/`NASDAQ`/`AMEX`/`TEST`)는 symbol-shape 미적용(1.0 비목표) | non-zero exit + 구조화 error payload (exchange=KRX 행에 한함) | symbol shape enforcement는 **#1611 정렬 사안**. ingress = `src/ante/cli/commands/instrument.py` import handler |
-| Data API `timeframe` filter (`GET /api/data/datasets`) | `{1m,5m,15m,1h,1d}` | **400 (기구현)** | `timeframe`은 #1594에서 vocabulary 외 값 **400 거부 기구현**. `symbol`은 별개 — invalid `symbol` vocabulary 거부는 **#1594 아님**, exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) **정렬 사안**이며 현재 invalid `symbol`은 **200 empty 유지**(web-api/05 `GET /api/data/datasets` 계약과 정합) |
+| Data API `timeframe` filter (`GET /api/data/datasets`) | `{1m,5m,15m,1h,1d}` | **400 (기구현)** | `timeframe`은 #1594에서 vocabulary 외 값 **400 거부 기구현**. `symbol`은 별개 축 — datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 **exact-match 필터로만** 처리한다(매칭 데이터 미존재 시 **200 empty**, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset을 반환 — 아래 "Legacy out-of-vocabulary 호환 정책"과 정합). `symbol` vocabulary 거부 자체는 **#1594 아님**, exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) **정렬 사안**(web-api/05 `GET /api/data/datasets` 계약과 정합) |
 | Live DataCollector write·경로 생성 | **OHLCV `{1m,5m,15m,1h}`만** (`1d`는 write-ownership상 DataFeed 소유라 제외, `tick`은 별도 data_type라 제외) | enforcement 미구현 (현재 spec-vs-impl gap) | ingress enforcement는 **#1614 정렬 사안** (Depends on #1613). 본 행은 "Collector write vocabulary는 OHLCV `{1m,5m,15m,1h}`로 한정(축 D상 `1d`·축 C상 `tick` 제외)" 경계만 명시 |
 
 판정 보조 노트:
@@ -332,7 +332,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | legacy parquet path migration KRX 판별 (축 E legacy 판별 — 신규 입력 검증과 별개 축) | `src/ante/data/store.py:34` `_KRX_SYMBOL_PATTERN`(`^\d{6}$`) + `:74` `migrate_parquet_paths` | **축 E legacy 판별 — #1611 enforcement 대상 아님** (store.py legacy 호환 무손상 보존, "Legacy out-of-vocabulary 호환 정책" 규율) |
 | RuleEngine OrderRequestEvent KRX numeric preflight (#1299 기존 동작) | `src/ante/rule/engine.py:55` `_KRX_NUMERIC_SYMBOL_PATTERN`(`^[0-9]{6}$`) OrderRequestEvent preflight | **#1299 기존 동작 — 본 SSOT 도입으로 동작 불변, #1611 아님** |
 | Data API `timeframe` filter (기구현 400) | `src/ante/web/routes/data.py:65,85` #1594 timeframe 400 filter (기구현) | #1594 |
-| Data API `symbol` filter 잔여 vocabulary 거부 (현재 200 empty 유지 — 독립 행) | `src/ante/web/routes/data.py` datasets `symbol` query (현재 invalid `symbol`은 200 empty, **#1594 아님**, web-api/05 계약과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
+| Data API `symbol` filter (exact-match·미거부 — 독립 행) | `src/ante/web/routes/data.py` datasets `symbol` query (datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 시 200 empty, legacy out-of-vocab symbol dir이 저장돼 있으면 그 dataset 반환; **#1594 아님**, web-api/05 계약·Legacy 호환 정책과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외 — 독립 행) | `src/ante/data/collector.py:61-150` `DataCollector.start/add_data/_collect_loop/_flush` live write | **#1614** (Depends on #1613) |
 | fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | `docs/dashboard/user-stories/backtest-data.md`, `docs/dashboard/mockups/backtest-data-fundamental.html` (본 이슈 무편집) | **후보 D** (deferral, 사람 등록 surface) |
 

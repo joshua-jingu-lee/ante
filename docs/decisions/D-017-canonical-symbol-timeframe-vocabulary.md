@@ -92,7 +92,7 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
 | legacy parquet path migration KRX 판별 (축 E legacy — 신규 입력 검증과 별개 축) | `store.py` `_KRX_SYMBOL_PATTERN`/`migrate_parquet_paths` legacy 호환 무손상 보존 | **#1611 enforcement 대상 아님** (축 E legacy) |
 | RuleEngine OrderRequestEvent KRX numeric preflight | `rule/engine.py` `_KRX_NUMERIC_SYMBOL_PATTERN` #1299 기존 동작 — 본 SSOT 도입으로 동작 불변 | **#1299** (불변, #1611 아님) |
 | Data API `timeframe` filter (기구현 400) | vocabulary 외 timeframe 400 거부 기구현 | #1594 |
-| Data API `symbol` filter 잔여 vocabulary 거부 (현재 200 empty 유지) | invalid `symbol`은 현재 200 empty (web-api/05 계약과 정합, **#1594 아님**) — exchange-aware symbol SSOT 후속 정렬 | **#1613 코드 SSOT 체인** |
+| Data API `symbol` filter (exact-match·미거부) | datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 200 empty, legacy out-of-vocab symbol dir 저장 시 그 dataset 반환 (web-api/05 계약·Legacy 호환 정책과 정합, **#1594 아님**) — exchange-aware symbol SSOT 후속 정렬 | **#1613 코드 SSOT 체인** |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외) | 누락 소비자 ingress enforcement 추적 폐쇄 | **#1614** (Depends on #1613) |
 | fundamental cadence `dataset.timeframe` overload reconciliation (축 F) | dashboard user-stories/mockups ↔ #1594 datasets API OHLCV-only 400 cross-surface 불일치 docs 정합화 | **후보 D** (deferral, 사람 등록) |
 
