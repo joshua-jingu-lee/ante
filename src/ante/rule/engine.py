@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from ante.core.market_data_vocab import is_krx_symbol
 from ante.rule.base import (
     EvaluationResult,
     Rule,
@@ -52,7 +52,12 @@ _VALID_ORDER_TYPES: frozenset[str] = frozenset(
 # 6자리 numeric 단축코드를 가정한다. "INVALID" 같은 비수치 symbol이 RuleEngine을
 # 통과하면 KIS 40070000(매매불가 종목)을 유발하므로(#1299 A7 oracle 회귀), 룰 평가
 # 이전에 fail-closed로 거부한다.
-_KRX_NUMERIC_SYMBOL_PATTERN = re.compile(r"^[0-9]{6}$")
+#
+# 형태 검증은 코드 레벨 SSOT(`ante.core.market_data_vocab.is_krx_symbol`)에
+# 위임한다. `is_krx_symbol` 은 `\A[0-9]{6}\Z` + `fullmatch` + non-str
+# 선검사로 구현되어 위임 전 `_KRX_NUMERIC_SYMBOL_PATTERN.fullmatch` 와
+# 엄격도가 동일하다 — `123456\n`·leading/trailing whitespace·비문자열은
+# 위임 전후 모두 fail-closed로 거부된다(#1613 narrow-scope: #1299 동작 불변).
 
 
 def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
@@ -661,10 +666,7 @@ class RuleEngine:
             # 6자리 숫자 PDNO(예: "005930", "069500")만 가정하므로, 그 형식을
             # 만족하지 않는 KRX symbol은 룰 평가/Treasury 조회 이전에 fail-closed로
             # 거부한다. 비-KRX exchange는 broker adapter에 위임한다.
-            if event.exchange == "KRX" and (
-                not isinstance(event.symbol, str)
-                or not _KRX_NUMERIC_SYMBOL_PATTERN.fullmatch(event.symbol)
-            ):
+            if event.exchange == "KRX" and not is_krx_symbol(event.symbol):
                 reason = (
                     f"Invalid KRX numeric symbol: {_safe_repr(event.symbol)} "
                     f"(expected 6-digit numeric per current Ante "

@@ -1535,6 +1535,74 @@ class TestRuleEngineEventBus:
         assert len(validated) == 1
         assert validated[0].symbol == "AAPL"
 
+    @pytest.mark.parametrize(
+        "bad_symbol",
+        ["123456\n", "\n123456", "123456\t", " 005930", "005930 ", "  005930  "],
+        ids=[
+            "trailing-newline",
+            "leading-newline",
+            "trailing-tab",
+            "leading-space",
+            "trailing-space",
+            "surrounding-space",
+        ],
+    )
+    async def test_rule_engine_rejects_krx_symbol_with_whitespace_padding(
+        self, engine, eventbus, monkeypatch, bad_symbol
+    ):
+        """R1-F1(#1613): whitespace padding KRX symbol을 fail-closed 거부한다.
+
+        `is_krx_symbol` 위임 후에도 `\\A...\\Z`+`fullmatch` 엄격도가
+        유지되어 `123456\\n`(`re.match(r'^[0-9]{6}$', ...)` 이면 통과)·
+        leading/trailing whitespace 가 위임 전과 동일하게 거부됨을 잠근다
+        (#1299 fail-closed 회귀 방지).
+        """
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        evaluate_calls: list[object] = []
+        treasury_calls: list[str] = []
+
+        def _spy_evaluate(context):
+            evaluate_calls.append(context)
+            raise AssertionError("evaluate must not run for invalid KRX symbol")
+
+        async def _spy_query_treasury(bot_id: str = ""):
+            treasury_calls.append(bot_id)
+            raise AssertionError(
+                "_query_treasury_data must not run for invalid KRX symbol"
+            )
+
+        monkeypatch.setattr(engine, "evaluate", _spy_evaluate)
+        monkeypatch.setattr(engine, "_query_treasury_data", _spy_query_treasury)
+
+        order = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol=bad_symbol,
+            side="buy",
+            quantity=10.0,
+            order_type="limit",
+            price=1000.0,
+            exchange="KRX",
+            reason="R1-F1 fullmatch whitespace-padding regression",
+        )
+        await eventbus.publish(order)
+
+        assert evaluate_calls == []
+        assert treasury_calls == []
+        assert len(validated) == 0
+        assert len(rejected) == 1
+
+        ev = rejected[0]
+        assert "Invalid KRX numeric symbol" in ev.reason
+        assert isinstance(ev.symbol, str)
+        assert ev.symbol == bad_symbol
+        assert ev.exchange == "KRX"
+
     @pytest.mark.parametrize("side", ["buy", "sell"])
     async def test_rule_engine_rejects_limit_order_without_price(
         self, engine, eventbus, monkeypatch, side

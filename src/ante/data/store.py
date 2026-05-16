@@ -30,8 +30,17 @@ _TIME_COLUMN: dict[str, str] = {
 # 전과 완전히 동일하다(#1576 narrow-scope: zero-change).
 _KNOWN_EXCHANGES: frozenset[str] = CANONICAL_EXCHANGES
 
-# KRX 심볼 형식: 6자리 숫자
-_KRX_SYMBOL_PATTERN: re.Pattern[str] = re.compile(r"^\d{6}$")
+# legacy parquet path migration 판별용 KRX 심볼 형식: 6자리 숫자.
+# **신규 입력 ASCII 검증과 별개 축이다**(core.md
+# ``### symbol/timeframe 축 구분`` 축 E · ``### Legacy out-of-vocabulary
+# 호환 정책``). `\d` 는 Unicode digit까지 매치하며, 이는 6자리 Unicode-digit
+# legacy dir이 `migrate_parquet_paths()` 로 `KRX/` 하위로 이동되던 기존
+# 동작을 보존하기 위해 **의도적으로** 유지된다. 신규 입력 KRX symbol
+# 검증(`ante.core.market_data_vocab._KRX_SYMBOL_REGEX`, ASCII `[0-9]`,
+# fullmatch)으로 위임·대체·강화하지 않는다 — 위임 시 Unicode-digit
+# legacy dir migration이 silent 회귀한다(#1613 narrow-scope: legacy 무손상
+# 보존, 축 E 분리).
+_LEGACY_KRX_SYMBOL_PATTERN: re.Pattern[str] = re.compile(r"^\d{6}$")
 
 
 def _get_actual_dir_name(parent: Path, name: str) -> str | None:
@@ -61,6 +70,13 @@ def migrate_parquet_paths(data_path: Path) -> int:
     # ohlcv 디렉토리 마이그레이션
     ohlcv_path = data_path / "ohlcv"
     if ohlcv_path.exists():
+        # 불변식(#1613 R1-F2): timeframe dir 순회는 `TIMEFRAME_SET`/canonical
+        # 필터를 적용하지 않는다. 어떤 set 검사도 없이 모든 timeframe dir의
+        # legacy symbol dir을 `KRX/` 하위로 이동한다. 필터를 추가하면
+        # `ohlcv/<non-canonical_tf>/<6digit>/`(예: `ohlcv/2h/005930/`)가
+        # exchange-less 위치에 잔존해 `read(symbol,<tf>,exchange='KRX')`
+        # 에서 silent 비가시가 된다(legacy non-canonical timeframe migration
+        # 동작 보존 — core.md ``### Legacy out-of-vocabulary 호환 정책``).
         for timeframe_dir in ohlcv_path.iterdir():
             if not timeframe_dir.is_dir():
                 continue
@@ -70,8 +86,9 @@ def migrate_parquet_paths(data_path: Path) -> int:
                 # 이미 exchange 디렉토리면 스킵
                 if symbol_dir.name in _KNOWN_EXCHANGES:
                     continue
-                # KRX 심볼은 6자리 숫자 형식 검증
-                if not _KRX_SYMBOL_PATTERN.match(symbol_dir.name):
+                # KRX 심볼은 6자리 숫자 형식 검증 (legacy `\d` Unicode 판별,
+                # 신규 입력 ASCII 검증과 별개 축 — 위 상수 주석 참조)
+                if not _LEGACY_KRX_SYMBOL_PATTERN.match(symbol_dir.name):
                     logger.warning(
                         "마이그레이션 스킵: %s — KRX 심볼 형식(6자리 숫자)이 아님",
                         symbol_dir,
