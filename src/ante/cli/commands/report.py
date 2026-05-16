@@ -264,6 +264,26 @@ def report_performance(
 
     fmt = get_formatter(ctx)
 
+    # period별 옵션 배타 검증: DB 연결/_run_performance/asyncio.run 이전에
+    # 차단한다 (treasury.py:205-211 동형 패턴). PerformanceTracker는
+    # daily/monthly 메서드가 분리되어 있어 silent-ignore API가 없으므로
+    # (report.py:276-288에서 daily는 start/end만, monthly는 year만 라우팅)
+    # CLI 진입 검증이 실행 경로상 완전한 fix다. `--period` 기본값이 daily
+    # 이므로 `--period` 생략 + `--year` 조합도 여기서 거부된다.
+    if period == "monthly" and (start or end):
+        fmt.error(
+            "--start/--end 옵션은 --period monthly와 함께 사용할 수 없습니다. "
+            "(daily 전용)",
+            code="CLI_OPTION_CONFLICT",
+        )
+        raise SystemExit(1)
+    if period == "daily" and year is not None:
+        fmt.error(
+            "--year 옵션은 --period daily와 함께 사용할 수 없습니다. (monthly 전용)",
+            code="CLI_OPTION_CONFLICT",
+        )
+        raise SystemExit(1)
+
     async def _run_performance() -> list[dict]:
         from ante.cli.main import get_db_path
         from ante.core.database import Database

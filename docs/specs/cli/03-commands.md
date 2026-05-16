@@ -432,6 +432,11 @@ ante report view <report_id> [--db-path <경로>]        # 리포트 상세 조�
 ante report performance [--period daily|monthly] [--bot-id <봇ID>] [--start <날짜>] [--end <날짜>] [--year <연도>]  # 기간별 성과 집계
 ```
 
+`report performance`의 기간 옵션은 `--period`별로 배타적이다. `--start`/`--end`는
+`--period daily` 전용, `--year`는 `--period monthly` 전용이며 (`--period` 기본값은
+`daily`), period와 맞지 않는 옵션을 함께 지정하면 DB 접근 이전에
+`CLI_OPTION_CONFLICT` 에러 코드와 exit code 1로 거부한다(빈 집계 반환 금지).
+
 ### `ante feed` — 데이터 피드 (DataFeed)
 
 CLI 정의는 `src/ante/feed/cli.py`에 있으며 `ante.cli.main`에서 서브커맨드로 등록된다.
