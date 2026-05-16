@@ -355,6 +355,14 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             # 차단한다. 형제 명령(`bot info`/`bot remove`/`bot positions`,
             # #1558)과 동일하게 code 없는 에러 + exit 1 로 거부한다.
             #
+            # ``status != 'deleted'`` 조건은 ``BotManager.load_from_db``
+            # (manager.py:212 ``FROM bots WHERE status != 'deleted'``)의
+            # 운영 bot 정의와 정렬한다. ``bot remove`` 는 키 폐기 후
+            # soft-delete (manager.py:826 ``UPDATE bots SET status =
+            # 'deleted'``) 하므로 row 가 남는다 — 이를 운영상 미존재로
+            # 취급하지 않으면 soft-deleted bot 에 ``--rotate`` 가
+            # orphan credential 을 재발급한다 (#1596가 막으려는 버그류).
+            #
             # ``bots`` 테이블은 ``BotManager.initialize()`` 에서 생성되며
             # 위 ``_create_services()`` 가 이를 보장하지만, 방어적으로
             # malformed db 외의 "no such table" 은 미존재 bot 으로 정규화
@@ -362,7 +370,8 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             # 삼키지 않도록 메시지로 좁힌다, #1558 동형).
             try:
                 bot_row = await db.fetch_one(
-                    "SELECT 1 FROM bots WHERE bot_id = ?", (bot_id,)
+                    "SELECT 1 FROM bots WHERE bot_id = ? AND status != 'deleted'",
+                    (bot_id,),
                 )
             except sqlite3.OperationalError as e:
                 if "no such table" in str(e).lower():

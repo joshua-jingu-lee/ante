@@ -747,6 +747,185 @@ class TestBotSignalKeyMissingBotExit:
         mock_skm.get_key.assert_not_awaited()
 
 
+class TestBotSignalKeySoftDeletedBotExit:
+    """soft-deleted bot 은 운영상 미존재로 거부 (#1596 attempt2).
+
+    ``bot remove`` 는 키 폐기 후 ``UPDATE bots SET status = 'deleted'``
+    (soft delete, manager.py:826) 하므로 ``bots`` row 가 남는다. row
+    존재만 확인하던 ``SELECT 1 FROM bots WHERE bot_id = ?`` 는 이를
+    통과시켜 ``--rotate`` 가 삭제된 봇에 orphan credential 을 재발급했다
+    (#1596가 막으려는 버그류).
+
+    수정: 존재확인에 ``AND status != 'deleted'`` 추가 →
+    ``BotManager.load_from_db`` 의 운영 bot 정의(manager.py:212
+    ``FROM bots WHERE status != 'deleted'``)와 정렬. soft-deleted bot 은
+    row 없는 미존재 bot 과 동일한 missing sentinel → 동일 거부
+    ("봇을 찾을 수 없습니다" + exit 1, code 없음), orphan 미발급.
+    """
+
+    def _missing_skm(self) -> AsyncMock:
+        """rotate/get_key 가 호출되면 즉시 실패하는 SignalKeyManager mock.
+
+        soft-deleted bot 가드가 ``skm.rotate``/``skm.get_key`` **이전**에
+        걸리므로, 이 mock 의 메서드는 호출되어선 안 된다 (orphan
+        credential 미발급 검증).
+        """
+        skm = AsyncMock()
+        skm.initialize = AsyncMock()
+        skm.rotate = AsyncMock(
+            side_effect=AssertionError(
+                "soft-deleted bot 인데 rotate 가 호출됨 (orphan 재발급)"
+            )
+        )
+        skm.get_key = AsyncMock(
+            side_effect=AssertionError("soft-deleted bot 인데 get_key 가 호출됨")
+        )
+        return skm
+
+    def _soft_deleted_db(self) -> AsyncMock:
+        """soft-deleted bot 을 모사하는 ``Database`` mock.
+
+        쿼리 SQL 을 검사해 ``status != 'deleted'`` 필터가 실제로
+        적용되는지 회귀 고정한다. 필터가 빠진 옛 쿼리
+        (``WHERE bot_id = ?``) 면 row 가 반환되어 orphan 가드를
+        통과 → ``skm`` AssertionError 로 테스트가 실패한다.
+        """
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+
+        async def fetch_one(query: str, params: tuple) -> dict | None:
+            normalized = " ".join(query.lower().split())
+            # bots row 는 존재하나 status='deleted'. 운영 bot 필터가
+            # 적용된 쿼리만 None(미존재) 을 돌려준다.
+            if "status != 'deleted'" in normalized:
+                return None
+            return {"1": 1}
+
+        mock_db.fetch_one = AsyncMock(side_effect=fetch_one)
+        return mock_db
+
+    def test_soft_deleted_bot_rotate_exits_nonzero_json(
+        self, runner: CliRunner
+    ) -> None:
+        mock_db = self._soft_deleted_db()
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "bot",
+                    "signal-key",
+                    "soft-deleted-bot",
+                    "--rotate",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert "봇을 찾을 수 없습니다: soft-deleted-bot" in payload["message"]
+        # 미존재 bot 과 동일 형제 계약(#1558): code 없음 (Non-Goal).
+        assert payload["code"] == ""
+        # orphan credential 미발급: rotate 가 호출되지 않았어야 한다.
+        mock_skm.rotate.assert_not_awaited()
+        mock_skm.get_key.assert_not_awaited()
+
+    def test_soft_deleted_bot_rotate_exits_nonzero_text(
+        self, runner: CliRunner
+    ) -> None:
+        mock_db = self._soft_deleted_db()
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli, ["bot", "signal-key", "soft-deleted-bot", "--rotate"]
+            )
+
+        assert result.exit_code == 1
+        assert "Error:" in result.stderr
+        assert "봇을 찾을 수 없습니다: soft-deleted-bot" in result.stderr
+        mock_skm.rotate.assert_not_awaited()
+
+    def test_soft_deleted_bot_lookup_exits_nonzero_json(
+        self, runner: CliRunner
+    ) -> None:
+        """soft-deleted bot + rotate 없음(키 조회)도 exit 1 + 동일 메시지."""
+        mock_db = self._soft_deleted_db()
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "bot", "signal-key", "soft-deleted-bot"],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert "봇을 찾을 수 없습니다: soft-deleted-bot" in payload["message"]
+        # soft-deleted bot 이 "시그널 키가 없습니다" 로 잘못 빠지지 않아야 한다.
+        assert "시그널 키가 없습니다" not in payload["message"]
+        assert payload["code"] == ""
+        mock_skm.get_key.assert_not_awaited()
+
+    def test_soft_deleted_bot_lookup_exits_nonzero_text(
+        self, runner: CliRunner
+    ) -> None:
+        mock_db = self._soft_deleted_db()
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(cli, ["bot", "signal-key", "soft-deleted-bot"])
+
+        assert result.exit_code == 1
+        assert "Error:" in result.stderr
+        assert "봇을 찾을 수 없습니다: soft-deleted-bot" in result.stderr
+        mock_skm.get_key.assert_not_awaited()
+
+
 # ── member info ──────────────────────────────────────────
 
 
