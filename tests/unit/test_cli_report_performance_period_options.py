@@ -56,6 +56,14 @@ def _assert_conflict_json(result) -> None:
     assert payload["code"] == "CLI_OPTION_CONFLICT"
 
 
+def _assert_report_validation_json(result) -> None:
+    """JSON 포맷 REPORT_VALIDATION_ERROR 응답 공통 검증 (#1599)."""
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["status"] == "error"
+    assert payload["code"] == "REPORT_VALIDATION_ERROR"
+
+
 class TestPeriodOptionConflictRejected:
     """period와 맞지 않는 옵션 조합은 exit 1 + CLI_OPTION_CONFLICT."""
 
@@ -213,6 +221,101 @@ class TestPeriodOptionConflictRejected:
         assert result.exit_code == 1
         assert "--year" in result.output
         mock_run.assert_not_called()
+
+    @pytest.mark.parametrize("bad_year", ["0", "-1"])
+    def test_daily_non_positive_year_still_conflict(self, runner, bad_year):
+        """#1593 경계 회귀: daily+year<=0은 monthly year<=0 검증보다
+        먼저 period-exclusive로 잡혀 CLI_OPTION_CONFLICT여야 한다
+        (REPORT_VALIDATION_ERROR 아님 — #1599가 #1593 관할을 침범 금지)."""
+        with patch("ante.cli.commands.report.asyncio.run") as mock_run:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "report",
+                    "performance",
+                    "--period",
+                    "daily",
+                    "--year",
+                    bad_year,
+                ],
+            )
+        _assert_conflict_json(result)
+        assert "--year" in result.output
+        mock_run.assert_not_called()
+
+
+class TestMonthlyNonPositiveYearRejected:
+    """monthly --year<=0은 exit 1 + REPORT_VALIDATION_ERROR (#1599 oracle A7).
+
+    이전: invalid calendar year(`-1`/`0`)가 거부되지 않고 exit 0 빈 월간
+    집계로 처리됨. monthly --year는 양수(>0) calendar year만 허용한다.
+    """
+
+    @pytest.mark.parametrize("bad_year", ["-1", "0"])
+    def test_monthly_non_positive_year_json(self, runner, bad_year):
+        with patch("ante.cli.commands.report.asyncio.run") as mock_run:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "report",
+                    "performance",
+                    "--period",
+                    "monthly",
+                    "--year",
+                    bad_year,
+                ],
+            )
+        _assert_report_validation_json(result)
+        payload = json.loads(result.output)
+        assert "양수" in payload["message"]
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize("bad_year", ["-1", "0"])
+    def test_monthly_non_positive_year_text_format(self, runner, bad_year):
+        """text 포맷에서도 exit 1 + 메시지로 거부된다."""
+        with patch("ante.cli.commands.report.asyncio.run") as mock_run:
+            result = runner.invoke(
+                cli,
+                [
+                    "report",
+                    "performance",
+                    "--period",
+                    "monthly",
+                    "--year",
+                    bad_year,
+                ],
+            )
+        assert result.exit_code == 1
+        assert "양수" in result.output
+        mock_run.assert_not_called()
+
+    def test_monthly_non_positive_year_does_not_touch_db(self, runner):
+        """invalid year 검증이 _run_performance(Database/asyncio.run)
+        이전임을 고정한다."""
+        with (
+            patch("ante.cli.commands.report.asyncio.run") as mock_run,
+            patch("ante.core.database.Database") as mock_db,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "report",
+                    "performance",
+                    "--period",
+                    "monthly",
+                    "--year",
+                    "-1",
+                ],
+            )
+        assert result.exit_code == 1
+        mock_run.assert_not_called()
+        mock_db.assert_not_called()
 
 
 class TestValidPeriodOptionCombosRegression:

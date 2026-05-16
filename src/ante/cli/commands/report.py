@@ -284,6 +284,21 @@ def report_performance(
         )
         raise SystemExit(1)
 
+    # monthly --year 비양수 거부 (#1599 oracle A7): #1593 period-exclusive
+    # 블록 직후, _run_performance/asyncio.run 이전에 차단한다. 캘린더 연도는
+    # 양수(>0)만 유효하므로 0/음수는 거부한다. daily+year는 위 #1593
+    # CLI_OPTION_CONFLICT가 먼저 잡으므로(이 블록은 그 after 배치) 여기 도달
+    # 하는 year는 monthly 경로뿐이며 daily+year<=0도 CLI_OPTION_CONFLICT다.
+    # 에러코드는 report 도메인의 기존 REPORT_VALIDATION_ERROR를 재사용한다
+    # (report submit 검증 report.py:66/77/107과 동일 코드). 상한/미래연도
+    # 검증은 범위 밖(>0만 검증).
+    if period == "monthly" and year is not None and year <= 0:
+        fmt.error(
+            "monthly --year는 양수 calendar year여야 합니다. (0 이하 거부)",
+            code="REPORT_VALIDATION_ERROR",
+        )
+        raise SystemExit(1)
+
     # inverted date range(시작일 > 종료일) 거부: #1593 period-exclusive 블록
     # 직후, _run_performance/asyncio.run 이전에 차단한다 (backtest.py:72-77
     # 동형, INVALID_DATE_RANGE + exit 1). #1593이 monthly+start/end는 이미

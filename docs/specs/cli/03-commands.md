@@ -455,6 +455,14 @@ ante report performance [--period daily|monthly] [--bot-id <봇ID>] [--start <�
 `--period monthly --start ... --end ...`는 여전히 `CLI_OPTION_CONFLICT`로
 거부되며 `INVALID_DATE_RANGE`에 도달하지 않는다.
 
+또한 `--year`는 `--period monthly` 전용의 양수(>0) calendar year다.
+`--period monthly --year`에 `0` 또는 음수가 지정되면, 위 period-exclusive
+검증 직후·DB 접근 이전에 `REPORT_VALIDATION_ERROR` 에러 코드와 exit code 1로
+거부한다(빈 집계 반환 금지). 상한·미래연도는 검증하지 않는다(양수 여부만 검증).
+검증 순서는 period-exclusive(`CLI_OPTION_CONFLICT`)가 먼저이므로
+`--period daily --year 0`/`--year -1`은 여전히 `CLI_OPTION_CONFLICT`로 거부되며
+(`--year`는 monthly 전용) `REPORT_VALIDATION_ERROR`에 도달하지 않는다.
+
 ### `ante feed` — 데이터 피드 (DataFeed)
 
 CLI 정의는 `src/ante/feed/cli.py`에 있으며 `ante.cli.main`에서 서브커맨드로 등록된다.
