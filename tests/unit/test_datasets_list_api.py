@@ -488,3 +488,34 @@ def test_list_datasets_invalid_timeframe_http_400(_http_client):
     assert "oracle-invalid-timeframe" in detail
     for tf in TIMEFRAMES:
         assert tf in detail
+
+
+def test_datasets_openapi_documents_400_and_timeframe_vocabulary(_http_client):
+    """OpenAPI 계약-런타임 drift 방지 (#1594 Codex attempt2 blocking).
+
+    수동 검증 + 400 동작을 유지하면서 OpenAPI 스키마에 그 계약을
+    문서화한다. timeframe 타입은 ``string|null`` 을 유지해야 하며
+    (Literal/enum 전환 금지 — Plan Review 019e2e2f deferred),
+    400 response 와 vocabulary description 만 노출한다.
+    """
+    spec = _http_client.get("/openapi.json").json()
+    op = spec["paths"]["/api/data/datasets"]["get"]
+
+    # 400 response 가 problem+json ErrorResponse $ref 로 노출
+    assert "400" in op["responses"]
+    resp_400 = op["responses"]["400"]
+    schema_ref = resp_400["content"]["application/problem+json"]["schema"]["$ref"]
+    assert schema_ref == "#/components/schemas/ErrorResponse"
+    assert "1594" in resp_400["description"]
+
+    # timeframe 파라미터: description 에 vocabulary 노출, 타입은 string|null 유지
+    tf_param = next(p for p in op["parameters"] if p["name"] == "timeframe")
+    assert "1m" in tf_param["description"] and "1d" in tf_param["description"]
+    assert "400" in tf_param["description"]
+    # Literal/enum 전환이 아니어야 한다: anyOf(string, null), enum 없음
+    tf_schema = tf_param["schema"]
+    any_of_types = {s.get("type") for s in tf_schema.get("anyOf", [])}
+    assert any_of_types == {"string", "null"}
+    assert "enum" not in tf_schema
+    for sub in tf_schema.get("anyOf", []):
+        assert "enum" not in sub

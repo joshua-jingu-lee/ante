@@ -35,12 +35,36 @@ DATA_TYPES = ["ohlcv", "fundamental"]
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
-@router.get("/datasets", response_model=DatasetListResponse)
+@router.get(
+    "/datasets",
+    response_model=DatasetListResponse,
+    responses={
+        400: {
+            "description": (
+                "허용되지 않은 ``timeframe`` 값. ``timeframe`` 은 canonical "
+                "vocabulary (``1m``, ``5m``, ``15m``, ``1h``, ``1d``) 중 하나여야 "
+                "하며, 그 외 값은 400으로 거부된다 (#1594). 타입은 ``string`` "
+                "이지만 위 vocabulary 외 값은 런타임에서 검증된다."
+            ),
+            "content": {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"},
+                },
+            },
+        },
+    },
+)
 async def list_datasets(
     _caller_id: Annotated[str, Depends(require_data_read)],
     store: Annotated[Any | None, Depends(get_data_store)],
     symbol: str | None = None,
-    timeframe: str | None = None,
+    timeframe: str | None = Query(
+        None,
+        description=(
+            "OHLCV timeframe 필터 (canonical vocabulary: 1m, 5m, 15m, 1h, 1d). "
+            "미지정 시 전체 timeframe 반환. 위 vocabulary 외 값은 400으로 거부된다."
+        ),
+    ),
     data_type: Literal["ohlcv", "fundamental"] | None = Query(
         None, description="데이터 유형 (ohlcv, fundamental, 미지정 시 전체)"
     ),
