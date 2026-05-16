@@ -349,6 +349,29 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             skm = SignalKeyManager(db)
             await skm.initialize()
 
+            # 미존재 bot 에 대한 signal key 발급/조회를 막기 위해
+            # rotate/get_key 호출 전에 bot 존재를 먼저 확인한다. 미존재면
+            # sentinel(``missing=True``)을 반환하여 orphan credential 발급을
+            # 차단한다. 형제 명령(`bot info`/`bot remove`/`bot positions`,
+            # #1558)과 동일하게 code 없는 에러 + exit 1 로 거부한다.
+            #
+            # ``bots`` 테이블은 ``BotManager.initialize()`` 에서 생성되며
+            # 위 ``_create_services()`` 가 이를 보장하지만, 방어적으로
+            # malformed db 외의 "no such table" 은 미존재 bot 으로 정규화
+            # 한다 (malformed db 같은 다른 ``OperationalError`` 까지
+            # 삼키지 않도록 메시지로 좁힌다, #1558 동형).
+            try:
+                bot_row = await db.fetch_one(
+                    "SELECT 1 FROM bots WHERE bot_id = ?", (bot_id,)
+                )
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e).lower():
+                    bot_row = None
+                else:
+                    raise
+            if bot_row is None:
+                return {"bot_id": bot_id, "missing": True}
+
             if rotate:
                 new_key = await skm.rotate(bot_id)
                 return {"bot_id": bot_id, "signal_key": new_key, "rotated": True}
@@ -365,6 +388,14 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     except Exception as e:
         fmt.error(str(e))
         return
+
+    if result.get("missing"):
+        # 미존재 bot: 형제 명령(`bot info`/`bot remove`/`bot positions`)과
+        # 동일하게 code 없는 에러 메시지 + exit 1 (#1596). signal_key None
+        # 분기보다 먼저 처리하여 미존재 bot 이 "키 없음" 으로 잘못 빠지지
+        # 않도록 한다.
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        ctx.exit(1)
 
     if result.get("signal_key") is None:
         fmt.error(f"시그널 키가 없습니다: {bot_id}")

@@ -16,6 +16,18 @@
 - ``Formatter.error()`` 자체는 미변경 — ``strategy validate`` 등 ``fmt.error`` 후
   추가 errors/warnings를 계속 출력하는 호출자 회귀 회피.
 
+``ante bot signal-key <missing-bot>`` orphan credential 거부 (#1596):
+``bot signal-key``는 #1515에서 "키 없음(실재 bot)" missing-key만 exit 1로
+정렬됐으나, 미존재 bot에 대해서는 ``skm.rotate``/``skm.get_key``가 그대로
+호출되어 orphan signal key가 발급/조회되고 exit 0으로 종료되던 결함이
+잔존했다(oracle A7 missing-resource). 형제 명령(`bot info`/`bot remove`/
+`bot positions`, #1558)과 동일하게 rotate/get_key **이전**에 ``SELECT 1
+FROM bots WHERE bot_id = ?``로 bot 존재를 확인하고, 미존재면 "봇을 찾을
+수 없습니다: {bot_id}" + exit 1 (code 없음)로 거부한다. 미존재 sentinel
+처리는 기존 ``signal_key is None``("시그널 키가 없습니다") 분기보다 먼저
+와서 미존재 bot이 "키 없음"으로 잘못 빠지지 않게 한다. ``SignalKeyManager``
+자체와 다른 bot 서브커맨드는 미변경 (Non-Goal).
+
 ``ante signal connect`` 연결 실패 exit code 회귀 (#1560):
 ``signal connect``의 ``_run_connect``(``src/ante/cli/commands/signal.py``)에는
 연결 실패 가드 4개가 모두 ``_err(...)``(stderr 출력) 후 ``return``으로 끝나
@@ -302,11 +314,18 @@ class TestBotInfoMissingExit:
 
 
 class TestBotSignalKeyMissingExit:
-    """``ante bot signal-key <bot-without-key>`` 은 exit 1."""
+    """``ante bot signal-key <bot-without-key>`` 은 exit 1.
 
-    def test_missing_exits_nonzero_json(self, runner: CliRunner) -> None:
+    "키 없음(실재 bot)" 경로의 회귀 보존. 미존재 bot 거부(#1596)는
+    ``TestBotSignalKeyMissingBotExit``에서 별도 검증한다 — 두 케이스는
+    서로 다른 invariant("키 없음" vs "봇 없음")라 메시지/문구가 다르다.
+    """
+
+    def test_missing_key_exits_nonzero_json(self, runner: CliRunner) -> None:
         mock_db = AsyncMock()
         mock_db.close = AsyncMock()
+        # 실재 bot (bots row 존재) 이지만 signal key 미발급 상태.
+        mock_db.fetch_one = AsyncMock(return_value={"1": 1})
         mock_skm = AsyncMock()
         mock_skm.initialize = AsyncMock()
         mock_skm.get_key = AsyncMock(return_value=None)
@@ -331,10 +350,13 @@ class TestBotSignalKeyMissingExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "bot-without-key" in payload["message"]
+        # 실재 bot 의 키 없음 → "시그널 키가 없습니다" (불변, #1596 비대상).
+        assert "시그널 키가 없습니다" in payload["message"]
 
-    def test_missing_exits_nonzero_text(self, runner: CliRunner) -> None:
+    def test_missing_key_exits_nonzero_text(self, runner: CliRunner) -> None:
         mock_db = AsyncMock()
         mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={"1": 1})
         mock_skm = AsyncMock()
         mock_skm.initialize = AsyncMock()
         mock_skm.get_key = AsyncMock(return_value=None)
@@ -354,11 +376,13 @@ class TestBotSignalKeyMissingExit:
 
         assert result.exit_code == 1
         assert "Error:" in result.stderr
+        assert "시그널 키가 없습니다" in result.stderr
 
     def test_valid_exits_zero(self, runner: CliRunner) -> None:
         """signal_key 존재 시 exit 0 회귀 보존."""
         mock_db = AsyncMock()
         mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={"1": 1})
         mock_skm = AsyncMock()
         mock_skm.initialize = AsyncMock()
         mock_skm.get_key = AsyncMock(return_value="sk_test123")
@@ -381,6 +405,269 @@ class TestBotSignalKeyMissingExit:
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = json.loads(result.stdout)
         assert payload["signal_key"] == "sk_test123"
+
+    def test_valid_rotate_exits_zero(self, runner: CliRunner) -> None:
+        """실재 bot --rotate 재발급은 exit 0 + rotated 회귀 보존."""
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={"1": 1})
+        mock_skm = AsyncMock()
+        mock_skm.initialize = AsyncMock()
+        mock_skm.rotate = AsyncMock(return_value="sk_rotated999")
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "bot", "signal-key", "b-1", "--rotate"]
+            )
+
+        assert result.exit_code == 0, result.stdout + result.stderr
+        # rotate 성공은 ``fmt.success`` envelope: {status:ok, message, data}.
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "ok"
+        assert payload["data"]["signal_key"] == "sk_rotated999"
+        assert payload["data"]["rotated"] is True
+        mock_skm.rotate.assert_awaited_once_with("b-1")
+
+
+class TestBotSignalKeyMissingBotExit:
+    """``ante bot signal-key <missing-bot> [--rotate]`` 은 exit 1 (#1596).
+
+    미존재 bot 에 대한 signal key 발급/조회를 차단한다 (oracle A7
+    missing-resource). 형제 명령(`bot info`/`bot remove`/`bot positions`,
+    #1558)과 동일하게 "봇을 찾을 수 없습니다: {bot_id}" + exit 1, **에러
+    코드 없음**으로 거부하고, orphan credential 을 발급하지 않는다.
+
+    target 경로는 ``_create_services()`` 의 ``Database`` 직접 조회
+    (``SELECT 1 FROM bots WHERE bot_id = ?``) — ``SignalKeyManager``
+    자체는 미변경 (Non-Goal).
+    """
+
+    def _missing_skm(self) -> AsyncMock:
+        """rotate/get_key 가 호출되면 즉시 실패하는 SignalKeyManager mock.
+
+        미존재 bot 가드가 ``skm.rotate``/``skm.get_key`` **이전**에
+        걸리므로, 이 mock 의 메서드는 호출되어선 안 된다 (orphan
+        credential 미발급 검증).
+        """
+        skm = AsyncMock()
+        skm.initialize = AsyncMock()
+        skm.rotate = AsyncMock(
+            side_effect=AssertionError("미존재 bot 인데 rotate 가 호출됨 (orphan)")
+        )
+        skm.get_key = AsyncMock(
+            side_effect=AssertionError("미존재 bot 인데 get_key 가 호출됨")
+        )
+        return skm
+
+    def test_missing_bot_rotate_exits_nonzero_json(self, runner: CliRunner) -> None:
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value=None)  # bots row 없음
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "bot",
+                    "signal-key",
+                    "oracle-missing-bot",
+                    "--rotate",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
+        # code 없는 형제 계약(#1558): error envelope 의 code 는 빈 문자열
+        # (신규 에러코드 신설 금지 — Non-Goal).
+        assert payload["code"] == ""
+        # orphan credential 미발급: rotate 가 호출되지 않았어야 한다.
+        mock_skm.rotate.assert_not_awaited()
+        mock_skm.get_key.assert_not_awaited()
+
+    def test_missing_bot_rotate_exits_nonzero_text(self, runner: CliRunner) -> None:
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value=None)
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli, ["bot", "signal-key", "oracle-missing-bot", "--rotate"]
+            )
+
+        assert result.exit_code == 1
+        assert "Error:" in result.stderr
+        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in result.stderr
+        mock_skm.rotate.assert_not_awaited()
+
+    def test_missing_bot_lookup_exits_nonzero_json(self, runner: CliRunner) -> None:
+        """미존재 bot + rotate 없음(키 조회)도 exit 1 + 동일 메시지."""
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value=None)
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "bot", "signal-key", "oracle-missing-bot"],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
+        # 미존재 bot 이 "시그널 키가 없습니다" 로 잘못 빠지지 않아야 한다.
+        assert "시그널 키가 없습니다" not in payload["message"]
+        assert payload["code"] == ""
+        mock_skm.get_key.assert_not_awaited()
+
+    def test_missing_bot_lookup_exits_nonzero_text(self, runner: CliRunner) -> None:
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value=None)
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(cli, ["bot", "signal-key", "oracle-missing-bot"])
+
+        assert result.exit_code == 1
+        assert "Error:" in result.stderr
+        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in result.stderr
+        mock_skm.get_key.assert_not_awaited()
+
+    def test_missing_bot_no_such_table_normalized(self, runner: CliRunner) -> None:
+        """``bots`` 테이블 부재 → 미존재 bot 으로 정규화 (#1558 동형).
+
+        ``no such table`` ``OperationalError`` 는 정의상 해당 bot_id 가
+        존재할 수 없으므로 미존재 bot 과 동일하게 exit 1 + 거부 메시지.
+        """
+        import sqlite3
+
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("no such table: bots")
+        )
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "bot",
+                    "signal-key",
+                    "oracle-missing-bot",
+                    "--rotate",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
+        mock_skm.rotate.assert_not_awaited()
+
+    def test_other_operational_error_not_swallowed(self, runner: CliRunner) -> None:
+        """``no such table`` 외 ``OperationalError`` 는 미존재로 정규화하지
+        않고 그대로 전파(일반 에러 경로 → exit 1, 거부 메시지 아님)."""
+        import sqlite3
+
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("database disk image is malformed")
+        )
+        mock_skm = self._missing_skm()
+
+        with (
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new_callable=AsyncMock,
+                return_value=(mock_db, None, None, None),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "bot", "signal-key", "some-bot", "--rotate"],
+            )
+
+        # malformed db 는 미존재 bot 으로 둔갑하지 않는다 (메시지 구분).
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert "봇을 찾을 수 없습니다" not in payload["message"]
+        mock_skm.rotate.assert_not_awaited()
 
 
 # ── member info ──────────────────────────────────────────
