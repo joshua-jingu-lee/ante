@@ -58,10 +58,8 @@ async def list_datasets(
     Returns:
         {items: [...], total: int}
     """
-    if store is None:
-        return {"items": [], "total": 0}
-
     # timeframe 필터는 TIMEFRAMES vocabulary 외 값을 400으로 거부한다 (#1594).
+    # store 유무와 무관하게 API 경계에서 거부해야 하므로 store-None 가드보다 앞.
     # (symbol vocabulary 거부는 exchange-aware symbol SSOT 후속 — 본 PR 범위 외)
     if timeframe is not None and timeframe not in TIMEFRAMES:
         raise HTTPException(
@@ -69,6 +67,9 @@ async def list_datasets(
             detail=f"허용되지 않은 timeframe 값: {timeframe} "
             f"(허용: {', '.join(TIMEFRAMES)})",
         )
+
+    if store is None:
+        return {"items": [], "total": 0}
 
     loop = asyncio.get_event_loop()
 

@@ -56,6 +56,48 @@ async def test_list_datasets_returns_empty_when_no_store():
 
 
 @pytest.mark.asyncio
+async def test_list_datasets_store_none_invalid_timeframe_still_400():
+    """store 미주입(None) 환경에서도 invalid timeframe은 400으로 거부된다.
+
+    Codex 브랜치 리뷰 [P2] blocking 회귀 고정: timeframe 검증이
+    store-None 조기 반환 뒤에 있으면 store 미주입 앱/테스트에서
+    invalid timeframe이 200 empty로 새어 나간다. 검증은 store 유무와
+    무관하게 API 경계에서 일어나야 한다.
+    """
+    with pytest.raises(HTTPException) as exc_info:
+        await list_datasets(
+            _caller_id="test-caller",
+            store=None,
+            symbol=None,
+            timeframe="oracle-invalid-timeframe",
+            data_type="ohlcv",
+            offset=0,
+            limit=50,
+        )
+
+    assert exc_info.value.status_code == 400
+    detail = exc_info.value.detail
+    assert "oracle-invalid-timeframe" in detail
+    for tf in TIMEFRAMES:
+        assert tf in detail
+
+
+@pytest.mark.asyncio
+async def test_list_datasets_store_none_valid_timeframe_still_empty():
+    """store=None + valid timeframe은 기존대로 200 empty (동작 회귀)."""
+    result = await list_datasets(
+        _caller_id="test-caller",
+        store=None,
+        symbol=None,
+        timeframe="1d",
+        data_type="ohlcv",
+        offset=0,
+        limit=50,
+    )
+    assert result == {"items": [], "total": 0}
+
+
+@pytest.mark.asyncio
 async def test_list_datasets_pagination_limits_enrichment():
     """페이지네이션이 적용되어 해당 페이지 종목만 enrich한다."""
     syms = [f"00{i:04d}" for i in range(5)]
