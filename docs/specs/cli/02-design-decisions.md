@@ -86,6 +86,15 @@ JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "
 명확하면 도메인 prefix를 사용하고(`ACCOUNT_*`, `MEMBER_*`, `BOT_*`, `UPDATE_*`),
 도메인이 없으면 `CLI_*` prefix를 사용한다.
 
+> **명명 규칙 예외 (legacy/common date-range 코드)**: 위 규칙은 domainless
+> 입력 계약 위반에 `CLI_*` prefix를 요구하지만, `INVALID_DATE_RANGE`(시작일 >
+> 종료일)와 `INVALID_DATE`(달력 날짜 형식 오류)는 기존 `backtest run` CLI가
+> 이미 사용 중인(`src/ante/cli/commands/backtest.py:69,75`) 호환 유지용
+> legacy/common date-range 코드로 `CLI_*` prefix 예외다. 신규 코드를 신설하지
+> 않고 동일 의미를 갖는 다른 read/report 명령에도 이 코드를 그대로 재사용한다
+> (#1597). 신규 입력 계약 위반은 이 예외를 따르지 않고 위 표준 명명 규칙을
+> 적용한다.
+
 표준 에러 코드 (이번 이슈에서 SSOT로 확정):
 
 | 에러 코드 | 의미 | 발생 명령 |
@@ -93,6 +102,7 @@ JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "
 | `CLI_MISSING_REQUIRED_INPUT` | 필수 옵션·인자 누락 (도메인 명확 시 도메인 prefix specialize) | 모든 명령 |
 | `CLI_CONFIRMATION_REQUIRED` | 위험 명령에 `--yes`/`--force` 누락 | `account delete`, `bot remove`, `member revoke`, `update` |
 | `CLI_OPTION_CONFLICT` | 상호 배타적인 옵션을 동시 사용 (period별 전용 옵션을 다른 period와 함께 사용 등) | `report performance`, `treasury snapshot` |
+| `INVALID_DATE_RANGE` | 시작일 > 종료일 (inverted date range). **legacy/common 코드 — `CLI_*` 명명 규칙 예외**(위 예외 박스 참조) | `backtest run`, `audit list`, `trade list`, `treasury snapshot`, `report performance` |
 | `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` | `BrokerPreset.required_credentials`에 정의된 credential key 누락 | `account create`, `account set-credentials` |
 | `ACCOUNT_UNKNOWN_CREDENTIAL_KEY` | broker preset의 `required_credentials`에 정의되지 않은 credential key 제공 | `account create`, `account set-credentials` |
 | `ACCOUNT_DUPLICATE_CREDENTIAL_KEY` | 같은 credential key를 `--credential`/`--credential-env`/`--credential-file` 중 둘 이상 채널로 중복 제공 | `account create`, `account set-credentials` |

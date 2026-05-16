@@ -15,9 +15,13 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import datetime
+from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from ante.cli.formatter import OutputFormatter
 
 # Web API helper(`src/ante/web/utils/date_params.py:56`)와 동일한 strict
 # ``YYYY-MM-DD`` (zero-padded 10자) 정규식. ``datetime.strptime`` 단독은
@@ -128,4 +132,72 @@ def validate_positive_finite_amount(
     return value
 
 
-__all__ = ["validate_iso_date", "validate_positive_finite_amount"]
+def reject_inverted_date_range(
+    from_value: str | None,
+    to_value: str | None,
+    fmt: OutputFormatter,
+    *,
+    from_label: str = "시작일",
+    to_label: str = "종료일",
+) -> None:
+    """공유 date-only 헬퍼: ``from > to`` inverted range를 거부한다.
+
+    오라클 A7 finding(#1597): ``audit list``/``trade list``/
+    ``treasury snapshot``/``report performance --period daily`` 4개 read/report
+    명령이 inverted date range(시작일 > 종료일)를 non-zero가 아니라 exit 0 빈
+    결과로 처리하여 실제 데이터 부재와 구별되지 않던 ingress drift가 있었다.
+    ``backtest run``(``backtest.py:72-77``)은 이미 ``INVALID_DATE_RANGE`` +
+    ``SystemExit(1)``로 거부하고 있으며, 본 헬퍼는 그 메시지 톤·종료 코드와
+    동형으로 나머지 4곳에 일괄 적용해 drift를 닫는다.
+
+    **date-only 계약**: 4개 명령의 date 옵션은 전부 기존
+    :func:`validate_iso_date`(``_validators.py:62-78``)가 strict
+    ``YYYY-MM-DD``로 검증·정규화한 뒤 본 헬퍼에 도달한다. 따라서 본 헬퍼는
+    ``datetime.date.fromisoformat(value)`` **단일 타입**만 파싱한다
+    (mixed date/datetime ``TypeError`` 차단). 형식 검증은 본 헬퍼의 책임이
+    아니다 — invalid 형식은 ``validate_iso_date``의 ``click.BadParameter``
+    경로에서 본 헬퍼 도달 전에 이미 거부된다. 방어적으로, 어떤 경로로 형식
+    invalid가 들어오면 ``fromisoformat``이 ``ValueError``를 던지므로 그대로
+    통과시켜 기존 click 표준 경로를 보존한다(형식 검증 책임을 넘지 않는다).
+
+    동작:
+
+    - ``from_value``/``to_value`` 한쪽 또는 양쪽이 ``None`` → 통과 (옵션
+      미지정/한쪽만 지정 분기 보존).
+    - 둘 다 not ``None`` & 둘 다 ``date.fromisoformat`` 파싱 성공 &
+      ``from_date > to_date`` → ``fmt.error(code="INVALID_DATE_RANGE")`` 후
+      ``SystemExit(1)``.
+    - 그 외(파싱 실패 포함) → 통과.
+
+    Args:
+        from_value: 시작일 문자열(``YYYY-MM-DD``) 또는 ``None``.
+        to_value: 종료일 문자열(``YYYY-MM-DD``) 또는 ``None``.
+        fmt: ``get_formatter(ctx)``로 얻은 출력 포맷터. text/json 모드에 따라
+            구조화된 에러를 출력한다.
+        from_label: 에러 메시지의 시작일 라벨 (기본 ``"시작일"``).
+        to_label: 에러 메시지의 종료일 라벨 (기본 ``"종료일"``).
+
+    Raises:
+        SystemExit: inverted range일 때 exit code 1로 종료.
+    """
+    if from_value is None or to_value is None:
+        return
+    try:
+        from_date = date.fromisoformat(from_value)
+        to_date = date.fromisoformat(to_value)
+    except (ValueError, TypeError):
+        # 형식 검증은 본 헬퍼 책임 아님 — validate_iso_date의 click 경로 보존.
+        return
+    if from_date > to_date:
+        fmt.error(
+            f"{from_label}({from_value})이(가) {to_label}({to_value}) 이후입니다.",
+            code="INVALID_DATE_RANGE",
+        )
+        raise SystemExit(1)
+
+
+__all__ = [
+    "reject_inverted_date_range",
+    "validate_iso_date",
+    "validate_positive_finite_amount",
+]

@@ -7,7 +7,7 @@ from datetime import datetime
 
 import click
 
-from ante.cli._validators import validate_iso_date
+from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
@@ -71,6 +71,17 @@ def trade_list(
 ) -> None:
     """거래 목록 조회."""
     fmt = get_formatter(ctx)
+
+    # inverted date range(시작일 > 종료일) 거부: _create_trade_service/DB
+    # 생성 및 _run_list 내부 datetime.fromisoformat 이전에 차단한다
+    # (backtest.py:72-77 동형, INVALID_DATE_RANGE + exit 1).
+    reject_inverted_date_range(
+        from_date,
+        to_date,
+        fmt,
+        from_label="시작일",
+        to_label="종료일",
+    )
 
     async def _run_list() -> list[dict]:
         service, db = await _create_trade_service()

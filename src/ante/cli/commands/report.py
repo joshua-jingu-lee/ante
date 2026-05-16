@@ -8,7 +8,7 @@ import json
 import click
 from pydantic import ValidationError
 
-from ante.cli._validators import validate_iso_date
+from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.report.models import ReportStatus
@@ -283,6 +283,19 @@ def report_performance(
             code="CLI_OPTION_CONFLICT",
         )
         raise SystemExit(1)
+
+    # inverted date range(시작일 > 종료일) 거부: #1593 period-exclusive 블록
+    # 직후, _run_performance/asyncio.run 이전에 차단한다 (backtest.py:72-77
+    # 동형, INVALID_DATE_RANGE + exit 1). #1593이 monthly+start/end는 이미
+    # CLI_OPTION_CONFLICT로 거부했으므로 여기 도달하는 start/end 조합은
+    # daily 경로뿐이다. #1593 순서/코드는 보존(이 블록은 after 배치).
+    reject_inverted_date_range(
+        start,
+        end,
+        fmt,
+        from_label="시작일",
+        to_label="종료일",
+    )
 
     async def _run_performance() -> list[dict]:
         from ante.cli.main import get_db_path

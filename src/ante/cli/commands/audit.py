@@ -6,7 +6,7 @@ import asyncio
 
 import click
 
-from ante.cli._validators import validate_iso_date
+from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -51,6 +51,16 @@ def audit_list(
 ) -> None:
     """감사 로그 목록 조회."""
     fmt = get_formatter(ctx)
+
+    # inverted date range(시작일 > 종료일) 거부: DB/AuditLogger.query 진입
+    # 이전에 차단한다 (backtest.py:72-77 동형, INVALID_DATE_RANGE + exit 1).
+    reject_inverted_date_range(
+        from_date,
+        to_date,
+        fmt,
+        from_label="시작 날짜",
+        to_label="종료 날짜",
+    )
 
     async def _run_list() -> list[dict]:
         from ante.audit import AuditLogger
