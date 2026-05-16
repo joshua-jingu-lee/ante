@@ -17,7 +17,10 @@ from ante.web.schemas import (
     PortfolioHistoryResponse,
     PortfolioValueResponse,
 )
-from ante.web.utils.date_params import validate_iso_date_only
+from ante.web.utils.date_params import (
+    reject_inverted_date_range,
+    validate_iso_date_only,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +102,9 @@ async def portfolio_value(
             "description": (
                 "Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). "
                 "``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 "
-                "저장되므로 임의 문자열을 허용하지 않는다 (#1440)."
+                "저장되므로 임의 문자열을 허용하지 않는다 (#1440). "
+                "``start_date > end_date`` (inverted range)도 422로 거부한다 "
+                "(#1595)."
             ),
             "content": {
                 "application/problem+json": {
@@ -133,6 +138,8 @@ async def portfolio_history(
     """
     start_date = validate_iso_date_only(start_date, "start_date")
     end_date = validate_iso_date_only(end_date, "end_date")
+    # default 적용 이전: 미지정(None)은 통과, start>end (inverted) 만 거부 (#1595).
+    reject_inverted_date_range(start_date, end_date)
 
     target = _resolve_treasury(treasury, treasury_manager, account_id)
 

@@ -5153,7 +5153,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Invalid date filter (ISO 8601 required). ``start_date``/``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다. */
+            /** @description Invalid date filter (ISO 8601 required). ``start_date``/``end_date``는 ISO 8601 date(``YYYY-MM-DD``) 또는 datetime(``YYYY-MM-DDTHH:MM:SS[Z]``)만 허용한다. UTC 정규화 후 ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6200,7 +6200,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioHistoryResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7450,7 +7450,7 @@ export interface operations {
                     "application/json": components["schemas"]["SnapshotListResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_daily_snapshots.snapshot_date`` 컬럼이 date-only로 저장되므로 임의 문자열을 허용하지 않는다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7589,7 +7589,7 @@ export interface operations {
                     "application/json": components["schemas"]["TransactionListResponse"];
                 };
             };
-            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). ``type`` query는 정규 vocabulary ``{allocate, deallocate, release, fill, bot_stopped_release}`` (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477). */
+            /** @description Invalid ``start_date``/``end_date`` (ISO ``YYYY-MM-DD`` required). ``treasury_transactions.created_at``은 SQLite ``datetime('now')`` 포맷(``YYYY-MM-DD HH:MM:SS``)으로 저장되며, 검증된 boundary로만 비교한다 (#1440). ``start_date > end_date`` (inverted range)도 422로 거부한다 (#1595). ``type`` query는 정규 vocabulary ``{allocate, deallocate, release, fill, bot_stopped_release}`` (#1476) 외 값을 ``Literal`` 좁힘으로 422 거부한다 (#1477). */
             422: {
                 headers: {
                     [name: string]: unknown;
