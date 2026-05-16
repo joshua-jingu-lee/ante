@@ -57,6 +57,11 @@ def run(
     from ante.backtest.service import BacktestService
     from ante.cli.main import get_db_path
     from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
+    from ante.core.market_data_vocab import (
+        CANONICAL_TIMEFRAMES,
+        is_krx_symbol,
+        is_valid_timeframe,
+    )
 
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
@@ -84,6 +89,39 @@ def run(
             code="BACKTEST_INVALID_EXCHANGE",
         )
         raise SystemExit(1)
+
+    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, #1613 SSOT helper 위임).
+    # precedence: date/exchange 검증 이후 → ① timeframe → ② 빈 segment →
+    # ③ KRX symbol shape. config build·BacktestService.run·_save_backtest_run
+    # 이전이어야 invalid 입력 시 backtest_runs history가 생성되지 않는다.
+    if not is_valid_timeframe(timeframe):
+        fmt.error(
+            f"유효하지 않은 타임프레임: {timeframe!r}. "
+            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
+            code="BACKTEST_INVALID_TIMEFRAME",
+        )
+        raise SystemExit(1)
+
+    if symbols is not None:
+        parsed = symbols.split(",")
+        if any(not s.strip() for s in parsed):
+            fmt.error(
+                f"유효하지 않은 종목 코드: {symbols!r}. "
+                "빈 종목 코드를 포함할 수 없습니다.",
+                code="BACKTEST_INVALID_SYMBOL",
+            )
+            raise SystemExit(1)
+        # KRX symbol shape는 resolved exchange == KRX 신규 입력 한정
+        # (core.md `### KRX symbol shape`). 비-KRX exchange는 미적용.
+        if exchange == "KRX":
+            for seg in parsed:
+                if not is_krx_symbol(seg):
+                    fmt.error(
+                        f"유효하지 않은 종목 코드: {seg!r}. "
+                        "KRX 종목 코드는 6자리 숫자여야 합니다.",
+                        code="BACKTEST_INVALID_SYMBOL",
+                    )
+                    raise SystemExit(1)
 
     config = {
         "strategy_path": strategy_path,
