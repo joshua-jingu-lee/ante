@@ -20,7 +20,7 @@
 | `author_name` | `str` | `"agent"` | 작성자 표시 이름 (예: `"전략 리서치 1호"`) |
 | `author_id` | `str` | `"agent"` | 작성자 ID (예: `"strategy-dev-01"`) |
 | `symbols` | `list[str] \| None` | `None` | 대상 종목 (`None`이면 봇 설정에서 지정) |
-| `timeframe` | `str` | `"1d"` | 기본 타임프레임 (`1m`, `5m`, `15m`, `1h`, `1d` 등) |
+| `timeframe` | `str` | `"1d"` | 기본 타임프레임 (canonical: `1m`, `5m`, `15m`, `1h`, `1d` — core.md `## Canonical Symbol/Timeframe Vocabulary`. exact-literal 5종, alias·추가 timeframe 없음) |
 | `exchange` | `str` | `"KRX"` | 대상 거래소. 유효 값: `"KRX"`, `"NYSE"`, `"NASDAQ"`, `"AMEX"`, `"TEST"`, `"*"`. `"*"`는 시장 무관(범용) 전략 |
 | `accepts_external_signals` | `bool` | `False` | 외부 시그널 수신 가능 여부. `True`인 전략만 시그널 채널 연결 허용 |
 

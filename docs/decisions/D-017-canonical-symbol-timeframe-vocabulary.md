@@ -87,7 +87,8 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
 | `data validate` CLI timeframe enforcement | non-canonical → non-zero exit + 구조화 error payload | #1605 |
 | `feed inject` timeframe enforcement | non-canonical → 거부 | #1606 |
 | Instrument import KRX symbol shape enforcement | non-`^[0-9]{6}$` → non-zero exit + 구조화 error payload | #1611 |
-| Data API `timeframe` filter (기구현 400) + 잔여 symbol filter | vocabulary 외 timeframe 400 거부 기구현, 잔여 symbol filter 정렬 | #1594 |
+| Data API `timeframe` filter (기구현 400) | vocabulary 외 timeframe 400 거부 기구현 | #1594 |
+| Data API `symbol` filter 잔여 vocabulary 거부 (현재 200 empty 유지) | invalid `symbol`은 현재 200 empty (web-api/05 계약과 정합, **#1594 아님**) — exchange-aware symbol SSOT 후속 정렬 | **#1613 코드 SSOT 체인** |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외) | 누락 소비자 ingress enforcement 추적 폐쇄 | **#1614** (Depends on #1613) |
 | fundamental cadence `dataset.timeframe` overload reconciliation (축 F) | dashboard user-stories/mockups ↔ #1594 datasets API OHLCV-only 400 cross-surface 불일치 docs 정합화 | **후보 D** (deferral, 사람 등록) |
 

@@ -73,7 +73,7 @@
 ## 데이터 (`/api/data`)
 
 > canonical symbol/timeframe 계약 SSOT: [core.md `## Canonical Symbol/Timeframe Vocabulary`](../core/core.md#canonical-symboltimeframe-vocabulary).
-> `timeframe` vocabulary(`1m, 5m, 15m, 1h, 1d`) 계약 본문은 core.md 절이 SSOT이며 코드 상수 단일화는 #1613에 위임된다. 표면별 enforcement 정렬은 #1594에서 다룬다.
+> `timeframe` vocabulary(`1m, 5m, 15m, 1h, 1d`) 계약 본문은 core.md 절이 SSOT이며 코드 상수 단일화는 #1613에 위임된다. **`timeframe` filter 표면별 enforcement 정렬은 #1594에서 다룬다(`timeframe` 한정).** `symbol` vocabulary 거부는 #1594가 아니라 exchange-aware symbol SSOT 후속(후보 0 / #1613 코드 SSOT 체인) 정렬 사안이며, 현재 invalid `symbol`은 200 empty 유지(아래 `GET /api/data/datasets` 행과 정합).
 
 | Method | Path | 설명 |
 |--------|------|------|
