@@ -13,6 +13,11 @@ from ante.backtest.data_provider import BacktestDataProvider
 from ante.backtest.exceptions import BacktestConfigError, BacktestError
 from ante.backtest.executor import BacktestExecutor
 from ante.backtest.result import BacktestResult
+from ante.core.market_data_vocab import (
+    CANONICAL_TIMEFRAMES,
+    is_krx_symbol,
+    is_valid_timeframe,
+)
 from ante.data.store import ParquetStore
 from ante.strategy.loader import StrategyLoader
 
@@ -132,6 +137,52 @@ class BacktestService:
             msg = f"Missing required config keys: {missing}"
             raise BacktestConfigError(msg)
 
+        # symbol/timeframe vocabulary 검증 (#1604, core.md ``## Canonical
+        # Symbol/Timeframe Vocabulary``:286 — programmatic API 행이
+        # "검증 에러"를 normative로 요구). CLI(#1603)는 Click이 타입을
+        # 협소화하지만 programmatic ``dict[str, Any]`` 는 임의 타입이
+        # 유입되므로 모든 분기에 명시적 타입 경계를 두어 invalid를
+        # ``TypeError`` 가 아닌 ``BacktestConfigError`` 로 early-fail
+        # 시킨다. SSOT(`is_krx_symbol`)의 non-str→False 가드를
+        # 우회하지 않도록 ``str()`` 캐스팅은 쓰지 않는다.
+        # precedence: required-key → ① timeframe → ② symbols 정규화/
+        # 구조/빈 → ③ KRX shape.
+        timeframe = config.get("timeframe", "1d")
+        if not isinstance(timeframe, str) or not is_valid_timeframe(timeframe):
+            msg = (
+                f"Invalid timeframe: {timeframe!r}. "
+                f"Allowed: {', '.join(CANONICAL_TIMEFRAMES)}"
+            )
+            raise BacktestConfigError(msg)
+
+        symbols_raw = config.get("symbols", [])
+        # None/누락/[] → [] (no-symbols backtest 정상, 미거부). 명시적
+        # ``{"symbols": None}`` 도 여기서 ``[]`` 로 정규화하여 build
+        # 라인이 ``BacktestConfig.symbols=None`` 으로 새지 않게 한다.
+        normalized_symbols = [] if symbols_raw is None else symbols_raw
+        if not isinstance(normalized_symbols, list) or not all(
+            isinstance(s, str) for s in normalized_symbols
+        ):
+            msg = f"Invalid symbols (expected list[str]): {symbols_raw!r}"
+            raise BacktestConfigError(msg)
+        if any(not s.strip() for s in normalized_symbols):
+            msg = f"Invalid symbols (empty/blank segment): {symbols_raw!r}"
+            raise BacktestConfigError(msg)
+
+        exchange = config.get("exchange", "KRX")
+        if exchange == "KRX":
+            # resolved exchange == KRX 신규 입력 한정 (core.md
+            # ``### KRX symbol shape``). 비-KRX exchange의 symbol
+            # shape은 미검증 (NYSE+AAPL 비거부). 원본 str 값을 그대로
+            # 전달 — ② 에서 list[str] 보장, SSOT non-str 가드 보존.
+            for s in normalized_symbols:
+                if not is_krx_symbol(s):
+                    msg = (
+                        f"Invalid KRX symbol: {s!r}. "
+                        "Expected 6-digit canonical KRX symbol shape."
+                    )
+                    raise BacktestConfigError(msg)
+
         data_paths = config.get(
             "data_paths",
             [config.get("data_path", self._data_path)],
@@ -139,7 +190,7 @@ class BacktestService:
 
         return BacktestConfig(
             strategy_path=config["strategy_path"],
-            symbols=config.get("symbols", []),
+            symbols=normalized_symbols,
             timeframe=config.get("timeframe", "1d"),
             exchange=config.get("exchange", "KRX"),
             start_date=config.get("start_date", ""),
