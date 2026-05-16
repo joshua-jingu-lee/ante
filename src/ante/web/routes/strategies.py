@@ -630,12 +630,17 @@ async def get_strategy_performance(
     미지정(``None``)은 가드를 통과해 봇 추출 fallback → (추출 불가 시) 400으로
     이어진다 — #1218이 정렬한 omitted query 정책을 보존한다. valid-pattern
     but absent(``acc-9999``)는 가드를 통과해 기존 단건 존재 검증 404로
-    이어진다 (invalid-format ↔ genuine not-found 분리)."""
+    이어진다 (invalid-format ↔ genuine not-found 분리).
+
+    가드는 함수 진입 직후, strategy 레지스트리/봇 조회 **이전**에 실행한다.
+    그래야 존재하지 않는 ``strategy_id`` + provided-invalid ``account_id``
+    조합에서도 account_id 422 계약이 strategy 존재 여부에 종속되지 않는다
+    (#1624 ingress invariant)."""
+    reject_invalid_account_id(account_id)
+
     record = await registry.get(strategy_id)
     if not record:
         raise HTTPException(status_code=404, detail=_STRATEGY_NOT_FOUND)
-
-    reject_invalid_account_id(account_id)
 
     # account_id 결정: 쿼리 파라미터 우선, 없으면 봇에서 추출.
     # 둘 다 실패하면 `"default"` fallback 없이 400으로 명시 실패한다 (#1218 query 정책).

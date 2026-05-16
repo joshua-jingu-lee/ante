@@ -368,3 +368,94 @@ class TestOpenAPI422Documented:
         assert ref == "#/components/schemas/ErrorResponse", (
             f"inv#{inv} {path} 422 ref={ref}"
         )
+
+
+# ── 축 1 보강: #9 가드가 strategy 존재 여부에 종속되지 않음 (#1624) ──
+
+
+class _StubRegistryMissing:
+    """``strategy_registry`` 자리 — 전략이 **존재하지 않는다** (``get`` →
+    ``None``). 존재하지 않는 ``strategy_id`` + provided-invalid
+    ``account_id`` 조합에서 account_id 422 가드가 strategy-not-found(404)
+    보다 **먼저** 발동함을 검증하기 위한 stub (#1624 ingress invariant)."""
+
+    async def get(self, strategy_id: str) -> Any:
+        return None
+
+
+@pytest.fixture
+def app_client_missing_strategy(treasury: MagicMock, trade_service: _StubTradeService):
+    """#9 전용: strategy 레지스트리가 비어 있는(전략 미존재) authed client."""
+    app = create_app(
+        treasury=treasury,
+        treasury_manager=_StubTreasuryManager(),
+        trade_service=trade_service,
+        strategy_registry=_StubRegistryMissing(),
+        bot_manager=_StubBotManager(),
+        db=_StubDB(),
+        member_service=make_master_member_service(),
+    )
+    return make_authed_client(app)
+
+
+class TestStrategyPerfGuardIndependentOfStrategyExistence:
+    """#9 ``GET /api/strategies/{id}/performance``: account_id 422 가드는
+    strategy 레지스트리/봇 조회 **이전**에 실행되어, strategy 존재 여부와
+    무관하게 동작한다 (#1624 attempt 1 blocking finding 회귀 락).
+
+    핵심 회귀: 존재하지 않는 ``strategy_id`` + provided-invalid
+    ``account_id`` → **422** (404 아님). 가드가 ``registry.get`` 뒤에 있던
+    drift에서는 strategy 404가 422를 가렸다."""
+
+    MISSING_STRATEGY_PATH = "/api/strategies/no-such-strat/performance"
+
+    @pytest.mark.parametrize("value", INVALID_VALUES)
+    def test_missing_strategy_provided_invalid_is_422_not_404(
+        self, app_client_missing_strategy, value: str
+    ) -> None:
+        """존재하지 않는 strategy_id + provided-invalid account_id → 422.
+
+        strategy 404가 account_id 422를 가리면 안 된다 (가드 위치
+        invariant: lookup/SQL/service 호출 이전)."""
+        resp = app_client_missing_strategy.get(
+            self.MISSING_STRATEGY_PATH, params={"account_id": value}
+        )
+        assert resp.status_code == 422, (
+            f"missing strategy + account_id={value!r}: expected 422 "
+            f"(account_id ingress 가드 우선) got {resp.status_code} {resp.text}"
+        )
+        assert resp.headers["content-type"] == "application/problem+json", (
+            f"account_id={value!r} ct={resp.headers.get('content-type')}"
+        )
+        body = resp.json()
+        assert body["type"] == "/errors/validation", body
+        assert body["status"] == 422, body
+        assert "account_id" in body["detail"], body
+        assert "Traceback" not in body["detail"], body
+
+    def test_missing_strategy_omitted_account_id_still_404(
+        self, app_client_missing_strategy
+    ) -> None:
+        """#1218 omitted 보존: 가드는 ``account_id`` 미지정(``None``)을
+        통과시키므로 omitted → 기존 strategy-not-found 404가 그대로
+        반환된다 (가드가 omitted→통과 분기를 깨지 않음)."""
+        resp = app_client_missing_strategy.get(self.MISSING_STRATEGY_PATH)
+        assert resp.status_code == 404, (
+            f"missing strategy + omitted account_id: expected 404 "
+            f"(가드 통과 → strategy 404) got {resp.status_code} {resp.text}"
+        )
+        assert resp.status_code != 422, "omitted account_id leaked 422 (#1218)"
+
+    def test_missing_strategy_valid_absent_account_id_still_404(
+        self, app_client_missing_strategy
+    ) -> None:
+        """valid-pattern but absent(``acc-9999``)는 가드를 통과 → strategy
+        미존재 404 (가드 과적용 0, invalid-format ↔ not-found 분리)."""
+        resp = app_client_missing_strategy.get(
+            self.MISSING_STRATEGY_PATH, params={"account_id": ABSENT_VALID}
+        )
+        assert resp.status_code == 404, (
+            f"missing strategy + account_id={ABSENT_VALID}: expected 404 "
+            f"got {resp.status_code} {resp.text}"
+        )
+        assert resp.status_code != 422, "valid-but-absent leaked 422 (과적용)"
