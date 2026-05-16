@@ -347,6 +347,11 @@ ante trade list [--bot <bot_id>] [--from <날짜>] [--to <날짜>] [--limit N]
 ante trade info <trade_id>         # 거래 상세
 ```
 
+`trade list`의 `--from`/`--to`가 모두 지정되고 시작일(`--from`)이 종료일(`--to`)
+이후이면(inverted date range) DB 접근 이전에 `INVALID_DATE_RANGE` 에러 코드와
+exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다 미지정·동일
+날짜는 정상 처리한다.
+
 ### `ante strategy` — 전략 관리
 
 ```bash
@@ -372,6 +377,12 @@ ante treasury snapshot [--account <account_id>]                        # 최근 
 ante treasury snapshot --from <날짜> --to <날짜> [--account <account_id>]  # 기간별 스냅샷 (대시보드 D-2 차트)
 ante treasury snapshot --date <날짜> [--account <account_id>]          # 특정일 스냅샷
 ```
+
+`treasury snapshot`의 `--from`/`--to`가 모두 지정되고 시작일(`--from`)이
+종료일(`--to`) 이후이면(inverted date range), `--date`/`--from`/`--to` 배타
+검증(`CLI_OPTION_CONFLICT`) 직후·서비스 호출 이전에 `INVALID_DATE_RANGE` 에러
+코드와 exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다
+미지정·동일 날짜는 정상 처리한다.
 
 > 스냅샷 스펙: [treasury.md — 일별 자산 스냅샷](../treasury/treasury.md#일별-자산-스냅샷-daily-asset-snapshot)
 
@@ -436,6 +447,13 @@ ante report performance [--period daily|monthly] [--bot-id <봇ID>] [--start <�
 `--period daily` 전용, `--year`는 `--period monthly` 전용이며 (`--period` 기본값은
 `daily`), period와 맞지 않는 옵션을 함께 지정하면 DB 접근 이전에
 `CLI_OPTION_CONFLICT` 에러 코드와 exit code 1로 거부한다(빈 집계 반환 금지).
+
+추가로 `--period daily`에서 `--start`/`--end`가 모두 지정되고 시작일(`--start`)이
+종료일(`--end`) 이후이면(inverted date range), 위 period-exclusive 검증 직후·DB
+접근 이전에 `INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 집계 반환
+금지). 검증 순서는 period-exclusive(`CLI_OPTION_CONFLICT`)가 먼저이므로
+`--period monthly --start ... --end ...`는 여전히 `CLI_OPTION_CONFLICT`로
+거부되며 `INVALID_DATE_RANGE`에 도달하지 않는다.
 
 ### `ante feed` — 데이터 피드 (DataFeed)
 
@@ -607,6 +625,11 @@ ante instrument import <filepath> [--dry-run] [--db-path <경로>]  # CSV/JSON �
 ```bash
 ante audit list [--member <member_id>] [--action <prefix>] [--from-date <날짜>] [--to-date <날짜>] [--limit N] [--offset N]
 ```
+
+`audit list`의 `--from-date`/`--to-date`가 모두 지정되고 시작 날짜
+(`--from-date`)가 종료 날짜(`--to-date`) 이후이면(inverted date range) DB 접근
+이전에 `INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환
+금지). 한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다.
 
 ### `ante signal` — 외부 시그널 채널
 

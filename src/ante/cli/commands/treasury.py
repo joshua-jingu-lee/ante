@@ -6,7 +6,11 @@ import asyncio
 
 import click
 
-from ante.cli._validators import validate_iso_date, validate_positive_finite_amount
+from ante.cli._validators import (
+    reject_inverted_date_range,
+    validate_iso_date,
+    validate_positive_finite_amount,
+)
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
@@ -209,6 +213,17 @@ def snapshot(
             code="CLI_OPTION_CONFLICT",
         )
         raise SystemExit(1)
+
+    # inverted date range(시작일 > 종료일) 거부: CLI_OPTION_CONFLICT 검증
+    # 직후, _run_snapshot/서비스 호출 이전에 차단한다 (backtest.py:72-77
+    # 동형, INVALID_DATE_RANGE + exit 1).
+    reject_inverted_date_range(
+        from_date,
+        to_date,
+        fmt,
+        from_label="시작일",
+        to_label="종료일",
+    )
 
     async def _run_snapshot() -> dict | list[dict] | None:
         t, db = await _create_treasury(account_id)
