@@ -23,6 +23,11 @@ import click
 if TYPE_CHECKING:
     from ante.cli.formatter import OutputFormatter
 
+# `require_account_id`가 raise하는 `InvalidAccountIdError`에 대응하는 에러 코드.
+# #1633 선결정으로 `InvalidAccountIdError.code == "VALIDATION_ERROR"`가 SSOT로
+# 고정됐다(`src/ante/account/errors.py:68-77`). 본 모듈은 그 코드를 재사용만
+# 하며 신 코드를 도입하지 않는다.
+
 # Web API helper(`src/ante/web/utils/date_params.py:56`)와 동일한 strict
 # ``YYYY-MM-DD`` (zero-padded 10자) 정규식. ``datetime.strptime`` 단독은
 # ``2026-5-1``이나 ``2026-05-1`` 같은 non-zero-padded 입력을 silently 통과
@@ -196,7 +201,65 @@ def reject_inverted_date_range(
         raise SystemExit(1)
 
 
+def reject_invalid_account_id(
+    account_id: str | None,
+    fmt: OutputFormatter,
+    *,
+    context: str = "",
+) -> str:
+    """공유 helper: provided invalid ``account_id``를 lookup/filter 이전에 거부.
+
+    오라클 #1623 finding(Split A — #1634): read-only account-scoped CLI
+    (``account info``/``account credentials``/``bot list --account``)가 invalid
+    ``account_id``(``default``/``""``/패턴 위반)를 ``AccountService.get`` lookup
+    이나 SQL filter 이전에 거부하지 않아, not-found 메시지로 오분류되거나
+    exit 0 + empty success로 처리되던 ingress drift가 있었다. 본 helper가 그
+    drift를 닫는다.
+
+    내부적으로 :func:`ante.account.scoping.require_account_id`(account-id 계약
+    SSOT)를 호출한다. ``require_account_id``가 raise하는
+    :class:`ante.account.errors.InvalidAccountIdError`는 non-Click
+    ``AccountError``이며, ``AuthenticatedGroup.main``
+    (``src/ante/cli/middleware.py:568-596``)은 ``click.UsageError``/``Abort``만
+    envelope 변환한다. 따라서 본 helper가 그 예외를 **명시적으로** catch해
+    ``fmt.error(str(e), code="VALIDATION_ERROR")`` + ``SystemExit(1)``로
+    변환한다(미catch 시 traceback/uncaught). 에러 코드는 #1633 SSOT
+    (``InvalidAccountIdError.code == "VALIDATION_ERROR"``)를 ``e.code``로 그대로
+    재사용하며 신 코드를 도입하지 않는다.
+
+    **omitted-vs-provided 계약**: ``bot list --account``는 ``--account`` 미지정
+    (``account_id is None``) 시 전체 봇을 반환하는 동작을 보존해야 한다(omitted
+    보존, #1624 동형). 그 호출 표면은 ``account_id is not None``일 때만 본
+    helper를 호출해 provided 값만 검증한다. 본 helper 자체는 ``None``도
+    invalid로 거부하므로(``require_account_id`` 계약), omitted 분기를 보존할
+    책임은 호출 표면에 있다. positional required arg(``account info``/
+    ``account credentials``)는 omitted가 없어 전 입력을 본 helper로 검증한다.
+
+    Args:
+        account_id: 검증할 account_id (또는 ``None``).
+        fmt: ``get_formatter(ctx)``로 얻은 출력 포맷터. text/json 모드에 따라
+            구조화된 에러를 출력한다.
+        context: ``require_account_id``에 전달할 호출 위치 식별자
+            (예: ``"cli.account.info"``).
+
+    Returns:
+        검증된 account_id. 호출 측 type narrow를 위해 ``str``로 반환된다.
+
+    Raises:
+        SystemExit: invalid account_id일 때 exit code 1로 종료.
+    """
+    from ante.account.errors import InvalidAccountIdError
+    from ante.account.scoping import require_account_id
+
+    try:
+        return require_account_id(account_id, context=context)
+    except InvalidAccountIdError as e:
+        fmt.error(str(e), code=e.code)
+        raise SystemExit(1) from e
+
+
 __all__ = [
+    "reject_invalid_account_id",
     "reject_inverted_date_range",
     "validate_iso_date",
     "validate_positive_finite_amount",
