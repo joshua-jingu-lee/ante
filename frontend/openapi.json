@@ -8671,17 +8671,14 @@
             "type": "string"
           },
           "backtest_period": {
-            "default": "",
             "title": "Backtest Period",
             "type": "string"
           },
           "total_return_pct": {
-            "default": 0.0,
             "title": "Total Return Pct",
             "type": "number"
           },
           "total_trades": {
-            "default": 0,
             "minimum": 0,
             "title": "Total Trades",
             "type": "integer"
@@ -8722,12 +8719,10 @@
             "title": "Win Rate"
           },
           "summary": {
-            "default": "",
             "title": "Summary",
             "type": "string"
           },
           "rationale": {
-            "default": "",
             "title": "Rationale",
             "type": "string"
           },
@@ -8762,7 +8757,12 @@
         "required": [
           "strategy_name",
           "strategy_version",
-          "strategy_path"
+          "strategy_path",
+          "backtest_period",
+          "total_return_pct",
+          "total_trades",
+          "summary",
+          "rationale"
         ],
         "title": "ReportSubmitRequest",
         "type": "object"
