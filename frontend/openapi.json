@@ -8730,18 +8730,6 @@
             "default": "{}",
             "title": "Detail Json",
             "type": "string"
-          },
-          "sections": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sections"
           }
         },
         "required": [

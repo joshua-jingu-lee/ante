@@ -241,3 +241,96 @@ class TestExtraForbid:
             headers=_AUTH_HEADERS,
         )
         assert res.status_code == 422
+
+
+# ── #1632: sections 미지원 필드 (accept-and-drop → 422 거부) ────────────
+
+
+class TestSectionsRejected:
+    """``sections``는 미문서·미영속 accept-and-drop 버그였다 (#1632).
+
+    사용자 정책 판정(2026-05-17): ``sections``는 YAGNI → 1급 영속 feature를
+    구현하지 않고 미지원 필드로 확정해 422로 거부한다 (option 2b). 스키마에서
+    ``sections`` 선언을 제거하면 기존 ``extra='forbid'``가 ``sections`` 포함
+    payload를 자동 ``extra_forbidden`` 422로 거부한다. accept-and-drop(201 후
+    silent drop) 동작은 금지된다.
+
+    SSOT: ``docs/specs/report-store/report-store.md``(``sections`` 무언급),
+    ``src/ante/web/schemas.py::ReportSubmitRequest``.
+    """
+
+    # oracle host probe(report_sections_dropped)가 사용하는 sentinel marker.
+    _SENTINEL = "oracle_payload_sections_marker"
+
+    def test_sections_payload_rejected(self, client: TestClient) -> None:
+        """``sections`` 포함 payload → 422 (201 아님). accept-and-drop 금지."""
+        res = client.post(
+            "/api/reports",
+            json=_base_payload(
+                sections={
+                    self._SENTINEL: {
+                        "rationale": "secret-rationale-text",
+                        "evidence": ["secret-evidence-item"],
+                    }
+                }
+            ),
+            headers=_AUTH_HEADERS,
+        )
+        assert res.status_code == 422, (
+            f"sections 포함 payload는 422로 거부되어야 함 "
+            f"(got {res.status_code}): {res.text}"
+        )
+
+    def test_sections_rejection_does_not_echo_input(self, client: TestClient) -> None:
+        """거부 응답 detail에 sections sentinel/내용이 반사되지 않는다.
+
+        #1629 L1(``reports.py:194`` ``include_input=False``)이 작동해
+        ``extra_forbidden`` 에러의 ``input`` (제출한 sections rationale/
+        evidence) 이 echo되지 않음을 회귀 검증한다.
+        """
+        res = client.post(
+            "/api/reports",
+            json=_base_payload(
+                sections={
+                    self._SENTINEL: {
+                        "rationale": "secret-rationale-text",
+                        "evidence": ["secret-evidence-item"],
+                    }
+                }
+            ),
+            headers=_AUTH_HEADERS,
+        )
+        assert res.status_code == 422
+        body = res.text
+        assert self._SENTINEL not in body, (
+            f"거부 응답에 sections sentinel이 반사됨: {body}"
+        )
+        assert "secret-rationale-text" not in body, (
+            f"거부 응답에 sections rationale이 반사됨: {body}"
+        )
+        assert "secret-evidence-item" not in body, (
+            f"거부 응답에 sections evidence가 반사됨: {body}"
+        )
+
+    def test_sections_payload_not_persisted(self, client: TestClient) -> None:
+        """``sections`` 포함 payload는 거부되어 report가 생성되지 않는다."""
+        res = client.post(
+            "/api/reports",
+            json=_base_payload(sections={self._SENTINEL: {"x": 1}}),
+            headers=_AUTH_HEADERS,
+        )
+        assert res.status_code == 422
+        # 거부되었으므로 report_id 없음 → detail 조회 자체가 불가.
+        assert "report_id" not in res.text
+
+    def test_payload_without_sections_still_accepted(self, client: TestClient) -> None:
+        """``sections`` 없는 정상 payload는 회귀 없이 201."""
+        res = client.post(
+            "/api/reports",
+            json=_base_payload(),
+            headers=_AUTH_HEADERS,
+        )
+        assert res.status_code == 201, (
+            f"sections 없는 정상 payload는 201이어야 함 "
+            f"(got {res.status_code}): {res.text}"
+        )

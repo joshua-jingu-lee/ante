@@ -749,7 +749,6 @@ class ReportSubmitRequest(BaseModel):
     risks: str = ""
     recommendations: str = ""
     detail_json: str = "{}"
-    sections: dict[str, Any] | None = None
 
 
 class ReportSubmitResponse(BaseModel):
