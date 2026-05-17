@@ -99,7 +99,11 @@ def _validate_scopes_vocabulary(value: list[str]) -> list[str]:
     """
     for scope in value:
         if scope not in SCOPE_VOCABULARY:
-            msg = f"unsupported scope: {scope!r}"
+            # 거부된 raw scope 값을 msg 에 interpolation 하지 않는다 (보안
+            # invariant #1629 L1 반사 경로 2 — include_input=False 후에도
+            # custom validator msg 가 거부값을 반사함). 실패 위치는 ``loc``
+            # 가 제공. SSOT: src/ante/member/scopes.py.
+            msg = "scopes에 SCOPE_VOCABULARY 미등록 값이 포함되어 있습니다"
             raise ValueError(msg)
     return value
 
@@ -475,7 +479,12 @@ async def create_member(
     try:
         body = MemberCreateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
+        # / accounts.py:1307 선례와 동일 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 4. service 호출.
     try:
@@ -911,7 +920,12 @@ async def change_password(
     try:
         body = PasswordChangeRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1 probe 표면 —
+        # password-adjacent secret 노출 차단; bots.py:433 선례 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 4. credential check (svc.change_password 내부의 old-password 비교).
     try:
@@ -1037,7 +1051,12 @@ async def update_scopes(
     try:
         body = ScopesUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
+        # / accounts.py:1307 선례와 동일 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 4. service 호출.
     try:

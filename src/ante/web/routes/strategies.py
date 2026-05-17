@@ -218,7 +218,12 @@ async def validate_strategy(
     try:
         body = StrategyValidateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
+        # / accounts.py:1307 선례와 동일 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     filepath = body.path
     if not filepath:
@@ -470,7 +475,12 @@ async def update_strategy_status(
     try:
         body = StatusUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
+        # / accounts.py:1307 선례와 동일 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 3. enum 변환 — Pydantic Literal value 가 ``StrategyStatus`` enum value
     #    와 1:1 매칭이라 항상 성공한다 (#1441 — 기존 try/except ValueError

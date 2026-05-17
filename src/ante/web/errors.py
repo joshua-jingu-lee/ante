@@ -28,6 +28,28 @@ ERROR_CATALOG: dict[int, tuple[str, str]] = {
 
 PROBLEM_JSON = "application/problem+json"
 
+# 422 validation 응답에서 거부된 입력 값을 노출하면 안 되는 top-level error 키.
+# pydantic ``ValidationError.errors()`` 는 ``input``(거부된 원본 값) 과
+# ``ctx``(``ValueError`` 객체 등 비-JSON repr) 를 포함한다.
+_SANITIZED_ERROR_KEYS = ("input", "ctx")
+
+
+def _sanitize_pydantic_errors(errors: list[dict]) -> list[dict]:
+    """글로벌 ``RequestValidationError`` 의 error dict 에서 입력 값 반사를 제거.
+
+    ``fastapi.exceptions.RequestValidationError.errors()`` 는 FastAPI 0.135.1
+    에서 ``include_input`` / ``include_context`` kwargs 를 지원하지 않으므로
+    (pydantic ``ValidationError.errors()`` 와 시그니처가 다름) kwargs 를 쓰면
+    핸들러가 ``TypeError`` 를 던져 422 대신 500 이 반환된다. 따라서 글로벌
+    핸들러는 ``errors()`` 를 호출한 뒤 사후적으로 ``input``/``ctx`` 키만
+    제거하고 ``loc``/``type``/``msg``/``url`` 은 보존한다 (보안 invariant
+    #1629 L1: 거부된 입력 값/ctx 미반사; ``loc`` 키 정규화는 #1643).
+    """
+    return [
+        {k: v for k, v in error.items() if k not in _SANITIZED_ERROR_KEYS}
+        for error in errors
+    ]
+
 
 def _build_error(status: int, detail: str, instance: str = "") -> ErrorResponse:
     """상태 코드에 맞는 RFC 7807 에러 응답 생성."""
@@ -65,7 +87,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         error = _build_error(
             status=422,
-            detail=str(exc.errors()),
+            detail=str(_sanitize_pydantic_errors(list(exc.errors()))),
             instance=request.url.path,
         )
         return JSONResponse(
