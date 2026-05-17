@@ -411,6 +411,28 @@ ante broker reconcile [--account <account_id>] [--fix]  # 시스템↔증권사 
 `data`/`feed` 계열 커맨드로 다룬다. `broker order`와 `broker stream prices`는
 일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙 없이는 제공하지 않는다.
 
+> `broker health`/`broker price <symbol>`는 본 문서에 기재되어 있으나
+> `src/ante/cli/commands/broker.py`에는 `status`/`balance`/`positions`/`reconcile`
+> 만 등록되어 있다(spec-only drift). 처리 결정은
+> [account-id-contract.md — account-scoped CLI inventory 결정표](../account/14-account-id-contract.md#결정표)
+> 참조(문서수정 후속).
+
+### account-scoped `account_id` 입력 표면 — 14-account-id-contract 참조
+
+account-scoped CLI 명령의 invalid `account_id`( `None`/빈 문자열/`default`/
+패턴 위반 ) 거부 **에러코드 SSOT**(`InvalidAccountIdError.code =
+"VALIDATION_ERROR"` 재사용 고정)와, 6개 CLI command 파일에서 `account_id`를
+입력받는 모든 Click 표면(positional `@click.argument("account_id")` +
+`--account`/`--account-id` option)의 **전수 inventory·#1623 split 분류**는
+다음 단일 SSOT가 보유한다(표 본체는 14-account-id-contract.md에만 둔다):
+
+> [docs/specs/account/14-account-id-contract.md — invalid account_id 에러코드 (SSOT)](../account/14-account-id-contract.md#invalid-account_id-에러코드-ssot--16231633)
+> / [account-scoped CLI inventory 결정표](../account/14-account-id-contract.md#account-scoped-cli-inventory-결정표-ssot--16231633)
+
+#1623 split A(#1634)/B(#1635)/C(#1636) 및 follow-up은 위 결정표를 참조하며,
+본 03-commands 표의 account-scoped 행과 충돌하면 14-account-id-contract.md를
+우선한다.
+
 ### `ante data` — 데이터 관리
 
 모든 data 커맨드는 `@require_auth`와 `@require_scope("data:read")` 데코레이터 적용.

@@ -87,6 +87,139 @@ violations:
 | ``account_id = account_id or ""`` | ``account_id = require_account_id(account_id, context="...")`` |
 | 빈 문자열을 wildcard로 해석 | wildcard 의미가 필요하면 별도 sentinel 도입 (1.0 범위 외) |
 
+## invalid account_id 에러코드 (SSOT — #1623/#1633)
+
+이 절은 account-scoped CLI / IPC / oracle 표면에서 invalid
+``account_id`` ( ``None`` / 빈 문자열 / ``"default"`` / 패턴 위반 )를
+거부할 때 노출되는 **안정 에러코드의 단일 출처(SSOT)** 다. #1623
+split A/B/C ( #1634 / #1635 / #1636 ) 및 후속 follow-up은 이 절을
+참조하며, 임의의 신규 코드를 도입하지 않는다.
+
+### 결정 — `VALIDATION_ERROR` 재사용 고정
+
+invalid ``account_id``는 다음 세 표면 모두에서 **항상**
+``InvalidAccountIdError.code = "VALIDATION_ERROR"`` 코드로 노출된다.
+
+| 표면 | 노출 경로 | 코드 |
+|---|---|---|
+| account-scoped CLI JSON error | ``require_account_id`` → :class:`InvalidAccountIdError` → CLI JSON error payload | ``VALIDATION_ERROR`` |
+| IPC broker dispatch | ``broker.status`` / ``broker.balance`` / ``broker.positions`` / ``broker.reconcile`` handler 의 ``require_account_id`` → :class:`InvalidAccountIdError` → IPC server ``getattr(e, "code", "EXECUTION_ERROR")`` | ``VALIDATION_ERROR`` |
+| oracle host probe | ``ANTE_ORACLE_HOST_PROBE_MODE=cli_account_id_invalid_contract`` 가 기대하는 nonzero clean invalid account_id 응답 | ``VALIDATION_ERROR`` |
+
+근거 (코드 현실과 정합):
+
+- ``src/ante/account/errors.py`` 의 ``InvalidAccountIdError.code =
+  "VALIDATION_ERROR"`` 클래스 속성. docstring 은 ``require_account_id``
+  가 raise 하는 모든 IPC 경로( ``bot.create`` ,
+  ``treasury.allocate`` / ``deallocate`` , ``broker.reconcile`` 등)가
+  IPC server 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 폴백으로
+  자동 ``VALIDATION_ERROR`` 매핑됨을 명시한다.
+- IPC 에러코드 계약 가드 ``tests/unit/test_ipc_error_code_mapping.py``
+  가 ``InvalidAccountIdError.code == "VALIDATION_ERROR"`` 및 IPC
+  응답 ``error.code == "VALIDATION_ERROR"`` 를 고정한다.
+- 형식 위반 메시지 자체는 위 [`### 메시지 형식 보존`](#메시지-형식-보존)
+  계약을 따른다. 본 절은 **에러코드**의 SSOT이고, 메시지 문자열은
+  별도 계약이다(둘은 충돌하지 않는다).
+
+### 신 도메인코드 도입 예외 절차
+
+invalid ``account_id`` 에 ``VALIDATION_ERROR`` 재사용이 불가능하다는
+근거(예: IPC 계약 충돌)가 확인되는 경우에만 신 도메인코드를 도입한다.
+그 경우 도입을 결정하는 **같은 이슈의 스펙**에 다음을 먼저 남긴다:
+
+1. 재사용 불가 사유 (구체적 충돌 지점),
+2. IPC 호환성 영향 (어떤 IPC handler 응답 코드가 바뀌는지),
+3. ``tests/unit/test_ipc_error_code_mapping.py`` 등 갱신 대상 테스트 범위.
+
+#1633 은 재사용 고정 결정이므로 본 절차에 해당하지 않는다(신코드 0).
+
+## account-scoped CLI inventory 결정표 (SSOT — #1623/#1633)
+
+이 표는 6개 CLI command 파일( ``account`` / ``bot`` / ``broker`` /
+``rule`` / ``strategy`` / ``treasury`` )에서 ``account_id`` 를 입력받는
+**모든 Click 입력 표면** ( ``@click.argument("account_id")`` positional
++ account 관련 ``@click.option`` )의 전수 inventory이자 #1623 split
+분류 SSOT다. 표 본체는 본 문서에 고정하며,
+[`docs/specs/cli/03-commands.md`](../cli/03-commands.md#account-scoped-account_id-입력-표면--14-account-id-contract-참조)
+는 본 표를 참조한다.
+
+### enumeration 방법론
+
+- **포함 기준**: Click decorator 기준 — ``@click.argument("account_id")``
+  ( positional; 예 ``ante account info default`` 가 #1623 실제 실패
+  표면) + account 관련 ``@click.option`` ( ``--account`` /
+  ``--account-id`` ). flag-only 한정 금지(positional 누락 0). raw
+  ``rg`` line count 는 SQL/출력/payload 비표면 매치를 다수 포함하므로
+  검증 기준으로 쓰지 않는다 — **unique CLI command path** 목록으로
+  산출한다.
+- **diff 분류**: (i) Click decorator 산출 code 목록 ↔ (ii)
+  03-commands.md account-scoped command 목록을 비교해
+  ``match`` / ``spec-only`` (코드 미등록) / ``code-only`` (spec
+  미기재) 로 폐쇄한다.
+- **row-count 동치**: 결정표 row 수 == enumerate된 unique command
+  path 수( ``match`` + ``code-only`` ) + ``spec-only`` 별도 행. 현
+  코드 표면( ``treasury snapshot`` , ``strategy performance`` 포함)
+  누락 0.
+
+### 분류 bucket
+
+| bucket | 의미 | #1623 매핑 |
+|---|---|---|
+| **A** | read-only lookup/filter ingress | #1634 |
+| **B** | treasury·rule local construction lifecycle ( ``_create_treasury`` / ``_create_rule_engine`` 경유) | #1635 |
+| **C** | broker IPC envelope ( ``broker.status/balance/positions/reconcile`` ) | #1636 |
+| **D** | account-lifecycle / cold-path / AccountService mutation — #1634/35/36 범위 아님 | follow-up / 구현대상아님 |
+| **E** | non-broker mutating IPC ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw, ``bot.create`` ) — #1634/35/36 범위 아님 | follow-up |
+
+**일반 규칙(구조적 폐쇄)**: enumerate된 **모든** Click ``account_id``
+command 표면은 본 표에 **명시 row 1개씩** 필수다(rule-only / implicit
+금지). A/B/C 는 **#1623 probe 실패 집합과 동형인 표면만** 배정하며,
+그 외(D 계열·E 계열·2-bucket 걸침·진정 애매)는 명시
+follow-up / scope-extension / 구현대상아님 / 문서수정 결정으로 닫는다
+(임의 배정·누락 0). ``spec-only`` / ``code-only`` 행은 각각
+``구현대상아님`` / ``문서수정`` / ``후속`` 중 하나로 확정한다.
+
+### 결정표
+
+| CLI command path | account_id 입력형태 | code/spec 상태 | 진입 패턴 | #1623 split 분류 (결정) |
+|---|---|---|---|---|
+| `ante account info <account_id>` | positional arg | match | read-only `svc.get` lookup ingress | **A — #1634** (#1623 실제 실패 표면 `account_info_default`/`account_info_bad_pattern`) |
+| `ante account credentials <account_id>` | positional arg | match | read-only `svc.get` 마스킹 lookup ingress | **A — #1634** (`account info` 와 동형 read-only ingress) |
+| `ante bot list --account <account_id>` | option | match | read-only DB filter ingress | **A — #1634** (#1623 `bot_list_default`) |
+| `ante treasury status --account <account_id>` | option | match | local construction lifecycle (`_create_treasury` → `require_account_id`) | **B — #1635** (#1623 `treasury_status_default`) |
+| `ante rule list --account <account_id>` | option | match | local construction lifecycle (`_create_rule_engine` → `RuleEngine.__init__` `require_account_id`) | **B — #1635** (#1623 `rule_list_default`; DB lifecycle 누수 포함) |
+| `ante rule info <rule_id> --account <account_id>` | option | match | local construction lifecycle (`_create_rule_engine`) | **B — #1635** (`rule list` 와 동형 construction; #1635 본문 `rule info` 포함) |
+| `ante broker status --account <account_id>` | option | match | broker IPC dispatch (`broker.status`, handler `require_account_id`) | **C — #1636** |
+| `ante broker balance --account <account_id>` | option | match | broker IPC dispatch (`broker.balance`) | **C — #1636** (#1623 `broker_balance_default`) |
+| `ante broker positions --account <account_id>` | option | match | broker IPC dispatch (`broker.positions`) | **C — #1636** |
+| `ante broker reconcile --account <account_id>` | option | match | broker IPC dispatch (`broker.reconcile`) | **C — #1636** |
+| `ante account suspend <account_id>` | positional arg | match | AccountService mutation / lifecycle (runtime IPC) | **D — follow-up 후보** (account-lifecycle invalid account_id 점검; #1623 probe 집합 아님 — #1634/35/36 임의 포함 금지) |
+| `ante account activate <account_id>` | positional arg | match | AccountService mutation / lifecycle (runtime IPC) | **D — follow-up 후보** (동 lifecycle/mutation) |
+| `ante account delete <account_id>` | positional arg | match | AccountService mutation / lifecycle (cold-path) | **D — follow-up 후보** (동 lifecycle/mutation) |
+| `ante account set-credentials <account_id>` | positional arg | match | AccountService mutation (cold-path) | **D — follow-up 후보** (동 lifecycle/mutation) |
+| `ante account repair-timezone <account_id> <new_timezone>` | positional arg | match | AccountService mutation (cold-path) | **D — follow-up 후보** (동 lifecycle/mutation) |
+| `ante account create --account-id <account_id>` | option | match | 신규 Account 생성 (cold-path) | **D — 구현대상아님** (`validate_new_account_id` cold-path 가 이미 검증 — 별도 계약, #1623 drift 아님) |
+| `ante treasury allocate <bot_id> <amount> --account <account_id>` | option | match | non-broker mutating IPC (`treasury.allocate` → `_handle_treasury_allocate` → `treasury_manager.get` **raw**, `require_account_id` 미경유) | **E — follow-up 후보** (#1635 construction-lifecycle 범위 아님; #1623 probe 집합 아님) |
+| `ante treasury deallocate <bot_id> <amount> --account <account_id>` | option | match | non-broker mutating IPC (`treasury.deallocate` → `_handle_treasury_deallocate` → `treasury_manager.get` **raw**) | **E — follow-up 후보** (동 mutating IPC) |
+| `ante bot create --account <account_id>` | option | match | mutating IPC (`bot.create` handler `require_account_id`; 단 `--account` 생략 시 single-active resolver) | **E — follow-up 후보** (#1623 probe 집합 아님; 구현 시 경로 확인 후 동 결정) |
+| `ante treasury snapshot --account <account_id>` | option | match | read-only persisted snapshot 조회 (`_create_treasury` → `require_account_id`) | **E — follow-up 후보** (#1623 probe 집합 아님; `treasury status` 와 helper 공유하나 #1635 본문은 `treasury status`로 한정 — 임의 #1635 확장 금지, 동 follow-up) |
+| `ante strategy performance <name> --account-id <account_id>` | option | match | read-only 성과 DB 집계 (#1218 edge resolver 제거, `--account-id` required) | **E — follow-up 후보** (#1623 probe 집합 아님; #1634 read-only ingress 와 패턴 유사하나 probe 실패 집합 외 — 임의 #1634 포함 금지, 동 follow-up) |
+| `ante broker health [--account <account_id>]` | option | **spec-only** (03-commands.md:114·400 에 기재; `broker.py` 미등록 — status/balance/positions/reconcile 만 존재) | (코드 미존재) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
+| `ante broker price <symbol> [--account <account_id>]` | option | **spec-only** (03-commands.md:117·403 에 기재; `broker.py` 미등록) | (코드 미존재) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
+
+> row-count 동치 검증: 위 표 결정 row 23개 = code 표면 21개( ``match`` ;
+> ``code-only`` 0) + ``spec-only`` 2개( ``broker health`` /
+> ``broker price`` ). enumerate된 unique CLI command path 수 21개와
+> 동치(누락 0). ``treasury snapshot`` · ``strategy performance`` 포함.
+
+> D/E = follow-up 항목( ``account suspend/activate/delete/set-credentials/repair-timezone`` ,
+> ``treasury allocate/deallocate`` , ``bot create`` ,
+> ``treasury snapshot`` , ``strategy performance`` )은 본 이슈
+> #1633 의 통합 follow-up 후보로 묶이며 사람이 등록한다(자동 생성
+> 금지). ``account create`` ( ``validate_new_account_id`` 가 이미
+> 검증)와 ``broker health`` / ``broker price`` ( spec-only, 코드
+> 표면 없음)는 follow-up 대상이 아니다.
+
 ## Helper API
 
 소스: ``src/ante/account/scoping.py``.
