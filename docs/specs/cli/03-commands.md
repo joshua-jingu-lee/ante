@@ -394,9 +394,14 @@ ante rule info <rule_id> --account <account_id>           # 룰 상세
 ```
 
 `rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
-의 `require_account_id` 를 경유하므로 `--account` 가 필수다(생략·invalid
-`account_id` 는 `VALIDATION_ERROR` 로 거부; 아래 [account-scoped 표면
-참조](#account-scoped-account_id-입력-표면--14-account-id-contract-참조)).
+의 `require_account_id` 를 경유하므로 `--account` 가 필수다. invalid
+`account_id` ( `None`/빈 문자열/`default`/패턴 위반 )의 **목표
+에러코드는 `VALIDATION_ERROR`** 이나(normative target), 현재 그
+정렬(이 두 표면이 지금 `VALIDATION_ERROR` 를 산출하는지) 확정·교정은
+**#1635** 책임이다(현재 CLI 콜백 `except` 가 `InvalidAccountIdError`
+미catch + `AuthenticatedGroup.main` 이 non-Click `AccountError`
+미변환 → 미정렬 가능). 목표 코드·정적 등재 상태·담당 split 의 SSOT
+는 아래 [account-scoped 표면 참조](#account-scoped-account_id-입력-표면--14-account-id-contract-참조).
 
 ### `ante broker` — 증권사 연동
 
@@ -431,7 +436,7 @@ account-scoped CLI 명령의 invalid `account_id`( `None`/빈 문자열/`default
 `--account`/`--account-id` option)의 **전수 inventory·#1623 split 분류**는
 다음 단일 SSOT가 보유한다(표 본체는 14-account-id-contract.md에만 둔다):
 
-> [docs/specs/account/14-account-id-contract.md — invalid account_id 에러코드 (SSOT)](../account/14-account-id-contract.md#invalid-account_id-에러코드-ssot--16231633)
+> [docs/specs/account/14-account-id-contract.md — invalid account_id 에러코드 SSOT (목표)](../account/14-account-id-contract.md#invalid-account_id-에러코드-ssot-목표--16231633)
 > / [account-scoped CLI inventory 결정표](../account/14-account-id-contract.md#account-scoped-cli-inventory-결정표-ssot--16231633)
 
 #1623 split A(#1634)/B(#1635)/C(#1636) 및 follow-up은 위 결정표를 참조하며,
