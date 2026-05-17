@@ -2882,7 +2882,7 @@
           "strategies"
         ],
         "summary": "Get Strategy Performance",
-        "description": "전략 성과 지표 조회. 인증된 master/human 또는 ``strategy:read`` scope 를\n보유한 agent 만 호출 가능 (#1407).\n\n제공된 runtime-invalid ``account_id`` (``\"\"``/``\"default\"``/패턴 위반)는\naccount 해석/lookup **이전**에 422로 거부한다 (#1624). ``account_id``\n미지정(``None``)은 가드를 통과해 봇 추출 fallback → (추출 불가 시) 400으로\n이어진다 — #1218이 정렬한 omitted query 정책을 보존한다. valid-pattern\nbut absent(``acc-9999``)는 가드를 통과해 기존 단건 존재 검증 404로\n이어진다 (invalid-format ↔ genuine not-found 분리).",
+        "description": "전략 성과 지표 조회. 인증된 master/human 또는 ``strategy:read`` scope 를\n보유한 agent 만 호출 가능 (#1407).\n\n제공된 runtime-invalid ``account_id`` (``\"\"``/``\"default\"``/패턴 위반)는\naccount 해석/lookup **이전**에 422로 거부한다 (#1624). ``account_id``\n미지정(``None``)은 가드를 통과해 봇 추출 fallback → (추출 불가 시) 400으로\n이어진다 — #1218이 정렬한 omitted query 정책을 보존한다. valid-pattern\nbut absent(``acc-9999``)는 가드를 통과해 기존 단건 존재 검증 404로\n이어진다 (invalid-format ↔ genuine not-found 분리).\n\n가드는 함수 진입 직후, strategy 레지스트리/봇 조회 **이전**에 실행한다.\n그래야 존재하지 않는 ``strategy_id`` + provided-invalid ``account_id``\n조합에서도 account_id 422 계약이 strategy 존재 여부에 종속되지 않는다\n(#1624 ingress invariant).",
         "operationId": "get_strategy_performance_api_strategies__strategy_id__performance_get",
         "parameters": [
           {
@@ -6669,21 +6669,6 @@
             "title": "Scopes",
             "default": []
           },
-          "token_hash": {
-            "type": "string",
-            "title": "Token Hash",
-            "default": ""
-          },
-          "password_hash": {
-            "type": "string",
-            "title": "Password Hash",
-            "default": ""
-          },
-          "recovery_key_hash": {
-            "type": "string",
-            "title": "Recovery Key Hash",
-            "default": ""
-          },
           "created_at": {
             "type": "string",
             "title": "Created At",
@@ -6715,7 +6700,6 @@
             "default": ""
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "member_id",
@@ -6723,7 +6707,7 @@
           "role"
         ],
         "title": "MemberInfo",
-        "description": "멤버 정보."
+        "description": "멤버 정보 (공개 응답 노출 계약 — `docs/specs/member/03-member-model.md`).\n\n`token_hash`/`password_hash`/`recovery_key_hash`는 credential verifier\nmaterial 이므로 응답 schema·runtime body 어디에도 노출하지 않는다 (#1627)."
       },
       "MemberListResponse": {
         "properties": {

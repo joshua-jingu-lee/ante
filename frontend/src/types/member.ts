@@ -67,7 +67,6 @@ export interface MemberView {
 export interface MemberDetailView extends MemberView {
   scopes: string[]
   created_by?: string
-  token_prefix?: string
   suspended_at?: string
 }
 

@@ -127,14 +127,7 @@ export default function AgentDetail() {
           <h3 className="text-[15px] font-semibold">토큰 관리</h3>
         </div>
         <div className="flex items-center gap-4 mt-3">
-          <div className="flex-1">
-            {member.token_prefix && (
-              <div className="flex justify-between py-2.5 border-b border-border text-[13px]">
-                <span className="text-text-muted">토큰 접두어</span>
-                <span className="font-mono">{member.token_prefix}****</span>
-              </div>
-            )}
-          </div>
+          <div className="flex-1" />
           <button
             onClick={handleRotateToken}
             disabled={member.status === 'revoked'}

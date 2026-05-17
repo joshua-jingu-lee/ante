@@ -873,7 +873,11 @@ class FeedStatusResponse(BaseModel):
 
 
 class MemberInfo(BaseModel):
-    """멤버 정보."""
+    """멤버 정보 (공개 응답 노출 계약 — `docs/specs/member/03-member-model.md`).
+
+    `token_hash`/`password_hash`/`recovery_key_hash`는 credential verifier
+    material 이므로 응답 schema·runtime body 어디에도 노출하지 않는다 (#1627).
+    """
 
     member_id: str
     type: str
@@ -883,9 +887,6 @@ class MemberInfo(BaseModel):
     emoji: str = ""
     status: str = "active"
     scopes: list[str] = []
-    token_hash: str = ""
-    password_hash: str = ""
-    recovery_key_hash: str = ""
     created_at: str = ""
     created_by: str = ""
     last_active_at: str = ""
@@ -893,8 +894,10 @@ class MemberInfo(BaseModel):
     revoked_at: str = ""
     token_expires_at: str = ""
 
-    # Member dataclass 변환 시 추가 필드 허용
-    model_config = ConfigDict(extra="allow")
+    # Member dataclass 변환 시 임의 extra 필드(hash 포함)는 validation
+    # error 없이 받되 **출력에서 drop** 한다. `extra="allow"` 는 extra 키를
+    # 응답으로 그대로 echo 하므로 credential hash 누출 트랩이 된다 (#1627).
+    model_config = ConfigDict(extra="ignore")
 
 
 class MemberListResponse(BaseModel):

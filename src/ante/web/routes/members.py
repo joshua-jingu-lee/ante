@@ -33,6 +33,38 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# 공개 API 응답 노출 계약 (docs/specs/member/03-member-model.md). credential
+# verifier material(`token_hash`/`password_hash`/`recovery_key_hash`)은 어떤
+# member 응답에도 포함하지 않는다. `MemberInfo`(extra="ignore")와 더불어
+# defense-in-depth 의 route 계층 allowlist (#1627).
+_PUBLIC_MEMBER_FIELDS: tuple[str, ...] = (
+    "member_id",
+    "type",
+    "role",
+    "org",
+    "name",
+    "emoji",
+    "status",
+    "scopes",
+    "created_at",
+    "created_by",
+    "last_active_at",
+    "suspended_at",
+    "revoked_at",
+    "token_expires_at",
+)
+
+
+def _public_member(member: Any) -> dict[str, Any]:
+    """Member dataclass 를 공개 응답 노출 계약 필드만 담은 dict 로 변환한다.
+
+    `token_hash`/`password_hash`/`recovery_key_hash` 등 노출 계약에 없는
+    필드는 절대 포함하지 않는다(스키마/config 회귀 시에도 누출 불가).
+    """
+    raw = asdict(member)
+    return {key: raw[key] for key in _PUBLIC_MEMBER_FIELDS if key in raw}
+
+
 _AUTH_REQUIRED_RESPONSE_DESCRIPTION = (
     "Authentication required (missing or invalid Authorization header "
     "AND missing or invalid ante_session cookie). 대시보드 사용자는 "
@@ -314,7 +346,7 @@ async def list_members(
         raise HTTPException(
             status_code=503, detail="멤버 목록을 조회할 수 없습니다"
         ) from None
-    return {"members": [asdict(m) for m in members], "total": total}
+    return {"members": [_public_member(m) for m in members], "total": total}
 
 
 @router.post(
@@ -474,7 +506,7 @@ async def create_member(
             ip=request.client.host if request.client else "",
         )
 
-    return {"member": asdict(member), "token": token}
+    return {"member": _public_member(member), "token": token}
 
 
 @router.get(
@@ -515,7 +547,7 @@ async def get_member(
         ) from None
     if member is None:
         raise HTTPException(status_code=404, detail="멤버를 찾을 수 없습니다")
-    return {"member": asdict(member)}
+    return {"member": _public_member(member)}
 
 
 @router.post(
@@ -573,7 +605,7 @@ async def suspend_member(
             ip=request.client.host if request.client else "",
         )
 
-    return {"member": asdict(member)}
+    return {"member": _public_member(member)}
 
 
 @router.post(
@@ -631,7 +663,7 @@ async def reactivate_member(
             ip=request.client.host if request.client else "",
         )
 
-    return {"member": asdict(member)}
+    return {"member": _public_member(member)}
 
 
 @router.post(
@@ -689,7 +721,7 @@ async def revoke_member(
             ip=request.client.host if request.client else "",
         )
 
-    return {"member": asdict(member)}
+    return {"member": _public_member(member)}
 
 
 @router.post(
@@ -751,7 +783,7 @@ async def rotate_token(
             ip=request.client.host if request.client else "",
         )
 
-    return {"member": asdict(member), "token": token}
+    return {"member": _public_member(member), "token": token}
 
 
 @router.patch(
@@ -1028,4 +1060,4 @@ async def update_scopes(
             ip=request.client.host if request.client else "",
         )
 
-    return {"member": asdict(member)}
+    return {"member": _public_member(member)}
