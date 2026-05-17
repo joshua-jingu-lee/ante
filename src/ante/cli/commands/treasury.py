@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from ante.cli._validators import (
+    reject_invalid_account_id,
     reject_inverted_date_range,
     validate_iso_date,
     validate_positive_finite_amount,
@@ -64,6 +65,14 @@ async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
 def status(ctx: click.Context, account_id: str) -> None:
     """자금 현황 요약."""
     fmt = get_formatter(ctx)
+
+    # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
+    # 이전에 거부한다(#1635 Split B Layer 1). `_create_treasury`는 이미
+    # `require_account_id`를 `db.connect()` 이전에 호출하지만(leak-free), CLI
+    # 콜백이 non-Click `InvalidAccountIdError`를 명시적으로 catch하지 않아
+    # traceback으로 새던 contract-drift를 본 ingress 거부가 닫는다. 에러코드는
+    # #1633 SSOT `VALIDATION_ERROR`(helper가 `e.code` 재사용).
+    reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
     async def _run_status() -> dict:
         t, db = await _create_treasury(account_id)
@@ -205,6 +214,12 @@ def snapshot(
     from datetime import UTC, datetime
 
     fmt = get_formatter(ctx)
+
+    # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
+    # 이전에 거부한다(#1635 Split B Layer 1). `status`와 동일 `_create_treasury`
+    # construction-lifecycle 경계를 공유하므로 동형으로 ingress에서 차단한다.
+    # 에러코드는 #1633 SSOT `VALIDATION_ERROR`(helper가 `e.code` 재사용).
+    reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
     # 옵션 검증: --date 와 --from/--to 는 동시 사용 불가
     if date_str and (from_date or to_date):

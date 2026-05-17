@@ -9,6 +9,7 @@ import sqlite3
 import click
 
 from ante.account.errors import AccountNotFoundError
+from ante.cli._validators import reject_invalid_account_id
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -31,16 +32,29 @@ async def _create_rule_engine(account_id: str):  # noqa: ANN202
     해야 한다. fallback 정책상 첫 번째 계좌를 임의로 선택해선 안 된다
     (#1217). ``RuleEngine`` 생성자가 내부에서 ``require_account_id`` 로
     재검증한다.
+
+    invalid ``account_id`` 검증은 ``db.connect()`` **이전**에 수행한다
+    (#1635 Split B Layer 2 — ``treasury.py:37`` ``_create_treasury`` 패턴
+    1:1 미러). 기존 구조는 ``db.connect()`` 후 ``RuleEngine(account_id=...)``
+    내부 ``require_account_id`` 가 raise하여 ``(engine, db)`` 가 미반환 →
+    호출자 ``finally: db.close()`` 미도달 → aiosqlite connection 누수
+    (#1623 Codex finding, lifecycle). resource acquisition 이전에 검증·raise
+    하면 획득 자원이 0이라 정리 대상도 0 — 누수 구조 자체를 제거한다.
+    ``RuleEngine.__init__`` 내부 ``require_account_id``(``engine.py:270``)는
+    defense-in-depth로 그대로 유지한다(무변경).
     """
+    from ante.account.scoping import require_account_id
     from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.rule.engine import RuleEngine
 
+    validated_account_id = require_account_id(account_id, context="cli.rule")
+
     db = Database(get_db_path())
     await db.connect()
     eventbus = EventBus()
-    engine = RuleEngine(eventbus=eventbus, account_id=account_id)
+    engine = RuleEngine(eventbus=eventbus, account_id=validated_account_id)
     return engine, db
 
 
@@ -104,6 +118,15 @@ def _collect_rules(engine) -> list[dict]:  # noqa: ANN001
 def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> None:
     """룰 목록 조회."""
     fmt = get_formatter(ctx)
+
+    # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
+    # 이전에 거부한다(#1635 Split B Layer 1). invalid-format은 여기서
+    # `VALIDATION_ERROR`(#1633 SSOT) + exit 1로 종료된다. valid-but-absent
+    # account_id는 `require_account_id`가 거부하지 않으므로 기존 경로로
+    # 흘러 아래 `_run_list`의 account 존재 SELECT → `AccountNotFoundError`
+    # → `ACCOUNT_NOT_FOUND` 분기를 보존한다(invalid-format ↔ valid-absent
+    # 분리 불변, VALIDATION_ERROR 오분류 금지).
+    reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_list() -> list[dict]:
         engine, db = await _create_rule_engine(account_id)
@@ -193,6 +216,15 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
 def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     """룰 상세 정보 조회."""
     fmt = get_formatter(ctx)
+
+    # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
+    # 이전에 거부한다(#1635 Split B Layer 1). invalid-format만 여기서
+    # `VALIDATION_ERROR`(#1633 SSOT) + exit 1로 종료한다. `rule_info`는
+    # `rule_list`와 달리 account 존재 SELECT/`AccountNotFoundError` catch가
+    # 없으며, valid-but-absent account_id의 기존 동작은 #1635 범위 밖이라
+    # 불변으로 보존한다(account-existence parity는 후속 후보로 분리,
+    # ACCOUNT_NOT_FOUND 강제 금지).
+    reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_info() -> dict | None:
         engine, db = await _create_rule_engine(account_id)
