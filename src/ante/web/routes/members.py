@@ -107,15 +107,17 @@ def _validate_scopes_vocabulary(value: list[str]) -> list[str]:
 class MemberCreateRequest(BaseModel):
     """멤버 등록 요청.
 
+    ``member_type`` 은 ``MemberType`` enum SSOT(``human`` / ``agent``) 로,
     ``role`` 은 ``MemberRole`` enum SSOT(``master`` / ``admin`` / ``default``)
-    로 강제한다 (#1465 — split #1417/A). 알 수 없는 role 문자열은 Pydantic
-    이 자동으로 422 로 거부하므로 service / token 생성 전에 차단된다.
+    로 강제한다 (#1465 — split #1417/A; #1628 — ``member_type`` 동형 미러).
+    알 수 없는 member_type / role 문자열은 Pydantic 이 자동으로 422 로
+    거부하므로 service / token 생성 전에 차단된다.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     member_id: str
-    member_type: str  # "human" | "agent"
+    member_type: MemberType
     role: MemberRole = MemberRole.DEFAULT
     org: str = "default"
     name: str = ""
