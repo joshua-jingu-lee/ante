@@ -109,14 +109,40 @@ invalid ``account_id``는 다음 세 표면 모두에서 **항상**
 근거 (코드 현실과 정합):
 
 - ``src/ante/account/errors.py`` 의 ``InvalidAccountIdError.code =
-  "VALIDATION_ERROR"`` 클래스 속성. docstring 은 ``require_account_id``
-  가 raise 하는 모든 IPC 경로( ``bot.create`` ,
-  ``treasury.allocate`` / ``deallocate`` , ``broker.reconcile`` 등)가
-  IPC server 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 폴백으로
-  자동 ``VALIDATION_ERROR`` 매핑됨을 명시한다.
+  "VALIDATION_ERROR"`` 클래스 속성. 자동 ``VALIDATION_ERROR`` 매핑은
+  IPC server 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 폴백을 타는
+  구조이므로 **``require_account_id`` 를 실제로 경유하여
+  :class:`InvalidAccountIdError` 가 raise 되는 IPC handler 경로에
+  한정**된다. 현재 그 경로는 broker IPC dispatch
+  ( ``broker.status`` / ``broker.balance`` / ``broker.positions`` /
+  ``broker.reconcile`` — 각 handler 가 ``require_account_id`` 호출,
+  ``src/ante/ipc/registry.py:303``/``:318``/``:330``/``:344`` )와
+  ``bot.create`` ( ``registry.py:160`` 의 ``require_account_id`` )
+  이다. account-scoped CLI JSON error 경로
+  ( ``_create_treasury`` / ``_create_rule_engine`` →
+  ``Treasury.__init__`` / ``RuleEngine.__init__`` 의
+  ``require_account_id`` ) 및 oracle host probe 도 같은 helper 를
+  경유하므로 동일하게 ``VALIDATION_ERROR`` 로 노출된다.
+- **예외 — 현재 미정렬 경로**: ``treasury.allocate`` /
+  ``treasury.deallocate`` IPC 는 ``_handle_treasury_allocate`` /
+  ``_handle_treasury_deallocate`` ( ``src/ante/ipc/registry.py:188``/
+  ``:199`` )가 ``account_id = args["account_id"]`` 를 그대로
+  ``svc.treasury_manager.get(account_id)`` 에 전달하며
+  **``require_account_id`` 를 경유하지 않는다**. 따라서 invalid
+  ``account_id`` 가 이 두 IPC 에서 ``VALIDATION_ERROR`` 로 **자동
+  매핑되지 않는다**(완료/자동매핑으로 오인 금지). 이 정렬은
+  결정표 bucket **E** ( ``_handle_treasury_*`` →
+  ``treasury_manager.get`` raw ) 의 non-broker mutating IPC
+  follow-up 에서 해당 handler 를 ``require_account_id`` 경유로
+  정렬할 때 비로소 ``VALIDATION_ERROR`` 로 닫힌다. 결정표
+  ``ante treasury allocate`` / ``deallocate`` 행( **E — follow-up
+  후보** )과 정합한다.
 - IPC 에러코드 계약 가드 ``tests/unit/test_ipc_error_code_mapping.py``
-  가 ``InvalidAccountIdError.code == "VALIDATION_ERROR"`` 및 IPC
-  응답 ``error.code == "VALIDATION_ERROR"`` 를 고정한다.
+  가 ``InvalidAccountIdError.code == "VALIDATION_ERROR"`` 및
+  ``require_account_id`` 경유 IPC 응답 ``error.code ==
+  "VALIDATION_ERROR"`` 를 고정한다(미경유
+  ``treasury.allocate``/``deallocate`` 는 E follow-up 정렬 시 본
+  가드 범위에 편입된다).
 - 형식 위반 메시지 자체는 위 [`### 메시지 형식 보존`](#메시지-형식-보존)
   계약을 따른다. 본 절은 **에러코드**의 SSOT이고, 메시지 문자열은
   별도 계약이다(둘은 충돌하지 않는다).
@@ -187,8 +213,8 @@ follow-up / scope-extension / 구현대상아님 / 문서수정 결정으로 닫
 | `ante account credentials <account_id>` | positional arg | match | read-only `svc.get` 마스킹 lookup ingress | **A — #1634** (`account info` 와 동형 read-only ingress) |
 | `ante bot list --account <account_id>` | option | match | read-only DB filter ingress | **A — #1634** (#1623 `bot_list_default`) |
 | `ante treasury status --account <account_id>` | option | match | local construction lifecycle (`_create_treasury` → `require_account_id`) | **B — #1635** (#1623 `treasury_status_default`) |
-| `ante rule list --account <account_id>` | option | match | local construction lifecycle (`_create_rule_engine` → `RuleEngine.__init__` `require_account_id`) | **B — #1635** (#1623 `rule_list_default`; DB lifecycle 누수 포함) |
-| `ante rule info <rule_id> --account <account_id>` | option | match | local construction lifecycle (`_create_rule_engine`) | **B — #1635** (`rule list` 와 동형 construction; #1635 본문 `rule info` 포함) |
+| `ante rule list --account <account_id>` | option | match (본 #1633 에서 03-commands.md rule 섹션·명령 표에 `--account <account_id>` 기재 보정 후 `match` 로 닫음 — 보정 전 `code-only`: 코드 `rule.py:93` `@click.option("--account","account_id",required=True)` 존재, 03-commands.md 미기재였음) | local construction lifecycle (`_create_rule_engine` → `RuleEngine.__init__` `require_account_id`) | **B — #1635** (#1623 `rule_list_default`; DB lifecycle 누수 포함) |
+| `ante rule info <rule_id> --account <account_id>` | option | match (본 #1633 에서 03-commands.md 보정 후 `match`; 보정 전 `code-only`: 코드 `rule.py:189` `@click.option("--account","account_id",required=True)` 존재, 03-commands.md 미기재였음) | local construction lifecycle (`_create_rule_engine`) | **B — #1635** (`rule list` 와 동형 construction; #1635 본문 `rule info` 포함) |
 | `ante broker status --account <account_id>` | option | match | broker IPC dispatch (`broker.status`, handler `require_account_id`) | **C — #1636** |
 | `ante broker balance --account <account_id>` | option | match | broker IPC dispatch (`broker.balance`) | **C — #1636** (#1623 `broker_balance_default`) |
 | `ante broker positions --account <account_id>` | option | match | broker IPC dispatch (`broker.positions`) | **C — #1636** |
@@ -211,6 +237,22 @@ follow-up / scope-extension / 구현대상아님 / 문서수정 결정으로 닫
 > ``code-only`` 0) + ``spec-only`` 2개( ``broker health`` /
 > ``broker price`` ). enumerate된 unique CLI command path 수 21개와
 > 동치(누락 0). ``treasury snapshot`` · ``strategy performance`` 포함.
+>
+> match/spec-only/code-only 집계: ``match`` 21 / ``spec-only`` 2 /
+> ``code-only`` 0. ``rule list`` · ``rule info`` 는 코드
+> ( ``src/ante/cli/commands/rule.py:93``/``:189`` 의
+> ``@click.option("--account","account_id",required=True)`` )에는 존재하나
+> 03-commands.md rule 섹션·offline 명령 표에는 미기재였으므로 본 정정
+> **이전** 상태는 ``code-only`` 2 였다. 본 #1633 (docs-only)이
+> 03-commands.md 의 rule 섹션·offline 명령 표 양쪽에 rule
+> ``--account <account_id>`` 표면을 함께 기재 보정하여 두 행을
+> ``code-only → match`` 로 닫았다(일관 처리: 동일 docs-only 범위 내
+> 03-commands.md drift 즉시 교정이 ``code-only`` 후속 항목을 별도로
+> 미루는 것보다 정합적이고 row-count·집계 동치를 보존). 따라서 보정 후
+> 최종 ``code-only`` 0, 위 23/21/2 동치는 유지된다. ``rule`` 행의
+> #1623 split 분류는 정정과 무관하게 **B(#1635, rule construction
+> lifecycle)** 로 불변이다(상태 컬럼만 정정, 분류·진입 패턴·row 수
+> 무변경).
 
 > D/E = follow-up 항목( ``account suspend/activate/delete/set-credentials/repair-timezone`` ,
 > ``treasury allocate/deallocate`` , ``bot create`` ,

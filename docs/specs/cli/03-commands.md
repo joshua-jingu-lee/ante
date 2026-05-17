@@ -109,8 +109,8 @@ allowlist 후보에서 제거한다.
 | `ante treasury allocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury deallocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury snapshot ...` | `offline` | 일별 snapshot 조회 |
-| `ante rule list [--scope global|strategy]` | `offline` | rule 설정 조회 |
-| `ante rule info <rule_id>` | `offline` | rule 설정 조회 |
+| `ante rule list --account <account_id> [--scope global|strategy]` | `offline` | rule 설정 조회 (`--account` 필수) |
+| `ante rule info <rule_id> --account <account_id>` | `offline` | rule 설정 조회 (`--account` 필수) |
 | `ante broker status/health [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 상태 |
 | `ante broker balance [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
 | `ante broker positions [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
@@ -389,9 +389,14 @@ ante treasury snapshot --date <날짜> [--account <account_id>]          # 특�
 ### `ante rule` — 거래 룰 관리
 
 ```bash
-ante rule list [--scope global|strategy]  # 전역 + 전략별 룰 목록
-ante rule info <rule_id>           # 룰 상세
+ante rule list --account <account_id> [--scope global|strategy]  # 전역 + 전략별 룰 목록
+ante rule info <rule_id> --account <account_id>           # 룰 상세
 ```
+
+`rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
+의 `require_account_id` 를 경유하므로 `--account` 가 필수다(생략·invalid
+`account_id` 는 `VALIDATION_ERROR` 로 거부; 아래 [account-scoped 표면
+참조](#account-scoped-account_id-입력-표면--14-account-id-contract-참조)).
 
 ### `ante broker` — 증권사 연동
 
