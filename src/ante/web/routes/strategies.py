@@ -23,6 +23,7 @@ from ante.web.deps import (
     require_strategy_read,
     require_strategy_write,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     DailySummaryResponse,
     MonthlySummaryResponse,
@@ -218,11 +219,11 @@ async def validate_strategy(
     try:
         body = StrategyValidateRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     filepath = body.path
@@ -475,11 +476,11 @@ async def update_strategy_status(
     try:
         body = StatusUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 3. enum 변환 — Pydantic Literal value 가 ``StrategyStatus`` enum value

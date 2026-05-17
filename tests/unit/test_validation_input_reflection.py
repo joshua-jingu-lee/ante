@@ -1,17 +1,28 @@
-"""422 validation error 입력 값 반사 차단 — 보안 invariant 회귀 (#1629 L1).
+"""422 validation error 입력 반사 차단 — 보안 invariant 회귀 (#1629 L1 / #1650 L2).
 
 L1 범위(이슈 #1629 본문 SSOT):
 - 거부된 입력 **값**/``input``/``ctx``/``msg`` 반사 금지
-- raw-body 핸들러는 ``e.errors(include_context=False, include_input=False)``
-  (pydantic ``ValidationError``), 글로벌 ``RequestValidationError`` 핸들러는
-  ``_sanitize_pydantic_errors(exc.errors())`` 로 ``input``/``ctx`` 제거
+- raw-body 핸들러는 공용 chokepoint ``sanitize_validation_errors(e)``
+  (= ``e.errors(include_context=False, include_input=False)`` +
+  ``_normalize_error_loc``, pydantic ``ValidationError``), 글로벌
+  ``RequestValidationError`` 핸들러는 ``_sanitize_pydantic_errors(exc.
+  errors())`` (= ``input``/``ctx`` 제거 + ``_normalize_error_loc``)
 - web request 모델 validator 메시지는 거부된 raw value 를 ``msg`` 에
   interpolation 하지 않는다 (반사 경로 2: scopes/trading_hours/timezone)
 
-``loc`` 세그먼트의 caller-제어 키(거부된 extra 필드 키 이름 / 자유형
-``dict[str,*]`` 키) 정규화는 **#1643(별도 이슈)** 영역이며, 본 파일은
-``loc`` 케이스를 단언하지 않는다 (L1 에서 ``loc`` 키는 변경 전과 동일
-노출 — 악화 0; #1643 이 후속 정규화).
+L2 범위(이슈 #1650 본문 SSOT — #1643 Split A):
+- Pydantic ``error["type"] == "extra_forbidden"`` 항목의 ``loc`` **말단
+  세그먼트**(거부된 caller extra 필드 키 이름)는 고정 placeholder
+  ``[extra]`` 로 정규화된다. 두 sanitization 경로(글로벌 ``_sanitize_
+  pydantic_errors`` / raw-body chokepoint ``sanitize_validation_errors``)
+  모두 적용한다. static ``loc`` prefix(``body`` 등)·``type``/``msg``/
+  ``url``·HTTP 422·RFC7807 envelope 는 보존한다.
+- **본 파일의 L2 보안 단언은 ``type=='extra_forbidden'`` loc 벡터에
+  한정**한다. 비-``extra_forbidden`` caller-controlled ``loc``(자유형
+  ``dict[str,*]`` 키, structured body, validator-합성 loc) 및 수동
+  unknown-key detail 반사(``accounts.py`` PUT account update F3,
+  ``test_account_api.py:886``/``:1445``)는 #1650 정규화 대상이 아니며
+  **#1651(spec-first 종합 정책)** 에서 다룬다.
 """
 
 from __future__ import annotations
@@ -29,9 +40,15 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from ante.web.app import create_app  # noqa: E402
-from ante.web.errors import _sanitize_pydantic_errors  # noqa: E402
+from ante.web.errors import (  # noqa: E402
+    _EXTRA_FORBIDDEN_LOC_PLACEHOLDER,
+    _normalize_error_loc,
+    _sanitize_pydantic_errors,
+    sanitize_validation_errors,
+)
 from ante.web.routes.accounts import _ActivateNoBody  # noqa: E402
 from ante.web.routes.approvals import ApprovalStatusUpdate  # noqa: E402
+from ante.web.routes.bots import BotCreateRequest  # noqa: E402
 from ante.web.routes.config import ConfigUpdateRequest  # noqa: E402
 from ante.web.routes.members import (  # noqa: E402
     MemberCreateRequest,
@@ -46,7 +63,9 @@ from ante.web.routes.treasury import (  # noqa: E402
 from ante.web.schemas import (  # noqa: E402
     AccountSuspendRequest,
     AccountUpdateRequest,
+    BotUpdateRequest,
     ReportSubmitRequest,
+    RuleUpdateRequest,
     StatusUpdateRequest,
     StrategyValidateRequest,
 )
@@ -65,15 +84,19 @@ SENTINEL_OBJ = {"leaked": SENTINEL}
 
 # ── 구조적 폐쇄 락: behavioral SENTINEL parametrized 매트릭스 ──────────
 #
-# sweep 15 raw-body 사이트의 request 모델 × {필드값, non-str} sentinel.
-# 각 핸들러가 적용하는 sanitizer(``e.errors(include_context=False,
-# include_input=False)``)를 거친 detail 문자열에 sentinel 부재를 단언한다.
-# mechanism-agnostic: input/ctx/msg/helper-위임/미래 validator 모두 포착.
+# 전체 18 raw-body chokepoint 사이트의 request 모델 × {필드값, non-str}
+# sentinel. 각 핸들러가 적용하는 공용 chokepoint
+# ``sanitize_validation_errors(e)`` (= ``e.errors(include_context=False,
+# include_input=False)`` + ``_normalize_error_loc``)를 거친 detail
+# 문자열에 sentinel 부재를 단언한다. mechanism-agnostic: input/ctx/msg/
+# helper-위임/미래 validator 모두 포착.
 #
 # 케이스 ID 는 (라우트 사이트, vector) 단위. 동일 모델이 복수 raw-body
 # 사이트에서 재사용되는 경우(MemberCreate, BudgetChange 등) 사이트 단위로
-# 케이스를 두어 discovery 게이트(grep raw-body 사이트 수 == 케이스 수)를
-# 만족시킨다.
+# 케이스를 두어 discovery 게이트(grep chokepoint 사이트 수 == 케이스 수)
+# 를 만족시킨다. #1650 으로 chokepoint 가 전 raw-body 사이트(#1629 sweep
+# 15 + bots POST/PUT 2 + accounts RuleUpdate #1380 1 = 18)를 단일 SSOT
+# 로 흡수했으므로, 본 매트릭스도 18 사이트를 전수 커버한다.
 #
 # (case_id, model, payload)  — payload 는 ``model_validate`` 에서
 # pydantic ``ValidationError`` 를 일으키고 sentinel 을 담는다.
@@ -170,59 +193,99 @@ SENTINEL_MATRIX: list[tuple[str, type[pydantic.BaseModel], dict]] = [
         BalanceSetRequest,
         {"balance": SENTINEL},
     ),
+    # bots.py POST /api/bots  (BotCreateRequest, extra='forbid')
+    # #1650: chokepoint 가 #1629 sweep 외 bots POST 사이트도 흡수.
+    (
+        "bots_create__botcreate__nonstr",
+        BotCreateRequest,
+        {"bot_id": SENTINEL_OBJ, "strategy_id": "s1"},
+    ),
+    # bots.py PUT /api/bots/{id}  (BotUpdateRequest, extra='forbid')
+    (
+        "bots_update__botupdate__nonstr",
+        BotUpdateRequest,
+        {"name": SENTINEL_OBJ},
+    ),
+    # accounts.py PUT /api/accounts/{id}/rules  (RuleUpdateRequest, #1380)
+    # extra='forbid' 아님 — non-bool ``enabled`` 로 type-error 반사 경로.
+    (
+        "accounts_rules__ruleupdate__nonbool",
+        RuleUpdateRequest,
+        {"enabled": SENTINEL_OBJ},
+    ),
 ]
 
 
-def _grep_raw_body_site_count() -> int:
-    """sweep 라우트 파일의 sanitize 적용 raw-body 사이트 수.
+_ALL_ROUTE_FILES = [
+    "accounts.py",
+    "approvals.py",
+    "bots.py",
+    "config.py",
+    "members.py",
+    "reports.py",
+    "strategies.py",
+    "system.py",
+    "treasury.py",
+]
 
-    선례(``bots.py`` 2 사이트, ``accounts.py`` RuleUpdate #1380)는 sweep
-    대상이 아니므로 제외하고, 본 #1629 sweep 으로 정화된 사이트만 센다.
-    discovery 게이트: 이 수 == ``SENTINEL_MATRIX`` 케이스 수.
+
+def _grep_chokepoint_site_count() -> int:
+    """전 라우트 파일의 공용 chokepoint 호출 raw-body 사이트 수.
+
+    #1650 으로 모든 raw-body ``model_validate`` 422 사이트가 직접
+    ``e.errors(include_context=False, include_input=False)`` 대신 공용
+    chokepoint ``sanitize_validation_errors(e)`` 를 호출한다(직접 호출
+    잔존 0 — SSOT). 본 grep 은 chokepoint 호출 사이트만 센다(하드코딩
+    상수 없음 — 사이트 추가/삭제 시 자동 추종). discovery 게이트:
+    이 수 == ``SENTINEL_MATRIX`` 케이스 수.
     """
-    sweep_files = [
-        "config.py",
-        "members.py",
-        "system.py",
-        "approvals.py",
-        "accounts.py",
-        "strategies.py",
-        "reports.py",
-        "treasury.py",
-    ]
     total = 0
-    for name in sweep_files:
+    for name in _ALL_ROUTE_FILES:
         text = (_ROUTES_DIR / name).read_text()
-        # raw-body 사이트는 ``detail=e.errors(include_context=False,
-        # include_input=False)`` 형태. accounts.py 의 #1380 RuleUpdate
-        # 선례 1 사이트는 sweep 대상 아님 → 차감.
-        count = len(
+        total += len(re.findall(r"detail=sanitize_validation_errors\(e\),", text))
+    return total
+
+
+def _grep_direct_unsanitized_errors_count() -> int:
+    """raw-body 사이트에서 chokepoint 우회 직접 ``e.errors(...)`` 잔존 수.
+
+    #1650 SSOT invariant: raw-body 사이트는 chokepoint 만 호출하므로
+    ``detail=e.errors(include_context=False, include_input=False)`` 직접
+    호출은 0 이어야 한다.
+    """
+    total = 0
+    for name in _ALL_ROUTE_FILES:
+        text = (_ROUTES_DIR / name).read_text()
+        total += len(
             re.findall(
                 r"detail=e\.errors\(include_context=False, include_input=False\)",
                 text,
             )
         )
-        if name == "accounts.py":
-            # accounts.py 의 RuleUpdateRequest(#1380) 선례 1 사이트 제외.
-            count -= 1
-        total += count
     return total
 
 
 def test_discovery_gate_sentinel_matrix_covers_all_sweep_sites() -> None:
-    """discovery 게이트: grep raw-body 사이트 수 == sentinel 매트릭스 케이스 수.
+    """discovery 게이트: chokepoint 사이트 수 == sentinel 매트릭스 케이스 수.
 
-    sweep 사이트가 추가/누락되면 본 테스트가 깨져 매트릭스 갱신을 강제한다
-    (per-site grep 의 helper-위임 누락 회귀를 behavioral 하게 락).
+    #1650 으로 게이트 기준을 (#1629 sweep 하드코딩 15) 에서 (공용
+    chokepoint 호출 사이트 수) 로 재정의한다. raw-body 사이트가 추가/
+    누락되면 본 테스트가 깨져 매트릭스 갱신을 강제한다(per-site
+    chokepoint 위임 누락 회귀를 behavioral 하게 락). 추가로 chokepoint
+    우회 직접 ``e.errors(include_input=False)`` 호출 잔존 0 을 단언한다
+    (#1650 SSOT — 직접 호출 잔존 시 loc 정규화가 누락된다).
     """
-    grep_count = _grep_raw_body_site_count()
-    assert grep_count == 15, (
-        f"sweep raw-body 사이트 수 변동: grep={grep_count}, 예상=15. "
-        "SENTINEL_MATRIX 와 함께 갱신 필요."
+    direct_count = _grep_direct_unsanitized_errors_count()
+    assert direct_count == 0, (
+        f"chokepoint 우회 직접 e.errors(include_input=False) 잔존: "
+        f"{direct_count} (raw-body 사이트는 sanitize_validation_errors 만 호출)"
     )
-    assert len(SENTINEL_MATRIX) == grep_count, (
+    chokepoint_count = _grep_chokepoint_site_count()
+    assert chokepoint_count > 0, "chokepoint 호출 사이트가 0 — grep 회귀 의심"
+    assert len(SENTINEL_MATRIX) == chokepoint_count, (
         f"SENTINEL_MATRIX 케이스 수({len(SENTINEL_MATRIX)}) != "
-        f"grep raw-body 사이트 수({grep_count})"
+        f"grep chokepoint raw-body 사이트 수({chokepoint_count}). "
+        "raw-body 사이트 추가/삭제 시 SENTINEL_MATRIX 갱신 필요."
     )
 
 
@@ -233,19 +296,22 @@ def test_discovery_gate_sentinel_matrix_covers_all_sweep_sites() -> None:
 def test_sweep_site_detail_has_no_input_reflection(
     case_id: str, model: type[pydantic.BaseModel], payload: dict
 ) -> None:
-    """sweep 사이트 모델의 sanitized detail 에 sentinel 부재.
+    """sweep 사이트 모델의 sanitized detail 에 sentinel 부재 (L1).
 
-    각 raw-body 핸들러가 적용하는 sanitizer(``e.errors(include_context=
-    False, include_input=False)``)를 거친 detail 문자열에 거부된 입력
-    값/sentinel 이 절대 등장하지 않아야 한다.
+    각 raw-body 핸들러가 적용하는 공용 chokepoint
+    ``sanitize_validation_errors(e)`` (= ``e.errors(include_context=False,
+    include_input=False)`` + ``_normalize_error_loc``)를 거친 detail
+    문자열에 거부된 입력 값/sentinel 이 절대 등장하지 않아야 한다.
     """
     with pytest.raises(pydantic.ValidationError) as excinfo:
         model.model_validate(payload)
 
     exc = excinfo.value
-    # 핸들러 계약: HTTPException(detail=...) → http_exception_handler 가
-    # ``str(exc.detail)`` 로 직렬화. 동일 경로를 그대로 재현한다.
-    sanitized_detail = str(exc.errors(include_context=False, include_input=False))
+    # 핸들러 계약: HTTPException(detail=sanitize_validation_errors(e)) →
+    # http_exception_handler 가 ``str(exc.detail)`` 로 직렬화. 동일 경로를
+    # 그대로 재현한다 (#1650 chokepoint).
+    errs = sanitize_validation_errors(exc)
+    sanitized_detail = str(errs)
 
     # sanitize 전(raw)에는 sentinel 이 새므로(테스트 자기검증) sanitize
     # 후에는 절대 부재여야 한다.
@@ -259,7 +325,6 @@ def test_sweep_site_detail_has_no_input_reflection(
     )
 
     # detail 구조 보존: loc/type/msg 는 파싱 가능해야 한다.
-    errs = exc.errors(include_context=False, include_input=False)
     assert errs, f"[{case_id}] errors() 가 비어 있음"
     for e in errs:
         assert "loc" in e and "type" in e and "msg" in e, (
@@ -304,6 +369,161 @@ def test_sanitize_pydantic_errors_removes_input_ctx_keeps_rest() -> None:
 
 def test_sanitize_pydantic_errors_empty_list() -> None:
     assert _sanitize_pydantic_errors([]) == []
+
+
+# ── #1650 L2: extra_forbidden loc 말단 정규화 ─────────────────────────
+#
+# 본 섹션의 보안 단언은 모두 ``type=='extra_forbidden'`` loc 벡터에
+# 한정한다. 비-extra_forbidden caller-controlled loc 및 수동 unknown-key
+# detail 반사는 #1651(spec-first 종합 정책) 대상.
+
+# extra='forbid' 요청모델 × extra-key sentinel. payload 는 미정의 caller
+# extra 키(SENTINEL)를 담아 ``extra_forbidden`` 422 를 일으킨다. 현 모든
+# extra='forbid' 요청모델은 flat BaseModel(#1643 v-series AST 실측).
+EXTRA_FORBIDDEN_MATRIX: list[tuple[str, type[pydantic.BaseModel], dict]] = [
+    (
+        "activatenobody__extra_key",
+        _ActivateNoBody,
+        {SENTINEL: "x"},
+    ),
+    (
+        "botcreate__extra_key",
+        BotCreateRequest,
+        {"bot_id": "b", "strategy_id": "s1", SENTINEL: "leak"},
+    ),
+    (
+        "botupdate__extra_key",
+        BotUpdateRequest,
+        {"name": "n", SENTINEL: "leak"},
+    ),
+]
+
+
+def test_normalize_error_loc_extra_forbidden_replaces_last_segment() -> None:
+    """``extra_forbidden`` 항목의 ``loc`` 말단 caller 키만 placeholder 치환.
+
+    static prefix(``body``)·``type``/``msg``/``url`` 보존. 컨테이너 타입
+    (글로벌=list / raw-body pydantic=tuple) 유지. 비-extra_forbidden
+    항목은 ``loc`` 완전 보존(#1650 한정 — #1651 미경유).
+    """
+    raw = [
+        # 글로벌 RequestValidationError 형태(loc=list, prefix=body)
+        {
+            "type": "extra_forbidden",
+            "loc": ["body", SENTINEL],
+            "msg": "Extra inputs are not permitted",
+            "url": "https://errors.pydantic.dev/2.12/v/extra_forbidden",
+        },
+        # raw-body pydantic 형태(loc=tuple, prefix 없음)
+        {
+            "type": "extra_forbidden",
+            "loc": (SENTINEL,),
+            "msg": "Extra inputs are not permitted",
+        },
+        # 비-extra_forbidden — loc 완전 보존(#1650 비대상)
+        {
+            "type": "missing",
+            "loc": ("body", "member_id"),
+            "msg": "Field required",
+        },
+    ]
+    out = _normalize_error_loc(raw)
+    # 1) 글로벌: list 유지, prefix 보존, 말단만 placeholder.
+    assert out[0]["loc"] == ["body", _EXTRA_FORBIDDEN_LOC_PLACEHOLDER]
+    assert isinstance(out[0]["loc"], list)
+    assert out[0]["type"] == "extra_forbidden"
+    assert out[0]["msg"] == "Extra inputs are not permitted"
+    assert out[0]["url"].endswith("/extra_forbidden")
+    # 2) raw-body: tuple 유지, 말단(유일 세그먼트)만 placeholder.
+    assert out[1]["loc"] == (_EXTRA_FORBIDDEN_LOC_PLACEHOLDER,)
+    assert isinstance(out[1]["loc"], tuple)
+    # 3) 비-extra_forbidden: loc 불변(#1650 한정 — #1651 대상).
+    assert out[2]["loc"] == ("body", "member_id")
+    # sentinel 전수 부재.
+    assert SENTINEL not in str(out)
+
+
+def test_normalize_error_loc_empty_and_no_loc() -> None:
+    """빈 loc / loc 부재 / 비-list-tuple loc 는 안전하게 통과(no-op)."""
+    raw = [
+        {"type": "extra_forbidden", "loc": (), "msg": "m"},
+        {"type": "extra_forbidden", "msg": "no loc"},
+        {"type": "extra_forbidden", "loc": "weird", "msg": "m"},
+    ]
+    out = _normalize_error_loc(raw)
+    assert out[0]["loc"] == ()
+    assert "loc" not in out[1]
+    assert out[2]["loc"] == "weird"
+
+
+def test_sanitize_pydantic_errors_composes_loc_normalization() -> None:
+    """글로벌 경로: input/ctx 제거 후 extra_forbidden loc 정규화 합성.
+
+    #1650 CV2 (a): synthetic ``extra_forbidden`` 에러(caller-key loc) →
+    합성 글로벌 sanitizer → sentinel ∉ loc/detail · static prefix/type/
+    msg 보존.
+    """
+    raw = [
+        {
+            "type": "extra_forbidden",
+            "loc": ["body", SENTINEL],
+            "msg": "Extra inputs are not permitted",
+            "input": SENTINEL,
+            "url": "https://errors.pydantic.dev/2.12/v/extra_forbidden",
+        }
+    ]
+    out = _sanitize_pydantic_errors(raw)
+    assert len(out) == 1
+    o = out[0]
+    assert "input" not in o and "ctx" not in o
+    assert o["loc"] == ["body", _EXTRA_FORBIDDEN_LOC_PLACEHOLDER]
+    assert o["type"] == "extra_forbidden"
+    assert o["msg"] == "Extra inputs are not permitted"
+    assert o["url"].endswith("/extra_forbidden")
+    flat = str(out)
+    assert SENTINEL not in flat
+
+
+@pytest.mark.parametrize(
+    ("case_id", "model", "payload"),
+    [pytest.param(c, m, p, id=c) for c, m, p in EXTRA_FORBIDDEN_MATRIX],
+)
+def test_extra_forbidden_loc_placeholder_raw_body_path(
+    case_id: str, model: type[pydantic.BaseModel], payload: dict
+) -> None:
+    """raw-body chokepoint: extra_forbidden loc 말단 caller 키 placeholder.
+
+    raw-body ``model_validate`` 사이트가 호출하는 공용 chokepoint
+    ``sanitize_validation_errors(e)`` 를 거치면 ``extra_forbidden`` 항목
+    ``loc`` 말단(거부 caller 키 = SENTINEL)이 placeholder 로 치환되고
+    detail 어디에도 sentinel 이 노출되지 않는다. ``type``/``msg`` 보존.
+    """
+    with pytest.raises(pydantic.ValidationError) as excinfo:
+        model.model_validate(payload)
+    exc = excinfo.value
+
+    # 자기검증: sanitize 전 raw 에는 caller 키(SENTINEL) 가 loc 에 노출.
+    raw = exc.errors()
+    assert any(
+        e.get("type") == "extra_forbidden" and SENTINEL in tuple(e.get("loc", ()))
+        for e in raw
+    ), f"[{case_id}] 자기검증 실패: raw loc 에 extra_forbidden caller 키 부재"
+
+    errs = sanitize_validation_errors(exc)
+    ef = [e for e in errs if e.get("type") == "extra_forbidden"]
+    assert ef, f"[{case_id}] extra_forbidden 항목 부재: {errs}"
+    for e in ef:
+        loc = tuple(e.get("loc", ()))
+        assert loc and loc[-1] == _EXTRA_FORBIDDEN_LOC_PLACEHOLDER, (
+            f"[{case_id}] loc 말단이 placeholder 가 아님: {loc}"
+        )
+        assert SENTINEL not in loc, f"[{case_id}] caller 키 잔존: {loc}"
+        assert e["type"] == "extra_forbidden", f"[{case_id}] type 변형: {e}"
+        assert "msg" in e, f"[{case_id}] msg 손상: {e}"
+    # detail 직렬화 어디에도 caller 키 부재.
+    assert SENTINEL not in str(errs), (
+        f"[{case_id}] sanitized detail 에 caller 키 반사: {errs}"
+    )
 
 
 # ── HTTP 회귀: probe 2 표면 + 글로벌 핸들러 + 반사 경로 2 + #1630 ────
@@ -564,3 +784,95 @@ def test_grep_invariant_validator_msg_no_value_interpolation() -> None:
         ):
             offenders.append(f"{t.name}: {m.group(0)[:80]}")
     assert not offenders, f"validator msg 거부값 interpolation: {offenders}"
+
+
+# ── #1650 CV2 (b): 글로벌 RequestValidationError 경로 end-to-end ──────
+
+
+class _EFBody(pydantic.BaseModel):
+    """test-only ``extra='forbid'`` 요청 body 모델 (CV2 b).
+
+    module-scope 정의라 FastAPI 가 typed body 로 추론한다(함수-로컬
+    클래스는 query param 으로 오추론됨).
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+    name: str
+
+
+def test_global_path_extra_forbidden_loc_placeholder_e2e() -> None:
+    """CV2 (b): test-only ``extra='forbid'`` 미니 route + TestClient.
+
+    typed ``body: _EFBody`` 라 미정의 caller 키는 FastAPI-native
+    ``RequestValidationError`` (글로벌 ``validation_exception_handler``
+    경로)로 ``extra_forbidden`` 422 를 일으킨다. 글로벌 핸들러는
+    ``_sanitize_pydantic_errors`` (= input/ctx 제거 + ``_normalize_error_
+    loc``) 를 적용하므로, 422 detail 에 caller 키(SENTINEL) 가 노출되지
+    않고 ``loc`` 말단이 placeholder 로 치환되며 static prefix(``body``)·
+    ``type``/``msg``·HTTP 422·RFC7807 envelope 가 보존된다.
+    """
+    from fastapi import FastAPI
+
+    from ante.web.errors import register_exception_handlers
+
+    mini = FastAPI()
+    register_exception_handlers(mini)
+
+    @mini.post("/ef")
+    def _ef(body: _EFBody) -> dict:  # pragma: no cover - 422 전 미도달
+        return {"ok": body.name}
+
+    mini_client = TestClient(mini)
+    resp = mini_client.post("/ef", json={"name": "n", SENTINEL: "leak"})
+
+    assert resp.status_code == 422, f"status={resp.status_code} {resp.text}"
+    body = resp.json()
+    # RFC7807 envelope 보존.
+    assert body["status"] == 422
+    assert body["type"] == "/errors/validation"
+    detail = str(body.get("detail", ""))
+    # caller 키(SENTINEL) 가 loc/detail 어디에도 노출되지 않는다.
+    assert SENTINEL not in detail, f"글로벌 경로 caller 키 반사: {detail}"
+    # placeholder 가 loc 에 등장(말단 정규화 적용).
+    assert _EXTRA_FORBIDDEN_LOC_PLACEHOLDER in detail, f"placeholder 미적용: {detail}"
+    # type/msg/static prefix(body) 보존.
+    assert "extra_forbidden" in detail, detail
+    assert "'body'" in detail or '"body"' in detail, detail
+    assert "'input'" not in detail and "'ctx'" not in detail, detail
+
+
+# ── #1650 범위 경계 회귀: F3 수동 unknown-key 의도적 잔존 ─────────────
+
+
+def test_f3_manual_unknown_key_detail_intentionally_retained(client) -> None:
+    """범위 경계 회귀: PUT /api/accounts/{id} 수동 unknown-key detail 잔존.
+
+    ``accounts.py:644-648`` 은 unknown mutable 키를
+    ``AccountUpdateRequest.model_validate`` **이전** 에 직접
+    ``unknown_keys`` 문자열로 join 해 422 를 던진다(Pydantic
+    ``extra_forbidden`` 미경유 — F3 벡터). 이 detail-string 반사는 #1650
+    sanitizer/chokepoint 로 정규화되지 **않으며**, #1650 보안 단언 대상이
+    아니다. 본 테스트는 caller 키가 (의도적으로) detail 에 **남아 있음**
+    을 단언해 #1650 가 이 경로를 다루지 않음을 회귀로 고정한다.
+
+    후속: 이 detail-string 반사의 종합 정책은 **#1651**(비-
+    extra_forbidden) + F3 후속 후보에서 다룬다. #1650 가 이 경로를
+    placeholder 화하면(=본 단언 실패) 범위 오확장이므로 중단·재보고.
+    """
+    resp = client.put(
+        "/api/accounts/acc-1",
+        json={"some_unknown_field": "x"},
+    )
+    # account_service 미주입이면 503 가능 → F3 422 일 때만 단언.
+    if resp.status_code != 422:
+        pytest.skip(f"F3 422 전 단계(status={resp.status_code}) — 경계 무관")
+    detail = str(resp.json().get("detail", ""))
+    # F3: 수동 join detail 에 caller 키가 (의도적으로) 그대로 남아 있다.
+    assert "some_unknown_field" in detail, (
+        f"#1650 범위 경계 회귀 실패 — F3 수동 unknown-key detail 이 "
+        f"placeholder 화됨(#1650 범위 오확장 / #1651·F3 영역 침범): {detail}"
+    )
+    # #1650 sanitizer 미경유이므로 placeholder 토큰은 등장하지 않는다.
+    assert _EXTRA_FORBIDDEN_LOC_PLACEHOLDER not in detail, (
+        f"F3 경로에 #1650 placeholder 오적용: {detail}"
+    )

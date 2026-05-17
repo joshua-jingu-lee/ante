@@ -883,6 +883,15 @@ class TestUpdateAccount:
         # 라우트 단 422 — unknown field가 명시적으로 reject된다.
         assert resp.status_code == 422
         body = resp.json()
+        # #1650/#1651·F3 경계 회귀: 이 422 는 ``accounts.py:644-648`` 의
+        # 수동 unknown-key 가드(``AccountUpdateRequest.model_validate``
+        # **이전** 직접 ``unknown_keys`` join — Pydantic ``extra_forbidden``
+        # 미경유, ``e.errors()`` loc 없음, F3 벡터)에서 발생한다. #1650
+        # sanitizer/chokepoint 로 정규화되지 **않으며**(보안 단언 대상
+        # 아님), caller 키가 detail 에 (의도적으로) 그대로 남는다. 이
+        # detail-string 반사의 종합 정책은 #1651(비-extra_forbidden) +
+        # F3 후속 후보에서 다룬다. #1650 이 이 경로를 placeholder 화하면
+        # 범위 오확장이므로 본 단언이 의도적 잔존을 회귀로 고정한다.
         assert "some_unknown_field" in body.get("detail", "")
         # service.update 미호출 — DB 오염 차단.
         assert account_service._accounts["test-account"].name == "테스트 계좌"
@@ -1433,7 +1442,15 @@ class TestUpdateAccount:
         client: TestClient,
         account_service: FakeAccountService,
     ) -> None:
-        """unknown mutable key(`{"foo": "bar"}`) → 422 (additionalProperties: False)."""
+        """unknown mutable key(`{"foo": "bar"}`) → 422 (additionalProperties: False).
+
+        #1650/#1651·F3 경계 회귀: ``accounts.py:644-648`` 수동 unknown-key
+        가드(Pydantic ``extra_forbidden`` 미경유 — F3 벡터) 경로. #1650
+        sanitizer/chokepoint 미적용·보안 단언 대상 아님. caller 키
+        (``foo``)가 detail 에 (의도적으로) 잔존함을 회귀로 고정한다 —
+        종합 정책은 #1651 + F3 후속에서 처리. #1650 이 placeholder 화
+        하면 범위 오확장.
+        """
         account = _make_account()
         account_service._accounts[account.account_id] = account
 
@@ -1617,7 +1634,15 @@ class TestActivateAccount:
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
-        """``{"unexpected": "body"}`` 같은 extra key dict는 422 (#1510)."""
+        """``{"unexpected": "body"}`` 같은 extra key dict는 422 (#1510).
+
+        #1650 마이그레이션: ``_ActivateNoBody`` 는 ``extra='forbid'`` 라
+        raw-body ``model_validate`` → 공용 chokepoint
+        ``sanitize_validation_errors`` 경로를 탄다. detail 의 ``loc`` 말단
+        (거부 caller 키)은 placeholder ``[extra]`` 로 정규화되어 caller
+        키(``unexpected``)가 노출되지 않는다. ``extra_forbidden`` type 은
+        보존되고 side-effect(activate/audit)는 발생하지 않는다.
+        """
         account = _make_account()
         account.status = AccountStatus.SUSPENDED
         account_service._accounts[account.account_id] = account
@@ -1630,13 +1655,16 @@ class TestActivateAccount:
         # side-effect 미발생.
         assert account_service.activate_calls == 0
         assert self._activate_audit_logs(audit_logger) == []
-        # detail은 ``http_exception_handler``를 거치며 ``str(e.errors())``로
-        # 직렬화된다 (``suspend_account``와 동일 경로). 핵심 정보가 detail
-        # 문자열에 그대로 포함되는지만 확인한다.
+        # detail은 ``http_exception_handler``를 거치며 ``str(e.detail)``로
+        # 직렬화된다 (``suspend_account``와 동일 경로). chokepoint sanitizer
+        # 가 적용되어 ``extra_forbidden`` type 은 유지되고 loc 말단은
+        # placeholder 로 정규화된다.
         detail = resp.json()["detail"]
         assert isinstance(detail, str)
         assert "extra_forbidden" in detail
-        assert "unexpected" in detail
+        # loc 말단 placeholder 적용 + caller 키 부재 (#1650 L2).
+        assert "[extra]" in detail
+        assert "unexpected" not in detail
 
     def test_activate_rejects_multiple_extra_keys(
         self,
@@ -1644,7 +1672,13 @@ class TestActivateAccount:
         account_service: FakeAccountService,
         audit_logger: FakeAuditLogger,
     ) -> None:
-        """extra key가 2개 이상이면 422, 두 key 모두 detail에 보고된다."""
+        """extra key가 2개 이상이면 422, 어느 키도 detail에 노출되지 않는다.
+
+        #1650 마이그레이션: 복수 extra 키여도 각 ``extra_forbidden`` 항목
+        ``loc`` 말단이 placeholder 로 정규화되어 caller 키(``a``/``b``)가
+        detail 어디에도 노출되지 않는다(보안 목표 — key-echo 되돌림 금지).
+        ``extra_forbidden`` type 보존 + side-effect 미발생.
+        """
         account = _make_account()
         account.status = AccountStatus.SUSPENDED
         account_service._accounts[account.account_id] = account
@@ -1656,11 +1690,13 @@ class TestActivateAccount:
         assert resp.status_code == 422
         assert account_service.activate_calls == 0
         assert self._activate_audit_logs(audit_logger) == []
-        # str(e.errors()) 직렬화 안에 두 extra key가 모두 보고되어야 한다.
+        # str(e.detail) 직렬화 안에 어떤 caller extra 키도 노출되지 않는다.
         detail = resp.json()["detail"]
         assert isinstance(detail, str)
         assert "extra_forbidden" in detail
-        assert "'a'" in detail and "'b'" in detail
+        # 각 extra_forbidden 항목 loc 말단 = placeholder, caller 키 부재.
+        assert "[extra]" in detail
+        assert "'a'" not in detail and "'b'" not in detail
 
     def test_activate_rejects_non_object_body(
         self,

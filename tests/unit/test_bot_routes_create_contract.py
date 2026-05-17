@@ -429,9 +429,16 @@ class TestBotCreateValidationErrorSerialization:
         )
 
     def test_extra_field_returns_422_with_clean_detail(self, client) -> None:
-        """``extra='forbid'`` 케이스에서도 detail 이 깨끗하게 직렬화된다.
-        (이 케이스는 ctx 가 None 이라 기본 동작도 안전하지만,
-        ``include_context=False`` 적용 후에도 회귀 없이 동작함을 검증.)"""
+        """``extra='forbid'`` 케이스에서 detail 이 깨끗하게 직렬화된다.
+
+        #1650 마이그레이션: ``BotCreateRequest`` 는 ``extra='forbid'`` 라
+        raw-body ``model_validate`` → 공용 chokepoint
+        ``sanitize_validation_errors`` 경로를 탄다. ``extra_forbidden``
+        type 은 보존되고 ``loc`` 말단(거부 caller 키 = ``bot_type``)은
+        placeholder ``[extra]`` 로 정규화되어 caller 키가 detail 에
+        노출되지 않는다(보안 목표 — key-echo 되돌림 금지). ValueError
+        repr leak 도 없다.
+        """
         resp = client.post(
             "/api/bots",
             json={
@@ -444,9 +451,14 @@ class TestBotCreateValidationErrorSerialization:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         detail_blob = str(body.get("detail", ""))
-        # ``extra='forbid'`` 에러 메시지 또는 키 이름이 detail 에 포함되어야 함.
-        assert "bot_type" in detail_blob or "extra" in detail_blob.lower(), (
-            f"detail 에 거부 사유가 없음 — {detail_blob!r}"
+        # ``extra_forbidden`` type 유지 + loc 말단 placeholder 정규화.
+        assert "extra_forbidden" in detail_blob, (
+            f"extra_forbidden type 소실 — {detail_blob!r}"
         )
+        assert "[extra]" in detail_blob, (
+            f"loc 말단 placeholder 미적용 — {detail_blob!r}"
+        )
+        # caller 키(``bot_type``)는 detail 에 노출되지 않는다 (#1650 L2).
+        assert "bot_type" not in detail_blob, f"caller extra 키 반사 — {detail_blob!r}"
         # ValueError repr leak 없음.
         assert "ValueError(" not in detail_blob
