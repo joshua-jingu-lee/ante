@@ -1335,6 +1335,11 @@ export type paths = {
          *     이어진다 — #1218이 정렬한 omitted query 정책을 보존한다. valid-pattern
          *     but absent(``acc-9999``)는 가드를 통과해 기존 단건 존재 검증 404로
          *     이어진다 (invalid-format ↔ genuine not-found 분리).
+         *
+         *     가드는 함수 진입 직후, strategy 레지스트리/봇 조회 **이전**에 실행한다.
+         *     그래야 존재하지 않는 ``strategy_id`` + provided-invalid ``account_id``
+         *     조합에서도 account_id 422 계약이 strategy 존재 여부에 종속되지 않는다
+         *     (#1624 ingress invariant).
          */
         get: operations["get_strategy_performance_api_strategies__strategy_id__performance_get"];
         put?: never;
@@ -2743,7 +2748,10 @@ export type components = {
         };
         /**
          * MemberInfo
-         * @description 멤버 정보.
+         * @description 멤버 정보 (공개 응답 노출 계약 — `docs/specs/member/03-member-model.md`).
+         *
+         *     `token_hash`/`password_hash`/`recovery_key_hash`는 credential verifier
+         *     material 이므로 응답 schema·runtime body 어디에도 노출하지 않는다 (#1627).
          */
         MemberInfo: {
             /**
@@ -2779,16 +2787,6 @@ export type components = {
              */
             org: string;
             /**
-             * Password Hash
-             * @default
-             */
-            password_hash: string;
-            /**
-             * Recovery Key Hash
-             * @default
-             */
-            recovery_key_hash: string;
-            /**
              * Revoked At
              * @default
              */
@@ -2815,15 +2813,8 @@ export type components = {
              * @default
              */
             token_expires_at: string;
-            /**
-             * Token Hash
-             * @default
-             */
-            token_hash: string;
             /** Type */
             type: string;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * MemberListResponse

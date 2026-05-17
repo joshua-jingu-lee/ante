@@ -60,10 +60,6 @@ function toApiMemberRole(role: ApiMemberRole | undefined): ApiMemberRole {
   return role ?? 'default'
 }
 
-function toOptionalString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
 export function toMemberView(raw: ApiMemberInfo): Member {
   return {
     member_id: raw.member_id,
@@ -84,7 +80,6 @@ export function toMemberDetailView(raw: ApiMemberInfo): MemberDetail {
     ...toMemberView(raw),
     scopes: raw.scopes,
     created_by: raw.created_by || undefined,
-    token_prefix: toOptionalString(raw.token_prefix),
     suspended_at: raw.suspended_at || undefined,
   }
 }

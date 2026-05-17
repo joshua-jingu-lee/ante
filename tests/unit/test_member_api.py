@@ -639,3 +639,177 @@ class TestErrorHandlingLogging:
         assert len(data["members"]) == 1
         assert data["total"] == 1
         assert data["members"][0]["member_id"] == "agent-01"
+
+
+# ── #1627: credential verifier material 노출 차단 회귀 ──────────────────────
+
+_SENSITIVE_HASH_FIELDS = ("token_hash", "password_hash", "recovery_key_hash")
+
+# docs/specs/member/03-member-model.md "공개 API 응답 노출 계약" SSOT.
+_PUBLIC_MEMBER_FIELDS = {
+    "member_id",
+    "type",
+    "role",
+    "org",
+    "name",
+    "emoji",
+    "status",
+    "scopes",
+    "created_at",
+    "created_by",
+    "last_active_at",
+    "suspended_at",
+    "revoked_at",
+    "token_expires_at",
+}
+
+
+@dataclass
+class FakeMemberWithExtra(FakeMember):
+    """`extra="ignore"` 트랩 회귀용 — Member 에 임의 extra 필드가 있어도
+
+    응답에 echo 되면 안 된다 (#1627: `extra="allow"` 트랩이 핵심 기술 위험).
+    """
+
+    secret_extra: str = "must-not-leak"
+
+
+def _assert_no_hash_leak(member_obj: dict) -> None:
+    """member 응답 객체에 credential verifier material 이 없어야 한다."""
+    for field_name in _SENSITIVE_HASH_FIELDS:
+        assert field_name not in member_obj, (
+            f"{field_name} 가 member 응답에 노출됨 (#1627 회귀)"
+        )
+    # 노출 계약 밖의 임의 키도 새지 않아야 한다 (extra="ignore" + allowlist).
+    assert set(member_obj).issubset(_PUBLIC_MEMBER_FIELDS), (
+        f"노출 계약 밖 필드 누출: {set(member_obj) - _PUBLIC_MEMBER_FIELDS}"
+    )
+
+
+class TestMemberHashExposureRegression:
+    """#1627: 8 member 응답 표면 전부에서 hash 필드 부재 + 노출 계약 준수."""
+
+    def _seed(self, member_service, *, member_id="agent-01", **kwargs):
+        member_service._members[member_id] = FakeMember(
+            member_id=member_id,
+            type=kwargs.pop("type", "agent"),
+            name=kwargs.pop("name", "테스트"),
+            token_hash="tk-secret-hash",
+            password_hash="pw-secret-hash",
+            recovery_key_hash="rk-secret-hash",
+            **kwargs,
+        )
+
+    def test_list_no_hash_and_contract(self, client, member_service):
+        """1. GET /api/members — list item 에 hash 부재 + 계약 필드."""
+        self._seed(member_service)
+        resp = client.get("/api/members")
+        assert resp.status_code == 200
+        items = resp.json()["members"]
+        assert len(items) == 1
+        item = items[0]
+        _assert_no_hash_leak(item)
+        # 노출 계약 필드 정상 포함 (list item shape).
+        assert item["member_id"] == "agent-01"
+        assert item["type"] == "agent"
+        assert "status" in item
+        assert "scopes" in item
+
+    def test_get_no_hash_and_contract(self, client, member_service):
+        """2. GET /api/members/{id} — detail 에 hash 부재 + 계약 필드."""
+        self._seed(member_service)
+        resp = client.get("/api/members/agent-01")
+        assert resp.status_code == 200
+        member = resp.json()["member"]
+        _assert_no_hash_leak(member)
+        assert member["member_id"] == "agent-01"
+        assert member["status"] == "active"
+
+    def test_create_no_hash_token_top_level(self, client):
+        """3. POST /api/members — member 객체 hash 부재, token top-level 1회."""
+        resp = client.post(
+            "/api/members",
+            json={"member_id": "new-agent", "member_type": "agent"},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        _assert_no_hash_leak(body["member"])
+        # raw token 은 member 객체 밖 top-level 로 1회만 반환.
+        assert isinstance(body["token"], str) and body["token"]
+        assert "token" not in body["member"]
+        assert body["member"]["member_id"] == "new-agent"
+
+    def test_suspend_no_hash(self, client, member_service):
+        """4. POST /api/members/{id}/suspend — hash 부재."""
+        self._seed(member_service)
+        resp = client.post("/api/members/agent-01/suspend")
+        assert resp.status_code == 200
+        member = resp.json()["member"]
+        _assert_no_hash_leak(member)
+        assert member["status"] == "suspended"
+
+    def test_reactivate_no_hash(self, client, member_service):
+        """5. POST /api/members/{id}/reactivate — hash 부재."""
+        self._seed(member_service, status="suspended")
+        resp = client.post("/api/members/agent-01/reactivate")
+        assert resp.status_code == 200
+        member = resp.json()["member"]
+        _assert_no_hash_leak(member)
+        assert member["status"] == "active"
+
+    def test_revoke_no_hash(self, client, member_service):
+        """6. POST /api/members/{id}/revoke — hash 부재."""
+        self._seed(member_service)
+        resp = client.post("/api/members/agent-01/revoke")
+        assert resp.status_code == 200
+        member = resp.json()["member"]
+        _assert_no_hash_leak(member)
+        assert member["status"] == "revoked"
+
+    def test_rotate_token_no_hash_token_top_level(self, client, member_service):
+        """7. POST /api/members/{id}/rotate-token — hash 부재, token top-level."""
+        self._seed(member_service)
+        resp = client.post("/api/members/agent-01/rotate-token")
+        assert resp.status_code == 200
+        body = resp.json()
+        _assert_no_hash_leak(body["member"])
+        assert isinstance(body["token"], str) and body["token"]
+        assert "token" not in body["member"]
+
+    def test_update_scopes_no_hash(self, client, member_service):
+        """8. PUT /api/members/{id}/scopes — hash 부재 + 계약 필드."""
+        self._seed(member_service)
+        resp = client.put(
+            "/api/members/agent-01/scopes",
+            json={"scopes": ["trade:read", "audit:read"]},
+        )
+        assert resp.status_code == 200
+        member = resp.json()["member"]
+        _assert_no_hash_leak(member)
+        assert member["scopes"] == ["trade:read", "audit:read"]
+
+    def test_extra_ignore_trap_regression(self, client, member_service):
+        """Member 에 임의 extra 필드가 있어도 응답에 노출되지 않는다.
+
+        `extra="allow"` 트랩(이슈 핵심): 스키마/route allowlist 회귀 시에도
+        credential 또는 임의 extra 필드가 새면 안 된다.
+        """
+        member_service._members["agent-extra"] = FakeMemberWithExtra(
+            member_id="agent-extra",
+            type="agent",
+            token_hash="tk",
+            password_hash="pw",
+            recovery_key_hash="rk",
+        )
+        # list 표면
+        resp = client.get("/api/members")
+        item = next(
+            m for m in resp.json()["members"] if m["member_id"] == "agent-extra"
+        )
+        _assert_no_hash_leak(item)
+        assert "secret_extra" not in item
+        # detail 표면
+        resp = client.get("/api/members/agent-extra")
+        member = resp.json()["member"]
+        _assert_no_hash_leak(member)
+        assert "secret_extra" not in member
