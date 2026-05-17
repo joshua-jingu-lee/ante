@@ -19,6 +19,7 @@ from ante.web.deps import (
     require_master_caller,
     require_member_read,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     MemberCreateResponse,
     MemberDetailResponse,
@@ -479,11 +480,11 @@ async def create_member(
     try:
         body = MemberCreateRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 4. service 호출.
@@ -920,11 +921,12 @@ async def change_password(
     try:
         body = PasswordChangeRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1 probe 표면 —
-        # password-adjacent secret 노출 차단; bots.py:433 선례 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 probe 표면 — password-adjacent secret /
+        # recovery_key 등 extra 키 노출 차단; #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 4. credential check (svc.change_password 내부의 old-password 비교).
@@ -1051,11 +1053,11 @@ async def update_scopes(
     try:
         body = ScopesUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 4. service 호출.

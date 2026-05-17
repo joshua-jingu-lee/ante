@@ -15,6 +15,7 @@ from ante.web.deps import (
     require_config_read,
     require_config_write,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import ConfigListResponse, ConfigUpdateResponse
 
 router = APIRouter()
@@ -224,11 +225,11 @@ async def update_config(
     try:
         body = ConfigUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 3. 키 존재 확인.

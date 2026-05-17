@@ -19,6 +19,7 @@ from ante.web.deps import (
     require_treasury_admin,
     require_treasury_read,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     BalanceSetResponse,
     BudgetListResponse,
@@ -542,11 +543,11 @@ async def allocate(
     try:
         body = BudgetChangeRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     if bot_manager is not None and bot_manager.get_bot(bot_id) is None:
@@ -711,11 +712,11 @@ async def deallocate(
     try:
         body = BudgetChangeRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     if bot_manager is not None and bot_manager.get_bot(bot_id) is None:
@@ -886,11 +887,11 @@ async def set_balance(
     try:
         body = BalanceSetRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     await treasury.set_account_balance(body.balance)

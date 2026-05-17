@@ -15,6 +15,7 @@ from ante.web.deps import (
     require_report_read,
     require_report_write,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     ReportDetailResponse,
     ReportListResponse,
@@ -183,11 +184,12 @@ async def submit_report(
     try:
         body = ReportSubmitRequest.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1 probe 표면;
-        # bots.py:433 / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 probe 표면 — api_secret 등 extra 키 노출
+        # 차단; #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 3. submitted_by = caller_id (이전: request.state.member_id 또는 "agent").

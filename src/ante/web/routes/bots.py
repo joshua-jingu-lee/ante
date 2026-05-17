@@ -23,6 +23,7 @@ from ante.web.deps import (
     require_bot_admin,
     require_bot_read,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     BotDetailResponse,
     BotListResponse,
@@ -416,8 +417,8 @@ async def create_bot(
     try:
         body = BotCreateRequest.model_validate(payload)
     except ValidationError as e:
-        # ``include_context=False, include_input=False`` 로 detail 을 sanitize
-        # 한다 (codex r3 FAIL #1436). ``_require_strategy_identifier``
+        # 공용 chokepoint ``sanitize_validation_errors`` 로 detail 을 sanitize
+        # 한다 (codex r3 FAIL #1436 + #1650). ``_require_strategy_identifier``
         # model_validator 가 raise 하는 ``ValueError`` 는 Pydantic
         # ``e.errors()`` 의 ``ctx.error`` 필드에 ``ValueError`` 객체로
         # 노출된다. ``HTTPException(detail=e.errors())`` 를 그대로 사용하면
@@ -426,11 +427,13 @@ async def create_bot(
         # 수 없는 깨진 응답이 된다. ``budget`` 같은 finite-positive 필드에
         # NaN/Inf 가 들어오면 ``input`` 에도 non-finite ``float`` 가 담겨
         # ``JSONResponse(allow_nan=False)`` 가 직렬화에 실패해 422 대신 500 이
-        # 반환될 수 있는 잠재 위험도 함께 sanitize 한다 (#1380 accounts.py
-        # RuleUpdateRequest 선례와 동일 패턴).
+        # 반환될 수 있는 잠재 위험도 chokepoint 가 함께 sanitize 한다 (#1380
+        # accounts.py RuleUpdateRequest 선례). chokepoint 는 추가로
+        # ``extra_forbidden`` 항목의 ``loc`` 말단 caller 키를 placeholder 로
+        # 정규화한다 (#1650 L2; ``bot_type`` 등 extra='forbid' 거부 키).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # strategy_id / strategy_name 해석 ─────────────────────
@@ -1135,14 +1138,15 @@ async def update_bot(
     try:
         body = BotUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        # detail sanitize — POST /api/bots 와 동일 정책 (codex r3 FAIL #1436).
-        # ``budget`` finite-positive 필드에 NaN/Inf 가 들어오면 ``input`` 에
-        # non-finite ``float`` 가 담겨 ``JSONResponse(allow_nan=False)`` 가
-        # 직렬화에 실패해 422 대신 500 이 반환될 수 있다 (#1435 BotUpdateRequest
-        # finite invariant). ``include_input=False`` 로 sanitize 한다.
+        # detail sanitize — POST /api/bots 와 동일 정책 (codex r3 FAIL #1436 +
+        # #1650). ``budget`` finite-positive 필드에 NaN/Inf 가 들어오면
+        # ``input`` 에 non-finite ``float`` 가 담겨
+        # ``JSONResponse(allow_nan=False)`` 가 직렬화에 실패해 422 대신 500 이
+        # 반환될 수 있다 (#1435 BotUpdateRequest finite invariant). 공용
+        # chokepoint 가 input/ctx 제거 + extra_forbidden loc 말단 정규화한다.
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 3. 봇 존재 확인.

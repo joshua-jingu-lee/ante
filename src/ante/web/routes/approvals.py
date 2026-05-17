@@ -18,6 +18,7 @@ from ante.web.deps import (
     require_approval_admin,
     require_approval_read,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     ApprovalDetailResponse,
     ApprovalListResponse,
@@ -269,11 +270,11 @@ async def update_approval_status(
     try:
         body = ApprovalStatusUpdate.model_validate(payload)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # ``body.status`` 는 ``Literal["approved", "rejected"]`` 로 좁혀지므로

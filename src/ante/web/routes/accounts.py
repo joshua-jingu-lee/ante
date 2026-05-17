@@ -20,6 +20,7 @@ from ante.web.deps import (
     require_rule_admin,
     require_rule_read,
 )
+from ante.web.errors import sanitize_validation_errors
 from ante.web.schemas import (
     AccountActionResponse,
     AccountDetailResponse,
@@ -650,11 +651,11 @@ async def update_account(
     try:
         validated = AccountUpdateRequest.model_validate(mutable_payload_in)
     except ValidationError as e:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
-        # / accounts.py:1307 선례와 동일 sanitizer).
+        # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단 정규화
+        # (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 9. ``exclude_none=True``로 set된 mutable 필드만 추출. ``{"name": null}``
@@ -883,11 +884,11 @@ async def suspend_account(
             try:
                 body = AccountSuspendRequest.model_validate(payload)
             except ValidationError as e:
-                # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1;
-                # bots.py:433 / accounts.py:1307 선례와 동일 sanitizer).
+                # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단
+                # 정규화 (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
                 raise HTTPException(
                     status_code=422,
-                    detail=e.errors(include_context=False, include_input=False),
+                    detail=sanitize_validation_errors(e),
                 ) from None
 
     reason = (body.reason if body else None) or "dashboard"
@@ -1007,11 +1008,11 @@ async def activate_account(
             try:
                 _ActivateNoBody.model_validate(payload)
             except ValidationError as e:
-                # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1;
-                # bots.py:433 / accounts.py:1307 선례와 동일 sanitizer).
+                # 거부된 입력 값/ctx 반사 금지 + extra_forbidden loc 말단
+                # 정규화 (보안 invariant #1629 L1 + #1650 L2; 공용 chokepoint).
                 raise HTTPException(
                     status_code=422,
-                    detail=e.errors(include_context=False, include_input=False),
+                    detail=sanitize_validation_errors(e),
                 ) from None
 
     try:
@@ -1310,16 +1311,19 @@ async def update_account_rule(
     try:
         body = RuleUpdateRequest.model_validate(payload)
     except ValidationError as e:
-        # ``include_context=False, include_input=False`` 로 detail 을 sanitize 한다
-        # (#1380 codex review P1). NaN/Inf 가 ``params`` 안에 들어오면 Pydantic
-        # 기본 ``e.errors()`` 는 ``ctx.error`` 에 ``ValueError`` 객체와
-        # ``input`` 에 non-finite ``float`` 를 그대로 포함시키는데, Starlette
-        # ``JSONResponse(allow_nan=False)`` 가 이를 직렬화하지 못해 의도한 422
-        # 대신 500 이 반환된다. 두 필드를 빼면 detail 은 순수 JSON-호환 dict
-        # list 가 되고, 호출자는 ``loc`` / ``msg`` 만 받게 된다.
+        # 공용 chokepoint ``sanitize_validation_errors`` 로 detail 을 sanitize
+        # 한다 (#1380 codex review P1 + #1650). NaN/Inf 가 ``params`` 안에
+        # 들어오면 Pydantic 기본 ``e.errors()`` 는 ``ctx.error`` 에
+        # ``ValueError`` 객체와 ``input`` 에 non-finite ``float`` 를 그대로
+        # 포함시키는데, Starlette ``JSONResponse(allow_nan=False)`` 가 이를
+        # 직렬화하지 못해 의도한 422 대신 500 이 반환된다. chokepoint 는
+        # ``include_context=False, include_input=False`` 로 두 필드를 빼고
+        # ``extra_forbidden`` 항목의 ``loc`` 말단 caller 키를 placeholder 로
+        # 정규화하므로, 호출자는 ``loc``(말단 정규화) / ``type`` / ``msg``
+        # 만 받게 된다.
         raise HTTPException(
             status_code=422,
-            detail=e.errors(include_context=False, include_input=False),
+            detail=sanitize_validation_errors(e),
         ) from None
 
     # 3. 계좌 존재 확인
