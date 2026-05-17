@@ -47,6 +47,7 @@ import collections.abc
 import dataclasses
 import enum
 import importlib
+import re
 import types
 import typing
 from decimal import Decimal
@@ -153,6 +154,24 @@ class WalkResult:
     validator_surfaces: set[str] = dataclasses.field(default_factory=set)
 
 
+@dataclasses.dataclass
+class _Justify:
+    """검증 walk 용 justified-PASS 컨텍스트(default-deny 보강).
+
+    빈(기본) 컨텍스트면 walker 는 **순수 default-deny** — 비-
+    ``dict[str,Any]`` dict 노드/validator surface 가 무조건 FAIL.
+    검증 walk 에서만 호출측이 **per-(owner,field) 등록 pre-reject
+    증명** dict 키와 **per-surface-id 등록 CV3** validator surface 를
+    주입해 그 노드만 PASS 로 간주시킨다. 주입되지 않은(=미증명) 모든
+    unsafe shape(``extra='allow'``/RootModel/dataclass/unknown 포함)는
+    트리 어디에 있든 여전히 FAIL — short-circuit 으로 가려진 다른
+    unsafe shape 까지 검증 walk 가 끝까지 도달해 잡아낸다.
+    """
+
+    dict_keys: frozenset[tuple[str, str]] = frozenset()
+    validator_surfaces: frozenset[str] = frozenset()
+
+
 def _is_leaf_safe(tp: Any) -> bool:
     if tp is None or tp is type(None) or tp is Any:
         return True
@@ -217,12 +236,43 @@ def _model_validators(model: type[BaseModel]) -> list[str]:
     return names
 
 
+def _dict_node_field_key(owner: type | None, path: str) -> tuple[str, str]:
+    """발견된 비-``dict[str,Any]`` dict 노드를 **(owner qualname,
+    owner-relative field/annotation-path)** 키로 정규화.
+
+    walker path 형식: ``<root>...<Owner>.<field>`` + container/Union
+    위치 표식(``|N``/``[N]``). 매칭 키는 owner qualname + container
+    인덱스 표식을 제거한 owner-relative field-path 다. 같은 owner 라도
+    **다른** ``dict[str,T]`` 필드가 추가되면 그 (owner,field) 가
+    별도 키가 되어 기존 증명으로 통과되지 않는다(per-(owner,field)).
+    """
+    oq = owner.__qualname__ if owner is not None else "<root>"
+    # container/Union 위치 표식 제거 — field 식별만 남긴다.
+    cleaned = re.sub(r"[|\[][0-9]+\]?", "", path)
+    segs = [s for s in cleaned.split(".") if s]
+    # walker path 는 ``<root=qual>.<qual>.<field>...`` 처럼 owner
+    # qualname 이 여러 번 등장할 수 있다(root prefix + 필드 강하 시
+    # ``{path}.{qualname}.{fname}``). 발견된 필드는 owner qualname 의
+    # **마지막** 등장 *직후* 컴포넌트다(중첩 시 그 이하 dotted 경로 전체
+    # 를 field 키로 사용해 per-field 구분). 미등장(root annotation) 시
+    # 마지막 컴포넌트.
+    field = segs[-1] if segs else cleaned
+    last_idx = -1
+    for i, s in enumerate(segs):
+        if s == oq:
+            last_idx = i
+    if last_idx != -1 and last_idx + 1 < len(segs):
+        field = ".".join(segs[last_idx + 1 :])
+    return (oq, field)
+
+
 def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
     tp: Any,
     path: str,
     result: WalkResult,
     *,
     seen: set[int] | None = None,
+    justify: _Justify | None = None,
 ) -> bool:
     """annotation 타입 트리 default-deny 재귀 walk.
 
@@ -230,9 +280,18 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
     트리 전 노드를 검사하며(I-safe), dict 노드는 정확히
     ``dict[str,Any]`` 만 PASS·그 외는 ``result.dict_nodes`` 에 기록 후
     FAIL(I-dict; justified-unreachable 해제는 호출측 precedence guard).
+
+    ``justify`` (기본 None=빈 컨텍스트)는 검증 walk 에서만 호출측이
+    주입한다. **per-(owner,field)** 등록 pre-reject 증명 dict 키·
+    **per-surface-id** 등록 CV3 validator surface 만 PASS 로 간주하고,
+    그 외 모든 unsafe shape 는 트리 어디에 있든 여전히 FAIL — 즉
+    short-circuit 으로 가려질 수 있던 다른 unsafe shape 까지 검증 walk
+    가 끝까지 도달해 default-deny 로 잡아낸다.
     """
     if seen is None:
         seen = set()
+    if justify is None:
+        justify = _Justify()
 
     # leaf-safe
     if _is_leaf_safe(tp):
@@ -252,6 +311,11 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
         if markers:
             sid = f"{path}::Annotated[*Validator]"
             result.validator_surfaces.add(sid)
+            # per-surface-id 등록 CV3 면 PASS 로 간주하고 inner 계속
+            # walk(그래도 inner 가 unsafe 면 거기서 FAIL). 미등록이면
+            # default-deny FAIL-CLOSED.
+            if sid in justify.validator_surfaces:
+                return _walk(inner, path, result, seen=seen, justify=justify)
             result.ok = False
             result.reason = (
                 f"Annotated[*Validator/custom-core-schema] opaque "
@@ -259,7 +323,7 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
             )
             result.path = path
             return False
-        return _walk(inner, path, result, seen=seen)
+        return _walk(inner, path, result, seen=seen, justify=justify)
 
     # Literal[...] — leaf-safe (값은 caller dict 키 생성 불가)
     if origin is Literal:
@@ -268,7 +332,7 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
     # Optional/Union 계열 — 모든 인자 재귀 PASS
     if origin is Union or origin is getattr(types, "UnionType", None):
         for i, arg in enumerate(get_args(tp)):
-            if not _walk(arg, f"{path}|{i}", result, seen=seen):
+            if not _walk(arg, f"{path}|{i}", result, seen=seen, justify=justify):
                 return False
         return True
 
@@ -282,9 +346,13 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
         )
         if is_exact_str_any:
             return True
-        # 비-dict[str,Any] dict 노드 — 소유 모델/필드 기록 후 fail-closed.
+        # 비-dict[str,Any] dict 노드 — 소유 모델/필드 기록.
         owner = seen_owner.get(id(result), None)
         result.dict_nodes.append((owner, path))
+        # per-(owner,field) 등록 pre-validation-reject 증명이 있으면
+        # justified-unreachable PASS, 그 외 default-deny FAIL-CLOSED.
+        if _dict_node_field_key(owner, path) in justify.dict_keys:
+            return True
         result.ok = False
         result.reason = (
             f"비-dict[str,Any] dict/Mapping 노드 (정확히 dict[str,Any] 만 "
@@ -305,7 +373,7 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
         # tuple[X, ...] / 가변 인자: Ellipsis 는 구조 표식, type 인자만 검사.
         type_args = [a for a in args if a is not Ellipsis]
         for i, arg in enumerate(type_args):
-            if not _walk(arg, f"{path}[{i}]", result, seen=seen):
+            if not _walk(arg, f"{path}[{i}]", result, seen=seen, justify=justify):
                 return False
         return True
 
@@ -352,12 +420,15 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
         # surface ⊆ 등록집합 단언이 별도 *직교* 게이트로 해제 — walker
         # 자체는 절대 PASS 시키지 않는다). 단 surface/dict 노드 전수
         # 발견을 위해 필드 walk 는 계속하고 FAIL 은 말미에 확정한다.
-        validator_opaque = False
-        vs = _model_validators(tp)
-        if vs:
-            validator_opaque = True
-            for v in vs:
-                result.validator_surfaces.add(v)
+        # 본 모델의 validator surface 를 **전수** self-enumerate(model
+        # decorators ∪ field Annotated[*Validator] marker). 단 하나라도
+        # CV3 per-surface-id 미등록이면 opaque FAIL-CLOSED — 이미 등록된
+        # 모델에 새 validator 가 추가돼도 그 신규 surface-id 가 등록
+        # 집합에 없어 FAIL(default-deny).
+        model_surfaces: set[str] = set()
+        for v in _model_validators(tp):
+            model_surfaces.add(v)
+            result.validator_surfaces.add(v)
 
         prev_owner = seen_owner.get(id(result))
         seen_owner[id(result)] = tp
@@ -365,8 +436,7 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
             for fname, fi in tp.model_fields.items():
                 fpath = f"{path}.{tp.__qualname__}.{fname}"
                 # Annotated[*Validator] 는 pydantic 이 metadata 로 분리 —
-                # field metadata 의 validator marker self-enumerate(이
-                # 또한 opaque → FAIL-CLOSED; 발견 계속).
+                # field metadata 의 validator marker self-enumerate.
                 markers = _validator_markers_in_metadata(
                     getattr(fi, "metadata", []) or []
                 )
@@ -376,8 +446,8 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
                         f"field_annotated_validator::{fname}"
                     )
                     result.validator_surfaces.add(sid)
-                    validator_opaque = True
-                if not _walk(fi.annotation, fpath, result, seen=seen):
+                    model_surfaces.add(sid)
+                if not _walk(fi.annotation, fpath, result, seen=seen, justify=justify):
                     return False
         finally:
             if prev_owner is None:
@@ -385,16 +455,19 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
             else:
                 seen_owner[id(result)] = prev_owner
 
-        if validator_opaque:
-            result.ok = False
-            result.reason = (
-                f"validator/Annotated[*Validator] 보유 opaque BaseModel "
-                f"(default-deny FAIL-CLOSED; CV3 등록 behavioral canary "
-                f"+ surface ⊆ 등록집합 직교 게이트로만 해제) at "
-                f"{path}:{tp.__qualname__}"
-            )
-            result.path = path
-            return False
+        if model_surfaces:
+            unregistered = model_surfaces - justify.validator_surfaces
+            if unregistered:
+                result.ok = False
+                result.reason = (
+                    f"validator/Annotated[*Validator] 보유 opaque BaseModel "
+                    f"(default-deny FAIL-CLOSED; per-surface-id CV3 미등록 "
+                    f"surface={sorted(unregistered)} — CV3 등록 behavioral "
+                    f"canary + surface ⊆ 등록집합 직교 게이트로만 해제) at "
+                    f"{path}:{tp.__qualname__}"
+                )
+                result.path = path
+                return False
         return True
 
     # dataclass / pydantic dataclass
@@ -436,10 +509,19 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
 seen_owner: dict[int, type | None] = {}
 
 
-def walk_annotation(tp: Any, path: str = "root") -> WalkResult:
-    """annotation 트리를 default-deny walk 하고 결과를 반환한다."""
+def walk_annotation(
+    tp: Any, path: str = "root", *, justify: _Justify | None = None
+) -> WalkResult:
+    """annotation 트리를 default-deny walk 하고 결과를 반환한다.
+
+    ``justify`` 미지정(기본)이면 **순수 default-deny** — 등록 증명을
+    전혀 반영하지 않으므로 비-``dict[str,Any]`` dict/validator 보유
+    모델은 무조건 FAIL(CV1 known-bad 극성 보장). 검증 walk 만
+    per-(owner,field) 등록 pre-reject dict 키 + per-surface-id 등록
+    CV3 surface 를 주입한다.
+    """
     result = WalkResult(ok=True)
-    ok = _walk(tp, path, result)
+    ok = _walk(tp, path, result, justify=justify)
     result.ok = ok and result.ok
     return result
 
@@ -906,18 +988,25 @@ def _behavioral_validator_check(model: type[BaseModel], payloads: list[dict]) ->
 
 @dataclasses.dataclass
 class _PreValidationRejectProof:
-    """owner 모델 식별 + behavioral 증명 callable.
+    """(owner 모델, field/annotation-path) 단위 식별 + behavioral 증명.
 
-    ``owner_qualname`` 은 lock 이 self-derive 한 dict 노드 owner 와
-    대조하는 키(하드코딩 normative 멤버 아님 — lock 결과와 1:1 대조용
-    식별자). ``prove`` 는 owner 모델 ``model_validate`` 스파이를 걸고
-    그 필드를 포함한 요청이 model_validate **미호출** 상태로 거부됨을
-    단언한다(strip 후처리 단언 불충분 — model_validate 스파이 invoke
-    시 fail).
+    ``owner_qualname`` + ``field_name`` 으로 lock 이 self-derive 한
+    **각 비-``dict[str,Any]`` dict 노드** 와 (owner,path) 단위로 1:1
+    대조한다(owner 단독 아님 — 같은 owner 의 다른 ``dict[str,T]``
+    필드가 추가되면 그 (owner,field) 는 별도 키라 기존 증명으로
+    통과되지 않는다). ``prove`` 는 owner 모델 ``model_validate`` 스파이를
+    걸고 그 필드를 포함한 요청이 model_validate **미호출** 상태로
+    거부됨을 단언한다(strip 후처리 단언 불충분 — 스파이 invoke 시 fail).
+    하드코딩 normative 멤버 아님 — lock 결과와 1:1 대조용 식별자.
     """
 
     owner_qualname: str
+    field_name: str
     prove: typing.Callable[[], None]
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.owner_qualname, self.field_name)
 
 
 def _prove_account_update_credentials_pre_reject() -> None:
@@ -987,6 +1076,7 @@ def _prove_account_update_credentials_pre_reject() -> None:
 _PRE_VALIDATION_REJECT_REGISTRY: list[_PreValidationRejectProof] = [
     _PreValidationRejectProof(
         owner_qualname="AccountUpdateRequest",
+        field_name="credentials",
         prove=_prove_account_update_credentials_pre_reject,
     ),
 ]
@@ -1004,7 +1094,18 @@ _PRE_VALIDATION_REJECT_REGISTRY: list[_PreValidationRejectProof] = [
 
 @dataclasses.dataclass
 class _ValidatorCanary:
-    """validator surface 행위 canary. ``owner`` 모델 + 검증 payloads."""
+    """validator surface 행위 canary.
+
+    ``owner_qualname`` 은 진단·식별 보조용일 뿐(매칭 키 아님).
+    **CV3 등록/subset 매칭은 full surface-id 단위**다 — ``model_ref``
+    가 가리키는 모델의 validator surface-id 를 lock 의 self-derive 규칙
+    (``_model_validators`` + ``Annotated[*Validator]`` field metadata)
+    과 **동일하게** 재도출한 집합이 본 canary 의 등록 surface-id 집합이
+    된다(하드코딩 문자열 아님 — 같은 introspection SSOT). 따라서 이미
+    등록된 모델에 새 ``field_validator``/``model_validator`` 가 추가되면
+    그 신규 surface-id 는 어느 canary 의 등록 집합에도 들어가지 않아
+    lock 이 FAIL 한다(별도 canary 미작성 시).
+    """
 
     owner_qualname: str
     model_ref: typing.Callable[[], type[BaseModel]]
@@ -1023,9 +1124,9 @@ def _m(modname: str, clsname: str) -> typing.Callable[[], type[BaseModel]]:
 
 # 각 entry 는 lock 이 self-enumerate 하는 surface 의 소유 모델에 대해
 # behavioral 단언을 제공한다. surface 식별자 자체는 lock 이 도출하며
-# 본 등록은 owner 모델 단위(한 모델의 모든 validator surface 를
-# behavioral 로 커버). #1629 L1 de-interpolation 회귀도 동일 self-
-# derived 집합에서 보존(scopes ×2 포함).
+# 본 등록은 ``model_ref`` 모델에서 **lock 과 동일 규칙으로 재도출한
+# surface-id 집합**(payload 가 그 surface 들을 실제 트리거)을 커버한다.
+# #1629 L1 de-interpolation 회귀도 동일 self-derived 집합에서 보존.
 _CV3_REGISTRY: list[_ValidatorCanary] = [
     _ValidatorCanary(
         "BotCreateRequest",
@@ -1059,23 +1160,43 @@ _CV3_REGISTRY: list[_ValidatorCanary] = [
     _ValidatorCanary(
         "RuleUpdateRequest",
         _m("ante.web.schemas", "RuleUpdateRequest"),
-        [{"params": {"max_drawdown": float("nan")}}],
+        # caller-controlled **key** = SENTINEL 이고 그 value 가 finite
+        # 위반(NaN) → `_validate_params_finite` 가 실제 실패한다. 이렇게
+        # 해야 "422 detail 에 SENTINEL 부재 ∧ loc=static field-path 뿐"
+        # 단언이 공허하지 않고 실효(de-interpolation 회귀 게이트)를 갖는다.
+        [{"params": {SENTINEL: float("nan")}}],
     ),
 ]
 
 
-def _registered_validator_owner_qualnames() -> set[str]:
-    return {c.owner_qualname for c in _CV3_REGISTRY}
+def _canary_surface_ids(canary: _ValidatorCanary) -> set[str]:
+    """canary 가 커버하는 full surface-id 집합 — lock 의 self-derive
+    규칙(``_model_validators`` + ``Annotated[*Validator]`` field
+    metadata)으로 ``model_ref`` 모델에서 재도출(하드코딩 문자열 아님).
 
-
-def _surface_owner_qualname(surface_id: str) -> str:
-    """lock self-derive surface 식별자에서 owner 모델 qualname 추출.
-
-    형식: ``<module>.<Model>::<kind>::<key>`` 또는 walk path 기반.
+    모델에 새 validator 가 추가되면 그 신규 surface-id 가 여기 자동
+    포함되지만, 해당 canary payload 가 그 surface 를 실제 트리거하지
+    않으면 behavioral 단언(``test_cv3_validator_behavioral_*``)이
+    FAIL 한다 — 즉 단순 등록이 아니라 행위 증명이 게이트.
     """
-    head = surface_id.split("::", 1)[0]
-    # head = <module>.<Qual...>; 마지막 dotted 컴포넌트가 모델 qualname.
-    return head.rsplit(".", 1)[-1]
+    model = canary.model_ref()
+    out: set[str] = set(_model_validators(model))
+    for fname, fi in model.model_fields.items():
+        markers = _validator_markers_in_metadata(getattr(fi, "metadata", []) or [])
+        if markers:
+            out.add(
+                f"{model.__module__}.{model.__qualname__}::"
+                f"field_annotated_validator::{fname}"
+            )
+    return out
+
+
+def _registered_validator_surface_ids() -> set[str]:
+    """전 canary 가 커버하는 full surface-id 등록 집합(union)."""
+    out: set[str] = set()
+    for c in _CV3_REGISTRY:
+        out |= _canary_surface_ids(c)
+    return out
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1139,110 +1260,130 @@ def test_s2_mounted_recursive_no_unproven_mount() -> None:
     assert s2.body_models, "S2 body 수집 0건 — introspection 회귀 의심"
 
 
-def test_discovery_lock_current_surface_all_pass_false_positive_zero() -> None:
-    """현 코드 락 green: S1∪S2 전수 PASS (false-positive 0).
-
-    비-extra_forbidden caller-supplied 키/이름 벡터 live 0건. 발견한
-    비-dict[str,Any] dict 노드는 전부 등록 pre-validation-reject
-    behavioral 증명(미증명 0). validator surface 는 전부 CV3 등록
-    집합 ⊆ (미등록 0). I-flat 은 #1651 lock invariant 아님 — safe
-    forbid/nested BaseModel 은 PASS.
-    """
+def _s1s2_models() -> tuple[list[type[BaseModel]], list[tuple[str, Any]]]:
+    """S1∪S2 self-enumerate BaseModel + root-container annotation."""
     resolved, failures = _collect_s1_models()
     assert not failures, f"S1b origin-complete FAIL: {failures}"
-
     app = _build_app()
     s2 = _collect_s2(app)
     assert not s2.fail_mounts, f"S2 mount FAIL: {s2.fail_mounts}"
 
     models: list[type[BaseModel]] = []
+    roots: list[tuple[str, Any]] = []
     for _, m in resolved:
         if m not in models:
             models.append(m)
-    for _, ann in s2.body_models:
+    for path, ann in s2.body_models:
         if isinstance(ann, type) and issubclass(ann, BaseModel):
             if ann not in models:
                 models.append(ann)
         else:
-            # root-container body — annotation 직접 walk(BaseModel
-            # resolve 선행 금지). 현 실측 0건이나 구조적으로 처리.
-            res = walk_annotation(ann, "s2-root")
-            assert res.ok, f"S2 root-container body FAIL: {res.reason} ({res.path})"
+            roots.append((path, ann))
+    return models, roots
 
-    registered_owners = {p.owner_qualname for p in _PRE_VALIDATION_REJECT_REGISTRY}
-    cv3_owners = _registered_validator_owner_qualnames()
 
-    all_dict_nodes: list[tuple[str, str]] = []
-    all_validator_surfaces: set[str] = set()
-    unjustified: list[str] = []
+def test_discovery_lock_current_surface_all_pass_false_positive_zero() -> None:
+    """현 코드 락 green: S1∪S2 전수 default-deny 검증 PASS.
 
-    for m in models:
-        res = walk_annotation(m, m.__qualname__)
-        all_validator_surfaces |= res.validator_surfaces
-        if res.ok:
-            continue
-        # FAIL 이면 (a) 발견 dict 노드가 전부 등록 pre-reject 증명
-        # owner 이거나 (b) validator surface 가 전부 CV3 등록집합 ⊆
-        # 일 때만 justified-unreachable PASS 로 간주.
-        justified = True
-        for owner, p in res.dict_nodes:
-            oq = owner.__qualname__ if owner is not None else "<root>"
-            all_dict_nodes.append((oq, p))
-            if oq not in registered_owners:
-                justified = False
-                unjustified.append(
-                    f"미등록 비-dict[str,Any] dict 노드 owner={oq} "
-                    f"path={p} (pre-validation-reject 증명 필요)"
-                )
-        # validator-bearing 으로 인한 FAIL: surface 가 CV3 등록 owner
-        # 면 justified(behavioral canary 가 별 테스트로 증명).
-        for sid in res.validator_surfaces:
-            owner_q = _surface_owner_qualname(sid)
-            if owner_q not in cv3_owners:
-                justified = False
-                unjustified.append(
-                    f"미등록 validator surface={sid} (owner={owner_q} ∉ CV3 등록집합)"
-                )
-        if not justified and not res.dict_nodes and not res.validator_surfaces:
-            unjustified.append(
-                f"{m.__qualname__}: 정당화 불가 FAIL — {res.reason} ({res.path})"
-            )
+    핵심(default-deny): 각 S1∪S2 surface 는 검증 walk 가 **완전히
+    ok** 여야만 PASS. 검증 walk 는 등록된 per-(owner,field)
+    pre-validation-reject 증명 dict 키와 per-surface-id 등록 CV3
+    validator surface 만 PASS 로 간주하고, 그 외 모든 unsafe shape
+    (``extra='allow'``/RootModel/dataclass/TypedDict/unknown/미증명
+    dict/미등록 validator)는 트리 어디에 있든 — short-circuit 으로
+    가려질 수 있던 곳까지 — FAIL 한다. ``walk_annotation()`` 이 한
+    노드라도 미충족이면 그 surface 는 무조건 FAIL(``justified`` 초기값/
+    단축 분기 없음). 추가로 발견된 비-``dict[str,Any]`` dict 노드는
+    전부 (owner,field) 등록 증명 보유, validator surface 는 전부
+    per-surface-id CV3 등록임을 단언한다(stale·over-broad 차단).
 
-    assert not unjustified, (
-        "discovery lock false-positive/미증명 surface 발견 "
-        "(현 가정=0건 — Stop Condition: live 노출 표면 또는 미증명 "
-        f"surface 면 즉시 중단·재보고): {unjustified}"
+    현 가정 = caller-supplied 키/이름 벡터 live 0건. 강화 후에도 현
+    S1∪S2 전수 PASS 여야 하며, 새 FAIL = 실 live 노출 표면 발견 →
+    Stop Condition(중단·재보고).
+    """
+    models, roots = _s1s2_models()
+
+    # 등록 증명집합을 (owner,field) / surface-id 단위로 self-derive.
+    justify = _Justify(
+        dict_keys=frozenset(p.key for p in _PRE_VALIDATION_REJECT_REGISTRY),
+        validator_surfaces=frozenset(_registered_validator_surface_ids()),
     )
 
-    # 발견한 dict 노드 owner 전부 등록 pre-reject 증명 ⊆.
-    discovered_dict_owners = {oq for oq, _ in all_dict_nodes}
-    assert discovered_dict_owners <= registered_owners, (
-        f"발견 dict 노드 owner {discovered_dict_owners} ⊄ 등록 "
-        f"pre-reject 증명집합 {registered_owners}"
+    discovered_dict_keys: set[tuple[str, str]] = set()
+    discovered_validator_surfaces: set[str] = set()
+    failed: list[str] = []
+
+    def _record(res: WalkResult) -> None:
+        for owner, p in res.dict_nodes:
+            discovered_dict_keys.add(_dict_node_field_key(owner, p))
+        discovered_validator_surfaces.update(res.validator_surfaces)
+
+    # root-container body(현 실측 0건이나 구조적 처리 — BaseModel
+    # resolve 선행 금지).
+    for rpath, ann in roots:
+        res = walk_annotation(ann, f"s2-root:{rpath}", justify=justify)
+        _record(res)
+        if not res.ok:
+            failed.append(
+                f"S2 root-container body 미증명 FAIL: {res.reason} ({res.path})"
+            )
+
+    for m in models:
+        # default-deny 검증 walk — 등록 증명/CV3 만 PASS, 그 외 일체
+        # FAIL(미증명/unknown/구조 unsafe 가 트리 어디 있든 잡힘).
+        res = walk_annotation(m, m.__qualname__, justify=justify)
+        _record(res)
+        if not res.ok:
+            failed.append(
+                f"{m.__module__}.{m.__qualname__}: default-deny 검증 walk "
+                f"FAIL(미증명/unknown unsafe shape) — {res.reason} ({res.path})"
+            )
+
+    assert not failed, (
+        "discovery lock default-deny FAIL — 미증명/unknown unsafe surface "
+        "발견 (현 가정=0건 — Stop Condition: live 노출 표면 또는 미증명 "
+        f"surface 면 즉시 중단·재보고): {failed}"
+    )
+
+    # 발견된 비-dict[str,Any] dict 노드는 전부 (owner,field) 등록 증명
+    # 보유(stale/over-broad 차단 — owner 단독 아님).
+    missing_dict = sorted(discovered_dict_keys - set(justify.dict_keys))
+    assert not missing_dict, (
+        f"발견 dict 노드 (owner,field) {missing_dict} 가 등록 "
+        f"pre-validation-reject 증명집합 {sorted(justify.dict_keys)} 에 없음 "
+        "(per-(owner,field) 증명 필요)"
+    )
+    # 발견된 validator surface 는 전부 per-surface-id CV3 등록.
+    missing_vs = sorted(discovered_validator_surfaces - set(justify.validator_surfaces))
+    assert not missing_vs, (
+        f"발견 validator surface {missing_vs} 가 CV3 per-surface-id "
+        f"등록집합 {sorted(justify.validator_surfaces)} 에 없음"
     )
 
 
 def test_lock_validator_surfaces_subset_of_cv3_registry() -> None:
-    """CV3: lock self-derive validator surface 집합 ⊆ 등록 owner 집합.
+    """CV3: lock self-derive validator surface 집합 ⊆ **full surface-id**
+    등록집합.
 
     S1∪S2 모델의 ``__pydantic_decorators__``(field/model + v1 호환
     ``.validators``/``.root_validators``) ∪ ``Annotated[*Validator]``
-    field metadata 를 self-enumerate 한 집합의 owner 가 전부 CV3
-    등록집합 ⊆ 여야 한다(미등록 1개라도 FAIL). 개수·고정 멤버명
-    하드코딩 아님 — lock self-derive 가 SSOT.
+    field metadata 를 self-enumerate 한 **각 surface-id** 가 CV3
+    등록집합(전 canary 가 ``model_ref`` 모델에서 동일 규칙으로 재도출한
+    surface-id union)에 그 surface-id 로 존재해야 한다. owner 이름
+    비교가 아니라 surface-id 단위 — 이미 등록된 모델에 새
+    ``field_validator``/``model_validator`` 가 추가돼도 그 신규
+    surface-id 가 어느 canary 의 등록 집합에도 없으므로 FAIL(별도
+    canary 미작성 시). 개수·고정 멤버명 하드코딩 아님 — lock
+    self-derive 가 SSOT.
     """
     surfaces = _enumerate_all_validator_surfaces()
     assert surfaces, "validator surface self-enumerate 0건 — 회귀 의심"
-    cv3_owners = _registered_validator_owner_qualnames()
-    missing: list[str] = []
-    for sid in surfaces:
-        owner_q = _surface_owner_qualname(sid)
-        if owner_q not in cv3_owners:
-            missing.append(f"{sid} (owner={owner_q})")
+    registered = _registered_validator_surface_ids()
+    missing = sorted(set(surfaces) - registered)
     assert not missing, (
-        "lock self-enumerate validator surface 가 CV3 미등록 — "
-        f"미등록 surface(즉시 FAIL): {missing}. CV3 등록집합 owner="
-        f"{sorted(cv3_owners)}"
+        "lock self-enumerate validator surface 가 CV3 미등록 "
+        f"(surface-id 단위 — 신규 validator 추가 차단): {missing}. "
+        f"CV3 등록 surface-id 집합={sorted(registered)}"
     )
 
 
