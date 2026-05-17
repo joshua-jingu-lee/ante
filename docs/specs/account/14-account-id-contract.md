@@ -87,6 +87,287 @@ violations:
 | ``account_id = account_id or ""`` | ``account_id = require_account_id(account_id, context="...")`` |
 | 빈 문자열을 wildcard로 해석 | wildcard 의미가 필요하면 별도 sentinel 도입 (1.0 범위 외) |
 
+## invalid account_id 에러코드 SSOT (목표 — #1623/#1633)
+
+이 절은 account-scoped CLI / IPC / oracle 표면에서 invalid
+``account_id`` ( ``None`` / 빈 문자열 / ``"default"`` / 패턴 위반 )를
+거부할 때 노출되어야 하는 **목표(normative target) 안정 에러코드의
+단일 출처(SSOT)** 다. #1623 split A/B/C ( #1634 / #1635 / #1636 ) 및
+후속 follow-up이 **도달시켜야 할 상태**를 정의하며, 임의의 신규
+코드를 도입하지 않는다.
+
+> **목표(normative target) — current 단정 아님.** 본 절의 표·prose 는
+> 각 표면이 invalid ``account_id`` 에 대해 **어떤 코드를 내야
+> 하는지**(target)를 정의한다. 어떤 항목도 "현재 이미 그 코드를
+> 산출한다"를 단정하지 않는다. 특정 표면이 지금 무엇을 내는지(정렬
+> 여부) 확정은 그 표면을 담당하는 #1623 split ( #1634 / #1635 /
+> #1636 ) 의 probe 책임이다(아래 [Non-Goal](#1633-non-goal--per-surface-런타임-trace는-split-책임) 참조).
+
+### 결정 — `VALIDATION_ERROR` 재사용 고정 (목표)
+
+invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
+``InvalidAccountIdError.code = "VALIDATION_ERROR"`` 코드로 노출되어야
+한다. 본 표는 #1623 split 이 도달시켜야 할 목표 상태이며, 현재
+산출을 단정하지 않는다.
+
+| 표면 | 목표 노출 경로 | 목표 코드 |
+|---|---|---|
+| account-scoped CLI JSON error | ``require_account_id`` → :class:`InvalidAccountIdError` → CLI JSON error payload (담당 split 이 CLI 콜백의 ``except`` / non-Click 예외 변환을 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
+| IPC broker dispatch | ``broker.status`` / ``broker.balance`` / ``broker.positions`` / ``broker.reconcile`` handler 의 ``require_account_id`` → :class:`InvalidAccountIdError` → IPC server ``getattr(e, "code", "EXECUTION_ERROR")`` (담당 split 이 ``require_account_id`` 최우선화를 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
+| oracle host probe | ``ANTE_ORACLE_HOST_PROBE_MODE=cli_account_id_invalid_contract`` 가 기대하는 nonzero clean invalid account_id 응답 | ``VALIDATION_ERROR`` |
+
+근거 (목표 코드 = ``InvalidAccountIdError.code`` 재사용, 코드 상수와 정합):
+
+- ``src/ante/account/errors.py`` 의 ``InvalidAccountIdError.code =
+  "VALIDATION_ERROR"`` 클래스 속성이 목표 코드의 출처다. IPC server
+  의 ``getattr(e, "code", "EXECUTION_ERROR")`` 폴백 구조상, 그
+  ``VALIDATION_ERROR`` 가 envelope 으로 노출되려면 **그 핸들러/CLI
+  콜백이 invalid ``account_id`` 에 대해 :class:`InvalidAccountIdError`
+  를 실제로 raise 하고 그 예외가 envelope 까지 전파**되어야 한다.
+- **require_account_id 최우선성 일반 규칙 (분류 기준).** 어떤
+  표면이 invalid ``account_id`` 에 목표 ``VALIDATION_ERROR`` 를
+  내려면, 그 표면의 핸들러/CLI 콜백에서 ``require_account_id`` 가
+  **다른 입력 처리** ( ``args["bot_id"]`` / ``args["amount"]`` 같은
+  raw ``get`` , 별도 lookup, CLI 내부 ``except`` 가
+  :class:`InvalidAccountIdError` 를 미포함, 그룹 레벨이 non-Click
+  ``AccountError`` 를 미변환 등 ) **보다 먼저 호출되고 그 예외가
+  envelope 까지 전파**되어야 한다. 이 규칙은 어느 split 이 어떤
+  표면의 정렬을 맡는지 **판단하는 분류 기준**일 뿐이며, **#1633 은
+  특정 표면이 지금 무엇을 내는지를 단정하지 않고 담당 split 만
+  배정한다.**
+  어떤 표면이 drift 인지는 결정표 ``정렬 담당 split`` 컬럼으로만
+  함의되며, 그 표면의 정렬·확정은 담당 split 이 자기 probe 로
+  수행한다. 분류 근거가 되는 **구조 사실**(코드 위치)은 다음과
+  같다(구조 표기일 뿐, 런타임 산출 단정 아님):
+  - ``broker.reconcile`` — ``_handle_broker_reconcile`` 이
+    ``bot_id = args["bot_id"]`` 를 ``require_account_id`` **이전**에
+    raw 로 읽는 **구조** ( ``src/ante/ipc/registry.py:343`` )다.
+    이 ordering 구조 때문에 invalid-account-only 정렬은 담당 split
+    이 ``require_account_id`` 우선화까지 포함해 맡는다. 목표 =
+    ``VALIDATION_ERROR``, 정렬 담당 = **#1636** ( ``require_account_id``
+    우선화 포함 ). status/balance/positions 와 진입 구조가 달라
+    별도 행으로 분리한다.
+  - ``treasury.allocate`` / ``treasury.deallocate`` —
+    ``_handle_treasury_allocate`` / ``_handle_treasury_deallocate``
+    ( ``src/ante/ipc/registry.py:188``/``:199`` )가
+    ``account_id = args["account_id"]`` 를 raw 로 읽어 그대로
+    ``svc.treasury_manager.get(account_id)`` 에 전달하는 **구조**로,
+    ``require_account_id`` 를 경유하지 않는다. 이 구조상 목표
+    ``VALIDATION_ERROR`` 도달은 **``require_account_id`` 경유 표면
+    한정**이 아니므로 자동 매핑되지 않으며, bucket **E** 의
+    non-broker mutating IPC follow-up 이 해당 handler 를
+    ``require_account_id`` 경유로 정렬할 때 비로소 닫힌다(완료/자동
+    매핑으로 오인 금지). 결정표 ``ante treasury allocate`` /
+    ``deallocate`` 행( **E — follow-up 후보** )과 정합한다.
+  - ``rule list`` / ``rule info`` — CLI 콜백 ``except`` 가
+    :class:`AccountNotFoundError` 만 잡고 :class:`InvalidAccountIdError`
+    를 미포함하는 **구조** ( ``src/ante/cli/commands/rule.py`` )이며,
+    ``AuthenticatedGroup.main`` 이 ``standalone_mode=False`` 에서
+    ``click.UsageError`` / ``Abort`` 만 catch 하는 **구조**
+    ( ``src/ante/cli/middleware.py`` )로 non-Click ``AccountError``
+    변환 경로를 두지 않는다. 이 except/변환 구조 때문에 목표
+    도달 정렬을 담당 split 이 맡는다. 목표 = ``VALIDATION_ERROR``,
+    정렬 담당 = **#1635**.
+- IPC 에러코드 계약 가드 ``tests/unit/test_ipc_error_code_mapping.py``
+  가 ``InvalidAccountIdError.code == "VALIDATION_ERROR"`` 및
+  ``require_account_id`` 경유 IPC 응답 ``error.code ==
+  "VALIDATION_ERROR"`` 를 고정한다. ``require_account_id`` 비경유
+  표면( ``treasury.allocate``/``deallocate`` 등 )은 담당 split /
+  follow-up 정렬 시 본 가드 범위에 편입된다(본 #1633 은 가드 미갱신).
+- 형식 위반 메시지 자체는 위 [`### 메시지 형식 보존`](#메시지-형식-보존)
+  계약을 따른다. 본 절은 **에러코드 목표**의 SSOT이고, 메시지
+  문자열은 별도 계약이다(둘은 충돌하지 않는다).
+
+### 신 도메인코드 도입 예외 절차
+
+invalid ``account_id`` 에 ``VALIDATION_ERROR`` 재사용이 불가능하다는
+근거(예: IPC 계약 충돌)가 확인되는 경우에만 신 도메인코드를 도입한다.
+그 경우 도입을 결정하는 **같은 이슈의 스펙**에 다음을 먼저 남긴다:
+
+1. 재사용 불가 사유 (구체적 충돌 지점),
+2. IPC 호환성 영향 (어떤 IPC handler 응답 코드가 바뀌는지),
+3. ``tests/unit/test_ipc_error_code_mapping.py`` 등 갱신 대상 테스트 범위.
+
+#1633 은 재사용 고정 결정이므로 본 절차에 해당하지 않는다(신코드 0).
+
+## account-scoped CLI inventory 결정표 (SSOT — #1623/#1633)
+
+이 표는 6개 CLI command 파일( ``account`` / ``bot`` / ``broker`` /
+``rule`` / ``strategy`` / ``treasury`` )에서 ``account_id`` 를 입력받는
+**모든 Click 입력 표면** ( ``@click.argument("account_id")`` positional
++ account 관련 ``@click.option`` )의 전수 inventory이자 #1623 split
+분류 SSOT다. 표 본체는 본 문서에 고정하며,
+[`docs/specs/cli/03-commands.md`](../cli/03-commands.md#account-scoped-account_id-입력-표면--14-account-id-contract-참조)
+는 본 표를 참조한다.
+
+### current 단정 금지 (필수 — 거짓종결 방지)
+
+> **본 표는 목표(normative target) 계약이다.** 어떤 행도 그 표면이
+> 지금 시점에 목표 코드를 이미 내고 있다는 식의 현재-동작 단정을
+> 하지 않는다(런타임-일치 단정 금지). ``목표 에러코드`` 컬럼은 그
+> 표면이 invalid ``account_id`` 에 대해 **내야 하는** 코드(target)
+> 이고, ``code/spec 등재 상태`` 컬럼은 **정적 사실만** (Click
+> decorator 존재 vs 03-commands.md 기재 여부 — 런타임 산출과 무관),
+> ``정렬 담당 split`` 컬럼은 그 목표에 도달시킬 책임 주체다.
+> **각 표면이 지금 무엇을 내는지(정렬 여부) 확정은 각 담당
+> split 의 invalid-account-only probe 책임**이며 #1633 범위가
+> 아니다(아래 [Non-Goal](#1633-non-goal--per-surface-런타임-trace는-split-책임)).
+> 따라서 진입-패턴 / 현재-동작 / 런타임-일치 류 **런타임 산출
+> 단정 컬럼·문구는 본 표에서 폐기**한다.
+
+### enumeration 방법론
+
+- **포함 기준**: Click decorator 기준 — ``@click.argument("account_id")``
+  ( positional; 예 ``ante account info default`` 가 #1623 실제 실패
+  표면) + account 관련 ``@click.option`` ( ``--account`` /
+  ``--account-id`` ). flag-only 한정 금지(positional 누락 0). raw
+  ``rg`` line count 는 SQL/출력/payload 비표면 매치를 다수 포함하므로
+  검증 기준으로 쓰지 않는다 — **unique CLI command path** 목록으로
+  산출한다.
+- **diff 분류 (정적 사실만)**: (i) Click decorator 산출 code 목록
+  ( ``@click.argument("account_id")`` 또는 account ``@click.option``
+  보유 command 함수 ) ↔ (ii) 03-commands.md account-scoped command
+  목록을 비교해 ``match`` / ``spec-only`` (코드 미등록) / ``code-only``
+  (spec 미기재) 로 폐쇄한다. 이 분류는 **Click decorator 존재 vs
+  03-commands 기재 여부라는 정적 사실**일 뿐, 런타임 산출 코드와
+  무관하다.
+- **row-count 동치 (정적)**: 결정표 row 수 == enumerate된 unique
+  command path 수( ``match`` + ``code-only`` ) + ``spec-only`` 별도
+  행. 이 동치는 Click decorator 산출 목록 vs 03-commands 목록의
+  정적 비교만으로 검증하며, 런타임 trace 와 무관하다. 현 코드
+  표면( ``treasury snapshot`` , ``strategy performance`` 포함)
+  누락 0.
+
+### 분류 bucket
+
+| bucket | 의미 | #1623 매핑 |
+|---|---|---|
+| **A** | read-only lookup/filter ingress | #1634 |
+| **B** | treasury·rule local construction lifecycle ( ``_create_treasury`` / ``_create_rule_engine`` 경유) | #1635 |
+| **C** | broker IPC envelope ( ``broker.status/balance/positions/reconcile`` ) | #1636 |
+| **D** | account-lifecycle / cold-path / AccountService mutation — #1634/35/36 범위 아님 | follow-up |
+| **E** | non-broker mutating IPC — ``treasury.allocate`` / ``treasury.deallocate`` ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw, ``registry.py:188``/``:199`` ) , ``bot.create`` **만**. read 표면( ``treasury snapshot`` 은 ``_create_treasury`` =B, ``strategy performance`` 는 read-family follow-up )은 E 아님 — #1634/35/36 범위 아님 | follow-up |
+
+**일반 규칙(구조적 폐쇄)**: enumerate된 **모든** Click ``account_id``
+command 표면은 본 표에 **명시 row 1개씩** 필수다(rule-only / implicit
+금지). A/B/C 는 **#1623 probe 실패 집합과 동형인 표면만** 배정하며,
+그 외(D 계열·E 계열·2-bucket 걸침·진정 애매)는 명시
+follow-up / scope-extension / 구현대상아님 / 문서수정 결정으로 닫는다
+(임의 배정·누락 0). ``spec-only`` / ``code-only`` 행은 각각
+``구현대상아님`` / ``문서수정`` / ``후속`` 중 하나로 확정한다.
+
+### 결정표
+
+각 컬럼 의미: ``목표 에러코드`` = 그 표면이 invalid ``account_id`` 에
+대해 **내야 하는**(target) 코드 — **전 행 ``VALIDATION_ERROR`` 고정**
+(normative target; 런타임-일치 단정 아님). ``code/spec 등재 상태`` =
+**정적 사실만** ( Click decorator 존재 vs 03-commands.md 기재 여부 —
+``match`` / ``spec-only`` / ``code-only`` ; 런타임 산출과 무관 ).
+``정렬 담당 split`` = 그 목표에 도달시킬 책임 ( A=#1634 / B=#1635 /
+C=#1636 / D follow-up / E follow-up / read-family follow-up /
+문서수정 ). **그 표면이 지금 무엇을 내는지는 본
+표가 단정하지 않으며**(위 [current 단정 금지](#current-단정-금지-필수--거짓종결-방지);
+어떤 표면이 drift 인지는 ``정렬 담당 split`` 컬럼으로만 함의),
+담당 split 의 probe 책임이다.
+
+| CLI command path | account_id 입력형태 | 목표 에러코드 | code/spec 등재 상태 (정적) | 정렬 담당 split |
+|---|---|---|---|---|
+| `ante account info <account_id>` | positional arg | `VALIDATION_ERROR` | match | **A — #1634** (#1623 probe `account_info_default`/`account_info_bad_pattern` 대상 표면) |
+| `ante account credentials <account_id>` | positional arg | `VALIDATION_ERROR` | match | **A — #1634** (`account info` 와 동형 read-only `svc.get`; 정렬·확정은 #1634 probe 책임) |
+| `ante bot list --account <account_id>` | option | `VALIDATION_ERROR` | match | **A — #1634** (#1623 probe `bot_list_default` 대상) |
+| `ante treasury status --account <account_id>` | option | `VALIDATION_ERROR` | match | **B — #1635** (#1623 probe `treasury_status_default` 대상; `_create_treasury` construction 경계) |
+| `ante rule list --account <account_id>` | option | `VALIDATION_ERROR` | match (본 #1633 docs-only 보정으로 03-commands.md rule 섹션·offline 명령 표 양쪽에 `--account <account_id>` 기재 → `code-only`→`match`. 보정 전: 코드 `rule.py:93` `@click.option("--account","account_id",required=True)` 존재, 03-commands.md 미기재. **정적 사실만**) | **B — #1635** (#1623 probe `rule_list_default` 대상. CLI 콜백 `except` 가 `AccountNotFoundError` 만 잡고 `InvalidAccountIdError` 미포함하는 **구조** (`rule.py`), `AuthenticatedGroup.main` 이 non-Click `AccountError` 변환 경로 미보유 **구조** (`middleware.py`)이므로 목표 도달 정렬은 **#1635** 담당. 정렬·산출 확정은 #1635 probe 책임) |
+| `ante rule info <rule_id> --account <account_id>` | option | `VALIDATION_ERROR` | match (본 #1633 docs-only 보정으로 03-commands.md 기재 → `code-only`→`match`. 보정 전: 코드 `rule.py:189` `@click.option("--account","account_id",required=True)` 존재, 03-commands.md 미기재. **정적 사실만**) | **B — #1635** (`rule list` 와 동형 construction; #1635 본문 `rule info` 포함. `rule_info` CLI 콜백이 `InvalidAccountIdError` 를 잡는 `except` 미보유 + `AuthenticatedGroup.main` non-Click 변환 경로 미보유 **구조**이므로 목표 도달 정렬은 **#1635** 담당) |
+| `ante broker status --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.status` 경계; 정렬·확정은 #1636 probe 책임) |
+| `ante broker balance --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (#1623 probe `broker_balance_default` 대상) |
+| `ante broker positions --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.positions` 경계) |
+| `ante broker reconcile --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.reconcile`. **별도 행** — `_handle_broker_reconcile` 이 `args["bot_id"]` 를 `require_account_id` **이전**에 raw 로 읽는 ordering **구조** (`src/ante/ipc/registry.py:343`)이므로 invalid-account-only 정렬을 담당 split 이 `require_account_id` 우선화까지 포함해 맡는다. 목표=`VALIDATION_ERROR`, 정렬 담당=**#1636** (`require_account_id` 우선화 포함). status/balance/positions 와 진입 구조 다름 → 분리) |
+| `ante account suspend <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (AccountService mutation/lifecycle; #1623 probe 집합 아님 — #1634/35/36 임의 포함 금지) |
+| `ante account activate <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation) |
+| `ante account delete <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation, cold-path) |
+| `ante account set-credentials <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation, cold-path) |
+| `ante account repair-timezone <account_id> <new_timezone>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation, cold-path) |
+| `ante account create --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **D — follow-up 후보** (account-lifecycle / cold-path; `account_create` 콜백이 `svc.create` 를 generic `except Exception` → `fmt.error(str(e))` ( `code=` 인자 없음 )로 감싸는 **구조** ( `src/ante/cli/commands/account.py` ). `validate_new_account_id` 검증 자체와 무관하게 그 CLI 래핑 구조상 목표 `VALIDATION_ERROR` 도달은 D 통합 follow-up 의 cold-path drift 점검 대상; #1634/35/36 probe 집합 아님) |
+| `ante treasury allocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (non-broker mutating IPC `treasury.allocate`→`_handle_treasury_allocate`→`treasury_manager.get` **raw**, `require_account_id` 미경유 (`registry.py:188`). #1635 construction-lifecycle 범위 아님; #1623 probe 집합 아님. 목표=`VALIDATION_ERROR`, follow-up 이 `require_account_id` 경유로 정렬 시 도달) |
+| `ante treasury deallocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (동 mutating IPC `treasury.deallocate`→`_handle_treasury_deallocate`→`treasury_manager.get` **raw** (`registry.py:199`)) |
+| `ante bot create --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (mutating IPC `bot.create` handler `require_account_id`; 단 `--account` 생략 시 single-active resolver. #1623 probe 집합 아님; 구현 시 경로 확인 후 동 결정) |
+| `ante treasury snapshot --account <account_id>` | option | `VALIDATION_ERROR` | match | **B — #1635** (`treasury status` (`src/ante/cli/commands/treasury.py:64`) 와 **동일** `_create_treasury(account_id)` construction-lifecycle 경로 — snapshot 콜백 `src/ante/cli/commands/treasury.py:229` 가 `t, db = await _create_treasury(account_id)` 로, status 콜백 `:69` 와 동일 `_create_treasury`→`require_account_id` (`:37`) 경계를 공유하는 **구조**. ∴ B(#1635) construction-lifecycle 범위 (mutating IPC E 아님). 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 #1635 probe 책임) |
+| `ante strategy performance <name> --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **follow-up (read-family, 비-#1623-probe)** (읽기 표면 — `strategy_performance` CLI 콜백 (`src/ante/cli/commands/strategy.py:432`) 자체가 `account_id` 를 처리 (`account_id is None` → `STRATEGY_MISSING_REQUIRED_ACCOUNT`, `:450`) 하고 `PerformanceTracker` + 자체 `SELECT 1 FROM accounts` 단건 read 를 수행하는 **구조**. `_create_treasury`/`_create_rule_engine` construction(B) 도, broker/non-broker mutating IPC dispatch(C/E) 도 아니며, #1623-probe(`account info`/`bot list`) 비동형 → mutating IPC E 와 구분되는 **read-family follow-up**. 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 read-family follow-up 책임) |
+| `ante broker health [--account <account_id>]` | option | `VALIDATION_ERROR` | **spec-only** (03-commands.md:114(`status/health` 합산 행)·410(bash 블록) 에 기재; `broker.py` 미등록 — status/balance/positions/reconcile 만 존재. **정적 사실**) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
+| `ante broker price <symbol> [--account <account_id>]` | option | `VALIDATION_ERROR` | **spec-only** (03-commands.md:117·413(bash 블록) 에 기재; `broker.py` 미등록. **정적 사실**) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
+
+> row-count 동치 검증 (정적): 위 표 결정 row 23개 = code 표면
+> 21개( 등재 상태 ``match`` ; ``code-only`` 0) + ``spec-only`` 2개
+> ( ``broker health`` / ``broker price`` ). enumerate된 unique CLI
+> command path 수 21개와 동치(누락 0). ``treasury snapshot`` ·
+> ``strategy performance`` 포함. **이 동치는 Click decorator 산출
+> 목록 vs 03-commands 기재의 정적 비교만으로 검증하며, 런타임 trace
+> 와 무관하다.**
+>
+> match/spec-only/code-only 집계( **정적** ): ``match`` 21 /
+> ``spec-only`` 2 / ``code-only`` 0. ``rule list`` · ``rule info``
+> 는 코드 ( ``src/ante/cli/commands/rule.py:93``/``:189`` 의
+> ``@click.option("--account","account_id",required=True)`` )에는
+> 존재하나 03-commands.md rule 섹션·offline 명령 표에는 미기재였으므로
+> 본 정정 **이전** 상태는 ``code-only`` 2 였다. 본 #1633 (docs-only)이
+> 03-commands.md 의 rule 섹션·offline 명령 표 양쪽에 rule
+> ``--account <account_id>`` 표면을 함께 기재 보정하여 두 행의
+> **등재 상태**를 ``code-only → match`` 로 닫았다(일관 처리: 동일
+> docs-only 범위 내 03-commands.md drift 즉시 교정이 ``code-only``
+> 후속 항목을 별도로 미루는 것보다 정합적이고 row-count·집계 동치를
+> 보존). 따라서 보정 후 최종 ``code-only`` 0, 위 23/21/2 동치는
+> 유지된다. ``rule`` 행의 ``등재 상태`` 정정은 **정적 사실의 정정**일
+> 뿐이며 그 표면이 지금 무엇을 내는지는 단정하지 않는다(목표
+> ``VALIDATION_ERROR`` 도달 정렬은 except/변환 **구조**상 **#1635**
+> 담당, [Non-Goal](#1633-non-goal--per-surface-런타임-trace는-split-책임)).
+> #1623 split 분류는 정정과 무관하게 **B(#1635, rule
+> construction lifecycle)** 로 불변이다(등재 상태 컬럼만 정정,
+> 분류·목표 코드·row 수 무변경).
+
+> D/E/read-family = follow-up 항목은 본 이슈 #1633 의 통합 follow-up
+> 후보로 묶이며 사람이 등록한다(자동 생성 금지). 세 follow-up 계열은
+> 진입 구조가 다르므로 **섞지 않는다**:
+>
+> - **D (account-lifecycle / cold-path)**: ``account create`` ,
+>   ``account suspend/activate/delete/set-credentials/repair-timezone`` .
+> - **E (non-broker mutating IPC)**: ``treasury allocate`` ,
+>   ``treasury deallocate`` , ``bot create`` **만**
+>   ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw,
+>   ``registry.py:188``/``:199`` ; ``bot.create`` mutating IPC handler ).
+>   ``treasury snapshot`` ( ``_create_treasury`` =B/#1635 ) ·
+>   ``strategy performance`` ( read-family ) 는 mutating IPC 가
+>   아니므로 **E 에 포함하지 않는다**.
+> - **read-family (#1623-probe 비동형 read 표면)**:
+>   ``strategy performance`` ( ``strategy_performance`` 콜백 자체
+>   ``account_id`` 처리 + ``PerformanceTracker`` / 자체
+>   ``SELECT 1 FROM accounts`` read 의 **구조**; #1623-probe
+>   ( ``account info`` / ``bot list`` ) 비동형 ). mutating IPC(E) 와
+>   섞지 않는다.
+>
+> ``account create`` 는 ``account_create`` 콜백이 ``svc.create``
+> 를 generic ``except Exception`` → ``fmt.error(str(e))`` ( ``code=``
+> 인자 없음 )로 감싸는 **구조**상, ``validate_new_account_id`` 검증
+> 자체와 무관하게 그 cold-path CLI 래핑이 목표 ``VALIDATION_ERROR``
+> 도달을 보장하지 않으므로 D 통합 follow-up( account-lifecycle /
+> cold-path drift 점검 ) 후보에 포함된다. ``broker health`` /
+> ``broker price`` ( spec-only, 코드 표면 없음)만 follow-up 대상이
+> 아니다(처리는 ``문서수정``).
+
+### #1633 Non-Goal — per-surface 런타임 trace는 split 책임
+
+각 표면의 invalid-account-only probe **실제 런타임 산출**( 목표
+코드 충족 vs drift: uncaught / ``KeyError``→``EXECUTION_ERROR`` /
+raw 전달 )의 trace·단정은 **#1633 범위가 아니다**. #1633 은
+(1) 목표 에러코드(전 행 ``VALIDATION_ERROR``), (2) 정적 등재 상태
+( ``match`` / ``spec-only`` / ``code-only`` — Click decorator vs
+03-commands 기재 ), (3) 담당 split 분류만 고정한다. 어떤 표면이
+지금 시점에 그 목표에 정렬되어 있는지(무엇을 산출하는지) 확정은
+그 표면을 담당하는 split ( #1634 / #1635 / #1636 ) 또는 follow-up
+이 자기 invalid-account-only probe 로 수행한다. #1633 이 이를
+단정하면 docs 이슈가 코드 trace 의무를 떠안아 거짓종결한다 — 그러므로
+본 문서의 어떤 행·문구도 그 표면이 지금 목표 코드를 이미 내고
+있다는 식의 현재-동작/런타임-일치 단정을 하지 않는다.
+
 ## Helper API
 
 소스: ``src/ante/account/scoping.py``.

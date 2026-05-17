@@ -109,8 +109,8 @@ allowlist 후보에서 제거한다.
 | `ante treasury allocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury deallocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury snapshot ...` | `offline` | 일별 snapshot 조회 |
-| `ante rule list [--scope global|strategy]` | `offline` | rule 설정 조회 |
-| `ante rule info <rule_id>` | `offline` | rule 설정 조회 |
+| `ante rule list --account <account_id> [--scope global|strategy]` | `offline` | rule 설정 조회 (`--account` 필수) |
+| `ante rule info <rule_id> --account <account_id>` | `offline` | rule 설정 조회 (`--account` 필수) |
 | `ante broker status/health [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 상태 |
 | `ante broker balance [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
 | `ante broker positions [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
@@ -389,9 +389,22 @@ ante treasury snapshot --date <날짜> [--account <account_id>]          # 특�
 ### `ante rule` — 거래 룰 관리
 
 ```bash
-ante rule list [--scope global|strategy]  # 전역 + 전략별 룰 목록
-ante rule info <rule_id>           # 룰 상세
+ante rule list --account <account_id> [--scope global|strategy]  # 전역 + 전략별 룰 목록
+ante rule info <rule_id> --account <account_id>           # 룰 상세
 ```
+
+`rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
+의 `require_account_id` 를 경유하므로 `--account` 가 필수다. invalid
+`account_id` ( `None`/빈 문자열/`default`/패턴 위반 )의 **목표
+에러코드는 `VALIDATION_ERROR`** 이다(normative target). CLI 콜백
+`except` 가 `InvalidAccountIdError` 를 미catch 하고
+`AuthenticatedGroup.main` 이 non-Click `AccountError` 변환 경로를
+미보유하는 **구조**이므로, 목표 도달 정렬·확정은 **#1635** 담당이다
+(어느 표면이 drift 인지는 14-account-id-contract.md 결정표
+`정렬 담당 split` 컬럼으로만 함의하며, 본 문서·결정표 어디서도 이
+두 표면이 지금 무엇을 내는지는 단정하지 않는다 — 담당 split probe
+책임). 목표 코드·정적 등재 상태·담당 split 의 SSOT 는 아래
+[account-scoped 표면 참조](#account-scoped-account_id-입력-표면--14-account-id-contract-참조).
 
 ### `ante broker` — 증권사 연동
 
@@ -410,6 +423,28 @@ ante broker reconcile [--account <account_id>] [--fix]  # 시스템↔증권사 
 `broker price`는 live broker quote만 의미한다. 과거·공개 market data 조회는
 `data`/`feed` 계열 커맨드로 다룬다. `broker order`와 `broker stream prices`는
 일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙 없이는 제공하지 않는다.
+
+> `broker health`/`broker price <symbol>`는 본 문서에 기재되어 있으나
+> `src/ante/cli/commands/broker.py`에는 `status`/`balance`/`positions`/`reconcile`
+> 만 등록되어 있다(spec-only drift). 처리 결정은
+> [account-id-contract.md — account-scoped CLI inventory 결정표](../account/14-account-id-contract.md#결정표)
+> 참조(문서수정 후속).
+
+### account-scoped `account_id` 입력 표면 — 14-account-id-contract 참조
+
+account-scoped CLI 명령의 invalid `account_id`( `None`/빈 문자열/`default`/
+패턴 위반 ) 거부 **에러코드 SSOT**(`InvalidAccountIdError.code =
+"VALIDATION_ERROR"` 재사용 고정)와, 6개 CLI command 파일에서 `account_id`를
+입력받는 모든 Click 표면(positional `@click.argument("account_id")` +
+`--account`/`--account-id` option)의 **전수 inventory·#1623 split 분류**는
+다음 단일 SSOT가 보유한다(표 본체는 14-account-id-contract.md에만 둔다):
+
+> [docs/specs/account/14-account-id-contract.md — invalid account_id 에러코드 SSOT (목표)](../account/14-account-id-contract.md#invalid-account_id-에러코드-ssot-목표--16231633)
+> / [account-scoped CLI inventory 결정표](../account/14-account-id-contract.md#account-scoped-cli-inventory-결정표-ssot--16231633)
+
+#1623 split A(#1634)/B(#1635)/C(#1636) 및 follow-up은 위 결정표를 참조하며,
+본 03-commands 표의 account-scoped 행과 충돌하면 14-account-id-contract.md를
+우선한다.
 
 ### `ante data` — 데이터 관리
 
