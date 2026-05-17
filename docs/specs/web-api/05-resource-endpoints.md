@@ -78,10 +78,10 @@
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/data/datasets` | 보유 데이터셋 목록 (필터: symbol, timeframe, data_type, offset, limit). `timeframe`은 OHLCV bar vocabulary(`1m, 5m, 15m, 1h, 1d`, 계약 SSOT: core.md `## Canonical Symbol/Timeframe Vocabulary` (코드 상수 위임 #1613))만 허용 — vocabulary 외 값은 400 거부 (#1594). `data_type`은 `ohlcv \| fundamental` enum, 외 값은 422. `symbol`은 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 매칭 데이터 미존재 시 200 empty, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset 반환(core.md Legacy out-of-vocabulary 호환 정책과 정합). `symbol` vocabulary 거부 자체는 exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인)에 위임 |
-| GET | `/api/data/datasets/{dataset_id}` | 데이터셋 상세 조회. 메타데이터(symbol, timeframe, 기간, 행 수) + 데이터 미리보기(최근 5행). dataset_id = `{symbol}__{timeframe}`. ParquetStore.read(limit=5) 활용 |
+| GET | `/api/data/datasets/{dataset_id}` | 데이터셋 상세 조회. 메타데이터(symbol, timeframe, 기간, 행 수) + 데이터 미리보기(최근 5행). dataset_id = `{symbol}__{timeframe}`. ParquetStore.read(limit=5) 활용. `symbol`/`timeframe` segment가 path traversal(`.`/`..`/`/`/`\` /NUL/절대경로)이면 400 (#1631 — parent 디렉토리를 dataset으로 해석하는 결함 방어). `symbol` vocabulary는 별도 거부하지 않으며 legacy out-of-vocab symbol dir은 정상 처리(`## 데이터` 절 Legacy 호환 정책 정합) |
 | GET | `/api/data/schema` | 데이터 스키마 (필터: data_type) |
 | GET | `/api/data/storage` | 저장 용량 현황 |
-| DELETE | `/api/data/datasets/{dataset_id}` | 데이터셋 삭제. `data_type` query는 `ohlcv \| fundamental` enum (기본 `ohlcv`), enum 외 값은 422 |
+| DELETE | `/api/data/datasets/{dataset_id}` | 데이터셋 삭제. `dataset_id` = `{symbol}__{timeframe}`. 삭제 대상 유형(kind)의 SSOT는 `dataset_id`의 timeframe segment(`__fundamental` → fundamental, 그 외 → ohlcv). `data_type` query는 `ohlcv \| fundamental` enum (선택, 고정 기본값 없음 — 생략 시 `dataset_id` segment에서 파생, 명시 시 파생값과 일치해야 하며 불일치는 400). enum 외 값은 422. `symbol`/`timeframe` segment가 path traversal(`.`/`..`/`/`/`\` /NUL/절대경로)이면 400 (#1631 — `shutil.rmtree` 임의 디렉토리 삭제 방어). `symbol` vocabulary는 별도 거부하지 않으며 legacy out-of-vocab symbol dir은 정상 처리(spec `## 데이터` 절 Legacy 호환 정책 정합) |
 | GET | `/api/data/feed-status` | Feed 파이프라인 상태 조회 |
 
 ## 결재 관리 (`/api/approvals`)

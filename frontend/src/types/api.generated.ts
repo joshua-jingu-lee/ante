@@ -792,6 +792,10 @@ export type paths = {
          *
          *     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
          *     fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
+         *
+         *     삭제 대상 유형(kind)의 SSOT는 dataset_id의 timeframe segment다.
+         *     ``data_type`` query는 생략 가능하며, 명시 시 파생값과 일치하지 않으면
+         *     400으로 거부한다(`shutil.rmtree` 오삭제 방지, #1631).
          */
         delete: operations["delete_dataset_api_data_datasets__dataset_id__delete"];
         options?: never;
@@ -5486,8 +5490,8 @@ export interface operations {
     delete_dataset_api_data_datasets__dataset_id__delete: {
         parameters: {
             query?: {
-                /** @description 데이터 유형 (ohlcv, fundamental) */
-                data_type?: "ohlcv" | "fundamental";
+                /** @description 데이터 유형 (ohlcv, fundamental). 생략 시 dataset_id의 timeframe segment에서 파생(`__fundamental` → fundamental, 그 외 → ohlcv). 명시 시 파생값과 일치해야 하며 불일치는 400. */
+                data_type?: ("ohlcv" | "fundamental") | null;
             };
             header?: never;
             path: {
