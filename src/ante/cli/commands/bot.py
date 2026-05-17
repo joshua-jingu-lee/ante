@@ -9,6 +9,7 @@ from pathlib import Path
 
 import click
 
+from ante.cli._validators import reject_invalid_account_id
 from ante.cli.cold_path import is_active_runtime
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
@@ -84,10 +85,22 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
     """봇 목록 조회."""
     fmt = get_formatter(ctx)
 
+    # SQL filter **이전** ingress 검증 (#1634, Split A).
+    #
+    # omitted-vs-provided 계약 (#1624 동형):
+    #   - `--account` 미지정(`account_id is None`) → 전체 봇 반환 동작 **보존**
+    #     (omitted 분기는 검증하지 않는다; 이게 불변이다).
+    #   - `--account` provided(`default`/패턴 위반/`""` 포함) → invalid면
+    #     SQL filter 이전에 `VALIDATION_ERROR` + exit 1로 거부. 기존
+    #     `if account_id:` truthy 분기는 `""`를 falsy-skip해 전체 봇을
+    #     반환했으나(provided-empty drift), provided-empty도 invalid로 거부한다.
+    if account_id is not None:
+        account_id = reject_invalid_account_id(account_id, fmt, context="cli.bot.list")
+
     async def _run_list() -> list[dict]:
         db, _, _, _ = await _create_services()
         try:
-            if account_id:
+            if account_id is not None:
                 rows = await db.fetch_all(
                     "SELECT bot_id, name, strategy_id, account_id, status, created_at"
                     " FROM bots WHERE status != 'deleted' AND account_id = ?",

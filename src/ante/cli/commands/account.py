@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import click
 
 from ante.account.models import AccountStatus
+from ante.cli._validators import reject_invalid_account_id
 from ante.cli.cold_path import (
     ACCOUNT_COLD_PATH_BLOCKED_CODE,
     assert_no_active_runtime,
@@ -654,10 +655,20 @@ def account_info(ctx: click.Context, account_id: str) -> None:
     """계좌 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
+    # `svc.get(account_id)` lookup **이전** ingress 검증 (#1634, Split A).
+    # invalid account_id(`default`/`""`/패턴 위반)를 not-found로 오분류하지
+    # 않고 `VALIDATION_ERROR` + exit 1로 거부한다. positional required arg라
+    # omitted가 없어 전 입력을 검증한다. helper가 `InvalidAccountIdError`를
+    # 명시 catch하므로 아래 generic `except Exception`(code 없음 → not-found
+    # 오분류)에 도달하지 않는다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.info"
+    )
+
     async def _do_info() -> dict:
         svc, db = await _create_account_service()
         try:
-            acct = await svc.get(account_id)
+            acct = await svc.get(validated_account_id)
             return _account_to_detail(acct)
         finally:
             await db.close()
@@ -823,10 +834,17 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     """인증 정보 조회 (마스킹)."""
     fmt = get_formatter(ctx)
 
+    # `account info`와 동형 — `svc.get(account_id)` lookup **이전** ingress
+    # 검증 (#1634, Split A). invalid account_id를 not-found로 오분류하지 않고
+    # `VALIDATION_ERROR` + exit 1로 거부한다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.credentials"
+    )
+
     async def _do_credentials() -> dict[str, str]:
         svc, db = await _create_account_service()
         try:
-            acct = await svc.get(account_id)
+            acct = await svc.get(validated_account_id)
             return {k: mask_value(k, v) for k, v in acct.credentials.items()}
         finally:
             await db.close()
