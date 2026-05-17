@@ -99,14 +99,12 @@ class AccountCreateRequest(BaseModel):
         if v == "":
             return v
         if not _HH_MM_RE.fullmatch(v):
-            raise ValueError(
-                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
-            )
+            raise ValueError("trading_hours는 strict HH:MM 24시간 형식이어야 합니다")
         try:
             dtime.fromisoformat(v)
         except ValueError as exc:
             raise ValueError(
-                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
+                "trading_hours는 strict HH:MM 24시간 형식이어야 합니다"
             ) from exc
         return v
 
@@ -123,7 +121,13 @@ class AccountCreateRequest(BaseModel):
         """
         if v == "":
             return v
-        return validate_iana_timezone(v)
+        # 공유 helper(account/timezone.py)는 service caller 보존을 위해
+        # 미변경. web 422 경계에서만 거부값을 반사하지 않도록 wrap 한다
+        # (보안 invariant #1629 L1 반사 경로 2 — helper 위임 경로).
+        try:
+            return validate_iana_timezone(v)
+        except ValueError as exc:
+            raise ValueError("timezone은 유효한 IANA timezone이어야 합니다") from exc
 
 
 class AccountUpdateRequest(BaseModel):
@@ -163,14 +167,12 @@ class AccountUpdateRequest(BaseModel):
         if v is None:
             return v
         if not _HH_MM_RE.fullmatch(v):
-            raise ValueError(
-                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
-            )
+            raise ValueError("trading_hours는 strict HH:MM 24시간 형식이어야 합니다")
         try:
             dtime.fromisoformat(v)
         except ValueError as exc:
             raise ValueError(
-                f"trading_hours는 strict HH:MM 24시간 형식이어야 합니다: {v!r}"
+                "trading_hours는 strict HH:MM 24시간 형식이어야 합니다"
             ) from exc
         return v
 
@@ -187,7 +189,13 @@ class AccountUpdateRequest(BaseModel):
         """
         if v is None:
             return v
-        return validate_iana_timezone(v)
+        # 공유 helper(account/timezone.py)는 service caller 보존을 위해
+        # 미변경. web 422 경계에서만 거부값을 반사하지 않도록 wrap 한다
+        # (보안 invariant #1629 L1 반사 경로 2 — helper 위임 경로).
+        try:
+            return validate_iana_timezone(v)
+        except ValueError as exc:
+            raise ValueError("timezone은 유효한 IANA timezone이어야 합니다") from exc
 
 
 class AccountSuspendRequest(BaseModel):

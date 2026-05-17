@@ -650,7 +650,12 @@ async def update_account(
     try:
         validated = AccountUpdateRequest.model_validate(mutable_payload_in)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
+        # / accounts.py:1307 선례와 동일 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
     # 9. ``exclude_none=True``로 set된 mutable 필드만 추출. ``{"name": null}``
     # 같이 명시적으로 null이 들어온 경우 model_dump에서 빠지므로 service까지
@@ -878,7 +883,12 @@ async def suspend_account(
             try:
                 body = AccountSuspendRequest.model_validate(payload)
             except ValidationError as e:
-                raise HTTPException(status_code=422, detail=e.errors()) from None
+                # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1;
+                # bots.py:433 / accounts.py:1307 선례와 동일 sanitizer).
+                raise HTTPException(
+                    status_code=422,
+                    detail=e.errors(include_context=False, include_input=False),
+                ) from None
 
     reason = (body.reason if body else None) or "dashboard"
 
@@ -997,7 +1007,12 @@ async def activate_account(
             try:
                 _ActivateNoBody.model_validate(payload)
             except ValidationError as e:
-                raise HTTPException(status_code=422, detail=e.errors()) from None
+                # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1;
+                # bots.py:433 / accounts.py:1307 선례와 동일 sanitizer).
+                raise HTTPException(
+                    status_code=422,
+                    detail=e.errors(include_context=False, include_input=False),
+                ) from None
 
     try:
         await account_service.activate(account_id, activated_by=caller_id)

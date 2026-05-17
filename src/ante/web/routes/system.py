@@ -236,7 +236,12 @@ async def _parse_optional_request_body(
     try:
         return model.model_validate(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors()) from None
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1; bots.py:433
+        # / accounts.py:1307 선례와 동일 sanitizer).
+        raise HTTPException(
+            status_code=422,
+            detail=e.errors(include_context=False, include_input=False),
+        ) from None
 
 
 @router.post(
