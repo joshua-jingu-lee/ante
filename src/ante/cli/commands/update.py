@@ -93,12 +93,18 @@ def update(
 ) -> None:
     """ante를 최신 버전으로 업데이트합니다.
 
-    `--check`은 PyPI 버전 조회만 수행한다 (`--yes` 불필요).
-    `--check`이 아닌 실제 업데이트 실행은 `--yes`가 반드시 필요하며,
-    누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
-    `--yes` 게이트는 PyPI 조회 **앞에** 평가하므로, 네트워크 느림/실패
-    환경에서도 `--yes` 누락 호출은 PyPI 실패가 아닌 동일한 구조화 에러
-    코드로 거절된다.
+    게이트 평가 우선순위 (SSOT: docs/specs/cli/02-design-decisions.md
+    "위험 명령 확인 방식"):
+    ``--check`` → ``--yes`` confirmation(``CLI_CONFIRMATION_REQUIRED``)
+    → server-running/``--force``(``UPDATE_SERVER_RUNNING``) → 실제 update.
+
+    `--check`은 PyPI 버전 조회만 수행하는 dry-run이다 (`--yes`/server-running
+    무관, 최우선). `--check`이 아닌 실제 업데이트 실행은 `--yes`가 반드시
+    필요하며, 누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로
+    종료한다. `--yes` 게이트는 server 상태 검사와 PyPI 조회 **앞에**
+    평가하므로, 서버 실행/네트워크 느림·실패 환경에서도 `--yes` 누락
+    호출은 server-running 안내나 PyPI 실패가 아닌 동일한 구조화 에러
+    코드로 거절된다 (#1626 D1, Codex P2 2차).
     """
     from ante.update.checker import (
         get_current_version,
@@ -108,24 +114,22 @@ def update(
 
     fmt = get_formatter(ctx)
 
-    # 서버 실행 중 확인
-    if check_server_running():
-        if force:
-            if not fmt.is_json:
-                click.echo("서버를 중지합니다...")
-            # TODO: graceful shutdown
-        else:
-            fmt.error(
-                "서버가 실행 중입니다. "
-                "먼저 서버를 중지하거나 --force 옵션을 사용하세요."
-            )
-            raise SystemExit(1)
-
     current = get_current_version()
-    if not fmt.is_json:
-        click.echo(f"현재 버전: {current}")
 
+    # 게이트 평가 우선순위 (SSOT: docs/specs/cli/02-design-decisions.md
+    # "위험 명령 확인 방식" — precedence normative 규칙):
+    #   `--check` → `--yes` confirmation(``CLI_CONFIRMATION_REQUIRED``)
+    #   → server-running/`--force`(``UPDATE_SERVER_RUNNING``) → 실제 update
+    # `--check`은 dry-run으로 `--yes`/server-running과 무관(최우선,
+    # 충돌 정책: `--check` 우선). 그 외 실제 update 호출은 server 상태·
+    # side-effect 검사 **이전에** `--yes` 누락을 먼저 거부한다.
+
+    # 1) `--check`: PyPI 버전 조회만 수행하는 dry-run. `--yes`/server-running
+    #    상태와 무관하며 부수 효과가 없으므로 최우선으로 처리하고 반환한다
+    #    (`--check`+`--yes` 동시 사용 시에도 `--check` 우선 — 충돌 정책).
     if check:
+        if not fmt.is_json:
+            click.echo(f"현재 버전: {current}")
         latest = get_latest_version()
         if latest is None:
             fmt.error("PyPI 버전 확인 실패")
@@ -145,14 +149,18 @@ def update(
             click.echo("이미 최신 버전입니다")
         return
 
-    # 비대화형 입력 계약 (#1170, #1171 SSOT): `--check`이 아닌 실제 업데이트
-    # 실행 호출에는 `--yes`가 반드시 필요하다. 이 게이트는 PyPI 조회
-    # (`get_latest_version()`) **앞에** 위치해야 한다 — 그래야 네트워크
-    # 느림/실패 환경에서도 `--yes` 누락 호출이 PyPI 실패가 아닌
-    # ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (Codex P2 finding 2차).
-    # 자동화는 네트워크 상태와 무관하게 동일한 구조화 에러 코드를 받는다.
-    # 게이트 통과 전이므로 PyPI 조회/backup/pip upgrade/migration 등
-    # 부수 효과는 일체 발생하지 않는다.
+    # 2) 비대화형 입력 계약 (#1170, #1171, #1626 SSOT): `--check`이 아닌 실제
+    #    업데이트 실행 호출에는 `--yes`가 반드시 필요하다. 이 게이트는
+    #    server 상태 검사(`check_server_running()`)와 PyPI 조회
+    #    (`get_latest_version()`) **앞에** 위치해야 한다 — 그래야:
+    #    (a) 서버 실행 환경에서도 `--yes` 누락 호출이 server-running 안내가
+    #        아닌 ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (#1626 D1: spec
+    #        precedence — confirmation gate가 server 상태보다 우선).
+    #    (b) 네트워크 느림/실패 환경에서도 PyPI 실패가 아닌 동일한 구조화
+    #        에러 코드로 거절된다 (Codex P2 finding 2차).
+    #    자동화는 server/네트워크 상태와 무관하게 동일한 코드를 받는다.
+    #    게이트 통과 전이므로 server 상태 검사/PyPI 조회/backup/pip upgrade/
+    #    migration 등 부수 효과는 일체 발생하지 않는다.
     if not yes:
         fmt.error(
             f"업데이트 실행에는 --yes가 필요합니다 (현재 {current}). "
@@ -160,6 +168,27 @@ def update(
             code="CLI_CONFIRMATION_REQUIRED",
         )
         raise SystemExit(1)
+
+    # 3) 서버 실행 중 확인 — `--yes` 게이트 통과 후, 실제 update 부수 효과
+    #    이전에 평가한다. `--force` 없이 서버가 실행 중이면
+    #    ``UPDATE_SERVER_RUNNING``(#1626 D2: SSOT 02-design-decisions.md:115,
+    #    03-commands.md)으로 거절한다. `--force` 시 가드를 우회한다(현
+    #    graceful shutdown은 미구현 TODO — 본 이슈 범위 밖, 후속 후보).
+    if check_server_running():
+        if force:
+            if not fmt.is_json:
+                click.echo("서버를 중지합니다...")
+            # TODO: graceful shutdown
+        else:
+            fmt.error(
+                "서버가 실행 중입니다. "
+                "먼저 서버를 중지하거나 --force 옵션을 사용하세요.",
+                code="UPDATE_SERVER_RUNNING",
+            )
+            raise SystemExit(1)
+
+    if not fmt.is_json:
+        click.echo(f"현재 버전: {current}")
 
     # 업데이트 실행 — `--yes` 게이트 통과 후에만 PyPI를 조회한다.
     latest = target_version or get_latest_version()

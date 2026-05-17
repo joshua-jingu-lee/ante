@@ -661,4 +661,8 @@ ante update [--check] [--version <version>] [--yes] [--force]
 
 - `--check`은 단순 조회이므로 `--yes`/`--force` 영향 없음. `--check`과 `--yes`를 동시에 사용해도
   `--check`이 우선한다(충돌 정책: `--check` 우선).
+- 게이트 평가 우선순위는 **`--check` → `--yes` confirmation(`CLI_CONFIRMATION_REQUIRED`) →
+  server-running/`--force`(`UPDATE_SERVER_RUNNING`) → 실제 update** 순서다. 즉 실제 update 호출은
+  server 상태·side-effect 검사 이전에 `--yes` 누락을 먼저 거부한다(상세 normative 규칙은
+  `02-design-decisions.md` "위험 명령 확인 방식" 참조).
 - prompt 기반 확인 경로(`click.confirm`)는 제거되었다. 모든 확인은 옵션으로 명시한다.
