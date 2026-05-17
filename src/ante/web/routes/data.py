@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ante.data.schemas import TIMEFRAMES
+from ante.data.store import _is_safe_path_segment
 from ante.web.deps import (
     get_audit_logger_optional,
     get_data_store,
@@ -187,6 +188,16 @@ async def get_dataset_detail(
 
     symbol, timeframe = parts
 
+    # path traversal 방어(#1631): symbol/timeframe segment가 `..`/slash/
+    # 절대경로 등이면 거부. vocabulary(KRX 6자리·canonical tf)는 검사하지
+    # 않는다 — legacy out-of-vocab symbol은 통과(spec 05:76 호환 정책).
+    if not _is_safe_path_segment(symbol) or not _is_safe_path_segment(timeframe):
+        raise HTTPException(
+            status_code=400,
+            detail="dataset_id의 symbol/timeframe에 허용되지 않는 경로 문자가 "
+            "포함되어 있습니다",
+        )
+
     # fundamental 타입 판별
     is_fundamental = timeframe == "fundamental"
     data_type = "fundamental" if is_fundamental else "ohlcv"
@@ -332,8 +343,13 @@ async def delete_dataset(
     caller_id: Annotated[str, Depends(require_data_write)],
     store: Annotated[Any | None, Depends(get_data_store)],
     audit_logger: Annotated[Any | None, Depends(get_audit_logger_optional)],
-    data_type: Literal["ohlcv", "fundamental"] = Query(
-        "ohlcv", description="데이터 유형 (ohlcv, fundamental)"
+    data_type: Literal["ohlcv", "fundamental"] | None = Query(
+        None,
+        description=(
+            "데이터 유형 (ohlcv, fundamental). 생략 시 dataset_id의 "
+            "timeframe segment에서 파생(`__fundamental` → fundamental, "
+            "그 외 → ohlcv). 명시 시 파생값과 일치해야 하며 불일치는 400."
+        ),
     ),
 ) -> None:
     """데이터셋 삭제. 인증된 master/human 또는 ``data:write`` scope 를 보유한
@@ -341,6 +357,10 @@ async def delete_dataset(
 
     dataset_id 형식: "{symbol}__{timeframe}" (예: "005930__1d")
     fundamental의 경우: "{symbol}__fundamental" (예: "005930__fundamental")
+
+    삭제 대상 유형(kind)의 SSOT는 dataset_id의 timeframe segment다.
+    ``data_type`` query는 생략 가능하며, 명시 시 파생값과 일치하지 않으면
+    400으로 거부한다(`shutil.rmtree` 오삭제 방지, #1631).
     """
     if store is None:
         raise HTTPException(status_code=503, detail="Data store not available")
@@ -354,7 +374,32 @@ async def delete_dataset(
 
     symbol, timeframe = parts
 
-    if data_type == "fundamental":
+    # path traversal 방어(#1631): symbol/timeframe segment 검증.
+    # vocabulary 미검사 — legacy out-of-vocab symbol 통과(spec 05:76).
+    if not _is_safe_path_segment(symbol) or not _is_safe_path_segment(timeframe):
+        raise HTTPException(
+            status_code=400,
+            detail="dataset_id의 symbol/timeframe에 허용되지 않는 경로 문자가 "
+            "포함되어 있습니다",
+        )
+
+    # kind SSOT = dataset_id timeframe segment. `__fundamental` →
+    # fundamental, 그 외(path-safe) → ohlcv.
+    derived_kind: Literal["ohlcv", "fundamental"] = (
+        "fundamental" if timeframe == "fundamental" else "ohlcv"
+    )
+    # data_type query: 생략(None) → 파생값 사용. 명시 → 파생값과 일치해야
+    # 함. 불일치 시 400(rmtree 오삭제 방지, #1631).
+    if data_type is not None and data_type != derived_kind:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"data_type='{data_type}'가 dataset_id에서 파생된 유형 "
+                f"'{derived_kind}'와 일치하지 않습니다"
+            ),
+        )
+
+    if derived_kind == "fundamental":
         path = store._resolve_path(symbol, "", data_type="fundamental")
     else:
         path = store._resolve_path(symbol, timeframe, data_type="ohlcv")

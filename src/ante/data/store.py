@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -13,6 +14,40 @@ import polars as pl
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 
 logger = logging.getLogger(__name__)
+
+
+def _is_safe_path_segment(seg: str) -> bool:
+    """단일 path segment가 traversal-safe한지 판정.
+
+    저장소 경로(`base/.../{symbol}` 등)의 각 segment는 정확히 한 단계의
+    디렉토리 이름이어야 한다. 이 술어는 **vocabulary와 무관**하다 — KRX
+    6자리 형식이나 canonical timeframe 여부를 검사하지 않으며, legacy
+    out-of-vocabulary symbol(`ABCDEF`, `oracle-safe-symbol` 등)은 통과
+    한다(web-api spec `05-resource-endpoints.md:76` Legacy 호환 정책 정합).
+    오직 path traversal/escape 벡터만 거부한다.
+
+    거부 조건:
+      - 빈 문자열
+      - `.` 또는 `..` (현재/부모 디렉토리)
+      - `/`, `\\`, NUL 문자 포함 (경로 구분자/인젝션)
+      - 절대 경로 또는 드라이브 지정 (`os.path.isabs`)
+
+    Returns:
+        traversal-safe하면 True, 그 외 False.
+    """
+    if not seg:
+        return False
+    if seg in (".", ".."):
+        return False
+    if "/" in seg or "\\" in seg or "\x00" in seg:
+        return False
+    if os.path.isabs(seg):
+        return False
+    # Windows 드라이브/UNC(`C:`, `\\\\host`) 방어. POSIX에서는 no-op.
+    if os.path.splitdrive(seg)[0]:
+        return False
+    return True
+
 
 # write_parquet compression 타입
 CompressionType = Literal["lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"]
@@ -153,15 +188,62 @@ class ParquetStore:
         - ohlcv: {base}/ohlcv/{timeframe}/{exchange}/{symbol}/
         - fundamental: {base}/fundamental/{exchange}/{symbol}/
         - tick: {base}/tick/{exchange}/{symbol}/
+
+        path traversal 방어(#1631): 경로에 **실제로 사용되는** 각 segment
+        (`symbol`/`exchange`/`data_type`, ohlcv 계열은 `timeframe`)를
+        `_is_safe_path_segment`로 검증하고, resolved(`.resolve()` symlink
+        해소) 기준으로 candidate가 정확히 expected parent 직하위이며 base
+        하위에 포함되는지 단언한다. 위반 시 `ValueError`. legacy
+        out-of-vocabulary symbol 등 정상 caller는 모두 통과한다.
         """
+        used_segments: tuple[str, ...]
         if data_type == "ohlcv":
-            return self._base / "ohlcv" / timeframe / exchange / symbol
+            candidate = self._base / "ohlcv" / timeframe / exchange / symbol
+            expected_parent = self._base / "ohlcv" / timeframe / exchange
+            used_segments = (timeframe, exchange, symbol)
         elif data_type == "fundamental":
-            return self._base / "fundamental" / exchange / symbol
+            candidate = self._base / "fundamental" / exchange / symbol
+            expected_parent = self._base / "fundamental" / exchange
+            used_segments = (exchange, symbol)
         elif data_type == "tick":
-            return self._base / "tick" / exchange / symbol
+            candidate = self._base / "tick" / exchange / symbol
+            expected_parent = self._base / "tick" / exchange
+            used_segments = (exchange, symbol)
         else:
-            return self._base / data_type / timeframe / exchange / symbol
+            candidate = self._base / data_type / timeframe / exchange / symbol
+            expected_parent = self._base / data_type / timeframe / exchange
+            used_segments = (data_type, timeframe, exchange, symbol)
+
+        # data_type별 expected-parent 검증: 경로에 사용되지 않는 segment
+        # (fundamental/tick의 `timeframe=""`)는 검사 대상에서 제외한다.
+        for seg in used_segments:
+            if not _is_safe_path_segment(seg):
+                raise ValueError(
+                    f"path traversal 차단: 안전하지 않은 경로 segment '{seg}' "
+                    f"(data_type={data_type})"
+                )
+
+        # resolved(symlink 해소) containment 단언. lexical 검사만으로는
+        # 중간 디렉토리(`ohlcv/{tf}/{exchange}` 등)가 base 밖을 가리키는
+        # symlink면 통과해 `shutil.rmtree` 등이 base 밖으로 탈출할 수
+        # 있다. base/expected_parent/candidate를 동일하게 resolve한 뒤
+        # candidate가 expected_parent 직하위이며 base 하위인지 확인한다.
+        # data root 전체가 symlink인 정상 deployment는 base/candidate가
+        # 동일 resolve되어 통과한다(거부 대상은 resolved 후 base 밖 탈출).
+        resolved_base = self._base.resolve()
+        resolved_parent = expected_parent.resolve()
+        resolved_candidate = candidate.resolve()
+        if (
+            resolved_candidate.parent != resolved_parent
+            or not resolved_candidate.is_relative_to(resolved_base)
+        ):
+            raise ValueError(
+                f"path traversal 차단: 해석된 경로가 예상 위치를 벗어남 "
+                f"(symbol={symbol!r}, timeframe={timeframe!r}, "
+                f"data_type={data_type!r})"
+            )
+
+        return candidate
 
     def resolve_path(
         self,

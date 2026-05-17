@@ -148,3 +148,105 @@ class TestDatasetDetail:
         assert body["dataset"]["data_type"] == "fundamental"
         assert body["dataset"]["symbol"] == "005930"
         assert len(body["preview"]) > 0
+
+
+class TestDatasetDetailPathTraversal:
+    """GET /api/data/datasets/{dataset_id} path traversal 방어 (#1631).
+
+    `..__1d`(symbol=`..`) 등이 parent 디렉토리를 정상 dataset으로 해석해
+    200을 반환하던 보안 결함을 400으로 거부하는지 검증한다.
+    """
+
+    def test_parent_traversal_symbol_rejected(self, client, store):
+        """원 재현 벡터: `..__1d` (symbol=`..`) → 400 (200 아님)."""
+        # parent를 leaf로 해석하지 못하도록, parent dir이 실제 존재해도
+        # 거부되어야 한다.
+        store.write("005930", "1d", _make_ohlcv_df())
+        resp = client.get("/api/data/datasets/..__1d")
+        assert resp.status_code == 400, (
+            f"path traversal `..__1d`가 거부되지 않음: {resp.status_code}"
+        )
+
+    @pytest.mark.parametrize(
+        "dataset_id",
+        [
+            "..__1d",
+            "005930__..",
+            "005930__.",
+            ".__1d",
+        ],
+    )
+    def test_no_slash_traversal_variants_rejected_400(self, client, dataset_id):
+        """slash 없는 traversal 변형(`..`/`.`) → ingress 400."""
+        resp = client.get(f"/api/data/datasets/{dataset_id}")
+        assert resp.status_code == 400, (
+            f"traversal 변형 거부 실패: {dataset_id} → {resp.status_code}"
+        )
+
+    def test_url_encoded_dotdot_decoded_and_rejected_400(self, client):
+        """URL-encoded `%2e%2e`(slash 없음) → decode 후 ingress 400."""
+        resp = client.get("/api/data/datasets/%2e%2e__1d")
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize(
+        "dataset_id",
+        [
+            "../../x__1d",
+            "a/b__1d",
+            "005930__../../x",
+            "005930__a/b",
+        ],
+    )
+    def test_slash_bearing_traversal_unreachable(self, client, dataset_id):
+        """slash 포함 입력은 path param이 `/`를 캡처하지 않아 라우트 자체가
+        매치되지 않음 → handler 도달 불가(404, 200 아님).
+
+        400을 강제하려면 catch-all 라우트/path-scheme 변경이 필요한데 이는
+        Non-Goal(`_resolve_path` 경로 스킴 구조 변경 금지). 200/메타데이터
+        노출이 발생하지 않는 것이 보안 불변.
+        """
+        resp = client.get(f"/api/data/datasets/{dataset_id}")
+        assert resp.status_code != 200, (
+            f"slash traversal이 200으로 노출됨: {dataset_id}"
+        )
+        assert resp.status_code in (400, 404)
+
+    @pytest.mark.parametrize(
+        "raw_path",
+        [
+            "/api/data/datasets/005930__%2e%2e%2f%2e%2e%2fx",
+            "/api/data/datasets/%2e%2e%2f%2e%2e%2fx__1d",
+            "/api/data/datasets/%2fetc%2fpasswd__1d",
+        ],
+    )
+    def test_url_encoded_slash_traversal_not_exposed(self, client, raw_path):
+        """URL-encoded slash(`%2f`) 포함 → 200 노출 안 됨(라우트 미매치)."""
+        resp = client.get(raw_path)
+        assert resp.status_code != 200, (
+            f"URL-encoded slash traversal이 200으로 노출됨: {raw_path}"
+        )
+        assert resp.status_code in (400, 404)
+
+    async def test_legacy_non_6digit_symbol_not_rejected(self, client, store):
+        """legacy out-of-vocab symbol(6자리 외, path-safe)은 400 아님.
+
+        `ABCDEF__1d`/`oracle-safe-symbol__1d`는 path-safe이므로 존재 시
+        정상 200, 미존재 시 404 — spec 05:76 legacy 호환 보존.
+        """
+        store.write("ABCDEF", "1d", _make_ohlcv_df())
+        resp = client.get("/api/data/datasets/ABCDEF__1d")
+        assert resp.status_code == 200
+        assert resp.json()["dataset"]["symbol"] == "ABCDEF"
+
+        # hyphen 포함 legacy symbol 디렉토리도 path-safe → 정상 동작
+        legacy_dir = store.base_path / "ohlcv" / "1d" / "KRX" / "oracle-safe-symbol"
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        resp2 = client.get("/api/data/datasets/oracle-safe-symbol__1d")
+        assert resp2.status_code != 400, (
+            f"legacy path-safe symbol이 400으로 회귀: {resp2.status_code}"
+        )
+
+    def test_legacy_missing_symbol_404_not_400(self, client):
+        """미존재 legacy path-safe symbol → 404 (400 아님)."""
+        resp = client.get("/api/data/datasets/ABCDEF__1d")
+        assert resp.status_code == 404

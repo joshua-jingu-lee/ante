@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import patch
 
 import polars as pl
 import pytest
@@ -206,6 +207,184 @@ class TestDeleteDataset:
             params={"data_type": "fundamental"},
         )
         assert resp.status_code == 404
+
+
+class TestDeleteDatasetPathTraversal:
+    """DELETE /api/data/datasets/{dataset_id} path traversal 방어 (#1631).
+
+    `..__1d` 등이 `shutil.rmtree`로 의도 디렉토리 밖을 삭제하던 destructive
+    결함을 400으로 거부하고 rmtree가 호출되지 않는지 검증한다.
+    """
+
+    def test_parent_traversal_rejected_and_rmtree_not_called(self, client, store):
+        """`..__1d` → 400 + `shutil.rmtree` 미호출."""
+        store.write("005930", "1d", _make_ohlcv_df())
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete("/api/data/datasets/..__1d")
+        assert resp.status_code == 400, (
+            f"path traversal `..__1d` DELETE가 거부되지 않음: {resp.status_code}"
+        )
+        mock_rmtree.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "dataset_id",
+        [
+            "..__1d",
+            "005930__..",
+            "005930__.",
+            ".__1d",
+        ],
+    )
+    def test_no_slash_traversal_rejected_400_no_rmtree(self, client, dataset_id):
+        """slash 없는 traversal(`..`/`.`) → ingress 400 + rmtree 미호출."""
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete(f"/api/data/datasets/{dataset_id}")
+        assert resp.status_code == 400, (
+            f"traversal 변형 DELETE 거부 실패: {dataset_id} → {resp.status_code}"
+        )
+        mock_rmtree.assert_not_called()
+
+    def test_url_encoded_dotdot_decoded_rejected_400_no_rmtree(self, client):
+        """URL-encoded `%2e%2e`(slash 없음) → decode 후 400 + rmtree 미호출."""
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete("/api/data/datasets/%2e%2e__1d")
+        assert resp.status_code == 400
+        mock_rmtree.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "dataset_id",
+        [
+            "../../x__1d",
+            "a/b__1d",
+            "005930__../../x",
+            "005930__a/b",
+        ],
+    )
+    def test_slash_bearing_traversal_unreachable_no_rmtree(self, client, dataset_id):
+        """slash 포함 입력은 라우트 미매치로 handler 도달 불가 → rmtree
+        절대 미호출(404/400, destructive 코드 구조적 도달 불가).
+
+        400 강제는 catch-all 라우트/path-scheme 변경 필요 — Non-Goal.
+        보안 불변: rmtree 미호출 + 204 아님.
+        """
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete(f"/api/data/datasets/{dataset_id}")
+        assert resp.status_code != 204, f"slash traversal DELETE가 성공함: {dataset_id}"
+        assert resp.status_code in (400, 404)
+        mock_rmtree.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "raw_path",
+        [
+            "/api/data/datasets/005930__%2e%2e%2f%2e%2e%2fx",
+            "/api/data/datasets/%2e%2e%2f%2e%2e%2fx__1d",
+            "/api/data/datasets/%2fetc%2fpasswd__1d",
+        ],
+    )
+    def test_url_encoded_slash_traversal_no_rmtree(self, client, raw_path):
+        """URL-encoded slash(`%2f`) 포함 → rmtree 미호출 + 204 아님."""
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete(raw_path)
+        assert resp.status_code != 204
+        assert resp.status_code in (400, 404)
+        mock_rmtree.assert_not_called()
+
+    async def test_legacy_non_6digit_symbol_not_rejected(self, client, store):
+        """legacy out-of-vocab symbol(path-safe)은 400 아님 — 정상 삭제.
+
+        spec 05:76 legacy 호환 보존.
+        """
+        store.write("ABCDEF", "1d", _make_ohlcv_df())
+        resp = client.delete("/api/data/datasets/ABCDEF__1d")
+        assert resp.status_code == 204, (
+            f"legacy path-safe symbol DELETE가 회귀: {resp.status_code}"
+        )
+
+    def test_legacy_missing_symbol_404_not_400(self, client):
+        """미존재 legacy path-safe symbol DELETE → 404 (400 아님)."""
+        resp = client.delete("/api/data/datasets/ABCDEF__1d")
+        assert resp.status_code == 404
+
+
+class TestDeleteDatasetDataTypeContract:
+    """DELETE `data_type` ↔ dataset_id timeframe segment 일치 계약 (#1631).
+
+    kind SSOT = dataset_id timeframe segment. data_type query 생략 시 파생값
+    사용, 명시 시 파생값과 불일치하면 400(rmtree 오삭제 방지).
+    """
+
+    # ── omitted: 파생값 사용 ──
+    async def test_omitted_fundamental_segment_uses_fundamental(self, client, store):
+        """`005930__fundamental` (query 생략) → fundamental 정상 삭제."""
+        store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        resp = client.delete("/api/data/datasets/005930__fundamental")
+        assert resp.status_code == 204
+        listing = client.get("/api/data/datasets", params={"data_type": "fundamental"})
+        assert listing.json()["items"] == []
+
+    async def test_omitted_ohlcv_segment_uses_ohlcv(self, client, store):
+        """`005930__1d` (query 생략) → ohlcv 정상 삭제."""
+        store.write("005930", "1d", _make_ohlcv_df())
+        resp = client.delete("/api/data/datasets/005930__1d")
+        assert resp.status_code == 204
+
+    # ── 명시 일치: 정상 ──
+    async def test_explicit_match_fundamental(self, client, store):
+        """`005930__fundamental?data_type=fundamental` → 정상 삭제."""
+        store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        resp = client.delete(
+            "/api/data/datasets/005930__fundamental",
+            params={"data_type": "fundamental"},
+        )
+        assert resp.status_code == 204
+
+    async def test_explicit_match_ohlcv(self, client, store):
+        """`005930__1d?data_type=ohlcv` → 정상 삭제."""
+        store.write("005930", "1d", _make_ohlcv_df())
+        resp = client.delete(
+            "/api/data/datasets/005930__1d",
+            params={"data_type": "ohlcv"},
+        )
+        assert resp.status_code == 204
+
+    # ── 명시 mismatch: 400 + rmtree 미호출 ──
+    async def test_explicit_mismatch_fundamental_segment_ohlcv_query(
+        self, client, store
+    ):
+        """`005930__fundamental?data_type=ohlcv` → 400 + rmtree 미호출."""
+        store.write("005930", "", _make_fundamental_df(), data_type="fundamental")
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete(
+                "/api/data/datasets/005930__fundamental",
+                params={"data_type": "ohlcv"},
+            )
+        assert resp.status_code == 400, (
+            f"mismatch(fundamental seg / ohlcv query) 거부 실패: {resp.status_code}"
+        )
+        mock_rmtree.assert_not_called()
+
+    async def test_explicit_mismatch_ohlcv_segment_fundamental_query(
+        self, client, store
+    ):
+        """`005930__1d?data_type=fundamental` → 400 + rmtree 미호출."""
+        store.write("005930", "1d", _make_ohlcv_df())
+        with patch("ante.web.routes.data.shutil.rmtree") as mock_rmtree:
+            resp = client.delete(
+                "/api/data/datasets/005930__1d",
+                params={"data_type": "fundamental"},
+            )
+        assert resp.status_code == 400, (
+            f"mismatch(ohlcv seg / fundamental query) 거부 실패: {resp.status_code}"
+        )
+        mock_rmtree.assert_not_called()
+
+    def test_invalid_enum_data_type_still_422(self, client):
+        """enum 외 data_type 값은 여전히 422 (#1438 회귀 보존)."""
+        resp = client.delete(
+            "/api/data/datasets/005930__1d",
+            params={"data_type": "oracle_invalid_type"},
+        )
+        assert resp.status_code == 422
 
 
 class TestFundamentalDatasets:
