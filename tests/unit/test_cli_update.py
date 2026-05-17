@@ -191,16 +191,57 @@ class TestUpdateFormatText:
 
 
 class TestUpdateFormatJsonError:
-    """JSON 모드 에러 출력 테스트."""
+    """JSON 모드 에러 출력 테스트.
 
-    def test_server_running_json_error(self, runner: CliRunner) -> None:
-        """서버 실행 중 에러도 JSON으로 출력된다."""
-        with patch("ante.cli.commands.update.check_server_running", return_value=True):
+    의도 변경(#1626 D2/D3): 이전 ``test_server_running_json_error``는
+    서버 실행 중 ``ante update --check --format json``이 exit 1 JSON
+    에러로 차단되는 buggy 순서를 정상으로 단언했다. SSOT(precedence
+    normative 규칙)는 ``--check``을 dry-run으로 server-running 무관하게
+    처리하도록 명시하므로, 본 케이스는 spec 정합 의미로 갱신한다 —
+    ``--check``은 차단되지 않고, server-running JSON 에러는 실제 update
+    경로(``--yes`` 게이트 통과 후)에서 ``UPDATE_SERVER_RUNNING`` 코드와
+    함께 노출된다.
+    """
+
+    def test_check_json_not_blocked_by_server_running(self, runner: CliRunner) -> None:
+        """서버 실행 중이어도 ``--check --format json`` dry-run은 성공한다.
+
+        #1626 D3: ``--check``은 server-running과 무관(최우선 dry-run).
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="0.6.1"),
+            patch("ante.update.checker.get_latest_version", return_value="0.7.0"),
+        ):
             result = runner.invoke(cli, ["update", "--check", "--format", "json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["current_version"] == "0.6.1"
+        assert data["latest_version"] == "0.7.0"
+        assert data["update_available"] is True
+
+    def test_server_running_json_error_has_update_server_running_code(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 실행 + ``--yes`` + ``--force`` 없음 → JSON ``UPDATE_SERVER_RUNNING``.
+
+        #1626 D2: server-running JSON 에러는 ``code`` 가 null 이 아닌
+        ``UPDATE_SERVER_RUNNING`` 이어야 한다 (이전 buggy 동작은 code=null).
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+        ):
+            result = runner.invoke(
+                cli, ["update", "--yes", "--format", "json"], input=None
+            )
 
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert "message" in data
+        assert data["code"] == "UPDATE_SERVER_RUNNING"
+        assert data["code"] is not None
 
     def test_pypi_failure_json_error(self, runner: CliRunner) -> None:
         """PyPI 조회 실패 시 JSON 에러 출력."""
@@ -429,3 +470,243 @@ class TestUpdateNonInteractive:
 
         assert result.exit_code == 0
         mock_pip_upgrade.assert_not_called()
+
+
+class TestUpdateGatePrecedence:
+    """게이트 평가 우선순위 회귀 (#1626).
+
+    SSOT: ``docs/specs/cli/02-design-decisions.md`` "위험 명령 확인 방식"
+    precedence normative 규칙 —
+    ``--check`` → ``--yes`` confirmation(``CLI_CONFIRMATION_REQUIRED``)
+    → server-running/``--force``(``UPDATE_SERVER_RUNNING``) → 실제 update.
+
+    이전 buggy 순서(server-running 가드가 ``--yes`` 게이트보다 선행, 그리고
+    server-running ``fmt.error``에 ``code=`` 누락)를 정상으로 단언하던
+    ``test_update.py``/``test_cli_update.py`` 케이스를 spec 정합으로 갱신한
+    것과 별개로, oracle A7 contract-drift 재발 방지를 위한 직접 회귀를
+    여기에 잠근다.
+    """
+
+    def test_server_running_without_yes_yields_confirmation_required(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 실행 + ``--yes`` 누락 → exit≠0, ``CLI_CONFIRMATION_REQUIRED``.
+
+        oracle probe(``cli_update_confirmation_gate_contract``) 재현 케이스:
+        서버 실행 중 ``ante --format json update``(no ``--yes``)는
+        server-running(code=null)이 아닌 confirmation gate로 거절되어야 한다.
+        server 상태 검사·PyPI 조회·side-effect 일체 미진입.
+        """
+        with (
+            patch(
+                "ante.cli.commands.update.check_server_running", return_value=True
+            ) as mock_srv,
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value="2.0.0"
+            ) as mock_latest,
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["message"]
+        # confirmation gate가 server 상태 검사보다 우선 → server 검사 미진입.
+        mock_srv.assert_not_called()
+        mock_latest.assert_not_called()
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+
+    def test_server_running_with_yes_no_force_yields_update_server_running(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 실행 + ``--yes`` + ``--force`` 없음 → ``UPDATE_SERVER_RUNNING``.
+
+        #1626 D2: 이전 buggy 동작은 ``code=null`` 이었다. 이 회귀는 code 가
+        null 이 아닌 ``UPDATE_SERVER_RUNNING`` 임을 직접 단언한다. update
+        side-effect(pip/backup/migration)는 진입하지 않아야 한다.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value="2.0.0"
+            ) as mock_latest,
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.snapshot_dependencies") as mock_snapshot,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "update", "--yes"], input=None
+            )
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["code"] == "UPDATE_SERVER_RUNNING"
+        assert data["code"] is not None
+        assert "서버가 실행 중입니다" in data["message"]
+        # server-running 가드는 update side-effect 이전에 평가됨.
+        mock_latest.assert_not_called()
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_snapshot.assert_not_called()
+        mock_migrate.assert_not_called()
+
+    def test_server_not_running_without_yes_yields_confirmation_required(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 미실행 + ``--yes`` 누락 → ``CLI_CONFIRMATION_REQUIRED``.
+
+        server 상태와 무관하게 ``--yes`` 누락은 confirmation gate로 거절.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=False),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value="2.0.0"
+            ) as mock_latest,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["message"]
+        mock_latest.assert_not_called()
+
+    def test_check_with_server_running_dry_run_succeeds(
+        self, runner: CliRunner
+    ) -> None:
+        """충돌 정책 잠금: 서버 실행 + ``ante update --check`` → dry-run 성공.
+
+        #1626 D3: ``--check``은 server-running과 무관(미차단).
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+        ):
+            result = runner.invoke(cli, ["update", "--check", "--format", "json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["update_available"] is True
+        mock_pip_upgrade.assert_not_called()
+
+    def test_check_yes_json_check_wins_no_side_effect(self, runner: CliRunner) -> None:
+        """충돌 정책 잠금: ``ante update --check --yes --format json``.
+
+        ``--check`` 우선(충돌 정책: ``--check`` 우선). dry-run JSON 성공이며
+        ``check_server_running``/update side-effect 에 진입하지 않는다.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running") as mock_srv,
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+            patch("ante.db.backup.backup_db") as mock_backup,
+            patch("ante.update.executor.run_post_update_migrations") as mock_migrate,
+        ):
+            result = runner.invoke(
+                cli, ["update", "--check", "--yes", "--format", "json"]
+            )
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["update_available"] is True
+        # `--check` 우선 → server 검사/side-effect 미진입.
+        mock_srv.assert_not_called()
+        mock_pip_upgrade.assert_not_called()
+        mock_backup.assert_not_called()
+        mock_migrate.assert_not_called()
+
+    def test_check_yes_server_running_check_wins(self, runner: CliRunner) -> None:
+        """충돌 정책 잠금: 서버 실행 + ``--check --yes`` → ``--check`` 우선.
+
+        server 실행 중이어도 ``--check``+``--yes`` 동시 사용 시 ``--check``
+        우선 dry-run 성공, side-effect 미진입.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+        ):
+            result = runner.invoke(cli, ["update", "--check", "--yes"])
+
+        assert result.exit_code == 0
+        assert "서버가 실행 중입니다" not in result.output
+        assert "업데이트 가능: 1.0.0" in result.output
+        mock_pip_upgrade.assert_not_called()
+
+    def test_server_running_with_yes_and_force_bypasses_server_guard(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 실행 + ``--yes`` + ``--force`` → ``UPDATE_SERVER_RUNNING`` 우회.
+
+        #1626 (Codex r1 [medium]): 본 케이스는 **``UPDATE_SERVER_RUNNING``
+        가드가 우회됨**(server-running으로 거절되지 **않음**)만 검증한다.
+        update 성공/실제 진행을 성공 의미로 단언하지 않는다 — graceful
+        shutdown 미구현은 본 acceptance 범위 밖(Non-Goal). 검증 방법:
+        server-running 거부 코드가 아니고, ``--yes`` 게이트도 통과하여
+        실제 update 경로(여기서는 PyPI 조회)로 진입함을 확인한다.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value="2.0.0"
+            ) as mock_latest,
+            patch("ante.cli.commands.update.check_disk_space", return_value=(True, "")),
+            patch("ante.db.backup.backup_db"),
+            patch("ante.update.executor.snapshot_dependencies", return_value=None),
+            patch("ante.update.executor.pip_upgrade", return_value=True),
+            patch("ante.update.executor.run_post_update_migrations", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "update", "--yes", "--force"], input=None
+            )
+
+        # server-running 거부가 아님 — 가드 우회 검증 (성공 의미 단언 아님).
+        if result.output.strip():
+            try:
+                data = json.loads(result.output)
+            except json.JSONDecodeError:
+                data = {}
+            assert data.get("code") != "UPDATE_SERVER_RUNNING"
+            assert data.get("code") != "CLI_CONFIRMATION_REQUIRED"
+        # `--yes`+`--force` 게이트 통과 → 실제 update 경로(PyPI 조회) 진입.
+        mock_latest.assert_called_once()
+
+    def test_output_shape_json_vs_text(self, runner: CliRunner) -> None:
+        """JSON/text 양쪽 출력 shape 1케이스 (server-running 거부).
+
+        JSON: ``{status, code, message}`` 구조. text: 사람이 읽는 메시지.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+        ):
+            json_result = runner.invoke(
+                cli, ["--format", "json", "update", "--yes"], input=None
+            )
+            text_result = runner.invoke(cli, ["update", "--yes"], input=None)
+
+        assert json_result.exit_code != 0
+        jdata = json.loads(json_result.output)
+        assert jdata["status"] == "error"
+        assert jdata["code"] == "UPDATE_SERVER_RUNNING"
+        assert "message" in jdata
+
+        assert text_result.exit_code != 0
+        assert "서버가 실행 중입니다" in text_result.output

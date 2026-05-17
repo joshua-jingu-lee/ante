@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -77,15 +78,76 @@ class TestUpdateCheckFlag:
 
 
 class TestServerRunningBlock:
-    """서버 실행 중 차단 테스트."""
+    """서버 실행 중 게이트 우선순위 테스트 (#1626).
 
-    def test_server_running_blocks_update(self, runner: CliRunner) -> None:
-        """서버가 실행 중이면 exit code 1로 종료한다."""
-        with patch("ante.cli.commands.update.check_server_running", return_value=True):
+    의도 변경(#1626 D1/D3): 이전 ``test_server_running_blocks_update``는
+    서버 실행 중 ``ante update --check``이 server-running으로 차단(exit 1)
+    되는 buggy 순서를 정상으로 단언했다. 그러나 SSOT
+    (``docs/specs/cli/02-design-decisions.md`` 위험 명령 확인 방식 +
+    precedence normative 규칙)는 ``--check``을 dry-run으로 server-running과
+    무관하게(최우선) 처리하도록 명시한다. 따라서 본 클래스는 spec 정합
+    의미로 갱신한다 — server-running 차단이 적용되는 경로는 ``--check``이
+    아닌 실제 update 호출(``--yes`` 게이트 통과 후)이다.
+    """
+
+    def test_check_not_blocked_by_server_running(self, runner: CliRunner) -> None:
+        """서버 실행 중이어도 ``--check`` dry-run은 차단되지 않는다 (#1626 D3).
+
+        SSOT: ``--check``은 PyPI 버전 조회만 수행하는 dry-run으로
+        ``--yes``/server-running과 무관하며 최우선으로 처리된다.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
+        ):
             result = runner.invoke(cli, ["update", "--check"])
 
+        assert result.exit_code == 0
+        assert "서버가 실행 중입니다" not in result.output
+        assert "업데이트 가능: 1.0.0" in result.output
+
+    def test_server_running_without_yes_returns_confirmation_required(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 실행 + ``--yes`` 누락 → ``CLI_CONFIRMATION_REQUIRED`` (#1626 D1).
+
+        spec precedence: confirmation gate가 server 상태 검사보다 우선.
+        server-running 안내(``UPDATE_SERVER_RUNNING``)가 아닌
+        ``CLI_CONFIRMATION_REQUIRED``로 거절되어야 한다.
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update"], input=None)
+
         assert result.exit_code == 1
-        assert "서버가 실행 중입니다" in result.output
+        data = json.loads(result.output)
+        assert data["code"] == "CLI_CONFIRMATION_REQUIRED"
+        assert "--yes" in data["message"]
+
+    def test_server_running_with_yes_without_force_returns_server_running(
+        self, runner: CliRunner
+    ) -> None:
+        """서버 실행 + ``--yes`` + ``--force`` 없음 → ``UPDATE_SERVER_RUNNING``.
+
+        #1626 D2: server-running 에러 코드는 ``UPDATE_SERVER_RUNNING``이며
+        ``code`` 가 null 이 아니어야 한다 (이전 buggy 동작은 code=null).
+        """
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=True),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "update", "--yes"], input=None
+            )
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "UPDATE_SERVER_RUNNING"
+        assert data["code"] is not None
+        assert "서버가 실행 중입니다" in data["message"]
 
 
 class TestUpdateChecker:

@@ -75,6 +75,8 @@ CLI 코드에서 다음 API 사용을 금지한다.
 
 `ante update --check`는 PyPI 버전 조회만 수행하는 dry-run이므로 `--yes`가 필요하지 않다.
 
+`ante update`의 게이트 평가 우선순위는 **`--check` → `--yes` confirmation(`CLI_CONFIRMATION_REQUIRED`) → server-running/`--force`(`UPDATE_SERVER_RUNNING`) → 실제 update** 순서다. `--check`은 dry-run으로 `--yes`/server-running과 무관하며(`--check` 우선), 그 외 실제 update 호출은 server 상태·side-effect 검사 이전에 `--yes` 누락을 먼저 거부한다. 이 우선순위는 위 표 행 순서(`--yes` 행이 `--force` 행 앞)와 "누락 입력 처리: 즉시 종료" 해석에 의존하지 않는 normative 규칙이다. 위 표에서 `ante update [실제 실행]`(`--yes`/`CLI_CONFIRMATION_REQUIRED`)이 `ante update`(서버 실행 중)(`--force`/`UPDATE_SERVER_RUNNING`)보다 **앞에** 나열된 것은 이 우선순위와 일치한다.
+
 **누락 입력 처리**:
 
 필수 옵션·인자가 누락되면 prompt하지 않고 구조화된 에러로 즉시 종료한다(exit code 1).
