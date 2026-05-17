@@ -286,3 +286,100 @@ async def test_ipc_dispatch_broker_status_account_scoped_returns_validation_erro
         assert response["error"]["code"] == "VALIDATION_ERROR"
     finally:
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_ipc_dispatch_broker_reconcile_invalid_account_only_validation_error(
+    socket_path: str, service_registry: ServiceRegistry
+) -> None:
+    """``broker.reconcile`` IPC dispatch에서 **bot_id 없는** invalid-account-only
+    payload도 ``VALIDATION_ERROR``로 매핑되는지 검증 (#1636 / #1623 Split C).
+
+    회귀 모델:
+        이전에는 ``_handle_broker_reconcile``이 ``bot_id = args["bot_id"]`` 를
+        ``require_account_id`` **이전**에 읽어, bot_id 없는 invalid-account-only
+        direct-IPC probe가 ``KeyError`` → server.py:323 ``getattr(e, "code",
+        "EXECUTION_ERROR")`` → ``EXECUTION_ERROR``로 잘못 노출되었다 (#1633
+        finding). #1636이 ``require_account_id``를 ``args["bot_id"]`` 이전으로
+        옮겨, invalid account_id가 ``InvalidAccountIdError``
+        (code="VALIDATION_ERROR", #1633 SSOT)로 먼저 raise되어
+        ``VALIDATION_ERROR`` envelope이 되도록 한다.
+
+    ``test_ipc_dispatch_broker_status_...`` (바로 위, broker.status만 커버)
+    옆에 reconcile ordering 가드를 추가한다 (#1633 메타리뷰 지적).
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+    await server.start()
+    try:
+        client = IPCClient(socket_path, timeout=5.0)
+
+        # bot_id 없는 invalid-account-only: account_id 누락 → VALIDATION_ERROR
+        # (KeyError → EXECUTION_ERROR 회귀 차단)
+        response = await client.send("broker.reconcile", {}, actor="tester")
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR", response
+        assert response["error"]["code"] != "EXECUTION_ERROR", response
+        assert "ipc.broker.reconcile" in response["error"]["message"], response
+
+        # bot_id 없는 invalid-account-only: 'default' 예약어 → VALIDATION_ERROR
+        response = await client.send(
+            "broker.reconcile",
+            {"account_id": "default"},
+            actor="tester",
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR", response
+
+        # bot_id 없는 invalid-account-only: 빈 문자열 → VALIDATION_ERROR
+        response = await client.send(
+            "broker.reconcile",
+            {"account_id": ""},
+            actor="tester",
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR", response
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_ipc_dispatch_broker_reconcile_missing_account_keeps_keyerror_path(
+    socket_path: str, service_registry: ServiceRegistry
+) -> None:
+    """#1556 회귀 유지: **valid** account_id로 reconcile하면
+    ``require_account_id``를 통과하므로 invalid-account 분기가 아니라 기존
+    경로(bot_id 부재 시 ``KeyError`` → EXECUTION_ERROR)를 그대로 탄다.
+
+    #1636은 invalid-account-only를 VALIDATION_ERROR로 정렬하되,
+    valid account_id의 기존 reconcile 동작(bot_id 누락 → KeyError →
+    EXECUTION_ERROR)은 **불변**이어야 한다. require_account_id를 bot_id
+    이전으로 옮긴 ordering 변경이 valid 경로의 KeyError 계약을 깨지
+    않음을 가드한다 (narrow scope: reconcile invalid만 변경, valid 불변).
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+    await server.start()
+    try:
+        client = IPCClient(socket_path, timeout=5.0)
+
+        # valid account_id + bot_id 누락 → require_account_id 통과 후
+        # args["bot_id"] KeyError → EXECUTION_ERROR (기존 계약 불변)
+        response = await client.send(
+            "broker.reconcile",
+            {"account_id": "oracle-valid-account"},
+            actor="tester",
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "EXECUTION_ERROR", response
+        assert response["error"]["code"] != "VALIDATION_ERROR", response
+    finally:
+        await server.stop()

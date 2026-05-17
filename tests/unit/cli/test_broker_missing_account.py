@@ -555,6 +555,227 @@ class TestStatusAndReconcileFollowupScope:
         assert "broker connection refused" in str(payload["error"]), payload
 
 
+# ── #1636 / #1623 Split C: invalid account_id ingress → VALIDATION_ERROR ────
+
+
+class TestBrokerInvalidAccountIdIngress:
+    """``broker {status,balance,positions,reconcile}`` 의 invalid ``account_id``
+    (``default`` 예약어 / ``bad_id`` 형식 위반 / ``""`` 빈 문자열)가 IPC 호출 /
+    ``_get_broker`` fallback **이전**에 ``VALIDATION_ERROR`` envelope + exit≠0
+    으로 거부됨을 검증 (#1636 / #1623 Split C).
+
+    회귀 모델:
+        이전에는 4 cmd가 bare ``require_account_id(account_id, ...)`` 를 호출했고,
+        그것이 raise하는 ``InvalidAccountIdError`` 는 non-Click ``AccountError``
+        라 기존 ``except click.ClickException`` fallback이 잡지 못해 **traceback**
+        (#1623 ``broker_balance_default``) 으로 누출됐다. #1636이 #1634
+        ``reject_invalid_account_id`` helper로 교체해 그 예외를
+        ``fmt.error(code="VALIDATION_ERROR")`` + ``SystemExit(1)`` 로 변환한다.
+
+    검증:
+        - 4 cmd × {default, bad_id, ""} × {json, text} → exit≠0
+        - JSON: ``{"status":"error","code":"VALIDATION_ERROR",...}``
+        - traceback 부재 (``result.exception`` 이 ``SystemExit`` 만)
+        - IPC / ``_create_account_service`` 가 **호출되지 않음** (ingress 차단)
+    """
+
+    _INVALID_IDS = ["default", "bad id!", ""]
+
+    @pytest.fixture
+    def _ipc_spy(self):  # noqa: ANN202
+        """IPC / account-service mock — invalid ingress면 호출되면 안 된다."""
+        ipc_mock = AsyncMock(
+            side_effect=AssertionError(
+                "invalid account_id가 IPC 호출까지 도달했다 (ingress 차단 실패)"
+            )
+        )
+        create_mock = AsyncMock(
+            side_effect=AssertionError(
+                "invalid account_id가 _create_account_service까지 도달했다"
+            )
+        )
+        ipc_send_mock = AsyncMock(
+            side_effect=AssertionError(
+                "invalid account_id가 ipc_send까지 도달했다 (reconcile ingress)"
+            )
+        )
+        return ipc_mock, create_mock, ipc_send_mock
+
+    def _invoke(
+        self,
+        runner: CliRunner,
+        _ipc_spy,  # noqa: ANN001
+        *,
+        cmd: str,
+        account_id: str,
+        fmt: str,
+    ) -> object:
+        ipc_mock, create_mock, ipc_send_mock = _ipc_spy
+        with (
+            patch("ante.cli.commands.broker._ipc_broker_command", ipc_mock),
+            patch("ante.cli.commands.broker._create_account_service", create_mock),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send_mock),
+        ):
+            return runner.invoke(
+                cli,
+                ["--format", fmt, "broker", cmd, "--account", account_id],
+            )
+
+    @pytest.mark.parametrize("cmd", ["status", "balance", "positions", "reconcile"])
+    @pytest.mark.parametrize("account_id", _INVALID_IDS)
+    def test_invalid_account_id_json_emits_validation_error_envelope(
+        self,
+        runner: CliRunner,
+        _ipc_spy,  # noqa: ANN001
+        cmd: str,
+        account_id: str,
+    ) -> None:
+        """JSON 모드: invalid account_id → exit≠0 +
+        ``code=VALIDATION_ERROR`` envelope + traceback 부재."""
+        result = self._invoke(
+            runner, _ipc_spy, cmd=cmd, account_id=account_id, fmt="json"
+        )
+
+        assert result.exit_code != 0, (
+            f"[{cmd} --account {account_id!r}] expected exit≠0, "
+            f"got {result.exit_code}\nstdout={result.stdout!r}"
+        )
+        # traceback 부재: 예외가 있다면 SystemExit 만 허용.
+        if result.exception is not None:
+            assert isinstance(result.exception, SystemExit), (
+                f"[{cmd} --account {account_id!r}] 비-SystemExit 예외/traceback: "
+                f"{result.exception!r}"
+            )
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "VALIDATION_ERROR", payload
+
+    @pytest.mark.parametrize("cmd", ["status", "balance", "positions", "reconcile"])
+    @pytest.mark.parametrize("account_id", _INVALID_IDS)
+    def test_invalid_account_id_text_emits_stderr_and_nonzero_exit(
+        self,
+        runner: CliRunner,
+        _ipc_spy,  # noqa: ANN001
+        cmd: str,
+        account_id: str,
+    ) -> None:
+        """text 모드: invalid account_id → exit≠0 + stderr ``Error: ...`` +
+        stdout JSON 누출 없음 + traceback 부재."""
+        result = self._invoke(
+            runner, _ipc_spy, cmd=cmd, account_id=account_id, fmt="text"
+        )
+
+        assert result.exit_code != 0, (
+            f"[{cmd} --account {account_id!r}] expected exit≠0, "
+            f"got {result.exit_code}\nstderr={result.stderr!r}"
+        )
+        if result.exception is not None:
+            assert isinstance(result.exception, SystemExit), (
+                f"[{cmd} --account {account_id!r}] 비-SystemExit 예외/traceback: "
+                f"{result.exception!r}"
+            )
+        assert result.stdout.strip() == "", result.stdout
+        assert "Error:" in result.stderr, result.stderr
+
+
+# ── #1636: valid-absent per-command narrow (Codex r1 [medium]) ──────────────
+
+
+class TestBrokerValidAbsentPerCommandNarrow:
+    """Codex r1 [medium] narrow: helper swap 후 **valid-but-nonexistent**
+    account_id 의 기존 동작이 보존되는지 per-command 로 검증 (#1636).
+
+    ``reject_invalid_account_id`` helper는 ``require_account_id`` 계약을 그대로
+    재사용하므로 valid 패턴(``oracle-missing-account``)은 거부하지 않는다.
+    따라서 valid-but-nonexistent account_id 는 helper를 통과해 기존
+    not-found 경로로 흐른다:
+
+    - ``broker status`` = 기존 ``ACCOUNT_NOT_FOUND`` envelope 보존
+    - ``broker balance``/``positions``/``reconcile`` = ``VALIDATION_ERROR``
+      **오분류 아님** + 기존 동작 불변 (generic ``fmt.error(str(e))`` 등 —
+      ACCOUNT_NOT_FOUND 강제·추가 금지; balance/positions parity는 후속 후보).
+
+    이미 위 ``TestBrokerBalanceMissingAccount``/``TestBrokerPositionsMissingAccount``/
+    ``TestStatusAndReconcileFollowupScope`` 가 missing-account exit 1 + 메시지를
+    검증한다. 본 클래스는 helper swap이 그 경로에 **VALIDATION_ERROR 오분류를
+    주입하지 않음**을 추가로 못박는다.
+    """
+
+    def _invoke(
+        self,
+        runner: CliRunner,
+        *,
+        cmd: str,
+    ) -> object:
+        mock_db, mock_account_service = _patch_account_service_not_found()
+
+        async def _fake_create_service():  # noqa: ANN202
+            return mock_account_service, mock_db
+
+        if cmd == "reconcile":
+            ipc_patch = patch(
+                "ante.cli.commands.ipc_helpers.ipc_send",
+                AsyncMock(
+                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                ),
+            )
+        else:
+            ipc_patch = patch(
+                "ante.cli.commands.broker._ipc_broker_command",
+                _build_ipc_unavailable_mock(),
+            )
+
+        with (
+            ipc_patch,
+            patch(
+                "ante.cli.commands.broker._create_account_service",
+                side_effect=_fake_create_service,
+            ),
+        ):
+            return runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    cmd,
+                    "--account",
+                    _MISSING_ACCOUNT_ID,
+                ],
+            )
+
+    def test_status_valid_absent_keeps_account_not_found(
+        self, runner: CliRunner
+    ) -> None:
+        """``broker status`` valid-absent = ``ACCOUNT_NOT_FOUND`` 보존
+        (VALIDATION_ERROR 오분류 아님)."""
+        result = self._invoke(runner, cmd="status")
+
+        assert result.exit_code == 1, result.stdout
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "ACCOUNT_NOT_FOUND", payload
+        assert payload["code"] != "VALIDATION_ERROR", payload
+
+    @pytest.mark.parametrize("cmd", ["balance", "positions", "reconcile"])
+    def test_balance_positions_reconcile_valid_absent_not_validation_error(
+        self, runner: CliRunner, cmd: str
+    ) -> None:
+        """``broker balance``/``positions``/``reconcile`` valid-absent =
+        ``VALIDATION_ERROR`` **오분류 아님** + 기존 동작 불변. helper가
+        valid 패턴을 거부하지 않아 not-found 경로가 유지됨을 가드한다
+        (ACCOUNT_NOT_FOUND 강제 안 함 — balance/positions parity는 후속)."""
+        result = self._invoke(runner, cmd=cmd)
+
+        assert result.exit_code == 1, result.stdout
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        # helper swap이 valid-absent를 VALIDATION_ERROR로 오분류하면 안 된다.
+        assert payload["code"] != "VALIDATION_ERROR", payload
+        # 기존 not-found 메시지가 그대로 노출 (동작 불변).
+        assert _NOT_FOUND_MESSAGE in str(payload["message"]), payload
+
+
 # ── subprocess hang 회귀 (실제 프로세스 종료 확인) ──────────────────────────
 
 

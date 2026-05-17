@@ -340,10 +340,18 @@ async def _handle_broker_reconcile(
     from ante.account.errors import InvalidAccountIdError
     from ante.account.scoping import require_account_id
 
-    bot_id = args["bot_id"]
+    # #1623 Split C / #1633 finding: ``require_account_id``를
+    # ``args["bot_id"]`` **이전**으로 둔다. 그래야 bot_id 없는
+    # invalid-account-only direct-IPC probe도 ``InvalidAccountIdError``
+    # (code="VALIDATION_ERROR", #1633 SSOT)로 raise되어 server.py:323
+    # ``getattr(e, "code", ...)``를 거쳐 VALIDATION_ERROR envelope이 된다.
+    # bot_id를 먼저 읽으면 ``KeyError``가 먼저 터져 EXECUTION_ERROR로
+    # 오분류된다. status/balance/positions handler는 이미 require_account_id
+    # 최우선이라 무변경 — reconcile만 ordering 대상.
     account_id = require_account_id(
         args.get("account_id"), context="ipc.broker.reconcile"
     )
+    bot_id = args["bot_id"]
 
     # Refs #1240 review (P2-1): BotManager로부터 봇의 실제 account_id를 조회해
     # 요청 payload의 account_id와 일치하지 않으면 거부한다. 잘못된 account_id가
