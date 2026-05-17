@@ -396,12 +396,15 @@ ante rule info <rule_id> --account <account_id>           # 룰 상세
 `rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
 의 `require_account_id` 를 경유하므로 `--account` 가 필수다. invalid
 `account_id` ( `None`/빈 문자열/`default`/패턴 위반 )의 **목표
-에러코드는 `VALIDATION_ERROR`** 이나(normative target), 현재 그
-정렬(이 두 표면이 지금 `VALIDATION_ERROR` 를 산출하는지) 확정·교정은
-**#1635** 책임이다(현재 CLI 콜백 `except` 가 `InvalidAccountIdError`
-미catch + `AuthenticatedGroup.main` 이 non-Click `AccountError`
-미변환 → 미정렬 가능). 목표 코드·정적 등재 상태·담당 split 의 SSOT
-는 아래 [account-scoped 표면 참조](#account-scoped-account_id-입력-표면--14-account-id-contract-참조).
+에러코드는 `VALIDATION_ERROR`** 이다(normative target). CLI 콜백
+`except` 가 `InvalidAccountIdError` 를 미catch 하고
+`AuthenticatedGroup.main` 이 non-Click `AccountError` 변환 경로를
+미보유하는 **구조**이므로, 목표 도달 정렬·확정은 **#1635** 담당이다
+(어느 표면이 drift 인지는 14-account-id-contract.md 결정표
+`정렬 담당 split` 컬럼으로만 함의하며, 본 문서·결정표 어디서도 이
+두 표면이 지금 무엇을 내는지는 단정하지 않는다 — 담당 split probe
+책임). 목표 코드·정적 등재 상태·담당 split 의 SSOT 는 아래
+[account-scoped 표면 참조](#account-scoped-account_id-입력-표면--14-account-id-contract-참조).
 
 ### `ante broker` — 증권사 연동
 
