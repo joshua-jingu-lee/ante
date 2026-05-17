@@ -105,13 +105,20 @@ async def _ipc_broker_command(command: str, account_id: str, actor: str) -> dict
 @require_scope("broker:read")
 def status(ctx: click.Context, account_id: str) -> None:
     """증권사 연결 상태 조회."""
-    from ante.account.scoping import require_account_id
+    from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
-    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
-    validated_account_id = require_account_id(account_id, context="cli.broker.status")
+    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
+    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    # ``InvalidAccountIdError``는 non-Click ``AccountError``라 기존
+    # ``except click.ClickException`` fallback이 잡지 못해 traceback이 났다.
+    # helper가 ``InvalidAccountIdError``→``fmt.error(code=VALIDATION_ERROR)``+
+    # ``SystemExit(1)``로 변환하고 검증된 account_id를 반환한다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.broker.status"
+    )
 
     # IPC 우선 시도
     try:
@@ -167,13 +174,16 @@ def status(ctx: click.Context, account_id: str) -> None:
 @require_scope("broker:read")
 def balance(ctx: click.Context, account_id: str) -> None:
     """증권사 계좌 잔고 조회."""
-    from ante.account.scoping import require_account_id
+    from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
-    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
-    validated_account_id = require_account_id(account_id, context="cli.broker.balance")
+    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
+    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.broker.balance"
+    )
 
     # IPC 우선 시도
     try:
@@ -215,14 +225,15 @@ def balance(ctx: click.Context, account_id: str) -> None:
 @require_scope("broker:read")
 def positions(ctx: click.Context, account_id: str) -> None:
     """증권사 보유 종목 조회."""
-    from ante.account.scoping import require_account_id
+    from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
-    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
-    validated_account_id = require_account_id(
-        account_id, context="cli.broker.positions"
+    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
+    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.broker.positions"
     )
 
     # IPC 우선 시도
@@ -272,14 +283,15 @@ def positions(ctx: click.Context, account_id: str) -> None:
 @require_scope("broker:read")
 def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
     """내부 데이터와 증권사 데이터 대사."""
-    from ante.account.scoping import require_account_id
+    from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
 
     fmt = get_formatter(ctx)
 
-    # CLI 진입에서 account_id 검증 (fallback 금지, #1217 SPLIT-1).
-    validated_account_id = require_account_id(
-        account_id, context="cli.broker.reconcile"
+    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
+    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.broker.reconcile"
     )
 
     # --fix 옵션이 있으면 IPC로 서버에 위임 (상태 변경)
