@@ -246,7 +246,7 @@ invalid ``account_id`` 에 ``VALIDATION_ERROR`` 재사용이 불가능하다는
 | **B** | treasury·rule local construction lifecycle ( ``_create_treasury`` / ``_create_rule_engine`` 경유) | #1635 |
 | **C** | broker IPC envelope ( ``broker.status/balance/positions/reconcile`` ) | #1636 |
 | **D** | account-lifecycle / cold-path / AccountService mutation — #1634/35/36 범위 아님 | follow-up |
-| **E** | non-broker mutating IPC ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw, ``bot.create`` ) — #1634/35/36 범위 아님 | follow-up |
+| **E** | non-broker mutating IPC — ``treasury.allocate`` / ``treasury.deallocate`` ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw, ``registry.py:188``/``:199`` ) , ``bot.create`` **만**. read 표면( ``treasury snapshot`` 은 ``_create_treasury`` =B, ``strategy performance`` 는 read-family follow-up )은 E 아님 — #1634/35/36 범위 아님 | follow-up |
 
 **일반 규칙(구조적 폐쇄)**: enumerate된 **모든** Click ``account_id``
 command 표면은 본 표에 **명시 row 1개씩** 필수다(rule-only / implicit
@@ -264,7 +264,8 @@ follow-up / scope-extension / 구현대상아님 / 문서수정 결정으로 닫
 **정적 사실만** ( Click decorator 존재 vs 03-commands.md 기재 여부 —
 ``match`` / ``spec-only`` / ``code-only`` ; 런타임 산출과 무관 ).
 ``정렬 담당 split`` = 그 목표에 도달시킬 책임 ( A=#1634 / B=#1635 /
-C=#1636 / D / E / 문서수정 ). **그 표면이 지금 무엇을 내는지는 본
+C=#1636 / D follow-up / E follow-up / read-family follow-up /
+문서수정 ). **그 표면이 지금 무엇을 내는지는 본
 표가 단정하지 않으며**(위 [current 단정 금지](#current-단정-금지-필수--거짓종결-방지);
 어떤 표면이 drift 인지는 ``정렬 담당 split`` 컬럼으로만 함의),
 담당 split 의 probe 책임이다.
@@ -290,8 +291,8 @@ C=#1636 / D / E / 문서수정 ). **그 표면이 지금 무엇을 내는지는 
 | `ante treasury allocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (non-broker mutating IPC `treasury.allocate`→`_handle_treasury_allocate`→`treasury_manager.get` **raw**, `require_account_id` 미경유 (`registry.py:188`). #1635 construction-lifecycle 범위 아님; #1623 probe 집합 아님. 목표=`VALIDATION_ERROR`, follow-up 이 `require_account_id` 경유로 정렬 시 도달) |
 | `ante treasury deallocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (동 mutating IPC `treasury.deallocate`→`_handle_treasury_deallocate`→`treasury_manager.get` **raw** (`registry.py:199`)) |
 | `ante bot create --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (mutating IPC `bot.create` handler `require_account_id`; 단 `--account` 생략 시 single-active resolver. #1623 probe 집합 아님; 구현 시 경로 확인 후 동 결정) |
-| `ante treasury snapshot --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (#1623 probe 집합 아님; `treasury status` 와 helper 공유하나 #1635 본문은 `treasury status`로 한정 — 임의 #1635 확장 금지, 동 follow-up) |
-| `ante strategy performance <name> --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (#1623 probe 집합 아님; #1634 read-only ingress 와 패턴 유사하나 probe 실패 집합 외 — 임의 #1634 포함 금지, 동 follow-up) |
+| `ante treasury snapshot --account <account_id>` | option | `VALIDATION_ERROR` | match | **B — #1635** (`treasury status` (`src/ante/cli/commands/treasury.py:64`) 와 **동일** `_create_treasury(account_id)` construction-lifecycle 경로 — snapshot 콜백 `src/ante/cli/commands/treasury.py:229` 가 `t, db = await _create_treasury(account_id)` 로, status 콜백 `:69` 와 동일 `_create_treasury`→`require_account_id` (`:37`) 경계를 공유하는 **구조**. ∴ B(#1635) construction-lifecycle 범위 (mutating IPC E 아님). 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 #1635 probe 책임) |
+| `ante strategy performance <name> --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **follow-up (read-family, 비-#1623-probe)** (읽기 표면 — `strategy_performance` CLI 콜백 (`src/ante/cli/commands/strategy.py:432`) 자체가 `account_id` 를 처리 (`account_id is None` → `STRATEGY_MISSING_REQUIRED_ACCOUNT`, `:450`) 하고 `PerformanceTracker` + 자체 `SELECT 1 FROM accounts` 단건 read 를 수행하는 **구조**. `_create_treasury`/`_create_rule_engine` construction(B) 도, broker/non-broker mutating IPC dispatch(C/E) 도 아니며, #1623-probe(`account info`/`bot list`) 비동형 → mutating IPC E 와 구분되는 **read-family follow-up**. 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 read-family follow-up 책임) |
 | `ante broker health [--account <account_id>]` | option | `VALIDATION_ERROR` | **spec-only** (03-commands.md:114(`status/health` 합산 행)·410(bash 블록) 에 기재; `broker.py` 미등록 — status/balance/positions/reconcile 만 존재. **정적 사실**) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
 | `ante broker price <symbol> [--account <account_id>]` | option | `VALIDATION_ERROR` | **spec-only** (03-commands.md:117·413(bash 블록) 에 기재; `broker.py` 미등록. **정적 사실**) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
 
@@ -323,12 +324,27 @@ C=#1636 / D / E / 문서수정 ). **그 표면이 지금 무엇을 내는지는 
 > construction lifecycle)** 로 불변이다(등재 상태 컬럼만 정정,
 > 분류·목표 코드·row 수 무변경).
 
-> D/E = follow-up 항목( ``account create`` ,
-> ``account suspend/activate/delete/set-credentials/repair-timezone`` ,
-> ``treasury allocate/deallocate`` , ``bot create`` ,
-> ``treasury snapshot`` , ``strategy performance`` )은 본 이슈
-> #1633 의 통합 follow-up 후보로 묶이며 사람이 등록한다(자동 생성
-> 금지). ``account create`` 는 ``account_create`` 콜백이 ``svc.create``
+> D/E/read-family = follow-up 항목은 본 이슈 #1633 의 통합 follow-up
+> 후보로 묶이며 사람이 등록한다(자동 생성 금지). 세 follow-up 계열은
+> 진입 구조가 다르므로 **섞지 않는다**:
+>
+> - **D (account-lifecycle / cold-path)**: ``account create`` ,
+>   ``account suspend/activate/delete/set-credentials/repair-timezone`` .
+> - **E (non-broker mutating IPC)**: ``treasury allocate`` ,
+>   ``treasury deallocate`` , ``bot create`` **만**
+>   ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw,
+>   ``registry.py:188``/``:199`` ; ``bot.create`` mutating IPC handler ).
+>   ``treasury snapshot`` ( ``_create_treasury`` =B/#1635 ) ·
+>   ``strategy performance`` ( read-family ) 는 mutating IPC 가
+>   아니므로 **E 에 포함하지 않는다**.
+> - **read-family (#1623-probe 비동형 read 표면)**:
+>   ``strategy performance`` ( ``strategy_performance`` 콜백 자체
+>   ``account_id`` 처리 + ``PerformanceTracker`` / 자체
+>   ``SELECT 1 FROM accounts`` read 의 **구조**; #1623-probe
+>   ( ``account info`` / ``bot list`` ) 비동형 ). mutating IPC(E) 와
+>   섞지 않는다.
+>
+> ``account create`` 는 ``account_create`` 콜백이 ``svc.create``
 > 를 generic ``except Exception`` → ``fmt.error(str(e))`` ( ``code=``
 > 인자 없음 )로 감싸는 **구조**상, ``validate_new_account_id`` 검증
 > 자체와 무관하게 그 cold-path CLI 래핑이 목표 ``VALIDATION_ERROR``
