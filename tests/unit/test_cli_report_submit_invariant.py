@@ -204,6 +204,74 @@ class TestExtraForbid:
         assert body["code"] == "REPORT_VALIDATION_ERROR"
 
 
+# ── #1632: sections 미지원 필드 거부 + CLI input-reflection 차단 ─────────
+
+
+class TestSectionsRejected:
+    """``sections``는 미지원 필드 — CLI도 Web API와 동일하게 거부 (#1632).
+
+    사용자 정책 판정(2026-05-17): ``sections``는 YAGNI → 미지원 필드로 확정해
+    422/exit 1로 거부한다 (option 2b). ``ante report submit`` CLI는 Web API와
+    동일한 ``ReportSubmitRequest`` (SSOT)를 사용하므로 ``sections``는
+    ``extra='forbid'``로 거부된다.
+
+    Codex Plan Review r2 [high]: 2b가 ``sections``를 ValidationError
+    (``extra_forbidden``) 경로로 보내므로 ``str(exc)``의 ``input_value={...}``
+    (제출한 sections rationale/evidence)가 터미널/CI 로그에 반사되는 신규
+    CLI input-reflection이 발생한다. ``report.py``를 #1629 L1 패턴
+    (``exc.errors(include_context=False, include_input=False)``)으로 정화해
+    sentinel/내용이 stdout에 반사되지 않음을 회귀 검증한다.
+    """
+
+    _SENTINEL = "oracle_payload_sections_marker"
+
+    def _sections_payload(self) -> dict[str, Any]:
+        return _base_payload(
+            sections={
+                self._SENTINEL: {
+                    "rationale": "secret-rationale-text",
+                    "evidence": ["secret-evidence-item"],
+                }
+            }
+        )
+
+    def test_sections_payload_rejected(self, runner, tmp_path) -> None:
+        """``sections`` 포함 JSON → exit 1 + REPORT_VALIDATION_ERROR."""
+        path = _write_payload(tmp_path, self._sections_payload())
+        result = _invoke_submit(runner, tmp_path, path)
+        assert result.exit_code == 1, result.output
+        body = json.loads(result.output)
+        assert body["status"] == "error"
+        assert body["code"] == "REPORT_VALIDATION_ERROR"
+
+    def test_sections_rejection_does_not_echo_input(self, runner, tmp_path) -> None:
+        """stdout 전체에 sections sentinel/내용이 반사되지 않는다.
+
+        #1629 L1 패턴 1:1 미러(``exc.errors(include_context=False,
+        include_input=False)``)가 CLI에 적용되어 거부된 sections payload가
+        터미널/CI 로그로 새지 않음을 회귀 검증한다.
+        """
+        path = _write_payload(tmp_path, self._sections_payload())
+        result = _invoke_submit(runner, tmp_path, path)
+        assert result.exit_code == 1, result.output
+        out = result.output
+        assert self._SENTINEL not in out, f"stdout에 sections sentinel이 반사됨: {out}"
+        assert "secret-rationale-text" not in out, (
+            f"stdout에 sections rationale이 반사됨: {out}"
+        )
+        assert "secret-evidence-item" not in out, (
+            f"stdout에 sections evidence가 반사됨: {out}"
+        )
+
+    def test_payload_without_sections_still_accepted(self, runner, tmp_path) -> None:
+        """``sections`` 없는 정상 JSON은 회귀 없이 정상 제출."""
+        path = _write_payload(tmp_path, _base_payload())
+        result = _invoke_submit(runner, tmp_path, path)
+        assert result.exit_code == 0, result.output
+        body = json.loads(result.output)
+        assert body["status"] == "ok"
+
+
 # ── CLI extras (submitted_by, backtest_run_id) ──────────────
 
 

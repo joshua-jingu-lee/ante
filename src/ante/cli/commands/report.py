@@ -104,7 +104,15 @@ def submit(
     try:
         validated = ReportSubmitRequest.model_validate(report_data)
     except ValidationError as exc:
-        fmt.error(str(exc), code="REPORT_VALIDATION_ERROR")
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1 패턴 1:1 미러;
+        # reports.py:194 web sweep 와 동일 sanitizer). 2b 가 sections 미지원
+        # 필드를 ValidationError(extra_forbidden) 경로로 보내므로 ``str(exc)``
+        # 의 ``input_value={...}`` (제출한 sections rationale/evidence) 가
+        # 터미널/CI 로그에 반사되지 않도록 loc/type/msg 만 출력한다 (#1632).
+        fmt.error(
+            str(exc.errors(include_context=False, include_input=False)),
+            code="REPORT_VALIDATION_ERROR",
+        )
         raise SystemExit(1) from exc
 
     async def _submit() -> dict:

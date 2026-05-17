@@ -3156,10 +3156,6 @@ export type components = {
              * @default
              */
             risks: string;
-            /** Sections */
-            sections?: {
-                [key: string]: unknown;
-            } | null;
             /** Sharpe Ratio */
             sharpe_ratio?: number | null;
             /** Strategy Name */

@@ -43,13 +43,9 @@ router = APIRouter()
 #   ``"default": None`` 만 있고 ``required`` 에서 빠지지 않으면
 #   openapi-typescript 가 ``number | null`` 필수 필드로 생성해 (``?`` 마커 없음),
 #   메트릭을 생략하는 정상 제출이 타입 오류로 막힌다.
-# - ``sections`` 가 런타임에 ``dict[str, Any] | None`` 인데 schema 에
-#   ``additionalProperties`` 를 명시하지 않으면 generated type 이
-#   ``Record<string, never> | null`` 이 되어 임의 section payload 를 보낼 수 없다.
 #
 # Pydantic 의 ``model_json_schema()`` 는 default 가 있는 필드를 ``required`` 에서
-# 자동으로 빼고, ``dict[str, Any]`` 를 ``additionalProperties: true`` 로 노출하며,
-# ``model_config = ConfigDict(extra="forbid")`` 를 top-level
+# 자동으로 빼고, ``model_config = ConfigDict(extra="forbid")`` 를 top-level
 # ``additionalProperties: false`` 로 반영한다. 다만 ``default=None`` 을 키 안에
 # 그대로 남기면 openapi-typescript 가 ``?`` 마커 대신 ``T | null`` 필수 필드로
 # 생성한다. FastAPI 자동 schema (``ReportSubmitRequest`` 가 라우트 시그니처에
