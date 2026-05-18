@@ -570,13 +570,55 @@ class _EntrypointSite:
     callee_src: str  # 예: "BotCreateRequest.model_validate"
     receiver: str  # 예: "BotCreateRequest" / "model"
     method: str
+    # INV-1 정밀화(Codex attempt-5 [P2] — site granularity 과병합
+    # 회귀 락): 이 검증 호출을 감싸는 **가장 가까운 enclosing
+    # FunctionDef/AsyncFunctionDef 의 dotted qualname**(route
+    # handler/endpoint 함수; 중첩 시 ``outer.inner``, 메서드는
+    # ``Class.method``). lineno-agnostic 하면서도 같은 모듈·같은
+    # 모델의 검증 호출이 **다른 handler** 면 distinct site-id 가
+    # 되도록 하는 안정·distinct 식별자. 모듈 스코프(어떤 함수에도
+    # 안 감싸인) 호출은 ``"<module>"``. enclosing 함수 qualname 이
+    # pre-reject 가드 적용 경계(자연 floor) — 같은 함수 내 동일
+    # 모델 2회 호출은 동일 가드 context 라 더 미세 단위 불요.
+    enclosing: str
+
+
+def _enclosing_callable_qualname(tree: ast.AST, call_node: ast.Call) -> str:
+    """``call_node`` 를 감싸는 가장 가까운 FunctionDef/AsyncFunctionDef
+    의 **dotted qualname** 을 AST 로 도출(INV-1 정밀화 — site-id
+    enclosing-qualname 성분).
+
+    부모 체인을 따라 ClassDef/FunctionDef/AsyncFunctionDef 이름을
+    바깥→안 순서로 모아 ``.`` 으로 잇는다(중첩 함수 ``outer.inner``,
+    메서드 ``Class.method``, route handler/endpoint 함수). 어떤
+    함수에도 감싸이지 않은 모듈 스코프 호출은 ``"<module>"``.
+    lineno 는 포함하지 않는다(fragile-by-design 회피) — enclosing
+    함수 qualname 만으로 같은 모듈·같은 모델의 distinct handler 가
+    distinct site-id 가 된다(과병합 회귀 영구 락).
+    """
+    parent: dict[int, ast.AST] = {}
+    for p in ast.walk(tree):
+        for child in ast.iter_child_nodes(p):
+            parent[id(child)] = p
+    chain: list[str] = []
+    cur: ast.AST | None = parent.get(id(call_node))
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            chain.append(cur.name)
+        cur = parent.get(id(cur))
+    if not chain:
+        return "<module>"
+    return ".".join(reversed(chain))
 
 
 def _scan_s1_entrypoints() -> list[_EntrypointSite]:
     """routes/**/*.py AST 에서 Pydantic 검증 entrypoint 호출 전수.
 
     ``<Recv>.<method>(...)`` 형태의 call 중 method ∈ entrypoint API.
-    손-열거 census 금지 — AST self-derive.
+    손-열거 census 금지 — AST self-derive. 각 site 는 그 호출을
+    감싸는 enclosing callable qualname 도 보존한다(INV-1 정밀화 —
+    같은 모듈·같은 모델이라도 다른 handler 면 distinct site-id;
+    과병합 fail-open 차단).
     """
     sites: list[_EntrypointSite] = []
     for modname, path in _route_modules():
@@ -601,6 +643,7 @@ def _scan_s1_entrypoints() -> list[_EntrypointSite]:
                     callee_src=f"{recv_name}.{func.attr}",
                     receiver=recv_name,
                     method=func.attr,
+                    enclosing=_enclosing_callable_qualname(tree, node),
                 )
             )
     return sites
@@ -720,7 +763,15 @@ def _resolve_s1() -> _S1Resolve:
     """
     res = _S1Resolve()
     for site in _scan_s1_entrypoints():
-        sid = f"{site.module}:{site.lineno}:{site.callee_src}"
+        # sid 형식: ``module:lineno:enclosing-qualname:callee_src``.
+        # lineno 는 helper-trace(_trace_generic_helper_model_args)
+        # 가 site.lineno 로 호출을 특정하는 데만 쓰이고 안정
+        # site-id(``_stable_s1_site``)에서는 제거된다(fragile
+        # 회피). enclosing-qualname 은 안정·distinct call-site
+        # 식별자로 보존된다(INV-1 정밀화 — 과병합 차단). module·
+        # lineno 는 단일 세그먼트이고 enclosing/callee_src 에는
+        # ``:`` 가 없으므로 4-세그먼트 split 이 모호하지 않다.
+        sid = f"{site.module}:{site.lineno}:{site.enclosing}:{site.callee_src}"
         recv = site.receiver
         cls = _resolve_name_in_module(site.module, recv)
         if isinstance(cls, type) and issubclass(cls, BaseModel):
@@ -830,6 +881,22 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
     for r in routes:
         if isinstance(r, APIRoute):
             full = prefix + r.path
+            # INV-1 정밀화(Codex attempt-5 [P2] — S2 site granularity
+            # 동형 보장): S2 validating-site 도 distinct call-site 가
+            # 되도록 route path 에 더해 **HTTP method 집합 + endpoint
+            # 함수 qualname**(route handler/endpoint 함수)을 보존한다.
+            # 같은 path 에 다른 method(GET/PUT)·다른 endpoint 함수가
+            # 매핑되면(또는 동일 path/다른 handler) S1 의 enclosing
+            # -qualname 보존과 동형으로 distinct site-id 가 되어 한
+            # site 의 pre-reject 증명이 가드 없는 다른 S2 site 로
+            # 재사용되지 않는다. lineno 는 포함하지 않는다(S1 과 동형
+            # — fragile 회피; path+method+endpoint qualname 이 안정·
+            # distinct call-site 식별자, 자연 floor).
+            ep = getattr(r, "endpoint", None)
+            ep_qn = getattr(ep, "__qualname__", None) or repr(ep)
+            ep_mod = getattr(ep, "__module__", None) or "<?>"
+            methods = ",".join(sorted(getattr(r, "methods", None) or []))
+            s2_site = f"{full}[{methods}]@{ep_mod}.{ep_qn}"
             # INV-3 정밀화(Codex `review-mpagchqw` [P2]): introspection
             # 예외를 try/except 로 삼켜 route body params 를 조용히
             # 누락하면 default-deny 가 green 으로 새는 fail-open 이다.
@@ -856,7 +923,7 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
                         f"{type(exc).__name__}: {exc} (INV-3 sink)"
                     )
                 else:
-                    out.body_models.append((f"{full}#body_field", ann))
+                    out.body_models.append((f"{s2_site}#body_field", ann))
             try:
                 fd = get_flat_dependant(r.dependant)
                 body_params = list(fd.body_params)
@@ -880,7 +947,7 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
                             "(INV-3 sink)"
                         )
                         continue
-                    out.body_models.append((f"{full}#dep_body", ann))
+                    out.body_models.append((f"{s2_site}#dep_body", ann))
         elif isinstance(r, Mount):
             sub = r.app
             mount_path = prefix + r.path
@@ -933,23 +1000,40 @@ def _build_app() -> Any:
 
 
 def _stable_s1_site(s1_site_id: str) -> str:
-    """S1 site_id(``module:lineno:callee_src`` [+``#Model``])를 **lineno
-    무관 안정 site**(``module:callee_src``)로 정규화 — INV-1 정밀화.
+    """S1 site_id(``module:lineno:enclosing-qualname:callee_src``
+    [+``#Model``])를 **lineno 무관·enclosing-qualname 보존 안정
+    site**(``module:enclosing-qualname:callee_src``)로 정규화 —
+    INV-1 정밀화(Codex attempt-5 [P2] — site granularity 과병합 락).
 
-    issue 본문이 validating-site = "S1 callee 위치(파일:심볼)" 로 정의
-    하므로 volatile 한 lineno 는 키에서 제거한다(가드 유무는 그 callee
-    심볼=route+entrypoint 의 사실이지 줄 번호의 사실이 아니다). 줄
-    번호를 키에 넣으면 routes 파일의 무관한 윗쪽 편집만으로 키가
-    흔들려 등록 proof 가 stale 가 되는 fragile-by-design 결함이 된다
-    (site 는 자연 floor — 더 미세 단위 불요).
+    volatile 한 lineno 는 키에서 제거한다(가드 유무는 줄 번호의
+    사실이 아니라 그 검증 호출을 감싸는 enclosing handler/endpoint
+    함수의 사실이다 — 줄 번호를 키에 넣으면 routes 파일의 무관한
+    윗쪽 편집만으로 키가 흔들려 fragile-by-design). 그러나 **enclosing
+    callable qualname 은 보존**한다: lineno-agnostic 하게 callee 만
+    으로 site 를 정규화하면 같은 route 모듈 내 동일 모델의 검증
+    호출이 2개(서로 다른 handler)면 하나의 site-id 로 과병합돼, 한
+    handler 의 pre-reject 가드 proof 가 가드 없는 다른 handler 에
+    재사용되어 discovery lock 이 fail-open 으로 PASS 한다(attempt-5
+    FAIL class). enclosing 함수 qualname 을 site-id 에 두면 같은
+    모듈·같은 모델이라도 distinct handler 면 distinct site-id 가
+    되어 가드 없는 site 는 자기 proof 가 없어 UNPROVEN→FAIL.
+    enclosing 함수가 pre-reject 가드 적용 경계(자연 floor) — 같은
+    함수 내 동일 모델 2회 호출은 동일 가드 context 라 더 미세 단위
+    불요. sid 는 정확히 4-세그먼트(``module:lineno:enclosing:
+    callee_src``)이며 module·lineno 는 단일 세그먼트, enclosing·
+    callee_src 에는 ``:`` 가 없다(enclosing 은 식별자+``.``,
+    제네릭 helper 의 ``#Model`` suffix 는 callee_src 마지막
+    세그먼트에 포함). lineno 만 떼고 ``module:enclosing:callee_src``
+    재조립.
     """
     parts = s1_site_id.split(":")
-    if len(parts) >= 3:
+    if len(parts) >= 4:
         module = parts[0]
-        callee_src = ":".join(parts[2:])  # callee_src 자체엔 ':' 없음
-        # 제네릭 helper 의 ``#Model`` suffix 도 callee_src 에 포함돼
-        # site 식별자로 보존(같은 helper 라도 다른 검증 모델은 별 site).
-        return f"{module}:{callee_src}"
+        # parts[1] = lineno(제거). parts[2] = enclosing-qualname.
+        # parts[3:] = callee_src(``:`` 없음 — join 은 안전 복원).
+        enclosing = parts[2]
+        callee_src = ":".join(parts[3:])
+        return f"{module}:{enclosing}:{callee_src}"
     return s1_site_id  # 형식 예외 — 원본 유지(set-difference 가 잡음)
 
 
@@ -1071,12 +1155,15 @@ class _DictPreRejectProof:
 
 def _prove_account_update_credentials_pre_reject() -> None:
     """``AccountUpdateRequest.credentials`` (비-dict[str,Any] dict 노드)
-    가 그 검증 site(``ante.web.routes.accounts:AccountUpdateRequest.
-    model_validate`` — ``PUT /api/accounts/{id}``)에서 ``model_validate``
-    이전 STRUCTURAL 409 로 거부됨을 behavioral 증명. model_validate
-    스파이가 invoke 되면 (가드 회귀) 단언 실패. 이 증명은 그 **특정
-    site** 한정이며, 동일 모델/필드를 검증하는 다른 site 가 생기면
-    그 site 는 별도 키라 본 증명으로 통과되지 않는다(INV-1 정밀화).
+    가 그 검증 site(``ante.web.routes.accounts:update_account:
+    AccountUpdateRequest.model_validate`` — ``update_account`` handler,
+    ``PUT /api/accounts/{id}``)에서 ``model_validate`` 이전 STRUCTURAL
+    409 로 거부됨을 behavioral 증명. model_validate 스파이가 invoke
+    되면 (가드 회귀) 단언 실패. 이 증명은 그 **특정 site**(특정
+    enclosing handler ``update_account``) 한정이며, 동일 모델/필드를
+    검증하는 다른 handler/site 가 생기면 그 site 는 별도 키(enclosing
+    qualname 이 다름)라 본 증명으로 통과되지 않는다(INV-1 정밀화 —
+    같은 모듈·같은 모델 다중-handler 과병합 fail-open 차단).
     """
     from ante.web.routes import accounts as accounts_mod
     from ante.web.schemas import AccountUpdateRequest
@@ -1131,13 +1218,16 @@ def _prove_account_update_credentials_pre_reject() -> None:
 
 # INV-1: 리터럴 (owner,field,validating-site) 키 집합. introspection
 # 미호출 — validating_site 는 그 dict 노드가 검증되는 S1 안정 callee
-# ``module:callee_src`` 리터럴(lineno 무관 — issue 본문 "파일:심볼").
+# ``module:enclosing-qualname:callee_src`` 리터럴(lineno 무관·enclosing
+# handler qualname 보존 — Codex attempt-5 [P2] 과병합 락; 같은 모듈·
+# 같은 모델이라도 distinct handler 면 distinct site-id).
 _REGISTERED_DICT_PROOFS: list[_DictPreRejectProof] = [
     _DictPreRejectProof(
         owner_qualname="AccountUpdateRequest",
         field_name="credentials",
         validating_site=(
-            "ante.web.routes.accounts:AccountUpdateRequest.model_validate"
+            "ante.web.routes.accounts:update_account:"
+            "AccountUpdateRequest.model_validate"
         ),
         prove=_prove_account_update_credentials_pre_reject,
     ),
@@ -1749,6 +1839,124 @@ def test_pre_validation_reject_precedence_guards_all_proven() -> None:
     )
 
 
+def test_attempt5_same_module_same_model_multi_handler_no_overmerge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-5 회귀 canary(Codex [P2] — site-id 과병합 영구 락):
+    같은 route 모듈·같은 모델을 검증하는 handler 가 2개이고 그중
+    **하나만** pre-reject 가드가 있을 때, 가드 없는 handler 의 dict
+    노드가 가드 있는 handler 의 proof 로 재사용되지 않고
+    UNPROVEN→FAIL 함을 행위로 단언한다.
+
+    이전 ``_stable_s1_site`` 는 site-id 를 ``module:callee_src`` 로
+    lineno-agnostic 정규화하면서 enclosing handler 를 버려, 같은
+    모듈·같은 모델의 2개 handler(``handler_a`` 가드 有 /
+    ``handler_b`` 가드 無) 검증 호출이 단일 site-id 로 **과병합**
+    됐다. 그러면 ``handler_a`` 의 pre-reject proof 키가 가드 없는
+    ``handler_b`` 의 dict 노드에도 매칭돼 discovery lock 이
+    fail-open 으로 PASS 했다(attempt-5 FAIL class).
+
+    본 canary 는 합성 routes 모듈을 두고 (a) 두 handler 가
+    **distinct** stable site-id(enclosing qualname 이 다름)를
+    가짐을 단언하고, (b) ``handler_a`` site 만 proof 등록한 상태로
+    ``compute_verdict`` 가 ``handler_b`` 의 dict 노드를 UNPROVEN
+    으로 FAIL 시킴을 단언한다. **old 코드(module:callee_src
+    과병합)에서는 (a)/(b) 모두 red** — 영구 회귀 락.
+    """
+    # 패키지 디렉토리명 = ``_ROUTES_PKG`` 와 동일해야
+    # ``import_module`` 으로 정적 resolve(_resolve_s1) 가능.
+    syn_routes = tmp_path / "syn_routes_1651_a5"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # 같은 모듈·같은 모델(비-dict[str,Any] dict 필드 보유 → dict
+    # 노드 발생)을 검증하는 handler 2개. handler_a=가드 有(개념),
+    # handler_b=가드 無. lock 관점에서 둘은 distinct site 여야 한다.
+    (syn_routes / "multi.py").write_text(
+        "from pydantic import BaseModel\n"
+        "\n"
+        "class MultiReq(BaseModel):\n"
+        "    creds: dict[str, str] = {}\n"
+        "\n"
+        "def handler_a(payload):\n"
+        "    return MultiReq.model_validate(payload)\n"
+        "\n"
+        "def handler_b(payload):\n"
+        "    return MultiReq.model_validate(payload)\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a5")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a5" or m.startswith("syn_routes_1651_a5."):
+                del sys.modules[m]
+        s1 = _resolve_s1()
+    finally:
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a5" or m.startswith("syn_routes_1651_a5."):
+                del sys.modules[m]
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    # (a) 두 handler 가 distinct stable site-id 를 가져야 한다.
+    stable_sites = {_stable_s1_site(sid) for sid, _m in s1.models}
+    site_a = "syn_routes_1651_a5.multi:handler_a:MultiReq.model_validate"
+    site_b = "syn_routes_1651_a5.multi:handler_b:MultiReq.model_validate"
+    assert site_a in stable_sites and site_b in stable_sites, (
+        "attempt-5 과병합 회귀 — 같은 모듈·같은 모델의 2개 handler "
+        "가 enclosing-qualname 보존 distinct site-id 로 분리되지 "
+        f"않음(old module:callee_src 과병합 재발): {sorted(stable_sites)}"
+    )
+    assert site_a != site_b, "site_a/site_b 가 동일 — 과병합(canary 무효)"
+
+    # DISCOVERED dict 노드: 두 site 각각에 (MultiReq, creds, site) 가
+    # 별도로 발견돼야 한다(과병합이면 1개로 합쳐짐).
+    surf = _SurfaceModels(
+        site_models=[(_stable_s1_site(sid), m) for sid, m in s1.models],
+        site_roots=[],
+        unresolvable=list(s1.unresolvable),
+    )
+    disc = _discover_all(surf)
+    node_a = ("MultiReq", "creds", site_a)
+    node_b = ("MultiReq", "creds", site_b)
+    assert node_a in disc.dict_nodes and node_b in disc.dict_nodes, (
+        "attempt-5 과병합 회귀 — handler 별 distinct dict 노드 "
+        f"(owner,field,site) 미생성: {sorted(disc.dict_nodes)}"
+    )
+
+    # (b) handler_a site 만 proof 등록 → handler_b dict 노드는
+    # UNPROVEN 으로 FAIL 해야 한다(과병합이면 site_a proof 가
+    # 가드 없는 site_b 노드까지 덮어 fail-open PASS).
+    registered_a_only = frozenset({node_a})
+    verdict = compute_verdict(
+        disc,
+        surf.unresolvable,
+        registered_dict_keys=registered_a_only,
+        registered_validator_ids=frozenset(),
+    )
+    assert not verdict.ok, (
+        "attempt-5 과병합 fail-open 재발 — handler_a site proof 만 "
+        "등록했는데 lock PASS(가드 없는 handler_b dict 노드가 "
+        "handler_a proof 로 재사용됨): "
+        f"unproven_dict={verdict.unproven_dict}"
+    )
+    assert node_b in set(verdict.unproven_dict), (
+        "attempt-5 — 가드 없는 handler_b 의 dict 노드가 UNPROVEN "
+        f"으로 떨어지지 않음: unproven={verdict.unproven_dict}"
+    )
+    assert node_a not in set(verdict.unproven_dict), (
+        "handler_a dict 노드는 proof 등록됐으므로 PROVEN 이어야 함 "
+        f"(per-site 1:1 결합 회귀): unproven={verdict.unproven_dict}"
+    )
+
+
 # ════════════════════════════════════════════════════════════════════
 # CV1: fail-closed FastAPI introspection canary
 # ════════════════════════════════════════════════════════════════════
@@ -1904,11 +2112,15 @@ def test_cv1_introspection_shapes_1_to_4_detect_model() -> None:
     )
 
     # path 별 수집 annotation 인덱스(route_path → 발견 BaseModel 집합).
+    # S2 site-id 형식(INV-1 정밀화 — Codex attempt-5 [P2]):
+    # ``{route_path}[{methods}]@{mod}.{endpoint_qn}#{kind}``. route
+    # path 는 첫 ``[`` 앞 토큰이다(method/endpoint qualname 보존으로
+    # site-id 가 distinct — 같은 path 다른 method/handler 면 별 site).
     by_path: dict[str, set[Any]] = {}
     for path, ann in collected.body_models:
         if isinstance(ann, type) and issubclass(ann, BaseModel):
-            # path 형식 예: "/s1#body_field" / "/s4#dep_body".
-            route = path.split("#", 1)[0]
+            # 예: "/s1[POST]@mod._s1#body_field" → route="/s1".
+            route = path.split("[", 1)[0]
             by_path.setdefault(route, set()).add(ann)
 
     # INV-4: **각** path 가 자기 기대 모델을 개별 수집했는지 positive
@@ -2188,6 +2400,7 @@ def test_cv1_origin_complete_canary_helper_literal_dynamic_mix_unresolvable(
             callee_src="model.model_validate",
             receiver="model",
             method="model_validate",
+            enclosing="helper",
         )
         models, all_resolved = _trace_generic_helper_model_args(site)
     finally:
