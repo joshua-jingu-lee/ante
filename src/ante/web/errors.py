@@ -59,9 +59,12 @@ def _normalize_error_loc(errors: list[dict]) -> list[dict]:
 
     **본 정규화는 ``type=='extra_forbidden'`` loc 벡터 한정**이다. 비-
     extra_forbidden caller-controlled loc(자유형 ``dict[str,*]`` 키,
-    structured body, validator-합성 loc) 및 수동 unknown-key detail
-    반사(``accounts.py`` PUT account update F3)는 본 함수가 정규화하지
-    않으며 #1651(spec-first 종합 정책)에서 다룬다.
+    structured body, validator-합성 loc)는 본 함수가 정규화하지 않으며
+    #1651(spec-first 종합 정책)에서 다룬다. ``accounts.py`` PUT account
+    update 수동 unknown-key detail 반사(F3)는 #1654 로 해소됐다 — 해당
+    수동 가드가 caller-supplied unknown body key 이름을 반사하지 않는
+    고정 메시지를 쓰며(L1 #1629 와 같은 방향 런타임 보장), 본 함수는
+    여전히 미경유다(model_validate 이전 수동 가드).
     """
     normalized: list[dict] = []
     for error in errors:

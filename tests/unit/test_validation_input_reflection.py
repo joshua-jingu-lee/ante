@@ -19,10 +19,15 @@ L2 범위(이슈 #1650 본문 SSOT — #1643 Split A):
   ``url``·HTTP 422·RFC7807 envelope 는 보존한다.
 - **본 파일의 L2 보안 단언은 ``type=='extra_forbidden'`` loc 벡터에
   한정**한다. 비-``extra_forbidden`` caller-controlled ``loc``(자유형
-  ``dict[str,*]`` 키, structured body, validator-합성 loc) 및 수동
-  unknown-key detail 반사(``accounts.py`` PUT account update F3,
-  ``test_account_api.py:886``/``:1445``)는 #1650 정규화 대상이 아니며
-  **#1651(spec-first 종합 정책)** 에서 다룬다.
+  ``dict[str,*]`` 키, structured body, validator-합성 loc)는 #1650
+  정규화 대상이 아니며 **#1651(spec-first 종합 정책)** 에서 다룬다.
+- ``PUT /api/accounts/{id}`` raw body 의 수동 unknown-key 422 detail
+  반사(F3 벡터, Pydantic ``extra_forbidden``/공용 chokepoint 미경유)는
+  **#1654 로 해소**됐다 — caller-supplied unknown body key 이름을
+  반사하지 않는 고정 메시지(L1 #1629 와 같은 방향 런타임 보장)이며,
+  본 함수(``_normalize_error_loc``/``sanitize_validation_errors``)는
+  여전히 미경유다. positive 반사-차단 lock 은
+  ``test_f3_manual_unknown_key_detail_not_reflected``.
 """
 
 from __future__ import annotations
@@ -374,8 +379,10 @@ def test_sanitize_pydantic_errors_empty_list() -> None:
 # ── #1650 L2: extra_forbidden loc 말단 정규화 ─────────────────────────
 #
 # 본 섹션의 보안 단언은 모두 ``type=='extra_forbidden'`` loc 벡터에
-# 한정한다. 비-extra_forbidden caller-controlled loc 및 수동 unknown-key
-# detail 반사는 #1651(spec-first 종합 정책) 대상.
+# 한정한다. 비-extra_forbidden caller-controlled loc 는 #1651(spec-first
+# 종합 정책) 대상. PUT /api/accounts/{id} 수동 unknown-key 422 detail
+# 반사(F3)는 #1654 로 해소(caller key 미반사 고정 메시지, 본 sanitizer
+# 미경유) — positive lock 은 test_f3_manual_unknown_key_detail_not_reflected.
 
 # extra='forbid' 요청모델 × extra-key sentinel. payload 는 미정의 caller
 # extra 키(SENTINEL)를 담아 ``extra_forbidden`` 422 를 일으킨다. 현 모든
@@ -841,38 +848,42 @@ def test_global_path_extra_forbidden_loc_placeholder_e2e() -> None:
     assert "'input'" not in detail and "'ctx'" not in detail, detail
 
 
-# ── #1650 범위 경계 회귀: F3 수동 unknown-key 의도적 잔존 ─────────────
+# ── F3 (#1654): 수동 unknown-key 422 detail caller key 미반사 ─────────
 
 
-def test_f3_manual_unknown_key_detail_intentionally_retained(client) -> None:
-    """범위 경계 회귀: PUT /api/accounts/{id} 수동 unknown-key detail 잔존.
+def test_f3_manual_unknown_key_detail_not_reflected(client) -> None:
+    """F3 (#1654): PUT /api/accounts/{id} 수동 unknown-key 422 detail 미반사.
 
-    ``accounts.py:644-648`` 은 unknown mutable 키를
-    ``AccountUpdateRequest.model_validate`` **이전** 에 직접
-    ``unknown_keys`` 문자열로 join 해 422 를 던진다(Pydantic
-    ``extra_forbidden`` 미경유 — F3 벡터). 이 detail-string 반사는 #1650
-    sanitizer/chokepoint 로 정규화되지 **않으며**, #1650 보안 단언 대상이
-    아니다. 본 테스트는 caller 키가 (의도적으로) detail 에 **남아 있음**
-    을 단언해 #1650 가 이 경로를 다루지 않음을 회귀로 고정한다.
+    ``accounts.py`` 의 8단계 수동 unknown-key 가드는 unknown mutable 키를
+    ``AccountUpdateRequest.model_validate`` **이전** 에 직접 처리해 422 를
+    던진다(Pydantic ``extra_forbidden`` 미경유, ``e.errors()`` loc 없음,
+    공용 chokepoint ``sanitize_validation_errors``/``_normalize_error_loc``
+    미경유 — F3 벡터). #1654 는 이 detail-string 이 caller 가 보낸 unknown
+    body key 이름을 그대로 반사하지 않도록(L1 #1629 와 같은 방향 런타임
+    보장) 고정 메시지로 정렬한다. 거부 동작·status 422 는 불변이다.
 
-    후속: 이 detail-string 반사의 종합 정책은 **#1651**(비-
-    extra_forbidden) + F3 후속 후보에서 다룬다. #1650 가 이 경로를
-    placeholder 화하면(=본 단언 실패) 범위 오확장이므로 중단·재보고.
+    본 테스트는 positive 반사-차단 lock 이다(mechanism-agnostic): 유니크
+    SENTINEL 을 unknown body key 로 보냈을 때 (a) status 422 유지 (b)
+    전체 직렬화 응답(detail 및 임의 필드) 어디에도 SENTINEL 부재 (c)
+    #1650 placeholder 토큰 미등장(F3 는 sanitizer 미경유). caller key 가
+    detail 에 다시 등장하면(=본 단언 실패) #1654 회귀이므로 중단·재보고.
     """
     resp = client.put(
         "/api/accounts/acc-1",
-        json={"some_unknown_field": "x"},
+        json={SENTINEL: "x"},
     )
-    # account_service 미주입이면 503 가능 → F3 422 일 때만 단언.
-    if resp.status_code != 422:
-        pytest.skip(f"F3 422 전 단계(status={resp.status_code}) — 경계 무관")
+    # 수동 unknown-key 가드는 model_validate·service 해소 이전 단계라
+    # unknown body key 면 422 가 무조건 발화한다(503 선행 없음).
+    assert resp.status_code == 422, f"status={resp.status_code} {resp.text}"
+    # 전체 직렬화 응답(detail 포함 임의 필드) 어디에도 caller 가 보낸
+    # unknown body key 이름(SENTINEL)이 반사되지 않는다.
+    serialized = resp.text
+    assert SENTINEL not in serialized, (
+        f"#1654 회귀 — F3 수동 unknown-key 422 응답이 caller key 반사: {serialized}"
+    )
+    # F3 는 #1650 sanitizer/chokepoint 미경유이므로 placeholder 토큰도
+    # 등장하지 않는다(메커니즘 동일성 회귀 — 고정 메시지일 뿐).
     detail = str(resp.json().get("detail", ""))
-    # F3: 수동 join detail 에 caller 키가 (의도적으로) 그대로 남아 있다.
-    assert "some_unknown_field" in detail, (
-        f"#1650 범위 경계 회귀 실패 — F3 수동 unknown-key detail 이 "
-        f"placeholder 화됨(#1650 범위 오확장 / #1651·F3 영역 침범): {detail}"
-    )
-    # #1650 sanitizer 미경유이므로 placeholder 토큰은 등장하지 않는다.
     assert _EXTRA_FORBIDDEN_LOC_PLACEHOLDER not in detail, (
-        f"F3 경로에 #1650 placeholder 오적용: {detail}"
+        f"F3 경로에 #1650 placeholder 오적용(메커니즘 침범): {detail}"
     )

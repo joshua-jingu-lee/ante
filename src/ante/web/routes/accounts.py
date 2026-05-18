@@ -643,9 +643,13 @@ async def update_account(
     }
     unknown_keys = sorted(set(mutable_payload_in) - set(MUTABLE_FIELDS))
     if unknown_keys:
+        # F3 (#1654): caller-supplied unknown body key 이름을 detail 에
+        # 반사하지 않는다(L1 #1629 와 같은 방향 런타임 보장). 거부 동작·
+        # status 422·``unknown_keys`` 계산은 불변이며, sibling 고정 메시지
+        # (:595/:610/:628/:667) 스타일로 caller key·개수를 미포함한다.
         raise HTTPException(
             status_code=422,
-            detail=(f"알 수 없는 필드가 포함되었습니다: {', '.join(unknown_keys)}"),
+            detail="알 수 없는 필드가 포함되었습니다.",
         )
 
     try:

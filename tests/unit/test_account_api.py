@@ -869,6 +869,15 @@ class TestUpdateAccount:
         service.update는 호출되지 않으며, unknown field가 DB에 도달할 가능성
         도 차단된다.
 
+        F3 경계 (#1654): 이 422 는 수동 unknown-key 가드
+        (``AccountUpdateRequest.model_validate`` **이전** 직접 처리 —
+        Pydantic ``extra_forbidden`` 미경유, ``e.errors()`` loc 없음,
+        공용 chokepoint 미경유 — F3 벡터)에서 발생한다. #1654 로 이
+        detail-string 은 caller 가 보낸 unknown body key 이름을 그대로
+        반사하지 않는 고정 메시지로 정렬됐다(L1 #1629 와 같은 방향 런타임
+        보장). status 422·거부 동작은 불변이다. caller key 가 detail 에
+        다시 등장하면(=본 단언 실패) #1654 회귀이므로 중단·재보고.
+
         service-layer 회귀 보호처(별도 invariant):
         ``tests/unit/test_account_immutable_fields.py``의
         ``test_update_unknown_field_raises_value_error``.
@@ -883,16 +892,10 @@ class TestUpdateAccount:
         # 라우트 단 422 — unknown field가 명시적으로 reject된다.
         assert resp.status_code == 422
         body = resp.json()
-        # #1650/#1651·F3 경계 회귀: 이 422 는 ``accounts.py:644-648`` 의
-        # 수동 unknown-key 가드(``AccountUpdateRequest.model_validate``
-        # **이전** 직접 ``unknown_keys`` join — Pydantic ``extra_forbidden``
-        # 미경유, ``e.errors()`` loc 없음, F3 벡터)에서 발생한다. #1650
-        # sanitizer/chokepoint 로 정규화되지 **않으며**(보안 단언 대상
-        # 아님), caller 키가 detail 에 (의도적으로) 그대로 남는다. 이
-        # detail-string 반사의 종합 정책은 #1651(비-extra_forbidden) +
-        # F3 후속 후보에서 다룬다. #1650 이 이 경로를 placeholder 화하면
-        # 범위 오확장이므로 본 단언이 의도적 잔존을 회귀로 고정한다.
-        assert "some_unknown_field" in body.get("detail", "")
+        # F3 (#1654): caller 가 보낸 unknown body key 이름이 detail(및
+        # 전체 직렬화 응답) 어디에도 반사되지 않는다.
+        assert "some_unknown_field" not in body.get("detail", "")
+        assert "some_unknown_field" not in resp.text
         # service.update 미호출 — DB 오염 차단.
         assert account_service._accounts["test-account"].name == "테스트 계좌"
         # audit 미발행
@@ -1444,12 +1447,12 @@ class TestUpdateAccount:
     ) -> None:
         """unknown mutable key(`{"foo": "bar"}`) → 422 (additionalProperties: False).
 
-        #1650/#1651·F3 경계 회귀: ``accounts.py:644-648`` 수동 unknown-key
-        가드(Pydantic ``extra_forbidden`` 미경유 — F3 벡터) 경로. #1650
-        sanitizer/chokepoint 미적용·보안 단언 대상 아님. caller 키
-        (``foo``)가 detail 에 (의도적으로) 잔존함을 회귀로 고정한다 —
-        종합 정책은 #1651 + F3 후속에서 처리. #1650 이 placeholder 화
-        하면 범위 오확장.
+        F3 경계 (#1654): ``accounts.py`` 수동 unknown-key 가드(Pydantic
+        ``extra_forbidden``/공용 chokepoint 미경유 — F3 벡터) 경로. #1654
+        로 detail-string 은 caller 가 보낸 unknown body key 이름(``foo``)을
+        반사하지 않는 고정 메시지로 정렬됐다(L1 #1629 와 같은 방향 런타임
+        보장). status 422·거부 동작은 불변이다. caller key 가 응답에 다시
+        등장하면(=본 단언 실패) #1654 회귀이므로 중단·재보고.
         """
         account = _make_account()
         account_service._accounts[account.account_id] = account
@@ -1459,7 +1462,10 @@ class TestUpdateAccount:
             json={"foo": "bar"},
         )
         assert resp.status_code == 422
-        assert "foo" in resp.json().get("detail", "")
+        # F3 (#1654): caller key(``foo``)가 detail(및 전체 직렬화 응답)
+        # 어디에도 반사되지 않는다.
+        assert "foo" not in resp.json().get("detail", "")
+        assert "foo" not in resp.text
 
     # ── service-layer fallback (#1144 defense-in-depth) ──
 
