@@ -701,11 +701,21 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
+    # IPC dispatch **이전** ingress 검증 (#1655, D follow-up — #1634
+    # `account_info` 1:1 동형 미러). invalid account_id(`default`/`""`/패턴
+    # 위반)를 service/IPC 진입 전 `VALIDATION_ERROR` + exit 1로 거부한다.
+    # positional required arg라 omitted가 없어 전 입력을 검증한다. helper가
+    # `InvalidAccountIdError`를 명시 catch하므로 아래 generic
+    # `except Exception`(code 없음 → traceback 누출)에 도달하지 않는다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.suspend"
+    )
+
     try:
         _run(
             ipc_send(
                 "account.suspend",
-                {"account_id": account_id, "reason": reason},
+                {"account_id": validated_account_id, "reason": reason},
                 actor=member_id,
             )
         )
@@ -715,7 +725,7 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
         fmt.error(str(e))
         raise SystemExit(1) from e
 
-    fmt.success(f'계좌 "{account_id}" 정지 완료')
+    fmt.success(f'계좌 "{validated_account_id}" 정지 완료')
 
 
 # ── activate ──────────────────────────────────────
@@ -733,11 +743,21 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
+    # IPC dispatch **이전** ingress 검증 (#1655, D follow-up — #1634
+    # `account_info` 1:1 동형 미러). invalid account_id(`default`/`""`/패턴
+    # 위반)를 service/IPC 진입 전 `VALIDATION_ERROR` + exit 1로 거부한다.
+    # positional required arg라 omitted가 없어 전 입력을 검증한다. helper가
+    # `InvalidAccountIdError`를 명시 catch하므로 아래 generic
+    # `except Exception`(code 없음 → traceback 누출)에 도달하지 않는다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.activate"
+    )
+
     try:
         _run(
             ipc_send(
                 "account.activate",
-                {"account_id": account_id},
+                {"account_id": validated_account_id},
                 actor=member_id,
             )
         )
@@ -747,7 +767,7 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
         fmt.error(str(e))
         raise SystemExit(1) from e
 
-    fmt.success(f'계좌 "{account_id}" 활성화 완료')
+    fmt.success(f'계좌 "{validated_account_id}" 활성화 완료')
 
 
 # ── delete ──────────────────────────────────────
