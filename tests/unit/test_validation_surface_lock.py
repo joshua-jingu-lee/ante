@@ -913,42 +913,195 @@ def _exception_alias_names(handler: ast.ExceptHandler) -> set[str]:
     return aliases
 
 
-def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
-    """raw-body ValidationError 처리 site 의 chokepoint vs 직접
-    ``.errors(...)`` 호출 수 — **AST 의미 검사**(substring 폐기).
-
-    origin-complete (#1650/#1629 SSOT): 모든 raw-body
-    ``except (...ValidationError...) as <name>:`` handler 안에서 그
-    예외 객체(``<name>`` **및 그 단순 별칭**)의 422 detail 생성은
-    **반드시 ``sanitize_validation_errors(<name|alias>)`` 단일
-    chokepoint** 만 거쳐야 하고, 그 예외 객체에 대한 **직접
-    ``<name|alias>.errors(...)`` 호출은 0** 이어야 한다.
-
-    이전 구현은 정확 substring
-    ``detail=e.errors(include_context=False, include_input=False)``
-    만 셌다 — 변수명 차이(``exc.errors(...)``)·중간 변수
-    (``errs = e.errors(...); detail=errs``)·kwarg 순서/목록 차이·
-    줄바꿈 차이면 매칭 실패해 ``direct == 0`` 으로 통과(fail-open;
-    새 raw-body handler 가 그런 형태로 chokepoint 를 우회하면 lock
-    이 못 막음). 본 스캔은 AST 로:
-
-    - ``choke`` += handler 본문의 ``Call`` 중 ``func`` 가
-      ``Name(<chokepoint>)`` 이고 인자에 예외 별칭 Name 이 1개 이상
-      섞인 호출 수(kwarg/줄바꿈 무관).
-    - ``direct`` += handler 본문의 ``Call`` 중 ``func`` 가
-      ``Attribute(attr='errors')`` 이고 **receiver(``func.value``)가
-      예외 별칭 Name** 인 호출 수(substring 형태·kwarg 순서·
-      변수명·줄바꿈 전부 무관 — 호출 대상 attribute 가 ``.errors``
-      이고 receiver 가 그 ValidationError 객체/별칭이면 위반).
-      ``sanitize_validation_errors(e)`` 안에서 ``e`` 를 인자로만
-      넘기는 것은 receiver 가 아니므로 ``direct`` 로 안 셈 —
-      chokepoint 단일 sink 만 통과.
-
-    하드코딩 카운트 없음 — routes/**/*.py AST self-derive.
+def _is_chokepoint_call_of(node: ast.expr, aliases: set[str]) -> bool:
+    """``node`` 가 ``sanitize_validation_errors(<exc|alias>)`` chokepoint
+    호출인가 — ``func`` == ``Name(<chokepoint>)`` 이고 인자
+    (positional/keyword) 중 예외 별칭 Name 이 1개 이상(kwarg/줄바꿈
+    무관). #1650 SSOT 의 **유일한** sanctioned launder 형태.
     """
-    choke = 0
-    direct = 0
-    for _modname, path in _route_modules():
+    if not isinstance(node, ast.Call):
+        return False
+    f = node.func
+    if not (isinstance(f, ast.Name) and f.id == _CHOKEPOINT_NAME):
+        return False
+    arg_exprs = list(node.args) + [kw.value for kw in node.keywords]
+    return any(isinstance(a, ast.Name) and a.id in aliases for a in arg_exprs)
+
+
+def _expr_taints_from_exc(node: ast.expr, aliases: set[str]) -> bool:
+    """``node`` 가 예외 객체(별칭 집합 ``aliases``)에서 **파생된**
+    값을 만드는 표현인가 — 단, 단일 chokepoint
+    ``sanitize_validation_errors(<alias>)`` 호출은 launder 된 것으로
+    보아 **taint 아님**(그 안의 alias 인자는 sink 가 아니므로 무시).
+
+    fail-closed: chokepoint 가 아닌 모든 형태에서 예외 별칭 Name 이
+    그 표현의 서브트리에 등장하면 taint 로 판정한다 — ``str(e)`` ·
+    ``e.json()`` · ``e.errors(...)`` · ``repr(e)`` · ``e.__str__()`` ·
+    ``f"{e}"`` · ``"x" % e`` · ``"x" + str(e)`` · ``[e]`` ·
+    ``{"k": e}`` · 그 외 예외 객체에서 임의로 파생한 detail 전부
+    (열거 화이트리스트가 아니라 "예외 alias 가 새는 비-chokepoint
+    표현 = taint" behavioral 매트릭스 — 새 우회 형태도 자동 포착).
+    chokepoint 호출 자체는 launder 이므로, 그 chokepoint 호출
+    노드는 taint 가 아니고 그 인자(alias)도 sink 로 안 본다.
+    """
+    if _is_chokepoint_call_of(node, aliases):
+        return False
+    for sub in ast.walk(node):
+        # chokepoint 서브식은 launder — 그 안의 alias 는 sink 아님.
+        if isinstance(sub, ast.Call) and _is_chokepoint_call_of(sub, aliases):
+            continue
+        if isinstance(sub, ast.Name) and sub.id in aliases:
+            # 이 alias 참조가 어떤 enclosing chokepoint 호출의
+            # 인자 안에 들어 있으면 launder — taint 아님.
+            return not _ref_inside_chokepoint(node, sub, aliases)
+    return False
+
+
+def _ref_inside_chokepoint(root: ast.expr, ref: ast.Name, aliases: set[str]) -> bool:
+    """``root`` 서브트리에서 ``ref`` (예외 alias Name 노드)가
+    chokepoint 호출 ``sanitize_validation_errors(...)`` 의 인자
+    서브트리 안에 포함되면 True(그 alias 는 launder 됨).
+    """
+    for sub in ast.walk(root):
+        if isinstance(sub, ast.Call) and _is_chokepoint_call_of(sub, aliases):
+            arg_exprs = list(sub.args) + [kw.value for kw in sub.keywords]
+            for a in arg_exprs:
+                for inner in ast.walk(a):
+                    if inner is ref:
+                        return True
+    return False
+
+
+# detail 을 응답 body 로 방출하는 sink 생성자(라우트 전수 실측 =
+# ``HTTPException`` 만 사용; ``*Response`` 군은 방어적으로 함께
+# 커버해 향후 raw error-response 우회도 fail-closed). substring
+# 화이트리스트가 아니라 "이름이 HTTPException 또는 *Response 로
+# 끝나는 호출 = 응답 sink" behavioral 규칙.
+def _is_response_sink_call(call: ast.Call) -> bool:
+    f = call.func
+    name = _ref_terminal_name(f) if isinstance(f, (ast.Name, ast.Attribute)) else None
+    if name is None:
+        return False
+    return name == "HTTPException" or name.endswith("Response")
+
+
+def _handler_emits_unsanitized_exc_detail(
+    handler: ast.ExceptHandler, aliases: set[str]
+) -> bool:
+    """이 ValidationError handler block 이 예외 객체에서 파생된
+    detail 을 **chokepoint 미경유**로 응답에 방출하는가(handler-level
+    판정 — 전역 count 아님).
+
+    sink 인식(fail-closed):
+    - 응답 sink 생성자 호출(``HTTPException(...)``/``*Response(...)``)
+      의 임의 인자가 ``_expr_taints_from_exc`` → True 이면 그 handler
+      는 미경유 detail 방출.
+    - ``raise <expr>`` / ``return <expr>`` 의 ``<expr>`` 가
+      exc-taint 이면(예외 객체를 그대로/파생해 raise·return) 미경유
+      방출 — ``raise HTTPException(...)`` 는 위 sink 규칙으로 이미
+      커버, 추가로 ``return e`` / ``return str(e)`` 같은 raw 방출도
+      포착.
+    - tainted 값을 변수에 담아 우회(``msg = str(e); detail=msg``)는
+      ``_exception_alias_names`` 의 Name→Name 전이폐포로 alias 가
+      확장되고, 또한 ``v = <exc-taint expr>`` 대입의 RHS 가 taint
+      이면 그 target Name 도 taint-name 으로 전파해 downstream sink
+      에서 잡는다.
+
+    handler 가 ValidationError 를 잡되 detail 을 그 예외에서 안
+    만들고 re-raise / 무관 응답이면(예: ``raise HTTPException(...,
+    detail="고정 문자열")``) taint 가 없으므로 대상 아님 — 본 함수
+    False.
+    """
+    if not aliases:
+        # ``except ValidationError:`` (별칭 없음) — 예외 객체를
+        # 직접 detail 로 만들 수 없으므로 미경유 방출 불가.
+        return False
+
+    # tainted 변수 이름 전파: ``v = <exc-taint RHS>`` 면 v 도 taint.
+    tainted_names: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for stmt in handler.body:
+            for n in ast.walk(stmt):
+                if not isinstance(n, ast.Assign):
+                    continue
+                rhs = n.value
+                rhs_aliases = aliases | tainted_names
+                if _expr_taints_from_exc(rhs, rhs_aliases):
+                    for tgt in n.targets:
+                        if isinstance(tgt, ast.Name) and tgt.id not in tainted_names:
+                            tainted_names.add(tgt.id)
+                            changed = True
+
+    sink_aliases = aliases | tainted_names
+
+    for n in ast.walk(handler):
+        # 응답 sink 생성자 — 인자 중 exc-taint 가 하나라도 있으면 위반.
+        if isinstance(n, ast.Call) and _is_response_sink_call(n):
+            arg_exprs = list(n.args) + [kw.value for kw in n.keywords]
+            for a in arg_exprs:
+                if _expr_taints_from_exc(a, sink_aliases):
+                    return True
+        # ``raise <expr>`` — 예외 객체/파생을 그대로 raise.
+        if isinstance(n, ast.Raise) and n.exc is not None:
+            if _expr_taints_from_exc(n.exc, sink_aliases):
+                # ``raise sanitize_validation_errors(e)`` 같은 건
+                # 의미상 안 나오지만, 위 _expr_taints_from_exc 가
+                # chokepoint launder 를 이미 제외하므로 안전.
+                # 단 ``raise HTTPException(...)`` 는 sink-call 규칙이
+                # 정밀 — 여기서는 raw ``raise e`` / ``raise X(str(e))``
+                # 중 sink-call 아닌 형태를 보강 포착.
+                if not (isinstance(n.exc, ast.Call) and _is_response_sink_call(n.exc)):
+                    return True
+        # ``return <exc-taint>`` — raw 예외 파생을 응답으로 반환.
+        if isinstance(n, ast.Return) and n.value is not None:
+            if _expr_taints_from_exc(n.value, sink_aliases):
+                if not (
+                    isinstance(n.value, ast.Call) and _is_response_sink_call(n.value)
+                ):
+                    return True
+    return False
+
+
+def _scan_validationerror_handler_chokepoint(
+    route_modules: list[tuple[str, Path]] | None = None,
+) -> tuple[int, list[str]]:
+    """**per-handler** chokepoint 강제 (#1650 SSOT, INV-3): 각 raw-body
+    ``except (...ValidationError...) as <name>:`` handler 가 예외
+    객체에서 파생한 422/HTTP detail 을 방출할 때 **반드시 그 handler
+    자신의 ``sanitize_validation_errors(<name|alias>)`` 단일
+    chokepoint** 만 거쳐야 한다.
+
+    반환: ``(conforming_choke, nonconforming)``.
+    - ``conforming_choke`` = chokepoint 를 실제 사용하는(launder 하는)
+      ValidationError handler 수 — #1650 SSOT 가 살아 있다는 positive
+      증거(0 이면 SSOT 회귀).
+    - ``nonconforming`` = chokepoint 미경유로 예외-파생 detail 을
+      방출하는 handler 식별자 리스트. **이 집합이 비어 있어야 PASS.**
+
+    attempt-7 fail-open 봉인: 이전 구현은 **전역** ``choke`` 합과
+    ``direct`` 합만 봤다(``direct==0 ∧ 전역 choke>0`` ⟹ PASS). 새
+    raw-body handler 가 ``except ValidationError as e:`` 후
+    ``detail=str(e)`` / ``e.json()`` / ``repr(e)`` / f-string 보간
+    등 ``.errors()`` 가 **아닌** 형태로 우회하면 그 handler 는
+    ``.errors()`` 를 안 부르니 ``direct==0`` 이고
+    ``sanitize_validation_errors`` 도 안 거치지만, **다른 기존
+    handler 들** 때문에 전역 ``choke>0`` 이 유지돼 lock 이
+    통과(fail-open)했다. #1650 SSOT 는 *각* ValidationError handler
+    가 chokepoint 를 거쳐야 한다 — 전역 합이 아니라 **handler 별**
+    강제. 전역 ``direct``/``choke`` 합산 게이트를 폐기하고
+    "ValidationError handler 집합 중 chokepoint-미경유 detail 방출
+    handler 수 == 0" 단일 단언으로 재집약한다.
+
+    하드코딩 카운트 없음 — routes/**/*.py AST self-derive. handler
+    block 단위가 자연 floor(각 ``except ValidationError`` block 이
+    #1650 chokepoint SSOT 적용 경계).
+    """
+    mods = route_modules if route_modules is not None else _route_modules()
+    conforming_choke = 0
+    nonconforming: list[str] = []
+    for modname, path in mods:
         tree = ast.parse(path.read_text(), filename=str(path))
         for handler in ast.walk(tree):
             if not isinstance(handler, ast.ExceptHandler):
@@ -956,35 +1109,16 @@ def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
             if not _except_handles_validation_error(handler):
                 continue
             aliases = _exception_alias_names(handler)
-            if not aliases:
-                # ``except ValidationError:`` (별칭 없음) — 예외
-                # 객체를 직접 못 다루므로 chokepoint/direct 산정
-                # 대상 없음. (현 SSOT 는 항상 ``as e`` 를 쓴다.)
-                continue
-            for node in ast.walk(handler):
-                if not isinstance(node, ast.Call):
-                    continue
-                f = node.func
-                # 직접 ``<exc|alias>.errors(...)`` — receiver 가
-                # 예외 별칭 Name 이면 위반(형태/kwarg 무관).
-                if (
-                    isinstance(f, ast.Attribute)
-                    and f.attr == "errors"
-                    and isinstance(f.value, ast.Name)
-                    and f.value.id in aliases
-                ):
-                    direct += 1
-                    continue
-                # chokepoint ``sanitize_validation_errors(<exc|alias>)``
-                # — 인자(positional/keyword) 중 예외 별칭 Name 이
-                # 1개 이상.
-                if isinstance(f, ast.Name) and f.id == _CHOKEPOINT_NAME:
-                    arg_exprs = list(node.args) + [kw.value for kw in node.keywords]
-                    if any(
-                        isinstance(a, ast.Name) and a.id in aliases for a in arg_exprs
-                    ):
-                        choke += 1
-    return choke, direct
+            uses_chokepoint = any(
+                _is_chokepoint_call_of(c, aliases)
+                for c in ast.walk(handler)
+                if isinstance(c, ast.Call)
+            )
+            if uses_chokepoint:
+                conforming_choke += 1
+            if _handler_emits_unsanitized_exc_detail(handler, aliases):
+                nonconforming.append(f"{modname}:L{handler.lineno}")
+    return conforming_choke, nonconforming
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1707,8 +1841,10 @@ def test_s1b_origin_complete_single_unresolvable_sink_empty() -> None:
     BaseModel resolve) 또는 #1650 chokepoint 경유여야 한다. 제네릭
     helper 는 model 인자 중 **하나라도** 정적 literal-BaseModel resolve
     안 되면 그 site 전체가 단일 unresolvable(any-match →
-    all-must-resolve). raw-body chokepoint 우회 직접 ``e.errors(...)``
-    detail 잔존 0(#1650 SSOT).
+    all-must-resolve). raw-body chokepoint 우회 **per-handler** 검사:
+    각 ValidationError handler 가 예외-파생 detail 을 chokepoint
+    미경유로 방출하면 그 handler 가 FAIL 로 집계(#1650 SSOT;
+    전역 count 아님 — attempt-7 fail-open 봉인).
     """
     s1 = _resolve_s1()
     assert not s1.unresolvable, (
@@ -1717,10 +1853,15 @@ def test_s1b_origin_complete_single_unresolvable_sink_empty() -> None:
     )
     assert s1.models, "S1 검증 entrypoint 0건 — AST 스캔 회귀 의심"
 
-    choke, direct = _scan_chokepoint_and_error_sites()
-    assert direct == 0, (
-        f"chokepoint 우회 직접 e.errors(...) detail 잔존: {direct} "
-        "(raw-body site 는 sanitize_validation_errors chokepoint 만 호출)"
+    choke, nonconforming = _scan_validationerror_handler_chokepoint()
+    assert not nonconforming, (
+        "ValidationError handler 집합 중 chokepoint-미경유 예외-파생 "
+        "detail 방출 handler 발견 — #1650 SSOT 는 *각* handler 가 "
+        "``sanitize_validation_errors(<exc>)`` 단일 chokepoint 만 "
+        "거쳐야 한다(``detail=str(e)``/``e.json()``/``e.errors(...)``/"
+        "``repr(e)``/f-string 보간 등 임의 예외-파생 detail 금지; "
+        "전역 합 아니라 handler 별 강제 — attempt-7 fail-open 봉인): "
+        f"{nonconforming}"
     )
     assert choke > 0, "chokepoint 호출 site 0 — #1650 SSOT 회귀 의심"
 
@@ -2265,15 +2406,15 @@ def test_attempt6_variant_validationerror_handler_ast_semantic_fail(
     handler 가 **직접 ``<exc>.errors(...)``** 로 422 detail 을
     만드는데, substring 매칭이 못 잡는 **variant** 형태(다른 변수명
     ``exc`` · 중간 변수 ``errs = exc.errors(...)`` · kwarg 순서
-    뒤바꿈 · 줄바꿈 차이)일 때 AST 의미 검사가 그것을 **direct**
-    로 잡아 ``direct > 0`` 으로 FAIL 함을 단언한다.
+    뒤바꿈 · 줄바꿈 차이)일 때 per-handler AST 의미 검사가 그
+    handler 를 **nonconforming** 으로 잡아 FAIL 함을 단언한다.
 
     **old 코드(정확 substring
     ``detail=e.errors(include_context=False, include_input=False)``
     카운트)에서는 이 variant 가 매칭 실패해 ``direct == 0`` 으로
     통과(fail-open)** — 영구 회귀 락. 동시에 정상 chokepoint
-    handler 는 ``direct == 0 ∧ choke > 0`` 으로 통과함을 확인한다
-    (강화가 정상 패턴을 false-positive 로 깨지 않음).
+    handler 는 nonconforming 에 안 들고 ``choke > 0`` 으로 통과함을
+    확인한다(강화가 정상 패턴을 false-positive 로 깨지 않음).
     """
     syn_routes = tmp_path / "syn_routes_1651_a6e"
     syn_routes.mkdir()
@@ -2328,20 +2469,151 @@ def test_attempt6_variant_validationerror_handler_ast_semantic_fail(
     sys.path.insert(0, str(tmp_path))
     try:
         importlib.invalidate_caches()
-        choke, direct = _scan_chokepoint_and_error_sites()
+        choke, nonconforming = _scan_validationerror_handler_chokepoint()
     finally:
         if str(tmp_path) in sys.path:
             sys.path.remove(str(tmp_path))
         importlib.invalidate_caches()
 
-    assert direct >= 1, (
+    assert any("bypass" in s for s in nonconforming), (
         "attempt-6 ValidationError-handler AST 게이트 회귀 — variant "
         "직접 ``exc.errors(...)`` (다른 변수명·중간 변수·kwarg 순서·"
-        "줄바꿈)이 direct 로 안 잡힘(old substring count fail-open "
-        f"재발): direct={direct}"
+        "줄바꿈) handler 가 nonconforming 으로 안 잡힘(old substring "
+        f"count fail-open 재발): nonconforming={nonconforming}"
+    )
+    assert not any("ok" in s for s in nonconforming), (
+        "정상 chokepoint handler 가 nonconforming 으로 잘못 잡힘 — "
+        f"AST 의미 검사가 정상 패턴을 false-positive: {nonconforming}"
     )
     assert choke >= 1, (
         "정상 chokepoint handler 가 choke 로 안 잡힘 — AST 의미 "
+        f"검사가 정상 패턴을 false-negative: choke={choke}"
+    )
+
+
+def test_attempt7_per_handler_chokepoint_global_count_fail_open_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-7 회귀 canary ③ (Codex [P2] — per-handler chokepoint
+    강제; **전역 count fail-open** 영구 락):
+
+    raw-body handler 가 ``except ValidationError as e:`` 후
+    ``detail=str(e)`` (또는 ``e.json()``)로 우회한다 — ``.errors()``
+    를 **안** 부르므로 old 전역-count 로직에선 그 handler 의
+    ``direct == 0``, 그리고 ``sanitize_validation_errors`` 도 안
+    거치지만 **같은 스캔 대상의 다른 정상 chokepoint handler** 때문에
+    전역 ``choke > 0`` 이 유지돼 lock 이 PASS(fail-open) 했다.
+
+    신 per-handler 로직: 그 우회 handler 가 chokepoint 미경유로
+    예외-파생 detail (``str(e)``/``e.json()``)을 방출하므로 그
+    handler 단위로 **nonconforming** 에 집계돼 FAIL. 정상 chokepoint
+    handler 는 nonconforming 에 안 들고 ``choke > 0`` 에 기여한다 —
+    즉 **old 전역-count 로직이라면 green(=red 누락) 일 시나리오가 신
+    로직에선 정상 FAIL**. 영구 락: 이 canary 가 red 면 per-handler
+    강제가 전역 합산으로 회귀한 것.
+
+    ``str(e)`` 우회와 ``e.json()`` 우회를 별 모듈로 두 형태 모두
+    포착함을 단언(``.errors()`` AST 만 보던 attempt-6 보강 — 임의
+    예외-파생 detail 방출 behavioral 매트릭스).
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a7p"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # 우회 ①: ``detail=str(e)`` — 예외 객체를 문자열화해 그대로
+    # 방출(``.errors()`` 미호출 → old 전역 direct==0).
+    (syn_routes / "bypass_str.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class ReqStr(BaseModel):\n"
+        "    x: int\n"
+        "\n"
+        "def handler_str(payload):\n"
+        "    try:\n"
+        "        return ReqStr.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(status_code=422, detail=str(e)) "
+        "from None\n"
+    )
+    # 우회 ②: 중간 변수 + ``e.json()`` — f-string 보간으로 detail
+    # 합성(``.errors()`` 미호출 → old 전역 direct==0).
+    (syn_routes / "bypass_json.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class ReqJson(BaseModel):\n"
+        "    y: int\n"
+        "\n"
+        "def handler_json(payload):\n"
+        "    try:\n"
+        "        return ReqJson.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        msg = e.json()\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        '            detail=f"invalid: {msg}",\n'
+        "        ) from None\n"
+    )
+    # 같은 스캔 대상에 정상 chokepoint handler 동거 — old 전역
+    # count 라면 이 handler 때문에 ``choke > 0`` 이 유지돼 위
+    # 우회들이 fail-open 으로 통과했다.
+    (syn_routes / "ok.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "from ante.web.errors import sanitize_validation_errors\n"
+        "\n"
+        "class OkReq(BaseModel):\n"
+        "    z: int\n"
+        "\n"
+        "def ok_handler(payload):\n"
+        "    try:\n"
+        "        return OkReq.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        "            detail=sanitize_validation_errors(e),\n"
+        "        ) from None\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a7p")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        choke, nonconforming = _scan_validationerror_handler_chokepoint()
+    finally:
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    # ``str(e)`` 우회 handler 가 per-handler nonconforming 에 집계.
+    assert any("bypass_str" in s for s in nonconforming), (
+        "attempt-7 per-handler 회귀 — ``detail=str(e)`` 우회 handler "
+        "가 nonconforming 으로 안 잡힘(전역 count fail-open 재발: "
+        "다른 정상 handler 의 choke>0 이 이 handler 의 미경유를 "
+        f"가림): nonconforming={nonconforming}"
+    )
+    # ``e.json()`` f-string 보간 우회 handler 도 집계.
+    assert any("bypass_json" in s for s in nonconforming), (
+        "attempt-7 per-handler 회귀 — ``e.json()`` f-string 보간 "
+        "우회 handler 가 nonconforming 으로 안 잡힘(임의 예외-파생 "
+        f"detail behavioral 매트릭스 회귀): nonconforming={nonconforming}"
+    )
+    # 정상 chokepoint handler 는 nonconforming 에 안 든다(강화가
+    # 정상 패턴을 false-positive 로 깨지 않음 — old 전역 count
+    # 라면 이 handler 가 우회들을 fail-open 으로 가렸을 바로 그
+    # handler).
+    assert not any("ok" in s for s in nonconforming), (
+        "정상 chokepoint handler 가 nonconforming 으로 잘못 잡힘 — "
+        f"per-handler 의미 검사가 정상 패턴을 false-positive: "
+        f"{nonconforming}"
+    )
+    assert choke >= 1, (
+        "정상 chokepoint handler 가 choke 로 안 잡힘 — per-handler "
         f"검사가 정상 패턴을 false-negative: choke={choke}"
     )
 
