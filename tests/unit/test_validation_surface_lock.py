@@ -611,38 +611,240 @@ def _enclosing_callable_qualname(tree: ast.AST, call_node: ast.Call) -> str:
     return ".".join(reversed(chain))
 
 
+# BaseModel 생성자-경로 검증 site 의 합성 ``method`` 마커 —
+# ``model_validate`` 군과 동형으로 S1 source walk 하되, 정적
+# resolve 불가 생성자-스타일 검증은 INV-3 single-sink 로
+# unresolvable 충전(default-deny). 실제 Pydantic API 이름과
+# 충돌하지 않는 sentinel(``_PYDANTIC_ENTRYPOINT_METHODS`` 와
+# 교집합 ∅).
+_CONSTRUCTOR_VALIDATION_METHOD = "<ctor>"
+
+# raw-body **parsed-object** source 를 만드는 호출(말단 식별자
+# 기준 — ``request.json()`` / ``json.loads(...)``). 이 호출 결과를
+# 담은 변수(및 Name→Name 단순 alias 전이)가 생성자 인자로 **그
+# 자체** 전달되면(``Req(**payload)`` / ``Req(payload)``) 그
+# 생성자는 raw-body 검증 문맥이다. ``request.body()``(raw bytes)는
+# 그 자체로 모델 검증 입력이 아니므로(``json.loads`` 의 인자로만
+# 쓰임) seed 에서 제외 — over-taint(``body.x`` 파생 등) 로 무관한
+# 일반 객체 생성을 false-positive 로 잡지 않도록 좁힌다.
+_RAW_BODY_PARSED_CALL_NAMES: frozenset[str] = frozenset({"json", "loads"})
+
+
+def _enclosing_funcdef(
+    tree: ast.AST, call_node: ast.Call
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """``call_node`` 를 감싸는 가장 가까운 (Async)FunctionDef. 없으면
+    None(모듈 스코프).
+    """
+    parent: dict[int, ast.AST] = {}
+    for p in ast.walk(tree):
+        for child in ast.iter_child_nodes(p):
+            parent[id(child)] = p
+    cur: ast.AST | None = parent.get(id(call_node))
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return cur
+        cur = parent.get(id(cur))
+    return None
+
+
+def _raw_body_tainted_names(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    """``fn`` 본문에서 raw-body **parsed-object** 입력을 담은 변수
+    이름 집합(Name→Name 단순 alias 전이 폐포).
+
+    seed = ``request.json()`` / ``json.loads(...)`` 호출 결과를
+    **직접** 담은 대입 target Name(``payload = json.loads(raw)`` ·
+    ``data: dict = await request.json()`` — assignment 형태 무관,
+    ``_assignment_bindings`` 정규화). 이후 ``y = x`` **Name→Name
+    단순 alias**(RHS 가 정확히 tainted Name)만 고정점 전파한다.
+
+    **attribute/subscript 파생은 전파하지 않는다**:
+    ``body = json.loads(raw)`` 의 ``body`` 는 seed 지만
+    ``cfg = body.bot_id`` 의 ``cfg`` 는 raw-body 검증 입력이 아닌
+    이미 추출된 필드값이므로 tainted 아님(over-taint 로 무관한
+    일반 객체 생성 ``BotConfig(bot_id=body.bot_id)`` 을
+    false-positive 로 잡는 것을 차단 — 검증-source 자체만 추적).
+    """
+    tainted: set[str] = set()
+
+    def _is_parsed_call(rhs: ast.expr) -> bool:
+        for sub in ast.walk(rhs):
+            if isinstance(sub, ast.Call) and isinstance(
+                sub.func, (ast.Name, ast.Attribute)
+            ):
+                if _ref_terminal_name(sub.func) in _RAW_BODY_PARSED_CALL_NAMES:
+                    return True
+        return False
+
+    def _strip(e: ast.expr) -> ast.expr:
+        # ``await x`` 의 await 를 벗겨 내부 표현으로(직접 source 판정).
+        return e.value if isinstance(e, ast.Await) else e
+
+    changed = True
+    while changed:
+        changed = False
+        for stmt in fn.body:
+            for node in ast.walk(stmt):
+                for tgt_names, rhs in _assignment_bindings(node):
+                    core = _strip(rhs)
+                    is_seed = _is_parsed_call(rhs)
+                    is_alias = isinstance(core, ast.Name) and core.id in tainted
+                    if not (is_seed or is_alias):
+                        continue
+                    for nm in tgt_names:
+                        if nm not in tainted:
+                            tainted.add(nm)
+                            changed = True
+    return tainted
+
+
+def _is_raw_body_parsed_call(e: ast.expr) -> bool:
+    """``e`` 가 ``request.json()`` / ``json.loads(...)`` (또는 그
+    ``await``) 직접 호출인가 — 중간 변수 없는 raw-body parsed-object
+    source.
+    """
+    if isinstance(e, ast.Await):
+        e = e.value
+    return (
+        isinstance(e, ast.Call)
+        and isinstance(e.func, (ast.Name, ast.Attribute))
+        and _ref_terminal_name(e.func) in _RAW_BODY_PARSED_CALL_NAMES
+    )
+
+
+def _ctor_raw_body_form(call: ast.Call, raw_body_names: set[str]) -> str | None:
+    """생성자 호출 인자가 caller-controlled raw-body parsed-object
+    **그 자체**를 검증 입력으로 받는 형태인가, 그렇다면 어떤 형태인가.
+
+    반환:
+    - ``"unpack"`` — ``Req(**payload)`` / ``Req(**await
+      request.json())``: raw-body parsed dict 를 ``**``-unpack 하는
+      형태. Pydantic 생성자 검증의 **정의 형태**이며 builtin/helper
+      는 절대 raw-body 를 이렇게 unpack 하지 않는다 → callee 의
+      BaseModel resolve 여부와 무관하게 항상 생성자-경로 검증 site
+      (resolve 안 되면 _resolve_s1 에서 default-deny unresolvable).
+    - ``"positional"`` — ``Req(payload)`` / ``Req(json.loads(raw))``:
+      raw-body parsed dict 를 단일 positional 인자로 넘기는 형태.
+      ``len(payload)``/``set(payload)``/``list(payload)`` 같은
+      builtin 가드와 형태가 동일해 **모호**하므로, 호출측에서
+      callee 가 정적 BaseModel 서브클래스로 resolve 될 때만 검증
+      site 로 채택한다(그 외엔 무관한 builtin/helper — false-positive
+      0). 모호성은 BaseModel-resolve 라는 positive 증명으로만 해소.
+    - ``None`` — raw-body parsed-object 자체가 인자가 아님
+      (``body.bot_id``/``payload["k"]``/f-string/literal 등 파생값,
+      또는 raw-body 무관). 검증-source 동일성 없음 → 생성자-경로
+      검증 아님(``BotConfig(bot_id=body.bot_id)``/``HTTPException``/
+      ``isinstance``/``Path(p)`` false-positive 차단).
+    """
+
+    def _is_raw_body_value(v: ast.expr) -> bool:
+        if isinstance(v, ast.Name) and v.id in raw_body_names:
+            return True
+        return _is_raw_body_parsed_call(v)
+
+    # ``**``-unpack 검증 형태 — builtin/helper 는 raw-body 를 이렇게
+    # unpack 하지 않으므로 callee resolve 무관 항상 생성자-경로 site.
+    for kw in call.keywords:
+        if kw.arg is None and _is_raw_body_value(kw.value):
+            return "unpack"
+    # 단일 positional 검증 입력 — builtin 가드(len/set/list)와 형태
+    # 동일·모호. callee BaseModel positive resolve 시에만 site.
+    if len(call.args) == 1 and not call.keywords:
+        only = call.args[0]
+        if not isinstance(only, ast.Starred) and _is_raw_body_value(only):
+            return "positional"
+    return None
+
+
 def _scan_s1_entrypoints() -> list[_EntrypointSite]:
     """routes/**/*.py AST 에서 Pydantic 검증 entrypoint 호출 전수.
 
-    ``<Recv>.<method>(...)`` 형태의 call 중 method ∈ entrypoint API.
-    손-열거 census 금지 — AST self-derive. 각 site 는 그 호출을
-    감싸는 enclosing callable qualname 도 보존한다(INV-1 정밀화 —
-    같은 모듈·같은 모델이라도 다른 handler 면 distinct site-id;
-    과병합 fail-open 차단).
+    ``<Recv>.<method>(...)`` 형태의 call 중 method ∈ entrypoint API
+    (model_validate 군). 추가로 raw-body 검증 문맥의 **BaseModel
+    생성자 호출**(``<Name>(**payload)`` / ``<Name>(payload)`` —
+    caller-controlled raw-body 입력이 생성자 인자) 도 S1 검증 site
+    로 수집한다(model_validate 와 동형 — S1a/INV-3 [P2]; 새 raw-body
+    handler 가 일반 Pydantic 생성자 ``Req(**payload)`` 로 검증해도
+    discovery lock 이 우회되지 않게). 손-열거 census 금지 — AST
+    self-derive. 각 site 는 그 호출을 감싸는 enclosing callable
+    qualname 도 보존한다(INV-1 정밀화 — 같은 모듈·같은 모델이라도
+    다른 handler 면 distinct site-id; 과병합 fail-open 차단).
     """
     sites: list[_EntrypointSite] = []
     for modname, path in _route_modules():
         tree = ast.parse(path.read_text(), filename=str(path))
+        # 함수별 raw-body tainted-name 캐시(생성자-경로 문맥 판정용).
+        raw_body_cache: dict[int, set[str]] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if not isinstance(func, ast.Attribute):
+            if isinstance(func, ast.Attribute):
+                if func.attr not in _PYDANTIC_ENTRYPOINT_METHODS:
+                    continue
+                recv = func.value
+                if isinstance(recv, ast.Name):
+                    recv_name = recv.id
+                else:
+                    recv_name = ast.unparse(recv)
+                sites.append(
+                    _EntrypointSite(
+                        module=modname,
+                        lineno=node.lineno,
+                        callee_src=f"{recv_name}.{func.attr}",
+                        receiver=recv_name,
+                        method=func.attr,
+                        enclosing=_enclosing_callable_qualname(tree, node),
+                    )
+                )
                 continue
-            if func.attr not in _PYDANTIC_ENTRYPOINT_METHODS:
+            # BaseModel 생성자-경로 검증 탐지 (S1a/INV-3 [P2]).
+            # callee 가 단순 이름(``Req``) 또는 점 접근(``m.Req``)인
+            # 생성자 호출만 후보 — 생성자 인자가 caller-controlled
+            # raw-body parsed-object **그 자체**(``Req(**payload)``/
+            # ``Req(**await request.json())``/``Req(payload)``)일 때만
+            # S1 site. raw-body 에서 파생된 일부 값(``body.x``)·무관한
+            # 일반 객체 생성은 제외(false-positive 0). 모호하면
+            # (callee 비-BaseModel·동적 클래스) _resolve_s1 에서 INV-3
+            # single-sink unresolvable(default-deny).
+            if not isinstance(func, (ast.Name, ast.Attribute)):
                 continue
-            recv = func.value
-            if isinstance(recv, ast.Name):
-                recv_name = recv.id
+            fn = _enclosing_funcdef(tree, node)
+            if fn is None:
+                # 모듈 스코프 객체 생성 — raw-body handler 문맥 아님.
+                continue
+            key = id(fn)
+            if key not in raw_body_cache:
+                raw_body_cache[key] = _raw_body_tainted_names(fn)
+            raw_body_names = raw_body_cache[key]
+            form = _ctor_raw_body_form(node, raw_body_names)
+            if form is None:
+                # 생성자 인자가 raw-body parsed-object 자체가 아님 —
+                # 무관한 일반 객체 생성(검증-source 동일성 없음). skip.
+                continue
+            if isinstance(func, ast.Name):
+                recv_name = func.id
             else:
-                recv_name = ast.unparse(recv)
+                recv_name = ast.unparse(func)
+            if form == "positional":
+                # ``Req(payload)`` 는 ``len(payload)``/``set(payload)``
+                # builtin 가드와 형태 동일·모호 — callee 가 정적
+                # BaseModel 서브클래스로 resolve 될 때만 검증 site
+                # (positive 증명으로만 모호성 해소; 그 외 builtin/
+                # helper false-positive 0). ``**``-unpack 형태는
+                # builtin 이 안 쓰므로 resolve 무관 항상 site(아래).
+                resolved = _resolve_name_in_module(modname, recv_name)
+                if not (isinstance(resolved, type) and issubclass(resolved, BaseModel)):
+                    continue
             sites.append(
                 _EntrypointSite(
                     module=modname,
                     lineno=node.lineno,
-                    callee_src=f"{recv_name}.{func.attr}",
+                    callee_src=f"{recv_name}.{_CONSTRUCTOR_VALIDATION_METHOD}",
                     receiver=recv_name,
-                    method=func.attr,
+                    method=_CONSTRUCTOR_VALIDATION_METHOD,
                     enclosing=_enclosing_callable_qualname(tree, node),
                 )
             )
@@ -789,6 +991,10 @@ def _resolve_s1() -> _S1Resolve:
     """S1a∪S1b: entrypoint site 전수 → 검증 모델 정적 resolve.
 
     - ``<Model>.model_validate`` : 모듈 namespace 에서 literal Model.
+    - ``<Model>(**payload)`` 생성자-경로 검증 : 모듈 namespace 에서
+      literal BaseModel 이면 model_validate 와 동형 S1 source.
+      정적 resolve 불가(동적 클래스·미해결 qualified name) 면
+      INV-3 single-sink unresolvable(default-deny — 우회 차단).
     - ``TypeAdapter(...).validate_*`` : 동적 → 단일 unresolvable.
     - 제네릭 ``model.model_validate`` : helper model 인자 전수 추적.
       **하나라도** literal-BaseModel resolve 안 되면 site 전체
@@ -809,6 +1015,19 @@ def _resolve_s1() -> _S1Resolve:
         cls = _resolve_name_in_module(site.module, recv)
         if isinstance(cls, type) and issubclass(cls, BaseModel):
             res.models.append((sid, cls))
+            continue
+        if site.method == _CONSTRUCTOR_VALIDATION_METHOD:
+            # raw-body 검증 문맥의 BaseModel 생성자 호출인데 callee
+            # 가 정적으로 BaseModel 서브클래스로 resolve 안 됨(동적
+            # 클래스·미해결 qualified name 등) → INV-3 single-sink
+            # unresolvable (default-deny — 생성자-경로로 lock 우회
+            # 차단). 정적 BaseModel 이면 위 분기에서 이미 model_validate
+            # 와 동형 S1 source 로 충전됐다.
+            res.unresolvable.append(
+                f"{sid} → BaseModel 생성자-경로 검증인데 callee 가 정적 "
+                "literal-BaseModel 로 resolve 불가 (동적 클래스/미해결 "
+                "qualified name — INV-3 single-sink, default-deny)"
+            )
             continue
         if "TypeAdapter(" in recv:
             res.unresolvable.append(
@@ -881,35 +1100,101 @@ def _except_handles_validation_error(handler: ast.ExceptHandler) -> bool:
     return False
 
 
+def _target_names(target: ast.expr) -> list[str]:
+    """대입 target 표현에서 바인딩되는 **단순 Name** 들을 도출.
+
+    ``x`` (Name) → ``[x]``; ``a, b`` / ``[a, b]`` / ``a, *rest``
+    (Tuple/List/Starred unpack) → 각 element 의 Name; attribute/
+    subscript target(``self.x``/``d[k]``) 은 단순 변수 바인딩이
+    아니므로 무시(taint 전파 대상 아님). 중첩 unpack 도 재귀.
+    """
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out: list[str] = []
+        for el in target.elts:
+            out.extend(_target_names(el))
+        return out
+    return []
+
+
+def _assignment_bindings(
+    node: ast.AST,
+) -> list[tuple[list[str], ast.expr]]:
+    """예외-파생 alias/taint 전이를 위한 **대입 형태 정규화**.
+
+    assignment 형태와 무관하게 동일 taint 가 되도록(behavioral),
+    ``(bound Name 들, RHS 표현식)`` 쌍 리스트를 반환한다:
+
+    - ``ast.Assign`` (``x = v`` / ``a, b = v`` / 다중 target
+      ``a = b = v``): 각 target 의 Name 들, RHS = ``node.value``.
+    - ``ast.AnnAssign`` (``errs: list = exc.errors(...)``): target
+      이 Name 이고 ``value`` 가 있으면 그 Name, RHS = ``node.value``
+      (annotation-only ``x: T`` 는 RHS 없음 → 제외).
+    - ``ast.AugAssign`` (``x += exc.json()``): target 이 Name 이면
+      그 Name, RHS = ``node.value`` (누적도 예외-파생이면 taint).
+    - ``ast.NamedExpr`` (walrus ``(errs := exc.errors())``): target
+      Name, RHS = ``node.value``.
+
+    tuple/starred unpack(``a, b = exc, ...``)은 element-level 로
+    Name 을 모두 바인딩에 넣어 RHS 가 taint 면 전부 taint 처리한다
+    (보수적 — unpack 으로 예외-파생 alias 가 새는 것을 누락 없이).
+    attribute/subscript target 은 단순 변수 바인딩이 아니라 제외.
+    """
+    if isinstance(node, ast.Assign):
+        names: list[str] = []
+        for tgt in node.targets:
+            names.extend(_target_names(tgt))
+        return [(names, node.value)] if names else []
+    if isinstance(node, ast.AnnAssign):
+        if node.value is None:
+            return []
+        names = _target_names(node.target)
+        return [(names, node.value)] if names else []
+    if isinstance(node, ast.AugAssign):
+        names = _target_names(node.target)
+        return [(names, node.value)] if names else []
+    if isinstance(node, ast.NamedExpr):
+        names = _target_names(node.target)
+        return [(names, node.value)] if names else []
+    return []
+
+
 def _exception_alias_names(handler: ast.ExceptHandler) -> set[str]:
     """handler 본문에서 ``as <name>`` 예외 객체 **및 그 단순 별칭**
     변수 이름 집합을 도출(``v = <alias>`` 단순 대입 전이 폐포).
 
     ``except ... as e:`` 의 ``e`` 에서 시작해, handler 본문의
     ``x = e`` / ``y = x`` 같은 **Name→Name 단순 대입**을 고정점까지
-    전파한다. 이로써 ``errs = e; errs.errors(...)`` 같은 변수 경유
-    직접 호출도 그 receiver(``errs``)가 별칭 집합에 들어가 위반으로
-    잡힌다(substring 으로는 못 잡던 변수 경유 우회 차단). ``as``
-    이름이 없으면(``except ValidationError:``) 빈 집합.
+    전파한다. assignment 형태(``ast.Assign``/``ast.AnnAssign``
+    ``y: T = e``/``ast.AugAssign``/walrus ``(y := e)``/tuple·
+    starred unpack ``a, b = e, _``)와 무관하게 동일 alias 전이
+    (behavioral — ``_assignment_bindings`` 정규화). 이로써
+    ``errs = e; errs.errors(...)`` · ``errs: list = e`` 같은 변수
+    경유 직접 호출도 그 receiver(``errs``)가 별칭 집합에 들어가
+    위반으로 잡힌다(substring/Assign-only 로는 못 잡던 변수·
+    annotation 경유 우회 차단). ``as`` 이름이 없으면
+    (``except ValidationError:``) 빈 집합.
     """
     if handler.name is None:
         return set()
     aliases: set[str] = {handler.name}
-    # 고정점 — 새 별칭이 더 생기지 않을 때까지 본문 Assign 재스캔.
+    # 고정점 — 새 별칭이 더 생기지 않을 때까지 본문 대입 재스캔
+    # (assignment 형태 무관 — _assignment_bindings 정규화).
     changed = True
     while changed:
         changed = False
         for stmt in handler.body:
             for node in ast.walk(stmt):
-                if not isinstance(node, ast.Assign):
-                    continue
-                val = node.value
-                if not (isinstance(val, ast.Name) and val.id in aliases):
-                    continue
-                for tgt in node.targets:
-                    if isinstance(tgt, ast.Name) and tgt.id not in aliases:
-                        aliases.add(tgt.id)
-                        changed = True
+                for tgt_names, val in _assignment_bindings(node):
+                    if not (isinstance(val, ast.Name) and val.id in aliases):
+                        continue
+                    for nm in tgt_names:
+                        if nm not in aliases:
+                            aliases.add(nm)
+                            changed = True
     return aliases
 
 
@@ -1001,11 +1286,15 @@ def _handler_emits_unsanitized_exc_detail(
       방출 — ``raise HTTPException(...)`` 는 위 sink 규칙으로 이미
       커버, 추가로 ``return e`` / ``return str(e)`` 같은 raw 방출도
       포착.
-    - tainted 값을 변수에 담아 우회(``msg = str(e); detail=msg``)는
-      ``_exception_alias_names`` 의 Name→Name 전이폐포로 alias 가
-      확장되고, 또한 ``v = <exc-taint expr>`` 대입의 RHS 가 taint
-      이면 그 target Name 도 taint-name 으로 전파해 downstream sink
-      에서 잡는다.
+    - tainted 값을 변수에 담아 우회(``msg = str(e); detail=msg`` ·
+      ``errs: list = e.errors(...); detail=errs`` · ``buf += e.json()``
+      · walrus·tuple unpack)는 ``_exception_alias_names`` 의
+      Name→Name 전이폐포로 alias 가 확장되고, 또한
+      ``<assignment> = <exc-taint expr>`` 대입의 RHS 가 taint 이면
+      그 target Name 도 taint-name 으로 전파해 downstream sink 에서
+      잡는다(assignment 형태 무관 — ``_assignment_bindings`` 정규화;
+      ``ast.Assign``/``ast.AnnAssign``/``ast.AugAssign``/walrus/
+      tuple·starred unpack 동등 처리).
 
     handler 가 ValidationError 를 잡되 detail 을 그 예외에서 안
     만들고 re-raise / 무관 응답이면(예: ``raise HTTPException(...,
@@ -1017,22 +1306,27 @@ def _handler_emits_unsanitized_exc_detail(
         # 직접 detail 로 만들 수 없으므로 미경유 방출 불가.
         return False
 
-    # tainted 변수 이름 전파: ``v = <exc-taint RHS>`` 면 v 도 taint.
+    # tainted 변수 이름 전파: ``<assignment> = <exc-taint RHS>`` 면
+    # 그 bound Name 도 taint(assignment 형태 무관 —
+    # ``_assignment_bindings`` 가 ``ast.Assign``/``ast.AnnAssign``
+    # ``errs: list = exc.errors(...)``/``ast.AugAssign``/walrus/
+    # tuple·starred unpack 을 동등 정규화. Assign-only 추적이면
+    # annotated-assignment 로 예외-파생값을 중간변수에 담아
+    # ``HTTPException(detail=errs)`` 로 우회 시 taint 미전파 →
+    # fail-open; 형태 무관 동일 taint 로 봉인).
     tainted_names: set[str] = set()
     changed = True
     while changed:
         changed = False
         for stmt in handler.body:
             for n in ast.walk(stmt):
-                if not isinstance(n, ast.Assign):
-                    continue
-                rhs = n.value
-                rhs_aliases = aliases | tainted_names
-                if _expr_taints_from_exc(rhs, rhs_aliases):
-                    for tgt in n.targets:
-                        if isinstance(tgt, ast.Name) and tgt.id not in tainted_names:
-                            tainted_names.add(tgt.id)
-                            changed = True
+                for tgt_names, rhs in _assignment_bindings(n):
+                    rhs_aliases = aliases | tainted_names
+                    if _expr_taints_from_exc(rhs, rhs_aliases):
+                        for nm in tgt_names:
+                            if nm not in tainted_names:
+                                tainted_names.add(nm)
+                                changed = True
 
     sink_aliases = aliases | tainted_names
 
@@ -2618,6 +2912,310 @@ def test_attempt7_per_handler_chokepoint_global_count_fail_open_locked(
     )
 
 
+def test_attempt8_annassign_exc_derived_detail_bypass_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-8 회귀 canary ① (Codex [P2] — AnnAssign taint 전파
+    영구 락):
+
+    raw-body handler 가 ``except ValidationError as exc:`` 후
+    **annotated assignment** ``errs: list = exc.errors(...)`` 로
+    예외-파생값을 중간변수에 담아 ``HTTPException(detail=errs)`` 로
+    방출한다. ``ast.Assign`` 만 전파하던 old 구현은 ``ast.AnnAssign``
+    을 보지 못해 ``errs`` 가 tainted-name 으로 전파되지 않아 그
+    handler 가 nonconforming 으로 안 잡혔다(fail-open). 신
+    ``_assignment_bindings`` 정규화는 assignment 형태 무관하게 동일
+    taint 처리하므로 그 handler 가 per-handler nonconforming 에
+    집계돼 FAIL. ``AugAssign`` 누적·walrus·tuple unpack 우회 변종도
+    같은 정규화로 함께 포착됨을 단언(behavioral — 형태 무관).
+    정상 chokepoint handler 는 false-positive 로 안 깨진다.
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a8a"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # 우회 ①: annotated assignment ``errs: list = exc.errors(...)``.
+    (syn_routes / "bypass_ann.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class ReqAnn(BaseModel):\n"
+        "    x: int\n"
+        "\n"
+        "def handler_ann(payload):\n"
+        "    try:\n"
+        "        return ReqAnn.model_validate(payload)\n"
+        "    except ValidationError as exc:\n"
+        "        errs: list = exc.errors(\n"
+        "            include_input=False,\n"
+        "            include_context=False,\n"
+        "        )\n"
+        "        raise HTTPException(status_code=422, detail=errs) "
+        "from None\n"
+    )
+    # 우회 ②: AugAssign 누적 ``buf += exc.json()``.
+    (syn_routes / "bypass_aug.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class ReqAug(BaseModel):\n"
+        "    y: int\n"
+        "\n"
+        "def handler_aug(payload):\n"
+        "    try:\n"
+        "        return ReqAug.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        '        buf = "invalid: "\n'
+        "        buf += e.json()\n"
+        "        raise HTTPException(status_code=422, detail=buf) "
+        "from None\n"
+    )
+    # 우회 ③: walrus ``(w := exc.errors())`` 직접 sink 인자.
+    (syn_routes / "bypass_walrus.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class ReqW(BaseModel):\n"
+        "    z: int\n"
+        "\n"
+        "def handler_walrus(payload):\n"
+        "    try:\n"
+        "        return ReqW.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        "            detail=(w := e.errors()),\n"
+        "        ) from None\n"
+    )
+    # 우회 ④: tuple unpack ``a, b = exc.errors(), None`` 후 detail=a.
+    (syn_routes / "bypass_tuple.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class ReqT(BaseModel):\n"
+        "    t: int\n"
+        "\n"
+        "def handler_tuple(payload):\n"
+        "    try:\n"
+        "        return ReqT.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        a, b = e.errors(), None\n"
+        "        raise HTTPException(status_code=422, detail=a) "
+        "from None\n"
+    )
+    # 정상 chokepoint handler — 강화가 false-positive 로 깨면 안 됨.
+    (syn_routes / "ok.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "from ante.web.errors import sanitize_validation_errors\n"
+        "\n"
+        "class OkReq(BaseModel):\n"
+        "    x: int\n"
+        "\n"
+        "def ok_handler(payload):\n"
+        "    try:\n"
+        "        return OkReq.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        "            detail=sanitize_validation_errors(e),\n"
+        "        ) from None\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a8a")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        choke, nonconforming = _scan_validationerror_handler_chokepoint()
+    finally:
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    for variant in ("bypass_ann", "bypass_aug", "bypass_walrus", "bypass_tuple"):
+        assert any(variant in s for s in nonconforming), (
+            f"attempt-8 AnnAssign taint 회귀 — ``{variant}`` 우회 "
+            "handler 가 nonconforming 으로 안 잡힘(assignment 형태 "
+            "무관 taint 정규화 회귀 = fail-open: AnnAssign/AugAssign/"
+            f"walrus/tuple unpack 미전파): nonconforming={nonconforming}"
+        )
+    assert not any("ok" in s for s in nonconforming), (
+        "정상 chokepoint handler 가 nonconforming 으로 잘못 잡힘 — "
+        f"taint 정규화가 정상 패턴을 false-positive: {nonconforming}"
+    )
+    assert choke >= 1, (
+        "정상 chokepoint handler 가 choke 로 안 잡힘 — taint "
+        f"정규화가 정상 패턴을 false-negative: choke={choke}"
+    )
+
+
+def test_attempt8_basemodel_constructor_path_validation_s1_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-8 회귀 canary ② (Codex [P2] — BaseModel 생성자-경로
+    검증 S1 탐지 영구 락):
+
+    새 raw-body handler 가 Pydantic 일반 생성자
+    ``Req(**payload)`` / ``Req(payload)`` 로 검증한다(``model_validate``
+    가 아님). old S1 scanner 는 ``model_validate`` attribute call
+    패턴만 보고 ``ast.Call.func`` 가 ``Name`` 인 생성자 호출을 전부
+    skip → unsafe dict 필드를 가진 요청 모델을 그렇게 검증해도
+    discovery lock 이 green(fail-open) 이었다.
+
+    신 S1a 탐지(생성자-경로 포함): (a) callee 가 정적 BaseModel
+    서브클래스로 resolve 되면 ``model_validate`` 와 동형 S1 source
+    로 walk → unsafe ``dict[str, str]`` 필드가 DISCOVERED dict
+    노드가 되어 미등록이면 UNPROVEN→FAIL. (b) 정적 resolve 불가한
+    생성자-스타일 검증(동적 클래스)은 INV-3 single-sink
+    ``unresolvable`` 충전(default-deny). raw-body 검증 문맥
+    한정(caller-controlled ``payload`` 가 생성자 인자) — 무관한
+    일반 객체 생성은 S1 site 아님(false-positive 0).
+
+    **old 코드(생성자-경로 미탐지)에서는 (a)/(b) 모두 red(누락)**
+    — 영구 회귀 락.
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a8b"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # (a) 정적 BaseModel 생성자-경로 검증(``Req(**payload)``) — unsafe
+    #     ``dict[str, str]`` 필드 보유 → DISCOVERED dict 노드.
+    #     인접 무관 객체 생성(``_Helper(a=1)``)은 S1 site 아님.
+    (syn_routes / "ctor_static.py").write_text(
+        "import json\n"
+        "from pydantic import BaseModel\n"
+        "from fastapi import Request\n"
+        "\n"
+        "class _Helper:\n"
+        "    def __init__(self, a=0):\n"
+        "        self.a = a\n"
+        "\n"
+        "class CtorReq(BaseModel):\n"
+        "    creds: dict[str, str] = {}\n"
+        "\n"
+        "async def ctor_handler(request: Request):\n"
+        "    raw = await request.body()\n"
+        "    payload = json.loads(raw)\n"
+        "    _local = _Helper(a=1)\n"
+        "    return CtorReq(**payload)\n"
+    )
+    # (b) 동적 클래스 생성자-경로 검증 — 정적 resolve 불가 →
+    #     INV-3 single-sink unresolvable(default-deny).
+    (syn_routes / "ctor_dynamic.py").write_text(
+        "import json\n"
+        "from fastapi import Request\n"
+        "\n"
+        "def _pick():\n"
+        "    import pydantic\n"
+        "    return pydantic.BaseModel\n"
+        "\n"
+        "async def dyn_handler(request: Request):\n"
+        "    payload = json.loads(await request.body())\n"
+        "    Model = _pick()\n"
+        "    return Model(**payload)\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a8b")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a8b" or m.startswith("syn_routes_1651_a8b."):
+                del sys.modules[m]
+        sites = _scan_s1_entrypoints()
+        s1 = _resolve_s1()
+    finally:
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a8b" or m.startswith("syn_routes_1651_a8b."):
+                del sys.modules[m]
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    # 실제 scanner 가 두 생성자-경로 검증 site 를 발견.
+    ctor_sites = [s for s in sites if s.method == _CONSTRUCTOR_VALIDATION_METHOD]
+    static_site = [
+        s
+        for s in ctor_sites
+        if s.module == "syn_routes_1651_a8b.ctor_static" and s.receiver == "CtorReq"
+    ]
+    dyn_site = [
+        s
+        for s in ctor_sites
+        if s.module == "syn_routes_1651_a8b.ctor_dynamic" and s.receiver == "Model"
+    ]
+    assert static_site, (
+        "attempt-8 생성자-경로 회귀 — 정적 BaseModel ``CtorReq(**payload)`` "
+        f"검증 site 가 S1 scanner 에서 미발견(fail-open): {sites}"
+    )
+    assert dyn_site, (
+        "attempt-8 생성자-경로 회귀 — 동적 ``Model(**payload)`` 검증 "
+        f"site 가 S1 scanner 에서 미발견(fail-open): {sites}"
+    )
+    # 무관한 일반 객체 생성(``_Helper(a=1)``)은 S1 site 아님
+    # (false-positive 0 — raw-body 인자 무관).
+    assert not any(s.receiver == "_Helper" for s in ctor_sites), (
+        "무관한 일반 객체 생성(``_Helper(a=1)``)이 S1 생성자-경로 "
+        f"site 로 잘못 잡힘(false-positive): {ctor_sites}"
+    )
+
+    # (a) 정적 BaseModel → model_validate 와 동형 S1 source(models).
+    static_models = [
+        (sid, m)
+        for sid, m in s1.models
+        if sid.startswith("syn_routes_1651_a8b.ctor_static:")
+    ]
+    assert static_models and all(
+        m.__name__ == "CtorReq" for _sid, m in static_models
+    ), (
+        "attempt-8 생성자-경로 회귀 — 정적 ``CtorReq(**payload)`` 가 "
+        f"S1 source(models)로 충전되지 않음(fail-open): {s1.models}"
+    )
+    # 그 모델이 DISCOVERED dict 노드를 만들고 미등록이면 FAIL.
+    surf = _SurfaceModels(
+        site_models=[(_stable_s1_site(sid), m) for sid, m in static_models],
+        site_roots=[],
+        unresolvable=[],
+    )
+    disc = _discover_all(surf)
+    assert any(
+        owner == "CtorReq" and field == "creds" for owner, field, _s in disc.dict_nodes
+    ), (
+        "attempt-8 생성자-경로 회귀 — 정적 BaseModel 의 unsafe "
+        f"``creds: dict[str,str]`` 가 DISCOVERED dict 노드로 안 잡힘: "
+        f"{sorted(disc.dict_nodes)}"
+    )
+    verdict = compute_verdict(
+        disc,
+        surf.unresolvable,
+        registered_dict_keys=frozenset(),
+        registered_validator_ids=frozenset(),
+    )
+    assert not verdict.ok, (
+        "attempt-8 생성자-경로 fail-open 재발 — 생성자-경로 검증 "
+        "모델의 unsafe dict 필드가 미등록인데 discovery lock PASS: "
+        f"unproven_dict={verdict.unproven_dict}"
+    )
+
+    # (b) 동적 클래스 생성자-경로 → INV-3 single-sink unresolvable.
+    assert any(
+        "syn_routes_1651_a8b.ctor_dynamic" in u and "생성자-경로" in u
+        for u in s1.unresolvable
+    ), (
+        "attempt-8 생성자-경로 회귀 — 동적 클래스 ``Model(**payload)`` "
+        "생성자-경로 검증이 INV-3 single-sink unresolvable 로 충전되지 "
+        f"않음(default-deny 회귀 = fail-open): {s1.unresolvable}"
+    )
+
+
 # ════════════════════════════════════════════════════════════════════
 # CV1: fail-closed FastAPI introspection canary
 # ════════════════════════════════════════════════════════════════════
@@ -2907,28 +3505,72 @@ def test_cv1_polarity_meta_assertion_unknown_is_fail() -> None:
 
 
 def test_cv1_origin_complete_canary_unsafe_entrypoint_fail_closed(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """CV1 S1b canary ①: synthetic unsafe entrypoint(미walkable
-    TypeAdapter) → entrypoint API 매칭에 잡힘(우회 불가).
+    TypeAdapter) → **실제 S1 scanner/resolver** 가 단일
+    ``unresolvable`` 로 충전(우회 불가, 비공허 회귀 락).
+
+    이전 구현은 synthetic 파일 생성 후 **테스트 내부 별도 AST
+    루프**만 돌고 ``_scan_s1_entrypoints()``/``_resolve_s1()`` 를
+    호출하지 않아, 실제 S1 scanner/resolver 가 TypeAdapter 검증을
+    더 이상 unresolvable 로 충전 안 하게 회귀해도 canary 가
+    green(공허 단언)이었다. 본 canary 는 ``_ROUTES_DIR``/
+    ``_ROUTES_PKG`` 를 synthetic routes 디렉터리로 monkeypatch 한
+    뒤 **실제 ``_scan_s1_entrypoints()``/``_resolve_s1()`` 를
+    호출**해 unsafe TypeAdapter 검증 site 가 INV-3 single-sink
+    ``unresolvable`` 에 들어가는지(그리고 models 로 잘못 충전되지
+    않는지) 단언한다 — 실-resolver 경유(공허 일소).
     """
-    syn = tmp_path / "syn_route.py"
-    syn.write_text(
+    syn_routes = tmp_path / "syn_routes_1651_c1"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    (syn_routes / "ta.py").write_text(
         "from pydantic import TypeAdapter\n"
         "def h(payload):\n"
         "    return TypeAdapter(dict[str, int]).validate_python(payload)\n"
     )
-    tree = ast.parse(syn.read_text(), filename=str(syn))
-    found_unsafe = False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr in _PYDANTIC_ENTRYPOINT_METHODS:
-                recv = ast.unparse(node.func.value)
-                if "TypeAdapter(" in recv:
-                    found_unsafe = True
-    assert found_unsafe, (
-        "S1b canary ① self-검증 실패 — synthetic unsafe TypeAdapter "
-        "entrypoint 가 entrypoint API 매칭에서 누락(미탐지 시 우회 가능)"
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_c1")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_c1" or m.startswith("syn_routes_1651_c1."):
+                del sys.modules[m]
+        sites = _scan_s1_entrypoints()
+        s1 = _resolve_s1()
+    finally:
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_c1" or m.startswith("syn_routes_1651_c1."):
+                del sys.modules[m]
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    # 실제 scanner 가 TypeAdapter entrypoint 를 발견했는가.
+    assert any(
+        s.module == "syn_routes_1651_c1.ta" and "TypeAdapter(" in s.receiver
+        for s in sites
+    ), (
+        "S1b canary ① — 실제 ``_scan_s1_entrypoints()`` 가 synthetic "
+        f"unsafe TypeAdapter entrypoint 를 발견 못 함(우회 가능): {sites}"
+    )
+    # 실제 resolver 가 그것을 단일 unresolvable sink 로 충전.
+    assert any("TypeAdapter" in u for u in s1.unresolvable), (
+        "S1b canary ① 비공허 회귀 락 위반 — 실제 ``_resolve_s1()`` 가 "
+        "unsafe TypeAdapter 검증을 INV-3 single-sink unresolvable 로 "
+        f"충전하지 않음(공허/회귀 = fail-open): {s1.unresolvable}"
+    )
+    # 잘못 models(정적 BaseModel resolve 성공)로 충전되면 안 된다.
+    assert not any(sid.startswith("syn_routes_1651_c1.ta:") for sid, _m in s1.models), (
+        "S1b canary ① — unsafe TypeAdapter 검증이 정적 BaseModel "
+        f"models 로 잘못 충전됨(극성 위반): {s1.models}"
     )
 
 
