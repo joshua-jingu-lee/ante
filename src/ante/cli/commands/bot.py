@@ -252,6 +252,19 @@ def bot_create(
             fmt.error(str(e))
             raise SystemExit(1) from e
 
+    # #1656 E bucket defense-in-depth: provided invalid account_id
+    # (`default`/패턴 위반/`""`)를 omitted resolver / `ipc_send`
+    # (→`_handle_bot_create`) 이전에 거부한다. IPC handler가 1차
+    # 보증(handler-first require_account_id)하지만, CLI ingress 거부는 clean
+    # early exit(traceback 부재)이다. **provided-only**(`account_id is not
+    # None`)로만 검증해 `--account` 미지정(None) → 비대화형 resolver 분기를
+    # **보존**한다(omitted 불변, #1634 `bot_list`(L97) 동형, invalid-format ↔
+    # valid-absent/omitted 분리). 에러코드는 #1633 SSOT `VALIDATION_ERROR`.
+    if account_id is not None:
+        account_id = reject_invalid_account_id(
+            account_id, fmt, context="cli.bot.create"
+        )
+
     # 계좌 미지정 시 비대화형 resolver — 단일 active 계좌면 자동 선택,
     # 그 외(0개/2개 이상)에는 BOT_MISSING_REQUIRED_ACCOUNT로 실패한다.
     if account_id is None:

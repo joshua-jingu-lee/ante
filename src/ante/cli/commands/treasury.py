@@ -108,6 +108,16 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
 
+    # #1656 E bucket defense-in-depth: invalid account_id(`default`/패턴
+    # 위반/`""`)를 `ipc_send`(→`_handle_treasury_allocate`) 이전에 거부한다.
+    # IPC handler가 1차 보증(handler-first require_account_id)하지만, CLI
+    # ingress 거부는 clean early exit(traceback 부재) + #1634/#1635 동형
+    # 방어선이다. `--account` required arg라 전 입력을 검증한다. 에러코드는
+    # #1633 SSOT `VALIDATION_ERROR`(helper가 `e.code` 재사용).
+    account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.treasury.allocate"
+    )
+
     async def _run_allocate() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -148,6 +158,13 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
     """봇 예산 회수."""
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
+
+    # #1656 E bucket defense-in-depth: `allocate`와 동형 — invalid account_id를
+    # `ipc_send`(→`_handle_treasury_deallocate`) 이전에 거부한다(required arg
+    # 전검증, clean early exit). 에러코드는 #1633 SSOT `VALIDATION_ERROR`.
+    account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.treasury.deallocate"
+    )
 
     async def _run_deallocate() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send

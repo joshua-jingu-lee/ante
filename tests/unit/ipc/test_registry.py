@@ -181,7 +181,16 @@ class TestHandleBotCreate:
         assert call_kwargs["config"].interval_seconds == 30
 
     async def test_raises_when_strategy_not_found(self):
-        """미등록 strategy_id → ValueError."""
+        """미등록 strategy_id → ValueError.
+
+        #1656 E bucket: ``_handle_bot_create`` 가 ``require_account_id`` 를
+        함수 최상단(strategy lookup 이전)으로 옮겼으므로, 순수
+        strategy-not-found ``ValueError`` 경로를 검증하려면 **valid**
+        account_id 를 payload에 포함해야 한다(account 검증을 통과한 뒤
+        strategy lookup 도달). account_id 누락 시 #1656 validate-first 로
+        ``InvalidAccountIdError`` 가 먼저 raise되어 본 테스트 의도(순수
+        strategy-not-found)가 가려진다.
+        """
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_bot_create
@@ -195,70 +204,107 @@ class TestHandleBotCreate:
         with pytest.raises(ValueError, match="전략을 찾을 수 없습니다"):
             await _handle_bot_create(
                 svc,
-                {"strategy_id": "nonexistent"},
+                {"strategy_id": "nonexistent", "account_id": "acct-1"},
                 "cli-user",
             )
 
     async def test_ipc_bot_create_account_scoped_required(self):
-        """Refs #1217 → #1241 SPLIT-2: ``args["account_id"]`` 누락/invalid 시
+        """Refs #1217 → #1241 SPLIT-2 / #1656: invalid/missing ``account_id`` 시
         ``InvalidAccountIdError`` 로 거부한다.
 
-        ``args.get("account_id", "")`` fallback 이 제거되어 IPC routing
-        진입점에서 즉시 거부된다. ``BotConfig.__post_init__`` 까지 도달하기
-        전에 ``ipc.bot.create`` context 로 실패한다.
+        ``args.get("account_id")`` fallback 이 제거되어 IPC routing 진입점에서
+        즉시 거부된다. #1656 E bucket: ``require_account_id`` 가 함수 최상단
+        (strategy_registry.get / StrategyLoader.load 이전)으로 이동했으므로
+        strategy mock / StrategyLoader monkeypatch workaround 없이도(실제
+        strategy 처리 이전) ``ipc.bot.create`` context 로 먼저 실패한다.
         """
-        from dataclasses import dataclass
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.account.errors import InvalidAccountIdError
         from ante.ipc.registry import _handle_bot_create
 
-        @dataclass
-        class FakeRecord:
-            filepath: str = "/tmp/strategy.py"
-
-        fake_registry = AsyncMock()
-        fake_registry.get.return_value = FakeRecord()
-
         fake_bot_manager = AsyncMock()
 
         svc = MagicMock()
-        svc.strategy_registry = fake_registry
         svc.bot_manager = fake_bot_manager
+
+        # 누락 → 거부 (validate-first: strategy mock 불필요)
+        with pytest.raises(InvalidAccountIdError, match="ipc.bot.create"):
+            await _handle_bot_create(
+                svc,
+                {"strategy_id": "strat-1"},
+                "cli-user",
+            )
+
+        # 빈 문자열 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            await _handle_bot_create(
+                svc,
+                {"strategy_id": "strat-1", "account_id": ""},
+                "cli-user",
+            )
+
+        # 'default' 예약어 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            await _handle_bot_create(
+                svc,
+                {"strategy_id": "strat-1", "account_id": "default"},
+                "cli-user",
+            )
+
+        # 패턴 위반 → 거부
+        with pytest.raises(InvalidAccountIdError):
+            await _handle_bot_create(
+                svc,
+                {"strategy_id": "strat-1", "account_id": "bad_id!"},
+                "cli-user",
+            )
+
+        # bot_manager.create_bot 까지 절대 도달하지 않아야 한다
+        fake_bot_manager.create_bot.assert_not_called()
+
+    async def test_bot_create_validate_first_skips_strategy_lookup_and_load(self):
+        """#1656 E bucket validate-first 회귀: invalid/missing ``account_id`` 면
+        ``strategy_registry.get`` 과 ``StrategyLoader.load`` 가 **호출되지
+        않는다**(account 검증이 strategy 처리보다 먼저).
+
+        ``_handle_bot_create`` 가 ``require_account_id`` 를 함수 최상단으로
+        옮긴 계약(strategy lookup/load 이전)을 spy 로 고정한다. 이전 순서
+        (strategy lookup → load → 늦은 require_account_id)에서는 invalid
+        account_id 라도 strategy_registry.get / StrategyLoader.load 가 먼저
+        호출되어 본 단언이 실패한다(failing check before fix).
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.account.errors import InvalidAccountIdError
+        from ante.ipc.registry import _handle_bot_create
+
+        fake_registry = AsyncMock()
+
+        svc = MagicMock()
+        svc.strategy_registry = fake_registry
 
         import ante.strategy.loader
 
+        load_calls: list = []
         original_load = ante.strategy.loader.StrategyLoader.load
-        ante.strategy.loader.StrategyLoader.load = MagicMock(
-            return_value=type("FakeStrategy", (), {})
+        ante.strategy.loader.StrategyLoader.load = (  # type: ignore[assignment]
+            lambda path: load_calls.append(path)
         )
         try:
-            # 누락 → 거부
-            with pytest.raises(InvalidAccountIdError, match="ipc.bot.create"):
-                await _handle_bot_create(
-                    svc,
-                    {"strategy_id": "strat-1"},
-                    "cli-user",
-                )
+            for bad_args in (
+                {"strategy_id": "strat-1"},  # account_id 키 생략
+                {"strategy_id": "strat-1", "account_id": ""},
+                {"strategy_id": "strat-1", "account_id": "default"},
+                {"strategy_id": "strat-1", "account_id": "bad_id!"},
+            ):
+                with pytest.raises(InvalidAccountIdError):
+                    await _handle_bot_create(svc, bad_args, "cli-user")
 
-            # 빈 문자열 → 거부
-            with pytest.raises(InvalidAccountIdError):
-                await _handle_bot_create(
-                    svc,
-                    {"strategy_id": "strat-1", "account_id": ""},
-                    "cli-user",
-                )
-
-            # 'default' 예약어 → 거부
-            with pytest.raises(InvalidAccountIdError):
-                await _handle_bot_create(
-                    svc,
-                    {"strategy_id": "strat-1", "account_id": "default"},
-                    "cli-user",
-                )
-
-            # bot_manager.create_bot 까지 절대 도달하지 않아야 한다
-            fake_bot_manager.create_bot.assert_not_called()
+            # validate-first: account 검증이 먼저 raise되어 strategy lookup /
+            # load 가 절대 호출되지 않는다.
+            fake_registry.get.assert_not_called()
+            assert load_calls == [], load_calls
         finally:
             ante.strategy.loader.StrategyLoader.load = original_load
 
