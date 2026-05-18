@@ -145,6 +145,17 @@ async def _handle_bot_create(
     from ante.bot.config import BotConfig
     from ante.strategy.loader import StrategyLoader
 
+    # #1656 E bucket / #1633 finding: ``require_account_id``를 함수
+    # **최상단**(strategy_registry.get / StrategyLoader.load 이전)으로 둔다.
+    # 그래야 invalid/missing account_id direct-IPC payload가 strategy
+    # lookup/load 오류(ValueError / 파일 IO)나 늦은 검증에 가리지 않고
+    # ``InvalidAccountIdError``(code="VALIDATION_ERROR", #1633 SSOT)로 먼저
+    # raise되어 server.py:323 ``getattr(e, "code", ...)``를 거쳐
+    # VALIDATION_ERROR envelope이 된다. #1636 broker handlers(account_id-first)
+    # 1:1 동형. Refs #1217 → #1241 SPLIT-2: account_id fallback 제거 — IPC
+    # routing 진입점에서 ``ipc.bot.create`` context로 명시 검증한다.
+    account_id = require_account_id(args.get("account_id"), context="ipc.bot.create")
+
     strategy_id = args["strategy_id"]
     record = await svc.strategy_registry.get(strategy_id)
     if record is None:
@@ -153,11 +164,6 @@ async def _handle_bot_create(
 
     strategy_cls = StrategyLoader.load(Path(record.filepath))
 
-    # Refs #1217 → #1241 SPLIT-2: account_id fallback 제거.
-    # ``BotConfig.__post_init__`` 의 require_account_id 와 중복되지만
-    # IPC routing 진입점에서 한 번 더 명시 검증해 ``InvalidAccountIdError`` 의
-    # context 를 ``ipc.bot.create`` 로 표시한다.
-    account_id = require_account_id(args.get("account_id"), context="ipc.bot.create")
     config = BotConfig(
         bot_id=args.get("bot_id", ""),
         strategy_id=strategy_id,
@@ -185,7 +191,20 @@ async def _handle_bot_remove(
 async def _handle_treasury_allocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args["account_id"]
+    from ante.account.scoping import require_account_id
+
+    # #1656 E bucket / #1633 finding: ``require_account_id``를 함수 **첫
+    # 문장**으로(``args["bot_id"]``/``args["amount"]`` 이전) 둔다. raw
+    # ``args["account_id"]`` 직접 인덱싱은 account_id 키 생략 payload에서
+    # ``KeyError``가 먼저 터져 server.py:323 ``getattr(e, "code",
+    # "EXECUTION_ERROR")``로 오분류된다. ``args.get`` +
+    # ``require_account_id``로 invalid/missing 모두 ``InvalidAccountIdError``
+    # (code="VALIDATION_ERROR", #1633 SSOT)로 먼저 raise되어
+    # VALIDATION_ERROR envelope이 된다. #1636 broker handlers(args["bot_id"]
+    # 이전 require_account_id) 1:1 동형.
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.treasury.allocate"
+    )
     bot_id = args["bot_id"]
     amount = args["amount"]
     treasury = svc.treasury_manager.get(account_id)
@@ -196,7 +215,15 @@ async def _handle_treasury_allocate(
 async def _handle_treasury_deallocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    account_id = args["account_id"]
+    from ante.account.scoping import require_account_id
+
+    # #1656 E bucket / #1633 finding: ``_handle_treasury_allocate``와 동형 —
+    # ``require_account_id``를 첫 문장으로(``args["bot_id"]``/``args["amount"]``
+    # 이전, ``args.get``). 키 생략 payload의 ``KeyError`` →
+    # EXECUTION_ERROR 누수 차단, invalid/missing 모두 VALIDATION_ERROR.
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.treasury.deallocate"
+    )
     bot_id = args["bot_id"]
     amount = args["amount"]
     treasury = svc.treasury_manager.get(account_id)
