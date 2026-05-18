@@ -10,6 +10,7 @@ from pathlib import Path
 import click
 
 from ante.account.errors import AccountNotFoundError
+from ante.cli._validators import reject_invalid_account_id
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
@@ -453,6 +454,10 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
             code="STRATEGY_MISSING_REQUIRED_ACCOUNT",
         )
         raise SystemExit(1)
+
+    account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.strategy.performance"
+    )
 
     async def _perf() -> dict | None:
         from ante.cli.main import get_db_path
