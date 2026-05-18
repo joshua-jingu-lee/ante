@@ -6,26 +6,54 @@ self-enumerate default-deny discovery lock (#1651, #1643 Split B).
 **test-only** 정적 discovery lock 으로 비-``extra_forbidden``
 caller-supplied 문자열 식별자 ``loc`` 벡터를 merge 전 봉인한다.
 
-본 lock 은 #1643 v11 default-deny 락 계약을 1:1 재사용한다(재유도 금지).
-검사 surface·validator·registry 의 개수도, 고정 모델/필드 멤버명도
-하드코딩하지 않는다 — introspection self-derive 가 유일 SSOT 이며
-미등록·미증명 항목은 fail-closed 다.
+## PASS-computation 구조 (이슈 #1651 INV-1..5 봉인 — 단일 형태)
 
-surface = **S1**(raw-body Pydantic 검증 callee 모델 annotation-tree
-walk + origin-complete fail-closed 가드) **∪ S2**(``create_app()``
-route 재귀 순회 — Mount/sub-app 내부 포함; positive-type 증명된
-non-validation mount 만 면제).
+@code-reviewer 메타리뷰가 Codex 2연속 fail-open FAIL 의 근본원인을
+``proven=f(discovered)`` self-defeat / walker 내부 노드별
+plausibility-OR 로 진단했다. 본 모듈은 PASS 판정을 **단일 함수**로
+재집약한다(스팟 수정 금지):
 
-annotation-tree default-deny walker: safe-allowlist(스칼라/``Enum``/
-``Literal``/``Any`` · 인식 container 재귀 · **정확히 ``dict[str,Any]``
-만** · ``BaseModel``[``extra∈{forbid,ignore}``·typed
-``__pydantic_extra__`` 부재·validator-clean·fields recurse-safe])
-양성 매칭만 PASS, 그 외 일체 fail-closed FAIL.
+- **INV-1 (물리 분리)**: ``DISCOVERED`` (introspection self-derive —
+  ``_discover`` enumeration walk 만 채움) 와 ``REGISTERED_STATIC``
+  (정적 리터럴 선언: dict 축 ``_REGISTERED_DICT_PROOFS`` · validator
+  축 ``_REGISTERED_VALIDATOR_SURFACE_IDS``) 는 **서로 다른 코드
+  경로**. ``REGISTERED_STATIC`` 을 만드는 코드는 introspection 함수
+  (``_iter_model_validators``/``_validator_markers``/enumeration walk)
+  를 **절대 호출하지 않는다** — 명시 리터럴 surface-id/필드-키
+  집합이다(재도출 시 ``proven=f(discovered)`` self-defeating).
+- **INV-2 (enumeration·verdict 분리)**: ``_discover`` walk 는
+  **verdict 없이** 트리 전 노드를 끝까지 방문해 ``DISCOVERED`` 만
+  채운다(미증명 unsafe 노드에서 short-circuit/``return`` 금지 — 기록
+  하고 계속). PASS 는 walk 종료 후 단 한 곳(``compute_verdict``)에서
+  ``UNPROVEN = DISCOVERED − REGISTERED_STATIC``,
+  ``PASS ⟺ (UNPROVEN == ∅ ∧ unresolvable == ∅)`` 로만 계산한다.
+- **INV-3 (single fail-closed sink)**: 정적 resolve 불가(dynamic
+  helper 인자·미해결 receiver·미지 mount/route·unwalkable origin)
+  전부 단일 ``unresolvable`` 집합에 모이고 ``unresolvable ≠ ∅ ⟹
+  무조건 FAIL``. helper-trace 는 site 의 model 인자 중 정적
+  literal-BaseModel resolve 안 되는 게 하나라도 있으면 site 전체
+  unresolvable(any-match → all-must-resolve).
+- **INV-4 (per-identifier 1:1 behavioral)**: 각 ``REGISTERED_STATIC``
+  항목(dict (owner,field) 키 / validator surface-id)은 그 식별자
+  **단위로** behavioral 증명과 1:1. validator canary 는 모델-단위
+  'ValidationError 한 번' 이 아니라 등록 surface-id **각각**이
+  sentinel 주입 시 loc=static·sentinel∉detail 임을 개별 증명.
+- **INV-5 (self-defeat 회귀 canary)**: ``REGISTERED_STATIC`` 공집합
+  치환 시 현 S1∪S2 의 모든 validator-bearing·비-``dict[str,Any]``
+  surface 가 전수 FAIL 함을 단언(RC-1 영구 락 — red 면
+  ``proven=f(discovered)`` 재발).
+
+본 lock 은 #1643 v11 default-deny 락 계약을 1:1 재사용한다(재유도
+금지). 검사 surface 의 개수도 고정 모델/필드 멤버명도 lock 입력으로
+하드코딩하지 않는다 — ``DISCOVERED`` introspection self-derive 가 유일
+SSOT 이며 미등록·미증명 항목은 fail-closed 다. (``REGISTERED_STATIC``
+리터럴은 lock 입력이 아니라 INV-1 정적 proof 축이다 — 등록
+behavioral 증명 1:1 식별자.)
 
 해석 B(2026-05-18 사용자/대표 결정): bounded 정수 수열 인덱스
 (``list``/``tuple``/``set`` element 위치)는 invariant 대상이 아니므로
-container 를 인덱스 사유로 FAIL 하지 않는다(element TYPE 이 unsafe 면
-element 노드에서 FAIL — 인덱스 면제 ≠ element-TYPE 면제).
+container 를 인덱스 사유로 unsafe 기록하지 않는다(element TYPE 이
+unsafe 면 그 element 노드를 기록 — 인덱스 면제 ≠ element-TYPE 면제).
 
 I-flat 은 #1651 lock invariant 가 아니다(#1650 extra_forbidden 런타임
 소유 — safe forbid/nested BaseModel 은 PASS).
@@ -93,27 +121,12 @@ SENTINEL = "SNTNL_1651_lockf00dbeef"
 
 
 # ════════════════════════════════════════════════════════════════════
-# annotation-tree default-deny walker (#1643 v11 계약 1:1)
+# 공유 introspection primitive (DISCOVERED 전용 — INV-1)
 # ════════════════════════════════════════════════════════════════════
 #
-# walker 는 노드를 closed safe-allowlist 에 양성 매칭될 때만 PASS 시키고
-# 그 외 일체를 fail-closed FAIL 한다(극성 반전 — 위험 열거 아님).
-
-
-def _opt(tp: Any) -> Any:
-    """legacy ``typing.Union[tp, None]`` origin 동적 생성(canary 전용).
-
-    PEP604 ``tp | None`` 은 ``types.UnionType`` origin, ``typing.Union``
-    은 ``typing.Union`` origin — walker 가 둘을 동일 Union 분기로
-    처리함을 양쪽 canary 로 고정한다. 동적 생성이라 ruff 정적 annotation
-    규칙(UP007/UP045) 비대상.
-    """
-    return Union[tp, None]  # noqa: UP007 — legacy Union origin canary 의도
-
-
-def _opt_dict_str_int() -> Any:
-    """``typing.Union[dict[str,int], None]`` (legacy Union origin) canary."""
-    return _opt(dict[str, int])
+# 아래 primitive 는 **introspection self-derive** 다. INV-1 에 따라
+# DISCOVERED 산출 경로(``_discover``/``_enumerate_*``)에서만 호출하며
+# REGISTERED_STATIC 산출 경로는 이 함수들을 절대 호출하지 않는다.
 
 
 _LEAF_SAFE_TYPES: tuple[type, ...] = (
@@ -141,46 +154,8 @@ _VALIDATOR_MARKER_TYPES: tuple[type, ...] = (
 )
 
 
-@dataclasses.dataclass
-class WalkResult:
-    """walk 결과. ``ok`` False 면 ``reason``/``path`` 가 FAIL 근거."""
-
-    ok: bool
-    reason: str = ""
-    path: str = ""
-    # walk 중 발견한 비-``dict[str,Any]`` dict 노드(소유 모델, 필드명).
-    dict_nodes: list[tuple[type, str]] = dataclasses.field(default_factory=list)
-    # walk 중 self-enumerate 한 validator surface 식별자 집합.
-    validator_surfaces: set[str] = dataclasses.field(default_factory=set)
-
-
-@dataclasses.dataclass
-class _Justify:
-    """검증 walk 용 justified-PASS 컨텍스트(default-deny 보강).
-
-    빈(기본) 컨텍스트면 walker 는 **순수 default-deny** — 비-
-    ``dict[str,Any]`` dict 노드/validator surface 가 무조건 FAIL.
-    검증 walk 에서만 호출측이 **per-(owner,field) 등록 pre-reject
-    증명** dict 키와 **per-surface-id 등록 CV3** validator surface 를
-    주입해 그 노드만 PASS 로 간주시킨다. 주입되지 않은(=미증명) 모든
-    unsafe shape(``extra='allow'``/RootModel/dataclass/unknown 포함)는
-    트리 어디에 있든 여전히 FAIL — short-circuit 으로 가려진 다른
-    unsafe shape 까지 검증 walk 가 끝까지 도달해 잡아낸다.
-    """
-
-    dict_keys: frozenset[tuple[str, str]] = frozenset()
-    validator_surfaces: frozenset[str] = frozenset()
-
-
 def _is_leaf_safe(tp: Any) -> bool:
     if tp is None or tp is type(None) or tp is Any:
-        return True
-    if (
-        tp
-        in (
-            # datetime/date/time/UUID 는 import 비용 없이 이름으로 식별
-        )
-    ):
         return True
     try:
         import datetime as _dt
@@ -198,11 +173,11 @@ def _is_leaf_safe(tp: Any) -> bool:
     return False
 
 
-def _validator_markers_in_metadata(metadata: typing.Iterable[Any]) -> list[Any]:
+def _validator_markers(metadata: typing.Iterable[Any]) -> list[Any]:
     """field metadata 에서 validator/custom core-schema provider 추출.
 
     pydantic 은 ``Annotated[X, *Validator]`` 의 X 만 ``fi.annotation`` 에
-    남기고 validator 는 ``fi.metadata`` 로 분리하므로, walker 는
+    남기고 validator 는 ``fi.metadata`` 로 분리하므로, enumeration 은
     metadata 를 검사해 opaque validator surface 를 self-enumerate 한다.
     """
     out: list[Any] = []
@@ -214,7 +189,7 @@ def _validator_markers_in_metadata(metadata: typing.Iterable[Any]) -> list[Any]:
     return out
 
 
-def _model_validators(model: type[BaseModel]) -> list[str]:
+def _iter_model_validators(model: type[BaseModel]) -> list[str]:
     """모델의 field/model validator + v1 호환 validator surface 식별자.
 
     하드코딩 금지 — ``__pydantic_decorators__`` 전 맵에서 self-derive.
@@ -236,8 +211,45 @@ def _model_validators(model: type[BaseModel]) -> list[str]:
     return names
 
 
-def _dict_node_field_key(owner: type | None, path: str) -> tuple[str, str]:
-    """발견된 비-``dict[str,Any]`` dict 노드를 **(owner qualname,
+def _field_annotated_validator_sid(model: type[BaseModel], fname: str) -> str:
+    return (
+        f"{model.__module__}.{model.__qualname__}::field_annotated_validator::{fname}"
+    )
+
+
+# ════════════════════════════════════════════════════════════════════
+# DISCOVERED: verdict-free enumeration walk (INV-2)
+# ════════════════════════════════════════════════════════════════════
+#
+# ``_discover`` 는 annotation 트리를 끝까지 enumeration 한다. PASS/FAIL
+# verdict 를 내지 않고(short-circuit/``return False`` 없음) 발견한
+# 모든 사실을 ``Discovered`` 에 축적한다. verdict 는 ``compute_verdict``
+# 단일 지점에서 set-difference 로만 계산된다(INV-2).
+
+
+@dataclasses.dataclass
+class Discovered:
+    """enumeration 결과 — verdict 없음. introspection self-derive 사실."""
+
+    # 비-``dict[str,Any]`` dict 노드 (owner qualname, owner-relative
+    # field/annotation-path).
+    dict_nodes: set[tuple[str, str]] = dataclasses.field(default_factory=set)
+    # validator/Annotated[*Validator]/custom-core-schema surface-id 전수.
+    validator_surfaces: set[str] = dataclasses.field(default_factory=set)
+    # safe-allowlist 에 **양성 매칭되지 않은** 비-dict·비-validator
+    # 노드(extra='allow'/RootModel/dataclass/TypedDict/NamedTuple/
+    # unknown/opaque generic 등). 이 집합은 ``REGISTERED_STATIC`` 으로
+    # 절대 해제되지 않는다 — 비어 있어야 PASS(default-deny).
+    unsafe_nodes: list[str] = dataclasses.field(default_factory=list)
+
+    def merge(self, other: Discovered) -> None:
+        self.dict_nodes |= other.dict_nodes
+        self.validator_surfaces |= other.validator_surfaces
+        self.unsafe_nodes.extend(other.unsafe_nodes)
+
+
+def _owner_field_key(owner: type | None, path: str) -> tuple[str, str]:
+    """비-``dict[str,Any]`` dict 노드를 **(owner qualname,
     owner-relative field/annotation-path)** 키로 정규화.
 
     walker path 형식: ``<root>...<Owner>.<field>`` + container/Union
@@ -247,15 +259,8 @@ def _dict_node_field_key(owner: type | None, path: str) -> tuple[str, str]:
     별도 키가 되어 기존 증명으로 통과되지 않는다(per-(owner,field)).
     """
     oq = owner.__qualname__ if owner is not None else "<root>"
-    # container/Union 위치 표식 제거 — field 식별만 남긴다.
     cleaned = re.sub(r"[|\[][0-9]+\]?", "", path)
     segs = [s for s in cleaned.split(".") if s]
-    # walker path 는 ``<root=qual>.<qual>.<field>...`` 처럼 owner
-    # qualname 이 여러 번 등장할 수 있다(root prefix + 필드 강하 시
-    # ``{path}.{qualname}.{fname}``). 발견된 필드는 owner qualname 의
-    # **마지막** 등장 *직후* 컴포넌트다(중첩 시 그 이하 dotted 경로 전체
-    # 를 field 키로 사용해 per-field 구분). 미등장(root annotation) 시
-    # 마지막 컴포넌트.
     field = segs[-1] if segs else cleaned
     last_idx = -1
     for i, s in enumerate(segs):
@@ -266,77 +271,57 @@ def _dict_node_field_key(owner: type | None, path: str) -> tuple[str, str]:
     return (oq, field)
 
 
-def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
+def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기多
     tp: Any,
     path: str,
-    result: WalkResult,
+    disc: Discovered,
     *,
-    seen: set[int] | None = None,
-    justify: _Justify | None = None,
-) -> bool:
-    """annotation 타입 트리 default-deny 재귀 walk.
+    seen: frozenset[int] = frozenset(),
+    owner: type | None = None,
+) -> None:
+    """annotation 타입 트리 **verdict-free** enumeration (INV-2).
 
-    safe-allowlist 양성 매칭만 PASS, 그 외 일체 fail-closed FAIL.
-    트리 전 노드를 검사하며(I-safe), dict 노드는 정확히
-    ``dict[str,Any]`` 만 PASS·그 외는 ``result.dict_nodes`` 에 기록 후
-    FAIL(I-dict; justified-unreachable 해제는 호출측 precedence guard).
+    트리 전 노드를 끝까지 방문하며(short-circuit 금지) 발견 사실만
+    ``disc`` 에 축적한다. 어느 노드도 verdict(PASS/FAIL)를 내지
+    않는다 — PASS 는 ``compute_verdict`` 단일 지점에서만.
 
-    ``justify`` (기본 None=빈 컨텍스트)는 검증 walk 에서만 호출측이
-    주입한다. **per-(owner,field)** 등록 pre-reject 증명 dict 키·
-    **per-surface-id** 등록 CV3 validator surface 만 PASS 로 간주하고,
-    그 외 모든 unsafe shape 는 트리 어디에 있든 여전히 FAIL — 즉
-    short-circuit 으로 가려질 수 있던 다른 unsafe shape 까지 검증 walk
-    가 끝까지 도달해 default-deny 로 잡아낸다.
+    safe-allowlist 양성 매칭 노드는 아무것도 기록하지 않는다(자식
+    재귀만). 비-``dict[str,Any]`` dict 노드 → ``dict_nodes``.
+    validator/Annotated[*Validator] surface → ``validator_surfaces``.
+    그 외 일체(extra='allow'/RootModel/dataclass/TypedDict/NamedTuple/
+    unknown)는 ``unsafe_nodes`` (REGISTERED_STATIC 으로 해제 불가).
+    해석 B: bounded 정수 element 인덱스 자체는 위반 아님 — container
+    를 인덱스 사유로 unsafe 기록하지 않는다(element TYPE 만 재귀).
     """
-    if seen is None:
-        seen = set()
-    if justify is None:
-        justify = _Justify()
-
-    # leaf-safe
+    # leaf-safe — 안전. 아무것도 기록하지 않고 종료(자식 없음).
     if _is_leaf_safe(tp):
-        return True
+        return
 
     origin = get_origin(tp)
 
-    # Annotated[X, *meta]: 구조 메타만 unwrap, validator/custom core-schema
-    # 제공자가 있으면 opaque → validator surface 로 self-enumerate 후 FAIL
-    # (CV3 등록 canary 로만 해제 — 본 walker 는 무조건 fail-closed).
+    # Annotated[X, *meta]: 구조 메타 unwrap. validator/custom
+    # core-schema 제공자 → surface-id 기록(opaque) 후 inner 계속 walk.
     if origin is Annotated or (
         origin is None and getattr(tp, "__metadata__", None) is not None
     ):
         args = get_args(tp)
         inner = args[0]
-        markers = _validator_markers_in_metadata(args[1:])
-        if markers:
-            sid = f"{path}::Annotated[*Validator]"
-            result.validator_surfaces.add(sid)
-            # per-surface-id 등록 CV3 면 PASS 로 간주하고 inner 계속
-            # walk(그래도 inner 가 unsafe 면 거기서 FAIL). 미등록이면
-            # default-deny FAIL-CLOSED.
-            if sid in justify.validator_surfaces:
-                return _walk(inner, path, result, seen=seen, justify=justify)
-            result.ok = False
-            result.reason = (
-                f"Annotated[*Validator/custom-core-schema] opaque "
-                f"(self-enumerate; CV3 등록 canary 필요) at {path}"
-            )
-            result.path = path
-            return False
-        return _walk(inner, path, result, seen=seen, justify=justify)
+        if _validator_markers(args[1:]):
+            disc.validator_surfaces.add(f"{path}::Annotated[*Validator]")
+        _discover(inner, path, disc, seen=seen, owner=owner)
+        return
 
-    # Literal[...] — leaf-safe (값은 caller dict 키 생성 불가)
+    # Literal[...] — leaf-safe (값은 caller dict 키 생성 불가).
     if origin is Literal:
-        return True
+        return
 
-    # Optional/Union 계열 — 모든 인자 재귀 PASS
+    # Optional/Union 계열 — 모든 인자 재귀(verdict 없음).
     if origin is Union or origin is getattr(types, "UnionType", None):
         for i, arg in enumerate(get_args(tp)):
-            if not _walk(arg, f"{path}|{i}", result, seen=seen, justify=justify):
-                return False
-        return True
+            _discover(arg, f"{path}|{i}", disc, seen=seen, owner=owner)
+        return
 
-    # dict/Mapping 계열 — 정확히 dict[str,Any] 만 PASS
+    # dict/Mapping 계열 — 정확히 dict[str,Any] 만 safe(기록 안 함).
     if origin in (dict, collections.abc.Mapping, collections.abc.MutableMapping) or (
         isinstance(origin, type) and issubclass(origin, collections.abc.Mapping)
     ):
@@ -345,197 +330,107 @@ def _walk(  # noqa: C901 - default-deny walker 는 단일 책임이나 분기多
             origin is dict and len(args) == 2 and args[0] is str and args[1] is Any
         )
         if is_exact_str_any:
-            return True
-        # 비-dict[str,Any] dict 노드 — 소유 모델/필드 기록.
-        owner = seen_owner.get(id(result), None)
-        result.dict_nodes.append((owner, path))
-        # per-(owner,field) 등록 pre-validation-reject 증명이 있으면
-        # justified-unreachable PASS, 그 외 default-deny FAIL-CLOSED.
-        if _dict_node_field_key(owner, path) in justify.dict_keys:
-            return True
-        result.ok = False
-        result.reason = (
-            f"비-dict[str,Any] dict/Mapping 노드 (정확히 dict[str,Any] 만 "
-            f"PASS — justified-unreachable precedence guard 필요) at {path}"
-        )
-        result.path = path
-        return False
+            return
+        # 비-dict[str,Any] dict 노드 — (owner,field) 키로 기록.
+        disc.dict_nodes.add(_owner_field_key(owner, path))
+        return
 
-    # 인식 container — 모든 type 인자가 재귀 safe 여야 PASS.
-    # 해석 B: bounded 정수 element 인덱스 자체는 위반이 아니므로
-    # container 를 인덱스 사유로 FAIL 하지 않는다(element TYPE 만 검사).
+    # 인식 container — element TYPE 만 재귀(해석 B: 인덱스 자체는
+    # 위반 아님 → container 를 인덱스 사유로 unsafe 기록하지 않음).
     if origin in _CONTAINER_ORIGINS or (
         isinstance(origin, type)
-        and origin not in (dict,)
+        and origin is not dict
         and issubclass(origin, (list, tuple, set, frozenset))
     ):
         args = get_args(tp)
-        # tuple[X, ...] / 가변 인자: Ellipsis 는 구조 표식, type 인자만 검사.
         type_args = [a for a in args if a is not Ellipsis]
         for i, arg in enumerate(type_args):
-            if not _walk(arg, f"{path}[{i}]", result, seen=seen, justify=justify):
-                return False
-        return True
+            _discover(arg, f"{path}[{i}]", disc, seen=seen, owner=owner)
+        return
 
-    # pydantic RootModel — opaque structured body → fail-closed.
+    # pydantic RootModel — opaque structured body → unsafe 기록.
     if isinstance(tp, type) and issubclass(tp, RootModel):
-        result.ok = False
-        result.reason = f"RootModel structured body (fail-closed) at {path}"
-        result.path = path
-        return False
+        disc.unsafe_nodes.append(
+            f"RootModel structured body at {path}:{tp.__qualname__}"
+        )
+        return
 
-    # pydantic BaseModel — extra∈{forbid,ignore} & typed __pydantic_extra__
-    # 부재 & validator-clean(또는 validator surface self-enumerate 후
-    # CV3 등록 canary 로만 해제) & fields recurse-safe 면 PASS.
+    # pydantic BaseModel — extra/typed __pydantic_extra__/validator
+    # surface 를 기록하고 필드를 **전수** 재귀(verdict 없음 —
+    # short-circuit 으로 가려질 자식까지 끝까지 enumeration).
     if isinstance(tp, type) and issubclass(tp, BaseModel):
         if id(tp) in seen:
-            return True  # 재귀 모델 — 사이클 방지(이미 walk 중)
-        seen = seen | {id(tp)}
+            return  # 재귀 모델 사이클 방지(이미 walk 중).
+        child_seen = seen | {id(tp)}
 
         extra = tp.model_config.get("extra")
         if extra not in (None, "forbid", "ignore"):
-            # pydantic 기본(None) == ignore. 'allow' 는 fail-closed.
-            result.ok = False
-            result.reason = (
-                f"BaseModel extra='{extra}' (extra∈{{forbid,ignore}} 만 "
-                f"PASS) at {path}:{tp.__qualname__}"
+            # pydantic 기본(None) == ignore. 'allow' 는 unsafe.
+            disc.unsafe_nodes.append(
+                f"BaseModel extra='{extra}' at {path}:{tp.__qualname__}"
             )
-            result.path = path
-            return False
 
-        # typed __pydantic_extra__ annotation 부재 단언.
         ann = getattr(tp, "__annotations__", {})
         if "__pydantic_extra__" in ann:
-            result.ok = False
-            result.reason = (
-                f"typed __pydantic_extra__ 보유 BaseModel (fail-closed) "
-                f"at {path}:{tp.__qualname__}"
+            disc.unsafe_nodes.append(
+                f"typed __pydantic_extra__ at {path}:{tp.__qualname__}"
             )
-            result.path = path
-            return False
 
-        # validator self-enumerate — validator/Annotated[*Validator] 보유
-        # 모델은 임의 loc 합성 가능한 **opaque code** → walker 는
-        # **default-deny FAIL-CLOSED**(CV3 등록 behavioral canary +
-        # surface ⊆ 등록집합 단언이 별도 *직교* 게이트로 해제 — walker
-        # 자체는 절대 PASS 시키지 않는다). 단 surface/dict 노드 전수
-        # 발견을 위해 필드 walk 는 계속하고 FAIL 은 말미에 확정한다.
-        # 본 모델의 validator surface 를 **전수** self-enumerate(model
-        # decorators ∪ field Annotated[*Validator] marker). 단 하나라도
-        # CV3 per-surface-id 미등록이면 opaque FAIL-CLOSED — 이미 등록된
-        # 모델에 새 validator 가 추가돼도 그 신규 surface-id 가 등록
-        # 집합에 없어 FAIL(default-deny).
-        model_surfaces: set[str] = set()
-        for v in _model_validators(tp):
-            model_surfaces.add(v)
-            result.validator_surfaces.add(v)
+        # validator surface 전수 self-enumerate(model decorators ∪
+        # field Annotated[*Validator] marker). 기록만 — verdict 없음.
+        for v in _iter_model_validators(tp):
+            disc.validator_surfaces.add(v)
 
-        prev_owner = seen_owner.get(id(result))
-        seen_owner[id(result)] = tp
-        try:
-            for fname, fi in tp.model_fields.items():
-                fpath = f"{path}.{tp.__qualname__}.{fname}"
-                # Annotated[*Validator] 는 pydantic 이 metadata 로 분리 —
-                # field metadata 의 validator marker self-enumerate.
-                markers = _validator_markers_in_metadata(
-                    getattr(fi, "metadata", []) or []
-                )
-                if markers:
-                    sid = (
-                        f"{tp.__module__}.{tp.__qualname__}::"
-                        f"field_annotated_validator::{fname}"
-                    )
-                    result.validator_surfaces.add(sid)
-                    model_surfaces.add(sid)
-                if not _walk(fi.annotation, fpath, result, seen=seen, justify=justify):
-                    return False
-        finally:
-            if prev_owner is None:
-                seen_owner.pop(id(result), None)
-            else:
-                seen_owner[id(result)] = prev_owner
-
-        if model_surfaces:
-            unregistered = model_surfaces - justify.validator_surfaces
-            if unregistered:
-                result.ok = False
-                result.reason = (
-                    f"validator/Annotated[*Validator] 보유 opaque BaseModel "
-                    f"(default-deny FAIL-CLOSED; per-surface-id CV3 미등록 "
-                    f"surface={sorted(unregistered)} — CV3 등록 behavioral "
-                    f"canary + surface ⊆ 등록집합 직교 게이트로만 해제) at "
-                    f"{path}:{tp.__qualname__}"
-                )
-                result.path = path
-                return False
-        return True
+        for fname, fi in tp.model_fields.items():
+            fpath = f"{path}.{tp.__qualname__}.{fname}"
+            if _validator_markers(getattr(fi, "metadata", []) or []):
+                disc.validator_surfaces.add(_field_annotated_validator_sid(tp, fname))
+            # owner = 이 BaseModel — 자식 dict 노드 (owner,field) 귀속.
+            _discover(fi.annotation, fpath, disc, seen=child_seen, owner=tp)
+        return
 
     # dataclass / pydantic dataclass
     if dataclasses.is_dataclass(tp):
-        result.ok = False
-        result.reason = f"dataclass structured body (fail-closed) at {path}"
-        result.path = path
-        return False
+        disc.unsafe_nodes.append(f"dataclass structured body at {path}")
+        return
 
     # TypedDict
     if typing_extensions.is_typeddict(tp) or (
         hasattr(typing, "is_typeddict") and typing.is_typeddict(tp)
     ):
-        result.ok = False
-        result.reason = f"TypedDict structured body (fail-closed) at {path}"
-        result.path = path
-        return False
+        disc.unsafe_nodes.append(f"TypedDict structured body at {path}")
+        return
 
     # NamedTuple
     if isinstance(tp, type) and issubclass(tp, tuple) and hasattr(tp, "_fields"):
-        result.ok = False
-        result.reason = f"NamedTuple structured body (fail-closed) at {path}"
-        result.path = path
-        return False
+        disc.unsafe_nodes.append(f"NamedTuple structured body at {path}")
+        return
 
     # 그 외 일체(임의 class/Generic/ForwardRef/미해결 string/unknown)
-    # → 증명가능 안전 아님 → fail-closed FAIL (I-safe 핵심).
-    result.ok = False
-    result.reason = (
-        f"증명가능 안전 아님 (unknown/opaque shape, default-deny FAIL): "
-        f"{tp!r} at {path}"
+    # → 증명가능 안전 아님 → unsafe 기록(default-deny 핵심).
+    disc.unsafe_nodes.append(
+        f"증명가능 안전 아님 (unknown/opaque shape): {tp!r} at {path}"
     )
-    result.path = path
-    return False
 
 
-# walk 중 '현재 소유 BaseModel' 추적(dict 노드 owner 기록용). WalkResult
-# id 키 — 재진입/병렬 walk 격리.
-seen_owner: dict[int, type | None] = {}
-
-
-def walk_annotation(
-    tp: Any, path: str = "root", *, justify: _Justify | None = None
-) -> WalkResult:
-    """annotation 트리를 default-deny walk 하고 결과를 반환한다.
-
-    ``justify`` 미지정(기본)이면 **순수 default-deny** — 등록 증명을
-    전혀 반영하지 않으므로 비-``dict[str,Any]`` dict/validator 보유
-    모델은 무조건 FAIL(CV1 known-bad 극성 보장). 검증 walk 만
-    per-(owner,field) 등록 pre-reject dict 키 + per-surface-id 등록
-    CV3 surface 를 주입한다.
+def discover_annotation(tp: Any, path: str = "root") -> Discovered:
+    """annotation 트리를 verdict-free enumeration 하고 ``Discovered``
+    반환. PASS/FAIL 판정은 호출측 ``compute_verdict`` 단일 지점에서만.
     """
-    result = WalkResult(ok=True)
-    ok = _walk(tp, path, result, justify=justify)
-    result.ok = ok and result.ok
-    return result
+    disc = Discovered()
+    _discover(tp, path, disc)
+    return disc
 
 
 # ════════════════════════════════════════════════════════════════════
 # S1 (a+b origin-complete fail-closed) — raw-body Pydantic 검증 surface
 # ════════════════════════════════════════════════════════════════════
 #
-# S1a: routes/**/*.py 의 raw-body Pydantic 검증 callee 모델 resolve +
-#      annotation-tree walk.
-# S1b: 모든 raw-body ValidationError/sanitize_validation_errors 처리
-#      site 가 lock-walked 검증 source 에 1:1; 모든 Pydantic 검증
-#      entrypoint 가 lock-walkable 또는 #1650 chokepoint 경유.
-#      미충족 1개라도 FAIL-CLOSED.
+# S1a: routes/**/*.py 의 raw-body Pydantic 검증 callee 모델 resolve.
+# S1b: 모든 Pydantic 검증 entrypoint 가 lock-walked 검증 source 에 1:1
+#      (정적 literal-BaseModel resolve) 또는 #1650 chokepoint 경유.
+#      정적 resolve 불가 origin/entrypoint 1개라도 → 단일
+#      ``unresolvable`` 집합(INV-3, all-must-resolve).
 
 
 # Pydantic 검증 entrypoint API 표면(self-derive 대상; 손-열거 아님 —
@@ -573,6 +468,24 @@ def _resolve_name_in_module(modname: str, name: str) -> Any:
     return getattr(mod, name, None)
 
 
+def _module_source_path(modname: str) -> Path | None:
+    """모듈의 실제 소스 파일 경로(``__file__``) — routes-dir 가정 금지.
+
+    실 S1 site 는 전부 ``ante.web.routes.*`` 라 결과 동일하지만,
+    모듈 객체의 ``__file__`` 로 resolve 하면 routes 밖 helper canary
+    (synthetic 모듈)도 동일 코드로 정확히 추적된다.
+    """
+    try:
+        mod = importlib.import_module(modname)
+    except Exception:  # pragma: no cover - 방어
+        return None
+    f = getattr(mod, "__file__", None)
+    if not f:
+        return None
+    p = Path(f)
+    return p if p.exists() else None
+
+
 @dataclasses.dataclass
 class _EntrypointSite:
     module: str
@@ -603,11 +516,6 @@ def _scan_s1_entrypoints() -> list[_EntrypointSite]:
             recv = func.value
             if isinstance(recv, ast.Name):
                 recv_name = recv.id
-            elif isinstance(recv, ast.Call) and isinstance(
-                recv.func, (ast.Name, ast.Attribute)
-            ):
-                # TypeAdapter(...).validate_python 형태.
-                recv_name = ast.unparse(recv)
             else:
                 recv_name = ast.unparse(recv)
             sites.append(
@@ -622,66 +530,38 @@ def _scan_s1_entrypoints() -> list[_EntrypointSite]:
     return sites
 
 
-def _resolve_s1_model(
-    site: _EntrypointSite,
-) -> tuple[type[BaseModel] | None, str]:
-    """entrypoint site 의 검증 모델을 정적 resolve.
+@dataclasses.dataclass
+class _S1Resolve:
+    """S1a∪S1b resolve 결과.
 
-    - ``<Model>.model_validate`` : 모듈 namespace 에서 Model resolve.
-    - 제네릭 ``model.model_validate`` : 동일 모듈 AST 에서 helper 의
-      ``model`` 파라미터에 전달되는 literal 클래스 인자를 추적 resolve
-      (정적 literal 만; 동적 디스패치는 resolve 불가 → S1b FAIL-CLOSED).
-    반환: (모델 or None, 진단 사유). None = 정적 resolve 불가
-    (origin-complete fail-closed).
+    ``models`` = 정적 literal-BaseModel 로 resolve 된 (site_id, model).
+    ``unresolvable`` = 정적 resolve 불가 origin/entrypoint(단일 sink —
+    INV-3; ≠∅ ⟹ 무조건 FAIL, all-must-resolve).
     """
-    recv = site.receiver
-    # 직접 <Model>.method 형태.
-    cls = _resolve_name_in_module(site.module, recv)
-    if isinstance(cls, type) and issubclass(cls, BaseModel):
-        return cls, ""
 
-    # TypeAdapter(...).validate_* 형태 — adapter 인자 정적 추출.
-    if recv.startswith("TypeAdapter(") or "TypeAdapter(" in recv:
-        return None, (
-            f"TypeAdapter 동적 검증 (정적 resolve 불가 / lock-walkable "
-            f"아님 — origin-complete FAIL-CLOSED): {site.callee_src}"
-        )
-
-    # 제네릭 helper(예 ``model.model_validate``): 동일 모듈에서 helper
-    # 함수의 ``model`` 파라미터로 전달되는 호출 인자 literal 추적.
-    if recv.isidentifier():
-        models = _trace_generic_helper_models(site)
-        if models is None:
-            return None, (
-                f"제네릭 검증 helper 의 모델 인자 정적 resolve 불가 "
-                f"(동적 디스패치 — origin-complete FAIL-CLOSED): "
-                f"{site.module}:{site.lineno} {site.callee_src}"
-            )
-        # helper 가 복수 literal 모델로 호출 — 전부 walk 대상으로 반환
-        # (호출측이 순회). 단일 반환 시그니처 유지를 위해 첫 모델만
-        # 반환하고 나머지는 별도 수집(아래 _collect_s1_models 에서 처리).
-        if not models:
-            return None, (
-                f"제네릭 helper 모델 인자 0건 (정적 literal 부재 — "
-                f"FAIL-CLOSED): {site.callee_src}"
-            )
-        return models[0], ""
-    return None, (f"검증 receiver 정적 resolve 불가 (FAIL-CLOSED): {site.callee_src}")
+    models: list[tuple[str, type[BaseModel]]] = dataclasses.field(default_factory=list)
+    unresolvable: list[str] = dataclasses.field(default_factory=list)
 
 
-def _trace_generic_helper_models(
+def _trace_generic_helper_model_args(
     site: _EntrypointSite,
-) -> list[type[BaseModel]] | None:
-    """제네릭 helper(``model.model_validate``)의 model 인자 literal 추적.
+) -> tuple[list[type[BaseModel]], bool]:
+    """제네릭 helper(``model.model_validate``)의 model 인자 추적.
 
-    helper 의 ``model`` 파라미터에 전달되는 호출 인자가 정적 literal
-    클래스명일 때만 resolve. 변수/동적 디스패치면 None(FAIL-CLOSED).
+    helper 의 ``model`` 파라미터로 전달되는 **모든** 호출 인자를
+    검사한다. 반환: (literal-BaseModel 리스트, all_resolved).
+    ``all_resolved`` 는 helper 호출 site 의 model 인자가 **하나도
+    빠짐없이** 정적 literal-BaseModel 로 resolve 됐을 때만 True
+    (any-match → all-must-resolve, INV-3). literal+dynamic 혼재면
+    False → 호출측이 단일 ``unresolvable`` 로 보낸다(우회 차단).
     """
     modname = site.module
-    path = _ROUTES_DIR / f"{modname.rsplit('.', 1)[-1]}.py"
-    tree = ast.parse(path.read_text(), filename=str(path))
+    src_path = _module_source_path(modname)
+    if src_path is None:
+        # 소스 파일 식별 불가 → 추적 불가(전부 미해결, INV-3).
+        return [], False
+    tree = ast.parse(src_path.read_text(), filename=str(src_path))
 
-    # site 의 receiver 가 어떤 함수의 파라미터인지 찾기.
     enclosing: ast.FunctionDef | ast.AsyncFunctionDef | None = None
     for fn in ast.walk(tree):
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -696,14 +576,24 @@ def _trace_generic_helper_models(
             ):
                 enclosing = fn
     if enclosing is None:
-        return None
+        # helper 함수 식별 불가 → 추적 불가(전부 미해결).
+        return [], False
     param_names = {a.arg for a in enclosing.args.args}
     if site.receiver not in param_names:
-        return None  # receiver 가 helper 파라미터 아님(예 지역 변수)
+        # receiver 가 helper 파라미터 아님(지역 변수 등) → 추적 불가.
+        return [], False
+
+    # site.receiver 가 helper 의 몇 번째 파라미터인지(positional index).
+    pos_params = [a.arg for a in enclosing.args.args]
+    try:
+        recv_pos = pos_params.index(site.receiver)
+    except ValueError:  # pragma: no cover - 위 param_names 검사로 도달 불가
+        return [], False
 
     helper_name = enclosing.name
-    # 동일 모듈에서 helper(... , <Literal Class>, ...) 호출 전수.
     models: list[type[BaseModel]] = []
+    all_resolved = True
+    saw_call = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -715,49 +605,73 @@ def _trace_generic_helper_models(
         )
         if called != helper_name:
             continue
-        all_args = list(node.args) + [kw.value for kw in node.keywords]
-        for a in all_args:
-            if isinstance(a, ast.Name):
-                resolved = _resolve_name_in_module(modname, a.id)
-                if isinstance(resolved, type) and issubclass(resolved, BaseModel):
+        saw_call = True
+        # 이 helper 호출에서 receiver 파라미터로 전달되는 인자를 찾는다
+        # (positional index 우선, 없으면 keyword).
+        arg_node: ast.expr | None = None
+        if recv_pos < len(node.args):
+            arg_node = node.args[recv_pos]
+        else:
+            for kw in node.keywords:
+                if kw.arg == site.receiver:
+                    arg_node = kw.value
+                    break
+        if arg_node is None:
+            # 이 호출에서 model 인자 전달 형태 불명 → 미해결(전체 FAIL).
+            all_resolved = False
+            continue
+        if isinstance(arg_node, ast.Name):
+            resolved = _resolve_name_in_module(modname, arg_node.id)
+            if isinstance(resolved, type) and issubclass(resolved, BaseModel):
+                if resolved not in models:
                     models.append(resolved)
-    # 중복 제거.
-    uniq: list[type[BaseModel]] = []
-    for m in models:
-        if m not in uniq:
-            uniq.append(m)
-    return uniq
+                continue
+        # 변수/표현식/비-BaseModel literal → 정적 resolve 불가.
+        all_resolved = False
+    if not saw_call:
+        return [], False
+    return models, all_resolved
 
 
-def _collect_s1_models() -> tuple[list[tuple[str, type[BaseModel]]], list[str]]:
-    """S1a∪S1b: entrypoint site 전수 → 검증 모델 resolve.
+def _resolve_s1() -> _S1Resolve:
+    """S1a∪S1b: entrypoint site 전수 → 검증 모델 정적 resolve.
 
-    반환: (resolved [(site_id, model)], failures [origin-complete 사유]).
-    failures 비어있지 않으면 S1b origin-complete FAIL-CLOSED.
+    - ``<Model>.model_validate`` : 모듈 namespace 에서 literal Model.
+    - ``TypeAdapter(...).validate_*`` : 동적 → 단일 unresolvable.
+    - 제네릭 ``model.model_validate`` : helper model 인자 전수 추적.
+      **하나라도** literal-BaseModel resolve 안 되면 site 전체
+      unresolvable(any-match → all-must-resolve, INV-3).
     """
-    resolved: list[tuple[str, type[BaseModel]]] = []
-    failures: list[str] = []
+    res = _S1Resolve()
     for site in _scan_s1_entrypoints():
         sid = f"{site.module}:{site.lineno}:{site.callee_src}"
-        # 제네릭 helper 는 복수 모델 가능 — 전수 수집.
         recv = site.receiver
         cls = _resolve_name_in_module(site.module, recv)
         if isinstance(cls, type) and issubclass(cls, BaseModel):
-            resolved.append((sid, cls))
+            res.models.append((sid, cls))
             continue
-        if recv.startswith("TypeAdapter(") or "TypeAdapter(" in recv:
-            failures.append(f"{sid} → TypeAdapter 동적 검증 (lock-walkable 아님)")
+        if "TypeAdapter(" in recv:
+            res.unresolvable.append(
+                f"{sid} → TypeAdapter 동적 검증 (정적 resolve 불가 — "
+                "lock-walkable 아님)"
+            )
             continue
         if recv.isidentifier():
-            models = _trace_generic_helper_models(site)
-            if not models:
-                failures.append(f"{sid} → 제네릭 helper 모델 정적 resolve 불가")
+            models, all_resolved = _trace_generic_helper_model_args(site)
+            if not all_resolved or not models:
+                # any-match → all-must-resolve: literal+dynamic 혼재
+                # 또는 추적 불가 → site 전체 단일 unresolvable.
+                res.unresolvable.append(
+                    f"{sid} → 제네릭 helper model 인자 전수 정적 "
+                    "literal-BaseModel resolve 실패 (any-match → "
+                    "all-must-resolve; literal+dynamic 혼재/추적불가)"
+                )
                 continue
             for m in models:
-                resolved.append((f"{sid}#{m.__name__}", m))
+                res.models.append((f"{sid}#{m.__name__}", m))
             continue
-        failures.append(f"{sid} → receiver resolve 불가")
-    return resolved, failures
+        res.unresolvable.append(f"{sid} → receiver 정적 resolve 불가")
+    return res
 
 
 def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
@@ -766,7 +680,7 @@ def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
     origin-complete: 모든 raw-body ``except ValidationError`` site 가
     chokepoint ``sanitize_validation_errors`` 를 detail 로 사용해야
     한다(직접 ``e.errors(...)`` detail 잔존 0 — #1650 SSOT). 본 스캔은
-    AST 로 self-derive(하드코딩 카운트 없음).
+    AST/텍스트로 self-derive(하드코딩 카운트 없음).
     """
     choke = 0
     direct = 0
@@ -774,7 +688,6 @@ def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
         path = _ROUTES_DIR / f"{modname.rsplit('.', 1)[-1]}.py"
         text = path.read_text()
         choke += text.count(f"detail={_CHOKEPOINT_NAME}(e),")
-        # 직접 e.errors(...) detail 잔존 탐지(#1650 SSOT 위반).
         if "detail=e.errors(include_context=False, include_input=False)" in text:
             direct += text.count(
                 "detail=e.errors(include_context=False, include_input=False)"
@@ -790,7 +703,8 @@ def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
 @dataclasses.dataclass
 class _S2Collect:
     body_models: list[tuple[str, Any]]  # (route_path, annotation)
-    fail_mounts: list[str]  # positive 미증명 mount (FAIL-CLOSED)
+    # positive 미증명 mount/route — 단일 unresolvable sink(INV-3).
+    unresolvable: list[str]
 
 
 # positive-type non-validation mount allowlist — 검증불가가 타입으로
@@ -809,14 +723,13 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
       - positive-type 증명 non-validation mount(allowlist 타입
         ``isinstance``) → 면제 PASS.
       - 그 외 일체(no-routes-but-validating custom ASGI 포함) →
-        FAIL-CLOSED(absence 를 safe 로 추론하지 않음).
+        단일 ``unresolvable``(absence 를 safe 로 추론하지 않음).
     """
-    out = _S2Collect(body_models=[], fail_mounts=[])
+    out = _S2Collect(body_models=[], unresolvable=[])
     routes = getattr(app, "routes", None)
     if routes is None:
-        out.fail_mounts.append(
-            f"{prefix or '<root>'}: routes 속성 없는 app "
-            f"(positive 미증명 — FAIL-CLOSED)"
+        out.unresolvable.append(
+            f"{prefix or '<root>'}: routes 속성 없는 app (positive 미증명)"
         )
         return out
     for r in routes:
@@ -836,43 +749,32 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
         elif isinstance(r, Mount):
             sub = r.app
             mount_path = prefix + r.path
-            # positive-type non-validation mount 면제(absence 추론 금지).
             if isinstance(sub, _NON_VALIDATION_MOUNT_TYPES):
                 continue
-            # route-bearing ASGI sub-app → 재귀.
             if getattr(sub, "routes", None) is not None:
                 child = _collect_s2(sub, mount_path)
                 out.body_models.extend(child.body_models)
-                out.fail_mounts.extend(child.fail_mounts)
+                out.unresolvable.extend(child.unresolvable)
                 continue
-            # positive 미증명 일체(no-routes-but-validating custom ASGI
-            # 포함) → FAIL-CLOSED.
-            out.fail_mounts.append(
+            out.unresolvable.append(
                 f"{mount_path}: positive-type 미증명 mount "
                 f"({type(sub).__module__}.{type(sub).__name__} — "
-                f"route-bearing 아님 ∧ known-safe non-validation 타입 "
-                f"아님; absence 추론 금지 FAIL-CLOSED)"
+                "route-bearing 아님 ∧ known-safe non-validation 타입 "
+                "아님; absence 추론 금지)"
             )
         elif isinstance(r, (Route, WebSocketRoute)):
-            # **positive 구조 증명** (absence 추론 아님): FastAPI 의
-            # request-body Pydantic 검증·422 ``loc`` 생성은 **구조적으로
-            # ``APIRoute`` 에만** 존재한다(``body_field``/
-            # ``dependant.body_params`` 는 ``APIRoute`` 전용 필드).
-            # Starlette ``Route``/``WebSocketRoute`` (FastAPI 내부
-            # ``/openapi.json``·``/docs``·``/redoc`` GET endpoint·
-            # websocket)은 FastAPI body_field 를 가질 수 없는 **타입**
-            # 이므로 Pydantic 422 loc 표면이 아니다 — known-safe 타입의
-            # positive 증명으로 out-of-S2.
+            # positive 구조 증명(absence 추론 아님): FastAPI 의
+            # request-body Pydantic 검증·422 loc 생성은 구조적으로
+            # ``APIRoute`` 에만 존재(``body_field``/
+            # ``dependant.body_params`` 는 ``APIRoute`` 전용). Starlette
+            # ``Route``/``WebSocketRoute`` (FastAPI 내부 openapi/docs/
+            # redoc GET·websocket)은 body_field 를 가질 수 없는 타입
+            # 이므로 Pydantic 422 loc 표면이 아니다 — out-of-S2.
             continue
         else:
-            # 미지 route 타입(APIRoute/Mount/Route/WebSocketRoute 어디
-            # 에도 positive 분류 안 됨) → default-deny FAIL-CLOSED
-            # (absence 를 safe 로 추론하지 않음 — 새 route 클래스가
-            # body 검증 표면을 도입해도 묵시 통과 불가).
-            out.fail_mounts.append(
+            out.unresolvable.append(
                 f"{prefix + getattr(r, 'path', '?')}: 미지 route 타입 "
-                f"{type(r).__module__}.{type(r).__name__} "
-                f"(positive 미증명 — FAIL-CLOSED)"
+                f"{type(r).__module__}.{type(r).__name__} (positive 미증명)"
             )
     return out
 
@@ -883,121 +785,84 @@ def _build_app() -> Any:
 
 
 # ════════════════════════════════════════════════════════════════════
-# CV3: validator self-enumerate behavioral canary 등록 집합
+# S1∪S2 self-enumerate → DISCOVERED (introspection, INV-1 DISCOVERED 축)
 # ════════════════════════════════════════════════════════════════════
-#
-# 락이 S1∪S2 모델에서 self-enumerate 한 validator surface 집합 ⊆ CV3
-# 등록집합(generic — 고정 멤버명 하드코딩 금지). 등록 entry 는 caller
-# sentinel 주입 → 422 loc=static field-path · sentinel∉detail 를
-# behavioral 로 단언한다. surface 식별자는 lock 의 _model_validators 와
-# 동일 규칙으로 self-derive 한다(아래 _enumerate_all_validator_surfaces).
-
-
-def _enumerate_all_validator_surfaces() -> dict[str, type[BaseModel]]:
-    """S1∪S2 모델 전수에서 validator surface 식별자 → 소유 모델 맵.
-
-    lock self-derive 와 동일 규칙(``__pydantic_decorators__`` field/
-    model/v1 + ``Annotated[*Validator]`` field metadata). 하드코딩
-    금지 — introspection SSOT.
-    """
-    surfaces: dict[str, type[BaseModel]] = {}
-    models: list[type[BaseModel]] = []
-
-    s1, _ = _collect_s1_models()
-    for _, m in s1:
-        if m not in models:
-            models.append(m)
-
-    app = _build_app()
-    s2 = _collect_s2(app)
-    for _, ann in s2.body_models:
-        if isinstance(ann, type) and issubclass(ann, BaseModel):
-            if ann not in models:
-                models.append(ann)
-
-    def _recurse(model: type[BaseModel], seen: set[int]) -> None:
-        if id(model) in seen:
-            return
-        seen.add(id(model))
-        for sid in _model_validators(model):
-            surfaces[sid] = model
-        for fname, fi in model.model_fields.items():
-            markers = _validator_markers_in_metadata(getattr(fi, "metadata", []) or [])
-            if markers:
-                sid = (
-                    f"{model.__module__}.{model.__qualname__}::"
-                    f"field_annotated_validator::{fname}"
-                )
-                surfaces[sid] = model
-            ann = fi.annotation
-            for arg in (ann, *get_args(ann)):
-                if isinstance(arg, type) and issubclass(arg, BaseModel):
-                    _recurse(arg, seen)
-
-    seen: set[int] = set()
-    for m in models:
-        _recurse(m, seen)
-    return surfaces
-
-
-def _behavioral_validator_check(model: type[BaseModel], payloads: list[dict]) -> None:
-    """validator surface 행위 단언: caller sentinel → loc=static
-    field-path · sentinel∉detail (#1629 L1 de-interpolation 회귀 겸함).
-    """
-    triggered = False
-    for payload in payloads:
-        try:
-            model.model_validate(payload)
-        except pydantic.ValidationError as e:
-            triggered = True
-            errs = e.errors(include_context=False, include_input=False)
-            for err in errs:
-                loc = err.get("loc", ())
-                # loc segment 는 static field-path(문자열 필드명/정수
-                # 인덱스)뿐 — caller sentinel 문자열 식별자 부재.
-                for seg in loc:
-                    assert seg != SENTINEL, (
-                        f"{model.__qualname__} validator loc 에 caller "
-                        f"sentinel 노출: {loc}"
-                    )
-                detail = str(err)
-                assert SENTINEL not in detail, (
-                    f"{model.__qualname__} validator detail 에 caller "
-                    f"sentinel 반사: {detail}"
-                )
-    assert triggered, (
-        f"{model.__qualname__} validator canary self-검증 실패 — "
-        f"payload 가 검증 실패 경로를 타지 않음"
-    )
-
-
-# ════════════════════════════════════════════════════════════════════
-# pre-validation-reject behavioral precedence guard registry (generic)
-# ════════════════════════════════════════════════════════════════════
-#
-# lock 이 발견한 비-``dict[str,Any]`` dict 노드의 justified-unreachable
-# PASS 는, 소유 모델 ``model_validate`` 가 호출되기 *이전에* 그 필드를
-# 포함한 요청이 거부(예 4xx)됨을 행위로 증명한 등록 테스트로만 허용.
-# registry 는 고정 멤버 목록이 아니라 (lock 발견 dict 노드 ∩ 등록된
-# behavioral pre-validation-reject 증명) 으로 self-derive 한다. plan/
-# 본 모듈은 어떤 모델/필드명도 registry 멤버로 normative 하게 적지
-# 않는다 — 아래 등록 entry 는 "이 owner 모델의 dict 노드에 대해
-# pre-validation-reject 를 행위로 증명한다" 는 검증 함수일 뿐이고, lock
-# 은 발견한 dict 노드 owner 가 등록 entry 로 증명되는지만 대조한다.
 
 
 @dataclasses.dataclass
-class _PreValidationRejectProof:
-    """(owner 모델, field/annotation-path) 단위 식별 + behavioral 증명.
+class _SurfaceModels:
+    """S1∪S2 self-enumerate 결과."""
 
-    ``owner_qualname`` + ``field_name`` 으로 lock 이 self-derive 한
-    **각 비-``dict[str,Any]`` dict 노드** 와 (owner,path) 단위로 1:1
-    대조한다(owner 단독 아님 — 같은 owner 의 다른 ``dict[str,T]``
-    필드가 추가되면 그 (owner,field) 는 별도 키라 기존 증명으로
-    통과되지 않는다). ``prove`` 는 owner 모델 ``model_validate`` 스파이를
-    걸고 그 필드를 포함한 요청이 model_validate **미호출** 상태로
-    거부됨을 단언한다(strip 후처리 단언 불충분 — 스파이 invoke 시 fail).
-    하드코딩 normative 멤버 아님 — lock 결과와 1:1 대조용 식별자.
+    models: list[type[BaseModel]]
+    roots: list[tuple[str, Any]]
+    # S1b/S2 단일 unresolvable sink(INV-3).
+    unresolvable: list[str]
+
+
+def _s1s2_surface_models() -> _SurfaceModels:
+    """S1∪S2 self-enumerate BaseModel + root-container annotation +
+    단일 unresolvable sink(S1b helper/TypeAdapter + S2 mount/route).
+    """
+    s1 = _resolve_s1()
+    app = _build_app()
+    s2 = _collect_s2(app)
+
+    models: list[type[BaseModel]] = []
+    roots: list[tuple[str, Any]] = []
+    for _, m in s1.models:
+        if m not in models:
+            models.append(m)
+    for path, ann in s2.body_models:
+        if isinstance(ann, type) and issubclass(ann, BaseModel):
+            if ann not in models:
+                models.append(ann)
+        else:
+            roots.append((path, ann))
+    return _SurfaceModels(
+        models=models,
+        roots=roots,
+        unresolvable=list(s1.unresolvable) + list(s2.unresolvable),
+    )
+
+
+def _discover_all(surface: _SurfaceModels) -> Discovered:
+    """S1∪S2 전 surface 의 annotation 트리를 verdict-free enumeration
+    해 단일 ``Discovered`` 로 병합(INV-2 — verdict 없음)."""
+    disc = Discovered()
+    for rpath, ann in surface.roots:
+        disc.merge(discover_annotation(ann, f"s2-root:{rpath}"))
+    for m in surface.models:
+        disc.merge(discover_annotation(m, m.__qualname__))
+    return disc
+
+
+# ════════════════════════════════════════════════════════════════════
+# REGISTERED_STATIC (INV-1 — 정적 리터럴, introspection 절대 미호출)
+# ════════════════════════════════════════════════════════════════════
+#
+# 아래 두 집합은 **명시 리터럴**이다. INV-1: 이 집합을 만드는 코드는
+# introspection 함수(``_iter_model_validators``/``_validator_markers``/
+# ``_discover``)를 절대 호출하지 않는다. ``proven=f(discovered)``
+# self-defeat 영구 차단(INV-5 canary 가 락). 등록 식별자 각각은
+# behavioral 증명과 1:1(INV-4).
+
+
+# ── dict 축 REGISTERED_STATIC ──────────────────────────────────────
+#
+# 비-``dict[str,Any]`` dict 노드의 justified-unreachable PASS 는, 소유
+# 모델 ``model_validate`` 가 호출되기 *이전에* 그 필드를 포함한 요청이
+# 거부(예 4xx)됨을 행위로 증명한 등록 entry 로만 허용. (owner_qualname,
+# field_name) 리터럴 키 + behavioral prove fn 의 1:1(INV-4).
+
+
+@dataclasses.dataclass
+class _DictPreRejectProof:
+    """(owner qualname, field/annotation-path) **리터럴** 키 +
+    behavioral 증명. lock self-derive 한 dict 노드와 (owner,path)
+    단위 1:1(owner 단독 아님). ``prove`` 는 owner 모델 ``model_validate``
+    스파이를 걸고 그 필드를 포함한 요청이 model_validate **미호출**
+    상태로 거부됨을 단언(strip 후처리 단언 불충분 — 스파이 invoke 시
+    fail). 이 키는 introspection 으로 만들지 않는다(리터럴).
     """
 
     owner_qualname: str
@@ -1010,13 +875,9 @@ class _PreValidationRejectProof:
 
 
 def _prove_account_update_credentials_pre_reject() -> None:
-    """``AccountUpdateRequest`` 의 비-dict[str,Any] dict 노드
-    (``credentials``) 가 ``model_validate`` 이전 STRUCTURAL 409 로
-    거부됨을 behavioral 로 증명.
-
-    accounts.py: ``credentials ∈ STRUCTURAL_FIELDS`` → cold-path 409 가
-    ``AccountUpdateRequest.model_validate`` 호출 *이전* 분기에서 발화.
-    model_validate 스파이가 invoke 되면 (가드 회귀) 단언 실패.
+    """``AccountUpdateRequest.credentials`` (비-dict[str,Any] dict 노드)
+    가 ``model_validate`` 이전 STRUCTURAL 409 로 거부됨을 behavioral
+    증명. model_validate 스파이가 invoke 되면 (가드 회귀) 단언 실패.
     """
     from ante.web.routes import accounts as accounts_mod
     from ante.web.schemas import AccountUpdateRequest
@@ -1038,7 +899,6 @@ def _prove_account_update_credentials_pre_reject() -> None:
     c = TestClient(app)
     c.headers.update(MASTER_AUTH_HEADERS)
 
-    # model_validate 스파이 주입(상속 메서드 → 서브클래스 override).
     AccountUpdateRequest.model_validate = classmethod(  # type: ignore[method-assign]
         lambda cls, *a, **k: _spy(*a, **k)
     )
@@ -1048,8 +908,6 @@ def _prove_account_update_credentials_pre_reject() -> None:
             json={"credentials": {SENTINEL: "leak"}},
         )
     finally:
-        # 복원: 서브클래스 자체 override 가 없었으면 삭제(상속 복귀),
-        # 있었으면 원본 재설정.
         if had_own:
             AccountUpdateRequest.model_validate = orig  # type: ignore[method-assign]
         else:
@@ -1067,47 +925,85 @@ def _prove_account_update_credentials_pre_reject() -> None:
         "이전 가드를 우회해 호출됨 — pre-validation-reject precedence "
         "guard 붕괴 (strip 후처리 단언으로는 증명 불충분)"
     )
-    # accounts_mod 참조 유지(정적 import 검증 — 가드 모듈 존재 단언).
     assert hasattr(accounts_mod, "STRUCTURAL_FIELDS")
     detail = str(resp.json().get("detail", ""))
     assert SENTINEL not in detail, f"409 detail 에 caller sentinel 반사: {detail}"
 
 
-_PRE_VALIDATION_REJECT_REGISTRY: list[_PreValidationRejectProof] = [
-    _PreValidationRejectProof(
+# INV-1: 리터럴 (owner,field) 키 집합. introspection 미호출.
+_REGISTERED_DICT_PROOFS: list[_DictPreRejectProof] = [
+    _DictPreRejectProof(
         owner_qualname="AccountUpdateRequest",
         field_name="credentials",
         prove=_prove_account_update_credentials_pre_reject,
     ),
 ]
 
+# INV-1: dict 축 REGISTERED_STATIC = 리터럴 (owner,field) 키 frozenset.
+_REGISTERED_DICT_KEYS: frozenset[tuple[str, str]] = frozenset(
+    p.key for p in _REGISTERED_DICT_PROOFS
+)
 
-# ════════════════════════════════════════════════════════════════════
-# CV3 validator self-enumerate behavioral canary 등록 집합
-# ════════════════════════════════════════════════════════════════════
+
+# ── validator 축 REGISTERED_STATIC ─────────────────────────────────
 #
-# lock 이 self-derive 한 validator surface 집합 ⊆ 본 등록집합(미등록
-# 1개라도 FAIL). 등록 entry 는 caller sentinel 주입 → 422 loc=static
-# field-path · sentinel∉detail behavioral 단언. surface 식별자는 lock
-# 의 _model_validators / Annotated marker 규칙과 동일하게 self-derive.
+# INV-1 핵심 정정(RC-1): validator 축 REGISTERED_STATIC 은 **명시
+# 리터럴 surface-id 문자열 집합**이다. dict 축 ``_REGISTERED_DICT_KEYS``
+# 와 **동형의 정적 proof**. 이 집합을 만드는 코드는 ``model_ref`` 모델을
+# introspection(``_iter_model_validators``/``_validator_markers``)으로
+# 재도출하지 않는다 — 재도출하면 ``proven=f(discovered)`` 라
+# DISCOVERED 가 늘면 REGISTERED 도 같이 늘어 set-difference 가 영구
+# 공집합(self-defeating). 신규 validator 가 모델에 추가되면 그
+# surface-id 가 DISCOVERED 에는 들어가지만 본 리터럴 집합에는 없으므로
+# UNPROVEN ≠ ∅ → FAIL(default-deny). INV-5 canary 가 이를 영구 락.
+#
+# surface-id 문자열 형식(introspection 산출물과 동일 규칙이되 여기서는
+# 리터럴 선언):
+#   "<module>.<Model>::field_validators::<name>"
+#   "<module>.<Model>::model_validators::<name>"
+#   "<module>.<Model>::validators::<name>"        (v1 호환)
+#   "<module>.<Model>::root_validators::<name>"    (v1 호환)
+#   "<module>.<Model>::field_annotated_validator::<field>"
+#   "<path>::Annotated[*Validator]"
+
+_REGISTERED_VALIDATOR_SURFACE_IDS: frozenset[str] = frozenset(
+    {
+        "ante.web.routes.bots.BotCreateRequest::model_validators::"
+        "_require_strategy_identifier",
+        "ante.web.routes.members.MemberCreateRequest::field_validators::"
+        "_validate_scopes",
+        "ante.web.routes.members.ScopesUpdateRequest::field_validators::"
+        "_validate_scopes",
+        "ante.web.schemas.AccountUpdateRequest::field_validators::"
+        "_validate_timezone_update",
+        "ante.web.schemas.AccountUpdateRequest::field_validators::"
+        "_validate_trading_hours_update",
+        "ante.web.schemas.RuleUpdateRequest::field_validators::_validate_params_finite",
+    }
+)
+
+
+# ── validator 축 behavioral canary (INV-4 — surface-id 1:1) ─────────
+#
+# 각 등록 surface-id 는 caller sentinel 주입 시 422 loc=static
+# field-path · sentinel∉detail 임을 **개별** 증명한다(모델-단위
+# 'ValidationError 한 번' 금지). canary 는 ``surface_ids`` 를
+# **리터럴**로 선언하고(INV-1) payload 가 그 surface 를 실제 트리거
+# 함을 behavioral 로 단언한다.
 
 
 @dataclasses.dataclass
-class _ValidatorCanary:
-    """validator surface 행위 canary.
+class _ValidatorBehavioralCanary:
+    """validator surface-id 1:1 behavioral canary.
 
-    ``owner_qualname`` 은 진단·식별 보조용일 뿐(매칭 키 아님).
-    **CV3 등록/subset 매칭은 full surface-id 단위**다 — ``model_ref``
-    가 가리키는 모델의 validator surface-id 를 lock 의 self-derive 규칙
-    (``_model_validators`` + ``Annotated[*Validator]`` field metadata)
-    과 **동일하게** 재도출한 집합이 본 canary 의 등록 surface-id 집합이
-    된다(하드코딩 문자열 아님 — 같은 introspection SSOT). 따라서 이미
-    등록된 모델에 새 ``field_validator``/``model_validator`` 가 추가되면
-    그 신규 surface-id 는 어느 canary 의 등록 집합에도 들어가지 않아
-    lock 이 FAIL 한다(별도 canary 미작성 시).
+    ``surface_ids`` = 이 canary 가 behavioral 로 커버하는 **리터럴**
+    surface-id 집합(introspection 재도출 아님 — INV-1). ``model_ref``
+    + ``payloads`` 로 그 surface 가 실제 트리거돼 loc=static·
+    sentinel∉detail 임을 단언(INV-4). #1629 L1 de-interpolation 회귀
+    겸함.
     """
 
-    owner_qualname: str
+    surface_ids: frozenset[str]
     model_ref: typing.Callable[[], type[BaseModel]]
     payloads: list[dict]
 
@@ -1122,21 +1018,26 @@ def _m(modname: str, clsname: str) -> typing.Callable[[], type[BaseModel]]:
     return _get
 
 
-# 각 entry 는 lock 이 self-enumerate 하는 surface 의 소유 모델에 대해
-# behavioral 단언을 제공한다. surface 식별자 자체는 lock 이 도출하며
-# 본 등록은 ``model_ref`` 모델에서 **lock 과 동일 규칙으로 재도출한
-# surface-id 집합**(payload 가 그 surface 들을 실제 트리거)을 커버한다.
-# #1629 L1 de-interpolation 회귀도 동일 self-derived 집합에서 보존.
-_CV3_REGISTRY: list[_ValidatorCanary] = [
-    _ValidatorCanary(
-        "BotCreateRequest",
-        _m("ante.web.routes.bots", "BotCreateRequest"),
-        [{"bot_id": "b1", "name": SENTINEL}],
+_VALIDATOR_BEHAVIORAL_CANARIES: list[_ValidatorBehavioralCanary] = [
+    _ValidatorBehavioralCanary(
+        surface_ids=frozenset(
+            {
+                "ante.web.routes.bots.BotCreateRequest::model_validators::"
+                "_require_strategy_identifier"
+            }
+        ),
+        model_ref=_m("ante.web.routes.bots", "BotCreateRequest"),
+        payloads=[{"bot_id": "b1", "name": SENTINEL}],
     ),
-    _ValidatorCanary(
-        "MemberCreateRequest",
-        _m("ante.web.routes.members", "MemberCreateRequest"),
-        [
+    _ValidatorBehavioralCanary(
+        surface_ids=frozenset(
+            {
+                "ante.web.routes.members.MemberCreateRequest::field_validators::"
+                "_validate_scopes"
+            }
+        ),
+        model_ref=_m("ante.web.routes.members", "MemberCreateRequest"),
+        payloads=[
             {
                 "member_id": "m1",
                 "member_type": "AGENT",
@@ -1144,59 +1045,136 @@ _CV3_REGISTRY: list[_ValidatorCanary] = [
             }
         ],
     ),
-    _ValidatorCanary(
-        "ScopesUpdateRequest",
-        _m("ante.web.routes.members", "ScopesUpdateRequest"),
-        [{"scopes": [SENTINEL]}],
+    _ValidatorBehavioralCanary(
+        surface_ids=frozenset(
+            {
+                "ante.web.routes.members.ScopesUpdateRequest::field_validators::"
+                "_validate_scopes"
+            }
+        ),
+        model_ref=_m("ante.web.routes.members", "ScopesUpdateRequest"),
+        payloads=[{"scopes": [SENTINEL]}],
     ),
-    _ValidatorCanary(
-        "AccountUpdateRequest",
-        _m("ante.web.schemas", "AccountUpdateRequest"),
-        [
-            {"trading_hours_start": SENTINEL},
-            {"timezone": SENTINEL},
-        ],
+    _ValidatorBehavioralCanary(
+        surface_ids=frozenset(
+            {
+                "ante.web.schemas.AccountUpdateRequest::field_validators::"
+                "_validate_trading_hours_update"
+            }
+        ),
+        model_ref=_m("ante.web.schemas", "AccountUpdateRequest"),
+        payloads=[{"trading_hours_start": SENTINEL}],
     ),
-    _ValidatorCanary(
-        "RuleUpdateRequest",
-        _m("ante.web.schemas", "RuleUpdateRequest"),
-        # caller-controlled **key** = SENTINEL 이고 그 value 가 finite
-        # 위반(NaN) → `_validate_params_finite` 가 실제 실패한다. 이렇게
-        # 해야 "422 detail 에 SENTINEL 부재 ∧ loc=static field-path 뿐"
-        # 단언이 공허하지 않고 실효(de-interpolation 회귀 게이트)를 갖는다.
-        [{"params": {SENTINEL: float("nan")}}],
+    _ValidatorBehavioralCanary(
+        surface_ids=frozenset(
+            {
+                "ante.web.schemas.AccountUpdateRequest::field_validators::"
+                "_validate_timezone_update"
+            }
+        ),
+        model_ref=_m("ante.web.schemas", "AccountUpdateRequest"),
+        payloads=[{"timezone": SENTINEL}],
+    ),
+    _ValidatorBehavioralCanary(
+        surface_ids=frozenset(
+            {
+                "ante.web.schemas.RuleUpdateRequest::field_validators::"
+                "_validate_params_finite"
+            }
+        ),
+        model_ref=_m("ante.web.schemas", "RuleUpdateRequest"),
+        # caller-controlled **key**=SENTINEL 이고 value 가 finite 위반
+        # (NaN) → ``_validate_params_finite`` 실제 실패. 이렇게 해야
+        # "SENTINEL∉detail ∧ loc=static field-path" 단언이 공허하지
+        # 않고 실효(de-interpolation 회귀 게이트).
+        payloads=[{"params": {SENTINEL: float("nan")}}],
     ),
 ]
 
+# INV-4: 전 canary 의 리터럴 surface_ids union 이 등록 behavioral 커버
+# 집합이어야 한다(REGISTERED_VALIDATOR_SURFACE_IDS 와 정확히 일치 —
+# 등록은 했으나 behavioral 미증명 = 공허 단언 금지).
+_BEHAVIORAL_COVERED_SURFACE_IDS: frozenset[str] = frozenset().union(
+    *(c.surface_ids for c in _VALIDATOR_BEHAVIORAL_CANARIES)
+)
 
-def _canary_surface_ids(canary: _ValidatorCanary) -> set[str]:
-    """canary 가 커버하는 full surface-id 집합 — lock 의 self-derive
-    규칙(``_model_validators`` + ``Annotated[*Validator]`` field
-    metadata)으로 ``model_ref`` 모델에서 재도출(하드코딩 문자열 아님).
 
-    모델에 새 validator 가 추가되면 그 신규 surface-id 가 여기 자동
-    포함되지만, 해당 canary payload 가 그 surface 를 실제 트리거하지
-    않으면 behavioral 단언(``test_cv3_validator_behavioral_*``)이
-    FAIL 한다 — 즉 단순 등록이 아니라 행위 증명이 게이트.
+def _behavioral_validator_check(model: type[BaseModel], payloads: list[dict]) -> None:
+    """validator surface 행위 단언: caller sentinel → loc=static
+    field-path · sentinel∉detail (#1629 L1 de-interpolation 회귀 겸함).
     """
-    model = canary.model_ref()
-    out: set[str] = set(_model_validators(model))
-    for fname, fi in model.model_fields.items():
-        markers = _validator_markers_in_metadata(getattr(fi, "metadata", []) or [])
-        if markers:
-            out.add(
-                f"{model.__module__}.{model.__qualname__}::"
-                f"field_annotated_validator::{fname}"
-            )
-    return out
+    triggered = False
+    for payload in payloads:
+        try:
+            model.model_validate(payload)
+        except pydantic.ValidationError as e:
+            triggered = True
+            errs = e.errors(include_context=False, include_input=False)
+            for err in errs:
+                loc = err.get("loc", ())
+                for seg in loc:
+                    assert seg != SENTINEL, (
+                        f"{model.__qualname__} validator loc 에 caller "
+                        f"sentinel 노출: {loc}"
+                    )
+                detail = str(err)
+                assert SENTINEL not in detail, (
+                    f"{model.__qualname__} validator detail 에 caller "
+                    f"sentinel 반사: {detail}"
+                )
+    assert triggered, (
+        f"{model.__qualname__} validator canary self-검증 실패 — "
+        f"payload 가 검증 실패 경로를 타지 않음"
+    )
 
 
-def _registered_validator_surface_ids() -> set[str]:
-    """전 canary 가 커버하는 full surface-id 등록 집합(union)."""
-    out: set[str] = set()
-    for c in _CV3_REGISTRY:
-        out |= _canary_surface_ids(c)
-    return out
+# ════════════════════════════════════════════════════════════════════
+# compute_verdict: 단일 PASS-computation (INV-2 — verdict 단일 지점)
+# ════════════════════════════════════════════════════════════════════
+#
+# PASS ⟺ (UNPROVEN == ∅ ∧ unresolvable == ∅)
+# UNPROVEN = (dict_nodes − REGISTERED_DICT_KEYS)
+#          ∪ (validator_surfaces − REGISTERED_VALIDATOR_SURFACE_IDS)
+#          ∪ {unsafe_nodes}            # REGISTERED 으로 해제 불가
+#
+# walker 내부 노드별 plausibility-OR PASS 구조는 전면 폐기됐다 —
+# verdict 는 오직 여기서만 set-difference 로 계산된다(INV-2).
+
+
+@dataclasses.dataclass
+class Verdict:
+    ok: bool
+    unproven_dict: list[tuple[str, str]] = dataclasses.field(default_factory=list)
+    unproven_validators: list[str] = dataclasses.field(default_factory=list)
+    unsafe: list[str] = dataclasses.field(default_factory=list)
+    unresolvable: list[str] = dataclasses.field(default_factory=list)
+
+
+def compute_verdict(
+    disc: Discovered,
+    unresolvable: typing.Sequence[str],
+    *,
+    registered_dict_keys: frozenset[tuple[str, str]],
+    registered_validator_ids: frozenset[str],
+) -> Verdict:
+    """단일 PASS-computation (INV-2). DISCOVERED − REGISTERED_STATIC.
+
+    ``registered_*`` 는 호출측이 명시 리터럴(INV-1)을 주입한다 —
+    introspection 으로 만들지 않는다. INV-5 canary 는 빈
+    REGISTERED 를 주입해 전수 FAIL 을 단언한다.
+    """
+    unproven_dict = sorted(disc.dict_nodes - registered_dict_keys)
+    unproven_vs = sorted(disc.validator_surfaces - registered_validator_ids)
+    unsafe = list(disc.unsafe_nodes)
+    unres = list(unresolvable)
+    ok = not unproven_dict and not unproven_vs and not unsafe and not unres
+    return Verdict(
+        ok=ok,
+        unproven_dict=unproven_dict,
+        unproven_validators=unproven_vs,
+        unsafe=unsafe,
+        unresolvable=unres,
+    )
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1220,21 +1198,22 @@ def test_fastapi_verified_version_pin_advisory() -> None:
         )
 
 
-def test_s1b_origin_complete_no_unresolvable_validation_origin() -> None:
-    """S1b origin-complete: 정적 resolve 불가 검증 origin/entrypoint 0.
+def test_s1b_origin_complete_single_unresolvable_sink_empty() -> None:
+    """S1b origin-complete(INV-3): 단일 unresolvable sink == ∅.
 
-    모든 Pydantic 검증 entrypoint 가 lock-walkable(모델 정적 resolve)
-    또는 #1650 chokepoint 경유여야 한다. 미충족 1개라도 FAIL-CLOSED.
-    raw-body chokepoint 우회 직접 ``e.errors(...)`` detail 잔존 0
-    (#1650 SSOT — chokepoint 단독을 안전증명으로 쓰지 않으며 검증
-    source 모델이 lock-walk 되어야 함).
+    모든 Pydantic 검증 entrypoint 가 lock-walkable(정적 literal
+    BaseModel resolve) 또는 #1650 chokepoint 경유여야 한다. 제네릭
+    helper 는 model 인자 중 **하나라도** 정적 literal-BaseModel resolve
+    안 되면 그 site 전체가 단일 unresolvable(any-match →
+    all-must-resolve). raw-body chokepoint 우회 직접 ``e.errors(...)``
+    detail 잔존 0(#1650 SSOT).
     """
-    resolved, failures = _collect_s1_models()
-    assert not failures, (
+    s1 = _resolve_s1()
+    assert not s1.unresolvable, (
         "S1b origin-complete FAIL-CLOSED — 정적 resolve 불가 검증 "
-        f"origin/entrypoint: {failures}"
+        f"origin/entrypoint(단일 sink): {s1.unresolvable}"
     )
-    assert resolved, "S1 검증 entrypoint 0건 — AST 스캔 회귀 의심"
+    assert s1.models, "S1 검증 entrypoint 0건 — AST 스캔 회귀 의심"
 
     choke, direct = _scan_chokepoint_and_error_sites()
     assert direct == 0, (
@@ -1244,8 +1223,9 @@ def test_s1b_origin_complete_no_unresolvable_validation_origin() -> None:
     assert choke > 0, "chokepoint 호출 site 0 — #1650 SSOT 회귀 의심"
 
 
-def test_s2_mounted_recursive_no_unproven_mount() -> None:
-    """S2 mounted 재귀: positive-type 미증명 mount 0 (default-deny).
+def test_s2_mounted_recursive_single_unresolvable_sink_empty() -> None:
+    """S2 mounted 재귀(INV-3): positive-type 미증명 mount/route 단일
+    unresolvable sink == ∅.
 
     ``create_app()`` route 재귀 순회(Mount/sub-app 내부 포함). mount
     면제는 positive-type 증명(allowlist 타입 isinstance)으로만 PASS —
@@ -1253,167 +1233,267 @@ def test_s2_mounted_recursive_no_unproven_mount() -> None:
     """
     app = _build_app()
     s2 = _collect_s2(app)
-    assert not s2.fail_mounts, (
-        "S2 FAIL-CLOSED — positive-type 미증명 mount(route-bearing "
-        f"아님 ∧ known-safe non-validation 타입 아님): {s2.fail_mounts}"
+    assert not s2.unresolvable, (
+        "S2 FAIL-CLOSED — positive-type 미증명 mount/route(route-bearing "
+        f"아님 ∧ known-safe non-validation 타입 아님): {s2.unresolvable}"
     )
     assert s2.body_models, "S2 body 수집 0건 — introspection 회귀 의심"
 
 
-def _s1s2_models() -> tuple[list[type[BaseModel]], list[tuple[str, Any]]]:
-    """S1∪S2 self-enumerate BaseModel + root-container annotation."""
-    resolved, failures = _collect_s1_models()
-    assert not failures, f"S1b origin-complete FAIL: {failures}"
-    app = _build_app()
-    s2 = _collect_s2(app)
-    assert not s2.fail_mounts, f"S2 mount FAIL: {s2.fail_mounts}"
+def test_discovery_lock_current_surface_pass_false_positive_zero() -> None:
+    """현 코드 락 green: 단일 PASS-computation 전수 PASS.
 
-    models: list[type[BaseModel]] = []
-    roots: list[tuple[str, Any]] = []
-    for _, m in resolved:
-        if m not in models:
-            models.append(m)
-    for path, ann in s2.body_models:
-        if isinstance(ann, type) and issubclass(ann, BaseModel):
-            if ann not in models:
-                models.append(ann)
-        else:
-            roots.append((path, ann))
-    return models, roots
+    INV-2: ``_discover`` 가 S1∪S2 전 surface 의 트리를 verdict-free
+    enumeration → 단일 ``Discovered``. ``compute_verdict`` 한 곳에서
+    ``UNPROVEN = DISCOVERED − REGISTERED_STATIC`` 단일 set-difference.
+    ``PASS ⟺ (UNPROVEN == ∅ ∧ unresolvable == ∅)``.
 
-
-def test_discovery_lock_current_surface_all_pass_false_positive_zero() -> None:
-    """현 코드 락 green: S1∪S2 전수 default-deny 검증 PASS.
-
-    핵심(default-deny): 각 S1∪S2 surface 는 검증 walk 가 **완전히
-    ok** 여야만 PASS. 검증 walk 는 등록된 per-(owner,field)
-    pre-validation-reject 증명 dict 키와 per-surface-id 등록 CV3
-    validator surface 만 PASS 로 간주하고, 그 외 모든 unsafe shape
-    (``extra='allow'``/RootModel/dataclass/TypedDict/unknown/미증명
-    dict/미등록 validator)는 트리 어디에 있든 — short-circuit 으로
-    가려질 수 있던 곳까지 — FAIL 한다. ``walk_annotation()`` 이 한
-    노드라도 미충족이면 그 surface 는 무조건 FAIL(``justified`` 초기값/
-    단축 분기 없음). 추가로 발견된 비-``dict[str,Any]`` dict 노드는
-    전부 (owner,field) 등록 증명 보유, validator surface 는 전부
-    per-surface-id CV3 등록임을 단언한다(stale·over-broad 차단).
+    REGISTERED_STATIC 은 명시 리터럴(INV-1) — introspection 재도출
+    아님. 발견된 비-``dict[str,Any]`` dict 노드/validator surface 중
+    리터럴 등록집합에 없는 것이 하나라도 있으면 FAIL. 미증명/unknown
+    unsafe shape(unsafe_nodes)는 REGISTERED 으로 해제 불가.
 
     현 가정 = caller-supplied 키/이름 벡터 live 0건. 강화 후에도 현
     S1∪S2 전수 PASS 여야 하며, 새 FAIL = 실 live 노출 표면 발견 →
     Stop Condition(중단·재보고).
     """
-    models, roots = _s1s2_models()
-
-    # 등록 증명집합을 (owner,field) / surface-id 단위로 self-derive.
-    justify = _Justify(
-        dict_keys=frozenset(p.key for p in _PRE_VALIDATION_REJECT_REGISTRY),
-        validator_surfaces=frozenset(_registered_validator_surface_ids()),
+    surface = _s1s2_surface_models()
+    disc = _discover_all(surface)
+    verdict = compute_verdict(
+        disc,
+        surface.unresolvable,
+        registered_dict_keys=_REGISTERED_DICT_KEYS,
+        registered_validator_ids=_REGISTERED_VALIDATOR_SURFACE_IDS,
     )
-
-    discovered_dict_keys: set[tuple[str, str]] = set()
-    discovered_validator_surfaces: set[str] = set()
-    failed: list[str] = []
-
-    def _record(res: WalkResult) -> None:
-        for owner, p in res.dict_nodes:
-            discovered_dict_keys.add(_dict_node_field_key(owner, p))
-        discovered_validator_surfaces.update(res.validator_surfaces)
-
-    # root-container body(현 실측 0건이나 구조적 처리 — BaseModel
-    # resolve 선행 금지).
-    for rpath, ann in roots:
-        res = walk_annotation(ann, f"s2-root:{rpath}", justify=justify)
-        _record(res)
-        if not res.ok:
-            failed.append(
-                f"S2 root-container body 미증명 FAIL: {res.reason} ({res.path})"
-            )
-
-    for m in models:
-        # default-deny 검증 walk — 등록 증명/CV3 만 PASS, 그 외 일체
-        # FAIL(미증명/unknown/구조 unsafe 가 트리 어디 있든 잡힘).
-        res = walk_annotation(m, m.__qualname__, justify=justify)
-        _record(res)
-        if not res.ok:
-            failed.append(
-                f"{m.__module__}.{m.__qualname__}: default-deny 검증 walk "
-                f"FAIL(미증명/unknown unsafe shape) — {res.reason} ({res.path})"
-            )
-
-    assert not failed, (
-        "discovery lock default-deny FAIL — 미증명/unknown unsafe surface "
-        "발견 (현 가정=0건 — Stop Condition: live 노출 표면 또는 미증명 "
-        f"surface 면 즉시 중단·재보고): {failed}"
-    )
-
-    # 발견된 비-dict[str,Any] dict 노드는 전부 (owner,field) 등록 증명
-    # 보유(stale/over-broad 차단 — owner 단독 아님).
-    missing_dict = sorted(discovered_dict_keys - set(justify.dict_keys))
-    assert not missing_dict, (
-        f"발견 dict 노드 (owner,field) {missing_dict} 가 등록 "
-        f"pre-validation-reject 증명집합 {sorted(justify.dict_keys)} 에 없음 "
-        "(per-(owner,field) 증명 필요)"
-    )
-    # 발견된 validator surface 는 전부 per-surface-id CV3 등록.
-    missing_vs = sorted(discovered_validator_surfaces - set(justify.validator_surfaces))
-    assert not missing_vs, (
-        f"발견 validator surface {missing_vs} 가 CV3 per-surface-id "
-        f"등록집합 {sorted(justify.validator_surfaces)} 에 없음"
+    assert verdict.ok, (
+        "discovery lock default-deny FAIL — 미증명/unknown unsafe "
+        "surface 또는 unresolvable origin 발견 (현 가정=0건 — Stop "
+        "Condition: live 노출 표면 또는 미증명 surface 면 즉시 중단·"
+        f"재보고): unproven_dict={verdict.unproven_dict} "
+        f"unproven_validators={verdict.unproven_validators} "
+        f"unsafe={verdict.unsafe} unresolvable={verdict.unresolvable}"
     )
 
 
-def test_lock_validator_surfaces_subset_of_cv3_registry() -> None:
-    """CV3: lock self-derive validator surface 집합 ⊆ **full surface-id**
-    등록집합.
+def test_inv5_self_defeat_regression_canary_empty_registered_all_fail() -> None:
+    """INV-5 self-defeat 회귀 canary: ``REGISTERED_STATIC`` 공집합
+    치환 시 현 S1∪S2 의 모든 validator-bearing·비-``dict[str,Any]``
+    surface 가 **전수 FAIL** 해야 한다.
 
-    S1∪S2 모델의 ``__pydantic_decorators__``(field/model + v1 호환
-    ``.validators``/``.root_validators``) ∪ ``Annotated[*Validator]``
-    field metadata 를 self-enumerate 한 **각 surface-id** 가 CV3
-    등록집합(전 canary 가 ``model_ref`` 모델에서 동일 규칙으로 재도출한
-    surface-id union)에 그 surface-id 로 존재해야 한다. owner 이름
-    비교가 아니라 surface-id 단위 — 이미 등록된 모델에 새
-    ``field_validator``/``model_validator`` 가 추가돼도 그 신규
-    surface-id 가 어느 canary 의 등록 집합에도 없으므로 FAIL(별도
-    canary 미작성 시). 개수·고정 멤버명 하드코딩 아님 — lock
-    self-derive 가 SSOT.
+    이 canary 가 red 면 ``proven=f(discovered)`` 가 재발한 것이다
+    (RC-1 영구 락 — REGISTERED 가 introspection 으로 재도출되면 빈
+    REGISTERED 를 줘도 set-difference 가 공집합이 되어 FAIL 하지
+    못한다). 현 코드는 validator-bearing 모델·비-``dict[str,Any]``
+    dict 노드를 실제로 가지므로(검증용 실측), 빈 REGISTERED 면
+    UNPROVEN ≠ ∅ 이어야 한다.
     """
-    surfaces = _enumerate_all_validator_surfaces()
-    assert surfaces, "validator surface self-enumerate 0건 — 회귀 의심"
-    registered = _registered_validator_surface_ids()
-    missing = sorted(set(surfaces) - registered)
+    surface = _s1s2_surface_models()
+    disc = _discover_all(surface)
+
+    # DISCOVERED 자체는 비어 있지 않아야 한다(현 코드는 validator
+    # surface·dict 노드 보유 — 이게 비면 enumeration 회귀라 canary 무효).
+    assert disc.validator_surfaces, (
+        "INV-5 canary self-검증 실패 — DISCOVERED validator surface 0건"
+        " (enumeration 회귀; canary 가 공허해짐)"
+    )
+    assert disc.dict_nodes, (
+        "INV-5 canary self-검증 실패 — DISCOVERED dict 노드 0건 "
+        "(enumeration 회귀; canary 가 공허해짐)"
+    )
+
+    # REGISTERED_STATIC 공집합 주입 → 전수 FAIL 단언.
+    verdict = compute_verdict(
+        disc,
+        surface.unresolvable,
+        registered_dict_keys=frozenset(),
+        registered_validator_ids=frozenset(),
+    )
+    assert not verdict.ok, (
+        "INV-5 위반 — REGISTERED_STATIC 공집합인데 lock PASS "
+        "(proven=f(discovered) self-defeat 재발)"
+    )
+    # 모든 validator surface 가 UNPROVEN 으로 떨어져야 한다.
+    assert set(verdict.unproven_validators) == disc.validator_surfaces, (
+        "INV-5 위반 — 빈 REGISTERED 인데 일부 validator surface 가 "
+        f"UNPROVEN 으로 안 떨어짐: discovered={sorted(disc.validator_surfaces)} "
+        f"unproven={sorted(verdict.unproven_validators)}"
+    )
+    # 모든 비-dict[str,Any] dict 노드가 UNPROVEN 으로 떨어져야 한다.
+    assert set(verdict.unproven_dict) == disc.dict_nodes, (
+        "INV-5 위반 — 빈 REGISTERED 인데 일부 dict 노드가 UNPROVEN "
+        f"으로 안 떨어짐: discovered={sorted(disc.dict_nodes)} "
+        f"unproven={sorted(verdict.unproven_dict)}"
+    )
+
+
+def test_registered_static_does_not_invoke_introspection() -> None:
+    """INV-1 구조 단언: ``REGISTERED_STATIC`` 두 축이 명시 리터럴이고
+    introspection 산출이 아님을 정적으로 확인.
+
+    - validator 축: ``_REGISTERED_VALIDATOR_SURFACE_IDS`` 의 모든
+      원소가 ``str`` 리터럴(introspection 객체 아님). 모듈 소스 AST
+      에서 그 frozenset literal 이 함수 호출(``_iter_model_validators``
+      등) 없이 문자열 set 으로만 구성됨을 단언.
+    - dict 축: ``_REGISTERED_DICT_KEYS`` 가 ``_REGISTERED_DICT_PROOFS``
+      의 리터럴 ``(owner_qualname, field_name)`` 튜플로만 구성.
+
+    이 단언이 깨지면 ``proven=f(discovered)`` 재유입 — INV-5 와 함께
+    RC-1 이중 락.
+    """
+    assert all(isinstance(s, str) for s in _REGISTERED_VALIDATOR_SURFACE_IDS), (
+        "validator 축 REGISTERED_STATIC 에 비-str(introspection 객체) 혼입"
+    )
+    assert all(
+        isinstance(p.owner_qualname, str) and isinstance(p.field_name, str)
+        for p in _REGISTERED_DICT_PROOFS
+    ), "dict 축 REGISTERED_STATIC 키가 리터럴 str 아님"
+
+    # 모듈 소스 AST: _REGISTERED_VALIDATOR_SURFACE_IDS 대입 RHS 가
+    # frozenset({<str literal>...}) 형태(함수 호출 노드 부재)인지 확인.
+    src = Path(__file__).read_text()
+    tree = ast.parse(src)
+    found = False
+    for node in ast.walk(tree):
+        # ``NAME: ann = rhs`` 는 AnnAssign, ``NAME = rhs`` 는 Assign.
+        if isinstance(node, ast.AnnAssign):
+            target = node.target
+            targets = [target.id] if isinstance(target, ast.Name) else []
+            value = node.value
+        elif isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            value = node.value
+        else:
+            continue
+        if "_REGISTERED_VALIDATOR_SURFACE_IDS" not in targets:
+            continue
+        assert value is not None
+        found = True
+        # RHS = frozenset({...}) — frozenset 호출 인자는 set literal,
+        # 그 원소는 전부 str Constant(또는 implicit-concat str). 내부에
+        # introspection 함수 호출 노드가 없어야 한다.
+        bad_calls = [
+            n
+            for n in ast.walk(value)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id != "frozenset"
+        ]
+        assert not bad_calls, (
+            "INV-1 위반 — _REGISTERED_VALIDATOR_SURFACE_IDS 리터럴 RHS "
+            f"에 함수 호출(introspection 재도출 의심): "
+            f"{[ast.dump(b) for b in bad_calls]}"
+        )
+        for n in ast.walk(value):
+            assert not isinstance(n, ast.Attribute), (
+                "INV-1 위반 — REGISTERED_STATIC RHS 에 attribute 접근 "
+                "(introspection/모델 참조 의심)"
+            )
+    assert found, "_REGISTERED_VALIDATOR_SURFACE_IDS 대입을 AST 에서 미발견"
+
+
+def test_lock_validator_surfaces_subset_of_registered_static() -> None:
+    """CV3 subset(INV-1): lock self-derive(DISCOVERED) validator
+    surface 집합 ⊆ ``_REGISTERED_VALIDATOR_SURFACE_IDS`` (리터럴).
+
+    DISCOVERED 는 introspection self-derive, REGISTERED 는 명시
+    리터럴 — 물리 분리(INV-1). 둘이 다른 코드 경로라, 등록 모델에 새
+    ``field_validator``/``model_validator`` 가 추가되면 그 신규
+    surface-id 가 DISCOVERED 에는 들어가지만 리터럴 REGISTERED 에는
+    없어 subset 위반 → FAIL(default-deny). 개수·고정 멤버명 lock 입력
+    하드코딩 아님 — DISCOVERED self-derive 가 SSOT, REGISTERED 는
+    INV-1 정적 proof 축.
+    """
+    surface = _s1s2_surface_models()
+    disc = _discover_all(surface)
+    assert disc.validator_surfaces, "validator surface self-enumerate 0건 — 회귀 의심"
+    missing = sorted(disc.validator_surfaces - _REGISTERED_VALIDATOR_SURFACE_IDS)
     assert not missing, (
-        "lock self-enumerate validator surface 가 CV3 미등록 "
-        f"(surface-id 단위 — 신규 validator 추가 차단): {missing}. "
-        f"CV3 등록 surface-id 집합={sorted(registered)}"
+        "lock self-enumerate validator surface 가 REGISTERED_STATIC "
+        f"미등록(surface-id 단위 — 신규 validator 추가 차단): {missing}. "
+        f"등록 리터럴 집합={sorted(_REGISTERED_VALIDATOR_SURFACE_IDS)}"
+    )
+
+
+def test_registered_validators_have_per_surface_id_behavioral_canary() -> None:
+    """INV-4: ``_REGISTERED_VALIDATOR_SURFACE_IDS`` 의 **각** surface-id
+    가 behavioral canary 로 1:1 커버됨(공허 단언 금지).
+
+    등록만 하고 behavioral 미증명이면(모델-단위 'ValidationError 한
+    번' 으로 약화) FAIL. 등록 리터럴 집합 == behavioral 커버 집합
+    이어야 한다(over-register/under-cover 양방향 차단).
+    """
+    only_reg = sorted(
+        _REGISTERED_VALIDATOR_SURFACE_IDS - _BEHAVIORAL_COVERED_SURFACE_IDS
+    )
+    only_cov = sorted(
+        _BEHAVIORAL_COVERED_SURFACE_IDS - _REGISTERED_VALIDATOR_SURFACE_IDS
+    )
+    assert _BEHAVIORAL_COVERED_SURFACE_IDS == _REGISTERED_VALIDATOR_SURFACE_IDS, (
+        "INV-4 위반 — 등록 surface-id 집합 ≠ behavioral 커버 집합. "
+        f"등록만={only_reg} 커버만={only_cov}"
     )
 
 
 @pytest.mark.parametrize(
     "canary",
-    [pytest.param(c, id=c.owner_qualname) for c in _CV3_REGISTRY],
+    [
+        pytest.param(c, id="+".join(sorted(c.surface_ids)))
+        for c in _VALIDATOR_BEHAVIORAL_CANARIES
+    ],
 )
-def test_cv3_validator_behavioral_no_sentinel_in_loc_or_detail(
-    canary: _ValidatorCanary,
+def test_cv3_validator_behavioral_per_surface_no_sentinel(
+    canary: _ValidatorBehavioralCanary,
 ) -> None:
-    """CV3 behavioral: validator surface caller sentinel 주입 →
-    422 loc=static field-path 뿐 · sentinel∉detail.
+    """CV3 behavioral(INV-4): 등록 surface-id 각각이 caller sentinel
+    주입 시 422 loc=static field-path 뿐 · sentinel∉detail.
 
-    #1629 L1 de-interpolation 회귀도 동일 self-derived 집합에서 보존
-    (scopes/trading_hours/timezone msg 거부값 미삽입).
+    surface-id 단위 1:1(모델-단위 'ValidationError 한 번' 금지) —
+    canary 의 리터럴 ``surface_ids`` 가 ``model_ref`` 모델이 실제
+    self-enumerate 하는 surface 부분집합인지도 확인(공허 canary 차단).
+    #1629 L1 de-interpolation 회귀 겸함.
     """
     model = canary.model_ref()
+    # canary 의 리터럴 surface_ids 가 실제 모델 introspection 의
+    # 부분집합인지(존재하지 않는 surface 를 등록한 공허 canary 차단).
+    actual: set[str] = set(_iter_model_validators(model))
+    for fname, fi in model.model_fields.items():
+        if _validator_markers(getattr(fi, "metadata", []) or []):
+            actual.add(_field_annotated_validator_sid(model, fname))
+    stale = canary.surface_ids - actual
+    assert not stale, (
+        f"INV-4 — canary 리터럴 surface_ids 가 모델 introspection 에 "
+        f"부재(stale/오타 canary): {sorted(stale)} (실제={sorted(actual)})"
+    )
     _behavioral_validator_check(model, canary.payloads)
 
 
 def test_pre_validation_reject_precedence_guards_all_proven() -> None:
-    """self-derived 비-dict[str,Any] dict 노드 전부 등록 pre-reject
-    behavioral 증명 green (미증명 노드 0).
+    """INV-4: self-derived 비-dict[str,Any] dict 노드 전부 등록
+    pre-reject behavioral 증명 green (미증명 노드 0).
 
     각 등록 entry 는 owner 모델 ``model_validate`` 스파이를 걸고 그
     필드를 포함한 요청이 model_validate **미호출** 상태로 거부됨을
-    단언(strip 후처리 단언 불충분).
+    단언(strip 후처리 단언 불충분). 추가로 DISCOVERED dict 노드
+    집합이 등록 리터럴 키 집합과 정확히 일치(stale/over-broad 차단).
     """
-    for proof in _PRE_VALIDATION_REJECT_REGISTRY:
+    for proof in _REGISTERED_DICT_PROOFS:
         proof.prove()
+
+    # DISCOVERED dict 노드 ⊆ 등록 리터럴 키(미증명 노드 0). 동시에
+    # 등록 키가 실제 발견되는지(stale 등록 차단)도 단언.
+    surface = _s1s2_surface_models()
+    disc = _discover_all(surface)
+    missing = sorted(disc.dict_nodes - _REGISTERED_DICT_KEYS)
+    assert not missing, (
+        f"발견 dict 노드 (owner,field) {missing} 가 등록 리터럴 "
+        f"pre-validation-reject 키 집합 {sorted(_REGISTERED_DICT_KEYS)} 에 "
+        "없음 (per-(owner,field) 증명 필요)"
+    )
+    stale = sorted(_REGISTERED_DICT_KEYS - disc.dict_nodes)
+    assert not stale, (
+        f"등록 dict 키 {stale} 가 현 S1∪S2 에서 미발견 (stale 등록 — "
+        "registry 가 introspection 과 괴리)"
+    )
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1476,8 +1556,39 @@ class _OpaqueArbitrary:  # 임의 class — known-safe 아님.
     pass
 
 
+class _CanaryEnum(enum.Enum):
+    A = "a"
+    B = "b"
+
+
+def _opt(tp: Any) -> Any:
+    """legacy ``typing.Union[tp, None]`` origin 동적 생성(canary 전용).
+
+    PEP604 ``tp | None`` 은 ``types.UnionType`` origin, ``typing.Union``
+    은 ``typing.Union`` origin — enumeration 이 둘을 동일 Union 분기로
+    처리함을 양쪽 canary 로 고정한다.
+    """
+    return Union[tp, None]  # noqa: UP007 — legacy Union origin canary 의도
+
+
+def _make_dict_field_model() -> type[BaseModel]:
+    class _DictFieldModel(BaseModel):
+        m: dict[str, int]
+
+    return _DictFieldModel
+
+
 def _shape_pass(tp: Any) -> bool:
-    return walk_annotation(tp, "canary").ok
+    """단일 PASS-computation 으로 shape 판정(REGISTERED 공집합 —
+    순수 default-deny canary 극성)."""
+    disc = discover_annotation(tp, "canary")
+    v = compute_verdict(
+        disc,
+        [],
+        registered_dict_keys=frozenset(),
+        registered_validator_ids=frozenset(),
+    )
+    return v.ok
 
 
 def test_cv1_introspection_shapes_1_to_4_detect_model() -> None:
@@ -1520,13 +1631,14 @@ def test_cv1_introspection_shapes_1_to_4_detect_model() -> None:
     assert _SafeIgnoreModel in found, (
         f"CV1 ①~④ S2 introspection 가 BaseModel 미검출: {collected.body_models}"
     )
-    assert not collected.fail_mounts
+    assert not collected.unresolvable
 
 
 def test_cv1_known_bad_shapes_all_fail_closed() -> None:
     """CV1 ⑤~⑳: element-TYPE/구조 known-bad shape 전부 fail-closed.
 
-    walker 가 통과(PASS)하면 canary 자체 fail(극성 보장).
+    단일 PASS-computation(REGISTERED 공집합)이 통과(PASS)하면 canary
+    자체 fail(극성 보장).
     """
     known_bad: list[tuple[str, Any]] = [
         ("dict[str,int]", dict[str, int]),
@@ -1536,10 +1648,7 @@ def test_cv1_known_bad_shapes_all_fail_closed() -> None:
         ("list[ExtraAllowModel]", list[_ExtraAllowModel]),
         ("list[TypedPydanticExtraModel]", list[_TypedPydanticExtraModel]),
         ("list[ValidatorBearingModel]", list[_ValidatorBearingModel]),
-        # typing.Union origin 과 PEP604 types.UnionType origin 양쪽 커버
-        # (walker 가 둘을 동일 Union 분기로 처리하므로 element-unsafe
-        # 면 양쪽 다 fail-closed).
-        ("Optional[dict[str,int]] (typing.Union origin)", _opt_dict_str_int()),
+        ("Optional[dict[str,int]] (typing.Union origin)", _opt(dict[str, int])),
         ("dict[str,int]|None (UnionType origin)", dict[str, int] | None),
         ("PlainDataclass", _PlainDataclass),
         ("PydanticDataclass", _PydanticDataclass),
@@ -1562,15 +1671,9 @@ def test_cv1_known_bad_shapes_all_fail_closed() -> None:
     ]
     leaked = [name for name, tp in known_bad if _shape_pass(tp)]
     assert not leaked, (
-        f"CV1 known-bad shape 가 walker 를 통과(fail-open) — 극성 위반: {leaked}"
+        f"CV1 known-bad shape 가 PASS-computation 을 통과(fail-open) — "
+        f"극성 위반: {leaked}"
     )
-
-
-def _make_dict_field_model() -> type[BaseModel]:
-    class _DictFieldModel(BaseModel):
-        m: dict[str, int]
-
-    return _DictFieldModel
 
 
 def test_cv1_interpretation_b_positive_element_safe_containers_pass() -> None:
@@ -1606,16 +1709,11 @@ def test_cv1_interpretation_b_positive_element_safe_containers_pass() -> None:
     )
 
 
-class _CanaryEnum(enum.Enum):
-    A = "a"
-    B = "b"
-
-
 def test_cv1_polarity_meta_assertion_unknown_is_fail() -> None:
     """CV1 극성-반전 메타-단언: opaque/미지 annotation 도 unknown=FAIL.
 
-    walker 가 shape 를 미리 알지 못해도 default-deny 로 FAIL 하는지를
-    검증("shape 열거"가 아니라 "unknown=FAIL" 폴리시 자체).
+    PASS-computation 이 shape 를 미리 알지 못해도 default-deny 로 FAIL
+    하는지를 검증("shape 열거"가 아니라 "unknown=FAIL" 폴리시 자체).
     """
 
     class _NeverSeenBefore:
@@ -1641,11 +1739,7 @@ def test_cv1_origin_complete_canary_unsafe_entrypoint_fail_closed(
     tmp_path: Path,
 ) -> None:
     """CV1 S1b canary ①: synthetic unsafe entrypoint(미walkable
-    TypeAdapter / 동적 model_validate) → lock fail-closed.
-
-    routes/ 밖이 아닌, S1b origin-complete 가 TypeAdapter/동적
-    디스패치 entrypoint 를 정적 resolve 불가로 판정해 FAIL-CLOSED 함을
-    합성 모듈로 증명(lock green 이면 canary 자체 fail).
+    TypeAdapter) → entrypoint API 매칭에 잡힘(우회 불가).
     """
     syn = tmp_path / "syn_route.py"
     syn.write_text(
@@ -1667,49 +1761,68 @@ def test_cv1_origin_complete_canary_unsafe_entrypoint_fail_closed(
     )
 
 
-def test_cv1_origin_complete_canary_routes_outside_unsafe_helper() -> None:
-    """CV1 S1b canary ②: routes 밖 imported unsafe helper/wrapper —
-    제네릭 helper 모델 인자 정적 resolve 불가 → FAIL-CLOSED.
+def test_cv1_origin_complete_canary_helper_literal_dynamic_mix_unresolvable(
+    tmp_path: Path,
+) -> None:
+    """CV1 S1b canary ②: 제네릭 helper 가 literal+dynamic 모델 호출
+    혼재 시 추적기가 **all-must-resolve** 로 site 전체 unresolvable
+    판정(any-match 우회 차단 — Codex attempt2 finding).
 
-    helper 가 변수로 결정되는 모델(literal 아님)로 검증하면
-    ``_trace_generic_helper_models`` 가 None → S1b FAIL-CLOSED 임을
-    합성 AST 로 증명.
+    합성 모듈: helper 가 한 호출에서는 literal 모델, 다른 호출에서는
+    변수(dynamic)로 검증 → ``_trace_generic_helper_model_args`` 가
+    ``all_resolved=False`` 를 반환해야 한다(literal 하나 있다고
+    models 비-empty 만으로 통과시키면 안 됨 — RC-3 any-match 차단).
     """
+    import sys
+
     src = (
-        "def validate_payload(payload, model):\n"
+        "import sys\n"
+        "from pydantic import BaseModel\n"
+        "class LiteralModel(BaseModel):\n"
+        "    x: int\n"
+        "def helper(payload, model):\n"
         "    return model.model_validate(payload)\n"
-        "def route():\n"
-        "    chosen = pick_model()\n"
-        "    return validate_payload({}, chosen)\n"
+        "def route_a():\n"
+        "    return helper({}, LiteralModel)\n"
+        "def route_b():\n"
+        "    chosen = sys.modules\n"
+        "    return helper({}, chosen)\n"
     )
-    tree = ast.parse(src)
-    # helper 의 model 파라미터로 전달되는 인자가 literal 클래스가 아닌
-    # 변수(chosen) → resolve 불가. 본 canary 는 lock 의 generic-helper
-    # 추적기가 변수 인자에 대해 모델을 만들어내지 않음(=FAIL-CLOSED)
-    # 을 단언한다.
-    calls = [
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Name)
-        and n.func.id == "validate_payload"
-    ]
-    assert calls, "S1b canary ② self-검증 실패 — helper 호출 미탐지"
-    arg_is_variable = any(
-        isinstance(a, ast.Name) and a.id == "chosen" for c in calls for a in c.args
-    )
-    assert arg_is_variable, (
-        "S1b canary ② — helper 모델 인자가 변수가 아님(literal 이면 "
-        "resolve 가능해 canary 무효)"
+    modname = "_syn_helper_mix_1651"
+    syn = tmp_path / f"{modname}.py"
+    syn.write_text(src)
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        sys.modules.pop(modname, None)
+        importlib.import_module(modname)
+        # helper 본문 ``model.model_validate`` 의 lineno.
+        lineno = src.splitlines().index("    return model.model_validate(payload)") + 1
+        site = _EntrypointSite(
+            module=modname,
+            lineno=lineno,
+            callee_src="model.model_validate",
+            receiver="model",
+            method="model_validate",
+        )
+        models, all_resolved = _trace_generic_helper_model_args(site)
+    finally:
+        sys.modules.pop(modname, None)
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    assert not all_resolved, (
+        "S1b canary ② 위반 — literal+dynamic 혼재 helper 가 "
+        "all-must-resolve 로 unresolvable 판정되지 않음(any-match "
+        f"fail-open): models={[m.__name__ for m in models]}"
     )
 
 
 def test_cv1_origin_complete_canary_route_bearing_mounted_subapp() -> None:
     """CV1 S1b canary ③: route-bearing mounted FastAPI sub-app 내부
-    unsafe body validation route → S2 재귀가 내려가 FAIL-CLOSED.
-
-    sub-app 미재귀 시 우회 가능 — 재귀 순회가 sub-app 의 unsafe body
-    annotation 까지 도달함을 단언(walker FAIL → lock FAIL-CLOSED).
+    unsafe body validation route → S2 재귀가 내려가 enumeration 이
+    unsafe 기록 → 단일 verdict 에서 FAIL.
     """
     sub = FastAPI()
 
@@ -1721,29 +1834,22 @@ def test_cv1_origin_complete_canary_route_bearing_mounted_subapp() -> None:
     parent.mount("/sub", sub)
 
     collected = _collect_s2(parent)
-    # route-bearing sub-app 은 fail_mounts 가 아니라 재귀로 수집됨.
-    assert not collected.fail_mounts, (
+    assert not collected.unresolvable, (
         f"route-bearing sub-app 이 positive 미증명 mount 로 오분류: "
-        f"{collected.fail_mounts}"
+        f"{collected.unresolvable}"
     )
     inner_anns = [ann for path, ann in collected.body_models if "/sub/inner" in path]
     assert inner_anns, "S2 재귀가 mounted sub-app 내부 route 에 미도달 — 우회 가능"
-    # 수집된 unsafe body annotation 은 walker 가 FAIL-CLOSED 해야 함.
     for ann in inner_anns:
-        res = walk_annotation(ann, "subapp-inner")
-        assert not res.ok, (
+        assert not _shape_pass(ann), (
             f"mounted sub-app 내부 unsafe body(dict[str,int]) 가 "
-            f"walker PASS(fail-open): {ann}"
+            f"PASS-computation 통과(fail-open): {ann}"
         )
 
 
 def test_cv1_origin_complete_canary_no_routes_custom_asgi_fail_closed() -> None:
-    """CV1 S1b canary ⑤: no-routes custom ASGI mount → FAIL-CLOSED.
-
-    ``routes`` 속성 없는 custom ASGI app(내부에서
-    ``TypeAdapter(dict[str,int]).validate_python`` 검증 수행)을 mount.
-    absence-of-routes 를 safe 로 추론하면(fail-open) 이 canary 가
-    fail 시켜 default-deny 구현을 강제한다.
+    """CV1 S1b canary ⑤: no-routes custom ASGI mount → 단일
+    unresolvable sink(absence-of-routes 를 safe 추론 = fail-open).
     """
 
     class _CustomASGI:
@@ -1755,13 +1861,13 @@ def test_cv1_origin_complete_canary_no_routes_custom_asgi_fail_closed() -> None:
     parent.mount("/custom", _CustomASGI())
 
     collected = _collect_s2(parent)
-    assert collected.fail_mounts, (
-        "no-routes custom ASGI mount 가 FAIL-CLOSED 되지 않음 "
+    assert collected.unresolvable, (
+        "no-routes custom ASGI mount 가 unresolvable 되지 않음 "
         "(absence-of-routes 를 safe 로 추론 = fail-open)"
     )
-    assert any(
-        "/custom" in fm and "FAIL-CLOSED" in fm for fm in collected.fail_mounts
-    ), f"custom ASGI mount FAIL 진단 부재: {collected.fail_mounts}"
+    assert any("/custom" in fm for fm in collected.unresolvable), (
+        f"custom ASGI mount 진단 부재: {collected.unresolvable}"
+    )
 
 
 def test_cv1_staticfiles_positive_type_mount_out_of_s2_both_envs(
@@ -1773,30 +1879,27 @@ def test_cv1_staticfiles_positive_type_mount_out_of_s2_both_envs(
     fixture 로 고정. assets 존재(StaticFiles mount 1건 → out-of-S2
     PASS) / 부재(mount 0) 양환경에서 lock green·false-positive 0.
     """
-    # 환경 A: StaticFiles mount 존재(임의 경로명 — 이름 하드코딩 아님).
     app_with = FastAPI()
     static_root = tmp_path / "static"
     static_root.mkdir()
     (static_root / "x.txt").write_text("ok")
     app_with.mount("/arbitrary-name", StaticFiles(directory=str(static_root)))
     c_with = _collect_s2(app_with)
-    assert not c_with.fail_mounts, (
+    assert not c_with.unresolvable, (
         f"StaticFiles mount 가 positive-type 면제되지 않음(경로명 무관 "
-        f"타입 증명): {c_with.fail_mounts}"
+        f"타입 증명): {c_with.unresolvable}"
     )
 
-    # 환경 B: mount 0건.
     app_without = FastAPI()
     c_without = _collect_s2(app_without)
-    assert not c_without.fail_mounts, (
-        f"mount 0 환경에서 false-positive: {c_without.fail_mounts}"
+    assert not c_without.unresolvable, (
+        f"mount 0 환경에서 false-positive: {c_without.unresolvable}"
     )
 
-    # 실 create_app 도 양환경(frontend/dist/assets 존재/부재)에서 green.
     real = create_app()
     rc = _collect_s2(real)
-    assert not rc.fail_mounts, (
-        f"create_app() S2 mount FAIL(현 dist/assets 환경): {rc.fail_mounts}"
+    assert not rc.unresolvable, (
+        f"create_app() S2 mount FAIL(현 dist/assets 환경): {rc.unresolvable}"
     )
 
 
@@ -1804,8 +1907,8 @@ def test_cv1_no_routes_custom_asgi_distinct_from_staticfiles() -> None:
     """CV1 보강: no-routes 라는 absence 가 아니라 known-safe 타입의
     positive 증명만 면제임을 대조 단언.
 
-    StaticFiles(routes 없음) → PASS, custom ASGI(routes 없음) →
-    FAIL-CLOSED. 두 mount 모두 ``routes`` 부재이나 결과가 갈리는
+    StaticFiles(routes 없음) → out-of-S2, custom ASGI(routes 없음) →
+    unresolvable. 두 mount 모두 ``routes`` 부재이나 결과가 갈리는
     것은 absence 추론이 아닌 positive-type 증명임을 고정한다.
     """
     import tempfile
@@ -1820,9 +1923,7 @@ def test_cv1_no_routes_custom_asgi_distinct_from_staticfiles() -> None:
         app.mount("/sf", StaticFiles(directory=d))
         app.mount("/cu", _CustomASGI())
         c = _collect_s2(app)
-    # StaticFiles 면제, custom ASGI 만 FAIL.
-    assert len(c.fail_mounts) == 1, (
+    assert len(c.unresolvable) == 1, (
         f"positive-type 대조 실패 — StaticFiles 와 custom ASGI 가 "
-        f"동일 처리(absence 추론 의심): {c.fail_mounts}"
+        f"동일 처리(absence 추론 의심): {c.unresolvable}"
     )
-    assert "/cu" in c.fail_mounts[0]
