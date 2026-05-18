@@ -90,7 +90,7 @@ httpx = pytest.importorskip("httpx", reason="httpx required for web API tests")
 
 from fastapi import Body, Depends, FastAPI  # noqa: E402
 from fastapi.dependencies.utils import get_flat_dependant  # noqa: E402
-from fastapi.routing import APIRoute  # noqa: E402
+from fastapi.routing import APIRoute, APIRouter  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from pydantic import (  # noqa: E402
@@ -104,7 +104,13 @@ from pydantic import (  # noqa: E402
     WrapValidator,
     field_validator,
 )
-from starlette.routing import Mount, Route, WebSocketRoute  # noqa: E402
+from starlette.applications import Starlette  # noqa: E402
+from starlette.routing import (  # noqa: E402
+    Mount,
+    Route,
+    Router,
+    WebSocketRoute,
+)
 
 from ante.web.app import create_app  # noqa: E402
 
@@ -502,13 +508,34 @@ _PYDANTIC_ENTRYPOINT_METHODS: frozenset[str] = frozenset(
 _CHOKEPOINT_NAME = "sanitize_validation_errors"
 
 
-def _route_module_names() -> list[str]:
-    """``ante.web.routes`` 패키지의 모듈 이름 전수(손-열거 금지)."""
-    out = []
-    for p in sorted(_ROUTES_DIR.glob("*.py")):
-        if p.name == "__init__.py":
-            continue
-        out.append(f"{_ROUTES_PKG}.{p.stem}")
+def _route_modules() -> list[tuple[str, Path]]:
+    """``ante.web.routes`` 패키지의 **모든 하위 모듈** (dotted name,
+    소스 경로) 전수 — 재귀 self-enumerate(손-열거 금지).
+
+    top-level ``routes/*.py`` 만이 아니라 ``routes/**/*.py`` 하위
+    패키지 전체를 ``Path.rglob`` 으로 빠짐없이 수집한다. 향후
+    ``src/ante/web/routes/foo/bar.py`` 같은 하위 패키지 모듈에
+    raw-body Pydantic 검증 callee/entrypoint 가 추가돼도 S1
+    discovery 가 그 validation surface 를 놓치지 않도록 한다(top-level
+    한정 glob 은 fail-open). ``__init__.py`` 도 포함한다 — 패키지
+    초기화 모듈도 핸들러를 호스팅할 수 있으므로 일괄 skip 은 그
+    자체로 fail-open 갭이다(``routes/__init__.py`` →
+    ``ante.web.routes``, ``routes/foo/__init__.py`` →
+    ``ante.web.routes.foo``, ``routes/foo/bar.py`` →
+    ``ante.web.routes.foo.bar``).
+
+    dotted module name 은 ``__file__`` 기반 가정 없이 relative path
+    에서 직접 도출하므로 하위 패키지 모듈도 ``importlib`` 으로 정확히
+    import·AST 추적된다(flat ``rsplit`` 경로 재구성 금지 — INV-3).
+    """
+    out: list[tuple[str, Path]] = []
+    for p in sorted(_ROUTES_DIR.rglob("*.py")):
+        rel = p.relative_to(_ROUTES_DIR).with_suffix("")
+        parts = list(rel.parts)
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        modname = ".".join([_ROUTES_PKG, *parts]) if parts else _ROUTES_PKG
+        out.append((modname, p))
     return out
 
 
@@ -552,8 +579,7 @@ def _scan_s1_entrypoints() -> list[_EntrypointSite]:
     손-열거 census 금지 — AST self-derive.
     """
     sites: list[_EntrypointSite] = []
-    for modname in _route_module_names():
-        path = _ROUTES_DIR / f"{modname.rsplit('.', 1)[-1]}.py"
+    for modname, path in _route_modules():
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -734,8 +760,7 @@ def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
     """
     choke = 0
     direct = 0
-    for modname in _route_module_names():
-        path = _ROUTES_DIR / f"{modname.rsplit('.', 1)[-1]}.py"
+    for _modname, path in _route_modules():
         text = path.read_text()
         choke += text.count(f"detail={_CHOKEPOINT_NAME}(e),")
         if "detail=e.errors(include_context=False, include_input=False)" in text:
@@ -762,18 +787,38 @@ class _S2Collect:
 # 불가). "routes 속성 부재 ⇒ PASS" absence 추론 금지(fail-open).
 _NON_VALIDATION_MOUNT_TYPES: tuple[type, ...] = (StaticFiles,)
 
+# positive-type **route-container** allowlist — lock 이 ``routes`` 의
+# Starlette route 의미(``APIRoute``/``Mount``/``Route``/
+# ``WebSocketRoute`` 자식 트리)를 **아는** known 타입에 한해서만 재귀
+# 한다. ``Starlette`` 는 ``FastAPI`` sub-app 을 MRO 로 포함하고,
+# ``Router`` 는 ``Mount(routes=[...])`` 가 wrapping 하는 컨테이너,
+# ``APIRouter`` 는 FastAPI 라우터 컨테이너다. **``routes`` 속성 존재
+# 만으로 재귀·통과 금지** — 빈 ``routes=[]`` known 컨테이너는 재귀가
+# positive-type 으로 완결(자식 0 = 검증 surface 0; 컨테이너 타입
+# 자체는 request body 검증 불가, ``APIRoute`` 자식만 가능)되지만,
+# 타입 미지(unknown ASGI)·``routes`` duck-typing 만 가진 mount 는
+# positive 증명 불가이므로 단일 ``unresolvable`` 로 fail-closed
+# (absence/duck-typing 추론 금지 — INV-3 single-sink, positive-type).
+_KNOWN_ROUTE_CONTAINER_TYPES: tuple[type, ...] = (Starlette, Router, APIRouter)
+
 
 def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
     """``create_app()`` route 재귀 순회(Mount/sub-app 내부 포함).
 
     각 ``APIRoute`` 의 ``route.body_field`` ∪
     ``get_flat_dependant(route.dependant).body_params`` 의 annotation
-    수집. Mount 는:
-      - route-bearing ASGI sub-app(``routes`` 보유) → 재귀.
-      - positive-type 증명 non-validation mount(allowlist 타입
-        ``isinstance``) → 면제 PASS.
-      - 그 외 일체(no-routes-but-validating custom ASGI 포함) →
-        단일 ``unresolvable``(absence 를 safe 로 추론하지 않음).
+    수집. Mount 는 (INV-3 single-sink + positive-type):
+      - positive-type 증명 non-validation mount(``StaticFiles`` 등
+        allowlist 타입 ``isinstance``) → 면제 PASS.
+      - **known route-container 타입**(``_KNOWN_ROUTE_CONTAINER_TYPES``
+        — ``Starlette``/``Router``/``APIRouter``; lock 이 ``routes`` 의
+        route 의미를 아는 타입) → 재귀(빈 ``routes=[]`` 도 positive
+        타입으로 재귀 완결 = surface 0). ``routes`` 속성 존재만으로
+        재귀하지 않는다.
+      - 그 외 일체(unknown ASGI · empty-route custom mount ·
+        ``routes`` duck-typing 만; positive 증명 불가) → 그 mount id
+        를 단일 ``unresolvable`` 에 충전(fail-closed; absence/
+        duck-typing 을 safe 로 추론하지 않음).
     """
     out = _S2Collect(body_models=[], unresolvable=[])
     routes = getattr(app, "routes", None)
@@ -841,7 +886,13 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
             mount_path = prefix + r.path
             if isinstance(sub, _NON_VALIDATION_MOUNT_TYPES):
                 continue
-            if getattr(sub, "routes", None) is not None:
+            # positive-type 증명만 재귀(INV-3 single-sink): lock 이
+            # ``routes`` 의 route 의미를 **아는** known 컨테이너 타입
+            # 일 때만. ``routes`` 속성 존재(duck-typing)·빈 ``routes=[]``
+            # custom ASGI mount 만으로 재귀·통과하면 그 mount 가
+            # ``__call__`` 에서 request body/Pydantic 검증 시 S2
+            # default-deny 가 우회된다(fail-open).
+            if isinstance(sub, _KNOWN_ROUTE_CONTAINER_TYPES):
                 child = _collect_s2(sub, mount_path)
                 out.body_models.extend(child.body_models)
                 out.unresolvable.extend(child.unresolvable)
@@ -849,8 +900,10 @@ def _collect_s2(app: Any, prefix: str = "") -> _S2Collect:  # noqa: C901
             out.unresolvable.append(
                 f"{mount_path}: positive-type 미증명 mount "
                 f"({type(sub).__module__}.{type(sub).__name__} — "
-                "route-bearing 아님 ∧ known-safe non-validation 타입 "
-                "아님; absence 추론 금지)"
+                "known route-container 타입 아님 ∧ known-safe "
+                "non-validation 타입 아님; routes 속성/empty-route/"
+                "duck-typing absence 추론 금지 → single fail-closed "
+                "sink, INV-3)"
             )
         elif isinstance(r, (Route, WebSocketRoute)):
             # positive 구조 증명(absence 추론 아님): FastAPI 의
@@ -2006,6 +2059,92 @@ def test_cv1_origin_complete_canary_unsafe_entrypoint_fail_closed(
     )
 
 
+def test_cv1_s1_route_discovery_recursive_subpackage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CV1 S1 보강(Codex attempt4 [P2] — S1 하위 route 모듈 재귀
+    스캔): ``_route_modules()`` 가 top-level ``routes/*.py`` 만이
+    아니라 ``routes/**/*.py`` 하위 패키지 전체를 빠짐없이 self-
+    enumerate 함을 행위로 고정한다(``__init__.py`` 포함, dotted
+    module name 정확).
+
+    이전 구현은 top-level glob 한정이라 향후
+    ``src/ante/web/routes/foo/bar.py`` 같은 하위 패키지 모듈에
+    raw-body Pydantic 검증 callee/entrypoint 가 추가되면 S1
+    discovery 가 그 validation surface 를 전혀 발견 못 했다
+    (fail-open). 본 canary 는 합성 routes 트리(top-level + 하위
+    패키지 + 패키지 ``__init__``)를 두고 모든 모듈이 (정확한 dotted
+    name, 실제 소스 경로)로 수집되는지, 그리고 하위 패키지 모듈의
+    Pydantic entrypoint 가 ``_scan_s1_entrypoints`` 에 등장하는지
+    단언한다.
+    """
+    syn_routes = tmp_path / "routes"
+    (syn_routes / "deep" / "nested").mkdir(parents=True)
+    # top-level 모듈.
+    (syn_routes / "top.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class TopReq(BaseModel):\n"
+        "    a: int\n"
+        "def h(p):\n"
+        "    return TopReq.model_validate(p)\n"
+    )
+    # 패키지 __init__.py (포함돼야 함 — 일괄 skip 은 fail-open 갭).
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    (syn_routes / "deep" / "__init__.py").write_text("")
+    (syn_routes / "deep" / "nested" / "__init__.py").write_text("")
+    # 하위 패키지 모듈의 raw-body Pydantic 검증 entrypoint.
+    (syn_routes / "deep" / "nested" / "bar.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class BarReq(BaseModel):\n"
+        "    b: int\n"
+        "def handler(payload):\n"
+        "    return BarReq.model_validate(payload)\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651")
+
+    mods = dict(_route_modules())
+    names = set(mods)
+    # 정확한 dotted module name 도출(__init__ → 패키지명; 중첩 .구분).
+    assert "syn_routes_1651" in names, (
+        f"패키지 __init__.py(routes/__init__.py)가 수집 누락 — 일괄 "
+        f"skip 은 fail-open 갭(핸들러 호스팅 가능): {sorted(names)}"
+    )
+    assert "syn_routes_1651.top" in names, f"top-level 모듈 누락: {sorted(names)}"
+    assert "syn_routes_1651.deep" in names, (
+        f"하위 패키지 __init__.py 누락: {sorted(names)}"
+    )
+    assert "syn_routes_1651.deep.nested.bar" in names, (
+        f"하위 패키지 모듈(routes/**/*.py) 재귀 미발견 — top-level "
+        f"한정 glob fail-open: {sorted(names)}"
+    )
+    # (modname, path) 쌍의 path 가 실제 소스(flat 재구성 아님)여야 함.
+    assert mods["syn_routes_1651.deep.nested.bar"] == (
+        syn_routes / "deep" / "nested" / "bar.py"
+    ), "하위 패키지 모듈 경로가 실제 소스가 아님(flat rsplit 재구성 잔존)"
+
+    # 하위 패키지 모듈의 Pydantic 검증 entrypoint 가 S1 스캔에 등장.
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        for m in list(sys.modules):
+            if m == "syn_routes_1651" or m.startswith("syn_routes_1651."):
+                del sys.modules[m]
+        sites = _scan_s1_entrypoints()
+    finally:
+        sys.path.remove(str(tmp_path))
+    scanned_mods = {s.module for s in sites}
+    assert "syn_routes_1651.deep.nested.bar" in scanned_mods, (
+        f"하위 패키지 모듈의 raw-body model_validate entrypoint 가 S1 "
+        f"스캔에서 누락(재귀 self-enumerate 미작동 = fail-open): "
+        f"{scanned_mods}"
+    )
+
+
 def test_cv1_origin_complete_canary_helper_literal_dynamic_mix_unresolvable(
     tmp_path: Path,
 ) -> None:
@@ -2171,6 +2310,81 @@ def test_cv1_no_routes_custom_asgi_distinct_from_staticfiles() -> None:
     assert len(c.unresolvable) == 1, (
         f"positive-type 대조 실패 — StaticFiles 와 custom ASGI 가 "
         f"동일 처리(absence 추론 의심): {c.unresolvable}"
+    )
+
+
+def test_cv1_routes_duck_typed_custom_asgi_fail_closed() -> None:
+    """CV1 보강(Codex attempt4 [P2] — unknown/empty-route mount
+    fail-closed): ``routes`` 속성을 가졌지만(``routes=[]`` 포함)
+    **known route-container 타입이 아닌** custom ASGI mount 는
+    positive-type 미증명이므로 단일 ``unresolvable`` 에 충전돼야
+    한다(fail-closed).
+
+    이전 게이트는 ``getattr(sub, "routes", None) is not None`` 라
+    ``routes`` duck-typing 만 있어도(빈 ``routes=[]`` 포함) 재귀 후
+    조용히 통과 → 그런 custom ASGI 가 ``__call__`` 에서 request body/
+    Pydantic 검증을 수행하면 S2 default-deny 가 우회됐다(fail-open).
+    본 canary 는 ``routes`` 속성 존재만으로 통과되지 않고 positive-type
+    증명(known route-container ∨ known-safe non-validation 타입)만이
+    PASS 임을 행위로 고정한다.
+    """
+
+    class _DuckRoutesEmpty:
+        """``routes=[]`` 를 가지나 알려진 route-container 가 아닌
+        custom ASGI(``__call__`` 에서 body 검증 가능)."""
+
+        routes: list[Any] = []
+
+        async def __call__(
+            self, scope: Any, receive: Any, send: Any
+        ) -> None:  # pragma: no cover - 구조 증명용
+            TypeAdapter(dict[str, int]).validate_python({})
+
+    class _DuckRoutesNonEmpty:
+        """``routes`` 가 비어있지 않은 임의 객체 리스트(Starlette route
+        타입 아님) — duck-typing 만으로 재귀하면 오탐."""
+
+        def __init__(self) -> None:
+            self.routes = [object()]
+
+        async def __call__(
+            self, scope: Any, receive: Any, send: Any
+        ) -> None: ...  # pragma: no cover
+
+    parent = FastAPI()
+    parent.mount("/duck-empty", _DuckRoutesEmpty())
+    parent.mount("/duck-nonempty", _DuckRoutesNonEmpty())
+    collected = _collect_s2(parent)
+
+    for tag in ("/duck-empty", "/duck-nonempty"):
+        assert any(tag in u for u in collected.unresolvable), (
+            f"routes duck-typed custom ASGI mount({tag}) 가 단일 "
+            f"unresolvable 에 미충전 — routes 속성/empty-route 만으로 "
+            f"재귀·통과(fail-open): {collected.unresolvable}"
+        )
+    assert not collected.body_models, (
+        "duck-typed custom ASGI mount 로 재귀해 body_models 가 수집됨 "
+        f"(known route-container 가 아닌데 재귀): {collected.body_models}"
+    )
+
+
+def test_cv1_known_empty_route_container_recurses_positive_type() -> None:
+    """CV1 보강(대조): 알려진 route-container 타입은 ``routes=[]`` 로
+    비어 있어도 positive-type 으로 재귀가 완결(검증 surface 0)되어
+    ``unresolvable`` 에 충전되지 않는다.
+
+    fail-closed 가 빈 known 컨테이너까지 잘못 거부하면 false-positive
+    이다. ``Mount(routes=[...])`` 는 Starlette 가 ``Router`` 로
+    wrapping 하므로 known route-container positive-type 면제 경로를
+    탄다(empty known container = surface 0, ≠ unknown ASGI).
+    """
+    parent = FastAPI()
+    parent.routes.append(Mount("/empty-router", routes=[]))
+    parent.mount("/empty-fastapi", FastAPI())
+    collected = _collect_s2(parent)
+    assert not collected.unresolvable, (
+        "known route-container(빈 Router/FastAPI sub-app)가 fail-closed "
+        f"오거부됨(false-positive — empty ≠ unknown): {collected.unresolvable}"
     )
 
 
