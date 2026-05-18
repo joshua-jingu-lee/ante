@@ -39,6 +39,37 @@ account-scoped **construction-lifecycle** CLI 표면 —
    오분류 **아님**: ``rule list``는 기존 ``ACCOUNT_NOT_FOUND`` 유지,
    ``rule info``/``treasury``는 각 기존 동작 불변(ACCOUNT_NOT_FOUND 강제 안 함)
 4. 정상 account_id → 4 표면 기존 동작 유지 (회귀 0)
+
+------------------------------------------------------------------------------
+(#1655, D follow-up — #1623 oracle probe ``account_suspend_default``/
+``account_activate_default`` 축)
+
+account-scoped **account-lifecycle** CLI 표면 — ``account suspend <account_id>``,
+``account activate <account_id>``(둘 다 ``@click.argument`` positional required,
+IPC ``account.suspend``/``account.activate`` dispatch) — 이 제공된 runtime-invalid
+``account_id``(``"default"``/패턴 위반/``""``)를 IPC dispatch **이전** ingress에서
+거부하지 않아 ``ipc_send``→``InvalidAccountIdError``(non-Click ``AccountError``,
+``except click.ClickException`` fallback 미포착)가 **traceback**으로 누출되던
+contract-drift(#1623 ``cli_account_lifecycle_invalid_account_id``)를 같은
+``account.py`` ``account_info``(#1634 Split A)와 1:1 동형인
+``reject_invalid_account_id`` ingress 가드로 닫는다.
+
+``docs/specs/account/14-account-id-contract.md`` 결정표 **D bucket =
+account-lifecycle / cold-path / AccountService mutation → follow-up**의 목표 상태
+(invalid → ``VALIDATION_ERROR``)로 ``account suspend``/``account activate`` 2표면을
+정렬한다(D bucket의 ``account delete`` 등 다른 표면·E bucket·read-family는 범위 밖).
+
+검증축 (이슈 #1655 Verification SSOT):
+
+5. 2 표면 × {``default``, ``bad_id``(패턴 위반), ``""``} × {json, text} →
+   exit ≠ 0 + JSON ``code="VALIDATION_ERROR"`` + traceback **부재**
+6. invalid 입력에서 ``ipc_send`` / ``IPCClient.send`` **미호출** 단언
+   (ingress가 IPC dispatch 이전 차단 — Codex Plan Review 보강)
+7. valid-format **absent** account_id(``acc-9999``)는 ingress helper를 통과해
+   기존 IPC 에러 경로로 흐른다(invalid-format ↔ valid-absent 분리 불변 —
+   Codex Plan Review 보강): VALIDATION_ERROR 오분류 아님 + ``IPCClient.send``
+   도달
+8. 정상 account_id → 2 표면 IPC dispatch 도달·기존 동작 유지 (회귀 0)
 """
 
 from __future__ import annotations
@@ -562,3 +593,214 @@ class TestValidAccountIdRegression:
         assert result.exit_code == 1, result.output
         payload = json.loads(result.output.strip())
         assert payload.get("code") != "VALIDATION_ERROR", payload
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# #1655, D follow-up — account-lifecycle IPC ingress
+# (oracle probe ``account_suspend_default``/``account_activate_default``)
+#
+# ``account suspend``/``account activate``는 IPC ``account.suspend``/
+# ``account.activate`` dispatch라 ``_create_*`` resource 모킹이 아니라
+# ``ipc_send``/``IPCClient`` spy로 검증한다(#1636 Split C 동형). 두 함수는
+# ``from ante.cli.commands.ipc_helpers import ipc_send`` local import이므로
+# ``ante.cli.commands.ipc_helpers.ipc_send`` 패치가 호출 경로를 가린다.
+# ════════════════════════════════════════════════════════════════════════════
+
+
+# account suspend/activate는 positional required arg(omitted 없음). 3종 전부
+# provided로 검증한다 (#1634/#1635 _INVALID_INPUTS 동형: default/패턴위반/"").
+_LIFECYCLE_SURFACES = [
+    ("suspend", ["account", "suspend"], "account.suspend", "정지 완료"),
+    ("activate", ["account", "activate"], "account.activate", "활성화 완료"),
+]
+
+
+def _make_ipc_spy() -> tuple[object, AsyncMock, AsyncMock]:
+    """``ipc_send``/``IPCClient.send`` 이중 spy.
+
+    invalid account_id가 ingress(``reject_invalid_account_id``)에서 막히면
+    ``ipc_send``도 ``IPCClient.send``도 호출되면 안 된다(IPC dispatch 이전
+    차단 — Codex Plan Review 보강). ``ipc_send``는 함수 본문 local import라
+    ``ipc_helpers.ipc_send``를 패치하고, 그 내부에서 도달했을 경우를 대비해
+    ``IPCClient`` 자체도 spy로 둔다(이중 방어).
+    """
+    ipc_send_mock = AsyncMock(
+        side_effect=AssertionError(
+            "invalid account_id가 ipc_send까지 도달했다 (ingress 차단 실패)"
+        )
+    )
+    client_send_mock = AsyncMock(
+        side_effect=AssertionError(
+            "invalid account_id가 IPCClient.send까지 도달했다 (ingress 차단 실패)"
+        )
+    )
+    mock_client = AsyncMock()
+    mock_client.send = client_send_mock
+    client_cls = MagicMock(return_value=mock_client)
+    return client_cls, ipc_send_mock, client_send_mock
+
+
+# ── 축 5/6: 2 표면 × {default, bad_id, ""} × {json,text} → VALIDATION_ERROR ──
+
+
+class TestAccountLifecycleInvalidRejected:
+    """``account suspend``/``account activate`` invalid ingress 거부.
+
+    IPC dispatch **이전** ``reject_invalid_account_id`` 가드(#1634 ``account_info``
+    1:1 동형 미러)가 traceback 누출을 ``VALIDATION_ERROR`` envelope + exit 1로
+    변환하고, ``ipc_send``/``IPCClient.send``가 호출되지 않음을 단언한다.
+    """
+
+    @pytest.mark.parametrize(
+        "name,argv,_ipc_cmd,_success",
+        _LIFECYCLE_SURFACES,
+        ids=[s[0] for s in _LIFECYCLE_SURFACES],
+    )
+    @pytest.mark.parametrize("invalid", _INVALID_INPUTS)
+    def test_invalid_rejected_before_ipc_dispatch_json(
+        self, runner, name, argv, _ipc_cmd, _success, invalid: str
+    ) -> None:
+        client_cls, ipc_send_mock, client_send_mock = _make_ipc_spy()
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send_mock),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", client_cls),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+        ):
+            result = runner.invoke(cli, ["--format", "json", *argv, invalid])
+        _assert_validation_error_envelope(result)
+        # traceback 부재: 예외가 있다면 SystemExit만 허용.
+        if result.exception is not None:
+            assert isinstance(result.exception, SystemExit), (
+                f"[{name} {invalid!r}] 비-SystemExit 예외/traceback: "
+                f"{result.exception!r}"
+            )
+        # IPC dispatch 이전 차단 — ipc_send / IPCClient.send 미호출.
+        ipc_send_mock.assert_not_awaited()
+        client_send_mock.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "name,argv,_ipc_cmd,_success",
+        _LIFECYCLE_SURFACES,
+        ids=[s[0] for s in _LIFECYCLE_SURFACES],
+    )
+    @pytest.mark.parametrize("invalid", _INVALID_INPUTS)
+    def test_invalid_rejected_before_ipc_dispatch_text(
+        self, runner, name, argv, _ipc_cmd, _success, invalid: str
+    ) -> None:
+        """text 모드: exit≠0 + stdout JSON 누출 없음 + traceback 부재."""
+        client_cls, ipc_send_mock, client_send_mock = _make_ipc_spy()
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send_mock),
+            patch("ante.cli.commands.ipc_helpers.IPCClient", client_cls),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+        ):
+            result = runner.invoke(cli, [*argv, invalid])
+        assert result.exit_code != 0, result.output
+        if result.exception is not None:
+            assert isinstance(result.exception, SystemExit), (
+                f"[{name} {invalid!r}] 비-SystemExit 예외/traceback: "
+                f"{result.exception!r}"
+            )
+        assert "Traceback" not in result.output, result.output
+        ipc_send_mock.assert_not_awaited()
+        client_send_mock.assert_not_awaited()
+
+
+# ── 축 7: valid-format absent → ingress 통과해 기존 IPC 에러 경로 ────────────
+
+
+class TestAccountLifecycleValidAbsentNotMisclassified:
+    """패턴 유효·미존재 account_id는 invalid-format으로 오분류되지 않는다.
+
+    valid-but-absent는 ``require_account_id``가 거부하지 않으므로 ingress helper를
+    통과해 기존 IPC 에러 경로로 흐른다(invalid-format ↔ valid-absent 분리 불변 —
+    Codex Plan Review 보강). 서버측 ``account.suspend``/``account.activate``
+    핸들러가 not-found를 내면 ``ipc_send``가 그것을 ``click.ClickException``으로
+    변환한다. 본 테스트는 helper가 그 경로에 VALIDATION_ERROR 오분류를
+    주입하지 않고 ``IPCClient.send``에 valid account_id가 도달함만 못박는다.
+    """
+
+    @pytest.mark.parametrize(
+        "name,argv,ipc_cmd,_success",
+        _LIFECYCLE_SURFACES,
+        ids=[s[0] for s in _LIFECYCLE_SURFACES],
+    )
+    def test_valid_absent_flows_to_existing_ipc_error_path(
+        self, runner, name, argv, ipc_cmd, _success
+    ) -> None:
+        # 서버측 핸들러가 not-found error envelope를 반환하는 상황을 모킹.
+        # ingress helper를 통과하면 IPCClient.send가 valid account_id로
+        # 호출되고, ipc_send가 error 응답을 ClickException으로 변환한다.
+        client_send_mock = AsyncMock(
+            return_value={
+                "status": "error",
+                "error": {
+                    "code": "ACCOUNT_NOT_FOUND",
+                    "message": "계좌를 찾을 수 없습니다",
+                },
+            }
+        )
+        mock_client = AsyncMock()
+        mock_client.send = client_send_mock
+        client_cls = MagicMock(return_value=mock_client)
+        with (
+            patch("ante.cli.commands.ipc_helpers.IPCClient", client_cls),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+        ):
+            result = runner.invoke(cli, ["--format", "json", *argv, _VALID_ABSENT])
+        # ingress 통과 → IPCClient.send가 valid account_id로 도달.
+        client_send_mock.assert_awaited_once()
+        sent_args = client_send_mock.await_args[0]
+        assert sent_args[0] == ipc_cmd, sent_args
+        assert sent_args[1].get("account_id") == _VALID_ABSENT, sent_args
+        # VALIDATION_ERROR 오분류 아님(기존 IPC 에러 경로 보존).
+        assert result.exit_code != 0, result.output
+        if result.output.strip():
+            try:
+                payload = json.loads(result.output.strip())
+                assert payload.get("code") != "VALIDATION_ERROR", payload
+            except json.JSONDecodeError:
+                pass
+
+
+# ── 축 8: 정상 account_id → IPC dispatch 도달·회귀 0 ────────────────────────
+
+
+class TestAccountLifecycleValidRegression:
+    """정상 account_id는 2 표면 모두 기존 IPC dispatch 동작을 유지한다."""
+
+    @pytest.mark.parametrize(
+        "name,argv,ipc_cmd,success",
+        _LIFECYCLE_SURFACES,
+        ids=[s[0] for s in _LIFECYCLE_SURFACES],
+    )
+    def test_valid_account_id_dispatches_ipc(
+        self, runner, name, argv, ipc_cmd, success
+    ) -> None:
+        client_send_mock = AsyncMock(return_value={"status": "ok", "data": {}})
+        mock_client = AsyncMock()
+        mock_client.send = client_send_mock
+        client_cls = MagicMock(return_value=mock_client)
+        with (
+            patch("ante.cli.commands.ipc_helpers.IPCClient", client_cls),
+            patch(
+                "ante.cli.commands.ipc_helpers.get_socket_path",
+                return_value="/tmp/test.sock",
+            ),
+        ):
+            result = runner.invoke(cli, [*argv, _VALID_PRESENT])
+        assert result.exit_code == 0, result.output
+        assert success in result.output, result.output
+        client_send_mock.assert_awaited_once()
+        sent_args = client_send_mock.await_args[0]
+        assert sent_args[0] == ipc_cmd, sent_args
+        assert sent_args[1].get("account_id") == _VALID_PRESENT, sent_args
