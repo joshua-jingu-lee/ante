@@ -664,11 +664,32 @@ class _S1Resolve:
 
 def _trace_generic_helper_model_args(
     site: _EntrypointSite,
-) -> tuple[list[type[BaseModel]], bool]:
+) -> tuple[list[tuple[str, type[BaseModel]]], bool]:
     """제네릭 helper(``model.model_validate``)의 model 인자 추적.
 
     helper 의 ``model`` 파라미터로 전달되는 **모든** 호출 인자를
-    검사한다. 반환: (literal-BaseModel 리스트, all_resolved).
+    검사한다. 반환: ((caller-site, literal-BaseModel) 리스트,
+    all_resolved). ``caller-site`` = 그 helper 호출을 감싸는 **가장
+    가까운 enclosing callable 의 dotted qualname**(즉 helper 를
+    invoke 한 endpoint/handler 함수; 모듈 스코프면 ``"<module>"``).
+
+    INV-1 정밀화(Codex attempt-6 [P2] — attempt-5 enclosing-qualname
+    원칙을 helper-trace 경로에 동일 확장): 이전 구현은 helper 본문
+    내부 단일 ``model.model_validate`` call site 의 sid 와 model 만
+    보존하고 helper 를 **호출한 endpoint** 정보를 버린 채
+    **model-only dedupe** 했다. 같은 BaseModel 을 2개 endpoint 가
+    같은 helper 로 검증하고 그중 **한** handler 만 unsafe dict 필드를
+    pre-reject 하면, model-only dedupe 가 그 dict 노드를 단일
+    site-id 로 만들어 한 endpoint 의 pre-reject proof 가 가드 없는
+    다른 endpoint 에도 재사용된다(attempt-5 와 동일 fail-open class
+    의 helper-trace 변종). 따라서 helper 호출 site 별로 **(caller
+    enclosing-callable-qualname, model)** 단위로 보존한다(model-only
+    dedupe 폐기). 같은 helper·같은 모델이라도 호출 endpoint(enclosing
+    handler)가 다르면 distinct caller-site → distinct site-id →
+    DISCOVERED dict-node 키·``_REGISTERED_DICT_PROOFS`` 키 양쪽 그
+    caller-site 포함(INV-1 set-difference 정합; 가드 없는 caller-site
+    는 자기 proof 없어 UNPROVEN→FAIL).
+
     ``all_resolved`` 는 helper 호출 site 의 model 인자가 **하나도
     빠짐없이** 정적 literal-BaseModel 로 resolve 됐을 때만 True
     (any-match → all-must-resolve, INV-3). literal+dynamic 혼재면
@@ -710,7 +731,13 @@ def _trace_generic_helper_model_args(
         return [], False
 
     helper_name = enclosing.name
-    models: list[type[BaseModel]] = []
+    # (caller-site, model) 쌍 — model-only dedupe 폐기(INV-1 정밀화).
+    # caller-site = helper 호출 노드를 감싸는 enclosing callable
+    # qualname(helper 를 invoke 한 endpoint/handler). 같은
+    # (caller-site, model) 만 dedupe(같은 endpoint 안 동일 helper·
+    # 동일 모델 2회 호출은 동일 가드 context — 자연 floor).
+    pairs: list[tuple[str, type[BaseModel]]] = []
+    seen_pairs: set[tuple[str, int]] = set()
     all_resolved = True
     saw_call = False
     for node in ast.walk(tree):
@@ -725,6 +752,10 @@ def _trace_generic_helper_model_args(
         if called != helper_name:
             continue
         saw_call = True
+        # 이 helper 호출을 감싸는 enclosing callable(=helper 를 invoke
+        # 한 endpoint/handler) qualname — attempt-5 site-id 원칙을
+        # helper-trace caller 경로에 동일 적용.
+        caller_site = _enclosing_callable_qualname(tree, node)
         # 이 helper 호출에서 receiver 파라미터로 전달되는 인자를 찾는다
         # (positional index 우선, 없으면 keyword).
         arg_node: ast.expr | None = None
@@ -742,14 +773,16 @@ def _trace_generic_helper_model_args(
         if isinstance(arg_node, ast.Name):
             resolved = _resolve_name_in_module(modname, arg_node.id)
             if isinstance(resolved, type) and issubclass(resolved, BaseModel):
-                if resolved not in models:
-                    models.append(resolved)
+                pk = (caller_site, id(resolved))
+                if pk not in seen_pairs:
+                    seen_pairs.add(pk)
+                    pairs.append((caller_site, resolved))
                 continue
         # 변수/표현식/비-BaseModel literal → 정적 resolve 불가.
         all_resolved = False
     if not saw_call:
         return [], False
-    return models, all_resolved
+    return pairs, all_resolved
 
 
 def _resolve_s1() -> _S1Resolve:
@@ -784,8 +817,8 @@ def _resolve_s1() -> _S1Resolve:
             )
             continue
         if recv.isidentifier():
-            models, all_resolved = _trace_generic_helper_model_args(site)
-            if not all_resolved or not models:
+            pairs, all_resolved = _trace_generic_helper_model_args(site)
+            if not all_resolved or not pairs:
                 # any-match → all-must-resolve: literal+dynamic 혼재
                 # 또는 추적 불가 → site 전체 단일 unresolvable.
                 res.unresolvable.append(
@@ -794,30 +827,163 @@ def _resolve_s1() -> _S1Resolve:
                     "all-must-resolve; literal+dynamic 혼재/추적불가)"
                 )
                 continue
-            for m in models:
-                res.models.append((f"{sid}#{m.__name__}", m))
+            # INV-1 정밀화(attempt-6 [P2]): helper-trace site-id 의
+            # **enclosing 세그먼트를 helper 내부(site.enclosing)가
+            # 아니라 helper 를 invoke 한 caller endpoint qualname**
+            # 으로 둔다. 같은 helper·같은 모델이라도 caller endpoint
+            # 가 다르면 distinct enclosing 세그먼트 → ``_stable_s1_site``
+            # 정규화 후에도 distinct stable site-id 가 되어 한 endpoint
+            # 의 pre-reject proof 가 가드 없는 다른 endpoint dict 노드로
+            # 재사용되지 않는다(attempt-5 와 동형의 helper-trace 변종
+            # fail-open 차단). sid 형식(``module:lineno:enclosing:
+            # callee_src``)·4-세그먼트 split 불변 — enclosing 세그먼트만
+            # caller_site 로 치환하고 ``#Model`` 은 callee_src 마지막
+            # 세그먼트에 부착(``:`` 무포함 유지).
+            for caller_site, m in pairs:
+                helper_sid = (
+                    f"{site.module}:{site.lineno}:{caller_site}:"
+                    f"{site.callee_src}#{m.__name__}"
+                )
+                res.models.append((helper_sid, m))
             continue
         res.unresolvable.append(f"{sid} → receiver 정적 resolve 불가")
     return res
 
 
-def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
-    """raw-body ValidationError 처리 site 와 chokepoint 호출 수.
+def _ref_terminal_name(node: ast.expr) -> str | None:
+    """``Name``/``Attribute`` 참조의 **말단 식별자**(점 접근의 마지막
+    attr; ``pydantic.ValidationError`` → ``ValidationError``,
+    ``ValidationError`` → ``ValidationError``). 그 외 None.
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
 
-    origin-complete: 모든 raw-body ``except ValidationError`` site 가
-    chokepoint ``sanitize_validation_errors`` 를 detail 로 사용해야
-    한다(직접 ``e.errors(...)`` detail 잔존 0 — #1650 SSOT). 본 스캔은
-    AST/텍스트로 self-derive(하드코딩 카운트 없음).
+
+def _except_handles_validation_error(handler: ast.ExceptHandler) -> bool:
+    """``except`` handler 타입 표현이 ``ValidationError`` 를 잡는가.
+
+    ``except ValidationError``, ``except pydantic.ValidationError``,
+    ``except (X, ValidationError)``, ``except (A | ValidationError)``
+    형태를 모두 인식한다(말단 식별자 == ``ValidationError`` 인
+    Name/Attribute 가 타입 표현 트리 어디에든 있으면 True). bare
+    ``except:``/타입 미지정은 False(본 게이트는 ValidationError 전용).
+    """
+    t = handler.type
+    if t is None:
+        return False
+    for n in ast.walk(t):
+        if isinstance(n, (ast.Name, ast.Attribute)):
+            if _ref_terminal_name(n) == "ValidationError":
+                return True
+    return False
+
+
+def _exception_alias_names(handler: ast.ExceptHandler) -> set[str]:
+    """handler 본문에서 ``as <name>`` 예외 객체 **및 그 단순 별칭**
+    변수 이름 집합을 도출(``v = <alias>`` 단순 대입 전이 폐포).
+
+    ``except ... as e:`` 의 ``e`` 에서 시작해, handler 본문의
+    ``x = e`` / ``y = x`` 같은 **Name→Name 단순 대입**을 고정점까지
+    전파한다. 이로써 ``errs = e; errs.errors(...)`` 같은 변수 경유
+    직접 호출도 그 receiver(``errs``)가 별칭 집합에 들어가 위반으로
+    잡힌다(substring 으로는 못 잡던 변수 경유 우회 차단). ``as``
+    이름이 없으면(``except ValidationError:``) 빈 집합.
+    """
+    if handler.name is None:
+        return set()
+    aliases: set[str] = {handler.name}
+    # 고정점 — 새 별칭이 더 생기지 않을 때까지 본문 Assign 재스캔.
+    changed = True
+    while changed:
+        changed = False
+        for stmt in handler.body:
+            for node in ast.walk(stmt):
+                if not isinstance(node, ast.Assign):
+                    continue
+                val = node.value
+                if not (isinstance(val, ast.Name) and val.id in aliases):
+                    continue
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id not in aliases:
+                        aliases.add(tgt.id)
+                        changed = True
+    return aliases
+
+
+def _scan_chokepoint_and_error_sites() -> tuple[int, int]:
+    """raw-body ValidationError 처리 site 의 chokepoint vs 직접
+    ``.errors(...)`` 호출 수 — **AST 의미 검사**(substring 폐기).
+
+    origin-complete (#1650/#1629 SSOT): 모든 raw-body
+    ``except (...ValidationError...) as <name>:`` handler 안에서 그
+    예외 객체(``<name>`` **및 그 단순 별칭**)의 422 detail 생성은
+    **반드시 ``sanitize_validation_errors(<name|alias>)`` 단일
+    chokepoint** 만 거쳐야 하고, 그 예외 객체에 대한 **직접
+    ``<name|alias>.errors(...)`` 호출은 0** 이어야 한다.
+
+    이전 구현은 정확 substring
+    ``detail=e.errors(include_context=False, include_input=False)``
+    만 셌다 — 변수명 차이(``exc.errors(...)``)·중간 변수
+    (``errs = e.errors(...); detail=errs``)·kwarg 순서/목록 차이·
+    줄바꿈 차이면 매칭 실패해 ``direct == 0`` 으로 통과(fail-open;
+    새 raw-body handler 가 그런 형태로 chokepoint 를 우회하면 lock
+    이 못 막음). 본 스캔은 AST 로:
+
+    - ``choke`` += handler 본문의 ``Call`` 중 ``func`` 가
+      ``Name(<chokepoint>)`` 이고 인자에 예외 별칭 Name 이 1개 이상
+      섞인 호출 수(kwarg/줄바꿈 무관).
+    - ``direct`` += handler 본문의 ``Call`` 중 ``func`` 가
+      ``Attribute(attr='errors')`` 이고 **receiver(``func.value``)가
+      예외 별칭 Name** 인 호출 수(substring 형태·kwarg 순서·
+      변수명·줄바꿈 전부 무관 — 호출 대상 attribute 가 ``.errors``
+      이고 receiver 가 그 ValidationError 객체/별칭이면 위반).
+      ``sanitize_validation_errors(e)`` 안에서 ``e`` 를 인자로만
+      넘기는 것은 receiver 가 아니므로 ``direct`` 로 안 셈 —
+      chokepoint 단일 sink 만 통과.
+
+    하드코딩 카운트 없음 — routes/**/*.py AST self-derive.
     """
     choke = 0
     direct = 0
     for _modname, path in _route_modules():
-        text = path.read_text()
-        choke += text.count(f"detail={_CHOKEPOINT_NAME}(e),")
-        if "detail=e.errors(include_context=False, include_input=False)" in text:
-            direct += text.count(
-                "detail=e.errors(include_context=False, include_input=False)"
-            )
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for handler in ast.walk(tree):
+            if not isinstance(handler, ast.ExceptHandler):
+                continue
+            if not _except_handles_validation_error(handler):
+                continue
+            aliases = _exception_alias_names(handler)
+            if not aliases:
+                # ``except ValidationError:`` (별칭 없음) — 예외
+                # 객체를 직접 못 다루므로 chokepoint/direct 산정
+                # 대상 없음. (현 SSOT 는 항상 ``as e`` 를 쓴다.)
+                continue
+            for node in ast.walk(handler):
+                if not isinstance(node, ast.Call):
+                    continue
+                f = node.func
+                # 직접 ``<exc|alias>.errors(...)`` — receiver 가
+                # 예외 별칭 Name 이면 위반(형태/kwarg 무관).
+                if (
+                    isinstance(f, ast.Attribute)
+                    and f.attr == "errors"
+                    and isinstance(f.value, ast.Name)
+                    and f.value.id in aliases
+                ):
+                    direct += 1
+                    continue
+                # chokepoint ``sanitize_validation_errors(<exc|alias>)``
+                # — 인자(positional/keyword) 중 예외 별칭 Name 이
+                # 1개 이상.
+                if isinstance(f, ast.Name) and f.id == _CHOKEPOINT_NAME:
+                    arg_exprs = list(node.args) + [kw.value for kw in node.keywords]
+                    if any(
+                        isinstance(a, ast.Name) and a.id in aliases for a in arg_exprs
+                    ):
+                        choke += 1
     return choke, direct
 
 
@@ -1957,6 +2123,229 @@ def test_attempt5_same_module_same_model_multi_handler_no_overmerge(
     )
 
 
+def test_attempt6_same_helper_same_model_multi_endpoint_caller_site_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-6 회귀 canary ① (Codex [P2] — helper-trace caller-site
+    과병합 영구 락; attempt-5 enclosing-qualname 원칙을 helper-trace
+    경로에 확장):
+
+    **같은 제네릭 helper**(``model.model_validate``)를 **같은 모델**
+    (비-``dict[str,Any]`` dict 필드 보유)로 검증하는 endpoint 가 2개
+    이고 그중 **하나만** pre-reject 가드가 있을 때, 가드 없는
+    endpoint 의 dict 노드가 가드 있는 endpoint 의 proof 로
+    재사용되지 않고 UNPROVEN→FAIL 함을 단언한다.
+
+    이전 ``_trace_generic_helper_model_args`` 는 helper 본문 내부
+    단일 ``model.model_validate`` call site 의 sid·model 만 보존하고
+    **model-only dedupe** 했다(같은 모델이면 1개로 합침). 그러면
+    같은 helper 를 ``endpoint_a``(가드 有 개념)/``endpoint_b``(가드
+    無)가 **같은 모델**로 호출해도 단일 site-id 로 과병합돼,
+    ``endpoint_a`` 의 pre-reject proof 키가 가드 없는 ``endpoint_b``
+    dict 노드에도 매칭돼 discovery lock 이 fail-open PASS 했다
+    (attempt-5 와 동형의 helper-trace 변종 fail-open class).
+
+    본 canary 는 (a) 두 caller endpoint 가 **distinct** stable
+    site-id(caller enclosing-qualname 이 다름)를 가짐을 단언하고,
+    (b) ``endpoint_a`` site dict 노드만 proof 등록한 상태로
+    ``compute_verdict`` 가 ``endpoint_b`` dict 노드를 UNPROVEN 으로
+    FAIL 시킴을 단언한다. **old 코드(model-only dedupe — helper
+    내부 site 단일화)에서는 (a)/(b) 모두 red** — 영구 회귀 락.
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a6"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # 제네릭 helper 가 같은 모델(SameReq — 비-dict[str,Any] dict 필드
+    # 보유 → dict 노드 발생)을 2개 endpoint(endpoint_a/endpoint_b)
+    # 에서 검증. lock 관점 둘은 distinct caller-site 여야 한다.
+    (syn_routes / "shared.py").write_text(
+        "from pydantic import BaseModel\n"
+        "\n"
+        "class SameReq(BaseModel):\n"
+        "    creds: dict[str, str] = {}\n"
+        "\n"
+        "def _parse(payload, model):\n"
+        "    return model.model_validate(payload)\n"
+        "\n"
+        "def endpoint_a(payload):\n"
+        "    return _parse(payload, SameReq)\n"
+        "\n"
+        "def endpoint_b(payload):\n"
+        "    return _parse(payload, SameReq)\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a6")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a6" or m.startswith("syn_routes_1651_a6."):
+                del sys.modules[m]
+        s1 = _resolve_s1()
+    finally:
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a6" or m.startswith("syn_routes_1651_a6."):
+                del sys.modules[m]
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    # (a) 두 caller endpoint 가 distinct stable site-id 를 가져야
+    # 한다(helper 내부가 아니라 caller endpoint qualname 이 enclosing
+    # 세그먼트). 같은 helper·같은 모델이라도 caller 가 다르면 분리.
+    stable_sites = {_stable_s1_site(sid) for sid, _m in s1.models}
+    site_a = "syn_routes_1651_a6.shared:endpoint_a:model.model_validate#SameReq"
+    site_b = "syn_routes_1651_a6.shared:endpoint_b:model.model_validate#SameReq"
+    assert site_a in stable_sites and site_b in stable_sites, (
+        "attempt-6 helper-trace 과병합 회귀 — 같은 helper·같은 "
+        "모델을 검증하는 2개 caller endpoint 가 caller "
+        "enclosing-qualname 보존 distinct site-id 로 분리되지 "
+        f"않음(old model-only dedupe 재발): {sorted(stable_sites)}"
+    )
+    assert site_a != site_b, "site_a/site_b 동일 — 과병합(canary 무효)"
+    assert not s1.unresolvable, (
+        "synthetic helper 가 all-must-resolve 인데 unresolvable "
+        f"(canary 무효 — INV-3 회귀): {s1.unresolvable}"
+    )
+
+    # DISCOVERED dict 노드: 두 caller site 각각에 (SameReq, creds,
+    # site) 가 별도로 발견돼야 한다(과병합이면 1개로 합쳐짐).
+    surf = _SurfaceModels(
+        site_models=[(_stable_s1_site(sid), m) for sid, m in s1.models],
+        site_roots=[],
+        unresolvable=list(s1.unresolvable),
+    )
+    disc = _discover_all(surf)
+    node_a = ("SameReq", "creds", site_a)
+    node_b = ("SameReq", "creds", site_b)
+    assert node_a in disc.dict_nodes and node_b in disc.dict_nodes, (
+        "attempt-6 helper-trace 과병합 회귀 — caller endpoint 별 "
+        f"distinct dict 노드 (owner,field,site) 미생성: "
+        f"{sorted(disc.dict_nodes)}"
+    )
+
+    # (b) endpoint_a site dict 노드만 proof 등록 → endpoint_b dict
+    # 노드는 UNPROVEN 으로 FAIL 해야 한다(과병합이면 site_a proof 가
+    # 가드 없는 site_b 노드까지 덮어 fail-open PASS).
+    registered_a_only = frozenset({node_a})
+    verdict = compute_verdict(
+        disc,
+        surf.unresolvable,
+        registered_dict_keys=registered_a_only,
+        registered_validator_ids=frozenset(),
+    )
+    assert not verdict.ok, (
+        "attempt-6 helper-trace 과병합 fail-open 재발 — endpoint_a "
+        "site proof 만 등록했는데 lock PASS(가드 없는 endpoint_b "
+        "dict 노드가 endpoint_a proof 로 재사용됨): "
+        f"unproven_dict={verdict.unproven_dict}"
+    )
+    assert node_b in set(verdict.unproven_dict), (
+        "attempt-6 — 가드 없는 endpoint_b 의 dict 노드가 UNPROVEN "
+        f"으로 떨어지지 않음: unproven={verdict.unproven_dict}"
+    )
+    assert node_a not in set(verdict.unproven_dict), (
+        "endpoint_a dict 노드는 proof 등록됐으므로 PROVEN 이어야 함 "
+        f"(per-caller-site 1:1 결합 회귀): unproven={verdict.unproven_dict}"
+    )
+
+
+def test_attempt6_variant_validationerror_handler_ast_semantic_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-6 회귀 canary ② (Codex [P2] — ValidationError-handler
+    AST 의미 게이트 영구 락; substring count 폐기):
+
+    chokepoint(``sanitize_validation_errors``)를 우회해 raw-body
+    handler 가 **직접 ``<exc>.errors(...)``** 로 422 detail 을
+    만드는데, substring 매칭이 못 잡는 **variant** 형태(다른 변수명
+    ``exc`` · 중간 변수 ``errs = exc.errors(...)`` · kwarg 순서
+    뒤바꿈 · 줄바꿈 차이)일 때 AST 의미 검사가 그것을 **direct**
+    로 잡아 ``direct > 0`` 으로 FAIL 함을 단언한다.
+
+    **old 코드(정확 substring
+    ``detail=e.errors(include_context=False, include_input=False)``
+    카운트)에서는 이 variant 가 매칭 실패해 ``direct == 0`` 으로
+    통과(fail-open)** — 영구 회귀 락. 동시에 정상 chokepoint
+    handler 는 ``direct == 0 ∧ choke > 0`` 으로 통과함을 확인한다
+    (강화가 정상 패턴을 false-positive 로 깨지 않음).
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a6e"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # variant bypass handler: 다른 변수명(exc)·중간 변수(errs)·
+    # kwarg 순서 뒤바꿈(include_input 먼저)·줄바꿈 — substring
+    # ``detail=e.errors(include_context=False, include_input=False)``
+    # 와 한 글자도 안 맞지만 의미상 직접 e.errors() detail 우회.
+    (syn_routes / "bypass.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "\n"
+        "class Req(BaseModel):\n"
+        "    x: int\n"
+        "\n"
+        "def handler(payload):\n"
+        "    try:\n"
+        "        return Req.model_validate(payload)\n"
+        "    except ValidationError as exc:\n"
+        "        errs = exc.errors(\n"
+        "            include_input=False,\n"
+        "            include_context=False,\n"
+        "        )\n"
+        "        raise HTTPException(status_code=422, detail=errs) from None\n"
+    )
+    # 정상 chokepoint handler — 강화가 이걸 false-positive 로 깨지
+    # 않아야 한다(direct 0 · choke 1).
+    (syn_routes / "ok.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "from ante.web.errors import sanitize_validation_errors\n"
+        "\n"
+        "class OkReq(BaseModel):\n"
+        "    x: int\n"
+        "\n"
+        "def ok_handler(payload):\n"
+        "    try:\n"
+        "        return OkReq.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        "            detail=sanitize_validation_errors(e),\n"
+        "        ) from None\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a6e")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        choke, direct = _scan_chokepoint_and_error_sites()
+    finally:
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    assert direct >= 1, (
+        "attempt-6 ValidationError-handler AST 게이트 회귀 — variant "
+        "직접 ``exc.errors(...)`` (다른 변수명·중간 변수·kwarg 순서·"
+        "줄바꿈)이 direct 로 안 잡힘(old substring count fail-open "
+        f"재발): direct={direct}"
+    )
+    assert choke >= 1, (
+        "정상 chokepoint handler 가 choke 로 안 잡힘 — AST 의미 "
+        f"검사가 정상 패턴을 false-negative: choke={choke}"
+    )
+
+
 # ════════════════════════════════════════════════════════════════════
 # CV1: fail-closed FastAPI introspection canary
 # ════════════════════════════════════════════════════════════════════
@@ -2402,7 +2791,7 @@ def test_cv1_origin_complete_canary_helper_literal_dynamic_mix_unresolvable(
             method="model_validate",
             enclosing="helper",
         )
-        models, all_resolved = _trace_generic_helper_model_args(site)
+        pairs, all_resolved = _trace_generic_helper_model_args(site)
     finally:
         sys.modules.pop(modname, None)
         if str(tmp_path) in sys.path:
@@ -2412,7 +2801,7 @@ def test_cv1_origin_complete_canary_helper_literal_dynamic_mix_unresolvable(
     assert not all_resolved, (
         "S1b canary ② 위반 — literal+dynamic 혼재 helper 가 "
         "all-must-resolve 로 unresolvable 판정되지 않음(any-match "
-        f"fail-open): models={[m.__name__ for m in models]}"
+        f"fail-open): pairs={[(cs, m.__name__) for cs, m in pairs]}"
     )
 
 
