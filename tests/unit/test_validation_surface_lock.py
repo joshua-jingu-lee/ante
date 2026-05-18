@@ -75,7 +75,6 @@ import collections.abc
 import dataclasses
 import enum
 import importlib
-import re
 import types
 import typing
 from decimal import Decimal
@@ -265,32 +264,39 @@ class Discovered:
 
 
 def _owner_field_key(
-    owner: type | None, path: str, validating_site: str
+    owner: type | None, field_path: tuple[str, ...], validating_site: str
 ) -> tuple[str, str, str]:
     """비-``dict[str,Any]`` dict 노드를 **(owner qualname,
-    owner-relative field/annotation-path, validating-site)** 키로
-    정규화(INV-1 정밀화 — site 포함).
+    caller-visible static schema full field-path, validating-site)**
+    키로 정규화(INV-1 — site 포함 + full-path).
 
-    walker path 형식: ``<root>...<Owner>.<field>`` + container/Union
-    위치 표식(``|N``/``[N]``). 매칭 키는 owner qualname + container
-    인덱스 표식을 제거한 owner-relative field-path + **그 노드가
-    검증되는 site** 다. 같은 owner 라도 **다른** ``dict[str,T]``
-    필드가 추가되면 그 (owner,field,site) 가 별도 키가 되고, **같은
-    (owner,field) 라도 다른 검증-site**(S1 callee / S2
-    route+entrypoint)에서 발견되면 그 site 별 키가 별도가 되어 한
-    site 의 pre-reject 증명이 가드 없는 다른 site 로 재사용되지
-    않는다(per-(owner,field,site) — fail-open 차단).
+    ``field_path`` = 루트 요청 모델부터 그 dict 노드까지의 **부모
+    필드명 경로 전체**(``("a", "creds")`` — Annotated unwrap·Union·
+    container 인덱스는 필드가 아니므로 미포함; 해석 B). 매칭 키의
+    path 성분은 ``".".join(field_path)`` 전체다 — **마지막-owner
+    suffix 정규화 폐기**([P2] nested full-path key).
+
+    이전 구현은 path 문자열에서 마지막 owner qualname 이후 suffix
+    만 남겼다. 동일 nested ``BaseModel`` 타입이 한 요청 모델의 **두
+    필드에 재사용**되고 그 nested 에 unsafe dict 필드가 있으면
+    (``Parent.a: Inner`` / ``Parent.b: Inner``, ``Inner.creds:
+    dict[str,str]``), 두 경로의 최종 owner(``Inner``)·필드(``creds``)
+    가 같아 ``(Inner, creds, site)`` 단일 키로 **병합**됐다. 그러면
+    ``Parent.a`` 경로의 pre-reject proof 가 무가드 ``Parent.b``
+    경로까지 덮어 fail-open. full static schema path 를 보존하면
+    ``(Inner, a.creds, site)`` ≠ ``(Inner, b.creds, site)`` 로
+    distinct → 각 부모 경로가 자기 pre-reject proof 필요(무가드
+    경로 UNPROVEN→FAIL). 같은 owner 라도 **다른** ``dict[str,T]``
+    필드가 추가되면 별 키, **같은 (owner,field-path) 라도 다른
+    검증-site**(S1 callee / S2 route+entrypoint)면 site 별 키가 별도
+    (per-(owner,full-path,site) — fail-open 차단).
+
+    flat top-level dict 필드(``AccountUpdateRequest.credentials``)는
+    부모 필드 경로가 단일 필드뿐이라 ``field_path == ("credentials",)``
+    → path 성분 ``"credentials"``(기존 registry 키 불변 — 회귀 없음).
     """
     oq = owner.__qualname__ if owner is not None else "<root>"
-    cleaned = re.sub(r"[|\[][0-9]+\]?", "", path)
-    segs = [s for s in cleaned.split(".") if s]
-    field = segs[-1] if segs else cleaned
-    last_idx = -1
-    for i, s in enumerate(segs):
-        if s == oq:
-            last_idx = i
-    if last_idx != -1 and last_idx + 1 < len(segs):
-        field = ".".join(segs[last_idx + 1 :])
+    field = ".".join(field_path) if field_path else ""
     return (oq, field, validating_site)
 
 
@@ -302,6 +308,7 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
     validating_site: str,
     seen: frozenset[int] = frozenset(),
     owner: type | None = None,
+    field_path: tuple[str, ...] = (),
 ) -> None:
     """annotation 타입 트리 **verdict-free** enumeration (INV-2).
 
@@ -316,6 +323,14 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
     unknown)는 ``unsafe_nodes`` (REGISTERED_STATIC 으로 해제 불가).
     해석 B: bounded 정수 element 인덱스 자체는 위반 아님 — container
     를 인덱스 사유로 unsafe 기록하지 않는다(element TYPE 만 재귀).
+
+    ``field_path`` = 루트 요청 모델부터 현재 노드까지의 **부모 필드명
+    경로**([P2] nested full-path key). BaseModel 필드 진입 시에만
+    그 필드명을 append 하며(Annotated unwrap·Union·container 인덱스
+    재귀는 필드가 아니므로 그대로 전달 — 해석 B 인덱스 면제), dict
+    노드 키의 path 성분으로 그 full-path 전체를 쓴다(마지막-owner
+    suffix 정규화 폐기 — 동일 nested 타입 2필드 재사용 시 부모 경로가
+    달라 distinct 키).
     """
     # leaf-safe — 안전. 아무것도 기록하지 않고 종료(자식 없음).
     if _is_leaf_safe(tp):
@@ -333,7 +348,13 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
         if _validator_markers(args[1:]):
             disc.validator_surfaces.add(f"{path}::Annotated[*Validator]")
         _discover(
-            inner, path, disc, validating_site=validating_site, seen=seen, owner=owner
+            inner,
+            path,
+            disc,
+            validating_site=validating_site,
+            seen=seen,
+            owner=owner,
+            field_path=field_path,
         )
         return
 
@@ -351,6 +372,7 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
                 validating_site=validating_site,
                 seen=seen,
                 owner=owner,
+                field_path=field_path,
             )
         return
 
@@ -364,8 +386,9 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
         )
         if is_exact_str_any:
             return
-        # 비-dict[str,Any] dict 노드 — (owner,field,site) 키로 기록.
-        disc.dict_nodes.add(_owner_field_key(owner, path, validating_site))
+        # 비-dict[str,Any] dict 노드 — (owner, full field-path, site)
+        # 키로 기록(마지막-owner suffix 아님 — [P2] nested full-path).
+        disc.dict_nodes.add(_owner_field_key(owner, field_path, validating_site))
         return
 
     # 인식 container — element TYPE 만 재귀(해석 B: 인덱스 자체는
@@ -385,6 +408,7 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
                 validating_site=validating_site,
                 seen=seen,
                 owner=owner,
+                field_path=field_path,
             )
         return
 
@@ -425,7 +449,11 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
             fpath = f"{path}.{tp.__qualname__}.{fname}"
             if _validator_markers(getattr(fi, "metadata", []) or []):
                 disc.validator_surfaces.add(_field_annotated_validator_sid(tp, fname))
-            # owner = 이 BaseModel — 자식 dict 노드 (owner,field,site) 귀속.
+            # owner = 이 BaseModel — 자식 dict 노드 (owner,field,site)
+            # 귀속. field_path 에 이 필드명 append([P2] full-path —
+            # 같은 nested 타입이 2필드 재사용돼도 부모 경로가 달라
+            # distinct 키; root 모델 자신의 필드부터 기록되므로 flat
+            # 필드는 단일 성분 ``(fname,)`` = 기존 registry 키 불변).
             _discover(
                 fi.annotation,
                 fpath,
@@ -433,6 +461,7 @@ def _discover(  # noqa: C901 - enumeration 은 단일 책임이나 타입 분기
                 validating_site=validating_site,
                 seen=child_seen,
                 owner=tp,
+                field_path=(*field_path, fname),
             )
         return
 
@@ -714,9 +743,41 @@ def _is_raw_body_parsed_call(e: ast.expr) -> bool:
     )
 
 
+def _is_body_derived_value(v: ast.expr, raw_body_names: set[str]) -> bool:
+    """``v`` 가 caller-controlled parsed-body 에서 **파생된** 값인가
+    (S1a [P2] body-kwarg 생성자-경로 탐지용 — 파생 폐포).
+
+    body-derived = (a) raw-body parsed-object **그 자체**
+    (``payload`` tainted Name · ``await request.json()`` /
+    ``json.loads(raw)`` 직접 호출), 또는 (b) 그 parsed-object 의
+    임의 **subscript/attribute 파생 체인**(``payload["credentials"]``
+    · ``payload.credentials`` · ``body["a"]["b"]`` · ``await
+    request.json()["x"]``). subscript key/attr 체인을 끝까지 벗겨
+    말단 base 가 tainted Name 또는 raw-body parsed call 이면 True.
+
+    이 술어는 ``Req(credentials=payload["credentials"], ...)`` 처럼
+    parsed body 의 **필드값을 BaseModel 생성자 인자**(kwarg 포함)로
+    넘기는 경로를 잡기 위한 것이다 — Pydantic 이 그 dict 필드의
+    caller-controlled key/value 를 검증해 422 ``loc`` 에 반사할 수
+    있어 lock 우회 벡터다. ``_raw_body_tainted_names`` 의 exact-value
+    closure(unpack/positional 형태가 쓰는 attribute/subscript
+    **비**전파)는 그대로 두고, 본 술어만 파생 체인을 추적한다
+    (over-taint 로 무관한 일반 객체 생성을 잡지 않도록 호출측에서
+    callee BaseModel-positive-resolve 게이트와 결합 — 모호성은
+    positive 증명으로만 해소).
+    """
+    cur: ast.expr = v
+    # subscript/attribute 파생 체인을 말단 base 까지 벗긴다.
+    while isinstance(cur, (ast.Subscript, ast.Attribute)):
+        cur = cur.value
+    if isinstance(cur, ast.Name) and cur.id in raw_body_names:
+        return True
+    return _is_raw_body_parsed_call(cur)
+
+
 def _ctor_raw_body_form(call: ast.Call, raw_body_names: set[str]) -> str | None:
-    """생성자 호출 인자가 caller-controlled raw-body parsed-object
-    **그 자체**를 검증 입력으로 받는 형태인가, 그렇다면 어떤 형태인가.
+    """생성자 호출 인자가 caller-controlled raw-body 입력을 검증 입력
+    으로 받는 형태인가, 그렇다면 어떤 형태인가.
 
     반환:
     - ``"unpack"`` — ``Req(**payload)`` / ``Req(**await
@@ -732,11 +793,23 @@ def _ctor_raw_body_form(call: ast.Call, raw_body_names: set[str]) -> str | None:
       callee 가 정적 BaseModel 서브클래스로 resolve 될 때만 검증
       site 로 채택한다(그 외엔 무관한 builtin/helper — false-positive
       0). 모호성은 BaseModel-resolve 라는 positive 증명으로만 해소.
-    - ``None`` — raw-body parsed-object 자체가 인자가 아님
-      (``body.bot_id``/``payload["k"]``/f-string/literal 등 파생값,
-      또는 raw-body 무관). 검증-source 동일성 없음 → 생성자-경로
-      검증 아님(``BotConfig(bot_id=body.bot_id)``/``HTTPException``/
-      ``isinstance``/``Path(p)`` false-positive 차단).
+    - ``"kwarg"`` — ``Req(credentials=payload["credentials"], ...)``
+      (S1a [P2] 완결): parsed body 에서 **파생된 값**(subscript/attr
+      체인 ``payload["x"]``/``body.x``/raw-body call 파생)이
+      BaseModel 생성자의 **임의 인자**(keyword/positional/``**``)로
+      흘러가는 형태. Pydantic 이 그 인자로 받은 dict 필드의
+      caller-controlled key/value 를 검증해 422 ``loc`` 에 반사할 수
+      있어 unpack/positional 만 보던 attempt-8 탐지의 우회 벡터다.
+      ``len(payload)``/``BotConfig(bot_id=body.bot_id)`` 같은 builtin/
+      무관 객체 생성과 형태가 모호하므로 positional 과 동일하게
+      callee BaseModel-positive-resolve 시에만 site(호출측 게이트 —
+      false-positive 0). unpack/positional 보다 **약한** 형태이므로
+      그 둘에 매칭되지 않은 경우에만 평가한다.
+    - ``None`` — body-파생값이 어떤 인자로도 안 감(상수/literal/
+      raw-body 무관 인자만, 또는 raw-body 자체가 함수 안에 없음).
+      검증-source 파생 없음 → 생성자-경로 검증 아님
+      (``HTTPException``/``isinstance``/``Path(p)``/``_Helper(a=1)``
+      false-positive 차단).
     """
 
     def _is_raw_body_value(v: ast.expr) -> bool:
@@ -755,6 +828,19 @@ def _ctor_raw_body_form(call: ast.Call, raw_body_names: set[str]) -> str | None:
         only = call.args[0]
         if not isinstance(only, ast.Starred) and _is_raw_body_value(only):
             return "positional"
+    # body-파생값(subscript/attr 체인)이 **임의 생성자 인자**(kwarg
+    # 포함)로 흘러가는 형태 — parsed body 의 필드값을 BaseModel
+    # 생성자 인자로 넘기는 우회(``Req(credentials=payload["x"])``).
+    # positional 과 동형으로 모호 → callee BaseModel-positive-resolve
+    # 게이트(호출측)에서만 site 채택(false-positive 0). positional
+    # 인자·keyword 인자·``**``-인자 어디든 1개라도 body-파생이면 True.
+    arg_exprs: list[ast.expr] = []
+    for a in call.args:
+        arg_exprs.append(a.value if isinstance(a, ast.Starred) else a)
+    arg_exprs.extend(kw.value for kw in call.keywords)
+    for a in arg_exprs:
+        if _is_body_derived_value(a, raw_body_names):
+            return "kwarg"
     return None
 
 
@@ -802,12 +888,16 @@ def _scan_s1_entrypoints() -> list[_EntrypointSite]:
                 continue
             # BaseModel 생성자-경로 검증 탐지 (S1a/INV-3 [P2]).
             # callee 가 단순 이름(``Req``) 또는 점 접근(``m.Req``)인
-            # 생성자 호출만 후보 — 생성자 인자가 caller-controlled
+            # 생성자 호출만 후보. 생성자 인자가 caller-controlled
             # raw-body parsed-object **그 자체**(``Req(**payload)``/
-            # ``Req(**await request.json())``/``Req(payload)``)일 때만
-            # S1 site. raw-body 에서 파생된 일부 값(``body.x``)·무관한
-            # 일반 객체 생성은 제외(false-positive 0). 모호하면
-            # (callee 비-BaseModel·동적 클래스) _resolve_s1 에서 INV-3
+            # ``Req(**await request.json())``/``Req(payload)``)이거나,
+            # parsed body 에서 **파생된 값**(``Req(creds=payload["x"])``
+            # — subscript/attr 체인)이 임의 생성자 인자(kwarg 포함)로
+            # 흘러갈 때 S1 site (S1a [P2] body-kwarg 완결). raw-body
+            # 와 무관한 일반 객체 생성·상수/literal 인자만의 생성은
+            # 제외(false-positive 0). 모호 형태(positional/kwarg)는
+            # callee BaseModel-positive-resolve 시에만 site 채택, 동적
+            # 클래스 ``**``-unpack 은 _resolve_s1 에서 INV-3
             # single-sink unresolvable(default-deny).
             if not isinstance(func, (ast.Name, ast.Attribute)):
                 continue
@@ -828,13 +918,15 @@ def _scan_s1_entrypoints() -> list[_EntrypointSite]:
                 recv_name = func.id
             else:
                 recv_name = ast.unparse(func)
-            if form == "positional":
-                # ``Req(payload)`` 는 ``len(payload)``/``set(payload)``
-                # builtin 가드와 형태 동일·모호 — callee 가 정적
-                # BaseModel 서브클래스로 resolve 될 때만 검증 site
-                # (positive 증명으로만 모호성 해소; 그 외 builtin/
-                # helper false-positive 0). ``**``-unpack 형태는
-                # builtin 이 안 쓰므로 resolve 무관 항상 site(아래).
+            if form in ("positional", "kwarg"):
+                # ``Req(payload)``/``Req(creds=payload["x"])`` 는
+                # ``len(payload)``/``BotConfig(bot_id=body.bot_id)``
+                # builtin·무관 객체 생성과 형태 동일·모호 — callee 가
+                # 정적 BaseModel 서브클래스로 resolve 될 때만 검증
+                # site (positive 증명으로만 모호성 해소; 그 외 builtin/
+                # helper/무관 객체 false-positive 0). ``**``-unpack
+                # 형태는 builtin 이 안 쓰므로 resolve 무관 항상 site
+                # (아래; 동적 클래스면 _resolve_s1 default-deny).
                 resolved = _resolve_name_in_module(modname, recv_name)
                 if not (isinstance(resolved, type) and issubclass(resolved, BaseModel)):
                     continue
@@ -1216,29 +1308,46 @@ def _is_chokepoint_call_of(node: ast.expr, aliases: set[str]) -> bool:
 def _expr_taints_from_exc(node: ast.expr, aliases: set[str]) -> bool:
     """``node`` 가 예외 객체(별칭 집합 ``aliases``)에서 **파생된**
     값을 만드는 표현인가 — 단, 단일 chokepoint
-    ``sanitize_validation_errors(<alias>)`` 호출은 launder 된 것으로
-    보아 **taint 아님**(그 안의 alias 인자는 sink 가 아니므로 무시).
+    ``sanitize_validation_errors(<alias>)`` 호출**의 인자 위치**에
+    들어간 alias 만 launder 된 것으로 보아 그 위치의 ref 는 sink 가
+    아니다.
 
-    fail-closed: chokepoint 가 아닌 모든 형태에서 예외 별칭 Name 이
-    그 표현의 서브트리에 등장하면 taint 로 판정한다 — ``str(e)`` ·
-    ``e.json()`` · ``e.errors(...)`` · ``repr(e)`` · ``e.__str__()`` ·
-    ``f"{e}"`` · ``"x" % e`` · ``"x" + str(e)`` · ``[e]`` ·
-    ``{"k": e}`` · 그 외 예외 객체에서 임의로 파생한 detail 전부
-    (열거 화이트리스트가 아니라 "예외 alias 가 새는 비-chokepoint
-    표현 = taint" behavioral 매트릭스 — 새 우회 형태도 자동 포착).
-    chokepoint 호출 자체는 launder 이므로, 그 chokepoint 호출
-    노드는 taint 가 아니고 그 인자(alias)도 sink 로 안 본다.
+    fail-closed: chokepoint **인자 위치 밖**에서 예외 별칭 Name 이
+    그 표현의 서브트리에 **하나라도** 등장하면 taint 로 판정한다 —
+    ``str(e)`` · ``e.json()`` · ``e.errors(...)`` · ``repr(e)`` ·
+    ``e.__str__()`` · ``f"{e}"`` · ``"x" % e`` · ``"x" + str(e)`` ·
+    ``[e]`` · ``{"k": e}`` · 그 외 예외 객체에서 임의로 파생한
+    detail 전부(열거 화이트리스트가 아니라 "예외 alias 가 새는
+    비-chokepoint 위치 = taint" behavioral 매트릭스 — 새 우회 형태도
+    자동 포착).
+
+    mixed-expr 보강 ([P2] — attempt-9 fail-open 봉인): 같은 응답
+    표현에 chokepoint 와 raw 예외 참조가 섞이면
+    (``{"safe": sanitize_validation_errors(e), "raw": str(e)}``),
+    이전 구현은 ``ast.walk`` 중 chokepoint child 인 첫 alias 를
+    만나 거기서 조기 ``return False``(clean) 하고 뒤의 sibling
+    raw ``str(e)`` 를 못 봐 fail-open 했다. 본 함수는 **표현 전체를
+    끝까지 스캔**해, chokepoint 호출 인자 위치에 들어간 alias ref 는
+    launder 로 건너뛰되, **그 외 위치의 alias ref 가 하나라도 있으면
+    taint** 로 집계한다(launder 범위 = chokepoint 호출 인자 서브트리
+    위치에 한정 — chokepoint child 방문이 sibling raw ref 검출을
+    단축시키지 않음). chokepoint 호출 노드 자체(``node`` 가 그
+    호출)도 taint 아님(인자 alias 는 launder).
     """
     if _is_chokepoint_call_of(node, aliases):
         return False
     for sub in ast.walk(node):
-        # chokepoint 서브식은 launder — 그 안의 alias 는 sink 아님.
-        if isinstance(sub, ast.Call) and _is_chokepoint_call_of(sub, aliases):
+        if not (isinstance(sub, ast.Name) and sub.id in aliases):
             continue
-        if isinstance(sub, ast.Name) and sub.id in aliases:
-            # 이 alias 참조가 어떤 enclosing chokepoint 호출의
-            # 인자 안에 들어 있으면 launder — taint 아님.
-            return not _ref_inside_chokepoint(node, sub, aliases)
+        # 이 alias 참조가 ``node`` 서브트리 어떤 chokepoint 호출의
+        # 인자 위치에 들어 있으면 launder — 그 ref 는 sink 아님.
+        # **단축 금지**: launder 된 ref 라도 조기 종료하지 않고
+        # 다음 alias ref 를 계속 검사한다(sibling raw 누락 차단).
+        if _ref_inside_chokepoint(node, sub, aliases):
+            continue
+        # chokepoint 인자 밖 alias ref — taint(나머지 ref 무관하게
+        # 이미 새는 것이 확정).
+        return True
     return False
 
 
@@ -3213,6 +3322,319 @@ def test_attempt8_basemodel_constructor_path_validation_s1_locked(
         "attempt-8 생성자-경로 회귀 — 동적 클래스 ``Model(**payload)`` "
         "생성자-경로 검증이 INV-3 single-sink unresolvable 로 충전되지 "
         f"않음(default-deny 회귀 = fail-open): {s1.unresolvable}"
+    )
+
+
+def test_attempt9_body_kwarg_constructor_path_validation_s1_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-9 회귀 canary ① (Codex [P2] — body-파생 keyword 생성자
+    S1 site 영구 락; attempt-8 생성자-경로 탐지의 완결):
+
+    raw-body handler 가 parsed body 의 **필드값**을 BaseModel 생성자
+    **keyword 인자**로 넘겨 검증한다
+    (``Req(credentials=payload["credentials"], name=payload["name"])``).
+    attempt-8 탐지는 ``Req(**payload)``(unpack)·``Req(payload)``
+    (single positional raw object)만 S1 site 로 잡고, parsed body 의
+    subscript/attr 파생값이 생성자 keyword 인자로 흘러가는 경로는
+    미탐지였다 — 그런데 Pydantic 은 그 인자로 받은 ``credentials``
+    dict 필드의 caller-controlled key/value 를 검증해 422 ``loc`` 에
+    반사할 수 있어 lock 우회 벡터다.
+
+    신 S1a 탐지(``"kwarg"`` 형태): parsed-body alias 의 subscript/attr
+    파생 체인이 BaseModel-positive-resolve 생성자의 **임의 인자**
+    (kwarg 포함)로 전달되면 그 모델을 ``model_validate`` 와 동형 S1
+    source 로 walk → unsafe ``dict[str,str]`` 필드가 DISCOVERED dict
+    노드가 되어 미등록이면 UNPROVEN→FAIL. 무관한 일반 객체 생성
+    (``_Helper(a=payload["a"])`` — callee 비-BaseModel)은 BaseModel-
+    positive-resolve 게이트로 S1 site 아님(false-positive 0).
+
+    **old 코드(body-파생 kwarg 생성자 미탐지)에서는 red(누락)
+    = fail-open** — 영구 회귀 락.
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a9k"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # body-파생 필드값을 BaseModel 생성자 keyword 인자로 — unsafe
+    # ``dict[str,str]`` 필드 보유 → DISCOVERED dict 노드. 인접 무관
+    # 객체 생성(``_Helper(a=payload["a"])``)은 callee 비-BaseModel
+    # 이므로 S1 site 아님(false-positive 0).
+    (syn_routes / "kw_static.py").write_text(
+        "import json\n"
+        "from pydantic import BaseModel\n"
+        "from fastapi import Request\n"
+        "\n"
+        "class _Helper:\n"
+        "    def __init__(self, a=0):\n"
+        "        self.a = a\n"
+        "\n"
+        "class KwReq(BaseModel):\n"
+        "    credentials: dict[str, str] = {}\n"
+        "    name: str = ''\n"
+        "\n"
+        "async def kw_handler(request: Request):\n"
+        "    raw = await request.body()\n"
+        "    payload = json.loads(raw)\n"
+        "    _local = _Helper(a=payload['a'])\n"
+        "    return KwReq(\n"
+        "        credentials=payload['credentials'],\n"
+        "        name=payload['name'],\n"
+        "    )\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a9k")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a9k" or m.startswith("syn_routes_1651_a9k."):
+                del sys.modules[m]
+        sites = _scan_s1_entrypoints()
+        s1 = _resolve_s1()
+    finally:
+        for m in list(sys.modules):
+            if m == "syn_routes_1651_a9k" or m.startswith("syn_routes_1651_a9k."):
+                del sys.modules[m]
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    ctor_sites = [s for s in sites if s.method == _CONSTRUCTOR_VALIDATION_METHOD]
+    kw_site = [
+        s
+        for s in ctor_sites
+        if s.module == "syn_routes_1651_a9k.kw_static" and s.receiver == "KwReq"
+    ]
+    assert kw_site, (
+        "attempt-9 body-kwarg 회귀 — body-파생 필드값을 keyword "
+        "인자로 넘기는 ``KwReq(credentials=payload['credentials'])`` "
+        f"생성자-경로 검증 site 가 S1 scanner 에서 미발견(fail-open): "
+        f"{sites}"
+    )
+    # 무관한 일반 객체 생성(``_Helper(a=payload['a'])``)은 callee
+    # 비-BaseModel 이므로 S1 site 아님(false-positive 0).
+    assert not any(s.receiver == "_Helper" for s in ctor_sites), (
+        "무관한 일반 객체 생성(``_Helper(a=payload['a'])``)이 S1 "
+        f"body-kwarg site 로 잘못 잡힘(false-positive): {ctor_sites}"
+    )
+    # 정적 BaseModel → model_validate 와 동형 S1 source(models).
+    kw_models = [
+        (sid, m)
+        for sid, m in s1.models
+        if sid.startswith("syn_routes_1651_a9k.kw_static:")
+    ]
+    assert kw_models and all(m.__name__ == "KwReq" for _sid, m in kw_models), (
+        "attempt-9 body-kwarg 회귀 — ``KwReq(credentials=payload['x'])`` "
+        f"가 S1 source(models)로 충전되지 않음(fail-open): {s1.models}"
+    )
+    # 그 모델의 unsafe dict 필드가 DISCOVERED → 미등록이면 FAIL.
+    surf = _SurfaceModels(
+        site_models=[(_stable_s1_site(sid), m) for sid, m in kw_models],
+        site_roots=[],
+        unresolvable=[],
+    )
+    disc = _discover_all(surf)
+    assert any(
+        owner == "KwReq" and field == "credentials"
+        for owner, field, _s in disc.dict_nodes
+    ), (
+        "attempt-9 body-kwarg 회귀 — body-kwarg 검증 모델의 unsafe "
+        f"``credentials: dict[str,str]`` 가 DISCOVERED dict 노드로 안 "
+        f"잡힘: {sorted(disc.dict_nodes)}"
+    )
+    verdict = compute_verdict(
+        disc,
+        surf.unresolvable,
+        registered_dict_keys=frozenset(),
+        registered_validator_ids=frozenset(),
+    )
+    assert not verdict.ok, (
+        "attempt-9 body-kwarg fail-open 재발 — body-kwarg 생성자-경로 "
+        "검증 모델의 unsafe dict 필드가 미등록인데 discovery lock "
+        f"PASS: unproven_dict={verdict.unproven_dict}"
+    )
+
+
+def test_attempt9_mixed_expr_chokepoint_sibling_raw_ref_scanned_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """attempt-9 회귀 canary ② (Codex [P2] — mixed-expr chokepoint+raw
+    sibling 전체 스캔 영구 락):
+
+    같은 response detail 표현에 chokepoint 와 raw 예외 참조가 섞이면
+    (``detail={"safe": sanitize_validation_errors(e), "raw": str(e)}``),
+    이전 ``_expr_taints_from_exc`` 는 ``ast.walk`` 중 chokepoint
+    호출의 child alias ``e`` 를 먼저 만나 거기서 조기 ``return``
+    (clean)하고 뒤의 sibling raw ``str(e)`` 를 못 봐 그 handler 가
+    ``nonconforming`` 에서 누락(fail-open)됐다.
+
+    신 로직: 표현 전체를 끝까지 스캔해 chokepoint 인자 위치의 alias
+    ref 는 launder 로 건너뛰되, **그 외 위치(sibling raw ``str(e)``)
+    의 alias ref 가 하나라도 있으면 taint** → 그 handler 가
+    per-handler ``nonconforming`` 에 집계돼 FAIL. 정상 chokepoint-only
+    handler 는 nonconforming 에 안 들고 ``choke > 0`` 에 기여한다 —
+    즉 강화가 정상 패턴을 false-positive 로 깨지 않는다.
+
+    **old 코드(chokepoint child 조기 종료)에서는 red(누락)
+    = fail-open** — 영구 회귀 락.
+    """
+    syn_routes = tmp_path / "syn_routes_1651_a9m"
+    syn_routes.mkdir()
+    (syn_routes / "__init__.py").write_text('"""syn routes pkg."""\n')
+    # mixed-expr 우회: detail dict 에 chokepoint(safe)와 raw str(e)
+    # 가 sibling — chokepoint child 를 먼저 walk 하면 raw 누락.
+    (syn_routes / "mixed.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "from ante.web.errors import sanitize_validation_errors\n"
+        "\n"
+        "class MixedReq(BaseModel):\n"
+        "    x: int\n"
+        "\n"
+        "def mixed_handler(payload):\n"
+        "    try:\n"
+        "        return MixedReq.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        "            detail={\n"
+        '                "safe": sanitize_validation_errors(e),\n'
+        '                "raw": str(e),\n'
+        "            },\n"
+        "        ) from None\n"
+    )
+    # 정상 chokepoint-only handler — 강화가 false-positive 로 깨면 안 됨.
+    (syn_routes / "ok.py").write_text(
+        "from pydantic import BaseModel, ValidationError\n"
+        "from fastapi import HTTPException\n"
+        "from ante.web.errors import sanitize_validation_errors\n"
+        "\n"
+        "class OkReq(BaseModel):\n"
+        "    z: int\n"
+        "\n"
+        "def ok_handler(payload):\n"
+        "    try:\n"
+        "        return OkReq.model_validate(payload)\n"
+        "    except ValidationError as e:\n"
+        "        raise HTTPException(\n"
+        "            status_code=422,\n"
+        "            detail=sanitize_validation_errors(e),\n"
+        "        ) from None\n"
+    )
+
+    import sys
+
+    lock_mod = sys.modules[__name__]
+    monkeypatch.setattr(lock_mod, "_ROUTES_DIR", syn_routes)
+    monkeypatch.setattr(lock_mod, "_ROUTES_PKG", "syn_routes_1651_a9m")
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        importlib.invalidate_caches()
+        choke, nonconforming = _scan_validationerror_handler_chokepoint()
+    finally:
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+        importlib.invalidate_caches()
+
+    assert any("mixed" in s for s in nonconforming), (
+        "attempt-9 mixed-expr 회귀 — chokepoint 와 sibling raw "
+        "``str(e)`` 가 섞인 detail 표현의 handler 가 nonconforming "
+        "으로 안 잡힘(chokepoint child 조기 종료 fail-open 재발): "
+        f"nonconforming={nonconforming}"
+    )
+    assert not any("ok" in s for s in nonconforming), (
+        "정상 chokepoint-only handler 가 nonconforming 으로 잘못 "
+        f"잡힘 — mixed-expr 전체 스캔이 정상 패턴을 false-positive: "
+        f"{nonconforming}"
+    )
+    assert choke >= 1, (
+        "정상 chokepoint handler 가 choke 로 안 잡힘 — 전체 스캔이 "
+        f"정상 패턴을 false-negative: choke={choke}"
+    )
+
+
+# attempt-9 canary ③ 전용 모듈-레벨 모델(qualname 이 dotted-suffix
+# 없는 안정 식별자여야 owner 키가 ``_NestedReuseInner`` 로 고정 —
+# 함수-로컬 클래스는 ``<locals>`` 가 붙음).
+class _NestedReuseInner(BaseModel):
+    creds: dict[str, str] = {}
+
+
+class _NestedReuseParent(BaseModel):
+    a: _NestedReuseInner
+    b: _NestedReuseInner
+
+
+def test_attempt9_nested_same_type_two_field_reuse_full_path_key_locked() -> None:
+    """attempt-9 회귀 canary ③ (Codex [P2] — nested 동일 타입 2필드
+    재사용 full static schema path 키 영구 락):
+
+    동일 nested ``BaseModel`` 타입(``_Inner`` — unsafe ``dict[str,str]``
+    필드 보유)이 한 요청 모델의 **두 필드**(``a``/``b``)에 재사용되면,
+    이전 ``_owner_field_key`` 의 마지막-owner suffix 정규화가 두 경로
+    (``a.creds``·``b.creds``)를 같은 ``(_Inner, creds, site)`` 단일
+    키로 **병합**했다. 그러면 한 부모 경로(``a``)의 pre-reject proof
+    가 무가드 다른 부모 경로(``b``)까지 덮어 fail-open PASS.
+
+    신 로직: dict 노드 키의 path 성분을 **루트 요청모델부터 그 dict
+    노드까지의 full static schema field-path** 로 보존
+    (``a.creds`` ≠ ``b.creds``) → 두 경로가 distinct 키. ``a`` 경로만
+    proof 등록하면 ``b`` 경로는 자기 proof 가 없어 UNPROVEN→FAIL.
+
+    **old 코드(마지막-owner suffix 병합)에서는 red(병합돼 한
+    proof 가 무가드 경로까지 덮음) = fail-open** — 영구 회귀 락.
+    site-id(enclosing-qualname) 성분은 그대로 결합됨도 확인.
+    """
+    site = "syn:lock_a9n:nested_reuse:_NestedReuseParent.model_validate"
+    disc = discover_annotation(
+        _NestedReuseParent,
+        _NestedReuseParent.__qualname__,
+        validating_site=site,
+    )
+
+    node_a = ("_NestedReuseInner", "a.creds", site)
+    node_b = ("_NestedReuseInner", "b.creds", site)
+    # 두 부모 경로가 **distinct** full-path 키로 분리돼야 한다(병합
+    # 이면 ``(_Inner, creds, site)`` 단일 노드만 남음).
+    assert node_a in disc.dict_nodes and node_b in disc.dict_nodes, (
+        "attempt-9 nested full-path 회귀 — 동일 nested 타입 2필드 "
+        "재사용이 부모 경로별 distinct (owner, full-path, site) 키로 "
+        f"분리되지 않음(마지막-owner suffix 병합 재발): "
+        f"{sorted(disc.dict_nodes)}"
+    )
+    merged = ("_NestedReuseInner", "creds", site)
+    assert merged not in disc.dict_nodes, (
+        "attempt-9 nested full-path 회귀 — 마지막-owner suffix "
+        f"병합 키 ``{merged}`` 가 생성됨(full-path 보존 실패)"
+    )
+
+    # ``a`` 경로만 proof 등록 → ``b`` 경로는 UNPROVEN→FAIL 해야 한다
+    # (병합이면 ``a`` proof 가 무가드 ``b`` 경로까지 덮어 PASS).
+    registered_a_only = frozenset({node_a})
+    verdict = compute_verdict(
+        disc,
+        [],
+        registered_dict_keys=registered_a_only,
+        registered_validator_ids=frozenset(),
+    )
+    assert not verdict.ok, (
+        "attempt-9 nested full-path fail-open 재발 — ``a`` 경로 "
+        "proof 만 등록했는데 lock PASS(무가드 ``b`` 경로가 ``a`` "
+        f"proof 로 재사용됨): unproven_dict={verdict.unproven_dict}"
+    )
+    assert node_b in set(verdict.unproven_dict), (
+        "attempt-9 — 무가드 ``b.creds`` 경로가 UNPROVEN 으로 안 "
+        f"떨어짐: unproven={verdict.unproven_dict}"
+    )
+    assert node_a not in set(verdict.unproven_dict), (
+        "``a.creds`` 경로는 proof 등록됐으므로 PROVEN 이어야 함 "
+        f"(per-full-path 1:1 결합 회귀): unproven={verdict.unproven_dict}"
     )
 
 
