@@ -102,6 +102,9 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
         "ante bot create/info/list/positions/remove/signal-key "
         "(start/stop/status 미구현 follow-up)"
     ),
+    "src/ante/web/routes/notifications.py": (
+        "알림 API (stub, 이력 조회 삭제·텔레그램 이관)"
+    ),
     "strategies": "전략 템플릿과 예제",
     "tests": "단위·통합 테스트",
 }
