@@ -53,10 +53,16 @@ ante member list [--type human|agent] [--org strategy-lab] [--status active] [--
 
 출력에 각 멤버의 이모지가 표시된다.
 
+> JSON 출력은 root 전역 옵션으로 지정한다: `ante --format json member <subcommand> ...`.
+> `member list`처럼 서브커맨드 자체가 `--format`을 받는 명령은 trailing 형태도
+> 유효하지만, `member info/set-emoji/suspend/reactivate/revoke/rotate-token` 등
+> 아래 명령은 서브커맨드에 `--format`이 없으므로 leaf 위치 사용 시
+> `No such option: --format`으로 실패한다.
+
 ### `ante member info <member_id>`
 
 ```
-ante member info strategy-dev-01 [--format json]
+ante member info strategy-dev-01
 ```
 
 출력에 멤버의 이모지가 표시된다.
@@ -85,7 +91,7 @@ ante member register \
 ### `ante member set-emoji <member_id> <emoji>`
 
 ```
-ante member set-emoji strategy-dev-01 🦊 [--format json]
+ante member set-emoji strategy-dev-01 🦊
 ```
 
 ### `ante member suspend <member_id>`
@@ -93,7 +99,7 @@ ante member set-emoji strategy-dev-01 🦊 [--format json]
 **권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
 
 ```
-ante member suspend strategy-dev-01 [--format json]
+ante member suspend strategy-dev-01
 ```
 
 ### `ante member reactivate <member_id>`
@@ -101,7 +107,7 @@ ante member suspend strategy-dev-01 [--format json]
 **권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
 
 ```
-ante member reactivate strategy-dev-01 [--format json]
+ante member reactivate strategy-dev-01
 ```
 
 ### `ante member revoke <member_id> --yes`
@@ -109,7 +115,7 @@ ante member reactivate strategy-dev-01 [--format json]
 **권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
 
 ```
-ante member revoke strategy-dev-01 --yes [--format json]
+ante member revoke strategy-dev-01 --yes
 # ⚠️ 이 작업은 되돌릴 수 없습니다. --yes 누락 시 CLI_CONFIRMATION_REQUIRED로 실패합니다.
 ```
 
@@ -118,7 +124,7 @@ ante member revoke strategy-dev-01 --yes [--format json]
 **권한: master-only**. agent token이면 service layer `_assert_master`에서 거부된다.
 
 ```
-ante member rotate-token strategy-dev-01 [--format json]
+ante member rotate-token strategy-dev-01
 # 기존 토큰이 즉시 무효화됩니다.
 # 새 토큰: ante_ak_3f7x...
 ```
