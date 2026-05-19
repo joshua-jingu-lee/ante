@@ -11,7 +11,7 @@
 | 함수 | 설명 |
 |------|------|
 | `encode_cursor(value)` | 커서 값을 base64 URL-safe 인코딩 |
-| `decode_cursor(cursor)` | 인코딩된 커서를 디코딩 |
+| `decode_cursor(cursor)` | 인코딩된 커서를 디코딩. strict URL-safe base64 + canonical 동치(`encode_cursor(decode(c))==c`); 빈/비canonical/undecodable → `ValueError('invalid cursor')` → 400 (#1356 동형). 빈 cursor_field 값의 next_cursor emit 정합은 별 follow-up |
 | `paginate(items, cursor_field, limit, cursor)` | 아이템 목록에서 커서 이후 limit건 추출. `{"items": [...], "next_cursor": ... \| None}` 반환 |
 
 적용 엔드포인트: `/api/bots`, `/api/trades`, `/api/notifications`, `/api/reports`
