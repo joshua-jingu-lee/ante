@@ -664,6 +664,146 @@ class TestStrategyPerformance:
         assert "ACCOUNT_NOT_FOUND" not in result.output
         tracker.calculate.assert_not_called()
 
+    # ── read-family follow-up: provided invalid account_id ingress 거부 ──
+    # (#1657, oracle A7 cli_strategy_performance_invalid_account_id)
+    #
+    # docs/specs/account/14-account-id-contract.md L295: ``ante strategy
+    # performance <name> --account-id <id>`` = read-family follow-up,
+    # 목표 에러코드 = ``VALIDATION_ERROR``. provided invalid account_id
+    # (``default``/``""``/패턴 위반)가 ``SELECT 1 FROM accounts`` 존재
+    # 조회 이전 ingress에서 거부되지 않아 ``ACCOUNT_NOT_FOUND``로
+    # 오분류되던 contract-drift를 ``reject_invalid_account_id`` 공유
+    # 가드로 차단한다. 에러코드 SSOT는 #1633 선결정 재사용(신 코드 0).
+    #
+    # 3-way 분리 불변:
+    #   invalid-format → VALIDATION_ERROR (본 픽스 목표)
+    #   valid-format absent → ACCOUNT_NOT_FOUND (보존)
+    #   omitted (--account-id 미지정) → STRATEGY_MISSING_REQUIRED_ACCOUNT (보존)
+    # #1634/#1655 테스트 구조 미러.
+
+    @pytest.mark.parametrize("invalid", ["default", "bad_id!", ""])
+    def test_performance_invalid_account_id_rejected(self, runner, invalid):
+        """(a) provided invalid account_id → VALIDATION_ERROR (ACCOUNT_NOT_FOUND 아님).
+
+        #1657: invalid-format/예약어 account_id가 존재 SELECT 이전 ingress
+        에서 거부되어 ``code=VALIDATION_ERROR``로 분류된다. 픽스 전 코드
+        에서는 ``code=ACCOUNT_NOT_FOUND``로 오분류되어 본 단언이 FAIL한다.
+        """
+        db = _mock_db()
+        registry = _mock_registry([_SAMPLE_RECORD])
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    invalid,
+                ],
+            )
+        assert result.exit_code != 0, result.output
+        data = json.loads(result.output.strip())
+        assert data["status"] == "error", data
+        assert data["code"] == "VALIDATION_ERROR", data
+        # not-found 오분류 차단 — invalid-format을 not-found로 분류 금지.
+        assert data["code"] != "ACCOUNT_NOT_FOUND", data
+        assert "찾을 수 없" not in result.output, result.output
+        assert "Traceback" not in result.output, result.output
+
+    def test_performance_valid_absent_account_keeps_not_found(self, runner):
+        """(b) valid-format absent account_id → ACCOUNT_NOT_FOUND까지 실제 도달.
+
+        #1657: helper가 형식 정상·미존재 account_id를 통과시켜 기존
+        ``SELECT 1 FROM accounts`` → ``AccountNotFoundError`` →
+        ``code=ACCOUNT_NOT_FOUND`` 경로가 보존된다. helper 삽입이
+        non-None account_id 경로를 ``NameError`` 등으로 깨면 본 테스트가
+        즉시 FAIL한다(NameError류 회귀 차단).
+        """
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row=None,
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-9999",
+                ],
+            )
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.output)
+        assert data["status"] == "error", data
+        assert data["code"] == "ACCOUNT_NOT_FOUND", data
+        assert "acc-9999" in data["message"], data
+        tracker.calculate.assert_not_called()
+
+    def test_performance_omitted_account_keeps_missing_required(self, runner):
+        """(c) --account-id 미지정 → STRATEGY_MISSING_REQUIRED_ACCOUNT 보존.
+
+        #1657: omitted(account_id is None)는 helper 호출 이전
+        ``if account_id is None:`` 가드가 선차단하므로
+        ``STRATEGY_MISSING_REQUIRED_ACCOUNT`` 코드가 보존된다(helper는
+        그 가드 이후 호출되어 None에 도달하지 않는다).
+        """
+        db = _mock_db()
+        registry = _mock_registry([_SAMPLE_RECORD])
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new_callable=AsyncMock,
+            return_value=(registry, db),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "strategy", "performance", "momentum"]
+            )
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.output)
+        assert data["code"] == "STRATEGY_MISSING_REQUIRED_ACCOUNT", data
+
+    def test_performance_valid_present_account_succeeds(self, runner):
+        """(d) valid-format present account_id → 성공 경로 통과.
+
+        #1657: helper가 형식 정상·존재 account_id를 통과시켜 정상 성과
+        집계가 보존된다. helper 삽입이 non-None account_id 경로를
+        ``NameError`` 등으로 깨면 본 테스트가 즉시 FAIL한다.
+        """
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row={"1": 1},
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["strategy_name"] == "momentum", data
+        assert data["metrics"]["total_trades"] == 10, data
+        tracker.calculate.assert_awaited_once()
+
 
 class TestStrategySubmit:
     """ante strategy submit 커맨드 테스트."""
