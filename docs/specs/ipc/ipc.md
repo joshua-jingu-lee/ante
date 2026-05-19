@@ -65,8 +65,6 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 
 #### System
 
-> ⚠️ **구현 상태**: `system.halt` IPC 커맨드는 이미 `CommandRegistry`에 등록되어 동작한다. `system.clear_halt`는 본 이슈(#1212)에서 SSOT로 확정되었으나, `CommandRegistry.register_all_handlers()`와 CLI 송신 이름 정렬, legacy `system.activate` 제거는 [#1213](https://github.com/joshua-jingu-lee/ante/issues/1213)에서 구현된다. #1213 머지 전에는 기존 `system.activate`가 등록되어 있으며, `system.clear_halt`로 호출하면 unknown command가 된다.
-
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
 | `ante system halt` | `system.halt` | `AccountService.suspend_all()` | `AccountSuspendedEvent` → BotManager 소속 봇 중지 |
