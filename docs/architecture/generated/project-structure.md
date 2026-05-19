@@ -230,7 +230,7 @@ src/ante/
 │   │   ├── config.py                 # /api/config 라우트 (동적 설정 조회/변경)
 │   │   ├── data.py                   # /api/data 라우트
 │   │   ├── members.py                # /api/members 라우트 (멤버 관리)
-│   │   ├── notifications.py          # /api/notifications 라우트 (cursor 페이지네이션)
+│   │   ├── notifications.py          # 알림 API (stub, 이력 조회 삭제·텔레그램 이관)
 │   │   ├── portfolio.py              # /api/portfolio 라우트 (자산 가치/추이)
 │   │   ├── reports.py                # /api/reports 라우트 (cursor 페이지네이션)
 │   │   ├── strategies.py             # /api/strategies 라우트
