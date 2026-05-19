@@ -105,16 +105,16 @@ allowlist 후보에서 제거한다.
 | `ante strategy list` | `offline` | StrategyRegistry 조회 |
 | `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
 | `ante strategy performance <name> [--account-id <account_id>]` | `offline` | 성과 DB 집계 |
-| `ante treasury status [--account <account_id>]` | `offline` | persisted treasury 상태 조회 |
+| `ante treasury status --account <account_id>` | `offline` | persisted treasury 상태 조회 (`--account` 필수) |
 | `ante treasury allocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury deallocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
-| `ante treasury snapshot ...` | `offline` | 일별 snapshot 조회 |
+| `ante treasury snapshot --account <account_id> ...` | `offline` | 일별 snapshot 조회 (`--account` 필수) |
 | `ante rule list --account <account_id> [--scope global|strategy]` | `offline` | rule 설정 조회 (`--account` 필수) |
 | `ante rule info <rule_id> --account <account_id>` | `offline` | rule 설정 조회 (`--account` 필수) |
-| `ante broker status [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 상태 |
-| `ante broker balance [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
-| `ante broker positions [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
-| `ante broker reconcile [--account <account_id>] [--fix]` | `runtime IPC` | 서버 PositionReconciler |
+| `ante broker status --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 상태 (`--account` 필수) |
+| `ante broker balance --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
+| `ante broker positions --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
+| `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
 | `ante data list/schema/storage/validate ...` | `offline` | canonical data root 또는 명시 data path 대상 |
 | `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
 | `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
@@ -376,14 +376,14 @@ ante strategy performance <name> [--account-id <account_id>]  # 전략 전체 �
 ### `ante treasury` — 자금 관리
 
 ```bash
-ante treasury status [--account <account_id>]    # 자금 현황 (계좌별 필터링)
+ante treasury status --account <account_id>      # 자금 현황 (계좌별 필터링)
 ante treasury allocate <bot_id> <금액> --account <account_id>    # 봇에 자금 할당
 ante treasury deallocate <bot_id> <금액> --account <account_id>  # 봇 자금 회수
 
 # 일별 자산 스냅샷 조회
-ante treasury snapshot [--account <account_id>]                        # 최근 스냅샷 (대시보드 D-1)
-ante treasury snapshot --from <날짜> --to <날짜> [--account <account_id>]  # 기간별 스냅샷 (대시보드 D-2 차트)
-ante treasury snapshot --date <날짜> [--account <account_id>]          # 특정일 스냅샷
+ante --format json treasury snapshot --account <account_id>                        # 최근 스냅샷 (대시보드 D-1)
+ante --format json treasury snapshot --from <날짜> --to <날짜> --account <account_id>  # 기간별 스냅샷 (대시보드 D-2 차트)
+ante --format json treasury snapshot --date <날짜> --account <account_id>          # 특정일 스냅샷
 ```
 
 `treasury snapshot`의 `--from`/`--to`가 모두 지정되고 시작일(`--from`)이
@@ -417,10 +417,10 @@ ante rule info <rule_id> --account <account_id>           # 룰 상세
 ### `ante broker` — 증권사 연동
 
 ```bash
-ante broker status [--account <account_id>]      # 증권사 연결 상태
-ante broker balance [--account <account_id>]     # 실제 증권사 잔고 조회
-ante broker positions [--account <account_id>]   # 실제 증권사 포지션 조회
-ante broker reconcile [--account <account_id>] [--fix]  # 시스템↔증권사 포지션 대사
+ante broker status --account <account_id>        # 증권사 연결 상태
+ante broker balance --account <account_id>       # 실제 증권사 잔고 조회
+ante broker positions --account <account_id>     # 실제 증권사 포지션 조회
+ante broker reconcile --account <account_id> [--fix]  # 시스템↔증권사 포지션 대사
 ```
 
 모든 `broker` live 커맨드는 서버가 시작 시 생성한 BrokerAdapter를 통해 실행하는

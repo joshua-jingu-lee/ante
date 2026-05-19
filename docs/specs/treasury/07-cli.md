@@ -10,7 +10,7 @@ Treasury 관점의 사용 예시만 제공한다.
 
 ```bash
 # 자금 현황 조회
-ante treasury status [--account domestic]
+ante treasury status --account <account_id>
 
 # 자금 할당/회수
 ante treasury allocate <bot_id> <amount> --account domestic
