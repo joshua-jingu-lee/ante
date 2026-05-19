@@ -93,14 +93,16 @@ GET /api/audit?member_id=agent-01&action=bot.&from_date=2026-03-12&to_date=2026-
 CLI 명령 시그니처와 실행 분류의 SSOT는
 [cli/03-commands.md](../cli/03-commands.md#ante-audit--감사-로그-조회)다.
 
+`--format`은 root 전역 옵션(`--format text|json`, `table` 미지원)이므로
+`ante` 바로 뒤에 둔다.
+
 ```
-ante audit list \
+ante --format json audit list \
   [--member agent-01] \
   [--action "bot."] \
   [--from-date 2026-03-12] \
   [--to-date 2026-03-19] \
-  [--limit 100] [--offset 0] \
-  [--format json|table]
+  [--limit 100] [--offset 0]
 ```
 
 ## 감사 로그 기록 지점

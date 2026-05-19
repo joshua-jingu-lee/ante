@@ -291,9 +291,11 @@ ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] 
 ```bash
 ante member reset-password \
   --recovery-key <key> \
-  (--new-password-env ENV_NAME | --new-password-file PATH) \
-  [--format json]
+  (--new-password-env ENV_NAME | --new-password-file PATH)
 ```
+
+JSON 출력이 필요하면 root 전역 옵션을 사용한다:
+`ante --format json member reset-password ...`.
 
 - `--new-password-env` 또는 `--new-password-file` 중 정확히 하나를 사용한다.
 - 직접 `--new-password` 값 옵션은 shell history 노출 우려로 본 이슈에서 권장 채널에서 제외한다
@@ -305,9 +307,11 @@ ante member reset-password \
 
 ```bash
 ante member regenerate-recovery-key \
-  (--password-env ENV_NAME | --password-file PATH) \
-  [--format json]
+  (--password-env ENV_NAME | --password-file PATH)
 ```
+
+JSON 출력이 필요하면 root 전역 옵션을 사용한다:
+`ante --format json member regenerate-recovery-key ...`.
 
 - `--password-env` 또는 `--password-file` 중 정확히 하나를 사용한다.
 - prompt 기반 현재 패스워드 입력은 제거되었다.

@@ -35,7 +35,7 @@ ante bot start bot_001
 # 봇 목록 조회
 ante bot list
 ante bot list --account domestic         # 계좌별 필터
-ante bot list --format json
+ante --format json bot list              # JSON 출력은 root 전역 옵션
 
 # 봇 상태 조회 — 미구현 (follow-up): CLI command 미등록
 ante bot status bot_001

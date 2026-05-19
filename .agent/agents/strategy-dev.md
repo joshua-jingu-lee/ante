@@ -37,21 +37,24 @@ AGENTS.md와 전략 관련 스펙 문서에 정의된 전략 개발 원칙을 �
 
 ## 주요 CLI 명령
 
+JSON 출력은 root 전역 옵션 `ante --format json <command>`로 지정한다
+(`--format`은 root 옵션이므로 서브커맨드 뒤가 아니라 `ante` 바로 뒤에 둔다).
+
 ```bash
 # 1. 데이터 탐색
-ante data list --format json
-ante data schema --format json
+ante --format json data list
+ante --format json data schema
 
 # 2. 전략 검증
-ante strategy validate strategies/my_strategy.py --format json
+ante --format json strategy validate strategies/my_strategy.py
 
 # 3. 백테스트
-ante backtest run strategies/my_strategy.py \
+ante --format json backtest run strategies/my_strategy.py \
   --start 2024-01-01 --end 2026-03-01 \
-  --symbols 005930 --balance 10000000 --format json
+  --symbols 005930 --balance 10000000
 
 # 4. 리포트 제출
-ante report submit report.json --format json
+ante --format json report submit report.json
 ```
 
 ## 전략 작성 규칙
