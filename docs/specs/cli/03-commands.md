@@ -90,12 +90,12 @@ allowlist 후보에서 제거한다.
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
 | `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
-| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
+| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선. **미구현 (follow-up)**: `ante bot status` CLI command 부재 |
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
-| `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성 |
-| `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지 |
+| `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성. **미구현 (follow-up)**: `ante bot start` CLI command 부재 |
+| `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지. **미구현 (follow-up)**: `ante bot stop` CLI command 부재 |
 | `ante bot remove <bot_id> --yes` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
 | `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
 | `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
@@ -317,14 +317,19 @@ ante member regenerate-recovery-key \
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
-ante bot start <bot_id>            # 봇 시작
-ante bot stop <bot_id>             # 봇 중지
+ante bot start <bot_id>            # 봇 시작 — 미구현 (follow-up)
+ante bot stop <bot_id>             # 봇 중지 — 미구현 (follow-up)
 ante bot remove <bot_id> --yes     # 봇 삭제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante bot info <bot_id>             # 봇 상세 정보
-ante bot status <bot_id>           # 봇 실행 상태
+ante bot status <bot_id>           # 봇 실행 상태 — 미구현 (follow-up)
 ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
+
+> **미구현 (follow-up)**: `ante bot start`/`ante bot stop`/`ante bot status`
+> CLI command는 현재 등록되어 있지 않다. 위 매핑은 설계 계약이며 wiring은
+> 별도 follow-up이다. 현재 실재 bot CLI는
+> `create/info/list/positions/remove/signal-key`.
 
 `bot create`의 `--account` 생략 시 동작은 [위 절](#ante-bot-create의---account-생략-정책)을 따른다.
 

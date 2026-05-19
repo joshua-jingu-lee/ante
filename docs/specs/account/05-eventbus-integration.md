@@ -44,3 +44,4 @@ ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계
 - `AccountActivatedEvent`: BotManager는 계좌 상태 변화를 인지하고 로깅만 수행한다. 자동 재시작은 수행하지 않는다.
 
 재시작은 운영자가 명시적으로 `ante bot start <bot_id>` 또는 동등 IPC 명령으로 수행한다.
+단 `ante bot start` CLI command은 미구현 (follow-up)이며 wiring은 별도 follow-up이다.

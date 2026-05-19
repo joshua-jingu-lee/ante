@@ -95,6 +95,11 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
 | `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
 
+> **미구현 (follow-up)**: 위 표의 `bot.start`/`bot.stop` IPC handler 및 대응 CLI
+> command(`ante bot start`/`ante bot stop`)는 현재 등록되어 있지 않다. 또한
+> `ante bot status` CLI command도 부재다. 위 매핑은 설계 계약이며 wiring은
+> 별도 follow-up이다.
+
 서버 실행 중 `ante bot list/info/status/positions/signal-key`는 `bot.query` 계열 IPC로
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
 snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
