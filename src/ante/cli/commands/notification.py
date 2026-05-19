@@ -9,6 +9,6 @@ from __future__ import annotations
 import click
 
 
-@click.group()
+@click.group(hidden=True)
 def notification() -> None:
     """알림 관리."""
