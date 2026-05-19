@@ -101,8 +101,10 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 > wiring이 별도 follow-up이다. 위 매핑은 설계 계약이다.
 
 서버 실행 중 `ante bot list/info/positions/signal-key`는 `bot.query` 계열 IPC로
-서버의 live 상태를 우선 조회한다 (`ante bot status`/`bot.query`/`bot.status`는
-**미구현 (follow-up)** — CLI command·IPC handler 미등록). 서버가 정지된 상태에서는 DB에 저장된 persisted
+서버의 live 상태를 우선 조회한다 — 이 4개 CLI command과 그 live 조회 경로는
+실재·동작한다. 미구현인 것은 enumeration의 `status`뿐이다: `ante bot status`
+CLI command(부재)와 그 status 조회 경로(`bot.status` handler 미등록)는
+**미구현 (follow-up)**이다. 서버가 정지된 상태에서는 DB에 저장된 persisted
 snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
 상태에서 `signal_keys`, 전략 스냅샷, Treasury budget, `bots.status='deleted'`만 직접
 정리할 수 있다. `handle_positions=liquidate`는 IPC/Web runtime 경로에서만 의미가 있고,
@@ -166,10 +168,10 @@ maintenance/test 스펙 없이는 제공하지 않는다.
 `member list/info`, `audit`, `signal` 등.
 
 조회 커맨드라도 서버가 가진 live 상태를 읽어야 하면 런타임 IPC 대상이다. 대표적으로
-`bot list/info/status/positions/signal-key`의 live 조회와
-`broker status/balance/positions`가 여기에 속한다. 단 `bot status`(및 대응
-`bot.query`/`bot.status` IPC)는 미구현 (follow-up) — CLI command·IPC handler
-미등록. 실재 bot 조회 CLI는 `list/info/positions/signal-key`다.
+`bot list/info/positions/signal-key`의 live 조회(`bot.query` 계열 IPC — 실재·동작)와
+`broker status/balance/positions`가 여기에 속한다. 단 enumeration의 `status`만
+미구현 (follow-up)이다: `ante bot status` CLI command과 그 status 조회 경로
+(`bot.status` handler)가 미등록. 실재 bot 조회 CLI는 `list/info/positions/signal-key`다.
 
 ### Cold-path structural 커맨드
 
@@ -259,10 +261,13 @@ IPC command 분리는 별도 이슈 범위다.
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
 taxonomy 대상이 아니다. `member.*`, `bot.start/stop`, `bot.query`/`bot.status`,
 `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로 표현되어 있으나 현재
-`register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다. 특히
-`bot.start`/`bot.stop`/`bot.query`/`bot.status`는 대응 CLI command(`ante bot
-start/stop/status`)와 함께 미구현 (follow-up)이다 — `BotManager.start_bot()`/
-`stop_bot()` 코드는 실재하나 CLI·IPC wiring 미등록.
+`register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다. 단 `bot.query` 계열은
+실재 `ante bot list/info/positions/signal-key` 4개 CLI command의 조회 경로로 동작하므로
+이를 통째 미구현으로 보지 않는다. 미구현 (follow-up) 범위는 다음 둘로 한정된다:
+(1) `bot.start`/`bot.stop`(mutating) — 대응 CLI command `ante bot start/stop` 부재.
+(2) enumeration의 `status` — `ante bot status` CLI command(부재)와 그 status 조회
+경로(`bot.status` handler 미등록). `BotManager.start_bot()`/`stop_bot()` 코드는
+실재하나 CLI·IPC wiring이 미등록일 뿐이다.
 
 ## 통신 프로토콜
 

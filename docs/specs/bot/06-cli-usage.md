@@ -16,9 +16,11 @@ DB의 persisted state를 직접 정리한다. 서버 실행 중 조회는 IPC로
 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다.
 
 > **미구현 (follow-up)**: `ante bot start`/`bot stop`/`bot status`는 CLI command 및
-> IPC handler(`bot.start`/`bot.stop`/`bot.query`/`bot.status`)가 등록되어 있지 않다.
-> `BotManager.start_bot()`/`stop_bot()` 코드는 실재하나 CLI(Click)·IPC wiring이 별도
-> follow-up이다. 아래 사용 예시의 `bot start`/`bot stop`/`bot status` 라인은 설계
+> 대응 IPC handler(`bot.start`/`bot.stop` mutating + `bot.status` status 조회)가
+> 등록되어 있지 않다. `BotManager.start_bot()`/`stop_bot()` 코드는 실재하나
+> CLI(Click)·IPC wiring이 별도 follow-up이다. `bot.query` 계열 조회 경로는
+> 실재 `list/info/positions/signal-key` CLI에 대해 동작하므로 미구현이 아니다.
+> 아래 사용 예시의 `bot start`/`bot stop`/`bot status` 라인은 설계
 > 의도이며 현재 실행 불가다. 현재 실재 bot CLI는
 > `create/info/list/positions/remove/signal-key`.
 

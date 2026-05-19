@@ -90,7 +90,7 @@ allowlist 후보에서 제거한다.
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
 | `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
-| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선. **미구현 (follow-up)**: CLI command·`bot.query`/`bot.status` IPC handler 미등록 |
+| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선. **미구현 (follow-up)**: `ante bot status` CLI command(부재)·그 status 조회 경로(`bot.status` handler 미등록). list/info/positions/signal-key의 `bot.query` 계열 조회 경로는 실재·동작 |
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
@@ -327,9 +327,11 @@ ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
 
 > **미구현 (follow-up)**: `bot start`/`bot stop`/`bot status`는 CLI command 및
-> IPC handler가 등록되어 있지 않다. `BotManager.start_bot()`/`stop_bot()` 코드는
-> 실재하나 CLI(Click)·IPC(`bot.start`/`bot.stop`/`bot.query`/`bot.status`) wiring이
-> 별도 follow-up이다. 현재 실재 bot CLI는 `create/info/list/positions/remove/signal-key`.
+> 대응 IPC handler가 등록되어 있지 않다. `BotManager.start_bot()`/`stop_bot()` 코드는
+> 실재하나 CLI(Click)·IPC(`bot.start`/`bot.stop` mutating + `bot.status` status 조회)
+> wiring이 별도 follow-up이다. `bot.query` 계열 조회 경로는
+> `list/info/positions/signal-key`에 대해 실재·동작하므로 미구현이 아니다.
+> 현재 실재 bot CLI는 `create/info/list/positions/remove/signal-key`.
 
 `bot create`의 `--account` 생략 시 동작은 [위 절](#ante-bot-create의---account-생략-정책)을 따른다.
 
