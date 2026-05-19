@@ -90,12 +90,12 @@ allowlist 후보에서 제거한다.
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
 | `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
-| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선. **미구현 (follow-up)**: `ante bot status` CLI command(부재)·그 status 조회 경로(`bot.status` handler 미등록). list/info/positions/signal-key의 `bot.query` 계열 조회 경로는 실재·동작 |
+| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선. **미구현 (follow-up)**: `ante bot status` CLI command 부재 |
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
-| `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성. **미구현 (follow-up)**: `BotManager.start_bot()`는 실재하나 CLI command·`bot.start` IPC handler 미등록 |
-| `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지. **미구현 (follow-up)**: `BotManager.stop_bot()`는 실재하나 CLI command·`bot.stop` IPC handler 미등록 |
+| `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성. **미구현 (follow-up)**: `ante bot start` CLI command 부재 |
+| `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지. **미구현 (follow-up)**: `ante bot stop` CLI command 부재 |
 | `ante bot remove <bot_id> --yes` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
 | `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
 | `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
@@ -326,22 +326,19 @@ ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
 
-> **미구현 (follow-up)**: `bot start`/`bot stop`/`bot status`는 CLI command 및
-> 대응 IPC handler가 등록되어 있지 않다. `BotManager.start_bot()`/`stop_bot()` 코드는
-> 실재하나 CLI(Click)·IPC(`bot.start`/`bot.stop` mutating + `bot.status` status 조회)
-> wiring이 별도 follow-up이다. `bot.query` 계열 조회 경로는
-> `list/info/positions/signal-key`에 대해 실재·동작하므로 미구현이 아니다.
-> 현재 실재 bot CLI는 `create/info/list/positions/remove/signal-key`.
+> **미구현 (follow-up)**: `ante bot start`/`ante bot stop`/`ante bot status`
+> CLI command는 현재 등록되어 있지 않다. 위 매핑은 설계 계약이며 wiring은
+> 별도 follow-up이다. 현재 실재 bot CLI는
+> `create/info/list/positions/remove/signal-key`.
 
 `bot create`의 `--account` 생략 시 동작은 [위 절](#ante-bot-create의---account-생략-정책)을 따른다.
 
 `bot create/start/stop`과 `bot signal-key --rotate`는 서버 BotManager의 인메모리
 `_bots`, 실행 task, EventBus 구독, signal key 연결 상태를 바꾸므로 런타임 IPC 커맨드다.
-(`bot start`/`bot stop`은 **미구현 (follow-up)** — CLI command·IPC handler 미등록.)
 `bot remove`는 서버 실행 중에는 IPC로 BotManager에 위임하고, 서버 정지 중에는
 cold-path fallback으로 signal key, 전략 스냅샷, Treasury budget, `bots.status`만
-정리한다. 서버 실행 중 `bot list/info/positions/signal-key` 조회는 IPC로
-서버의 live 상태를 우선 조회한다 (`bot status`는 **미구현 (follow-up)**). 서버가 정지된 상태에서는 DB의 persisted snapshot만
+정리한다. 서버 실행 중 `bot list/info/status/positions/signal-key` 조회는 IPC로
+서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB의 persisted snapshot만
 읽을 수 있으며, `bot remove` 외 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
 
 `--strategy`는 등록된 `strategy_id`다. 전략 파일 경로를 직접 넘기려면 먼저

@@ -15,13 +15,10 @@ EventBus 구독, 외부 signal channel에 영향을 주므로 런타임 IPC로 �
 DB의 persisted state를 직접 정리한다. 서버 실행 중 조회는 IPC로 live 상태를 우선
 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다.
 
-> **미구현 (follow-up)**: `ante bot start`/`bot stop`/`bot status`는 CLI command 및
-> 대응 IPC handler(`bot.start`/`bot.stop` mutating + `bot.status` status 조회)가
-> 등록되어 있지 않다. `BotManager.start_bot()`/`stop_bot()` 코드는 실재하나
-> CLI(Click)·IPC wiring이 별도 follow-up이다. `bot.query` 계열 조회 경로는
-> 실재 `list/info/positions/signal-key` CLI에 대해 동작하므로 미구현이 아니다.
-> 아래 사용 예시의 `bot start`/`bot stop`/`bot status` 라인은 설계
-> 의도이며 현재 실행 불가다. 현재 실재 bot CLI는
+> **미구현 (follow-up)**: `ante bot start`/`ante bot stop`/`ante bot status`
+> CLI command는 현재 등록되어 있지 않다. 아래 사용 예시의 `bot start`/
+> `bot stop`/`bot status` 라인은 설계 의도이며 현재 실행 불가다.
+> wiring은 별도 follow-up이다. 현재 실재 bot CLI는
 > `create/info/list/positions/remove/signal-key`.
 
 ```bash
@@ -32,7 +29,7 @@ ante bot create --name "Momentum Bot" --strategy momentum_breakout_v1.0.0 --acco
 ante bot create --name "Agent Relay" --strategy agent_relay_v1.0.0 --account us-stock
 # → bot_id: bot_002, signal_key: sk_a1b2c3d4 (외부 시그널 수신 가능)
 
-# 봇 시작 — 미구현 (follow-up): CLI command·IPC handler 미등록
+# 봇 시작 — 미구현 (follow-up): CLI command 미등록
 ante bot start bot_001
 
 # 봇 목록 조회
@@ -40,10 +37,10 @@ ante bot list
 ante bot list --account domestic         # 계좌별 필터
 ante bot list --format json
 
-# 봇 상태 조회 — 미구현 (follow-up): CLI command·IPC handler 미등록
+# 봇 상태 조회 — 미구현 (follow-up): CLI command 미등록
 ante bot status bot_001
 
-# 봇 중지 — 미구현 (follow-up): CLI command·IPC handler 미등록
+# 봇 중지 — 미구현 (follow-up): CLI command 미등록
 ante bot stop bot_001
 
 # 봇 삭제 — --yes 필수. 서버 실행 중이면 IPC, 서버 정지 중이면 cold-path cleanup

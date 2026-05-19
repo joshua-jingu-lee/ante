@@ -164,9 +164,8 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{member_id}` |
 
 > **미구현 (follow-up)**: 위 표의 `ante bot start`(`bot.start`)·`ante bot
-> stop`(`bot.stop`) 행은 audit action 매핑 계약이다. 해당 CLI command·IPC
-> handler는 현재 미등록(`BotManager.start_bot()`/`stop_bot()` 코드는 실재) —
-> wiring은 별도 follow-up이며, 그때까지 이 두 매핑은 도달 불가다.
+> stop`(`bot.stop`) 행은 audit action 매핑 계약이다. 해당 CLI command는 현재
+> 미등록이며 wiring은 별도 follow-up이다. 그때까지 이 두 매핑은 도달 불가다.
 
 ### 구현 방식 — 이중 구조
 
