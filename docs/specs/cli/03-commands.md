@@ -122,7 +122,7 @@ allowlist 후보에서 제거한다.
 | `ante feed init/status/config/inject/run ...` | `offline` | canonical data root의 feed 작업 |
 | `ante feed start [--data-path <path>]` | `external process` | 장기 실행 feed scheduler |
 | `ante config get [key]` | `offline` | static/dynamic config 조회 |
-| `ante config set <key> <value>` | `runtime IPC` | 서버 DynamicConfigService + EventBus |
+| `ante config set <key> <value>` | `runtime IPC` | 서버 DynamicConfigService + EventBus. enum SSOT가 정의된 키(예 `system.log_level`)에 invalid 값 → `CONFIG_VALIDATION_ERROR` + `--format json` 시 `{status:"error",code,message}` envelope (exit 1, traceback 미노출) |
 | `ante config history <key>` | `offline` | dynamic config history 조회 |
 | `ante approval request/approve/reject/cancel/reopen ...` | `runtime IPC` | 서버 ApprovalService + Notification/EventBus |
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |

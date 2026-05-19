@@ -20,7 +20,7 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any
 
-from ante.config.exceptions import ConfigError
+from ante.config.exceptions import ConfigError, ConfigValidationError
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -96,10 +96,17 @@ def validate_value(key: str, value: Any) -> None:
     ``"debug"`` 같은 소문자 입력은 ValueError 로 거부된다 (#1379 oracle A7).
 
     Raises:
-        ValueError: 키별 invariant 또는 numeric finite invariant 를 위반한 경우.
-            호출자(web/IPC/CLI)는 이를 422 등 도메인 응답으로 변환해야 한다.
+        ValueError: numeric finite invariant 를 위반한 경우 (#1412, generic
+            가드 — 별 multi-consumer 표면이라 코드화 비목표).
+        ConfigValidationError: ``system.log_level`` 같은 키별 enum invariant
+            를 위반한 경우. ``ValueError`` 서브클래스이므로 web 글로벌
+            핸들러는 그대로 422로 변환하고, IPC 서버는 ``.code`` 속성으로
+            ``CONFIG_VALIDATION_ERROR`` 안정코드를 envelope에 노출한다
+            (#1673). 호출자(web/IPC/CLI)는 이를 도메인 응답으로 변환한다.
     """
     # Generic numeric finite 가드 (#1412). dict/list 내부까지 재귀 검사한다.
+    # 이 ValueError 는 별 multi-consumer 표면이므로 코드화하지 않는다 (#1673
+    # Non-Goal). 무변경.
     ok, bad = _is_value_finite(value)
     if not ok:
         raise ValueError(
@@ -109,7 +116,10 @@ def validate_value(key: str, value: Any) -> None:
 
     if key == "system.log_level":
         if not isinstance(value, str) or value not in _VALID_LOG_LEVELS:
-            raise ValueError(
+            # 메시지 문구·대소문자 정책 불변 (#1379 테스트 보존). 예외
+            # 타입만 ConfigValidationError(≤ValueError)로 승격해 CLI/IPC가
+            # CONFIG_VALIDATION_ERROR JSON envelope로 정리하도록 한다 (#1673).
+            raise ConfigValidationError(
                 "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 (대소문자 구분)."
             )
 

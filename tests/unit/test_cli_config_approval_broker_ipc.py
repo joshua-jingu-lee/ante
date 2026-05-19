@@ -6,6 +6,7 @@ broker reconcile --fix 커맨드가 IPCClient를 통해 서버에 전달되는�
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -98,6 +99,69 @@ class TestConfigSetIPC:
 
         assert result.exit_code != 0
         assert "STATIC_CONFIG" in result.output
+
+    def test_config_set_invalid_log_level_json_envelope(
+        self, runner: CliRunner
+    ) -> None:
+        """#1673 oracle A7: invalid log_level → clean JSON error envelope.
+
+        traceback/Click ``Error:`` 누출 없이 stdout 으로
+        ``{status:"error",code:"CONFIG_VALIDATION_ERROR",message}`` +
+        exit 1 을 반환해야 한다.
+        """
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "error",
+            "error": {
+                "code": "CONFIG_VALIDATION_ERROR",
+                "message": (
+                    "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 "
+                    "(대소문자 구분)."
+                ),
+            },
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(
+                cli,
+                ["config", "set", "system.log_level", "debug", "--format", "json"],
+            )
+
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.stdout)
+        assert data == {
+            "status": "error",
+            "code": "CONFIG_VALIDATION_ERROR",
+            "message": (
+                "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 (대소문자 구분)."
+            ),
+        }
+        # traceback / Click 기본 ``Error:`` stderr 누출이 없어야 한다.
+        assert "Traceback" not in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+    def test_config_set_invalid_log_level_text_mode(self, runner: CliRunner) -> None:
+        """텍스트 모드 동치: exit 1 + 코드/메시지 stderr (server_error 톤 보존)."""
+        mock_client, ipc_cls_patch, socket_patch = _patch_ipc()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "error",
+            "error": {
+                "code": "CONFIG_VALIDATION_ERROR",
+                "message": (
+                    "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 "
+                    "(대소문자 구분)."
+                ),
+            },
+        }
+
+        with ipc_cls_patch, socket_patch:
+            result = runner.invoke(cli, ["config", "set", "system.log_level", "debug"])
+
+        assert result.exit_code == 1, result.output
+        assert "CONFIG_VALIDATION_ERROR" in result.output
+        assert "Traceback" not in result.output
 
 
 # ── Approval IPC ────────────────────────────────

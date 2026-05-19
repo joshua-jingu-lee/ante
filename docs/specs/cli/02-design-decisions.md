@@ -117,6 +117,7 @@ JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "
 | `UPDATE_SERVER_RUNNING` | `ante update --force` 없이 서버가 실행 중 | `update` |
 | `APPROVAL_VALIDATION_ERROR` | `approval request --type` 값이 SSOT enum에 없음 | `approval request` |
 | `REPORT_VALIDATION_ERROR` | report 명령 입력 계약 위반 (제출 리포트 JSON/스키마 위반, `report performance --period monthly --year` 가 비양수 calendar year) | `report submit`, `report performance` |
+| `CONFIG_VALIDATION_ERROR` | `config set <key> <value>` 의 key-invariant 위반 (enum SSOT가 정의된 키에 invalid 값, 예 `system.log_level` 이 `_VALID_LOG_LEVELS` 비멤버) | `config set` |
 
 `--broker-config`는 1.0 범위에서 free-form pass-through(아래 silent ignore trade-off
 참조)이므로 본 이슈에서는 `UNKNOWN_BROKER_CONFIG_KEY`를 정의하지 않는다.

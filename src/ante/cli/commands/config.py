@@ -146,8 +146,32 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 
     try:
         result = _run(_run_set())
-    except click.ClickException:
-        raise
+    except click.ClickException as e:
+        # #1673 oracle A7: invalid log_level 같은 서비스 경계 입력 오류는
+        # ipc_send 가 error envelope를 ClickException 으로 변환한다. bare
+        # 재raise 하면 Click 기본 처리가 ``Error: ...`` 를 stderr 로 출력하고
+        # exit 1 로 종료해 JSON 모드 stdout 이 비어 envelope 계약이 깨진다
+        # (probe stdout_status=None). #1655-1657 envelope discipline 미러:
+        # ipc_send 가 부착한 원본 code/message 를 split 없이 복원해
+        # text/JSON 공용으로 구조화된 에러를 출력하고 SystemExit(1) 한다
+        # (_validators.reject_invalid_account_id 패턴).
+        code = getattr(e, "ipc_error_code", "")
+        message = getattr(e, "ipc_error_message", None)
+        if message is None:
+            # 비-IPC ClickException(서버 미기동/타임아웃 등): code 속성이
+            # 없으면 ``str(e)`` 가 사람용 메시지 그대로다.
+            message = str(e)
+        if fmt.is_json:
+            # probe 계약: stdout 으로 {status,code,message} 분리 필드.
+            fmt.error(message, code=code)
+        else:
+            # 텍스트 모드는 ``OutputFormatter.error`` 가 code 를 출력하지
+            # 않으므로, 기존 Click 기본 처리(``Error: {code}: {message}``)
+            # 와 동치가 되도록 code 를 message 에 prefix 한다
+            # (test_config_set_server_error 톤 보존).
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
     except Exception as e:
         fmt.error(str(e))
         return
