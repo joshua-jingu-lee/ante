@@ -82,7 +82,16 @@ async def ipc_send(
         error = response.get("error", {})
         code = error.get("code", "UNKNOWN")
         message = error.get("message", "알 수 없는 오류")
-        raise click.ClickException(f"{code}: {message}")
+        # 기존 소비자 호환: ``str(exc)`` 는 종전과 동일하게
+        # ``"{code}: {message}"`` 를 반환한다(동작 불변, 순수 additive).
+        # config set 처럼 JSON envelope를 직접 만들어야 하는 호출자가
+        # 원본 code/message 를 split 없이 복원할 수 있도록 속성을
+        # 부착한다 (#1673 택A — ipc_send 변경이 다수 명령에 회귀를
+        # 유발하지 않도록 raise 문자열·시그니처는 그대로 둔다).
+        exc = click.ClickException(f"{code}: {message}")
+        exc.ipc_error_code = code  # type: ignore[attr-defined]
+        exc.ipc_error_message = message  # type: ignore[attr-defined]
+        raise exc
 
     # "result" 키가 있으면 inner result만, 없으면 전체 응답 반환
     return response.get("result", response)

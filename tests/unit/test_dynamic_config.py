@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from ante.config import ConfigError, DynamicConfigService
+from ante.config import ConfigError, ConfigValidationError, DynamicConfigService
 from ante.config.dynamic import _is_value_finite, validate_value
 from ante.core import Database
 from ante.eventbus.events import ConfigChangedEvent
@@ -172,6 +172,58 @@ async def test_set_non_string_log_level_raises_value_error(service, eventbus):
         await service.set("system.log_level", 10, category="system")
     with pytest.raises(ValueError, match="system.log_level"):
         await service.set("system.log_level", None, category="system")
+
+    assert not await service.exists("system.log_level")
+    assert eventbus.published == []
+
+
+# ── #1673 oracle A7: ConfigValidationError 이중 계약 보증 ────────────
+
+
+def test_config_validation_error_is_value_error_subclass():
+    """``ConfigValidationError`` 는 ``ValueError`` 서브클래스여야 한다.
+
+    비회귀 불변조건 — web 글로벌 ``@app.exception_handler(ValueError)``
+    422 핸들러와 기존 service-boundary 테스트(``pytest.raises(ValueError)``)
+    가 이 관계에 의존한다 (#1673).
+    """
+    assert isinstance(ConfigValidationError(), ValueError) is True
+    assert issubclass(ConfigValidationError, ValueError)
+
+
+def test_config_validation_error_has_stable_code():
+    """IPC 서버 ``getattr(e, "code", ...)`` 안정코드 계약 (#1144 S5 / #1673)."""
+    assert ConfigValidationError.code == "CONFIG_VALIDATION_ERROR"
+    assert ConfigValidationError("msg").code == "CONFIG_VALIDATION_ERROR"
+
+
+def test_validate_value_invalid_log_level_raises_config_validation_error():
+    """invalid ``system.log_level`` → ``ConfigValidationError`` (#1673).
+
+    예외 타입만 승격됐고 메시지 문구·대소문자 정책은 불변이라 기존
+    ``pytest.raises(ValueError, match=...)`` 테스트가 그대로 통과한다.
+    generic numeric-finite ValueError(#1412)는 무변경(별 표면).
+    """
+    with pytest.raises(ConfigValidationError, match="system.log_level"):
+        validate_value("system.log_level", "ORACLE_INVALID_LEVEL")
+    with pytest.raises(ConfigValidationError, match="대소문자 구분"):
+        validate_value("system.log_level", "debug")
+    with pytest.raises(ConfigValidationError, match="system.log_level"):
+        validate_value("system.log_level", 10)
+    with pytest.raises(ConfigValidationError, match="system.log_level"):
+        validate_value("system.log_level", None)
+
+    # generic numeric-finite 가드는 ConfigValidationError 가 아닌 plain
+    # ValueError 로 유지된다 (#1412 무변경, #1673 Non-Goal).
+    with pytest.raises(ValueError, match="finite") as exc_info:
+        validate_value("risk.max_mdd_pct", float("nan"))
+    assert not isinstance(exc_info.value, ConfigValidationError)
+
+
+async def test_set_invalid_log_level_raises_config_validation_error(service, eventbus):
+    """서비스 경계도 ``ConfigValidationError`` 를 전파한다 (#1673)."""
+    with pytest.raises(ConfigValidationError, match="system.log_level"):
+        await service.set("system.log_level", "ORACLE_INVALID_LEVEL", category="system")
 
     assert not await service.exists("system.log_level")
     assert eventbus.published == []
