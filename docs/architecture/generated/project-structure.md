@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-15 (KST)
+> 마지막 생성 시점: 2026-05-20 (KST)
 
 ## 최상위 구조
 
@@ -49,7 +49,9 @@ src/ante/
 │   │   └── setup.py                  # setup_logging() stdout + JSONL 파일 핸들러 구성
 │   ├── __init__.py
 │   ├── registry.py
-│   └── time.py
+│   ├── time.py
+│   ├── exchange.py
+│   └── market_data_vocab.py
 ├── config/
 │   ├── config.py                     # ConfigService — 설정 로딩 (system.toml + secrets.env)
 │   ├── defaults.py                   # 기본 설정값
@@ -248,7 +250,8 @@ src/ante/
 │   ├── deps.py
 │   └── utils/
 │       ├── __init__.py
-│       └── date_params.py
+│       ├── date_params.py
+│       └── account_params.py
 ├── cli/
 │   ├── main.py                       # CLI 루트 그룹 (ante 커맨드)
 │   ├── middleware.py                 # 인증 미들웨어 (require_auth, require_scope)
@@ -261,15 +264,15 @@ src/ante/
 │   │   ├── bot.py                    # ante bot create/info/list/positions/remove/signal-key (start/stop/status 미구현 follow-up)
 │   │   ├── broker.py                 # ante broker 명령
 │   │   ├── config.py                 # ante config 명령
-│   │   ├── data.py                   # ante data list/schema/inject/validate
+│   │   ├── data.py                   # ante data list/schema/storage/validate
 │   │   ├── init.py                   # ante init — 비대화형 최소 초기 설정 (master + 테스트 계좌)
 │   │   ├── instrument.py             # ante instrument list/search/sync/import (--listed-only)
 │   │   ├── member.py                 # ante member register/list/info/suspend/revoke/set-emoji/... (bootstrap은 init으로 통합)
-│   │   ├── notification.py           # ante notification history
-│   │   ├── report.py                 # ante report list/show/schema/performance/view
+│   │   ├── notification.py           # 알림 CLI (public leaf 없음 — 텔레그램 이관)
+│   │   ├── report.py                 # ante report schema/submit/list/performance/view
 │   │   ├── rule.py                   # ante rule 명령
 │   │   ├── signal.py                 # ante signal — 외부 시그널 채널 관리
-│   │   ├── strategy.py               # ante strategy list/validate/load
+│   │   ├── strategy.py               # ante strategy validate/submit/list/info/performance
 │   │   ├── system.py                 # ante system 명령
 │   │   ├── trade.py                  # ante trade 명령
 │   │   ├── treasury.py               # ante treasury 명령
@@ -426,7 +429,8 @@ tests/
 │   │   ├── test_auth_format_json.py
 │   │   ├── test_bot_create_exit_code.py
 │   │   ├── test_broker_missing_account.py
-│   │   └── test_usage_error_json.py
+│   │   ├── test_usage_error_json.py
+│   │   └── test_instrument_exchange_validation.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -610,7 +614,30 @@ tests/
 │   ├── test_cli_pagination_validation.py
 │   ├── test_cli_treasury_amount_validation.py
 │   ├── test_cli_member_master_only.py
-│   └── test_member_admin_master_only.py
+│   ├── test_member_admin_master_only.py
+│   ├── test_api_account_id_invalid_contract.py
+│   ├── test_api_inverted_date_range.py
+│   ├── test_backtest_exchange_plumbing.py
+│   ├── test_backtest_programmatic_vocab_validation.py
+│   ├── test_cli_account_id_construction_lifecycle.py
+│   ├── test_cli_account_id_invalid_contract.py
+│   ├── test_cli_backtest_exchange_validation.py
+│   ├── test_cli_backtest_symbol_timeframe_validation.py
+│   ├── test_cli_data_validate_symbol_timeframe_validation.py
+│   ├── test_cli_e_bucket_mutating_ipc_account_id.py
+│   ├── test_cli_feed_inject_symbol_timeframe_validation.py
+│   ├── test_cli_inverted_date_range.py
+│   ├── test_cli_report_performance_period_options.py
+│   ├── test_core_exchange_vocabulary.py
+│   ├── test_data_collector_ingress_validation.py
+│   ├── test_exchange_vocabulary_contract.py
+│   ├── test_market_data_vocab.py
+│   ├── test_member_create_invalid_type.py
+│   ├── test_pagination_cursor_no_reflection.py
+│   ├── test_report_required_fields_contract.py
+│   ├── test_store_path_safety.py
+│   ├── test_validation_input_reflection.py
+│   └── test_validation_surface_lock.py
 └── __init__.py
 ```
 
@@ -718,7 +745,9 @@ docs/
 │   ├── D-012.md
 │   ├── D-013.md
 │   ├── D-014.md
-│   └── D-015-default-deny-auth-gate.md
+│   ├── D-015-default-deny-auth-gate.md
+│   ├── D-016-canonical-exchange-vocabulary.md
+│   └── D-017-canonical-symbol-timeframe-vocabulary.md
 ├── references/                       # 외부 참조 문서
 │   └── dashboard/
 │       ├── dart-openapi.md
