@@ -515,6 +515,18 @@ ante feed run daily [--date <날짜>] [--data-path <경로>]      # 어제(또�
 ante feed start [--data-path <경로>]                          # 내장 스케줄러로 backfill/daily 자동 실행하는 상주 프로세스 (scope: data:write)
 ```
 
+`feed run backfill --since`와 `[schedule].backfill_since`(config TOML)는 모두
+strict `YYYY-MM-DD`(zero-padded gregorian) 형식만 허용한다. basic ISO
+(`20260510`)·ISO week date(`2026-W19-1`)·non-zero-padded(`2026-1-1`) 등
+변형은 `CLI_INVALID_DATE` exit code 1로 거부한다. strict parse 통과 이후
+effective 시작일이 오늘(`today`, KST)보다 미래이면 backfill 수집/체크포인트
+접근 이전에 `INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(체크포인트
+resume·수집 진입 없이 단일 `{status:"error", code, message}` envelope만 출력).
+`feed start` 상주 스케줄러도 동일한 두 코드 관측 시 "Backfill 완료" 메시지를
+출력하지 않고 명시 오류를 echo/log한다. 기존 비날짜 `config_errors`(API 키
+누락, lock 경합, rate-limit 등)의 CLI 출력·exit code·scheduler 완료 표시는
+이 코드에 매핑되지 않으며 현행 동작을 유지한다.
+
 > 상세: [data-feed.md](../data-feed/data-feed.md)
 
 ### `ante config` — 설정 관리

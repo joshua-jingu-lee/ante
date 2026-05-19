@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,89 @@ from ante.feed.sources.data_go_kr import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_BACKFILL_SINCE = "2015-01-01"
+
+# zero-padded YYYY-MM-DD만 허용. date.fromisoformat()은 3.11+에서
+# basic ISO(20260510)·ISO week date(2026-W19-1) 등 변형도 수락하므로
+# 형태를 정규식으로 먼저 고정한 뒤 캘린더 유효성만 검증한다.
+# CLI `--since`(feed/cli.py::_validate_iso_date)와 동일한 strictness를
+# 사용해 두 진입 표면을 정합시킨다(이슈 #1674).
+_BACKFILL_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# coded config_error 코드. CLI/scheduler가 이 코드를 관측해 분기하므로,
+# 기존 비날짜 config_errors(`code` 키 없는 dict)와 명확히 구분된다.
+CONFIG_ERROR_CODE_INVALID_DATE = "CLI_INVALID_DATE"
+CONFIG_ERROR_CODE_INVALID_DATE_RANGE = "INVALID_DATE_RANGE"
+
+# 신설 coded config_errors의 코드 집합. CLI/scheduler에서 이 집합으로만
+# 새 envelope/차단 분기를 trigger한다 (기존 비날짜 entries 보존).
+BACKFILL_DATE_ERROR_CODES = frozenset(
+    {
+        CONFIG_ERROR_CODE_INVALID_DATE,
+        CONFIG_ERROR_CODE_INVALID_DATE_RANGE,
+    }
+)
+
+# `today`는 KST 캘린더 기준으로 산출한다. backfill_since는 거래일 단위
+# 날짜이며 cli_scheduler도 KST(UTC+9)로 동작한다(see cli_scheduler.KST).
+_KST = timezone(timedelta(hours=9))
+
+
+def _parse_strict_backfill_since(value: str) -> date | None:
+    """``backfill_since`` 값을 strict ``YYYY-MM-DD``로 파싱한다.
+
+    backfill 진입 표면(CLI ``--since`` / config TOML ``backfill_since``)이
+    공유하는 helper. 형태가 어긋나거나 캘린더상 유효하지 않으면 ``None`` 을
+    반환한다(호출 측이 ``CLI_INVALID_DATE`` config_error로 변환).
+
+    feed-local 사용에 한정한다 — 전역 validators 통합 금지(이슈 #1674
+    Stop Condition).
+    """
+    if not isinstance(value, str):
+        return None
+    if _BACKFILL_ISO_DATE_RE.fullmatch(value) is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _today_kst() -> date:
+    """오늘 날짜(KST 캘린더)를 반환한다."""
+    return datetime.now(tz=_KST).date()
+
+
+def validate_backfill_since(
+    value: str,
+) -> tuple[date | None, dict[str, str] | None]:
+    """``backfill_since`` 값을 strict 검증한다.
+
+    반환값:
+        ``(parsed_date, None)`` — strict ``YYYY-MM-DD`` + ``start <= today``
+        ``(None, {"code": "CLI_INVALID_DATE", "error": ...})`` — 형태/캘린더 위반
+        ``(None, {"code": "INVALID_DATE_RANGE", "error": ...})`` — ``start > today``
+
+    config_error dict는 ``CollectionResult.config_errors`` 에 그대로
+    삽입할 수 있는 shape이다(``code`` 키 존재로 비날짜 error와 구분).
+    """
+    parsed = _parse_strict_backfill_since(value)
+    if parsed is None:
+        return None, {
+            "code": CONFIG_ERROR_CODE_INVALID_DATE,
+            "error": (
+                f"잘못된 backfill_since 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)"
+            ),
+        }
+
+    today = _today_kst()
+    if parsed > today:
+        return None, {
+            "code": CONFIG_ERROR_CODE_INVALID_DATE_RANGE,
+            "error": (
+                f"backfill_since가 오늘({today.isoformat()})보다 미래입니다: '{value}'"
+            ),
+        }
+    return parsed, None
 
 
 class BackfillRunner:
@@ -59,7 +143,27 @@ class BackfillRunner:
         started_at: datetime,
         is_blocked: Any,
     ) -> CollectionResult:
-        """Backfill 내부 구현. data.go.kr + DART 수집 후 지표 계산."""
+        """Backfill 내부 구현. data.go.kr + DART 수집 후 지표 계산.
+
+        backfill_since strict 검증은 수렴점이므로 수집 메서드 진입 전
+        가장 먼저 수행한다. malformed/future일 때는 체크포인트·소스
+        접근 없이 coded config_error만 담은 result를 즉시 반환한다.
+        """
+        # strict 날짜 검증을 가장 먼저 수행해 malformed/future config가
+        # checkpoint/소스/지표 어디에도 도달하지 않도록 한다.
+        coded_date_error = self._validate_backfill_since(config)
+        if coded_date_error is not None:
+            logger.warning(
+                "Backfill 차단: backfill_since 검증 실패 (code=%s, error=%s)",
+                coded_date_error.get("code"),
+                coded_date_error.get("error"),
+            )
+            return _make_result(
+                "backfill",
+                started_at,
+                config_errors=[coded_date_error],
+            )
+
         ctx = _RunContext()
         store = self._store or ParquetStore(base_path=data_path)
 
@@ -92,6 +196,37 @@ class BackfillRunner:
         self._compute_indicators(store, ctx)
 
         return ctx.to_result("backfill", started_at)
+
+    @staticmethod
+    def _validate_backfill_since(
+        config: dict[str, Any],
+    ) -> dict[str, str] | None:
+        """``[schedule].backfill_since``를 strict 검증한다.
+
+        config에 ``backfill_since`` 가 명시되어 있을 때만 검증한다.
+        키 부재 시에는 ``DEFAULT_BACKFILL_SINCE`` (`2015-01-01`)가
+        쓰이며 정의상 strict + past이므로 검증을 건너뛴다.
+
+        Returns:
+            None이면 strict 통과 (수집 진입 가능).
+            dict이면 coded config_error (``code`` 키 = CLI_INVALID_DATE /
+            INVALID_DATE_RANGE).
+        """
+        schedule = config.get("schedule")
+        if not isinstance(schedule, dict):
+            return None
+        if "backfill_since" not in schedule:
+            return None
+        raw = schedule.get("backfill_since")
+        if not isinstance(raw, str):
+            return {
+                "code": CONFIG_ERROR_CODE_INVALID_DATE,
+                "error": (
+                    f"잘못된 backfill_since 날짜 형식: {raw!r} (YYYY-MM-DD 형식 필요)"
+                ),
+            }
+        _parsed, error = validate_backfill_since(raw)
+        return error
 
     @staticmethod
     def _resolve_dates(
