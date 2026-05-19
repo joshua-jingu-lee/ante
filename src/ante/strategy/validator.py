@@ -14,6 +14,24 @@ from ante.core.exchange import STRATEGY_EXCHANGES
 VALID_EXCHANGES: set[str] = set(STRATEGY_EXCHANGES)
 
 
+# #1675 — StrategyValidator source-read + AST-parse 단계 4클래스 정규화.
+# 두 상수는 인코딩명/`codec`/`null`/raw byte/source line/path 콘텐츠를 포함
+# 하지 않는 **고정 상수**다. 어떤 경우에도 `str(exception)`/예외 repr/codec명
+# /byte/문자/토큰/소스 라인 텍스트를 `errors[]`에 포함하지 않는다.
+_NOT_TEXT_SOURCE = "전략 파일을 텍스트 전략 소스로 읽을 수 없습니다."
+_FILE_NOT_READABLE = "전략 파일에 접근할 수 없습니다."
+
+
+def _syntax_msg(e: SyntaxError) -> str:
+    """`SyntaxError` 를 정수 line/offset 만 노출하는 content-free 메시지로 정규화.
+
+    `str(e)`/`{e}` 는 사용자가 제출한 원문 토큰·소스 라인을 그대로 반사할 수
+    있으므로 절대 호출하지 않는다. `e.lineno`/`e.offset` 이 `None` 인 경우는
+    `0` 으로 fallback 하여 형식 안정성을 유지한다.
+    """
+    return f"Syntax error (line {e.lineno or 0}, offset {e.offset or 0})"
+
+
 @dataclass
 class ValidationResult:
     """검증 결과."""
@@ -67,15 +85,21 @@ class StrategyValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
-        # 1. 파싱
+        # 1. 파싱 — source-read + AST-parse 단계 4클래스 정규화 (#1675).
+        # 예외 순서: `SyntaxError → OSError → (UnicodeDecodeError, ValueError)`.
+        # 이 순서로 `IsADirectoryError`/`PermissionError`/`FileNotFoundError`가
+        # `OSError`에서 잡히고, `UnicodeDecodeError`(ValueError 서브)는 마지막
+        # 묶음에서 잡힌다. 어떤 경우에도 `str(e)`/예외 repr/codec명/byte/문자/
+        # 토큰/소스 라인 텍스트를 `errors[]`에 포함하지 않는다.
         try:
             source = filepath.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(filepath))
         except SyntaxError as e:
-            return ValidationResult(
-                valid=False,
-                errors=[f"Syntax error: {e}"],
-            )
+            return ValidationResult(valid=False, errors=[_syntax_msg(e)])
+        except OSError:
+            return ValidationResult(valid=False, errors=[_FILE_NOT_READABLE])
+        except (UnicodeDecodeError, ValueError):
+            return ValidationResult(valid=False, errors=[_NOT_TEXT_SOURCE])
 
         # 2. Strategy 상속 클래스 존재
         strategy_classes = self._find_strategy_classes(tree)
