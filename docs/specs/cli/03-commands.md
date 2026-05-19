@@ -111,10 +111,9 @@ allowlist 후보에서 제거한다.
 | `ante treasury snapshot ...` | `offline` | 일별 snapshot 조회 |
 | `ante rule list --account <account_id> [--scope global|strategy]` | `offline` | rule 설정 조회 (`--account` 필수) |
 | `ante rule info <rule_id> --account <account_id>` | `offline` | rule 설정 조회 (`--account` 필수) |
-| `ante broker status/health [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 상태 |
+| `ante broker status [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 상태 |
 | `ante broker balance [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
 | `ante broker positions [--account <account_id>]` | `runtime IPC` | 서버 BrokerAdapter live 조회 |
-| `ante broker price <symbol> [--account <account_id>]` | `runtime IPC` | live broker quote |
 | `ante broker reconcile [--account <account_id>] [--fix]` | `runtime IPC` | 서버 PositionReconciler |
 | `ante data list/schema/storage/validate ...` | `offline` | canonical data root 또는 명시 data path 대상 |
 | `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
@@ -410,25 +409,17 @@ ante rule info <rule_id> --account <account_id>           # 룰 상세
 
 ```bash
 ante broker status [--account <account_id>]      # 증권사 연결 상태
-ante broker health [--account <account_id>]      # status alias
 ante broker balance [--account <account_id>]     # 실제 증권사 잔고 조회
 ante broker positions [--account <account_id>]   # 실제 증권사 포지션 조회
-ante broker price <symbol> [--account <account_id>]  # live 현재가 조회
 ante broker reconcile [--account <account_id>] [--fix]  # 시스템↔증권사 포지션 대사
 ```
 
 모든 `broker` live 커맨드는 서버가 시작 시 생성한 BrokerAdapter를 통해 실행하는
 런타임 IPC 커맨드다. CLI가 별도 adapter를 직접 생성하면 credentials 복호화, 연결
 상태, rate limit, circuit breaker, audit 경로가 서버와 분리되므로 허용하지 않는다.
-`broker price`는 live broker quote만 의미한다. 과거·공개 market data 조회는
-`data`/`feed` 계열 커맨드로 다룬다. `broker order`와 `broker stream prices`는
-일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙 없이는 제공하지 않는다.
-
-> `broker health`/`broker price <symbol>`는 본 문서에 기재되어 있으나
-> `src/ante/cli/commands/broker.py`에는 `status`/`balance`/`positions`/`reconcile`
-> 만 등록되어 있다(spec-only drift). 처리 결정은
-> [account-id-contract.md — account-scoped CLI inventory 결정표](../account/14-account-id-contract.md#결정표)
-> 참조(문서수정 후속).
+과거·공개 market data 조회는 `data`/`feed` 계열 커맨드로 다룬다. `broker order`와
+`broker stream prices`는 일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙
+없이는 제공하지 않는다.
 
 ### account-scoped `account_id` 입력 표면 — 14-account-id-contract 참조
 

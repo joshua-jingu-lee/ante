@@ -293,19 +293,16 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 | `ante bot create --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (mutating IPC `bot.create` handler `require_account_id`; 단 `--account` 생략 시 single-active resolver. #1623 probe 집합 아님; 구현 시 경로 확인 후 동 결정) |
 | `ante treasury snapshot --account <account_id>` | option | `VALIDATION_ERROR` | match | **B — #1635** (`treasury status` (`src/ante/cli/commands/treasury.py:64`) 와 **동일** `_create_treasury(account_id)` construction-lifecycle 경로 — snapshot 콜백 `src/ante/cli/commands/treasury.py:229` 가 `t, db = await _create_treasury(account_id)` 로, status 콜백 `:69` 와 동일 `_create_treasury`→`require_account_id` (`:37`) 경계를 공유하는 **구조**. ∴ B(#1635) construction-lifecycle 범위 (mutating IPC E 아님). 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 #1635 probe 책임) |
 | `ante strategy performance <name> --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **follow-up (read-family, 비-#1623-probe)** (읽기 표면 — `strategy_performance` CLI 콜백 (`src/ante/cli/commands/strategy.py:432`) 자체가 `account_id` 를 처리 (`account_id is None` → `STRATEGY_MISSING_REQUIRED_ACCOUNT`, `:450`) 하고 `PerformanceTracker` + 자체 `SELECT 1 FROM accounts` 단건 read 를 수행하는 **구조**. `_create_treasury`/`_create_rule_engine` construction(B) 도, broker/non-broker mutating IPC dispatch(C/E) 도 아니며, #1623-probe(`account info`/`bot list`) 비동형 → mutating IPC E 와 구분되는 **read-family follow-up**. 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 read-family follow-up 책임) |
-| `ante broker health [--account <account_id>]` | option | `VALIDATION_ERROR` | **spec-only** (03-commands.md:114(`status/health` 합산 행)·410(bash 블록) 에 기재; `broker.py` 미등록 — status/balance/positions/reconcile 만 존재. **정적 사실**) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
-| `ante broker price <symbol> [--account <account_id>]` | option | `VALIDATION_ERROR` | **spec-only** (03-commands.md:117·413(bash 블록) 에 기재; `broker.py` 미등록. **정적 사실**) | **문서수정** (03-commands.md drift 교정 후속; 코드 표면 없으므로 #1634/35/36 비대상) |
 
-> row-count 동치 검증 (정적): 위 표 결정 row 23개 = code 표면
-> 21개( 등재 상태 ``match`` ; ``code-only`` 0) + ``spec-only`` 2개
-> ( ``broker health`` / ``broker price`` ). enumerate된 unique CLI
-> command path 수 21개와 동치(누락 0). ``treasury snapshot`` ·
-> ``strategy performance`` 포함. **이 동치는 Click decorator 산출
-> 목록 vs 03-commands 기재의 정적 비교만으로 검증하며, 런타임 trace
-> 와 무관하다.**
+> row-count 동치 검증 (정적): 위 표 결정 row 21개 = code 표면
+> 21개( 등재 상태 ``match`` ; ``spec-only`` 0 / ``code-only`` 0).
+> enumerate된 unique CLI command path 수 21개와 동치(누락 0).
+> ``treasury snapshot`` · ``strategy performance`` 포함. **이 동치는
+> Click decorator 산출 목록 vs 03-commands 기재의 정적 비교만으로
+> 검증하며, 런타임 trace 와 무관하다.**
 >
 > match/spec-only/code-only 집계( **정적** ): ``match`` 21 /
-> ``spec-only`` 2 / ``code-only`` 0. ``rule list`` · ``rule info``
+> ``spec-only`` 0 / ``code-only`` 0. ``rule list`` · ``rule info``
 > 는 코드 ( ``src/ante/cli/commands/rule.py:93``/``:189`` 의
 > ``@click.option("--account","account_id",required=True)`` )에는
 > 존재하나 03-commands.md rule 섹션·offline 명령 표에는 미기재였으므로
@@ -315,8 +312,14 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 > **등재 상태**를 ``code-only → match`` 로 닫았다(일관 처리: 동일
 > docs-only 범위 내 03-commands.md drift 즉시 교정이 ``code-only``
 > 후속 항목을 별도로 미루는 것보다 정합적이고 row-count·집계 동치를
-> 보존). 따라서 보정 후 최종 ``code-only`` 0, 위 23/21/2 동치는
-> 유지된다. ``rule`` 행의 ``등재 상태`` 정정은 **정적 사실의 정정**일
+> 보존). 따라서 #1633 보정 후 최종 ``code-only`` 0 ( 그 시점 정적
+> 동치는 23/21/2: 결정 row 23 = code 표면 21 + ``spec-only`` 2 ).
+> 이후 #1659 가 ``broker health`` / ``broker price`` spec-only 2행을
+> 결정표에서 제거(코드·스펙 모두 부재로 확정 — 아래 [Resolved
+> (#1659)](#resolved-1659--broker-healthprice-분류-종결) 참조)하여
+> 현재형 정적 동치는 **21/21/0**( 결정 row 21 = code 표면 21,
+> ``spec-only`` 0 / ``code-only`` 0 )이다. ``rule`` 행의
+> ``등재 상태`` 정정은 **정적 사실의 정정**일
 > 뿐이며 그 표면이 지금 무엇을 내는지는 단정하지 않는다(목표
 > ``VALIDATION_ERROR`` 도달 정렬은 except/변환 **구조**상 **#1635**
 > 담당, [Non-Goal](#1633-non-goal--per-surface-런타임-trace는-split-책임)).
@@ -349,9 +352,30 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 > 인자 없음 )로 감싸는 **구조**상, ``validate_new_account_id`` 검증
 > 자체와 무관하게 그 cold-path CLI 래핑이 목표 ``VALIDATION_ERROR``
 > 도달을 보장하지 않으므로 D 통합 follow-up( account-lifecycle /
-> cold-path drift 점검 ) 후보에 포함된다. ``broker health`` /
-> ``broker price`` ( spec-only, 코드 표면 없음)만 follow-up 대상이
-> 아니다(처리는 ``문서수정``).
+> cold-path drift 점검 ) 후보에 포함된다.
+
+### Resolved (#1659) — broker health/price 분류 종결
+
+> **#1659 문서수정 완료 — ``broker health`` / ``broker price`` 는
+> 코드·스펙 모두 부재.** 본 절은 과거 분류 사실의 보존 기록이며 위
+> [결정표](#결정표)의 현재형 정적 inventory 집계에는 포함되지
+> 않는다(현재형 동치 = 21/21/0).
+>
+> #1633 시점에는 ``ante broker health`` · ``ante broker price
+> <symbol>`` 가 03-commands.md 등 CLI/런타임-IPC 스펙에 공개 명령으로
+> 기재되어 있으나 ``src/ante/cli/commands/broker.py`` 에는
+> ``status``/``balance``/``positions``/``reconcile`` 만 등록되어 있어
+> ``spec-only`` (코드 표면 없음)로 분류되었고, 처리 결정은
+> ``문서수정`` (코드 구현 비대상; #1634/35/36 비대상)이었다. follow-up
+> (D/E/read-family) 대상도 아니었다(처리는 ``문서수정``).
+>
+> #1659 가 SSOT 결정(``문서수정``)을 집행하여 03-commands.md ·
+> 06-cross-module-notes.md · broker-adapter/14-cli.md · ipc.md 의 모든
+> ``broker health`` / ``broker price`` CLI·런타임-IPC 명령 등재를
+> 제거하고, 본 결정표에서도 두 ``spec-only`` 행을 제거했다. 그 결과
+> 코드·스펙 양쪽에서 두 명령이 모두 부재하여 drift 가 해소되었다.
+> 잔존 broker 명령( ``status``/``balance``/``positions``/``reconcile``
+> )은 무변경 보존된다.
 
 ### #1633 Non-Goal — per-surface 런타임 trace는 split 책임
 

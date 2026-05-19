@@ -15,7 +15,6 @@ Broker Adapter 관점의 런타임 경계만 설명한다.
 ```bash
 # 연결 상태 확인
 ante broker status [--account domestic]
-ante broker health [--account domestic]     # status alias
 
 # 잔고 조회
 ante broker balance [--account domestic]
@@ -23,15 +22,11 @@ ante broker balance [--account domestic]
 # 포지션 조회
 ante broker positions [--account domestic]
 
-# live 현재가 조회
-ante broker price <symbol> [--account domestic]
-
 # 포지션 대사
 ante broker reconcile [--account domestic] [--fix]
 ```
 
-`broker price`는 live broker quote만 의미한다. historical/public market data 조회는
-`data` 또는 `feed` 계열 커맨드가 담당한다.
+historical/public market data 조회는 `data` 또는 `feed` 계열 커맨드가 담당한다.
 
 일반 운영 CLI는 `broker order`를 제공하지 않는다. 주문은 Bot/Strategy → RuleEngine
 → BrokerAdapter 경로로만 들어가야 하며, 수동 주문 테스트가 필요하면 별도

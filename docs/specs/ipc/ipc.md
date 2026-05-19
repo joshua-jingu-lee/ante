@@ -130,10 +130,9 @@ cold-path 삭제는 항상 keep 의미다.
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
-| `ante broker status` / `ante broker health` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
+| `ante broker status` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
 | `ante broker balance` | `broker.balance` | `BrokerAdapter.get_account_balance()` | 서버 시작 시 생성된 adapter/credentials/rate limit 상태 재사용 |
 | `ante broker positions` | `broker.positions` | `BrokerAdapter.get_positions()` | 서버 adapter 연결과 계좌 topology 기준으로 live 포지션 조회 |
-| `ante broker price` | `broker.price` | `BrokerAdapter.get_current_price()` | live broker quote 조회. historical/public data 조회와 분리 |
 | `ante broker reconcile --fix` | `broker.reconcile` | `PositionReconciler.reconcile()` | TradeService 인메모리 반영 + `NotificationEvent` 알림 |
 
 일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의
@@ -162,7 +161,7 @@ maintenance/test 스펙 없이는 제공하지 않는다.
 
 조회 커맨드라도 서버가 가진 live 상태를 읽어야 하면 런타임 IPC 대상이다. 대표적으로
 `bot list/info/status/positions/signal-key`의 live 조회와
-`broker status/health/balance/positions/price`가 여기에 속한다.
+`broker status/balance/positions`가 여기에 속한다.
 
 ### Cold-path structural 커맨드
 
@@ -250,7 +249,7 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 IPC command 분리는 별도 이슈 범위다.
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
-taxonomy 대상이 아니다. `broker.price`, `member.*`, `bot.start/stop`,
+taxonomy 대상이 아니다. `member.*`, `bot.start/stop`,
 `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로 표현되어 있으나 현재
 `register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다.
 
