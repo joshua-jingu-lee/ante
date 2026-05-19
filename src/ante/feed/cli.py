@@ -250,6 +250,11 @@ def run_backfill(
 
     from ante.feed.cli_output import format_backfill_result
     from ante.feed.config import FeedConfig
+    from ante.feed.pipeline.backfill_runner import (
+        BACKFILL_DATE_ERROR_CODES,
+        CONFIG_ERROR_CODE_INVALID_DATE_RANGE,
+        validate_backfill_since,
+    )
 
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
@@ -262,6 +267,21 @@ def run_backfill(
 
     if until is not None:
         _validate_iso_date(until, "--until", fmt)
+
+    # `--since` strict parse 통과 이후 effective start가 미래이면
+    # orchestrator 호출 전에 INVALID_DATE_RANGE로 즉시 거부한다.
+    # malformed는 위 `_validate_iso_date`가 이미 CLI_INVALID_DATE로
+    # 처리했으므로 여기서는 future-check만 책임진다.
+    if since is not None:
+        _parsed, since_err = validate_backfill_since(since)
+        if since_err is not None and since_err.get("code") == (
+            CONFIG_ERROR_CODE_INVALID_DATE_RANGE
+        ):
+            fmt.error(
+                f"잘못된 --since 날짜: {since_err['error']}",
+                code=CONFIG_ERROR_CODE_INVALID_DATE_RANGE,
+            )
+            raise SystemExit(1)
 
     config = cfg.load_config()
 
@@ -279,6 +299,18 @@ def run_backfill(
             config=config,
         )
     )
+
+    # 수렴점(BackfillRunner)에서 coded date config_error를 담아왔다면
+    # 성공 result 출력 없이 단일 envelope + exit 1로 매핑한다. 기존
+    # 비날짜 config_errors(소스 누락·lock 경합·rate-limit 등)는 code
+    # 키가 없으므로 이 분기에 진입하지 않고 현행 출력 흐름을 유지한다.
+    for entry in result.config_errors:
+        if not isinstance(entry, dict):
+            continue
+        code = entry.get("code")
+        if code in BACKFILL_DATE_ERROR_CODES:
+            fmt.error(str(entry.get("error", "")), code=str(code))
+            raise SystemExit(1)
 
     format_backfill_result(result, fmt)
 

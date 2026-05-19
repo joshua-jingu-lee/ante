@@ -110,13 +110,39 @@ async def _run_backfill_job(
     config: dict[str, Any],
     current_date: str,
 ) -> None:
-    """Backfill 수집 작업을 1회 실행한다."""
+    """Backfill 수집 작업을 1회 실행한다.
+
+    `result.config_errors`에 coded date error(CLI_INVALID_DATE /
+    INVALID_DATE_RANGE)가 포함된 경우 "Backfill 완료" 메시지를 출력하지
+    않고 명시 오류를 echo/log한다. 기존 비날짜 config_errors(소스 누락·
+    lock 경합·rate-limit 등)는 현행 완료 메시지 흐름을 유지한다.
+    """
+    from ante.feed.pipeline.backfill_runner import BACKFILL_DATE_ERROR_CODES
+
     logger.info("Backfill 수집 시작 (%s)", current_date)
     try:
         result = await orchestrator.run_backfill(
             data_path=Path(data_path),
             config=config,
         )
+        coded_date_errors = [
+            entry
+            for entry in result.config_errors
+            if isinstance(entry, dict)
+            and entry.get("code") in BACKFILL_DATE_ERROR_CODES
+        ]
+        if coded_date_errors:
+            for entry in coded_date_errors:
+                code = entry.get("code")
+                message = entry.get("error", "")
+                logger.error(
+                    "Backfill 차단 (%s): code=%s, error=%s",
+                    current_date,
+                    code,
+                    message,
+                )
+                click.echo(f"[{current_date}] Backfill 차단: {code} — {message}")
+            return
         click.echo(
             f"[{current_date}] Backfill 완료: "
             f"{result.symbols_success}/{result.symbols_total} 종목, "

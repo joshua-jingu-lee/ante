@@ -15,7 +15,10 @@ from typing import Any
 from ante.data.normalizer import DARTNormalizer, DataGoKrNormalizer
 from ante.data.store import ParquetStore
 from ante.feed.models.result import CollectionResult
-from ante.feed.pipeline.backfill_runner import BackfillRunner, _make_result
+from ante.feed.pipeline.backfill_runner import (
+    BackfillRunner,
+    _make_result,
+)
 from ante.feed.pipeline.daily_runner import DailyRunner
 from ante.feed.pipeline.dart_collector import DARTCollector
 from ante.feed.pipeline.data_go_kr_collector import DataGoKrCollector
@@ -73,9 +76,28 @@ class FeedOrchestrator:
         data_path: Path,
         config: dict[str, Any],
     ) -> CollectionResult:
-        """과거 데이터 대량 수집 (backfill 모드)."""
+        """과거 데이터 대량 수집 (backfill 모드).
+
+        ``[schedule].backfill_since`` strict 검증은 lock acquire 이전에
+        수행한다. malformed/future일 때는 lock 파일을 만들지 않고
+        coded config_error만 담은 결과를 즉시 반환한다(체크포인트·소스
+        진입 차단).
+        """
         feed_dir = data_path / ".feed"
         started_at = datetime.now(tz=UTC)
+
+        coded_date_error = BackfillRunner._validate_backfill_since(config)
+        if coded_date_error is not None:
+            logger.warning(
+                "Backfill 차단(orchestrator): code=%s, error=%s",
+                coded_date_error.get("code"),
+                coded_date_error.get("error"),
+            )
+            return _make_result(
+                "backfill",
+                started_at,
+                config_errors=[coded_date_error],
+            )
 
         if not self._acquire_lock(feed_dir):
             return _make_result(
