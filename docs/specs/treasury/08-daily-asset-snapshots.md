@@ -118,11 +118,11 @@ Treasury 퍼블릭 메서드:
 
 ```bash
 # 최근 스냅샷 조회
-ante treasury snapshot --format json
+ante --format json treasury snapshot --account <account_id>
 
 # 기간별 스냅샷 조회 (차트 데이터)
-ante treasury snapshot --from 2026-01-01 --to 2026-03-21 --format json
+ante --format json treasury snapshot --from 2026-01-01 --to 2026-03-21 --account <account_id>
 
 # 특정일 스냅샷 조회
-ante treasury snapshot --date 2026-03-20 --format json
+ante --format json treasury snapshot --date 2026-03-20 --account <account_id>
 ```

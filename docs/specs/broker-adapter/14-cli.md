@@ -14,16 +14,16 @@ Broker Adapter 관점의 런타임 경계만 설명한다.
 
 ```bash
 # 연결 상태 확인
-ante broker status [--account domestic]
+ante broker status --account <account_id>
 
 # 잔고 조회
-ante broker balance [--account domestic]
+ante broker balance --account <account_id>
 
 # 포지션 조회
-ante broker positions [--account domestic]
+ante broker positions --account <account_id>
 
 # 포지션 대사
-ante broker reconcile [--account domestic] [--fix]
+ante broker reconcile --account <account_id> [--fix]
 ```
 
 historical/public market data 조회는 `data` 또는 `feed` 계열 커맨드가 담당한다.

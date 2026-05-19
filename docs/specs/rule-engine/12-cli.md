@@ -10,10 +10,10 @@ Rule Engine 관점의 조회 예시만 제공한다.
 
 ```bash
 # 룰 목록 조회
-ante rule list [--scope global|strategy]
+ante rule list --account <account_id> [--scope global|strategy]
 
 # 룰 상세 조회
-ante rule info <rule_id>
+ante rule info <rule_id> --account <account_id>
 ```
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
