@@ -84,6 +84,99 @@ class TestCollectCommands:
         names = [name for name, _ in result]
         assert "grp" in names
 
+    def test_hidden_leaf_command_excluded(self) -> None:
+        """hidden 리프 명령은 수집 결과에서 제외된다 (#1682)."""
+
+        @click.group()
+        def root() -> None:
+            pass
+
+        @root.command()
+        def visible() -> None:
+            """노출."""
+
+        @root.command(hidden=True)
+        def secret() -> None:
+            """숨김."""
+
+        result = _collect_commands(root)
+        names = [name for name, _ in result]
+        assert "visible" in names
+        assert "secret" not in names
+
+    def test_hidden_group_and_subtree_excluded(self) -> None:
+        """hidden 그룹은 그룹 자체와 하위 재귀 전체가 제외된다 (#1682).
+
+        notification 빈 그룹을 ``@click.group(hidden=True)`` 로 숨기면
+        guide/cli.md(생성물)에서 그룹 heading 과 하위 명령이 모두
+        사라져야 한다. generic·mechanism-agnostic 검증.
+        """
+
+        @click.group()
+        def root() -> None:
+            pass
+
+        @root.group(name="shown")
+        def visible_grp() -> None:
+            """노출 그룹."""
+
+        @visible_grp.command(name="run")
+        def visible_leaf() -> None:
+            """노출 리프."""
+
+        @root.group(name="hidden", hidden=True)
+        def hidden_grp() -> None:
+            """숨김 그룹."""
+
+        @hidden_grp.command(name="buried")
+        def buried_leaf() -> None:
+            """숨김 그룹 하위 리프."""
+
+        result = _collect_commands(root)
+        names = [name for name, _ in result]
+        # hidden 그룹 자체 + 하위 재귀 전부 부재
+        assert "hidden" not in names
+        assert "hidden buried" not in names
+        # 노출 그룹과 그 하위는 영향 없음 (회귀 0)
+        assert "shown" in names
+        assert "shown run" in names
+
+    def test_hidden_group_absent_from_generated_markdown(self) -> None:
+        """hidden 그룹은 생성된 markdown TOC/heading 에 미포함 (#1682)."""
+
+        @click.group()
+        def root() -> None:
+            """루트."""
+
+        @root.group(hidden=True)
+        def notification() -> None:
+            """알림 관리."""
+
+        @root.group()
+        def shown() -> None:
+            """노출 그룹."""
+
+        @shown.command()
+        def run() -> None:
+            """실행."""
+
+        # get_cli 를 더미 트리로 패치하여 전체 생성 경로를 검증한다.
+        original_get_cli = _mod.get_cli
+        _mod.get_cli = lambda: root
+        try:
+            buf = io.StringIO()
+            generate_cli_reference(buf)
+            content = buf.getvalue()
+        finally:
+            _mod.get_cli = original_get_cli
+
+        assert "notification" not in content
+        assert "## notification" not in content
+        assert "](#notification" not in content
+        # 노출 그룹은 정상 생성 (회귀 0)
+        assert "## shown" in content
+        assert "ante shown run" in content
+
 
 class TestFormatParamType:
     """_format_param_type가 파라미터 타입을 올바르게 포맷팅하는지 검증."""

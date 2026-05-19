@@ -57,6 +57,12 @@ def _collect_commands(
         if cmd is None:
             continue
 
+        # hidden 명령은 public 표면(guide/cli.md)에서 제외한다.
+        # 그룹이 hidden이면 그룹 자체뿐 아니라 하위 재귀도 skip한다.
+        # generic·mechanism-agnostic: 임의의 hidden 명령을 자동 제외한다.
+        if getattr(cmd, "hidden", False):
+            continue
+
         full_name = f"{prefix} {name}".strip() if prefix else name
 
         if isinstance(cmd, click.Group):

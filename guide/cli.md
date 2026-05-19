@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-15
+> 마지막 갱신: 2026-05-20
 
 ## 목차
 
@@ -86,7 +86,6 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante member rotate-token](#ante-member-rotate-token)
   - [ante member reset-password](#ante-member-reset-password)
   - [ante member regenerate-recovery-key](#ante-member-regenerate-recovery-key)
-- [notification — 알림 관리.](#notification-알림-관리)
 - [rule — 거래 룰 조회·관리.](#rule-거래-룰-조회관리)
   - [ante rule list](#ante-rule-list)
   - [ante rule info](#ante-rule-info)
@@ -1303,6 +1302,7 @@ ante backtest run <STRATEGY_PATH> [OPTIONS]
 | `--symbols` | - | TEXT | — | 종목 코드 (콤마 구분) |
 | `--balance` | - | FLOAT | 10000000 | 초기 자금 |
 | `--timeframe` | - | TEXT | 1d | 타임프레임 |
+| `--exchange` | - | TEXT | KRX | 거래소 (기본: KRX) |
 | `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
@@ -1780,10 +1780,6 @@ ante member regenerate-recovery-key [OPTIONS]
 
 ---
 
-## notification — 알림 관리.
-
----
-
 ## rule — 거래 룰 조회·관리.
 
 ### ante rule list
@@ -2092,12 +2088,18 @@ ante treasury snapshot [OPTIONS]
 
 ante를 최신 버전으로 업데이트합니다.
 
-`--check`은 PyPI 버전 조회만 수행한다 (`--yes` 불필요).
-`--check`이 아닌 실제 업데이트 실행은 `--yes`가 반드시 필요하며,
-누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
-`--yes` 게이트는 PyPI 조회 **앞에** 평가하므로, 네트워크 느림/실패
-환경에서도 `--yes` 누락 호출은 PyPI 실패가 아닌 동일한 구조화 에러
-코드로 거절된다.
+게이트 평가 우선순위 (SSOT: docs/specs/cli/02-design-decisions.md
+"위험 명령 확인 방식"):
+``--check`` → ``--yes`` confirmation(``CLI_CONFIRMATION_REQUIRED``)
+→ server-running/``--force``(``UPDATE_SERVER_RUNNING``) → 실제 update.
+
+`--check`은 PyPI 버전 조회만 수행하는 dry-run이다 (`--yes`/server-running
+무관, 최우선). `--check`이 아닌 실제 업데이트 실행은 `--yes`가 반드시
+필요하며, 누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로
+종료한다. `--yes` 게이트는 server 상태 검사와 PyPI 조회 **앞에**
+평가하므로, 서버 실행/네트워크 느림·실패 환경에서도 `--yes` 누락
+호출은 server-running 안내나 PyPI 실패가 아닌 동일한 구조화 에러
+코드로 거절된다 (#1626 D1, Codex P2 2차).
 
 - **필요 scope**: —
 - **토큰**: 인증 불필요
