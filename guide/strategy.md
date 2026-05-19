@@ -134,7 +134,7 @@ self.ctx.modify_order(order_id="ORD-001", price=59000, reason="지정가 수정"
   ↓ ante strategy submit — 검증 후 Registry에 등록
   ↓
 봇 생성 (ante bot create --strategy <strategy_id>)
-  ↓ ante bot start — 봇 가동
+  ↓ ante bot start — 봇 가동 (미구현 / follow-up: CLI command·IPC handler 미등록)
   ↓
 주기적 루프 (interval_seconds마다)
   ├─ on_step(context) 호출

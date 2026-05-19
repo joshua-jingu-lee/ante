@@ -258,7 +258,7 @@ src/ante/
 │   │   ├── approval.py               # ante approval request/list/info/review/cancel/approve/reject
 │   │   ├── audit.py                  # ante audit — 감사 로그 조회
 │   │   ├── backtest.py               # ante backtest run (진행률 바, 성과 지표 테이블 포함)
-│   │   ├── bot.py                    # ante bot create/list/start/stop/info (--param 전략 파라미터 오버라이드)
+│   │   ├── bot.py                    # ante bot create/info/list/positions/remove/signal-key (start/stop/status 미구현 follow-up)
 │   │   ├── broker.py                 # ante broker 명령
 │   │   ├── config.py                 # ante config 명령
 │   │   ├── data.py                   # ante data list/schema/inject/validate

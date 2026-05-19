@@ -98,6 +98,10 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "scripts/generate_db_schema.py": "DB 스키마 문서 자동 생성",
     "scripts/generate_project_structure.py": "프로젝트 구조 Agent INDEX 생성/check",
     "src/ante": "Python 백엔드 패키지",
+    "src/ante/cli/commands/bot.py": (
+        "ante bot create/info/list/positions/remove/signal-key "
+        "(start/stop/status 미구현 follow-up)"
+    ),
     "strategies": "전략 템플릿과 예제",
     "tests": "단위·통합 테스트",
 }

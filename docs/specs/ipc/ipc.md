@@ -95,8 +95,14 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
 | `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
 
-서버 실행 중 `ante bot list/info/status/positions/signal-key`는 `bot.query` 계열 IPC로
-서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
+> **미구현 (follow-up)**: 위 표의 `bot.start`/`bot.stop` IPC handler 및 대응 CLI
+> command(`ante bot start`/`ante bot stop`)는 현재 등록되어 있지 않다.
+> `BotManager.start_bot()`/`stop_bot()` 코드는 실재하나 CLI(Click)·IPC registry
+> wiring이 별도 follow-up이다. 위 매핑은 설계 계약이다.
+
+서버 실행 중 `ante bot list/info/positions/signal-key`는 `bot.query` 계열 IPC로
+서버의 live 상태를 우선 조회한다 (`ante bot status`/`bot.query`/`bot.status`는
+**미구현 (follow-up)** — CLI command·IPC handler 미등록). 서버가 정지된 상태에서는 DB에 저장된 persisted
 snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
 상태에서 `signal_keys`, 전략 스냅샷, Treasury budget, `bots.status='deleted'`만 직접
 정리할 수 있다. `handle_positions=liquidate`는 IPC/Web runtime 경로에서만 의미가 있고,
@@ -161,7 +167,9 @@ maintenance/test 스펙 없이는 제공하지 않는다.
 
 조회 커맨드라도 서버가 가진 live 상태를 읽어야 하면 런타임 IPC 대상이다. 대표적으로
 `bot list/info/status/positions/signal-key`의 live 조회와
-`broker status/balance/positions`가 여기에 속한다.
+`broker status/balance/positions`가 여기에 속한다. 단 `bot status`(및 대응
+`bot.query`/`bot.status` IPC)는 미구현 (follow-up) — CLI command·IPC handler
+미등록. 실재 bot 조회 CLI는 `list/info/positions/signal-key`다.
 
 ### Cold-path structural 커맨드
 
@@ -249,9 +257,12 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 IPC command 분리는 별도 이슈 범위다.
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
-taxonomy 대상이 아니다. `member.*`, `bot.start/stop`,
+taxonomy 대상이 아니다. `member.*`, `bot.start/stop`, `bot.query`/`bot.status`,
 `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로 표현되어 있으나 현재
-`register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다.
+`register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다. 특히
+`bot.start`/`bot.stop`/`bot.query`/`bot.status`는 대응 CLI command(`ante bot
+start/stop/status`)와 함께 미구현 (follow-up)이다 — `BotManager.start_bot()`/
+`stop_bot()` 코드는 실재하나 CLI·IPC wiring 미등록.
 
 ## 통신 프로토콜
 
