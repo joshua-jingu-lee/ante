@@ -102,6 +102,16 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
         "ante bot create/info/list/positions/remove/signal-key "
         "(start/stop/status 미구현 follow-up)"
     ),
+    "src/ante/cli/commands/data.py": "ante data list/schema/storage/validate",
+    "src/ante/cli/commands/notification.py": (
+        "알림 CLI (public leaf 없음 — 텔레그램 이관)"
+    ),
+    "src/ante/cli/commands/report.py": (
+        "ante report schema/submit/list/performance/view"
+    ),
+    "src/ante/cli/commands/strategy.py": (
+        "ante strategy validate/submit/list/info/performance"
+    ),
     "src/ante/web/routes/notifications.py": (
         "알림 API (stub, 이력 조회 삭제·텔레그램 이관)"
     ),
