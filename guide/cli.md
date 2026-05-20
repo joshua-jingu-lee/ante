@@ -2201,7 +2201,6 @@ ante feed run backfill [OPTIONS]
 |------|------|------|--------|------|
 | `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
 | `--since` | - | TEXT | — | 수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드) |
-| `--until` | - | TEXT | — | 수집 종료일 (YYYY-MM-DD, 기본값: 오늘) |
 
 
 ### ante feed run daily

@@ -27,8 +27,8 @@ def _validate_iso_date(value: str, option: str, fmt: object) -> None:
     """``value``가 엄격한 ``YYYY-MM-DD``인지 검증한다.
 
     형식이 어긋나거나 캘린더상 유효하지 않으면 ``CLI_INVALID_DATE``
-    구조화 에러를 출력하고 ``SystemExit(1)``로 종료한다. 3개 날짜
-    옵션(``--since`` / ``--until`` / ``--date``)이 공유한다.
+    구조화 에러를 출력하고 ``SystemExit(1)``로 종료한다. 날짜
+    옵션(``--since`` / ``--date``)이 공유한다.
     """
     from datetime import date
 
@@ -234,7 +234,6 @@ def _ensure_initialized(  # noqa: ANN001, ANN201
 @click.option(
     "--since", default=None, help="수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드)"
 )
-@click.option("--until", default=None, help="수집 종료일 (YYYY-MM-DD, 기본값: 오늘)")
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_WRITE)
@@ -242,7 +241,6 @@ def run_backfill(
     ctx: click.Context,
     data_path: str,
     since: str | None,
-    until: str | None,
 ) -> None:
     """과거 데이터를 1회 수집한다 (backfill)."""
     import asyncio
@@ -264,9 +262,6 @@ def run_backfill(
 
     if since is not None:
         _validate_iso_date(since, "--since", fmt)
-
-    if until is not None:
-        _validate_iso_date(until, "--until", fmt)
 
     # `--since` strict parse 통과 이후 effective start가 미래이면
     # orchestrator 호출 전에 INVALID_DATE_RANGE로 즉시 거부한다.
