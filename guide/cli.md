@@ -519,7 +519,7 @@ ante audit list [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante approval request [OPTIONS]
+ante approval request --type <APPROVAL_TYPE> --title <TITLE> [OPTIONS]
 ```
 
 **Options:**
@@ -589,7 +589,7 @@ ante approval info <ID> [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante approval review <ID> [OPTIONS]
+ante approval review <ID> --result <REVIEW_RESULT> [OPTIONS]
 ```
 
 **Arguments:**
@@ -842,7 +842,7 @@ ante bot info <BOT_ID>
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante bot create [OPTIONS]
+ante bot create --name <NAME> --strategy <STRATEGY> [OPTIONS]
 ```
 
 **Options:**
@@ -939,7 +939,7 @@ ante bot positions <BOT_ID>
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante broker status [OPTIONS]
+ante broker status --account <ACCOUNT_ID>
 ```
 
 **Options:**
@@ -957,7 +957,7 @@ ante broker status [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante broker balance [OPTIONS]
+ante broker balance --account <ACCOUNT_ID>
 ```
 
 **Options:**
@@ -975,7 +975,7 @@ ante broker balance [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante broker positions [OPTIONS]
+ante broker positions --account <ACCOUNT_ID>
 ```
 
 **Options:**
@@ -993,7 +993,7 @@ ante broker positions [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante broker reconcile [OPTIONS]
+ante broker reconcile --account <ACCOUNT_ID> [OPTIONS]
 ```
 
 **Options:**
@@ -1284,7 +1284,7 @@ ante data validate [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante backtest run <STRATEGY_PATH> [OPTIONS]
+ante backtest run <STRATEGY_PATH> --start <START> --end <END> [OPTIONS]
 ```
 
 **Arguments:**
@@ -1617,7 +1617,7 @@ ante member list-invalid-roles [OPTIONS]
 - **토큰**: 🔑 Human master 전용 (#1543)
 
 ```bash
-ante member register [OPTIONS]
+ante member register --id <MEMBER_ID> --type <MEMBER_TYPE> [OPTIONS]
 ```
 
 **Options:**
@@ -1743,7 +1743,7 @@ Recovery Key로 패스워드 리셋 (인증 불필요).
 - **토큰**: 인증 불필요
 
 ```bash
-ante member reset-password [OPTIONS]
+ante member reset-password --recovery-key <RECOVERY_KEY> [OPTIONS]
 ```
 
 **Options:**
@@ -1790,7 +1790,7 @@ ante member regenerate-recovery-key [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante rule list [OPTIONS]
+ante rule list --account <ACCOUNT_ID> [OPTIONS]
 ```
 
 **Options:**
@@ -1809,7 +1809,7 @@ ante rule list [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante rule info <RULE_ID> [OPTIONS]
+ante rule info <RULE_ID> --account <ACCOUNT_ID>
 ```
 
 **Arguments:**
@@ -1837,7 +1837,7 @@ ante rule info <RULE_ID> [OPTIONS]
 - **토큰**: 인증 불필요
 
 ```bash
-ante signal connect [OPTIONS]
+ante signal connect --key <KEY>
 ```
 
 **Options:**
@@ -1997,7 +1997,7 @@ ante trade info <TRADE_ID> [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante treasury status [OPTIONS]
+ante treasury status --account <ACCOUNT_ID> [OPTIONS]
 ```
 
 **Options:**
@@ -2016,7 +2016,7 @@ ante treasury status [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante treasury allocate <BOT_ID> <AMOUNT> [OPTIONS]
+ante treasury allocate <BOT_ID> <AMOUNT> --account <ACCOUNT_ID>
 ```
 
 **Arguments:**
@@ -2041,7 +2041,7 @@ ante treasury allocate <BOT_ID> <AMOUNT> [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante treasury deallocate <BOT_ID> <AMOUNT> [OPTIONS]
+ante treasury deallocate <BOT_ID> <AMOUNT> --account <ACCOUNT_ID>
 ```
 
 **Arguments:**
@@ -2066,7 +2066,7 @@ ante treasury deallocate <BOT_ID> <AMOUNT> [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante treasury snapshot [OPTIONS]
+ante treasury snapshot --account <ACCOUNT_ID> [OPTIONS]
 ```
 
 **Options:**
@@ -2284,7 +2284,7 @@ ante feed status [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante feed inject <PATH> [OPTIONS]
+ante feed inject <PATH> --symbol <SYMBOL> [OPTIONS]
 ```
 
 **Arguments:**

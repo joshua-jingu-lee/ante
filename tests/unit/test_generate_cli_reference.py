@@ -23,6 +23,7 @@ _get_params = _mod._get_params
 _get_required_scopes = _mod._get_required_scopes
 _format_scope_cell = _mod._format_scope_cell
 _format_token_cell = _mod._format_token_cell
+_write_command_detail = _mod._write_command_detail
 generate_cli_reference = _mod.generate_cli_reference
 
 # ── 헬퍼 함수 테스트 ─────────────────────────────────────────────────────────
@@ -445,3 +446,126 @@ class TestGenerateCliReference:
 
         blank = [cmd for cmd, desc in summary_rows if not desc.strip()]
         assert blank == [], f"설명이 비어 있는 명령어: {blank}"
+
+
+# ── usage line: required option 인라인 표시 (#1696) ─────────────────────────
+
+
+def _render_usage(cmd: click.Command, full_name: str) -> str:
+    """``_write_command_detail`` 의 usage line(```bash ... ```) 한 줄을 추출한다."""
+    buf = io.StringIO()
+    _write_command_detail(buf, full_name, cmd)
+    content = buf.getvalue()
+    # ```bash\n<usage>\n``` 패턴에서 usage 한 줄을 뽑는다.
+    marker = "```bash\n"
+    start = content.index(marker) + len(marker)
+    end = content.index("\n```", start)
+    return content[start:end]
+
+
+class TestUsageLineRequiredOptionInline:
+    """``_write_command_detail`` usage line이 required option을 인라인 표시 (#1696).
+
+    7 case A~G 매트릭스 (이슈 #1696 Implementation Plan v3.1):
+      A. required-only        → ``--account <ACCOUNT_ID>`` 인라인, ``[OPTIONS]`` 부재
+      B. 혼합                  → required 인라인 + ``[OPTIONS]``
+      C. non-required-only 회귀 → 기존 ``[OPTIONS]`` 유지
+      D. 다중 required, 인자 없음 → 다중 인라인 + ``[OPTIONS]``
+      E. metavar 변환          → ``--type`` → ``<APPROVAL_TYPE>``
+      F. 인자 + 단일 required  → 인자 + 인라인, ``[OPTIONS]`` 부재
+      G. 다중 인자 + 단일 required → 인자2 + 인라인, ``[OPTIONS]`` 부재
+    """
+
+    def test_case_a_required_only_no_options_token(self) -> None:
+        """A. required-only: ``ante broker status --account <ACCOUNT_ID>``."""
+
+        @click.command(name="status")
+        @click.option("--account", "account_id", required=True)
+        def status(account_id: str) -> None:
+            """잔고 상태."""
+
+        usage = _render_usage(status, "broker status")
+        assert usage == "ante broker status --account <ACCOUNT_ID>"
+        assert "[OPTIONS]" not in usage
+
+    def test_case_b_mixed_required_and_optional(self) -> None:
+        """B. 혼합: ``ante broker reconcile --account <ACCOUNT_ID> [OPTIONS]``."""
+
+        @click.command(name="reconcile")
+        @click.option("--account", "account_id", required=True)
+        @click.option("--force", is_flag=True, default=False)
+        def reconcile(account_id: str, force: bool) -> None:
+            """리컨실."""
+
+        usage = _render_usage(reconcile, "broker reconcile")
+        assert usage == "ante broker reconcile --account <ACCOUNT_ID> [OPTIONS]"
+
+    def test_case_c_nonrequired_only_regression(self) -> None:
+        """C. non-required-only 회귀: ``[OPTIONS]`` 유지, 인라인 없음."""
+
+        @click.command(name="list")
+        @click.option("--limit", type=int, default=50)
+        @click.option("--format", "output_format", default="text")
+        def list_cmd(limit: int, output_format: str) -> None:
+            """목록."""
+
+        usage = _render_usage(list_cmd, "audit list")
+        assert usage == "ante audit list [OPTIONS]"
+
+    def test_case_d_multi_required_no_arg(self) -> None:
+        """D. 다중 required, 인자 없음: bot create 형태."""
+
+        @click.command(name="create")
+        @click.option("--name", required=True)
+        @click.option("--strategy", required=True)
+        @click.option("--description", default=None)
+        def create(name: str, strategy: str, description: str | None) -> None:
+            """봇 생성."""
+
+        usage = _render_usage(create, "bot create")
+        assert usage == "ante bot create --name <NAME> --strategy <STRATEGY> [OPTIONS]"
+
+    def test_case_e_metavar_conversion_from_human_name(self) -> None:
+        """E. metavar 변환: ``--type`` (human_name=approval_type) → 대문자화."""
+
+        @click.command(name="request")
+        @click.option("--type", "approval_type", required=True)
+        @click.option("--title", required=True)
+        @click.option("--note", default=None)
+        def request_cmd(approval_type: str, title: str, note: str | None) -> None:
+            """승인 요청."""
+
+        usage = _render_usage(request_cmd, "approval request")
+        assert (
+            usage
+            == "ante approval request --type <APPROVAL_TYPE> --title <TITLE> [OPTIONS]"
+        )
+
+    def test_case_f_arg_plus_single_required_option(self) -> None:
+        """F. 인자 + required option: ``rule info <RULE_ID> --account <ACCOUNT_ID>``."""
+
+        @click.command(name="info")
+        @click.argument("rule_id")
+        @click.option("--account", "account_id", required=True)
+        def info(rule_id: str, account_id: str) -> None:
+            """룰 상세."""
+
+        usage = _render_usage(info, "rule info")
+        assert usage == "ante rule info <RULE_ID> --account <ACCOUNT_ID>"
+        assert "[OPTIONS]" not in usage
+
+    def test_case_g_multi_arg_plus_single_required_option(self) -> None:
+        """G. 다중 인자 + 단일 required: treasury allocate 형태."""
+
+        @click.command(name="allocate")
+        @click.argument("bot_id")
+        @click.argument("amount")
+        @click.option("--account", "account_id", required=True)
+        def allocate(bot_id: str, amount: str, account_id: str) -> None:
+            """예산 할당."""
+
+        usage = _render_usage(allocate, "treasury allocate")
+        assert (
+            usage == "ante treasury allocate <BOT_ID> <AMOUNT> --account <ACCOUNT_ID>"
+        )
+        assert "[OPTIONS]" not in usage
