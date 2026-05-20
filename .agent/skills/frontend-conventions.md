@@ -3,7 +3,6 @@
 > 대시보드(React 19 + TypeScript + Tailwind CSS 4) 구현 시 이 컨벤션을 따른다.
 > 설계 문서: `docs/dashboard/architecture.md`
 > 디자인 가이드: `docs/dashboard/architecture.md` § 코딩 컨벤션 (디자인 토큰, 타이포그래피, 카드 레이아웃)
-> 유저스토리: `docs/dashboard/user-stories/`
 > 목업: `docs/dashboard/mockups/`
 > 디자인 토큰 정의: `frontend/src/index.css` (`@theme` 블록)
 
@@ -340,13 +339,13 @@ api/treasury.ts (fetchSnapshots)
 이슈 구현 시 반드시 다음을 확인한다:
 
 1. `docs/dashboard/architecture.md`의 해당 화면 구성표
-2. `docs/dashboard/user-stories/` 해당 유저스토리의 **모든 항목**이 구현되었는지 체크
+2. 이슈 본문 acceptance criteria의 **모든 항목**이 구현되었는지 체크
 3. `docs/dashboard/mockups/` 해당 목업과 레이아웃이 일치하는지 확인
 4. API 의존성이 올바르게 연결되었는지 확인
 5. 데이터 흐름이 `api/ → hooks/ → pages/ → components/` 패턴을 따르는지 확인
 
 **체크리스트** (PR 전 자가 검증):
-- [ ] 유저스토리의 구성 요소를 하나도 빠뜨리지 않았는가?
+- [ ] 이슈 본문 acceptance criteria(또는 architecture.md 화면 요구사항)의 구성 요소를 하나도 빠뜨리지 않았는가?
 - [ ] 레이아웃 순서가 목업과 동일한가?
 - [ ] 로딩/에러/빈 상태를 모두 처리했는가?
 - [ ] API 타입이 백엔드 스펙과 일치하는가?

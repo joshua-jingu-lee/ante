@@ -467,7 +467,7 @@ class Bot:
         """봇 상태 정보 반환.
 
         ``config`` nested object 는 ``BotConfig`` 의 runtime control 6 필드
-        (#1458 — ``docs/dashboard/user-stories/bots.md`` B-3/B-5 SSOT) 를
+        (#1458 — runtime control 6필드 SSOT: ``src/ante/bot/config.py``) 를
         대시보드 BotDetail prefill 용도로 노출한다. top-level ``interval_seconds``
         는 backward compatibility 용으로 유지된다(기존 list/detail 호출자의
         flat key 의존성). 다른 runtime control 필드는 top-level 에 추가하지
