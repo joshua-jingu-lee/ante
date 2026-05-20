@@ -361,8 +361,8 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 > [결정표](#결정표)의 현재형 정적 inventory 집계에는 포함되지
 > 않는다(현재형 동치 = 21/21/0).
 >
-> #1633 시점에는 ``ante broker health`` · ``ante broker price
-> <symbol>`` 가 03-commands.md 등 CLI/런타임-IPC 스펙에 공개 명령으로
+> #1633 시점에는 ``broker health`` · ``broker price <symbol>``
+> 가 03-commands.md 등 CLI/런타임-IPC 스펙에 공개 명령으로
 > 기재되어 있으나 ``src/ante/cli/commands/broker.py`` 에는
 > ``status``/``balance``/``positions``/``reconcile`` 만 등록되어 있어
 > ``spec-only`` (코드 표면 없음)로 분류되었고, 처리 결정은
