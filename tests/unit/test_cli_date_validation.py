@@ -30,7 +30,7 @@ Non-Goals (follow-up 후보):
   invalid str을 그대로 SQL로 전달) — CLI ingress에서 차단되는 이상 위험이
   실현되지 않으므로 본 PR scope 밖.
 - 다른 CLI date 옵션(`backtest run --start/--end`,
-  `report performance --start/--end`, `feed run --since/--until/--date`).
+  `report performance --start/--end`, `feed run --since/--date`).
 
 Codex Plan Review v2 권고:
 - `CliRunner(mix_stderr=False)`로 stderr 분리 단정 fragility를 방지한다.
