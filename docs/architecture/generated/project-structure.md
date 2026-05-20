@@ -421,7 +421,9 @@ tests/
 │   │   ├── __init__.py
 │   │   ├── test_dart_collector.py
 │   │   ├── test_cli_backfill_date_validation.py
-│   │   └── test_cli_config_set.py
+│   │   ├── test_cli_config_set.py
+│   │   ├── test_backfill_since_clean_reject.py
+│   │   └── test_cli_backfill_until_removed.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
@@ -637,7 +639,11 @@ tests/
 │   ├── test_report_required_fields_contract.py
 │   ├── test_store_path_safety.py
 │   ├── test_validation_input_reflection.py
-│   └── test_validation_surface_lock.py
+│   ├── test_validation_surface_lock.py
+│   ├── strategy/
+│   │   ├── __init__.py
+│   │   └── test_validator_source_read_parse_no_reflection.py
+│   └── test_cli_notification_hidden.py
 └── __init__.py
 ```
 
@@ -691,44 +697,34 @@ docs/
 │   ├── architecture.md               # 대시보드 아키텍처
 │   ├── design-guide.css
 │   ├── design-guide.html
-│   ├── mockups/
-│   │   ├── assets/
-│   │   │   ├── logo-a.svg
-│   │   │   ├── logo-e.svg
-│   │   │   ├── logo-n.svg
-│   │   │   └── logo-t.svg
-│   │   ├── agent-detail.html
-│   │   ├── agents.html
-│   │   ├── approval-detail-bot-stop.html
-│   │   ├── approval-detail-rule-change.html
-│   │   ├── approval-detail-strategy-adopt.html
-│   │   ├── approvals.html
-│   │   ├── backtest-data-fundamental.html
-│   │   ├── backtest-data.html
-│   │   ├── bot-detail-stopped.html
-│   │   ├── bot-detail.html
-│   │   ├── bot-logs.html
-│   │   ├── bots.html
-│   │   ├── common.css
-│   │   ├── login.html
-│   │   ├── performance.html
-│   │   ├── report-detail.html
-│   │   ├── settings.html
-│   │   ├── strategies.html
-│   │   ├── strategy-detail.html
-│   │   ├── trades.html
-│   │   ├── treasury-history.html
-│   │   └── treasury.html
-│   └── user-stories/
-│       ├── agents.md
-│       ├── approvals.md
-│       ├── backtest-data.md
-│       ├── bots.md
-│       ├── login.md
-│       ├── report-detail.md
-│       ├── settings.md
-│       ├── strategies.md
-│       └── treasury.md
+│   └── mockups/
+│       ├── assets/
+│       │   ├── logo-a.svg
+│       │   ├── logo-e.svg
+│       │   ├── logo-n.svg
+│       │   └── logo-t.svg
+│       ├── agent-detail.html
+│       ├── agents.html
+│       ├── approval-detail-bot-stop.html
+│       ├── approval-detail-rule-change.html
+│       ├── approval-detail-strategy-adopt.html
+│       ├── approvals.html
+│       ├── backtest-data-fundamental.html
+│       ├── backtest-data.html
+│       ├── bot-detail-stopped.html
+│       ├── bot-detail.html
+│       ├── bot-logs.html
+│       ├── bots.html
+│       ├── common.css
+│       ├── login.html
+│       ├── performance.html
+│       ├── report-detail.html
+│       ├── settings.html
+│       ├── strategies.html
+│       ├── strategy-detail.html
+│       ├── trades.html
+│       ├── treasury-history.html
+│       └── treasury.html
 ├── decisions/                        # 설계 결정 이력 디렉토리
 │   ├── README.md                     # 설계 결정 인덱스
 │   ├── D-001.md

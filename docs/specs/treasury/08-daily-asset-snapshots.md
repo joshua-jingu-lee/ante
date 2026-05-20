@@ -82,7 +82,6 @@ DailyReportScheduler (Trade, account.trading_hours_end + 30min)
 | T-2 일별 수익률 | 기간별 `daily_return` 시계열 | `treasury_daily_snapshots` 조회 |
 | T-2 기간 수익률 | `daily_return` 기하평균 | 프론트엔드 계산 |
 
-> 유저스토리: [자금 관리 T-1, T-2](../../dashboard/user-stories/treasury.md)
 > 자금 관리 화면은 실시간 조회 없이 **가장 최근 스냅샷 기준**으로 표시한다. 장 마감 후 스냅샷이 기록되면 화면에 반영된다.
 
 ### 인터페이스

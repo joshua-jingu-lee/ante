@@ -1,7 +1,7 @@
 # Ante 대시보드 아키텍처
 
 > 대시보드의 기술 스택, 데이터 흐름, API 의존성을 정의한다.
-> 화면 구성은 [mockups/](mockups/) 목업과 [user-stories/](user-stories/) 유저스토리를 참조한다.
+> 화면 구성은 [mockups/](mockups/) 목업과 본 문서를 참조한다.
 
 ## 사용자 정의
 
@@ -15,19 +15,19 @@ Ante의 대시보드는 **단일 사용자(운영자)**를 위한 화면이다.
 3. **운영** — 봇을 생성·제어하고, 자금을 배분하고, Agent를 관리한다
 4. **안전 관리** — 리스크 규칙을 설정하고, 이상 상황 시 킬스위치로 즉시 개입한다
 
-### 메뉴별 유저스토리
+### 메뉴별 목업
 
-| 메뉴 | 유저스토리 | 목업 |
-|------|-----------|------|
-| 로그인 | [login.md](user-stories/login.md) | [login.html](mockups/login.html) |
-| 자금 관리 | [treasury.md](user-stories/treasury.md) | [treasury.html](mockups/treasury.html), [treasury-history.html](mockups/treasury-history.html) |
-| 결재함 | [approvals.md](user-stories/approvals.md) | [approvals.html](mockups/approvals.html), approval-detail-*.html (5종) |
-| 봇 관리 | [bots.md](user-stories/bots.md) | [bots.html](mockups/bots.html), [bot-detail.html](mockups/bot-detail.html), [bot-detail-stopped.html](mockups/bot-detail-stopped.html) |
-| 전략과 성과 | [strategies.md](user-stories/strategies.md) | [strategies.html](mockups/strategies.html), [strategy-detail.html](mockups/strategy-detail.html), [performance.html](mockups/performance.html), [trades.html](mockups/trades.html) |
-| 에이전트 관리 | [agents.md](user-stories/agents.md) | [agents.html](mockups/agents.html), [agent-detail.html](mockups/agent-detail.html) |
-| 백테스트 데이터 | [backtest-data.md](user-stories/backtest-data.md) | [backtest-data.html](mockups/backtest-data.html) |
-| 리포트 상세 | [report-detail.md](user-stories/report-detail.md) | [report-detail.html](mockups/report-detail.html) |
-| 설정 | [settings.md](user-stories/settings.md) | [settings.html](mockups/settings.html) |
+| 메뉴 | 목업 |
+|------|------|
+| 로그인 | [login.html](mockups/login.html) |
+| 자금 관리 | [treasury.html](mockups/treasury.html), [treasury-history.html](mockups/treasury-history.html) |
+| 결재함 | [approvals.html](mockups/approvals.html), approval-detail-*.html (5종) |
+| 봇 관리 | [bots.html](mockups/bots.html), [bot-detail.html](mockups/bot-detail.html), [bot-detail-stopped.html](mockups/bot-detail-stopped.html) |
+| 전략과 성과 | [strategies.html](mockups/strategies.html), [strategy-detail.html](mockups/strategy-detail.html), [performance.html](mockups/performance.html), [trades.html](mockups/trades.html) |
+| 에이전트 관리 | [agents.html](mockups/agents.html), [agent-detail.html](mockups/agent-detail.html) |
+| 백테스트 데이터 | [backtest-data.html](mockups/backtest-data.html) |
+| 리포트 상세 | [report-detail.html](mockups/report-detail.html) |
+| 설정 | [settings.html](mockups/settings.html) |
 
 ## 1. 기술 스택
 

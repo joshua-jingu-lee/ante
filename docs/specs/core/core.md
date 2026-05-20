@@ -262,7 +262,7 @@ symbol shape 신규 입력 형태)만 SSOT로 소유한다. 나머지 축은 각
 | **C** | `tick` / `fundamental` data_type | OHLCV가 아닌 데이터 유형 | `docs/specs/data-pipeline/01·02·03` | 별개 축. timeframe이 아니라 data_type. 본 계약 밖 |
 | **D** | write-ownership (`<1d`+`tick`=Collector / `1d`+`fundamental`=DataFeed) | 파티션 쓰기 소유자 | `docs/specs/data-pipeline/02-write-ownership.md` | 별개 축. 어느 모듈이 쓰는가의 소유권 분배이며 입력 vocabulary 계약이 아니다 |
 | **E** | 신규 입력 strict ASCII 검증 vs legacy parquet path migration 판별 | 신규 입력 경계 vs 기존 경로 호환 | 신규 입력=본 절(`### KRX symbol shape`), legacy path migration 판별=`src/ante/data/store.py`(`\d` 보존) | 신규 입력 형태만 본 계약 SSOT. legacy 경로 판별 regex는 별개 축(아래 "Legacy 호환 정책") |
-| **F** | fundamental cadence/periodicity (`quarterly`/`annual`) | 재무 데이터 주기 | (현재 `dataset.timeframe` 필드에 overload — 정리는 후보 D deferral) | **별개 축. 본 canonical OHLCV-timeframe 계약에 포함하지 않는다.** 현재 `dataset.timeframe` 필드(`docs/dashboard/user-stories/backtest-data.md:79`·`docs/dashboard/mockups/backtest-data-fundamental.html:127`, fundamental parquet `quarterly.parquet`/`annual.parquet`)에 overload된 cross-surface 불일치는 #1612가 만든 것이 아니다. 본 절은 "fundamental cadence는 OHLCV bar timeframe과 별개 축이며 그 필드 의미 정리는 후보 D" 까지만 명문화하고 값 정의·필드 재설계는 하지 않는다 |
+| **F** | fundamental cadence/periodicity (`quarterly`/`annual`) | 재무 데이터 주기 | (현재 `dataset.timeframe` 필드에 overload — 정리는 후보 D deferral) | **별개 축. 본 canonical OHLCV-timeframe 계약에 포함하지 않는다.** 현재 `dataset.timeframe` 필드(`docs/dashboard/mockups/backtest-data-fundamental.html:127`, fundamental parquet `quarterly.parquet`/`annual.parquet`)에 overload된 cross-surface 불일치는 #1612가 만든 것이 아니다. 본 절은 "fundamental cadence는 OHLCV bar timeframe과 별개 축이며 그 필드 의미 정리는 후보 D" 까지만 명문화하고 값 정의·필드 재설계는 하지 않는다 |
 
 (D-016 `### exchange vs market vs source vs broker_type` 절과 동형 구조: 같은 리터럴이라도
 어느 축의 값인지에 따라 규율 SSOT가 다르며 값을 섞지 않는다.)
@@ -334,7 +334,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | Data API `timeframe` filter (기구현 400) | `src/ante/web/routes/data.py:65,85` #1594 timeframe 400 filter (기구현) | #1594 |
 | Data API `symbol` filter (exact-match·미거부 — 독립 행) | `src/ante/web/routes/data.py` datasets `symbol` query (datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 시 200 empty, legacy out-of-vocab symbol dir이 저장돼 있으면 그 dataset 반환; **#1594 아님**, web-api/05 계약·Legacy 호환 정책과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외 — 독립 행) | `src/ante/data/collector.py:61-150` `DataCollector.start/add_data/_collect_loop/_flush` live write | **#1614** (Depends on #1613) |
-| fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | `docs/dashboard/user-stories/backtest-data.md`, `docs/dashboard/mockups/backtest-data-fundamental.html` (본 이슈 무편집) | **후보 D** (deferral, 사람 등록 surface) |
+| fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | `docs/dashboard/mockups/backtest-data-fundamental.html` (본 이슈 무편집) | **후보 D** (deferral, 사람 등록 surface) |
 
 ## Logging 연계
 

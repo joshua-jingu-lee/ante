@@ -5903,7 +5903,7 @@
           "max_signals_per_step"
         ],
         "title": "BotConfigOut",
-        "description": "봇 runtime control 6 필드 nested 응답 (#1458).\n\n``GET /api/bots/{bot_id}`` 응답에 nested 객체 ``config`` 로 직렬화되어\n대시보드 BotDetail edit modal prefill 의 SSOT 가 된다.\n``docs/dashboard/user-stories/bots.md`` B-3/B-5 line 197-200 의 6 필드\n(``interval_seconds``, ``auto_restart``, ``max_restart_attempts``,\n``restart_cooldown_seconds``, ``step_timeout_seconds``,\n``max_signals_per_step``) 만 노출하며 다른 키는 ``extra=\"forbid\"`` 로\n차단한다 (강한 schema 계약)."
+        "description": "봇 runtime control 6 필드 nested 응답 (#1458).\n\n``GET /api/bots/{bot_id}`` 응답에 nested 객체 ``config`` 로 직렬화되어\n대시보드 BotDetail edit modal prefill 의 SSOT 가 된다.\n#1456/#1458 — runtime control 6 필드\n(``interval_seconds``, ``auto_restart``, ``max_restart_attempts``,\n``restart_cooldown_seconds``, ``step_timeout_seconds``,\n``max_signals_per_step``) 만 노출하며 다른 키는 ``extra=\"forbid\"`` 로\n차단한다 (강한 schema 계약). SSOT 는 ``src/ante/bot/config.py`` 상수 +\nmanual OpenAPI schema bounds."
       },
       "BotDetailResponse": {
         "properties": {
@@ -8551,7 +8551,7 @@
             ],
             "minimum": 1,
             "maximum": 10,
-            "description": "재시작 최대 시도 횟수. spec 범위 1~10 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
+            "description": "재시작 최대 시도 횟수. 허용 범위 1~10 외 값은 422 (#1456)."
           },
           "restart_cooldown_seconds": {
             "type": [
@@ -8560,7 +8560,7 @@
             ],
             "minimum": 10,
             "maximum": 600,
-            "description": "재시작 쿨다운(초). spec 범위 10~600 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
+            "description": "재시작 쿨다운(초). 허용 범위 10~600 외 값은 422 (#1456)."
           },
           "step_timeout_seconds": {
             "type": [
@@ -8569,7 +8569,7 @@
             ],
             "minimum": 5,
             "maximum": 120,
-            "description": "step 타임아웃(초). spec 범위 5~120 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
+            "description": "step 타임아웃(초). 허용 범위 5~120 외 값은 422 (#1456)."
           },
           "max_signals_per_step": {
             "type": [
@@ -8578,7 +8578,7 @@
             ],
             "minimum": 1,
             "maximum": 200,
-            "description": "step당 최대 signal 수. spec 범위 1~200 외 값은 422 (docs/dashboard/user-stories/bots.md B-5, #1456)."
+            "description": "step당 최대 signal 수. 허용 범위 1~200 외 값은 422 (#1456)."
           }
         }
       },

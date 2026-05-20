@@ -318,11 +318,12 @@ class BotConfigOut(BaseModel):
 
     ``GET /api/bots/{bot_id}`` 응답에 nested 객체 ``config`` 로 직렬화되어
     대시보드 BotDetail edit modal prefill 의 SSOT 가 된다.
-    ``docs/dashboard/user-stories/bots.md`` B-3/B-5 line 197-200 의 6 필드
+    #1456/#1458 — runtime control 6 필드
     (``interval_seconds``, ``auto_restart``, ``max_restart_attempts``,
     ``restart_cooldown_seconds``, ``step_timeout_seconds``,
     ``max_signals_per_step``) 만 노출하며 다른 키는 ``extra="forbid"`` 로
-    차단한다 (강한 schema 계약).
+    차단한다 (강한 schema 계약). SSOT 는 ``src/ante/bot/config.py`` 상수 +
+    manual OpenAPI schema bounds.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -374,10 +375,11 @@ class BotUpdateRequest(BaseModel):
 
     runtime control 4개 필드 (``max_restart_attempts``,
     ``restart_cooldown_seconds``, ``step_timeout_seconds``,
-    ``max_signals_per_step``) 는 ``docs/dashboard/user-stories/bots.md``
-    B-5 line 197-200 spec 범위 안에서만 허용된다 (#1456). 범위 밖 값은
-    ``ValidationError`` 로 거부되어 PUT 핸들러에서 422 가 반환된다.
-    ``BotConfig`` 단의 ``validate_runtime_controls`` 와 정합한다.
+    ``max_signals_per_step``) 는 #1456 허용 범위 안에서만 허용된다
+    (코드 SSOT: ``src/ante/bot/config.py`` 상수 + Pydantic Field +
+    manual OpenAPI schema bounds). 범위 밖 값은 ``ValidationError`` 로
+    거부되어 PUT 핸들러에서 422 가 반환된다. ``BotConfig`` 단의
+    ``validate_runtime_controls`` 와 정합한다.
     """
 
     model_config = ConfigDict(extra="forbid")

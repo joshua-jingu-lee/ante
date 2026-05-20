@@ -1,12 +1,13 @@
 """봇 runtime control 범위 검증 테스트 (#1456).
 
 SSOT:
-    - ``docs/dashboard/user-stories/bots.md`` B-5 line 197-200 — runtime
-      control 4개 필드의 spec 범위 정의.
+    - #1456 — runtime control 허용 범위 (코드 SSOT:
+      ``src/ante/bot/config.py`` 상수 + Pydantic Field +
+      manual OpenAPI schema bounds).
     - ``docs/specs/web-api/05-resource-endpoints.md`` PUT ``/api/bots/{bot_id}``
       body — runtime control 필드 contract.
 
-Spec 범위:
+허용 범위:
     - ``max_restart_attempts``: 1~10
     - ``restart_cooldown_seconds``: 10~600
     - ``step_timeout_seconds``: 5~120

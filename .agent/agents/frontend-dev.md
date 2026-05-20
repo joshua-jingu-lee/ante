@@ -30,7 +30,7 @@ Ante 대시보드(React)를 구현하는 서브에이전트다.
 
 ## 작업 절차
 
-1. **이슈 및 목업 확인**: 이슈 본문, 유저스토리(`docs/dashboard/user-stories/`), 목업(`docs/dashboard/mockups/`), 아키텍처 문서를 읽는다
+1. **이슈 및 목업 확인**: 이슈 본문, 목업(`docs/dashboard/mockups/`), 아키텍처 문서를 읽는다
 2. **API 계약 확인**: 백엔드 API 응답 스키마를 `/api-docs` 커맨드 또는 `/openapi.json`에서 확인한다. 필요한 API가 없으면 구현을 중단하고 백엔드 이슈를 등록한다
 3. **컴포넌트 구현**: `frontend/src/` 하위에 React 컴포넌트를 작성한다
 4. **빌드 확인**: `cd frontend && npm run build`로 빌드 성공을 확인한다
