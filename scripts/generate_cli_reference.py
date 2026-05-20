@@ -340,10 +340,18 @@ def _write_command_detail(
     options = [p for p in params if isinstance(p, click.Option)]
 
     # 사용법
+    # required option은 인라인 표시, non-required는 [OPTIONS]로 축약 (#1696).
     usage_parts = [f"ante {full_name}"]
     for arg in arguments:
-        usage_parts.append(f"<{arg.human_readable_name.upper()}>")
-    if options:
+        arg_mv = arg.metavar or (arg.human_readable_name or arg.name).upper()
+        usage_parts.append(f"<{arg_mv}>")
+    req_options = [o for o in options if o.required]
+    nonreq_options = [o for o in options if not o.required]
+    for opt in req_options:
+        opt_name = opt.opts[0] if opt.opts else f"--{opt.name.replace('_', '-')}"
+        opt_mv = opt.metavar or (opt.human_readable_name or opt.name).upper()
+        usage_parts.append(f"{opt_name} <{opt_mv}>")
+    if nonreq_options:
         usage_parts.append("[OPTIONS]")
     out.write(f"```bash\n{' '.join(usage_parts)}\n```\n\n")
 
