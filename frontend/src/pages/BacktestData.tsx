@@ -383,10 +383,6 @@ function DatasetDetailPanel({ dataset, onDelete }: { dataset: Dataset; onDelete:
   return (
     <div className="space-y-4">
       <pre className="m-0 whitespace-pre overflow-x-auto">
-        <span className="text-positive">$</span>{' '}
-        <span className="text-text">ante data show {filePath}</span>
-      </pre>
-      <pre className="m-0 whitespace-pre overflow-x-auto">
         <span className="text-text font-semibold">{'File'}</span>{'       '}{filePath}{'\n'}
         <span className="text-text font-semibold">{'Symbol'}</span>{'     '}{ds.symbol}{'\n'}
         <span className="text-text font-semibold">{'Type'}</span>{'       '}{typeLabel}{'\n'}
