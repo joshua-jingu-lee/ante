@@ -1851,7 +1851,7 @@ ante rule info <RULE_ID> --account <ACCOUNT_ID>
 - **토큰**: 인증 불필요
 
 ```bash
-ante signal connect --key <KEY>
+ante signal connect --key <KEY> [OPTIONS]
 ```
 
 **Options:**
@@ -1859,6 +1859,7 @@ ante signal connect --key <KEY>
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--key` | O | TEXT | — | 시그널 키 (sk_...) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ---
