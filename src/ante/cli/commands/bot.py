@@ -11,6 +11,7 @@ import click
 
 from ante.cli._validators import reject_invalid_account_id
 from ante.cli.cold_path import is_active_runtime
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 
@@ -78,6 +79,7 @@ async def _run_bot_remove_cold_path(bot_id: str) -> dict:
 
 @bot.command("list")
 @click.option("--account", "account_id", default=None, help="계좌 ID로 필터링")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("bot:read")

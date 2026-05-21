@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-20
+> 마지막 갱신: 2026-05-21
 
 ## 목차
 
@@ -814,6 +814,7 @@ ante bot list [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--account` | - | TEXT | — | 계좌 ID로 필터링 |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante bot info
@@ -1213,6 +1214,7 @@ ante data list [OPTIONS]
 |------|------|------|--------|------|
 | `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante data schema
@@ -1344,8 +1346,14 @@ ante backtest history <STRATEGY_NAME> [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante report schema
+ante report schema [OPTIONS]
 ```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante report submit
@@ -1566,7 +1574,7 @@ ante member list [OPTIONS]
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
 ```bash
-ante member info <MEMBER_ID>
+ante member info <MEMBER_ID> [OPTIONS]
 ```
 
 **Arguments:**
@@ -1574,6 +1582,12 @@ ante member info <MEMBER_ID>
 | 인자 | 필수 | 설명 |
 |------|------|------|
 | `<MEMBER_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ### ante member list-invalid-roles
