@@ -9,6 +9,7 @@ import click
 from pydantic import ValidationError
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.report.models import ReportStatus
@@ -27,6 +28,7 @@ def report() -> None:
 
 
 @report.command()
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("report:read")

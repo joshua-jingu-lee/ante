@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -16,6 +17,7 @@ def data() -> None:
 @data.command("list")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("data:read")

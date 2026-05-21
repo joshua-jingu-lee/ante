@@ -2,6 +2,11 @@
 
 이슈 #632: `ante account list --format json` 형태로 호출할 때
 서브커맨드 뒤의 --format 옵션이 올바르게 동작하는지 검증한다.
+
+이슈 #1701: ``report schema``, ``data list``, ``bot list``, ``member info`` 4개
+trailing 명령에도 ``@format_option`` 누락이 잔존해 ``Error: No such option:
+--format`` 으로 거부되던 ingress drift를 닫는다. 4 case (+ default text
+회귀 1건)는 본 파일의 #632 패턴을 그대로 미러한다 (additive backward-compat).
 """
 
 from __future__ import annotations
@@ -9,9 +14,14 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
+from ante.cli.commands.bot import bot_list
+from ante.cli.commands.data import data_list
+from ante.cli.commands.member import member_info
+from ante.cli.commands.report import schema as report_schema
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 
@@ -565,3 +575,140 @@ class TestAccountSetCredentialsNonInteractive:
             assert creds["app_key"] == "my-key"
             assert creds["app_secret"] == "my-secret"
             assert creds["account_no"] == "50123456-01"
+
+
+# ── #1701: trailing 4 commands 정적 + runtime 회귀 ─────────────
+
+
+_TRAILING_SUBCOMMANDS_1701 = [
+    ("report schema", report_schema),
+    ("data list", data_list),
+    ("bot list", bot_list),
+    ("member info", member_info),
+]
+
+
+class TestTrailingFormatOptionRegistered1701:
+    """#1701: 4개 trailing 명령에 ``--format`` 옵션이 등록되어 있는지 정적 검증.
+
+    ``test_cli_approval_format_option`` 의 1:1 미러 패턴 (#1078 sibling).
+    decorator 누락 회귀를 click 메타데이터 레벨에서 감지한다.
+    """
+
+    @pytest.mark.parametrize(
+        "name,cmd",
+        _TRAILING_SUBCOMMANDS_1701,
+        ids=[s[0] for s in _TRAILING_SUBCOMMANDS_1701],
+    )
+    def test_format_option_exists(self, name: str, cmd: click.Command) -> None:
+        """``{name}`` 커맨드에 ``--format`` 옵션이 존재해야 한다."""
+        param_names = [p.name for p in cmd.params]
+        assert "output_format" in param_names, (
+            f"{name} 커맨드에 --format 옵션이 없습니다 (issue #1701)"
+        )
+
+    @pytest.mark.parametrize(
+        "name,cmd",
+        _TRAILING_SUBCOMMANDS_1701,
+        ids=[s[0] for s in _TRAILING_SUBCOMMANDS_1701],
+    )
+    def test_format_option_choices(self, name: str, cmd: click.Command) -> None:
+        """``--format`` 옵션은 text/json 중 선택 가능해야 한다."""
+        fmt_param = next(p for p in cmd.params if p.name == "output_format")
+        assert isinstance(fmt_param.type, click.Choice)
+        assert "json" in fmt_param.type.choices
+        assert "text" in fmt_param.type.choices
+
+
+class TestReportSchemaFormatOption1701:
+    """#1701: ``ante report schema --format json`` 은 exit 0 + valid JSON."""
+
+    def test_format_after_subcommand(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["report", "schema", "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        # ReportStore.get_schema()는 dict를 반환하므로 JSON parse 가능해야 한다.
+        payload = json.loads(result.output)
+        assert isinstance(payload, dict)
+
+    def test_default_text_output_preserved(self, runner: CliRunner) -> None:
+        """``--format`` 미지정 시 기본 text 출력은 그대로 유지된다 (additive)."""
+        result = runner.invoke(cli, ["report", "schema"])
+
+        assert result.exit_code == 0, result.output
+        # text 모드는 ``OutputFormatter.output``이 ``str(data)`` 로 echo —
+        # JSON 모드의 indented dump (``{\n  "...":`` 패턴)와 구분된다.
+        assert not result.output.startswith("{\n  ")
+
+
+class TestDataListFormatOption1701:
+    """#1701: ``ante data list --format json`` 은 exit 0 + valid JSON."""
+
+    def test_format_after_subcommand(self, runner: CliRunner) -> None:
+        """ParquetStore가 빈 디렉토리를 반환하면 ``{datasets:[],count:0}`` 출력."""
+        mock_store = MagicMock()
+        mock_store.list_symbols.return_value = []
+
+        with patch("ante.data.store.ParquetStore", return_value=mock_store):
+            result = runner.invoke(cli, ["data", "list", "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload == {"datasets": [], "count": 0}
+
+
+class TestBotListFormatOption1701:
+    """#1701: ``ante bot list --format json`` 은 exit 0 + valid JSON."""
+
+    def test_format_after_subcommand(self, runner: CliRunner) -> None:
+        """봇이 없을 때 ``{message:..., bots:[]}`` 출력."""
+        mock_db = _mock_db()
+        mock_db.fetch_all = AsyncMock(return_value=[])
+
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new_callable=AsyncMock,
+            return_value=(mock_db, None, None, None),
+        ):
+            result = runner.invoke(cli, ["bot", "list", "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert "bots" in payload
+        assert payload["bots"] == []
+
+
+class TestMemberInfoFormatOption1701:
+    """#1701: ``ante member info <id> --format json`` 은 exit 0 + valid JSON.
+
+    기존 ``TestMemberInfoMissingExit.test_valid_exits_zero`` (#1515)는 루트 그룹
+    ``--format`` 을 사용했으나, #1701은 서브커맨드 위치 ``--format`` (member info
+    <id> --format json) 의 등록을 검증한다.
+    """
+
+    def test_format_after_subcommand(self, runner: CliRunner) -> None:
+        existing = Member(
+            member_id="m-1701",
+            type=MemberType.HUMAN,
+            role=MemberRole.DEFAULT,
+            org="default",
+            name="Existing",
+            status="active",
+            scopes=[],
+        )
+        svc = MagicMock()
+        svc.get = AsyncMock(return_value=existing)
+        db = _mock_db()
+
+        with patch(
+            "ante.cli.commands.member._create_service",
+            new_callable=AsyncMock,
+            return_value=(svc, db),
+        ):
+            result = runner.invoke(
+                cli, ["member", "info", "m-1701", "--format", "json"]
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["member_id"] == "m-1701"

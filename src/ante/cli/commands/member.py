@@ -196,6 +196,7 @@ def member_list(
 
 @member.command("info")
 @click.argument("member_id")
+@format_option
 @click.pass_context
 @require_auth
 @require_scope("member:read")
