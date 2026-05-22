@@ -228,7 +228,7 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 19개가
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 22개가
 SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
@@ -239,6 +239,8 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `account.activate` | mutating | `AccountService.activate()` 호출 |
 | `bot.create` | mutating | `BotManager.create_bot()` 호출 |
 | `bot.remove` | mutating | `BotManager.remove_bot()` 호출 |
+| `bot.start` | mutating | `BotManager.start_bot()` 호출. Web API `POST /api/bots/{bot_id}/start` 정렬. `app_key` preflight + audit `bot.start` (#1712) |
+| `bot.stop` | mutating | `BotManager.stop_bot()` 호출. Web API `POST /api/bots/{bot_id}/stop` 정렬. audit `bot.stop` (#1712) |
 | `treasury.allocate` | mutating | `Treasury.allocate()` 호출 |
 | `treasury.deallocate` | mutating | `Treasury.deallocate()` 호출 |
 | `config.set` | mutating | `DynamicConfigService.set()` 호출 |
@@ -252,26 +254,16 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `broker.status` | read-only | `BrokerAdapter.health_check()` live 조회 |
 | `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
 | `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
-
-### 후속 IPC handler 계약 (#1712 등록 예정, 현재 미등록)
-
-아래 3 handler는 본 스펙에서 계약을 사전에 확정한다. **현재 `CommandRegistry.register_all_handlers()`에 미등록**이며, shutdown drain의 mutating/read-only 처리·taxonomy 카운트(현재 19) 산정 등 runtime invariants는 위 SSOT 19개에만 적용된다. 실제 등록은 #1712에서 수행한 뒤 본 절의 19 → 22 카운트와 taxonomy 표가 함께 갱신된다.
-
-| IPC 커맨드 | taxonomy | 근거 |
-|-----------|----------|------|
-| `bot.start` | mutating | `BotManager.start_bot()` 호출. Web API `POST /api/bots/{bot_id}/start` 정렬. `app_key` preflight + audit `bot.start` |
-| `bot.stop` | mutating | `BotManager.stop_bot()` 호출. Web API `POST /api/bots/{bot_id}/stop` 정렬. audit `bot.stop` |
-| `bot.status` | read-only | `BotManager.get_bot()` live 조회. Web API `GET /api/bots/{bot_id}` 정렬. `BotDetailResponse` envelope |
+| `bot.status` | read-only | `BotManager.get_bot()` live 조회. Web API `GET /api/bots/{bot_id}` 정렬. `BotDetailResponse` envelope (#1712) |
 
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
 IPC command 분리는 별도 이슈 범위다.
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
-taxonomy 대상이 아니다. `member.*`, `bot.start/stop/status`,
-`bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로 표현되어 있으나 현재
-`register_all_handlers()`에 없는 명령의 실제 wiring은 별도 후속 이슈(`bot.start/stop/status`는
-#1712)에서 다룬다. 본 스펙 표는 그때 사용할 계약 SSOT다.
+taxonomy 대상이 아니다. `member.*`, `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로
+표현되어 있으나 현재 `register_all_handlers()`에 없는 명령의 실제 wiring은 별도 후속 이슈에서
+다룬다.
 
 ## 통신 프로토콜
 

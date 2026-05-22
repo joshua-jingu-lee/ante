@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ante.eventbus import EventBus
     from ante.strategy.registry import StrategyRegistry
     from ante.trade.reconciler import PositionReconciler
+    from ante.trade.service import TradeService
     from ante.treasury.manager import TreasuryManager
 
 
@@ -29,6 +30,12 @@ class ServiceRegistry:
     mutation IPC (``approval.cancel_invalid``) 가 정상 환경에서 audit_log 테이블에
     기록을 남기기 위해 추가되었다. 테스트/legacy 환경에서는 ``None`` 이 허용되며,
     핸들러는 ``getattr(svc, "audit_logger", None)`` 패턴으로 안전하게 처리한다.
+
+    Refs #1712: ``trade_service`` 필드는 IPC ``bot.status`` handler 의
+    positions 보강 (``enrich_bot_info``) 을 Web API 와 정렬하기 위해 optional
+    로 추가되었다. ``audit_logger`` 와 동형으로 ``None`` 허용 + ``getattr``
+    safe-access 가 보장된다. legacy ServiceRegistry 호출자(``trade_service``
+    인자 미전달)는 그대로 동작하며, positions 키는 부재한다.
     """
 
     account: AccountService | Any
@@ -40,3 +47,4 @@ class ServiceRegistry:
     eventbus: EventBus | Any
     strategy_registry: StrategyRegistry | Any = field(default=None)
     audit_logger: AuditLogger | Any = field(default=None)
+    trade_service: TradeService | Any = field(default=None)

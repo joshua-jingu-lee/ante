@@ -626,54 +626,25 @@ async def get_bot(
     trade_service: Annotated[Any | None, Depends(get_trade_service_optional)],
 ) -> dict:
     """봇 상세 조회. 인증된 master/human 또는 ``bot:read`` scope 를 보유한
-    agent 만 호출 가능 (#1407)."""
+    agent 만 호출 가능 (#1407).
+
+    Refs #1712: strategy/budget/positions 보강 로직은 ``ante.bot.info.
+    enrich_bot_info`` helper 로 추출되어 IPC ``bot.status`` handler 와 공유
+    된다. 응답 shape/field/key 순서는 그대로 보존된다(behavior-preserving
+    extraction).
+    """
+    from ante.bot.info import enrich_bot_info
+
     bot = bot_manager.get_bot(bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail=_BOT_NOT_FOUND)
 
-    info = bot.get_info()
-
-    # 전략 정보 추가
-    if registry is not None:
-        record = await registry.get(info.get("strategy_id", ""))
-        if record:
-            info["strategy_name"] = record.name
-            info["strategy_author_name"] = record.author_name
-            info["strategy_author_id"] = record.author_id
-            info["strategy"] = {
-                "name": record.name,
-                "version": record.version,
-                "author_name": record.author_name,
-                "author_id": record.author_id,
-                "description": record.description,
-            }
-
-    # 예산 정보 추가
-    if treasury is not None:
-        budget = treasury.get_budget(bot_id)
-        if budget:
-            info["budget"] = {
-                "allocated": budget.allocated,
-                "spent": budget.spent,
-                "reserved": budget.reserved,
-                "available": budget.available,
-            }
-
-    # 포지션 정보 추가
-    if trade_service is not None:
-        positions = await trade_service.get_positions(
-            bot_id=bot_id, include_closed=True
-        )
-        info["positions"] = [
-            {
-                "symbol": p.symbol,
-                "quantity": p.quantity,
-                "avg_entry_price": p.avg_entry_price,
-                "realized_pnl": p.realized_pnl,
-            }
-            for p in positions
-        ]
-
+    info = await enrich_bot_info(
+        bot,
+        strategy_registry=registry,
+        treasury=treasury,
+        trade_service=trade_service,
+    )
     return {"bot": info}
 
 

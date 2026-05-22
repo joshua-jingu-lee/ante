@@ -7,7 +7,8 @@
 
 분류 메모:
 - ``instrument import``는 spec ``docs/specs/cli/03-commands.md``상 offline CLI —
-  IPC route 없음 (handler 19개 외).
+  IPC route 없음 (handler 22개 외 — #1712 ``bot.start``/``bot.stop``/``bot.status``
+  포함).
 - ``Formatter.error()`` 자체는 미변경 — 출력은 호출자 책임, exit은 caller가
   ``ctx.exit(1)``로 강제.
 - 검증된 사이트 5개:

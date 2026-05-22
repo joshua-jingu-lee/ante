@@ -17,8 +17,10 @@ text stderr + exit 2 + **traceback 미노출**을 보장한다. trade list 케�
 스펙 / 분류:
 - `audit list`와 `treasury snapshot`은 `docs/specs/cli/03-commands.md`의 `offline`
   분류이며 IPC route가 없다 (`src/ante/ipc/registry.py`
-  `register_all_handlers()` 19개 handler 중 audit/snapshot route 부재).
-- `trade list` 역시 offline CLI (IPC registry 부재 — #1512에서 19 handler 확인).
+  `register_all_handlers()` 22개 handler 중 audit/snapshot route 부재 —
+  #1712 ``bot.start``/``bot.stop``/``bot.status`` 포함).
+- `trade list` 역시 offline CLI (IPC registry 부재 — #1512에서 19 handler 확인,
+  #1712 이후 22 handler).
   따라서 IPC integration 검증은 N/A이며 본 테스트는 CLI Click ingress 경로만
   검증한다.
 

@@ -1560,6 +1560,10 @@ async def _init_ipc(s: Services) -> None:
         eventbus=s.eventbus,
         strategy_registry=s.strategy_registry,
         audit_logger=s.audit_logger,
+        # Refs #1712: IPC ``bot.status`` handler 의 positions 보강을 위해
+        # ``trade_service`` 를 주입한다. ``audit_logger`` 와 동형의 optional
+        # 필드이며, ``enrich_bot_info`` 가 None 시 positions 키를 부재시킨다.
+        trade_service=s.trade_service,
     )
 
     command_registry = CommandRegistry()

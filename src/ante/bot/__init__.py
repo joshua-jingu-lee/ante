@@ -9,18 +9,30 @@ from ante.bot.config import (
     validate_interval,
 )
 from ante.bot.context_factory import StrategyContextFactory
-from ante.bot.exceptions import BOT_NOT_FOUND_CODE, BotError, BotNotFoundError
+from ante.bot.exceptions import (
+    BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE,
+    BOT_NOT_FOUND_CODE,
+    BOT_STATE_CONFLICT_CODE,
+    BotAccountCredentialsNotConfigured,
+    BotError,
+    BotNotFoundError,
+    BotStateConflict,
+)
 from ante.bot.manager import BotManager
 from ante.bot.signal_key import SignalKeyManager
 
 __all__ = [
     "Bot",
+    "BotAccountCredentialsNotConfigured",
     "BotConfig",
     "BotError",
     "BotNotFoundError",
+    "BotStateConflict",
     "BotManager",
     "BotStatus",
+    "BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE",
     "BOT_NOT_FOUND_CODE",
+    "BOT_STATE_CONFLICT_CODE",
     "MAX_INTERVAL_SECONDS",
     "MIN_INTERVAL_SECONDS",
     "SignalKeyManager",
