@@ -3,9 +3,8 @@
 이슈 #1513: 5개 CLI date 옵션 — `audit list --from-date`, `audit list --to-date`,
 `treasury snapshot --date`, `treasury snapshot --from`, `treasury snapshot --to`
 — 가 `not-a-date`나 `2026-5-1` 같은 invalid 입력을 exit 0으로 처리하던 ingress
-drift를 닫는다. Web API helper(`src/ante/web/utils/date_params.py:29-50`)와
-동일한 패턴(regex ``^\\d{4}-\\d{2}-\\d{2}$`` fullmatch 선검사 +
-``datetime.strptime`` calendar parse)을 CLI Click callback으로 적용한 결과를
+drift를 닫는다. regex ``^\\d{4}-\\d{2}-\\d{2}$`` fullmatch 선검사와
+``datetime.strptime`` calendar parse를 CLI Click callback으로 적용한 결과를
 검증한다.
 
 이슈 #1514: `trade list --from/--to`가 `datetime.fromisoformat` ``ValueError``

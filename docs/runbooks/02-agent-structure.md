@@ -38,26 +38,18 @@
 - Codex Plan Review verdict가 나기 전까지 구현을 시작하지 않음
 - Codex 브랜치 리뷰 실패 시 같은 브랜치에서 수정
 
-### 1.3 프론트엔드 개발자 (`@frontend-dev`)
-
-**담당**: 대시보드(React) 구현
-
-- `docs/dashboard/architecture.md` 기준으로 구현
-- API 계약은 백엔드 OpenAPI와 자동 생성 타입을 기준으로 사용
-- `api.generated.ts`는 wire contract SSOT로만 보고, UI 계층에는 `frontend/src/api/*.ts` adapter가 변환한 UI/domain model만 전달
-
-### 1.4 DevOps 엔지니어 (`@devops`)
+### 1.3 DevOps 엔지니어 (`@devops`)
 
 **담당**: Docker, GitHub Actions, CI/CD, 배포 환경 관리
 
 - 리뷰 게이트와 merge automation을 포함한 GitHub Actions 구성 관리
 - `pyproject.toml` dependencies 변경 시 사용자 확인 필수
 
-### 1.5 전략 개발자 (`@strategy-dev`)
+### 1.4 전략 개발자 (`@strategy-dev`)
 
 **담당**: 매매 전략 개발, 데이터 탐색, 백테스트
 
-### 1.6 코드 리뷰어 (`@code-reviewer`)
+### 1.5 코드 리뷰어 (`@code-reviewer`)
 
 **담당**: 구조 리스크 메타 리뷰, 반복 review failure 원인 분석
 
@@ -69,7 +61,7 @@
   - 같은 `risk class` failure가 2회 반복
   - 다음 시도 전에 "무엇을 먼저 검증해야 하는지"가 불명확
 
-### 1.7 Codex 외부 워커
+### 1.6 Codex 외부 워커
 
 Codex는 `.agent/` 내부 에이전트가 아니라 외부 Codex plugin 명령으로 호출되는 read-only 리뷰 워커다.
 
@@ -88,7 +80,6 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 .agent/
 ├── agents/                # Claude 측 역할 정의 (정식 위치)
 │   ├── backend-dev.md         # @backend-dev
-│   ├── frontend-dev.md        # @frontend-dev
 │   ├── devops.md              # @devops
 │   ├── strategy-dev.md        # @strategy-dev
 │   └── code-reviewer.md       # @code-reviewer — 구조 리스크 메타 리뷰
@@ -96,13 +87,11 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 │   ├── plan-preflight.md      # /plan-preflight
 │   ├── implement-issue.md     # /implement-issue
 │   ├── autopilot.md           # /autopilot
-│   ├── release.md             # /release
-│   └── api-docs.md            # /api-docs
+│   └── release.md             # /release
 └── skills/                # 도메인 지식 스킬
     ├── module-conventions.md
     ├── asyncio-patterns.md
     ├── sqlite-patterns.md
-    ├── frontend-conventions.md
     ├── review-pr.md           # PR 승인 공통 체크리스트 계약
     ├── receive-review.md
     ├── github-auth.md
@@ -136,7 +125,6 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 | 에이전트 | 기본 effort | 높여야 하는 경우 | 낮춰도 되는 경우 |
 |------|------|------|------|
 | `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, Codex Plan Review 고위험 판정 | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
-| `@frontend-dev` | `high` | API 계약 변경, 생성 타입 동기화, 다중 페이지 상태 흐름, 대규모 화면 리팩터링 | 스타일·문구·단일 컴포넌트 수정 |
 | `@devops` | `high` | CI/CD, 인증, secret, release, merge automation, 운영 스크립트 변경 | 문서성 변경, 작은 경로 수정 |
 | `@strategy-dev` | `xhigh` (`max`) | 새 전략 설계, 파라미터 탐색, 지표 해석, 백테스트 결과 비교 | 단순 validation rerun, 리포트 포맷 정리 |
 | `@code-reviewer` | `xhigh` (`max`) | 반복 risk class failure, lifecycle/contract drift, 범위 축소/이슈 분할/사람 에스컬레이션 판단 | finding이 매우 국소적인 경우 |
@@ -152,12 +140,10 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 - `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성
 - `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 Plan Preflight → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/release` — prepare로 release PR 생성, publish로 GitHub Release/PyPI/Docker image 배포
-- `/api-docs` — OpenAPI 스키마 조회
 
 ### 2.4 도메인 스킬 (skills/)
 
 - **백엔드**: `module-conventions`, `asyncio-patterns`, `sqlite-patterns`
-- **프론트엔드**: `frontend-conventions`
 - **리뷰 공통 규약**: `review-pr`
 - **GitHub 운용 공통 스킬**:
   - `github-auth`

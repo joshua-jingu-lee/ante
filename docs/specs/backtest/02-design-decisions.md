@@ -260,7 +260,6 @@ def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
 | **BacktestRunner** (subprocess) | 자동 호환 — service.py에서 주입 후 `result.to_dict()`에 포함 | 수정 불필요 |
 | **BacktestRunStore** | params_json에 입력 config만 저장 중 | 선택: resolved config 저장으로 개선 가능 |
 | **CLI** (`backtest run`) | to_dict() 기존 키 유지, 신규 키 추가만 | 선택: 결과 출력에 config 요약 추가 |
-| **Web API** (`reports`) | detail_json 파싱 시 config/datasets 접근 가능 | 선택: ReportDetailResponse에 필드 추가 |
 | **to_dict() 소비자** | 기존 필드 불변, 추가 키만 — **backward compatible** | 기존 코드 수정 불필요 |
 
 ### BacktestStrategyContext

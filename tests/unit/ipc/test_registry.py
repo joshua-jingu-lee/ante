@@ -42,7 +42,7 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 22개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 27개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
@@ -51,11 +51,15 @@ def test_register_all_handlers() -> None:
     mutating).
 
     Refs #1712: ``bot.start`` / ``bot.stop`` (mutating, 17~18) /
-    ``bot.status`` (read-only, 4번째) 추가 — Web API 라우트 정렬.
+    ``bot.status`` (read-only, 4번째) 추가.
+
+    Browser/HTTP 제거 parity: retained 운영 mutation 5개를 CLI/IPC로
+    이전하면서 ``bot.update``, ``treasury.set_balance``, ``rule.update``,
+    ``strategy.set_status``, ``member.update_scopes``를 추가.
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 22
+    assert len(registry.commands) == 27
 
     expected = {
         "system.halt",
@@ -66,9 +70,14 @@ def test_register_all_handlers() -> None:
         "bot.remove",
         "bot.start",
         "bot.stop",
+        "bot.update",
         "bot.status",
         "treasury.allocate",
         "treasury.deallocate",
+        "treasury.set_balance",
+        "rule.update",
+        "strategy.set_status",
+        "member.update_scopes",
         "config.set",
         "approval.request",
         "approval.approve",
@@ -89,7 +98,7 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 22개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
+    """등록된 27개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
     read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
@@ -106,8 +115,13 @@ def test_register_all_handlers_taxonomy() -> None:
         "bot.remove",
         "bot.start",
         "bot.stop",
+        "bot.update",
         "treasury.allocate",
         "treasury.deallocate",
+        "treasury.set_balance",
+        "rule.update",
+        "strategy.set_status",
+        "member.update_scopes",
         "config.set",
         "approval.request",
         "approval.approve",
@@ -124,7 +138,7 @@ def test_register_all_handlers_taxonomy() -> None:
         "bot.status",
     }
 
-    assert len(mutating) == 18
+    assert len(mutating) == 23
     assert len(read_only) == 4
     assert mutating | read_only == set(registry.commands)
 
@@ -332,9 +346,7 @@ class TestHandleBotCreate:
 class TestSystemKillSwitchHandlers:
     """system.halt / system.clear_halt IPC 응답 shape 회귀 가드.
 
-    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
-    Web API와 IPC가 동일한 shape (status, accounts_changed, changed_at, accounts[])을
-    사용한다.
+    IPC는 status, accounts_changed, changed_at, accounts[] shape를 사용한다.
     """
 
     @pytest.mark.asyncio

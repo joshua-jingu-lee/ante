@@ -39,7 +39,7 @@ class TreasuryManager:
 }
 ```
 
-원화 환산 합산은 Treasury의 책임이 아니다. Treasury는 각 계좌의 통화 기준 잔고만 관리하고, 환율 적용은 대시보드(프론트엔드) 또는 별도 서비스에서 수행한다.
+원화 환산 합산은 Treasury의 책임이 아니다. Treasury는 각 계좌의 통화 기준 잔고만 관리하고, 환율 적용은 별도 서비스에서 수행한다.
 
 소스: `src/ante/treasury/manager.py`
 

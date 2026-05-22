@@ -13,7 +13,7 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.report.models import ReportStatus
-from ante.web.schemas import ReportSubmitRequest
+from ante.report.validation import ReportSubmitRequest
 
 # `ReportStatus` enum이 `--status` 필터의 SSOT다. `report list`는 DB 진입 전
 # preflight에서 invalid 값을 차단해야 하며 (#1462), 이를 위해 함수 내부 import
@@ -86,10 +86,10 @@ def submit(
     if run_id:
         report_data["backtest_run_id"] = run_id
 
-    # ── #1415: Web API와 동일한 ReportSubmitRequest 검증 ────────────────
-    # SSOT: ``src/ante/web/schemas.py::ReportSubmitRequest``.
+    # ── #1415: ReportSubmitRequest 검증 ────────────────────────────────
+    # SSOT: ``src/ante/report/validation.py::ReportSubmitRequest``.
     #
-    # CLI 입력은 Web API와 같은 invariant를 통과해야 한다:
+    # CLI 입력은 제출 스키마 invariant를 통과해야 한다:
     # - ``total_trades >= 0``, ``win_rate ∈ [0.0, 100.0]``, metric finite
     # - ``extra='forbid'`` — 미지정 키는 오타로 간주하여 거부
     #

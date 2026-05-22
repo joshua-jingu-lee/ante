@@ -684,8 +684,7 @@ class TestIntegrationFlow:
     ):
         """clear_halt 실행 후 BotManager 자동 재시작이 호출되지 않음 (Refs #1213).
 
-        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT
-        "계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다".
+        Kill Switch 응답은 "계좌 상태만 복구하며 봇 자동 재시작은 수행하지 않는다".
         BotManager는 ``AccountActivatedEvent`` 수신 시 로깅만 수행한다.
         """
         from ante.account.models import AccountStatus

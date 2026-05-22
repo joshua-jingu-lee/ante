@@ -153,10 +153,9 @@ surface 운영/소스/핸들러 디테일은 후속 이슈 정렬 사안으로 �
 | Instrument CLI `sync` | 허용 (vocabulary 측면은 동일: canonical 5종만 유효, non-canonical 거부) | 거부 | non-zero exit + 구조화 error payload | **source-bound 표면.** `sync`는 KIS API(KRX 도메인)에서만 마스터를 가져와 전달 `exchange`를 저장 라벨로 쓴다(`src/ante/cli/commands/instrument.py`의 `sync`→`KISAdapter.get_instruments`, `docs/specs/instrument/` source 계약). 따라서 canonical이지만 source 미지원 exchange(`NYSE/NASDAQ/AMEX` 등 비-KRX)에 대한 sync 동작·에러 계약은 **source-supported-exchange 정렬 사안으로 #1577에 위임**(backtest `--exchange`처럼 spec-vs-implementation gap). 본 SSOT는 "sync는 source-bound이며 source 미지원 canonical 값 처리 계약은 #1577" 까지만 명시하고 완전 명세하지 않는다 |
 | Account CLI preset (`account create` 등) | canonical 5종은 invalid-exchange로 거부되지 않음 (축 A); preset 미제공 canonical 값은 축 B 제약 | 거부 | non-zero exit | 축 A: `*`/non-canonical은 거부. 축 B: canonical이지만 1.0 preset 미제공 값(`NYSE/NASDAQ/AMEX`)은 **preset/broker 가용성 제약**이지 invalid-exchange 거부가 아니다(별개 차원). 구체적 preset wiring(어떤 preset이 어떤 exchange를 자동 구성하는가)은 축 B canonical-known 표·축 B 정의를 상위 기준으로 삼아 **#1578에서 정렬**한다 — 본 행은 vocabulary 계약(축 A 비거부 / `*`·non-canonical 거부)만 명시한다 |
 | AccountService (생성/검증) | canonical 5종 허용 (축 A: non-canonical만 서비스 검증 에러) | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`). canonical 5종은 서비스 exchange 검증에서 거부되지 않는다. 1.0 account preset이 `NYSE/NASDAQ/AMEX`를 미제공하는 것은 **축 B(preset/broker 가용성) 제약**이며 "invalid exchange 거부"가 아니다(별개 차원) |
-| Account Web — `POST /api/accounts` (cold-path 계좌 생성) | — | — | **cold-path 차단 계층은 409** (계좌 생성은 cold-path 전용, `exchange` 포함 입력 무관) | **422 아님.** 진입 가드의 구체 동작·핸들러는 #1578에서 정렬한다 — 본 행은 "cold-path → 409, 스키마 층 422 아님"의 에러 계층만 명시한다 |
-| Account Web — `PUT /api/accounts/{account_id}` structural/identity 변경 (`exchange` 등) | — | — | **structural/identity 변경 차단 계층은 409** | **422 아님.** `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도는 cold-path 계층(409)에서 차단된다. structural 필드 집합·가드 구현은 #1578에서 정렬한다 |
-| Account Web — `PUT /api/accounts/{account_id}` mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용 계층.** mutable-only 업데이트는 정상 런타임 경로이며 cold-path 409로 차단되지 않는다. mutable 필드 집합의 구현 정렬은 #1578에 위임한다 |
-| Account Web OpenAPI/schema 레벨 | — | — | 빈 문자열/형식 오류는 **422** | cold-path 문서(스키마 검증) 전용. 런타임 차단(409)과 다른 층 |
+| Account CLI — `account create` (cold-path 계좌 생성) | — | — | **cold-path 차단 계층은 409** (계좌 생성은 cold-path 전용, `exchange` 포함 입력 무관) | 진입 가드의 구체 동작은 #1578에서 정렬한다 |
+| Account CLI/IPC — structural/identity 변경 (`exchange` 등) | — | — | **structural/identity 변경 차단 계층은 409** | `exchange`는 생성 후 수정 불가 identity 필드(`docs/specs/account/03-data-model.md:96`)이므로 런타임 변경 시도는 cold-path 계층(409)에서 차단된다. structural 필드 집합·가드 구현은 #1578에서 정렬한다 |
+| Account CLI/IPC — mutable-only (`name`/`timezone`/`trading_hours_start`/`trading_hours_end`) | — | — | (exchange 검증 범위 밖) | **409 아님 — 런타임 허용 계층.** mutable-only 업데이트는 정상 런타임 경로이며 cold-path 409로 차단되지 않는다. mutable 필드 집합의 구현 정렬은 #1578에 위임한다 |
 | DataStore path API — `write`/`append`/신규 경로 생성 | 허용 | 거부 | 신규 경로 생성 시 non-canonical·`*` 거부 | feed/data CLI 옵션이 아니라 DataStore 메서드 인자 표면. `*`는 경로로 해석 불가. 거부의 구현 동작(예외 처리 방식 등)은 #1578에서 정렬하며, 본 행은 "신규 경로 생성 시 non-canonical·`*` 거부"의 vocabulary 계약만 명시한다 |
 | DataStore path API — `read`(기존 경로, legacy out-of-vocab 포함) | 허용 | (입력 검증 미적용) | **거부하지 않음.** 신규 입력 검증을 기존 경로 read 인자에 적용하지 않는다 | "Legacy out-of-vocabulary 호환 정책" 절 우선. 이미 저장된 legacy 경로(예: `.../ohlcv/1d/LSE/...`)는 그대로 읽힌다 |
 | `StrategyMeta.exchange` | 허용 | **허용** | validator 에러 | **`*` 유일 허용 표면** (`docs/specs/strategy/03-09-strategy-validator.md`) |
@@ -262,7 +261,7 @@ symbol shape 신규 입력 형태)만 SSOT로 소유한다. 나머지 축은 각
 | **C** | `tick` / `fundamental` data_type | OHLCV가 아닌 데이터 유형 | `docs/specs/data-pipeline/01·02·03` | 별개 축. timeframe이 아니라 data_type. 본 계약 밖 |
 | **D** | write-ownership (`<1d`+`tick`=Collector / `1d`+`fundamental`=DataFeed) | 파티션 쓰기 소유자 | `docs/specs/data-pipeline/02-write-ownership.md` | 별개 축. 어느 모듈이 쓰는가의 소유권 분배이며 입력 vocabulary 계약이 아니다 |
 | **E** | 신규 입력 strict ASCII 검증 vs legacy parquet path migration 판별 | 신규 입력 경계 vs 기존 경로 호환 | 신규 입력=본 절(`### KRX symbol shape`), legacy path migration 판별=`src/ante/data/store.py`(`\d` 보존) | 신규 입력 형태만 본 계약 SSOT. legacy 경로 판별 regex는 별개 축(아래 "Legacy 호환 정책") |
-| **F** | fundamental cadence/periodicity (`quarterly`/`annual`) | 재무 데이터 주기 | (현재 `dataset.timeframe` 필드에 overload — 정리는 후보 D deferral) | **별개 축. 본 canonical OHLCV-timeframe 계약에 포함하지 않는다.** 현재 `dataset.timeframe` 필드(`docs/dashboard/mockups/backtest-data-fundamental.html:127`, fundamental parquet `quarterly.parquet`/`annual.parquet`)에 overload된 cross-surface 불일치는 #1612가 만든 것이 아니다. 본 절은 "fundamental cadence는 OHLCV bar timeframe과 별개 축이며 그 필드 의미 정리는 후보 D" 까지만 명문화하고 값 정의·필드 재설계는 하지 않는다 |
+| **F** | fundamental cadence/periodicity (`quarterly`/`annual`) | 재무 데이터 주기 | (현재 `dataset.timeframe` 필드에 overload — 정리는 후보 D deferral) | **별개 축. 본 canonical OHLCV-timeframe 계약에 포함하지 않는다.** 현재 `dataset.timeframe` 필드에 overload된 cross-surface 불일치는 #1612가 만든 것이 아니다. 본 절은 "fundamental cadence는 OHLCV bar timeframe과 별개 축이며 그 필드 의미 정리는 후보 D" 까지만 명문화하고 값 정의·필드 재설계는 하지 않는다 |
 
 (D-016 `### exchange vs market vs source vs broker_type` 절과 동형 구조: 같은 리터럴이라도
 어느 축의 값인지에 따라 규율 SSOT가 다르며 값을 섞지 않는다.)
@@ -287,7 +286,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | `data validate` CLI | `{1m,5m,15m,1h,1d}` | non-zero exit + 구조화 error payload | enforcement·에러코드는 **#1605 정렬 사안** |
 | `feed inject` | `{1m,5m,15m,1h,1d}` | 거부 (구조화 error) | enforcement·에러 계층은 **#1606 정렬 사안** |
 | Instrument import KRX symbol | **exchange=KRX일 때** `^[0-9]{6}$` (축 E 신규 입력); 비-KRX exchange(`NYSE`/`NASDAQ`/`AMEX`/`TEST`)는 symbol-shape 미적용(1.0 비목표) | non-zero exit + 구조화 error payload (exchange=KRX 행에 한함) | symbol shape enforcement는 **#1611 정렬 사안**. ingress = `src/ante/cli/commands/instrument.py` import handler |
-| Data API `timeframe` filter (`GET /api/data/datasets`) | `{1m,5m,15m,1h,1d}` | **400 (기구현)** | `timeframe`은 #1594에서 vocabulary 외 값 **400 거부 기구현**. `symbol`은 별개 축 — datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 **exact-match 필터로만** 처리한다(매칭 데이터 미존재 시 **200 empty**, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset을 반환 — 아래 "Legacy out-of-vocabulary 호환 정책"과 정합). `symbol` vocabulary 거부 자체는 **#1594 아님**, exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) **정렬 사안**(web-api/05 `GET /api/data/datasets` 계약과 정합) |
+| Data dataset `timeframe` filter | `{1m,5m,15m,1h,1d}` | **400 (기구현)** | `timeframe`은 #1594에서 vocabulary 외 값 **400 거부 기구현**. `symbol`은 별개 축 — datasets 조회는 `symbol`을 별도 vocabulary 거부하지 않고 **exact-match 필터로만** 처리한다(매칭 데이터 미존재 시 **200 empty**, legacy out-of-vocab symbol dir(`ohlcv/<tf>/KRX/<sym>`)이 저장돼 있으면 그 dataset을 반환 — 아래 "Legacy out-of-vocabulary 호환 정책"과 정합). `symbol` vocabulary 거부 자체는 **#1594 아님**, exchange-aware symbol SSOT 후속(#1613 코드 SSOT 체인) **정렬 사안** |
 | Live DataCollector write·경로 생성 | **OHLCV `{1m,5m,15m,1h}`만** (`1d`는 write-ownership상 DataFeed 소유라 제외, `tick`은 별도 data_type라 제외) | enforcement 미구현 (현재 spec-vs-impl gap) | ingress enforcement는 **#1614 정렬 사안** (Depends on #1613). 본 행은 "Collector write vocabulary는 OHLCV `{1m,5m,15m,1h}`로 한정(축 D상 `1d`·축 C상 `tick` 제외)" 경계만 명시 |
 
 판정 보조 노트:
@@ -331,10 +330,10 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | Instrument import KRX symbol shape enforcement (primary 소비자 — exchange=KRX 행 symbol 검증 경계) | `src/ante/cli/commands/instrument.py` import handler (`instrument_import`, import row 검증 루프 — 현재 `is_canonical(exchange)`로 exchange만 검증하고 KRX symbol shape는 미검증; #1611이 exchange=KRX 행에 symbol shape 검증 추가 대상) | #1611 |
 | legacy parquet path migration KRX 판별 (축 E legacy 판별 — 신규 입력 검증과 별개 축) | `src/ante/data/store.py:34` `_KRX_SYMBOL_PATTERN`(`^\d{6}$`) + `:74` `migrate_parquet_paths` | **축 E legacy 판별 — #1611 enforcement 대상 아님** (store.py legacy 호환 무손상 보존, "Legacy out-of-vocabulary 호환 정책" 규율) |
 | RuleEngine OrderRequestEvent KRX numeric preflight (#1299 기존 동작) | `src/ante/rule/engine.py:55` `_KRX_NUMERIC_SYMBOL_PATTERN`(`^[0-9]{6}$`) OrderRequestEvent preflight | **#1299 기존 동작 — 본 SSOT 도입으로 동작 불변, #1611 아님** |
-| Data API `timeframe` filter (기구현 400) | `src/ante/web/routes/data.py:65,85` #1594 timeframe 400 filter (기구현) | #1594 |
-| Data API `symbol` filter (exact-match·미거부 — 독립 행) | `src/ante/web/routes/data.py` datasets `symbol` query (datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 시 200 empty, legacy out-of-vocab symbol dir이 저장돼 있으면 그 dataset 반환; **#1594 아님**, web-api/05 계약·Legacy 호환 정책과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
+| Data dataset `timeframe` filter (기구현 400) | `src/ante/data/datasets.py` timeframe validation | #1594 |
+| Data dataset `symbol` filter (exact-match·미거부 — 독립 행) | `src/ante/data/datasets.py` datasets `symbol` query (datasets 조회는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 시 200 empty, legacy out-of-vocab symbol dir이 저장돼 있으면 그 dataset 반환; **#1594 아님**, Legacy 호환 정책과 정합) | **#1613 코드 SSOT 체인** (exchange-aware symbol SSOT 후속 정렬 사안) |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외 — 독립 행) | `src/ante/data/collector.py:61-150` `DataCollector.start/add_data/_collect_loop/_flush` live write | **#1614** (Depends on #1613) |
-| fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | `docs/dashboard/mockups/backtest-data-fundamental.html` (본 이슈 무편집) | **후보 D** (deferral, 사람 등록 surface) |
+| fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | fundamental dataset 표현 정리 | **후보 D** (deferral, 사람 등록 surface) |
 
 ## Logging 연계
 
@@ -364,7 +363,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 11. APIGateway 초기화                      # AccountService 주입, 계좌별 BrokerAdapter 라우팅
 12. BotManager 초기화                      # EventBus + StrategyRegistry + APIGateway factories
 13. NotificationService 초기화             # EventBus + 알림 어댑터
-14. WebAPI 시작                            # FastAPI (모든 서비스 주입)
+14. IPC 서버 시작                          # CommandRegistry + ServiceRegistry 주입
 15. BotManager.restore_bots()              # DB에서 봇 설정 복원 + 시작
 ```
 

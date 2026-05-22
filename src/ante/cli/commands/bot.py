@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 import click
 
-from ante.cli._validators import reject_invalid_account_id
+from ante.cli._validators import (
+    reject_invalid_account_id,
+    validate_positive_finite_amount,
+)
 from ante.cli.cold_path import is_active_runtime
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
@@ -535,14 +539,224 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
         fmt.table(result, ["symbol", "quantity", "avg_entry_price", "realized_pnl"])
 
 
+@bot.command("update")
+@click.argument("bot_id")
+@click.option("--name", default=None, help="봇 이름")
+@click.option("--strategy", "strategy_id", default=None, help="전략 ID")
+@click.option(
+    "--interval",
+    "interval_seconds",
+    type=click.IntRange(10, 3600),
+    default=None,
+    help="실행 주기(초)",
+)
+@click.option(
+    "--budget",
+    type=float,
+    callback=validate_positive_finite_amount,
+    default=None,
+    help="목표 할당 예산",
+)
+@click.option(
+    "--auto-restart/--no-auto-restart",
+    default=None,
+    help="오류 시 자동 재시작 여부",
+)
+@click.option("--max-restart-attempts", type=click.IntRange(1, 10), default=None)
+@click.option("--restart-cooldown-seconds", type=click.IntRange(10, 600), default=None)
+@click.option("--step-timeout-seconds", type=click.IntRange(5, 120), default=None)
+@click.option("--max-signals-per-step", type=click.IntRange(1, 200), default=None)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("bot:admin")
+def bot_update(
+    ctx: click.Context,
+    bot_id: str,
+    name: str | None,
+    strategy_id: str | None,
+    interval_seconds: int | None,
+    budget: float | None,
+    auto_restart: bool | None,
+    max_restart_attempts: int | None,
+    restart_cooldown_seconds: int | None,
+    step_timeout_seconds: int | None,
+    max_signals_per_step: int | None,
+) -> None:
+    """중지 상태 봇 설정 수정."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+    updates = {
+        "name": name,
+        "strategy_id": strategy_id,
+        "interval_seconds": interval_seconds,
+        "budget": budget,
+        "auto_restart": auto_restart,
+        "max_restart_attempts": max_restart_attempts,
+        "restart_cooldown_seconds": restart_cooldown_seconds,
+        "step_timeout_seconds": step_timeout_seconds,
+        "max_signals_per_step": max_signals_per_step,
+    }
+    updates = {k: v for k, v in updates.items() if v is not None}
+    if not updates:
+        fmt.error(
+            "변경할 필드를 하나 이상 지정하세요.",
+            code="CLI_MISSING_REQUIRED_INPUT",
+        )
+        raise SystemExit(1)
+
+    async def _run_update() -> dict:
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        return await ipc_send(
+            "bot.update",
+            {"bot_id": bot_id, "updates": updates},
+            actor=actor,
+        )
+
+    try:
+        result = _run(_run_update())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        click.echo(f"봇 설정 수정 완료: {bot_id}")
+
+
+def _parse_log_datetime(
+    value: str | None,
+    field: str,
+    *,
+    end_of_day: bool = False,
+) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed_date = date.fromisoformat(value)
+    except ValueError:
+        parsed_date = None
+    if parsed_date is not None:
+        t = time.max if end_of_day else time.min
+        return datetime.combine(parsed_date, t, tzinfo=UTC)
+    try:
+        parsed_dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise click.BadParameter(
+            f"{field}는 YYYY-MM-DD 또는 ISO 8601 datetime이어야 합니다"
+        ) from e
+    if parsed_dt.tzinfo is None:
+        return parsed_dt.replace(tzinfo=UTC)
+    return parsed_dt.astimezone(UTC)
+
+
+@bot.command("logs")
+@click.argument("bot_id")
+@click.option("--limit", default=50, type=click.IntRange(1, 100), help="조회 수")
+@click.option("--offset", default=0, type=click.IntRange(min=0), help="시작 offset")
+@click.option("--from", "from_date", default=None, help="시작일/시각")
+@click.option("--to", "to_date", default=None, help="종료일/시각")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("bot:read")
+def bot_logs(
+    ctx: click.Context,
+    bot_id: str,
+    limit: int,
+    offset: int,
+    from_date: str | None,
+    to_date: str | None,
+) -> None:
+    """봇 실행 로그 조회."""
+    fmt = get_formatter(ctx)
+    try:
+        since = _parse_log_datetime(from_date, "--from")
+        until = _parse_log_datetime(to_date, "--to", end_of_day=True)
+    except click.BadParameter as e:
+        fmt.error(str(e), code="VALIDATION_ERROR")
+        raise SystemExit(1) from e
+    if since is not None and until is not None and since > until:
+        fmt.error(
+            f"시작일({from_date})이(가) 종료일({to_date}) 이후입니다.",
+            code="INVALID_DATE_RANGE",
+        )
+        raise SystemExit(1)
+
+    async def _run_logs() -> dict:
+        from ante.cli.main import get_db_path
+        from ante.core.database import Database
+        from ante.eventbus.history import EventHistoryStore
+
+        db = Database(get_db_path(ctx))
+        await db.connect()
+        try:
+            try:
+                bot_row = await db.fetch_one(
+                    "SELECT 1 FROM bots WHERE bot_id = ? AND status != 'deleted'",
+                    (bot_id,),
+                )
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e).lower():
+                    bot_row = None
+                else:
+                    raise
+            if bot_row is None:
+                return {"bot_id": bot_id, "missing": True, "logs": [], "total": 0}
+
+            store = EventHistoryStore(db)
+            await store.initialize()
+            payload_filter = {"bot_id": bot_id}
+            rows = await store.query(
+                event_type="BotStepCompletedEvent",
+                since=since,
+                limit=limit,
+                until=until,
+                offset=offset,
+                payload_filter=payload_filter,
+            )
+            total = await store.count(
+                event_type="BotStepCompletedEvent",
+                since=since,
+                until=until,
+                payload_filter=payload_filter,
+            )
+            logs = [
+                {
+                    "event_id": row.get("event_id", ""),
+                    "timestamp": row.get("timestamp", ""),
+                    "result": row.get("payload", {}).get("result", ""),
+                    "message": row.get("payload", {}).get("message", ""),
+                }
+                for row in rows
+            ]
+            return {"bot_id": bot_id, "logs": logs, "total": total}
+        finally:
+            await db.close()
+
+    result = _run(_run_logs())
+    if result.get("missing"):
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        raise SystemExit(1)
+    if fmt.is_json:
+        fmt.output(result)
+    elif not result["logs"]:
+        click.echo("(logs 없음)")
+    else:
+        fmt.table(result["logs"], ["timestamp", "result", "message"])
+
+
 # ── 봇 생명주기 leaf (#1713) ─────────────────────────────────────────────
 #
 # Refs #1713/#1712: ``bot.start``/``bot.stop``/``bot.status`` IPC handler가
-# Web API ``POST/GET /api/bots/{bot_id}/...``와 정렬된 거부 경로
-# (``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
-# ``BOT_STATE_CONFLICT``) coded exception을 raise한다. CLI ingress는 IPC
-# 단일-chokepoint를 그대로 사용하며 별도 cold-path fallback을 제공하지
-# 않는다(Non-Goal). 에러 envelope 안정성은 #1673 ``config set`` 패턴
+# ``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
+# ``BOT_STATE_CONFLICT`` coded exception을 raise한다. CLI ingress는 IPC
+# 단일-chokepoint를 그대로 사용하며 별도 cold-path fallback을 제공하지 않는다.
+# 에러 envelope 안정성은 #1673 ``config set`` 패턴
 # (``ipc_send``가 ``ClickException``에 부착한 ``ipc_error_code``/
 # ``ipc_error_message``를 split 없이 복원) 1:1 미러로 보존한다.
 
@@ -554,7 +768,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
 @require_auth
 @require_scope("bot:admin")
 def bot_start(ctx: click.Context, bot_id: str) -> None:
-    """봇 시작 (Web API ``POST /api/bots/{bot_id}/start``와 같은 동작)."""
+    """봇 시작."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
@@ -577,9 +791,8 @@ def bot_start(ctx: click.Context, bot_id: str) -> None:
             fmt.error(text)
         raise SystemExit(1) from e
 
-    # JSON 모드는 IPC `{bot: ...}` envelope 그대로 (BotDetailResponse 정합 —
-    # `bot status`와 동일 shape, agent 파싱 일관). text 모드만 사용자 친화적
-    # 성공 메시지.
+    # JSON 모드는 IPC `{bot: ...}` envelope 그대로 유지해 `bot status`와
+    # 동일 shape를 제공한다. text 모드만 사용자 친화적 성공 메시지.
     if fmt.is_json:
         fmt.output(result)
     else:
@@ -593,7 +806,7 @@ def bot_start(ctx: click.Context, bot_id: str) -> None:
 @require_auth
 @require_scope("bot:admin")
 def bot_stop(ctx: click.Context, bot_id: str) -> None:
-    """봇 중지 (Web API ``POST /api/bots/{bot_id}/stop``과 같은 동작)."""
+    """봇 중지."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
@@ -627,7 +840,7 @@ def bot_stop(ctx: click.Context, bot_id: str) -> None:
 @require_auth
 @require_scope("bot:read")
 def bot_status(ctx: click.Context, bot_id: str) -> None:
-    """봇 live 상태 조회 (Web API ``GET /api/bots/{bot_id}``와 같은 동작)."""
+    """봇 live 상태 조회."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 

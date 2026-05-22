@@ -521,7 +521,7 @@ class BotManager:
             # budget 변경 시 Treasury 연동.
             # Refs #1335: 과거에는 ``new_budget is not None`` 인 경로에서도
             # ``TreasuryManager`` 부재 / account 미등록을 silent 하게 흘려보내
-            # 호출자(POST /api/bots) 가 budget 배정 실패를 감지하지 못했다.
+            # 호출자가 budget 배정 실패를 감지하지 못했다.
             # 이제 budget 배정 의도가 있는 경우(``new_budget is not None``)에는
             # ``TreasuryNotConfiguredError`` 를 raise 하여 라우트 계층이 422 로
             # 매핑할 수 있도록 한다. ``new_budget is None`` 인 단순 update
@@ -754,8 +754,8 @@ class BotManager:
                 기본 ``False`` 는 기존 soft delete 거동 (``status='deleted'``)
                 을 유지한다.
 
-                Refs #1335: ``POST /api/bots`` budget 배정 실패 후 rollback
-                경로에서는 같은 ``bot_id`` 로의 재시도가 가능해야 한다.
+                Refs #1335: budget 배정 실패 후 rollback 경로에서는 같은
+                ``bot_id`` 로의 재시도가 가능해야 한다.
                 soft delete 만 수행하면 row 가 ``status='deleted'`` 로
                 남아 ``_save_bot_config()`` UPSERT 가 status 를 복구하지
                 않으므로, 재시도가 ``201`` 을 반환해도 봇은 메모리에만

@@ -11,7 +11,7 @@
 
 Live 모드에서 `_do_sync()`는 브로커 API(`get_account_balance()`, `get_positions()`)를 호출하여 `_purchase_amount`, `_eval_amount`를 갱신한다. 이 값들이 `get_summary()`의 `ante_purchase_amount`, `ante_eval_amount`, `ante_profit_loss`를 결정한다.
 
-Virtual 모드에서는 브로커 동기화가 없으므로 이 필드들이 **항상 0.0**에 머문다. 결과적으로 대시보드 "Ante 관리자산 평가/손익"과 DailyReport의 unrealized_pnl이 0으로 표출된다.
+Virtual 모드에서는 브로커 동기화가 없으므로 이 필드들이 **항상 0.0**에 머문다. 결과적으로 관리자산 평가/손익과 DailyReport의 unrealized_pnl이 0으로 표출된다.
 
 ### Live 모드가 브로커 API를 쓰는 이유
 
@@ -48,7 +48,7 @@ PositionHistory(account_id의 미청산 포지션)
 - `get_summary()`: 수정 없음 — 입력 값(`_purchase_amount`, `_eval_amount`)이 갱신되면 기존 산식 그대로 동작
 - `DailyReportScheduler`: 수정 없음 — `get_summary()` 값에 의존
 - `take_snapshot()`: 수정 없음 — `get_summary()` 값에 의존
-- 대시보드 T-1/T-2: 수정 없음 — 스냅샷 데이터에 의존
+- T-1/T-2 조회: 수정 없음 — 스냅샷 데이터에 의존
 
 ### 기본 계약 위치
 

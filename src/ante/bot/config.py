@@ -24,9 +24,8 @@ MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 3600
 
 # Runtime control 허용 범위 (#1456 — 본 파일의 ``MIN_*``/``MAX_*`` 상수가
-# SSOT, ``docs/specs/web-api/05-resource-endpoints.md`` PUT
-# ``/api/bots/{bot_id}`` body contract와 정합). 범위 밖 값은 PUT 단계에서
-# 422, ``BotConfig`` 직접 생성 단계에서 ``ValueError`` 로 거부된다.
+# SSOT). 범위 밖 값은 ``BotConfig`` 직접 생성 단계에서 ``ValueError`` 로
+# 거부된다.
 MIN_MAX_RESTART_ATTEMPTS = 1
 MAX_MAX_RESTART_ATTEMPTS = 10
 MIN_RESTART_COOLDOWN_SECONDS = 10
@@ -47,10 +46,9 @@ class BotConfig:
     runtime control 4개 필드 (``max_restart_attempts``,
     ``restart_cooldown_seconds``, ``step_timeout_seconds``,
     ``max_signals_per_step``) 는 #1456 허용 범위 내에서만 허용된다
-    (코드 SSOT: 본 파일의 ``MIN_*``/``MAX_*`` 상수 + Pydantic Field +
-    manual OpenAPI schema bounds). 범위 밖 값은 ``ValueError`` 로
-    거부되어 ``update_bot`` (manager.py:340) 의 재구성 경로에서도 동일하게
-    차단된다.
+    (코드 SSOT: 본 파일의 ``MIN_*``/``MAX_*`` 상수). 범위 밖 값은
+    ``ValueError`` 로 거부되어 ``update_bot`` (manager.py:340) 의 재구성
+    경로에서도 동일하게 차단된다.
     """
 
     bot_id: str

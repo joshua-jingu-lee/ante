@@ -14,7 +14,7 @@
 | [D-005](D-005.md) | EventBus 적용 범위 | 2026-03-12 | 핵심 흐름만 EventBus, 나머지는 직접 호출 |
 | [D-006](D-006.md) | DB 엔진 및 데이터 저장 전략 | 2026-03-12 | SQLite(WAL) + Parquet 이원 구조 |
 | [D-007](D-007.md) | 외부 AI Agent 연동 방식 | 2026-03-12 | CLI 인터페이스 중심 연동 |
-| [D-008](D-008.md) | 웹 대시보드 프레임워크 | 2026-03-12 | FastAPI + React + Lightweight Charts |
+| [D-008](D-008.md) | 웹 대시보드 프레임워크 | 2026-03-12 | D-018로 대체된 역사 기록 |
 | [D-009](D-009.md) | 프로젝트 디렉토리 구조 | 2026-03-12 | 모듈 경계가 드러나는 디렉토리 구조 |
 | [D-010](D-010.md) | Agent 친화적 설계 원칙 | 2026-03-12 | Agent가 독립적으로 탐색·학습·사용 가능한 구조 |
 | [D-011](D-011.md) | 설정 관리 전략 | 2026-03-12 | 정적 설정 / 비밀값 / 동적 설정의 3계층 분리 |
@@ -24,6 +24,7 @@
 | [D-015](D-015-default-deny-auth-gate.md) | default-deny 인증 게이트 | 2026-05-11 | Web/CLI 모두 default-deny + allowlist (opt-out), middleware=인증·dependency=scope |
 | [D-016](D-016-canonical-exchange-vocabulary.md) | canonical exchange vocabulary | 2026-05-15 | Ante 전역 canonical exchange 집합·wildcard·legacy 호환 계약 SSOT |
 | [D-017](D-017-canonical-symbol-timeframe-vocabulary.md) | canonical symbol/timeframe vocabulary | 2026-05-16 | symbol/timeframe canonical 집합·다축 구분·legacy 호환 계약 SSOT |
+| [D-018](D-018-core-interface-cli-ipc.md) | Core Interface CLI/IPC 중심화 | 2026-05-22 | React/HTTP 런타임 제거, CLI/IPC를 활성 운영 인터페이스로 고정 |
 
 ## 사용 규칙
 

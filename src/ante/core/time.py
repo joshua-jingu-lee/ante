@@ -1,13 +1,7 @@
 """UTC ISO 8601 직렬화 helper.
 
-SSOT: ``docs/specs/web-api/04-system-endpoints.md``의 Kill Switch 응답은
-``changed_at``을 ``string (ISO 8601 UTC)``로 정의하며 ``Z`` suffix를 사용한다.
 Python ``datetime.isoformat()``은 UTC offset을 ``+00:00``으로 직렬화하므로,
-응답 표면에서는 본 helper로 ``Z`` suffix로 통일한다.
-
-Web API (``ante.web.routes.system``)와 IPC registry
-(``ante.ipc.registry``)는 동일한 Kill Switch envelope을 공유하므로 양쪽이
-이 helper를 호출한다 (Refs #1360).
+응답 표면에서는 본 helper로 ``Z`` suffix로 통일한다 (Refs #1360).
 """
 
 from __future__ import annotations

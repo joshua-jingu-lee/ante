@@ -1,8 +1,7 @@
 """``ante.core.time.format_utc`` 단위 테스트 (Refs #1360).
 
-Web API와 IPC가 공유하는 UTC ISO 8601 직렬화 helper. SSOT는
-``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답에서 ``Z`` suffix를
-요구한다. Python ``datetime.isoformat()``의 기본 ``+00:00``을 ``Z``로 치환한다.
+IPC와 이벤트 payload가 공유하는 UTC ISO 8601 직렬화 helper. Python
+``datetime.isoformat()``의 기본 ``+00:00``을 ``Z``로 치환한다.
 """
 
 from __future__ import annotations

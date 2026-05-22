@@ -79,23 +79,11 @@ PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/codex
 - **결과**: `ci`
 - **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
 
-#### Frontend API Type Boundary Gate 준비 기준
-
-Frontend OpenAPI 타입 경계 검사는 zero-violation 정책을 사용한다.
-
-- Report-only 진단: `cd frontend && npm run check-api-types`
-- Blocking 명령: `cd frontend && npm run check-api-types:strict`
-- CI job: `frontend-api-types`
-- Baseline/allowlist: 사용하지 않는다. #1261/#1262/#1263 이후 findings 0을 기준선으로 삼는다.
-- Changed-file mode: 사용하지 않는다. 전체 `frontend/src` 경계를 검사한다.
-- `ci` aggregate job은 `frontend-api-types`를 `needs`에 포함한다. branch protection이 `ci`를 required status check로 사용하면 API 타입 경계 위반도 `ci` 실패로 머지를 차단한다.
-
 branch protection repository setting은 이 저장소 밖 운영 설정이므로 워크플로우가 직접 수정하지 않는다.
 
 예시:
 
 ```yaml
-- cd frontend && npm run check-api-types:strict
 - PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
 - PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
 - PYTHONPATH=$PWD/src .venv/bin/python -m ruff format --check src/ tests/

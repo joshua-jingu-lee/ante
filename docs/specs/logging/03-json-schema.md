@@ -33,7 +33,7 @@ JSONL 파일에 기록되는 한 줄의 구조를 정의한다. stdout 평문 �
 | `strategy_id` | string | 전략 실행 |
 | `order_id` | string | 주문 흐름 추적 |
 | `symbol` | string | 종목 관련 |
-| `request_id` | string | Web API 요청 |
+| `request_id` | string | 외부 요청 추적 |
 | `extra` | object | 모듈 특수 정보 (표준 필드에 들지 않는 자유 객체) |
 
 **예시**:

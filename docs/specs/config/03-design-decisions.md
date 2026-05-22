@@ -90,7 +90,7 @@ TELEGRAM_CHAT_ID=987654321
 
 #### 3. 동적 설정 — SQLite (`dynamic_config` 테이블)
 
-런타임 변경이 필요한 설정. 웹 대시보드에서 CRUD, 변경 시 EventBus 알림.
+런타임 변경이 필요한 설정. CLI/IPC로 CRUD, 변경 시 EventBus 알림.
 
 ```sql
 CREATE TABLE dynamic_config (
@@ -116,7 +116,7 @@ CREATE TABLE dynamic_config (
 |----|---------|------|--------|
 | `accounts.{account_id}.rules` | rule | 계좌별 리스크 룰 리스트. 런타임 룰 변경의 SSOT | `[{"type":"daily_loss_limit","enabled":true,"max_daily_loss_rate":0.03,"action":"halt"}]` |
 
-계좌별 룰은 per-rule key로 나누지 않는다. `PUT /api/accounts/{account_id}/rules/{rule_type}`는
+계좌별 룰은 per-rule key로 나누지 않는다. `ante rule update <rule_type> --account <account_id>`는
 해당 rule만 수정하더라도 `accounts.{account_id}.rules` 리스트 전체를 갱신하고,
 `ConfigChangedEvent(category="rule", key="accounts.{account_id}.rules")`를 발행한다.
 정적 TOML의 `accounts.{account_id}.rules`는 초기 seed/fallback으로만 사용한다.
@@ -280,7 +280,7 @@ AuditLogger가 공유하는 canonical DB이다. 예외적으로 다른 DB를 볼
 
 **접근 방식**: 로드 시점에 검증 (Fail-fast)
 
-`Config.validate()`는 시스템 시작 시 호출되며, 필수 정적 설정(`db.path`, `data.path`, `web.port`)의 존재 여부와 타입을 검증한다. 검증 실패 시 모든 에러를 수집하여 `ConfigError`로 일괄 보고한다.
+`Config.validate()`는 시스템 시작 시 호출되며, 필수 정적 설정(`db.path`, `data.path`, `runtime.socket_path`)의 존재 여부와 타입을 검증한다. 검증 실패 시 모든 에러를 수집하여 `ConfigError`로 일괄 보고한다.
 
 **근거**:
 - 시작 시 전체 검증으로 런타임 에러 방지
@@ -300,8 +300,6 @@ AuditLogger가 공유하는 canonical DB이다. 예외적으로 다른 DB를 볼
 | `runtime.socket_path` | `"run/ante.sock"` |
 | `logging.directory` | `"logs"` |
 | `parquet.compression` | `"snappy"` |
-| `web.host` | `"0.0.0.0"` |
-| `web.port` | `3982` |
 | `eventbus.history_size` | `1000` |
 | `member.token_ttl_days` | `90` |
 | `instrument.default_exchange` | `"KRX"` |

@@ -554,6 +554,72 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
 
 
+@member.command("update-scopes")
+@click.argument("member_id")
+@click.option(
+    "--scopes",
+    required=True,
+    help="권한 범위 목록 (쉼표 구분, 빈 문자열은 권한 없음)",
+)
+@format_option
+@click.pass_context
+@require_auth
+@require_master
+def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> None:
+    """멤버 권한 범위 변경."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+    scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+
+    async def _run_update_scopes() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "member.update_scopes",
+                {"member_id": member_id, "scopes": scope_list},
+                actor=actor,
+            )
+
+        service, db = await _create_service()
+        try:
+            m = await service.update_scopes(
+                member_id,
+                scope_list,
+                updated_by=actor,
+            )
+            return {
+                "member_id": m.member_id,
+                "scopes": m.scopes,
+                "status": m.status,
+            }
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_run_update_scopes())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except PermissionDeniedError:
+        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
+    except InvalidScopeError as e:
+        fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
+        raise SystemExit(1) from None
+    except (ValueError, PermissionError) as e:
+        fmt.error(str(e))
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.success(f"멤버 권한 변경 완료: {member_id}", result)
+
+
 @member.command("suspend")
 @click.argument("member_id")
 @click.pass_context

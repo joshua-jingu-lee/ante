@@ -28,7 +28,7 @@ class TestConfigLoad:
         config = Config.load(config_dir=tmp_path)
 
         assert config.get("db.path") == "db/ante.db"
-        assert config.get("web.port") == 3982
+        assert config.get("runtime.socket_path") == "run/ante.sock"
 
     def test_load_with_dotenv(self, tmp_path: Path) -> None:
         """.env 파일에서 비밀값을 로드한다."""
@@ -49,11 +49,11 @@ class TestConfigGet:
     def test_nested_get(self) -> None:
         """점(.) 구분자로 중첩 키에 접근한다."""
         config = Config(
-            static={"db": {"path": "my.db"}, "web": {"port": 9090}},
+            static={"db": {"path": "my.db"}, "runtime": {"socket_path": "custom.sock"}},
             secrets={},
         )
         assert config.get("db.path") == "my.db"
-        assert config.get("web.port") == 9090
+        assert config.get("runtime.socket_path") == "custom.sock"
 
     def test_defaults_fallback(self) -> None:
         """TOML에 없는 키는 DEFAULTS에서 가져온다."""

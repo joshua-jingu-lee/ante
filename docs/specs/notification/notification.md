@@ -197,11 +197,11 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
 
 텔레그램 명령(`/approve`, `/reject`, `/stop`, `/halt`, `/clear_halt` 등)으로 처리된 작업은 `TelegramCommandReceiver`가 직접 응답(reply)을 발송한다. 이때 동일 내용의 `NotificationEvent`를 발행하면 사용자가 같은 채널에서 메시지를 2번 수신하게 된다.
 
-**정책**: 텔레그램 명령으로 트리거된 작업은 직접 응답만 발송하고, `NotificationEvent`는 발행하지 않는다. 대시보드·CLI 등 텔레그램 외 채널에서 처리된 경우에만 `NotificationEvent`를 발행한다.
+**정책**: 텔레그램 명령으로 트리거된 작업은 직접 응답만 발송하고, `NotificationEvent`는 발행하지 않는다. CLI 등 텔레그램 외 채널에서 처리된 경우에만 `NotificationEvent`를 발행한다.
 
 ```
 텔레그램에서 처리 → 직접 응답(reply)만 발송, NotificationEvent 생략 → 1회
-대시보드/CLI에서 처리 → NotificationEvent 발행 → 텔레그램 도착 → 1회
+CLI에서 처리 → NotificationEvent 발행 → 텔레그램 도착 → 1회
 ```
 
 이를 통해 사용자는 어떤 채널에서 처리하든 정확히 1번만 메시지를 수신한다.
@@ -215,5 +215,5 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
 ## 타 모듈 설계 시 참고
 
 - **Config 스펙**: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`는 secrets.env에서 관리. `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours`는 dynamic_config에서 관리
-- **Web API 스펙**: `/api/config/{key:path}` 동적 설정 API로 `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours`를 변경
+- **CLI/IPC 스펙**: 동적 설정 명령으로 `notification.telegram_enabled`, `notification.min_level`, `notification.quiet_hours`를 변경
 - **EventBus 스펙**: `NotificationEvent`에 `category` 필드 추가, `SystemStartedEvent` 신규 생성

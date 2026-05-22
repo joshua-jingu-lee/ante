@@ -5,11 +5,11 @@
 # 개요
 
 Trade 모듈은 **모든 거래의 실행 기록을 영속적으로 저장하고, 봇/전략 단위의 성과 지표를 산출하는 거래 추적 계층**이다.
-EventBus를 통해 주문 흐름 이벤트를 구독하여 자동으로 기록하며, 웹 대시보드와 CLI에서 거래 이력 및 성과를 조회할 수 있다.
+EventBus를 통해 주문 흐름 이벤트를 구독하여 자동으로 기록하며, CLI에서 거래 이력 및 성과를 조회할 수 있다.
 
 > **포지션의 단일 소유자(Single Source of Truth)**: 포지션은 거래 기록/회계 관점에서 정의하며,
 > Trade 모듈의 `positions` 테이블이 시스템 내 유일한 포지션 저장소이다.
-> 다른 모듈(Rule Engine, Bot, Web API 등)이 포지션 정보가 필요하면 `TradeService`를 통해 조회한다.
+> 다른 모듈(Rule Engine, Bot 등)이 포지션 정보가 필요하면 `TradeService`를 통해 조회한다.
 
 **주요 기능**:
 - **거래 기록 (TradeRecorder)**: OrderFilledEvent, OrderCancelEvent 등 주문 흐름 이벤트를 구독하여 SQLite에 영속 기록

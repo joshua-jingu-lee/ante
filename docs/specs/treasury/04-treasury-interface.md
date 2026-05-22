@@ -49,7 +49,7 @@ Treasury(
 | `update_budget` | bot_id: str, target_amount: float | `None` | 봇 예산 변경. 증가분은 미할당에서 차감, 감소분은 미할당으로 환수 |
 | `set_account_info` | account_number: str, is_demo_trading: bool | `None` | KIS 계좌 메타 정보 설정 (계좌번호, 모의투자 여부) |
 
-`set_account_balance(balance)` 입력 invariant: balance는 finite이며 `>=0`. 위반 시 ValueError. POST /api/treasury/balance도 동일 invariant를 ValidationError로 거부한다.
+`set_account_balance(balance)` 입력 invariant: balance는 finite이며 `>=0`. CLI `ante treasury set-balance`도 같은 invariant를 검증한다.
 
 ### Reserve 정책 (`_on_order_validated`)
 

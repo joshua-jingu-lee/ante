@@ -40,6 +40,8 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante bot remove](#ante-bot-remove)
   - [ante bot signal-key](#ante-bot-signal-key)
   - [ante bot positions](#ante-bot-positions)
+  - [ante bot update](#ante-bot-update)
+  - [ante bot logs](#ante-bot-logs)
   - [ante bot start](#ante-bot-start)
   - [ante bot stop](#ante-bot-stop)
   - [ante bot status](#ante-bot-status)
@@ -56,10 +58,14 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante strategy validate](#ante-strategy-validate)
   - [ante strategy submit](#ante-strategy-submit)
   - [ante strategy list](#ante-strategy-list)
+  - [ante strategy set-status](#ante-strategy-set-status)
   - [ante strategy info](#ante-strategy-info)
+  - [ante strategy summary](#ante-strategy-summary)
   - [ante strategy performance](#ante-strategy-performance)
 - [data — 데이터 관리.](#data-데이터-관리)
   - [ante data list](#ante-data-list)
+  - [ante data info](#ante-data-info)
+  - [ante data delete](#ante-data-delete)
   - [ante data schema](#ante-data-schema)
   - [ante data storage](#ante-data-storage)
   - [ante data validate](#ante-data-validate)
@@ -83,6 +89,7 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante member list-invalid-roles](#ante-member-list-invalid-roles)
   - [ante member register](#ante-member-register)
   - [ante member set-emoji](#ante-member-set-emoji)
+  - [ante member update-scopes](#ante-member-update-scopes)
   - [ante member suspend](#ante-member-suspend)
   - [ante member reactivate](#ante-member-reactivate)
   - [ante member revoke](#ante-member-revoke)
@@ -92,6 +99,7 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
 - [rule — 거래 룰 조회·관리.](#rule-거래-룰-조회관리)
   - [ante rule list](#ante-rule-list)
   - [ante rule info](#ante-rule-info)
+  - [ante rule update](#ante-rule-update)
 - [signal — 외부 시그널 채널 관리.](#signal-외부-시그널-채널-관리)
   - [ante signal connect](#ante-signal-connect)
 - [system — 시스템 시작·중지·상태 확인.](#system-시스템-시작중지상태-확인)
@@ -105,9 +113,14 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante trade info](#ante-trade-info)
 - [treasury — 자금 현황 조회·관리.](#treasury-자금-현황-조회관리)
   - [ante treasury status](#ante-treasury-status)
+  - [ante treasury transactions](#ante-treasury-transactions)
+  - [ante treasury budgets](#ante-treasury-budgets)
+  - [ante treasury set-balance](#ante-treasury-set-balance)
   - [ante treasury allocate](#ante-treasury-allocate)
   - [ante treasury deallocate](#ante-treasury-deallocate)
   - [ante treasury snapshot](#ante-treasury-snapshot)
+  - [ante treasury portfolio value](#ante-treasury-portfolio-value)
+  - [ante treasury portfolio history](#ante-treasury-portfolio-history)
 - [update](#update)
   - [ante update](#ante-update)
 - [feed — DataFeed — 시세·재무 데이터 수집 파이프라인.](#feed-datafeed-시세재무-데이터-수집-파이프라인)
@@ -168,9 +181,11 @@ ante [OPTIONS] <command>
 | `ante bot remove` | 봇 삭제. | `bot:admin` | H·A |
 | `ante bot signal-key` | 봇 시그널 키 조회 또는 재발급. | `bot:admin` | H·A |
 | `ante bot positions` | 봇 보유 포지션 조회. | `bot:read` | H·A |
-| `ante bot start` | 봇 시작 (Web API ``POST /api/bots/{bot_id}/start``와 같은 동작). | `bot:admin` | H·A |
-| `ante bot stop` | 봇 중지 (Web API ``POST /api/bots/{bot_id}/stop``과 같은 동작). | `bot:admin` | H·A |
-| `ante bot status` | 봇 live 상태 조회 (Web API ``GET /api/bots/{bot_id}``와 같은 동작). | `bot:read` | H·A |
+| `ante bot update` | 중지 상태 봇 설정 수정. | `bot:admin` | H·A |
+| `ante bot logs` | 봇 실행 로그 조회. | `bot:read` | H·A |
+| `ante bot start` | 봇 시작. | `bot:admin` | H·A |
+| `ante bot stop` | 봇 중지. | `bot:admin` | H·A |
+| `ante bot status` | 봇 live 상태 조회. | `bot:read` | H·A |
 | `ante broker status` | 증권사 연결 상태 조회. | `broker:read` | H·A |
 | `ante broker balance` | 증권사 계좌 잔고 조회. | `broker:read` | H·A |
 | `ante broker positions` | 증권사 보유 종목 조회. | `broker:read` | H·A |
@@ -181,9 +196,13 @@ ante [OPTIONS] <command>
 | `ante strategy validate` | 전략 파일 정적 검증 (AST 기반). | `strategy:write` | H·A |
 | `ante strategy submit` | 전략 제출 (검증 -> 로드 테스트 -> Registry 등록). | `strategy:write` | H·A |
 | `ante strategy list` | 등록된 전략 목록 조회. | `strategy:read` | H·A |
+| `ante strategy set-status` | 전략 상태 변경. | `strategy:write` | H·A |
 | `ante strategy info` | 전략 상세 정보 조회 (메타데이터 + 파라미터). | `strategy:read` | H·A |
+| `ante strategy summary` | 전략 기간별 성과 집계. | `strategy:read` | H·A |
 | `ante strategy performance` | 전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용). | `strategy:read` | H·A |
 | `ante data list` | 보유 데이터셋 목록. | `data:read` | H·A |
+| `ante data info` | 데이터셋 상세 조회. | `data:read` | H·A |
+| `ante data delete` | 데이터셋 삭제. | `data:write` | H·A |
 | `ante data schema` | 데이터 스키마 조회. | `data:read` | H·A |
 | `ante data storage` | 저장 용량 현황. | `data:read` | H·A |
 | `ante data validate` | Parquet 파일 무결성 검증. | `data:read` | H·A |
@@ -203,6 +222,7 @@ ante [OPTIONS] <command>
 | `ante member list-invalid-roles` | ``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468). | `member:read` | H·A |
 | `ante member register` | 멤버 등록 (토큰 발급). | master-only | H(master) |
 | `ante member set-emoji` | 멤버 이모지 설정/변경. | master-only | H(master) |
+| `ante member update-scopes` | 멤버 권한 범위 변경. | master-only | H(master) |
 | `ante member suspend` | 멤버 일시 정지. | master-only | H(master) |
 | `ante member reactivate` | 멤버 재활성화. | master-only | H(master) |
 | `ante member revoke` | 멤버 영구 폐기. | master-only | H(master) |
@@ -211,6 +231,7 @@ ante [OPTIONS] <command>
 | `ante member regenerate-recovery-key` | Recovery Key 재발급 (인증 불필요). | — | — |
 | `ante rule list` | 룰 목록 조회. | `rule:read` | H·A |
 | `ante rule info` | 룰 상세 정보 조회. | `rule:read` | H·A |
+| `ante rule update` | 계좌 룰 설정 수정. | `rule:admin` | H·A |
 | `ante signal connect` | 양방향 JSON Lines 시그널 채널 수립. | — | — |
 | `ante system start` | 시스템 시작 (포어그라운드). | `system:admin` | H·A |
 | `ante system stop` | 시스템 정상 종료 (SIGTERM). | `system:admin` | H·A |
@@ -220,9 +241,14 @@ ante [OPTIONS] <command>
 | `ante trade list` | 거래 목록 조회. | `trade:read` | H·A |
 | `ante trade info` | 거래 상세 정보 조회. | `trade:read` | H·A |
 | `ante treasury status` | 자금 현황 요약. | `treasury:read` | H·A |
+| `ante treasury transactions` | 자금 변동 이력 조회. | `treasury:read` | H·A |
+| `ante treasury budgets` | 봇별 예산 목록 조회. | `treasury:read` | H·A |
+| `ante treasury set-balance` | 계좌 총 잔고 수동 설정. | `treasury:admin` | H·A |
 | `ante treasury allocate` | 봇에 예산 할당. | `treasury:admin` | H·A |
 | `ante treasury deallocate` | 봇 예산 회수. | `treasury:admin` | H·A |
 | `ante treasury snapshot` | 일별 자산 스냅샷 조회. | `treasury:read` | H·A |
+| `ante treasury portfolio value` | 총 자산 가치 조회. | `treasury:read` | H·A |
+| `ante treasury portfolio history` | 기간별 자산 추이 조회. | `treasury:read` | H·A |
 | `ante update` | ante를 최신 버전으로 업데이트합니다. | — | — |
 | `ante feed config set` | API 키를 .feed/.env 파일에 저장한다. | `data:write` | H·A |
 | `ante feed config list` | 등록된 API 키 목록을 마스킹하여 표시한다. | `data:read` | H·A |
@@ -934,9 +960,70 @@ ante bot positions <BOT_ID>
 | `<BOT_ID>` | O |  |
 
 
+### ante bot update
+
+중지 상태 봇 설정 수정.
+
+- **필요 scope**: `bot:admin`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante bot update <BOT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<BOT_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--name` | - | TEXT | — | 봇 이름 |
+| `--strategy` | - | TEXT | — | 전략 ID |
+| `--interval` | - | INT (10~3600) | — | 실행 주기(초) |
+| `--budget` | - | FLOAT | — | 목표 할당 예산 |
+| `--auto-restart`, `--no-auto-restart` | - | BOOLEAN | — | 오류 시 자동 재시작 여부 |
+| `--max-restart-attempts` | - | INT (1~10) | — |  |
+| `--restart-cooldown-seconds` | - | INT (10~600) | — |  |
+| `--step-timeout-seconds` | - | INT (5~120) | — |  |
+| `--max-signals-per-step` | - | INT (1~200) | — |  |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante bot logs
+
+봇 실행 로그 조회.
+
+- **필요 scope**: `bot:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante bot logs <BOT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<BOT_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--limit` | - | INT (1~100) | 50 | 조회 수 |
+| `--offset` | - | INT (0~) | 0 | 시작 offset |
+| `--from` | - | TEXT | — | 시작일/시각 |
+| `--to` | - | TEXT | — | 종료일/시각 |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
 ### ante bot start
 
-봇 시작 (Web API ``POST /api/bots/{bot_id}/start``와 같은 동작).
+봇 시작.
 
 - **필요 scope**: `bot:admin`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
@@ -960,7 +1047,7 @@ ante bot start <BOT_ID> [OPTIONS]
 
 ### ante bot stop
 
-봇 중지 (Web API ``POST /api/bots/{bot_id}/stop``과 같은 동작).
+봇 중지.
 
 - **필요 scope**: `bot:admin`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
@@ -984,7 +1071,7 @@ ante bot stop <BOT_ID> [OPTIONS]
 
 ### ante bot status
 
-봇 live 상태 조회 (Web API ``GET /api/bots/{bot_id}``와 같은 동작).
+봇 live 상태 조회.
 
 - **필요 scope**: `bot:read`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
@@ -1220,6 +1307,31 @@ ante strategy list [OPTIONS]
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
+### ante strategy set-status
+
+전략 상태 변경.
+
+- **필요 scope**: `strategy:write`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante strategy set-status <STRATEGY_ID> --status <STATUS> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<STRATEGY_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--status` | O | adopted / archived | — | 변경할 전략 상태 |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
 ### ante strategy info
 
 전략 상세 정보 조회 (메타데이터 + 파라미터).
@@ -1241,6 +1353,31 @@ ante strategy info <NAME> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante strategy summary
+
+전략 기간별 성과 집계.
+
+- **필요 scope**: `strategy:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante strategy summary <STRATEGY_ID> --period <PERIOD> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<STRATEGY_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--period` | O | daily / weekly / monthly | — | 집계 기간 |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1290,8 +1427,65 @@ ante data list [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
+| `--symbol` | - | TEXT | — | 종목 코드 exact-match 필터 |
+| `--timeframe` | - | TEXT | — | 타임프레임 필터 |
+| `--type` | - | ohlcv / fundamental | — | 데이터 유형 필터 |
+| `--offset` | - | INT (0~) | 0 | 조회 offset |
+| `--limit` | - | INT (1~) | 50 | 조회 개수 |
 | `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante data info
+
+데이터셋 상세 조회.
+
+- **필요 scope**: `data:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante data info <DATASET_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<DATASET_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante data delete
+
+데이터셋 삭제.
+
+- **필요 scope**: `data:write`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante data delete <DATASET_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<DATASET_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--type` | - | ohlcv / fundamental | — | dataset_id 파생 유형과 일치해야 하는 데이터 유형 |
+| `--yes` | - | BOOLEAN | false | 삭제를 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패 |
+| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1743,6 +1937,31 @@ ante member set-emoji <MEMBER_ID> <EMOJI>
 | `<EMOJI>` | O |  |
 
 
+### ante member update-scopes
+
+멤버 권한 범위 변경.
+
+- **필요 scope**: master-only
+- **토큰**: 🔑 Human master 전용 (#1543)
+
+```bash
+ante member update-scopes <MEMBER_ID> --scopes <SCOPES> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<MEMBER_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--scopes` | O | TEXT | — | 권한 범위 목록 (쉼표 구분, 빈 문자열은 권한 없음) |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
 ### ante member suspend
 
 멤버 일시 정지.
@@ -1917,6 +2136,34 @@ ante rule info <RULE_ID> --account <ACCOUNT_ID>
 | `--account` | O | TEXT | — | 계좌 ID |
 
 
+### ante rule update
+
+계좌 룰 설정 수정.
+
+- **필요 scope**: `rule:admin`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante rule update <RULE_TYPE> --account <ACCOUNT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<RULE_TYPE>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | O | TEXT | — | 계좌 ID |
+| `--enabled`, `--disabled` | - | BOOLEAN | true | 룰 활성화 여부 |
+| `--param` | - | TEXT | — | 룰 파라미터 (key=value, 복수 지정 가능) |
+| `--params-json` | - | TEXT | — | 룰 파라미터 JSON object |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
 ---
 
 ## signal — 외부 시그널 채널 관리.
@@ -2048,6 +2295,7 @@ ante trade list [OPTIONS]
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--bot` | - | TEXT | — | 봇 ID 필터 |
+| `--strategy` | - | TEXT | — | 전략 ID 필터 |
 | `--from` | - | TEXT | — | 시작일 (YYYY-MM-DD) |
 | `--to` | - | TEXT | — | 종료일 (YYYY-MM-DD) |
 | `--limit` | - | INT (1~) | 50 | 최대 조회 수 |
@@ -2092,6 +2340,75 @@ ante trade info <TRADE_ID> [OPTIONS]
 ```bash
 ante treasury status --account <ACCOUNT_ID> [OPTIONS]
 ```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | O | TEXT | — | 계좌 ID |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante treasury transactions
+
+자금 변동 이력 조회.
+
+- **필요 scope**: `treasury:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante treasury transactions [OPTIONS]
+```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | - | TEXT | — | 계좌 ID 필터 |
+| `--type` | - | allocate / deallocate / release / fill / bot_stopped_release | — | 거래 유형 필터 |
+| `--bot` | - | TEXT | — | 봇 ID 필터 |
+| `--from` | - | TEXT | — |  |
+| `--to` | - | TEXT | — |  |
+| `--limit` | - | INT (1~100) | 20 | 조회 수 |
+| `--offset` | - | INT (0~) | 0 | 시작 offset |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante treasury budgets
+
+봇별 예산 목록 조회.
+
+- **필요 scope**: `treasury:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante treasury budgets [OPTIONS]
+```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | - | TEXT | — | 계좌 ID 필터 |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante treasury set-balance
+
+계좌 총 잔고 수동 설정.
+
+- **필요 scope**: `treasury:admin`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante treasury set-balance <AMOUNT> --account <ACCOUNT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<AMOUNT>` | O |  |
 
 **Options:**
 
@@ -2170,6 +2487,46 @@ ante treasury snapshot --account <ACCOUNT_ID> [OPTIONS]
 | `--from` | - | TEXT | — | 기간 조회 시작일 (YYYY-MM-DD) |
 | `--to` | - | TEXT | — | 기간 조회 종료일 (YYYY-MM-DD) |
 | `--account` | O | TEXT | — | 계좌 ID |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante treasury portfolio value
+
+총 자산 가치 조회.
+
+- **필요 scope**: `treasury:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante treasury portfolio value [OPTIONS]
+```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | - | TEXT | — | 계좌 ID |
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante treasury portfolio history
+
+기간별 자산 추이 조회.
+
+- **필요 scope**: `treasury:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante treasury portfolio history [OPTIONS]
+```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | - | TEXT | — | 계좌 ID |
+| `--from` | - | TEXT | — |  |
+| `--to` | - | TEXT | — |  |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 

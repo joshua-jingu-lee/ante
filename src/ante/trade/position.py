@@ -197,7 +197,7 @@ class PositionHistory:
         """봇의 현재 포지션 조회.
 
         legacy 'default' (또는 기타 invalid) ``account_id`` row는 skip하고
-        warning만 남긴다. dashboard / Treasury 동기화가 마이그레이션 전에도
+        warning만 남긴다. Treasury 동기화가 마이그레이션 전에도
         실패하지 않도록 하기 위함이다.
         """
         conditions = ["bot_id = ?"]

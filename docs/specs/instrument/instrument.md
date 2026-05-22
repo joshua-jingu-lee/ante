@@ -147,4 +147,4 @@ CSV/JSON 파일에서 종목 데이터를 일괄 등록/갱신한다. 파일 확
 
 - **Notification**: `NotificationService`에 `instrument_service` 주입 시 체결 알림에 종목명 병기
 - **Data Pipeline**: 시세 데이터 수집 시 종목 메타데이터도 함께 갱신하는 설계 고려
-- **Web API**: 종목 검색 API — `/api/instruments/search?q=삼성`
+- **CLI**: 종목 검색/조회 명령은 InstrumentService를 통해 구현한다.

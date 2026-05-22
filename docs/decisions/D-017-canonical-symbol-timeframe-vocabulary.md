@@ -36,8 +36,7 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
   보류되며, 작업이 `#1612 docs-only 계약` / `#1613 코드 SSOT` / 표면별
   enforcement(#1603~#1611)로 분리됐다. 최신 스펙 확인 결과 OHLCV timeframe·KRX
   symbol vocabulary의 SSOT가 부재했고 normative 서술이 여러 스펙에 분산되어 있었다:
-  - `docs/specs/web-api/05-resource-endpoints.md:77` — 인라인 `SSOT:
-    ante.data.schemas.TIMEFRAMES` 선언.
+  - data dataset 조회 계약 — 인라인 `SSOT: ante.data.schemas.TIMEFRAMES` 선언.
   - `docs/specs/data-pipeline/03-design-decisions.md:66` — `TIMEFRAMES: list[str]`
     (소스: `src/ante/data/schemas.py`).
   - `docs/specs/data-pipeline/02-write-ownership.md` — write-ownership 표(축 D).
@@ -51,7 +50,7 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
   코드 SSOT #1576 → 표면별 enforcement)와 동일 순서를 따라 먼저 docs-only 계약을
   확정한다.
 - 계약 본문 위치를 `docs/specs/core/core.md`로 정한 이유: OHLCV bar timeframe·KRX
-  symbol은 특정 모듈 소유 개념이 아니라 data/web-api/cli/strategy/backtest가
+  symbol은 특정 모듈 소유 개념이 아니라 data/cli/strategy/backtest가
   공유하는 식별 차원이며, core 모듈 개요가 "모든 모듈이 공유하는 기반 인프라"로
   정의되어 있다. D-017을 normative SSOT로 두면 ADR이 계약 본문을 머금게 되어 결정
   기록의 역할을 벗어나므로, ADR은 core.md 절을 링크하는 결정 기록으로 유지한다.
@@ -67,8 +66,8 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
   경계를 명시하고, ingress enforcement 자체는 #1614(Depends on #1613)에 위임한다.
 - fundamental cadence(`quarterly`/`annual`)를 **본 계약에서 제외하고 후보 D로
   deferral한 이유**: `quarterly`/`annual`이 `dataset.timeframe` 필드에 overload되어
-  있고(dashboard user-stories/mockups, fundamental parquet `quarterly.parquet`/
-  `annual.parquet`), #1594 datasets API는 OHLCV vocabulary 외 값을 400 거부한다.
+  있고(fundamental parquet `quarterly.parquet`/`annual.parquet`), #1594 datasets
+  조회 계약은 OHLCV vocabulary 외 값을 400 거부한다.
   이 cross-surface 불일치는 #1612가 만든 것이 아닌 기존 문제다. 본 canonical
   OHLCV-timeframe 계약은 `quarterly`/`annual`을 포함하지 않으며, 축 F를 "별개 축,
   필드 의미 정리는 후보 D" 까지만 명문화한다. 후보 D 이슈는 plan-preflight 계약상
@@ -92,11 +91,11 @@ A~F, per-surface 허용/거부·에러 계약 매트릭스, legacy 호환 정책
 | legacy parquet path migration KRX 판별 (축 E legacy — 신규 입력 검증과 별개 축) | `store.py` `_KRX_SYMBOL_PATTERN`/`migrate_parquet_paths` legacy 호환 무손상 보존 | **#1611 enforcement 대상 아님** (축 E legacy) |
 | RuleEngine OrderRequestEvent KRX numeric preflight | `rule/engine.py` `_KRX_NUMERIC_SYMBOL_PATTERN` #1299 기존 동작 — 본 SSOT 도입으로 동작 불변 | **#1299** (불변, #1611 아님) |
 | Data API `timeframe` filter (기구현 400) | vocabulary 외 timeframe 400 거부 기구현 | #1594 |
-| Data API `symbol` filter (exact-match·미거부) | datasets API는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 200 empty, legacy out-of-vocab symbol dir 저장 시 그 dataset 반환 (web-api/05 계약·Legacy 호환 정책과 정합, **#1594 아님**) — exchange-aware symbol SSOT 후속 정렬 | **#1613 코드 SSOT 체인** |
+| Data dataset `symbol` filter (exact-match·미거부) | datasets 조회는 `symbol`을 별도 vocabulary 거부하지 않고 exact-match 필터로만 처리 — 미매칭 200 empty, legacy out-of-vocab symbol dir 저장 시 그 dataset 반환 (Legacy 호환 정책과 정합, **#1594 아님**) — exchange-aware symbol SSOT 후속 정렬 | **#1613 코드 SSOT 체인** |
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외) | 누락 소비자 ingress enforcement 추적 폐쇄 | **#1614** (Depends on #1613) |
-| fundamental cadence `dataset.timeframe` overload reconciliation (축 F) | dashboard user-stories/mockups ↔ #1594 datasets API OHLCV-only 400 cross-surface 불일치 docs 정합화 | **후보 D** (deferral, 사람 등록) |
+| fundamental cadence `dataset.timeframe` overload reconciliation (축 F) | fundamental dataset 표현 ↔ #1594 datasets 조회 OHLCV-only 400 cross-surface 불일치 docs 정합화 | **후보 D** (deferral, 사람 등록) |
 
-본 ADR과 영향 스펙(web-api/data-pipeline/data-feed/strategy)은 core.md
+본 ADR과 영향 스펙(data-pipeline/data-feed/strategy)은 core.md
 `## Canonical Symbol/Timeframe Vocabulary` 절을 단일 참조점으로 가리킨다. 영향
 스펙의 normative 값 집합은 본 결정에서 재작성하지 않으며(값 `{1m,5m,15m,1h,1d}`·
 보존 기간 수치·축 정의 불변), 코드 레벨 SSOT·표면별 enforcement·후보 D는 위

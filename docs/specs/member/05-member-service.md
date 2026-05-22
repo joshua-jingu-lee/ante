@@ -22,7 +22,7 @@ MemberService는 내부적으로 책임을 분리하여 `AuthService`(인증), `
 | `bootstrap_master` | member_id, password, name, emoji | tuple[Member, str, str] | master 생성 + (token, recovery_key) 반환. 최초 1회만. 이미 존재 시 에러. CLI에서는 `ante init`이 내부 호출 |
 | `register` | member_id, type, role, org, name, scopes, registered_by, emoji | tuple[Member, str] | 멤버 등록 + 토큰 반환. **권한: master-only** (`_assert_master` 강제) |
 | `authenticate` | token | Member | 토큰으로 멤버 식별. 타입 접두어 검증 포함 |
-| `authenticate_password` | member_id, password | Member | 패스워드 인증 (human 대시보드 로그인) |
+| `authenticate_password` | member_id, password | Member | 패스워드 인증 (human 복구/maintenance) |
 | `get` | member_id | Member ∣ None | 단건 조회 |
 | `list` | type, org, status, limit, offset | list[Member] | 필터 조회 |
 | `suspend` | member_id, suspended_by | Member | 일시 정지. master는 정지 불가. **권한: master-only** (`_assert_master` 강제) |
@@ -38,7 +38,7 @@ MemberService는 내부적으로 책임을 분리하여 `AuthService`(인증), `
 
 ### 런타임 경계
 
-서버 실행 중 member 상태·토큰·패스워드·복구키 변경은 IPC 또는 Web API를 통해 서버
+서버 실행 중 member 상태·토큰·패스워드·복구키 변경은 IPC를 통해 서버
 프로세스의 MemberService에서 실행한다. CLI가 서버와 같은 `config_dir`을 쓰고 서버가
 실행 중이면 직접 DB 수정 대신 IPC를 사용해야 한다.
 
@@ -46,9 +46,8 @@ MemberService는 내부적으로 책임을 분리하여 `AuthService`(인증), `
 
 | 작업 | 필수 후처리 |
 |------|-------------|
-| `suspend`, `revoke` | `SessionService.delete_by_member(member_id)`로 기존 웹 세션 무효화 |
 | `rotate_token` | 기존 토큰 해시 폐기. 새 토큰은 1회만 반환 |
-| `reset_password`, `change_password` | 기존 웹 세션 무효화 + 보안 알림 |
+| `reset_password`, `change_password` | 보안 알림 |
 | `regenerate_recovery_key` | 기존 recovery key 폐기 + 보안 알림 |
 | `register`, `update_emoji`, `update_scopes`, `reactivate` | 감사 로그와 member 이벤트 발행 |
 
@@ -78,7 +77,7 @@ def _assert_invariants(self, member: Member, action: str) -> None:
 - `register`, `suspend`, `reactivate`, `revoke`, `rotate_token`, `update_scopes`,
   `change_password` 등 member admin mutation은 **master-only**다. service layer
   진입 시점에 `_assert_master(actor)`가 호출자 principal을 검사하고, master가 아니면
-  `PermissionError`를 발생시킨다. 매핑 책임은 표면(Web API/CLI/IPC)이 진다.
+  `PermissionError`를 발생시킨다. 매핑 책임은 표면(CLI/IPC)이 진다.
 - `member:admin` scope는 vocabulary에 정의되어 있으나 1.0 계약에서는 **reserved
   (현재 미사용)**다. agent token에 `member:admin`이 부여되어 있어도 mutation은
   `_assert_master`에서 거부된다. agent 위임 정책이 마련되기 전까지 본 invariant는
@@ -87,6 +86,6 @@ def _assert_invariants(self, member: Member, action: str) -> None:
   패스워드 자체이므로 master 토큰을 요구하지 않는 공개 명령 allowlist 경로다
   ([cli/03-commands.md — 공개 명령 allowlist](../cli/03-commands.md#공개-명령-allowlist--인증-면제) 참조).
 
-> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> 후속 implementation 정렬: #1543 (CLI 표면 가드 master-only로 일치),
 > #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
 > 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.

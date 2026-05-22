@@ -13,7 +13,7 @@ main()은 조율만 수행한다.
 6. Feed: DataPipeline, Backtest, Report
 7. Approval: ApprovalService
 8. Notification: Telegram(account_service 주입)
-9. Web: FastAPI(account_service 주입)
+9. IPC: Unix 도메인 소켓 서버
 """
 
 import asyncio
@@ -175,7 +175,6 @@ class Services:
     notification_service: Any = None
     telegram_receiver: Any = None
     ipc_server: Any = None
-    web_task: asyncio.Task | None = None  # type: ignore[type-arg]
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
     _cleanup_tasks: list[str] = field(default_factory=list)
@@ -1560,6 +1559,7 @@ async def _init_ipc(s: Services) -> None:
         eventbus=s.eventbus,
         strategy_registry=s.strategy_registry,
         audit_logger=s.audit_logger,
+        member_service=s.member_service,
         # Refs #1712: IPC ``bot.status`` handler 의 positions 보강을 위해
         # ``trade_service`` 를 주입한다. ``audit_logger`` 와 동형의 optional
         # 필드이며, ``enrich_bot_info`` 가 None 시 positions 키를 부재시킨다.
@@ -1577,56 +1577,6 @@ async def _init_ipc(s: Services) -> None:
     s.ipc_server = IPCServer(socket_path, service_registry, command_registry)
     await s.ipc_server.start()
     logger.info("IPC 서버 초기화 완료: %s", socket_path)
-
-
-async def _init_web(s: Services) -> None:
-    """FastAPI 앱 생성 및 uvicorn 서버 시작."""
-    assert s.db is not None
-    assert s.eventbus is not None
-
-    web_enabled = s.config.get("web.enabled", False)
-    if not web_enabled:
-        return
-
-    from ante.web.app import create_app
-    from ante.web.session import SessionService
-
-    session_service = SessionService(db=s.db)
-    await session_service.initialize()
-
-    app = create_app(
-        config=s.config,
-        db=s.db,
-        eventbus=s.eventbus,
-        bot_manager=s.bot_manager,
-        trade_service=s.trade_service,
-        treasury_manager=s.treasury_manager,
-        report_store=s.report_store,
-        data_store=s.parquet_store,
-        audit_logger=s.audit_logger,
-        member_service=s.member_service,
-        session_service=session_service,
-        strategy_registry=s.strategy_registry,
-        dynamic_config=s.dynamic_config,
-        approval_service=s.approval_service,
-        account_service=s.account_service,
-    )
-
-    import uvicorn
-
-    uv_config = uvicorn.Config(
-        app,
-        host=s.config.get("web.host", "0.0.0.0"),
-        port=s.config.get("web.port", 3982),
-        log_level="info",
-    )
-    server = uvicorn.Server(uv_config)
-    s.web_task = asyncio.create_task(server.serve(), name="web-api")
-    logger.info(
-        "Web API 시작: http://%s:%d",
-        uv_config.host,
-        uv_config.port,
-    )
 
 
 async def _run(s: Services) -> None:
@@ -1672,17 +1622,16 @@ async def _shutdown(s: Services) -> None:
     2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**.
        이 호출 시작 시 IPCServer state는 `SHUTTING_DOWN`으로 전환되어 이후
        active connection의 mutating command를 `SERVICE_UNAVAILABLE`로 거부한다.
-    3. Web API 종료
-    4. DailyReportScheduler, ReconcileScheduler 종료
-    5. 각 계좌의 Treasury sync 중지
-    6. BotManager 전체 봇 중지
-    7. StreamIntegration 종료
-    8. APIGateway 종료
-    9. BrokerAdapter/DB 종료 직전 **IPCServer.stop_dispatching()** — active
+    3. DailyReportScheduler, ReconcileScheduler 종료
+    4. 각 계좌의 Treasury sync 중지
+    5. BotManager 전체 봇 중지
+    6. StreamIntegration 종료
+    7. APIGateway 종료
+    8. BrokerAdapter/DB 종료 직전 **IPCServer.stop_dispatching()** — active
         connection의 read-only dispatch까지 `SERVICE_UNAVAILABLE`로 거부.
-    10. 각 계좌의 BrokerAdapter disconnect
-    11. Database 종료
-    12. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
+    9. 각 계좌의 BrokerAdapter disconnect
+    10. Database 종료
+    11. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
         cold-path guard(`PID alive AND socket exists`)가 이 시점부터 'active 아님'
         판정.
     """
@@ -1728,14 +1677,6 @@ async def _shutdown(s: Services) -> None:
     if s.ipc_server:
         await s.ipc_server.stop_accepting()
         logger.info("IPCServer 새 연결 수락 중지")
-
-    if s.web_task and not s.web_task.done():
-        s.web_task.cancel()
-        try:
-            await s.web_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Web API 종료")
 
     if s.daily_report_scheduler:
         await s.daily_report_scheduler.stop()
@@ -1837,7 +1778,6 @@ async def main() -> None:
     7. Approval: ApprovalService
     8. Notification: Telegram(account_service 주입)
     9. IPC: Unix 도메인 소켓 서버 (성공 후 booting marker 제거)
-    10. Web: FastAPI(account_service 주입)
 
     종료 순서: 역순 (상위 소비자부터 정리)
     """
@@ -1878,7 +1818,6 @@ async def main() -> None:
         await _init_notification(s)
         await _init_ipc(s)
         _remove_starting_marker(s.config)
-        await _init_web(s)
         await _run(s)
     finally:
         _remove_starting_marker(s.config)

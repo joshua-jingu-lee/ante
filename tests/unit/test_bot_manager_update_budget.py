@@ -228,7 +228,7 @@ class TestDeleteBotHard:
     async def test_delete_bot_hard_removes_row_from_db(self, eventbus, db, ctx) -> None:
         """``hard=True`` 는 ``DELETE FROM bots`` 로 row 자체를 제거한다.
 
-        rollback 경로(POST /api/bots budget 실패) 가 사용하는 분기.
+        봇 생성 후 예산 배정 실패 rollback 경로가 사용하는 분기.
         soft delete 가 남기는 ``status='deleted'`` row 가 같은 bot_id
         재시도를 막는 문제를 해결한다.
         """

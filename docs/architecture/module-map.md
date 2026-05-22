@@ -103,11 +103,11 @@
 - **기능**: 리포트 저장, 조회
 - 상세 설계: [specs/report-store/report-store.md](../specs/report-store/report-store.md)
 
-### 14. 웹 대시보드 (Web Dashboard)
-- **역할**: 사용자의 주요 인터페이스
-- **기능**: 봇 상태/수익 확인, 리포트 열람/채택, 봇 생성/전략 로드/활성화
-- **구현**: FastAPI (같은 프로세스 내에서 EventBus 상태 조회)
-- 상세 설계: [specs/web-api/web-api.md](../specs/web-api/web-api.md) (백엔드 API), [dashboard/architecture.md](../dashboard/architecture.md) (프론트엔드)
+### 14. CLI/IPC 인터페이스
+- **역할**: 사용자와 Agent가 함께 사용하는 운영 인터페이스
+- **기능**: 봇 상태/수익 확인, 리포트 열람/채택, 봇 생성/전략 등록/활성화, 런타임 제어
+- **구현**: Click 기반 CLI + Unix domain socket IPC
+- 상세 설계: [specs/cli/cli.md](../specs/cli/cli.md), [specs/ipc/ipc.md](../specs/ipc/ipc.md)
 
 ### 15. 알림 모듈 (Notification Adapter)
 - **역할**: 외부 알림 발송

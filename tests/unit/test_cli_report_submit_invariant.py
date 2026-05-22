@@ -1,10 +1,10 @@
 """ante report submit CLI invariant 회귀 테스트 (#1415).
 
-Web API ``POST /api/reports``는 ``ReportSubmitRequest`` (SSOT)로 invalid
-metric을 422로 거부하지만, 이전까지 ``ante report submit`` CLI는 동일 invariant를
-적용하지 않고 exit 0으로 통과시켜 ReportStore에 invalid 값을 저장했다.
+``ReportSubmitRequest``는 invalid metric을 거부해야 한다. 이전까지
+``ante report submit`` CLI는 동일 invariant를 적용하지 않고 exit 0으로
+통과시켜 ReportStore에 invalid 값을 저장했다.
 
-본 모듈은 CLI도 Web API와 동일한 invariants를 통과해야 함을 회귀 검증한다:
+본 모듈은 CLI가 리포트 제출 invariants를 통과해야 함을 회귀 검증한다:
 - ``total_trades >= 0``
 - ``win_rate ∈ [0.0, 100.0]`` (percent 단위, ``None`` 허용)
 - 4개 metric (``total_return_pct``, ``sharpe_ratio``, ``max_drawdown_pct``,
@@ -13,7 +13,7 @@ metric을 422로 거부하지만, 이전까지 ``ante report submit`` CLI는 동
 
 SSOT:
 - ``docs/specs/report-store/report-store.md``
-- ``src/ante/web/schemas.py::ReportSubmitRequest``
+- ``src/ante/report/validation.py::ReportSubmitRequest``
 """
 
 from __future__ import annotations
@@ -208,11 +208,11 @@ class TestExtraForbid:
 
 
 class TestSectionsRejected:
-    """``sections``는 미지원 필드 — CLI도 Web API와 동일하게 거부 (#1632).
+    """``sections``는 미지원 필드 — CLI에서 거부 (#1632).
 
     사용자 정책 판정(2026-05-17): ``sections``는 YAGNI → 미지원 필드로 확정해
-    422/exit 1로 거부한다 (option 2b). ``ante report submit`` CLI는 Web API와
-    동일한 ``ReportSubmitRequest`` (SSOT)를 사용하므로 ``sections``는
+    exit 1로 거부한다 (option 2b). ``ante report submit`` CLI는
+    ``ReportSubmitRequest`` (SSOT)를 사용하므로 ``sections``는
     ``extra='forbid'``로 거부된다.
 
     Codex Plan Review r2 [high]: 2b가 ``sections``를 ValidationError

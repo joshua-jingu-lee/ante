@@ -11,8 +11,6 @@ DEFAULTS: dict[str, object] = {
     "runtime.socket_path": "run/ante.sock",
     "parquet.base_path": "data/",
     "parquet.compression": "snappy",
-    "web.host": "0.0.0.0",
-    "web.port": 3982,
     "eventbus.history_size": 1000,
     "member.token_ttl_days": 90,
     "instrument.cache_ttl_seconds": 3600,

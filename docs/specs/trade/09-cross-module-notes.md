@@ -8,7 +8,6 @@
   - Rule Engine: 포지션 기반 리스크 룰 평가 시 TradeService에서 포지션 조회
   - Treasury: 포지션을 추적하지 않음 — 예산(현금)만 관리
   - Bot/Strategy: StrategyContext의 portfolio_view를 통해 간접 조회
-- **Web API 스펙 작성 시**: TradeService를 REST API로 노출 — GET /trades, GET /performance, GET /bots/{id}/summary
 - **CLI 스펙 작성 시**: `ante trade list/performance/summary` 커맨드 구현
 - **Broker Adapter 스펙 작성 시**: OrderFilledEvent에 commission 필드 포함 필요
 - **EventBus 스펙 갱신 시**: OrderCancelledEvent (취소 완료) 이벤트 타입 추가 (OrderCancelEvent는 취소 요청, OrderCancelledEvent는 취소 완료)

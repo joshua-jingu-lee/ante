@@ -8,4 +8,4 @@
 - **Report**: 전략 채택 흐름이 Report 직접 채택 → Approval을 통한 채택으로 변경
 - **Treasury**: `budget_change` 승인 시 `update_budget()` 호출
 - **BotManager**: `bot_create`, `bot_stop` 승인 시 해당 동작 호출
-- **Web API**: 결재 목록 조회·승인·거절 API 엔드포인트 필요
+- **CLI/IPC**: 결재 목록 조회·승인·거절 명령 필요

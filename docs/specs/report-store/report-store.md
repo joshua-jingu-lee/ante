@@ -183,5 +183,5 @@ CREATE INDEX idx_reports_status ON reports(status);
 ## 타 모듈 설계 시 참고
 
 - **CLI 스펙**: 명령 시그니처와 실행 분류의 SSOT는 [cli/03-commands.md](../cli/03-commands.md)다. Report Store는 `ante report schema/submit/list/view/performance`의 저장소 동작만 설명한다.
-- **Web API 스펙**: 리포트 목록/상세 조회 + 상태 변경 (채택/미채택) API
+- **CLI 스펙**: 리포트 목록/상세 조회 + 상태 변경 명령
 - **Backtest 스펙**: BacktestResult를 리포트로 변환하는 유틸리티. `detail_json` 내부 구조는 `BacktestResult.to_dict()` 스펙 참조 ([backtest.md](../backtest/backtest.md))

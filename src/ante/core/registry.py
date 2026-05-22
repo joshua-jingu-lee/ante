@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ante.bot.manager import BotManager
     from ante.config.dynamic import DynamicConfigService
     from ante.eventbus import EventBus
+    from ante.member.service import MemberService
     from ante.strategy.registry import StrategyRegistry
     from ante.trade.reconciler import PositionReconciler
     from ante.trade.service import TradeService
@@ -32,10 +33,10 @@ class ServiceRegistry:
     핸들러는 ``getattr(svc, "audit_logger", None)`` 패턴으로 안전하게 처리한다.
 
     Refs #1712: ``trade_service`` 필드는 IPC ``bot.status`` handler 의
-    positions 보강 (``enrich_bot_info``) 을 Web API 와 정렬하기 위해 optional
-    로 추가되었다. ``audit_logger`` 와 동형으로 ``None`` 허용 + ``getattr``
-    safe-access 가 보장된다. legacy ServiceRegistry 호출자(``trade_service``
-    인자 미전달)는 그대로 동작하며, positions 키는 부재한다.
+    positions 보강 (``enrich_bot_info``) 을 위해 optional 로 추가되었다.
+    ``audit_logger`` 와 동형으로 ``None`` 허용 + ``getattr`` safe-access 가
+    보장된다. legacy ServiceRegistry 호출자(``trade_service`` 인자 미전달)는
+    그대로 동작하며, positions 키는 부재한다.
     """
 
     account: AccountService | Any
@@ -48,3 +49,4 @@ class ServiceRegistry:
     strategy_registry: StrategyRegistry | Any = field(default=None)
     audit_logger: AuditLogger | Any = field(default=None)
     trade_service: TradeService | Any = field(default=None)
+    member_service: MemberService | Any = field(default=None)

@@ -87,10 +87,9 @@ class CommandRegistry:
 def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
     """Kill Switch IPC 응답 envelope.
 
-    SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답 SSOT.
-    Web API와 IPC가 동일한 shape(``status``, ``accounts_changed``, ``changed_at``,
-    ``accounts[]``)을 사용한다. ``changed_at``은 ISO 8601 UTC ``Z`` suffix를
-    사용한다 (Refs #1360).
+    ``status``, ``accounts_changed``, ``changed_at``, ``accounts[]`` shape를
+    사용한다. ``changed_at``은 ISO 8601 UTC ``Z`` suffix를 사용한다
+    (Refs #1360).
     """
     from datetime import UTC, datetime
 
@@ -191,10 +190,10 @@ async def _handle_bot_remove(
 async def _handle_bot_start(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 시작 IPC handler — Web API ``POST /api/bots/{bot_id}/start`` 정렬.
+    """봇 시작 IPC handler.
 
-    Refs #1712: Web API 라우트의 거부 경로(404 bot 부재 / 422 app_key 부재 /
-    409 BotError) 와 1:1 매핑되는 coded exception 으로 raise 한다. IPC
+    Refs #1712: bot 부재 / app_key 부재 / BotError를 stable coded exception으로
+    raise 한다. IPC
     ``server.py:323`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope
     이 ``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
     ``BOT_STATE_CONFLICT`` 로 변환한다.
@@ -214,7 +213,7 @@ async def _handle_bot_start(
     if bot is None:
         raise BotNotFoundError(bot_id)
 
-    # 계좌 인증정보 검증: app_key 가 없으면 봇 시작 거부 (Web API 와 동일).
+    # 계좌 인증정보 검증: app_key 가 없으면 봇 시작 거부.
     account = await svc.account.get(bot.config.account_id)
     if not account.credentials.get("app_key"):
         raise BotAccountCredentialsNotConfigured(
@@ -241,11 +240,11 @@ async def _handle_bot_start(
 async def _handle_bot_stop(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 중지 IPC handler — Web API ``POST /api/bots/{bot_id}/stop`` 정렬.
+    """봇 중지 IPC handler.
 
-    Refs #1712: Web API 라우트의 거부 경로(404 bot 부재 / 409 BotError) 와
-    1:1 매핑. ``app_key`` preflight 는 stop 경로에 없다(Web API 정렬). audit
-    logger 가 주입된 환경에서는 ``bot.stop`` action 을 기록한다.
+    Refs #1712: bot 부재 / BotError를 stable coded exception으로 매핑한다.
+    ``app_key`` preflight 는 stop 경로에 없다. audit logger 가 주입된 환경에서는
+    ``bot.stop`` action 을 기록한다.
     """
     from ante.bot.exceptions import (
         BotError,
@@ -278,11 +277,10 @@ async def _handle_bot_stop(
 async def _handle_bot_status(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 상태 조회 IPC handler — Web API ``GET /api/bots/{bot_id}`` 정렬.
+    """봇 상태 조회 IPC handler.
 
     Refs #1712: read-only handler. ``enrich_bot_info`` 로 strategy/budget/
-    positions 보강 결과를 ``{"bot": info}`` envelope 으로 반환한다. Web API
-    라우트와 동일한 helper 를 공유하므로 응답 shape/field/key 순서가 보존된다.
+    positions 보강 결과를 ``{"bot": info}`` envelope 으로 반환한다.
 
     의존성은 모두 ``getattr`` safe-access 로 optional 처리한다:
     - ``strategy_registry`` 부재 시 strategy 키 부재.
@@ -300,9 +298,7 @@ async def _handle_bot_status(
     if bot is None:
         raise BotNotFoundError(bot_id)
 
-    # 계좌별 Treasury resolve — Web API ``get_treasury_optional`` 가 단일
-    # Treasury 인스턴스를 노출하는 것과 정렬되도록 ``TreasuryManager.get`` 으로
-    # 봇의 account_id Treasury 를 가져온다. manager 부재 또는 미등록 시 None.
+    # 계좌별 Treasury resolve. manager 부재 또는 미등록 시 None.
     treasury_manager = getattr(svc, "treasury_manager", None)
     treasury_for_bot: Any | None = None
     if treasury_manager is not None:
@@ -318,6 +314,35 @@ async def _handle_bot_status(
         trade_service=getattr(svc, "trade_service", None),
     )
     return {"bot": info}
+
+
+async def _handle_bot_update(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    from ante.bot.exceptions import BotError
+
+    bot_id = args["bot_id"]
+    updates = dict(args.get("updates") or {})
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        from ante.bot.exceptions import BotNotFoundError
+
+        raise BotNotFoundError(bot_id)
+    try:
+        bot = await svc.bot_manager.update_bot(bot_id, **updates)
+    except BotError:
+        raise
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="bot.update",
+            resource=f"bot:{bot_id}",
+            detail=f"fields={list(updates.keys())}",
+            ip="",
+        )
+    return {"bot": bot.get_info()}
 
 
 async def _handle_treasury_allocate(
@@ -361,6 +386,102 @@ async def _handle_treasury_deallocate(
     treasury = svc.treasury_manager.get(account_id)
     result = await treasury.deallocate(bot_id, amount)
     return {"account_id": account_id, "bot_id": bot_id, "success": result}
+
+
+async def _handle_treasury_set_balance(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    from datetime import UTC, datetime
+
+    from ante.account.scoping import require_account_id
+
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.treasury.set_balance"
+    )
+    balance = args["balance"]
+    treasury = svc.treasury_manager.get(account_id)
+    await treasury.set_account_balance(balance)
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="treasury.set_balance",
+            resource=f"treasury:{account_id}",
+            detail=f"balance={balance:,.0f}",
+            ip="",
+        )
+    return {
+        "account_id": account_id,
+        "total_balance": treasury.account_balance,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+async def _handle_rule_update(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    from ante.account.scoping import require_account_id
+    from ante.rule.config_update import update_account_rule_config
+
+    account_id = require_account_id(args.get("account_id"), context="ipc.rule.update")
+    return await update_account_rule_config(
+        account_service=svc.account,
+        dynamic_config=svc.dynamic_config,
+        account_id=account_id,
+        rule_type=args["rule_type"],
+        enabled=bool(args.get("enabled", True)),
+        params=dict(args.get("params") or {}),
+        changed_by=actor,
+        audit_logger=getattr(svc, "audit_logger", None),
+    )
+
+
+async def _handle_strategy_set_status(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    from ante.strategy.registry import StrategyStatus
+
+    strategy_id = args["strategy_id"]
+    status = StrategyStatus(args["status"])
+    await svc.strategy_registry.update_status(strategy_id, status)
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="strategy.set_status",
+            resource=f"strategy:{strategy_id}",
+            detail=f"status={status.value}",
+            ip="",
+        )
+    return {"strategy_id": strategy_id, "status": status.value}
+
+
+async def _handle_member_update_scopes(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    member_id = args["member_id"]
+    scopes = list(args.get("scopes") or [])
+    member_service = getattr(svc, "member_service", None)
+    if member_service is None:
+        raise RuntimeError("member service not configured")
+    member = await member_service.update_scopes(member_id, scopes, updated_by=actor)
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="member.update_scopes",
+            resource=f"member:{member_id}",
+            detail=f"scopes={scopes}",
+            ip="",
+        )
+    return {
+        "member_id": member.member_id,
+        "scopes": member.scopes,
+        "status": member.status,
+    }
 
 
 async def _handle_config_set(
@@ -536,7 +657,7 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """22개 런타임 커맨드 핸들러를 일괄 등록.
+    """27개 런타임 커맨드 핸들러를 일괄 등록.
 
     Refs #1184: 각 핸들러는 mutating(18개) 또는 read-only(4개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
@@ -549,12 +670,11 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` (mutating) 추가.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` (mutating) / ``bot.status``
-    (read-only) 추가. Web API ``POST /api/bots/{bot_id}/start``/``/stop`` /
-    ``GET /api/bots/{bot_id}`` 와 정렬되며, ``bot.start`` 는 ``app_key``
-    preflight + audit ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``,
-    ``bot.status`` 는 ``enrich_bot_info`` 보강 후 ``{"bot": info}`` envelope.
+    (read-only) 추가. ``bot.start`` 는 ``app_key`` preflight + audit
+    ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``, ``bot.status`` 는
+    ``enrich_bot_info`` 보강 후 ``{"bot": info}`` envelope.
     """
-    # ── mutating (18개): 서버 상태/DB를 변경 ──────────
+    # ── mutating (23개): 서버 상태/DB를 변경 ──────────
     registry.register("system.halt", _handle_system_halt, is_mutating=True)
     registry.register("system.clear_halt", _handle_system_clear_halt, is_mutating=True)
     registry.register("account.suspend", _handle_account_suspend, is_mutating=True)
@@ -563,9 +683,20 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     registry.register("bot.remove", _handle_bot_remove, is_mutating=True)
     registry.register("bot.start", _handle_bot_start, is_mutating=True)
     registry.register("bot.stop", _handle_bot_stop, is_mutating=True)
+    registry.register("bot.update", _handle_bot_update, is_mutating=True)
     registry.register("treasury.allocate", _handle_treasury_allocate, is_mutating=True)
     registry.register(
         "treasury.deallocate", _handle_treasury_deallocate, is_mutating=True
+    )
+    registry.register(
+        "treasury.set_balance", _handle_treasury_set_balance, is_mutating=True
+    )
+    registry.register("rule.update", _handle_rule_update, is_mutating=True)
+    registry.register(
+        "strategy.set_status", _handle_strategy_set_status, is_mutating=True
+    )
+    registry.register(
+        "member.update_scopes", _handle_member_update_scopes, is_mutating=True
     )
     registry.register("config.set", _handle_config_set, is_mutating=True)
     registry.register("approval.request", _handle_approval_request, is_mutating=True)

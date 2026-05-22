@@ -128,8 +128,6 @@ ante member list-invalid-roles --format json
 
 ## Audit 한계
 
-- Web API revoke 경로(`POST /api/members/<id>/revoke`)는 `audit_logger.log` 로
-  audit 기록을 남긴다.
 - CLI `ante member revoke` 는 본 PR (#1468) 시점에서 audit 기록을 **남기지 않는다.**
   CLI revoke audit 보강은 별도 audit 정책 이슈에서 다룬다.
 - 따라서 본 runbook 으로 CLI cleanup 을 수행할 때는, 운영 일지에 수동으로 revoke
@@ -141,4 +139,4 @@ ante member list-invalid-roles --format json
 - #1465 — write path `_assert_role_enum` (close).
 - #1466 — auth read-path `_VALID_MEMBER_ROLES` guard (close).
 - 본 runbook (#1468) — operator cleanup 절차.
-- frontend role type 분리: #1467 (별도 범위).
+- member role type 분리: #1467 (별도 범위).

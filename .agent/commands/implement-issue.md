@@ -32,8 +32,8 @@ mkdir -p "$WORKTREE_ROOT"
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 구현 분석 완료 또는 스킵 이슈 코멘트 |
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
 | 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
-| 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
-| 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 + 로컬 구현 완료 이슈 코멘트 |
+| 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
+| 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 + 로컬 구현 완료 이슈 코멘트 |
 | 10~11 (사전 리뷰 루프) | Codex + Claude | `/codex:review --base <ref>` + Claude 개발 에이전트 | 이슈 코멘트 |
 | 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
 | 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Closes #이슈`) |
@@ -51,10 +51,9 @@ mkdir -p "$WORKTREE_ROOT"
    - 스펙에 정의되지 않은 인터페이스·동작을 요구하면 구현하지 않고 이슈에 스킵 사유를 남긴다.
 3. **대상 에이전트 결정**:
    - `src/ante/` 변경 → `@backend-dev`
-   - `frontend/` 변경 → `@frontend-dev`
    - Docker/CI/CD/scripts/ 변경 → `@devops`
    - `strategies/` 변경 → `@strategy-dev`
-   - 양쪽 모두 변경 → 백엔드 먼저, 프론트엔드 후속
+   - 여러 영역 변경 → 모듈 의존성 순서대로 진행
 4. **기존 코드 파악**: 이슈가 기존 모듈 수정을 포함하면 관련 소스를 먼저 읽고 영향 범위를 파악한다.
 
 4a. **Plan Preflight 구현계획 작성/정비**: 구현 전에 이슈 본문에 실행 가능한 구현계획이 있는지 확인하고, 없거나 부족하거나 stale하면 `/plan-preflight #{번호}`를 먼저 실행한다.
@@ -113,7 +112,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 분석 완료**
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 담당 에이전트: @{에이전트명}
-- 변경 대상: {src/ante/xxx, frontend/ 등}
+- 변경 대상: {src/ante/xxx, docs/xxx, scripts/xxx 등}
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
 - Codex Plan Review: {approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}

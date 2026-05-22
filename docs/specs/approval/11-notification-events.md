@@ -46,9 +46,9 @@ ID: `{id}`
 - `reject_reason` → 거절 사유 (거절 시)
 - 예외 발생 여부 → executor 실행 실패, 이미 처리됨, 만료됨, ID 없음
 
-**중복 알림 방지 정책**: 텔레그램 명령(`/approve`, `/reject`, 인라인 버튼)으로 처리된 경우 직접 응답(reply)만 발송하고 NotificationEvent는 발행하지 않는다. 대시보드·CLI 등 텔레그램 외 채널에서 처리된 경우에만 NotificationEvent를 발행한다. 이를 통해 사용자는 어떤 채널에서 처리하든 정확히 1번만 메시지를 수신한다.
+**중복 알림 방지 정책**: 텔레그램 명령(`/approve`, `/reject`, 인라인 버튼)으로 처리된 경우 직접 응답(reply)만 발송하고 NotificationEvent는 발행하지 않는다. CLI 등 텔레그램 외 채널에서 처리된 경우에만 NotificationEvent를 발행한다. 이를 통해 사용자는 어떤 채널에서 처리하든 정확히 1번만 메시지를 수신한다.
 
-**NotificationEvent 발행** (대시보드·CLI 등 텔레그램 외 채널에서 처리 시):
+**NotificationEvent 발행** (CLI 등 텔레그램 외 채널에서 처리 시):
 
 ```
 level: info

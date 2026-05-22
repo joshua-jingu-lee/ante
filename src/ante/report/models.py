@@ -28,13 +28,13 @@ def validate_strategy_report_metrics(
 ) -> None:
     """``StrategyReport`` metric invariant 명시 검증 (#1415).
 
-    저장 경로 (CLI submit, Web API submit 등 새 값을 DB에 쓰는 경계)에서만 호출한다.
+    저장 경로 (CLI submit 등 새 값을 DB에 쓰는 경계)에서만 호출한다.
     DB read path (``ReportStore._row_to_report``)는 **legacy invalid row**를 허용하기
     위해 호출하지 않는다 — 그렇지 않으면 이 PR 이전에 저장된 invalid row가 존재할 때
     list/detail 조회가 ``ValueError``로 fail해 사용자가 정리할 수 없다 (codex r1 P2).
 
     SSOT:
-    - ``src/ante/web/schemas.py::ReportSubmitRequest`` — Web API 입력 검증 SSOT.
+    - ``src/ante/report/validation.py::ReportSubmitRequest`` — CLI 입력 검증 SSOT.
 
     invariants:
     - ``total_trades >= 0`` (거래 수는 음수 불가).

@@ -4,7 +4,7 @@ DART API에서 상장기업 재무제표(매출, 순이익, 자본총계 등)를
 고유번호(corp_code) 매핑, 다중회사 배치 호출(fnlttMultiAcnt),
 Rate Limiting, 에러 코드 처리를 담당한다.
 
-API 레퍼런스: docs/references/dashboard/dart-openapi.md
+API 레퍼런스: docs/references/external-apis/dart-openapi.md
 """
 
 from __future__ import annotations

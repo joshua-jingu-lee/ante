@@ -101,7 +101,6 @@ def _register_brokers() -> None:
 # Cold-path 전용 필드 (서버 실행 중에는 변경 불가).
 # SSOT:
 #   - docs/specs/account/04-account-service.md (9개 cold-path 필드)
-#   - src/ante/web/routes/accounts.py STRUCTURAL_FIELDS (라우트 1차 가드)
 #
 # - credentials, broker_config, buy_commission_rate, sell_commission_rate,
 #   market_order_reserve_buffer_rate:
@@ -902,7 +901,7 @@ class AccountService:
             - ``status`` (str): 호출 직후 상태 (소문자 wire 값)
             - ``changed`` (bool): 실제 전환 여부
 
-        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
+        IPC Kill Switch 응답 shape와 동일하다.
         """
         results: list[dict[str, Any]] = []
         for account_id in list(self._accounts.keys()):
@@ -942,7 +941,7 @@ class AccountService:
         계좌 상태만 ACTIVE로 복구하며 봇 자동 재시작은 수행하지 않는다
         (BotManager는 ``AccountActivatedEvent`` 수신 시 로깅만 수행).
 
-        SSOT: ``docs/specs/web-api/04-system-endpoints.md`` Kill Switch 응답.
+        IPC Kill Switch 응답 shape와 동일하다.
         """
         results: list[dict[str, Any]] = []
         for account_id in list(self._accounts.keys()):

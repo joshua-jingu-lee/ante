@@ -44,8 +44,6 @@ human과 agent의 인증 경로를 물리적으로 분리하여, 한쪽의 인�
 ```
 접근 경로              인증 방식                   토큰 접두어
 ────────────────────────────────────────────────────────────
-Web API 대시보드    → 패스워드 + 세션 쿠키          (human session)
-Web API client     → Authorization: Bearer 헤더    ante_ak_
 CLI (human)        → ANTE_MEMBER_TOKEN 환경변수    ante_hk_
 CLI (agent)        → ANTE_MEMBER_TOKEN 환경변수    ante_ak_
 ```
@@ -80,7 +78,6 @@ scope 문자열의 의미와 판정 규칙은 이 문서를 따른다.
 | 영역 | SSOT 책임 |
 |------|-----------|
 | Member | `human`/`agent`/`master` 모델, 토큰 접두어, scope vocabulary, human bypass, agent scope 제한 |
-| Web API | session cookie와 Bearer token을 HTTP 요청에서 추출. **default-deny gate(middleware)가 1차 차단(인증)**, dependency는 endpoint별 required scope 검증 책임. 공개 라우트는 `PUBLIC_PATHS`/`PUBLIC_PREFIXES` allowlist(SSOT: [web-api/09-public-paths.md](../web-api/09-public-paths.md))로 명시. |
 | CLI | `ANTE_MEMBER_TOKEN`을 canonical instance DB에서 검증. **default-deny group factory가 1차 차단(인증)**, `@require_scope` decorator는 command별 required scope 검증 책임. 공개 명령은 `_AUTH_EXEMPT_COMMAND_PATHS` allowlist(SSOT: [cli/03-commands.md](../cli/03-commands.md))로 명시. |
 | IPC | 별도 인증/권한 모델을 두지 않음. CLI에서 검증된 `actor`와 command payload를 서버 런타임 실행 경로로 전달 |
 
@@ -89,9 +86,9 @@ scope 문자열의 의미와 판정 규칙은 이 문서를 따른다.
 > 전제로 한다.
 
 필요 scope의 연결표는 각 표면의 계약 문서에 둘 수 있다. 예를 들어 CLI command별
-required scope는 `docs/specs/cli/03-commands.md`, HTTP endpoint별 required scope는
-Web API 라우터/스키마 문서에 둘 수 있다. 단, `bot:admin`이나 `backtest:run` 같은
-scope 문자열의 의미와 human/agent 판정 규칙은 Member 문서가 소유한다.
+required scope는 `docs/specs/cli/03-commands.md`에 둔다. 단, `bot:admin`이나
+`backtest:run` 같은 scope 문자열의 의미와 human/agent 판정 규칙은 Member 문서가
+소유한다.
 
 ### 비밀번호 복구 — Recovery Key
 
@@ -197,8 +194,8 @@ master(human)는 scope 제한 없이 모든 작업을 수행할 수 있다. scop
 
 **Scope vocabulary 코드 SSOT**: 위 매트릭스의 "—"가 아닌 모든 cell 은
 `src/ante/member/scopes.py` 의 `SCOPE_VOCABULARY: frozenset[str]` 에 등록되어
-있다(#1439). Web API ingress(Pydantic field validator), `MemberService.register`
-/ `update_scopes` (defense-in-depth), CLI 입력 모두 이 vocabulary 에 대해
+있다(#1439). `MemberService.register` / `update_scopes` (defense-in-depth),
+CLI 입력 모두 이 vocabulary 에 대해
 검증되며, 등록되지 않은 scope 문자열은 입력 시점에 거부된다. spec doc
 매트릭스와 `SCOPE_VOCABULARY` 의 drift 는 `tests/unit/test_member_scope_drift.py`
 가 정적으로 검증한다.
@@ -212,12 +209,12 @@ agent에게 위임하지 않으며, 향후 agent 위임 정책(target 제한, se
 **Member admin mutation 권한 모델 (1.0 — master-only)**: member admin
 mutation(`register`, `suspend`, `reactivate`, `revoke`, `rotate-token`,
 `update_scopes`, `password`)은 1.0 계약에서 **master-only**다. 모든 호출
-경로(Web API, CLI, IPC)에서 service layer `MemberService._assert_master`가
-master 외 호출자를 `PermissionError`로 거부하며, 표면 계약(Web API endpoint,
-CLI command, route-scope table)도 이 invariant에 정합한다. `member:admin`
+경로(CLI, IPC)에서 service layer `MemberService._assert_master`가
+master 외 호출자를 `PermissionError`로 거부하며, 표면 계약(CLI command)도
+이 invariant에 정합한다. `member:admin`
 agent token으로의 접근은 1.0에서 허용되지 않는다.
 
-> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> 후속 implementation 정렬: #1543 (CLI 표면 가드 master-only로 일치),
 > #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
 > 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
 
@@ -225,11 +222,10 @@ agent token으로의 접근은 1.0에서 허용되지 않는다.
 
 `member list/info`는 오프라인 조회가 가능하다. 등록, 정지, 재활성화, 폐기,
 토큰 재발급, 패스워드 변경/리셋, recovery key 재발급, scope 변경은 인증 상태를 바꾸는
-mutation이므로 서버 실행 중 IPC 또는 Web API를 통해 서버 프로세스에서 처리한다.
+mutation이므로 서버 실행 중 IPC를 통해 서버 프로세스에서 처리한다.
 
 근거:
 
-- 서버는 Web API 세션을 보유하므로 member mutation 직후 세션 무효화가 필요하다.
 - 토큰/패스워드/recovery key 변경은 감사 로그와 security notification을 동반한다.
 - 향후 member cache나 권한 cache가 생겨도 CLI 직접 DB 수정이 런타임 상태와 어긋나지
   않도록 단일 실행 경로를 유지한다.
@@ -247,8 +243,7 @@ def require_scope(member: Member, required: str) -> bool:
 ```
 
 human 멤버는 scope 검증을 무조건 통과한다. agent 멤버만 등록된 scope 목록에 대해
-검증된다. CLI는 `@require_scope(...)` 데코레이터로, Web API는 라우트 dependency 또는
-middleware로 같은 predicate를 적용한다.
+검증된다. CLI는 `@require_scope(...)` 데코레이터로 같은 predicate를 적용한다.
 
 **agent 등록 시 scope 조합 예시:**
 
@@ -302,8 +297,8 @@ $ ante init --member-id owner --name "홈트레이더"
 이는 CLI 첫 사용 흐름에서 **순환 의존을 방지**하기 위한 설계다.
 
 **배경**: `ante system start` 등 대부분의 명령은 `ANTE_MEMBER_TOKEN` 환경변수가 필요하다.
-그러나 토큰을 발급받으려면 웹 대시보드 로그인이 필요하고, 웹 대시보드는 시스템 시작 이후에만 사용 가능하다.
-`ante init`에서 토큰을 함께 발급하면 별도의 웹 로그인 없이 CLI만으로 전체 초기 설정을 완료할 수 있다.
+그러나 토큰을 발급받으려면 기존 인증 수단이 필요하고, 시스템 시작 이전에는 런타임 인증 경로를 사용할 수 없다.
+`ante init`에서 토큰을 함께 발급하면 CLI만으로 전체 초기 설정을 완료할 수 있다.
 
 **출력 예시**:
 
@@ -329,11 +324,11 @@ $ ante init --member-id owner --name "홈트레이더"
 **보안 고려**:
 - 토큰과 recovery key 모두 **1회만 표시**된다. 시스템 내에는 해시만 저장.
 - 토큰 분실 시 `ante member rotate-token`으로 재발급 가능 (인증된 상태에서).
-- 토큰 TTL은 기본 90일. 만료 시 웹 대시보드 로그인 또는 `rotate-token`으로 갱신.
+- 토큰 TTL은 기본 90일. 만료 시 `rotate-token`으로 갱신.
 
 ### 이모지 시스템
 
-각 멤버는 고유한 아바타 이모지를 가질 수 있다. 대시보드, CLI 출력 등에서 멤버를 시각적으로 빠르게 식별하는 용도로 사용한다.
+각 멤버는 고유한 아바타 이모지를 가질 수 있다. CLI 출력 등에서 멤버를 시각적으로 빠르게 식별하는 용도로 사용한다.
 
 **동물 이모지 풀 (ANIMAL_EMOJI_POOL):**
 

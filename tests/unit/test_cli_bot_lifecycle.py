@@ -1,7 +1,7 @@
 """``ante bot start/stop/status`` CLI leaf 회귀 테스트 (#1713).
 
-Refs #1713/#1712: Web API ``POST/GET /api/bots/{bot_id}/...`` 와 정렬된 IPC
-handler(``bot.start``/``bot.stop``/``bot.status``)를 CLI ingress로 노출한다.
+Refs #1713/#1712: IPC handler(``bot.start``/``bot.stop``/``bot.status``)를
+CLI ingress로 노출한다.
 회귀 매트릭스:
 
 - 성공 경로 (start/stop/status: BotInfo or detail envelope 반환).

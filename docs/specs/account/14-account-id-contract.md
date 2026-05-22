@@ -61,8 +61,8 @@ account-scoped 데이터/이벤트/명령은 모두 본 문서가 정의한 형�
 | trading_mode | ``VIRTUAL`` |
 
 public :meth:`AccountService.create` API에는 ``_bootstrap`` 같은 우회 플래그가
-**노출되지 않는다**. CLI ``ante account create``, Web POST ``/api/accounts``,
-IPC handlers를 비롯한 모든 외부 호출자는 ``validate_new_account_id`` 의
+**노출되지 않는다**. CLI ``ante account create``와 IPC handlers를 비롯한 모든
+외부 호출자는 ``validate_new_account_id`` 의
 RESTRICTED ( ``"test"`` ) / fallback ( ``"default"`` ) 거부를 거치며,
 seed 자동 생성은 :meth:`AccountService.create_default_test_account` 만의
 책임이다 (#1216 P2).
@@ -516,10 +516,6 @@ Read query 정책 정렬 + edge resolver. 본 SPLIT 에서 적용 완료
 | 호출 위치 | 형태 | 비고 |
 |---|---|---|
 | CLI `strategy performance` (`src/ante/cli/commands/strategy.py`) | `--account-id` required, 미지정 시 `STRATEGY_MISSING_REQUIRED_ACCOUNT` 에러 | edge resolver 제거, query 정책 일관 (#1218 Edge resolver) |
-| Web `GET /api/strategies` cumulative_return | 봇 미발견 strategy는 `cumulative_return = None`, `"default"` fallback 금지 | `StrategyListItem.cumulative_return: float \| None` 호환 (#1218 Edge resolver) |
-| Web `GET /api/strategies/{id}/performance` | account_id query 미지정 + 봇에서 추출 불가 시 400 | `"default"` fallback 제거 (#1218 Edge resolver) |
-| Web `GET /api/treasury` / `/api/portfolio/*` | account_id 미지정 = all-account 집계 (현재 분기 보존, 응답 schema 보존) | single-detail (`snapshot/{date}`) 은 명시 필수 (#1218 Edge resolver) |
-| Web `POST /api/bots` resolver | `_resolve_single_active` 패턴 (정확히 1개일 때만 자동, 0/2+은 400 `BOT_MISSING_REQUIRED_ACCOUNT`) | CLI `_resolve_account_non_interactive` 와 일관 (#1218 Edge resolver) |
 | `report.feedback.PerformanceFeedback.get_bot_performance` | bot 미발견 시 `BotNotFoundError` raise | `"default"` fallback 제거 (#1218 Edge resolver) |
 
 ## 테스트 게이트

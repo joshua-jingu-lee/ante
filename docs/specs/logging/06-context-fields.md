@@ -62,7 +62,6 @@ logger.info(
 | `ante.broker.*` (KIS 어댑터, 주문) | `account_id`, `order_id`, `symbol` |
 | `ante.bot.*` (봇 수명주기) | `bot_id`, `strategy_id` |
 | `ante.trade.*` (체결·포지션) | `account_id`, `order_id`, `symbol` |
-| `ante.web.*` (API 핸들러) | `request_id`, `account_id` (인증된 경우) |
 | `ante.rule.*` (룰 평가) | `account_id`, `bot_id` |
 
 다른 모듈은 기존 호출부 유지로 충분하다. 전체 모듈에 일괄 주입하는 작업은 우선순위가 낮다.
