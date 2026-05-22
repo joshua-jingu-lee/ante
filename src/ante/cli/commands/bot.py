@@ -533,3 +533,158 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
         fmt.output({"positions": result})
     else:
         fmt.table(result, ["symbol", "quantity", "avg_entry_price", "realized_pnl"])
+
+
+# ── 봇 생명주기 leaf (#1713) ─────────────────────────────────────────────
+#
+# Refs #1713/#1712: ``bot.start``/``bot.stop``/``bot.status`` IPC handler가
+# Web API ``POST/GET /api/bots/{bot_id}/...``와 정렬된 거부 경로
+# (``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
+# ``BOT_STATE_CONFLICT``) coded exception을 raise한다. CLI ingress는 IPC
+# 단일-chokepoint를 그대로 사용하며 별도 cold-path fallback을 제공하지
+# 않는다(Non-Goal). 에러 envelope 안정성은 #1673 ``config set`` 패턴
+# (``ipc_send``가 ``ClickException``에 부착한 ``ipc_error_code``/
+# ``ipc_error_message``를 split 없이 복원) 1:1 미러로 보존한다.
+
+
+@bot.command("start")
+@click.argument("bot_id")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("bot:admin")
+def bot_start(ctx: click.Context, bot_id: str) -> None:
+    """봇 시작 (Web API ``POST /api/bots/{bot_id}/start``와 같은 동작)."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+
+    async def _run_start() -> dict:
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        return await ipc_send("bot.start", {"bot_id": bot_id}, actor=actor)
+
+    try:
+        result = _run(_run_start())
+    except click.ClickException as e:
+        # #1673 미러: ipc_send가 부착한 원본 code/message를 split 없이
+        # 복원해 text/JSON 공용 envelope 안정성을 보존한다.
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
+
+    # JSON 모드는 IPC `{bot: ...}` envelope 그대로 (BotDetailResponse 정합 —
+    # `bot status`와 동일 shape, agent 파싱 일관). text 모드만 사용자 친화적
+    # 성공 메시지.
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        click.echo(f"봇 시작 완료: {bot_id}")
+
+
+@bot.command("stop")
+@click.argument("bot_id")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("bot:admin")
+def bot_stop(ctx: click.Context, bot_id: str) -> None:
+    """봇 중지 (Web API ``POST /api/bots/{bot_id}/stop``과 같은 동작)."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+
+    async def _run_stop() -> dict:
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        return await ipc_send("bot.stop", {"bot_id": bot_id}, actor=actor)
+
+    try:
+        result = _run(_run_stop())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        click.echo(f"봇 중지 완료: {bot_id}")
+
+
+@bot.command("status")
+@click.argument("bot_id")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("bot:read")
+def bot_status(ctx: click.Context, bot_id: str) -> None:
+    """봇 live 상태 조회 (Web API ``GET /api/bots/{bot_id}``와 같은 동작)."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+
+    async def _run_status() -> dict:
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        return await ipc_send("bot.status", {"bot_id": bot_id}, actor=actor)
+
+    try:
+        result = _run(_run_status())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
+
+    # status 출력 계약:
+    # - JSON 모드: IPC result 그대로 (``BotDetailResponse``-equivalent
+    #   ``{"bot": info}`` envelope). 보강된 strategy/budget/positions까지
+    #   포함된다.
+    # - text 모드: ``bot info`` 스타일 detail + optional sections
+    #   (strategy_name/budget/positions). 의존성 부재로 키가 없으면
+    #   해당 section을 생략한다(#1712 read-only 정렬).
+    if fmt.is_json:
+        fmt.output(result)
+        return
+
+    info = result.get("bot", {})
+    click.echo(f"  Bot ID       : {info.get('bot_id')}")
+    click.echo(f"  Name         : {info.get('name')}")
+    click.echo(f"  Status       : {info.get('status')}")
+    click.echo(f"  Account ID   : {info.get('account_id')}")
+    click.echo(f"  Strategy ID  : {info.get('strategy_id')}")
+    if info.get("strategy_name"):
+        click.echo(f"  Strategy Name: {info.get('strategy_name')}")
+    if info.get("interval_seconds") is not None:
+        click.echo(f"  Interval     : {info.get('interval_seconds')}s")
+    if info.get("started_at"):
+        click.echo(f"  Started At   : {info.get('started_at')}")
+    if info.get("stopped_at"):
+        click.echo(f"  Stopped At   : {info.get('stopped_at')}")
+    if info.get("error_message"):
+        click.echo(f"  Error        : {info.get('error_message')}")
+    budget = info.get("budget")
+    if budget:
+        click.echo("  Budget:")
+        for k, v in budget.items():
+            click.echo(f"    {k}: {v}")
+    positions = info.get("positions")
+    if positions:
+        click.echo(f"  Positions ({len(positions)}):")
+        for p in positions:
+            click.echo(
+                f"    {p.get('symbol')}: qty={p.get('quantity')}, "
+                f"avg={p.get('avg_entry_price')}"
+            )
