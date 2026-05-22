@@ -298,7 +298,6 @@ def stage_install() -> bool:
         "ante.backtest",
         "ante.report",
         "ante.notification",
-        "ante.web",
     ]
 
     log_info("모듈 import 확인 중...")
