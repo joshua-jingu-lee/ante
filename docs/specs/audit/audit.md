@@ -165,9 +165,11 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web
 | `ante member reset-password` | `member.reset_password` | `member:{member_id}` |
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{member_id}` |
 
-> **미구현 (follow-up)**: 위 표의 `ante bot start`(`bot.start`)·`ante bot
-> stop`(`bot.stop`) 행은 audit action 매핑 계약이다. 해당 CLI command는 현재
-> 미등록이며 wiring은 별도 follow-up이다. 그때까지 이 두 매핑은 도달 불가다.
+`ante bot start`/`ante bot stop`은 Web API `POST /api/bots/{bot_id}/start` /
+`POST /api/bots/{bot_id}/stop`과 같은 audit action(`bot.start`/`bot.stop`) 이름을
+공유한다. CLI/IPC와 Web API 양쪽 호출자의 봇 생애주기 변경이 단일 audit action
+namespace로 모인다. `ante bot status`는 read-only live 조회이므로 audit 대상이 아니다
+(상태 변경 액션만 기록하는 audit 기록 원칙).
 
 ### 구현 방식 — 이중 구조
 

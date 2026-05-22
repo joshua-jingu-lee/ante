@@ -207,8 +207,16 @@ BotManager.start_bot(bot_id)
 CLI의 `bot create/start/stop`과 `bot signal-key --rotate`는 위 흐름을 서버
 프로세스 안에서 실행해야 하므로 런타임 IPC 전용이다. 직접 DB 수정으로 봇 status나
 signal key를 바꾸면 `_bots`, 실행 task, EventBus 구독, 외부 signal channel이
-어긋나므로 허용하지 않는다. 단 `ante bot start`/`ante bot stop` CLI command은
-미구현 (follow-up)이며 wiring은 별도 follow-up이다.
+어긋나므로 허용하지 않는다.
+
+`ante bot start/stop/status`의 CLI/IPC 계약은 Web API 봇 라우트(`POST
+/api/bots/{bot_id}/start`, `POST /api/bots/{bot_id}/stop`, `GET /api/bots/{bot_id}`)와
+1:1 정렬된다. CLI/IPC가 같은 BotManager 인스턴스를 통해 같은 검증·실행·이벤트·감사
+경로를 사용해야, Web API와 CLI 양쪽 호출자가 같은 봇에 대해 같은 결과를 얻고 같은
+audit trail을 남기기 때문이다. `start`의 `app_key` 사전 검증, `BotError` → 409 의미의
+state conflict 매핑, `bot.start`/`bot.stop` audit action 이름, `BotDetailResponse`
+envelope (`{"bot": ...}`)은 모두 Web API 라우트의 동작에서 가져온다. cold-path
+fallback이나 직접 DB 수정으로 봇을 시작/중지하는 경로는 양쪽 모두 허용하지 않는다.
 
 `bot remove`는 예외적으로 서버 실행 중에는 런타임 IPC, 서버 정지 상태에서는
 cold-path cleanup을 허용한다. cold-path 삭제는 BotManager를 만들지 않고 DB에

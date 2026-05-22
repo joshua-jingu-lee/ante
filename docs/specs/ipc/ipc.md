@@ -88,17 +88,23 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
-| `ante bot start` | `bot.start` | `BotManager.start_bot()` | asyncio task 생성 + `BotStartedEvent` 발행 |
-| `ante bot stop` | `bot.stop` | `BotManager.stop_bot()` | 실행 task 취소 + `BotStoppedEvent` 발행 |
+| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | Web API `POST /api/bots/{bot_id}/start`와 같은 동작. live 봇 존재 확인 + `app_key` credential preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 |
+| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | Web API `POST /api/bots/{bot_id}/stop`과 같은 동작. live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 |
+| `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | Web API `GET /api/bots/{bot_id}`와 같은 live 조회. 응답은 `BotDetailResponse`와 같은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 |
 | `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
 | `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
 
-> **미구현 (follow-up)**: 위 표의 `bot.start`/`bot.stop` IPC handler 및 대응 CLI
-> command(`ante bot start`/`ante bot stop`)는 현재 등록되어 있지 않다. 또한
-> `ante bot status` CLI command도 부재다. 위 매핑은 설계 계약이며 wiring은
-> 별도 follow-up이다.
+`bot.start`/`bot.stop`은 mutating, `bot.status`는 read-only다. 세 명령 모두 다음 stable
+error code를 Web API 라우트의 의미와 동일하게 사용한다.
 
-서버 실행 중 `ante bot list/info/status/positions/signal-key`는 `bot.query` 계열 IPC로
+- `BOT_NOT_FOUND` (재사용 SSOT: `src/ante/bot/exceptions.py:BOT_NOT_FOUND_CODE`):
+  `BotManager.get_bot()`이 `None`을 반환. Web API 404와 같은 의미.
+- `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` (신규): `bot.start`에서
+  `account.credentials["app_key"]` 누락. Web API 422와 같은 의미.
+- `BOT_STATE_CONFLICT` (신규): `bot.start`/`bot.stop`의 `BotManager.start_bot()` /
+  `stop_bot()` 호출 중 `BotError`. Web API 409와 같은 의미.
+
+서버 실행 중 `ante bot list/info/positions/signal-key`는 `bot.query` 계열 IPC로
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
 snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
 상태에서 `signal_keys`, 전략 스냅샷, Treasury budget, `bots.status='deleted'`만 직접
@@ -247,14 +253,25 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
 | `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
 
+### 후속 IPC handler 계약 (#1712 등록 예정, 현재 미등록)
+
+아래 3 handler는 본 스펙에서 계약을 사전에 확정한다. **현재 `CommandRegistry.register_all_handlers()`에 미등록**이며, shutdown drain의 mutating/read-only 처리·taxonomy 카운트(현재 19) 산정 등 runtime invariants는 위 SSOT 19개에만 적용된다. 실제 등록은 #1712에서 수행한 뒤 본 절의 19 → 22 카운트와 taxonomy 표가 함께 갱신된다.
+
+| IPC 커맨드 | taxonomy | 근거 |
+|-----------|----------|------|
+| `bot.start` | mutating | `BotManager.start_bot()` 호출. Web API `POST /api/bots/{bot_id}/start` 정렬. `app_key` preflight + audit `bot.start` |
+| `bot.stop` | mutating | `BotManager.stop_bot()` 호출. Web API `POST /api/bots/{bot_id}/stop` 정렬. audit `bot.stop` |
+| `bot.status` | read-only | `BotManager.get_bot()` live 조회. Web API `GET /api/bots/{bot_id}` 정렬. `BotDetailResponse` envelope |
+
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
 IPC command 분리는 별도 이슈 범위다.
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
-taxonomy 대상이 아니다. `member.*`, `bot.start/stop`,
+taxonomy 대상이 아니다. `member.*`, `bot.start/stop/status`,
 `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로 표현되어 있으나 현재
-`register_all_handlers()`에 없는 명령 추가도 별도 후속 범위다.
+`register_all_handlers()`에 없는 명령의 실제 wiring은 별도 후속 이슈(`bot.start/stop/status`는
+#1712)에서 다룬다. 본 스펙 표는 그때 사용할 계약 SSOT다.
 
 ## 통신 프로토콜
 
