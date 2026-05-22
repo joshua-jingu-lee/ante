@@ -90,12 +90,12 @@ allowlist 후보에서 제거한다.
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
 | `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
-| `ante bot status <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선. **미구현 (follow-up)**: `ante bot status` CLI command 부재 |
+| `ante bot status <bot_id>` | `runtime IPC` | Web API `GET /api/bots/{bot_id}`와 같은 live `BotManager.get_bot()` 조회. read-only. 응답은 `BotDetailResponse`와 같은 `{bot: ...}` envelope |
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
-| `ante bot start <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 생성. **미구현 (follow-up)**: `ante bot start` CLI command 부재 |
-| `ante bot stop <bot_id>` | `runtime IPC` | 서버 BotManager 실행 task 중지. **미구현 (follow-up)**: `ante bot stop` CLI command 부재 |
+| `ante bot start <bot_id>` | `runtime IPC` | Web API `POST /api/bots/{bot_id}/start`와 같은 동작. `BotManager.start_bot()` 실행 task 생성. `app_key` 사전 검증 + audit `bot.start` |
+| `ante bot stop <bot_id>` | `runtime IPC` | Web API `POST /api/bots/{bot_id}/stop`과 같은 동작. `BotManager.stop_bot()` 실행 task 중지. audit `bot.stop` |
 | `ante bot remove <bot_id> --yes` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
 | `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
 | `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
@@ -318,22 +318,19 @@ JSON 출력이 필요하면 root 전역 옵션을 사용한다:
 
 ### `ante bot` — 봇 관리
 
+> **구현 진행 상황 (#1698 epic)**: `start/stop/status`의 IPC handler 등록은 #1712, Click command 등록과 `guide/cli.md` 재생성은 #1713에서 수행한다. 본 절은 그 계약을 사전에 확정하는 SSOT다. 현재 main(`8479e53`)의 `ante bot --help`에는 `start/stop/status`가 아직 노출되지 않는다 — 사용자/Agent는 #1712 + #1713 merge 후 실행 가능하다.
+
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
-ante bot start <bot_id>            # 봇 시작 — 미구현 (follow-up)
-ante bot stop <bot_id>             # 봇 중지 — 미구현 (follow-up)
+ante bot start <bot_id>            # 봇 시작 (Web API POST /api/bots/{bot_id}/start와 같은 동작)
+ante bot stop <bot_id>             # 봇 중지 (Web API POST /api/bots/{bot_id}/stop과 같은 동작)
 ante bot remove <bot_id> --yes     # 봇 삭제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante bot info <bot_id>             # 봇 상세 정보
-ante bot status <bot_id>           # 봇 실행 상태 — 미구현 (follow-up)
+ante bot status <bot_id>           # 봇 실행 상태 (Web API GET /api/bots/{bot_id}와 같은 live 조회)
 ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
-
-> **미구현 (follow-up)**: `ante bot start`/`ante bot stop`/`ante bot status`
-> CLI command는 현재 등록되어 있지 않다. 위 매핑은 설계 계약이며 wiring은
-> 별도 follow-up이다. 현재 실재 bot CLI는
-> `create/info/list/positions/remove/signal-key`.
 
 `bot create`의 `--account` 생략 시 동작은 [위 절](#ante-bot-create의---account-생략-정책)을 따른다.
 
@@ -341,9 +338,36 @@ ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 `_bots`, 실행 task, EventBus 구독, signal key 연결 상태를 바꾸므로 런타임 IPC 커맨드다.
 `bot remove`는 서버 실행 중에는 IPC로 BotManager에 위임하고, 서버 정지 중에는
 cold-path fallback으로 signal key, 전략 스냅샷, Treasury budget, `bots.status`만
-정리한다. 서버 실행 중 `bot list/info/status/positions/signal-key` 조회는 IPC로
+정리한다. 서버 실행 중 `bot list/info/positions/signal-key` 조회는 IPC로
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB의 persisted snapshot만
 읽을 수 있으며, `bot remove` 외 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
+
+`bot status`는 Web API `GET /api/bots/{bot_id}`와 1:1 정렬된 live-only 조회이며, snapshot
+fallback이 없다 — 서버가 정지된 상태에서는 `BotManager`가 부재하므로 `status`는 호출할 수
+없고, persisted 봇 메타데이터는 `bot list/info`로 조회한다.
+
+`bot start/stop/status`는 Web API 봇 라우트와 1:1 정렬된다.
+
+- `ante bot start <bot_id>` ≡ `POST /api/bots/{bot_id}/start`: live
+  `BotManager.get_bot(bot_id)`로 존재 확인 후, `account_service.get(bot.config.account_id)`로
+  `app_key` 사전 검증. `BotManager.start_bot()` 호출 후 audit action `bot.start`를 기록한다.
+  성공 응답은 `BotDetailResponse`와 같은 `{"bot": bot.get_info()}` envelope이다. cold-path
+  fallback은 없다.
+- `ante bot stop <bot_id>` ≡ `POST /api/bots/{bot_id}/stop`: live
+  `BotManager.get_bot(bot_id)` 후 `BotManager.stop_bot()` 호출, audit action `bot.stop`을
+  기록한다. 응답은 `{"bot": bot.get_info()}` envelope. cold-path fallback은 없다.
+- `ante bot status <bot_id>` ≡ `GET /api/bots/{bot_id}`: read-only live
+  `BotManager.get_bot(bot_id)` 조회. 응답은 `{"bot": info}` envelope이며 Web API 상세
+  조회와 같이 가능한 경우 `strategy_name`/`strategy_author_name`/`strategy_author_id`/
+  `strategy` (`strategy_registry` 보유 시), `budget` (`treasury_manager` 보유 시),
+  `positions` (`trade_service` 보유 시)를 보강한다. read-only audit 대상은 아니다.
+
+세 명령 모두 `BotManager.get_bot()`이 `None`을 반환하면 Web API 404와 같은 의미의
+stable error code `BOT_NOT_FOUND` (SSOT: `src/ante/bot/exceptions.py:BOT_NOT_FOUND_CODE`)
+로 실패한다. `start`에서 `app_key` 누락은 Web API 422와 같은 의미의 stable error code
+`BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`로 실패한다. `start`/`stop`에서 `BotError`는 Web
+API 409와 같은 의미의 stable error code `BOT_STATE_CONFLICT`로 매핑한다. JSON 모드는
+IPC error envelope에서 받은 `code`/`message`를 그대로 보존한다.
 
 `--strategy`는 등록된 `strategy_id`다. 전략 파일 경로를 직접 넘기려면 먼저
 `ante strategy submit <path>`로 등록해야 한다.
