@@ -137,33 +137,31 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 
 **런타임 중 허용**:
 
-| 작업 | CLI | Web API | 실행 경로 |
-|---|---|---|---|
-| 계좌 목록/상세 조회 | `account list`, `account info` | `GET /api/accounts`, `GET /api/accounts/{id}` | 읽기 |
-| 인증 정보 마스킹 조회 | `account credentials` | — (Web API 미제공) | 읽기 |
-| 계좌 거래 정지 | `account suspend` | `POST /api/accounts/{id}/suspend` | IPC/Web API → `AccountService.suspend()` |
-| 계좌 거래 재개 | `account activate` | `POST /api/accounts/{id}/activate` | IPC/Web API → `AccountService.activate()` |
-| 전체 거래 정지 | `system halt` | `POST /api/system/halt` | IPC/Web API → `AccountService.suspend_all()` |
-| 전체 거래 정지 해제 | `system clear-halt` | `POST /api/system/clear-halt` | IPC/Web API → `AccountService.activate_all()` (계좌 상태 복구만; 봇 자동 재시작 아님) |
-| 비구조 필드 수정 | `account update` 계열 향후 명령 | `PUT /api/accounts/{id}` | `name`, `timezone`, `trading_hours` 등 브로커 재초기화가 필요 없는 필드만 |
-| 계좌별 rule 변경 | `rule`/`config` 계열 명령 | `PUT /api/accounts/{id}/rules/{rule_type}` | DynamicConfig + `ConfigChangedEvent` |
+| 작업 | CLI/IPC | 실행 경로 |
+|---|---|---|
+| 계좌 목록/상세 조회 | `account list`, `account info` | 읽기 |
+| 인증 정보 마스킹 조회 | `account credentials` | 읽기 |
+| 계좌 거래 정지 | `account suspend` | IPC → `AccountService.suspend()` |
+| 계좌 거래 재개 | `account activate` | IPC → `AccountService.activate()` |
+| 전체 거래 정지 | `system halt` | IPC → `AccountService.suspend_all()` |
+| 전체 거래 정지 해제 | `system clear-halt` | IPC → `AccountService.activate_all()` (계좌 상태 복구만; 봇 자동 재시작 아님) |
+| 비구조 필드 수정 | `account update` 계열 향후 명령 | `name`, `timezone`, `trading_hours` 등 브로커 재초기화가 필요 없는 필드만 |
+| 계좌별 rule 변경 | `rule update` | DynamicConfig + `ConfigChangedEvent` |
 
 **cold-path 전용**:
 
-| 작업 | CLI/Web API | 서버 실행 중 동작 |
+| 작업 | CLI | 서버 실행 중 동작 |
 |---|---|---|
-| 계좌 생성 | `account create`, `POST /api/accounts` | `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로 거부 |
-| 계좌 삭제 | `account delete`, `DELETE /api/accounts/{id}` | 동일 |
+| 계좌 생성 | `account create` | `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`로 거부 |
+| 계좌 삭제 | `account delete` | 동일 |
 | credentials 변경 | `account set-credentials`, credentials 변경 payload | 동일 |
-| `broker_config` 변경 | `PUT /api/accounts/{id}` payload | 동일 |
-| `buy_commission_rate` / `sell_commission_rate` 변경 | `PUT /api/accounts/{id}` payload | 동일 |
+| `broker_config` 변경 | structural update payload | 동일 |
+| `buy_commission_rate` / `sell_commission_rate` 변경 | structural update payload | 동일 |
 | `broker_type`, `exchange`, `currency`, `trading_mode` 변경 | 생성 후 불변. 변경하려면 서버 정지 상태에서 새 계좌 생성 + 기존 계좌 삭제 |
 
 **차단 규칙**:
 
 1. cold-path 전용 CLI는 먼저 같은 `config_dir`의 PID/socket으로 서버 실행 여부를 확인한다.
 2. 서버가 실행 중이면 DB를 열기 전에 실패한다.
-3. 런타임 Web API가 cold-path 전용 요청을 받으면 409 Conflict와
-   `ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER`를 반환한다.
-4. cold-path structural mutation은 runtime IPC 대상이 아니다.
-5. 서버는 시작 시 DB의 계좌 목록을 로드하고, 그 구조를 해당 프로세스의 계좌 topology로 고정한다. 구조 변경 후에는 서버 재시작이 필요하다.
+3. cold-path structural mutation은 runtime IPC 대상이 아니다.
+4. 서버는 시작 시 DB의 계좌 목록을 로드하고, 그 구조를 해당 프로세스의 계좌 topology로 고정한다. 구조 변경 후에는 서버 재시작이 필요하다.

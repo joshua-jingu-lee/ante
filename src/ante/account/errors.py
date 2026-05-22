@@ -35,7 +35,7 @@ class InvalidExchangeError(AccountError):
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
     ``"VALIDATION_ERROR"``를 노출하도록 한다(``InvalidAccountIdError`` 와
-    동일한 account 검증 에러 SSOT). Web API 라우트는 RFC 7807 422로 매핑된다.
+    동일한 account 검증 에러 SSOT).
     """
 
     code: str = "VALIDATION_ERROR"
@@ -108,8 +108,8 @@ class AccountStructuralChangeRequiresStoppedServerError(AccountError):
     defense-in-depth 역할이다.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가 ``getattr(e, "code", "EXECUTION_ERROR")``로
-    안정 코드 ``"ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"``를 노출하도록
-    한다. Web API 라우트는 별도 catch에서 409 + cold-path detail로 매핑한다.
+    안정 코드 ``"ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"``를
+    노출하도록 한다.
     """
 
     code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"

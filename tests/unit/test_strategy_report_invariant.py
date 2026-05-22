@@ -1,11 +1,11 @@
 """``StrategyReport`` metric invariant 단위 테스트 (#1415).
 
-``validate_strategy_report_metrics`` 함수는 저장 경계(CLI/Web submit)에서 명시 호출되는
+``validate_strategy_report_metrics`` 함수는 저장 경계(CLI submit)에서 명시 호출되는
 opt-in invariant 검증이다. DB read path (``ReportStore._row_to_report``)는 legacy
 invalid row를 허용하기 위해 이 함수를 호출하지 않는다.
 
 SSOT:
-- ``src/ante/web/schemas.py::ReportSubmitRequest`` — Web API 입력 검증 SSOT
+- ``src/ante/report/validation.py::ReportSubmitRequest`` — CLI 입력 검증 SSOT
 - ``src/ante/report/models.py::validate_strategy_report_metrics`` — 저장 경계 가드
 
 검증 대상 invariants:
@@ -348,7 +348,7 @@ class TestReportStoreSaveBoundaryGuard:
     """``ReportStore.submit`` / ``upsert_draft`` 가 invariant 위반을 차단해야 한다.
 
     codex r3 P2: ``validate_strategy_report_metrics`` 는 ``StrategyReport`` 를 직접
-    저장하는 경로 (CLI, Web API submit, draft 자동 생성 등) 에 모두 부착해야 한다.
+    저장하는 경로 (CLI submit, draft 자동 생성 등) 에 모두 부착해야 한다.
     그렇지 않으면 잘못된 입력 (예: 백테스트 결과의 NaN sharpe, 음수 trades, 100 초과
     win_rate) 이 ``submit``/``upsert_draft`` 를 거쳐 DB에 기록될 수 있다.
 

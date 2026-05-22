@@ -373,17 +373,15 @@ class MemberService:
         """멤버 등록 + 토큰 반환.
 
         ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
-        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. Web API
-        ingress 는 Pydantic field validator 로 동일 invariant 를 검증하지만
-        CLI direct path 와 내부 caller 가 본 메소드를 직접 호출할 수 있으므로
-        service 계층에서 한 번 더 방어한다(defense-in-depth).
+        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI direct
+        path 와 내부 caller 가 본 메소드를 직접 호출할 수 있으므로 service
+        계층에서 방어한다(defense-in-depth).
 
         ``role`` 은 ``MemberRole`` enum SSOT 멤버이어야 한다 (#1465 — split
         #1417/A). ``member_type`` 은 ``MemberType`` enum SSOT 멤버이어야 한다
-        (#1628 — ``role`` 동형 미러). Web API ingress 는 Pydantic
-        ``MemberRole`` / ``MemberType`` 필드로 422 를 강제하지만, CLI direct
-        path 및 내부 caller 가 임의 문자열을 넘길 수 있으므로 본 서비스
-        계층에서도 ``ValueError`` 로 재검증한다. 검증은 ``_assert_master``
+        (#1628 — ``role`` 동형 미러). CLI direct path 및 내부 caller 가 임의
+        문자열을 넘길 수 있으므로 본 서비스 계층에서도 ``ValueError`` 로
+        재검증한다. 검증은 ``_assert_master``
         직후, ``_assert_type_role`` 직전에 둬서 enum membership 위반이
         type-role 분기보다 먼저 거부되도록 한다.
         """
@@ -472,7 +470,7 @@ class MemberService:
         return await self._auth_service.authenticate(token)
 
     async def authenticate_password(self, member_id: str, password: str) -> Member:
-        """패스워드 인증 (human 대시보드 로그인)."""
+        """패스워드 인증 (human 복구/maintenance)."""
         return await self._auth_service.authenticate_password(member_id, password)
 
     # ── 조회 ───────────────────────────────────────────
@@ -728,9 +726,8 @@ class MemberService:
         본 가드를 제거해 빈 caller도 거부한다.
 
         ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
-        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. Web API
-        ingress 가 Pydantic field validator 로 422 차단하지만 CLI 직접 호출과
-        내부 caller 를 위해 service 계층에서 한 번 더 방어한다.
+        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI 직접
+        호출과 내부 caller 를 위해 service 계층에서 방어한다.
         """
         await self._assert_master(updated_by, "update_scopes")
         # vocabulary 검증은 master 검증 직후, 멤버 조회 / DB write 이전에 수행한다.
@@ -795,7 +792,6 @@ class MemberService:
     def _assert_role_enum(role: str) -> None:
         """``role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다 (#1465).
 
-        Web API ingress 는 Pydantic ``MemberRole`` 필드로 422 를 강제하지만,
         CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
         있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층
         에서 한 번 더 방어한다 (defense-in-depth — Plan Preflight narrow-scope
@@ -803,8 +799,7 @@ class MemberService:
 
         ``StrEnum`` 인스턴스는 곧 문자열이므로 ``MemberRole.DEFAULT`` 같은
         enum 직접 호출도 통과한다. 알 수 없는 문자열은 ``ValueError`` 로
-        거부되며, Web API 라우터의 ``except ValueError`` 분기가 400 으로
-        매핑한다 (현재 핸들러 시그니처 유지).
+        거부된다.
         """
         valid = {member.value for member in MemberRole}
         if role not in valid:
@@ -815,7 +810,6 @@ class MemberService:
     def _assert_type_enum(member_type: str) -> None:
         """``member_type`` 이 ``MemberType`` enum SSOT 의 멤버인지 검증한다 (#1628).
 
-        Web API ingress 는 Pydantic ``MemberType`` 필드로 422 를 강제하지만,
         CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
         있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층
         에서 한 번 더 방어한다 (defense-in-depth — #1465 ``role`` enum 강제
@@ -823,8 +817,7 @@ class MemberService:
 
         ``StrEnum`` 인스턴스는 곧 문자열이므로 ``MemberType.AGENT`` 같은
         enum 직접 호출도 통과한다. 알 수 없는 문자열은 ``ValueError`` 로
-        거부되며, Web API 라우터의 ``except ValueError`` 분기가 400 으로
-        매핑한다 (현재 핸들러 시그니처 유지).
+        거부된다.
         """
         valid = {member.value for member in MemberType}
         if member_type not in valid:

@@ -4,25 +4,21 @@
 
 ## 언제 읽나
 
-- API endpoint rename
+- CLI 명령 / IPC command rename
 - response field 추가 / 삭제 / rename
 - CLI 명령 / 옵션 변경
-- schema, Pydantic model, generated type 변경
+- schema, Pydantic model 변경
 - docs/specs 와 구현이 같이 흔들릴 가능성이 있는 변경
 
 ## 체크리스트
 
 - SSOT 문서와 실제 구현이 같은 이름과 경로를 쓰는가
 - 경로 rename 시 모든 소비자가 함께 바뀌었는가
-- field rename 시 frontend / tests / docs / generated outputs가 같이 갱신되었는가
+- field rename 시 CLI / IPC / tests / docs / generated outputs가 같이 갱신되었는가
 - 스펙을 바꾸지 않고 구현만 바꾸는 drift가 없는가
 - 구현을 유지한 채 스펙만 앞서가거나 뒤처지지 않는가
 
 ## red flags
 
 - 문서엔 `kill-switch`인데 구현은 `halt` / `activate`
-- OpenAPI는 갱신됐는데 generated type은 예전 필드를 유지
 - response_model은 바뀌었는데 tests가 예전 shape만 본다
-- 프론트 수동 타입(`frontend/src/types/*.ts`)이 generated response를 shadowing한다
-- `res.data as SomeManualType` 또는 mapper 밖 `as unknown as`로 API drift를 숨긴다
-- hooks/pages/components가 `types/api.generated`를 직접 import해 adapter 경계를 우회한다

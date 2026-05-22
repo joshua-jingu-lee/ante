@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3
 
@@ -10,8 +11,9 @@ import click
 
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
+from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
-from ante.cli.middleware import require_auth, require_scope
+from ante.cli.middleware import get_member_id, require_auth, require_scope
 
 logger = logging.getLogger(__name__)
 
@@ -249,3 +251,142 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     else:
         for key, value in result.items():
             click.echo(f"  {key:15s}: {value}")
+
+
+def _parse_rule_params(param_items: tuple[str, ...], params_json: str | None) -> dict:
+    params: dict = {}
+    if params_json:
+        try:
+            decoded = json.loads(params_json)
+        except json.JSONDecodeError as e:
+            raise click.BadParameter("--params-json 값은 JSON object여야 합니다") from e
+        if not isinstance(decoded, dict):
+            raise click.BadParameter("--params-json 값은 JSON object여야 합니다")
+        params.update(decoded)
+    for item in param_items:
+        key, value = _parse_key_value(item)
+        params[key] = value
+    return params
+
+
+def _parse_key_value(value: str) -> tuple[str, object]:
+    if "=" not in value:
+        raise click.BadParameter(f"잘못된 파라미터 형식: {value!r} (key=value)")
+    key, raw = value.split("=", 1)
+    key = key.strip()
+    if not key:
+        raise click.BadParameter("파라미터 key는 비어 있을 수 없습니다")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+    return key, parsed
+
+
+@rule.command("update")
+@click.argument("rule_type")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
+@click.option(
+    "--enabled/--disabled",
+    default=True,
+    show_default=True,
+    help="룰 활성화 여부",
+)
+@click.option(
+    "--param",
+    "params",
+    multiple=True,
+    help="룰 파라미터 (key=value, 복수 지정 가능)",
+)
+@click.option("--params-json", default=None, help="룰 파라미터 JSON object")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("rule:admin")
+def rule_update(
+    ctx: click.Context,
+    rule_type: str,
+    account_id: str,
+    enabled: bool,
+    params: tuple[str, ...],
+    params_json: str | None,
+) -> None:
+    """계좌 룰 설정 수정."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+    account_id = reject_invalid_account_id(account_id, fmt, context="cli.rule.update")
+
+    try:
+        param_dict = _parse_rule_params(params, params_json)
+    except click.BadParameter as e:
+        fmt.error(str(e), code="VALIDATION_ERROR")
+        raise SystemExit(1) from e
+
+    async def _run_update() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "rule.update",
+                {
+                    "account_id": account_id,
+                    "rule_type": rule_type,
+                    "enabled": enabled,
+                    "params": param_dict,
+                },
+                actor=actor,
+            )
+
+        from ante.account.service import AccountService
+        from ante.audit import AuditLogger
+        from ante.cli.main import get_config_dir, get_db_path
+        from ante.config import Config, DynamicConfigService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+        from ante.rule.config_update import update_account_rule_config
+
+        db = Database(get_db_path(ctx))
+        await db.connect()
+        try:
+            eventbus = EventBus()
+            account_service = AccountService(db=db, eventbus=eventbus)
+            await account_service.initialize()
+            dynamic_config = DynamicConfigService(db=db, eventbus=eventbus)
+            await dynamic_config.initialize()
+            audit_logger = AuditLogger(db=db)
+            await audit_logger.initialize()
+            config = Config.load(config_dir=get_config_dir(ctx))
+            return await update_account_rule_config(
+                account_service=account_service,
+                dynamic_config=dynamic_config,
+                account_id=account_id,
+                rule_type=rule_type,
+                enabled=enabled,
+                params=param_dict,
+                changed_by=actor,
+                config=config,
+                audit_logger=audit_logger,
+            )
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_run_update())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code=getattr(e, "code", "RULE_UPDATE_ERROR"))
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        rule_item = result.get("rule", {})
+        click.echo(
+            f"룰 수정 완료: {result.get('account_id')} "
+            f"{rule_item.get('type', rule_type)} enabled={rule_item.get('enabled')}"
+        )

@@ -90,32 +90,41 @@ allowlist 후보에서 제거한다.
 | `ante account activate <account_id>` | `runtime IPC` | 서버 AccountService + EventBus |
 | `ante bot list [--account <account_id>]` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
 | `ante bot info <bot_id>` | `runtime IPC + snapshot fallback` | 서버 BotManager live 조회 우선 |
-| `ante bot status <bot_id>` | `runtime IPC` | Web API `GET /api/bots/{bot_id}`와 같은 live `BotManager.get_bot()` 조회. read-only. 응답은 `BotDetailResponse`와 같은 `{bot: ...}` envelope |
+| `ante bot status <bot_id>` | `runtime IPC` | live `BotManager.get_bot()` 조회. read-only. 응답은 `{bot: ...}` envelope |
 | `ante bot positions <bot_id>` | `runtime IPC + snapshot fallback` | live 포지션 조회 우선 |
 | `ante bot signal-key <bot_id>` | `runtime IPC + snapshot fallback` | live signal key 상태 조회 우선 |
 | `ante bot create --name <name> --strategy <strategy_id> ...` | `runtime IPC` | 서버 BotManager 생성 |
-| `ante bot start <bot_id>` | `runtime IPC` | Web API `POST /api/bots/{bot_id}/start`와 같은 동작. `BotManager.start_bot()` 실행 task 생성. `app_key` 사전 검증 + audit `bot.start` |
-| `ante bot stop <bot_id>` | `runtime IPC` | Web API `POST /api/bots/{bot_id}/stop`과 같은 동작. `BotManager.stop_bot()` 실행 task 중지. audit `bot.stop` |
+| `ante bot start <bot_id>` | `runtime IPC` | `BotManager.start_bot()` 실행 task 생성. `app_key` 사전 검증 + audit `bot.start` |
+| `ante bot stop <bot_id>` | `runtime IPC` | `BotManager.stop_bot()` 실행 task 중지. audit `bot.stop` |
+| `ante bot update <bot_id> ...` | `runtime IPC` | 중지 상태 봇 설정 수정 |
 | `ante bot remove <bot_id> --yes` | `runtime IPC + cold-path fallback` | 실행 중이면 서버 BotManager 정리, 정지 중이면 persisted bot cleanup |
+| `ante bot logs <bot_id> ...` | `offline` | 봇 로그 조회 |
 | `ante bot signal-key <bot_id> --rotate` | `runtime IPC` | 기존 signal channel 무효화 |
-| `ante trade list [--bot <bot_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
+| `ante trade list [--bot <bot_id>] [--strategy <strategy_id>] [--from <date>] [--to <date>] [--limit N]` | `offline` | canonical DB 조회 |
 | `ante trade info <trade_id>` | `offline` | canonical DB 조회 |
 | `ante strategy validate <path>` | `offline` | AST 정적 검증 |
 | `ante strategy submit <path>` | `offline` | 검증 + 로드 테스트 + StrategyRegistry 등록 |
 | `ante strategy list` | `offline` | StrategyRegistry 조회 |
 | `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
 | `ante strategy performance <name> [--account-id <account_id>]` | `offline` | 성과 DB 집계 |
+| `ante strategy set-status <strategy_id> --status adopted\|archived` | `runtime IPC` | 전략 상태 변경 |
+| `ante strategy summary <strategy_id> --period daily\|weekly\|monthly` | `offline` | 성과 기간 집계 |
 | `ante treasury status --account <account_id>` | `offline` | persisted treasury 상태 조회 (`--account` 필수) |
 | `ante treasury allocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury deallocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
+| `ante treasury transactions ...` | `offline` | 자금 거래 내역 조회 |
+| `ante treasury budgets [--account <account_id>]` | `offline` | 봇별 예산 조회 |
+| `ante treasury set-balance <amount> --account <account_id>` | `runtime IPC` | 계좌 총 잔고 수동 설정 |
+| `ante treasury portfolio value/history [--account <account_id>]` | `offline` | 포트폴리오 가치 조회 |
 | `ante treasury snapshot --account <account_id> ...` | `offline` | 일별 snapshot 조회 (`--account` 필수) |
 | `ante rule list --account <account_id> [--scope global|strategy]` | `offline` | rule 설정 조회 (`--account` 필수) |
 | `ante rule info <rule_id> --account <account_id>` | `offline` | rule 설정 조회 (`--account` 필수) |
+| `ante rule update <rule_type> --account <account_id> ...` | `runtime IPC` | 계좌별 stored rule 수정 |
 | `ante broker status --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 상태 (`--account` 필수) |
 | `ante broker balance --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker positions --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
-| `ante data list/schema/storage/validate ...` | `offline` | canonical data root 또는 명시 data path 대상 |
+| `ante data list/schema/storage/validate/info/delete ...` | `offline` | canonical data root 또는 명시 data path 대상 |
 | `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
 | `ante backtest history <strategy_name> [--limit N]` | `offline` | BacktestRunStore 조회 |
 | `ante report schema/submit/list/view/performance ...` | `offline` | ReportStore/PerformanceFeedback 직접 호출 |
@@ -133,6 +142,7 @@ allowlist 후보에서 제거한다.
 | `ante member list-invalid-roles` | `offline` | DB 직접 조회 (runtime IPC 우회; `service.initialize` 수반) |
 | `ante member register --id <member_id> --type human|agent ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member set-emoji/suspend/reactivate/rotate-token ...` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
+| `ante member update-scopes <member_id> --scopes <csv>` | `runtime IPC` | master-only scope 변경 |
 | `ante member revoke <member_id> --yes` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member reset-password --recovery-key <key> (--new-password-env <ENV>\|--new-password-file <PATH>)` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
 | `ante member regenerate-recovery-key (--password-env <ENV>\|--password-file <PATH>)` | `runtime IPC` | 서버 실행 중 member/session/security 상태 변경 |
@@ -323,11 +333,11 @@ JSON 출력이 필요하면 root 전역 옵션을 사용한다:
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
-ante bot start <bot_id>            # 봇 시작 (Web API POST /api/bots/{bot_id}/start와 같은 동작)
-ante bot stop <bot_id>             # 봇 중지 (Web API POST /api/bots/{bot_id}/stop과 같은 동작)
+ante bot start <bot_id>            # 봇 시작
+ante bot stop <bot_id>             # 봇 중지
 ante bot remove <bot_id> --yes     # 봇 삭제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante bot info <bot_id>             # 봇 상세 정보
-ante bot status <bot_id>           # 봇 실행 상태 (Web API GET /api/bots/{bot_id}와 같은 live 조회)
+ante bot status <bot_id>           # 봇 실행 상태 live 조회
 ante bot positions <bot_id>        # 봇 현재 포지션
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
@@ -342,31 +352,31 @@ cold-path fallback으로 signal key, 전략 스냅샷, Treasury budget, `bots.st
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB의 persisted snapshot만
 읽을 수 있으며, `bot remove` 외 직접 DB 수정으로 봇 상태를 바꾸는 경로는 허용하지 않는다.
 
-`bot status`는 Web API `GET /api/bots/{bot_id}`와 1:1 정렬된 live-only 조회이며, snapshot
+`bot status`는 live-only 조회이며, snapshot
 fallback이 없다 — 서버가 정지된 상태에서는 `BotManager`가 부재하므로 `status`는 호출할 수
 없고, persisted 봇 메타데이터는 `bot list/info`로 조회한다.
 
-`bot start/stop/status`는 Web API 봇 라우트와 1:1 정렬된다.
+`bot start/stop/status`는 런타임 IPC를 통해 서버 BotManager와 정렬된다.
 
-- `ante bot start <bot_id>` ≡ `POST /api/bots/{bot_id}/start`: live
+- `ante bot start <bot_id>`: live
   `BotManager.get_bot(bot_id)`로 존재 확인 후, `account_service.get(bot.config.account_id)`로
   `app_key` 사전 검증. `BotManager.start_bot()` 호출 후 audit action `bot.start`를 기록한다.
-  성공 응답은 `BotDetailResponse`와 같은 `{"bot": bot.get_info()}` envelope이다. cold-path
+  성공 응답은 `{"bot": bot.get_info()}` envelope이다. cold-path
   fallback은 없다.
-- `ante bot stop <bot_id>` ≡ `POST /api/bots/{bot_id}/stop`: live
+- `ante bot stop <bot_id>`: live
   `BotManager.get_bot(bot_id)` 후 `BotManager.stop_bot()` 호출, audit action `bot.stop`을
   기록한다. 응답은 `{"bot": bot.get_info()}` envelope. cold-path fallback은 없다.
-- `ante bot status <bot_id>` ≡ `GET /api/bots/{bot_id}`: read-only live
-  `BotManager.get_bot(bot_id)` 조회. 응답은 `{"bot": info}` envelope이며 Web API 상세
-  조회와 같이 가능한 경우 `strategy_name`/`strategy_author_name`/`strategy_author_id`/
+- `ante bot status <bot_id>`: read-only live
+  `BotManager.get_bot(bot_id)` 조회. 응답은 `{"bot": info}` envelope이며 가능한 경우
+  `strategy_name`/`strategy_author_name`/`strategy_author_id`/
   `strategy` (`strategy_registry` 보유 시), `budget` (`treasury_manager` 보유 시),
   `positions` (`trade_service` 보유 시)를 보강한다. read-only audit 대상은 아니다.
 
-세 명령 모두 `BotManager.get_bot()`이 `None`을 반환하면 Web API 404와 같은 의미의
+세 명령 모두 `BotManager.get_bot()`이 `None`을 반환하면
 stable error code `BOT_NOT_FOUND` (SSOT: `src/ante/bot/exceptions.py:BOT_NOT_FOUND_CODE`)
-로 실패한다. `start`에서 `app_key` 누락은 Web API 422와 같은 의미의 stable error code
-`BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`로 실패한다. `start`/`stop`에서 `BotError`는 Web
-API 409와 같은 의미의 stable error code `BOT_STATE_CONFLICT`로 매핑한다. JSON 모드는
+로 실패한다. `start`에서 `app_key` 누락은 stable error code
+`BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`로 실패한다. `start`/`stop`에서 `BotError`는
+stable error code `BOT_STATE_CONFLICT`로 매핑한다. JSON 모드는
 IPC error envelope에서 받은 `code`/`message`를 그대로 보존한다.
 
 `--strategy`는 등록된 `strategy_id`다. 전략 파일 경로를 직접 넘기려면 먼저
@@ -405,8 +415,8 @@ ante treasury allocate <bot_id> <금액> --account <account_id>    # 봇에 자�
 ante treasury deallocate <bot_id> <금액> --account <account_id>  # 봇 자금 회수
 
 # 일별 자산 스냅샷 조회
-ante --format json treasury snapshot --account <account_id>                        # 최근 스냅샷 (대시보드 D-1)
-ante --format json treasury snapshot --from <날짜> --to <날짜> --account <account_id>  # 기간별 스냅샷 (대시보드 D-2 차트)
+ante --format json treasury snapshot --account <account_id>                        # 최근 스냅샷
+ante --format json treasury snapshot --from <날짜> --to <날짜> --account <account_id>  # 기간별 스냅샷
 ante --format json treasury snapshot --date <날짜> --account <account_id>          # 특정일 스냅샷
 ```
 
@@ -660,7 +670,7 @@ ante member reset-password --recovery-key <key> (--new-password-env ENV_NAME | -
 ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file PATH)  # 복구 키 재발급 (공개 명령 allowlist — 현재 패스워드가 인증 수단)
 ```
 
-> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> 후속 implementation 정렬: #1543 (CLI 표면 가드 master-only로 일치),
 > #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
 > 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
 

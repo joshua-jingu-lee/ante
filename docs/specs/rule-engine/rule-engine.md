@@ -154,17 +154,10 @@
 
 상세 내용: [10-rule-engine-manager.md](10-rule-engine-manager.md)
 
-## REST API
+## CLI/IPC
 
-상세 내용: [11-rest-api.md](11-rest-api.md)
-
-### GET /api/accounts/{account_id}/rules
-
-상세 내용: [11-rest-api.md](11-rest-api.md)
-
-### PUT /api/accounts/{account_id}/rules/{rule_type}
-
-상세 내용: [11-rest-api.md](11-rest-api.md)
+계좌별 룰 런타임 변경은 `ante rule update <rule_type> --account <account_id>`를
+통해 수행한다. 상세 계약은 [09-rule-management.md](09-rule-management.md)를 따른다.
 
 ## CLI 인터페이스
 

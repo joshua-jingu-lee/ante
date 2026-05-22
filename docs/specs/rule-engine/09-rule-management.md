@@ -53,13 +53,13 @@ broker_type별 defaults와 stored overrides의 merge다.
   `test` broker는 default가 없다(24h 거래 가정).
 - merge 정책: type-key 기반. stored 항목이 default와 같은 `type`이면 stored가
   default를 override한다. 사용자/Agent는 `enabled: false`로 default를 명시
-  비활성화할 수 있으며, audit/UI/API 응답에서 그 결정이 드러나야 한다
-  (UI/API의 effective view는 후속 이슈).
-- reload: `ConfigChangedEvent` 처리 시에도 같은 merge 정책이 적용되어, PUT
+  비활성화할 수 있으며, audit/CLI 응답에서 그 결정이 드러나야 한다
+  (effective view는 후속 이슈).
+- reload: `ConfigChangedEvent` 처리 시에도 같은 merge 정책이 적용되어, update
   이후 reload 결과가 default를 잃지 않는다.
 
-GET/PUT API(`/api/accounts/{id}/rules*`)는 stored rules만 노출한다. effective
-rules의 별도 노출은 본 스펙의 후속 이슈에서 다룬다.
+CLI `rule update`는 stored rules만 갱신한다. effective rules의 별도 노출은 본
+스펙의 후속 이슈에서 다룬다.
 
 ### Static TOML seed
 

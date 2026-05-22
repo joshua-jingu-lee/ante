@@ -139,8 +139,7 @@ AuditLogger 기록은 다음 둘 중 하나의 경로로 확인한다:
    WHERE action = 'approval.cancel_invalid'
    ORDER BY created_at DESC;
   ```
-- Web API (`audit:read` scope) `GET /api/audit?action=approval.cancel_invalid` —
-  서버 가동 중이고 dashboard / API 경로가 활성화된 경우.
+- CLI `ante audit` 조회 명령이 제공되는 환경에서는 같은 action filter로 확인한다.
 
 ### 5. Rollback
 
@@ -161,7 +160,7 @@ AuditLogger 기록은 다음 둘 중 하나의 경로로 확인한다:
 - `ServiceRegistry.audit_logger` 가 `None` 인 환경(테스트 / legacy 마이그레이션)
   에서는 audit 호출이 skip 되며, ApprovalRequest 의 `history` append
   (`action: "cancelled_invalid_type"`) 가 fallback 추적 경로다.
-- web-api / 대시보드 노출은 본 PR scope 가 아니다 (Non-goal).
+- 추가 조회 표면 노출은 본 PR scope 가 아니다 (Non-goal).
 
 ## 관련 spec 링크
 

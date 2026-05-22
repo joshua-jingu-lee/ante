@@ -9,4 +9,4 @@
 - **Treasury 스펙**: RuleContext에서 계좌별 Treasury의 가용 예산(available) 조회
 - **Trade 스펙**: RuleContext에서 TradeService의 포지션/성과 정보 조회 — 포지션은 Trade 모듈이 단일 소유자
 - **Config 스펙**: DynamicConfigService로 룰 파라미터 런타임 변경
-- **Web API 스펙**: 룰 관리 CRUD API 제공
+- **CLI/IPC 스펙**: `ante rule update`로 계좌별 룰 파라미터를 런타임 변경

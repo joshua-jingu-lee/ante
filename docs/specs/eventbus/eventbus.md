@@ -182,7 +182,7 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 | `MemberRecoveryKeyRegeneratedEvent` | MemberService | Notification | `member_id`, `regenerated_by` |
 | `MemberAuthFailedEvent` | MemberService | Notification | `member_id`, `reason` |
 
-Member 변경 이벤트는 서버 실행 중 CLI IPC 또는 Web API 런타임 경로에서 발행한다.
+Member 변경 이벤트는 서버 실행 중 CLI IPC 런타임 경로에서 발행한다.
 서버 정지 상태의 maintenance fallback은 EventBus consumer를 호출하지 않으며, 감사 기록과
 canonical DB 상태를 남긴 뒤 서버 재시작 시 반영된다.
 
@@ -299,7 +299,7 @@ object.__setattr__(event, "_consumed", True)
 | `cleanup` | `retention_days: int = 30` | `int` | 보존 기간 초과 이벤트 삭제, 삭제 건수 반환 |
 
 **활용**:
-- 웹 대시보드에서 이벤트 타임라인 조회
+- CLI/리포트에서 이벤트 타임라인 조회
 - 주문 흐름 추적 (OrderRequest → ... → OrderFilled 전체 경로)
 - 장애 분석 시 이벤트 재현
 

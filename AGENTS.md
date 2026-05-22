@@ -25,12 +25,11 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 
 - **Agent 잠재성 우선**: 시스템이 AI Agent의 자유로운 활동을 제약해서는 안 된다. Ante는 거래 실행과 안전 규칙만 담당하는 얇은 인프라에 머물고, 나머지 판단 영역은 Agent에게 열어둔다.
 - **전략 전권 위임**: 전략의 설계와 수행은 AI Agent에게 최대한 일임한다. 전략은 정량적(가격, 지표) + 정성적(뉴스, 사건) 데이터를 자유롭게 활용할 수 있으며, 각 전략은 독립 모듈로 존재하여 시스템 코어와 완전히 분리된다.
-- **인간-AI 공용 인터페이스**: Ante의 모든 인터페이스(웹 대시보드, REST API, CLI, MCP 등)는 사용자와 AI Agent가 함께 사용하는 것을 전제로 설계한다. 사람이 읽기 좋은 UI와 Agent가 다루기 좋은 구조화된 출력을 동시에 지원하며, 어느 한쪽을 위한 설계가 다른 쪽의 사용성을 희생시키지 않도록 한다.
+- **인간-AI 공용 인터페이스**: Ante의 모든 인터페이스(CLI, IPC, 알림, 향후 MCP 등)는 사용자와 AI Agent가 함께 사용하는 것을 전제로 설계한다. 사람이 읽기 좋은 출력과 Agent가 다루기 좋은 구조화된 출력을 동시에 지원하며, 어느 한쪽을 위한 설계가 다른 쪽의 사용성을 희생시키지 않도록 한다.
 
 ## 기술 및 아키텍처
 
 > 상세 설계: [docs/architecture/README.md](docs/architecture/README.md)
-> 대시보드(프론트엔드): [docs/dashboard/architecture.md](docs/dashboard/architecture.md)
 > 설계 결정 이력: [docs/decisions/README.md](docs/decisions/README.md)
 
 ## 개발 프로세스
@@ -58,4 +57,4 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 - .gitignore 에 등록된 파일은 커밋 여부를 묻지 않는다.
 - 설계·계획 단계 에이전트(`superpowers:writing-plans` 등 스펙/플래닝 스킬)는 **GitHub 이슈 등록까지만** 수행한다.
 - Claude 오케스트레이터와 `/autopilot`은 `/implement-issue`·`/autopilot` 커맨드 계약에 따라 Plan Preflight 조율, 이슈/브랜치/PR 코멘트, PR 생성, 상태 보고 같은 오케스트레이션을 수행할 수 있다. 자세한 분담은 [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)를 따른다.
-- 직접 코드 구현과 작업 브랜치 수정은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@frontend-dev`, `@devops`, `@strategy-dev`)에게 위임한다.
+- 직접 코드 구현과 작업 브랜치 수정은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@devops`, `@strategy-dev`)에게 위임한다.

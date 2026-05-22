@@ -65,13 +65,11 @@ gh pr diff #{PR번호}
 
 | 변경 영역 / 신호 | 로딩 대상 |
 |---|---|
-| `src/ante/web/` | `docs/specs/web-api/web-api.md`, `.agent/skills/contract-drift-review.md` |
 | `src/ante/{모듈}/` | `docs/specs/{모듈}/{모듈}.md`, `.agent/skills/module-conventions.md` |
-| `frontend/` | `docs/dashboard/architecture.md`, `.agent/skills/frontend-conventions.md`, `.agent/skills/generated-artifact-sync.md` |
 | async 코드 포함 | `.agent/skills/asyncio-patterns.md` |
 | DB/DML/DDL 포함 | `.agent/skills/sqlite-patterns.md`, `.agent/skills/generated-artifact-sync.md` |
 | 캐시/세션/클라이언트/브로커/게이트웨이/설정 변경 | `.agent/skills/lifecycle-review.md` |
-| OpenAPI, schema, 생성 타입, CLI/DB 생성 문서 변경 | `.agent/skills/contract-drift-review.md`, `.agent/skills/generated-artifact-sync.md` |
+| schema, CLI/DB 생성 문서 변경 | `.agent/skills/contract-drift-review.md`, `.agent/skills/generated-artifact-sync.md` |
 | `release/*` PR, `pyproject.toml`, `CHANGELOG.md`, `Dockerfile`, `.github/workflows/publish.yml` | `docs/runbooks/06-release.md`, `docs/runbooks/03-git-workflow.md`, `docs/runbooks/04-ci-cd.md` |
 
 ### 3단계: 리뷰 확장 조건
@@ -112,7 +110,7 @@ gh pr diff #{PR번호}
 
 - 프로젝트 구조 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`를 실행했는지 확인한다.
 - DB DDL/schema 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`를 실행했는지 확인한다.
-- CLI reference, OpenAPI JSON, frontend generated types처럼 전용 check 명령이 없는 산출물은 대응 generate 명령 실행 후 `git diff --exit-code -- <산출물>` 결과가 검증 증거에 남았는지 확인한다.
+- CLI reference처럼 전용 check 명령이 없는 산출물은 대응 generate 명령 실행 후 `git diff --exit-code -- <산출물>` 결과가 검증 증거에 남았는지 확인한다.
 - 실행 증거가 없고 코드 독해로만 최신이라고 추론했다면 B3는 PASS가 아니라 FAIL 또는 follow-up으로 분리한다.
 
 #### C. 상태 전이 및 수명주기
@@ -156,21 +154,6 @@ release PR이면 추가로 확인한다.
 | F4 | release PR 범위 | `pyproject.toml`, `CHANGELOG.md`, 릴리스 노트 같은 메타데이터 변경만 포함하는가 |
 | F5 | release 검증 증거 | PR 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차가 있는가 |
 | F6 | publish 분리 | release PR 단계에서 PyPI/GHCR push를 수행하지 않는가 |
-
-#### G. 프론트엔드
-
-`frontend/`가 바뀐 경우에만 적용한다.
-
-| # | 검증 항목 | 판정 기준 |
-|---|---|---|
-| G1 | 디자인 토큰 준수 | 시맨틱 토큰만 사용했는가 |
-| G2 | 타이포그래피 체계 | 프로젝트가 정한 타입 스케일을 따르는가 |
-| G3 | API 임의 생성 금지 | 백엔드에 없는 엔드포인트를 만들지 않았는가 |
-| G4 | wire contract SSOT | `api.generated.ts`를 직접 수정하지 않고, generated type import가 `frontend/src/api/*.ts` 밖으로 새지 않았는가 |
-| G5 | adapter 경계 | `api/*.ts`가 generated raw response를 UI/domain `View` model로 변환하고, hooks/pages/components가 generated type을 직접 소비하지 않는가 |
-| G6 | 수동 API 타입 shadowing 금지 | 수동 `Response`/`Request`/`Payload` 타입 선언이나 `res.data as SomeManualType`로 drift를 숨기지 않는가 |
-| G7 | 데이터 흐름 | `api -> hooks -> pages -> components` 패턴을 따르는가 |
-| G8 | 빌드 통과 | `npm run build` 또는 동등 검증이 성공하는가 |
 
 ### 5단계: 결과 구조화
 

@@ -193,7 +193,6 @@ class Config:
         required_static: list[tuple[str, type]] = [
             ("db.path", str),
             ("parquet.base_path", str),
-            ("web.port", int),
         ]
         for key, expected_type in required_static:
             value = self.get(key)

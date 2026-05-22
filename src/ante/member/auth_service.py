@@ -101,7 +101,7 @@ class AuthService:
         return member
 
     async def authenticate_password(self, member_id: str, password: str) -> Member:
-        """패스워드 인증 (human 대시보드 로그인)."""
+        """패스워드 인증 (human 복구/maintenance)."""
         member = await self._get_member(member_id)
         if not member:
             await self._publish_auth_failed(member_id, "존재하지 않는 멤버")
@@ -136,10 +136,10 @@ class AuthService:
 
         legacy invalid-role member/token 차단 (#1466 — split #1417/B).
 
-        write path (#1465 — split #1417/A) 가 ``MemberService.register`` 와
-        Web API ingress 에서 enum membership 을 422/ValueError 로 막은 뒤에도,
-        그 이전에 DB 에 남은 ``role="oracle_invalid_role"`` 같은 row 는 그대로
-        남는다 (cleanup 은 #1468 비목표). 본 게이트는 그런 row 가 auth
+        write path (#1465 — split #1417/A) 가 ``MemberService.register``에서
+        enum membership 을 막은 뒤에도, 그 이전에 DB 에 남은
+        ``role="oracle_invalid_role"`` 같은 row 는 그대로 남는다
+        (cleanup 은 #1468 비목표). 본 게이트는 그런 row 가 auth
         principal 로 사용되는 것을 차단한다.
 
         검증 실패 시 ``MemberAuthFailedEvent`` + 알림을 발행해 운영자가 cleanup

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class TradeService:
     """Trade 모듈의 통합 인터페이스.
 
-    외부 모듈(Web API, CLI)은 이 클래스를 통해 접근.
+    CLI, IPC, 내부 모듈은 이 클래스를 통해 접근.
     """
 
     def __init__(
@@ -120,7 +120,7 @@ class TradeService:
     # ── 요약 ──────────────────────────────────────
 
     async def get_summary(self, bot_id: str, account_id: str) -> dict:
-        """봇 요약 정보 (대시보드용)."""
+        """봇 요약 정보."""
         positions = await self.get_positions(bot_id, account_id=account_id)
         performance = await self.get_performance(account_id=account_id, bot_id=bot_id)
         recent_trades = await self.get_trades(

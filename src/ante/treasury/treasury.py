@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 #
 # 5-value vocabulary, drift-checked against:
 #   - docs/specs/treasury/06-database-schema.md transaction_type 주석
-#   - frontend/src/types/treasury.ts TransactionType union
 #
 # 의미:
 #   - allocate            : 봇에 예산 할당 (Treasury.allocate)
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 #   - fill                : 주문 체결로 인한 자금 이동 기록 (_on_order_filled)
 #   - bot_stopped_release : 봇 중지 시 잔여 예약 자금 환수 (_on_bot_stopped)
 #
-# 새 값 추가 시 spec/frontend 동시 갱신과 drift regression 테스트
+# 새 값 추가 시 spec 동시 갱신과 drift regression 테스트
 # (tests/unit/test_treasury_transaction_vocabulary.py) 통과가 필요하다.
 TransactionType = Literal[
     "allocate",
@@ -1724,8 +1723,7 @@ class Treasury:
 
         ``tx_type``는 ``TRANSACTION_TYPE_VOCABULARY``에 속한 값만 허용한다
         (Literal 타입 힌트로 future drift를 차단). 새 값이 필요하면 spec
-        (``docs/specs/treasury/06-database-schema.md``), frontend
-        (``frontend/src/types/treasury.ts``), drift regression 테스트
+        (``docs/specs/treasury/06-database-schema.md``), drift regression 테스트
         (``tests/unit/test_treasury_transaction_vocabulary.py``)를 동시에
         갱신해야 한다.
         """

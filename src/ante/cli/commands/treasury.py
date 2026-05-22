@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import math
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 
 import click
 
@@ -25,6 +28,29 @@ def treasury() -> None:
 
 def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
+
+
+def validate_nonnegative_finite_amount(
+    ctx: click.Context | None,
+    param: click.Parameter | None,
+    value: float | None,
+) -> float | None:
+    """Click callback: finite amount >= 0."""
+    if value is None:
+        return None
+    if math.isnan(value) or math.isinf(value):
+        raise click.BadParameter(
+            f"{value!r}은(는) finite number여야 합니다 (NaN/Infinity 거부).",
+            ctx=ctx,
+            param=param,
+        )
+    if value < 0:
+        raise click.BadParameter(
+            f"{value!r}은(는) 0 이상이어야 합니다.",
+            ctx=ctx,
+            param=param,
+        )
+    return value
 
 
 async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
@@ -54,6 +80,23 @@ async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
     )
     await t.initialize()
     return t, db
+
+
+async def _create_treasury_manager():  # noqa: ANN202
+    from ante.account.service import AccountService
+    from ante.cli.main import get_db_path
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
+    from ante.treasury.manager import TreasuryManager
+
+    db = Database(get_db_path())
+    await db.connect()
+    eventbus = EventBus()
+    account_service = AccountService(db=db, eventbus=eventbus)
+    await account_service.initialize()
+    manager = TreasuryManager(db=db, eventbus=eventbus)
+    await manager.initialize_all(await account_service.list())
+    return manager, db
 
 
 @treasury.command()
@@ -94,6 +137,205 @@ def status(ctx: click.Context, account_id: str) -> None:
         click.echo(f"  총 예약        : {result['total_reserved']:>15,.0f}")
         click.echo(f"  미할당         : {result['unallocated']:>15,.0f}")
         click.echo(f"  봇 수          : {result['bot_count']:>15d}")
+
+
+@treasury.command("transactions")
+@click.option("--account", "account_id", default=None, help="계좌 ID 필터")
+@click.option(
+    "--type",
+    "tx_type",
+    type=click.Choice(
+        ["allocate", "deallocate", "release", "fill", "bot_stopped_release"]
+    ),
+    default=None,
+    help="거래 유형 필터",
+)
+@click.option("--bot", "bot_id", default=None, help="봇 ID 필터")
+@click.option("--from", "from_date", default=None, callback=validate_iso_date)
+@click.option("--to", "to_date", default=None, callback=validate_iso_date)
+@click.option("--limit", default=20, type=click.IntRange(1, 100), help="조회 수")
+@click.option("--offset", default=0, type=click.IntRange(min=0), help="시작 offset")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("treasury:read")
+def transactions(
+    ctx: click.Context,
+    account_id: str | None,
+    tx_type: str | None,
+    bot_id: str | None,
+    from_date: str | None,
+    to_date: str | None,
+    limit: int,
+    offset: int,
+) -> None:
+    """자금 변동 이력 조회."""
+    fmt = get_formatter(ctx)
+    if account_id is not None:
+        account_id = reject_invalid_account_id(
+            account_id, fmt, context="cli.treasury.transactions"
+        )
+    reject_inverted_date_range(from_date, to_date, fmt)
+
+    async def _run_transactions() -> dict:
+        from ante.cli.main import get_db_path
+        from ante.core.database import Database
+
+        db = Database(get_db_path(ctx))
+        await db.connect()
+        try:
+            where: list[str] = []
+            params: list[str | int] = []
+            if account_id:
+                where.append("account_id = ?")
+                params.append(account_id)
+            if tx_type:
+                where.append("transaction_type = ?")
+                params.append(tx_type)
+            if bot_id:
+                where.append("bot_id = ?")
+                params.append(bot_id)
+            if from_date:
+                where.append("created_at >= ?")
+                params.append(f"{from_date} 00:00:00")
+            if to_date:
+                where.append("created_at <= ?")
+                params.append(f"{to_date} 23:59:59")
+            where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+            try:
+                count_row = await db.fetch_one(
+                    f"SELECT COUNT(*) as cnt FROM treasury_transactions{where_sql}",
+                    tuple(params),
+                )
+                rows = await db.fetch_all(
+                    f"SELECT * FROM treasury_transactions{where_sql}"
+                    " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (*params, limit, offset),
+                )
+            except Exception as e:
+                if "no such table" in str(e).lower():
+                    return {"items": [], "total": 0}
+                raise
+            items = [
+                {
+                    "id": r["id"],
+                    "account_id": r["account_id"],
+                    "type": r["transaction_type"],
+                    "bot_id": r["bot_id"],
+                    "amount": r["amount"],
+                    "description": r["description"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+            return {"items": items, "total": int(count_row["cnt"]) if count_row else 0}
+        finally:
+            await db.close()
+
+    result = _run(_run_transactions())
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.table(
+            result["items"],
+            ["created_at", "account_id", "type", "bot_id", "amount"],
+        )
+
+
+@treasury.command("budgets")
+@click.option("--account", "account_id", default=None, help="계좌 ID 필터")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("treasury:read")
+def budgets(ctx: click.Context, account_id: str | None) -> None:
+    """봇별 예산 목록 조회."""
+    fmt = get_formatter(ctx)
+    if account_id is not None:
+        account_id = reject_invalid_account_id(
+            account_id, fmt, context="cli.treasury.budgets"
+        )
+
+    async def _run_budgets() -> dict:
+        if account_id is not None:
+            t, db = await _create_treasury(account_id)
+            treasuries = [t]
+        else:
+            manager, db = await _create_treasury_manager()
+            treasuries = manager.list_all()
+        try:
+            items = []
+            for treasury_obj in treasuries:
+                for budget in treasury_obj.list_budgets():
+                    data = asdict(budget)
+                    if hasattr(budget.last_updated, "isoformat"):
+                        data["last_updated"] = budget.last_updated.isoformat()
+                    items.append(data)
+            return {"budgets": items}
+        finally:
+            await db.close()
+
+    result = _run(_run_budgets())
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.table(
+            result["budgets"],
+            ["account_id", "bot_id", "allocated", "available", "reserved"],
+        )
+
+
+@treasury.command("set-balance")
+@click.argument("amount", type=float, callback=validate_nonnegative_finite_amount)
+@click.option("--account", "account_id", required=True, help="계좌 ID")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("treasury:admin")
+def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
+    """계좌 총 잔고 수동 설정."""
+    fmt = get_formatter(ctx)
+    actor = _get_member_id(ctx)
+    account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.treasury.set_balance"
+    )
+
+    async def _run_set_balance() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "treasury.set_balance",
+                {"account_id": account_id, "balance": amount},
+                actor=actor,
+            )
+        t, db = await _create_treasury(account_id)
+        try:
+            await t.set_account_balance(amount)
+            return {
+                "account_id": account_id,
+                "total_balance": t.account_balance,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_run_set_balance())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        click.echo(f"계좌 잔고 설정 완료: {account_id} {amount:,.0f}")
 
 
 @treasury.command()
@@ -289,6 +531,185 @@ def snapshot(
         _print_snapshot_list(result)
     else:
         _print_snapshot(result)
+
+
+@treasury.group("portfolio")
+def portfolio() -> None:
+    """포트폴리오 가치와 추이 조회."""
+
+
+def _portfolio_value_from_snapshot_or_summary(treasury_obj) -> dict:  # noqa: ANN001
+    async def _inner() -> dict:
+        snapshot = await treasury_obj.get_latest_snapshot()
+        if snapshot is not None:
+            return {
+                "account_id": treasury_obj.account_id,
+                "total_value": snapshot["total_asset"],
+                "daily_pnl": snapshot["daily_pnl"],
+                "daily_return": snapshot["daily_return"],
+                "unrealized_pnl": snapshot["unrealized_pnl"],
+                "snapshot_date": snapshot["snapshot_date"],
+                "updated_at": snapshot["created_at"],
+            }
+        summary = treasury_obj.get_summary()
+        return {
+            "account_id": treasury_obj.account_id,
+            "total_value": summary.get("total_evaluation", 0.0),
+            "daily_pnl": 0.0,
+            "daily_return": 0.0,
+            "unrealized_pnl": 0.0,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+
+    return _run(_inner())
+
+
+@portfolio.command("value")
+@click.option("--account", "account_id", default=None, help="계좌 ID")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("treasury:read")
+def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
+    """총 자산 가치 조회."""
+    fmt = get_formatter(ctx)
+    if account_id is not None:
+        account_id = reject_invalid_account_id(
+            account_id, fmt, context="cli.treasury.portfolio.value"
+        )
+
+    async def _run_value() -> dict:
+        if account_id is not None:
+            t, db = await _create_treasury(account_id)
+            treasuries = [t]
+        else:
+            manager, db = await _create_treasury_manager()
+            treasuries = manager.list_all()
+        try:
+            values = []
+            for treasury_obj in treasuries:
+                snapshot = await treasury_obj.get_latest_snapshot()
+                if snapshot is not None:
+                    values.append(
+                        {
+                            "account_id": treasury_obj.account_id,
+                            "total_value": snapshot["total_asset"],
+                            "daily_pnl": snapshot["daily_pnl"],
+                            "daily_return": snapshot["daily_return"],
+                            "unrealized_pnl": snapshot["unrealized_pnl"],
+                            "snapshot_date": snapshot["snapshot_date"],
+                            "updated_at": snapshot["created_at"],
+                        }
+                    )
+                else:
+                    summary = treasury_obj.get_summary()
+                    values.append(
+                        {
+                            "account_id": treasury_obj.account_id,
+                            "total_value": summary.get("total_evaluation", 0.0),
+                            "daily_pnl": 0.0,
+                            "daily_return": 0.0,
+                            "unrealized_pnl": 0.0,
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
+            total_value = sum(float(v["total_value"]) for v in values)
+            daily_pnl = sum(float(v["daily_pnl"]) for v in values)
+            unrealized_pnl = sum(float(v["unrealized_pnl"]) for v in values)
+            daily_return = daily_pnl / total_value if total_value else 0.0
+            return {
+                "total_value": total_value,
+                "daily_pnl": daily_pnl,
+                "daily_return": daily_return,
+                "unrealized_pnl": unrealized_pnl,
+                "accounts": values,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        finally:
+            await db.close()
+
+    result = _run(_run_value())
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        click.echo(f"  총 자산        : {result['total_value']:>15,.0f}")
+        click.echo(f"  당일 손익      : {result['daily_pnl']:>15,.0f}")
+        click.echo(f"  수익률         : {result['daily_return']:>15.4f}")
+        click.echo(f"  미실현 손익    : {result['unrealized_pnl']:>15,.0f}")
+
+
+@portfolio.command("history")
+@click.option("--account", "account_id", default=None, help="계좌 ID")
+@click.option("--from", "from_date", default=None, callback=validate_iso_date)
+@click.option("--to", "to_date", default=None, callback=validate_iso_date)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("treasury:read")
+def portfolio_history(
+    ctx: click.Context,
+    account_id: str | None,
+    from_date: str | None,
+    to_date: str | None,
+) -> None:
+    """기간별 자산 추이 조회."""
+    fmt = get_formatter(ctx)
+    if account_id is not None:
+        account_id = reject_invalid_account_id(
+            account_id, fmt, context="cli.treasury.portfolio.history"
+        )
+    reject_inverted_date_range(from_date, to_date, fmt)
+
+    end_date = to_date or datetime.now(UTC).strftime("%Y-%m-%d")
+    start_date = from_date or (datetime.now(UTC) - timedelta(days=30)).strftime(
+        "%Y-%m-%d"
+    )
+
+    async def _run_history() -> dict:
+        if account_id is not None:
+            t, db = await _create_treasury(account_id)
+            treasuries = [t]
+        else:
+            manager, db = await _create_treasury_manager()
+            treasuries = manager.list_all()
+        try:
+            by_date: dict[str, dict[str, float | str]] = {}
+            for treasury_obj in treasuries:
+                for snapshot in await treasury_obj.get_snapshots(start_date, end_date):
+                    row = by_date.setdefault(
+                        snapshot["snapshot_date"],
+                        {
+                            "date": snapshot["snapshot_date"],
+                            "total_asset": 0.0,
+                            "daily_pnl": 0.0,
+                            "daily_return": 0.0,
+                            "unrealized_pnl": 0.0,
+                        },
+                    )
+                    row["total_asset"] = float(row["total_asset"]) + float(
+                        snapshot["total_asset"]
+                    )
+                    row["daily_pnl"] = float(row["daily_pnl"]) + float(
+                        snapshot["daily_pnl"]
+                    )
+                    row["unrealized_pnl"] = float(row["unrealized_pnl"]) + float(
+                        snapshot["unrealized_pnl"]
+                    )
+            data = []
+            for row in sorted(by_date.values(), key=lambda x: str(x["date"])):
+                total_asset = float(row["total_asset"])
+                daily_pnl = float(row["daily_pnl"])
+                row["daily_return"] = daily_pnl / total_asset if total_asset else 0.0
+                data.append(row)
+            return {"data": data, "start_date": start_date, "end_date": end_date}
+        finally:
+            await db.close()
+
+    result = _run(_run_history())
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.table(result["data"], ["date", "total_asset", "daily_pnl", "daily_return"])
 
 
 def _print_snapshot(s: dict) -> None:

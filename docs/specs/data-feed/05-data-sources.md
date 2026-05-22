@@ -8,7 +8,7 @@
 
 `getStockPriceInfo` 단일 호출로 OHLCV + 거래대금 + 시가총액 + 상장주식수를 동시 확보.
 
-> API 레퍼런스: [docs/references/dashboard/data-go-kr-stock-price-api.md](../../references/dashboard/data-go-kr-stock-price-api.md)
+> API 레퍼런스: [docs/references/external-apis/data-go-kr-stock-price-api.md](../../references/external-apis/data-go-kr-stock-price-api.md)
 
 | 제약 | 값 |
 |------|-----|
@@ -66,7 +66,7 @@ HTTP 상태 코드만으로 성공 여부를 판단하면 안 된다.
 
 ### DART OpenAPI — 재무제표
 
-> API 레퍼런스: [docs/references/dashboard/dart-openapi.md](../../references/dashboard/dart-openapi.md)
+> API 레퍼런스: [docs/references/external-apis/dart-openapi.md](../../references/external-apis/dart-openapi.md)
 
 | 제약 | 값 |
 |------|-----|

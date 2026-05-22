@@ -13,7 +13,7 @@ from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
-from ante.cli.middleware import require_auth, require_scope
+from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.strategy.registry import StrategyStatus
 
 # `StrategyStatus` enum이 단일 SSOT이며 (#1463에서 임시 frozenset 복사본 제거),
@@ -40,6 +40,21 @@ async def _create_registry():  # noqa: ANN202
     await db.connect()
     registry = StrategyRegistry(db)
     return registry, db
+
+
+async def _find_bot_id_for_strategy(db, strategy_id: str) -> str | None:  # noqa: ANN001
+    """전략에 연결된 첫 번째 봇 ID를 반환한다."""
+    try:
+        row = await db.fetch_one(
+            "SELECT bot_id FROM bots WHERE strategy_id = ? AND status != 'deleted' "
+            "ORDER BY bot_id LIMIT 1",
+            (strategy_id,),
+        )
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return None
+        raise
+    return row["bot_id"] if row else None
 
 
 @strategy.command()
@@ -275,6 +290,69 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         )
 
 
+@strategy.command("set-status")
+@click.argument("strategy_id")
+@click.option(
+    "--status",
+    required=True,
+    type=click.Choice(["adopted", "archived"]),
+    help="변경할 전략 상태",
+)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("strategy:write")
+def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> None:
+    """전략 상태 변경."""
+    fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
+    target_status = StrategyStatus(status)
+
+    async def _set_status() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "strategy.set_status",
+                {"strategy_id": strategy_id, "status": target_status.value},
+                actor=actor,
+            )
+
+        registry, db = await _create_registry()
+        try:
+            await registry.initialize()
+            await registry.update_status(strategy_id, target_status)
+            record = await registry.get(strategy_id)
+            return {
+                "strategy_id": strategy_id,
+                "status": target_status.value,
+                "name": record.name if record else "",
+                "version": record.version if record else "",
+            }
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_set_status())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except ValueError as e:
+        fmt.error(str(e), code="STRATEGY_INVALID_STATUS_TRANSITION")
+        raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code="STRATEGY_ERROR")
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.success(f"전략 상태 변경 완료: {strategy_id} -> {status}", result)
+
+
 @strategy.command("info")
 @click.argument("name")
 @format_option
@@ -428,6 +506,87 @@ def _load_strategy_params(filepath: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+@strategy.command("summary")
+@click.argument("strategy_id")
+@click.option(
+    "--period",
+    required=True,
+    type=click.Choice(["daily", "weekly", "monthly"]),
+    help="집계 기간",
+)
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("strategy:read")
+def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
+    """전략 기간별 성과 집계."""
+    fmt = get_formatter(ctx)
+
+    async def _summary() -> dict | None:
+        from ante.trade.performance import PerformanceTracker
+
+        registry, db = await _create_registry()
+        try:
+            await registry.initialize()
+            record = await registry.get(strategy_id)
+            if record is None:
+                return None
+
+            tracker = PerformanceTracker(db)
+            bot_id = await _find_bot_id_for_strategy(db, strategy_id)
+            if period == "daily":
+                daily_summaries = await tracker.get_daily_summary(bot_id=bot_id)
+                items = [asdict(s) for s in daily_summaries]
+            elif period == "weekly":
+                weekly_summaries = await tracker.get_weekly_summary(bot_id=bot_id)
+                items = [
+                    {**asdict(s), "week_label": s.week_label} for s in weekly_summaries
+                ]
+            else:
+                monthly_summaries = await tracker.get_monthly_summary(bot_id=bot_id)
+                items = [asdict(s) for s in monthly_summaries]
+
+            return {
+                "strategy_id": strategy_id,
+                "period": period,
+                "bot_id": bot_id,
+                "items": items,
+            }
+        finally:
+            await db.close()
+
+    try:
+        result = _run(_summary())
+    except Exception as e:
+        fmt.error(str(e), code="STRATEGY_ERROR")
+        raise SystemExit(1) from e
+
+    if result is None:
+        fmt.error(f"전략을 찾을 수 없습니다: {strategy_id}", code="STRATEGY_NOT_FOUND")
+        raise SystemExit(1)
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        rows = result["items"]
+        if not rows:
+            fmt.output({"message": "성과 집계 없음", "items": []})
+            return
+        columns = {
+            "daily": ["date", "realized_pnl", "trade_count", "win_rate"],
+            "weekly": [
+                "week_start",
+                "week_end",
+                "week_label",
+                "realized_pnl",
+                "trade_count",
+                "win_rate",
+            ],
+            "monthly": ["year", "month", "realized_pnl", "trade_count", "win_rate"],
+        }[period]
+        fmt.table(rows, columns)
 
 
 @strategy.command("performance")

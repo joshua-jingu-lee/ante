@@ -249,7 +249,7 @@ class IPCServer:
 
         Refs #1184: 기존 error 응답 포맷
         ``{"id", "status": "error", "error": {"code", "message"}}``과 동일한
-        구조를 사용해 다른 IPC consumer(CLI/MCP/dashboard)가 별도 처리 없이
+        구조를 사용해 다른 IPC consumer(CLI/MCP)가 별도 처리 없이
         기존 generic error path로 흘러가도록 한다.
         """
         return {
@@ -270,8 +270,7 @@ class IPCServer:
           ``SERVICE_UNAVAILABLE``. 서비스 리소스 종료 구간 또는 종료 이후이므로
           read-only도 closed resource 접근 위험.
         * ``SHUTTING_DOWN`` + mutating: ``SERVICE_UNAVAILABLE``.
-        * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정,
-          dashboard 가시성 보존).
+        * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정).
         * ``RUNNING``: 정상 dispatch.
         """
         request_id = request.get("id", str(uuid.uuid4()))

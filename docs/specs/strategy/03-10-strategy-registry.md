@@ -62,8 +62,8 @@ CREATE TABLE strategies (
 | `author_name` | `str` | `"agent"` | 작성자 표시 이름 |
 | `author_id` | `str` | `"agent"` | 작성자 ID |
 | `validation_warnings` | `list[str]` | `[]` | 검증 경고 목록 |
-| `rationale` | `str` | `""` | 투자 논거. Agent가 전략 제출 시 작성. 대시보드 전략 상세에서 표시 |
-| `risks` | `str` | `""` | 주요 리스크. Agent가 전략 제출 시 작성. 대시보드 전략 상세에서 표시 |
+| `rationale` | `str` | `""` | 투자 논거. Agent가 전략 제출 시 작성 |
+| `risks` | `str` | `""` | 주요 리스크. Agent가 전략 제출 시 작성 |
 
 **근거**:
 - `strategy_id`는 `{name}_v{version}` 형식 — 동일 전략의 다른 버전 공존 가능

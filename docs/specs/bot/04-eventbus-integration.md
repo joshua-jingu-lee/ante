@@ -20,7 +20,7 @@
 
 ### BotStepCompletedEvent
 
-`_run_loop()`의 매 실행 사이클(on_step) 완료 시 발행한다. EventHistoryStore가 `event_log` 테이블에 자동 영속화하므로, 대시보드 봇 실행 로그의 데이터 소스로 활용된다.
+`_run_loop()`의 매 실행 사이클(on_step) 완료 시 발행한다. EventHistoryStore가 `event_log` 테이블에 자동 영속화하므로, 봇 실행 로그의 데이터 소스로 활용된다.
 
 ```python
 @dataclass(frozen=True)

@@ -301,26 +301,13 @@ CREATE TABLE IF NOT EXISTS trade_logs (
 );
 ```
 
-## 12. API 엔드포인트 응답 규칙
+## 12. CLI/IPC 응답 규칙
 
-### response_model 필수
-
-모든 새 API 엔드포인트는 반드시 `response_model`을 명시한다:
-
-```python
-# 좋음: response_model 명시
-@router.get("/bots", response_model=BotListResponse)
-async def list_bots() -> BotListResponse:
-    ...
-
-# 나쁨: dict 직접 반환
-@router.get("/bots")
-async def list_bots() -> dict:
-    return {"bots": [...]}
-```
+새 CLI/IPC 표면은 사람이 읽는 text 출력과 agent가 읽는 JSON 출력을 모두
+고려한다.
 
 **규칙**:
-- 응답 모델은 `src/ante/web/schemas.py`에 Pydantic 모델로 정의한다
-- `dict`를 직접 반환하는 것은 금지한다
-- 기존 `response_model`(Pydantic 모델)을 변경하려면 별도 스키마 변경 이슈를 거친다 (참조: `docs/runbooks/01-development-process.md` §8)
-- 예외: 204 응답(삭제)과 동적 스키마 엔드포인트는 `response_model` 면제
+- CLI 명령은 기존 `format_option` / `OutputFormatter` 패턴을 따른다.
+- IPC mutating command는 `actor`, audit log, 구조화된 `{...}` result를 남긴다.
+- 입력 오류는 traceback 대신 도메인 코드가 있는 구조화 에러로 종료한다.
+- 기존 CLI JSON shape를 바꾸는 변경은 별도 스키마 변경 이슈를 거친다.

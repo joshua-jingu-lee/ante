@@ -545,9 +545,8 @@ async def test_delete_error_message_includes_cold_path_bot_remove_procedure(
 async def test_suspend_all(service):
     """모든 ACTIVE 계좌 정지. DELETED 제외.
 
-    SSOT (`docs/specs/web-api/04-system-endpoints.md`): 반환은 처리 대상 계좌
-    list (DELETED 제외). 각 항목은 ``account_id``, ``previous_status``, ``status``,
-    ``changed`` 4개 키만 포함한다.
+    반환은 처리 대상 계좌 list (DELETED 제외)이다. 각 항목은 ``account_id``,
+    ``previous_status``, ``status``, ``changed`` 4개 키만 포함한다.
     """
     await service.create(_make_account("acc1"))
     await service.create(_make_account("acc2"))
@@ -598,9 +597,8 @@ async def test_suspend_all_idempotent_for_already_suspended(service):
 async def test_activate_all(service):
     """모든 SUSPENDED 계좌 활성화. DELETED 제외.
 
-    SSOT (`docs/specs/web-api/04-system-endpoints.md`): 반환은 처리 대상 계좌
-    list (DELETED 제외). 각 항목은 ``account_id``, ``previous_status``, ``status``,
-    ``changed`` 4개 키만 포함한다.
+    반환은 처리 대상 계좌 list (DELETED 제외)이다. 각 항목은 ``account_id``,
+    ``previous_status``, ``status``, ``changed`` 4개 키만 포함한다.
     """
     await service.create(_make_account("acc1"))
     await service.create(_make_account("acc2"))

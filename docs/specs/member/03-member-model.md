@@ -26,9 +26,9 @@ class Member:
     token_expires_at: str = ""  # 토큰 만료 시각 (기본 90일 TTL)
 ```
 
-### 공개 API 응답 노출 계약
+### 공개 응답 노출 계약
 
-Web API member 응답(`GET /api/members`, `/api/members/{id}`, create/rotate-token/suspend/reactivate/revoke/update-scopes)은 Member 필드 중 `member_id, type, role, org, name, emoji, status, scopes, created_at, created_by, last_active_at, suspended_at, revoked_at, token_expires_at`만 노출한다. `token_hash`, `password_hash`, `recovery_key_hash`는 credential verifier material이므로 응답 schema·runtime body에서 **항상 제외**한다. raw token은 create/rotate-token 응답에서 member 객체 밖 top-level로 1회만 반환한다.
+CLI/IPC member 응답은 Member 필드 중 `member_id, type, role, org, name, emoji, status, scopes, created_at, created_by, last_active_at, suspended_at, revoked_at, token_expires_at`만 노출한다. `token_hash`, `password_hash`, `recovery_key_hash`는 credential verifier material이므로 응답 body에서 **항상 제외**한다. raw token은 create/rotate-token 응답에서 member 객체 밖 top-level로 1회만 반환한다.
 
 ### 토큰 만료 관리
 

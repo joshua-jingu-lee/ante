@@ -3,14 +3,13 @@
 본 모듈은 Ante 시스템 전반에서 사용하는 scope 문자열 vocabulary 의 단일 진실
 저장소(SSOT)다. 인증 후 권한 판정에 사용되는 모든 scope 토큰은 본 모듈의
 ``SCOPE_VOCABULARY`` 에 등록되어 있어야 하며, 등록되지 않은 scope 문자열은
-서비스 계층/Web API ingress/CLI 입력 단계에서 모두 거부된다.
+서비스 계층과 CLI 입력 단계에서 모두 거부된다.
 
 설계 결정 (#1439 — Codex Plan Review r1):
-- SSOT 위치를 ``src/ante/web/deps.py`` 의 require_scope alias 가 아닌 본
-  ``src/ante/member`` 패키지로 둔다. Member 모듈이 principal/credential/scope
-  vocabulary 전체의 SSOT 라는 spec 결정(``docs/specs/member/02-design-decisions.md``
-  "Authorization SSOT")과 일관성을 맞춘다. ``ante.web.deps`` 의 ``require_X_Y``
-  alias 들은 본 vocabulary 의 소비처이며 SSOT 가 아니다.
+- SSOT 위치를 ``src/ante/member`` 패키지로 둔다. Member 모듈이
+  principal/credential/scope vocabulary 전체의 SSOT 라는 spec 결정
+  (``docs/specs/member/02-design-decisions.md`` "Authorization SSOT")과
+  일관성을 맞춘다.
 - vocabulary 정의는 ``docs/specs/member/02-design-decisions.md`` 의 "권한 범위
   (Scope)" 매트릭스(read / write / admin / run 컬럼, "—" 셀 제외)에서 직접
   파생된다. spec doc 매트릭스의 모든 valid cell 은 본 frozenset 의 원소로
@@ -96,8 +95,6 @@ def is_valid_scope(scope: str) -> bool:
 class InvalidScopeError(ValueError):
     """SCOPE_VOCABULARY 에 없는 scope 문자열이 service 계층에 전달된 경우.
 
-    Web API ingress(Pydantic field validator)는 동일 invariant 를 위반한
-    요청을 422 로 차단하므로 본 예외가 ingress 경로에서 raise 되지는 않는다.
     CLI direct path 와 내부 caller (``MemberService.register`` /
     ``update_scopes`` 직접 호출) 가 invalid scope 를 넘기는 경우 본 예외가
     defense-in-depth 로 raise 된다.

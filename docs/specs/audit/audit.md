@@ -80,16 +80,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 
 ## 감사 로그 조회 인터페이스
 
-### Web API
-
-```
-GET /api/audit?member_id=agent-01&action=bot.&from_date=2026-03-12&to_date=2026-03-19&limit=100&offset=0
-```
-
-응답: `{ "logs": [...], "total": 42 }`
-
-### CLI
-
 CLI 명령 시그니처와 실행 분류의 SSOT는
 [cli/03-commands.md](../cli/03-commands.md#ante-audit--감사-로그-조회)다.
 
@@ -107,42 +97,15 @@ ante --format json audit list \
 
 ## 감사 로그 기록 지점
 
-AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web API와 CLI** — 사용자/Agent 액션의 진입점에서 수행한다.
+AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **CLI/IPC** — 사용자/Agent 액션의 진입점에서 수행한다.
 
 ### 기록 원칙
 
 - **상태 변경 액션만 기록**: GET/조회는 기록하지 않는다
-- **진입점에서 기록**: 서비스 내부가 아닌, Web API 라우트 핸들러와 CLI 커맨드 핸들러에서 호출한다
-- **member_id 식별**: Web API는 세션 쿠키(`ante_session`)에서, CLI는 토큰(`ANTE_MEMBER_TOKEN`)에서 추출한다
+- **진입점에서 기록**: 서비스 내부가 아닌, CLI 커맨드 핸들러나 IPC handler에서 호출한다
+- **member_id 식별**: CLI는 토큰(`ANTE_MEMBER_TOKEN`)에서 추출하고 IPC에는 검증된 actor를 전달한다
 
-### Web API 기록 대상
-
-| 엔드포인트 | action | resource 예시 |
-|-----------|--------|--------------|
-| `POST /auth/login` | `auth.login` | `member:{member_id}` |
-| `POST /auth/logout` | `auth.logout` | `member:{member_id}` |
-| `PATCH /approvals/{id}/status` | `approval.approve` / `approval.reject` | `approval:{id}` |
-| `POST /bots` | `bot.create` | `bot:{bot_id}` |
-| `POST /bots/{id}/start` | `bot.start` | `bot:{bot_id}` |
-| `POST /bots/{id}/stop` | `bot.stop` | `bot:{bot_id}` |
-| `DELETE /bots/{id}` | `bot.delete` | `bot:{bot_id}` |
-| `POST /members` | `member.create` | `member:{member_id}` |
-| `POST /members/{id}/suspend` | `member.suspend` | `member:{member_id}` |
-| `POST /members/{id}/reactivate` | `member.reactivate` | `member:{member_id}` |
-| `POST /members/{id}/revoke` | `member.revoke` | `member:{member_id}` |
-| `POST /members/{id}/rotate-token` | `member.rotate_token` | `member:{member_id}` |
-| `PATCH /members/{id}/password` | `member.change_password` | `member:{member_id}` |
-| `PUT /members/{id}/scopes` | `member.update_scopes` | `member:{member_id}` |
-| `PUT /config/{key}` | `config.update` | `config:{key}` |
-| `POST /treasury/.../allocate` | `treasury.allocate` | `bot:{bot_id}` |
-| `POST /treasury/.../deallocate` | `treasury.deallocate` | `bot:{bot_id}` |
-| `POST /treasury/balance` | `treasury.set_balance` | `treasury` |
-| `POST /system/halt` | `system.halt` | `system:kill_switch` |
-| `POST /system/clear-halt` | `system.clear_halt` | `system:kill_switch` |
-| `POST /reports` | `report.submit` | `report:{report_id}` |
-| `DELETE /data/datasets/{id}` | `data.delete_dataset` | `dataset:{dataset_id}` |
-
-### CLI 기록 대상
+### CLI/IPC 기록 대상
 
 | 커맨드 | action | resource 예시 |
 |--------|--------|--------------|
@@ -165,66 +128,14 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **Web
 | `ante member reset-password` | `member.reset_password` | `member:{member_id}` |
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{member_id}` |
 
-`ante bot start`/`ante bot stop`은 Web API `POST /api/bots/{bot_id}/start` /
-`POST /api/bots/{bot_id}/stop`과 같은 audit action(`bot.start`/`bot.stop`) 이름을
-공유한다. CLI/IPC와 Web API 양쪽 호출자의 봇 생애주기 변경이 단일 audit action
-namespace로 모인다. `ante bot status`는 read-only live 조회이므로 audit 대상이 아니다
+`ante bot start`/`ante bot stop`은 audit action(`bot.start`/`bot.stop`) 이름을
+사용한다. 봇 생애주기 변경은 단일 audit action namespace로 모인다.
+`ante bot status`는 read-only live 조회이므로 audit 대상이 아니다
 (상태 변경 액션만 기록하는 audit 기록 원칙).
 
-### 구현 방식 — 이중 구조
+### 구현 방식
 
-감사 로그는 **미들웨어 안전망 + 핸들러 명시적 호출**의 이중 구조로 기록한다.
-새 엔드포인트가 추가될 때 핸들러에서 audit 호출을 빠뜨려도, 미들웨어가 최소한의 기록을 보장한다.
-
-| 계층 | 역할 | 기록 내용 |
-|------|------|----------|
-| **미들웨어** (안전망) | 모든 상태 변경 API를 자동 포착 | `action=api:post`, `resource=/api/bots/bot-001/stop` — 최소한의 정보 |
-| **핸들러** (명시적) | 의미 있는 세부 정보 보강 | `action=bot.stop`, `resource=bot:bot-001`, `detail=...` |
-
-#### Web API — AuditMiddleware (안전망)
-
-모든 POST/PUT/DELETE/PATCH 요청 중 성공(2xx)한 것을 자동 기록한다.
-핸들러에서 이미 명시적으로 기록한 경우에도 미들웨어 레코드가 별도로 남는다 — 이중 기록은 감사 목적상 문제가 되지 않으며, `action` 접두사(`api:` vs `bot.` 등)로 구분 가능하다.
-
-```python
-class AuditMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-            if 200 <= response.status_code < 400:
-                member_id = getattr(request.state, "member_id", "anonymous")
-                await self.audit_logger.log(
-                    member_id=member_id,
-                    action=f"api:{request.method.lower()}",
-                    resource=request.url.path,
-                    ip=request.client.host if request.client else "",
-                )
-        return response
-```
-
-`app.py`에서 CORSMiddleware와 함께 등록한다.
-
-#### Web API — 핸들러 명시적 호출 (보강)
-
-각 라우트 핸들러에서 상태 변경 성공 후 `audit_logger.log()`를 호출한다. 미들웨어보다 정확한 action/resource/detail을 기록한다.
-
-```python
-# 라우트 핸들러 예시 (bots.py)
-@router.post("/bots/{bot_id}/stop")
-async def stop_bot(bot_id: str, request: Request):
-    await bot_manager.stop_bot(bot_id)
-    await audit_logger.log(
-        member_id=request.state.member_id,
-        action="bot.stop",
-        resource=f"bot:{bot_id}",
-        ip=request.client.host,
-    )
-    return {"status": "ok"}
-```
-
-#### CLI — 명시적 호출
-
-CLI는 진입점이 명확하고 커맨드 수가 한정적이므로, 미들웨어 없이 명시적 호출만으로 충분하다.
+CLI/IPC는 진입점이 명확하고 커맨드 수가 한정적이므로, 명시적 호출로 기록한다.
 
 ```python
 # CLI 커맨드 예시 (approval.py)

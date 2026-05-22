@@ -15,10 +15,9 @@ EventBus 구독, 외부 signal channel에 영향을 주므로 런타임 IPC로 �
 DB의 persisted state를 직접 정리한다. 서버 실행 중 조회는 IPC로 live 상태를 우선
 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다.
 
-`ante bot start/stop/status`는 Web API 봇 제어 라우트(`POST /api/bots/{bot_id}/start`,
-`POST /api/bots/{bot_id}/stop`, `GET /api/bots/{bot_id}`)와 같은 live 서버 경로로 계약을
-정의한다. 세 명령 모두 서버가 실행 중일 때만 동작하며, cold-path fallback은 없다. 정렬
-계약은 [cli/03-commands.md](../cli/03-commands.md#ante-bot--봇-관리)에 있다.
+`ante bot start/stop/status`는 live 서버 경로로 계약을 정의한다. 세 명령 모두 서버가
+실행 중일 때만 동작하며, cold-path fallback은 없다. 정렬 계약은
+[cli/03-commands.md](../cli/03-commands.md#ante-bot--봇-관리)에 있다.
 
 > **구현 진행 상황 (#1698 epic)**: 본 절은 그 계약을 사전에 확정하는 SSOT다. 현재
 > main(`8479e53`)의 `ante bot --help`에는 `start/stop/status`가 아직 노출되지 않으며,
@@ -34,7 +33,7 @@ ante bot create --name "Momentum Bot" --strategy momentum_breakout_v1.0.0 --acco
 ante bot create --name "Agent Relay" --strategy agent_relay_v1.0.0 --account us-stock
 # → bot_id: bot_002, signal_key: sk_a1b2c3d4 (외부 시그널 수신 가능)
 
-# 봇 시작 — Web API POST /api/bots/{bot_id}/start와 같은 동작. app_key 사전 검증 + audit bot.start
+# 봇 시작 — app_key 사전 검증 + audit bot.start
 ante bot start bot_001
 
 # 봇 목록 조회
@@ -42,10 +41,10 @@ ante bot list
 ante bot list --account domestic         # 계좌별 필터
 ante --format json bot list              # JSON 출력은 root 전역 옵션
 
-# 봇 상태 조회 — Web API GET /api/bots/{bot_id}와 같은 live 조회. {bot: ...} envelope
+# 봇 상태 조회 — live 조회. {bot: ...} envelope
 ante bot status bot_001
 
-# 봇 중지 — Web API POST /api/bots/{bot_id}/stop과 같은 동작. audit bot.stop
+# 봇 중지 — audit bot.stop
 ante bot stop bot_001
 
 # 봇 삭제 — --yes 필수. 서버 실행 중이면 IPC, 서버 정지 중이면 cold-path cleanup

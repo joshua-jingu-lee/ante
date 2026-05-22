@@ -29,7 +29,6 @@ CREATE TABLE treasury_transactions (
     --   'fill'                 : 주문 체결로 인한 자금 이동
     --   'bot_stopped_release'  : 봇 중지 시 잔여 예약 자금 환수
     -- 코드 SSOT: src/ante/treasury/treasury.py::TRANSACTION_TYPE_VOCABULARY
-    -- 프런트엔드 SSOT: frontend/src/types/treasury.ts::TransactionType
     transaction_type TEXT NOT NULL,
     amount           REAL NOT NULL,
     description      TEXT DEFAULT '',

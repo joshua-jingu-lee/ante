@@ -41,7 +41,7 @@
 ### 예시
 
 ```
-[feat] 전략 백테스트 결과 비교 대시보드
+[feat] 전략 백테스트 결과 비교 리포트
 [fix] Treasury 잔고 계산 시 소수점 반올림 오류
 [refactor] Broker 어댑터 인터페이스 통일
 [perf] Parquet 읽기 시 컬럼 프루닝 적용

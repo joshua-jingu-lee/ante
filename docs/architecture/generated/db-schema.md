@@ -4,10 +4,10 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
-> 마지막 갱신: 2026-05-05
+> 마지막 갱신: 2026-05-22
 
-- 테이블: **22**개
-- 인덱스: **31**개
+- 테이블: **21**개
+- 인덱스: **29**개
 
 ## 목차
 
@@ -35,7 +35,6 @@ erDiagram
     strategies ||--o{ trades : "strategy_id"
     strategies ||--o{ reports : "strategy_name"
     dynamic_config ||--o{ dynamic_config_history : "key"
-    members ||--o{ sessions : "member_id"
     members ||--o{ audit_log : "member_id"
 ```
 
@@ -43,7 +42,7 @@ erDiagram
 
 | # | 테이블 | 모듈 | 설명 | 컬럼 수 |
 |---|--------|------|------|---------|
-| 1 | [accounts](#accounts) | `account` | 계좌 등록 정보 | 16 |
+| 1 | [accounts](#accounts) | `account` | 계좌 등록 정보 | 17 |
 | 2 | [approvals](#approvals) | `approval` | 결재 요청 | 15 |
 | 3 | [audit_log](#audit_log) | `audit` | 멤버 액션 감사 로그 | 7 |
 | 4 | [backtest_runs](#backtest_runs) | `backtest` | 백테스트 실행 이력 | 11 |
@@ -64,7 +63,6 @@ erDiagram
 | 19 | [treasury_transactions](#treasury_transactions) | `treasury` | 자금 트랜잭션 이력 | 7 |
 | 20 | [treasury_state](#treasury_state) | `treasury` | 계좌별 자산 상태 | 6 |
 | 21 | [treasury_daily_snapshots](#treasury_daily_snapshots) | `treasury` | 일간 자산 스냅샷 | 14 |
-| 22 | [sessions](#sessions) | `web` | 서버사이드 세션 | 6 |
 
 ## DDL
 
@@ -88,6 +86,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     broker_config TEXT NOT NULL DEFAULT '{}',
     buy_commission_rate  REAL NOT NULL DEFAULT 0,
     sell_commission_rate REAL NOT NULL DEFAULT 0,
+    market_order_reserve_buffer_rate REAL NOT NULL DEFAULT 0.005,
     status       TEXT NOT NULL DEFAULT 'active'
         CHECK(status IN ('active', 'suspended', 'deleted')),
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -544,26 +543,6 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 );
 ```
 
-### sessions
-
-모듈: `web.session`
-
-```sql
-CREATE TABLE IF NOT EXISTS sessions (
-    session_id    TEXT PRIMARY KEY,
-    member_id     TEXT NOT NULL,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at    TEXT NOT NULL,
-    ip_address    TEXT DEFAULT '',
-    user_agent    TEXT DEFAULT ''
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_member_id
-    ON sessions(member_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
-    ON sessions(expires_at);
-```
-
 ## 인덱스 목록
 
 | # | 인덱스명 | 테이블 | 컬럼 |
@@ -597,8 +576,6 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
 | 27 | `idx_trades_status` | `trades` | `status` |
 | 28 | `idx_bot_budgets_account` | `bot_budgets` | `account_id` |
 | 29 | `idx_treasury_transactions_account` | `treasury_transactions` | `account_id` |
-| 30 | `idx_sessions_member_id` | `sessions` | `member_id` |
-| 31 | `idx_sessions_expires_at` | `sessions` | `expires_at` |
 
 ## 보존 정책
 
@@ -625,5 +602,4 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
 | `treasury_transactions` | 영구 보존 |
 | `treasury_state` | 영구 보존 |
 | `treasury_daily_snapshots` | 영구 보존 |
-| `sessions` | 만료 후 삭제 |
 

@@ -43,6 +43,7 @@ async def _create_trade_service():  # noqa: ANN202
 
 @trade.command("list")
 @click.option("--bot", "bot_id", default=None, help="봇 ID 필터")
+@click.option("--strategy", "strategy_id", default=None, help="전략 ID 필터")
 @click.option(
     "--from",
     "from_date",
@@ -65,6 +66,7 @@ async def _create_trade_service():  # noqa: ANN202
 def trade_list(
     ctx: click.Context,
     bot_id: str | None,
+    strategy_id: str | None,
     from_date: str | None,
     to_date: str | None,
     limit: int,
@@ -89,12 +91,17 @@ def trade_list(
             fd = datetime.fromisoformat(from_date) if from_date else None
             td = datetime.fromisoformat(to_date) if to_date else None
             trades = await service.get_trades(
-                bot_id=bot_id, from_date=fd, to_date=td, limit=limit
+                bot_id=bot_id,
+                strategy_id=strategy_id,
+                from_date=fd,
+                to_date=td,
+                limit=limit,
             )
             return [
                 {
                     "trade_id": str(t.trade_id),
                     "bot_id": t.bot_id,
+                    "strategy_id": t.strategy_id,
                     "symbol": t.symbol,
                     "side": t.side,
                     "quantity": t.quantity,
@@ -118,7 +125,16 @@ def trade_list(
     else:
         fmt.table(
             result,
-            ["trade_id", "bot_id", "symbol", "side", "quantity", "price", "status"],
+            [
+                "trade_id",
+                "bot_id",
+                "strategy_id",
+                "symbol",
+                "side",
+                "quantity",
+                "price",
+                "status",
+            ],
         )
 
 

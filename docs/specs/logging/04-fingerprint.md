@@ -32,7 +32,7 @@
 다음 프레임은 `ante.*` 탐색 대상에서 제외한다.
 
 - 표준 라이브러리 (`asyncio.*`, `threading.*`, `logging.*` 등)
-- 외부 라이브러리 (`httpx.*`, `fastapi.*`, `aiosqlite.*`, `websockets.*` 등)
+- 외부 라이브러리 (`httpx.*`, `aiosqlite.*`, `websockets.*` 등)
 - 테스트 프레임워크 (`pytest.*`, `_pytest.*`)
 
 모듈 이름이 `ante.`로 시작하지 않으면 자동으로 제외된다.

@@ -3,7 +3,7 @@
 getStockPriceInfo 단일 호출로 OHLCV + 거래대금 + 시가총액 + 상장주식수를 동시 확보.
 날짜별 전종목 조회 방식을 사용하며, 페이지네이션과 에러 코드 처리를 담당한다.
 
-API 레퍼런스: docs/references/dashboard/data-go-kr-stock-price-api.md
+API 레퍼런스: docs/references/external-apis/data-go-kr-stock-price-api.md
 """
 
 from __future__ import annotations

@@ -63,7 +63,7 @@ Claude 오케스트레이터
   │     ├── `plan-preflight:done` 및 최신 이슈 본문 구현계획 확인
   │     │    └── 구현 분석 완료: 이슈 코멘트
   │     │
-  │     ├──▶ Claude 개발 에이전트 (`@backend-dev` / `@frontend-dev` / `@devops` / `@strategy-dev`)
+  │     ├──▶ Claude 개발 에이전트 (`@backend-dev` / `@devops` / `@strategy-dev`)
   │     │     ├── 워크트리 격리
   │     │     ├── 착수 기록: 이슈 코멘트
   │     │     ├── 구현 + 로컬 lint/test
@@ -244,35 +244,33 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - 로컬 검증 전에는 `PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `src/ante/__init__.py`가 import되는지 확인한다.
 - Plan Preflight와 리뷰 단계에서 generated artifact sync 위험을 발견하면 구현 체크리스트와 검증 체크리스트에 regenerate/check 흐름을 함께 포함한다.
 
-## 8. API 스키마 변경 규칙
+## 8. CLI/IPC 계약 변경 규칙
 
-API 스키마 계약의 상세 SSOT는 [docs/dashboard/architecture.md](../dashboard/architecture.md), `src/ante/web/schemas.py`, OpenAPI 생성물이다.
+CLI/IPC 계약의 상세 SSOT는 [docs/specs/cli/03-commands.md](../specs/cli/03-commands.md)와 [docs/specs/ipc/ipc.md](../specs/ipc/ipc.md)이다.
 이 문서에서는 프로세스 원칙만 둔다.
 
-- API 응답 스키마 변경은 백엔드와 프론트엔드 양쪽에 영향을 주는 계약 변경으로 본다.
-- 구현 이슈 진행 중 스키마 변경이 드러나면 Plan Preflight에서 별도 이슈 분리 또는 `needs-spec-first` 전환을 판단한다.
-- 새 엔드포인트와 응답 변경은 생성 타입 동기화까지 검증 계획에 포함한다.
-- 프론트 소비자가 있으면 `frontend/src/api/*.ts` adapter와 UI/domain model 동기화도 같은 검증 계획에 포함한다. `api.generated.ts`는 wire contract SSOT이고 hooks/pages/components는 generated type을 직접 소비하지 않는다.
+- 명령 이름, 인자, scope, 응답 envelope, stable error code 변경은 사용자와 Agent 양쪽에 영향을 주는 계약 변경으로 본다.
+- 구현 이슈 진행 중 계약 변경이 드러나면 Plan Preflight에서 별도 이슈 분리 또는 `needs-spec-first` 전환을 판단한다.
+- 새 런타임 명령은 CLI 명령, IPC handler, scope guard, audit action, 테스트를 같은 검증 계획에 포함한다.
+- 생성 산출물인 CLI reference와 프로젝트 구조 문서는 입력 변경 후 regenerate/check 흐름으로 검증한다.
 
-### 8.1 default-deny 인증 게이트 — 새 라우트/명령 추가 시
+### 8.1 default-deny 인증 게이트 — 새 명령 추가 시
 
 > 정책 SSOT: [D-015 default-deny 인증 게이트](../decisions/D-015-default-deny-auth-gate.md)
-> 공개 라우트 SSOT: [docs/specs/web-api/09-public-paths.md](../specs/web-api/09-public-paths.md)
 > 공개 명령 SSOT: [docs/specs/cli/03-commands.md — 공개 명령 allowlist](../specs/cli/03-commands.md#공개-명령-allowlist--인증-면제)
 
-Web/CLI 모두 default-deny + allowlist (opt-out) 정책이다. 새 라우트/명령 추가 시 다음 단계를 거친다.
+CLI는 default-deny + allowlist (opt-out) 정책이다. 새 명령 추가 시 다음 단계를 거친다.
 
-1. **PUBLIC_PATHS / 공개 명령 allowlist 검토**: 신설 라우트/명령이 인증 없이 접근 가능해야 하는지 판단한다.
+1. **공개 명령 allowlist 검토**: 신설 명령이 인증 없이 접근 가능해야 하는지 판단한다.
    - 인증 필요(기본값) → 별도 조치 없음. default-deny가 자동 적용된다. scope가 필요하면 `@require_scope`를 명시한다.
-   - 공개 필요 → 위 SSOT 표(`09-public-paths.md` 또는 `03-commands.md`)에 행을 추가하고, 같은 PR에서 코드 allowlist(`PUBLIC_PATHS`/`PUBLIC_PREFIXES` 또는 `_AUTH_EXEMPT_COMMAND_PATHS`)도 함께 갱신한다.
-2. **#1409 70-route 결정 표 갱신**: Web API 라우트는 [#1409](https://github.com/joshua-jingu-lee/ante/issues/1409)가 SSOT인 70-route 결정 표에 행을 추가한다. 신설 라우트의 분류(`public` / `system:read` / 기타 scope)를 명시한다.
-3. **검증 체크리스트**: PR 검증 단계에서 (1) 공개 라우트/명령 표와 코드 allowlist가 동기 상태인지, (2) 인증 필요 라우트가 default-deny 미들웨어 / `authenticated_group` factory로 보호되는지, (3) scope가 필요하면 `@require_scope`가 부착되었는지를 확인한다.
+   - 공개 필요 → 위 SSOT 표(`03-commands.md`)에 행을 추가하고, 같은 PR에서 코드 allowlist(`_AUTH_EXEMPT_COMMAND_PATHS`)도 함께 갱신한다.
+2. **검증 체크리스트**: PR 검증 단계에서 (1) 공개 명령 표와 코드 allowlist가 동기 상태인지, (2) 인증 필요 명령이 `authenticated_group` factory로 보호되는지, (3) scope가 필요하면 `@require_scope`가 부착되었는지를 확인한다.
 
 #### 8.1.1 게이트 구현 완료 전 임시 조항 (#1403/#1404 close까지)
 
 > 잔여 P2-B (D-015 ADR / #1402 PR #1420 review 잔재).
 
-epic [#1401](https://github.com/joshua-jingu-lee/ante/issues/1401)의 [#1403](https://github.com/joshua-jingu-lee/ante/issues/1403) (Web `RequireAuthMiddleware`) / [#1404](https://github.com/joshua-jingu-lee/ante/issues/1404) (CLI `authenticated_group` factory)가 모두 close되기 전까지는, 새 mutation 라우트/명령 추가 시 자동 default-deny에 의존하지 말고 명시적 가드를 부착한다.
+epic [#1401](https://github.com/joshua-jingu-lee/ante/issues/1401)의 [#1404](https://github.com/joshua-jingu-lee/ante/issues/1404) (CLI `authenticated_group` factory)가 close되기 전까지는, 새 mutation 명령 추가 시 자동 default-deny에 의존하지 말고 명시적 가드를 부착한다.
 
 - Web 라우트: `Depends(require_master_caller)` / `Depends(require_audit_read)` / `Depends(require_config_write)` 등 기존 dependency 중 하나를 라우트 시그니처에 명시한다.
 - CLI 명령: `@require_auth` / `@require_scope` 데코레이터를 명령 함수에 명시한다.

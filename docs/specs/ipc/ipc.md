@@ -11,35 +11,25 @@ IPC 모듈은 **CLI 프로세스가 서버 프로세스의 서비스 계층을 �
 
 ### 배경
 
-Ante는 "이벤트 드리븐 모듈러 모놀리스"로, 모든 핵심 컴포넌트가 단일 asyncio 프로세스 안에서 동일한 EventBus를 공유한다. 웹 API는 이 프로세스 안에서 실행되므로 이벤트 체인이 정상 작동한다.
+Ante는 "이벤트 드리븐 모듈러 모놀리스"로, 모든 핵심 컴포넌트가 단일 asyncio 프로세스 안에서 동일한 EventBus를 공유한다. 런타임 mutation은 이 프로세스 안에서 실행되어야 이벤트 체인이 정상 작동한다.
 
 그러나 CLI는 별도 프로세스로 실행되며, 서비스를 독립적으로 생성한다. 이로 인해 CLI에서 발행한 이벤트가 서버의 구독자에 전달되지 않아, 런타임 부수효과(봇 중지, 예산 환수, 알림 등)가 누락된다.
 
-IPC 모듈은 이 격차를 해소하여, **CLI와 웹 API가 동일한 서비스 인스턴스를 통해 동일한 검증·실행·이벤트 경로**를 타도록 한다.
+IPC 모듈은 이 격차를 해소하여, **CLI가 서버 서비스 인스턴스를 통해 동일한 검증·실행·이벤트 경로**를 타도록 한다.
 
 ```
-웹 API (서버 프로세스 내부)       CLI (별도 프로세스)
-┌─────────────────────┐        ┌──────────────────────┐
-│ FastAPI 라우터       │        │ 1. ANTE_MEMBER_TOKEN  │
-│                     │        │    → 인증 (DB 읽기)   │
-│                     │        │ 2. @require_scope     │
-│                     │        │ 3. IPCClient.send()   │
-│                     │        └──────────┬───────────┘
-│                     │                   │ Unix socket
-│  ┌───────────────┐  │    ┌──────────────▼──────────┐
-│  │               │  │    │ IPCServer               │
-│  │  Service      │◄─┼────┤  → CommandRegistry      │
-│  │  Registry     │  │    │  → _dispatch()          │
-│  │               │  │    └─────────────────────────┘
-│  └───────┬───────┘  │
-│          │          │
-│  ┌───────▼───────┐  │
-│  │   EventBus    │  │
-│  │  ├ BotManager │  │
-│  │  ├ RuleEngine │  │
-│  │  └ Treasury   │  │
-│  └───────────────┘  │
-└─────────────────────┘
+CLI (별도 프로세스)            서버 프로세스
+┌──────────────────────┐       ┌─────────────────────────┐
+│ 1. ANTE_MEMBER_TOKEN │       │ IPCServer               │
+│    → 인증 (DB 읽기)  │       │  → CommandRegistry      │
+│ 2. @require_scope    ├──────►│  → _dispatch()          │
+│ 3. IPCClient.send()  │ Unix  │                         │
+└──────────────────────┘ socket│  Service Registry       │
+                               │  ├ EventBus             │
+                               │  ├ BotManager           │
+                               │  ├ RuleEngine           │
+                               │  └ Treasury             │
+                               └─────────────────────────┘
 ```
 
 ### 설계 원칙
@@ -88,27 +78,28 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
-| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | Web API `POST /api/bots/{bot_id}/start`와 같은 동작. live 봇 존재 확인 + `app_key` credential preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 |
-| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | Web API `POST /api/bots/{bot_id}/stop`과 같은 동작. live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 |
-| `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | Web API `GET /api/bots/{bot_id}`와 같은 live 조회. 응답은 `BotDetailResponse`와 같은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 |
+| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + `app_key` credential preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 |
+| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 |
+| `ante bot update <bot_id>` | `bot.update` | `BotManager.update_bot()` | 중지 상태 봇 설정을 서버 BotManager 기준으로 갱신 |
+| `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 |
 | `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
 | `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
 
 `bot.start`/`bot.stop`은 mutating, `bot.status`는 read-only다. 세 명령 모두 다음 stable
-error code를 Web API 라우트의 의미와 동일하게 사용한다.
+error code를 사용한다.
 
 - `BOT_NOT_FOUND` (재사용 SSOT: `src/ante/bot/exceptions.py:BOT_NOT_FOUND_CODE`):
-  `BotManager.get_bot()`이 `None`을 반환. Web API 404와 같은 의미.
+  `BotManager.get_bot()`이 `None`을 반환.
 - `BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED` (신규): `bot.start`에서
-  `account.credentials["app_key"]` 누락. Web API 422와 같은 의미.
+  `account.credentials["app_key"]` 누락.
 - `BOT_STATE_CONFLICT` (신규): `bot.start`/`bot.stop`의 `BotManager.start_bot()` /
-  `stop_bot()` 호출 중 `BotError`. Web API 409와 같은 의미.
+  `stop_bot()` 호출 중 `BotError`.
 
 서버 실행 중 `ante bot list/info/positions/signal-key`는 `bot.query` 계열 IPC로
 서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
 snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
 상태에서 `signal_keys`, 전략 스냅샷, Treasury budget, `bots.status='deleted'`만 직접
-정리할 수 있다. `handle_positions=liquidate`는 IPC/Web runtime 경로에서만 의미가 있고,
+정리할 수 있다. `handle_positions=liquidate`는 IPC runtime 경로에서만 의미가 있고,
 cold-path 삭제는 항상 keep 의미다.
 
 #### Treasury
@@ -117,6 +108,19 @@ cold-path 삭제는 항상 keep 의미다.
 |-----------|-----------|-------------|-------------|
 | `ante treasury allocate` | `treasury.allocate` | `Treasury.allocate()` | 인메모리 `_budgets`/`_unallocated` 캐시 동기화 |
 | `ante treasury deallocate` | `treasury.deallocate` | `Treasury.deallocate()` | 동일 |
+| `ante treasury set-balance` | `treasury.set_balance` | `Treasury.set_account_balance()` | 계좌 총 잔고를 서버 TreasuryManager 캐시에 반영 |
+
+#### Rule
+
+| CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
+|-----------|-----------|-------------|-------------|
+| `ante rule update` | `rule.update` | `update_account_rule_config()` | DynamicConfig 갱신 + `ConfigChangedEvent` 발행 |
+
+#### Strategy
+
+| CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
+|-----------|-----------|-------------|-------------|
+| `ante strategy set-status` | `strategy.set_status` | `StrategyRegistry.update_status()` | 전략 채택/보관 상태를 서버 registry 기준으로 변경 |
 
 #### Config
 
@@ -159,6 +163,7 @@ maintenance/test 스펙 없이는 제공하지 않는다.
 | `ante member reactivate` | `member.reactivate` | `MemberService.reactivate()` | 인증 상태 변경을 런타임 API에 즉시 반영 |
 | `ante member revoke` | `member.revoke` | `MemberService.revoke()` | 토큰 해시 삭제 + 세션 무효화 + 되돌릴 수 없는 감사 이벤트 |
 | `ante member rotate-token` | `member.rotate_token` | `MemberService.rotate_token()` | 기존 토큰 즉시 무효화 + 새 토큰 1회 반환 |
+| `ante member update-scopes` | `member.update_scopes` | `MemberService.update_scopes()` | master-only scope 변경을 서버 MemberService에서 처리 |
 | `ante member reset-password` | `member.reset_password` | `MemberService.reset_password()` | recovery key 검증 + 세션 무효화 + 보안 알림 |
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `MemberService.regenerate_recovery_key()` | 기존 recovery key 폐기 + 보안 알림 |
 
@@ -228,7 +233,7 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 22개가
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 27개가
 SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
@@ -239,10 +244,15 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `account.activate` | mutating | `AccountService.activate()` 호출 |
 | `bot.create` | mutating | `BotManager.create_bot()` 호출 |
 | `bot.remove` | mutating | `BotManager.remove_bot()` 호출 |
-| `bot.start` | mutating | `BotManager.start_bot()` 호출. Web API `POST /api/bots/{bot_id}/start` 정렬. `app_key` preflight + audit `bot.start` (#1712) |
-| `bot.stop` | mutating | `BotManager.stop_bot()` 호출. Web API `POST /api/bots/{bot_id}/stop` 정렬. audit `bot.stop` (#1712) |
+| `bot.start` | mutating | `BotManager.start_bot()` 호출. `app_key` preflight + audit `bot.start` (#1712) |
+| `bot.stop` | mutating | `BotManager.stop_bot()` 호출. audit `bot.stop` (#1712) |
+| `bot.update` | mutating | `BotManager.update_bot()` 호출 |
 | `treasury.allocate` | mutating | `Treasury.allocate()` 호출 |
 | `treasury.deallocate` | mutating | `Treasury.deallocate()` 호출 |
+| `treasury.set_balance` | mutating | `Treasury.set_account_balance()` 호출 |
+| `rule.update` | mutating | DynamicConfig 기반 계좌 룰 수정 |
+| `strategy.set_status` | mutating | `StrategyRegistry.update_status()` 호출 |
+| `member.update_scopes` | mutating | `MemberService.update_scopes()` 호출 |
 | `config.set` | mutating | `DynamicConfigService.set()` 호출 |
 | `approval.request` | mutating | `ApprovalService.create()` 호출 |
 | `approval.approve` | mutating | `ApprovalService.approve()` 호출 |
@@ -254,14 +264,14 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `broker.status` | read-only | `BrokerAdapter.health_check()` live 조회 |
 | `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
 | `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
-| `bot.status` | read-only | `BotManager.get_bot()` live 조회. Web API `GET /api/bots/{bot_id}` 정렬. `BotDetailResponse` envelope (#1712) |
+| `bot.status` | read-only | `BotManager.get_bot()` live 조회. `{bot: ...}` envelope (#1712) |
 
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
 IPC command 분리는 별도 이슈 범위다.
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
-taxonomy 대상이 아니다. `member.*`, `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로
+taxonomy 대상이 아니다. `member.update_scopes`를 제외한 `member.*`, `bot.signal_key.rotate`처럼 CLI/스펙 표에는 runtime IPC로
 표현되어 있으나 현재 `register_all_handlers()`에 없는 명령의 실제 wiring은 별도 후속 이슈에서
 다룬다.
 

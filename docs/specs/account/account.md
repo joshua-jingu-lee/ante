@@ -21,7 +21,6 @@
 | [07-account-layout-v1.md](07-account-layout-v1.md) | 1.0 시점 계좌 구성 |
 | [08-config-migration.md](08-config-migration.md) | config/defaults.py 마이그레이션 |
 | [09-cli.md](09-cli.md) | CLI 인터페이스 |
-| [10-web-api.md](10-web-api.md) | Web API 엔드포인트 |
 | [11-scope-out.md](11-scope-out.md) | Scope Out (1.0에서 제외) |
 | [13-cross-module-notes.md](13-cross-module-notes.md) | 타 모듈 설계 시 참고 |
 | [14-account-id-contract.md](14-account-id-contract.md) | Account ID 형식·정책 계약 (helper SSOT) |
@@ -181,18 +180,6 @@
 ### CLI 출력 예시
 
 상세 내용: [09-cli.md](09-cli.md)
-
-## Web API 엔드포인트
-
-상세 내용: [10-web-api.md](10-web-api.md)
-
-### 계좌 전용 엔드포인트
-
-상세 내용: [10-web-api.md](10-web-api.md)
-
-### 기존 엔드포인트 계좌 필터
-
-상세 내용: [10-web-api.md](10-web-api.md)
 
 ## Scope Out (1.0에서 제외)
 

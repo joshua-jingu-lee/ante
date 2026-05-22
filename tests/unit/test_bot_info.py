@@ -6,8 +6,7 @@
   - ``strategy_registry`` → ``strategy_name`` / ``strategy_author_*`` / ``strategy``
   - ``treasury`` (단일 인스턴스) → ``budget`` (allocated/spent/reserved/available)
   - ``trade_service`` → ``positions`` (symbol/quantity/avg_entry_price/realized_pnl)
-- 응답 shape/field 가 Web API ``GET /api/bots/{bot_id}`` 라우트와 정렬
-  (behavior-preserving extraction 회귀 lock).
+- 응답 shape/field 가 IPC ``bot.status`` 핸들러와 정렬.
 - ``trade_service=None`` (legacy ServiceRegistry / cold-path) 시 ``positions``
   키 부재 — 빈 리스트로 흡수되는 contract drift 차단.
 """

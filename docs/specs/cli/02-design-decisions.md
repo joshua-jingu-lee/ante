@@ -134,8 +134,7 @@ Agent와 사람이 같은 명령 시그니처로 동일한 결과를 얻도록 �
 다음은 CLI stdin prompt와 별개의 표면이며 본 원칙의 적용 대상이 아니다.
 
 - Telegram `/confirm` 2단계 확인 — `docs/specs/notification/*` (사용자 단말의 별도 채널)
-- Dashboard 확인 모달 — `docs/specs/dashboard/*` (브라우저 UI의 별도 채널)
-- 서버 측 IPC/Web API 요청 본문 — CLI 입력 계약의 적용 범위 밖
+- 서버 측 IPC 요청 본문 — CLI 입력 계약의 적용 범위 밖
 
 **1.0 trade-off — `--broker-config` silent ignore 위험**:
 
@@ -209,7 +208,7 @@ exit 1로 종료한다. CLI 표면 가드(`@require_scope`)는 `member:admin` sc
 수단이 recovery key 또는 현재 패스워드 자체이므로 위 master-only 정책과 별도로
 공개 명령 allowlist 경로([03-commands.md — 공개 명령 allowlist](03-commands.md#공개-명령-allowlist--인증-면제))를 따른다.
 
-> 후속 implementation 정렬: #1543 (Web API/CLI 표면 가드 master-only로 일치),
+> 후속 implementation 정렬: #1543 (CLI 표면 가드 master-only로 일치),
 > #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
 > 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
 

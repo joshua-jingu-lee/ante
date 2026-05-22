@@ -45,7 +45,6 @@ legacy `[broker]` 설정의 출처만 설명하고, 이관 후 필드명은 본 
 | `db.path` | 단일 DB |
 | `db.event_log_retention_days` | 시스템 전역 정책 |
 | `data.path`, `parquet.compression` | 독립 모듈 (Data Store). `parquet.base_path`는 legacy alias |
-| `web.host`, `web.port` | 단일 웹 서버 |
 | `eventbus.history_size` | 시스템 인프라 |
 | `member.token_ttl_days` | Member는 Account 밖 |
 | `treasury.sync_interval_seconds` | 브로커 어댑터 내부에서 관리 |

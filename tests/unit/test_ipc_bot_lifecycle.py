@@ -3,10 +3,10 @@
 검증 대상:
 - 정상 경로: ``{bot: info}`` envelope 반환.
 - 거부 경로 coded exception:
-  - ``BotNotFoundError`` (code=BOT_NOT_FOUND) — Web API 404 정렬.
+  - ``BotNotFoundError`` (code=BOT_NOT_FOUND).
   - ``BotAccountCredentialsNotConfigured``
-    (code=BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED) — Web API 422 정렬.
-  - ``BotStateConflict`` (code=BOT_STATE_CONFLICT) — Web API 409 정렬.
+    (code=BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED).
+  - ``BotStateConflict`` (code=BOT_STATE_CONFLICT).
 - audit logger optional 처리:
   - ``bot.start`` / ``bot.stop`` 성공 시 audit ``bot.start`` / ``bot.stop`` 기록.
   - ``bot.status`` 는 read-only — audit 없음.
@@ -15,7 +15,7 @@
   - 주입 시 positions 보강.
   - 부재 시 ``positions`` 키 부재(회귀 lock, #1712 cold-path 호환).
 - ``CommandRegistry`` 등록 invariant: taxonomy(start/stop=mutating,
-  status=read-only), 22 count.
+  status=read-only), 27 count.
 """
 
 from __future__ import annotations
@@ -139,7 +139,7 @@ class TestHandleBotStart:
         svc.bot_manager.start_bot.assert_not_awaited()
 
     async def test_missing_app_key_raises_credentials_error(self) -> None:
-        """app_key 부재 → ``BotAccountCredentialsNotConfigured`` (Web API 422 정렬)."""
+        """app_key 부재 → ``BotAccountCredentialsNotConfigured``."""
         bot = _make_bot()
         account = SimpleNamespace(credentials={})  # app_key 누락
         svc, audit_log = _make_svc(bot=bot, account=account)
@@ -154,10 +154,7 @@ class TestHandleBotStart:
         audit_log.assert_not_awaited()
 
     async def test_bot_error_raises_state_conflict(self) -> None:
-        """``BotManager.start_bot`` 의 ``BotError`` → ``BotStateConflict``.
-
-        Web API ``POST /api/bots/{bot_id}/start`` 의 409 정렬.
-        """
+        """``BotManager.start_bot`` 의 ``BotError`` → ``BotStateConflict``."""
         bot = _make_bot()
         account = SimpleNamespace(credentials={"app_key": "AK"})
         svc, audit_log = _make_svc(
@@ -433,8 +430,8 @@ class TestRegistryRegistration:
         assert spec.is_mutating is False
         assert spec.handler is _handle_bot_status
 
-    def test_total_command_count_is_22(self) -> None:
-        """#1712: 19 → 22 (bot.start/stop/status 3 추가)."""
+    def test_total_command_count_is_27(self) -> None:
+        """#1712 이후 CLI/IPC parity mutation 5개를 포함한다."""
         registry = CommandRegistry()
         register_all_handlers(registry)
-        assert len(registry.commands) == 22
+        assert len(registry.commands) == 27

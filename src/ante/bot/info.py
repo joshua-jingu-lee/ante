@@ -1,14 +1,11 @@
-"""Bot info enrichment helper — Web API + IPC 공유.
+"""Bot info enrichment helper — IPC 공유.
 
-Refs #1712: Web API ``GET /api/bots/{bot_id}`` 와 IPC ``bot.status`` 가
-동일한 ``bot`` info 보강 로직(strategy/budget/positions 조인) 을 공유하기
-위한 behavior-preserving extraction. Web API 라우트가 in-place 로 수행하던
-보강을 그대로 미러한다(응답 shape/field/key 순서 무변경).
+Refs #1712: IPC ``bot.status`` 가 ``bot`` info 보강 로직
+(strategy/budget/positions 조인)을 공유하기 위한 extraction.
 
 설계 원칙:
-- FastAPI / HTTPException 의존성을 import 하지 않는다 (Codex Plan Review v2
-  advisory). 본 helper 는 순수 도메인 dict 변환만 수행하며, HTTP / IPC 표면
-  매핑은 각 라우트/handler 가 담당한다.
+- 본 helper 는 순수 도메인 dict 변환만 수행하며, IPC 표면 매핑은 handler가
+  담당한다.
 - 의존성은 모두 keyword-only optional — 보유한 객체만 보강에 기여한다. None
   이면 해당 섹션은 skip 되며 dict 에 키가 추가되지 않는다(누락 vs. 빈 값
   의미 구분).
@@ -31,9 +28,8 @@ async def enrich_bot_info(
 ) -> dict[str, Any]:
     """``bot.get_info()`` 결과에 strategy/budget/positions 정보를 보강한다.
 
-    Refs #1712: Web API ``GET /api/bots/{bot_id}`` (``src/ante/web/routes/
-    bots.py`` ``get_bot``) 의 보강 로직을 그대로 미러한다. 응답 shape/field/
-    key 순서를 변경하지 않으며, 의존성 None 시 해당 섹션 키 자체가 부재한다.
+    Refs #1712: 응답 shape/field/key 순서를 변경하지 않으며, 의존성 None 시
+    해당 섹션 키 자체가 부재한다.
 
     Args:
         bot: ``get_info()`` 메서드를 가진 Bot 인스턴스. info 의 ``strategy_id``
@@ -51,8 +47,7 @@ async def enrich_bot_info(
             / legacy 환경 호환).
 
     Returns:
-        ``bot.get_info()`` base dict + 보강 키 dict. Web API 라우트의 in-place
-        dict mutation 결과와 동일하다.
+        ``bot.get_info()`` base dict + 보강 키 dict.
     """
     info: dict[str, Any] = bot.get_info()
 

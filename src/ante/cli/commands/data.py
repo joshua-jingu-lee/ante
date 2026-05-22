@@ -15,38 +15,62 @@ def data() -> None:
 
 
 @data.command("list")
+@click.option("--symbol", default=None, help="종목 코드 exact-match 필터")
+@click.option("--timeframe", default=None, help="타임프레임 필터")
+@click.option(
+    "--type",
+    "data_type",
+    type=click.Choice(["ohlcv", "fundamental"]),
+    default=None,
+    help="데이터 유형 필터",
+)
+@click.option("--offset", default=0, type=click.IntRange(min=0), help="조회 offset")
+@click.option("--limit", default=50, type=click.IntRange(min=1), help="조회 개수")
 @click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @format_option
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def data_list(ctx: click.Context, data_path: str, db_path: str | None) -> None:
+def data_list(
+    ctx: click.Context,
+    symbol: str | None,
+    timeframe: str | None,
+    data_type: str | None,
+    offset: int,
+    limit: int,
+    data_path: str,
+    db_path: str | None,
+) -> None:
     """보유 데이터셋 목록."""
     import asyncio
 
     from ante.cli.main import get_db_path
-    from ante.data.schemas import TIMEFRAMES
+    from ante.data.datasets import list_datasets, validate_dataset_filters
     from ante.data.store import ParquetStore
 
     fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
     resolved_db_path = db_path or get_db_path(ctx)
 
-    datasets = []
-    for tf in TIMEFRAMES:
-        symbols = store.list_symbols(tf)
-        for symbol in symbols:
-            date_range = store.get_date_range(symbol, tf)
-            datasets.append(
-                {
-                    "symbol": symbol,
-                    "timeframe": tf,
-                    "start": date_range[0] if date_range else None,
-                    "end": date_range[1] if date_range else None,
-                }
-            )
+    try:
+        normalized_type = validate_dataset_filters(
+            timeframe=timeframe,
+            data_type=data_type,
+        )
+        result = list_datasets(
+            store,
+            symbol=symbol,
+            timeframe=timeframe,
+            data_type=normalized_type,
+            offset=offset,
+            limit=limit,
+        )
+    except ValueError as e:
+        fmt.error(str(e), code="DATA_INVALID_FILTER")
+        raise SystemExit(1) from e
 
+    datasets = result["items"]
     if not datasets:
         fmt.output({"datasets": [], "count": 0})
         return
@@ -67,7 +91,123 @@ def data_list(ctx: click.Context, data_path: str, db_path: str | None) -> None:
             await db.close()
 
     datasets = asyncio.run(_enrich(datasets))
-    fmt.table(datasets, ["symbol", "name", "timeframe", "start", "end"])
+    if fmt.is_json:
+        fmt.output({"datasets": datasets, "count": result["total"]})
+    else:
+        fmt.table(
+            datasets,
+            [
+                "id",
+                "symbol",
+                "name",
+                "timeframe",
+                "data_type",
+                "start_date",
+                "end_date",
+            ],
+        )
+
+
+@data.command("info")
+@click.argument("dataset_id")
+@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("data:read")
+def data_info(ctx: click.Context, dataset_id: str, data_path: str) -> None:
+    """데이터셋 상세 조회."""
+    from ante.data.datasets import get_dataset_detail
+    from ante.data.store import ParquetStore
+
+    fmt = get_formatter(ctx)
+    store = ParquetStore(base_path=data_path)
+    try:
+        result = get_dataset_detail(store, dataset_id)
+    except ValueError as e:
+        fmt.error(str(e), code="DATA_INVALID_DATASET_ID")
+        raise SystemExit(1) from e
+    except FileNotFoundError as e:
+        fmt.error(str(e), code="DATASET_NOT_FOUND")
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+        return
+
+    dataset = result["dataset"]
+    for key in (
+        "id",
+        "symbol",
+        "timeframe",
+        "data_type",
+        "start_date",
+        "end_date",
+        "row_count",
+        "file_size",
+    ):
+        click.echo(f"  {key:12s}: {dataset.get(key)}")
+    if result["preview"]:
+        click.echo("")
+        click.echo("  preview:")
+        for row in result["preview"]:
+            click.echo(f"    {row}")
+
+
+@data.command("delete")
+@click.argument("dataset_id")
+@click.option(
+    "--type",
+    "data_type",
+    type=click.Choice(["ohlcv", "fundamental"]),
+    default=None,
+    help="dataset_id 파생 유형과 일치해야 하는 데이터 유형",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="삭제를 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패",
+)
+@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@format_option
+@click.pass_context
+@require_auth
+@require_scope("data:write")
+def data_delete(
+    ctx: click.Context,
+    dataset_id: str,
+    data_type: str | None,
+    yes: bool,
+    data_path: str,
+) -> None:
+    """데이터셋 삭제."""
+    from ante.data.datasets import delete_dataset, validate_dataset_filters
+    from ante.data.store import ParquetStore
+
+    fmt = get_formatter(ctx)
+    if not yes:
+        fmt.error(
+            "위험 명령입니다. --yes를 명시해야 데이터셋을 삭제합니다.",
+            code="CLI_CONFIRMATION_REQUIRED",
+        )
+        raise SystemExit(1)
+
+    store = ParquetStore(base_path=data_path)
+    try:
+        normalized_type = validate_dataset_filters(data_type=data_type)
+        result = delete_dataset(store, dataset_id, data_type=normalized_type)
+    except ValueError as e:
+        fmt.error(str(e), code="DATA_INVALID_DATASET_ID")
+        raise SystemExit(1) from e
+    except FileNotFoundError as e:
+        fmt.error(str(e), code="DATASET_NOT_FOUND")
+        raise SystemExit(1) from e
+
+    if fmt.is_json:
+        fmt.output(result)
+    else:
+        fmt.success(f"데이터셋 삭제 완료: {dataset_id}", result)
 
 
 @data.command()

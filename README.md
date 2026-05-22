@@ -83,9 +83,9 @@ Ante는 전략을 안전하게 실행하는 인프라입니다.
 - 전략 검토 및 채택
 - 봇 실행 / 중지 / 예산 설정
 - 리스크 정책 정의
-- 대시보드 및 알림 모니터링
+- CLI와 알림 기반 모니터링
 
-👉 [Agent Guide](guide/agent.md)와 [Dashboard](guide/dashboard.md)에서 AI 에이전트 등록 및 활용법을 확인하세요.
+👉 [Agent Guide](guide/agent.md)와 [CLI Reference](guide/cli.md)에서 AI 에이전트 등록 및 활용법을 확인하세요.
 
 ---
 

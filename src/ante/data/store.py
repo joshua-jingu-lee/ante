@@ -23,7 +23,7 @@ def _is_safe_path_segment(seg: str) -> bool:
     디렉토리 이름이어야 한다. 이 술어는 **vocabulary와 무관**하다 — KRX
     6자리 형식이나 canonical timeframe 여부를 검사하지 않으며, legacy
     out-of-vocabulary symbol(`ABCDEF`, `oracle-safe-symbol` 등)은 통과
-    한다(web-api spec `05-resource-endpoints.md:76` Legacy 호환 정책 정합).
+    한다(core spec Legacy 호환 정책 정합).
     오직 path traversal/escape 벡터만 거부한다.
 
     거부 조건:

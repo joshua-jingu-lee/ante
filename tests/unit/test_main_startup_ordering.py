@@ -164,7 +164,6 @@ async def test_main_writes_marker_before_pid_and_removes_after_init_ipc(
         "_init_feed",
         "_init_approval",
         "_init_notification",
-        "_init_web",
     ):
         monkeypatch.setattr(main_module, name, fake_init_step)
     monkeypatch.setattr(main_module, "_init_core", fake_init_core)

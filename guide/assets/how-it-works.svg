@@ -55,7 +55,7 @@
 
   <!-- Ante -> User (elbow: left from Ante, then up to User) -->
   <polyline points="290,340 115,340 115,190" fill="none" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="196" y="334" text-anchor="middle" font-size="10" fill="#888">대시보드 · 알림</text>
+  <text x="196" y="334" text-anchor="middle" font-size="10" fill="#888">CLI · 알림</text>
 
   <!-- Agent <-> Ante (vertical, inside server) -->
   <line x1="440" y1="190" x2="440" y2="280" stroke="#999" stroke-width="1.5" marker-end="url(#arrow)"/>

@@ -197,10 +197,8 @@ def require_master(fn: Callable) -> Callable:
     member.type != ``MemberType.HUMAN`` 또는 member.role != ``MemberRole.MASTER``
     이면 ``permission_denied`` 로 종료.
 
-    SSOT: ``docs/specs/web-api/11-route-scope-table.md`` (#1542) 결정에 따라
-    member admin mutation 은 master-only 계약. CLI 표면 가드도 Web API
-    ``require_master_caller`` 와 동일한 invariant 를 적용한다 (#1543 — #1511
-    oracle drift 수렴).
+    member admin mutation 은 master-only 계약이다. CLI 표면 가드는 동일한
+    invariant 를 진입점에서 적용한다 (#1543 — #1511 oracle drift 수렴).
 
     멱등(idempotent) — 이미 ``require_master`` 가 부착된 함수에 재적용되어도
     한 번만 감싸지도록 자체 ``_require_master_applied`` sentinel marker 로
@@ -239,8 +237,7 @@ def require_master(fn: Callable) -> Callable:
             )
             raise SystemExit(1)
 
-        # MemberType.HUMAN + role == MASTER 만 통과. Web API
-        # ``require_master_caller`` 와 동일한 invariant.
+        # MemberType.HUMAN + role == MASTER 만 통과.
         member_type_value = getattr(member.type, "value", member.type)
         member_role_value = getattr(member.role, "value", member.role)
         if (

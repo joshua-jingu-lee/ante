@@ -3,7 +3,7 @@
 
 > ⚠️ 이 문서는 설계 의도와 인터페이스 계약을 기술합니다. 구현 코드는 `src/ante/member/` 를 참조하세요.
 
-> 참조: [architecture.md](../../architecture/README.md) 모듈 구성, [approval.md](../approval/approval.md) 결재 연동, [cli.md](../cli/cli.md) CLI, [web-api.md](../web-api/web-api.md) 대시보드 인증
+> 참조: [architecture.md](../../architecture/README.md) 모듈 구성, [approval.md](../approval/approval.md) 결재 연동, [cli.md](../cli/cli.md) CLI
 
 이 디렉토리는 300줄을 넘던 모듈 스펙을 주제별 문서로 분할해 관리한다.
 계약 SSOT는 이 README의 문서 목록과 주제별 하위 문서다.
