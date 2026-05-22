@@ -98,10 +98,17 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "scripts/generate_db_schema.py": "DB 스키마 문서 자동 생성",
     "scripts/generate_project_structure.py": "프로젝트 구조 Agent INDEX 생성/check",
     "src/ante": "Python 백엔드 패키지",
+    "src/ante/cli/commands/approval.py": (
+        "ante approval approve/audit-types/cancel/cancel-invalid/info/list/"
+        "reject/reopen/request/review"
+    ),
+    "src/ante/cli/commands/backtest.py": "ante backtest history/run",
     "src/ante/cli/commands/bot.py": (
         "ante bot create/info/list/positions/remove/signal-key "
         "(start/stop/status 미구현 follow-up)"
     ),
+    "src/ante/cli/commands/broker.py": "ante broker balance/positions/reconcile/status",
+    "src/ante/cli/commands/config.py": "ante config get/history/set",
     "src/ante/cli/commands/data.py": "ante data list/schema/storage/validate",
     "src/ante/cli/commands/notification.py": (
         "알림 CLI (public leaf 없음 — 텔레그램 이관)"
@@ -109,8 +116,14 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "src/ante/cli/commands/report.py": (
         "ante report schema/submit/list/performance/view"
     ),
+    "src/ante/cli/commands/rule.py": "ante rule info/list",
     "src/ante/cli/commands/strategy.py": (
         "ante strategy validate/submit/list/info/performance"
+    ),
+    "src/ante/cli/commands/system.py": "ante system clear-halt/halt/start/status/stop",
+    "src/ante/cli/commands/trade.py": "ante trade info/list",
+    "src/ante/cli/commands/treasury.py": (
+        "ante treasury allocate/deallocate/snapshot/status"
     ),
     "src/ante/web/routes/notifications.py": (
         "알림 API (stub, 이력 조회 삭제·텔레그램 이관)"

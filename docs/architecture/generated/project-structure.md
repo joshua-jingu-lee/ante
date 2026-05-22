@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-20 (KST)
+> 마지막 생성 시점: 2026-05-22 (KST)
 
 ## 최상위 구조
 
@@ -258,24 +258,24 @@ src/ante/
 │   ├── formatter.py                  # OutputFormatter — table/json 출력
 │   ├── commands/
 │   │   ├── _password.py              # generate_password() — CLI용 랜덤 패스워드 유틸
-│   │   ├── approval.py               # ante approval request/list/info/review/cancel/approve/reject
+│   │   ├── approval.py               # ante approval approve/audit-types/cancel/cancel-invalid/info/list/reject/reopen/request/review
 │   │   ├── audit.py                  # ante audit — 감사 로그 조회
-│   │   ├── backtest.py               # ante backtest run (진행률 바, 성과 지표 테이블 포함)
+│   │   ├── backtest.py               # ante backtest history/run
 │   │   ├── bot.py                    # ante bot create/info/list/positions/remove/signal-key (start/stop/status 미구현 follow-up)
-│   │   ├── broker.py                 # ante broker 명령
-│   │   ├── config.py                 # ante config 명령
+│   │   ├── broker.py                 # ante broker balance/positions/reconcile/status
+│   │   ├── config.py                 # ante config get/history/set
 │   │   ├── data.py                   # ante data list/schema/storage/validate
 │   │   ├── init.py                   # ante init — 비대화형 최소 초기 설정 (master + 테스트 계좌)
 │   │   ├── instrument.py             # ante instrument list/search/sync/import (--listed-only)
 │   │   ├── member.py                 # ante member register/list/info/suspend/revoke/set-emoji/... (bootstrap은 init으로 통합)
 │   │   ├── notification.py           # 알림 CLI (public leaf 없음 — 텔레그램 이관)
 │   │   ├── report.py                 # ante report schema/submit/list/performance/view
-│   │   ├── rule.py                   # ante rule 명령
+│   │   ├── rule.py                   # ante rule info/list
 │   │   ├── signal.py                 # ante signal — 외부 시그널 채널 관리
 │   │   ├── strategy.py               # ante strategy validate/submit/list/info/performance
-│   │   ├── system.py                 # ante system 명령
-│   │   ├── trade.py                  # ante trade 명령
-│   │   ├── treasury.py               # ante treasury 명령
+│   │   ├── system.py                 # ante system clear-halt/halt/start/status/stop
+│   │   ├── trade.py                  # ante trade info/list
+│   │   ├── treasury.py               # ante treasury allocate/deallocate/snapshot/status
 │   │   ├── __init__.py
 │   │   ├── account.py
 │   │   ├── ipc_helpers.py
@@ -643,7 +643,8 @@ tests/
 │   ├── strategy/
 │   │   ├── __init__.py
 │   │   └── test_validator_source_read_parse_no_reflection.py
-│   └── test_cli_notification_hidden.py
+│   ├── test_cli_notification_hidden.py
+│   └── test_cli_signal_connect.py
 └── __init__.py
 ```
 
