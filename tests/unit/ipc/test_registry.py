@@ -42,17 +42,20 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 19개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 22개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
 
     Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` 추가 (16번째
     mutating).
+
+    Refs #1712: ``bot.start`` / ``bot.stop`` (mutating, 17~18) /
+    ``bot.status`` (read-only, 4번째) 추가 — Web API 라우트 정렬.
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 19
+    assert len(registry.commands) == 22
 
     expected = {
         "system.halt",
@@ -61,6 +64,9 @@ def test_register_all_handlers() -> None:
         "account.activate",
         "bot.create",
         "bot.remove",
+        "bot.start",
+        "bot.stop",
+        "bot.status",
         "treasury.allocate",
         "treasury.deallocate",
         "config.set",
@@ -83,7 +89,11 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 19개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다."""
+    """등록된 22개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
+
+    Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
+    read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
+    """
     registry = CommandRegistry()
     register_all_handlers(registry)
 
@@ -94,6 +104,8 @@ def test_register_all_handlers_taxonomy() -> None:
         "account.activate",
         "bot.create",
         "bot.remove",
+        "bot.start",
+        "bot.stop",
         "treasury.allocate",
         "treasury.deallocate",
         "config.set",
@@ -105,10 +117,15 @@ def test_register_all_handlers_taxonomy() -> None:
         "approval.reopen",
         "broker.reconcile",
     }
-    read_only = {"broker.status", "broker.balance", "broker.positions"}
+    read_only = {
+        "broker.status",
+        "broker.balance",
+        "broker.positions",
+        "bot.status",
+    }
 
-    assert len(mutating) == 16
-    assert len(read_only) == 3
+    assert len(mutating) == 18
+    assert len(read_only) == 4
     assert mutating | read_only == set(registry.commands)
 
     for command in mutating:

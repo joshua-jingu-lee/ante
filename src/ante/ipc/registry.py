@@ -188,6 +188,138 @@ async def _handle_bot_remove(
     return {"bot_id": bot_id, "removed": True}
 
 
+async def _handle_bot_start(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 시작 IPC handler — Web API ``POST /api/bots/{bot_id}/start`` 정렬.
+
+    Refs #1712: Web API 라우트의 거부 경로(404 bot 부재 / 422 app_key 부재 /
+    409 BotError) 와 1:1 매핑되는 coded exception 으로 raise 한다. IPC
+    ``server.py:323`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope
+    이 ``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
+    ``BOT_STATE_CONFLICT`` 로 변환한다.
+
+    audit logger 가 주입된 환경에서는 ``approval.cancel_invalid`` 선례와 동형
+    으로 ``bot.start`` action 을 기록한다(``getattr`` safe-access).
+    """
+    from ante.bot.exceptions import (
+        BotAccountCredentialsNotConfigured,
+        BotError,
+        BotNotFoundError,
+        BotStateConflict,
+    )
+
+    bot_id = args["bot_id"]
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+
+    # 계좌 인증정보 검증: app_key 가 없으면 봇 시작 거부 (Web API 와 동일).
+    account = await svc.account.get(bot.config.account_id)
+    if not account.credentials.get("app_key"):
+        raise BotAccountCredentialsNotConfigured(
+            "계좌에 인증정보(app_key)가 설정되지 않았습니다"
+        )
+
+    try:
+        await svc.bot_manager.start_bot(bot_id)
+    except BotError as e:
+        raise BotStateConflict(str(e)) from e
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="bot.start",
+            resource=f"bot:{bot_id}",
+            ip="",
+        )
+
+    return {"bot": bot.get_info()}
+
+
+async def _handle_bot_stop(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 중지 IPC handler — Web API ``POST /api/bots/{bot_id}/stop`` 정렬.
+
+    Refs #1712: Web API 라우트의 거부 경로(404 bot 부재 / 409 BotError) 와
+    1:1 매핑. ``app_key`` preflight 는 stop 경로에 없다(Web API 정렬). audit
+    logger 가 주입된 환경에서는 ``bot.stop`` action 을 기록한다.
+    """
+    from ante.bot.exceptions import (
+        BotError,
+        BotNotFoundError,
+        BotStateConflict,
+    )
+
+    bot_id = args["bot_id"]
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+
+    try:
+        await svc.bot_manager.stop_bot(bot_id)
+    except BotError as e:
+        raise BotStateConflict(str(e)) from e
+
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id=actor,
+            action="bot.stop",
+            resource=f"bot:{bot_id}",
+            ip="",
+        )
+
+    return {"bot": bot.get_info()}
+
+
+async def _handle_bot_status(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 상태 조회 IPC handler — Web API ``GET /api/bots/{bot_id}`` 정렬.
+
+    Refs #1712: read-only handler. ``enrich_bot_info`` 로 strategy/budget/
+    positions 보강 결과를 ``{"bot": info}`` envelope 으로 반환한다. Web API
+    라우트와 동일한 helper 를 공유하므로 응답 shape/field/key 순서가 보존된다.
+
+    의존성은 모두 ``getattr`` safe-access 로 optional 처리한다:
+    - ``strategy_registry`` 부재 시 strategy 키 부재.
+    - ``treasury_manager`` 부재(또는 해당 계좌 Treasury 미등록) 시 budget 키 부재.
+    - ``trade_service`` 부재(legacy ServiceRegistry) 시 positions 키 부재(회귀
+      lock — #1712 cold-path 호환).
+
+    read-only 분류이므로 audit logger 호출 없음.
+    """
+    from ante.bot.exceptions import BotNotFoundError
+    from ante.bot.info import enrich_bot_info
+
+    bot_id = args["bot_id"]
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+
+    # 계좌별 Treasury resolve — Web API ``get_treasury_optional`` 가 단일
+    # Treasury 인스턴스를 노출하는 것과 정렬되도록 ``TreasuryManager.get`` 으로
+    # 봇의 account_id Treasury 를 가져온다. manager 부재 또는 미등록 시 None.
+    treasury_manager = getattr(svc, "treasury_manager", None)
+    treasury_for_bot: Any | None = None
+    if treasury_manager is not None:
+        try:
+            treasury_for_bot = treasury_manager.get(bot.config.account_id)
+        except KeyError:
+            treasury_for_bot = None
+
+    info = await enrich_bot_info(
+        bot,
+        strategy_registry=getattr(svc, "strategy_registry", None),
+        treasury=treasury_for_bot,
+        trade_service=getattr(svc, "trade_service", None),
+    )
+    return {"bot": info}
+
+
 async def _handle_treasury_allocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -404,9 +536,9 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """19개 런타임 커맨드 핸들러를 일괄 등록.
+    """22개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(16개) 또는 read-only(3개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(18개) 또는 read-only(4개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
@@ -415,14 +547,22 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
 
     Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` (mutating) 추가.
+
+    Refs #1712: ``bot.start`` / ``bot.stop`` (mutating) / ``bot.status``
+    (read-only) 추가. Web API ``POST /api/bots/{bot_id}/start``/``/stop`` /
+    ``GET /api/bots/{bot_id}`` 와 정렬되며, ``bot.start`` 는 ``app_key``
+    preflight + audit ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``,
+    ``bot.status`` 는 ``enrich_bot_info`` 보강 후 ``{"bot": info}`` envelope.
     """
-    # ── mutating (16개): 서버 상태/DB를 변경 ──────────
+    # ── mutating (18개): 서버 상태/DB를 변경 ──────────
     registry.register("system.halt", _handle_system_halt, is_mutating=True)
     registry.register("system.clear_halt", _handle_system_clear_halt, is_mutating=True)
     registry.register("account.suspend", _handle_account_suspend, is_mutating=True)
     registry.register("account.activate", _handle_account_activate, is_mutating=True)
     registry.register("bot.create", _handle_bot_create, is_mutating=True)
     registry.register("bot.remove", _handle_bot_remove, is_mutating=True)
+    registry.register("bot.start", _handle_bot_start, is_mutating=True)
+    registry.register("bot.stop", _handle_bot_stop, is_mutating=True)
     registry.register("treasury.allocate", _handle_treasury_allocate, is_mutating=True)
     registry.register(
         "treasury.deallocate", _handle_treasury_deallocate, is_mutating=True
@@ -443,7 +583,8 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     # dryrun 분리는 후속 이슈.
     registry.register("broker.reconcile", _handle_broker_reconcile, is_mutating=True)
 
-    # ── read-only (3개): BrokerAdapter live 조회만 ────
+    # ── read-only (4개): live 조회만 ──────────────────
     registry.register("broker.status", _handle_broker_status, is_mutating=False)
     registry.register("broker.balance", _handle_broker_balance, is_mutating=False)
     registry.register("broker.positions", _handle_broker_positions, is_mutating=False)
+    registry.register("bot.status", _handle_bot_status, is_mutating=False)

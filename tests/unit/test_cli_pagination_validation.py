@@ -7,8 +7,9 @@ exit 0으로 처리하던 ingress drift를 닫는다.
 스펙 참조:
 - 5개 명령은 모두 `docs/specs/cli/03-commands.md`의 `offline` 분류이며,
   `src/ante/ipc/registry.py:371-426` `register_all_handlers()`에 해당 IPC
-  route가 없다 (등록된 19개 handler: system/account/bot/treasury/config.set/
-  approval/broker만). 따라서 IPC integration test는 N/A.
+  route가 없다 (등록된 22개 handler: system/account/bot/treasury/config.set/
+  approval/broker만 — #1712 ``bot.start``/``bot.stop``/``bot.status`` 포함).
+  따라서 IPC integration test는 N/A.
 - 본 테스트는 CLI Click 데코레이터의 `IntRange` ingress 가드만 검증한다.
 - 서비스 직접 호출(`AuditLogger.query`, `TradeRecorder.get_trades`,
   `BacktestRunStore.list_by_strategy`, `InstrumentService.search`,
