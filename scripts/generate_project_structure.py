@@ -104,8 +104,7 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     ),
     "src/ante/cli/commands/backtest.py": "ante backtest history/run",
     "src/ante/cli/commands/bot.py": (
-        "ante bot create/info/list/positions/remove/signal-key "
-        "(start/stop/status 미구현 follow-up)"
+        "ante bot create/info/list/positions/remove/signal-key/start/stop/status"
     ),
     "src/ante/cli/commands/broker.py": "ante broker balance/positions/reconcile/status",
     "src/ante/cli/commands/config.py": "ante config get/history/set",

@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-21
+> 마지막 갱신: 2026-05-22
 
 ## 목차
 
@@ -40,6 +40,9 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante bot remove](#ante-bot-remove)
   - [ante bot signal-key](#ante-bot-signal-key)
   - [ante bot positions](#ante-bot-positions)
+  - [ante bot start](#ante-bot-start)
+  - [ante bot stop](#ante-bot-stop)
+  - [ante bot status](#ante-bot-status)
 - [broker — 증권사 계좌 정보 조회.](#broker-증권사-계좌-정보-조회)
   - [ante broker status](#ante-broker-status)
   - [ante broker balance](#ante-broker-balance)
@@ -165,6 +168,9 @@ ante [OPTIONS] <command>
 | `ante bot remove` | 봇 삭제. | `bot:admin` | H·A |
 | `ante bot signal-key` | 봇 시그널 키 조회 또는 재발급. | `bot:admin` | H·A |
 | `ante bot positions` | 봇 보유 포지션 조회. | `bot:read` | H·A |
+| `ante bot start` | 봇 시작 (Web API ``POST /api/bots/{bot_id}/start``와 같은 동작). | `bot:admin` | H·A |
+| `ante bot stop` | 봇 중지 (Web API ``POST /api/bots/{bot_id}/stop``과 같은 동작). | `bot:admin` | H·A |
+| `ante bot status` | 봇 live 상태 조회 (Web API ``GET /api/bots/{bot_id}``와 같은 동작). | `bot:read` | H·A |
 | `ante broker status` | 증권사 연결 상태 조회. | `broker:read` | H·A |
 | `ante broker balance` | 증권사 계좌 잔고 조회. | `broker:read` | H·A |
 | `ante broker positions` | 증권사 보유 종목 조회. | `broker:read` | H·A |
@@ -926,6 +932,78 @@ ante bot positions <BOT_ID>
 | 인자 | 필수 | 설명 |
 |------|------|------|
 | `<BOT_ID>` | O |  |
+
+
+### ante bot start
+
+봇 시작 (Web API ``POST /api/bots/{bot_id}/start``와 같은 동작).
+
+- **필요 scope**: `bot:admin`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante bot start <BOT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<BOT_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante bot stop
+
+봇 중지 (Web API ``POST /api/bots/{bot_id}/stop``과 같은 동작).
+
+- **필요 scope**: `bot:admin`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante bot stop <BOT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<BOT_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
+
+
+### ante bot status
+
+봇 live 상태 조회 (Web API ``GET /api/bots/{bot_id}``와 같은 동작).
+
+- **필요 scope**: `bot:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante bot status <BOT_ID> [OPTIONS]
+```
+
+**Arguments:**
+
+| 인자 | 필수 | 설명 |
+|------|------|------|
+| `<BOT_ID>` | O |  |
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
 ---

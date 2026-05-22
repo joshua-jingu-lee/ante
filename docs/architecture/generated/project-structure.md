@@ -98,7 +98,8 @@ src/ante/
 │   │   ├── virtual.py                # VirtualProvider — 가상 실행 봇 데이터 공급
 │   │   └── __init__.py
 │   ├── __init__.py
-│   └── cold_path.py
+│   ├── cold_path.py
+│   └── info.py
 ├── strategy/
 │   ├── base.py                       # Strategy ABC, StrategyMeta, TradeHistoryView
 │   ├── context.py                    # StrategyContext — 전략 실행 컨텍스트 (파일 접근, 로깅, 거래 이력)
@@ -261,7 +262,7 @@ src/ante/
 │   │   ├── approval.py               # ante approval approve/audit-types/cancel/cancel-invalid/info/list/reject/reopen/request/review
 │   │   ├── audit.py                  # ante audit — 감사 로그 조회
 │   │   ├── backtest.py               # ante backtest history/run
-│   │   ├── bot.py                    # ante bot create/info/list/positions/remove/signal-key (start/stop/status 미구현 follow-up)
+│   │   ├── bot.py                    # ante bot create/info/list/positions/remove/signal-key/start/stop/status
 │   │   ├── broker.py                 # ante broker balance/positions/reconcile/status
 │   │   ├── config.py                 # ante config get/history/set
 │   │   ├── data.py                   # ante data list/schema/storage/validate
@@ -644,7 +645,10 @@ tests/
 │   │   ├── __init__.py
 │   │   └── test_validator_source_read_parse_no_reflection.py
 │   ├── test_cli_notification_hidden.py
-│   └── test_cli_signal_connect.py
+│   ├── test_cli_signal_connect.py
+│   ├── test_bot_info.py
+│   ├── test_cli_bot_lifecycle.py
+│   └── test_ipc_bot_lifecycle.py
 └── __init__.py
 ```
 
