@@ -550,7 +550,8 @@ tests/
 │   ├── test_cli_init_secret_leak.py
 │   ├── test_cli_account_crypto_error.py
 │   ├── test_cli_account_reserve_buffer_validation.py
-│   └── test_cli_validators.py
+│   ├── test_cli_validators.py
+│   └── test_cli_account_invalid_id_ingress.py
 └── __init__.py
 ```
 

@@ -762,6 +762,10 @@ class TestAccountCreate:
         self, mock_account_service: AsyncMock, offline_runtime
     ) -> None:
         """``BROKER_REGISTRY`` 미등록 broker_type은 입력 단계에서 거부한다."""
+        # #1724: account-id ingress 검증이 _validate_broker_type 직전에 배치되어,
+        # invalid pattern (``"x"`` 1자)은 broker_type 검증에 도달하기 전에 먼저
+        # 거부된다. 본 테스트의 의도는 broker_type 거부이므로 account_id는 valid
+        # 패턴을 사용한다.
         result = _invoke(
             [
                 "account",
@@ -769,7 +773,7 @@ class TestAccountCreate:
                 "--broker-type",
                 "no-such-broker",
                 "--account-id",
-                "x",
+                "valid-x",
                 "--name",
                 "X",
                 "--trading-mode",

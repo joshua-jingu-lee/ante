@@ -256,6 +256,63 @@ def reject_inverted_date_range(
         raise SystemExit(1)
 
 
+def reject_invalid_new_account_id(
+    account_id: str | None,
+    fmt: OutputFormatter,
+    *,
+    context: str = "",
+) -> str:
+    """공유 helper: create-path 신규 ``account_id``를 service 진입 이전에 거부.
+
+    오라클 #1724 finding(D follow-up — #1634 동형): cold-path
+    ``account create``가 invalid ``account_id``(``default`` RESTRICTED,
+    pattern 위반 ``bad_id``, ``""``/``None``)를 ``AccountService.create``
+    SQL 진입 이전에 거부하지 않아 일부는 ``ACCOUNT_NOT_FOUND``로 오분류되고
+    일부는 empty/``EXECUTION_ERROR``로 떨어지던 ingress drift가 있었다.
+    본 helper가 그 drift를 닫는다.
+
+    :func:`reject_invalid_account_id`와 byte-for-byte 동형이지만 내부
+    delegate가 다르다 — :func:`ante.account.scoping.validate_new_account_id`
+    (create-policy SSOT)를 호출하여 **형식 + RESTRICTED + INVALID_RUNTIME**
+    세 단계를 한 번에 검사한다. ``require_account_id``(lookup-policy)와의
+    차이는 RESTRICTED-aware라는 점이다 — ``test`` 같은 bootstrap seed id는
+    lookup은 허용되지만 신규 생성은 금지된다.
+
+    :func:`reject_invalid_account_id`와 마찬가지로
+    :class:`ante.account.errors.InvalidAccountIdError`는 non-Click
+    ``AccountError``이며, ``AuthenticatedGroup.main``
+    (``src/ante/cli/middleware.py:568-596``)은 ``click.UsageError``/``Abort``만
+    envelope 변환한다. 따라서 본 helper가 그 예외를 **명시적으로** catch해
+    ``fmt.error(str(e), code=e.code)`` + ``SystemExit(1)``로 변환한다.
+    에러 코드는 #1633 SSOT
+    (``InvalidAccountIdError.code == "VALIDATION_ERROR"``)를 그대로 재사용하며
+    신 코드를 도입하지 않는다.
+
+    Args:
+        account_id: 검증할 신규 account_id (또는 ``None``).
+        fmt: ``get_formatter(ctx)``로 얻은 출력 포맷터. text/json 모드에 따라
+            구조화된 에러를 출력한다.
+        context: 호출 위치 식별자 (예: ``"cli.account.create"``). 현재
+            ``validate_new_account_id``는 context를 사용하지 않지만 sibling
+            helper 시그니처 정렬을 위해 보존한다.
+
+    Returns:
+        검증된 account_id. 호출 측 type narrow를 위해 ``str``로 반환된다.
+
+    Raises:
+        SystemExit: invalid account_id일 때 exit code 1로 종료.
+    """
+    from ante.account.errors import InvalidAccountIdError
+    from ante.account.scoping import validate_new_account_id
+
+    del context  # sibling 시그니처 정렬용 — validate_new_account_id가 사용하지 않음.
+    try:
+        return validate_new_account_id(account_id)
+    except InvalidAccountIdError as e:
+        fmt.error(str(e), code=e.code)
+        raise SystemExit(1) from e
+
+
 def reject_invalid_account_id(
     account_id: str | None,
     fmt: OutputFormatter,
@@ -315,6 +372,7 @@ def reject_invalid_account_id(
 
 __all__ = [
     "reject_invalid_account_id",
+    "reject_invalid_new_account_id",
     "reject_inverted_date_range",
     "validate_iso_date",
     "validate_nonnegative_finite_amount",
