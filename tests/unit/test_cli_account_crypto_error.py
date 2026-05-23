@@ -29,7 +29,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
@@ -193,13 +193,6 @@ class TestCreateAccountServiceCleanup:
         # initialize 단계에서 명시 mock으로 raise.
         monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
-        original_close = Database.close
-        close_call_count = {"count": 0}
-
-        async def spy_close(self: Database) -> None:
-            close_call_count["count"] += 1
-            await original_close(self)
-
         # AccountService.initialize를 raise하도록 monkeypatch
         from ante.account.service import AccountService
 
@@ -208,15 +201,19 @@ class TestCreateAccountServiceCleanup:
                 "테스트: initialize 도중 키 누락 시뮬레이션"
             )
 
-        with patch.object(Database, "close", spy_close):
+        # Plan v2 invariant #6: patch.object(Database, "close") spy를 AsyncMock으로
+        # 주입하고 await_count == 1로 검증한다. cleanup 호출 사실만 검증하면
+        # 충분하므로 실제 close 본체는 위임하지 않는다 (process 종료 시 임시
+        # 자원은 OS가 회수).
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
             monkeypatch.setattr(AccountService, "initialize", raising_initialize)
 
             with pytest.raises(EncryptionKeyMissingError):
                 await _create_account_service()
 
-        count = close_call_count["count"]
-        assert count == 1, (
-            f"Database.close 가 정확히 1회 await되어야 한다 (count={count})"
+        assert close_mock.await_count == 1, (
+            f"Database.close 가 정확히 1회 await되어야 한다 "
+            f"(await_count={close_mock.await_count})"
         )
 
 
