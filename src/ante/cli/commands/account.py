@@ -26,6 +26,7 @@ import click
 from ante.account.models import AccountStatus
 from ante.cli._validators import (
     reject_invalid_account_id,
+    reject_invalid_new_account_id,
     validate_nonnegative_finite_amount,
 )
 from ante.cli.cold_path import (
@@ -525,6 +526,17 @@ def account_create(
     assert name_opt is not None
     assert trading_mode_opt is not None
 
+    # 1-b) account_id ingress 검증 (#1724, D follow-up — #1634 동형). invalid
+    # account_id(`default` RESTRICTED, pattern 위반 `bad_id`, ``""``)를
+    # ``AccountService.create`` SQL 진입 이전에 `VALIDATION_ERROR` + exit 1로
+    # 거부한다. 미적용 시 ``svc.create``가 `EXECUTION_ERROR`/empty로 떨어져
+    # invalid ingress가 not-found 의미와 구별되지 않는다.
+    # ``validate_new_account_id``는 RESTRICTED-aware라 lookup-policy의
+    # ``require_account_id``와 달리 ``test`` 같은 bootstrap seed id도 거부한다.
+    account_id_opt = reject_invalid_new_account_id(
+        account_id_opt, fmt, context="cli.account.create"
+    )
+
     # 2) broker_type enum 검증 (BROKER_REGISTRY SSOT)
     _validate_broker_type(fmt, broker_type)
 
@@ -831,6 +843,16 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     # cold-path: confirm 통과 직후 active runtime 차단
     _assert_no_active_runtime(fmt)
 
+    # ingress 검증 (#1724, D follow-up — #1634 동형). invalid account_id
+    # (`default`/패턴 위반)를 ``AccountService.delete`` SQL 진입 이전에
+    # `VALIDATION_ERROR` + exit 1로 거부한다. 미적용 시 ``svc.delete``가
+    # ``AccountNotFoundError``로 raise되어 invalid ingress가 not-found 의미와
+    # 구별되지 않는다. positional required arg라 omitted가 없어 전 입력을
+    # 검증한다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.delete"
+    )
+
     from ante.account.errors import (
         AccountDeletedError,
         AccountHasActiveBotsError,
@@ -840,7 +862,7 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     async def _do_delete() -> None:
         svc, db = await _create_account_service()
         try:
-            await svc.delete(account_id, deleted_by=member_id)
+            await svc.delete(validated_account_id, deleted_by=member_id)
         finally:
             await db.close()
 
@@ -863,7 +885,7 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
         fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
-    fmt.success(f'계좌 "{account_id}" 삭제 완료')
+    fmt.success(f'계좌 "{validated_account_id}" 삭제 완료')
 
 
 # ── credentials ──────────────────────────────────────
@@ -963,12 +985,21 @@ def account_set_credentials(
     # cold-path: active runtime이 있으면 진입 직후 차단
     _assert_no_active_runtime(fmt)
 
+    # ingress 검증 (#1724, D follow-up — #1634 동형). invalid account_id
+    # (`default`/패턴 위반)를 ``svc.get`` lookup 이전에 `VALIDATION_ERROR` +
+    # exit 1로 거부한다. 미적용 시 ``svc.get``이 ``AccountNotFoundError``로
+    # raise되어 invalid ingress가 not-found 의미와 구별되지 않는다. positional
+    # required arg라 omitted가 없어 전 입력을 검증한다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.set-credentials"
+    )
+
     from ante.account.presets import BROKER_PRESETS
 
     async def _do_set_credentials() -> None:
         svc, db = await _create_account_service()
         try:
-            acct = await svc.get(account_id)
+            acct = await svc.get(validated_account_id)
             preset = BROKER_PRESETS.get(acct.broker_type)
             if not preset or not preset.required_credentials:
                 # broker preset이 credentials를 요구하지 않는 경우(예: 향후 broker)
@@ -1010,8 +1041,8 @@ def account_set_credentials(
                 file_pairs=credentials_file,
             )
 
-            await svc.update(account_id, credentials=new_credentials)
-            fmt.success(f'계좌 "{account_id}" 인증 정보 재설정 완료')
+            await svc.update(validated_account_id, credentials=new_credentials)
+            fmt.success(f'계좌 "{validated_account_id}" 인증 정보 재설정 완료')
         finally:
             await db.close()
 
@@ -1060,6 +1091,16 @@ def account_repair_timezone(
     # ``_create_account_service`` 자체가 호출되지 않아야 한다.
     _assert_no_active_runtime(fmt)
 
+    # ingress 검증 (#1724, D follow-up — #1634 동형). invalid account_id
+    # (`default`/패턴 위반)를 ``svc.repair_timezone`` 진입 이전에
+    # `VALIDATION_ERROR` + exit 1로 거부한다. 미적용 시 service-layer가
+    # ``AccountNotFoundError``로 raise되어 invalid ingress가 not-found 의미와
+    # 구별되지 않는다. positional required arg라 omitted가 없어 전 입력을
+    # 검증한다.
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.account.repair-timezone"
+    )
+
     from ante.account.errors import (
         AccountDeletedError,
         AccountNotFoundError,
@@ -1069,7 +1110,7 @@ def account_repair_timezone(
     async def _do_repair() -> Account:
         svc, db = await _create_account_service()
         try:
-            return await svc.repair_timezone(account_id, new_timezone)
+            return await svc.repair_timezone(validated_account_id, new_timezone)
         finally:
             await db.close()
 
