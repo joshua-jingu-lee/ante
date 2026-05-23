@@ -6,11 +6,14 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 import click
 
+from ante.account.crypto import _validate_fernet_key
 from ante.cli.commands._password import generate_password
 from ante.cli.formatter import OutputFormatter
 from ante.cli.main import get_formatter
@@ -53,14 +56,241 @@ host = "0.0.0.0"
 port = 3982
 """
 
+_ENCRYPTION_KEY_NAME = "ANTE_DB_ENCRYPTION_KEY"
+
 SECRETS_ENV_TEMPLATE = """\
 # Ante 비밀값 설정
 # 환경변수가 이 파일보다 우선합니다.
+
+# DB credentials Fernet 마스터 키. `ante init`이 자동 생성합니다.
+# 수동으로 교체하려면 cryptography.fernet.Fernet.generate_key() 출력만 사용하세요.
+{encryption_key_line}
 
 # 텔레그램 알림 (선택) - 사용 시 주석 해제하고 값 채우기
 # TELEGRAM_BOT_TOKEN=
 # TELEGRAM_CHAT_ID=
 """
+
+
+def _generate_db_encryption_key() -> str:
+    """신규 Fernet 마스터 키를 생성한다.
+
+    구현은 ``cryptography.fernet.Fernet.generate_key()``를 그대로 호출하고
+    base64 문자열로 디코딩해 반환한다. 결과는 항상 ``_validate_fernet_key``
+    검증을 통과한다.
+    """
+    from cryptography.fernet import Fernet
+
+    return Fernet.generate_key().decode()
+
+
+def _resolve_effective_key(
+    env_value: str | None, file_value: str | None
+) -> tuple[str, bool, bool]:
+    """env/file의 키 분류 결과로부터 effective key와 파일 상태 플래그를 도출한다.
+
+    결정 행렬 (이슈 #1721 Implementation Plan v4):
+
+    - valid env + valid file (동일 값): env 사용, file 보존, 백업 없음.
+    - valid env + valid file (다른 값): env-wins. file을 env value로 교체하지만
+      이전 라인이 valid였으므로 **백업하지 않는다**.
+    - valid env + invalid/없음 file: env value를 file에 기입. invalid이었으면
+      ``file_was_invalid_replaced=True`` 로 표시해 호출자가 백업하게 한다.
+    - invalid/없음 env + valid file: file value를 effective key로 채택.
+    - invalid/없음 env + invalid/없음 file: 신규 Fernet 키 생성. invalid이었으면
+      ``file_was_invalid_replaced=True``.
+
+    Args:
+        env_value: ``os.environ.get("ANTE_DB_ENCRYPTION_KEY")`` 결과.
+        file_value: ``secrets.env`` 의 동일 키 라인 값 (없으면 ``None``).
+
+    Returns:
+        ``(effective_key, file_was_invalid_replaced, file_was_synced_from_env)``.
+
+        - ``effective_key``: 실제로 사용할 Fernet 키 문자열.
+        - ``file_was_invalid_replaced``: file에 non-empty invalid 값이 있어서
+          교체해야 한다는 신호. 호출자는 이 경우에만 백업 파일을 만든다.
+        - ``file_was_synced_from_env``: file을 env value로 동기화해야 한다는 신호.
+          (env가 valid이고 file이 invalid/없음 또는 다른 valid 값인 경우)
+    """
+    env_valid = _validate_fernet_key(env_value)
+    file_valid = _validate_fernet_key(file_value)
+    file_present_invalid = (file_value is not None) and (not file_valid)
+
+    if env_valid:
+        assert env_value is not None  # narrow type for mypy
+        if file_valid and file_value == env_value:
+            # NOP — file already in sync with env.
+            return env_value, False, False
+        # env-wins: file을 env value로 동기화.
+        # 백업은 invalid 라인 교체 시에만(valid→valid 교체는 백업 없음).
+        return env_value, file_present_invalid, True
+
+    # env invalid/없음.
+    if file_valid:
+        assert file_value is not None  # narrow type for mypy
+        return file_value, False, False
+
+    # env invalid/없음 + file invalid/없음 → 신규 키 생성.
+    new_key = _generate_db_encryption_key()
+    return new_key, file_present_invalid, True
+
+
+def _read_existing_encryption_key_line(secrets_env_path: Path) -> str | None:
+    """secrets.env에서 ANTE_DB_ENCRYPTION_KEY 라인의 값만 추출.
+
+    동일 키가 여러 번 있으면 **마지막 라인**의 값을 반환한다(`_load_dotenv`와
+    동일한 last-wins 의미). 라인이 전혀 없으면 ``None``. 주석(#)으로 시작하는
+    라인은 무시한다.
+    """
+    if not secrets_env_path.exists():
+        return None
+    last: str | None = None
+    for raw_line in secrets_env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() != _ENCRYPTION_KEY_NAME:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        last = value
+    return last
+
+
+def _atomic_backup_secrets_env(secrets_env_path: Path) -> Path:
+    """기존 secrets.env 파일을 0600 권한으로 원자적 백업한다.
+
+    백업 파일명: ``secrets.env.bak.<UTC iso>`` (같은 디렉토리). tempfile에
+    내용을 0600으로 쓴 뒤 ``os.rename``으로 원자 이동한다. 기존 secrets.env는
+    그대로 유지된다(이 헬퍼는 백업만 담당).
+    """
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = secrets_env_path.parent / f"secrets.env.bak.{ts}"
+    content = secrets_env_path.read_bytes()
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".secrets.env.bak.", dir=str(secrets_env_path.parent)
+    )
+    try:
+        os.write(fd, content)
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    os.rename(tmp_path, backup_path)
+    return backup_path
+
+
+def _write_encryption_key_into_secrets_env(
+    secrets_env_path: Path, effective_key: str
+) -> None:
+    """secrets.env에 ANTE_DB_ENCRYPTION_KEY 라인을 갱신/추가한다.
+
+    - 파일이 없으면: ``SECRETS_ENV_TEMPLATE``을 채워 신규 생성(0600).
+    - 파일이 있는데 라인이 없으면: 파일 끝에 ``ANTE_DB_ENCRYPTION_KEY=…``
+      한 줄을 append하고 권한을 0600으로 다시 적용한다.
+    - 라인이 있으면: 마지막 발견 라인을 새 값으로 교체(주석 라인은 보존).
+
+    파일 갱신은 tempfile에 내용을 쓰고 0600 chmod 후 ``os.rename``으로
+    원자 이동한다. 이렇게 해야 부분 쓰기 상태에서 다른 프로세스가 키를 빈
+    상태로 읽지 않는다.
+    """
+    new_line = f"{_ENCRYPTION_KEY_NAME}={effective_key}"
+
+    if not secrets_env_path.exists():
+        secrets_env_path.parent.mkdir(parents=True, exist_ok=True)
+        content = SECRETS_ENV_TEMPLATE.format(encryption_key_line=new_line)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".secrets.env.", dir=str(secrets_env_path.parent)
+        )
+        try:
+            os.write(fd, content.encode())
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+        os.rename(tmp_path, secrets_env_path)
+        return
+
+    existing = secrets_env_path.read_text()
+    lines = existing.splitlines()
+    # 마지막 ANTE_DB_ENCRYPTION_KEY 라인 인덱스 탐색 (last-wins 일관).
+    last_idx: int | None = None
+    for i, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, _, _ = stripped.partition("=")
+        if key.strip() == _ENCRYPTION_KEY_NAME:
+            last_idx = i
+
+    if last_idx is None:
+        lines.append(new_line)
+    else:
+        lines[last_idx] = new_line
+
+    trailing_newline = "\n" if existing.endswith("\n") else ""
+    new_content = "\n".join(lines) + trailing_newline
+
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".secrets.env.", dir=str(secrets_env_path.parent)
+    )
+    try:
+        os.write(fd, new_content.encode())
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    os.rename(tmp_path, secrets_env_path)
+
+
+def _ensure_encryption_key_in_secrets_env(secrets_env_path: Path) -> str:
+    """ANTE_DB_ENCRYPTION_KEY 5-state idempotent path.
+
+    5개 상태 분기:
+      1. secrets.env 파일 자체가 없음 → 신규 키 생성 + 파일 신규 생성(템플릿).
+      2. 파일은 있는데 라인이 없음 → 신규 키 생성 + 라인 append.
+      3. 라인은 있는데 값이 빈 문자열 → 신규 키 생성 + 라인 교체(백업 없음, 빈
+         값은 backup 가치 없음).
+      4. 라인이 있고 값이 non-empty이지만 Fernet 검증 실패(invalid) → 신규 키
+         생성 또는 valid env value로 교체. **invalid 값 backup 필수**.
+      5. 라인이 있고 값이 Fernet valid → env-wins 비교. 동일 값이면 NOP,
+         다른 valid env가 있으면 env value로 교체(valid→valid는 backup 없음),
+         env가 invalid/없음이면 file value 유지.
+
+    Args:
+        secrets_env_path: ``<config_dir>/secrets.env`` 경로.
+
+    Returns:
+        이 함수가 effective key로 결정한 Fernet 키 문자열. 호출자는 이 값을
+        ``os.environ[_ENCRYPTION_KEY_NAME]`` 에 set한다(이미 valid env가
+        있으면 set 생략).
+    """
+    env_value = os.environ.get(_ENCRYPTION_KEY_NAME)
+    file_value = _read_existing_encryption_key_line(secrets_env_path)
+
+    effective_key, file_was_invalid_replaced, file_was_synced_from_env = (
+        _resolve_effective_key(env_value, file_value)
+    )
+
+    # 빈 문자열은 backup 대상이 아니다 — invalid 분류이지만 보호할 데이터가 없음.
+    needs_backup = file_was_invalid_replaced and bool(file_value)
+    needs_write = file_was_synced_from_env or (
+        not _validate_fernet_key(file_value)
+        and _validate_fernet_key(effective_key)
+        and file_value != effective_key
+    )
+
+    if needs_backup and secrets_env_path.exists():
+        _atomic_backup_secrets_env(secrets_env_path)
+
+    if needs_write:
+        _write_encryption_key_into_secrets_env(secrets_env_path, effective_key)
+
+    return effective_key
 
 
 def _run(coro):  # noqa: ANN001, ANN202
@@ -362,8 +592,15 @@ def init(
     db_absolute = (config_path / _DB_FILENAME).resolve()
     system_toml_content = SYSTEM_TOML_TEMPLATE.format(db_path=str(db_absolute))
     _ensure_file(artifacts["system.toml"], system_toml_content)
-    _ensure_file(artifacts["secrets.env"], SECRETS_ENV_TEMPLATE)
+    # secrets.env는 ANTE_DB_ENCRYPTION_KEY를 보장하기 위해 별도 helper로 처리한다.
+    # 이미 존재하는 파일은 내용을 보존하면서 키 라인만 갱신/추가하며, 신규
+    # 생성 시에는 SECRETS_ENV_TEMPLATE을 사용해 만든다.
+    effective_key = _ensure_encryption_key_in_secrets_env(artifacts["secrets.env"])
     artifacts["secrets.env"].chmod(0o600)
+    # in-process os.environ 설정: 현재 환경변수가 invalid/empty/unset일 때만
+    # override하고, non-empty valid env는 그대로 보존한다(env-wins).
+    if not _validate_fernet_key(os.environ.get(_ENCRYPTION_KEY_NAME)):
+        os.environ[_ENCRYPTION_KEY_NAME] = effective_key
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     token = ""

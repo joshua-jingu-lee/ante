@@ -20,6 +20,7 @@ docs/superpowers/
 
 # Secrets
 config/secrets.env
+config/secrets.env.bak.*
 config/system.toml
 .env
 .env.*

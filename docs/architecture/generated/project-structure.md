@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-22 (KST)
+> 마지막 생성 시점: 2026-05-23 (KST)
 
 ## 최상위 구조
 
@@ -546,7 +546,8 @@ tests/
 │   ├── test_cli_signal_connect.py
 │   ├── test_bot_info.py
 │   ├── test_cli_bot_lifecycle.py
-│   └── test_ipc_bot_lifecycle.py
+│   ├── test_ipc_bot_lifecycle.py
+│   └── test_cli_init_secret_leak.py
 └── __init__.py
 ```
 
