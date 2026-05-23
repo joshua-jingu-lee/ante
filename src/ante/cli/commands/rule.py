@@ -63,8 +63,8 @@ async def _create_rule_engine(account_id: str):  # noqa: ANN202
     validated_account_id = require_account_id(account_id, context="cli.rule")
 
     db = Database(get_db_path())
-    await db.connect()
     try:
+        await db.connect()
         # account existence pre-check. ``rule_list`` 의 기존 inline 블록을
         # 그대로 옮긴 형태이며, ``_create_treasury`` 동형 (#1725).
         #
