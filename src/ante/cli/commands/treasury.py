@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 import click
 
+from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import (
     reject_invalid_account_id,
     reject_inverted_date_range,
@@ -20,6 +22,8 @@ from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
 
+logger = logging.getLogger(__name__)
+
 
 @click.group()
 def treasury() -> None:
@@ -31,6 +35,17 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
+    """CLI에서 Treasury를 생성하는 헬퍼.
+
+    ``db.connect()`` 이후의 모든 라이프사이클(``AccountService.initialize`` /
+    ``AccountService.get`` / ``Treasury.initialize`` 포함)을 ``except
+    BaseException`` 블록으로 감싸 실패 시 ``db.close()``를 보장한다.
+    valid-but-missing account_id(예: ``acc-9999``)가 들어오면
+    ``account_service.get``이 :class:`AccountNotFoundError`를 raise하는데,
+    이 때 aiosqlite 연결이 leak되어 asyncio 종료 시 busy_timeout 대기로 CLI
+    프로세스가 6초 이상 hang하는 회귀를 차단한다(#1725). 본 패턴은
+    ``_create_account_service`` (#1722) byte-for-byte 동형이다.
+    """
     from ante.account.scoping import require_account_id
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
@@ -41,25 +56,40 @@ async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
     validated_account_id = require_account_id(account_id, context="cli.treasury")
 
     db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    account_service = AccountService(db=db, eventbus=eventbus)
-    await account_service.initialize()
-
-    account = await account_service.get(validated_account_id)
-    t = Treasury(
-        db,
-        eventbus,
-        account_id=account.account_id,
-        currency=account.currency,
-        buy_commission_rate=float(account.buy_commission_rate),
-        sell_commission_rate=float(account.sell_commission_rate),
-    )
-    await t.initialize()
+    try:
+        await db.connect()
+        eventbus = EventBus()
+        account_service = AccountService(db=db, eventbus=eventbus)
+        await account_service.initialize()
+        account = await account_service.get(validated_account_id)
+        t = Treasury(
+            db,
+            eventbus,
+            account_id=account.account_id,
+            currency=account.currency,
+            buy_commission_rate=float(account.buy_commission_rate),
+            sell_commission_rate=float(account.sell_commission_rate),
+        )
+        await t.initialize()
+    except BaseException:
+        try:
+            await db.close()
+        except Exception:
+            logger.debug(
+                "db.close() after init failure raised — ignored", exc_info=True
+            )
+        raise
     return t, db
 
 
 async def _create_treasury_manager():  # noqa: ANN202
+    """CLI에서 TreasuryManager를 생성하는 헬퍼.
+
+    ``_create_treasury`` 동형 cleanup 패턴(#1722). 현재 사용처
+    (``budgets``/``portfolio value`` no-account 분기)는 valid-but-missing
+    account_id를 직접 처리하지 않지만, defense-in-depth로 ``initialize_all``
+    / ``account_service.list`` 등 lifecycle 실패 시에도 db.close를 보장한다.
+    """
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
@@ -67,12 +97,21 @@ async def _create_treasury_manager():  # noqa: ANN202
     from ante.treasury.manager import TreasuryManager
 
     db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    account_service = AccountService(db=db, eventbus=eventbus)
-    await account_service.initialize()
-    manager = TreasuryManager(db=db, eventbus=eventbus)
-    await manager.initialize_all(await account_service.list())
+    try:
+        await db.connect()
+        eventbus = EventBus()
+        account_service = AccountService(db=db, eventbus=eventbus)
+        await account_service.initialize()
+        manager = TreasuryManager(db=db, eventbus=eventbus)
+        await manager.initialize_all(await account_service.list())
+    except BaseException:
+        try:
+            await db.close()
+        except Exception:
+            logger.debug(
+                "db.close() after init failure raised — ignored", exc_info=True
+            )
+        raise
     return manager, db
 
 
@@ -101,7 +140,15 @@ def status(ctx: click.Context, account_id: str) -> None:
         finally:
             await db.close()
 
-    result = _run(_run_status())
+    # valid-but-missing account_id(예: `acc-9999`)는 `account_service.get`에서
+    # `AccountNotFoundError`로 raise된다. Click 기본 핸들러가 typed exception을
+    # 모르고 traceback/빈 stdout으로 새던 contract-drift를 본 매핑이 닫는다
+    # (#1725). 에러코드는 `ACCOUNT_NOT_FOUND` SSOT.
+    try:
+        result = _run(_run_status())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
 
     if fmt.is_json:
         fmt.output(result)
@@ -492,7 +539,12 @@ def snapshot(
         finally:
             await db.close()
 
-    result = _run(_run_snapshot())
+    # valid-but-missing account_id 매핑은 status와 동형이다 (#1725).
+    try:
+        result = _run(_run_snapshot())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
 
     if result is None:
         target = date_str or datetime.now(UTC).strftime("%Y-%m-%d")
