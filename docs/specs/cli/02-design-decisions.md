@@ -224,15 +224,17 @@ CLI는 default-deny + allowlist (opt-out) 정책을 적용한다. 새 명령 추
 
 | 단계 | 책임 | 위치 |
 |------|------|------|
-| 1차 차단 (authentication) | `ANTE_MEMBER_TOKEN`이 없거나 검증 실패면 exit 1. allowlist 명령은 면제. | `authenticated_group` factory(#1404 구현 예정). 현재는 루트 그룹의 `authenticate_member(ctx)` + 명령 단의 `@require_auth`로 부분 적용. |
+| 1차 차단 (authentication) | `ANTE_MEMBER_TOKEN`이 없거나 검증 실패면 exit 1. allowlist 명령은 면제. | `AuthenticatedGroup` factory(#1404 closed). 적용 위치: `src/ante/cli/main.py:58`. |
 | 2차 차단 (authorization) | `@require_scope(...)` 데코레이터. agent에 대해서만 required scope를 검사하고 human은 bypass. | `src/ante/cli/middleware.py`의 `@require_scope`. |
 
 **현재 상태와 후속 전환**:
 
-- 1.0 현재 CLI는 opt-in 모델(`@require_auth` + `@require_scope` 명령별 부착)을 유지하고
-  있다. default-deny factory(`authenticated_group`) 도입은 #1404에서 구현한다.
-- 본 spec은 정책과 allowlist 결정만 확정한다. factory 시그니처, decorator shim,
-  마이그레이션 순서는 #1404가 SSOT다.
+- 1.0 현재 CLI는 default-deny 모델로 동작한다. default-deny factory
+  (`AuthenticatedGroup`)는 #1404로 적용 완료(`src/ante/cli/main.py:58`,
+  `src/ante/cli/middleware.py:353`).
+- 본 spec은 정책과 allowlist 결정을 확정한다. factory 시그니처와 decorator shim은
+  `src/ante/cli/middleware.py`의 `AuthenticatedGroup`가 SSOT다. 마이그레이션은
+  #1404로 완료되었고, 후속 명령 추가 시 default-deny가 자동 적용된다.
 - 공개 명령 allowlist의 SSOT는 [03-commands.md — 공개 명령 allowlist](03-commands.md#공개-명령-allowlist--인증-면제)다.
 
 **게이트-면제 메타 경로 (allowlist와 분리)**:
@@ -243,9 +245,9 @@ CLI는 default-deny + allowlist (opt-out) 정책을 적용한다. 새 명령 추
 | 게이트-면제 경로 | 사유 | 코드 cite |
 |-----------------|------|----------|
 | `ante --help` (root) | `click`은 root 그룹의 콜백 실행 **전에** root 레벨 `--help` 플래그를 처리해 도움말을 출력하고 종료한다. 인증 단계까지 진입하지 않는다. | `src/ante/cli/main.py:105`의 root `cli()` 콜백 안 `authenticate_member(ctx)`는 click이 root `--help`를 처리한 뒤에는 호출되지 않는다. |
-| `ante <cmd> --help`, `ante <cmd> <sub> --help` 등 nested `--help` | **주의**: click은 nested `--help`에서 **부모 그룹 콜백을 먼저 실행한 뒤** 서브커맨드 단의 도움말을 출력한다. 즉 `ante member --help`나 `ante member list --help`에서도 root `cli()` 콜백(과 #1404 도입 후 `authenticated_group` factory)이 실행된다. 토큰 없이 인증을 강제하면 보호 서브커맨드의 도움말 자체를 못 받게 되어 학습 경로가 막힌다. | nested help 처리 시 부모 group 콜백이 실행되는 시점의 `ctx.resilient_parsing` 값은 **click 내부 동작에 의존**하며 항상 `True`라고 보장되지 않는다. 따라서 본 spec은 invariant만 정의하고 구체 검사 시그니처는 #1404 plan-preflight에서 확정한다. invariant는 아래 "nested help 면제 invariant" 절을 따른다. raw `sys.argv` 검사(`"--help" in sys.argv[1:]`)는 어떤 경우에도 사용하지 않는다. `ante strategy submit -- --help`처럼 `--` 이후 위치 인자로 들어간 `--help`는 인증을 면제하지 않으며 default-deny 게이트가 정상 발화해야 한다. 도움말은 명령 사용법 그 자체이며 토큰 없이 받을 수 있어야 Agent와 사람이 명령을 학습할 수 있으므로 본 면제는 default-deny의 의도와 충돌하지 않는다(Codex review v4 Finding 2 — raw sys.argv 검사로 인한 우회 차단). |
+| `ante <cmd> --help`, `ante <cmd> <sub> --help` 등 nested `--help` | **주의**: click은 nested `--help`에서 **부모 그룹 콜백을 먼저 실행한 뒤** 서브커맨드 단의 도움말을 출력한다. 즉 `ante member --help`나 `ante member list --help`에서도 root `cli()` 콜백(과 `AuthenticatedGroup` factory, #1404 적용 후)이 실행된다. 토큰 없이 인증을 강제하면 보호 서브커맨드의 도움말 자체를 못 받게 되어 학습 경로가 막힌다. | nested help 처리 시 부모 group 콜백이 실행되는 시점의 `ctx.resilient_parsing` 값은 **click 내부 동작에 의존**하며 항상 `True`라고 보장되지 않는다. 따라서 본 spec은 invariant만 정의하고 구체 검사 시그니처는 #1404로 확정됨(`src/ante/cli/middleware.py`의 `AuthenticatedGroup`). invariant는 아래 "nested help 면제 invariant" 절을 따른다. raw `sys.argv` 검사(`"--help" in sys.argv[1:]`)는 어떤 경우에도 사용하지 않는다. `ante strategy submit -- --help`처럼 `--` 이후 위치 인자로 들어간 `--help`는 인증을 면제하지 않으며 default-deny 게이트가 정상 발화해야 한다. 도움말은 명령 사용법 그 자체이며 토큰 없이 받을 수 있어야 Agent와 사람이 명령을 학습할 수 있으므로 본 면제는 default-deny의 의도와 충돌하지 않는다(Codex review v4 Finding 2 — raw sys.argv 검사로 인한 우회 차단). |
 | `ante --version` | `@click.version_option`(`src/ante/cli/main.py:94`)이 root 콜백 진입 전 처리. 메타데이터 출력. | 동일. |
-| Click resilient parsing 경로 | `click`이 자동완성(shell completion) 등을 위해 명시적으로 `ctx.resilient_parsing=True`로 옵션 파싱을 시도할 때. 이 모드에서는 부작용을 일으키지 않아야 한다. **nested `--help`는 click 버전에 따라 부모 콜백 invoke 시점에 `resilient_parsing`이 `True`가 아닐 수 있으므로 위 nested help 행과 별도로 다룬다.** | `authenticate_member(ctx)`는 `ctx.resilient_parsing`이 True면 즉시 return하여 인증을 건너뛴다(`src/ante/cli/middleware.py:64-65`). #1404의 `authenticated_group` factory도 동일 가드를 갖는다. |
+| Click resilient parsing 경로 | `click`이 자동완성(shell completion) 등을 위해 명시적으로 `ctx.resilient_parsing=True`로 옵션 파싱을 시도할 때. 이 모드에서는 부작용을 일으키지 않아야 한다. **nested `--help`는 click 버전에 따라 부모 콜백 invoke 시점에 `resilient_parsing`이 `True`가 아닐 수 있으므로 위 nested help 행과 별도로 다룬다.** | `authenticate_member(ctx)`는 `ctx.resilient_parsing`이 True면 즉시 return하여 인증을 건너뛴다(`src/ante/cli/middleware.py:64-65`). `AuthenticatedGroup` factory(#1404 적용)도 동일 가드를 갖는다. |
 
 이 면제 경로는 4개 명령 allowlist와 다른 결로 운영된다.
 
@@ -265,8 +267,8 @@ CLI는 default-deny + allowlist (opt-out) 정책을 적용한다. 새 명령 추
 부모 group의 콜백을 먼저 invoke한 뒤 자식의 도움말을 렌더링하는 경로다. 이때
 부모 콜백이 호출되는 시점의 `ctx.resilient_parsing` 값은 click 내부 동작에
 의존하며 spec이 "항상 `True`"로 단언할 수 없다. 따라서 본 spec은 **invariant
-세 개만** 정의하고, 정확한 검사 시그니처(`ctx` 필드 조합)는 #1404 plan-preflight
-단계에서 click의 실제 동작을 확인한 뒤 확정한다.
+세 개만** 정의하고, 정확한 검사 시그니처(`ctx` 필드 조합)는 #1404로 확정됨
+(`src/ante/cli/middleware.py`의 `AuthenticatedGroup`).
 
 | invariant | 내용 |
 |-----------|------|
@@ -275,15 +277,15 @@ CLI는 default-deny + allowlist (opt-out) 정책을 적용한다. 새 명령 추
 | (H3) 검사 방식 | nested help 판정은 **Click context가 노출하는 상태만** 본다(예: `ctx.resilient_parsing`, `ctx.protected_args`, `ctx.invoked_subcommand`, `ctx.params`의 click 결과). raw `sys.argv` 검사(`"--help" in sys.argv`)는 어떤 경우에도 사용하지 않는다. (H2)를 만족시키기 위해 click이 이미 `--` 분리를 처리한 뒤의 context를 기준으로 한다. |
 
 대안 패턴(예: `group.no_args_is_help = True` 설정 후 root 콜백 진입 전에 click이
-help를 가로채도록 위임)도 본 invariant를 만족하면 허용된다. #1404 plan-preflight는
-click 버전(`click>=8.0` 등 본 프로젝트 pin)에서 실제 nested help 호출 시 어떤
+help를 가로채도록 위임)도 본 invariant를 만족하면 허용된다. #1404에서 click
+버전(`click>=8.0` 등 본 프로젝트 pin)의 실제 nested help 호출 시 어떤
 context 필드가 어떤 값으로 채워지는지 확인하고 (H1)(H2)(H3)을 동시에 만족하는
-검사 식을 확정한다.
+검사 식을 확정했다.
 
 **caveat**: 본 spec은 nested help 면제 검사의 정확한 함수 시그니처를 못박지
 않는다. click 내부 동작 의존 표면이라 spec과 코드를 같은 라운드에 정정하지
 않으면 회귀가 발생하기 쉽기 때문이다. 따라서 (H1)(H2)(H3) invariant 위반은
-#1404 PR에서 단위 테스트로 보증하고, spec은 invariant 정의에 한정한다.
+#1404 PR에서 단위 테스트로 보증되었고, spec은 invariant 정의에 한정한다.
 
 **`ante login` 후보 제거**: 본 이슈 검토 과정에서 거론되었으나 CLI는 `ANTE_MEMBER_TOKEN`
 환경변수 모델이며 별도 `login` 명령은 spec(`docs/specs/cli/03-commands.md`)과 코드
