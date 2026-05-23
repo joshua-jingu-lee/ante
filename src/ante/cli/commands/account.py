@@ -86,17 +86,37 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
 
 
 async def _create_account_service() -> tuple[AccountService, Database]:
-    """CLI에서 AccountService를 생성하는 헬퍼."""
+    """CLI에서 AccountService를 생성하는 헬퍼.
+
+    ``db.connect()`` 이후의 모든 라이프사이클(``AccountService.initialize`` 포함)을
+    ``except BaseException`` 블록으로 감싸 실패 시 ``db.close()``를 보장한다.
+    ``initialize`` 안에서 legacy row decrypt 실패 등으로 예외가 raise되면
+    aiosqlite 연결이 leak되어 asyncio 종료 시 busy_timeout 대기로 CLI 프로세스가
+    8초 가까이 hang하는 회귀를 차단한다(#1722). close 자체 실패는 inner
+    try/except로 흡수해 원본 예외를 가리지 않는다.
+    """
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
     db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    account_service = AccountService(db=db, eventbus=eventbus)
-    await account_service.initialize()
+    try:
+        await db.connect()
+        eventbus = EventBus()
+        account_service = AccountService(db=db, eventbus=eventbus)
+        await account_service.initialize()
+    except BaseException:
+        try:
+            await db.close()
+        except Exception:
+            # close 실패는 상위 예외를 가리지 않고 무시한다 — 원본 예외(예:
+            # EncryptionKeyMissingError)가 호출자에게 안정 ``code``를 전달해야
+            # CLI가 stable JSON error로 종료할 수 있다.
+            logger.debug(
+                "db.close() after init failure raised — ignored", exc_info=True
+            )
+        raise
     return account_service, db
 
 
@@ -568,7 +588,7 @@ def account_create(
     try:
         created = _run(_do_create())
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
     fmt.success(
@@ -626,7 +646,7 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     try:
         rows = _run(_do_list())
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
     if not rows:
@@ -676,7 +696,7 @@ def account_info(ctx: click.Context, account_id: str) -> None:
     try:
         detail = _run(_do_info())
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
     if fmt.is_json:
@@ -835,7 +855,7 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
     fmt.success(f'계좌 "{account_id}" 삭제 완료')
@@ -872,7 +892,7 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     try:
         masked = _run(_do_credentials())
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
     if not masked:
@@ -995,7 +1015,7 @@ def account_set_credentials(
     except SystemExit:
         raise
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
 
@@ -1075,7 +1095,7 @@ def account_repair_timezone(
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e))
+        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
         raise SystemExit(1) from e
 
     fmt.success(
