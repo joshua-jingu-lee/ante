@@ -264,18 +264,7 @@ CLI는 default-deny + allowlist (opt-out) 정책이다. 새 명령 추가 시 �
 1. **공개 명령 allowlist 검토**: 신설 명령이 인증 없이 접근 가능해야 하는지 판단한다.
    - 인증 필요(기본값) → 별도 조치 없음. default-deny가 자동 적용된다. scope가 필요하면 `@require_scope`를 명시한다.
    - 공개 필요 → 위 SSOT 표(`03-commands.md`)에 행을 추가하고, 같은 PR에서 코드 allowlist(`_AUTH_EXEMPT_COMMAND_PATHS`)도 함께 갱신한다.
-2. **검증 체크리스트**: PR 검증 단계에서 (1) 공개 명령 표와 코드 allowlist가 동기 상태인지, (2) 인증 필요 명령이 `authenticated_group` factory로 보호되는지, (3) scope가 필요하면 `@require_scope`가 부착되었는지를 확인한다.
-
-#### 8.1.1 게이트 구현 완료 전 임시 조항 (#1403/#1404 close까지)
-
-> 잔여 P2-B (D-015 ADR / #1402 PR #1420 review 잔재).
-
-epic [#1401](https://github.com/joshua-jingu-lee/ante/issues/1401)의 [#1404](https://github.com/joshua-jingu-lee/ante/issues/1404) (CLI `authenticated_group` factory)가 close되기 전까지는, 새 mutation 명령 추가 시 자동 default-deny에 의존하지 말고 명시적 가드를 부착한다.
-
-- Web 라우트: `Depends(require_master_caller)` / `Depends(require_audit_read)` / `Depends(require_config_write)` 등 기존 dependency 중 하나를 라우트 시그니처에 명시한다.
-- CLI 명령: `@require_auth` / `@require_scope` 데코레이터를 명령 함수에 명시한다.
-
-두 이슈가 모두 close되고 게이트가 런타임 동작으로 확인되면 [#1408](https://github.com/joshua-jingu-lee/ante/issues/1408) cleanup에서 본 임시 조항을 제거하고, dependency/decorator는 scope 검증 책임만 가진다(D-015 책임 매트릭스). 그 시점부터는 미들웨어/factory가 1차 차단을 보장하므로 누락이 자동 401/exit 1로 드러난다.
+2. **검증 체크리스트**: PR 검증 단계에서 (1) 공개 명령 표와 코드 allowlist가 동기 상태인지, (2) 인증 필요 명령이 `AuthenticatedGroup` factory로 보호되는지, (3) scope가 필요하면 `@require_scope`가 부착되었는지를 확인한다.
 
 ## 9. AGENTS.md 경량화 원칙
 
