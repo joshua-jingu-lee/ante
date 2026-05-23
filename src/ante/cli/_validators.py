@@ -292,9 +292,8 @@ def reject_invalid_new_account_id(
         account_id: 검증할 신규 account_id (또는 ``None``).
         fmt: ``get_formatter(ctx)``로 얻은 출력 포맷터. text/json 모드에 따라
             구조화된 에러를 출력한다.
-        context: 호출 위치 식별자 (예: ``"cli.account.create"``). 현재
-            ``validate_new_account_id``는 context를 사용하지 않지만 sibling
-            helper 시그니처 정렬을 위해 보존한다.
+        context: ``validate_new_account_id``에 전달할 호출 위치 식별자
+            (예: ``"cli.account.create"``). 에러 메시지에 prefix로 부착된다.
 
     Returns:
         검증된 account_id. 호출 측 type narrow를 위해 ``str``로 반환된다.
@@ -305,9 +304,8 @@ def reject_invalid_new_account_id(
     from ante.account.errors import InvalidAccountIdError
     from ante.account.scoping import validate_new_account_id
 
-    del context  # sibling 시그니처 정렬용 — validate_new_account_id가 사용하지 않음.
     try:
-        return validate_new_account_id(account_id)
+        return validate_new_account_id(account_id, context=context)
     except InvalidAccountIdError as e:
         fmt.error(str(e), code=e.code)
         raise SystemExit(1) from e

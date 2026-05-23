@@ -85,7 +85,7 @@ def require_account_id(account_id: str | None, *, context: str = "") -> str:
     return account_id  # type: ignore[return-value]
 
 
-def validate_new_account_id(account_id: str | None) -> str:
+def validate_new_account_id(account_id: str | None, *, context: str = "") -> str:
     """신규 Account 생성 정책 검증.
 
     형식 검사(:data:`ACCOUNT_ID_PATTERN`)와 RESTRICTED 거부
@@ -98,6 +98,10 @@ def validate_new_account_id(account_id: str | None) -> str:
 
     Args:
         account_id: 검증할 account_id.
+        context: 에러 메시지에 부착할 호출 위치 식별자
+            (:func:`require_account_id` 동형). 예: ``"cli.account.create"``.
+            기본값 ``""``는 기존 호출자(``AccountService.create``)와 호환되며
+            prefix를 출력하지 않는다.
 
     Returns:
         검증된 account_id.
@@ -106,23 +110,25 @@ def validate_new_account_id(account_id: str | None) -> str:
         InvalidAccountIdError: 형식 위반, 또는 RESTRICTED/INVALID_RUNTIME
             예약어와 일치할 때.
     """
+    prefix = f"({context}) " if context else ""
     if account_id is None or account_id == "":
         raise InvalidAccountIdError(
-            f"account_id 형식이 올바르지 않습니다: '{account_id}'. "
+            f"{prefix}account_id 형식이 올바르지 않습니다: '{account_id}'. "
             "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다."
         )
     if account_id in RESTRICTED_NEW_ACCOUNT_IDS:
         raise InvalidAccountIdError(
-            f"account_id '{account_id}'는 ante init이 생성하는 시드 계좌로 "
+            f"{prefix}account_id '{account_id}'는 ante init이 생성하는 시드 계좌로 "
             "예약되어 있어 신규 생성이 불가합니다."
         )
     if account_id in INVALID_RUNTIME_ACCOUNT_IDS:
         raise InvalidAccountIdError(
-            f"account_id '{account_id}'는 fallback 예약어로 신규 생성이 불가합니다."
+            f"{prefix}account_id '{account_id}'는 fallback 예약어로 "
+            "신규 생성이 불가합니다."
         )
     if not ACCOUNT_ID_PATTERN.fullmatch(account_id):
         raise InvalidAccountIdError(
-            f"account_id 형식이 올바르지 않습니다: '{account_id}'. "
+            f"{prefix}account_id 형식이 올바르지 않습니다: '{account_id}'. "
             "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다."
         )
     return account_id
