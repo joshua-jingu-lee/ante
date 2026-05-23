@@ -135,6 +135,63 @@ def validate_positive_finite_amount(
     return value
 
 
+def validate_nonnegative_finite_amount(
+    ctx: click.Context | None,
+    param: click.Parameter | None,
+    value: float | None,
+) -> float | None:
+    """Click callback: 0 이상 finite float 검증 (NaN/Infinity/음수 거부).
+
+    오라클 A7 finding(#1517 — ``treasury set-balance`` amount): ``type=float``만
+    갖춰 ``float('nan')``/``float('inf')``/음수가 그대로 통과되던 ingress drift를
+    닫는다. 오라클 A7 finding(#1723 — ``account create
+    --market-order-reserve-buffer-rate``)도 동일 invariant를 요구하며, 본 SSOT는
+    두 호출 표면 공유 callback이다.
+
+    :func:`validate_positive_finite_amount`와의 차이는 **0 허용 boundary**다.
+    ``Account.market_order_reserve_buffer_rate``는 ``docs/specs/account/03-data-
+    model.md:55,147``에서 ``Decimal("0")`` 기본값을 명시하고 있어 0을 정상값으로
+    수용해야 한다 (#1333 cold-path structural field).
+
+    검증은 두 단계:
+
+    1. ``math.isnan(value) or math.isinf(value)`` — NaN/±Infinity 거부.
+    2. ``value < 0`` — 음수 거부.
+
+    ``None`` 입력은 그대로 ``None``을 반환한다 (옵션 미지정 분기 보존).
+    invalid 입력은 ``click.BadParameter``로 raise되어 click 표준 경로에서
+    text stderr + exit 2로 변환된다. ``--format json`` 모드에서는
+    ``AuthenticatedGroup.main`` middleware(``src/ante/cli/middleware.py:561-581``)가
+    UsageError를 ``CLI_USAGE_ERROR`` JSON envelope + exit 1로 변환한다.
+
+    Args:
+        ctx: Click 컨텍스트 (``click.option(callback=...)`` 인자).
+        param: Click 파라미터 메타데이터 (``click.option(callback=...)`` 인자).
+        value: 사용자가 입력한 float, 또는 ``None``.
+
+    Returns:
+        검증된 float을 그대로 반환, 또는 ``None`` (입력이 ``None``일 때).
+
+    Raises:
+        click.BadParameter: NaN/±Infinity 또는 음수.
+    """
+    if value is None:
+        return None
+    if math.isnan(value) or math.isinf(value):
+        raise click.BadParameter(
+            f"{value!r}은(는) finite number여야 합니다 (NaN/Infinity 거부).",
+            ctx=ctx,
+            param=param,
+        )
+    if value < 0:
+        raise click.BadParameter(
+            f"{value!r}은(는) 0 이상이어야 합니다.",
+            ctx=ctx,
+            param=param,
+        )
+    return value
+
+
 def reject_inverted_date_range(
     from_value: str | None,
     to_value: str | None,
@@ -260,5 +317,6 @@ __all__ = [
     "reject_invalid_account_id",
     "reject_inverted_date_range",
     "validate_iso_date",
+    "validate_nonnegative_finite_amount",
     "validate_positive_finite_amount",
 ]
