@@ -328,8 +328,6 @@ JSON 출력이 필요하면 root 전역 옵션을 사용한다:
 
 ### `ante bot` — 봇 관리
 
-> **구현 진행 상황 (#1698 epic)**: `start/stop/status`의 IPC handler 등록은 #1712, Click command 등록과 `guide/cli.md` 재생성은 #1713에서 수행한다. 본 절은 그 계약을 사전에 확정하는 SSOT다. 현재 main(`8479e53`)의 `ante bot --help`에는 `start/stop/status`가 아직 노출되지 않는다 — 사용자/Agent는 #1712 + #1713 merge 후 실행 가능하다.
-
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]

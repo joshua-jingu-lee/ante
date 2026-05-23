@@ -19,12 +19,6 @@ DB의 persisted state를 직접 정리한다. 서버 실행 중 조회는 IPC로
 실행 중일 때만 동작하며, cold-path fallback은 없다. 정렬 계약은
 [cli/03-commands.md](../cli/03-commands.md#ante-bot--봇-관리)에 있다.
 
-> **구현 진행 상황 (#1698 epic)**: 본 절은 그 계약을 사전에 확정하는 SSOT다. 현재
-> main(`8479e53`)의 `ante bot --help`에는 `start/stop/status`가 아직 노출되지 않으며,
-> 실행 시 `No such command`로 실패한다. IPC handler 등록은 #1712, Click command
-> 등록과 `guide/cli.md` 재생성은 #1713에서 수행한다. 아래 사용 예시는 #1712 + #1713
-> merge 후 실행 가능한 형태다.
-
 ```bash
 # 전략 등록 후 봇 생성 — --account 필수 옵션 (active 계좌가 정확히 1개일 때만 생략 가능, 자동 선택)
 # active 계좌가 0개 또는 2개 이상이면 prompt 없이 BOT_MISSING_REQUIRED_ACCOUNT로 실패한다.
